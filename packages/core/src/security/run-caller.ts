@@ -7,8 +7,8 @@
  *
  * ## Why a mark
  *
- * An app-authored elevation sees through the organization wall what its
- * caller's plain door sees (`app-automation-organization-wall.ts`,
+ * An app-authored elevation is bounded by its caller's organization wall
+ * (`app-automation-organization-wall.ts`,
  * plugin-security), so the wall judges a `runAs: 'system'` run by the user it
  * runs for. After a human decision the run's segment carries the decider as
  * its `userId`: the decider is the segment's attribution user (`runAs` in

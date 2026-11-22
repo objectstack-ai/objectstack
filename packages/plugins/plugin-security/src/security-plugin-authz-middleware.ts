@@ -724,8 +724,8 @@ export function registerAuthzMiddleware(
       (line) => ctx.logger.warn(line),
     );
     // [ADR-0095 D1 · ADR-0123 D2] The same elevation, judged by the same
-    // predicate, sees through the organization wall exactly what the caller it
-    // runs for sees at the plain door: elevation lifts the caller's business
+    // predicate, is bounded by the organization wall of the caller it runs
+    // for: elevation lifts the caller's business
     // rules, never the wall. A caller the wall denies (no active organization)
     // reads nothing of a tenant-scoped object, its delete and purge there match
     // nothing (the read rule), and every other write there is refused naming

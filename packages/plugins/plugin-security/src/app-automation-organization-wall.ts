@@ -1,8 +1,8 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * An app-authored elevation sees through the organization wall what its
- * caller's plain door sees (ADR-0095 D1, ADR-0123 D1/D2).
+ * An app-authored elevation is bounded by its caller's organization wall
+ * (ADR-0095 D1, ADR-0123 D1/D2).
  *
  * App-authored automation elevates by declaration: an action body always, a
  * hook by `runAs: 'system'` (or a system context it inherits, or its
@@ -15,10 +15,12 @@
  * Layer 0 tenant wall among them. Elevation lifts the caller's business rules (Layer
  * 1: object and field permissions, ownership, sharing); it does not lift the
  * organization wall. So the wall that judges the elevation's operation is the
- * caller's own, the one the caller's plain door composes, and the elevation
- * reaches through it exactly what the caller reaches.
+ * caller's own, the one the caller's plain door composes: what the operation
+ * reads, and the existing records it writes, are those that wall admits, and
+ * a write whose own data names an organization outside it, or empties a row's
+ * organization, is refused.
  *
- * ## The caller's own wall, whole
+ * ## The caller's own wall
  *
  * The verdict is the caller's Layer 0, computed by the one ladder
  * (`computeTenantLayer0Verdict`) over the caller's own context and the
@@ -42,14 +44,6 @@
  * - a write that names an organization names one the wall admits, and an
  *   update never empties the organization of a row — judged for every caller,
  *   since the engine keeps an elevated payload's organization as sent;
- * - a write is judged again as it will be stored: the image the operation's
- *   before-hooks leave is checked by the same rule (the engine's
- *   `postHookWriteImageCheck` seam, judging only), as the plain door judges it;
- * - an organization the operation's option bag names (`tenantId`,
- *   `tenantIds`, which the engine hands its driver as given) is one the wall
- *   admits: on a read a name outside it matches nothing, a write naming one is
- *   refused `403`, and a before-hook that sets either key later is judged as
- *   it sets it;
  * - a caller the wall DENIES — no active organization under `isolated`, an
  *   empty membership set under `group`, a person outside every organization
  *   under `single` (ADR-0093 D8.1, as amended) — reads nothing (zero rows, no
@@ -74,8 +68,7 @@
  *   Layer 0's predicate is the only wall it has;
  * - the operation is a decided segment's: its own facts are its decider's, so
  *   the engine's projection of them is not its caller's wall;
- * - the write names or empties the organization column, or the option bag
- *   names an organization (above).
+ * - the write names or empties the organization column (above).
  *
  * The wall asks Layer 0 alone: the permission sets are loaded only where they
  * decide a platform operator's crossing. When the context lacks the facts the
@@ -83,8 +76,7 @@
  * user), they are resolved for the caller by the one resolver the request
  * path uses (`resolveUserAuthzGrants`), once per flow run
  * ({@link RunCallerFactsMemo}). A system run's own context carries its
- * caller's membership set and rung from run setup, unless it began for no
- * caller (`beganForNoCaller`).
+ * caller's membership set and rung from run setup.
  *
  * ## Which elevations: the predicate the identity refusal reads
  *
@@ -234,8 +226,8 @@ export function appAutomationOrganizationWallRefusal(
       `so this ${operation} has no organization to act in, and ${ELEVATION[source]} does not lift the ` +
       `organization wall. ${remedy}`,
     { operation, object },
-    `[ADR-0123 D2] An app-authored elevation sees through the organization wall exactly what its caller's plain ` +
-      `door sees: the caller's Layer 0 leaves '${object}' no organization for this ${operation}, so the elevation's ` +
+    `[ADR-0123 D2] An app-authored elevation is bounded by its caller's organization wall: the caller's ` +
+      `Layer 0 leaves '${object}' no organization for this ${operation}, so the elevation's ` +
       'reads resolve to nothing, its delete and purge match nothing, and its other writes are refused. System work ' +
       'that runs for no caller is unaffected.',
   );
@@ -349,28 +341,6 @@ function admittedOrganizations(verdict: TenantLayer0Verdict): ReadonlySet<string
   return undefined;
 }
 
-/** The organizations an option bag's pass-through tenant keys name (`tenantId`, `tenantIds`). */
-function bagTenantOrganizations(options: unknown): string[] | undefined {
-  if (!options || typeof options !== 'object') return undefined;
-  const bag = options as { tenantId?: unknown; tenantIds?: unknown };
-  const named: string[] = [];
-  if (typeof bag.tenantId === 'string' && bag.tenantId !== '') named.push(bag.tenantId);
-  if (Array.isArray(bag.tenantIds)) for (const id of bag.tenantIds) if (typeof id === 'string' && id !== '') named.push(id);
-  return named.length > 0 ? named : undefined;
-}
-
-/** The refusal of a write whose option bag names an organization the caller's wall does not admit. */
-function bagRefusal(source: ElevationSource, object: string, operation: string): PermissionDeniedError {
-  return new PermissionDeniedError(
-    `[Security] Access denied: this ${operation} on '${object}' names, in its options, an organization the user ` +
-      `${SUBJECT[source]} runs for may not write in, and ${ELEVATION[source]} does not lift the organization wall.`,
-    { operation, object },
-  );
-}
-
-/** The verbs whose option bag the engine hands its driver (`find`/`findOne`, `update`, `delete`). */
-const BAG_VERBS: ReadonlySet<string> = new Set(['find', 'findOne', 'update', 'delete', 'purge']);
-
 /** Rows of a write payload, each a plain object. */
 function payloadRows(data: unknown): Record<string, unknown>[] {
   const rows = Array.isArray(data) ? data : data === undefined || data === null ? [] : [data];
@@ -396,7 +366,6 @@ export async function applyAppAutomationOrganizationWall(
     options?: unknown;
     ast?: { where?: unknown } | null;
     tenantLayer0Verdict?: unknown;
-    postHookWriteImageCheck?: { evaluate(rows: readonly Record<string, unknown>[]): unknown; honoured?: boolean };
   },
   deps: AppAutomationWallDeps,
 ): Promise<void> {
@@ -414,118 +383,25 @@ export async function applyAppAutomationOrganizationWall(
   // so no projection of the wall reaches it. The common elevation, which
   // names none, pays nothing for this.
   const touchesOrganization = rows.some((row) => namesOrganization(row) || (verb === 'update' && emptiesOrganization(row)));
-  // [ADR-0095 D1] The driver pass-through tenant keys of the option bag
-  // (`tenantId`, `tenantIds`): an explicit one wins the driver scope under
-  // every verdict, so an organization they name is held to the caller's wall.
-  const bagOrganizations = BAG_VERBS.has(operation) ? bagTenantOrganizations(opCtx.options) : undefined;
-
-  // The caller's facts and Layer 0, worked out at most once for this
-  // operation, and only where something asks for them.
-  let judged: Promise<{ callerContext: Record<string, unknown>; answer: CallerLayer0Answer }> | undefined;
-  const judge = () =>
-    (judged ??= (async () => {
-      // The door's facts, resolved for the caller where the context does not
-      // carry them (a flow run's envelope carries no permission sets).
-      const callerContext = carriesDoorFacts(caller.callerContext)
-        ? caller.callerContext
-        : await deps.completeCaller(caller.callerContext);
-      return { callerContext, answer: await deps.callerLayer0(callerContext, object, operation) };
-    })());
-  let judgedAdmitted: ReadonlySet<string> | undefined | null = null;
-
-  // [ADR-0095 D1, the plain door's second half] The stored image a write's
-  // before-hooks leave is judged as the plain door judges it
-  // (`composeWriteTenantWall`'s stored-row half): a row stored in an
-  // organization the caller's wall does not admit, or an update left in none,
-  // is refused. Judging only — the system strips stay off. A row stored in the
-  // caller's own active organization needs no verdict.
-  if (operation === 'insert' || operation === 'update') {
-    const prior = opCtx.postHookWriteImageCheck;
-    const ownOrganization = carriesActiveOrganization(caller.callerContext) ? String(caller.callerContext.tenantId) : undefined;
-    opCtx.postHookWriteImageCheck = {
-      async evaluate(images: readonly Record<string, unknown>[]) {
-        if (prior) {
-          prior.honoured = true;
-          await prior.evaluate(images);
-        }
-        const asks = images.some(
-          (row) =>
-            (namesOrganization(row) && String(row[ORGANIZATION_FIELD]) !== ownOrganization) ||
-            (operation === 'update' && emptiesOrganization(row)),
-        );
-        if (!asks) return;
-        const { answer } = await judge();
-        const admitted = admittedOrganizations(answer.tenantLayer0Verdict);
-        if (!admitted) return;
-        for (const row of images) {
-          if (namesOrganization(row) && !admitted.has(String(row[ORGANIZATION_FIELD]))) {
-            throw landingRefusal(caller.source, object, operation);
-          }
-          if (operation === 'update' && emptiesOrganization(row)) throw removalRefusal(caller.source, object, operation);
-        }
-      },
-    };
-  }
-
-  // A tenant key a before-hook writes into the option bag after this point is
-  // judged as it is written: the organizations this operation's verdict
-  // admits, or — where none was worked out — the caller's active organization
-  // alone (narrower, never wider). A write naming another is refused; a read
-  // naming one scopes to an organization no row is in, so it matches nothing.
-  if (BAG_VERBS.has(operation) && opCtx.options && typeof opCtx.options === 'object') {
-    const bag = opCtx.options as Record<string, unknown>;
-    const ownOrganization = carriesActiveOrganization(caller.callerContext) ? String(caller.callerContext.tenantId) : undefined;
-    const isRead = !isWrite;
-    for (const key of ['tenantId', 'tenantIds'] as const) {
-      let value = bag[key];
-      // Enumerable only while it holds a value, as a plain key would be.
-      const define = () =>
-        Object.defineProperty(bag, key, {
-          configurable: true,
-          enumerable: value !== undefined,
-          get: () => value,
-          set: (next: unknown) => {
-            const named = bagTenantOrganizations({ [key]: next }) ?? [];
-            // `undefined`: the verdict was worked out and has no wall.
-            const admitted: ReadonlySet<string> | undefined =
-              judgedAdmitted !== null ? judgedAdmitted : new Set(ownOrganization !== undefined ? [ownOrganization] : []);
-            if (admitted === undefined || named.every((id) => admitted.has(id))) {
-              value = next;
-            } else if (!isRead) {
-              throw bagRefusal(caller.source, object, operation);
-            } else {
-              value = key === 'tenantId' ? RLS_DENY_FILTER.id : [RLS_DENY_FILTER.id];
-            }
-            define();
-          },
-        });
-      define();
-    }
-  }
-
   // Always asked: a federated object (the engine projects no driver scope
-  // there), a decided segment (its own facts are the decider's), a write that
-  // names or empties the organization, and an option bag that names one.
-  const alwaysAsked =
-    deps.isFederated(object) || caller.decided === true || touchesOrganization || bagOrganizations !== undefined;
+  // there), a decided segment (its own facts are the decider's), and a write
+  // that names or empties the organization.
+  const alwaysAsked = deps.isFederated(object) || caller.decided === true || touchesOrganization;
   if (!alwaysAsked && !callerMayLackOrganization(caller.callerContext)) return;
 
-  // …and the question asked again: a resolved active membership may answer it.
-  const { callerContext, answer } = await judge();
+  // The door's facts, resolved for the caller where the context does not
+  // carry them (a flow run's envelope carries no permission sets), and the
+  // question asked again: a resolved active membership may answer it.
+  const callerContext = carriesDoorFacts(caller.callerContext)
+    ? caller.callerContext
+    : await deps.completeCaller(caller.callerContext);
   if (!alwaysAsked && !callerMayLackOrganization(callerContext)) return;
 
+  const answer = await deps.callerLayer0(callerContext, object, operation);
   const { tenantLayer0Verdict, crossedByPlatformAdmin } = answer;
   // A deny verdict's projection is the deny sentinel, never "no wall".
   const layer0 = tenantLayer0Verdict.kind === 'deny' ? (answer.layer0 ?? RLS_DENY_FILTER) : answer.layer0;
   const denied = tenantLayer0Verdict.kind === 'deny';
-  judgedAdmitted = admittedOrganizations(tenantLayer0Verdict);
-  // The option bag's tenant keys, judged as the payload is: a write naming an
-  // organization the caller's wall does not admit is refused. A read naming
-  // one matches nothing: the caller's wall is composed onto its predicate
-  // below, so no row of the named organization meets both.
-  const bagOutside =
-    bagOrganizations !== undefined && judgedAdmitted !== undefined && bagOrganizations.some((id) => !judgedAdmitted!.has(id));
-  if (bagOutside && isWrite) throw bagRefusal(caller.source, object, operation);
   // [ADR-0123 D2] A denied caller's delete and purge are answered by the read
   // rule, as its plain door answers them: the wall's deny filter goes onto a
   // predicate delete (it matches nothing), and a by-id delete answers as a
@@ -545,15 +421,11 @@ export async function applyAppAutomationOrganizationWall(
     // [ADR-0123 D2, as amended] A new row lands in the active organization:
     // with none, a walled tenant object has nowhere to place it — a crossing
     // operator's insert included, as at the plain door.
-    // A row that names an organization the wall admits has one to land in,
-    // with no active organization too, as at the plain door.
-    const admitted = admittedOrganizations(tenantLayer0Verdict);
-    const everyRowPlaced =
-      rows.length > 0 && rows.every((row) => namesOrganization(row) && (!admitted || admitted.has(String(row[ORGANIZATION_FIELD]))));
-    if (!carriesActiveOrganization(callerContext) && (tenantLayer0Verdict.kind !== 'none' || crossedByPlatformAdmin) && !everyRowPlaced) {
+    if (!carriesActiveOrganization(callerContext) && (tenantLayer0Verdict.kind !== 'none' || crossedByPlatformAdmin)) {
       throw appAutomationOrganizationWallRefusal(caller.source, object, operation, callerContext);
     }
     // A row that names its organization names one the caller's wall admits.
+    const admitted = admittedOrganizations(tenantLayer0Verdict);
     if (admitted) {
       for (const row of rows) {
         if (namesOrganization(row) && !admitted.has(String(row[ORGANIZATION_FIELD]))) {
@@ -590,14 +462,7 @@ export async function applyAppAutomationOrganizationWall(
       // entry verbs) is refused rather than run past the wall: the bin exempts
       // a system context from the verdict a dispatch records.
       if (id === null) throw appAutomationOrganizationWallRefusal(caller.source, object, operation, callerContext);
-      // [N12] A transaction the write names in its option bag, where its
-      // context threads none, is the write's transaction too.
-      const bagTransaction = (opCtx.options as { transaction?: unknown } | null | undefined)?.transaction;
-      const writeContext =
-        bagTransaction !== undefined && (opCtx.context as { transaction?: unknown }).transaction === undefined
-          ? { ...(opCtx.context as Record<string, unknown>), transaction: bagTransaction }
-          : opCtx.context;
-      if (denied || !(await deps.rowInScope(object, id, layer0, writeContext))) throw deps.notFound(object, id, opCtx.context);
+      if (denied || !(await deps.rowInScope(object, id, layer0, opCtx.context))) throw deps.notFound(object, id, opCtx.context);
       return;
     }
   } else if (!opCtx.ast) {
