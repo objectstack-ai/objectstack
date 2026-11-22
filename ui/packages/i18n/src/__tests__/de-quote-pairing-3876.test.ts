@@ -459,7 +459,11 @@ describe('objectui#3876 — de pack closes „ with “ and not with a straight 
     // `console.objectView.restoreFactoryConfirm` and `restoreFactoryDone`, the
     // factory-view restore's question and result naming the view („{{name}}“)
     // — two interpolated spans, view data.
-    expect(okSpans, 'correctly paired spans').toBe(123);
+    // 127 once objectstack-ai/objectstack#36371 added the view switcher's
+    // `makeSharedConfirm`, `makeSharedDone`, `unshareConfirm` and
+    // `unshareDone`, each naming the view („{{name}}“) — four interpolated
+    // spans, view data.
+    expect(okSpans, 'correctly paired spans').toBe(127);
   });
 
   it('keeps the count identity that replaces the card’s count(„) === count(“)', () => {
@@ -580,8 +584,9 @@ describe('objectui#3876 — de pack closes „ with “ and not with a straight 
     // `console.objectView.draft.saveToViewConfirm`, one more matched pair.
     // 123 / 123 / 0 after objectstack-ai/objectstack#36011 added
     // `console.objectView.restoreFactoryConfirm` and `restoreFactoryDone`, two
-    // more matched pairs.
-    expect({ open, close, rdq }).toEqual({ open: 123, close: 123, rdq: 0 });
+    // more matched pairs. 127 / 127 / 0 after objectstack-ai/objectstack#36371
+    // added four view-switcher sharing strings, four more matched pairs.
+    expect({ open, close, rdq }).toEqual({ open: 127, close: 127, rdq: 0 });
     // The durable shape: every „ closed by a “, every surplus “ an English
     // opener answered by a ”. Survived translating the two English values.
     expect(close).toBe(open + rdq);

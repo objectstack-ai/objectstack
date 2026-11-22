@@ -17,6 +17,10 @@
 import * as React from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, cleanup, screen, fireEvent, within } from '@testing-library/react';
+// The switcher's module reaches a dynamic `import('@objectstack/lint')` (the
+// draft bar's publish lint): pay its load at collection, never inside a case's
+// clocked window (`check:test-source-alias`).
+import '@objectstack/lint';
 import { ObjectViewTitleSwitcher, type ObjectViewTitleSwitcherProps, type TitleSwitcherView } from './objectViewTitleSwitcher';
 import type { ListViewFavorites } from '../layout/listViewFavorites';
 
