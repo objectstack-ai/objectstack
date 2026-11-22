@@ -26,6 +26,9 @@ import { cleanup, render } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { createI18n, I18nProvider } from '@object-ui/i18n';
 import { useSidebar } from '@object-ui/components';
+// Clocked windows measure behaviour, never loading (`check:test-source-alias`): the layout reaches
+// `@objectstack/lint` through the draft preview bar's dynamic import, so its first load is paid here.
+import '@objectstack/lint';
 
 const renders: string[] = [];
 
