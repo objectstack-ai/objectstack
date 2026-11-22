@@ -147,7 +147,7 @@ describe('objectui#7149 — the Activity card title resolves from the packs', ()
     // The exact string the card recorded as the visible half-done state:
     // `"Activity(0)暂无活动记录"`. It is now Chinese end to end.
     const { container } = renderIn('zh', []);
-    expect(container.textContent).toBe('活动(0)暂无活动记录');
+    expect(container.textContent).toBe('动态(0)暂无动态');
   });
 });
 
@@ -233,7 +233,7 @@ describe('objectui#7149 — filter chips and the group aria-label (published-exp
     // English copy change ("Activity type filter" -> "Filter activity") so one
     // control does not carry two names across two components; see the PR.
     renderIn('zh', [entry({})], true);
-    expect(screen.getByRole('group', { name: '筛选活动' })).toBeTruthy();
+    expect(screen.getByRole('group', { name: '筛选动态' })).toBeTruthy();
     cleanup();
 
     renderIn('ar', [entry({})], true);
