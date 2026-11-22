@@ -2452,6 +2452,7 @@ describe('validateTranslationReferences — flow node labels (`nodes.<node_id>.l
           { id: 'start', type: 'start', label: 'Start' },
           { id: 'gate', type: 'decision', label: 'High Value (> $500K)?' },
           { id: 'collect', type: 'screen', label: 'Collect', config: { fields: [{ name: 'note' }] } },
+          { id: 'greet', type: 'screen', label: 'Greeting', config: { title: 'Hello {{ vars.name }}' } },
           {
             id: 'manager_review',
             type: 'approval',
@@ -2503,13 +2504,31 @@ describe('validateTranslationReferences — flow node labels (`nodes.<node_id>.l
     );
   });
 
-  it('points a `nodes` key over a `screen` node at its heading', () => {
+  it('points a `nodes` key over an untitled `screen` node at its heading', () => {
     const findings = validateTranslationReferences(bundle({ opportunity_approval: { nodes: { collect: { label: 'x' } } } }));
-    expect(findings).toHaveLength(1);
-    expect(findings[0].message).toBe(
-      'Translations are keyed to node "collect", which flow "opportunity_approval" declares as a `screen` node; ' +
-        'its heading is keyed `screens.collect.title`.',
-    );
+    expect(findings.map((f) => [f.rule, f.severity, f.path])).toEqual([
+      [TRANSLATION_TARGET_UNKNOWN, 'error', 'translations[0]["zh-CN"].flows.opportunity_approval.nodes.collect'],
+    ]);
+    expect(findings[0].message).toContain('`screens.collect.title`');
+  });
+
+  it('accepts a `nodes` key over a screen that authors its own `config.title`, beside that screen\'s heading key', () => {
+    expect(
+      validateTranslationReferences(
+        bundle({
+          opportunity_approval: {
+            nodes: { greet: { label: '问候' } },
+            screens: { greet: { title: '你好 {{ vars.name }}' } },
+          },
+        }),
+      ),
+    ).toEqual([]);
+  });
+
+  it('offers a titled screen as the nearest node for a misspelt `nodes` key', () => {
+    const findings = validateTranslationReferences(bundle({ opportunity_approval: { nodes: { gret: { label: 'x' } } } }));
+    expect(findings.map((f) => f.rule)).toEqual([TRANSLATION_TARGET_UNKNOWN]);
+    expect(findings[0].message).toContain('Did you mean "greet"?');
   });
 
   it('refuses a `nodes` key over an UNKNOWN node, with the nearest labelled node offered', () => {

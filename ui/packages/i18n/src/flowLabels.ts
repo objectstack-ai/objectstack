@@ -15,10 +15,13 @@
  *  - an `approval` node: `flows.<flow>.approvals.<node_id>.label`;
  *  - a `screen` node with no `config.title`: `flows.<flow>.screens.<node_id>.title`
  *    (the executor titles such a screen by its label, so one key covers both);
- *  - any other node: `flows.<flow>.nodes.<node_id>.label` (ruling 7076440876).
+ *  - any other node, a screen that authors its own `config.title` included:
+ *    `flows.<flow>.nodes.<node_id>.label` (ruling 7076440876). Such a screen is
+ *    titled apart from its label, so its label is keyed like any other step's.
  *
- * A screen that authors its own `config.title` is titled apart from its label,
- * and its label has no key, so `stepLabel` answers nothing for it.
+ * An untitled screen's translated title is a run-time template: one holding a
+ * `{{ }}` hole a drawing cannot fill is not a step name, so `stepLabel`
+ * answers nothing for it and the drawing keeps the authored label.
  *
  * The Studio flow designer and the docs viewer's `type: flow` embed
  * (`element:metadata_viewer`) both read them here, and the flow label goes
@@ -40,8 +43,9 @@ export interface FlowLabelTranslations {
   flowLabel?: string;
   /**
    * The step's translated label: `approvals.<node_id>.label` for an `approval`,
-   * `screens.<node_id>.title` for an untitled `screen`, `nodes.<node_id>.label`
-   * for any other node. `undefined` for a titled screen and an id-less node.
+   * `screens.<node_id>.title` for an untitled `screen` (unless it holds a
+   * `{{ }}` hole), `nodes.<node_id>.label` for any other node, a titled screen
+   * included. `undefined` for an id-less node.
    */
   stepLabel: (node: { id?: unknown; type?: unknown; config?: unknown }) => string | undefined;
   /**
@@ -76,9 +80,10 @@ export function flowLabelTranslations(
       if (node.type === 'approval') return text(flow?.approvals?.[node.id]?.label);
       if (node.type === 'screen') {
         const config = node.config && typeof node.config === 'object' ? (node.config as { title?: unknown }) : {};
-        return config.title === undefined || config.title === null || config.title === ''
-          ? text(flow?.screens?.[node.id]?.title)
-          : undefined;
+        if (config.title === undefined || config.title === null || config.title === '') {
+          const title = text(flow?.screens?.[node.id]?.title);
+          return title?.includes('{{') ? undefined : title;
+        }
       }
       return text(flow?.nodes?.[node.id]?.label);
     },
