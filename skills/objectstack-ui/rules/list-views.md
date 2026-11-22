@@ -367,19 +367,19 @@ To let users enter a record **together with its child line items** (invoice +
 lines, project + tasks) and save them **atomically**, you almost never need a
 custom page or form config. Prefer, in order:
 
-1. **Relationship `inlineEdit` (default, zero UI config).** Declare it in the
-   DATA MODEL — set `inlineEdit` on the child's `master_detail` field that
-   references the parent. Every standard New/Edit form for the parent (modal,
-   drawer, full-page) then auto-renders the children and saves parent + children
-   in one atomic `/api/v1/batch`. **No view metadata needed.** A parent or child
+1. **A parent field group naming the child (zero view config).** In the DATA
+   MODEL, the parent declares `fieldGroups: [{ key: 'lines', label: 'Lines',
+   relatedList: 'invoice_line' }]`. Its standard New/Edit forms (modal,
+   drawer, full-page) then draw the children there and save parent + children
+   in one atomic `/api/v1/batch`. Without the group nothing changes: the child
+   is a tab and the form has no lines. A parent or child
    declaring `enable.apiMethods` must list `'bulk'`, or that save is refused
-   `405 OBJECT_API_METHOD_NOT_ALLOWED`. The
-   `true` / `'grid'` / `'form'` ladder and what each value picks:
+   `405 OBJECT_API_METHOD_NOT_ALLOWED`. `inlineEdit` only picks how rows are
+   edited, the `true` / `'grid'` / `'form'` ladder:
    **objectstack-data → Relationships → Inline Editing**.
 
 2. **Form view `subforms` (override / tuning).** Add to a form view only when you
-   need to override the derived columns/order, or expose a child the
-   relationship didn't mark inline:
+   need to override the derived columns/order, or inline a child no group names:
 
    ```typescript
    form: {
@@ -395,9 +395,8 @@ custom page or form config. Prefer, in order:
 3. **`object-master-detail-form` page block (bespoke layout).** Use a page only
    for free-form layouts. Same `details: [{ childObject }]` shorthand.
 
-**Line-item grid behaviors (`grid` mode).** The editable grid is a real
-spreadsheet-style line editor, and
-every behaviour is derived from the DATA MODEL — computed columns, catalog
+**Line-item grid behaviors (`grid` mode).** Every behaviour of the editable
+grid is derived from the DATA MODEL — computed columns, catalog
 typeahead auto-fill, persisted drag-reorder, and the live Subtotal → Tax → Total
 stack: **objectstack-data → Relationships → Inline Editing**. Three things are
 authored on this side: a trailing **ghost** row always exists, so never add an

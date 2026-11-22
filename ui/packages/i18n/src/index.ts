@@ -198,7 +198,9 @@ export { firstDayOfWeek, type WeekdayIndex } from './utils/index.js';
 
 // The app's `flows` translation group, read back out of the loaded resource
 // tree: the ONE reader every surface that names a flow goes through — the
-// console's flow runner and designer, and the docs viewer's flow embed.
+// console's flow runner and designer, the stage-change confirms that name
+// the flows a move would start (objectstack#35928), and the docs viewer's
+// flow embed.
 export {
   activeFlowsBundle,
   type FlowsTranslation,

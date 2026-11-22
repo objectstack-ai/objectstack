@@ -47,6 +47,7 @@ import {
 } from '@objectstack/core';
 import { ApprovalService } from './approval-service.js';
 import { ApprovalsServicePlugin } from './approvals-plugin.js';
+import { NotificationTextRenderer } from '@objectstack/service-messaging';
 import { ApprovalsTranslations } from './translations/index.js';
 import { relaxTenantColumns } from './pre-18-tenant-column.testkit.js';
 
@@ -544,6 +545,119 @@ describe('an empty admin_rescue slate opens on the organization\'s administrator
       const served = (await bare.listActions(row.id, { ...as('u_sub', ORG), locale: 'zh-CN' }))
         .filter((a) => a.action === 'comment' && !a.actor_id);
       expect(served.map((a) => a.comment)).toEqual(['审批人名单未指向任何人，因此已转交本组织管理员处理：岗位「sales_manager」无人任职。']);
+    });
+  });
+  // [#36035] The no-approver note (an organization with no administrator opens
+  // on the slate that names no one) stores its position as a `type:value`
+  // slot, not a finished string, and names it the way the note above does:
+  // the reader's pack, else the declared label, else the name.
+  describe('[#36035] the no-approver note names its position by its label', () => {
+    let labelled: ApprovalService;
+    let i18n: ReturnType<typeof createMemoryI18n>;
+    const told: any[] = [];
+    const declared: Record<string, string> = { sales_manager: 'Sales Manager' };
+    const holding = (who: string) => 'No one else can approve this request yet. An organization administrator '
+      + `must add a member who holds ${who}; that member can then decide it.`;
+    // [#36308] The approver type is named by its word, so no space sets it apart.
+    const holdingZh = (who: string) => `目前还没有其他人能审批此请求。组织管理员需要添加一名担任${who}的成员，之后由该成员决定。`;
+    /** A request the labelled service opens, so its notices reach `told`. */
+    const openLabelled = async (key: string, approvers: any[]): Promise<any> => {
+      await engine.insert('crm_deal', { id: `D_${key}`, title: key }, { context: SYSTEM } as any);
+      return labelled.openNodeRequest({
+        object: 'crm_deal', recordId: `D_${key}`, runId: `run_${key}`, nodeId: 'review', flowName: 'deal_review',
+        config: { approvers, behavior: 'first_response' } as any,
+        submitterId: 'u_sub', record: { id: `D_${key}`, title: key }, organizationId: LEADERLESS_ORG,
+      }, as('u_sub', LEADERLESS_ORG));
+    };
+    const ENGLISH = holding("position 'sales_manager'");
+    const noteFor = async (requestId: string, locale?: string) =>
+      (await labelled.listActions(requestId, { ...as('u_sub', LEADERLESS_ORG), ...(locale ? { locale } : {}) }))
+        .filter((a) => a.action === 'comment' && !a.actor_id)
+        .map((a) => a.comment);
+
+    beforeAll(() => {
+      i18n = createMemoryI18n();
+      for (const [locale, data] of Object.entries(ApprovalsTranslations)) {
+        i18n.loadTranslations(locale, data as Record<string, unknown>);
+      }
+      i18n.loadTranslations('zh-CN', { positions: { sales_manager: { label: '销售经理' } } });
+      labelled = new ApprovalService({
+        engine: engine as any,
+        clock: { now: () => new Date(now += 1000) },
+        logger: { warn: () => {}, info: () => {}, error: () => {}, debug: () => {} } as any,
+        i18nServiceSource: () => i18n,
+        positionLabelSource: async (name) => declared[name],
+      });
+      labelled.attachMessaging({ emit: (async (input: any) => { told.push(input); }) as any });
+    });
+
+    it('the snapshot stores the slot, not a finished string; the row stores the English with the name', async () => {
+      const row = await open('none_stored', UNSTAFFED, {}, LEADERLESS_ORG);
+      const [note] = (await actionsOf(row.id)).filter((a) => a.action === 'comment' && !a.actor_id);
+      expect(note.comment).toBe(ENGLISH);
+      expect((await snapshotOf(row.id)).__noApproverNote).toEqual({
+        action_id: note.id, slots: ['position:sales_manager'],
+      });
+      expect(await noteFor(row.id)).toEqual([ENGLISH]);
+    });
+
+    it('a zh-CN reader reads the pack\'s label, and never the machine name', async () => {
+      const row = await open('none_zh', UNSTAFFED, {}, LEADERLESS_ORG);
+      const [comment] = await noteFor(row.id, 'zh-CN');
+      expect(comment).toBe(holdingZh('岗位「销售经理」'));
+      expect(comment).not.toContain('sales_manager');
+      // [#36308] …and no English approver-type token.
+      expect(comment).not.toContain('position');
+    });
+
+    it('a reader whose pack holds no translation reads the declared label', async () => {
+      const row = await open('none_declared', UNSTAFFED, {}, LEADERLESS_ORG);
+      expect(await noteFor(row.id, 'en')).toEqual([holding("position 'Sales Manager'")]);
+      const [ja] = await noteFor(row.id, 'ja-JP');
+      expect(ja).toContain('役職「Sales Manager」を担うメンバー');
+      expect(ja).not.toContain('sales_manager');
+    });
+
+    it('a position with no label anywhere keeps its internal name', async () => {
+      const row = await open('none_unlabelled', [{ type: 'position', value: 'treasury' }], {}, LEADERLESS_ORG);
+      expect(await noteFor(row.id, 'zh-CN')).toEqual([holdingZh('岗位「treasury」')]);
+    });
+
+    // [#36308] The submitter's notice names the position the way the timeline
+    // does, per recipient at delivery: the recipient's pack label, else the
+    // declared label, else the name; and the approver type in their language.
+    it('the submitter\'s notice: zh-CN reads the pack\'s label and the type\'s word, the literal the declared label', async () => {
+      const row = await openLabelled('none_notice', UNSTAFFED);
+      const [notice] = told.filter((e) => e.source?.id === row.id);
+      expect([notice.topic, notice.audience, notice.keyedText.bodyKey])
+        .toEqual(['approval.comment', ['u_sub'], 'messages.approvalNoApproverHoldingSlot']);
+      expect(notice.payload.body).toBe(holding("position 'Sales Manager'"));
+      const renderer = new NotificationTextRenderer({ getData: () => undefined, getI18n: () => i18n as any });
+      const zh = renderer.render(notice.keyedText, notice.payload, 'zh-CN').body;
+      expect(zh).toBe(holdingZh('岗位「销售经理」'));
+      expect(zh).not.toMatch(/position|sales_manager/);
+      expect(renderer.render(notice.keyedText, notice.payload, 'ja-JP').body).toContain('役職「Sales Manager」');
+      expect(renderer.render(notice.keyedText, notice.payload, 'en').body).toBe(holding("position 'Sales Manager'"));
+    });
+
+    it('the submitter\'s notice: a position with no label anywhere keeps its internal name', async () => {
+      const row = await openLabelled('none_notice_bare', [{ type: 'position', value: 'treasury' }]);
+      const [notice] = told.filter((e) => e.source?.id === row.id);
+      expect(notice.payload.body).toBe(holding("position 'treasury'"));
+      const renderer = new NotificationTextRenderer({ getData: () => undefined, getI18n: () => i18n as any });
+      expect(renderer.render(notice.keyedText, notice.payload, 'zh-CN').body).toBe(holdingZh('岗位「treasury」'));
+    });
+
+    it('CONTROL: a note written before the slot was stored renders exactly as before', async () => {
+      const row = await open('none_legacy', UNSTAFFED, {}, LEADERLESS_ORG);
+      // The stored shape of a note written before #36035: `who`, pre-composed.
+      const snapshot = await snapshotOf(row.id);
+      snapshot.__noApproverNote = { action_id: snapshot.__noApproverNote.action_id, who: "position 'sales_manager'" };
+      await engine.update('sys_approval_request', { id: row.id, node_config_json: JSON.stringify(snapshot) },
+        { context: SYSTEM } as any);
+      expect(await noteFor(row.id, 'zh-CN')).toEqual([holdingZh("position 'sales_manager'")]);
+      expect(await noteFor(row.id, 'en')).toEqual([ENGLISH]);
+      expect(await noteFor(row.id)).toEqual([ENGLISH]);
     });
   });
 });

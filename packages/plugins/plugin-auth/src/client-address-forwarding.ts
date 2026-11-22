@@ -16,10 +16,11 @@
  */
 
 /**
- * The forwarded headers the rule reads, in the order it believes them, and
- * only when the deployment declares `server.trustProxy`: `X-Forwarded-For`
- * (its leftmost entry), then `X-Real-IP`. Lower-cased, as every adapter
- * delivers them. `resolveClientAddress` reads exactly this list.
+ * The forwarded headers the rule reads, and only when the deployment declares
+ * `server.trustProxy`: under `true`, `X-Forwarded-For` (its leftmost entry),
+ * then `X-Real-IP`, in this order; under the trusted-network form, the one of
+ * them the form names. Lower-cased, as every adapter delivers them.
+ * `resolveClientAddress` reads no header outside this list.
  */
 export const FORWARDED_CLIENT_ADDRESS_HEADERS: readonly string[] = Object.freeze(['x-forwarded-for', 'x-real-ip']);
 

@@ -176,9 +176,21 @@ const fab = () => document.querySelector('[data-testid="mobile-fab-create"]');
 beforeEach(() => {
   principal = {};
   phoneViewport = false;
+  // An open selection asks the explain engine whether the list offers Change
+  // Owner (objectstack#35403); this list answers no. Any other request is a
+  // defect of the test, not a double to grow.
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    if (String(url) === '/api/v1/security/explain') {
+      return { ok: true, status: 200, json: async () => ({ allowed: false }) };
+    }
+    throw new Error(`unexpected request: ${String(url)}`);
+  }));
 });
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 describe('the phone 「+」 while cards are selected (objectstack#35883)', () => {
   it('is drawn, is not drawn while a selection is open, and is drawn again after it ends', async () => {

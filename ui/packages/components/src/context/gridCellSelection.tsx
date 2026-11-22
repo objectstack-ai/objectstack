@@ -35,6 +35,17 @@ export interface GridCellFacts {
    */
   readOnlyReason?: string | null;
   /**
+   * The host is still reading what decides whether this cell edits (the
+   * record's lock, the reader's verdict on the record). An attempt to edit it
+   * meanwhile opens no editor: the cell shows `text`, and once `settled`
+   * settles (resolved or rejected) the same attempt, with the same typed key,
+   * is asked again — unless the reader selected another cell, asked something
+   * newer of it or opened an editor in the meantime. A toggle, a paste or a
+   * clear asked meanwhile waits the same way: nothing is written before the
+   * read settles. Absent ⇒ nothing is being read.
+   */
+  checking?: { text: string; settled: Promise<unknown> } | null;
+  /**
    * What a printable key typed on the selected cell does: `replace` opens the
    * editor with the typed text in place of the value (text, numbers); `open`
    * opens the editor over the value and the key is not written (a picker, a
@@ -98,7 +109,15 @@ export interface GridReferenceCells {
 }
 
 export interface GridCellSelection {
-  /** The host's facts for one cell; asked when the reader acts on it, never per render. */
+  /**
+   * The host's facts for one cell. The table asks for them when the reader
+   * acts on a cell (an edit, a key, a paste), and for the selected cell's
+   * `aria-readonly` (objectstack#35689): once as the cell becomes selected,
+   * and again when its row is re-read or the provider's value is a new
+   * object. The value's identity is part of this contract: keep it stable
+   * across renders (memoise it) and hand a new one only when an answer may
+   * have changed, or the selected cell is asked on every render.
+   */
   describeCell?: (row: any, columnKey: string) => GridCellFacts | null | undefined;
   /** Called when a cell becomes the selected one (a host may prefetch what an edit will need). */
   onCellSelect?: (row: any, columnKey: string) => void;

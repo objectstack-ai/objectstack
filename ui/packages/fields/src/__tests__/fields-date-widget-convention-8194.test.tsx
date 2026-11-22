@@ -23,11 +23,11 @@
  * That yields SIX bare no-bag sites, two more than the card's four:
  *
  *   1. `widgets/DateField.tsx`          readonly `date` widget        ← fixed
- *   2. `widgets/GridField.tsx`          sub-grid `date` column        ← fixed
+ *   2. `widgets/grid-field/GridFieldWidget.tsx` sub-grid `date` column ← fixed
  *   3. `widgets/FormulaField.tsx`       `returnType: 'date'`          ← fixed
  *   4. `widgets/lookupColumnDisplay.tsx` the `$date` fallback         ← fixed
  *   5. `widgets/DateField`'s sibling `DateTimeField.tsx` readonly     ← NOT
- *   6. `widgets/GridField.tsx`'s `datetime`/`time` branch             ← NOT
+ *   6. `widgets/grid-field/GridFieldWidget.tsx`'s `datetime`/`time` branch ← NOT
  *
  * 5 and 6 are DATETIME faces. Their one home is `formatDateTime`, which has
  * its own face vocabulary (`'compact'` from objectui#7443 versus the verbose
@@ -83,7 +83,7 @@ import { I18nProvider, LocalizationProvider } from '@object-ui/i18n';
 import { DateField } from '../widgets/DateField';
 import { DateTimeField } from '../widgets/DateTimeField';
 import { FormulaField } from '../widgets/FormulaField';
-import { GridField } from '../widgets/GridField';
+import { GridFieldWidget as GridField } from '../widgets/grid-field/GridFieldWidget';
 import { renderLookupColumnValue } from '../widgets/lookupColumnDisplay';
 
 /** The five locales this change was measured in. */

@@ -360,6 +360,10 @@ export const DETAIL_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'detail.pathStageChangeConflict': 'Someone else changed this record, and the latest version is now shown. Press the stage again if the move still applies.',
   'detail.pathStageChangeDenied': "You don't have permission to change this record's stage.",
   'detail.pathStageChangeFailed': 'The stage could not be changed.',
+  // objectstack#35928 — the flows a stage change would start, listed under
+  // the confirm's sentence (`stageChangeStarts`); byte-identical to the `en` pack.
+  'detail.stageChangeStartsHeading': 'Saving this change starts these flows:',
+  'detail.stageChangeStartsApproval': 'starts an approval',
   // objectstack#35685 — the save bar's note when the record changed elsewhere
   // during the edit session (`InlineEditSaveBar`). Byte-identical to the `en` pack.
   'detail.inlineEditRecordChanged': 'This record was changed elsewhere while you were editing. Your unsaved changes are kept, and Save writes them over the latest version.',

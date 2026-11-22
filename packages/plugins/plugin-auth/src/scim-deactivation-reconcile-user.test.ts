@@ -71,6 +71,14 @@
  *      And, under (d): a deactivation makes an administrator's EXPIRING ban
  *      permanent, so the vendor's auto-lift cannot re-admit a deactivated
  *      principal.
+ *  (k) an account disabled by any door keeps nothing running in its name: an
+ *      administrator's ban suspends the AI service accounts the person is
+ *      accountable for (its own reason; an unban, or a timed ban's expiry,
+ *      resumes none); register, set-owner and resume refuse an owner disabled
+ *      by either door; and a directory deactivation or delete disables the
+ *      OAuth applications the person registered and revokes the SCIM
+ *      credentials they minted, saying so once at error, which a
+ *      re-activation restores none of.
  */
 
 import { describe, it, expect, afterEach, afterAll, vi } from 'vitest';
@@ -81,7 +89,7 @@ import { runAdminBanUser, runAdminUnbanUser } from './admin-ban-endpoints.js';
 import { AuthManager } from './auth-manager.js';
 import { authIdentityObjects } from './manifest.js';
 import { createTenancyService } from './tenancy-service.js';
-import { mintScimConnectionCredential } from './scim-connection-service.js';
+import { mintScimConnectionCredential, verifyScimBearerToken } from './scim-connection-service.js';
 import { registerLastAdminGuard, type LastAdminGuardEngine } from './last-admin-guard.js';
 import { registerIdentityWriteGuard, registerManagedUpdateWhitelist } from './identity-write-guard.js';
 import { SYS_USER_PROFILE_EDIT_FIELDS } from './sys-user-writable-fields.js';
@@ -91,8 +99,13 @@ import { registerApiKeyRestoreGuard } from './api-key-restore-guard.js';
 import { FORCED_RESET_REVOKE_REASON } from './forced-reset-revocation.js';
 import { MEMBERSHIP_ENDED_REVOKE_REASON } from './membership-ended-session.js';
 import { SCIM_DEACTIVATION_REVOKE_REASON } from './scim-deactivation-key-revocation.js';
-import { SERVICE_ACCOUNT_OWNER_DEACTIVATED_REASON, SERVICE_ACCOUNT_OWNER_LEFT_REASON } from './service-account-owner-leaves.js';
-import { runResumeServiceAccount, type ServiceAccountLifecycleDeps } from './service-account-lifecycle.js';
+import {
+  SERVICE_ACCOUNT_OWNER_BANNED_REASON,
+  SERVICE_ACCOUNT_OWNER_DEACTIVATED_REASON,
+  SERVICE_ACCOUNT_OWNER_LEFT_REASON,
+} from './service-account-owner-leaves.js';
+import { runResumeServiceAccount, runSetServiceAccountOwner, type ServiceAccountLifecycleDeps } from './service-account-lifecycle.js';
+import { runRegisterServiceAccount } from './service-account-doors.js';
 import { runSetUserManager } from './admin-set-user-manager.js';
 import { runAdminSetUserPassword } from './admin-user-endpoints.js';
 import { CLOUD_MANAGED_REFUSAL_CODE, CLOUD_MANAGED_REFUSAL_STATUS } from './cloud-managed.js';
@@ -122,6 +135,9 @@ import '@better-auth/core/context';
 import '@better-auth/core/error';
 import '@better-auth/oauth-provider';
 import '@better-auth/scim';
+// The SSO discovery egress guard the source loads with a dynamic import, paid
+// here too, during collection (check-test-source-alias, "The source reach").
+import '@objectstack/core/egress';
 
 /**
  * [#23184] Every sign-in below verifies the password the case attached, which
@@ -185,6 +201,26 @@ const sysUserPermissionSet = {
     organization_id: { name: 'organization_id', type: 'text' as const },
     valid_from: { name: 'valid_from', type: 'datetime' as const },
     valid_until: { name: 'valid_until', type: 'datetime' as const },
+  },
+};
+
+/**
+ * The columns of `sys_audit_log` a revoked SCIM credential's row writes
+ * (`scimCredentialAuditRow`): the fixture the plugin-auth harness carries, as
+ * plugin-audit, the object's owner, is not a dependency of this package.
+ */
+const sysAuditLog = {
+  name: 'sys_audit_log',
+  label: 'Audit Log',
+  systemFields: { tenant: false },
+  fields: {
+    id: { name: 'id', type: 'text' as const, primaryKey: true },
+    action: { name: 'action', type: 'text' as const },
+    user_id: { name: 'user_id', type: 'text' as const },
+    actor: { name: 'actor', type: 'text' as const },
+    object_name: { name: 'object_name', type: 'text' as const },
+    record_id: { name: 'record_id', type: 'text' as const },
+    metadata: { name: 'metadata', type: 'textarea' as const },
   },
 };
 
@@ -261,7 +297,7 @@ async function bootEngine(): Promise<BootedSqliteEngine> {
   for (const object of AUTH_OBJECTS) {
     engine.registry.registerObject(object as never, '@objectstack/plugin-auth');
   }
-  for (const object of [sysPermissionSet, sysUserPermissionSet]) {
+  for (const object of [sysPermissionSet, sysUserPermissionSet, sysAuditLog]) {
     engine.registry.registerObject(object as never, '@objectstack/plugin-auth');
   }
   await engine.syncSchemas();
@@ -554,17 +590,46 @@ async function signInAnswer(
  * administrator gate in front of it is not the subject). The target must not
  * be the last local-credential holder, or the mount refuses the ban.
  */
-async function adminBan(h: Harness, userId: string, banReason?: string): Promise<void> {
+/**
+ * `POST /admin/ban-user` by a platform administrator, through the door's own
+ * handler with the data engine the mount hands it. Answers what the ban ended
+ * beside itself (`data.revoked`).
+ */
+async function adminBan(
+  h: Harness,
+  userId: string,
+  banReason?: string,
+  banExpiresIn?: number,
+): Promise<Record<string, unknown> | undefined> {
   const res = await runAdminBanUser(
-    { getAuthContext: () => h.manager.getAuthContext() },
+    { getAuthContext: () => h.manager.getAuthContext(), getDataEngine: () => h.engine },
     { id: 'usr_platform_admin' } as never,
     new Request(`${AUTH}/admin/ban-user`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ userId, ...(banReason !== undefined ? { banReason } : {}) }),
+      body: JSON.stringify({
+        userId,
+        ...(banReason !== undefined ? { banReason } : {}),
+        ...(banExpiresIn !== undefined ? { banExpiresIn } : {}),
+      }),
     }),
   );
   expect(res.status, `admin ban failed: ${JSON.stringify(res.body)}`).toBe(200);
+  return (res.body as { data?: { revoked?: Record<string, unknown> } }).data?.revoked;
+}
+
+/** `POST /admin/unban-user` by a platform administrator, through the door's own handler. */
+async function adminUnban(h: Harness, userId: string): Promise<void> {
+  const res = await runAdminUnbanUser(
+    { getAuthContext: () => h.manager.getAuthContext(), getDataEngine: () => h.engine },
+    { id: 'usr_platform_admin' } as never,
+    new Request(`${AUTH}/admin/unban-user`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ userId }),
+    }),
+  );
+  expect(res.status, `admin unban failed: ${JSON.stringify(res.body)}`).toBe(200);
 }
 
 describe('a sign-in refused for a SCIM deactivation names that cause; an administrator\'s ban does not', () => {
@@ -1209,6 +1274,7 @@ async function accountBan(h: Harness, id: string): Promise<{ banned: boolean; ba
 }
 
 const DIRECTORY_SUSPENDED = { banned: true, ban_reason: SERVICE_ACCOUNT_OWNER_DEACTIVATED_REASON };
+const BAN_SUSPENDED = { banned: true, ban_reason: SERVICE_ACCOUNT_OWNER_BANNED_REASON };
 const RUNNING = { banned: false, ban_reason: null };
 
 /** `POST /service-account/resume` by a platform administrator, through the door's own handler. */
@@ -1311,14 +1377,34 @@ describe('a directory deactivation suspends the AI service accounts the person i
     expect(await accountBan(h, 'usr_agent_sol_stopped')).toEqual({ banned: true, ban_reason: 'Stopped by a platform administrator' });
   }, 60_000);
 
-  it('(j) CONTROL: an administrator\'s ban of the owner leaves the account as it is', async () => {
+  it('(j) an administrator\'s ban of the owner suspends the account too, with its own reason, and an unban resumes none', async () => {
     const h = await boot();
     const tam = await provision(h, 'tam');
+    const other = await provision(h, 'una');
     const raw = await agentAccount(h, tam.userId, 'usr_agent_tam');
+    const rawB = await agentAccount(h, tam.userId, 'usr_agent_tam_b', AGENT_OTHER_ORG);
+    const rawOther = await agentAccount(h, other.userId, 'usr_agent_una');
 
-    await adminBan(h, tam.userId, 'Policy violation');
-    expect(await accountBan(h, 'usr_agent_tam')).toEqual(RUNNING);
+    expect(await adminBan(h, tam.userId, 'Policy violation')).toMatchObject({ serviceAccounts: 2, failed: 0, complete: true });
+    expect([await accountBan(h, 'usr_agent_tam'), await accountBan(h, 'usr_agent_tam_b')]).toEqual([BAN_SUSPENDED, BAN_SUSPENDED]);
+    // Suspension is the ban: nothing is revoked, and the keys are refused on it.
+    expect([await keyRow(h, 'key_usr_agent_tam'), await keyRow(h, 'key_usr_agent_tam_b')]).toEqual([LIVE, LIVE]);
+    expect([await keyDoor(h, raw), await keyDoor(h, rawB)]).toEqual(['refused:owner_banned', 'refused:owner_banned']);
+    // Another person's account is not this person's to stop.
+    expect(await accountBan(h, 'usr_agent_una')).toEqual(RUNNING);
+    expect(await keyDoor(h, rawOther)).toBe('admitted');
+
+    // Resume is refused while the owner is banned …
+    expect(await platformResume(h, 'usr_agent_tam')).toEqual({ status: 409, code: 'RESOURCE_CONFLICT' });
+    // … an unban lifts the person's ban only …
+    await adminUnban(h, tam.userId);
+    expect(isBanned(await userRow(h, tam.email))).toBe(false);
+    expect([await accountBan(h, 'usr_agent_tam'), await accountBan(h, 'usr_agent_tam_b')]).toEqual([BAN_SUSPENDED, BAN_SUSPENDED]);
+    expect(await keyDoor(h, raw)).toBe('refused:owner_banned');
+    // … and an administrator's resume, with the unbanned owner kept, lets the same key work again.
+    expect(await platformResume(h, 'usr_agent_tam')).toEqual({ status: 200 });
     expect(await keyDoor(h, raw)).toBe('admitted');
+    expect(await accountBan(h, 'usr_agent_tam_b')).toEqual(BAN_SUSPENDED);
   }, 60_000);
 
   it('(j) a suspension that cannot be written still deprovisions the person, and says so once at error', async () => {
@@ -1363,6 +1449,245 @@ describe('a directory deactivation suspends the AI service accounts the person i
     vi.mocked(h.manager.getDataEngine).mockReturnValue(real as never);
     expect((await setDisplayName(h, uma.scimId, 'uma Renamed')).status).toBe(200);
     expect(await accountBan(h, 'usr_agent_uma')).toEqual(DIRECTORY_SUSPENDED);
+  }, 60_000);
+});
+
+// ---------------------------------------------------------------------------
+// (k) — an account disabled by any door keeps nothing running in its name
+// ---------------------------------------------------------------------------
+
+/** The platform administrator's door deps for register and set-owner, over the harness engine. */
+function doorDeps(h: Harness) {
+  return {
+    getDataEngine: () => h.engine as never,
+    addMember: async ({ userId, organizationId }: { userId: string; organizationId: string }) => {
+      await h.engine.insert('sys_member', { id: `mem_${userId}_${organizationId}`, user_id: userId, organization_id: organizationId, role: 'member' }, SYSTEM);
+    },
+    runAtomically: <T,>(work: () => Promise<T>) => work(),
+  };
+}
+const PLATFORM_ADMIN = { id: 'usr_platform_admin', isPlatformAdmin: true, activeOrganizationId: AGENT_ORG } as never;
+const doorRequest = (path: string, body: unknown) =>
+  new Request(`${AUTH}/service-account/${path}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+const verdictOf = (res: { status: number; body: unknown }) => {
+  const error = (res.body as { error?: { code?: string; fields?: Array<{ field: string }> } }).error;
+  return { status: res.status, ...(error?.code ? { code: error.code } : {}), ...(error?.fields ? { fields: error.fields.map((f) => f.field) } : {}) };
+};
+/** `POST /service-account/register` by a platform administrator in {@link AGENT_ORG}, naming `ownerId`. */
+const register = async (h: Harness, ownerId: string, name: string) =>
+  verdictOf(await runRegisterServiceAccount(doorDeps(h), PLATFORM_ADMIN, doorRequest('register', { name, ownerId })));
+/** `POST /service-account/set-owner` by a platform administrator. */
+const setOwner = async (h: Harness, accountId: string, ownerId: string) =>
+  verdictOf(await runSetServiceAccountOwner(doorDeps(h) as never, PLATFORM_ADMIN, doorRequest('set-owner', { userId: accountId, ownerId })));
+/** A person the harness provisions, a member of {@link AGENT_ORG} as an owner must be. */
+async function member(h: Harness, localPart: string): Promise<Provisioned> {
+  const person = await provision(h, localPart);
+  await h.engine.insert('sys_member', { id: `mem_${person.userId}_${AGENT_ORG}`, user_id: person.userId, organization_id: AGENT_ORG, role: 'member' }, SYSTEM);
+  return person;
+}
+async function accountsOwnedBy(h: Harness, ownerId: string): Promise<number> {
+  const rows = await h.engine.find('sys_user', { where: { accountable_user_id: ownerId }, fields: ['id'] }, SYSTEM);
+  return Array.isArray(rows) ? rows.length : 0;
+}
+
+describe('an AI service account runs only while its accountable owner\'s account is active, whichever door disabled it', () => {
+  it('(k) a timed ban that expires leaves the accounts suspended; resume is allowed once the owner\'s ban no longer holds', async () => {
+    const h = await boot();
+    const vic = await provision(h, 'vic');
+    const raw = await agentAccount(h, vic.userId, 'usr_agent_vic');
+
+    expect(await adminBan(h, vic.userId, 'Cooling off', 2)).toMatchObject({ serviceAccounts: 1, complete: true });
+    expect(await accountBan(h, 'usr_agent_vic')).toEqual(BAN_SUSPENDED);
+    expect(await platformResume(h, 'usr_agent_vic')).toEqual({ status: 409, code: 'RESOURCE_CONFLICT' });
+
+    vi.useFakeTimers({ toFake: ['Date'], shouldAdvanceTime: true });
+    vi.setSystemTime(Date.now() + 5_000);
+    // The owner's ban has expired; the account's suspension has none.
+    expect(await accountBan(h, 'usr_agent_vic')).toEqual(BAN_SUSPENDED);
+    expect(await keyDoor(h, raw)).toBe('refused:owner_banned');
+    expect(await platformResume(h, 'usr_agent_vic')).toEqual({ status: 200 });
+    expect(await keyDoor(h, raw)).toBe('admitted');
+  }, 60_000);
+
+  it('(k) a deactivation over an administrator\'s ban: the account keeps the ban\'s reason, and resume is refused while either holds', async () => {
+    const h = await boot();
+    const wes = await provision(h, 'wes');
+    await agentAccount(h, wes.userId, 'usr_agent_wes');
+
+    await adminBan(h, wes.userId, 'Policy violation');
+    expect((await setActive(h, wes.scimId, false)).status).toBe(200);
+    // The person's ban keeps the administrator's reason; the account its first suspension.
+    expect((await userRow(h, wes.email))?.ban_reason).toBe('Policy violation');
+    expect(await accountBan(h, 'usr_agent_wes')).toEqual(BAN_SUSPENDED);
+    expect(await platformResume(h, 'usr_agent_wes')).toEqual({ status: 409, code: 'RESOURCE_CONFLICT' });
+  }, 60_000);
+
+  it('(k) register refuses an owner banned by an administrator or deactivated by the directory, and writes nothing', async () => {
+    const h = await boot();
+    const banned = await member(h, 'xia');
+    const deactivated = await member(h, 'yan');
+    const active = await member(h, 'zed');
+    await adminBan(h, banned.userId);
+    expect((await setActive(h, deactivated.scimId, false)).status).toBe(200);
+
+    for (const owner of [banned, deactivated]) {
+      expect(await register(h, owner.userId, `agent of ${owner.email}`)).toEqual({ status: 400, code: 'VALIDATION_FAILED', fields: ['ownerId'] });
+      expect(await accountsOwnedBy(h, owner.userId), 'no account is written').toBe(0);
+    }
+    // The control: an active member is accepted.
+    expect(await register(h, active.userId, 'agent of zed')).toEqual({ status: 201 });
+    expect(await accountsOwnedBy(h, active.userId)).toBe(1);
+
+    // An owner whose ban is lifted is accountable again.
+    await adminUnban(h, banned.userId);
+    expect(await register(h, banned.userId, 'agent of xia')).toEqual({ status: 201 });
+  }, 60_000);
+
+  it('(k) set-owner refuses to name a disabled person, by either door; an active person is named', async () => {
+    const h = await boot();
+    const ada = await member(h, 'ada');
+    await agentAccount(h, ada.userId, 'usr_agent_ada');
+    const banned = await member(h, 'bea');
+    const deactivated = await member(h, 'cyd');
+    const active = await member(h, 'dov');
+    await adminBan(h, banned.userId);
+    expect((await setActive(h, deactivated.scimId, false)).status).toBe(200);
+
+    for (const owner of [banned, deactivated]) {
+      expect(await setOwner(h, 'usr_agent_ada', owner.userId)).toEqual({ status: 400, code: 'VALIDATION_FAILED', fields: ['ownerId'] });
+    }
+    const [account] = (await h.engine.find('sys_user', { where: { id: 'usr_agent_ada' }, fields: ['accountable_user_id'] }, SYSTEM)) as Array<Record<string, unknown>>;
+    expect(account.accountable_user_id, 'the owner is unchanged').toBe(ada.userId);
+    expect(await setOwner(h, 'usr_agent_ada', active.userId)).toEqual({ status: 200 });
+  }, 60_000);
+});
+
+/** A SCIM credential for `connectionId`, minted by `mintedBy` through the mint door's own persist step. */
+const mintCredentialBy = (h: Harness, mintedBy: string, label: string, connectionId = 'okta-14360') =>
+  mintScimConnectionCredential(h.engine as never, SECRET, { connectionId, organizationId: AGENT_ORG, label, mintedByUserId: mintedBy });
+/** Two OAuth applications `ownerId` registered (one whose flag was never written), as the Setup form's create door writes them. */
+async function registeredApps(h: Harness, ownerId: string, tag: string): Promise<void> {
+  for (const [id, disabled] of [[`app_${tag}_a`, undefined], [`app_${tag}_b`, false]] as const) {
+    await h.engine.insert(
+      'sys_oauth_application',
+      { id, client_id: `${id}-client`, name: id, redirect_uris: JSON.stringify(['http://localhost:56789/cb']), user_id: ownerId, ...(disabled === undefined ? {} : { disabled }) },
+      SYSTEM,
+    );
+  }
+}
+async function appsDisabled(h: Harness, tag: string): Promise<boolean[]> {
+  const rows = (await h.engine.find('sys_oauth_application', { where: { id: { $in: [`app_${tag}_a`, `app_${tag}_b`] } }, orderBy: [{ field: 'id', order: 'asc' }] }, SYSTEM)) as Array<{ disabled?: unknown }>;
+  return rows.map((row) => row.disabled === true || row.disabled === 1);
+}
+const scimAdmits = async (h: Harness, bearer: string) => (await verifyScimBearerToken(h.engine as never, SECRET, bearer)) !== null;
+async function credentialRevokeTrail(h: Harness) {
+  const rows = (await h.engine.find('sys_audit_log', { where: { object_name: 'sys_scim_connection_credential' } }, SYSTEM)) as Array<Record<string, unknown>>;
+  return rows
+    .map((row) => ({ user_id: row.user_id ?? null, actor: row.actor, record_id: row.record_id, metadata: JSON.parse(String(row.metadata)) }))
+    .filter((row) => row.metadata.event === 'scim_credential_revoked');
+}
+const errorLines = (spy: { mock: { calls: unknown[][] } }, marker: string) => spy.mock.calls.map((c) => String(c[0])).filter((m) => m.includes(marker));
+
+describe('a directory deactivation or delete disables the OAuth applications the person registered and revokes the SCIM credentials they minted', () => {
+  it('(k) active:false ends them, recorded against the connection and said once at error; active:true restores none', async () => {
+    const h = await boot();
+    const eve = await provision(h, 'eve');
+    const fay = await provision(h, 'fay');
+    await registeredApps(h, eve.userId, 'eve');
+    await registeredApps(h, fay.userId, 'fay');
+    const minted = await mintCredentialBy(h, eve.userId, 'rotation');
+    const othersCredential = await mintCredentialBy(h, fay.userId, 'primary');
+    await h.engine.insert('sys_sso_provider', { id: 'sso_eve', provider_id: 'eve-okta', issuer: 'https://eve.okta.example', domain: 'eve.example', user_id: eve.userId }, SYSTEM);
+    expect(await scimAdmits(h, minted.token)).toBe(true);
+
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      expect((await setActive(h, eve.scimId, false)).status).toBe(200);
+      const lines = errorLines(errors, 'they are revoked');
+      expect(lines, 'one error line names the revoked credential and the remedy').toHaveLength(1);
+      expect(lines[0]).toContain('okta-14360 (rotation)');
+      expect(lines[0]).toContain('mints a new credential');
+    } finally {
+      errors.mockRestore();
+    }
+    expect(await appsDisabled(h, 'eve')).toEqual([true, true]);
+    expect(await scimAdmits(h, minted.token), 'the credential the person minted no longer verifies').toBe(false);
+    expect(await scimAdmits(h, h.token), "the connection's credential the request used still does").toBe(true);
+    // An unrelated person's registrations are untouched.
+    expect(await appsDisabled(h, 'fay')).toEqual([false, false]);
+    expect(await scimAdmits(h, othersCredential.token)).toBe(true);
+    // The single sign-on provider is kept, as a reset keeps it.
+    expect((await h.engine.find('sys_sso_provider', { where: { id: 'sso_eve' } }, SYSTEM)) as unknown[]).toHaveLength(1);
+    expect(await credentialRevokeTrail(h), 'the revoke is recorded against the connection, with no person').toEqual([
+      {
+        user_id: null,
+        actor: 'svc:scim:okta-14360',
+        record_id: minted.credentialId,
+        metadata: { event: 'scim_credential_revoked', connectionId: 'okta-14360' },
+      },
+    ]);
+
+    const res = await setActive(h, eve.scimId, true);
+    expect(res.status, `SCIM PATCH active:true failed: ${await res.clone().text()}`).toBe(200);
+    expect(isBanned(await userRow(h, eve.email))).toBe(false);
+    expect(await appsDisabled(h, 'eve'), 'a re-activation enables no app').toEqual([true, true]);
+    expect(await scimAdmits(h, minted.token), 'and restores no credential').toBe(false);
+  }, 60_000);
+
+  it('(k) DELETE /Users/{id} ends them the same way; a re-link through the tombstone restores none', async () => {
+    const h = await boot();
+    const gil = await provision(h, 'gil');
+    await registeredApps(h, gil.userId, 'gil');
+    const minted = await mintCredentialBy(h, gil.userId, 'rotation');
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const del = await h.send(scimRequest(h, 'DELETE', `/Users/${gil.scimId}`));
+      expect(del.status, `SCIM DELETE /Users/{id} failed: ${await del.clone().text()}`).toBe(204);
+    } finally {
+      errors.mockRestore();
+    }
+    expect(await appsDisabled(h, 'gil')).toEqual([true, true]);
+    expect(await scimAdmits(h, minted.token)).toBe(false);
+  }, 60_000);
+
+  it('(k) an application that cannot be disabled still deprovisions the person and revokes the credential, says so once at error, and the next inactive write retries', async () => {
+    const h = await boot();
+    const hal = await provision(h, 'hal');
+    await registeredApps(h, hal.userId, 'hal');
+    const minted = await mintCredentialBy(h, hal.userId, 'rotation');
+    const real = h.engine;
+    const refusing = new Proxy(real, {
+      get(target, prop, receiver) {
+        if (prop === 'update') {
+          return (object: string, data: Record<string, unknown>, options?: unknown) => {
+            if (object === 'sys_oauth_application') throw new Error('sys_oauth_application cannot be written (test)');
+            return target.update(object, data as never, options as never);
+          };
+        }
+        const value = Reflect.get(target, prop, receiver);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    vi.spyOn(h.manager, 'getDataEngine').mockReturnValue(refusing as never);
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const res = await setActive(h, hal.scimId, false);
+      expect(res.status, `SCIM PATCH failed: ${await res.clone().text()}`).toBe(200);
+      expect(isBanned(await userRow(h, hal.email))).toBe(true);
+      expect(await scimAdmits(h, minted.token), 'the credential is revoked though an app could not be disabled').toBe(false);
+      expect(await appsDisabled(h, 'hal')).toEqual([false, false]);
+      expect(errorLines(errors, 'ending the registrations of user')).toHaveLength(1);
+    } finally {
+      errors.mockRestore();
+    }
+
+    vi.mocked(h.manager.getDataEngine).mockReturnValue(real as never);
+    expect((await setDisplayName(h, hal.scimId, 'hal Renamed')).status).toBe(200);
+    expect(await appsDisabled(h, 'hal')).toEqual([true, true]);
   }, 60_000);
 });
 

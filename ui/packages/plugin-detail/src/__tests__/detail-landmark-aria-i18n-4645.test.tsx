@@ -125,7 +125,7 @@ describe('record-detail landmark names (objectui#4645)', () => {
     });
 
     it.each([
-      ['zh', '活动'],
+      ['zh', '动态'],
       ['ja', 'アクティビティ'],
       ['es', 'Actividad'],
       ['de', 'Aktivität'],

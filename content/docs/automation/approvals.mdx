@@ -408,6 +408,41 @@ never deadlock against itself. The exemption is keyed on run identity rather tha
 elevation, so a `runAs:'user'` run stays row-level-security scoped while it
 writes — it does not become a system write.
 
+**The record's lines are locked with it.** Rows of a `master_detail` child of the
+locked record (an expense claim's lines, an opportunity's products) refuse insert,
+update and delete with the same `409 RECORD_LOCKED`, and so does moving a row into
+or out of the record. The record lock's exemptions carry over: system writes and
+the run that opened the request still write the lines. Children joined by a plain
+`lookup` are not locked.
+
+**Deleting the record while it is pending** is not refused: the delete lands and
+its pending request is cancelled (`status: 'cancelled'`, with `cancel_reason` on
+the row). The delete removes the record's `master_detail` lines with it. In the
+cases below the server refuses the whole delete with `409 RECORD_LOCKED` instead, and
+the record, its lines and its pending request all stay:
+
+- the line object has a second relation that also cascades on delete (a `lookup`
+  with `deleteBehavior: 'cascade'`, or a second `master_detail`), so the server
+  cannot tell which record's delete removes the line;
+- the delete does not run inside an open transaction. This covers a datasource
+  that declares `supports.transactionsUnsupported`, a cascade that spans more
+  than one datasource, a record and its lines that sit together on a datasource
+  other than the default one (the server opens its cascade transaction on the
+  default datasource only), and a delete that carries the handle of a
+  transaction that has already finished (for example from an `async` after-hook).
+  The lines would be removed one by one, and a later refusal (a `restrict`
+  reference to the record) would leave the record locked with its lines gone.
+
+Inside a transaction the refusal is what keeps the lines: server code that owns
+the transaction must not catch the refused delete and commit anyway, or the
+lines are gone while the record stays locked.
+
+Deleting a different record never removes a locked record's line, with one
+exception: when the locked record is itself the child of a record whose delete
+cascades to it (a `master_detail` child, or a `lookup` child with
+`deleteBehavior: 'cascade'`), deleting that parent removes the locked record and
+its lines, and cancels its request.
+
 **Reading the lock.** Anyone who can read the record can ask whether it is
 locked, including a member who is not on the approval and so is served no
 request row:
@@ -423,11 +458,35 @@ which stay behind the object's `approvalsVisibleToReaders` switch. `locked` is
 `true` while a pending request's node has `lockRecord` other than `false`. That
 is the same check the server applies when it refuses an edit with `409
 RECORD_LOCKED`, so a page that reads it never offers an edit the server will
-refuse. The record is read as the caller: a record they cannot read answers
+refuse. Asked of a line, it answers `true` while the record the line belongs to
+is locked. The record is read as the caller: a record they cannot read answers
 `404 RECORD_NOT_FOUND`, the same body a record id that does not exist gets. The
 SDK call is `client.approvals.getRecordLock(object, recordId)`, and the service
 member is `IApprovalService.getRecordLock`. An approvals service without that
 member answers `501`.
+
+**Reading the locks of a page of records.** A list asks for every row on screen
+in one request rather than one per row:
+
+```bash
+curl -b cookies.txt -X POST -H 'Content-Type: application/json' \
+  -d '{"recordIds":["rec_123","rec_456","rec_789"]}' \
+  "https://your-app.example.com/api/v1/approvals/records/expense/locks"
+# → { "success": true, "data": { "records": [
+#      { "recordId": "rec_123", "locked": true },
+#      { "recordId": "rec_456", "locked": false },
+#      { "recordId": "rec_789", "locked": null } ] } }
+```
+
+Each entry is what the single-record read answers for that id, in the order the
+ids were sent; `null` stands where that read answers `404`, so a record the
+caller cannot read and one that does not exist look the same. One request
+carries at most 200 ids (`APPROVAL_RECORD_LOCKS_MAX_RECORD_IDS`); a longer list,
+an empty one or any other body key is refused with `400 VALIDATION_ERROR`. The
+SDK call is `client.approvals.getRecordLocks(object, recordIds)`, the service
+member `IApprovalService.getRecordLocks`, and an approvals service without it
+answers `501`. A list that edits in place reads it when a cell is first
+selected, and holds an edit asked before the answer arrives until it does.
 
 Only `approvers` is required on the node; everything else has a default
 (`behavior: 'first_response'`, `lockRecord: true`, `maxRevisions: 3`).
@@ -593,7 +652,9 @@ administrator is its submitter on a step that sets `excludeSubmitter`. The
 server logs a warning, and the request's timeline and a notice to its submitter
 say that no one else can approve it yet and that an organization administrator
 must add a member who can (one who holds the unstaffed position, when the slate
-names one). Only the admin override decides it, and never its submitter's own.
+names one). The timeline's note names that position the way the note above
+does: by its label for a reader, by its name in the text the row stores. Only the
+admin override decides it, and never its submitter's own.
 
 ### The approver finds it in their queue
 
@@ -874,7 +935,7 @@ continuity levers on the same request. All are `POST
 | Verb | Route | Who | Effect |
 |:---|:---|:---|:---|
 | `approve` / `reject` | `/approve` `/reject` | pending approver | Records the decision (finalizes per `behavior`). Accepts `comment` (a reject's reason — required at every human door, see below), `attachments`, and — when the node declares `decisionOutputs` — structured `outputs` handed to the flow as `<nodeId>.<key>` variables. |
-| `reassign` | `/reassign` | pending approver | Hands one slot to another user (`to`); the request stays pending. |
+| `reassign` | `/reassign` | pending approver | Hands their own slot to another user (`to`); the request stays pending. A `from` naming a slot the acting approver does not hold is refused `403 FORBIDDEN`; an administrator (the override) or the system may move any pending slot. |
 | `revise` (send back) | `/revise` | pending approver | Ends this round as **`returned`**, unlocks the record for rework (ADR-0044). |
 | `request-info` | `/request-info` | pending approver | Asks the submitter for more info; the request **stays pending**. `comment` required. |
 | `remind` | `/remind` | submitter | Nudges the pending approvers (publishes a notification topic). |

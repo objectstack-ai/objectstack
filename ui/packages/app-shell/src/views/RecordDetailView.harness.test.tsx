@@ -46,7 +46,7 @@
 
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach, beforeAll, afterAll } from 'vitest';
-import { render, waitFor, cleanup, screen, act, fireEvent } from '@testing-library/react';
+import { render, waitFor, cleanup, screen, act, fireEvent, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, BrowserRouter } from 'react-router-dom';
 import { toast } from 'sonner';
 import { RelatedCountStore } from '@object-ui/components';
@@ -1649,7 +1649,7 @@ describe('RecordDetailView.feedRefusal-11195', () => {
     } as any;
   }
 
-  function renderDetail(dataSource: any) {
+  function renderDetail(dataSource: any, { embedded = true }: { embedded?: boolean } = {}) {
     return render(
       <MemoryRouter initialEntries={[`/app/demo/${OBJECT_NAME}/${RECORD_ID}?related=timeline`]}>
         <MetadataCtx.Provider value={makeMetadata()}>
@@ -1659,7 +1659,7 @@ describe('RecordDetailView.feedRefusal-11195', () => {
             onEdit={() => {}}
             objectNameOverride={OBJECT_NAME}
             recordIdOverride={RECORD_ID}
-            embedded
+            embedded={embedded}
           />
         </MetadataCtx.Provider>
       </MemoryRouter>,
@@ -1811,7 +1811,8 @@ describe('RecordDetailView.feedRefusal-11195', () => {
       });
 
       window.localStorage.clear();
-      renderDetail(dataSource);
+      // objectstack#36225 — the comment panel is the full page's: a preview has none.
+      renderDetail(dataSource, { embedded: false });
 
       expect(await screen.findByText('Stage moved to qualified')).toBeTruthy();
       // The 动态 stream holds no comments, so their refusal is not its to say.
@@ -3029,7 +3030,9 @@ describe('RecordDetailView.recordEditState-35599', () => {
 
   const headerButton = (label: string) =>
     (Array.from(document.querySelectorAll('button')).find((b) => (b.textContent ?? '').trim() === label) as HTMLButtonElement | undefined) ?? null;
-  const pencils = (container: HTMLElement) => container.querySelectorAll('button[aria-label="Double-click to edit"]').length;
+  // The field list's pencil is named for a click (objectstack#36147), every other face's for a double-click.
+  const pencils = (container: HTMLElement) =>
+    container.querySelectorAll('button[aria-label="Double-click to edit"], button[aria-label="Click to edit"]').length;
   const editor = (container: HTMLElement, id: string) => container.querySelector(`[data-body-table-editor="${id}"]`) as HTMLElement | null;
   const cells = (scope: HTMLElement, label: string) => Array.from(scope.querySelectorAll(`input[aria-label="${label}"]`)) as HTMLInputElement[];
   const summaryInput = (container: HTMLElement) =>
@@ -3058,9 +3061,13 @@ describe('RecordDetailView.recordEditState-35599', () => {
     fireEvent.change(cells(tasks, 'Subject')[0], { target: { value: 'Visit' } });
   }
 
-  /** The pencil of the Summary field (the inline-edit entry), on the details column. */
+  /**
+   * The pencil of the Summary field (the inline-edit entry), on the details
+   * column: the keyboard's way in on the field list, named for a click
+   * (objectstack#36147).
+   */
   const summaryPencil = (container: HTMLElement) =>
-    (Array.from(container.querySelectorAll('[data-record-column="details"] button[aria-label="Double-click to edit"]')) as HTMLElement[])
+    (Array.from(container.querySelectorAll('[data-record-column="details"] button[aria-label="Click to edit"]')) as HTMLElement[])
       .find((b) => (b.closest('.group')?.textContent ?? '').includes('Summary')) ?? null;
   const saveBar = () => document.querySelector('[role="region"][aria-label="Edit fields"]') as HTMLElement | null;
   const detailInputValues = (container: HTMLElement) =>
@@ -3422,5 +3429,165 @@ describe('RecordDetailView.approvalSubjectTitle-35415', () => {
       renderRequestPage({ ...SERVED, record_title: SUBJECT }, other);
       await waitFor(() => expect(h1()?.textContent).toBe(FLOW_LABEL));
     });
+  });
+});
+
+// ── RecordDetailView.embeddedStageReread-36309 ──────────────────────────────
+
+/**
+ * objectstack#36309 — the header's stage menu draws in a drawer too (the list
+ * drawer, and the drawer a record page opens over itself, both mount this view
+ * `embedded`). A 409 on a Move there re-reads the record, so the next Move
+ * carries the version that is stored. The drawer still draws no Refresh entry:
+ * showing the entry and re-reading the record are two context members.
+ */
+describe('RecordDetailView.embeddedStageReread-36309', () => {
+  restoreAfterBlock();
+
+  const OBJECT = 'crm_deal_36309';
+  const ID = 'd1';
+  const DEF = {
+    name: OBJECT,
+    label: 'Deal',
+    nameField: 'name',
+    fields: {
+      id: { label: 'Id', type: 'text' },
+      name: { label: 'Name', type: 'text' },
+      stage: {
+        label: 'Stage',
+        type: 'select',
+        options: [
+          { value: 'prospecting', label: 'Prospecting' },
+          { value: 'negotiation', label: 'Negotiation' },
+        ],
+      },
+    },
+  };
+  const versionAt = (read: number) => `2026-11-22T0${read}:00:00.000Z`;
+
+  function makeMetadata() {
+    const pages: any[] = [];
+    return {
+      objects: [DEF], pages, loading: false, error: null,
+      refresh: async () => {}, invalidate: () => {},
+      ensureType: async () => pages, getItem: async () => null,
+      getItemsByType: () => pages,
+    } as any;
+  }
+
+  /** Every read answers a newer version; the first Move is refused with a 409. */
+  function renderDeal(embedded: boolean) {
+    let reads = 0;
+    const conflict = Object.assign(new Error('CONCURRENT_UPDATE'), { code: 'CONCURRENT_UPDATE', status: 409 });
+    let writes = 0;
+    const ds = {
+      find: vi.fn(async () => ({ data: [], total: 0, hasMore: false, pageSize: 50 })),
+      findOne: vi.fn(async () => {
+        reads += 1;
+        return { id: ID, name: 'Wayne deal', stage: 'prospecting', updated_at: versionAt(reads) };
+      }),
+      create: vi.fn(async (_o: string, r: any) => r),
+      update: vi.fn(async () => {
+        writes += 1;
+        if (writes === 1) throw conflict;
+        return {};
+      }),
+      delete: vi.fn(async () => ({})),
+      getObjectSchema: async () => DEF,
+    } as Record<string, any>;
+    render(
+      <MemoryRouter initialEntries={[`/apps/demo/${OBJECT}/record/${ID}`]}>
+        <MetadataCtx.Provider value={makeMetadata()}>
+          <NavigationProvider>
+            <RecordDetailView
+              dataSource={ds as never}
+              objects={[DEF] as never}
+              onEdit={() => {}}
+              objectNameOverride={OBJECT}
+              recordIdOverride={ID}
+              embedded={embedded}
+            />
+          </NavigationProvider>
+        </MetadataCtx.Provider>
+      </MemoryRouter>,
+    );
+    return { ds };
+  }
+
+  const stageMenu = () => document.querySelector('[data-record-stage-menu]') as HTMLElement | null;
+  const moreTrigger = () =>
+    document.querySelector('header [aria-label="More actions"], [data-record-top-bar-actions] [aria-label="More actions"]') as HTMLElement | null;
+
+  async function pickNegotiation() {
+    await waitFor(() => expect(stageMenu()).toBeTruthy());
+    fireEvent.pointerDown(stageMenu()!, { button: 0, ctrlKey: false, pointerType: 'mouse' });
+    const option = await waitFor(() => {
+      const el = document.querySelector('[data-record-stage-menu-list] [data-stage-value="negotiation"]') as HTMLElement | null;
+      expect(el).toBeTruthy();
+      return el!;
+    });
+    fireEvent.click(option);
+    return screen.findByRole('dialog');
+  }
+
+  beforeAll(() => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1280 });
+  });
+
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ allowed: true, data: [] }),
+      text: async () => '{}',
+    })) as never);
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  it('in a drawer, a 409 on Move re-reads the record and the second Move carries the new version', async () => {
+    const { ds } = renderDeal(true);
+    const dialog = await pickNegotiation();
+    expect(ds.findOne).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Move' }));
+    await waitFor(() => expect(ds.update).toHaveBeenCalledTimes(1));
+    expect(ds.update).toHaveBeenLastCalledWith(OBJECT, ID, { stage: 'negotiation' }, { ifMatch: versionAt(1) });
+    // The refusal re-reads the record in place.
+    await waitFor(() => expect(ds.findOne).toHaveBeenCalledTimes(2));
+
+    fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Move' }));
+    await waitFor(() => expect(ds.update).toHaveBeenCalledTimes(2));
+    expect(ds.update).toHaveBeenLastCalledWith(OBJECT, ID, { stage: 'negotiation' }, { ifMatch: versionAt(2) });
+  });
+
+  it('CONTROL — the drawer still draws no Refresh entry in the header', async () => {
+    const { ds } = renderDeal(true);
+    await waitFor(() => expect(ds.findOne).toHaveBeenCalled());
+    await waitFor(() => expect(stageMenu()).toBeTruthy());
+    const trigger = moreTrigger();
+    if (trigger) {
+      fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false, pointerType: 'mouse' });
+      await waitFor(() => expect(document.querySelector('[role="menu"]')).toBeTruthy());
+    }
+    expect(document.querySelector('[data-page-refresh]')).toBeNull();
+  });
+
+  it('CONTROL — on the record page the same 409 re-reads too, and the page keeps its Refresh entry', async () => {
+    const { ds } = renderDeal(false);
+    const dialog = await pickNegotiation();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Move' }));
+    await waitFor(() => expect(ds.update).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(ds.findOne).toHaveBeenCalledTimes(2));
+    fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Move' }));
+    await waitFor(() => expect(ds.update).toHaveBeenLastCalledWith(OBJECT, ID, { stage: 'negotiation' }, { ifMatch: versionAt(2) }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+
+    await waitFor(() => expect(moreTrigger()).toBeTruthy());
+    fireEvent.pointerDown(moreTrigger()!, { button: 0, ctrlKey: false, pointerType: 'mouse' });
+    await waitFor(() => expect(document.querySelector('[data-page-refresh]')).toBeTruthy());
   });
 });

@@ -68,8 +68,8 @@ describe('showcase: invoice-line controlled-by-parent (ADR-0055)', () => {
     const prod = idOf(await ql.insert('showcase_product', { name: 'Widget' }, sys));
 
     // Two invoices: one owned by the admin, one by the member.
-    adminInvoiceId = idOf(await ql.insert('showcase_invoice', { name: 'INV-ADMIN', account: acc, status: 'draft', created_by: adminId }, sys));
-    const memberInvoiceId = idOf(await ql.insert('showcase_invoice', { name: 'INV-MEMBER', account: acc, status: 'draft', created_by: memberId }, sys));
+    adminInvoiceId = idOf(await ql.insert('showcase_invoice', { name: 'INV-ADMIN', account: acc, status: 'draft', currency_code: 'USD', created_by: adminId }, sys));
+    const memberInvoiceId = idOf(await ql.insert('showcase_invoice', { name: 'INV-MEMBER', account: acc, status: 'draft', currency_code: 'USD', created_by: memberId }, sys));
 
     // A line under each invoice (the detail under test).
     adminLineId = idOf(await ql.insert('showcase_invoice_line', { invoice: adminInvoiceId, product: prod, quantity: 1, unit_price: 10, description: 'admin line' }, sys));

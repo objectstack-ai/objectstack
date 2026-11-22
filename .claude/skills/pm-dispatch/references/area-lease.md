@@ -10,8 +10,9 @@
 - 边界按卡触及的文件与包聚类,让两区极少改同一函数;⛔ 不按卡标题或词汇分。
 - 排空的区并入邻区,积压即再拆(「比如增加分区」),⛔ 不抬一容器 dev 上限(住项目记忆)。
 - 租约表(区→路径→线程会话)住座位贴,任一列变或线程轮换即重写,为唯一记录。
-- L1 线程每 3 活跃区一条,新开名 `L1-a`、`L1-b`…,在跑留原名;`lanes/l2-review.md` 席规不及它。
-- 请 L1 审或 delta 发线程消息,只取区在 PR 评论宣布的定稿绿 head;信箱只留跨账号或跨项目。
+- L1 线程每 3 活跃区一条,新开名 `L1-a`、`L1-b`…,在跑留原名。
+- 请 L1 审或 delta 发线程消息,只取区在 PR 评论宣布的定稿绿 head。
+- p1 卡线程卡交回且欠 L2 ⇒ L1 线程并行起隔离 L2 子代理(`contract-review.md`)。
 - ⛔ 不入区:大卡(`dispatch-runbook.md` 卡线程节)与队列值守(只照 `lanes/queue.md`,含其无席兜底)。
 
 ## 开席
@@ -35,7 +36,7 @@
   - `Prior rulings read:` 照 `decision-analysis.md`;grep `docs/adr/**`、链卡(⛔ 行在内)与反向 pin
     测试;记录冲突,或路线改门的可见行为超出本卡裁决,同作不过。
 - 重叠检查:认领前与每次推前跑 `scripts/pm/overlap-check.mjs`;exit 1 排所列 PR 后,3 补前提重跑。
-- 认领照 `execution-duties.md` 派发原子对,`Claim:` 带 `Area: <区>` 行;`Branch:` 照 AGENTS.md 命名。
+- 认领照 `execution-duties.md` 派发原子对,`Claim:` 带 `Area: <区>` 行。
 - 认领后回读(SKILL.md 标签写四步)只查 `pm:dispatched` 与 assignee,缺即重挂;首推即开 draft PR。
 - 认领前照 `dispatch-runbook.md` 派发前置核前提;开线程请求交席位攒批(`coordinator.md` 三)。
 - 写码与开发期读码全经 `os-dev` 等子代理(一卡或一组耦合卡,文件面不相交)。
@@ -55,11 +56,11 @@
 - 席位每轮照 `execution-duties.md` 四件套行复查全部已 PASS 受管 PR,各区转来的一并在内。
 - 性能卡与 PR 的提速数字只引已过 L1 的 bench PR 读数;⛔ 不引估算或未过 L1 的本地测量。
 - 席只裁路由(拆并延、归区);改可见行为或解读 ADR 照 SKILL.md〈升级与决策〉呈维护者。
-- 仅呈维护者选项组过独立 `CONTRACT_REVIEW_TIER` 评审,多卡一批;席自裁 ⛔ 不起评审,自读码。
+- 仅呈维护者选项组过独立评审,多卡一批;席自裁 ⛔ 不起评审,自读码。
   均带 `Prior rulings read:` 行,开工前呈 ⛔ 不在施工中途。
 - 席信箱只收:待裁、待落地受管 PR、跨区冲突、阻塞、交接完成;安全照 `security-findings.md`。
 - 线程约 150k 即在干净点轮换,⛔ 不在 L1/L2 中途;交接写 `/mnt/project-files/<席>/handover-<区>.md`。
-- 省耗:dev 推前照 os-dev.md〈本地验证范围〉;跨线程只传指针;线程 effort high;⛔ 不减 dev。
+- 省耗:dev 推前照 os-dev.md〈本地验证范围〉;跨线程只传指针;档位与 effort 照 `execution-duties.md`;⛔ 不减 dev。
 - 每读一次用量,在座位贴评论记一行:用量 %、关卡数、合并 PR 数。
 
 ## 交接与换号

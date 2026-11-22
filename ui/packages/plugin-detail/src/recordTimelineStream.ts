@@ -15,8 +15,8 @@
  * `trackHistory`), which the host hands over through
  * {@link RecordFieldChangesContext}. This module is the pure part: the audit
  * rows as feed items, the merge (newest first, one action one row), and
- * the four filter chips 全部 / 活动 / 讨论 / 变更 (变更 = the audit's field
- * changes; every activity row is 活动).
+ * the four filter chips 全部 / 事件 / 讨论 / 变更 (变更 = the audit's field
+ * changes; every activity row is 事件).
  */
 
 import * as React from 'react';
@@ -71,12 +71,13 @@ export const RecordTimelineTotalContext = React.createContext<number | null>(nul
 export const RecordTimelineCountContext = React.createContext<((count: number | null) => void) | null>(null);
 
 /**
- * Whether the record's comments live in its comment panel (objectstack#36075):
- * the host draws the panel beside the default record page, so the page's 动态
- * stream — its tab and its peek — draws the system entries alone: no comment,
- * no composer, no filter chips, and its count names those entries only.
- * `false` (the phone, an authored page, no host saying): the stream carries
- * the discussion as before.
+ * Whether the record's comments live outside its 动态 stream: in its comment
+ * panel (objectstack#36075), which the host draws beside the default record
+ * page, or on the full page, for a record the host draws in a side preview
+ * (objectstack#36225). The page's 动态 stream — its tab and its peek — then
+ * draws the system entries alone: no comment, no composer, no filter chips,
+ * and its count names those entries only. `false` (an authored page, no host
+ * saying): the stream carries the discussion as before.
  */
 export const RecordCommentsInPanelContext = React.createContext(false);
 
@@ -293,7 +294,7 @@ function pairedStream(
   return [...base, ...unpaired];
 }
 
-/** The stream's filter chips: 全部 / 活动 / 讨论 / 变更. */
+/** The stream's filter chips: 全部 / 事件 / 讨论 / 变更. */
 export type TimelineStreamFilter = 'all' | 'activity' | 'discussion' | 'changes';
 
 export const TIMELINE_STREAM_FILTERS: readonly TimelineStreamFilter[] = ['all', 'activity', 'discussion', 'changes'];
@@ -328,7 +329,7 @@ export function isSystemStreamEntry(item: FeedItem): boolean {
  * `changes_only`, hold these and nothing else (objectstack#30074, ruling C).
  * An activity row (`created` / `updated` / `deleted` / `assigned` / `shared`)
  * shares the `field_change` presentation but is an event, so it is judged by
- * its source and sits under 活动, whatever the history flag.
+ * its source and sits under 事件, whatever the history flag.
  */
 export function isFieldHistoryEntry(item: FeedItem): boolean {
   return item.type === 'field_change' && item.source === 'sys_audit_log';

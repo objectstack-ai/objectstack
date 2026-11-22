@@ -52,7 +52,11 @@ import { strandedDecisionDetails, sendError as sendEnvelopeError, sendOk } from 
 // object's select options are built FROM this list (#3786), so it is the
 // object's own declaration, read where the object reads it, and not a second
 // list kept beside it.
-import { APPROVAL_STATUSES, type ApprovalStatus } from '@objectstack/spec/contracts';
+import {
+    APPROVAL_RECORD_LOCKS_MAX_RECORD_IDS,
+    APPROVAL_STATUSES,
+    type ApprovalStatus,
+} from '@objectstack/spec/contracts';
 import {
     classifiedRefusalAnswer,
     nestedRefusalEnvelope,
@@ -78,6 +82,52 @@ import {
  * refused with the located 400 (AGENTS.md route rule 5), never dropped.
  */
 export const APPROVAL_RECORD_LOCK_PARAMS: readonly string[] = [];
+
+/**
+ * The closed query-parameter set of
+ * `POST {basePath}/approvals/records/:object/locks`: EMPTY. **Measured**: the
+ * handler reads the object from the path and the ids from the body, nothing
+ * from the query string (the caller's context comes from the session and
+ * headers). A name sent there is refused with the located 400, never dropped.
+ */
+export const APPROVAL_RECORD_LOCKS_PARAMS: readonly string[] = [];
+
+/** The body keys `POST {basePath}/approvals/records/:object/locks` reads: `recordIds` alone. */
+const APPROVAL_RECORD_LOCKS_BODY_KEYS: readonly string[] = ['recordIds'];
+
+/**
+ * Read the body of `POST {basePath}/approvals/records/:object/locks`: the ids,
+ * or the sentence that refuses the request. Every shape is refused whole,
+ * never trimmed: a body key the door does not read, a `recordIds` that is not
+ * a list of non-empty strings, an empty list and one over
+ * {@link APPROVAL_RECORD_LOCKS_MAX_RECORD_IDS}.
+ */
+export function readRecordLocksBody(body: unknown): { recordIds: string[] } | { refusal: string } {
+    if (body === null || typeof body !== 'object' || Array.isArray(body)) {
+        return { refusal: 'The request body must be a JSON object of the form {"recordIds": ["<id>", ...]}.' };
+    }
+    const unknown = Object.keys(body).filter((key) => !APPROVAL_RECORD_LOCKS_BODY_KEYS.includes(key));
+    if (unknown.length > 0) {
+        return {
+            refusal: `Unknown body field${unknown.length > 1 ? 's' : ''} ${unknown.map((key) => `"${key}"`).join(', ')}: `
+                + 'this request reads "recordIds" alone. Nothing was read.',
+        };
+    }
+    const ids = (body as { recordIds?: unknown }).recordIds;
+    if (!Array.isArray(ids) || ids.some((id) => typeof id !== 'string' || id.trim() === '')) {
+        return { refusal: '"recordIds" must be a list of record ids, each a non-empty string.' };
+    }
+    if (ids.length === 0) {
+        return { refusal: '"recordIds" names no record; send at least one id.' };
+    }
+    if (ids.length > APPROVAL_RECORD_LOCKS_MAX_RECORD_IDS) {
+        return {
+            refusal: `"recordIds" carries ${ids.length} ids; one request carries at most `
+                + `${APPROVAL_RECORD_LOCKS_MAX_RECORD_IDS}. Send the rest in another request. Nothing was read.`,
+        };
+    }
+    return { recordIds: ids as string[] };
+}
 
 /**
  * [#29880] Read `?status=` on `GET {basePath}/approvals/requests` against the
@@ -464,6 +514,43 @@ export function registerApprovalsEndpoints(this: ApprovalsRouteHost, basePath: s
             }
         },
         metadata: { summary: 'Whether a record is held by a locking approval', tags: ['approvals'] },
+    });
+
+    // The lock of a PAGE of records, in one request: what a list asks before it
+    // opens a cell editor, so moving through the rows sends no request per row.
+    // Each entry is exactly the single-record door's answer for that id, the
+    // 404 folded to `locked: null` (unreadable or missing, told apart by
+    // nothing); a service without `getRecordLocks` answers 501, never one
+    // `getRecordLock` per id.
+    this.routeManager.register({
+        method: 'POST',
+        path: `${dataPath}/approvals/records/:object/locks`,
+        handler: async (req: any, res: any) => {
+            try {
+                const environmentId = isScoped ? req.params?.environmentId : undefined;
+                const context = await this.resolveExecCtx(environmentId, req);
+                if (this.enforceAuth(req, res, context)) return;
+                if (refuseUnknownQueryParams(req, res, APPROVAL_RECORD_LOCKS_PARAMS)) return;
+                const read = readRecordLocksBody(req.body);
+                if ('refusal' in read) {
+                    sendEnvelopeError(res, 400, 'VALIDATION_ERROR', read.refusal);
+                    return;
+                }
+                const svc = await resolveService(environmentId, req);
+                if (!svc || typeof svc.getRecordLocks !== 'function') return respond501(res);
+                const { object } = req.params;
+                const answers = await svc.getRecordLocks(object, read.recordIds, context ?? {});
+                sendOk(res, {
+                    records: read.recordIds.map((recordId, index) => ({
+                        recordId,
+                        locked: answers[index] ? answers[index]!.locked === true : null,
+                    })),
+                });
+            } catch (error: any) {
+                handleRouteError(res, error);
+            }
+        },
+        metadata: { summary: 'Whether each of a page of records is held by a locking approval', tags: ['approvals'] },
     });
 
     // Record a decision on a node-driven request. Both branches funnel

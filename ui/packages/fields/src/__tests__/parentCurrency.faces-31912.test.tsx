@@ -15,15 +15,19 @@
  * draws a column in the currency its host names.
  */
 
-import { describe, it, expect, afterEach, vi } from 'vitest';
+import { describe, it, expect, afterEach, beforeAll, vi } from 'vitest';
 import React from 'react';
 import { render, cleanup, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom';
+import { ComponentRegistry } from '@object-ui/core';
 import { LocalizationProvider } from '@object-ui/i18n';
+// Module scope: pulls in the form renderer's registration side effect.
+import '@object-ui/components';
 import { FormulaCellRenderer, withFollowedParentObject } from '../index';
 import { CurrencyField } from '../widgets/CurrencyField';
 import { SummaryField } from '../widgets/SummaryField';
-import { GridField } from '../widgets/GridField';
+import { GridFieldWidget as GridField } from '../widgets/grid-field/GridFieldWidget';
+import { TextField } from '../widgets/TextField';
 
 afterEach(cleanup);
 
@@ -128,5 +132,57 @@ describe('inline grid: a column in the currency its host names (ADR-0144 D2 as a
 
   it('with no column named, the tenant currency still draws', () => {
     expect(text(grid().container.textContent)).toContain('$1,234.50');
+  });
+});
+
+describe('the edit form hands a roll-up its record, so the subtotal reads the record\'s currency (ADR-0144 D6 as amended)', () => {
+  // The real form renderer hosting the real widgets, registered raw (not
+  // through `registerAllFields()`, whose lazy loaders put a module load inside
+  // a bounded `findBy` window).
+  beforeAll(() => {
+    for (const [type, Component] of Object.entries({ text: TextField, currency: CurrencyField, summary: SummaryField })) {
+      ComponentRegistry.register(type, Component as any, { namespace: 'field', skipFallback: true });
+    }
+  }, 30000);
+
+  const CODE = { name: 'currency_code', label: 'Currency', type: 'text' };
+  // The form's read-only roll-up, as the edit form generates it: disabled.
+  const SUBTOTAL = {
+    name: 'total',
+    label: 'Subtotal',
+    type: 'summary',
+    disabled: true,
+    summaryOperations: { object: 'inv_line', field: 'amount', function: 'sum' },
+    currencyConfig: { currencyMode: 'record', currencyField: 'currency_code' },
+  };
+  // The tax-inclusive total: a computed `currency` field of the same record.
+  const TOTAL_INCL_TAX = {
+    name: 'amount',
+    label: 'Total incl. Tax',
+    type: 'currency',
+    readonly: true,
+    currencyConfig: { currencyMode: 'record', currencyField: 'currency_code' },
+  };
+
+  function editForm(record: Record<string, unknown>) {
+    const Form = ComponentRegistry.get('form')!;
+    return render(
+      <LocalizationProvider value={TENANT}>
+        <Form schema={{ type: 'form', mode: 'edit', showSubmit: false, showCancel: false, defaultValues: record, fields: [CODE, SUBTOTAL, TOTAL_INCL_TAX] }} />
+      </LocalizationProvider>,
+    );
+  }
+  const item = (name: string) => text(document.querySelector(`[data-field="${name}"]`)?.textContent);
+
+  it('a EUR record: the subtotal reads EUR, as the record page and the total incl. tax do', () => {
+    editForm({ currency_code: 'EUR', total: 230, amount: 276 });
+    expect(item('total')).toContain('€230.00');
+    expect(item('amount')).toContain('€276.00');
+  });
+
+  it('a record in the home currency keeps its format', () => {
+    editForm({ currency_code: 'USD', total: 230, amount: 276 });
+    expect(item('total')).toContain('$230.00');
+    expect(item('amount')).toContain('$276.00');
   });
 });

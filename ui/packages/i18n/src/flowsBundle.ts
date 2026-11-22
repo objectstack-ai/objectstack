@@ -14,11 +14,11 @@
  * this module, so none can disagree about where the bundle lives: the
  * console's `FlowRunner` (the paused screen's field copy and option labels,
  * the flow's label, the resume's terminal toasts), the two flow-LAUNCH hosts
- * through `launchConsoleFlow` (objectui#12075), and, through
- * `flowLabelTranslations` (`flowLabels.ts`), the Studio flow designer and the
- * docs viewer's `type: flow` embed. It lives here rather than in
- * `@object-ui/app-shell` because the embed's package does not depend on the
- * console.
+ * through `launchConsoleFlow` (objectui#12075), the flow designer's label
+ * translations, and the stage-change confirms of the list cell and the record
+ * page, which name the flows a move would start (objectstack#35928). It lives
+ * here rather than in `@object-ui/app-shell` because the confirms' packages
+ * do not depend on the console.
  *
  * The provider's `loadLanguage` hands the app's translation payload to
  * i18next (`transformSpecTranslations` forwards `flows` verbatim under the app

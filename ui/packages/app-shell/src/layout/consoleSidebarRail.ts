@@ -1,31 +1,32 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * consoleSidebarRail — how the console sidebar collapses, when it folds on its
- * own, and the menu it floats over the content (objectstack#27593,
- * objectstack#35062).
+ * consoleSidebarRail — how the console sidebar docks and collapses, which
+ * state a window starts in, and the menu it floats over the content
+ * (objectstack#27593, objectstack#35062, objectstack#36112).
  *
- * From the phone breakpoint up a collapsed sidebar is hidden: it takes no
- * width, and nothing of it is drawn, focusable or announced. Both ways of
- * collapsing look the same (ruling 6973617688 on objectstack#35062: one
- * collapsed look at 768 px and up): the reader's own collapse, and the fold
- * below. The full menu, with its labels and groups, floats over the content
- * instead, without changing what the reader chose: after the pointer rests on
- * the window's left edge, after a press on that edge, and from the app bar's
- * trigger or ⌘B, whichever way it collapsed. A pointer that floated it folds
- * it back by moving away; a navigation choice, a press outside it or Esc folds
- * it from any of them. "Keep sidebar open", at the foot of the floated menu,
- * puts the sidebar back beside the content and keeps it there.
+ * From the phone breakpoint up the sidebar is docked beside the content or
+ * collapsed, and a collapsed sidebar is hidden: it takes no width, and nothing
+ * of it is drawn, focusable or announced (ruling 6973617688 on
+ * objectstack#35062: one collapsed look at 768 px and up). The sidebar's
+ * collapse button and, while it is collapsed, the page header's expand button
+ * are the one control (ruling 7069868269 on objectstack#36112): each press is
+ * the reader's choice, and this browser keeps it.
  *
- * On a window too narrow for the record drawer and the list beside it next to
- * an expanded sidebar, the sidebar folds on its own. A reader who keeps it
- * open ({@link CONSOLE_SIDEBAR_KEEP_OPEN_PREFERENCE}) gets the wide-window
- * behaviour at every width above the phone breakpoint, where the primitive's
- * drawer takes over: the trigger collapses the sidebar, and floats its menu
- * once it is collapsed.
+ * Which state a window starts in is that choice, kept separately for a wide
+ * window ({@link CONSOLE_SIDEBAR_RAIL_BELOW_WIDTH} and up) and a narrow one
+ * (from the phone breakpoint to below it). With no choice kept, a wide window
+ * starts expanded and a narrow one collapsed.
  *
- * `useResponsiveSidebar` folds and unfolds the sidebar as the window crosses
- * the width; `UnifiedSidebar` draws the hidden sidebar, its edge and the float.
+ * Collapsed, the full menu, with its labels and groups, floats over the
+ * content without changing what the reader chose: after the pointer rests on
+ * the window's left edge, after a press on that edge, and from ⌘B. A pointer
+ * that floated it folds it back by moving away; a navigation choice, a press
+ * outside it or Esc folds it from any of them.
+ *
+ * `useResponsiveSidebar` gives each window its state as it loads and as it
+ * crosses the width, and keeps the reader's choices; `UnifiedSidebar` draws
+ * the hidden sidebar, its edge and the float.
  */
 
 import {
@@ -53,7 +54,7 @@ import {
  * The expanded sidebar's width in CSS pixels: the sidebar primitive's
  * `--sidebar-width` (16rem) in `@object-ui/components`.
  * `consoleSidebarRail.width-27593.test.tsx` reads the primitive's value and
- * holds this equal to it, so the derived threshold below follows the sidebar.
+ * holds this equal to it. The width is fixed (objectstack#36112 F2).
  */
 export const CONSOLE_EXPANDED_SIDEBAR_WIDTH = 256;
 
@@ -61,8 +62,7 @@ export const CONSOLE_EXPANDED_SIDEBAR_WIDTH = 256;
  * The record drawer's width in CSS pixels: a list record opens in the drawer
  * at plugin-view's `md` overlay bucket, `overlayWidthFor('md', …)` =
  * `min(92vw, 720px)` (objectstack#27545). `consoleSidebarRail.width-27593.test.tsx`
- * reads that value and holds this equal to it, so the derived threshold below
- * follows the drawer.
+ * reads that value and holds this equal to it.
  */
 export const RECORD_DRAWER_WIDTH = 720;
 
@@ -75,33 +75,35 @@ export const RECORD_DRAWER_WIDTH = 720;
 export const LIST_MIN_COLUMNS_WIDTH = 440;
 
 /**
- * The content width the record drawer needs over the full-width list: the
- * drawer (720) and, beside it, the narrowest list that still draws its
- * columns (440).
- */
-export const RECORD_DRAWER_MIN_CONTENT_WIDTH = LIST_MIN_COLUMNS_WIDTH + RECORD_DRAWER_WIDTH;
-
-/**
- * Below this window width the sidebar folds on its own.
+ * Below this window width a window with no choice kept starts with the
+ * sidebar collapsed; at it and above, expanded (ruling 7069868269 on
+ * objectstack#36112, 「1280 起默认展开，更窄才收起」). The one threshold: the
+ * wide and the narrow choice are kept on either side of it.
  *
- * Derived, not picked: a window narrower than the drawer's content plus the
- * expanded sidebar cannot keep the list's columns beside the open drawer with
- * the sidebar expanded, so the sidebar gives the content its width.
- * 1160 + 256 = 1416: a 1280 px window folds (the hidden sidebar leaves the
- * drawer 560 px of list beside it, where the expanded sidebar would leave
- * 304), a 1440 px window keeps the sidebar expanded (464 left). The record
- * page's own column tiers are measured on the container it gets, so they
- * follow either way.
+ * Chosen, not derived. The record drawer beside the narrowest list that still
+ * draws its columns, next to an expanded sidebar, needs 440 + 720 + 256 =
+ * 1416 px, the threshold before; the ruling accepts the cost below that. A
+ * 1280 px window with the sidebar expanded leaves the list beside an open
+ * record drawer 1280 − 256 − 720 = 304 px (560 with the sidebar collapsed),
+ * and on 1280 to 1415 px with the sidebar expanded, opening the record page's
+ * comment panel returns its fields to the tab row; collapsing the sidebar
+ * gives the content the width back. The record page's own column tiers are
+ * measured on the container it gets, so they follow either way.
  */
-export const CONSOLE_SIDEBAR_RAIL_BELOW_WIDTH = RECORD_DRAWER_MIN_CONTENT_WIDTH + CONSOLE_EXPANDED_SIDEBAR_WIDTH;
+export const CONSOLE_SIDEBAR_RAIL_BELOW_WIDTH = 1280;
 
 /**
- * The reader's "keep the sidebar open": `on` turns the fold off, so a narrow
- * window keeps the wide-window sidebar. A reader preference, per browser,
- * never metadata (objectstack#27052). With no choice: off. It changes when
- * the sidebar collapses, never how a collapsed sidebar looks.
+ * The reader's narrow-window choice: `on` keeps the sidebar expanded on a
+ * window below {@link CONSOLE_SIDEBAR_RAIL_BELOW_WIDTH}, `off` collapsed. A
+ * reader preference, per browser, never metadata (objectstack#27052). With no
+ * choice: collapsed. Only a collapse or expand on a narrow window by the
+ * reader writes it; the float never does.
+ *
+ * Kept under the name the retired "Keep sidebar open" switch used, which held
+ * the same choice: a reader who kept the sidebar open starts expanded on a
+ * narrow window (ruling 7069868269 on objectstack#36112).
  */
-export const CONSOLE_SIDEBAR_KEEP_OPEN_PREFERENCE = defineWorkspacePreference<PreferenceSwitch>({
+export const CONSOLE_SIDEBAR_NARROW_OPEN_PREFERENCE = defineWorkspacePreference<PreferenceSwitch>({
   name: 'console.sidebar.keepOpen',
   codec: versionedPreferenceCodec<PreferenceSwitch>({
     version: 1,
@@ -110,21 +112,24 @@ export const CONSOLE_SIDEBAR_KEEP_OPEN_PREFERENCE = defineWorkspacePreference<Pr
   }),
 });
 
+/** The reader's narrow-window choice: expanded only when they chose it. */
+function readNarrowWindowOpen(): boolean {
+  return readWorkspacePreference(CONSOLE_SIDEBAR_NARROW_OPEN_PREFERENCE, 'user') === 'on';
+}
+
 /**
  * Where the reader's wide-window choice, sidebar expanded or collapsed, is
- * kept (objectstack#28079). Only an open or close on a wide window writes it;
- * the fold, the float and a sidebar kept open on a narrow window never do,
- * and the "keep open" preference lives under its own key. The primitive's
- * `sidebar_state` cookie records every open and close, the fold's included,
- * so it cannot hold the wide-window choice. The key is the one the fold's
- * stash used before, which held the same value.
+ * kept (objectstack#28079). Only the reader's open or close on a wide window
+ * writes it; the float never does, and the narrow-window choice lives under
+ * its own key ({@link CONSOLE_SIDEBAR_NARROW_OPEN_PREFERENCE}). The
+ * primitive's `sidebar_state` cookie records every open and close, a narrow
+ * window's included, so it cannot hold the wide-window choice.
  */
 const WIDE_OPEN_KEY = 'os:console-sidebar:wide-open';
 
 /**
- * Set while the menu floats over a sidebar the reader collapsed (on a wide
- * window, or on a narrow one kept open): the provider's open state is the
- * float then, not the reader's choice, so {@link writeWideWindowOpen} keeps
+ * Set while the menu floats over a sidebar the reader collapsed on a wide
+ * window: the provider's open state is the float then, not the reader's choice, so {@link writeWideWindowOpen} keeps
  * none of it, its fold back included. `useConsoleSidebarRailPanel` sets it
  * when it floats the menu and clears it once the float has folded; the console
  * draws one sidebar per page.
@@ -135,7 +140,7 @@ function holdWideWindowChoice(hold: boolean): void {
   floatHoldsWideWindowChoice = hold;
 }
 
-/** The reader's wide-window choice, or `undefined` when none is kept. */
+/** The reader's wide-window choice, or `undefined` when none is kept (a wide window then starts expanded). */
 export function readWideWindowOpen(): boolean | undefined {
   const storage = workspacePreferenceStorage();
   if (!storage) return undefined;
@@ -147,15 +152,6 @@ export function readWideWindowOpen(): boolean | undefined {
   } catch {
     return undefined;
   }
-}
-
-/**
- * Keep `open` as the wide-window choice when none is kept yet: before the
- * fold first closes the sidebar, the open state it closes is the one the
- * reader last had on a wide window (or the primitive's default).
- */
-export function seedWideWindowOpen(open: boolean): void {
-  if (readWideWindowOpen() === undefined) writeWideWindowOpen(open);
 }
 
 /** Keep the reader's wide-window choice; nothing while the menu floats. */
@@ -201,29 +197,29 @@ function writeSidebarStateCookie(open: boolean): void {
 const PHONE_BELOW_WIDTH = 768;
 
 /**
+ * The state a window starts in from the phone breakpoint up: the reader's
+ * choice for its side of {@link CONSOLE_SIDEBAR_RAIL_BELOW_WIDTH}, else
+ * expanded on a wide window and collapsed on a narrow one.
+ */
+export function startingSidebarOpen(wide: boolean): boolean {
+  return wide ? (readWideWindowOpen() ?? true) : readNarrowWindowOpen();
+}
+
+/**
  * Hand the sidebar provider the open state its first frame draws, before it
  * mounts (objectstack#28077): the provider starts from its cookie, which the
- * last page wrote, so a narrow window would draw the expanded sidebar once and
- * then fold it, with the primitive's transition in between. Below the fold
- * width with no "keep open" the first frame is the hidden sidebar; on a wide
- * window it is the reader's wide-window choice; a sidebar kept open, and the
- * phone, keep what the cookie says. Call it once, from the component that
- * renders the provider, before the provider's first render.
+ * last page wrote, so a window would draw the last page's state once and then
+ * switch, with the primitive's transition in between. From the phone
+ * breakpoint up the first frame is the window's starting state
+ * ({@link startingSidebarOpen}); the phone keeps what the cookie says. Call
+ * it once, from the component that renders the provider, before the
+ * provider's first render.
  */
 export function primeConsoleSidebarOpen(): void {
   if (typeof window === 'undefined' || typeof document === 'undefined') return;
   const width = window.innerWidth;
   if (width < PHONE_BELOW_WIDTH) return;
-  let open: boolean | undefined;
-  if (width >= CONSOLE_SIDEBAR_RAIL_BELOW_WIDTH) {
-    open = readWideWindowOpen();
-  } else if (readWorkspacePreference(CONSOLE_SIDEBAR_KEEP_OPEN_PREFERENCE, 'user') !== 'on') {
-    // The primitive's own default is open.
-    seedWideWindowOpen(readSidebarStateCookie() ?? true);
-    open = false;
-  }
-  if (open === undefined) return;
-  writeSidebarStateCookie(open);
+  writeSidebarStateCookie(startingSidebarOpen(width >= CONSOLE_SIDEBAR_RAIL_BELOW_WIDTH));
 }
 
 export interface ConsoleSidebarRail {
@@ -235,15 +231,18 @@ export interface ConsoleSidebarRail {
   wide: boolean;
   /** The window is below {@link CONSOLE_SIDEBAR_RAIL_BELOW_WIDTH} and above the phone breakpoint. */
   narrow: boolean;
-  /** The reader keeps the sidebar open on a narrow window. */
-  keepOpen: boolean;
-  setKeepOpen: (keepOpen: boolean) => void;
-  /** The fold is on: a narrow window and no "keep open". */
+  /** The reader's narrow-window choice: expanded. */
+  narrowOpen: boolean;
+  setNarrowOpen: (open: boolean) => void;
+  /**
+   * A narrow window whose sidebar is collapsed by the narrow-window choice
+   * (the default): every open of the provider there is the float.
+   */
   railMode: boolean;
 }
 
 /**
- * Where the console sidebar stands against the fold. Inside the sidebar
+ * Where the console sidebar stands against the threshold. Inside the sidebar
  * provider. `enabled: false` answers "no fold" at every width: a sidebar the
  * console layout does not fold is drawn as the provider says.
  */
@@ -251,19 +250,19 @@ export function useConsoleSidebarRail({ enabled = true }: { enabled?: boolean } 
   const { isMobile } = useSidebar();
   const belowRailWidth = useIsViewportBelow(CONSOLE_SIDEBAR_RAIL_BELOW_WIDTH);
   const belowPhoneWidth = useIsViewportBelow(PHONE_BELOW_WIDTH);
-  const [keepOpenChoice, setKeepOpenChoice] = useWorkspacePreference(
-    CONSOLE_SIDEBAR_KEEP_OPEN_PREFERENCE,
+  const [narrowChoice, setNarrowChoice] = useWorkspacePreference(
+    CONSOLE_SIDEBAR_NARROW_OPEN_PREFERENCE,
     'user',
     'off',
   );
-  const setKeepOpen = useCallback(
-    (keepOpen: boolean) => setKeepOpenChoice(keepOpen ? 'on' : 'off'),
-    [setKeepOpenChoice],
+  const setNarrowOpen = useCallback(
+    (open: boolean) => setNarrowChoice(open ? 'on' : 'off'),
+    [setNarrowChoice],
   );
   const desktop = enabled && !belowPhoneWidth && !isMobile;
   const narrow = desktop && belowRailWidth;
-  const keepOpen = keepOpenChoice === 'on';
-  return { enabled, desktop, wide: !belowRailWidth, narrow, keepOpen, setKeepOpen, railMode: narrow && !keepOpen };
+  const narrowOpen = narrowChoice === 'on';
+  return { enabled, desktop, wide: !belowRailWidth, narrow, narrowOpen, setNarrowOpen, railMode: narrow && !narrowOpen };
 }
 
 /**
@@ -281,8 +280,7 @@ export const SIDEBAR_FLOAT_CLOSE_DELAY_MS = 150;
  * menu: 8 px (`w-2`), the strip the sidebar primitive's own `SidebarRail`
  * leaves inside the viewport beside a collapsed `offcanvas` sidebar (its `w-4`
  * strip moved `-right-2` past the panel's edge). Fixed, above the page; the
- * call site places it below the top bar, as it places the sidebar, so the
- * bar's trigger is never under it.
+ * call site places it where it places the sidebar.
  */
 export const SIDEBAR_EDGE_ZONE = 'fixed left-0 z-40 w-2';
 
@@ -344,15 +342,14 @@ function floatFocusTarget(root: HTMLElement | null): HTMLElement | null {
 }
 
 
-/** What floated the menu: the pointer resting on the edge, a press on it, or the trigger or ⌘B. */
+/** What floated the menu: the pointer resting on the edge, a press on it, or ⌘B. */
 type FloatOpener = 'hover' | 'press' | 'command';
 
 /**
  * What folded it: a press outside it; Esc; a link chosen in it by keyboard (or
- * any other navigation), or by pointer; the pointer moving away; or "Keep
- * sidebar open" docking it.
+ * any other navigation), or by pointer; or the pointer moving away.
  */
-type FloatCloser = 'outside' | 'escape' | 'navigate' | 'pointer' | 'away' | 'dock';
+type FloatCloser = 'outside' | 'escape' | 'navigate' | 'pointer' | 'away';
 
 /** The window a float over a collapsed sidebar floated on: at or past the fold width, or below it. */
 type FloatWidth = 'wide' | 'narrow';
@@ -380,26 +377,20 @@ export interface ConsoleSidebarRailPanel {
     onPointerLeave: () => void;
     onClick: () => void;
   } | null;
-  /**
-   * "Keep sidebar open", at the foot of the panel: in a float it puts the
-   * sidebar back beside the content and keeps it there; in a sidebar kept open
-   * on a narrow window it is pressed, and turns the fold back on. `null` where
-   * it is not drawn.
-   */
-  keepOpenControl: { pressed: boolean; onPress: () => void } | null;
 }
 
 /**
  * How the console's collapsed sidebar behaves. Collapsed from 768 px up, it is
  * hidden and inert, and an 8 px strip at the window's left edge floats the
  * menu over the content: after the pointer rests there
- * ({@link SIDEBAR_FLOAT_OPEN_DELAY_MS}), at once on a press. The app bar's
- * trigger and ⌘B float it too, whichever way the sidebar collapsed (ruling
- * 6973617688 on objectstack#35062), and move focus into it. Floating changes
- * nothing the reader chose: the wide-window choice and the cookie keep the
- * collapsed state, so a reload comes back collapsed; its "Keep sidebar open"
- * control docks the sidebar, as the reader's choice. A float the pointer
- * opened folds once the pointer has been away from it for
+ * ({@link SIDEBAR_FLOAT_OPEN_DELAY_MS}), at once on a press. ⌘B floats it too,
+ * whichever window it collapsed on (ruling 6973617688 on objectstack#35062),
+ * and moves focus into it. Floating changes nothing the reader chose: the
+ * kept choices and the cookie keep the collapsed state, so a reload comes back
+ * collapsed. The page header's expand button docks the sidebar instead, as the
+ * reader's choice (ruling 7069868269 on objectstack#36112): on a narrow window
+ * it keeps the narrow-window choice expanded, ahead of the provider's toggle.
+ * A float the pointer opened folds once the pointer has been away from it for
  * {@link SIDEBAR_FLOAT_CLOSE_DELAY_MS} (not while a menu or dialog is open over
  * the page); a navigation choice, a press outside it or Esc folds any float.
  * Focus inside a sidebar that hides goes back where it came from, or to the
@@ -412,7 +403,7 @@ export function useConsoleSidebarRailPanel(
   sidebarRef: RefObject<HTMLDivElement | null>,
 ): ConsoleSidebarRailPanel {
   const { open, setOpen } = useSidebar();
-  const { enabled, desktop, railMode, wide, narrow, keepOpen, setKeepOpen } = rail;
+  const { enabled, desktop, railMode, wide, narrowOpen, setNarrowOpen } = rail;
   const location = useLocation();
 
   // A float over a sidebar the reader collapsed, by the window it floated on;
@@ -440,7 +431,6 @@ export function useConsoleSidebarRailPanel(
   const openedBy = useRef<FloatOpener | null>(null);
   const closedBy = useRef<FloatCloser | null>(null);
   const returnFocus = useRef<HTMLElement | null>(null);
-  const undocked = useRef(false);
   const openTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   // The press and the pointer move that last landed in the sidebar's React
@@ -475,15 +465,25 @@ export function useConsoleSidebarRailPanel(
     setOpenRef.current(true);
   }, []);
 
-  // While the sidebar is hidden by hand, the reader's own toggle (the app
-  // bar's trigger, ⌘B) floats the menu as on the fold, instead of docking it
-  // (ruling 6973617688); "Keep sidebar open" docks it. Noted in the capture
-  // phase, ahead of the provider's toggle, whose open the next render turns
-  // into the float. A browser may render between the two (its microtask
-  // checkpoint after each listener), so the note waits for the open.
+  // While the sidebar is hidden, the page header's expand button docks it,
+  // as the reader's choice (ruling 7069868269): on a narrow window it keeps
+  // the narrow-window choice expanded before the provider's toggle opens it,
+  // so the open is not the float; on a wide window the toggle's open is
+  // already the reader's. ⌘B floats the menu instead (ruling 6973617688):
+  // while the sidebar is hidden by hand on a wide window its toggle is noted
+  // in the capture phase, ahead of the provider's, whose open the next render
+  // turns into the float; on the fold every open is the float. A browser may
+  // render between the two (its microtask checkpoint after each listener), so
+  // the note waits for the open.
   useEffect(() => {
-    if (!hiddenByHand) return undefined;
-    const asFloat = () => {
+    if (!hidden) return undefined;
+    const onClickCapture = (event: globalThis.MouseEvent) => {
+      if (!(event.target instanceof Element) || !event.target.closest('[data-sidebar="trigger"]')) return;
+      if (railModeRef.current) setNarrowOpen(true);
+    };
+    // The provider's chord: `SIDEBAR_KEYBOARD_SHORTCUT` in `@object-ui/components`' `ui/sidebar.tsx`.
+    const onKeyDownCapture = (event: KeyboardEvent) => {
+      if (!hiddenByHand || event.key !== 'b' || !(event.metaKey || event.ctrlKey)) return;
       holdWideWindowChoice(true);
       setToggleFloats(widthRef.current);
       // A toggle another listener swallowed opens nothing: drop the note.
@@ -492,42 +492,19 @@ export function useConsoleSidebarRailPanel(
         if (!overlayOpenRef.current) holdWideWindowChoice(false);
       }, 0);
     };
-    const onClickCapture = (event: globalThis.MouseEvent) => {
-      if (event.target instanceof Element && event.target.closest('[data-sidebar="trigger"]')) asFloat();
-    };
-    // The provider's chord: `SIDEBAR_KEYBOARD_SHORTCUT` in `@object-ui/components`' `ui/sidebar.tsx`.
-    const onKeyDownCapture = (event: KeyboardEvent) => {
-      if (event.key === 'b' && (event.metaKey || event.ctrlKey)) asFloat();
-    };
     document.addEventListener('click', onClickCapture, true);
     window.addEventListener('keydown', onKeyDownCapture, true);
     return () => {
       document.removeEventListener('click', onClickCapture, true);
       window.removeEventListener('keydown', onKeyDownCapture, true);
     };
-  }, [hiddenByHand]);
+  }, [hidden, hiddenByHand, setNarrowOpen]);
 
   // While the menu floats, the primitive's cookie says collapsed: its setter
   // wrote it open, and a reload comes back to the reader's state, not the float.
   useLayoutEffect(() => {
     if (overlayOpen) writeSidebarStateCookie(false);
   }, [overlayOpen]);
-
-  // "Keep sidebar open" in a float: the sidebar docks beside the content as
-  // the reader's choice, kept as the wide-window choice on a wide window and
-  // in the cookie; on the fold it also turns the fold off.
-  const dock = useCallback(() => {
-    if (overlayOpenRef.current) closedBy.current = 'dock';
-    holdWideWindowChoice(false);
-    if (railModeRef.current) setKeepOpen(true);
-    setFloatOn(null);
-    setOpenRef.current(true);
-    if (widthRef.current === 'wide') writeWideWindowOpen(true);
-  }, [setKeepOpen]);
-  const undock = useCallback(() => {
-    undocked.current = true;
-    setKeepOpen(false);
-  }, [setKeepOpen]);
 
   // Any navigation folds the float: an entry chosen in it, the command palette, Back.
   const routeKey = `${location.pathname}${location.search}`;
@@ -538,19 +515,17 @@ export function useConsoleSidebarRailPanel(
     close('navigate');
   }, [routeKey, close]);
 
-  // A float over a collapsed sidebar ended by the window, not by folding or
-  // docking: it turned wide or narrow, or phone-sized. The sidebar is what the
-  // reader chose there: the wide-window choice on a wide window
-  // (`useResponsiveSidebar` reads it too), collapsed otherwise ("keep open"
-  // leaves the fold off on a narrow one).
+  // A float over a collapsed sidebar ended by the window, not by folding: it
+  // turned wide or narrow, or phone-sized. The sidebar is the window's
+  // starting state there, as `useResponsiveSidebar` gives it.
   const floatedOn = useRef<FloatWidth | null>(null);
   useLayoutEffect(() => {
     const prev = floatedOn.current;
     floatedOn.current = floatOn;
     if (prev === null || floatOn !== null || !open) return;
     if (prev === width && desktop) return;
-    setOpenRef.current(width === 'wide' ? (readWideWindowOpen() ?? false) : false);
-  }, [floatOn, width, desktop, open]);
+    setOpenRef.current(width === 'wide' ? (readWideWindowOpen() ?? true) : narrowOpen);
+  }, [floatOn, width, desktop, open, narrowOpen]);
 
   // Focus: into a float the trigger or ⌘B opened; out of a sidebar that hides.
   const last = useRef({ open, overlayOpen, hidden });
@@ -559,7 +534,7 @@ export function useConsoleSidebarRailPanel(
     last.current = { open, overlayOpen, hidden };
     const root = sidebarRef.current;
     if (!hidden) clearTimeout(openTimer.current);
-    // Opened while folded, by neither the edge nor the pointer: the trigger or ⌘B.
+    // Opened while folded, by neither the edge nor the pointer: ⌘B.
     // (The fold switching on under an open sidebar is not an opening:
     // `useResponsiveSidebar` folds it in the same frame.)
     if (overlayOpen && !prev.overlayOpen && !prev.open && openedBy.current === null) {
@@ -576,27 +551,13 @@ export function useConsoleSidebarRailPanel(
     const by = openedBy.current;
     const closer = closedBy.current;
     const back = returnFocus.current;
-    const undid = undocked.current;
     openedBy.current = null;
     closedBy.current = null;
     returnFocus.current = null;
-    undocked.current = false;
     clearTimeout(closeTimer.current);
     closeTimer.current = undefined;
-    // "Keep sidebar open" goes away under the focus it held: with the float it
-    // docks on a wide window, with the sidebar it folds when turned off.
+    if (!becameHidden) return;
     const active = document.activeElement;
-    const lost = !(active instanceof HTMLElement) || active === document.body || !active.isConnected;
-    // Docked from the float: nothing to give back, and focus stays in the menu.
-    if (!becameHidden) {
-      if (closer === 'dock' && lost) floatFocusTarget(root)?.focus({ preventScroll: true });
-      return;
-    }
-    // Turned off: the fold hides the sidebar, and focus goes to the trigger.
-    if (undid && lost) {
-      sidebarTrigger()?.focus({ preventScroll: true });
-      return;
-    }
     // Focus stranded in the hidden, inert sidebar. A press outside moves it where it lands.
     if (closer === 'outside' || !(active instanceof HTMLElement) || !root?.contains(active)) return;
     const byPointer = closer === 'pointer' || closer === 'away' || (closer === null && (by === 'hover' || by === 'press'));
@@ -622,7 +583,7 @@ export function useConsoleSidebarRailPanel(
     if (!overlayOpen) return undefined;
     const onPointerDown = (event: globalThis.PointerEvent) => {
       if (event === insidePress.current) return;
-      // The app bar's trigger toggles the sidebar itself.
+      // A sidebar trigger toggles the sidebar itself.
       if (event.target instanceof Element && event.target.closest('[data-sidebar="trigger"]')) return;
       close('outside');
     };
@@ -706,10 +667,5 @@ export function useConsoleSidebarRailPanel(
     panelClassName: overlayOpen ? RAIL_OVERLAY_PANEL : undefined,
     panelProps,
     edgeZoneProps: hidden ? { onPointerEnter: onEdgeEnter, onPointerLeave: onEdgeLeave, onClick: onEdgePress } : null,
-    keepOpenControl: overlayOpen
-      ? { pressed: false, onPress: dock }
-      : narrow && keepOpen
-        ? { pressed: true, onPress: undock }
-        : null,
   };
 }

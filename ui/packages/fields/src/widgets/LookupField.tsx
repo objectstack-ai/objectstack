@@ -30,6 +30,7 @@ import { deriveLookupColumns } from './deriveLookupColumns.js';
 import { buildExpandFields, declaredNameField, getRecordDisplayName, mergeFilterNodes, resolveAffordance, resolveNameField, toPredicateRecord, withoutDeniedFields } from '@object-ui/core';
 import { getRecentLookupIds, pushRecentLookupId } from './recentLookups.js';
 import { getPersonInitials } from './personDisplay.js';
+import { rememberPickedRecords } from './referenceRecordCache.js';
 import { declaredLookupAutofillPatch, type LookupAutofillPair } from './lookupAutofill.js';
 import { getCellRendererResolver } from './_cell-renderer-bridge.js';
 // The one place a lookup column's display value is decided — shared with the
@@ -1271,6 +1272,8 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
     (option: LookupOption, row?: Record<string, unknown>) => {
       if (row && option && option.value != null) {
         setPickedRecords((prev) => mergeRowsByValue(prev, [row], idField));
+        // objectstack#36046 — the cell that stores the id draws the record from here.
+        rememberPickedRecords(referenceTo, [row], idField, refObjectSchema ?? undefined);
       }
       if (multiple) {
         // Normalise any expanded-reference objects to bare ids so toggling
@@ -1296,7 +1299,7 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
         setIsOpen(false);
       }
     },
-    [multiple, value, onChange, onSelectRecord, referenceTo, normalizeId, idField, fillDeclaredTargets, inCell, onCommit, perms.userId],
+    [multiple, value, onChange, onSelectRecord, referenceTo, normalizeId, idField, fillDeclaredTargets, inCell, onCommit, perms.userId, refObjectSchema],
   );
 
   const handleRemove = (optionValue: any) => {
@@ -1322,8 +1325,12 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
       // the picked row, with `pickedRecords` still holding the earlier picks.
       if (!multiple && records.length === 1) fillDeclaredTargets(records[0]);
       setPickedRecords(records);
+      // objectstack#36046 — the picked records are what the committed ids
+      // name: a list cell storing them draws each name and face from here at
+      // once, not the raw id until the list is read again.
+      rememberPickedRecords(referenceTo, records, idField, refObjectSchema ?? undefined);
     },
-    [idField, referenceTo, multiple, fillDeclaredTargets, perms.userId],
+    [idField, referenceTo, multiple, fillDeclaredTargets, perms.userId, refObjectSchema],
   );
 
   /**
@@ -1355,6 +1362,7 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
       const row = records[0];
       if (referenceTo) pushRecentLookupId(referenceTo, recordValue(row, idField) as string | number | undefined, perms.userId);
       setPickedRecords(records);
+      rememberPickedRecords(referenceTo, records, idField, refObjectSchema ?? undefined);
       onSelectRecord(recordToOption(row, declaredDisplayField, idField, effectiveDescriptionField, refObjectSchema, perms, referenceTo));
       if (commitsCell) onCommit?.();
     },

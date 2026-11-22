@@ -104,6 +104,22 @@ Keys that merely hide/re-arrange correct information (`hideRelatedTab`, `showRef
 > stack. Letting an extension package place its own list is the epic's child card
 > [#35901](https://github.com/objectstack-ai/objectstack/issues/35901).
 
+> **Note (2026-11-22, [#35901](https://github.com/objectstack-ai/objectstack/issues/35901), epic
+> [#35896](https://github.com/objectstack-ai/objectstack/issues/35896)).** The previous note's last
+> sentence is superseded. An extension package now says where the fields, groups and child lists it
+> brings go (`ObjectExtensionSchema.place`, applied once by the registry fold, ADR-0146 D10's note of
+> the same date), and a child list another package brings is **not** hidden by the parent's declared
+> `relatedLists`: placed, it sits where its package puts it; unplaced, it shows at the end of the
+> tabs (the maintainer: 「装了就自动排在末尾」, ruling 7073014077, flipping ruling 7072511859). The
+> parent's tab list still decides everything the parent's own package and package-less metadata
+> bring. The ruling's consequence, for the approver: the parent cannot hide another package's list.
+> It can move it by naming it in its own `relatedLists`; only `relatedList: false` on that package's
+> FK hides it, and that FK is the other package's to set. Placement arranges what the parent declares (「父对象声明了才生效」): a group or field placement
+> applies only where the parent declares `fieldGroups`, so §5's derivation is unchanged: an
+> extension's group lands among the declared groups (after or before one of them, or last) and a
+> field it places lands inside a group's member list, never above the parent's own fields on a
+> parent that declares no groups.
+
 ### 3. Deletions (all evidenced zero-author)
 
 - **`detail` block removed from `ObjectSchema`** — all three typed keys. `renderViaSchema` retires *together with* the legacy monolith renderer path in objectui (separate execution PR; the key is only that path's steering wheel, deleting it alone saves nothing). `hideReferenceRail`/`hideRelatedTab` are removed outright (the former is a proven no-op for spec authors; the latter's raison d'être — overriding rail/tab dedup — died with the rail).

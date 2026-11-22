@@ -10,7 +10,8 @@
 
 import { useState, useEffect, useLayoutEffect, useCallback, useContext, useMemo, useRef, type ReactElement } from 'react';
 import { useParams, useNavigate, useLocation, useSearchParams, Link } from 'react-router-dom';
-import { activityRowToFeedItem, buildCommentThreads, CommentsButton, CommentsPage, RecordCommentsInPanelContext, composeImpersonatedActor, IMPERSONATED_ACTOR_FALLBACK, auditEntriesToFeedItems, bodyTableIdsOf, claimQueuedRecord, RECORD_PAGE_TIMELINE_PANEL, RECORD_TIMELINE_PANEL_MAX_ENTRIES, RecordFieldChangesContext, RecordFieldHistoryContext, RecordTimelineTotalContext, DefaultRecordPageContext, EMPTY_RELATED_ARRANGEMENT, InlineEditSaveBar, RECORD_PAGE_DETAILS_WIDTH, RecordBodyTablesContext, RecordMetaFooter, RecordPageColumns, buildDefaultPageColumns, buildDefaultPageSchema, extractMentions, isRefusedFeedRead, recordSitsInQueue, resolveTitleField, useQueueClaimOffered, useRecordEditable, useRecordPageTier } from '@object-ui/plugin-detail';
+import { activityRowToFeedItem, buildCommentThreads, CommentsButton, CommentsPage, RecordCommentsInPanelContext, composeImpersonatedActor, IMPERSONATED_ACTOR_FALLBACK, auditEntriesToFeedItems, bodyTableIdsOf, claimQueuedRecord, RECORD_PAGE_TIMELINE_PANEL, RECORD_TIMELINE_PANEL_MAX_ENTRIES, RecordFieldChangesContext, RecordFieldHistoryContext, RecordTimelineTotalContext, DefaultRecordPageContext, EMPTY_RELATED_ARRANGEMENT, InlineEditSaveBar, RECORD_PAGE_DETAILS_WIDTH, RecordBodyTablesContext, RecordMetaFooter, RecordPageColumns, buildDefaultPageColumns, buildDefaultPageSchema, extractMentions, recordSitsInQueue, resolveTitleField, useQueueClaimOffered, useRecordEditable, useRecordPageTier } from '@object-ui/plugin-detail';
+import { isRefusedFeedRead } from '@object-ui/plugin-detail/core';
 // objectstack#36075 — the comment panel's unresolved count and the moderator's verdict.
 import { unresolvedThreadCount, useRecordVerdict } from '@object-ui/plugin-detail';
 import { Empty, EmptyTitle, EmptyDescription, Button, PageHeaderActions, PageHeaderPhoneContext, PageHeaderTrailingContext, PanelToggles, ObjectIconTile, RecordHeaderBarContext, RecordHeaderStateContext, RecordTopBar, RecordTopBarButton, cn, useRecordStepKeys, type PanelToggleItem, type RecordHeaderBar, type RecordHeaderGroupParts, type RecordHeaderState, type RecordTopBarStepper } from '@object-ui/components';
@@ -36,6 +37,8 @@ import { ActionConfirmDialog, type ConfirmDialogState } from './ActionConfirmDia
 import { ActionParamDialog, type ParamDialogState } from './ActionParamDialog.js';
 import { resolveParamDialogCompanion } from './actionDialogCompanion.js';
 import { ActionResultDialog, type ResultDialogState } from './ActionResultDialog.js';
+import { ChangeOwnerDialog } from './ChangeOwnerDialog.js';
+import { useRecordChangeOwnerOffer } from './changeOwner.js';
 import { FlowRunner, type ScreenFlowState, type ScreenSpec } from './FlowRunner.js';
 import { FlowRefusalNotice, type FlowRefusalState } from './FlowRefusalNotice.js';
 import { RelatedRecordActionsBridge } from './RelatedRecordActionsBridge.js';
@@ -43,8 +46,8 @@ import { RecordEditStateController, bodyTablesSaveTogether, isMasterDetailChild,
 import { isRecordPagePushed, useRecordPageScrollMemory } from './recordPagePush.js';
 import { phoneRecordHeader } from './recordPhoneHeader.js';
 import { usePhoneViewport } from '../hooks/usePhoneViewport.js';
-import { PrefetchUpcomingRelatedCounts, RecordDrawerUpcomingContext, RecordPageDrawerHost, RecordPaneBarComments, RecordPaneBarToggles, useRecordPane, useRecordPaneBar, useRecordPageReturn } from './recordDrawerStack.js';
-import { COMMENTS_PANEL_WIDTH, RecordCommentsAside, commentsPanelPlacement, useCommentsPanelOpen, useElementWidth, useWindowWidth } from './recordCommentsPanel.js';
+import { PrefetchUpcomingRelatedCounts, RecordDrawerUpcomingContext, RecordPageDrawerHost, RecordPaneBarToggles, useRecordPane, useRecordPaneBar, useRecordPageReturn } from './recordDrawerStack.js';
+import { COMMENTS_PANEL_WIDTH, RecordCommentsAside, commentsPanelPlacement, useCommentsPanelOpen, useWindowWidth } from './recordCommentsPanel.js';
 import {
   RECORD_PAGE_ACTIVITY_ROWS,
   RECORD_PAGE_ATTACHMENT_ROWS,
@@ -1170,6 +1173,11 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // keeps ⟳ off those surfaces for now. `undefined` is the opt-out
   // `page:header` reads, so nothing renders there.
   const headerRefresh = embedded ? undefined : handleManualRefresh;
+  // objectstack#36309 — the header's re-read (`RecordContext.reread`) is not
+  // the ⟳: the stage menu draws in a drawer too, and its 409 answer must read
+  // the record again there, so every host provides it. Same `'*'` scope as the
+  // ⟳: a 409 is exactly a write this client never saw.
+  const headerReread = handleManualRefresh;
 
   // Record-scoped presence ("who else is viewing this record"). The default
   // PresenceProvider source is a no-op, so this resolves to `[]` until a
@@ -1300,25 +1308,33 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   const [pageRootEl, setPageRootEl] = useState<HTMLDivElement | null>(null);
   const pageColumnsEligible = !assignedPage && !namedPageBlocked;
   // ─── The record's comment panel (objectstack#36075) ──────────────────
-  // Offered on the desktop, page and drawer, wherever the page draws the
-  // platform's own 动态 stream: the default page and a slotted one. That is
-  // where the stream gives its comments up to the panel; a page whose author
-  // composed it keeps its discussion where the author put it (a page is what
-  // its author composes), and an object with feeds off has none. The phone's
-  // comment page is its own surface. Open or closed is the reader's, kept per
-  // page and per drawer; beside the record it takes 380 px from the page,
-  // whose tier is judged on what is left.
+  // Offered on the desktop full page, wherever the page draws the platform's
+  // own 动态 stream: the default page and a slotted one. That is where the
+  // stream gives its comments up to the panel; a page whose author composed
+  // it keeps its discussion where the author put it (a page is what its
+  // author composes), and an object with feeds off has none. The phone's
+  // comment page is its own surface. Open or closed is the reader's, kept in
+  // this browser; beside the record it takes 380 px from the page, whose tier
+  // is judged on what is left.
+  //
+  // objectstack#36225 — a record drawn embedded (the side preview, and any
+  // drawer a list or a record page opens) has no comment panel and no
+  // comments icon: the comments are the full page's, one 「Open as full page」
+  // away. Its 动态 stream gives them up all the same, so the preview shows
+  // no comment and no composer anywhere.
   const commentsPhone = usePhoneViewport();
-  const commentsPanelOffered =
-    !!objectDef && objectDef.enable?.feeds !== false && pageColumnsEligible && !commentsPhone && !!pureRecordId;
+  const commentsEligible = !!objectDef && objectDef.enable?.feeds !== false && pageColumnsEligible && !!pureRecordId;
+  const commentsPanelOffered = commentsEligible && !commentsPhone && !embedded;
+  const commentsLeftToFullPage = commentsEligible && !!embedded;
   // objectstack#36076 — the phone's comment page, on the same pages: a page
   // over the record page, addressed by `?comments=` (empty: the threads; a
   // top-level comment's id: that thread). A phone draws no drawer or pane.
-  const commentsPageOffered =
-    !!objectDef && objectDef.enable?.feeds !== false && pageColumnsEligible && commentsPhone && !embedded && !!pureRecordId;
+  const commentsPageOffered = commentsEligible && commentsPhone && !embedded;
   // Either surface holds the record's comments, so the 动态 stream gives
-  // them up and names its system entries alone.
+  // them up and names its system entries alone — as it does in a preview,
+  // whose comments are the full page's.
   const commentsSurfaceOffered = commentsPanelOffered || commentsPageOffered;
+  const streamGivesUpComments = commentsSurfaceOffered || commentsLeftToFullPage;
   const commentsParam = commentsPageOffered ? tabSearchParams.get(RECORD_COMMENTS_PARAM) : null;
   const commentsPageOpen = commentsParam !== null;
   const commentsPageThread = commentsParam ? commentsParam : null;
@@ -1350,15 +1366,9 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     }
     commentsPageWasOpen.current = commentsPageOpen;
   }, [commentsPageOpen]);
-  const [commentsOpenChosen, setCommentsOpen] = useCommentsPanelOpen(embedded ? 'drawer' : 'page');
+  const [commentsOpenChosen, setCommentsOpen] = useCommentsPanelOpen();
   const commentsOpen = commentsPanelOffered && commentsOpenChosen;
-  const commentsWindowWidth = useWindowWidth();
-  const commentsHostWidth = useElementWidth(embedded ? pageRootEl : null);
-  const commentsPlacement = commentsPanelPlacement({
-    embedded: !!embedded,
-    windowWidth: commentsWindowWidth,
-    hostWidth: commentsHostWidth,
-  });
+  const commentsPlacement = commentsPanelPlacement(useWindowWidth());
   const recordPageTier = useRecordPageTier(pageRootEl, {
     enabled: pageColumnsEligible,
     reservedWidth: commentsOpen && commentsPlacement === 'beside' ? COMMENTS_PANEL_WIDTH : 0,
@@ -2668,6 +2678,14 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   const sittingInQueue = recordSitsInQueue(pageRecord);
   const claimOffered = useQueueClaimOffered(objectDef?.name, pureRecordId, sittingInQueue !== null);
 
+  // objectstack#35403 — Change Owner: the object offers it (structural
+  // eligibility and `userActions.transfer`, the spec's one resolution), the
+  // switch's `visibleWhen` admits this record, and the explain engine's
+  // `transfer` verdict for this record is a definite allow. The verdict rides
+  // the record page's one read below (`explain: ['transfer']`).
+  const changeOwnerOffer = useRecordChangeOwnerOffer(objectDef, pureRecordId, pageRecord);
+  const [changeOwnerOpen, setChangeOwnerOpen] = useState(false);
+
   // ─── The record page payload (objectstack#27627) ─────────────────────
   // Everything this page asks of the server when it opens, in ONE read
   // (`DataSource.getRecordPage`): the record with the `$expand` above, each
@@ -2726,8 +2744,12 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     if (objectDef?.name && !editOffByObject) explain.push('update');
     if (objectDef?.name && !deleteOffByObject) explain.push('delete');
     // Claim asks a transfer verdict only of a record sitting in a queue; the
-    // payload asks it of every record of an object that has the column.
-    if (objectDef?.fields && Object.prototype.hasOwnProperty.call(objectDef.fields, 'queue')) explain.push('transfer');
+    // payload asks it of every record of an object that has the column, and
+    // of every record of an object that offers Change Owner (objectstack#35403).
+    if (
+      changeOwnerOffer.asks
+      || (objectDef?.fields && Object.prototype.hasOwnProperty.call(objectDef.fields, 'queue'))
+    ) explain.push('transfer');
     const relatedExpand = (child: string, field: string): string[] => {
       const childDef = objects.find((o: any) => o?.name === child) as { fields?: Record<string, any> } | undefined;
       const expandable = buildExpandFields(childDef?.fields as any).filter((f) => f !== field);
@@ -2740,7 +2762,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       fieldAccess: typeof dataSource.getRecordFieldAccess === 'function',
       approvals: true,
     });
-  }, [hasPage, objectName, pureRecordId, dataSource, objectDef, editOffByObject, deleteOffByObject, pageRecordExpand, effectivePage, assignedPage, childRelations, objects, perms]);
+  }, [hasPage, objectName, pureRecordId, dataSource, objectDef, editOffByObject, deleteOffByObject, changeOwnerOffer.asks, pageRecordExpand, effectivePage, assignedPage, childRelations, objects, perms]);
   // The stream parts ride whichever payload the plan above asks; they never ask
   // one of their own. So they are read off a ref when the payload goes out, not
   // keyed into the plan: an assigned page landing after a synthesized one (which
@@ -3895,10 +3917,11 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   const timelineServed = feedRecordKey ? timelineCountByRecord[feedRecordKey] ?? null : null;
   const heldCommentCount = useMemo(() => feedItems.filter((item) => item.type === 'comment').length, [feedItems]);
   // objectstack#36075, objectstack#36076 — where the comment panel or the
-  // phone's comment page holds the comments, the 动态 stream names its system
+  // phone's comment page holds the comments (and in a preview, whose comments
+  // are the full page's, objectstack#36225), the 动态 stream names its system
   // entries alone.
   const timelineTotal = timelineServed
-    ? Math.max(0, timelineServed.total - timelineServed.comments + (commentsSurfaceOffered ? 0 : heldCommentCount))
+    ? Math.max(0, timelineServed.total - timelineServed.comments + (streamGivesUpComments ? 0 : heldCommentCount))
     : null;
   // The comments icon's number: the record's unresolved threads (#36075 item
   // 8; every thread where the deployment stores no resolution), unknown while
@@ -5344,6 +5367,24 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         }
       },
     } as any);
+    // objectstack#35403 — Change Owner, in the `⋯` ahead of Share's pane
+    // entries: offered only where the object offers it and the explain engine
+    // allows this caller to transfer this record (`useRecordChangeOwnerOffer`).
+    // The title is fixed; the dialog names the object's own owner field.
+    if (changeOwnerOffer.offered) {
+      items.push({
+        name: 'sys_change_owner',
+        label: t('console.changeOwner.title', { defaultValue: 'Change Owner' }),
+        icon: 'user-cog',
+        type: 'script',
+        locations: ['record_header'],
+        variant: 'outline',
+        order: 112,
+        component: 'action:menu',
+        ...(changeOwnerOffer.disabled ? { disabled: true, disabledReason: predicateDisabledReason } : {}),
+        onClick: () => setChangeOwnerOpen(true),
+      } as any);
+    }
     // objectstack#27545 — in a record pane, the way to this record's full page,
     // the last of the `⋯`'s host entries (the destructive band stays below it,
     // objectui#12529). The bar's `⤢` maximizes in place; it no longer routes.
@@ -5932,7 +5973,6 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       {pageBar}
       {/* In a pane, the record's ⊟ goes into the pane's own top bar. */}
       {embedded && paneBar && <RecordPaneBarToggles>{panelToggles}</RecordPaneBarToggles>}
-      {embedded && paneBar && <RecordPaneBarComments>{commentsButton}</RecordPaneBarComments>}
       {/* On a print page the shared chrome joins the print chrome row below,
           so the row's buttons are not drawn under it. On the page it sits
           under the top bar, where it sat before the bar. */}
@@ -5957,6 +5997,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         dataSource={dataSource}
         embedded={embedded}
         refresh={headerRefresh}
+        reread={headerReread}
         headerSystemActions={synthSystemActions}
         objectLabelNote={inSetupApp ? managedByNote ?? undefined : undefined}
       >
@@ -6090,7 +6131,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         {/* objectstack#27055 — the field changes of the timeline stream,
             for the synthesized page's `record:activity`; on an assigned page,
             for its feed blocks (objectstack#33996). */}
-        <RecordCommentsInPanelContext.Provider value={commentsSurfaceOffered}>
+        <RecordCommentsInPanelContext.Provider value={streamGivesUpComments}>
         <RecordFieldChangesContext.Provider value={timelineFieldChanges}>
         {/* objectstack#30074 — whether this record shows its field history
             (objectstack#30344: to this reader, whose audit read answered):
@@ -6238,7 +6279,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                   // overlay, not the console's pane) keeps its ⊟ at the end of
                   // the header's action row.
                   <PageHeaderTrailingContext.Provider
-                    value={embedded && !paneBar && (commentsButton || panelToggles) ? <>{commentsButton}{panelToggles}</> : null}
+                    value={embedded && !paneBar && panelToggles ? panelToggles : null}
                   >
                   <RecordPageColumns
                     tier={recordPageTier}
@@ -6439,6 +6480,16 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           if (!open) setParamState(s => ({ ...s, open: false }));
         }}
       />
+
+      {/* objectstack#35403 — the Change Owner dialog the header's action opens. */}
+      {changeOwnerOffer.offered && objectDef && pageRecord && (
+        <ChangeOwnerDialog
+          open={changeOwnerOpen}
+          onOpenChange={setChangeOwnerOpen}
+          objectDef={objectDef as any}
+          records={[{ ...pageRecord, id: pureRecordId }]}
+        />
+      )}
 
       {/* Action Result Reveal Dialog */}
       <ActionResultDialog

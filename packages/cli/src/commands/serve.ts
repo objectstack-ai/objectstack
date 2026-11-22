@@ -4658,8 +4658,11 @@ export default class Serve extends Command {
               // dispatcher's inbound rate limiter receives below: whether the
               // ADR-0069 D5 IP allow-list and the D7 login audit may believe
               // X-Forwarded-For / X-Real-IP when establishing a client address.
-              // Undeclared, both judge the transport's peer address.
-              trustProxy: (config as any).server?.trustProxy === true,
+              // Undeclared, both judge the transport's peer address. Handed over
+              // as authored, either form: AuthPlugin reads it with the
+              // client-address rule's own `readTrustProxy`, which refuses a
+              // malformed trusted-network form at boot.
+              trustProxy: (config as any).server?.trustProxy,
               // The stack's `demoStaff`, read off the definition this process
               // loaded — the authored config, since `os build` writes the key
               // into no artifact. Handed over whatever the boot: plugin-auth
@@ -5206,7 +5209,12 @@ export default class Serve extends Command {
       try {
         const { createRestApiPlugin } = await import('@objectstack/rest');
         await kernel.use(
-          createRestApiPlugin({ api: { api: { enableProjectScoping, projectResolution } } as any }),
+          createRestApiPlugin({
+            api: { api: { enableProjectScoping, projectResolution } } as any,
+            // The same switch the dispatcher plugin is handed below, so the two
+            // doors of this host judge environment membership alike.
+            enforceProjectMembership: apiConfig.enforceProjectMembership,
+          }),
         );
         trackPlugin('RestAPI');
       } catch (e: any) {
@@ -5235,7 +5243,9 @@ export default class Serve extends Command {
         const serverConfig = (config as any).server ?? {};
         const rateLimitConfig = {
             ...(serverConfig.security?.rateLimit ? { budget: serverConfig.security.rateLimit } : {}),
-            trustProxy: serverConfig.trustProxy === true,
+            // As authored, either form; the dispatcher reads it with
+            // `readTrustProxy`, the same reading AuthPlugin applies above.
+            trustProxy: serverConfig.trustProxy,
         };
 
         // Register Dispatcher plugin (auth, graphql, analytics, packages, hub, storage, automation)
