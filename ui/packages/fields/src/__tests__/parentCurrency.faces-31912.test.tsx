@@ -26,7 +26,7 @@ import '@object-ui/components';
 import { FormulaCellRenderer, withFollowedParentObject } from '../index';
 import { CurrencyField } from '../widgets/CurrencyField';
 import { SummaryField } from '../widgets/SummaryField';
-import { GridField } from '../widgets/GridField';
+import { GridFieldWidget as GridField } from '../widgets/grid-field/GridFieldWidget';
 import { TextField } from '../widgets/TextField';
 
 afterEach(cleanup);

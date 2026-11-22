@@ -18,7 +18,6 @@
  */
 
 export const zhHantGeneratedSourceHashes: Readonly<Record<string, string>> = {
-  "metadataForms.view.fields.navigation.mode.helpText": "3a34d1e59dc81b9f",
   "objects.sys_email.fields.message_id.label": "14cd089a4062f4b1",
   "objects.sys_email_template.fields.id.label": "00b0385c9c152888",
   "objects.sys_exchange_rate.fields.id.label": "00b0385c9c152888",

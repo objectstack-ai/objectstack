@@ -497,6 +497,10 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
         label: "سبب الإلغاء",
         help: "سبب إلغاء الجلسة (idle_timeout، absolute_max، concurrent_cap، ip_not_allowed، user_revoked، admin، organization_membership_ended، admin_password_reset، password_reset، …)."
       },
+      sso_provider_id: {
+        label: "مزوّد SSO",
+        help: "مزوّد SSO الذي سُجّل الدخول من خلاله في هذه الجلسة، إن وُجد. حذف ذلك المزوّد يُنهي الجلسة. يُدار من قِبل النظام."
+      },
       active_organization_id: {
         label: "المؤسسة النشطة"
       },

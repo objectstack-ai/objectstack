@@ -2,6 +2,7 @@
 
 import type { AutomationContext } from '@objectstack/spec/contracts';
 import type { HookContext } from '@objectstack/spec/data';
+import { recordChangeTriggerHookEvents } from '@objectstack/spec/automation';
 import { omitInternalFieldsFromWriteResponse } from '@objectstack/core';
 
 import { decoupleFromEngineState } from './decouple-flow-record.js';
@@ -205,30 +206,16 @@ export function closeSaveNoticeChannel(context: AutomationContext): void {
 
 /**
  * Map a flow start node's `triggerType` (e.g. `record-after-update`) to the
- * ObjectQL `HookEvent`(s) it binds. Returns a list because one token can bind
- * more than one lifecycle event:
+ * ObjectQL `HookEvent`(s) it binds — `['afterUpdate']`, or for the
+ * create-OR-update union `record-after-write` `['afterInsert', 'afterUpdate']`;
+ * `[]` for any other token.
  *
- * - Single ops (`create`/`insert`/`update`/`delete`) → one event, e.g.
- *   `record-after-update` → `['afterUpdate']`.
- * - `write` is the **create-OR-update union** (#3427) — the two mutations that
- *   persist field data (delete is deliberately excluded) — so
- *   `record-after-write` → `['afterInsert', 'afterUpdate']`. This is what lets a
- *   single flow react to "record created or updated" without duplicating the
- *   whole definition, mirroring Salesforce's "created or updated" record-trigger
- *   option and Rails' `after_save`.
- *
- * Returns `[]` for anything that isn't a
- * `record-(before|after)-(create|insert|update|delete|write)` token.
+ * [#35928] The grammar is the spec's `recordChangeTriggerHookEvents`, the one
+ * reading the automation engine's record-update preview asks too, so what
+ * this trigger binds and what the preview lists cannot disagree.
  */
 export function triggerTypeToHookEvents(triggerType: string | undefined): string[] {
-    if (!triggerType) return [];
-    const m = /^record-(before|after)-(create|insert|update|delete|write)$/.exec(triggerType.trim());
-    if (!m) return [];
-    const phase = m[1]; // 'before' | 'after'
-    const op = m[2]; // create|insert|update|delete|write
-    if (op === 'write') return [`${phase}Insert`, `${phase}Update`]; // create OR update
-    const verb = op === 'create' || op === 'insert' ? 'Insert' : op.charAt(0).toUpperCase() + op.slice(1);
-    return [`${phase}${verb}`]; // e.g. 'afterUpdate', 'beforeDelete'
+    return recordChangeTriggerHookEvents(triggerType);
 }
 
 /**

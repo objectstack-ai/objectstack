@@ -158,7 +158,7 @@
  *   launch hosts alike.
  *
  * WHERE the bundle comes from is the channel the console already has:
- * `activeFlowsBundle` (`utils/flowsBundle`) reads the `flows` group back out
+ * `activeFlowsBundle` (`@object-ui/i18n`) reads the `flows` group back out
  * of the i18next resource tree the provider loaded, for the active language.
  * There is no second loader.
  *
@@ -349,7 +349,7 @@ import {
 } from './ScreenView.js';
 import { flowSuccessCopy, interpretFlowResponse } from '../utils/flowResponse.js';
 import { announceFlowDroppedFields } from '../utils/flowLaunch.js';
-import { activeFlowsBundle, type FlowsTranslation } from '../utils/flowsBundle.js';
+import { activeFlowsBundle, type FlowsTranslation } from '@object-ui/i18n';
 
 export type { ScreenSpec, ScreenFieldSpec } from './ScreenView.js';
 

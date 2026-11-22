@@ -16,6 +16,7 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import type { ObjectFormSchema, FormField, FormSchema, DataSource } from '@object-ui/types';
 import { SchemaRenderer, useSafeFieldLabel } from '@object-ui/react';
+import { FormOwnerLine } from './formOwnerLine';
 import { pickLocalized, useObjectTranslation, useLocalization, withHomeAmountSource } from '@object-ui/i18n';
 import { useRecordInvalidation } from './recordInvalidation';
 import { useReportedDirtyChange } from './formDirtyReport';
@@ -1844,6 +1845,14 @@ const SimpleObjectForm: React.FC<{ schema: LocalizedObjectFormSchema; dataSource
         <FormSectionNavContext.Provider value={sectionNav.sink}>
         <div className="w-full @container">
           {closedAffordanceNotice}
+          {/* objectstack#35403 — the record's owner, read-only, with the host's action beside it. */}
+          <FormOwnerLine
+            mode={schema.mode}
+            objectName={schema.objectName}
+            recordId={schema.recordId}
+            record={loading ? null : initialData}
+            objectSchema={objectSchema}
+          />
           {/* Sticky, so the sections stay one click away down a long page. */}
           <FormSectionNav items={sectionNav.items} className="sticky top-0 z-10 mb-4 bg-background" />
           <SchemaRenderer
@@ -2043,6 +2052,14 @@ const SimpleObjectForm: React.FC<{ schema: LocalizedObjectFormSchema; dataSource
         data-mobile-form={mobileOpts ? 'true' : undefined}
       >
         {closedAffordanceNotice}
+          {/* objectstack#35403 — the record's owner, read-only, with the host's action beside it. */}
+          <FormOwnerLine
+            mode={schema.mode}
+            objectName={schema.objectName}
+            recordId={schema.recordId}
+            record={loading ? null : initialData}
+            objectSchema={objectSchema}
+          />
         <SchemaRenderer schema={formSchema} />
         <UploadInFlightNotice gate={uploadGate} />
         {conflictDialog}
