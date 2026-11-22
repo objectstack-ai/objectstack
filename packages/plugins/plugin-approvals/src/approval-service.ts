@@ -142,7 +142,9 @@ import {
   namesNoOneBut,
   noApproverNoteOf,
   noApproverNoteText,
+  noApproverPositions,
   noApproverSentence,
+  noApproverSlots,
   noApproverWho,
   type NoApproverNote,
 } from './no-approver-note.js';
@@ -5352,8 +5354,8 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
           slateSource = 'administrators';
         } else {
           slateSource = 'no_one';
-          const who = noApproverWho(approvers);
-          noApproverNote = { action_id: uid('aact'), ...(who ? { who } : {}) };
+          const slots = noApproverSlots(approvers);
+          noApproverNote = { action_id: uid('aact'), ...(slots ? { slots } : {}) };
           // Break-glass stays break-glass (#3424): an organization whose
           // administrators' slate resolves to nobody opens the request on the
           // slate that names no one — the only option that neither waves the
@@ -11385,7 +11387,10 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     const exclusion = submitterExclusionNoteOf(snapshot);
     if (exclusion) overlay(exclusion.action_id, () => submitterExclusionNoteText(exclusion, labels.sentence));
     const noApprover = noApproverNoteOf(snapshot);
-    if (noApprover) overlay(noApprover.action_id, () => noApproverNoteText(noApprover, labels.sentence));
+    if (noApprover) {
+      const positionLabels = await this.notePositionLabels(noApproverPositions(noApprover), labels);
+      overlay(noApprover.action_id, () => noApproverNoteText(noApprover, labels.sentence, (name) => positionLabels.get(name)));
+    }
   }
 
   /**
