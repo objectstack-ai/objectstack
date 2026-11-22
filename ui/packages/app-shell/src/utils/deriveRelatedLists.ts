@@ -101,7 +101,7 @@ import {
   relatedListEntryName,
 } from '@objectstack/spec/data';
 import { convertSortToQueryParams } from '@object-ui/core';
-import { relatedListEntryNames } from '@object-ui/plugin-detail';
+import { relatedListEntryNames } from '@object-ui/plugin-detail/core';
 
 /** Audit/ownership FKs that exist on nearly every object — never related lists. */
 const AUDIT_FK_FIELDS = new Set(['created_by', 'updated_by', 'owner_id']);

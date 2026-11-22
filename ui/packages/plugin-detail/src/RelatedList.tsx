@@ -108,6 +108,7 @@ import {
 import { relatedCardId } from './synth/relatedArrangement';
 import { relatedTabConditionsChanged, useRelatedTabConditions } from './relatedTabConditions';
 import { RelatedCardMenu, RelatedPanelHandle } from './RelatedCardMenu';
+import { normalizeSortSpec } from './relatedListSort';
 import { detectStatusField } from '@object-ui/types';
 
 export interface RelatedListProps {
@@ -383,28 +384,9 @@ function resolveRelatedLookupLabel(record: any, refSchema: any): string | undefi
   );
 }
 
-/**
- * Normalize the spec `sort` union (`'field'` / `'-field'` string or
- * `[{field, order}]`) into the object-array form fed to `$orderby`.
- */
-/**
- * A related list's declared sort as the row read sends it (`$orderby`). The
- * record page's payload asks a list's first rows in this order
- * (objectstack#27627), so a compact card can take them.
- */
-export function normalizeSortSpec(
-  sort: RelatedListProps['defaultSort'],
-): Array<{ field: string; order: 'asc' | 'desc' }> {
-  if (!sort) return [];
-  if (typeof sort === 'string') {
-    const trimmed = sort.trim();
-    if (!trimmed) return [];
-    return trimmed.startsWith('-')
-      ? [{ field: trimmed.slice(1), order: 'desc' }]
-      : [{ field: trimmed, order: 'asc' }];
-  }
-  return sort.filter((s) => !!s?.field);
-}
+// The sort normalizer lives in its own module so the side-effect-free
+// `/core` subpath can export it without this component.
+export { normalizeSortSpec };
 
 /** The permission context this component reads field-level security from. */
 type FieldReadPolicy = ReturnType<typeof usePermissions>;

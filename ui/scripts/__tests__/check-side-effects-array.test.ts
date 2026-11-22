@@ -795,7 +795,7 @@ describe('the real workspace — the population this widening was measured again
     const kinds = results.flatMap((r) => r.entryForms.map((e) => e.kind));
     expect(kinds).toContain('asset'); // @object-ui/app-shell's `./styles.css`
     expect(results.flatMap((r) => r.entryForms.flatMap((e) => e.alternateFormats)).length).toBeGreaterThan(0);
-    // ...and the genuine multi-entry population is exactly the two `/core`
+    // ...and the genuine multi-entry population is exactly the three `/core`
     // subpaths objectstack#33581 published: side-effect-free secondary entry
     // points, walked as roots of their own (and finding no registrar, which is
     // their point). Every other package still walks from one root. A package
@@ -804,6 +804,7 @@ describe('the real workspace — the population this widening was measured again
       results.filter((r) => r.entryPoints.length > 1).map((r) => [r.name, r.entryPoints]),
     );
     expect(multi).toEqual({
+      '@object-ui/plugin-detail': ['src/core.ts', 'src/index.tsx'],
       '@object-ui/plugin-form': ['src/core.ts', 'src/index.tsx'],
       '@object-ui/plugin-view': ['src/core.ts', 'src/index.tsx'],
     });
