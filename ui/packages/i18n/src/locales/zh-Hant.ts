@@ -1303,6 +1303,9 @@ const zhHant = {
     dragToReorder: '拖動排序',
     defaultView: '預設檢視',
     defaultBadge: '預設',
+    customizedBadge: '已定製',
+    customizedTitle: '已在此處修改：所有人看到的是這份副本，而不是其包自帶的版本。',
+    restoreFactory: '恢復出廠版本',
     tabActionsFor: '{{name}} 的檢視操作',
     readonlyAriaLabel: '只讀檢視',
     readonlyTooltip: '系統檢視 — 由程式碼定義，只讀。',
@@ -1603,6 +1606,7 @@ const zhHant = {
     updatedTime: '修改時間',
     recordNumber: '記錄編號',
     clickToEdit: '點選編輯',
+    setField: '設定{{field}}',
     // Attachments
     dropFilesToUpload: '拖拽檔案到此處或點選上傳',
     attachmentCount: '{{count}} 個附件',
@@ -2860,6 +2864,10 @@ const zhHant = {
       delete: '刪除',
       deleteViewTitle: '刪除檢視',
       deleteViewConfirm: '確定要刪除檢視 "{{name}}" 嗎？此操作無法撤銷。',
+      restoreFactory: '恢復',
+      restoreFactoryTitle: '恢復出廠版本',
+      restoreFactoryConfirm: '將檢視 "{{name}}" 恢復為其包自帶的版本？此檢視的所有使用者都將重新看到出廠版本，在此處修改的名稱、固定和預設設定將被移除。',
+      restoreFactoryDone: '已恢復 "{{name}}" 的出廠版本',
       bulkDeleteConfirm: '確定要刪除選中的 {{count}} 條記錄嗎？此操作無法撤銷。',
       bulkDeleteConfirm_one: '確定要刪除選中的 {{count}} 條記錄嗎？此操作無法撤銷。',
       bulkDeleteConfirm_other: '確定要刪除選中的 {{count}} 條記錄嗎？此操作無法撤銷。',
@@ -3513,6 +3521,11 @@ const zhHant = {
     collapse: '收起側邊欄',
     expand: '展開側邊欄',
   },
+  designMode: {
+    title: '設計模式',
+    leaveUnsaved: '離開設計模式？未儲存的改動將會丟失。',
+    saveFailed: '部分改動沒有儲存：{{reason}}',
+  },
   topbar: {
     aiAssistant: 'AI 助手',
     designInStudio: '在 Studio 中設計',
@@ -4081,6 +4094,7 @@ const zhHant = {
   objectViewActions: {
     renameFailed: '重新命名檢視失敗',
     deleteFailed: '刪除檢視失敗',
+    restoreFactoryFailed: '恢復出廠版本失敗',
   },
   dashboardActions: {
     printDialogOpening: '正在開啟瀏覽器列印對話方塊（不是匯出 PDF）',
@@ -5620,9 +5634,7 @@ const zhHant = {
     digestNone: "不傳送摘要",
     digestDaily: "每天",
     digestWeekly: "每週",
-    digestNoOff: "不提供“不傳送摘要”：儲存它不會關閉組織設定的摘要，因此可能不會生效。",
     quietHours: "免打擾時段",
-    quietHoursNoClear: "不能儲存空的時段：它不會關閉組織設定的免打擾時段，因此可能不會生效。請改為設定開始和結束時間。",
     save: "儲存",
     matrix: "主題與渠道",
     topic: "主題",

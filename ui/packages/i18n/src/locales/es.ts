@@ -1313,6 +1313,9 @@ const es = {
     dragToReorder: "Arrastrar para reordenar",
     defaultView: "Vista predeterminada",
     defaultBadge: "predeterminada",
+    customizedBadge: "personalizada",
+    customizedTitle: "Cambiada aquí: todos ven esta copia en lugar de la versión que incluye su paquete.",
+    restoreFactory: "Restaurar versión de fábrica",
     tabActionsFor: "Acciones de vista para {{name}}",
     readonlyAriaLabel: "Vista de solo lectura",
     readonlyTooltip: "Vista del sistema — definida en el código, solo lectura.",
@@ -1710,6 +1713,7 @@ const es = {
     updatedTime: "Fecha de modificación",
     recordNumber: "ID del registro",
     clickToEdit: "Haga clic para editar",
+    setField: "Establecer {{field}}",
     // objectui#3863 — base key, answering only a call made without a count. es's
     // `many` (exact millions) has its own slot since objectui#11432; it repeats
     // `_other` here because the count governs no noun complement.
@@ -2858,6 +2862,10 @@ const es = {
       delete: "Eliminar",
       deleteViewTitle: "Eliminar vista",
       deleteViewConfirm: "¿Eliminar la vista \"{{name}}\"? Esto no se puede deshacer.",
+      restoreFactory: "Restaurar",
+      restoreFactoryTitle: "Restaurar versión de fábrica",
+      restoreFactoryConfirm: "¿Restaurar la vista \"{{name}}\" a la versión que incluye su paquete? Todos los que usan esta vista volverán a ver la versión de fábrica, y se quitarán el nombre, la fijación y la vista predeterminada cambiados aquí.",
+      restoreFactoryDone: "Se restauró la versión de fábrica de \"{{name}}\"",
       bulkDeleteConfirm: "¿Eliminar {{count}} registros seleccionados? Esto no se puede deshacer.",
       bulkDeleteConfirm_one: "¿Eliminar {{count}} registro seleccionado? Esto no se puede deshacer.",
       bulkDeleteConfirm_many: "¿Eliminar {{count}} de registros seleccionados? Esto no se puede deshacer.",
@@ -3512,6 +3520,11 @@ const es = {
     collapse: 'Contraer la barra lateral',
     expand: 'Expandir la barra lateral',
   },
+  designMode: {
+    title: 'Modo de diseño',
+    leaveUnsaved: '¿Salir del modo de diseño? Se perderán los cambios no guardados.',
+    saveFailed: 'Algunos cambios no se guardaron: {{reason}}',
+  },
   topbar: {
     openAssistant: "Abrir el asistente {{name}}",
     offline: "Sin conexión",
@@ -3886,6 +3899,7 @@ const es = {
   objectViewActions: {
     renameFailed: "No se pudo renombrar la vista",
     deleteFailed: "No se pudo eliminar la vista",
+    restoreFactoryFailed: "No se pudo restaurar la versión de fábrica",
   },
   dashboardActions: {
     printDialogOpening: "Abriendo el cuadro de diálogo de impresión de tu navegador (no es una exportación a PDF)",
@@ -5721,9 +5735,7 @@ const es = {
     digestNone: "Sin resumen",
     digestDaily: "Diario",
     digestWeekly: "Semanal",
-    digestNoOff: "No se ofrece «Sin resumen»: guardarlo no desactiva un resumen que fija tu organización, así que podría no tener efecto.",
     quietHours: "Horas de silencio",
-    quietHoursNoClear: "No se puede guardar un intervalo vacío: no desactiva las horas de silencio que fija tu organización, así que podría no tener efecto. Indica una hora de inicio y una de fin.",
     save: "Guardar",
     matrix: "Temas y canales",
     topic: "Tema",

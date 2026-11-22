@@ -44,10 +44,14 @@
 // master gate is what decides".
 //
 // Section 3 is the other half of the same precondition, and the reason the floor
-// is dropped from a CALL SITE rather than from the object's posture alone: on a
-// BULK (AST) write `assertControlledByParentWrite` returns early
-// (`extractSingleId == null`), so nothing there replaces the floor and the floor
-// therefore STAYS. That is a residual, pinned, not an oversight.
+// is dropped from a CALL SITE rather than from the object's posture alone. When
+// this file was written the gate returned early on a write that addressed no
+// single id, so nothing replaced the floor there and it stayed. The gate has
+// since judged every master an addressed predicate write reaches, and ruling
+// record 7073030861 (ADR-0055 §3 as amended 2026-11-22) applies the same
+// precondition to that path: the floor is handed over where the gate judged the
+// write and admitted it, for the rows it judged, and stays on every write the
+// gate did not judge.
 
 import { describe, it, expect, vi } from 'vitest';
 import { SecurityPlugin } from './security-plugin.js';
@@ -401,9 +405,12 @@ function makeStore(rows: Record<string, Row[]>) {
       }
       if (!seam || opCtx.operation !== 'update') return;
       const dispatch = assertEngineUpdateDispatch(opCtx.data, opCtx.options);
-      if (dispatch.kind !== 'by-id') return;
       seam.honoured = true;
-      const targets = (rows[opCtx.object] ?? []).filter((r) => r.id === dispatch.id);
+      // The predicate path judges every row the composed AST selects, each
+      // merged with the payload, as `ObjectQL.update` does.
+      const targets = (rows[opCtx.object] ?? []).filter((r) =>
+        dispatch.kind === 'by-id' ? r.id === dispatch.id : matchesFilterCondition(r, opCtx.ast?.where ?? null),
+      );
       await seam.evaluate(targets.map((r) => ({ ...r, ...opCtx.data })));
     },
   };
@@ -536,12 +543,14 @@ async function boot(seed: { shares?: Row[] } = {}) {
      * so the injected tree is the only place the scope is observable (the
      * engine double is never called with it).
      */
-    bulkDetailWrite: async (operation: string, where: Record<string, unknown>, context: any) => {
+    bulkDetailWrite: async (operation: string, where: Record<string, unknown>, context: any, multi = false) => {
       const opCtx: any = {
         object: 'crm_campaign_member',
         operation,
         ...(operation === 'delete' ? {} : { data: { status: 'responded' } }),
-        options: { where },
+        // `multi: true` is what the engine routes down its predicate path; a
+        // write that carries neither it nor an id is one the engine refuses.
+        options: { where, ...(multi ? { multi: true } : {}) },
         ast: { where },
         context,
       };
@@ -705,16 +714,48 @@ describe('[#8757] §2 the card\'s three measured refusals become the master gate
   });
 });
 
-describe('[#8757] §3 RESIDUAL — the floor STAYS where the master gate does not run', () => {
-  it('a BULK write on the detail keeps the ownership floor', async () => {
+describe('[#8757] §3 THE PREDICATE PATH — the floor goes where the master gate judged the write, and stays where it did not', () => {
+  // Ruling record 7073030861 (ADR-0055 §3 as amended 2026-11-22). This section
+  // used to pin a RESIDUAL: "a BULK write on the detail keeps the ownership
+  // floor", on the reasoning that the gate returned early with no single id.
+  // The gate has judged a predicate write since: every master of the rows the
+  // write selects, refusing the write whole on the first the caller may not
+  // edit. So the precondition the floor's removal hangs on holds there too, and
+  // the residual is now the write the gate does NOT judge.
+  for (const operation of ['update', 'delete'] as const) {
+    it(`an addressed predicate ${operation.toUpperCase()} the gate admitted carries no ownership floor, and is scoped to the rows it judged`, async () => {
+      const h = await boot();
+      const mkt = h.ctxFor(MKT, 'marketing');
+      // Both rows under the campaign `usr_marketing` owns, one of them created
+      // by the admin: the row the floor used to leave out of the match.
+      const { outcome, injected } = await h.bulkDetailWrite(operation, { crm_campaign: 'camp_mkt' }, mkt, true);
+      expect(outcome).toMatchObject({ ok: true });
+      expect(injected).not.toContain('created_by');
+      // The scope is the gate's own row list: the rows whose master it judged.
+      expect(injected).toContain('mem_mkt_byadmin');
+      expect(injected).toContain('"mem_mkt"');
+      expect(injected).not.toContain('mem_admin');
+    });
+
+    it(`a predicate ${operation.toUpperCase()} that reaches a master the caller may not edit is refused whole by the gate`, async () => {
+      const h = await boot();
+      const mkt = h.ctxFor(MKT, 'marketing');
+      // `status: 'sent'` selects rows under both campaigns; `camp_admin` is not
+      // `usr_marketing`'s to edit. The widening is bounded by this refusal.
+      const { outcome } = await h.bulkDetailWrite(operation, { status: 'sent' }, mkt, true);
+      expect(outcome).toMatchObject({ ok: false, code: 'PERMISSION_DENIED', status: 403 });
+      expect(outcome.message).toMatch(MASTER_GATE_SENTENCE);
+    });
+  }
+
+  it('a write the gate does not judge keeps the ownership floor', async () => {
     const h = await boot();
     const mkt = h.ctxFor(MKT, 'marketing');
-    // `assertControlledByParentWrite` returns early on a bulk write
-    // (`extractSingleId == null` — "scoped by the read filter on the AST"), so
-    // no master gate covers this path and the precondition is NOT satisfied
-    // here. The floor is therefore dropped from the by-id CALL SITE, never from
-    // the object's posture alone, and this case is what holds that shape: the
-    // AST-injected filter must still carry `created_by == current_user.id`.
+    // No id and no `multi: true`: the engine refuses this shape itself, the
+    // gate judges nothing for it, and so nothing vouches for the floor's
+    // removal. The floor is dropped from a CALL SITE the gate covers, never
+    // from the object's posture alone, and this case is what holds that shape:
+    // the AST-injected filter must still carry `created_by == current_user.id`.
     const { injected } = await h.bulkDetailWrite('update', { status: 'sent' }, mkt);
     expect(injected).toContain('created_by');
     expect(injected).toContain(MKT);

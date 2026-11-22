@@ -209,6 +209,11 @@ const NON_PROVIDERS_IN_SPAN = [
     label: 'kernelServiceProvider',
     why: '`(name, environmentId?) => Promise<unknown>` — a BY-NAME lookup for the service an object declares as its `schemaReadDelegate` (decision 6840464379), so it names no slot of its own; pinned by its own case below',
   },
+  {
+    index: 23,
+    label: 'environmentMembership',
+    why: '`{ enforced: boolean }` — the host\'s environment-membership switch, a value resolved at boot, not a slot provider; pinned in `rest-environment-membership-door.test.ts`',
+  },
 ] as const;
 
 /**
@@ -283,10 +288,10 @@ function mockCtx(services: Record<string, unknown>) {
   };
 }
 
-async function boot(services: Record<string, unknown>) {
+async function boot(services: Record<string, unknown>, config?: Parameters<typeof createRestApiPlugin>[0]) {
   captured.ctorArgs.length = 0;
   const { ctx, asked } = mockCtx(services);
-  const plugin = createRestApiPlugin();
+  const plugin = createRestApiPlugin(config);
   await plugin.init?.(ctx as never);
   await plugin.start?.(ctx as never);
   expect(captured.ctorArgs).toHaveLength(1);
@@ -357,6 +362,22 @@ describe('[#4251 B4] rest-api-plugin slot lookups', () => {
     expect(args[10]).toBeUndefined();
     expect(typeof args[9], 'the neighbour is still the sharing provider').toBe('function');
     expect(typeof args[11], 'the neighbour is still the approvals provider').toBe('function');
+  });
+
+  it('passes the host environment-membership switch the dispatcher plugin reads, through the one shared function', async () => {
+    const scoped = { api: { api: { enableProjectScoping: true, projectResolution: 'auto' } } } as any;
+    const unscoped = { api: { api: { enableProjectScoping: false } } } as any;
+    const cases: Array<[string, Parameters<typeof createRestApiPlugin>[0], boolean]> = [
+      ['no config: off', undefined, false],
+      ['scoping on, no explicit switch: on', scoped, true],
+      ['scoping on, api.enforceProjectMembership false: off', { ...scoped, enforceProjectMembership: false }, false],
+      ['scoping off, no explicit switch: off', unscoped, false],
+      ['scoping off, api.enforceProjectMembership true: on', { ...unscoped, enforceProjectMembership: true }, true],
+    ];
+    for (const [label, config, enforced] of cases) {
+      const { args } = await boot(allServices(), config);
+      expect(args[23], label).toEqual({ enforced });
+    }
   });
 
   it('passes the env-registry and default-environment seams as RestServer declares them', async () => {

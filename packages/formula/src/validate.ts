@@ -121,16 +121,32 @@ export interface ExprSchemaHint {
    * key is what makes a `multiple: true` field a list here, since a field
    * type does not say whether it was declared multiple. A field either names
    * as multi-valued is a LIST SUBJECT, and a `==` / `!=` between a read of it
-   * (`record.<field>` / `previous.<field>`, in every member spelling the
-   * field-existence pass reads) and a non-null scalar literal is refused
-   * under `list-equality`: CEL compares the whole list with the scalar, so
-   * the expression answers the same constant on every row. `<field> == null`
-   * / `!= null` stays accepted. Absent ⇒ only {@link fieldTypes}' inherently
+   * and a non-null scalar literal is refused under `list-equality`: CEL
+   * compares the whole list with the scalar, so the expression answers the
+   * same constant on every row. A read is `record.<field>` / `previous.<field>`
+   * (`record['<field>']` too; the optional spellings are refused as
+   * `invalid-cel` first), and, at a `'flattened'` site whose
+   * {@link faultOutcome} is `'run-fails'` (a run proven to bind a row of the
+   * typed object), the bare `<field>` — not a name {@link flowVariables}
+   * holds, nor any bare name under {@link bareNamesUnproven}. At a flattened
+   * site with no proven row, nothing is judged. A name a comprehension macro
+   * binds is never the field inside that macro's body. `<field> == null` /
+   * `!= null` stays accepted. Absent ⇒ only {@link fieldTypes}' inherently
    * multi types are list subjects: a `select` / `lookup` / `user` field
    * declared `multiple: true` is then judged as it was before this key, not
    * at all.
    */
   multiValueFields?: readonly string[];
+  /**
+   * [#36167] The site's source is COMPILED TO A QUERY FILTER
+   * (`compileCelToFilter`), not evaluated as CEL per row: a sharing rule's
+   * `condition`. Only the `list-equality` prescription reads it: there `in`
+   * lowers only with a field on its left, so the membership test prescribed
+   * is `record.<field>.contains(…)` (`$contains`, membership on a list
+   * column), not `… in record.<field>`, which the lowering refuses. Absent ⇒
+   * the CEL spelling, every other caller's behaviour.
+   */
+  filterCompiled?: boolean;
   /**
    * Evaluation scope of the authoring site — determines whether a bare top-level
    * identifier is legal (#1928):
@@ -519,7 +535,8 @@ const DATE_FAIL_CLOSED_CLAUSE =
  *    (`date − date + 1`, `today() + 30`) — always faults at runtime and never
  *    recovers, so it blocks the build. A formula reads that fault as null; a
  *    flattened (flow) condition's fault fails the run, under the
- *    `date-arithmetic-run-fails` / `-run-may-fail` codes (#30016), a
+ *    `date-arithmetic-run-fails` / `-run-may-fail` codes (#30016) — its
+ *    `record.<field>` / `previous.<field>` read as its bare name (#34946) — a
  *    fail-closed site's refuses the write, under `date-arithmetic-fail-closed`
  *    (#30250), and an advisory rule's skips the rule, under
  *    `date-arithmetic-fail-open` (#30494, {@link dateArm}).
@@ -596,7 +613,10 @@ function typeSoundnessIssue(
     const use =
       `Use \`daysBetween(a, b)\` for the span in whole days, and \`daysFromNow(n)\` / ` +
       `\`addDays(d, n)\` / \`addMonths(d, n)\` to shift a date.`;
-    const arm = dateArm(scope, faultOutcome, bareNamesUnproven);
+    // [#34946] A `record.<field>` / `previous.<field>` read keeps the row's
+    // outcome whatever binds the bare names (#30025), as its type mismatch and
+    // its date-text verdicts do ({@link recordRootDateTextIssue}).
+    const arm = dateArm(scope, faultOutcome, mismatch.root !== undefined ? false : bareNamesUnproven);
     return {
       severity: 'error',
       issue: arm
@@ -1486,6 +1506,11 @@ function scalarLiteralOf(node: unknown): string | undefined {
  * another list subject, which is a real whole-list comparison; and an operand
  * that is not a literal ({@link scalarLiteralOf}).
  *
+ * At a `'flattened'` site nothing is judged unless the caller declares the run
+ * proven to bind a row of the typed object ({@link ExprSchemaHint.faultOutcome}
+ * `'run-fails'`); elsewhere the names hold what the entrance handed the run.
+ * The prescription is spelled for the site ({@link listMembershipRewrite}).
+ *
  * The subject is read through `rootMemberOf`, the field-existence pass's own
  * member reader, so `record.f` and `record['f']` (and `previous.…`) are
  * judged alike, and the refusal renders the read as `<root>.<field>`. The
@@ -1509,6 +1534,13 @@ function checkListEquality(
 ): void {
   const subjects = listSubjectsOf(schema);
   if (subjects.size === 0) return;
+  // A flattened (flow) site binds a row of the typed object only where the
+  // caller declares the run's outcome proven (`faultOutcome: 'run-fails'`: a
+  // record-triggered flow, or a time-relative sweep of the typed object).
+  // Anywhere else `record` and the bare names hold what the entrance handed
+  // the run — an API body, a parent's record, nothing — so a read is not
+  // proven to be the list field, and gets no verdict.
+  if (schema?.scope === 'flattened' && schema.faultOutcome !== 'run-fails') return;
   // CEL has no comments: a source that spells neither operator holds no comparison.
   if (!source.includes('==') && !source.includes('!=')) return;
   const tree = ast();
@@ -1522,16 +1554,19 @@ function checkListEquality(
     ? new Set([...subjects].filter((name) => !(schema.flowVariables ?? []).includes(name)))
     : undefined;
   // `bound`: the names the enclosing comprehension macros bind here.
-  const subjectOf = (node: unknown, bound: ReadonlySet<string>): { reference: string } | undefined => {
+  const subjectOf = (node: unknown, bound: ReadonlySet<string>): ListSubjectRead | undefined => {
     const read = rootMemberOf(node, FIELD_EXISTENCE_ROOTS);
     if (read) {
-      return subjects.has(read.field) && !bound.has(read.root) ? { reference: `${read.root}.${read.field}` } : undefined;
+      return subjects.has(read.field) && !bound.has(read.root)
+        ? { reference: `${read.root}.${read.field}`, bare: false }
+        : undefined;
     }
     const { op, args } = (node ?? {}) as { op?: unknown; args?: unknown };
     return op === 'id' && typeof args === 'string' && bareSubjects?.has(args) && !bound.has(args)
-      ? { reference: args }
+      ? { reference: args, bare: true }
       : undefined;
   };
+  const filterCompiled = schema?.filterCompiled === true;
   const walk = (node: unknown, bound: ReadonlySet<string>): void => {
     if (!node || typeof node !== 'object') return;
     if (Array.isArray(node)) {
@@ -1557,7 +1592,7 @@ function checkListEquality(
         const read = subjectOf(args[side], bound);
         const operand = read ? scalarLiteralOf(args[1 - side]) : undefined;
         if (!read || operand === undefined) continue;
-        errors.push(listEqualityRefusal(source, read.reference, op, operand));
+        errors.push(listEqualityRefusal(source, read, op, operand, filterCompiled));
         break;
       }
     }
@@ -1566,26 +1601,75 @@ function checkListEquality(
   walk(tree, new Set());
 }
 
+/** A read {@link checkListEquality} judges: `<root>.<field>`, or a bare field name at a flattened site. */
+interface ListSubjectRead {
+  readonly reference: string;
+  readonly bare: boolean;
+}
+
+/**
+ * The membership test that replaces `<reference> <operator> <operand>`, in
+ * the spelling that works where the source is read, parenthesised whole so it
+ * can stand where the comparison stood (`A && (…)`):
+ *
+ * - a `<root>.<field>` read evaluated as CEL: `has()`-guarded, because an
+ *   action's `visible` / `disabled` / `pressed` binds a sparse row (a key
+ *   absent from it faults on `record.f != null`) and `previous` is `null` on
+ *   a create; `has()` answers `false` there instead of faulting;
+ * - a bare name at a flattened (flow) site: the run binds every declared
+ *   field, `null` when empty, so the `!= null` guard is enough (`has()` takes
+ *   no bare name);
+ * - a site whose source compiles to a query filter (`filterCompiled`, a
+ *   sharing rule's `condition`): `in` lowers only with a field on its LEFT,
+ *   so membership is `.contains(…)`, which lowers to `$contains`, membership
+ *   on a list column; its comparand is text, so a number or boolean literal
+ *   is passed as its text (`$contains` names a stored `3` by `"3"`).
+ */
+function listMembershipRewrite(
+  read: ListSubjectRead,
+  operator: '==' | '!=',
+  operand: string,
+  filterCompiled: boolean,
+): string {
+  const r = read.reference;
+  if (filterCompiled && !read.bare) {
+    const text = operand.startsWith('"') || operand.startsWith("'") ? operand : JSON.stringify(operand);
+    return operator === '=='
+      ? `(${r} != null && ${r}.contains(${text}))`
+      : `(${r} == null || !${r}.contains(${text}))`;
+  }
+  if (read.bare) {
+    return operator === '=='
+      ? `(${r} != null && ${operand} in ${r})`
+      : `(${r} == null || !(${operand} in ${r}))`;
+  }
+  return operator === '=='
+    ? `(has(${r}) && ${r} != null && ${operand} in ${r})`
+    : `(!has(${r}) || ${r} == null || !(${operand} in ${r}))`;
+}
+
 /** The `list-equality` refusal for `<reference> <operator> <operand>`. */
 function listEqualityRefusal(
   source: string,
-  reference: string,
+  read: ListSubjectRead,
   operator: '==' | '!=',
   operand: string,
+  filterCompiled: boolean,
 ): ExprValidationError {
+  const { reference } = read;
   const answer = operator === '==' ? 'false' : 'true';
-  const rewrite = operator === '=='
-    ? `${reference} != null && ${operand} in ${reference}`
-    : `${reference} == null || !(${operand} in ${reference})`;
-  return refusal(
-    'list-equality',
-    { reference, operator, operand, answer, rewrite },
-    source,
-    `list compared with a scalar — \`${reference}\` holds a list (a multi-value field), and \`${operator}\` ` +
-      `compares the whole list with \`${operand}\`, so the expression answers \`${answer}\` on every row ` +
-      `whatever the list holds: the condition never changes. Test membership with \`in\`: write ` +
-      `\`${rewrite}\`. To test whether the list is set, compare it with \`null\`.`,
-  );
+  const rewrite = listMembershipRewrite(read, operator, operand, filterCompiled);
+  const head = `list compared with a scalar — \`${reference}\` holds a list (a multi-value field), and \`${operator}\` ` +
+    `compares the whole list with \`${operand}\``;
+  const message = filterCompiled && !read.bare
+    ? `${head}: as CEL it answers \`${answer}\` on every row, and this condition compiles to a query filter, ` +
+      `where \`${operator}\` against a list column is refused, so it never tests membership. Test membership with ` +
+      `\`contains\`, which compiles to a membership filter: write \`${rewrite}\`. To test whether the list is set, ` +
+      `compare it with \`null\`.`
+    : `${head}, so the expression answers \`${answer}\` on every row whatever the list holds: the condition never ` +
+      `changes. Test membership with \`in\`: write \`${rewrite}\`. To test whether the list is set, compare it with ` +
+      `\`null\`.`;
+  return refusal('list-equality', { reference, operator, operand, answer, rewrite }, source, message);
 }
 
 /**
