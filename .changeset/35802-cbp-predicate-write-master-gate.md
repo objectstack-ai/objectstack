@@ -18,7 +18,7 @@ It ships `patch` because it is a non-protocol breaking change (AGENTS.md Post-Ta
 
 The fix for a caller that must keep the old outcome: narrow the predicate to the rows it means to write (add `created_by` to the `where` to keep writing only the caller's own rows), or write the rows by id to get an outcome per row. To forbid a caller from writing rows other users created on a detail, author a row-level policy on the detail; it binds every row, by id and by predicate.
 
-This is the `controlled_by_parent` half of the predicate-write change shipped beside it (the note "a predicate update or delete now writes the rows a Modify All holder, a non-creator owner or an edit-share target can write by id"), whose bullet "A `controlled_by_parent` detail keeps the floor on a predicate write" no longer holds. It follows the maintainer's ruling that a predicate write and a by-id write of such a detail agree (ADR-0055 §3 as amended 2026-11-22).
+This is the `controlled_by_parent` half of the predicate-write change shipped beside it: see the note "a predicate update or delete now writes the rows a Modify All holder, a non-creator owner or an edit-share target can write by id" for every other object. It follows the maintainer's ruling that a predicate write and a by-id write of such a detail agree (ADR-0055 §3 as amended 2026-11-22).
 
 What does not change:
 
