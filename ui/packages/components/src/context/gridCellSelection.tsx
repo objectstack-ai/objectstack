@@ -39,9 +39,10 @@ export interface GridCellFacts {
    * record's lock, the reader's verdict on the record). An attempt to edit it
    * meanwhile opens no editor: the cell shows `text`, and once `settled`
    * settles (resolved or rejected) the same attempt, with the same typed key,
-   * is asked again — unless the reader selected another cell or opened an
-   * editor in the meantime. A toggle, a paste or a clear asked meanwhile shows
-   * `text` and writes nothing. Absent ⇒ nothing is being read.
+   * is asked again — unless the reader selected another cell, asked something
+   * newer of it or opened an editor in the meantime. A toggle, a paste or a
+   * clear asked meanwhile waits the same way: nothing is written before the
+   * read settles. Absent ⇒ nothing is being read.
    */
   checking?: { text: string; settled: Promise<unknown> } | null;
   /**

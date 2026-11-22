@@ -3720,11 +3720,32 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
   // Why the cell an edit was asked of opens no editor, drawn on that cell.
   const [cellNotice, setCellNotice] = useState<{ rowIndex: number; colIndex: number; text: string } | null>(null);
 
-  // objectstack#35795 — an edit asked while the host still reads what decides
-  // it (`GridCellFacts.checking`), asked again when that read settles. One at
-  // a time: a newer ask, another selected cell or an open editor drops it.
-  const waitingEditRef = useRef<{ rowKey: PendingRowKey; columnKey: string; seed?: { value: unknown } } | null>(null);
-  const retryWaitingEditRef = useRef<(waiting: { rowKey: PendingRowKey; columnKey: string; seed?: { value: unknown } }) => void>(() => {});
+  // objectstack#35795 — an edit or a write asked while the host still reads
+  // what decides it (`GridCellFacts.checking`), asked again when that read
+  // settles. One at a time: a newer ask, another selected cell or an open
+  // editor drops it.
+  type WaitingAct = { rowKey: PendingRowKey; columnKey: string; run: (rowIndex: number, colIndex: number) => void };
+  const waitingEditRef = useRef<WaitingAct | null>(null);
+  const retryWaitingEditRef = useRef<(waiting: WaitingAct) => void>(() => {});
+  /** Say on the cell that it is being checked, and ask `run` again once `settled` settles. */
+  const waitForChecking = (
+    rowIndex: number,
+    colIndex: number,
+    row: any,
+    col: TableColumn,
+    checking: { text: string; settled: Promise<unknown> },
+    run: WaitingAct['run'],
+  ) => {
+    setCellNotice({ rowIndex, colIndex, text: checking.text });
+    const waiting: WaitingAct = { rowKey: pendingRowKeyOf(row), columnKey: col.accessorKey, run };
+    waitingEditRef.current = waiting;
+    const retry = () => {
+      if (waitingEditRef.current !== waiting) return;
+      waitingEditRef.current = null;
+      retryWaitingEditRef.current(waiting);
+    };
+    checking.settled.then(retry, retry);
+  };
 
   const selectCell = (rowIndex: number, colIndex: number) => {
     const row = paginatedData[rowIndex];
@@ -3819,15 +3840,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     // Asked again when what decides it has been read; it says so meanwhile.
     const checking = factsOf(row, col)?.checking;
     if (checking) {
-      setCellNotice({ rowIndex, colIndex, text: checking.text });
-      const waiting = { rowKey: pendingRowKeyOf(row), columnKey: col.accessorKey, ...(seed ? { seed } : {}) };
-      waitingEditRef.current = waiting;
-      const retry = () => {
-        if (waitingEditRef.current !== waiting) return;
-        waitingEditRef.current = null;
-        retryWaitingEditRef.current(waiting);
-      };
-      checking.settled.then(retry, retry);
+      waitForChecking(rowIndex, colIndex, row, col, checking, (r, c) => attemptEdit(r, c, seed));
       return;
     }
     waitingEditRef.current = null;
@@ -3853,7 +3866,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     const rowIndex = paginatedData.findIndex((r) => pendingRowKeyOf(r) === waiting.rowKey);
     const colIndex = columns.findIndex((c) => c.accessorKey === waiting.columnKey);
     if (rowIndex < 0 || colIndex < 0) return;
-    attemptEdit(rowIndex, colIndex, waiting.seed);
+    waiting.run(rowIndex, colIndex);
   };
 
   /** Write a value into a cell without an editor: the commit `saveEdit` makes. */
@@ -3885,12 +3898,14 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     }
     const value = valueOf(row, col);
     if (value === undefined) return;
-    // Nothing is written while what decides the write is still being read.
+    // Written once what decides the write has been read, the value worked out
+    // again then; it says so meanwhile.
     const checking = factsOf(row, col)?.checking;
     if (checking) {
-      setCellNotice({ rowIndex, colIndex, text: checking.text });
+      waitForChecking(rowIndex, colIndex, row, col, checking, (r, c) => writeCell(r, c, valueOf));
       return;
     }
+    waitingEditRef.current = null;
     commitCellValue(row, col.accessorKey, value);
   };
 
