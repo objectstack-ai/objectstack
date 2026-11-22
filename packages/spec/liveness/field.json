@@ -586,7 +586,12 @@
     "trackHistory": {
       "status": "live",
       "evidence": "packages/plugins/plugin-audit/src/audit-writers.ts",
-      "note": "ADR-0052 §5b — the audit-writer renders tracked-field diffs as human-readable activity summaries (renderTrackedChangeSummary + getFieldDefs read field.trackHistory). Reintroduces the pruned auditTrail concept WITH a runtime consumer, satisfying enforce-or-remove (ADR-0049)."
+      "note": "ADR-0052 §5b — the audit-writer renders changed-field diffs as human-readable activity summaries (renderTrackedChangeSummary + changeValuesShownFor read field.trackHistory). Since #36290 values are on by default; `true` opts a media or structured-JSON field in, and `false` reads like absent (the field designer wrote it on every save while it meant nothing, so it is not an off switch; the off switch is `fieldHistory: false`). Reintroduces the pruned auditTrail concept WITH a runtime consumer, satisfying enforce-or-remove (ADR-0049)."
+    },
+    "fieldHistory": {
+      "status": "live",
+      "evidence": "packages/plugins/plugin-audit/src/audit-writers.ts#changeValuesShownFor",
+      "note": "#36290 (ruling 7076513167 point 1): the field's off switch for old → new values on the record activity stream. The writer reads `field.fieldHistory === false` (off) and `=== true` (on, a media or JSON type included); absent is on. No .default() on purpose, so only an author who wrote it turns values off. Who reads a value is the per-reader field redaction (packages/plugins/plugin-audit/src/activity-field-redaction.ts)."
     },
     "accept": {
       "status": "live",

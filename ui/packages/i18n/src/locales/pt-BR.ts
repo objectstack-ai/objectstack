@@ -2726,6 +2726,7 @@ const pt = {
       enterSwitchApp: "Trocar aplicativo",
       enterApplyTheme: "Aplicar tema",
       enterOpen: "Abrir",
+      currentPage: "Página atual",
       searching: "Pesquisando…",
       records: "Registros",
       recentRecords: "Vistos recentemente",
@@ -5387,6 +5388,7 @@ const pt = {
       dragSort: 'Arraste para mudar a prioridade da ordenação',
       viewOwn: 'Faz parte desta visualização; não pode ser removido aqui',
       viewFilter: 'Filtro da visualização',
+      relationPath: '{{lookup}} › {{field}}',
     },
   },
   sortBuilder: {

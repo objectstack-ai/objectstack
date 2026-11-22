@@ -1921,11 +1921,11 @@ function recordPictureUrl(value: unknown): string | undefined {
 }
 
 /**
- * The buttons a phone's bottom action bar holds before its `⋯`
- * (objectstack#27058): on an editable record, Edit and the primary action
- * (objectstack#34595); else the primary action and one more. The record page v4
- * header row's cap is the primary, two more and the `⋯`; at 390 px the second
- * of those folds into the `⋯`.
+ * The buttons a phone's bottom action bar holds (objectstack#27058): the
+ * primary action and one more. A host button the record page puts in the bar
+ * (the edit state's Cancel and Save, a queue's Claim) takes a slot like any
+ * other; the record page's Edit is not one of them on a phone, it sits in the
+ * `⋯` (objectstack#36151; before, it took the first slot, objectstack#34595).
  */
 const PHONE_ACTION_BAR_BUTTONS = 2;
 
@@ -1947,7 +1947,7 @@ export interface PageHeaderActionsProps {
   placedActions?: unknown;
   /** The inline-button budget on desktop, as `page:header`'s `maxVisible`; an out-of-contract value falls back to the unset default, 3 on every header. In a record page's header bar (`fitWidth`) the number is an upper bound: what does not fit the bar's width folds as well. */
   maxVisible?: unknown;
-  /** The inline-button budget on mobile, as `page:header`'s `mobileMaxVisible`; an out-of-contract value falls back to the unset default: 2 in a record page's phone bottom bar (`face: 'bar'`, the host's Edit included), 1 on any other header. */
+  /** The inline-button budget on mobile, as `page:header`'s `mobileMaxVisible`; an out-of-contract value falls back to the unset default: 2 in a record page's phone bottom bar (`face: 'bar'`), 1 on any other header. */
   mobileMaxVisible?: unknown;
   /** Drawn in place of the action row when no action survives the gates. */
   emptySlot?: React.ReactNode;
@@ -1968,10 +1968,11 @@ export interface PageHeaderActionsProps {
    * Where the row is drawn (objectstack#27058). `row` (the default) is the
    * header's own action row. `bar` is a phone's bottom action bar: the primary
    * action, one more and the `⋯`, each button sharing the bar's width. In the
-   * bar the host's Edit takes a slot like any other button, but the first
-   * one (objectstack#34595): on an editable record the bar is Edit, the
-   * primary action, then the `⋯` holding the rest. The page's
-   * `mobileMaxVisible` still sets the budget when it declares one.
+   * bar a host button (the edit state's Cancel and Save) takes a slot like any
+   * other, ahead of the page's actions. The page's `mobileMaxVisible` still
+   * sets the budget when it declares one. When the phone host hands a top-bar
+   * slot (`PageHeaderPhoneContext.more`, objectstack#36151) the `⋯` is drawn
+   * there and the bar holds the buttons alone, nothing when there are none.
    */
   face?: 'row' | 'bar';
   /**
@@ -2060,6 +2061,9 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
   // the row is what that group draws — the record's row unchanged, or the
   // state's own levers with the record's actions in their `⋯`.
   const stateGroup = React.useContext(RecordHeaderStateContext)?.group;
+  // objectstack#36151 — the phone host's top-bar slot for the `⋯`: handed, the
+  // bottom bar keeps the action buttons alone. `undefined` = no such slot.
+  const phoneMoreSlot = React.useContext(PageHeaderPhoneContext)?.more;
   // Record-level inline-edit session (objectui#2572 item 4): while a shared
   // inline draft is active, header actions flagged `disableDuringInlineEdit`
   // (the host's Edit CTA) grey out so the classic form-edit surface can't be
@@ -2713,10 +2717,10 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
     // The phone's bottom bar (objectstack#27058) has room for its budget and
     // no more, so there every button queues for the same slots and what does
     // not fit folds into the `⋯`. The queue is the bar's order
-    // (objectstack#34595): the host's buttons first — on an editable record
-    // that is its Edit, the record's base action, which the row never folds
-    // either — then the primary, then the page's other actions. So the
-    // default budget of two draws [Edit][primary][⋯] however many actions
+    // (objectstack#34595): the host's buttons first — the edit state's Cancel
+    // and Save — then the primary, then the page's other actions. The record
+    // page hands its Edit to the `⋯` on a phone (objectstack#36151), so the
+    // default budget of two draws [primary][next action] however many actions
     // the page declares. A destructive host action is not a host button (see
     // `isHostButton`): it still always folds.
     const authoredButtons = ranked.filter((a) => !isHostAction(a));
@@ -2856,9 +2860,8 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
       // record's name, though the record's fields edit in place. It now
       // draws outline there too; the page's own actions keep their pick and
       // their faces, and a host button DECLARING `variant: 'primary'` (the
-      // edit state's Save, objectstack#35816) stays filled. The phone's
-      // bottom bar keeps its filled Edit: there it is the bar's one big
-      // target.
+      // edit state's Save, objectstack#35816) stays filled. In the phone's
+      // bottom bar a host button that is the pick keeps the filled face.
       const hostEditPick =
         action === primaryAction && !barFace && isHostAction(action) && action?.variant !== 'primary';
       const variant =
@@ -2997,17 +3000,21 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
         <span>{refresh.label}</span>
       </DropdownMenuItem>
     ) : null;
-    const recordRowItems = (
-      <>
-        {inlineActions.map(renderButton)}
-        {useOverflow && (
+    // objectstack#36151 — with the host's top-bar slot the bar's `⋯` is drawn
+    // there, a ghost icon like the top bar's other controls, at touch size;
+    // the bar holds the buttons alone.
+    const moreInTopBar = barFace && phoneMoreSlot !== undefined;
+    const overflowMenu = useOverflow ? (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button
-                variant="outline"
+                variant={moreInTopBar ? 'ghost' : 'outline'}
                 size="sm"
-                className={barFace ? 'h-11 w-11 shrink-0 px-0' : 'gap-1 px-2 sm:h-7'}
+                className={moreInTopBar
+                  ? 'h-11 w-11 shrink-0 px-0 text-muted-foreground'
+                  : barFace ? 'h-11 w-11 shrink-0 px-0' : 'gap-1 px-2 sm:h-7'}
                 aria-label={tt('detail.moreActions', 'More actions')}
+                data-page-header-more={moreInTopBar ? 'top-bar' : undefined}
               >
                 <MoreHorizontal className="h-4 w-4" />
               </Button>
@@ -3022,7 +3029,13 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
               {overflowActions.map((action, idx) => renderMenuItem(action, idx, 'more', firstDestructiveIdx))}
             </DropdownMenuContent>
           </DropdownMenu>
-        )}
+    ) : null;
+    const recordRowItems = (
+      <>
+        {inlineActions.map(renderButton)}
+        {moreInTopBar
+          ? overflowMenu && phoneMoreSlot ? createPortal(overflowMenu, phoneMoreSlot) : null
+          : overflowMenu}
       </>
     );
     // A state group (objectstack#35593) takes the record's actions as `⋯`
@@ -3074,6 +3087,12 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
           {toolbarItems}
         </div>
       );
+    }
+    // objectstack#36151 — a bar whose `⋯` is in the top bar and that has no
+    // button to draw draws nothing, so the host's bar stays empty (and the
+    // host leaves it out); the `⋯` is still drawn in its slot.
+    if (moreInTopBar && !stateGroup && inlineActions.length === 0 && !hasTrailing) {
+      return recordRowItems;
     }
     return (
       <div
@@ -3740,7 +3759,7 @@ ComponentRegistry.register('header', PageHeaderRenderer, {
     // `description` stays the only authoring-time expression of it, and spec
     // stays the sole judge of values.)
     { name: 'maxVisible', type: 'number', description: 'How many header actions render as inline buttons on desktop before the rest fold into the overflow menu. A positive integer, defaulting to 3 — the contract rejects 0 and fractional values. In a record page\'s header bar, actions that do not fit its width fold too, so a narrow drawer shows fewer. Two kinds of action are routed to the overflow menu regardless of this budget and never occupy an inline slot: an action whose locations declare record_more without record_header, and any action with component action:menu. The host\'s own buttons (the record page\'s Edit) take no slot and never fold. The first inline action, or the one declaring variant primary, is the one filled primary button; the others are outline buttons. The host\'s Edit is always an outline button: on a record with no header action of its own the row has no filled button. An action declaring variant danger is never the primary: inline it is a destructive button, and in the overflow menu it is a red row below a separator.' },
-    { name: 'mobileMaxVisible', type: 'number', description: 'The same inline-button budget on mobile viewports, where horizontal room is scarce. A positive integer, defaulting to 1, or 2 in a record page\'s bottom action bar on a phone, where the host\'s Edit counts as one; the desktop half is Max Inline Actions, and the overflow routing rules stated there apply unchanged.' },
+    { name: 'mobileMaxVisible', type: 'number', description: 'The same inline-button budget on mobile viewports, where horizontal room is scarce. A positive integer, defaulting to 1, or 2 in a record page\'s bottom action bar on a phone, which holds the page\'s actions (the record\'s Edit is in the top bar\'s overflow menu there); the desktop half is Max Inline Actions, and the overflow routing rules stated there apply unchanged.' },
   ],
 });
 

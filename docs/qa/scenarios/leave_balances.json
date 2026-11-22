@@ -918,6 +918,7 @@
         "target": "as_102_1",
         "values": {"decision": "approved", "decided_on": "2026-09-30"},
         "actingAs": "dept_manager",
+        "via": "decide_approval_step",
         "outcome": {
           "kind": "applied",
           "state": [

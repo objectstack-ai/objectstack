@@ -2945,6 +2945,7 @@ const ar = {
       enterSwitchApp: "تبديل التطبيق",
       enterApplyTheme: "تطبيق المظهر",
       enterOpen: "فتح",
+      currentPage: "الصفحة الحالية",
       searching: "جارٍ البحث…",
       records: "السجلات",
       recentRecords: "شوهد مؤخراً",
@@ -5855,6 +5856,7 @@ const ar = {
       dragSort: 'اسحب لتغيير أولوية الفرز',
       viewOwn: 'جزء من طريقة العرض هذه؛ لا يمكن إزالته هنا',
       viewFilter: 'تصفية طريقة العرض',
+      relationPath: '{{field}} ({{lookup}})',
     },
   },
   sortBuilder: {

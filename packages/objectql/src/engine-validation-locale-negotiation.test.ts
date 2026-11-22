@@ -95,6 +95,10 @@ function servedI18n(bundle: Record<string, any>, fallbackLocale = 'en') {
       return typeof fallback === 'string' ? fallback : key;
     },
     getLocales: () => Object.keys(bundle),
+    // [#35384] The authored rule message is metadata: it is read off the
+    // bundle by `translateObject`, as `/meta` reads it, never through `t()`.
+    getTranslations: (locale: string) => bundle[locale] ?? {},
+    getFallbackLocale: () => fallbackLocale,
   };
 }
 
@@ -105,6 +109,9 @@ const DUTY_SCHEMA = {
     form: { type: 'select', label: 'Form' },
     status: { type: 'select', label: 'Status' },
     return_note: { type: 'text', label: 'Return note' },
+    // [#35384] Refused by a BUILT-IN message (`max_length`), the sentence the
+    // `t()` bridge still carries: the probe of what locale the bridge asks.
+    code: { type: 'text', label: 'Code', maxLength: 3 },
   },
   validations: [{
     type: 'script',
@@ -166,6 +173,22 @@ async function refusalEnvelopeFor(
 
 async function refusalFor(header: string, i18n: ReturnType<typeof servedI18n>): Promise<string> {
   return (await refusalEnvelopeFor(header, i18n)).message;
+}
+
+/**
+ * [#35384] A write refused by a BUILT-IN message (`code` over its
+ * `maxLength`), which renders through the `t()` bridge — the one the locale
+ * negotiation below is asserted on, now that the authored rule message reads
+ * the bundle through `translateObject` instead.
+ */
+async function builtinRefusalFor(locale: string | undefined, i18n: Parameters<typeof makeEngine>[0]): Promise<unknown> {
+  const ql = await makeEngine(i18n);
+  try {
+    await ql.update('duly_duty', { id: 'r1', code: 'too long' }, { context: { locale } } as any);
+  } catch (e) {
+    return e;
+  }
+  throw new Error('expected the write to be rejected');
 }
 
 /** PATH B — the cross-path control: a document translator, same bundle, same header. */
@@ -278,7 +301,7 @@ describe('#15757 the validation-message bridge negotiates the locale like every 
   it('asks the service for the locale it actually has, not the tag the client sent', async () => {
     const i18n = servedI18n(BUNDLE);
     expect(preferredLocaleFromHeader('zh')).toBe('zh');
-    await refusalFor('zh', i18n);
+    await builtinRefusalFor(preferredLocaleFromHeader('zh'), i18n);
     expect(i18n.asked).not.toContain('zh');
     expect(i18n.asked).toContain('zh-CN');
   });
@@ -291,6 +314,7 @@ describe('#15757 the validation-message bridge negotiates the locale like every 
   it('leaves a locale with no match alone', async () => {
     const i18n = servedI18n(BUNDLE);
     expect(await refusalFor('de', i18n)).toBe(AUTHORED_EN);
+    await builtinRefusalFor('de', i18n);
     expect(i18n.asked).toContain('de');
   });
 
@@ -303,12 +327,9 @@ describe('#15757 the validation-message bridge negotiates the locale like every 
    */
   it('passes the tag through when the service cannot report its locales', async () => {
     const asked: string[] = [];
-    const ql = await makeEngine({
+    await builtinRefusalFor('zh', {
       t: (key: string, locale: string) => { asked.push(locale); return key; },
     });
-    try {
-      await ql.update('duly_duty', { id: 'r1', status: 'returned' }, { context: { locale: 'zh' } } as any);
-    } catch { /* expected */ }
     expect(asked).toContain('zh');
   });
 });

@@ -181,6 +181,7 @@ export const SysSecret = ObjectSchema.create({
     // its producer-scoped label, key id, algorithm and version — and keeps no
     // copy of the key material (plugin-audit `key-material-copy.ts`).
     trackHistory: false,
+    fieldHistory: false, // [#36290] keeps this object's "no history": values off in the activity stream
     // [ADR-0103] Engine-owned: secrets are minted/rotated only by the settings /
     // secret service (SYSTEM_CTX), never via the generic data API. Locked to
     // reads (ciphertext only; decryption is a separate privileged path). Since

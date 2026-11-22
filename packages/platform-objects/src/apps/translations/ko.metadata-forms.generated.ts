@@ -276,9 +276,13 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "언어",
         helpText: "편집기 언어(예: sql, javascript)"
       },
+      "fields.fieldHistory": {
+        label: "필드 변경 값",
+        helpText: "레코드 활동 타임라인에 이 필드의 이전 값 → 새 값을 표시합니다. 설정하지 않으면 켜져 있으며 스위치는 꺼진 것처럼 보입니다. 켰다가 다시 끈 경우에만 false가 기록되고, 변경은 필드 이름으로만 표시됩니다. 켜면 미디어나 JSON 필드도 값을 표시합니다."
+      },
       "fields.trackHistory": {
         label: "기록 추적",
-        helpText: "레코드 활동 타임라인에 이 필드를 요약합니다"
+        helpText: "미디어나 JSON 필드(이미지, 파일, json 등)가 활동 타임라인에 이전 값 → 새 값을 표시하게 합니다. 다른 필드는 이미 표시하며, 꺼도 값이 숨겨지지 않습니다. 숨기려면 필드 변경 값을 사용하세요."
       },
       "fields.visibleWhen": {
         label: "표시 조건",
@@ -298,6 +302,10 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "enable.trackHistory": {
         label: "기록 추적"
+      },
+      "enable.fieldHistory": {
+        label: "필드 변경 값",
+        helpText: "레코드 활동 타임라인에 변경된 필드의 이전 값 → 새 값을 표시합니다. 설정하지 않으면 켜져 있으며 스위치는 꺼진 것처럼 보입니다. 켰다가 다시 끈 경우에만 false가 기록되고, 객체 전체에서 값이 표시되지 않습니다."
       },
       "enable.searchable": {
         label: "검색 가능"
@@ -901,9 +909,13 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "내부",
         helpText: "일반 데이터 경로에서 이 필드의 값을 절대 반환하지 않습니다. 엔진은 기본 투영과 클라이언트가 ?select=에서 필드를 지정한 경우 모두, find/findOne 결과와 create, update 응답 본문에서 키를 생략합니다. 저장, 필터링, 색인에는 영향이 없습니다."
       },
+      fieldHistory: {
+        label: "필드 변경 값",
+        helpText: "레코드 활동 타임라인에 이 필드의 이전 값 → 새 값을 표시합니다. 설정하지 않으면 켜져 있으며 스위치는 꺼진 것처럼 보입니다. 켰다가 다시 끈 경우에만 false가 기록되고, 변경은 필드 이름으로만 표시됩니다. 켜면 미디어나 JSON 필드도 값을 표시합니다."
+      },
       trackHistory: {
         label: "기록 추적",
-        helpText: "이 필드의 값 변경을 레코드 활동 타임라인의 항목으로 렌더링합니다(ADR-0052 §5b). 필드별로 선택합니다."
+        helpText: "미디어나 JSON 필드(이미지, 파일, json 등)가 활동 타임라인에 이전 값 → 새 값을 표시하게 합니다. 다른 필드는 이미 표시하며, 꺼도 값이 숨겨지지 않습니다. 숨기려면 필드 변경 값을 사용하세요."
       },
       widget: {
         label: "위젯",

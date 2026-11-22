@@ -132,6 +132,7 @@ export const SysPersonalView = ObjectSchema.create({
 
   enable: {
     trackHistory: false,
+    fieldHistory: false, // [#36290] keeps this object's "no history": values off in the activity stream
     searchable: false,
     apiEnabled: true,
     // No `apiMethods` — default-open, like `sys_user_preference`. No shipped

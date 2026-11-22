@@ -1302,10 +1302,15 @@ describe('#19403 round 10 — the verdicts, on the live bundles', () => {
       // all three locales.
       // 756 since #35985: the object form's `basics` offers a `color` row,
       // whose label zh-CN translates.
-      // 757 since #36425: the field form offers the `showOnCreate` row (ask
+      // 757 since #36290: the object form's `enable` composite offers
+      // `fieldHistory` — one row label, authored in all three locales.
+      // 759 since #36290's field off switch: the object form's `fields`
+      // repeater and the field form each offer a `fieldHistory` row — two
+      // row labels, authored in all three locales.
+      // 760 since #36425: the field form offers the `showOnCreate` row (ask
       // for the field when a record is created) — one row label, authored in
       // all three locales.
-      expect(translated.length, `${locale} positive control`).toBe(757);
+      expect(translated.length, `${locale} positive control`).toBe(760);
     }
     // ⭐ DARK — the blindness, executable. On a synthetic two-locale catalog the
     // all-three predicate returns 0 while the per-locale one returns 1, so the
