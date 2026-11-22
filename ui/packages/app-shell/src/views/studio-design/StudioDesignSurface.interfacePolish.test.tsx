@@ -134,30 +134,14 @@ function renderWorkbench() {
   );
 }
 
-/** The header Publish button, once the pending-draft count has resolved. */
-async function publishButton(): Promise<HTMLElement> {
-  // The rail's labelled leaf appears once the app has loaded, by which time the
-  // header's draft count has resolved too.
-  await screen.findByRole('button', { name: '客户仪表盘 仪表盘' });
-  return screen.getByRole('button', { name: /^发布/ });
-}
-
 describe('Studio top bar — the Publish button with nothing to publish (objectui#8219)', () => {
-  it('no draft: disabled, NOT the primary style, and the reason is visible text', async () => {
+  it('no draft: no Publish at all (objectstack#36511), and no "nothing to publish" text', async () => {
     renderWorkbench();
-    const btn = await publishButton();
-    expect(btn).toBeDisabled();
-    expect(btn.className).not.toMatch(/\bbg-primary\b/);
-    expect(btn.className).not.toMatch(/\btext-primary-foreground\b/);
-    // An outline: a border that is actually drawn (the primary state carries a
-    // transparent one only to keep the bar from shifting).
-    expect(btn.className).toMatch(/\bborder\b/);
-    expect(btn.className).not.toMatch(/\bborder-transparent\b/);
-    // The reason is on screen, not only in the hover tooltip.
-    const reason = screen.getByTestId('publish-none-reason');
-    expect(reason).toHaveTextContent('没有待发布的草稿');
-    expect(reason).toBeVisible();
-    expect(btn).toHaveAccessibleDescription('没有待发布的草稿');
+    // The rail's labelled leaf appears once the app has loaded, by which time the
+    // header's draft count has resolved too.
+    await screen.findByRole('button', { name: '客户仪表盘 仪表盘' });
+    expect(screen.queryByRole('button', { name: /^发布/ })).toBeNull();
+    expect(screen.queryByTestId('publish-none-reason')).toBeNull();
   });
 
   it('a pending draft: enabled, the primary button, and no "nothing to publish" text', async () => {
