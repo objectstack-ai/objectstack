@@ -987,3 +987,68 @@ describe('buildDefaultTabs — stable tab values (objectui#2257)', () => {
     ]);
   });
 });
+
+/**
+ * objectstack#35897 — a declared `relatedLists` arranges the tabs after the
+ * overview, the three built-in tabs placed by object name. The host's
+ * `related` is what exists (`deriveRelatedLists` drops unlisted side lists);
+ * this pins the arrangement. Each row's control differs by one entry.
+ */
+describe('declared relatedLists arranges the tabs (objectstack#35897)', () => {
+  const def = (relatedLists?: unknown[], files = true): ObjectDefLike => ({
+    name: 'account',
+    label: 'Account',
+    fields: { name: { type: 'text', label: 'Name' } },
+    ...(files ? { enable: { files: true } } : {}),
+    ...(relatedLists ? { relatedLists } : {}),
+  });
+  const related = [
+    { objectName: 'task', relationshipField: 'account_id' },
+    { objectName: 'contact', relationshipField: 'account_id' },
+  ];
+  const values = (d: ObjectDefLike, approvals = true) =>
+    tabItems(buildDefaultTabs(d, { related, ...(approvals ? { approvals: { count: 1 } } : {}) })).map((t: any) => t.value);
+
+  it('undeclared or empty: the lists, then attachments, approvals and the stream, as before (control)', () => {
+    const before = ['details', 'related:task.account_id', 'related:contact.account_id', 'attachments', 'approvals', 'timeline'];
+    expect(values(def())).toEqual(before);
+    expect(values(def([]))).toEqual(before);
+  });
+
+  it("['task', 'sys_attachment', 'contact']: task, attachments, contact, then the unlisted approvals and the stream last", () => {
+    expect(values(def(['task', 'sys_attachment', 'contact']))).toEqual([
+      'details', 'related:task.account_id', 'attachments', 'related:contact.account_id', 'approvals', 'timeline',
+    ]);
+  });
+
+  it("leaving 'sys_attachment' out removes the attachments tab", () => {
+    expect(values(def(['task', 'contact']))).toEqual([
+      'details', 'related:task.account_id', 'related:contact.account_id', 'approvals', 'timeline',
+    ]);
+  });
+
+  it("'sys_attachment' listed on an object without files draws no attachments tab", () => {
+    expect(values(def(['sys_attachment', 'task', 'contact'], false))).not.toContain('attachments');
+  });
+
+  it('places the approvals and stream tabs where they are listed; approvals still need requests', () => {
+    expect(values(def(['sys_activity', 'contact', 'sys_approval_request', 'task']))).toEqual([
+      'details', 'timeline', 'related:contact.account_id', 'approvals', 'related:task.account_id',
+    ]);
+    expect(values(def(['sys_activity', 'contact', 'sys_approval_request', 'task']), false)).toEqual([
+      'details', 'timeline', 'related:contact.account_id', 'related:task.account_id',
+    ]);
+  });
+
+  it('reads the object form by its list, object.field by its one FK, and the attachments tab stays the file-rows node', () => {
+    const tabs = buildDefaultTabs(def([{ list: 'contact.account_id', label: 'People' }, 'sys_attachment', 'task']), { related });
+    expect(tabItems(tabs).map((t: any) => t.value)).toEqual([
+      'details', 'related:contact.account_id', 'attachments', 'related:task.account_id', 'timeline',
+    ]);
+    expect(tabItems(tabs).find((t: any) => t.value === 'attachments').children).toEqual([{ type: 'record:attachments' }]);
+  });
+
+  it('a related tab the host passed but no entry names follows the listed tabs, in the order passed', () => {
+    expect(values(def(['contact']))).toEqual(['details', 'related:contact.account_id', 'related:task.account_id', 'approvals', 'timeline']);
+  });
+});

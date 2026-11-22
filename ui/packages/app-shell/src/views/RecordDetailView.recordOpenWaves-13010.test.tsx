@@ -411,6 +411,7 @@ beforeEach(() => {
   __clearRecordEditableCache();
   __resetRecordApprovalsStore();
   RelatedCountStore._reset();
+  window.localStorage.clear();
 });
 afterEach(() => {
   cleanup();
@@ -690,27 +691,37 @@ describe('the timeline, comments, attachments and user list wait for their panel
     expect(screen.getByText('signed-contract.pdf')).toBeTruthy();
   });
 
-  // The synthesized page has no discussion footer any more (#27055), and no
-  // tab strip at any width since objectstack#27524: its one stream is the 动态
-  // panel, the last panel of the right column (objectstack#34590) — drawn at
-  // open in every tier, so the feed is read at open, like an authored page opened on its
+  // The synthesized page has no discussion footer any more (#27055): its one
+  // stream is the 动态 tab (objectstack#34590; its rail card retired by
+  // objectstack#35890), whose count the page payload serves, so the feed is
+  // still asked with the page at open, like an authored page opened on its
   // Activity tab. A page with tabs still waits for its tab (above).
   // objectstack#28470 — asked with the page, not beside it; the mention list
   // waits for the composer's focus.
-  it('the synthesized page asks the feed with its page at open: its 动态 panel is on screen', async () => {
+  it('the synthesized page asks the feed with its page at open: one request, its 动态 tab on the row', async () => {
     const { held } = await openRecordPage({ page: { ...RECORD_PAGE, isDefault: false, object: 'os_13010_other' }, observer: FoldObserver });
     const table = waveTable(held);
     expect(screen.queryByRole('tab', { name: /^Timeline/ }), table).toBeNull();
-    // objectstack#35596 — the stream's newest rows are the 概览 rail's 最近动态 card.
-    expect(document.querySelector('[data-record-summary-card="timeline"]'), table).not.toBeNull();
-    // objectstack#28737 — the panel draws its newest rows, and the page
-    // payload serves the stream's count, so the activity part asks the
-    // panel's rows only.
+    // objectstack#35890 — the right rail (its 最近动态 card) is retired; the
+    // stream is the 动态 tab, whose count the page payload serves.
+    expect(document.querySelector('[data-record-summary-card]'), table).toBeNull();
+    expect(document.querySelector('[role="tab"][data-record-tab="timeline"]'), table).not.toBeNull();
+    // objectstack#28737 — the page payload serves the stream's count, so the
+    // activity part asks the newest rows only.
     expect(pageStreams(held), table).toMatchObject({ discussion: true, activity: 5 });
     for (const isRead of [isActivityRead, isCommentRead, isUserListRead]) {
       expect(held.filter(isRead), table).toEqual([]);
     }
-    expect(screen.getByText('Ping the buyer on Friday')).toBeTruthy();
+    // objectstack#36075 — the comment is the comment panel's, drawn from the
+    // same payload: opening the panel reads nothing.
+    const commentsButton = document.querySelector('[data-comments-button]') as HTMLElement;
+    expect(commentsButton, table).not.toBeNull();
+    await act(async () => { fireEvent.click(commentsButton); });
+    const panel = document.querySelector('[data-comments-panel]') as HTMLElement;
+    expect(panel.textContent).toContain('Ping the buyer on Friday');
+    for (const isRead of [isActivityRead, isCommentRead, isUserListRead]) {
+      expect(held.filter(isRead), table).toEqual([]);
+    }
   });
 
   it('CONTROL: the synthesized page opened on its 动态 tab (?related=timeline) asks the feed with its page at open', async () => {
@@ -758,8 +769,9 @@ describe('the 动态 stream reads the audit log when it is shown (objectui#13010
   // record read and its `sys_user` name lookup in wave 2, with the History tab
   // closed. After it: neither until the tab opens. Since #27055 the audit rows
   // are the field changes of the one stream, so the stream gates them; since
-  // objectstack#27524 that stream is the 动态 panel, on screen at open, so
-  // they are read at open — once, and not again when its tab opens.
+  // objectstack#27524 that stream was the 动态 panel, on screen at open, so
+  // they are read at open — once, and not again when its tab opens (kept as
+  // the host's read when objectstack#35890 retired the rail).
   it('a trackHistory record reads the audit log at open and its user names next: the 动态 panel shows the change', async () => {
     const { held } = await openHistory();
     const table = waveTable(held);
@@ -767,16 +779,16 @@ describe('the 动态 stream reads the audit log when it is shown (objectui#13010
     expect(screen.queryByRole('tab', { name: /^(Timeline|History)/ }), table).toBeNull();
     expect(held.filter(isAuditRead).map((h) => h.wave), table).toEqual([1]);
     expect(held.filter(isAuditUserLookup).map((h) => h.wave), table).toEqual([2]);
-    const panel = document.querySelector('[data-record-summary-card="timeline"]') as HTMLElement;
-    expect(panel.textContent, table).toMatch(/negotiation/);
+    // objectstack#35890 — no rail card shows the change; the 动态 tab does (below).
+    expect(document.querySelector('[data-record-summary-card]'), table).toBeNull();
   });
 
-  it('opening the 动态 tab from its rail card reads nothing again, and draws the rows with their actor', async () => {
+  it('opening the 动态 tab reads the audit log nothing again, and draws the rows with their actor', async () => {
     const { held, state } = await openHistory();
     const audit = () => held.filter(isAuditRead);
     expect(audit(), waveTable(held)).toHaveLength(1);
     await act(async () => {
-      fireEvent.click(document.querySelector('[data-record-summary-card="timeline"] [data-record-summary-card-title]') as HTMLElement);
+      fireEvent.click(document.querySelector('[role="tab"][data-record-tab="timeline"]') as HTMLElement);
     });
     await runWaves(held, state);
     const table = waveTable(held);

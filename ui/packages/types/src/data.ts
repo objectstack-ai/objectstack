@@ -31,7 +31,7 @@ import type {
 } from '@objectstack/spec/api';
 import type { EngineAggregateOptions, FilterArray } from '@objectstack/spec/data';
 import type { ValidationError } from '@objectstack/spec/kernel';
-import type { ListViewGroupHeaderRow } from '@objectstack/spec/ui';
+import type { Dataset, ListViewGroupHeaderRow } from '@objectstack/spec/ui';
 
 export type { ImportJobStatus, ImportWriteMode, ValidationError };
 
@@ -890,6 +890,31 @@ export interface DataSource<T = any> {
    * @returns Promise resolving to the page definition or null
    */
   getPage?(pageId: string): Promise<any | null>;
+
+  /**
+   * Get a semantic-layer dataset definition by name (ADR-0021), the document
+   * `GET /api/v1/meta/dataset/:name` serves.
+   *
+   * A dataset-bound dashboard widget learns its base object (`Dataset.object`)
+   * only from here before its first query: the dashboard filter bar reads the
+   * object's field definitions to decide how a filter on a field holding
+   * several values (`multiple: true`, `multiselect`, …) is lowered, since the
+   * server refuses `=` / `$in` on such a field.
+   *
+   * `options.callerPackage` is the READER's package (ADR-0150 D3), the one the
+   * dataset query names: the dataset name resolves from it.
+   *
+   * Resolves `null` when no dataset of that name is served. A failure
+   * (transport, permission, an ambiguous name) REJECTS, so a caller can tell
+   * "no such dataset" from "could not read it".
+   *
+   * Optional: an adapter without it leaves the dashboard lowering filters
+   * without the field definition, which the dashboard reports per filter.
+   *
+   * @param datasetName - Dataset name (what a widget's `dataset` stores)
+   * @throws on transport, permission or envelope failure — do NOT resolve `null`
+   */
+  getDataset?(datasetName: string, options?: { callerPackage?: string }): Promise<Dataset | null>;
 
   /**
    * Upload a single file to a resource.

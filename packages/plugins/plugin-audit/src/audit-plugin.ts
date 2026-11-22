@@ -42,7 +42,7 @@ import { SysAuditLogDetailPage } from './sys-audit-log.page.js';
 // @objectstack/service-storage for the same ownership reason (ADR-0052 §3: a
 // file↔record link belongs with storage, not the compliance ledger).
 import { installAuditWriters, type AuditActorSnapshot, type AuditI18nSurface, type MessagingEmitSurface } from './audit-writers.js';
-import { MENTION_EMAIL_TEMPLATES } from './mention-email.js';
+import { MENTION_EMAIL_TEMPLATES, REPLY_EMAIL_TEMPLATES } from './mention-email.js';
 import { createAppActivityWriter } from './app-activity-door.js';
 import { installReadAuditWriter, type ReadAuditWriterHandle } from './read-audit.js';
 import { createAuthEventAuditSink } from './auth-event-audit.js';
@@ -63,6 +63,13 @@ import {
   registerCommentReactionRoutes,
   type CommentReactionEngine,
 } from './comment-reaction-routes.js';
+import {
+  COMMENT_REMOVE_ROUTE,
+  COMMENT_RESOLUTION_ROUTE,
+  registerCommentDoorsRoutes,
+  type CommentDoorsEngine,
+  type CommentPostingGate,
+} from './comment-routes.js';
 import { admitMentionRecipients } from './mention-recipient-gate.js';
 import { installActivityReadVisibility } from './activity-read-visibility.js';
 import { installActivityFieldRedaction } from './activity-field-redaction.js';
@@ -541,7 +548,7 @@ export class AuditPlugin implements Plugin {
   }
 
   async start(ctx: PluginContext): Promise<void> {
-    this.mountUnreactDoor(ctx);
+    this.mountCommentDoors(ctx);
     // ObjectQL engine is only resolvable after the kernel is ready.
     ctx.hook('kernel:ready', async () => {
       let engine: IDataEngine | null = null;
@@ -650,6 +657,17 @@ export class AuditPlugin implements Plugin {
           messagingAtReady.registerBuiltinTemplates(MENTION_EMAIL_TEMPLATES);
         } catch (err: any) {
           ctx.logger.warn('AuditPlugin: the @mention e-mail templates were NOT registered — mention e-mails carry the notification title and comment preview with no link to the record', {
+            error: err?.message ?? String(err),
+          });
+        }
+      }
+      // [#36074] The reply e-mail's text: the mention e-mail's shape under the
+      // reply topic, registered on its own so one refusal leaves the other.
+      if (messagingAtReady && typeof messagingAtReady.registerBuiltinTemplates === 'function') {
+        try {
+          messagingAtReady.registerBuiltinTemplates(REPLY_EMAIL_TEMPLATES);
+        } catch (err: any) {
+          ctx.logger.warn('AuditPlugin: the comment reply e-mail templates were NOT registered — reply e-mails carry the notification title and comment preview with no link to the record', {
             error: err?.message ?? String(err),
           });
         }
@@ -1051,14 +1069,22 @@ export class AuditPlugin implements Plugin {
   }
 
   /**
-   * Mount the unreact door (`comment-reaction-routes.ts`) on the kernel's HTTP
-   * server: a member removes their own comment reaction, and only theirs,
-   * without an object-level `delete` grant (maintainer ruling 6422861164,
-   * letter A). Every service the door reads is read per request, so a provider
-   * that registers after this hook is still seen. A kernel with no HTTP server
+   * Mount the comment doors on the kernel's HTTP server:
+   *
+   *  - the unreact door (`comment-reaction-routes.ts`): a member removes their
+   *    own comment reaction, and only theirs, without an object-level `delete`
+   *    grant (maintainer ruling 6422861164, letter A);
+   *  - the resolution door and the own-comment delete door
+   *    (`comment-routes.ts`): whoever can read a thread resolves and reopens
+   *    it, and a member removes a comment they wrote (ruling records
+   *    7063285032 and 7069889899), past the row floor and without a `delete`
+   *    grant.
+   *
+   * Every service the doors read is read per request, so a provider that
+   * registers after this hook is still seen. A kernel with no HTTP server
    * mounts nothing, and says so.
    */
-  private mountUnreactDoor(ctx: PluginContext): void {
+  private mountCommentDoors(ctx: PluginContext): void {
     const optional = <T>(name: string): T | undefined => {
       try {
         return ctx.getService<T>(name) ?? undefined;
@@ -1070,21 +1096,31 @@ export class AuditPlugin implements Plugin {
     const http = optional<IHttpServer>('http.server') ?? optional<IHttpServer>('http-server');
     if (!http) {
       ctx.logger.warn(
-        `AuditPlugin: no HTTP server is registered, so the unreact door (DELETE ${COMMENT_REACTION_REMOVE_ROUTE}) ` +
-          'is not mounted, and a member whose grants carry no delete on sys_comment_reaction cannot remove their own reaction.',
+        `AuditPlugin: no HTTP server is registered, so the comment doors (DELETE ${COMMENT_REACTION_REMOVE_ROUTE}, ` +
+          `PUT ${COMMENT_RESOLUTION_ROUTE}, DELETE ${COMMENT_REMOVE_ROUTE}) are not mounted: a member whose grants carry ` +
+          'no delete cannot remove their own reaction or comment, and resolves only the threads they started.',
       );
       return;
     }
     const getEngine = () => optional<IDataEngine>('objectql') ?? optional<IDataEngine>('data');
+    const resolveCaller = platformCallerResolver({
+      getEngine,
+      getAuth: () => optional<IAuthService>('auth'),
+      tenancy: tenancyServiceResolver(ctx),
+    });
     registerCommentReactionRoutes(http, {
       getEngine: () => getEngine() as unknown as CommentReactionEngine | undefined,
-      resolveCaller: platformCallerResolver({
-        getEngine,
-        getAuth: () => optional<IAuthService>('auth'),
-        tenancy: tenancyServiceResolver(ctx),
-      }),
+      resolveCaller,
     });
-    ctx.logger.info(`AuditPlugin: unreact door mounted at DELETE ${COMMENT_REACTION_REMOVE_ROUTE}`);
+    registerCommentDoorsRoutes(http, {
+      getEngine: () => getEngine() as unknown as CommentDoorsEngine | undefined,
+      resolveCaller,
+      getSecurity: () => optional<CommentPostingGate>('security'),
+    });
+    ctx.logger.info(
+      `AuditPlugin: comment doors mounted at DELETE ${COMMENT_REACTION_REMOVE_ROUTE}, PUT ${COMMENT_RESOLUTION_ROUTE} ` +
+        `and DELETE ${COMMENT_REMOVE_ROUTE}`,
+    );
   }
 
   /**

@@ -455,6 +455,85 @@ single create.
 
 ---
 
+### `POST /data/:object/:id/change-owner`
+
+Hand one record to another person, or move it into an ownership queue
+(ADR-0142). The record is written by id, as the caller, through the ordinary
+write path: the caller needs edit on the record **and** the transfer grant
+(`allowTransfer` on the object, or `modifyAllRecords`). Without the grant the
+record keeps its owner and the answer is the data door's own
+`403 PERMISSION_DENIED`, exactly as a `PATCH` of `owner_id` would answer.
+
+Offered only on an object the platform gives a reassignable owner and whose
+`userActions.transfer` switch is on. The switch defaults to on, and to off on a
+`controlled_by_parent` detail. Any other object is refused as a whole with
+`403 CHANGE_OWNER_DISABLED`, whoever asks, a `modifyAllRecords` holder
+included. The switch gates this action only: a plain `owner_id` update (an
+import, a hook, a `PATCH`) still needs the transfer grant and nothing else.
+
+**Body**: exactly one target, and an optional notification.
+
+```json
+{ "ownerId": "usr_123", "notify": true }
+```
+
+```json
+{ "queue": "support_triage" }
+```
+
+- `ownerId`: the new owner. A user the caller cannot read, or one that does
+  not exist, is refused `404 RESOURCE_NOT_FOUND`; a banned user `400
+  VALIDATION_ERROR`. Both name `ownerId` in `details.fields`.
+- `queue`: an ownership queue's name. The record is written with no owner and
+  that queue; an object without a `queue` column refuses it `400`.
+- `notify` (default `false`): send the new owner one notification under the
+  `record.owner_changed` topic, in their own language. Not allowed with
+  `queue`. A notification that cannot be sent never fails the transfer.
+
+**Response** `200`:
+
+```json
+{ "success": true, "data": { "object": "lead", "id": "lead_1", "ownerId": "usr_123", "notified": true } }
+```
+
+A queue move answers `"ownerId": null, "queue": "support_triage"`.
+
+### `POST /data/:object/change-owner`
+
+The same for a list of records: one by-id update per record, each under the
+same rules as the single route. Takes up to **500** ids; an empty list, a list
+over 500 and a list naming an id twice are refused `400` before anything is
+written. An object that does not offer Change Owner is refused as a whole,
+`403 CHANGE_OWNER_DISABLED`, before any record is read.
+
+**Body**: `{ "ids": ["lead_1", "lead_2"], "ownerId": "usr_123", "notify": true }`
+(or `queue` in place of `ownerId`).
+
+**Response** `200`, with a report: every record that did not move is listed
+with the code and sentence its own update was refused with. None is skipped.
+
+```json
+{
+  "success": true,
+  "data": {
+    "object": "lead",
+    "field": "owner_id",
+    "ownerId": "usr_123",
+    "updated": 1,
+    "failed": 1,
+    "failures": [
+      { "id": "lead_2", "code": "PERMISSION_DENIED", "message": "…" }
+    ],
+    "notified": true
+  }
+}
+```
+
+With `notify`, the new owner gets one notification for all the records that
+moved, and none when nothing moved.
+
+---
+
 ## Analytics
 
 Semantic BI queries using a cube-style API. Provided by `@objectstack/service-analytics` —

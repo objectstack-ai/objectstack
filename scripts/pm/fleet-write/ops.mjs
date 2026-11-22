@@ -865,7 +865,7 @@
  * 31368 records them: 「你应该能自主读到所有的安全问题才是合理的」.
  *
  *   row             request                                                                    the payload carries
- *   `advisory_list` `GET …/security-advisories?state=S&per_page=100[&after=C]`, and nothing else  `public_key` alone
+ *   `advisory_list` `GET …/security-advisories?state=S&per_page=100[&after=C]`, and at most one `GET /repos/{repo}`  `public_key` alone
  *
  * The caller names NO state and NO query parameter: the row lists every state
  * in `ADVISORY_LIST_STATES` (`triage`, `draft` and `closed`, every unpublished
@@ -883,7 +883,23 @@
  * origin and path are the relay's own API and this collection, its `state` the
  * walk's own, and the cursor one value in `ADVISORY_LIST_CURSOR_SHAPE`
  * (`advisoryListNextCursor`); the next path is the relay's own spelling with
- * that cursor, never the link. A link that is none of these, a page that is not
+ * that cursor, never the link. The collection is this one under either
+ * spelling: `/repos/{repo}/security-advisories`, or the numeric
+ * `/repositories/{id}/security-advisories` GitHub's `Link` headers use for a
+ * request made on the named path (its pagination guide's example; this
+ * repository's own pull-files links, `scripts/pm/check-governed-merges.mjs`)
+ * — the numeric one only when `{id}` equals the repository's own id, which the
+ * walk reads ONCE, with one `GET /repos/{repo}`, the first time a link names
+ * one (`advisoryListRepoIdOf`: 200, its own full name, a positive integer),
+ * ⛔ never an id taken from the link; a read that fails is a FAILED action
+ * naming its status alone (`advisoryListRepoIdUnreadText`). Other query
+ * parameters of the link (`per_page`, a `page` beside the cursor) are never
+ * read. A refused link prints its SHAPE beside the fixed sentence
+ * (`advisoryListLinkShape`): the next-link count, the origin as the relay's or
+ * another, the path with the owner, the name and every id replaced by a
+ * placeholder, the query parameter NAMES, and whether `state` and `after`
+ * stand as the walk needs — ⛔ never a host, id, state, cursor or any other
+ * value, so the next mismatch reads from the job log. A link that is none of these, a page that is not
  * a list of advisories in the state asked for, an advisory whose `severity` is
  * not one of `ADVISORY_LIST_SEVERITIES` or null or whose `created_at` or
  * `updated_at` is neither null nor an ISO-8601 string
@@ -919,9 +935,10 @@
  * no byte read-back for it: opening the parts IS its read-back.
  *
  * ⛔ What crosses the public run: that the listing landed or failed, the HTTP
- * status, `advisoryListCall` (the call, its states in braces) and the padded
- * ciphertext. NEVER an id, a count, a state, a severity, a cursor, a page
- * number, or a byte or part count of the listing.
+ * status, `advisoryListCall` (the call, its states in braces), the padded
+ * ciphertext and, on a refused next link, that link's shape. NEVER an id, a
+ * count, a state, a severity, a cursor, a page number, or a byte or part count
+ * of the listing.
  *
  * The grant and the gate are `advisory_read`'s. Its `grant` is `read` on the
  * stroke-scoped `repository-advisories`, so the validator writes
@@ -929,8 +946,8 @@
  * workflow's existing input; it travels `alone`; and its `senderGate` is
  * `target-write` from `ADVISORY_READ_SENDER_GATES`: write, maintain or admin on
  * the target, which every stroke passes before its first request. A row naming
- * any other gate is refused before the first GET. The first live run measures
- * what the read grant lists and the form of the `Link` cursor. A refusal there
+ * any other gate is refused before the first GET. The repository read rides
+ * the stroke's literal `metadata: read`. A refusal there
  * is a FAILED action carrying `ADVISORY_LIST_ACCESS_REMEDY`, ⛔ never a retry
  * under a wider token.
  *
@@ -2480,20 +2497,44 @@ export const ADVISORY_LIST_CURSOR_REFUSED =
   'collection or this state, or a cursor that is not exactly one value in its declared shape — so nothing was sealed or emitted';
 
 /**
- * The next cursor of a full page (header): `{ after }` — `null` when the `Link` header names no `rel="next"`, which ends
- * the walk — or `{ fail }` with `ADVISORY_LIST_CURSOR_REFUSED`. A next link is followed only when there is exactly one,
- * its origin is `api`'s and its path is exactly `repo`'s collection, its `state` is exactly the walk's, and it carries
- * exactly one `after` in `ADVISORY_LIST_CURSOR_SHAPE`. Pure; never throws.
+ * The collection a next link may name by the repository's NUMERIC id (header: "The one row that LISTS advisories"):
+ * `/repositories/{id}/security-advisories`, the spelling GitHub's `Link` headers use for the collection the request
+ * named as `/repos/{owner}/{name}/…`. The id is decimal digits with no sign and no leading zero, at most 20. It is
+ * followed only when it equals the repository's own id, read once by the walk (`advisoryListRepoIdOf`).
  */
-export function advisoryListNextCursor(link, { api, repo, state }) {
-  if (link === null || link === undefined || link === '') return { after: null };
-  if (typeof link !== 'string') return { fail: ADVISORY_LIST_CURSOR_REFUSED };
-  const nexts = [];
-  for (const m of link.matchAll(/<([^>]*)>((?:\s*;\s*[^;,]*)*)/g)) {
-    const rel = /;\s*rel\s*=\s*"?([^";]*)"?/i.exec(m[2]);
-    // RFC 8288 §3.3: a relation type compares case-insensitively.
-    if (rel && rel[1].trim().toLowerCase().split(/\s+/).includes('next')) nexts.push(m[1]);
-  }
+export const ADVISORY_LIST_NUMERIC_COLLECTION_SHAPE = /^\/repositories\/([1-9][0-9]{0,19})\/security-advisories$/;
+
+/**
+ * The repository's own numeric id from the answer of `GET /repos/{repo}`: a positive safe integer, as a decimal string,
+ * when the answer is 200 with an `id` of that shape and a `full_name` equal to `repo` (case-insensitively, as the
+ * platform names a repository); otherwise `null`. Pure; never throws.
+ */
+export function advisoryListRepoIdOf(answer, repo) {
+  const json = answer?.json;
+  if (answer?.status !== 200 || json === null || typeof json !== 'object' || Array.isArray(json)) return null;
+  if (typeof json.full_name !== 'string' || json.full_name.toLowerCase() !== String(repo).toLowerCase()) return null;
+  return Number.isSafeInteger(json.id) && json.id > 0 ? String(json.id) : null;
+}
+
+/** What a walk prints when the repository's own id, needed to judge a numeric next link, could not be read: the status alone. */
+export function advisoryListRepoIdUnreadText(status) {
+  return `a full page's Link header names the collection by a repository id, and the repository's own id could not be read (GET of the repository answered HTTP ${status}) to compare it with — nothing was sealed or emitted`;
+}
+
+/**
+ * The next cursor of a full page (header): `{ after }` — `null` when the `Link` header names no `rel="next"`, which ends
+ * the walk — or `{ fail }` with `ADVISORY_LIST_CURSOR_REFUSED`, or `{ needsRepoId: true }` when the one next link
+ * names the collection by a numeric id and `repoId` was not given (the walk reads the repository's own id once and
+ * asks again). A next link is followed only when there is exactly one, its origin is `api`'s, its path is exactly
+ * `repo`'s collection — as `/repos/{repo}/security-advisories`, or as `/repositories/{id}/security-advisories` with
+ * `{id}` exactly `repoId`, the repository's own (`ADVISORY_LIST_NUMERIC_COLLECTION_SHAPE`) — its `state` is exactly
+ * the walk's, and it carries exactly one `after` in `ADVISORY_LIST_CURSOR_SHAPE`. Other query parameters (`per_page`,
+ * a `page` beside the cursor, an empty `before`) are never read: the next path is the relay's own spelling. Pure;
+ * never throws.
+ */
+export function advisoryListNextCursor(link, { api, repo, state, repoId = null }) {
+  const nexts = advisoryListNextLinks(link);
+  if (nexts === null) return { fail: ADVISORY_LIST_CURSOR_REFUSED };
   if (nexts.length === 0) return { after: null };
   if (nexts.length > 1) return { fail: ADVISORY_LIST_CURSOR_REFUSED };
   let url;
@@ -2504,11 +2545,81 @@ export function advisoryListNextCursor(link, { api, repo, state }) {
   } catch {
     return { fail: ADVISORY_LIST_CURSOR_REFUSED };
   }
-  if (url.origin !== base.origin || url.pathname !== `/repos/${repo}/security-advisories`) return { fail: ADVISORY_LIST_CURSOR_REFUSED };
+  if (url.origin !== base.origin) return { fail: ADVISORY_LIST_CURSOR_REFUSED };
   const states = url.searchParams.getAll('state');
   const afters = url.searchParams.getAll('after');
   if (states.length !== 1 || states[0] !== state || afters.length !== 1 || !ADVISORY_LIST_CURSOR_SHAPE.test(afters[0])) return { fail: ADVISORY_LIST_CURSOR_REFUSED };
-  return { after: afters[0] };
+  if (url.pathname === `/repos/${repo}/security-advisories`) return { after: afters[0] };
+  const numeric = ADVISORY_LIST_NUMERIC_COLLECTION_SHAPE.exec(url.pathname);
+  if (!numeric) return { fail: ADVISORY_LIST_CURSOR_REFUSED };
+  if (repoId === null || repoId === undefined) return { needsRepoId: true };
+  return String(repoId) === numeric[1] ? { after: afters[0] } : { fail: ADVISORY_LIST_CURSOR_REFUSED };
+}
+
+/** The targets of a `Link` header's `rel="next"` links — `[]` for none or an empty header, `null` for one that is no string. */
+function advisoryListNextLinks(link) {
+  if (link === null || link === undefined || link === '') return [];
+  if (typeof link !== 'string') return null;
+  const nexts = [];
+  for (const m of link.matchAll(/<([^>]*)>((?:\s*;\s*[^;,]*)*)/g)) {
+    const rel = /;\s*rel\s*=\s*"?([^";]*)"?/i.exec(m[2]);
+    // RFC 8288 §3.3: a relation type compares case-insensitively.
+    if (rel && rel[1].trim().toLowerCase().split(/\s+/).includes('next')) nexts.push(m[1]);
+  }
+  return nexts;
+}
+
+/** The path segments a refused link's shape prints as they are; every other segment prints as a placeholder. */
+const ADVISORY_LIST_SHAPE_WORDS = Object.freeze(['repos', 'repositories', 'security-advisories']);
+
+/**
+ * The diagnostic a refused next link prints in the job log (header): the link's SHAPE, ⛔ never a value — how many
+ * next links, whether the first is on the relay's API origin, its path with the owner, the name and every id or other
+ * segment replaced by a placeholder (and whether they are this repository's), its query parameter NAMES, and of its
+ * `state` and `after` only whether each is the walk's, how many there are and whether a cursor is in its shape.
+ * No host, owner, name, id, state, cursor or other value is ever printed. Pure; never throws.
+ */
+export function advisoryListLinkShape(link, { api, repo, state, repoId = null }) {
+  const nexts = advisoryListNextLinks(link);
+  if (nexts === null) return 'link shape: the Link header is no string';
+  if (nexts.length === 0) return 'link shape: no rel="next" link';
+  const parts = [`${nexts.length} rel="next" link(s)`];
+  let url;
+  let base;
+  try {
+    url = new URL(nexts[0]);
+    base = new URL(api);
+  } catch {
+    return `link shape: ${parts[0]}; the first is no absolute URL`;
+  }
+  parts.push(url.origin === base.origin ? "on the relay's API origin" : 'on another origin');
+  const segs = url.pathname.split('/').slice(1);
+  const [own0, own1] = String(repo).split('/');
+  const shown = [];
+  let note = '';
+  for (let k = 0; k < segs.length; k++) {
+    const seg = segs[k];
+    if (k === 1 && segs[0] === 'repos' && segs.length > 2) {
+      shown.push('OWNER', 'NAME');
+      const same = seg === own0 && segs[2] === own1;
+      const folded = !same && seg.toLowerCase() === String(own0).toLowerCase() && segs[2].toLowerCase() === String(own1).toLowerCase();
+      note = same ? ' (OWNER/NAME this repository)' : folded ? ' (OWNER/NAME this repository in another letter case)' : ' (OWNER/NAME another repository)';
+      k++;
+    } else if (k === 1 && segs[0] === 'repositories') {
+      shown.push('ID');
+      note = !/^[1-9][0-9]{0,19}$/.test(seg) ? ' (ID not a repository id)' : repoId === null || repoId === undefined ? ' (ID not compared: the repository id was not read)' : String(repoId) === seg ? " (ID this repository's)" : ' (ID another repository\'s)';
+    } else if (ADVISORY_LIST_SHAPE_WORDS.includes(seg) || seg === '') shown.push(seg);
+    else shown.push(/^[0-9]+$/.test(seg) ? 'N' : 'SEG');
+  }
+  parts.push(`path /${shown.join('/')}${note}`);
+  const names = [...url.searchParams.keys()].map((n) => (/^[a-z_]{1,32}$/.test(n) ? n : 'NAME'));
+  parts.push(`query names [${names.join(',')}]`);
+  const states = url.searchParams.getAll('state');
+  parts.push(`state ${states.length === 0 ? 'absent' : states.length > 1 ? `${states.length} values` : states[0] === state ? "the walk's" : 'not the walk\'s'}`);
+  const afters = url.searchParams.getAll('after');
+  const cursor = (c) => (ADVISORY_LIST_CURSOR_SHAPE.test(c) ? 'in its shape' : c.length > ADVISORY_LIST_CURSOR_MAX_CHARS ? 'over its length cap' : c.length === 0 ? 'empty' : 'with a character outside its alphabet');
+  parts.push(`after ${afters.length === 0 ? 'absent' : afters.length > 1 ? `${afters.length} values` : cursor(afters[0])}`);
+  return `link shape: ${parts.join('; ')}`;
 }
 
 /** The severities a listed advisory may carry, beside null (the platform's own enum for the field). */

@@ -166,7 +166,7 @@ export const FormSectionContainer: React.FC<FormSectionContainerProps> = ({
       )}
       <div className="flex-1">
         {label && (
-          <h3 className="text-sm font-semibold text-foreground">
+          <h3 className="text-sm font-medium text-foreground">
             {label}
           </h3>
         )}

@@ -17,7 +17,7 @@ import { ComponentRegistry, percentDisplayValue, type PercentScale, getRecordDis
 import { valueSchemaFor, resolveFieldScale } from '@objectstack/spec/data';
 import type { ReferenceNameOnlyValue } from '@objectstack/spec/data';
 import { useLocalization, useDisplayLocale, formatDisplayNumber, readHomeAmountSource } from '@object-ui/i18n';
-import { Badge, Avatar, AvatarImage, AvatarFallback, Button, Checkbox, EmptyValue, cn, setFieldReadFaceResolver } from '@object-ui/components';
+import { Badge, Avatar, AvatarImage, AvatarFallback, Button, Checkbox, EmptyValue, ObjectIconTile, cn, setFieldReadFaceResolver } from '@object-ui/components';
 import { Check, Copy, Phone as PhoneIcon, MapPin, CircleQuestionMark, Lock, Star } from 'lucide-react';
 import { useObjectTranslation, classifyLoadError } from '@object-ui/react';
 import { SchemaRendererContext as _SchemaRendererContext } from '@object-ui/react';
@@ -2033,8 +2033,11 @@ export function EmailCellRenderer({ value }: CellRendererProps): React.ReactElem
           {safe}
         </a>
       </Button>
+      {/* A select-first grid does not draw this (`data-cell-copy`): there a
+          click selects the cell and Ctrl/Cmd+C copies it (objectstack#36015). */}
       <button
         type="button"
+        data-cell-copy=""
         className="shrink-0 opacity-0 group-hover/email:opacity-100 transition-opacity p-0.5 rounded hover:bg-muted"
         onClick={handleCopy}
         aria-label={label('detail.copyEmail', 'Copy email')}
@@ -2130,8 +2133,10 @@ export function PhoneCellRenderer({ value }: CellRendererProps): React.ReactElem
         <PhoneIcon className="h-3 w-3 shrink-0" />
         <span className="truncate">{safe}</span>
       </a>
+      {/* Not drawn in a select-first grid, as `EmailCellRenderer`'s. */}
       <button
         type="button"
+        data-cell-copy=""
         className="shrink-0 opacity-0 group-hover/phone:opacity-100 transition-opacity p-0.5 rounded hover:bg-muted"
         onClick={handleCopy}
         aria-label={label('detail.copyPhone', 'Copy phone number')}
@@ -2288,7 +2293,9 @@ function displayableImagesOf(value: unknown): Array<{ url: string; name?: string
  *
  * Clicking a thumbnail opens a full-screen lightbox (single or gallery). The
  * click is `stopPropagation`-guarded so, inside a grid row, enlarging an image
- * doesn't also trigger row navigation.
+ * doesn't also trigger row navigation. Each thumbnail is a `data-cell-opener`:
+ * in a select-first grid a plain click selects the cell, and the cell's open
+ * button or Ctrl/Cmd+Enter opens the lightbox (objectstack#36015).
  */
 export function ImageCellRenderer({ value }: CellRendererProps): React.ReactElement {
   const { t } = useObjectTranslation();
@@ -2351,6 +2358,7 @@ export function ImageCellRenderer({ value }: CellRendererProps): React.ReactElem
               key={idx}
               src={img.url}
               alt={imageAlt(idx, img.name)}
+              data-cell-opener=""
               onClick={open(idx)}
               className="size-8 cursor-zoom-in rounded-md border-2 border-background object-cover transition-transform hover:scale-110 hover:z-10"
             />
@@ -2358,6 +2366,7 @@ export function ImageCellRenderer({ value }: CellRendererProps): React.ReactElem
           {imgs.length > 3 && (
             <button
               type="button"
+              data-cell-opener=""
               onClick={open(3)}
               className="size-8 rounded-md border-2 border-background bg-muted flex items-center justify-center text-xs font-medium text-muted-foreground hover:bg-muted/80"
             >
@@ -2376,6 +2385,7 @@ export function ImageCellRenderer({ value }: CellRendererProps): React.ReactElem
       <img
         src={imgs[0].url}
         alt={imageAlt(0, imgs[0].name)}
+        data-cell-opener=""
         onClick={open(0)}
         className="size-10 cursor-zoom-in rounded-md object-cover transition-transform hover:scale-105"
       />
@@ -2465,6 +2475,19 @@ function referencedRecordId(item: unknown): string | number | undefined {
  * link address" behave the way a link is supposed to; a plain left click is
  * handed to the host so navigation stays in-app.
  */
+/**
+ * Whether a referenced record is drawn as a chip (objectstack#36147): the
+ * referenced object's colour tile (`ObjectSchema.color` and `icon`,
+ * objectstack#35985) then the record's name, on a muted pill, the name
+ * wrapping instead of truncating. A record page's field area provides it;
+ * everywhere else a reference keeps its link face. A chip with no host route
+ * is the same pill, not a link.
+ */
+export const ReferenceChipContext = React.createContext(false);
+
+const REFERENCE_CHIP_CLASS =
+  'inline-flex max-w-full items-start gap-1.5 rounded-md bg-muted px-1.5 py-0.5 align-top text-foreground';
+
 function ReferencedRecordLink({
   objectName,
   recordId,
@@ -2483,13 +2506,34 @@ function ReferencedRecordLink({
   children: React.ReactNode;
 }): React.ReactElement {
   const host = useRelatedRecordActions();
+  const chip = React.useContext(ReferenceChipContext);
   const navigable = !!objectName && recordId != null && recordId !== '';
   const href =
     navigable && host?.recordHref
       ? host.recordHref(objectName as string, recordId as string | number)
       : null;
 
-  if (!href) return <>{children}</>;
+  const face = chip ? (
+    <>
+      <ObjectIconTile
+        icon={typeof objectSchema?.icon === 'string' ? objectSchema.icon : undefined}
+        color={typeof objectSchema?.color === 'string' ? objectSchema.color : undefined}
+        size="xs"
+        className="mt-0.5"
+      />
+      <span className="min-w-0 break-words">{label || children}</span>
+    </>
+  ) : children;
+
+  if (!href) {
+    return chip ? (
+      <span className={REFERENCE_CHIP_CLASS} data-record-chip="">
+        {face}
+      </span>
+    ) : (
+      <>{children}</>
+    );
+  }
 
   // Hovering the link (or Space on it) shows the referenced record's card
   // (objectstack#27604): the same reference, a glance instead of a visit.
@@ -2497,12 +2541,20 @@ function ReferencedRecordLink({
     <RecordHoverCard objectName={objectName} recordId={recordId} objectSchema={objectSchema} label={label}>
       <a
         href={href}
-        className={cn('text-primary underline-offset-4 hover:underline', className)}
+        className={cn(
+          chip ? cn(REFERENCE_CHIP_CLASS, 'transition-colors hover:bg-accent') : 'text-primary underline-offset-4 hover:underline',
+          className,
+        )}
+        data-record-chip={chip ? '' : undefined}
         // A host's list grid draws a referenced record as a small chip led by
         // the name's first letter (objectstack#35548); these say which link
-        // is one and what its letter is. Nothing else reads them.
+        // is one and what its letter is.
         data-record-link=""
         data-initial={recordLinkInitial(label)}
+        // The record the chip names: a select-first grid opens it in place on
+        // a single click when its host asks to (objectstack#36015).
+        data-record-object={objectName}
+        data-record-id={String(recordId)}
         onClick={(e) => {
           // The rows this cell sits in carry their own click handlers — the
           // detail row copies the field value, a related-list row opens ITS own
@@ -2517,7 +2569,7 @@ function ReferencedRecordLink({
           host.openRecord(objectName as string, recordId as string | number);
         }}
       >
-        {children}
+        {face}
       </a>
     </RecordHoverCard>
   );
@@ -5388,6 +5440,10 @@ export * from './widgets/BooleanField.js';
 // highlights chip). `BooleanValueText` stays internal: its only caller is the
 // lookup column renderer in this package.
 export { useBooleanValueLabel, type BooleanValueLabel } from './widgets/booleanValueLabel.js';
+// objectstack#36070 — the up-to-two-character initials a person chip draws
+// when it has no avatar image (PersonRow, the people-field chips). Exported so
+// `@object-ui/plugin-detail`'s comment author avatar draws the same initials.
+export { getPersonInitials } from './widgets/personDisplay.js';
 export * from './widgets/SelectField.js';
 export * from './widgets/DateField.js';
 export * from './widgets/DateTimeField.js';

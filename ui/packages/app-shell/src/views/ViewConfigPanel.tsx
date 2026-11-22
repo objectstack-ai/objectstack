@@ -139,8 +139,10 @@ type AuthoredSeed =
  * Map an Object definition's `fields` record into the inspector's flat field
  * catalog so it can render field-reference pickers (columns, groupByField, …)
  * without a network fetch.
+ *
+ * @internal exported for tests
  */
-function mapObjectFields(objectDef: ViewConfigPanelProps['objectDef']): ObjectFieldInfo[] {
+export function mapObjectFields(objectDef: ViewConfigPanelProps['objectDef']): ObjectFieldInfo[] {
     const fields = objectDef.fields;
     if (!fields || typeof fields !== 'object') return [];
     return Object.entries(fields).map(([name, def]) => {
@@ -150,6 +152,9 @@ function mapObjectFields(objectDef: ViewConfigPanelProps['objectDef']): ObjectFi
             label: typeof f.label === 'string' && f.label ? f.label : name,
             type: typeof f.type === 'string' ? f.type : 'text',
             hidden: f.hidden === true,
+            // The filter builder offers a list-valued column membership and
+            // the empty checks only (`operatorsForField`).
+            ...(f.multiple === true ? { multiple: true } : {}),
         };
     });
 }

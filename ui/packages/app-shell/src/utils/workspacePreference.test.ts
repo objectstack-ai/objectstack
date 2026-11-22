@@ -17,7 +17,8 @@
 import { describe, it, expect } from 'vitest';
 import {
   RECORD_RELATED_ARRANGEMENT_PREFERENCE,
-  RECORD_RELATED_COLUMN_PREFERENCE,
+  APPROVAL_QUEUE_OPEN_NEXT_PREFERENCE,
+  RECORD_DETAILS_WIDTH_PREFERENCE,
   defineWorkspacePreference,
   objectPreferenceScope,
   readWorkspacePreference,
@@ -38,8 +39,8 @@ const memoryStorage = () => {
 describe('workspacePreference keys (objectstack#27052)', () => {
   it('one key per preference × scope; the per-object scope names the object', () => {
     expect(objectPreferenceScope('crm_lead')).toBe('object:crm_lead');
-    expect(workspacePreferenceStorageKey(RECORD_RELATED_COLUMN_PREFERENCE, objectPreferenceScope('crm_lead'))).toBe(
-      'os:pref:record.columns.related@object:crm_lead',
+    expect(workspacePreferenceStorageKey(APPROVAL_QUEUE_OPEN_NEXT_PREFERENCE, objectPreferenceScope('crm_lead'))).toBe(
+      'os:pref:approvals.queue.open-next@object:crm_lead',
     );
     const userScoped = defineWorkspacePreference({ name: 'demo.user', codec: { decode: (s) => s, encode: (v: string) => v } });
     expect(workspacePreferenceStorageKey(userScoped)).toBe('os:pref:demo.user');
@@ -63,37 +64,57 @@ describe('the column switch — a versioned record (objectstack#27052)', () => {
 
   it('stores a record carrying `v`, and reads it back per object', () => {
     const storage = memoryStorage();
-    writeWorkspacePreference(RECORD_RELATED_COLUMN_PREFERENCE, lead, 'off', storage);
-    const stored = JSON.parse(storage.kept.get('os:pref:record.columns.related@object:crm_lead')!);
+    writeWorkspacePreference(APPROVAL_QUEUE_OPEN_NEXT_PREFERENCE, lead, 'off', storage);
+    const stored = JSON.parse(storage.kept.get('os:pref:approvals.queue.open-next@object:crm_lead')!);
     expect(stored).toEqual({ value: 'off', v: 1 });
-    expect(readWorkspacePreference(RECORD_RELATED_COLUMN_PREFERENCE, lead, storage)).toBe('off');
+    expect(readWorkspacePreference(APPROVAL_QUEUE_OPEN_NEXT_PREFERENCE, lead, storage)).toBe('off');
     // Another object, and another preference, have no choice.
-    expect(readWorkspacePreference(RECORD_RELATED_COLUMN_PREFERENCE, product, storage)).toBeUndefined();
+    expect(readWorkspacePreference(APPROVAL_QUEUE_OPEN_NEXT_PREFERENCE, product, storage)).toBeUndefined();
     expect(readWorkspacePreference(RECORD_RELATED_ARRANGEMENT_PREFERENCE, lead, storage)).toBeUndefined();
-    writeWorkspacePreference(RECORD_RELATED_COLUMN_PREFERENCE, lead, 'on', storage);
-    expect(readWorkspacePreference(RECORD_RELATED_COLUMN_PREFERENCE, lead, storage)).toBe('on');
+    writeWorkspacePreference(APPROVAL_QUEUE_OPEN_NEXT_PREFERENCE, lead, 'on', storage);
+    expect(readWorkspacePreference(APPROVAL_QUEUE_OPEN_NEXT_PREFERENCE, lead, storage)).toBe('on');
   });
 
   it('reads no choice from a record of another version, a value it does not know, or a spelling that is not a record', () => {
-    const key = 'os:pref:record.columns.related@object:crm_lead';
+    const key = 'os:pref:approvals.queue.open-next@object:crm_lead';
     const storageWith = (value: string) => ({ getItem: (k: string) => (k === key ? value : null) });
     for (const spelling of ['{"value":"off","v":2}', '{"value":"off"}', '{"value":"hidden","v":1}', 'off', '[1]', 'null', '{']) {
-      expect(readWorkspacePreference(RECORD_RELATED_COLUMN_PREFERENCE, lead, storageWith(spelling))).toBeUndefined();
+      expect(readWorkspacePreference(APPROVAL_QUEUE_OPEN_NEXT_PREFERENCE, lead, storageWith(spelling))).toBeUndefined();
     }
   });
 
   it('reads no choice with no storage, or with one that throws; a write to either throws nothing', () => {
-    expect(readWorkspacePreference(RECORD_RELATED_COLUMN_PREFERENCE, lead, null)).toBeUndefined();
+    expect(readWorkspacePreference(APPROVAL_QUEUE_OPEN_NEXT_PREFERENCE, lead, null)).toBeUndefined();
     const throwing = { getItem: () => { throw new Error('SecurityError'); } };
-    expect(readWorkspacePreference(RECORD_RELATED_COLUMN_PREFERENCE, lead, throwing)).toBeUndefined();
-    expect(() => writeWorkspacePreference(RECORD_RELATED_COLUMN_PREFERENCE, lead, 'off', null)).not.toThrow();
+    expect(readWorkspacePreference(APPROVAL_QUEUE_OPEN_NEXT_PREFERENCE, lead, throwing)).toBeUndefined();
+    expect(() => writeWorkspacePreference(APPROVAL_QUEUE_OPEN_NEXT_PREFERENCE, lead, 'off', null)).not.toThrow();
     const refusing = { setItem: () => { throw new Error('QuotaExceededError'); } };
-    expect(() => writeWorkspacePreference(RECORD_RELATED_COLUMN_PREFERENCE, product, 'off', refusing)).not.toThrow();
+    expect(() => writeWorkspacePreference(APPROVAL_QUEUE_OPEN_NEXT_PREFERENCE, product, 'off', refusing)).not.toThrow();
   });
 
   it('with no `window` (SSR — this file runs in the node project), the default storage is absent: no choice', () => {
     expect(typeof window).toBe('undefined');
-    expect(readWorkspacePreference(RECORD_RELATED_COLUMN_PREFERENCE, lead)).toBeUndefined();
+    expect(readWorkspacePreference(APPROVAL_QUEUE_OPEN_NEXT_PREFERENCE, lead)).toBeUndefined();
+  });
+});
+
+describe('the pinned details\' width — per person, per object (objectstack#35890)', () => {
+  const lead = objectPreferenceScope('crm_lead');
+
+  it('stores `{ width, v: 1 }` per object and reads it back', () => {
+    const storage = memoryStorage();
+    writeWorkspacePreference(RECORD_DETAILS_WIDTH_PREFERENCE, lead, 520, storage);
+    expect(JSON.parse(storage.kept.get('os:pref:record.columns.details-width@object:crm_lead')!)).toEqual({ width: 520, v: 1 });
+    expect(readWorkspacePreference(RECORD_DETAILS_WIDTH_PREFERENCE, lead, storage)).toBe(520);
+    expect(readWorkspacePreference(RECORD_DETAILS_WIDTH_PREFERENCE, objectPreferenceScope('crm_product'), storage)).toBeUndefined();
+  });
+
+  it('reads no width from a value that is not a positive finite number', () => {
+    const key = 'os:pref:record.columns.details-width@object:crm_lead';
+    const storageWith = (value: string) => ({ getItem: (k: string) => (k === key ? value : null) });
+    for (const spelling of ['{"width":0,"v":1}', '{"width":-5,"v":1}', '{"width":"400","v":1}', '{"width":400,"v":2}', '{"width":null,"v":1}', '400']) {
+      expect(readWorkspacePreference(RECORD_DETAILS_WIDTH_PREFERENCE, lead, storageWith(spelling))).toBeUndefined();
+    }
   });
 });
 

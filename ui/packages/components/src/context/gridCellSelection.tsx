@@ -76,6 +76,27 @@ export interface GridCellFacts {
   validate?: (value: unknown) => string | null | undefined;
 }
 
+/**
+ * The reference cells of a select-first grid (objectstack#36015): the columns
+ * whose cells name records of another object as chips, and how the host opens
+ * one in place. In such a cell a single click on a chip opens its record with
+ * {@link GridReferenceCells.openRecord} (and selects the cell), a click beside
+ * the chips only selects, Ctrl/Cmd+Enter opens the first chip the same way,
+ * and an edit button is drawn while the pointer is over the cell or the cell
+ * is selected and it opens an editor. A Ctrl/Cmd-click on a chip still
+ * follows its link (a new tab).
+ */
+export interface GridReferenceCells {
+  /**
+   * Whether this column's cells are reference cells. Asked per column on every
+   * render, so it answers from the column alone. A column of people is not one:
+   * its chips only select.
+   */
+  isReferenceColumn: (columnKey: string) => boolean;
+  /** Open the record a chip names, in place (the list's side drawer). */
+  openRecord: (objectName: string, recordId: string) => void;
+}
+
 export interface GridCellSelection {
   /** The host's facts for one cell; asked when the reader acts on it, never per render. */
   describeCell?: (row: any, columnKey: string) => GridCellFacts | null | undefined;
@@ -93,6 +114,12 @@ export interface GridCellSelection {
    * state-machine field (objectstack#35685).
    */
   confirmCommit?: (row: any, columnKey: string, value: unknown) => Promise<boolean> | null | undefined;
+  /**
+   * The grid's reference cells and how a chip in one opens its record
+   * (objectstack#36015). Absent ⇒ a chip is like any link a cell draws: a
+   * single click only selects the cell.
+   */
+  referenceCells?: GridReferenceCells | null;
 }
 
 const GridCellSelectionContext = React.createContext<GridCellSelection | null>(null);

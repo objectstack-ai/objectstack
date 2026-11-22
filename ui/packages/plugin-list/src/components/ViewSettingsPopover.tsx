@@ -98,6 +98,31 @@ export interface ViewSettingsField {
    * Absent means groupable.
    */
   groupable?: boolean;
+  /**
+   * The field's type in the object's declaration, and whether it holds many
+   * values (`multiple: true`). The Group editors offer a field by them
+   * (objectstack#36204); absent ⇒ not offered there while types are known.
+   */
+  type?: string;
+  multiple?: boolean;
+}
+
+/**
+ * objectstack#36204 — the types a list can be grouped by, as the maintainer
+ * set them: single select and radio (a status is a `select`), a tick
+ * (`boolean`, `toggle`), a person (`user`) and a linked record (`lookup`,
+ * `master_detail`, `tree`), each holding one value. Text, numbers, dates and
+ * many-valued fields are not offered.
+ */
+const GROUPABLE_TYPES = new Set([
+  'select', 'radio',
+  'boolean', 'toggle',
+  'user', 'lookup', 'master_detail', 'tree',
+]);
+
+/** Whether the Group editors offer a field of this declaration (`GROUPABLE_TYPES`, one value). */
+export function isGroupableField(f: Pick<ViewSettingsField, 'type' | 'multiple'>): boolean {
+  return !!f.type && GROUPABLE_TYPES.has(f.type) && f.multiple !== true;
 }
 
 /**
@@ -106,10 +131,20 @@ export interface ViewSettingsField {
  * wide toolbar's, read it, so the two forms offer the same fields. A level that
  * already names a withheld field still shows: `GroupingEditor` mounts a value
  * its options do not carry, so the level can be removed.
+ *
+ * objectstack#36204 — and, while the fields' types are known (`typesKnown`,
+ * the default), only those of a groupable type (`isGroupableField`), in the
+ * reader's column order (`order`, as `orderFields` reads it). With no type
+ * known at all (the host has no object definition) every field is offered,
+ * as before: nothing tells them apart.
  */
-export function groupFieldOptions(fields: readonly ViewSettingsField[]): Array<{ value: string; label: string }> {
-  return fields
-    .filter((f) => f.groupable !== false)
+export function groupFieldOptions(
+  fields: readonly ViewSettingsField[],
+  order?: readonly string[],
+  typesKnown = true,
+): Array<{ value: string; label: string }> {
+  return orderFields(fields, order)
+    .filter((f) => f.groupable !== false && (!typesKnown || isGroupableField(f)))
     .map((f) => ({ value: f.name, label: f.label || f.name }));
 }
 
@@ -177,6 +212,20 @@ export interface ViewSettingsPopoverProps {
   showGroup?: boolean;
   groupingConfig?: any;
   setGroupingConfig?: (next: any) => void;
+  /**
+   * objectstack#36204 — the fields the Group level offers, as the host works
+   * them out for both Group editors, and whether it is still reading their
+   * types. Absent ⇒ `groupFieldOptions(allFields, fieldOrder)`.
+   */
+  groupOptions?: Array<{ value: string; label: string }>;
+  groupOptionsLoading?: boolean;
+  /**
+   * objectstack#36204 — the label of a field a grouping level holds, as the
+   * host knows it: `groupOptions` reach past the columns, so a level can hold
+   * a field `allFields` does not carry. Absent, or answering `undefined`,
+   * the column's label, else the field's name.
+   */
+  groupFieldLabel?: (field: string) => string | undefined;
 
   showColor?: boolean;
   rowColorConfig?: { field: string; colors?: Record<string, string> } | undefined;
@@ -250,7 +299,7 @@ function MenuRow({
       onClick={onOpen}
       data-testid={testId}
       className={cn(
-        'flex w-full items-center gap-3 rounded-sm px-2 py-1.5 text-left text-[13px] hover:bg-muted max-sm:min-h-11',
+        'flex w-full items-center gap-3 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-muted max-sm:min-h-11',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
       )}
     >
@@ -288,7 +337,7 @@ function SubPage({
           onClick={onBack}
           data-testid="options-back"
           className={cn(
-            'flex min-w-0 items-center gap-1 rounded-sm px-1.5 py-1 text-[13px] font-medium hover:bg-muted max-sm:min-h-11',
+            'flex min-w-0 items-center gap-1 rounded-sm px-1.5 py-1 text-sm font-medium hover:bg-muted max-sm:min-h-11',
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
           )}
         >
@@ -394,7 +443,7 @@ function ViewNameField({ t, viewName }: { t: ViewSettingsPopoverProps['t']; view
   const title = t('list.optionsMenu.viewName', { defaultValue: 'View name' });
   if (!onRename) {
     return (
-      <div className="border-b px-3 py-2 text-[13px] font-medium break-words" data-testid="options-view-name">
+      <div className="border-b px-3 py-2 text-sm font-medium break-words" data-testid="options-view-name">
         {label}
       </div>
     );
@@ -432,7 +481,7 @@ function ViewNameField({ t, viewName }: { t: ViewSettingsPopoverProps['t']; view
             setDraft(label);
           }
         }}
-        className="h-8 text-[13px] font-medium max-sm:h-11"
+        className="h-8 text-sm font-medium max-sm:h-11"
         data-testid="options-view-name-input"
       />
     </div>
@@ -509,6 +558,9 @@ export function ViewSettingsContent(props: ViewSettingsPopoverProps & { closeMen
     showGroup,
     groupingConfig,
     setGroupingConfig,
+    groupOptions,
+    groupOptionsLoading,
+    groupFieldLabel,
     showColor,
     rowColorConfig,
     setRowColorConfig,
@@ -538,6 +590,7 @@ export function ViewSettingsContent(props: ViewSettingsPopoverProps & { closeMen
   const hasFooter = !!onSave || !!onReset || hasExport;
 
   const fieldLabel = (name: string) => allFields.find((f) => f.name === name)?.label || name;
+  const groupLevelLabel = (name: string) => groupFieldLabel?.(name) || fieldLabel(name);
   const none = t('list.none', { defaultValue: 'None' });
   const groupFields: string[] = Array.isArray(groupingConfig?.fields)
     ? groupingConfig.fields.map((f: { field?: string }) => f?.field).filter((f: unknown): f is string => typeof f === 'string' && !!f)
@@ -571,7 +624,7 @@ export function ViewSettingsContent(props: ViewSettingsPopoverProps & { closeMen
       {viewName && <ViewNameField t={t} viewName={viewName} />}
       {fieldsOffered && (
         <div className="border-b p-1" data-testid="options-columns">
-          <p className="px-2 pb-0.5 pt-1 text-[11px] text-muted-foreground">
+          <p className="px-2 pb-0.5 pt-1 text-xs text-muted-foreground">
             {t('list.optionsMenu.shownColumns', { defaultValue: 'Shown columns' })}
           </p>
           <FieldList
@@ -589,7 +642,7 @@ export function ViewSettingsContent(props: ViewSettingsPopoverProps & { closeMen
             onClick={() => setPage('fields')}
             data-testid="options-add-column"
             className={cn(
-              'flex w-full items-center gap-1.5 rounded-sm px-2 py-1.5 text-left text-[13px] text-muted-foreground hover:bg-muted hover:text-foreground max-sm:min-h-11',
+              'flex w-full items-center gap-1.5 rounded-sm px-2 py-1.5 text-left text-sm text-muted-foreground hover:bg-muted hover:text-foreground max-sm:min-h-11',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
             )}
           >
@@ -610,7 +663,7 @@ export function ViewSettingsContent(props: ViewSettingsPopoverProps & { closeMen
         {showGroup && setGroupingConfig && (
           <MenuRow
             label={titles.group}
-            value={groupFields.length > 0 ? groupFields.map(fieldLabel).join(' › ') : none}
+            value={groupFields.length > 0 ? groupFields.map(groupLevelLabel).join(' › ') : none}
             onOpen={() => setPage('group')}
             testId="options-row-group"
           />
@@ -630,7 +683,7 @@ export function ViewSettingsContent(props: ViewSettingsPopoverProps & { closeMen
             title={t('grid.toolbar.densityCycleShortHint', { defaultValue: 'Click to cycle' })}
             data-testid="view-settings-density-cycle"
             className={cn(
-              'flex w-full items-center gap-3 rounded-sm px-2 py-1.5 text-left text-[13px] hover:bg-muted max-sm:min-h-11',
+              'flex w-full items-center gap-3 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-muted max-sm:min-h-11',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
             )}
           >
@@ -703,12 +756,16 @@ export function ViewSettingsContent(props: ViewSettingsPopoverProps & { closeMen
         <div className="p-3">
           <GroupingEditor
             value={groupingConfig as any}
-            fieldOptions={groupFieldOptions(allFields)}
+            fieldOptions={groupOptions ?? groupFieldOptions(allFields, fieldOrder)}
+            askFieldOnAdd
+            fieldOptionsLoading={groupOptionsLoading}
+            fieldLabel={groupLevelLabel}
             maxLevels={3}
             labels={{
               addGroup: t('list.addGroup', 'Add group field'),
               collapseTitle: t('list.collapsedByDefault', 'Collapsed by default'),
               removeTitle: t('list.removeGroup', 'Remove'),
+              noFields: t('list.noGroupableFields', { defaultValue: 'No field here can group the list' }),
             }}
             onChange={(next) => setGroupingConfig(next as any)}
           />
@@ -726,7 +783,7 @@ export function ViewSettingsContent(props: ViewSettingsPopoverProps & { closeMen
         action={rowColorConfig ? clearAction(() => setRowColorConfig(undefined), 'options-color-clear') : undefined}
       >
         <div className="p-3">
-          <label className="mb-1 block text-[11px] text-muted-foreground">
+          <label className="mb-1 block text-xs text-muted-foreground">
             {t('list.colorByField', { defaultValue: 'Color by field' })}
           </label>
           <ColorFieldPicker
@@ -762,7 +819,7 @@ export function ViewSettingsContent(props: ViewSettingsPopoverProps & { closeMen
                 onClick={() => setMode(mode)}
                 data-testid={`options-row-height-${mode}`}
                 className={cn(
-                  'flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-[13px] hover:bg-muted max-sm:min-h-11',
+                  'flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-muted max-sm:min-h-11',
                   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                   active ? 'font-medium text-foreground' : 'text-foreground/90',
                 )}
@@ -880,7 +937,7 @@ export function ViewSettingsPopover(props: ViewSettingsPopoverProps) {
           <ChevronDown className="hidden h-3 w-3 opacity-60 @[56rem]/list:inline" aria-hidden="true" />
           {changedCount > 0 && (
             <span
-              className="flex h-4 min-w-[16px] items-center justify-center text-[10px] font-medium text-muted-foreground tabular-nums"
+              className="flex h-4 min-w-[16px] items-center justify-center text-xs font-medium text-muted-foreground tabular-nums"
               data-testid="toolbar-display-count"
             >
               {changedCount}

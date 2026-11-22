@@ -693,6 +693,66 @@ export function buildFilterCondition(
 }
 
 /**
+ * The operators one bound field takes when it is stored as a JSON column, or
+ * `undefined` for every other field (and for a field whose definition is not
+ * known). The renderer answers it with `jsonColumnFilterOperators` from
+ * `@object-ui/components`, the one helper every filter surface reads, over the
+ * field definitions of the widget's object: this module does not restate that
+ * operator table, and `@object-ui/core` cannot import the components package.
+ */
+export type DashboardFilterJsonColumnOperators = (field: string) => readonly string[] | undefined;
+
+/** A filter whose value names members (`select` / `lookup`): `=` or `$in` today. */
+function isMemberFilter(def: DashboardFilterDef): boolean {
+  return def.type === 'select' || def.type === 'lookup';
+}
+
+/**
+ * Lower a `select` / `lookup` filter bound to a field stored as a JSON column.
+ *
+ * A field holding several values takes `contains` (`$contains`, ONE member per
+ * condition) and the empty checks; `=` and `$in` are refused. So one selected
+ * member is `{ field: { $contains: member } }`, and several (any of them) are
+ * `$or` over one `$contains` each.
+ *
+ * Only a field that takes `contains` reaches here. A field stored as a JSON
+ * column without it (a structured value such as `json` or `address`, empty
+ * checks only) holds no members, so the caller keeps the `=` / `$in` lowering
+ * for it, as before.
+ */
+function buildJsonColumnMemberClause(
+  field: string,
+  value: unknown,
+): Record<string, unknown> | undefined {
+  const members = (Array.isArray(value) ? value : [value]).filter(
+    (m) => m !== undefined && m !== null && m !== '',
+  );
+  if (members.length === 0) return undefined;
+  if (members.length === 1) return { [field]: { $contains: members[0] } };
+  return { $or: members.map((m) => ({ [field]: { $contains: m } })) };
+}
+
+/**
+ * The names of the `select` / `lookup` filters that hold a value AND bind this
+ * widget — the filters whose lowering depends on the bound field's definition
+ * (see `jsonColumnOperators` on {@link buildWidgetScopedFilter}). Empty when
+ * no such filter applies, so a renderer that waits for the definition before
+ * querying waits only when the answer can change the query.
+ */
+export function boundMemberFilterNames(
+  widget: Pick<DashboardWidgetSchema, 'id' | 'filterBindings'>,
+  defs: DashboardFilterDef[],
+  values: Record<string, unknown>,
+): string[] {
+  const names: string[] = [];
+  for (const def of defs) {
+    if (!isMemberFilter(def) || isEmptyValue(def, values[def.name])) continue;
+    if (resolveBoundField(widget, def)) names.push(def.name);
+  }
+  return names;
+}
+
+/**
  * Resolve which of the widget's fields a filter binds to.
  * Returns `undefined` when the widget is not bound to this filter.
  *
@@ -727,12 +787,21 @@ function resolveBoundField(
  * field, so a typo surfaces as a visible (fixable) empty widget rather than
  * being silently dropped. Callers omit `knownFields` when metadata is not
  * (yet) available, preserving the previous behaviour.
+ *
+ * `jsonColumnOperators` answers, per bound field, the operators the field
+ * takes when it is stored as a JSON column (a field holding several values,
+ * `multiple: true` or a `multiselect`-like type). A `select` / `lookup` filter
+ * bound to such a field is lowered by {@link buildJsonColumnMemberClause}
+ * instead of to `=` / `$in`, which the server refuses there. Callers omit it
+ * when the field definitions are not known, which keeps the `=` / `$in`
+ * lowering of {@link buildFilterCondition}.
  */
 export function buildWidgetScopedFilter(
   widget: Pick<DashboardWidgetSchema, 'id' | 'filterBindings'>,
   defs: DashboardFilterDef[],
   values: Record<string, unknown>,
   knownFields?: ReadonlySet<string>,
+  jsonColumnOperators?: DashboardFilterJsonColumnOperators,
 ): Record<string, unknown> | undefined {
   const conditions: Record<string, unknown>[] = [];
 
@@ -750,6 +819,11 @@ export function buildWidgetScopedFilter(
             `map it with filterBindings: { "${def.name}": "<field>" } or opt out with false`,
         );
       }
+      continue;
+    }
+    if (isMemberFilter(def) && jsonColumnOperators?.(field)?.includes('contains')) {
+      const clause = buildJsonColumnMemberClause(field, value);
+      if (clause) conditions.push(clause);
       continue;
     }
     const condition = buildFilterCondition(def, value);

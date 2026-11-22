@@ -50,17 +50,16 @@ vi.mock('../../hooks/useAiSurface', () => ({
 
 // Chrome this card does not touch.
 vi.mock('../UnifiedSidebar', () => ({ UnifiedSidebar: () => null }));
-// objectstack#34608 — the launcher is the top-bar robot: the header stand-in
-// draws the real one.
-vi.mock('../AppHeader', async () => {
-  const { AssistantTopBarButton } = await import('../AssistantTopBarButton');
-  return { AppHeader: () => <div data-testid="app-header-stub"><AssistantTopBarButton /></div> };
-});
+// objectstack#34608 — the launcher is the robot; from 768 px up the page
+// header's group draws it (objectstack#36112), so the page below mounts the
+// real one and the phone's bar is a stand-in.
+vi.mock('../AppHeader', () => ({ AppHeader: () => <div data-testid="app-header-stub" /> }));
 vi.mock('../ConsoleNotificationBanners', () => ({ ConsoleNotificationBanners: () => null }));
 vi.mock('../../preview/DraftPreviewBar', () => ({ DraftPreviewBar: () => null }));
 vi.mock('../../preview/UnpublishedAppBar', () => ({ UnpublishedAppBar: () => null }));
 
 import { ConsoleLayout } from '../ConsoleLayout';
+import { AssistantTopBarButton } from '../AssistantTopBarButton';
 import { NavigationProvider } from '../../context/NavigationContext';
 import { DOCK_EXPANDED_STORAGE_KEY } from '../chatDockState';
 
@@ -71,6 +70,9 @@ function mountConsole() {
     <MemoryRouter initialEntries={['/apps/crm?preview=draft']}>
       <NavigationProvider>
         <ConsoleLayout activeAppName="crm" activeApp={APP} onAppChange={vi.fn()} objects={[]}>
+          {/* From 768 px up the robot sits in the page header's button group
+              (objectstack#36111), not in a top bar (objectstack#36112). */}
+          <AssistantTopBarButton />
           <div data-testid="route-content">page</div>
         </ConsoleLayout>
       </NavigationProvider>

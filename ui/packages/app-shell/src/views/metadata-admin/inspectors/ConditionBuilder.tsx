@@ -33,8 +33,9 @@ import { CelPredicateField } from '../CelPredicateField.js';
 import type { CelLintIssue } from '../celAuthoring.js';
 import { useServerHoldAt } from '../draftVerdict.js';
 import { t, tFormat, useMetadataLocale } from '../i18n.js';
+import { listMembershipCel, listSubjectOperators, readListMembership } from './cel-list-membership.js';
 
-type Op = '==' | '!=' | '>' | '<' | '>=' | '<=' | 'truthy' | 'falsy';
+type Op = '==' | '!=' | '>' | '<' | '>=' | '<=' | 'truthy' | 'falsy' | 'contains' | 'notContains';
 
 /** The quote character a string literal was authored with. Remembered per row
  *  so the builder re-emits the author's own spelling instead of normalising it
@@ -110,9 +111,30 @@ const VALUELESS_OP_KEYS: Readonly<Record<'boolean' | 'emptiable' | 'undeclared',
   },
 };
 
-/** The operator list one row offers: the compare operators, then the
- *  value-less pair worded for that row's subject (objectui#11894). */
-function opChoicesFor(declared: SubjectValue | undefined): ReadonlyArray<OpChoice> {
+/**
+ * This builder's operator for each operator the shared filter builder offers
+ * on a LIST subject (objectstack#36167). A translation, not a list: WHICH
+ * operators a list takes is `listSubjectOperators`' answer.
+ */
+const LIST_OP_CHOICES: Readonly<Record<string, OpChoice>> = {
+  contains: { value: 'contains', labelKey: 'engine.inspector.condition.op.contains' },
+  not_contains: { value: 'notContains', labelKey: 'engine.inspector.condition.op.notContains' },
+  is_empty: { value: 'falsy', labelKey: VALUELESS_OP_KEYS.emptiable.falsy },
+  is_not_empty: { value: 'truthy', labelKey: VALUELESS_OP_KEYS.emptiable.truthy },
+};
+
+/** The shared builder's operators for a list subject, or `undefined` when the subject is not one. */
+type ListOpsOf = (subject: string) => readonly string[] | undefined;
+const NO_LIST_SUBJECTS: ListOpsOf = () => undefined;
+
+/**
+ * The operator list one row offers. A list subject (objectstack#36167) takes
+ * membership and the empty checks — never `==` / `!=` / ordering, which CEL
+ * answers as a constant on a list. Every other subject takes the compare
+ * operators, then the value-less pair worded for it (objectui#11894).
+ */
+function opChoicesFor(declared: SubjectValue | undefined, listOps?: readonly string[]): ReadonlyArray<OpChoice> {
+  if (listOps) return listOps.flatMap((op) => (LIST_OP_CHOICES[op] ? [LIST_OP_CHOICES[op]] : []));
   const keys = VALUELESS_OP_KEYS[
     declared === undefined ? 'undeclared' : declared === 'boolean' ? 'boolean' : 'emptiable'
   ];
@@ -175,6 +197,28 @@ function declaredSubjectValues(
     if (declared === undefined) continue;
     out.set(`${fieldPrefix}${f.name}`, declared);
     if (includePrevious) out.set(`previous.${f.name}`, declared);
+  }
+  return out;
+}
+
+/**
+ * Every LIST subject the catalog declares (objectstack#36167), keyed like
+ * {@link declaredSubjectValues}, with the operators the shared builder offers
+ * it. A field is a list exactly when its 「is empty」 row is `multi_value` —
+ * both read the spec's `isMultiValueField` — so this map moves only when that
+ * one does.
+ */
+function listSubjectOps(
+  fields: ReadonlyArray<CatalogField>,
+  fieldPrefix: string,
+  includePrevious: boolean,
+): Map<string, readonly string[]> {
+  const out = new Map<string, readonly string[]>();
+  for (const f of fields) {
+    const ops = listSubjectOperators(f);
+    if (!ops) continue;
+    out.set(`${fieldPrefix}${f.name}`, ops);
+    if (includePrevious) out.set(`previous.${f.name}`, ops);
   }
   return out;
 }
@@ -675,7 +719,12 @@ function compileRow(r: Row, valueOf: SubjectValueOf): { cel: string; compound: b
     const clauses = emptyCheckClauses(r.subject, declared, empty);
     return { cel: clauses.join(empty ? ' || ' : ' && '), compound: clauses.length > 1 };
   }
-  const cmp = `${r.subject} ${r.op} ${fmtValue(r.value, r.quote)}`;
+  if (r.op === 'contains' || r.op === 'notContains') {
+    // objectstack#36167 — list membership, in the one spelling the flow edge's
+    // rows write too; null-safe, as CEL's `in` faults on a `null` list.
+    return { cel: listMembershipCel(r.subject, fmtValue(r.value, r.quote), r.op === 'contains'), compound: true };
+  }
+  const cmp =`${r.subject} ${r.op} ${fmtValue(r.value, r.quote)}`;
   // objectstack#27513 — an ordering comparison on a field faults on a `null`
   // value and the server refuses it at publish; behind `!= null` it is well
   // typed for every value. The same guard the "can't be negative" preset
@@ -790,10 +839,23 @@ function parseGuardedCompare(text: string): Row | null {
   return compileRow(row, NOTHING_DECLARED).cel === text ? row : null;
 }
 
+/**
+ * Read `text` back as a list membership row (objectstack#36167), or `null`.
+ * Accepts exactly the text {@link compileRow} emits for such a row; whether
+ * its subject is a list is {@link initFrom}'s question.
+ */
+function parseMembership(text: string): Row | null {
+  const m = readListMembership(text);
+  if (!m) return null;
+  const v = unfmtValue(m.member);
+  const row: Row = { subject: m.subject, op: m.contains ? 'contains' : 'notContains', value: v.value, quote: v.quote };
+  return compileRow(row, NOTHING_DECLARED).cel === text ? row : null;
+}
+
 /** Read one AND/OR term back as a row, or `null` when it is not a row's shape. */
 function parseTerm(p: string, valueOf: SubjectValueOf): Row | null {
   const group = enclosedGroup(p);
-  if (group !== null) return parseEmptyCheck(group, valueOf) ?? parseGuardedCompare(group);
+  if (group !== null) return parseEmptyCheck(group, valueOf) ?? parseGuardedCompare(group) ?? parseMembership(group);
   const check = parseEmptyCheck(p, valueOf);
   if (check) return check;
   const cmp = /^([a-zA-Z_][\w.]*)\s*(==|!=|>=|<=|>|<)\s*(.+)$/.exec(p);
@@ -817,7 +879,7 @@ function parse(
   if (!s) return { rows: [], join: '&&' };
   // A lone row whose check is several clauses compiles without parentheses,
   // so the whole text is tried as that one row before it is split.
-  const whole = parseEmptyCheck(s, valueOf) ?? parseGuardedCompare(s);
+  const whole = parseEmptyCheck(s, valueOf) ?? parseGuardedCompare(s) ?? parseMembership(s);
   if (whole) return { rows: [whole], join: '&&' };
   const split = splitTopLevel(s);
   if (!split) return null;
@@ -837,10 +899,19 @@ function parse(
  * author stored, so it opens in the raw editor verbatim rather than being
  * rewritten on their next edit (objectui#11894) — the rule this component's
  * header states for every expression it cannot reproduce.
+ *
+ * A row whose operator its subject is not offered opens in the raw editor too
+ * (objectstack#36167): a stored `record.tags == 'x'` on a list is a predicate
+ * CEL answers as a constant, and the rows have no operator to show it with.
  */
-function initFrom(value: string, valueOf: SubjectValueOf): { rows: Row[]; join: '&&' | '||'; raw: boolean } {
+function initFrom(
+  value: string,
+  valueOf: SubjectValueOf,
+  listOpsOf: ListOpsOf = NO_LIST_SUBJECTS,
+): { rows: Row[]; join: '&&' | '||'; raw: boolean } {
   const p = parse(value || '', valueOf);
-  if (p && norm(compile(p.rows, p.join, valueOf)) === norm(value || '')) {
+  const offered = (r: Row) => opChoicesFor(valueOf(r.subject), listOpsOf(r.subject)).some((o) => o.value === r.op);
+  if (p && p.rows.every(offered) && norm(compile(p.rows, p.join, valueOf)) === norm(value || '')) {
     return { rows: p.rows, join: p.join, raw: false };
   }
   return { rows: [], join: '&&', raw: !!value };
@@ -1010,6 +1081,24 @@ export function ConditionBuilder({ label, value, onCommit, objectName, fields: f
     [fields, fieldPrefix, includePrevious],
   );
   const valueOf: SubjectValueOf = (subject) => subjectValues.get(subject);
+  /** The list subjects and their operators (objectstack#36167). It moves only
+   *  with `declaredKey` — see {@link listSubjectOps}. */
+  const listOps = React.useMemo(
+    () => listSubjectOps(fields, fieldPrefix, includePrevious),
+    [fields, fieldPrefix, includePrevious],
+  );
+  const listOpsOf: ListOpsOf = (subject) => listOps.get(subject);
+  /** The operators the row's subject is offered. */
+  const opsFor = (subject: string) => opChoicesFor(valueOf(subject), listOpsOf(subject));
+  /**
+   * A row whose new subject is not offered its operator takes the subject's
+   * first one (objectstack#36167): a list subject is never left on `==`, and a
+   * row moved off a list onto a single-value field is never left on membership.
+   */
+  const withOfferedOp = (r: Row): Row => {
+    const ops = opsFor(r.subject);
+    return ops.some((o) => o.value === r.op) ? r : { ...r, op: ops[0].value };
+  };
   /** Every subject spelling that names a catalog field, hidden and untyped
    *  ones included — what an ordering row is guarded on (objectstack#27513). */
   const fieldSubjects = React.useMemo(() => {
@@ -1024,11 +1113,13 @@ export function ConditionBuilder({ label, value, onCommit, objectName, fields: f
   // Held in a ref so the effects below read this render's catalog without
   // listing a function that is new every render.
   const valueOfRef = React.useRef(valueOf);
+  const listOpsOfRef = React.useRef(listOpsOf);
   React.useEffect(() => {
     valueOfRef.current = valueOf;
+    listOpsOfRef.current = listOpsOf;
   });
 
-  const init = React.useMemo(() => initFrom(value, valueOf), []); // first mount only
+  const init = React.useMemo(() => initFrom(value, valueOf, listOpsOf), []); // first mount only
   const [rows, setRowsState] = React.useState<Row[]>(init.rows);
   const [join, setJoin] = React.useState<'&&' | '||'>(init.join);
   const [raw, setRaw] = React.useState<boolean>(init.raw);
@@ -1043,7 +1134,7 @@ export function ConditionBuilder({ label, value, onCommit, objectName, fields: f
     if (v === lastEmitted.current) return;
     lastEmitted.current = v;
     editedSinceRead.current = false;
-    const next = initFrom(v, valueOfRef.current);
+    const next = initFrom(v, valueOfRef.current, listOpsOfRef.current);
     setRowsState(next.rows);
     setJoin(next.join);
     setRaw(next.raw);
@@ -1063,7 +1154,7 @@ export function ConditionBuilder({ label, value, onCommit, objectName, fields: f
     if (readDeclaredKey.current === declaredKey) return;
     readDeclaredKey.current = declaredKey;
     if (editedSinceRead.current) return;
-    const next = initFrom(lastEmitted.current, valueOfRef.current);
+    const next = initFrom(lastEmitted.current, valueOfRef.current, listOpsOfRef.current);
     setRowsState(next.rows);
     setJoin(next.join);
     setRaw(next.raw);
@@ -1128,7 +1219,7 @@ export function ConditionBuilder({ label, value, onCommit, objectName, fields: f
         <div className="flex items-center justify-between">
           {label ? <Label className="text-xs text-muted-foreground">{label}</Label> : <span />}
           <button type="button" disabled={disabled}
-            onClick={() => { const n = initFrom(value, valueOf); if (!value || !n.raw) { editedSinceRead.current = false; setRowsState(n.rows); setJoin(n.join); setRaw(false); } }}
+            onClick={() => { const n = initFrom(value, valueOf, listOpsOf); if (!value || !n.raw) { editedSinceRead.current = false; setRowsState(n.rows); setJoin(n.join); setRaw(false); } }}
             className="inline-flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground disabled:opacity-50">
             <ListFilter className="h-3 w-3" /> {tLocal('engine.inspector.condition.builder')}
           </button>
@@ -1200,7 +1291,7 @@ export function ConditionBuilder({ label, value, onCommit, objectName, fields: f
               )}
               <div className="flex items-center gap-1">
                 <div className="min-w-0 flex-1">
-                  <Select value={r.subject} onValueChange={(v) => update(rows.map((x, j) => j === i ? { ...x, subject: v } : x))} disabled={disabled}>
+                  <Select value={r.subject} onValueChange={(v) => update(rows.map((x, j) => j === i ? withOfferedOp({ ...x, subject: v }) : x))} disabled={disabled}>
                     <SelectTrigger className="h-7 text-xs"><SelectValue placeholder={tLocal('engine.inspector.condition.subjectPlaceholder')} /></SelectTrigger>
                     <SelectContent>
                       {subjectOptions.map((o) => (
@@ -1225,7 +1316,7 @@ export function ConditionBuilder({ label, value, onCommit, objectName, fields: f
                   <Select value={r.op} onValueChange={(v) => update(rows.map((x, j) => j === i ? { ...x, op: v as Op } : x))} disabled={disabled}>
                     <SelectTrigger className="h-7 text-xs"><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      {opChoicesFor(valueOf(r.subject)).map((o) => <SelectItem key={o.value} value={o.value}>{'symbol' in o ? o.symbol : tLocal(o.labelKey)}</SelectItem>)}
+                      {opsFor(r.subject).map((o) => <SelectItem key={o.value} value={o.value}>{'symbol' in o ? o.symbol : tLocal(o.labelKey)}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </div>

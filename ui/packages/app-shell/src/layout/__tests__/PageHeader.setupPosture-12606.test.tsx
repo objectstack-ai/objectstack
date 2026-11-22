@@ -62,10 +62,10 @@ describe('the console page header’s Setup posture (objectui#12606)', () => {
       const chip = within(header).getByTestId('kind-chip');
       expect(chip.parentElement).toBe(h1.parentElement);
 
-      // The description is its own line under the title line, 13px.
+      // The description is its own line under the title line, 12px.
       const description = within(header).getByTestId('page-header-description');
       expect(description.textContent).toBe('Everyone who can sign in.');
-      expect(description.className).toContain('text-[13px]');
+      expect(description.className).toContain('text-xs');
       expect(description.parentElement).toBe(h1.parentElement!.parentElement);
       expect(description.previousElementSibling).toBe(h1.parentElement);
 

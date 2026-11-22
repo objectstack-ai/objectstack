@@ -286,7 +286,7 @@ export function HistoryTimeline({
                   {entry.action && (
                     <Badge
                       variant={variant}
-                      className={cn('text-[10px] tracking-wide', actionLabel === entry.action && 'uppercase')}
+                      className={cn('text-xs tracking-wide', actionLabel === entry.action && 'uppercase')}
                     >
                       {actionLabel}
                     </Badge>

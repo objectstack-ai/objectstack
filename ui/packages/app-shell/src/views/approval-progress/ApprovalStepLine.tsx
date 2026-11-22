@@ -109,7 +109,7 @@ export const ApprovalStepLine: React.FC<ApprovalStepLineProps> = ({ steps, decid
           <li key={s.id} className="flex items-start gap-2" data-decision={decision}>
             <div className="flex flex-col items-center self-stretch">
               <span className={cn(
-                'flex items-center justify-center h-5 w-5 shrink-0 rounded-full text-[10px] font-semibold',
+                'flex items-center justify-center h-5 w-5 shrink-0 rounded-full text-xs font-medium',
                 marker?.tint ?? (decision && 'bg-muted text-muted-foreground border'),
                 state === 'done' && 'bg-emerald-500 text-white',
                 state === 'current' && 'bg-amber-500 text-white ring-2 ring-amber-200 dark:ring-amber-500/30',

@@ -163,6 +163,9 @@ vi.mock('@object-ui/app-shell', async (importOriginal) => ({
   RequireOrganization: ({ children }: { children?: ReactNode }) => <>{children}</>,
   ConsoleToaster: () => null,
   LoadingScreen: () => <div data-testid="loading-screen" />,
+  // objectstack#35981 — the permission scope's loading fallback is the console's
+  // boot fallback, which is the splash off an app route.
+  LoadingFallback: () => <div data-testid="loading-screen" />,
   DefaultHomePage: () => <HomeRosterProbe />,
   DefaultAppContent: () => <AppContentProbe />,
   BuilderLanding: () => <StudioBuilderProbe />,

@@ -23,6 +23,13 @@
  * posture in `PageView.editInStudioFollowsPackagePosture-12615`; every case
  * here is a caller who passes the first, on a package the list serves
  * writable.
+ *
+ * objectstack#36111 — the floating pencil is the phone's face since the page
+ * header and the shell's button group arrived: from the phone breakpoint up
+ * the top bar's 「Edit app」 (and the group's, once the shell turns it on)
+ * opens the same surface through the same gate
+ * (`ShellPageActions-36111`). So this file reads the pencil at a
+ * phone's width.
  */
 
 import '@testing-library/jest-dom/vitest';
@@ -108,6 +115,8 @@ async function mountUnder(app: Record<string, unknown> | undefined) {
 }
 
 beforeEach(() => {
+  // The pencil's face: a phone (objectstack#36111).
+  Object.defineProperty(window, 'innerWidth', { configurable: true, value: 375 });
   navigateSpy.mockClear();
   // objectui#12615 — the app's package is served writable, so the pencil's
   // package half passes and this file's own questions are the ones asked.
@@ -125,6 +134,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1024 });
   cleanup();
   vi.unstubAllGlobals();
 });

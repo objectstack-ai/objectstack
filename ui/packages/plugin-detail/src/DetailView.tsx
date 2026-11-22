@@ -45,6 +45,7 @@ import { RecordComments } from './RecordComments';
 import { ActivityTimeline } from './ActivityTimeline';
 import { HistoryTimeline } from './HistoryTimeline';
 import { RecordMetaFooter } from './RecordMetaFooter';
+import { useRecordFieldList } from './recordFieldList';
 import { RecordPageProvenanceContext } from './recordPageProvenance';
 import { SchemaRenderer, SchemaErrorBoundary, toRenderableSchema, useSafeFieldLabel, useDataInvalidation, useInlineEdit, useRowPredicate, resolveApprovalLock, usePrintPage, useRecordContext, usePredicateScope } from '@object-ui/react';
 import { buildExpandFields, declaredNameField, getRecordDisplayName, formatTitleTemplate, recordDelete, recordDisplayValueAt, resolveAffordance, toDisplayDate, userActionPredicates, withoutDeniedFields } from '@object-ui/core';
@@ -340,7 +341,12 @@ export const DetailView: React.FC<DetailViewProps> = ({
   // whole-body fold (`EmptySectionsFold`).
   const inRecordDetailsBody = React.useContext(EmptySectionsLineContext);
   const onDefaultRecordPage = useDefaultRecordPage();
-  const emptySectionsAsLine = inRecordDetailsBody || onDefaultRecordPage;
+  // objectstack#36147 — in the laid-out record page's field list every
+  // section folds its own empty rows into the list's one last row, so this
+  // body draws its sections as they are, with neither fold.
+  const fieldList = useRecordFieldList();
+  const foldsIntoFieldList = fieldList !== null && onDefaultRecordPage && !isPrintPage;
+  const emptySectionsAsLine = (inRecordDetailsBody || onDefaultRecordPage) && !foldsIntoFieldList;
   const isInlineEditing = inline?.editing ?? false;
   const editedValues = inline?.draft ?? EMPTY_DRAFT;
   const autoFocusField = inline?.autoFocusField ?? null;
@@ -1206,7 +1212,7 @@ export const DetailView: React.FC<DetailViewProps> = ({
   // for the whole body (`EmptySectionsFold`). Only when the sections ARE the
   // body: section groups draw fields of their own beside them.
   const foldEmptySections = (rendered: React.ReactNode) =>
-    drawn.sectionGroups?.length ? rendered : (
+    drawn.sectionGroups?.length || foldsIntoFieldList ? rendered : (
       <EmptySectionsFold
         sections={drawn.sections ?? []}
         data={{ ...data, ...editedValues }}
@@ -1945,7 +1951,7 @@ export const DetailView: React.FC<DetailViewProps> = ({
                 aria-label={t('detail.approvalProgressLabel')}
                 className="flex items-center gap-2 w-full justify-end"
               >
-                <span className="text-[11px] text-muted-foreground whitespace-nowrap">
+                <span className="text-xs text-muted-foreground whitespace-nowrap">
                   {progress.behavior === 'per_group'
                     ? t('detail.approvalProgressGroups', { got: progress.got, need: progress.need })
                     : t('detail.approvalProgress', { got: progress.got, need: progress.need })}
@@ -1975,7 +1981,7 @@ export const DetailView: React.FC<DetailViewProps> = ({
                       key={g.group}
                       title={`${g.got}/${g.need}`}
                       className={cn(
-                        'inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11px]',
+                        'inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-xs',
                         g.satisfied
                           ? 'border-emerald-300 text-emerald-700'
                           : 'border-border text-muted-foreground',

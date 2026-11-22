@@ -27,6 +27,7 @@ import { suggestRename } from '../shared/rename-guess';
 import { refuseRecordProtoKey } from '../shared/record-proto-key-guard';
 import { bannedKeys } from '../shared/refinement-projection';
 import { FIELD_GROUP_KEY_PATTERN } from './field-group-layout';
+import { RECORD_PAGE_BUILTIN_TABS } from './related-list-entry';
 // [#23809] The stage-field option-kind rule, in its own module so the AI
 // blueprint object (`ai/solution-blueprint.zod.ts`) runs this same refinement.
 import { refuseStageFieldWithoutKinds } from './stage-field-kinds';
@@ -1268,6 +1269,93 @@ export const LifecycleSchema = lazySchema(() => strictObject({
  * snake_case machine-name grammar objects and fields already declare.
  */
 const RELATED_LIST_ENTRY_PATTERN = /^[a-z_][a-z0-9_]*(\.[a-z_][a-z0-9_]*)?$/;
+
+/**
+ * The object form's `list`: any entry name but a built-in tab's
+ * (`RECORD_PAGE_BUILTIN_TABS`), which is written only bare. A pattern rather
+ * than a refinement, so the published JSON Schema refuses it too.
+ */
+const RELATED_LIST_OBJECT_ENTRY_NAME_PATTERN = new RegExp(`^(?!(?:${RECORD_PAGE_BUILTIN_TABS.join('|')})$)`);
+
+const RELATED_LIST_ENTRY_NAME_MESSAGE =
+  'A relatedLists entry is a child object name (e.g. "task") or object.field (e.g. "event.related_to"), in snake_case';
+
+/**
+ * [#35899] The OBJECT form of one `ObjectSchema.relatedLists` entry: the
+ * relationship it names (`list`, spelled as the bare entry is), and that
+ * list's own title and columns, declared on the PARENT so an author arranging
+ * the account page need not edit the task object.
+ *
+ *  - `label` — the tab's title and the table's heading. Wins over the child
+ *    FK's `relatedListTitle`, which wins over the child object's plural label.
+ *  - `columns` — child FIELD NAMES, as the FK's `relatedListColumns` spells
+ *    them. Win over that key, which wins over the child object's derived
+ *    columns (`highlightFields`, then the field walk). One set of columns
+ *    serves every place this list is drawn: its tab, and the body table a
+ *    field group places (a group names no columns of its own). A name that is
+ *    no field of the child is refused where the child's fields are known
+ *    (`@objectstack/lint` `validate-related-list-refs`, the CLI and the runtime
+ *    metadata write door).
+ *
+ * The record page's three built-in tabs (`sys_attachment`,
+ * `sys_approval_request`, `sys_activity`, `RECORD_PAGE_BUILTIN_TABS`) are
+ * written only as their bare names: an object entry naming one is refused,
+ * since their renderers read no title or columns from here.
+ *
+ * No filter, width, totals or row order here: the FK's `relatedListFilter`
+ * keeps the list's scope, and rows keep the child's default list-view sort.
+ */
+export const RelatedListEntryObjectSchema = lazySchema(() => strictObject({
+  surface: 'this relatedLists entry',
+  history:
+    'An unknown key here would be dropped silently: the tab would still draw, with the title and columns ' +
+    'the child declares, so the author would believe the setting they wrote had been applied.',
+  aliases: {
+    name: 'list',
+    object: 'list',
+    objectName: 'list',
+    relationship: 'list',
+    title: 'label',
+    fields: 'columns',
+  },
+  guidance: {
+    filter:
+      '`filter` is not a relatedLists entry key: a related list\'s scope is the child FK\'s `relatedListFilter`.',
+    sort:
+      '`sort` is not a relatedLists entry key: a related list orders its rows the way the child object\'s default list view sorts.',
+  },
+}, {
+  list: z.string().regex(RELATED_LIST_ENTRY_PATTERN, { message: RELATED_LIST_ENTRY_NAME_MESSAGE })
+    .regex(RELATED_LIST_OBJECT_ENTRY_NAME_PATTERN, {
+      message:
+        `${RECORD_PAGE_BUILTIN_TABS.map((n) => `'${n}'`).join(', ')} are built-in record-page tabs, drawn by their own ` +
+        'renderers: write one as its bare name (e.g. \'sys_attachment\'), never as { list }. A built-in tab takes no label or columns.',
+    })
+    .describe('The relationship this entry names: a child object name (e.g. "quote_line"), or object.field when that child has more than one relationship to this object.'),
+  label: z.string().min(1).optional()
+    .describe("This list's title on the record page (its tab and its table heading). Wins over the child FK's relatedListTitle; absent = that key, else the child object's plural label."),
+  columns: z.array(z.string({
+    error: (issue) => issue.code === 'invalid_type'
+      ? "A relatedLists entry's columns are child FIELD-NAME strings (e.g. ['product', 'amount']): labels, cell types and formatting come from the child object's field definitions."
+      : undefined,
+  }).min(1)).min(1).optional()
+    .describe("This list's columns, as field names of the child object (e.g. ['product', 'quantity', 'amount']). Wins over the child FK's relatedListColumns; absent = that key, else the child object's derived columns. Used wherever this list is drawn: its tab, and the body table a field group places. A name that is no field of the child is refused where the child is known."),
+}));
+
+/**
+ * [#27069 · #35897 · #35899] One `ObjectSchema.relatedLists` entry: the bare
+ * name (`'task'`, `'event.related_to'`, or a built-in tab such as
+ * `'sys_attachment'`), or {@link RelatedListEntryObjectSchema}'s object form
+ * carrying the list's own title and columns. The two mix freely.
+ */
+export const RelatedListEntrySchema = lazySchema(() => z.union([
+  z.string().regex(RELATED_LIST_ENTRY_PATTERN, { message: RELATED_LIST_ENTRY_NAME_MESSAGE }),
+  RelatedListEntryObjectSchema,
+]));
+/** One `relatedLists` entry as an author writes it. */
+export type RelatedListEntry = z.input<typeof RelatedListEntrySchema>;
+/** One `relatedLists` entry after parse. */
+export type RelatedListEntryParsed = z.infer<typeof RelatedListEntrySchema>;
 
 /**
  * Object Field Group Schema — MVP (data-layer protocol)
@@ -4082,9 +4170,9 @@ const ObjectSchemaBase = strictObject(
    * surfaces. Each flag overrides the default derived from
    * {@link managedBy} via {@link resolveCrudAffordances}. Useful for the
    * handful of objects whose lifecycle doesn't cleanly fit a single
-   * bucket — e.g. an `append-only` table that should still expose CSV
-   * Export, or a `config` table that admins legitimately want to bulk
-   * import via CSV.
+   * bucket — e.g. a `platform` table whose records the console should not
+   * offer for download (`exportCsv: false`), or a `config` table that
+   * admins legitimately want to bulk import via CSV.
    *
    * Omitting the block (or leaving individual flags `undefined`) keeps
    * the {@link managedBy}-derived default.
@@ -4103,8 +4191,8 @@ const ObjectSchemaBase = strictObject(
    * off on a `controlled_by_parent` detail), and it can open the action only
    * on an object that is structurally eligible for it — see
    * `user-action-transfer.ts` (`isTransferEligible`,
-   * `resolveUserActionTransfer`). Nothing reads it at runtime yet: the Change
-   * Owner endpoint and the console action are cards #35402 and #35403.
+   * `resolveUserActionTransfer`). The server's Change Owner endpoint reads it
+   * (card #35402); the console action is card #35403.
    */
   userActions: strictObject({
     surface: "this object's `userActions` block",
@@ -4162,10 +4250,10 @@ const ObjectSchemaBase = strictObject(
         '`clone` is a CAPABILITY, not a user action — write `enable: { clone: false }`. ' +
         'The `enable` block (ObjectCapabilities) is where record deep-cloning is governed.',
       read:
-        '`userActions` toggles WRITE affordances only; there is no read toggle. Read ' +
+        '`userActions` toggles the write affordances and the data Export entry; there is no read toggle. Read ' +
         'access is governed by permissions (`requiredPermissions`) and `access.default`.',
       view:
-        '`userActions` toggles WRITE affordances only; there is no view toggle. ' +
+        '`userActions` toggles the write affordances and the data Export entry; there is no view toggle. ' +
         'Visibility is governed by permissions (`requiredPermissions`) and `access.default`.',
     },
   }, {
@@ -4181,7 +4269,9 @@ const ObjectSchemaBase = strictObject(
     delete: z.union([z.boolean(), RowCrudActionOverrideSchema]).optional().describe(
       'Show row-level delete + bulk delete. Boolean, or an object adding per-record visibleWhen/disabledWhen CEL predicates.',
     ),
-    exportCsv: z.boolean().optional().describe('Show CSV export entry.'),
+    exportCsv: z.boolean().optional().describe(
+      "Show the Export entry that downloads this object's data as CSV, XLSX or JSON: the grid's Export menu and its table CSV button, the list view's Export, and a dataset report's Export over this object; false hides it. A view's export of the picture it draws (the Gantt chart's PNG / PDF) is not covered. Omitted: shown, in every managedBy bucket. It hides the entry and refuses no export request: who may export is the permission set's allowExport.",
+    ),
     transfer: z.union([z.boolean(), RowCrudActionOverrideSchema]).optional().describe(
       'Offer the Change Owner action (single and bulk) on records of this object. Boolean, or an object adding per-record visibleWhen/disabledWhen CEL predicates. Omitted: on, except off on a controlled_by_parent detail. Offered only where the platform injects a reassignable owner_id that is provable and not declared readonly (ownership user or omitted, no managedBy, not a sys_ object; an external object declares owner_id or maps a remote column onto it); enabled: true elsewhere is refused. Gates the action, not a plain owner_id write. Resolved by resolveUserActionTransfer.',
     ),
@@ -4623,14 +4713,49 @@ const ObjectSchemaBase = strictObject(
   // (framework#2536): authoring it is rejected by `create()` like any unknown
   // key. All first-party consumers read `highlightFields` since objectui#2168.
   /**
-   * [#27069] The business order of this object's RELATED LISTS on its record
-   * page — what `highlightFields` is to fields, for child relationships. Each
-   * entry names one inbound relationship: the child object (`'task'`), or
-   * `object.field` when that child points here through more than one FK
-   * (`'event.related_to'`); a bare child name orders all of that child's lists
-   * together. Listed relationships come first, in this order; every unlisted
-   * one follows in the derived order (owned `master_detail` children, then
-   * `lookup` children, each in declaration order).
+   * [#27069 · #35897 · #35899] This object's record-page TABS beside its
+   * overview: which related lists show, in what order, with what title and
+   * columns, and where the three built-in tabs sit — what `highlightFields`
+   * is to fields, for child relationships.
+   *
+   * Absent (or empty): every inbound relationship shows, in the derived order
+   * (owned `master_detail` children, then `lookup` children, each in
+   * declaration order), then the attachments, approvals and activity-stream
+   * tabs — exactly as before this key existed.
+   *
+   * Declared: ONLY the lists it names show, in its order; removing an entry
+   * removes that tab. Each entry names one inbound relationship — the child
+   * object (`'task'`, every list of that child), or `object.field` when that
+   * child points here through more than one FK (`'event.related_to'`) — or a
+   * built-in tab by the platform object it draws (`RECORD_PAGE_BUILTIN_TABS`):
+   *
+   *  - `'sys_attachment'` — attachments; still drawn only when the object
+   *    enables files (`enable.files`), and not drawn when unlisted;
+   *  - `'sys_approval_request'` — approvals; still drawn only when the record
+   *    has approval requests. Unlisted, it follows the listed tabs: an
+   *    approval is never hidden by leaving it out;
+   *  - `'sys_activity'` — the one activity stream (activities, discussion and
+   *    field changes, each still switched by the object's own keys). Unlisted,
+   *    it closes the strip.
+   *
+   * `sys_comment` and `sys_audit_log` are parts of that stream, not tabs;
+   * `@objectstack/lint` warns on them and prescribes `'sys_activity'`.
+   *
+   * An entry is the bare name, or the object form
+   * {@link RelatedListEntryObjectSchema} (`{ list, label?, columns? }`) giving
+   * that list its own title and columns on the parent; the two forms mix. A
+   * built-in takes only the bare name.
+   *
+   * A child list another package adds is no exception: once this list is
+   * declared, it shows no tab until an entry names it, and `defineStack`
+   * accepts that name only when the package is in the stack. Letting an
+   * extension package place its own list is epic #35896's child card #35901.
+   *
+   * The FK's `relatedList: false` still hides a list whatever this says. Body
+   * tables a field group places in the overview (`fieldGroups[].relatedList`)
+   * are the field groups' to place and are not hidden by this list; it orders
+   * the body tables it names, and its `label` / `columns` apply wherever the
+   * list is drawn.
    *
    * Names are judged where the children are known (the shape alone is judged
    * at parse), and each refusal names the entry and the inbound relationships
@@ -4650,21 +4775,14 @@ const ObjectSchemaBase = strictObject(
    *    package's object that points in, so the entry is stored, and the
    *    record page places nothing for it. The boundary is deliberate: the
    *    `validate-related-list-refs` rule's header in `@objectstack/lint`
-   *    carries the reasoning.
-   *
-   * It orders; it does not show or hide. `relatedList: false` on the FK still
-   * hides a listed relationship, and a FK's `relatedList: 'primary'` still
-   * decides where its list is drawn (the record's body rather than a side
-   * card): this order applies among the body tables and among the side cards.
+   *    carries the reasoning;
+   *  - the three built-in names are never judged as children.
    *
    * Reader: objectui's record page, through `deriveRelatedLists`
-   * (`ui/packages/app-shell/src/utils/deriveRelatedLists.ts`).
+   * (`ui/packages/app-shell/src/utils/deriveRelatedLists.ts`) and the
+   * synthesized page's tab list (`buildDefaultTabs`).
    */
-  relatedLists: z.array(
-    z.string().regex(RELATED_LIST_ENTRY_PATTERN, {
-      message: 'A relatedLists entry is a child object name (e.g. "task") or object.field (e.g. "event.related_to"), in snake_case',
-    }),
-  ).optional().describe('Business order of this object\'s related lists on its record page, most important first. Each entry is a child object name (e.g. "task"), or object.field when that child has more than one relationship to this object (e.g. "event.related_to"). Listed relationships come first in this order; unlisted ones follow in the derived order (owned master_detail children, then lookup children). An entry whose child is in the stack but has no inbound lookup / master_detail field to this object is refused everywhere. An entry whose child exists nowhere is refused by os validate / os build (which leave a sys_ / cloud_ / ai_ name to the runtime) and by a metadata write that names no package; a write into a package stores it, since a child outside the package may be a downstream package\'s object that points here, and the record page places nothing for it. It orders only: relatedList: false on the relationship still hides a list, and relatedList: \'primary\' still places a list in the record\'s body, so the order applies among the body tables and among the side cards.'),
+  relatedLists: z.array(RelatedListEntrySchema).optional().describe('The record page\'s tabs beside the overview, in order. Absent: every related list shows (owned master_detail children, then lookup children), then attachments, approvals and the activity stream, as before. Declared: only the lists named here show, in this order; leaving one out hides its tab. That includes a child list another package adds: it is hidden until this object names it, which a build accepts only when that package is in the stack (letting a package place its own list is a later change). Each entry is a child object name (e.g. "task"), object.field when that child has more than one relationship to this object (e.g. "event.related_to"), or a built-in tab: "sys_attachment" (attachments, still only when enable.files is on; not shown when unlisted), "sys_approval_request" (approvals, still only when the record has requests; when unlisted it follows the listed tabs), "sys_activity" (the activity stream of activities, discussion and changes; when unlisted it comes last). An entry may instead be { list, label?, columns? } to give that list its own title and child-field columns (wins over the child FK\'s relatedListTitle / relatedListColumns, used wherever the list is drawn); a built-in tab is written only as its bare name. relatedList: false on the FK still hides a list; body tables placed by fieldGroups are not hidden by this list. A name whose child is in the stack but has no inbound lookup / master_detail field to this object is refused everywhere; one whose child exists nowhere is refused by os validate / os build (which leave a sys_ / cloud_ / ai_ name to the runtime) and by a metadata write that names no package; a write into a package stores it and the record page places nothing for it. A columns name that resolves to no field of the child (a dotted name is walked through the child\'s relationships, as relatedListColumns is) is refused.'),
   /**
    * [ADR-0085] Semantic role: the field that represents the record's LINEAR
    * lifecycle (an ordered pipeline / stage progression). A string names the
@@ -5798,7 +5916,11 @@ export interface CrudAffordances {
   edit: boolean;
   /** Row-level + bulk delete. */
   delete: boolean;
-  /** CSV / clipboard export. Allowed even on append-only audit tables by default. */
+  /**
+   * The console's data Export entry: a CSV, XLSX or JSON download of the
+   * object's data (not a view's picture export). On by default in every
+   * bucket, append-only audit tables included.
+   */
   exportCsv: boolean;
   /**
    * Per-record CEL predicates for the built-in row Edit action, present only

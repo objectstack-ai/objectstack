@@ -20,7 +20,7 @@
     }
   },
   "scripts": {
-    "build": "tsup --config ../../tsup.config.ts && node ../../scripts/check-dts-emitted.mjs",
+    "build": "tsup && node ../../scripts/check-dts-emitted.mjs",
     "dev": "tsc -w",
     "test": "vitest run --project local",
     "test:repo": "vitest run --project repo",

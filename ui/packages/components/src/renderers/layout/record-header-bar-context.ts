@@ -79,6 +79,27 @@ export interface RecordHeaderState {
    * stage, for a reader who may. Absent: the tag as it is.
    */
   stage?: (parts: RecordHeaderStageParts) => React.ReactNode;
+  /**
+   * The name the header gives the record, where the host knows a better one
+   * than the object's declared title: a record that stands for another record
+   * (an approval request) is named by the record it stands for. Absent, or
+   * with an empty `text`: the title the header derives from the object's
+   * declaration, unchanged.
+   */
+  title?: RecordHeaderTitle;
+}
+
+/**
+ * The host's name for the record (`RecordHeaderState.title`).
+ */
+export interface RecordHeaderTitle {
+  /** The name, as plain text: what the title says and what a reader copies. */
+  text: string;
+  /**
+   * Drawn inside the title's heading in place of `text`, such as a link to the
+   * record the name belongs to. Absent: `text`.
+   */
+  node?: React.ReactNode;
 }
 
 /**
