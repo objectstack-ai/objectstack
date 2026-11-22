@@ -1601,6 +1601,8 @@ const ja = {
     pathStageChangeConflict: '他のユーザーがこのレコードを変更したため、最新の内容を表示しています。移動が必要な場合は、もう一度ステージを押してください。',
     pathStageChangeDenied: 'このレコードのステージを変更する権限がありません。',
     pathStageChangeFailed: 'ステージを変更できませんでした。',
+    stageChangeStartsHeading: '保存すると次のフローが開始されます：',
+    stageChangeStartsApproval: '承認を開始',
     inlineEditRecordChanged: "編集中にこのレコードが別の場所で変更されました。未保存の変更はそのまま残り、保存すると最新版に上書きされます。",
     stageMenuTrigger: 'ステージ：{{stage}}。ステージを変更',
     stageMenuCurrent: '現在のステージ',

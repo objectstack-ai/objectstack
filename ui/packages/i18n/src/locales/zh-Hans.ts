@@ -1365,6 +1365,8 @@ const zh = {
     pathStageChangeConflict: '其他人已修改此记录，现已显示最新版本。如仍需移动，请再次点击该阶段。',
     pathStageChangeDenied: '你没有更改此记录阶段的权限。',
     pathStageChangeFailed: '无法更改阶段。',
+    stageChangeStartsHeading: '保存后将启动以下流程：',
+    stageChangeStartsApproval: '发起审批',
     inlineEditRecordChanged: '编辑期间，此记录已在别处被修改。你未保存的修改会保留，保存时以你的修改为准，写到最新版本上。',
     stageMenuTrigger: '阶段：{{stage}}，更改阶段',
     stageMenuCurrent: '当前阶段',

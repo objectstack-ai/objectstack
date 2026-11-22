@@ -1563,6 +1563,8 @@ const es = {
     pathStageChangeConflict: 'Otra persona ha modificado este registro y ahora se muestra la versión más reciente. Vuelve a pulsar la etapa si el cambio sigue siendo válido.',
     pathStageChangeDenied: 'No tienes permiso para cambiar la etapa de este registro.',
     pathStageChangeFailed: 'No se ha podido cambiar la etapa.',
+    stageChangeStartsHeading: 'Al guardar este cambio se inician estos flujos:',
+    stageChangeStartsApproval: 'inicia una aprobación',
     inlineEditRecordChanged: "Este registro se modificó en otro lugar mientras lo editaba. Sus cambios sin guardar se conservan, y Guardar los escribe sobre la versión más reciente.",
     stageMenuTrigger: 'Etapa: {{stage}}. Cambiar etapa',
     stageMenuCurrent: 'etapa actual',

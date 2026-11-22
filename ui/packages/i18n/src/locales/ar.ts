@@ -1695,6 +1695,8 @@ const ar = {
     pathStageChangeConflict: 'قام شخص آخر بتغيير هذا السجل، ويتم الآن عرض أحدث إصدار. اضغط على المرحلة مرة أخرى إذا كان النقل لا يزال مطلوبًا.',
     pathStageChangeDenied: 'ليس لديك إذن لتغيير مرحلة هذا السجل.',
     pathStageChangeFailed: 'تعذر تغيير المرحلة.',
+    stageChangeStartsHeading: 'يؤدي حفظ هذا التغيير إلى بدء هذه التدفقات:',
+    stageChangeStartsApproval: 'يبدأ موافقة',
     inlineEditRecordChanged: "تم تغيير هذا السجل في مكان آخر أثناء التحرير. يتم الاحتفاظ بتغييراتك غير المحفوظة، ويكتبها الحفظ فوق أحدث إصدار.",
     stageMenuTrigger: 'المرحلة: {{stage}}. تغيير المرحلة',
     stageMenuCurrent: 'المرحلة الحالية',

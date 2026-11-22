@@ -143,7 +143,17 @@ beforeEach(() => {
   perms.writeDenied = [];
 });
 
-afterEach(() => cleanup());
+// objectstack#35928 — the stage confirm asks which flows the move would start.
+// Answered here as a deployment without that read (501), so the confirm reads as
+// it does without it and no request leaves for the network.
+beforeEach(() => {
+  vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 501, json: async () => ({}) })));
+});
+
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 describe('#35891 the stage tag opens a menu of every stage', () => {
   it('lists every stage in order, the current one checked', () => {

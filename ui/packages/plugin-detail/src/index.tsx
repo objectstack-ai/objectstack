@@ -142,6 +142,10 @@ export type { RecordOperation } from './useRecordEditable';
 // claim is `{ owner_id: <self> }` through the normal update.
 export { recordSitsInQueue, useQueueClaimOffered, claimQueuedRecord, seedQueueClaimDecision } from './queueClaim';
 export type { QueueClaimOutcome, ClaimWriter } from './queueClaim';
+// objectstack#35928 — the flows a stage change would start, named in both
+// stage confirms: the record page's and the list cell's (`@object-ui/plugin-grid`).
+export { useRecordUpdateStarts, StageChangeStarts, RECORD_UPDATE_STARTS_PATH } from './stageChangeStarts';
+export type { RecordUpdateStartsAsk } from './stageChangeStarts';
 export { SectionGroup } from './SectionGroup';
 export { HeaderHighlight } from './HeaderHighlight';
 export { InlineFieldInput } from './InlineFieldInput';

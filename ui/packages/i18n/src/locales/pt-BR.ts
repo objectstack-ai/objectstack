@@ -1560,6 +1560,8 @@ const pt = {
     pathStageChangeConflict: 'Outra pessoa alterou este registro, e a versão mais recente está sendo exibida. Pressione a etapa novamente se a mudança ainda se aplicar.',
     pathStageChangeDenied: 'Você não tem permissão para alterar a etapa deste registro.',
     pathStageChangeFailed: 'Não foi possível alterar a etapa.',
+    stageChangeStartsHeading: 'Salvar esta alteração inicia estes fluxos:',
+    stageChangeStartsApproval: 'inicia uma aprovação',
     inlineEditRecordChanged: "Este registro foi alterado em outro lugar enquanto você editava. Suas alterações não salvas são mantidas, e Salvar as grava sobre a versão mais recente.",
     stageMenuTrigger: 'Etapa: {{stage}}. Alterar etapa',
     stageMenuCurrent: 'etapa atual',

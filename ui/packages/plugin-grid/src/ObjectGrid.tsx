@@ -79,6 +79,8 @@ import {
   ConcurrentUpdateDialog,
   isConcurrentUpdateError,
   useDetailTranslation,
+  StageChangeStarts,
+  useRecordUpdateStarts,
   type ConcurrentUpdateConflict,
 } from '@object-ui/plugin-detail';
 import { ChevronRight, ChevronLeft, ChevronsLeft, ChevronsRight, Download, Rows2, Rows3, Rows4, AlignJustify, Loader2, Check } from 'lucide-react';
@@ -935,6 +937,9 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   const [stateChange, setStateChange] = useState<StateChangeConfirm | null>(null);
   const stateChangeDecisionRef = React.useRef<((confirmed: boolean) => void) | null>(null);
   useEffect(() => () => stateChangeDecisionRef.current?.(false), []);
+  // objectstack#35928 — the flows the pending move would start, named under
+  // the confirm's sentence by the reader the record page's confirm shares.
+  const stateChangeStarts = useRecordUpdateStarts(stateChange?.ask ?? null);
   // objectstack#35685 — the rows a select-first save redrew in place, per
   // record id. Each applies while the grid still holds the row object it was
   // saved from (`RowPatch.base`); the next load's rows replace them.
@@ -1435,10 +1440,14 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     );
     const declared = objectFields?.[columnKey]?.label;
     const fallback = typeof declared === 'string' && declared.length > 0 ? declared : columnKey;
+    const recordId = resolveRecordId(row);
     return askStateChange({
       field: columnHeaderOf(columnKey) ?? (objectName ? resolveFieldLabel(objectName, columnKey, fallback) : fallback),
       from: labelOf(row?.[columnKey]),
       to: labelOf(value),
+      ...(objectName && recordId != null && recordId !== ''
+        ? { ask: { object: objectName, recordId: String(recordId), changes: { [columnKey]: value } } }
+        : {}),
     });
   }
 
@@ -4989,6 +4998,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
             })}
           </AlertDialogDescription>
         </AlertDialogHeader>
+        <StageChangeStarts flows={stateChangeStarts} />
         <AlertDialogFooter>
           <AlertDialogCancel>{t('grid.stateChange.cancel')}</AlertDialogCancel>
           <AlertDialogAction onClick={() => settleStateChange(true)}>{t('grid.stateChange.confirm')}</AlertDialogAction>

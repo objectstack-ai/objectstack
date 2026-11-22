@@ -2586,6 +2586,44 @@ uncached one: it is read live on every call and kept out of the ETag, so a
 read that carries it is always answered in full, never with `304 Not
 Modified`. It is the verdict of the engine in the process that answered.
 
+### Which flows a record update would start
+
+`POST /api/v1/automation/_record-starts` answers, before anything is written,
+which flows a proposed update of one record would start. The console's stage
+confirms read it: the list cell's state-machine confirm and the record page's
+stage confirm name those flows under their sentence (objectstack#35928).
+
+```json
+// request
+{ "object": "project", "recordId": "p1", "changes": { "status": "completed" } }
+// response
+{ "success": true, "data": { "flows": [
+  { "name": "project_closure", "label": "Project Closure", "startsApproval": true }
+] } }
+```
+
+- **Who is answered:** any signed-in caller who can read the record. The
+  record is read as the caller, through the `/data` door's own `get`, so a
+  record they cannot read answers `404 RECORD_NOT_FOUND` exactly as one that
+  does not exist. An anonymous call is refused `401`, a malformed body `400
+  VALIDATION_FAILED`, any query parameter `400 VALIDATION_ERROR`, and an engine
+  without the read `501`.
+- **Which flows:** enabled `record_change` flows of that object, armed on their
+  trigger, whose `triggerType` binds an update (`record-…-update` or
+  `record-…-write`), and whose start `condition` holds for the record with
+  `changes` applied, with `previous` as the record read. The condition is judged
+  by the same gate every run passes, on the record as the caller reads it. A
+  condition that cannot be evaluated against it is not listed. Hooks are never
+  listed.
+- **What is served per flow:** its `name`, its authored `label` (a client
+  translates it by `name`, as it translates any flow label) and
+  `startsApproval`, true when the flow holds an `approval` node. No
+  description, condition or nodes.
+
+The answer is a preview, not a promise: the write itself is judged when it
+happens, and a condition that reads a field the caller cannot see is judged
+here on what the caller sees.
+
 ## Expressions in flows
 
 A flow computes with **one expression dialect, CEL**: every condition is bare
