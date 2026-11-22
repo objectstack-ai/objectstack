@@ -307,7 +307,7 @@ export function ReportView({ dataSource }: { dataSource?: DataSource }) {
       ]);
       const authored = authoredBuffer('report', layers as AuthoredLayers, extractDraftBody(servedDraft));
       const lay = layers as { effective?: unknown; code?: unknown } | null;
-      published = ((lay?.effective ?? lay?.code ?? null) as Record<string, unknown> | null) ?? null;
+      published = (lay?.effective ?? lay?.code ?? null) as Record<string, unknown> | null;
       if (authored.kind === 'unserved') failure = tStudio('engine.studio.refusal.draftUnreadable', metadataLocale);
       else if (Object.keys(authored.body).length > 0) body = authored.body;
       else failure = tStudio('engine.form.notFound', metadataLocale);

@@ -319,7 +319,6 @@ export const ZH_CN_SPEC_FORMS: NonNullable<TranslationData['metadataForms']> = {
       description: { label: '描述', helpText: '一句话说明这张报表看什么，显示在名称下方' },
       // ⟨36373⟩ type · dataset · values · rows · columns · order
       type: { label: '类型', helpText: '报表类型：明细表、汇总表、矩阵表或联合报表' },
-      dataset · values · rows · columns · order
       dataset: { label: '数据来源', helpText: '报表从这里取数；每个人只能看到自己有权限的记录' },
       values: { label: '指标', helpText: '要统计的指标（来自数据来源）' },
       rows: { label: '分组', helpText: '按哪些字段分组（来自数据来源）' },
