@@ -84,6 +84,8 @@
  */
 import {
   type PluginContext,
+  isFederatedObject,
+  resolveUserAuthzGrants,
   recordNotFoundError,
   isExternalAudienceContext,
   withoutOperationPrivateKeys,
@@ -728,15 +730,64 @@ export function registerAuthzMiddleware(
     // exemptions are the plain door's. A caller with an active organization,
     // an elevation with no caller, and every platform system context pass on
     // to the bypass unchanged. See `app-automation-organization-wall.ts`.
-    await applyAppAutomationOrganizationWall(opCtx, async (callerContext, object, operation) => {
-      let callerSets: PermissionSet[] = [];
-      try {
-        callerSets = await this.resolvePermissionSetsForContext(callerContext);
-      } catch {
-        // Unresolvable sets grant no exemption: the wall's verdict stands.
-        callerSets = [];
-      }
-      return this.computeLayeredRlsFilter(callerSets, object, operation, callerContext);
+    await applyAppAutomationOrganizationWall(opCtx, {
+      isFederated: (object) => isFederatedObject(typeof ql?.getSchema === 'function' ? ql.getSchema(object) : undefined),
+      // The door's facts for a caller whose context does not carry them (a
+      // flow run's envelope carries no permission sets), resolved by the one
+      // resolver the request path uses. A failed resolution grants nothing:
+      // no sets and an empty membership set, which the wall reads closed.
+      completeCaller: async (callerContext) => {
+        const userId = callerContext.userId;
+        if (typeof userId !== 'string' || userId === '') {
+          return { ...callerContext, permissions: Array.isArray(callerContext.permissions) ? callerContext.permissions : [] };
+        }
+        try {
+          const tenantId = typeof callerContext.tenantId === 'string' && callerContext.tenantId !== '' ? callerContext.tenantId : undefined;
+          const grants = await resolveUserAuthzGrants(ql, userId, tenantId ? { tenantId } : {});
+          return {
+            ...callerContext,
+            positions: grants.positions,
+            permissions: grants.permissions,
+            ...(grants.permissionSetAddresses ? { permissionSetAddresses: grants.permissionSetAddresses } : {}),
+            accessible_org_ids: Array.isArray(callerContext.accessible_org_ids)
+              ? callerContext.accessible_org_ids
+              : grants.accessible_org_ids,
+            ...(callerContext.posture === undefined && grants.posture !== undefined ? { posture: grants.posture } : {}),
+          };
+        } catch (err) {
+          ctx.logger.warn(
+            `[security] The organization wall could not resolve the grants of the user an elevated ` +
+              `${String(opCtx.operation)} on '${String(opCtx.object)}' runs for; it judges the operation with none, ` +
+              'which grants no exemption.',
+            { object: opCtx.object, operation: opCtx.operation, error: err instanceof Error ? err.message : String(err) },
+          );
+          return { ...callerContext, permissions: [], accessible_org_ids: [] };
+        }
+      },
+      callerLayer0: async (callerContext, object, operation) => {
+        let callerSets: PermissionSet[] = [];
+        try {
+          callerSets = await this.resolvePermissionSetsForContext(callerContext);
+        } catch (err) {
+          // [N1] Unresolvable sets grant no exemption: the wall's verdict stands.
+          ctx.logger.warn(
+            `[security] The organization wall could not resolve the permission sets of the user an elevated ` +
+              `${operation} on '${object}' runs for; it judges the operation with none, which grants no exemption.`,
+            { object, operation, error: err instanceof Error ? err.message : String(err) },
+          );
+          callerSets = [];
+        }
+        return this.computeLayeredRlsFilter(callerSets, object, operation, callerContext);
+      },
+      rowInScope: async (object, id, layer0) => {
+        const row = await ql.findOne(object, {
+          where: { $and: [{ id }, layer0] },
+          fields: ['id'],
+          context: { isSystem: true },
+        } as any);
+        return !!row;
+      },
+      notFound: (object, id, context) => recordNotFoundError(object, id as string | number, context as any),
     });
 
     // [#34885] An action body's insert is owner-stamped as a direct create

@@ -33,6 +33,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { RESUME_AUTHORITY_SERVICE } from '@objectstack/spec/contracts';
 import { OrganizationsPlugin } from './organizations-plugin.js';
 
 const WALLED_BOOT_ENV = [
@@ -55,12 +56,122 @@ const HOOK_SOURCE =
   "  const rows = await ctx.api.object('eow_task').find({});" +
   "  await ctx.api.object('eow_note').insert({ name: 'seen-hook', seen: rows.map((r) => r.name).sort().join(',') });" +
   '}' +
-  "if (name === 'hook-write') { await ctx.api.object('eow_task').update({ id: ctx.input.target, touched: 'hook' }); }";
+  "if (name === 'hook-write') { await ctx.api.object('eow_task').update({ id: ctx.input.target, touched: 'hook' }); }" +
+  "if (name === 'hook-remote-read') {" +
+  "  const rows = await ctx.api.object('eow_remote').find({});" +
+  "  await ctx.api.object('eow_note').insert({ name: 'seen-hook-remote', seen: rows.map((r) => r.name).sort().join(',') });" +
+  '}';
+
+
+// ── A federated object: an in-memory remote system behind an external datasource ──
+//
+// The remote rows carry their own `organization_id`, which the object declares
+// (ADR-0015 §10), so the wall keys on it. The engine provisions no storage and
+// projects no driver scope for a federated object: Layer 0's predicate is the
+// only wall it has.
+
+const REMOTE_DS = 'eow_remote_ds';
+const REMOTE = 'eow_remote';
+
+type Row = Record<string, unknown>;
+const remoteRows: Row[] = [];
+
+/** Equality, `$eq` / `$ne` / `$in`, and `$and`; anything else refused by name. */
+function matches(row: Row, where: unknown): boolean {
+  if (where === undefined || where === null) return true;
+  if (typeof where !== 'object' || Array.isArray(where)) throw new Error(`eow remote: a non-object where: ${JSON.stringify(where)}`);
+  for (const [key, cond] of Object.entries(where as Record<string, unknown>)) {
+    if (key === '$and') {
+      if (!(cond as unknown[]).every((w) => matches(row, w))) return false;
+      continue;
+    }
+    if (key.startsWith('$')) throw new Error(`eow remote: unsupported combinator ${key}`);
+    if (cond !== null && typeof cond === 'object' && !Array.isArray(cond)) {
+      for (const [op, value] of Object.entries(cond as Record<string, unknown>)) {
+        if (op === '$eq') { if (row[key] !== value) return false; continue; }
+        if (op === '$ne') { if (row[key] === value) return false; continue; }
+        if (op === '$in') { if (!(value as unknown[]).includes(row[key])) return false; continue; }
+        throw new Error(`eow remote: unsupported operator ${op} on ${key}`);
+      }
+      continue;
+    }
+    if (row[key] !== cond) return false;
+  }
+  return true;
+}
+
+const project = (row: Row, fields: unknown): Row => {
+  if (!Array.isArray(fields)) return { ...row };
+  const out: Row = { id: row.id };
+  for (const f of fields) if (typeof f === 'string') out[f] = row[f];
+  return out;
+};
+
+const remoteDriver = {
+  name: REMOTE_DS,
+  version: '0.0.1',
+  supports: { transactionsUnsupported: true },
+  async connect() {},
+  async disconnect() {},
+  async checkHealth() { return true; },
+  async find(object: string, query: any = {}) {
+    return remoteRows.filter((r) => matches(r, query.where)).map((r) => project(r, query.fields));
+  },
+  async findOne(object: string, query: any = {}) {
+    const hit = remoteRows.find((r) => matches(r, query.where));
+    return hit ? project(hit, query.fields) : null;
+  },
+  async count(object: string, query: any = {}) {
+    return remoteRows.filter((r) => matches(r, query.where)).length;
+  },
+  async update(object: string, id: string | number, data: Row) {
+    const row = remoteRows.find((r) => r.id === id);
+    if (!row) return null;
+    Object.assign(row, data, { id: row.id });
+    return { ...row };
+  },
+  async syncSchema() {},
+};
+
+const remoteDriverPlugin = {
+  name: 'com.example.eow.remote-driver',
+  version: '1.0.0',
+  init: async (ctx: any) => {
+    ctx.registerService(`driver.${REMOTE_DS}`, remoteDriver);
+  },
+};
+
+const REMOTE_READ =
+  "const rows = await ctx.api.object('eow_remote').find({});" +
+  'return { seen: rows.map((r) => r.name).sort() };';
 
 const APP = {
   manifest: { id: 'com.example.eow', namespace: 'eow', version: '0.0.1', type: 'app', name: 'Elevated Org Wall Fixture' },
   requires: ['automation', 'triggers'],
+  datasources: [
+    {
+      name: REMOTE_DS,
+      label: 'Remote system',
+      driver: REMOTE_DS,
+      schemaMode: 'external',
+      config: {},
+      external: { allowWrites: true, validation: { onMismatch: 'fail', checkOnBoot: false } },
+    },
+  ],
+  plugins: [remoteDriverPlugin],
   objects: [
+    {
+      name: REMOTE,
+      label: 'Remote',
+      datasource: REMOTE_DS,
+      external: { remoteName: REMOTE, writable: true },
+      sharingModel: 'public_read_write',
+      fields: {
+        name: { type: 'text', label: 'Name' },
+        touched: { type: 'text', label: 'Touched' },
+        organization_id: { type: 'text', label: 'Organization' },
+      },
+    },
     {
       name: TASK,
       label: 'Task',
@@ -86,6 +197,16 @@ const APP = {
     },
   ],
   actions: [
+    { name: 'eow_remote_export', label: 'Remote export', objectName: TASK, type: 'script', target: 'eowRemoteExport' },
+    { name: 'eow_remote_touch', label: 'Remote touch', objectName: TASK, type: 'script', target: 'eowRemoteTouch' },
+    {
+      name: 'eow_remote_body_read',
+      label: 'Remote body read',
+      objectName: TASK,
+      type: 'script',
+      body: { language: 'js', source: REMOTE_READ, capabilities: ['api.read'] },
+    },
+    { name: 'eow_remote_flow_read', label: 'Remote flow read', objectName: TASK, type: 'flow', target: 'eow_sys_remote_read' },
     { name: 'eow_export', label: 'Export', objectName: TASK, type: 'script', target: 'eowExport' },
     { name: 'eow_delete_completed', label: 'Delete completed', objectName: TASK, type: 'script', target: 'eowDeleteCompleted' },
     { name: 'eow_ids', label: 'Ids', objectName: TASK, type: 'script', target: 'eowIds' },
@@ -119,6 +240,65 @@ const APP = {
     },
   ],
   flows: [
+    {
+      name: 'eow_sys_remote_read',
+      label: 'System remote read',
+      type: 'screen',
+      status: 'active',
+      runAs: 'system',
+      variables: [{ name: 'found', type: 'record_collection', isInput: false, isOutput: false }],
+      nodes: [
+        { id: 'start', type: 'start', label: 'Start' },
+        { id: 'read', type: 'get_record', label: 'Read', config: { objectName: REMOTE, limit: 100, outputVariable: 'found' } },
+        {
+          id: 'report',
+          type: 'create_record',
+          label: 'Report',
+          config: { objectName: NOTE, fields: { name: 'seen-remote-flow', seen: { dialect: 'cel', source: 'string(size(found))' } } },
+        },
+        { id: 'end', type: 'end', label: 'End' },
+      ],
+      edges: [
+        { id: 'e1', source: 'start', target: 'read' },
+        { id: 'e2', source: 'read', target: 'report' },
+        { id: 'e3', source: 'report', target: 'end' },
+      ],
+    },
+    {
+      // A run that begins for no caller and passes a human decision: it pauses
+      // on a signal, and the owning service resumes it naming the decider.
+      name: 'eow_sys_sweep',
+      label: 'System sweep',
+      type: 'autolaunched',
+      status: 'active',
+      runAs: 'system',
+      variables: [{ name: 'found', type: 'record_collection', isInput: false, isOutput: false }],
+      nodes: [
+        { id: 'start', type: 'start', label: 'Start' },
+        { id: 'hold', type: 'wait', label: 'Hold', waitEventConfig: { eventType: 'signal', signalName: 'eow.decided' } },
+        { id: 'read', type: 'get_record', label: 'Read', config: { objectName: TASK, limit: 100, outputVariable: 'found' } },
+        {
+          id: 'report',
+          type: 'create_record',
+          label: 'Report',
+          config: { objectName: NOTE, fields: { name: 'seen-sweep', seen: { dialect: 'cel', source: 'string(size(found))' } } },
+        },
+        {
+          id: 'write',
+          type: 'update_record',
+          label: 'Write',
+          config: { objectName: TASK, filter: { name: 'B1' }, multi: true, fields: { touched: 'sweep' } },
+        },
+        { id: 'end', type: 'end', label: 'End' },
+      ],
+      edges: [
+        { id: 'e1', source: 'start', target: 'hold' },
+        { id: 'e2', source: 'hold', target: 'read' },
+        { id: 'e3', source: 'read', target: 'report' },
+        { id: 'e4', source: 'report', target: 'write' },
+        { id: 'e5', source: 'write', target: 'end' },
+      ],
+    },
     {
       name: 'eow_sys_read',
       label: 'System read',
@@ -220,6 +400,14 @@ describe('an app-authored elevation sees through the organization wall what its 
       for (const id of ids) await ctx.engine.update(TASK, id, { touched: 'ids' });
       return { wrote: ids.length };
     });
+    ql.registerAction(TASK, 'eowRemoteExport', async (ctx: any) => {
+      const rows = await ctx.engine.find(REMOTE, {});
+      return { seen: rows.map((r: any) => r.name).sort() };
+    });
+    ql.registerAction(TASK, 'eowRemoteTouch', async (ctx: any) => {
+      await ctx.engine.update(REMOTE, String(ctx.params?.target), { touched: 'remote' });
+      return { wrote: 1 };
+    });
     ql.registerAction(NOTE, 'eowNoteAdd', async (ctx: any) => {
       await ctx.engine.insert(NOTE, { name: ctx.params?.name, target: ctx.params?.target ?? null });
       return { added: true };
@@ -232,6 +420,10 @@ describe('an app-authored elevation sees through the organization wall what its 
     expect([a.status, b.status]).toEqual([200, 200]);
     orgA = ((await a.json()) as { id: string }).id;
     orgB = ((await b.json()) as { id: string }).id;
+    remoteRows.push(
+      { id: 'rem_a1', name: 'RA1', touched: null, organization_id: orgA },
+      { id: 'rem_b1', name: 'RB1', touched: null, organization_id: orgB },
+    );
   }, 180_000);
 
   /** Every case starts from the same four rows, two per organization; one of each is completed. */
@@ -386,7 +578,70 @@ describe('an app-authored elevation sees through the organization wall what its 
     });
   });
 
+  describe('a caller with an active organization, on a federated object the engine projects no scope for', () => {
+    beforeAll(async () => {
+      await activate(orgA);
+    });
+    const resetRemote = () => {
+      for (const r of remoteRows) r.touched = null;
+    };
+
+    it('an action body handler reads its organization’s remote rows and no other’s', async () => {
+      const r = await run(TASK, 'eow_remote_export');
+      expect(r.status, JSON.stringify(r.body)).toBe(200);
+      expect(r.body.data).toEqual({ seen: ['RA1'] });
+    });
+
+    it('a declared action body reads its organization’s remote rows and no other’s', async () => {
+      const r = await run(TASK, 'eow_remote_body_read');
+      expect(r.status, JSON.stringify(r.body)).toBe(200);
+      expect(r.body.data).toEqual({ seen: ['RA1'] });
+    });
+
+    it('a system hook reads its organization’s remote rows and no other’s', async () => {
+      await reseed();
+      const r = await run(NOTE, 'eow_note_add', { name: 'hook-remote-read' });
+      expect(r.status, JSON.stringify(r.body)).toBe(200);
+      expect(await noteSeen('seen-hook-remote')).toBe('RA1');
+    });
+
+    it('a system flow reads its organization’s remote rows and no other’s', async () => {
+      await reseed();
+      const r = await run(TASK, 'eow_remote_flow_read');
+      expect(r.status, JSON.stringify(r.body)).toBe(200);
+      expect(await noteSeen('seen-remote-flow')).toBe('1');
+    });
+
+    it('an action body handler’s by-id write of another organization’s remote row answers as a row that is not there', async () => {
+      resetRemote();
+      const r = await run(TASK, 'eow_remote_touch', { target: 'rem_b1' });
+      expect(r.status, JSON.stringify(r.body)).toBe(404);
+      expect(r.body.error.code).toBe('RECORD_NOT_FOUND');
+      expect(remoteRows.find((x) => x.id === 'rem_b1')?.touched).toBeNull();
+    });
+
+    it('control: its by-id write of its own organization’s remote row lands', async () => {
+      resetRemote();
+      const r = await run(TASK, 'eow_remote_touch', { target: 'rem_a1' });
+      expect(r.status, JSON.stringify(r.body)).toBe(200);
+      expect(remoteRows.find((x) => x.id === 'rem_a1')?.touched).toBe('remote');
+    });
+  });
+
   describe('control: system work that runs for no caller is unchanged', () => {
+    it('a system run that began for no caller stays unjudged after a human decision', async () => {
+      await reseed();
+      await activate(null);
+      const automation: any = await stack.kernel.getServiceAsync('automation');
+      const decider = await ql.findOne('sys_user', { where: { email: 'eow-alice@verify.test' }, ...SYS });
+      const paused = await automation.execute('eow_sys_sweep', {});
+      expect(paused.status, JSON.stringify(paused)).toBe('paused');
+      const resumed = await automation.resume(paused.runId, { [RESUME_AUTHORITY_SERVICE]: true, resumedBy: decider.id });
+      expect(resumed.success, JSON.stringify(resumed)).toBe(true);
+      expect(await noteSeen('seen-sweep')).toBe('4');
+      expect((await touched()).B1).toBe('sweep');
+    });
+
     it('a platform system context and a caller-less run read every organization’s rows', async () => {
       await reseed();
       const names = async (context: Record<string, unknown>) =>

@@ -13,26 +13,51 @@
  * 1: object and field permissions, ownership, sharing); it does not lift the
  * organization wall. So the wall that judges the elevation's operation is the
  * caller's own, the one the caller's plain door composes, and the elevation
- * reaches through it exactly what the caller reaches:
+ * reaches through it exactly what the caller reaches.
  *
- * - a caller with an organization scope keeps the scope the engine already
- *   projects from its context (`organization_id = <active>` under `isolated`,
- *   the membership set under `group`), and nothing here runs for it;
+ * ## The caller's own wall, whole
+ *
+ * The verdict is the caller's Layer 0, computed by the one ladder
+ * (`computeTenantLayer0Verdict`) over the caller's own context and the
+ * caller's own permission sets, so its exemptions are the plain door's: an
+ * object outside tenancy, an object with no organization column, a platform
+ * operator crossing the wall on an object whose posture permits it, and the
+ * verified platform owner's read are answered as that door answers them. The
+ * verdict is then applied as the door applies it:
+ *
+ * - a read takes the wall's filter on its predicate (the deny sentinel, the
+ *   active organization, or the `group` membership set), and the verdict is
+ *   recorded on the operation, so the engine's own driver scope follows it;
+ * - a predicate write takes the same filter, so it matches only rows the
+ *   caller's wall admits;
+ * - a by-id write is checked against the row it names first: a row the
+ *   caller's wall does not admit answers as a row that is not there;
+ * - an insert lands only where the caller's wall lets a new row land: never
+ *   without an active organization on a walled tenant object, and never in an
+ *   organization the wall does not admit;
  * - a caller the wall DENIES — no active organization under `isolated`, an
  *   empty membership set under `group`, a person outside every organization
- *   under `single` (ADR-0093 D8.1, as amended) — reads nothing (the wall's
- *   deny sentinel, composed into the read's predicate as the plain door
- *   composes it: zero rows, no error), and every write is refused
- *   `403 PERMISSION_DENIED`, naming the missing active organization
- *   (ADR-0123 D2 and D4).
+ *   under `single` (ADR-0093 D8.1, as amended) — reads nothing (zero rows, no
+ *   error), and every write is refused `403 PERMISSION_DENIED`, naming the
+ *   missing active organization (ADR-0123 D2 and D4).
  *
- * The exemptions are the wall's own, because the verdict is the wall's own:
- * the caller's Layer 0, computed by the one ladder
- * (`computeTenantLayer0Verdict`) over the caller's own context, with the
- * caller's own permission sets. An object outside tenancy, an object with no
- * organization column and a platform operator crossing the wall on an object
- * whose posture permits it are answered as the caller's plain door answers
- * them.
+ * ## When the engine's own projection already is the caller's wall
+ *
+ * The engine scopes every operation's driver call by the same ladder over the
+ * operation's context (`engine-driver-options.ts`), so for most elevations it
+ * already projects exactly the caller's wall, and nothing here runs. That holds
+ * only while the context carries the facts the wall reads. The wall is asked
+ * here whenever it might not:
+ *
+ * - the caller has no active organization, or no membership set, or an empty
+ *   one (the states the wall can deny);
+ * - the caller is a platform operator (the crossing the engine does not grant);
+ * - the object is federated: the engine withholds every driver scope there, so
+ *   Layer 0's predicate is the only wall it has.
+ *
+ * When the context lacks the door's facts (a flow run's envelope carries no
+ * permission sets), they are resolved for the caller by the one resolver the
+ * request path uses (`resolveUserAuthzGrants`), so the verdict is the door's.
  *
  * ## Which elevations: the predicate the identity refusal reads
  *
@@ -48,18 +73,24 @@
  * a principal (`userId`), or the guest entry's envelope (ADR-0138). An
  * elevation with no caller at all — a scheduled run, a record-change run fired
  * by a write that carried no user — has no door and no active organization to
- * miss, and is unchanged.
+ * miss, and is unchanged, in every segment: a run that began for no caller
+ * stays unjudged after a human decision too, though the decider is then its
+ * attribution user, and a run that began for a caller goes on being judged by
+ * that caller's wall (`runCallerOf`, `@objectstack/core`).
  */
 
-import { isOutsideEveryOrganization, rlsOperationForVerb } from '@objectstack/core';
+import { isOutsideEveryOrganization, rlsOperationForVerb, runCallerOf } from '@objectstack/core';
 import type { TenantLayer0Verdict } from '@objectstack/spec/security';
 
 import { PermissionDeniedError } from './errors.js';
 import { ELEVATION, SUBJECT, elevationSource, type ElevationSource } from './flow-system-identity-write-refusal.js';
-import { RLS_DENY_FILTER } from './rls-compiler.js';
+import { extractSingleId } from './security-plugin-addressed-writes.js';
 
-/** The verbs judged as writes: `rlsOperationForVerb` maps `purge` and `restore` onto them. */
+/** The verbs judged as writes: `rlsOperationForVerb` maps `purge`, `transfer` and `restore` onto them. */
 const WRITE_CLASS: ReadonlySet<string> = new Set(['insert', 'update', 'delete']);
+
+/** The organization column the wall's filters and a payload name. */
+const ORGANIZATION_FIELD = 'organization_id';
 
 /** An elevation with a caller, and that caller's own context. */
 export interface AppAutomationWallCaller {
@@ -71,93 +102,242 @@ export interface AppAutomationWallCaller {
 /**
  * The caller an app-authored elevation runs for, or `undefined` for every
  * other context: a user's own (not elevated), a platform writer's (no run, no
- * mark), and an elevation that carries no caller.
+ * mark), an elevation that carries no caller, and a flow run that began for no
+ * caller, in every segment.
  */
 export function appAutomationWallCaller(context: unknown): AppAutomationWallCaller | undefined {
   if (!context || typeof context !== 'object') return undefined;
   const source = elevationSource(context as { isSystem?: unknown; flowRunId?: unknown });
   if (!source) return undefined;
+  // A decided flow segment names the user its run began for (`runCallerOf`):
+  // `null` when the run began for no caller, which stays unjudged in every
+  // segment; otherwise that user, not the decider, is the caller — and the
+  // facts the segment carries are not that user's, so none of them is kept.
+  const runCaller = runCallerOf(context);
+  if (runCaller === null) return undefined;
+  if (runCaller !== undefined && runCaller !== (context as { userId?: unknown }).userId) {
+    const { positions: _p, permissions: _s, permissionSetAddresses: _a, accessible_org_ids: _o, posture: _r, principalKind: _k, ...rest } =
+      context as Record<string, unknown>;
+    return { source, callerContext: { ...rest, userId: runCaller, isSystem: false } };
+  }
   const c = context as { userId?: unknown; principalKind?: unknown };
-  const hasCaller = (typeof c.userId === 'string' && c.userId !== '') || c.principalKind === 'guest';
+  const hasCaller = isPrincipal(c.userId) || c.principalKind === 'guest';
   if (!hasCaller) return undefined;
   return { source, callerContext: { ...(context as Record<string, unknown>), isSystem: false } };
 }
 
-/**
- * Can the wall deny this caller at all? Only a context with no active
- * organization, or one whose membership set is empty, can be denied: every
- * other caller is scoped by the engine's own projection of the same verdict,
- * so the common elevation (a caller with an active organization) pays no
- * permission-set resolution here.
- */
-export function callerMayLackOrganization(callerContext: Record<string, unknown>): boolean {
-  const tenantId = callerContext.tenantId;
-  if (tenantId === undefined || tenantId === null || tenantId === '') return true;
-  const set = callerContext.accessible_org_ids;
-  return Array.isArray(set) && set.length === 0;
+function isPrincipal(userId: unknown): userId is string {
+  return typeof userId === 'string' && userId !== '';
 }
 
-/** The refusal: the standard catalog's `PERMISSION_DENIED`, naming the missing active organization. */
+function carriesActiveOrganization(context: Record<string, unknown>): boolean {
+  const tenantId = context.tenantId;
+  return tenantId !== undefined && tenantId !== null && tenantId !== '';
+}
+
+/**
+ * Can the engine's own projection fall short of the caller's wall for this
+ * context? True when the context carries no active organization, no
+ * membership set, or an empty one (the states the wall can deny, or where the
+ * engine cannot see the caller's union), and for a platform operator (whose
+ * crossing the engine does not grant). Every other caller is scoped by the
+ * engine's projection of the same verdict, so the common elevation pays no
+ * resolution here.
+ */
+export function callerMayLackOrganization(callerContext: Record<string, unknown>): boolean {
+  if (!carriesActiveOrganization(callerContext)) return true;
+  const set = callerContext.accessible_org_ids;
+  if (!Array.isArray(set) || set.length === 0) return true;
+  return callerContext.posture === 'PLATFORM_ADMIN';
+}
+
+/** Does the context carry the facts the caller's door is judged on? */
+export function carriesDoorFacts(callerContext: Record<string, unknown>): boolean {
+  return Array.isArray(callerContext.permissions) && Array.isArray(callerContext.accessible_org_ids);
+}
+
+/** The refusal: the standard catalog's `PERMISSION_DENIED`, naming what is missing. */
 export function appAutomationOrganizationWallRefusal(
   source: ElevationSource,
   object: string,
   operation: string,
   callerContext: Record<string, unknown>,
 ): PermissionDeniedError {
-  // [ADR-0123 D4] The sentence names what is missing: a person outside every
+  // [ADR-0123 D4] The sentence names what is missing: the guest entry has no
+  // organization the deployment could derive, a person outside every
   // organization lacks a membership (ADR-0093 D8.1, as amended), every other
   // denied caller an active organization.
-  const missing = isOutsideEveryOrganization(callerContext)
-    ? 'holds no current membership in any organization'
-    : 'has no active organization';
+  const guest = !isPrincipal(callerContext.userId) && callerContext.principalKind === 'guest';
+  const whom = guest
+    ? `the guest entry ${SUBJECT[source]} runs for`
+    : `the user ${SUBJECT[source]} runs for`;
+  const missing = guest
+    ? 'resolves no organization'
+    : isOutsideEveryOrganization(callerContext)
+      ? 'holds no current membership in any organization'
+      : 'has no active organization';
+  const remedy = guest
+    ? 'A guest acts only in the organization the deployment derives for it.'
+    : isOutsideEveryOrganization(callerContext)
+      ? 'A membership in the organization restores access.'
+      : 'Join or select an active organization and retry.';
   return new PermissionDeniedError(
-    `[Security] Access denied: '${object}' is scoped to an organization, and the user ${SUBJECT[source]} runs for ` +
-      `${missing} — so this ${operation} has no organization to act in, and ${ELEVATION[source]} does not lift ` +
-      'the organization wall. Join or select an active organization and retry.',
+    `[Security] Access denied: '${object}' is scoped to an organization, and ${whom} ${missing} — ` +
+      `so this ${operation} has no organization to act in, and ${ELEVATION[source]} does not lift the ` +
+      `organization wall. ${remedy}`,
     { operation, object },
     `[ADR-0123 D2] An app-authored elevation sees through the organization wall exactly what its caller's plain ` +
-      `door sees: the caller's Layer 0 denies '${object}', so its reads resolve to nothing and its writes are ` +
-      'refused. System work that runs for no caller, and a caller with an active organization, are unaffected.',
+      `door sees: the caller's Layer 0 leaves '${object}' no organization for this ${operation}, so the elevation's ` +
+      'reads resolve to nothing and its writes are refused. System work that runs for no caller is unaffected.',
   );
 }
 
-/** What {@link applyAppAutomationOrganizationWall} reads about the caller: its own Layer 0 for the operation. */
-export type CallerLayer0 = (
-  callerContext: Record<string, unknown>,
-  object: string,
-  operation: string,
-) => Promise<{ layer0: Record<string, unknown> | null; tenantLayer0Verdict: TenantLayer0Verdict }>;
+/** The refusal of an insert naming an organization the caller's wall does not admit. */
+function landingRefusal(source: ElevationSource, object: string, operation: string): PermissionDeniedError {
+  return new PermissionDeniedError(
+    `[Security] Access denied: this ${operation} names an organization for a '${object}' record that the user ` +
+      `${SUBJECT[source]} runs for may not write in, and ${ELEVATION[source]} does not lift the organization wall.`,
+    { operation, object, field: ORGANIZATION_FIELD },
+  );
+}
+
+/** The caller's own Layer 0 for one operation, as the plain door computes it. */
+export interface CallerLayer0Answer {
+  layer0: Record<string, unknown> | null;
+  tenantLayer0Verdict: TenantLayer0Verdict;
+  /** A platform operator's crossing, and nothing else, made the verdict `none` (ADR-0095 D3). */
+  crossedByPlatformAdmin?: boolean;
+}
+
+/** What {@link applyAppAutomationOrganizationWall} reads, supplied by the security plugin. */
+export interface AppAutomationWallDeps {
+  /** Is the object federated (ADR-0015)? The engine withholds every driver scope there. */
+  isFederated(object: string): boolean;
+  /** The caller's context with the door's facts resolved, when it does not carry them. */
+  completeCaller(callerContext: Record<string, unknown>): Promise<Record<string, unknown>>;
+  /** The caller's own Layer 0 for the operation. */
+  callerLayer0(callerContext: Record<string, unknown>, object: string, operation: string): Promise<CallerLayer0Answer>;
+  /** Does the row the write names lie inside `layer0`? Read as the platform, by the wall's predicate alone. */
+  rowInScope(object: string, id: string | number | bigint, layer0: Record<string, unknown>): Promise<boolean>;
+  /** The answer for a by-id write of a row the caller's wall does not admit: the door's not-found. */
+  notFound(object: string, id: string | number | bigint, context: unknown): Error;
+}
+
+/** The organizations a verdict admits a new row into, or `undefined` for every organization. */
+function admittedOrganizations(verdict: TenantLayer0Verdict): ReadonlySet<string> | undefined {
+  if (verdict.kind === 'organization') return new Set([verdict.organizationId]);
+  if (verdict.kind === 'organizations') return new Set(verdict.organizationIds);
+  if (verdict.kind === 'deny') return new Set();
+  return undefined;
+}
+
+/** Rows of a write payload, each a plain object. */
+function payloadRows(data: unknown): Record<string, unknown>[] {
+  const rows = Array.isArray(data) ? data : data === undefined || data === null ? [] : [data];
+  return rows.filter((r): r is Record<string, unknown> => !!r && typeof r === 'object' && !Array.isArray(r));
+}
 
 /**
  * Hold an app-authored elevation's operation to its caller's organization
  * wall. Returns for every operation the wall admits, having composed the
- * wall's deny sentinel into a denied read's predicate; throws the refusal for
- * a denied write, and for a denied read that carries no predicate to compose
- * it into (none does today: every read verb dispatches with its `ast`).
+ * caller's wall onto its predicate where it has one; throws for a write the
+ * wall refuses.
  *
  * Called by the data middleware ahead of its `isSystem` bypass, beside the
  * identity and append-only refusals, so the operation it admits continues to
- * the bypass unchanged.
+ * the bypass with the caller's wall on it.
  */
 export async function applyAppAutomationOrganizationWall(
-  opCtx: { object?: unknown; operation?: unknown; context?: unknown; ast?: { where?: unknown } | null; tenantLayer0Verdict?: unknown },
-  callerLayer0: CallerLayer0,
+  opCtx: {
+    object?: unknown;
+    operation?: unknown;
+    context?: unknown;
+    data?: unknown;
+    options?: unknown;
+    ast?: { where?: unknown } | null;
+    tenantLayer0Verdict?: unknown;
+  },
+  deps: AppAutomationWallDeps,
 ): Promise<void> {
   const caller = appAutomationWallCaller(opCtx?.context);
-  if (!caller || !callerMayLackOrganization(caller.callerContext)) return;
+  if (!caller) return;
   const object = typeof opCtx.object === 'string' ? opCtx.object : '';
   const operation = typeof opCtx.operation === 'string' ? opCtx.operation : '';
   if (!object || !operation) return;
-  const { tenantLayer0Verdict } = await callerLayer0(caller.callerContext, object, operation);
-  if (tenantLayer0Verdict.kind !== 'deny') return;
-  if (WRITE_CLASS.has(rlsOperationForVerb(operation)) || !opCtx.ast) {
-    throw appAutomationOrganizationWallRefusal(caller.source, object, operation, caller.callerContext);
+  const federated = deps.isFederated(object);
+  if (!federated && !callerMayLackOrganization(caller.callerContext)) return;
+
+  // The door's facts, resolved for the caller where the context does not
+  // carry them (a flow run's envelope carries no permission sets), and the
+  // question asked again: a resolved active membership may answer it.
+  const callerContext = carriesDoorFacts(caller.callerContext)
+    ? caller.callerContext
+    : await deps.completeCaller(caller.callerContext);
+  if (!federated && !callerMayLackOrganization(callerContext)) return;
+
+  const { layer0, tenantLayer0Verdict, crossedByPlatformAdmin } = await deps.callerLayer0(callerContext, object, operation);
+  const isWrite = WRITE_CLASS.has(rlsOperationForVerb(operation));
+  if (tenantLayer0Verdict.kind === 'deny' && isWrite) {
+    throw appAutomationOrganizationWallRefusal(caller.source, object, operation, callerContext);
   }
-  // The read: the wall's deny sentinel, by reference (the engine and the
-  // explain engine recognise it by identity), AND-composed onto the predicate
-  // exactly as the caller's plain door composes it. Recorded as the plain
-  // door records it, so a reader of the verdict learns the wall's decision.
-  const where = opCtx.ast.where;
-  opCtx.ast.where = where ? { $and: [where, RLS_DENY_FILTER] } : RLS_DENY_FILTER;
+
+  if (operation === 'insert') {
+    // [ADR-0123 D2, as amended] A new row lands in the active organization:
+    // with none, a walled tenant object has nowhere to place it — a crossing
+    // operator's insert included, as at the plain door.
+    if (!carriesActiveOrganization(callerContext) && (tenantLayer0Verdict.kind !== 'none' || crossedByPlatformAdmin)) {
+      throw appAutomationOrganizationWallRefusal(caller.source, object, operation, callerContext);
+    }
+    // A row that names its organization names one the caller's wall admits.
+    const admitted = admittedOrganizations(tenantLayer0Verdict);
+    if (admitted) {
+      for (const row of payloadRows(opCtx.data)) {
+        const named = row[ORGANIZATION_FIELD];
+        if (named !== undefined && named !== null && named !== '' && !admitted.has(String(named))) {
+          throw landingRefusal(caller.source, object, operation);
+        }
+      }
+    }
+    return;
+  }
+
+  if (layer0 === null) {
+    if (opCtx.ast) opCtx.tenantLayer0Verdict = tenantLayer0Verdict;
+    return;
+  }
+
+  if (isWrite) {
+    // A write never moves a row into an organization the wall does not admit.
+    const admitted = admittedOrganizations(tenantLayer0Verdict);
+    if (admitted) {
+      for (const row of payloadRows(opCtx.data)) {
+        if (!Object.prototype.hasOwnProperty.call(row, ORGANIZATION_FIELD)) continue;
+        const named = row[ORGANIZATION_FIELD];
+        if (named === undefined || named === null || named === '' || !admitted.has(String(named))) {
+          throw landingRefusal(caller.source, object, operation);
+        }
+      }
+    }
+    if (!opCtx.ast) {
+      // A by-id write: the row it names is the caller's to write only if the
+      // caller's wall admits it; a row it does not admit answers as absent.
+      const id = extractSingleId(opCtx);
+      if (id === null) throw appAutomationOrganizationWallRefusal(caller.source, object, operation, callerContext);
+      if (!(await deps.rowInScope(object, id, layer0))) throw deps.notFound(object, id, opCtx.context);
+      return;
+    }
+  } else if (!opCtx.ast) {
+    // A read verb that carries no predicate to compose the wall into (none
+    // does today: every read dispatches with its `ast`) is refused rather
+    // than run past the wall.
+    throw appAutomationOrganizationWallRefusal(caller.source, object, operation, callerContext);
+  }
+
+  // The predicate: the caller's wall AND-composed onto it, as the plain door
+  // composes it (the deny sentinel by reference — the engine and the explain
+  // engine recognise it by identity), and the verdict recorded as the door
+  // records it, so the engine's driver scope follows the caller's wall.
+  const where = opCtx.ast!.where;
+  opCtx.ast!.where = where ? { $and: [where, layer0] } : layer0;
   opCtx.tenantLayer0Verdict = tenantLayer0Verdict;
 }
