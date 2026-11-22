@@ -585,6 +585,7 @@
     "ObjectExtensionFieldPlacement": "src/data/object.zod.ts#ObjectExtensionFieldPlacement (type)",
     "ObjectExtensionFieldPlacementSchema": "src/data/object.zod.ts#ObjectExtensionFieldPlacementSchema (const)",
     "ObjectExtensionGroupPlacement": "src/data/object.zod.ts#ObjectExtensionGroupPlacement (type)",
+    "ObjectExtensionGroupPlacementParsed": "src/data/object.zod.ts#ObjectExtensionGroupPlacementParsed (type)",
     "ObjectExtensionGroupPlacementSchema": "src/data/object.zod.ts#ObjectExtensionGroupPlacementSchema (const)",
     "ObjectExtensionListPlacement": "src/data/object.zod.ts#ObjectExtensionListPlacement (type)",
     "ObjectExtensionListPlacementSchema": "src/data/object.zod.ts#ObjectExtensionListPlacementSchema (const)",

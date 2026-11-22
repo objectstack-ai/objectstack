@@ -596,6 +596,7 @@
     "ObjectExtensionFieldPlacement (type)",
     "ObjectExtensionFieldPlacementSchema (const)",
     "ObjectExtensionGroupPlacement (type)",
+    "ObjectExtensionGroupPlacementParsed (type)",
     "ObjectExtensionGroupPlacementSchema (const)",
     "ObjectExtensionListPlacement (type)",
     "ObjectExtensionListPlacementSchema (const)",
