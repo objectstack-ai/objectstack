@@ -2779,6 +2779,7 @@ const zhHant = {
     changeOwner: {
       title: '更改負責人',
       descriptionRecord: '將此記錄交給新的負責人。',
+      descriptionBulk: '將 {{count}} 條記錄交給新的負責人。',
       descriptionBulk_one: '將 {{count}} 條記錄交給新的負責人。',
       descriptionBulk_other: '將 {{count}} 條記錄交給新的負責人。',
       ownerFallback: '負責人',
@@ -2799,6 +2800,7 @@ const zhHant = {
       changed: '負責人已更改。',
       report: '已轉移 {{moved}} 條，{{unchanged}} 條原本就是該負責人，{{failed}} 條無法轉移。',
       failure: '{{id}}：{{message}}',
+      skipped: '所選記錄中有 {{count}} 條不提供更改負責人，已排除。',
       skipped_one: '所選記錄中有 {{count}} 條不提供更改負責人，已排除。',
       skipped_other: '所選記錄中有 {{count}} 條不提供更改負責人，已排除。',
       noClient: '此處無法更改負責人。',

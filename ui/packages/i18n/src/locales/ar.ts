@@ -2964,6 +2964,7 @@ const ar = {
     changeOwner: {
       title: 'تغيير المالك',
       descriptionRecord: 'تسليم هذا السجل إلى مالك جديد.',
+      descriptionBulk: 'تسليم {{count}} سجل إلى مالك جديد.',
       descriptionBulk_zero: 'تسليم {{count}} سجل إلى مالك جديد.',
       descriptionBulk_one: 'تسليم {{count}} سجل إلى مالك جديد.',
       descriptionBulk_two: 'تسليم سجلين ({{count}}) إلى مالك جديد.',
@@ -2988,6 +2989,7 @@ const ar = {
       changed: 'تم تغيير المالك.',
       report: 'تم نقل {{moved}}، و{{unchanged}} لديها هذا المالك بالفعل، وتعذّر نقل {{failed}}.',
       failure: '{{id}}: {{message}}',
+      skipped: 'تم استبعاد {{count}} سجل من التحديد لأنها لا تتيح تغيير المالك.',
       skipped_zero: 'تم استبعاد {{count}} سجل من التحديد لأنه لا يتيح تغيير المالك.',
       skipped_one: 'تم استبعاد {{count}} سجل من التحديد لأنه لا يتيح تغيير المالك.',
       skipped_two: 'تم استبعاد سجلين ({{count}}) من التحديد لأنهما لا يتيحان تغيير المالك.',

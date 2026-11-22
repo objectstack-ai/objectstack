@@ -2676,6 +2676,7 @@ const ko = {
     changeOwner: {
       title: '소유자 변경',
       descriptionRecord: '이 레코드를 새 소유자에게 넘깁니다.',
+      descriptionBulk: '레코드 {{count}}개를 새 소유자에게 넘깁니다.',
       descriptionBulk_one: '레코드 {{count}}개를 새 소유자에게 넘깁니다.',
       descriptionBulk_other: '레코드 {{count}}개를 새 소유자에게 넘깁니다.',
       ownerFallback: '소유자',
@@ -2696,6 +2697,7 @@ const ko = {
       changed: '소유자가 변경되었습니다.',
       report: '{{moved}}개 이동, {{unchanged}}개는 이미 이 소유자, {{failed}}개는 이동할 수 없습니다.',
       failure: '{{id}}: {{message}}',
+      skipped: '선택한 레코드 중 {{count}}개는 소유자 변경을 제공하지 않아 제외됩니다.',
       skipped_one: '선택한 레코드 중 {{count}}개는 소유자 변경을 제공하지 않아 제외됩니다.',
       skipped_other: '선택한 레코드 중 {{count}}개는 소유자 변경을 제공하지 않아 제외됩니다.',
       noClient: '여기서는 소유자를 변경할 수 없습니다.',

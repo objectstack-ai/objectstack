@@ -2779,6 +2779,7 @@ const zh = {
     changeOwner: {
       title: '更改负责人',
       descriptionRecord: '将此记录交给新的负责人。',
+      descriptionBulk: '将 {{count}} 条记录交给新的负责人。',
       descriptionBulk_one: '将 {{count}} 条记录交给新的负责人。',
       descriptionBulk_other: '将 {{count}} 条记录交给新的负责人。',
       ownerFallback: '负责人',
@@ -2799,6 +2800,7 @@ const zh = {
       changed: '负责人已更改。',
       report: '已转移 {{moved}} 条，{{unchanged}} 条原本就是该负责人，{{failed}} 条无法转移。',
       failure: '{{id}}：{{message}}',
+      skipped: '所选记录中有 {{count}} 条不提供更改负责人，已排除。',
       skipped_one: '所选记录中有 {{count}} 条不提供更改负责人，已排除。',
       skipped_other: '所选记录中有 {{count}} 条不提供更改负责人，已排除。',
       noClient: '此处无法更改负责人。',

@@ -3280,6 +3280,7 @@ const en = {
     changeOwner: {
       title: 'Change Owner',
       descriptionRecord: 'Hand this record to a new owner.',
+      descriptionBulk: 'Hand {{count}} records to a new owner.',
       descriptionBulk_one: 'Hand {{count}} record to a new owner.',
       descriptionBulk_other: 'Hand {{count}} records to a new owner.',
       ownerFallback: 'Owner',
@@ -3300,6 +3301,7 @@ const en = {
       changed: 'Owner changed.',
       report: 'Moved {{moved}}, {{unchanged}} already had this owner, {{failed}} could not be moved.',
       failure: '{{id}}: {{message}}',
+      skipped: '{{count}} selected records do not offer Change Owner and are left out.',
       skipped_one: '{{count}} selected record does not offer Change Owner and is left out.',
       skipped_other: '{{count}} selected records do not offer Change Owner and are left out.',
       noClient: 'The owner cannot be changed here.',

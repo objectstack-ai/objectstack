@@ -2676,6 +2676,7 @@ const de = {
     changeOwner: {
       title: 'Besitzer ändern',
       descriptionRecord: 'Diesen Datensatz an einen neuen Besitzer übergeben.',
+      descriptionBulk: '{{count}} Datensätze an einen neuen Besitzer übergeben.',
       descriptionBulk_one: '{{count}} Datensatz an einen neuen Besitzer übergeben.',
       descriptionBulk_other: '{{count}} Datensätze an einen neuen Besitzer übergeben.',
       ownerFallback: 'Besitzer',
@@ -2696,6 +2697,7 @@ const de = {
       changed: 'Besitzer geändert.',
       report: '{{moved}} übertragen, {{unchanged}} hatten bereits diesen Besitzer, {{failed}} konnten nicht übertragen werden.',
       failure: '{{id}}: {{message}}',
+      skipped: '{{count}} ausgewählte Datensätze bieten Besitzer ändern nicht an und werden ausgelassen.',
       skipped_one: '{{count}} ausgewählter Datensatz bietet Besitzer ändern nicht an und wird ausgelassen.',
       skipped_other: '{{count}} ausgewählte Datensätze bieten Besitzer ändern nicht an und werden ausgelassen.',
       noClient: 'Der Besitzer kann hier nicht geändert werden.',
