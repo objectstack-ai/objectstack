@@ -3756,11 +3756,6 @@ export class SchemaRegistry {
    * layer and every other package's extension stay exactly where they are; a
    * package's whole set leaves with {@link unregisterObjectsByPackage}.
    *
-   * [#35609] Also the withdrawal a re-registered package body makes of an
-   * extension its new manifest no longer declares ({@link replacingPackageBody}).
-   * The object's layers are recorded in an open registration run before the
-   * removal, so a refusal later in that run puts the layer back.
-   *
    * @returns whether a contribution was removed (idempotent: `false` when the
    *   package contributes no extension to the object).
    */
@@ -4577,12 +4572,7 @@ export class SchemaRegistry {
    */
   private readonly packageBodyItems = new Map<string, ReadonlySet<string>>();
 
-  /**
-   * [#35609] Package id → the object extension layers its last body
-   * registration wrote ({@link replacingPackageBody}), by object key: the
-   * layer itself, so a layer another door has since put in the package's slot
-   * of that object is told apart. Forgotten by {@link uninstallPackage}.
-   */
+  /** [#35609] Package id → the extension layers its last body wrote, by object key (see `ItemsFacet`). */
   private readonly packageBodyExtensions = new Map<string, ReadonlyMap<string, ObjectContributor>>();
 
   /** The body registration {@link replacingPackageBody} has open, while it runs. */
@@ -4613,22 +4603,12 @@ export class SchemaRegistry {
    * claim recorded before it is removed, so a refusal later in the run (a later
    * member of the artifact, the run-end record-currency door) puts them back
    * with the rest of the installed version. `register` throwing withdraws
-   * nothing.
+   * nothing. Owned objects are not items and are not touched here.
    *
-   * [#35609] The same holds for the package's object extensions: an
-   * `objectExtensions` entry the previous body registered for a target the
-   * new body no longer extends is withdrawn (`withdrawObjectExtension`, the
-   * per-target withdrawal the `object_extension` item delete uses), so the
-   * target serves exactly the extensions the current manifest declares —
-   * fields, validations, indexes and the rest of the layer go with it. Before
-   * this, the extend splice replaced the package's layer only for a target the
-   * new body named again, and a dropped extension kept its fields served until
-   * a restart. Stored column data is not touched: the field is no longer
-   * served, and schema sync drops no column. Only the layer the previous body
-   * wrote is withdrawn — one another door registered under the package id (the
-   * `object_extension` item door) is kept — and the withdrawal is recorded in
-   * the open run, so a refusal later in it puts the layer back. Owned objects
-   * the new body no longer ships are not touched here.
+   * [#35609] An extension the previous body registered for a target the new
+   * body no longer extends is withdrawn (`withdrawObjectExtension`), the whole
+   * layer with it; stored column data is not touched, and a layer another door
+   * put under the package id is kept.
    */
   replacingPackageBody<T>(packageId: string | undefined, manifest: ObjectStackManifest, register: () => T): T {
     // [#33949 codemod] The body moved to `registry-items.ts` (see `ItemsHost`).

@@ -222,7 +222,20 @@ export class ItemsFacet {
     return { removed, orphanedOverlays };
   }
 
-  /** The body of `SchemaRegistry#replacingPackageBody`; the method's docblock there is its contract. */
+  /**
+   * The body of `SchemaRegistry#replacingPackageBody`; the method's docblock there is its contract.
+   *
+   * [#35609] The extension half in detail: `packageBodyExtensions` holds, per package id, the
+   * extension layers its last body wrote, by object key — the layer object itself, so a layer
+   * another door has since put in the package's slot of that object (the `object_extension`
+   * item door) is told apart and kept. A dropped target's layer leaves through `withdrawObjectExtension`, the per-target
+   * withdrawal the `object_extension` item delete uses, so the target serves exactly the
+   * extensions the current manifest declares. Before this, the extend splice replaced the
+   * package's layer only for a target the new body named again, and a dropped extension kept
+   * its fields served until a restart. Schema sync drops no column. The withdrawal is recorded
+   * in the open run, so a refusal later in it puts the layer back. The map is forgotten by
+   * `uninstallPackage`.
+   */
   static replacingPackageBody<T>(this: Pick<ItemsHost, 'log' | 'objectContributors' | 'openPackageBody' | 'packageBodyExtensions' | 'packageBodyItems' | 'restorePoint' | 'withdrawObjectExtension' | 'withdrawPackageBodyItemsNotShipped' | 'withdrawPackageClaimsNotDeclared'>, packageId: string | undefined, manifest: ObjectStackManifest, register: () => T): T {
     if (!packageId) return register();
     const open = this.openPackageBody;
