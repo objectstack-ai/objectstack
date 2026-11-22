@@ -49,31 +49,12 @@ export function getPersonName(record: any, nameField: string | readonly string[]
 }
 
 /**
- * Up-to-2-char initials for the avatar fallback, made of letters only
- * (objectstack#36046): brackets, punctuation, digits and spaces are skipped,
- * so a display name such as "Alice (Sales)" gives "AS", never "A(".
- * - "John Doe" → "JD"; "John" → "JO"; "A." → "A" (one letter when one is all there is)
- * - CJK single word → trailing 1–2 chars (given name): "张三" → "张三", "王小明" → "小明"
- * - no letter at all → "?"
+ * The one avatar-initials rule, letters only (objectstack#36046). It lives in
+ * `@object-ui/types`, the lowest package every face that draws initials can
+ * reach (objectstack#36346); re-exported here so field renderers keep reading
+ * it from beside the other person helpers.
  */
-export function getPersonInitials(name: string): string {
-  // A word is a run of letters (with their combining marks); everything else separates words.
-  const words = (name || '').split(/[^\p{L}\p{M}]+/u).filter(Boolean);
-  if (words.length === 0) return '?';
-  if (words.length >= 2) {
-    return (firstLetter(words[0]) + firstLetter(words[words.length - 1])).toUpperCase();
-  }
-  const letters = Array.from(words[0]).filter((ch) => /\p{L}/u.test(ch));
-  if (/[㐀-鿿]/.test(words[0])) {
-    return letters.length <= 2 ? letters.join('') : letters.slice(-2).join('');
-  }
-  return letters.slice(0, 2).join('').toUpperCase();
-}
-
-/** A word's first letter, a whole code point (never half a surrogate pair). */
-function firstLetter(word: string): string {
-  return Array.from(word).find((ch) => /\p{L}/u.test(ch)) ?? '';
-}
+export { getPersonInitials } from '@object-ui/types';
 
 /** Secondary line: resolve each field path, drop empties, join with " · ". */
 export function getPersonSubtitle(record: any, fields?: string[]): string {
