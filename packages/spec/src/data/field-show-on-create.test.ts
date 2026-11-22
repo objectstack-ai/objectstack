@@ -43,6 +43,13 @@ describe('Field.showOnCreate', () => {
     expect(issues[0].message).toMatch(/^`showOnCreate: false` leaves this field off every create surface/);
   });
 
+  it('refuses the pair when the field declares a `defaultValue` too', () => {
+    const issues = showOnCreateIssues(
+      FieldSchema.safeParse({ name: 'stage', type: 'text', required: true, defaultValue: 'new', showOnCreate: false }),
+    );
+    expect(issues).toHaveLength(1);
+  });
+
   it('accepts the controls beside the refused pair', () => {
     const controls = [
       { name: 'amount', type: 'number', required: true, showOnCreate: true },
