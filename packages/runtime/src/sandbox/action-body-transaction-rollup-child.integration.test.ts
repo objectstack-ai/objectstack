@@ -200,8 +200,9 @@ describe('an action body transaction inserting a roll-up child completes on SQLi
   // the body's transaction; the retry found the read cached. The hook below
   // issues that read: an engine read under a system context and no handle.
   it('on one datasource: a read the roll-up update\'s after-hook issues with no handle rides the body\'s transaction, and the first call answers 200 inside the bound', async () => {
-    const { e, ledger } = await boot(false);
+    const { e, ledger, primary } = await boot(false);
     e.registry.registerObject(SETTING as any);
+    await primary.initObjects([SETTING as any]);
     await e.insert('rux_setting', { key: 'currency', value: 'USD' }, SYS);
     const reads: string[] = [];
     e.registerHook('afterUpdate', async (ctx: any) => {
