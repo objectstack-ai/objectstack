@@ -131,7 +131,7 @@ describe('objectui#7149 — relative timestamps resolve from the packs', () => {
 describe('objectui#7149 — the Activity card title resolves from the packs', () => {
   it('titles the card in zh, ja and ar', () => {
     for (const [lang, word] of [
-      ['zh', '活动'],
+      ['zh', '动态'],
       ['ja', 'アクティビティ'],
       ['ar', 'النشاط'],
     ] as const) {

@@ -1416,7 +1416,7 @@ const ja = {
     recordTabsHidden: "非表示",
     bodyTableTotals: "合計（このページ）",
     streamAll: "すべて",
-    streamActivity: "アクティビティ",
+    streamActivity: "イベント",
     streamDiscussion: "ディスカッション",
     streamChanges: "変更",
     viewAllEntries: "すべて表示（{{count}} 件）→",

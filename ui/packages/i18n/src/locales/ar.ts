@@ -1826,7 +1826,7 @@ const ar = {
     recordTabsHidden: "مخفية",
     bodyTableTotals: "المجاميع (هذه الصفحة)",
     streamAll: "الكل",
-    streamActivity: "النشاط",
+    streamActivity: "الأحداث",
     streamDiscussion: "المناقشة",
     streamChanges: "التغييرات",
     viewAllEntries: "عرض الكل ({{count}}) →",

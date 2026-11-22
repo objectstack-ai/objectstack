@@ -1819,7 +1819,7 @@ const en = {
     recordTabsHidden: 'Hidden',
     bodyTableTotals: 'Totals (this page)',
     streamAll: 'All',
-    streamActivity: 'Activity',
+    streamActivity: 'Events',
     streamDiscussion: 'Discussion',
     streamChanges: 'Changes',
     viewAllEntries: 'View all {{count}} →',

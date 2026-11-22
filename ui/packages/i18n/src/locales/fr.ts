@@ -1672,7 +1672,7 @@ const fr = {
     recordTabsHidden: "Masqués",
     bodyTableTotals: "Totaux (cette page)",
     streamAll: "Tout",
-    streamActivity: "Activité",
+    streamActivity: "Événements",
     streamDiscussion: "Discussion",
     streamChanges: "Modifications",
     viewAllEntries: "Tout voir ({{count}}) →",

@@ -1513,7 +1513,7 @@ const ru = {
     recordTabsHidden: "Скрытые",
     bodyTableTotals: "Итоги (эта страница)",
     streamAll: "Все",
-    streamActivity: "Активность",
+    streamActivity: "События",
     streamDiscussion: "Обсуждение",
     streamChanges: "Изменения",
     viewAllEntries: "Показать все ({{count}}) →",
