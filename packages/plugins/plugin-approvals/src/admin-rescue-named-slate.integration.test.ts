@@ -560,6 +560,15 @@ describe('an empty admin_rescue slate opens on the organization\'s administrator
       + `must add a member who holds ${who}; that member can then decide it.`;
     // [#36308] The approver type is named by its word, so no space sets it apart.
     const holdingZh = (who: string) => `目前还没有其他人能审批此请求。组织管理员需要添加一名担任${who}的成员，之后由该成员决定。`;
+    /** A request the labelled service opens, so its notices reach `told`. */
+    const openLabelled = async (key: string, approvers: any[]): Promise<any> => {
+      await engine.insert('crm_deal', { id: `D_${key}`, title: key }, { context: SYSTEM } as any);
+      return labelled.openNodeRequest({
+        object: 'crm_deal', recordId: `D_${key}`, runId: `run_${key}`, nodeId: 'review', flowName: 'deal_review',
+        config: { approvers, behavior: 'first_response' } as any,
+        submitterId: 'u_sub', record: { id: `D_${key}`, title: key }, organizationId: LEADERLESS_ORG,
+      }, as('u_sub', LEADERLESS_ORG));
+    };
     const ENGLISH = holding("position 'sales_manager'");
     const noteFor = async (requestId: string, locale?: string) =>
       (await labelled.listActions(requestId, { ...as('u_sub', LEADERLESS_ORG), ...(locale ? { locale } : {}) }))
@@ -618,7 +627,7 @@ describe('an empty admin_rescue slate opens on the organization\'s administrator
     // does, per recipient at delivery: the recipient's pack label, else the
     // declared label, else the name; and the approver type in their language.
     it('the submitter\'s notice: zh-CN reads the pack\'s label and the type\'s word, the literal the declared label', async () => {
-      const row = await open('none_notice', UNSTAFFED, {}, LEADERLESS_ORG);
+      const row = await openLabelled('none_notice', UNSTAFFED);
       const [notice] = told.filter((e) => e.source?.id === row.id);
       expect([notice.topic, notice.audience, notice.keyedText.bodyKey])
         .toEqual(['approval.comment', ['u_sub'], 'messages.approvalNoApproverHoldingSlot']);
@@ -632,7 +641,7 @@ describe('an empty admin_rescue slate opens on the organization\'s administrator
     });
 
     it('the submitter\'s notice: a position with no label anywhere keeps its internal name', async () => {
-      const row = await open('none_notice_bare', [{ type: 'position', value: 'treasury' }], {}, LEADERLESS_ORG);
+      const row = await openLabelled('none_notice_bare', [{ type: 'position', value: 'treasury' }]);
       const [notice] = told.filter((e) => e.source?.id === row.id);
       expect(notice.payload.body).toBe(holding("position 'treasury'"));
       const renderer = new NotificationTextRenderer({ getData: () => undefined, getI18n: () => i18n as any });
