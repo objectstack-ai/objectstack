@@ -84,6 +84,7 @@ import type { II18nService } from '@objectstack/spec/contracts';
 import {
   resolveBundleLocale,
   translateObject,
+  type ObjectLike,
   type ResolveOptions,
   type TranslationBundle,
 } from '@objectstack/spec/system';
@@ -269,7 +270,8 @@ export function readerLabelsFor(
       try {
         translation ??= { value: objectLabelTranslation(service, locale) };
         if (!translation.value) return undefined;
-        const label = translateObject({ name: objectName }, translation.value.bundle, translation.value.options).label;
+        const doc: ObjectLike = { name: objectName };
+        const label = translateObject(doc, translation.value.bundle, translation.value.options).label;
         return typeof label === 'string' && label.trim().length > 0 ? label : undefined;
       } catch {
         // A misbehaving i18n service must not fail the read: the stored label stands.

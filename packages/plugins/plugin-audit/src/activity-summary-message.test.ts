@@ -226,7 +226,7 @@ describe('[#35384] a reader in the declared sourceLocale reads the labels as aut
     expect(i18n.t('objects.biz_deal.fields.stage.options.won', 'en')).toBe('赢单');
     const en = readerSummaryLocale(i18n, 'en', getObjectDef)!;
     expect(composeActivitySummary(CREATED, en)).toBe('Created Deal "Acme"');
-    expect(composeActivitySummary(NAMED, en)).toBe('Updated Deal "Acme": Amount, Owner, and 2 more fields');
+    expect(composeActivitySummary(NAMED, en)).toBe('Updated Deal "Acme": Amount, Owner, and 2 more');
     expect(composeActivitySummary(CHANGES, en)).toBe('Stage: ∅ → Won; Owner: 张伟 → Ana');
   });
 
