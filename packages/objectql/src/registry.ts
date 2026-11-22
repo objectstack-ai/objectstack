@@ -35,6 +35,7 @@ import {
 import { resolveTenancyPosture, resolveSearchPinyinEnabled } from '@objectstack/types';
 import { postureEnforcesWall } from '@objectstack/spec/security';
 import { provisionSearchCompanion } from './search-companion.js';
+import type { ExtensionPlacementNote } from './registry-extension-placement.js';
 import { ObjectStackManifest, InstalledPackage, type InstalledPackageSource, customizationBasePackageId, type NamespaceObjectNameClash } from '@objectstack/spec/kernel';
 import { applyProtection } from '@objectstack/spec/shared';
 // [ADR-0130 D1] The ONE derivation of the key a package is installed under
@@ -2985,6 +2986,19 @@ export class SchemaRegistry {
    * {@link shadowedExtensionQueueWarned} gives.
    */
   private fieldPatchMissesWarned = new Set<string>();
+
+  /**
+   * [#35901] Placement notes already named (a placement not applied, an
+   * anchor missing, an item that is not the extension's own), keyed by the
+   * note. Per registry, for the reason {@link shadowedExtensionQueueWarned}
+   * gives.
+   */
+  private extensionPlacementNotesWarned = new Set<string>();
+
+  private reportExtensionPlacements(notes: readonly ExtensionPlacementNote[]): void {
+    // The body lives in `registry-object-registration.ts` (see `ObjectRegistrationHost`).
+    return ObjectRegistrationFacet.reportExtensionPlacements.call(objectRegistrationHost.of(this), notes);
+  }
 
   /**
    * [#28835] Field names already named as declared by more than one
@@ -6117,6 +6131,7 @@ export class SchemaRegistry {
       declinedBaseLayerStamps: (...a) => registry.declinedBaseLayerStamps(...a),
       get deploymentPlatformGlobalObjects() { return registry.deploymentPlatformGlobalObjects; },
       extensionTargetKey: (...a) => registry.extensionTargetKey(...a),
+      get extensionPlacementNotesWarned() { return registry.extensionPlacementNotesWarned; },
       get fieldPatchMissesWarned() { return registry.fieldPatchMissesWarned; },
       finishServedObject: (...a) => registry.finishServedObject(...a),
       foldExtenders: (...a) => registry.foldExtenders(...a),
@@ -6145,6 +6160,7 @@ export class SchemaRegistry {
       refusePicklistItemArrival: (...a) => registry.refusePicklistItemArrival(...a),
       registerNamespace: (...a) => registry.registerNamespace(...a),
       reportChangedRuleCopies: (...a) => registry.reportChangedRuleCopies(...a),
+      reportExtensionPlacements: (...a) => registry.reportExtensionPlacements(...a),
       reportFieldPatchMisses: (...a) => registry.reportFieldPatchMisses(...a),
       reportRedeclaredFields: (...a) => registry.reportRedeclaredFields(...a),
       get reportedRuleCopyChanges() { return registry.reportedRuleCopyChanges; },
