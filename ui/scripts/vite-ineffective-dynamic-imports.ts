@@ -17,7 +17,7 @@ import type { Plugin, ResolvedConfig, Rollup } from 'vite';
  * into another chunk — the laziness is decoration:
  *
  * ```
- * [INEFFECTIVE_DYNAMIC_IMPORT] packages/fields/src/widgets/GridField.tsx is
+ * [INEFFECTIVE_DYNAMIC_IMPORT] packages/fields/src/widgets/VectorField.tsx is
  * dynamically imported by packages/fields/src/index.tsx but also statically
  * imported by packages/fields/src/index.tsx, dynamic import will not move
  * module into another chunk.
@@ -188,7 +188,6 @@ export const DEFEATED_LAZY_FIELD_WIDGETS: readonly string[] = Object.freeze([
   'packages/fields/src/widgets/FilterConditionField.tsx',
   'packages/fields/src/widgets/FormulaField.tsx',
   'packages/fields/src/widgets/GeolocationField.tsx',
-  'packages/fields/src/widgets/GridField.tsx',
   'packages/fields/src/widgets/ImageCropperDialog.tsx',
   'packages/fields/src/widgets/ImageField.tsx',
   'packages/fields/src/widgets/LocationField.tsx',

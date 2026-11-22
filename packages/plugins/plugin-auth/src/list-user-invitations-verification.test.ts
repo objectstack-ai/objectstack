@@ -24,6 +24,8 @@
 // it as B's (it strengthens the own-email pin) and excludes it only where an
 // exact id set is compared.
 
+// Pays the first load of the egress module at collection, not inside a clocked test.
+import '@objectstack/core/egress';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { readFileSync, existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -56,8 +58,10 @@ const createMemoryEngine = () => {
     a instanceof Date || b instanceof Date
       ? new Date(a as any).getTime() === new Date(b as any).getTime()
       : a === b;
-  const matches = (row: any, where: Record<string, any> = {}) =>
+  const matches = (row: any, where: Record<string, any> = {}): boolean =>
     Object.entries(where).every(([k, v]) => {
+      // A conjunction of conditions, as the engine's predicate path takes one.
+      if (k === '$and' && Array.isArray(v)) return v.every((w) => matches(row, w));
       if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
       const actual = row[k];
       if (v && typeof v === 'object' && !Array.isArray(v) && !(v instanceof Date)) {
@@ -103,7 +107,14 @@ const createMemoryEngine = () => {
       return rows(name).filter((r) => matches(r, q.where)).length;
     },
     async update(name: string, patch: any, options?: any) {
-      assertEngineUpdateDispatch(patch, options);
+      const dispatch = assertEngineUpdateDispatch(patch, options);
+      // The predicate path (`multi: true`, a `where` and no id in the payload)
+      // writes every matching row and answers how many it wrote.
+      if (dispatch.kind === 'multi') {
+        const targets = rows(name).filter((r) => matches(r, options?.where));
+        for (const target of targets) Object.assign(target, patch);
+        return targets.length;
+      }
       const row = rows(name).find((r) => r.id === patch.id);
       if (!row) return null;
       Object.assign(row, patch);

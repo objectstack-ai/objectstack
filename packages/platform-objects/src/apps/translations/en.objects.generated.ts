@@ -176,7 +176,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       ban_user: {
         label: "Ban User",
-        description: "Ban this user? They will be signed out, unable to sign in, and their API keys refused until unbanned, as are their OAuth access tokens and token refreshes. The keys work again after the unban.",
+        description: "Ban this user? They will be signed out, unable to sign in, and their API keys refused until unbanned, as are their OAuth access tokens and token refreshes. The keys work again after the unban. The ban also suspends the AI service accounts they are accountable for, disables the OAuth applications they registered and revokes the SCIM credentials they minted; the unban restores none of these.",
         successMessage: "User banned",
         params: {
           banReason: {
@@ -495,7 +495,11 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       revoke_reason: {
         label: "Revoke Reason",
-        help: "Why the session was revoked (idle_timeout, absolute_max, concurrent_cap, ip_not_allowed, user_revoked, admin, organization_membership_ended, admin_password_reset, password_reset, …)."
+        help: "Why the session was revoked (idle_timeout, absolute_max, concurrent_cap, ip_not_allowed, user_revoked, admin, organization_membership_ended, admin_password_reset, password_reset, sso_provider_deleted, …)."
+      },
+      sso_provider_id: {
+        label: "SSO Provider",
+        help: "The SSO provider this session was signed in through, if any. Deleting that provider ends the session. System-managed."
       },
       active_organization_id: {
         label: "Active Organization"

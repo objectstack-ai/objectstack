@@ -1355,11 +1355,11 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       },
       navigation: {
         label: "導覽",
-        helpText: "點選條目時的導覽設定（預設為抽屜，也可為 page、new_window 或 none）"
+        helpText: "點選條目時的導覽設定：抽屜尺寸，以及讓清單列不開啟任何內容的 `preventNavigation`（`mode` 已棄用——點記錄名稱進入整頁，點懸停圖示從側邊開啟）"
       },
       "navigation.mode": {
         label: "模式",
-        helpText: "[DEPRECATED] No longer picks how an object's list opens a record: in the console the record name opens the full page and the hover icon beside it opens the side panel, for every reader. There `drawer`, `page` and `new_window` still parse and change nothing; `none` still means rows open nothing — prefer `preventNavigation: true`. Omit the key."
+        helpText: "[已棄用] 在物件清單（清單檢視、物件的 `listViews`）上不再決定記錄如何開啟：在主控台中，對所有使用者而言，點記錄名稱進入整頁，點名稱旁的懸停圖示從側邊面板開啟。這裡 `drawer`、`page`、`new_window` 仍可解析，但不再起作用，請省略此鍵；`none` 仍表示清單列不開啟任何內容——建議改用 `preventNavigation: true`。帶 `navigation` 的頁面區塊（清單區塊、時間軸、嵌入檢視）仍按所有取值生效。"
       },
       "navigation.preventNavigation": {
         label: "禁止導覽",

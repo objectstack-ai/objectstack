@@ -111,7 +111,7 @@ import process from 'node:process';
 import { isEntrypoint } from '../invoked-as.mjs';
 import { cardIntakeKeys, CONTRACT_REVIEW_HEADING_MARKER, contractReviewVerdictLines, latestMarkedComment, readSignatureLine, seatIntakeKeys } from './check-half-states.mjs';
 import { repoIdForSlug } from './check-governed-merges.mjs';
-import { GOVERNED_APPROVERS, recordAuthorTrusted, recordTrustedAuthors } from './check-governed-queue-guard.mjs';
+import { GOVERNED_APPROVERS, NARROWING_FACE_LINE, narrowingDeclarationsIn, recordAuthorTrusted, recordTrustedAuthors } from './check-governed-queue-guard.mjs';
 import { FLEET_BOT_LOGIN } from './check-handover.mjs';
 import { readClause2Line } from './clause2-line.mjs';
 import { parseSeat } from './fleet-roster.mjs';
@@ -197,17 +197,25 @@ export function parseArgs(argv) {
  * path limbs are `reviewFace`'s `hits` (the queue guard's own reading), the
  * declaration limbs are `readClause2Line` on the PR body, and the face named
  * beside them is `reviewFace`'s answer for the same inputs.
+ *
+ * ⭐ A narrowing is found the way the queue's narrowed leg finds one (`narrowingDeclarationsIn`, imported): a
+ * `Metadata-protocol: narrowed` line counts as well as a `Clause-②:` narrowing arm, and the face is then read with
+ * the narrowing spelling handed in first (`NARROWING_FACE_LINE`), exactly as that leg holds the record — so a
+ * narrowing declared on the protocol line alone, on a diff with no schema and no governed path, is listed at the
+ * narrowing face's tier, never missed (N4 of #35610). One bound, stated: this list reads the body alone; the queue
+ * leg also reads the changesets its commits touch.
  */
 export function owedFace(pull, repo = DEFAULT_REPO) {
   const paths = Array.isArray(pull?.files) ? pull.files : [];
   const body = String(pull?.body ?? '');
+  const narrowing = narrowingDeclarationsIn(body).length > 0;
   // `reviewFace` takes the register's repository ID; an unregistered slug reaches it as null and is refused there, loudly.
-  const face = reviewFace(paths, repoIdForSlug(repo), { declaredOn: [body] });
+  const face = reviewFace(paths, repoIdForSlug(repo), { declaredOn: narrowing ? [NARROWING_FACE_LINE, body] : [body] });
   const limbs = [];
   if (face.hits.schema.length > 0) limbs.push('schema');
   if (face.hits.rules.length > 0) limbs.push('rules');
   const declared = readClause2Line(body);
-  if (declared?.kind === 'declared' && declared.arm === 'narrowing') limbs.push('narrowing');
+  if (narrowing) limbs.push('narrowing');
   else if (declared?.kind === 'declared' && declared.value === 'yes') limbs.push('declaration');
   else if (declared?.kind === 'malformed') limbs.push('clause2-unreadable');
   if (labelNames(pull).includes(WAITING_LABEL)) limbs.push('label');
@@ -610,7 +618,8 @@ let selfTestReachedVerdict = false;
 
 const SELF_TEST_BATTERIES = Object.freeze({
   'arguments: modes and every refusal': 6,
-  'the owed face: paths, the Clause-② line, the label — drafts included, nothing else owes': 9,
+  // 9 → 11 (N4 of #35610): a narrowing on the `Metadata-protocol:` line alone owes the narrowing face; its control.
+  'the owed face: paths, the Clause-② line, the label — drafts included, nothing else owes': 11,
   // 8 → 13 (#33705): the queue guard's author binding (an untrusted PASS unread, unable to shadow a trusted FAIL, an
   // approver's read) and its counted verdict reading (two lines `ambiguous`, an inline word alone `unstated`).
   'the record: on this head (by whom, as stated), on an earlier head, none, unjudged': 13,
@@ -690,6 +699,10 @@ export function selfTest() {
   t('a published schema path owes the schema face', owedFace(pull({ files: ['packages/spec/src/data/field.zod.ts'] })).limbs.includes('schema'));
   t('⭐ a `Clause-②: no (narrowing)` body owes with no contract path (the narrowing face)', owedFace(pull({ files: ['ui/packages/plugin-ai/package.json'], body: 'Clause-②: no (narrowing)\nMetadata-protocol: narrowed' })).limbs.join() === 'narrowing');
   t('a `Clause-②: yes` body owes the declaration face', owedFace(pull({ files: ['packages/runtime/src/x.ts'], body: 'Clause-②: yes\nMetadata-protocol: added' })).limbs.join() === 'declaration');
+  // N4 of #35610: a narrowing declared on the `Metadata-protocol:` line alone owes, at the narrowing face's tier — as
+  // the queue's narrowed leg demands; the control, the same body declaring `none`, owes nothing.
+  t('⭐ a narrowing declared on `Metadata-protocol: narrowed` alone, beside a bare `Clause-②: no`, owes the narrowing face — as the queue leg reads it', ((r, q) => r.limbs.join() === 'narrowing' && r.face === q.face && r.tierName === q.tierName && r.face !== null)(owedFace(pull({ files: ['packages/runtime/src/x.ts'], body: 'Clause-②: no\nMetadata-protocol: narrowed' })), owedFace(pull({ files: ['packages/runtime/src/x.ts'], body: 'Clause-②: no (narrowing)\nMetadata-protocol: narrowed' }))));
+  t('…the control: the same body with `Metadata-protocol: none` owes nothing, and the unfilled template menu declares nothing', owedFace(pull({ files: ['packages/runtime/src/x.ts'], body: 'Clause-②: no\nMetadata-protocol: none' })).limbs.length === 0 && owedFace(pull({ files: ['packages/runtime/src/x.ts'], body: 'Clause-②: no\nMetadata-protocol: added | narrowed | semantic | none' })).limbs.length === 0);
   t('a malformed `Clause-②:` line is listed, never dropped', owedFace(pull({ files: ['packages/runtime/src/x.ts'], body: 'Clause-②: maybe' })).limbs.join() === 'clause2-unreadable');
   t('⭐ the waiting label alone owes', owedFace(pull({ files: ['packages/runtime/src/x.ts'], body: 'Clause-②: no', labels: [{ name: WAITING_LABEL }] })).limbs.join() === 'label');
   t('⛔ an ordinary runtime diff declaring `Clause-②: no` owes NOTHING — no row', row({ files: ['packages/runtime/src/x.ts'], body: 'Clause-②: no' }) === null);

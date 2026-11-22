@@ -105,12 +105,12 @@
         {"id": "e18", "name": "Adam Wright", "department": "dep_exec", "title": "General manager", "email": "adam.wright@example.com"}
       ],
       "supplier": [
-        {"id": "s01", "name": "Bluepeak Electronics", "category": "it_hardware", "rating": "A", "payment_terms": "net_30", "bank_account": "6217 0000 0000 0101"},
-        {"id": "s02", "name": "Cedar Office Supply", "category": "office_supplies", "rating": "B", "payment_terms": "net_30", "bank_account": "6217 0000 0000 0102"},
-        {"id": "s03", "name": "Harbor Facilities Co.", "category": "facilities", "rating": "A", "payment_terms": "net_60", "bank_account": "6217 0000 0000 0103"},
-        {"id": "s04", "name": "Summit Advisory Group", "category": "services", "rating": "B", "payment_terms": "net_60", "bank_account": "6217 0000 0000 0104"},
-        {"id": "s05", "name": "Granite Systems", "category": "it_hardware", "rating": "A", "payment_terms": "net_30", "bank_account": "6217 0000 0000 0105"},
-        {"id": "s06", "name": "Maple Print Works", "category": "office_supplies", "rating": "C", "payment_terms": "net_30", "bank_account": "6217 0000 0000 0106"}
+        {"id": "s01", "name": "Bluepeak Electronics", "category": "it_hardware", "rating": "grade_a", "payment_terms": "net_30", "bank_account": "6217 0000 0000 0101"},
+        {"id": "s02", "name": "Cedar Office Supply", "category": "office_supplies", "rating": "grade_b", "payment_terms": "net_30", "bank_account": "6217 0000 0000 0102"},
+        {"id": "s03", "name": "Harbor Facilities Co.", "category": "facilities", "rating": "grade_a", "payment_terms": "net_60", "bank_account": "6217 0000 0000 0103"},
+        {"id": "s04", "name": "Summit Advisory Group", "category": "services", "rating": "grade_b", "payment_terms": "net_60", "bank_account": "6217 0000 0000 0104"},
+        {"id": "s05", "name": "Granite Systems", "category": "it_hardware", "rating": "grade_a", "payment_terms": "net_30", "bank_account": "6217 0000 0000 0105"},
+        {"id": "s06", "name": "Maple Print Works", "category": "office_supplies", "rating": "grade_c", "payment_terms": "net_30", "bank_account": "6217 0000 0000 0106"}
       ],
       "purchase_requisition": [
         {"id": "r001", "name": "PR-0001", "requester": "e01", "request_date": "2026-07-01", "category": "office_supplies", "description": "Printer paper for the office", "total_amount": 1200, "approval_levels": 1, "status": "received"},

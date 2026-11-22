@@ -3416,6 +3416,126 @@ describe('ListView.setupChrome-12606', () => {
   });
 });
 
+// ── ListView.headerMenuHide-35955 ───────────────────────────────────────────────
+
+/**
+ * objectstack#35955 — "Hide column" in the grid's column menu is the same
+ * choice as the eye in the hide-fields lists. The grid hands the column's
+ * field back (`onColumnHide`, pinned through the real grid and table in
+ * plugin-grid's `ObjectGrid.headerMenuHide-35955.test.tsx`); here: the list
+ * writes it through the eye's own writer, so its host hears it on
+ * `onHiddenFieldsChange` (the console holds it in the list's draft, which is
+ * what draws Discard and Save) and the grid is handed the columns without it.
+ * An added column leaves the reader's added fields, as unticking it does. A
+ * key naming no column the list draws reports nothing.
+ *
+ * plugin-grid is not a dependency of plugin-list, so a stub `object-grid`
+ * captures what ListView hands it.
+ */
+describe('ListView.headerMenuHide-35955', () => {
+  restoreAfterBlock();
+
+  const OBJECT = 'meeting_35955';
+  const DEFINITION = {
+    name: OBJECT,
+    label: 'Meeting',
+    fields: {
+      name: { type: 'text', label: 'Name' },
+      meeting_date: { type: 'date', label: 'Date' },
+      location: { type: 'text', label: 'Location' },
+      room: { type: 'text', label: 'Room' },
+    },
+  };
+
+  let gridProps: any = null;
+  let previousGrid: ReturnType<typeof ComponentRegistry.get>;
+  beforeAll(() => {
+    previousGrid = ComponentRegistry.get('object-grid');
+    ComponentRegistry.register('object-grid', (props: any) => {
+      gridProps = props;
+      return <div data-testid="grid-stub" />;
+    });
+  });
+  afterAll(() => {
+    if (previousGrid) ComponentRegistry.register('object-grid', previousGrid);
+  });
+  beforeEach(() => { gridProps = null; });
+
+  const drawn = () => (gridProps?.columns ?? []).map((c: any) => (typeof c === 'string' ? c : c.field));
+
+  function mount(opts: { hiddenFields?: string[]; added?: string[] } = {}) {
+    const onHiddenFieldsChange = vi.fn();
+    const onAddedFieldsChange = vi.fn();
+    const dataSource = {
+      find: vi.fn().mockResolvedValue({ data: [{ id: '1', name: 'A' }], total: 1 }),
+      findOne: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+      delete: vi.fn(),
+      getObjectSchema: vi.fn(async () => structuredClone(DEFINITION)),
+    };
+    const schema = {
+      type: 'list-view',
+      objectName: OBJECT,
+      viewType: 'grid',
+      columns: ['name', 'meeting_date', 'location', ...(opts.added ?? [])],
+      ...(opts.hiddenFields ? { hiddenFields: opts.hiddenFields } : {}),
+    } as unknown as ListViewSchema;
+    render(
+      <SchemaRendererProvider dataSource={dataSource as never}>
+        <ListView
+          schema={schema}
+          dataSource={dataSource as never}
+          onHiddenFieldsChange={onHiddenFieldsChange}
+          onAddedFieldsChange={onAddedFieldsChange}
+          addedFields={opts.added ?? []}
+        />
+      </SchemaRendererProvider>,
+    );
+    return { onHiddenFieldsChange, onAddedFieldsChange, dataSource };
+  }
+
+  async function hideFromMenu(field: string) {
+    await waitFor(() => expect(typeof gridProps?.onColumnHide).toBe('function'));
+    await act(async () => { gridProps.onColumnHide(field); });
+  }
+
+  it('hands the grid the column menu\'s hide, and reports it as the eye does: the hidden list, the column gone', async () => {
+    const { onHiddenFieldsChange } = mount();
+    await waitFor(() => expect(drawn()).toEqual(['name', 'meeting_date', 'location']));
+    await hideFromMenu('location');
+    expect(onHiddenFieldsChange.mock.calls.at(-1)![0]).toEqual(['location']);
+    await waitFor(() => expect(drawn()).toEqual(['name', 'meeting_date']));
+  });
+
+  it('adds to the columns already hidden, and hiding a hidden one again reports nothing', async () => {
+    const { onHiddenFieldsChange } = mount({ hiddenFields: ['meeting_date'] });
+    await waitFor(() => expect(drawn()).toEqual(['name', 'location']));
+    await hideFromMenu('location');
+    expect(onHiddenFieldsChange).toHaveBeenCalledTimes(1);
+    expect([...onHiddenFieldsChange.mock.calls[0][0]].sort()).toEqual(['location', 'meeting_date']);
+    await hideFromMenu('meeting_date');
+    expect(onHiddenFieldsChange).toHaveBeenCalledTimes(1);
+  });
+
+  it('a column the reader added leaves their added fields instead of being hidden', async () => {
+    const { onHiddenFieldsChange, onAddedFieldsChange } = mount({ added: ['room'] });
+    await waitFor(() => expect(drawn()).toContain('room'));
+    await hideFromMenu('room');
+    expect(onAddedFieldsChange.mock.calls.at(-1)![0]).toEqual([]);
+    expect(onHiddenFieldsChange).not.toHaveBeenCalled();
+  });
+
+  it('a key that names no column the list draws reports nothing', async () => {
+    const { onHiddenFieldsChange, onAddedFieldsChange } = mount();
+    await waitFor(() => expect(drawn()).toEqual(['name', 'meeting_date', 'location']));
+    await hideFromMenu('_row_number');
+    expect(onHiddenFieldsChange).not.toHaveBeenCalled();
+    expect(onAddedFieldsChange).not.toHaveBeenCalled();
+    expect(drawn()).toEqual(['name', 'meeting_date', 'location']);
+  });
+});
+
 // ── ListView.groupPickerUnstored-32631 ──────────────────────────────────────────
 
 /**
@@ -3439,12 +3559,15 @@ describe('ListView.groupPickerUnstored-32631', () => {
   const TITLE = { field: 'display_title', order: 'asc' as const, collapsed: false };
   const STATUS = { field: 'status', order: 'asc' as const, collapsed: false };
 
-  const objectDef = (titleType: 'formula' | 'text') => ({
+  // objectstack#36204 — the Group editors offer select-like fields only, so
+  // the stored fields here are selects: the formula is what these pins are
+  // about, and a select formula (`returnType`) is still a formula.
+  const objectDef = (titleType: 'formula' | 'text' | 'select') => ({
     name: OBJECT,
     fields: {
       display_title: { type: titleType, label: 'Title', ...(titleType === 'formula' ? { expression: 'subject' } : {}) },
-      subject: { type: 'text', label: 'Subject' },
-      status: { type: 'text', label: 'Status' },
+      subject: { type: 'select', label: 'Subject' },
+      status: { type: 'select', label: 'Status' },
     },
   });
 
@@ -3452,7 +3575,7 @@ describe('ListView.groupPickerUnstored-32631', () => {
   let previousGrid: ReturnType<typeof ComponentRegistry.get>;
 
   function mount(opts: {
-    titleType?: 'formula' | 'text';
+    titleType?: 'formula' | 'text' | 'select';
     compactToolbar?: boolean;
     grouping?: { fields: Array<typeof TITLE> };
     viewGrouping?: { fields: Array<typeof TITLE> } | undefined;
@@ -3509,12 +3632,22 @@ describe('ListView.groupPickerUnstored-32631', () => {
   });
 
   describe('the Group editors do not offer a formula field (objectstack#32631)', () => {
-    it('the toolbar Group panel: "Add group field" seeds the first stored field, and the level lists stored fields only', async () => {
+    // objectstack#36204 — "Add group field" groups by nothing yet: it opens
+    // the field dropdown, and that list is the one these pins read.
+    async function addAndRead(scope: { getByTestId: (id: string) => HTMLElement }): Promise<string[]> {
+      fireEvent.click(scope.getByTestId('grouping-add'));
+      const listbox = await screen.findByRole('listbox');
+      return within(listbox).getAllByRole('option').map((o) => o.textContent ?? '');
+    }
+
+    it('the toolbar Group panel: "Add group field" lists stored fields only, and the pick is the level', async () => {
       const { onGroupingChange } = mount();
       await screen.findByTestId('grid-stub');
       fireEvent.click(screen.getByRole('button', { name: /group/i }));
       await screen.findByTestId('group-field-list');
-      fireEvent.click(screen.getByTestId('grouping-add'));
+      expect(await addAndRead(screen)).toEqual(['Subject', 'Status']);
+      expect(onGroupingChange).not.toHaveBeenCalled();
+      fireEvent.click(within(screen.getByRole('listbox')).getByRole('option', { name: 'Subject' }));
       expect(onGroupingChange).toHaveBeenLastCalledWith({ fields: [{ field: 'subject', order: 'asc', collapsed: false }] });
       expect(await openOptions(screen.getByTestId('grouping-field-0'))).toEqual(['Subject', 'Status']);
     });
@@ -3525,17 +3658,18 @@ describe('ListView.groupPickerUnstored-32631', () => {
       fireEvent.click(screen.getByTestId('toolbar-display-trigger'));
       const content = await screen.findByTestId('view-settings-content');
       fireEvent.click(within(content).getByTestId('options-row-group'));
-      fireEvent.click(await within(content).findByTestId('grouping-add'));
-      expect(onGroupingChange).toHaveBeenLastCalledWith({ fields: [{ field: 'subject', order: 'asc', collapsed: false }] });
-      expect(await openOptions(within(content).getByTestId('grouping-field-0'))).toEqual(['Subject', 'Status']);
+      await within(content).findByTestId('grouping-add');
+      expect(await addAndRead(within(content))).toEqual(['Subject', 'Status']);
+      expect(onGroupingChange).not.toHaveBeenCalled();
     });
 
-    it('CONTROL — the same field stored (`text`) is offered first, in both editors', async () => {
-      const { onGroupingChange } = mount({ titleType: 'text' });
+    it('CONTROL — the same field stored (a `select`) is offered first', async () => {
+      const { onGroupingChange } = mount({ titleType: 'select' });
       await screen.findByTestId('grid-stub');
       fireEvent.click(screen.getByRole('button', { name: /group/i }));
       await screen.findByTestId('group-field-list');
-      fireEvent.click(screen.getByTestId('grouping-add'));
+      expect(await addAndRead(screen)).toEqual(['Title', 'Subject', 'Status']);
+      fireEvent.click(within(screen.getByRole('listbox')).getByRole('option', { name: 'Title' }));
       expect(onGroupingChange).toHaveBeenLastCalledWith({ fields: [TITLE] });
       expect(await openOptions(screen.getByTestId('grouping-field-0'))).toEqual(['Title', 'Subject', 'Status']);
     });
@@ -3575,5 +3709,81 @@ describe('ListView.groupPickerUnstored-32631', () => {
       expect(gridProps.schema.grouping?.fields).toEqual([TITLE]);
       expect(screen.queryByTestId('list-grouping-unstored-notice')).toBeNull();
     });
+  });
+});
+
+// ── ListView.refreshOnlyDisplay-36002 ───────────────────────────────────────────
+
+/**
+ * objectstack#36002 — the default (Display) toolbar has no Refresh
+ * (objectstack#35878, 「刷新去掉」), so `userActions.refresh` is not a reason to
+ * draw the Display entry. A non-grid view whose every other Display control is
+ * off (no layout switch, Group, Row height, Hide fields, Row colour or Export)
+ * draws no Display entry at all, instead of one that opens a panel with only
+ * its footer. The grid always offers Display (its columns), so the fixture is
+ * a kanban. The CONTROLS: the key still draws the wide toolbar's Refresh, and
+ * the same fixture with one Display control on draws the entry again.
+ */
+describe('ListView.refreshOnlyDisplay-36002', () => {
+  restoreAfterBlock();
+
+  /** Every Display control off; `refresh` is left at its default, on. */
+  const REFRESH_ONLY: ListViewSchema = {
+    type: 'list-view',
+    objectName: 'opportunity',
+    viewType: 'kanban',
+    fields: ['name', 'stage'],
+    kanban: { groupByField: 'stage' },
+    userActions: { group: false, rowHeight: false, hideFields: false },
+  } as ListViewSchema;
+
+  let previousKanban: ReturnType<typeof ComponentRegistry.get>;
+
+  beforeEach(() => {
+    previousKanban = ComponentRegistry.get('object-kanban');
+    ComponentRegistry.register('object-kanban', () => <div data-testid="kanban-stub" />);
+  });
+
+  afterEach(() => {
+    cleanup();
+    if (previousKanban) ComponentRegistry.register('object-kanban', previousKanban as any);
+  });
+
+  function mount(schema: Partial<ListViewSchema> = {}) {
+    const dataSource = {
+      find: vi.fn().mockResolvedValue({ data: [{ id: '1', name: 'Acme', stage: 'won' }], total: 1 }),
+      findOne: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+      delete: vi.fn(),
+      getObjectSchema: vi.fn().mockResolvedValue({
+        name: 'opportunity',
+        fields: { name: { type: 'text', label: 'Name' }, stage: { type: 'text', label: 'Stage' } },
+      }),
+    };
+    render(
+      <SchemaRendererProvider dataSource={dataSource as never}>
+        <ListView schema={{ ...REFRESH_ONLY, ...schema } as ListViewSchema} dataSource={dataSource as never} />
+      </SchemaRendererProvider>,
+    );
+  }
+
+  it('the default toolbar draws no Display entry when Refresh was its only option', async () => {
+    mount();
+    await screen.findByTestId('kanban-stub');
+    expect(screen.queryByTestId('toolbar-display-trigger')).toBeNull();
+    expect(screen.queryByTestId('refresh-button')).toBeNull();
+  });
+
+  it('CONTROL — the wide toolbar (`compactToolbar: false`) still draws Refresh for the same view', async () => {
+    mount({ compactToolbar: false } as Partial<ListViewSchema>);
+    await screen.findByTestId('kanban-stub');
+    expect(screen.getByTestId('refresh-button')).toBeInTheDocument();
+  });
+
+  it('CONTROL — the same view with Row height on draws the Display entry', async () => {
+    mount({ userActions: { group: false, rowHeight: true, hideFields: false } } as Partial<ListViewSchema>);
+    await screen.findByTestId('kanban-stub');
+    expect(screen.getByTestId('toolbar-display-trigger')).toBeInTheDocument();
   });
 });

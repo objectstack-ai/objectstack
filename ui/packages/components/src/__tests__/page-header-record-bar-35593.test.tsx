@@ -271,3 +271,83 @@ describe('page:header in the host bar folds by width (objectstack#35853)', () =>
     await waitFor(() => expect(screen.getAllByRole('button').map((b) => b.textContent?.trim())).toContain('Send email'));
   });
 });
+
+/**
+ * objectstack#35997 — the width cap belongs to the record and the action set
+ * it was measured on. The host steps between records (previous / next, the
+ * drawer) without remounting the row, so a cap lowered on a record with many
+ * actions must not outlive it: the next record draws the full budget and the
+ * next layout measures again. The row's line is stubbed as above, with the
+ * wrap point moved between the two records.
+ */
+describe('page:header in the host bar re-measures the width fold on another record (objectstack#35997)', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  const onlyContacted = { visible: 'record.status == "contacted"' };
+  const SWITCH_ACTIONS = [
+    act('convert', 'Convert', { variant: 'primary' }),
+    act('log_call', 'Log call'),
+    act('send_email', 'Send email', onlyContacted),
+    act('schedule', 'Schedule', onlyContacted),
+  ];
+  const OTHER = { id: 'lead-2', name: 'Ada Park', status: 'new' };
+
+  function stubWrap() {
+    const line = { wrapAt: 0 };
+    vi.spyOn(HTMLElement.prototype, 'offsetTop', 'get').mockImplementation(function (this: HTMLElement) {
+      const row = this.parentElement;
+      if (!row || row.getAttribute('role') !== 'toolbar') return 0;
+      return Array.from(row.children).indexOf(this) >= line.wrapAt ? 40 : 0;
+    });
+    return line;
+  }
+
+  const tree = (record: typeof LEAD) => (
+    <BarHost claim={vi.fn()}>
+      <ActionProvider>
+        <RecordContextProvider
+          objectName="crm_lead"
+          recordId={record.id}
+          data={record}
+          objectSchema={LEAD_SCHEMA}
+          headerSystemActions={HOST_ACTIONS}
+        >
+          <RecordHeaderStateContext.Provider value={null}>
+            <PageHeader schema={{ type: 'page:header', actions: SWITCH_ACTIONS }} />
+          </RecordHeaderStateContext.Provider>
+        </RecordContextProvider>
+      </ActionProvider>
+    </BarHost>
+  );
+
+  it('a record with fewer actions that fit draws min(maxVisible, count) again', async () => {
+    const line = stubWrap();
+    line.wrapAt = 3;
+    const { rerender } = render(tree(LEAD));
+    const actionSlot = screen.getByTestId('action-slot');
+    await waitFor(() => expect(inlineButtons(actionSlot)).toContain('Convert'));
+    await waitFor(() => expect(inlineButtons(actionSlot)).not.toContain('Log call'));
+
+    line.wrapAt = 99;
+    rerender(tree(OTHER));
+    await waitFor(() => expect(inlineButtons(actionSlot)).toContain('Log call'));
+    const labels = inlineButtons(actionSlot);
+    expect(labels).toContain('Convert');
+    expect(labels).toContain('Edit');
+    expect(labels).not.toContain('Send email');
+  });
+
+  it('CONTROL: a record whose row still wraps after the switch folds again', async () => {
+    const line = stubWrap();
+    line.wrapAt = 3;
+    const { rerender } = render(tree(LEAD));
+    const actionSlot = screen.getByTestId('action-slot');
+    await waitFor(() => expect(inlineButtons(actionSlot)).not.toContain('Log call'));
+
+    line.wrapAt = 2;
+    rerender(tree(OTHER));
+    await waitFor(() => expect(inlineButtons(actionSlot)).toContain('Convert'));
+    await waitFor(() => expect(inlineButtons(actionSlot)).not.toContain('Log call'));
+    expect(inlineButtons(actionSlot)).toContain('Edit');
+  });
+});

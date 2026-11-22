@@ -23,7 +23,8 @@
 import type { SchemaFormIssue } from './SchemaForm.js';
 import type { SchemaIssueDetail } from './i18n.js';
 import { lintCelPredicate } from './celAuthoring.js';
-import { readFields } from './previews/object-fields-io.js';
+import { readFields, type FieldsView } from './previews/object-fields-io.js';
+import { isMultiValueField } from '@objectstack/spec/data';
 
 /**
  * The structural slice of a Zod issue this module reads.
@@ -815,6 +816,31 @@ function predicateSource(v: unknown): string | null {
   return null;
 }
 
+/** One field definition {@link multiValueFieldsOf} reads: its name, `type` and `multiple`. */
+export interface CelFieldDef {
+  name: string;
+  type?: unknown;
+  multiple?: unknown;
+}
+
+/**
+ * [#36167] The fields whose stored value is a list, read through
+ * `isMultiValueField` (`@objectstack/spec/data`) — the `multiValueFields` the
+ * CEL lint hands the engine, so `record.<field> == 'a'` on a multi-value
+ * field is refused here as the publish lint refuses it. The ONE derivation:
+ * the draft check below and `CelPredicateField`'s as-you-type lint both call
+ * it, so the editor and the save judge the same fields as lists.
+ */
+export function multiValueFieldsOf(defs: ReadonlyArray<CelFieldDef>): string[] {
+  return defs
+    .filter((d) => typeof d.type === 'string' && isMultiValueField({ type: d.type, multiple: d.multiple === true }))
+    .map((d) => d.name);
+}
+
+function multiValueFieldsOfView(view: FieldsView): string[] {
+  return multiValueFieldsOf(view.entries.map((e) => ({ name: e.name, type: e.def.type, multiple: e.def.multiple })));
+}
+
 /**
  * Lint every field conditional rule — and every `formula` field's
  * `expression` (role `value`, objectui#1582 follow-up) — on an object draft.
@@ -828,6 +854,7 @@ async function validateObjectFieldRules(draft: unknown): Promise<SchemaFormIssue
   if (view.entries.length === 0) return [];
   const objectName = typeof d?.name === 'string' ? d.name : undefined;
   const fieldNames = view.entries.map((e) => e.name);
+  const multiValueFields = multiValueFieldsOfView(view);
   const issues: SchemaFormIssue[] = [];
   for (let i = 0; i < view.entries.length; i++) {
     const entry = view.entries[i];
@@ -838,6 +865,7 @@ async function validateObjectFieldRules(draft: unknown): Promise<SchemaFormIssue
       const findings = await lintCelPredicate(source, {
         objectName,
         fields: fieldNames,
+        multiValueFields,
         scope: 'record',
         // Names the authored key so the wrong-layer advisory takes the
         // platform's published verdict (`e3cb47624`). Only ERRORS are kept
@@ -858,6 +886,7 @@ async function validateObjectFieldRules(draft: unknown): Promise<SchemaFormIssue
         objectName,
         // A formula may reference every sibling, not itself (circular).
         fields: fieldNames.filter((n) => n !== entry.name),
+        multiValueFields,
         scope: 'record',
         role: 'value',
       });
@@ -945,7 +974,9 @@ async function validateObjectValidationRules(draft: unknown): Promise<SchemaForm
   const rules = d?.validations;
   if (!Array.isArray(rules)) return [];
   const objectName = typeof d?.name === 'string' ? d.name : undefined;
-  const fieldNames = readFields(d?.fields).entries.map((e) => e.name);
+  const view = readFields(d?.fields);
+  const fieldNames = view.entries.map((e) => e.name);
+  const multiValueFields = multiValueFieldsOfView(view);
   const issues: SchemaFormIssue[] = [];
 
   const visit = async (rule: unknown, path: string, depth: number): Promise<void> => {
@@ -958,6 +989,7 @@ async function validateObjectValidationRules(draft: unknown): Promise<SchemaForm
       const findings = await lintCelPredicate(source, {
         objectName,
         fields: fieldNames,
+        multiValueFields,
         scope: 'record',
       });
       for (const f of findings) {

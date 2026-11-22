@@ -24,6 +24,9 @@ import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFin
 import { ERROR_CODE_LEDGER } from '@objectstack/spec/api';
 import { MCP_AGENT_PERMISSION_SETS } from '@objectstack/spec/ai';
 import { AuthManager } from './auth-manager';
+// The SSO discovery egress guard the source loads with a dynamic import, paid
+// here, during collection (check-test-source-alias, "The source reach").
+import '@objectstack/core/egress';
 import { bindTestSecurityCatalog, catalogFromTables } from './__tests__/security-catalog.testkit.js';
 import {
   assertAudienceConfig,
@@ -337,6 +340,31 @@ describe('admission decision matrix (#11739): posture × creation class', () => 
       creationClass: 'self-serve',
     });
     expect(verdict).toEqual({ admit: true, grantPermissionSet: false });
+  });
+
+  // A sign-up the posture's own rule admits is admitted by that rule,
+  // invitation or not, and receives the declared set; one admitted by its
+  // invitation alone gets the account and no grant.
+  it.each([
+    ['email_domain', 'on the allowlist', 'colleague@acme.com', true, { admit: true, grantPermissionSet: true }],
+    ['email_domain', 'on the allowlist', 'colleague@acme.com', false, { admit: true, grantPermissionSet: true }],
+    ['email_domain', 'off the allowlist', 'contractor@external.com', true, { admit: true, grantPermissionSet: false }],
+    ['open', 'any address', 'anyone@external.com', true, { admit: true, grantPermissionSet: true }],
+    ['open', 'any address', 'anyone@external.com', false, { admit: true, grantPermissionSet: true }],
+    ['invite_only', 'any address', 'anyone@external.com', true, { admit: true, grantPermissionSet: false }],
+  ] as const)('%s, an address %s (%s), invited %s: %o', (posture, _where, email, invited, expected) => {
+    const verdict = decideAudienceAdmission({
+      ...base,
+      email,
+      hasPendingInvitation: invited,
+      audience: audience({
+        posture,
+        allowedEmailDomains: posture === 'email_domain' ? ['acme.com'] : [],
+        selfRegistrationPermissionSet: posture === 'invite_only' ? undefined : 'portal_user',
+      }),
+      creationClass: 'self-serve',
+    });
+    expect(verdict).toEqual(expected);
   });
 
   it('open admits self-serve with the grant', () => {
@@ -921,6 +949,47 @@ describe('end of the chain: better-auth pipeline over the memory engine (#11739)
     expect((engine.tables.get('sys_user') ?? []).length).toBe(1);
   });
 
+  // An invited sign-up the posture's own rule admits is a self-registrant: it
+  // asks for the declared set like an uninvited one, so a set that cannot be
+  // resolved refuses it too. The invitation does not admit it without the grant.
+  it.each([
+    ['open', 'missing', { posture: 'open' }, 'invited@anywhere.com'],
+    ['open', 'switched off', { posture: 'open' }, 'invited@anywhere.com'],
+    ['email_domain (on the allowlist)', 'missing', { posture: 'email_domain', allowedEmailDomains: ['acme.com'] }, 'invited@acme.com'],
+    ['email_domain (on the allowlist)', 'switched off', { posture: 'email_domain', allowedEmailDomains: ['acme.com'] }, 'invited@acme.com'],
+  ] as const)('%s: an invited sign-up whose declared set is %s is refused AUTH_CONFIG_ERROR, like an uninvited one', async (_posture, state, posture, email) => {
+    const engine = createMemoryEngine();
+    seedExistingUser(engine);
+    if (state === 'switched off') {
+      seedPermissionSet(engine, 'member_default');
+      engine.tables.set('sys_metadata_activation', [
+        { id: 'act_member', metadata_type: 'permission', name: 'member_default', package_id: 'pkg', active: false },
+      ]);
+    }
+    seedPendingInvitation(engine, email);
+    const set = state === 'missing' ? 'ghost' : 'member_default';
+    const manager = makeManager(engine, { audience: { ...posture, selfRegistrationPermissionSet: set } });
+    const res = await signUp(manager, email);
+    expect(res.status).toBe(403);
+    const body = await res.json();
+    expect(body.code).toBe(AUDIENCE_CONFIG_ERROR);
+    expect(String(body.message)).toContain(`'${set}'`);
+    expect((engine.tables.get('sys_user') ?? []).length).toBe(1);
+  });
+
+  it('CONTROL: email_domain, an invited sign-up OFF the allowlist is admitted by its invitation alone, asking for no set, so a missing set does not refuse it', async () => {
+    const engine = createMemoryEngine();
+    seedExistingUser(engine);
+    seedPendingInvitation(engine, 'contractor@external.com');
+    const manager = makeManager(engine, {
+      audience: { posture: 'email_domain', allowedEmailDomains: ['acme.com'], selfRegistrationPermissionSet: 'ghost' },
+    });
+    const res = await signUp(manager, 'contractor@external.com');
+    expect(res.status, await res.clone().text()).toBeLessThan(300);
+    expect((engine.tables.get('sys_user') ?? []).length).toBe(2);
+    expect(engine.tables.get('sys_user_permission_set') ?? []).toEqual([]);
+  });
+
   it('[ADR-0131 D3] the set ROW\'s `active` switches nothing: a row flagged off still admits and grants', async () => {
     // The resolver reads no catalog row, so the row flag is not a deactivation.
     const engine = createMemoryEngine();
@@ -1165,6 +1234,8 @@ describe('a self-serve social creation under an address-based posture is admitte
       admit: true,
       grantPermissionSet: false,
     });
+    // On the allowlist, the verified creation is admitted by its domain, invitation or not.
+    expect(decide({ hasPendingInvitation: true, emailVerified: true })).toEqual({ admit: true, grantPermissionSet: true });
   });
 
   it('open: refused while email verification is in force (undeclared or declared true), an invitation included', () => {

@@ -176,7 +176,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       ban_user: {
         label: "封禁用户",
-        description: "要封禁该用户吗？封禁后会立即登出，在解除封禁前无法再次登录，其 API 密钥也会被拒绝，OAuth 访问令牌与令牌续期同样被拒绝。解除封禁后这些密钥恢复可用。",
+        description: "要封禁该用户吗？封禁后会立即登出，在解除封禁前无法再次登录，其 API 密钥也会被拒绝，OAuth 访问令牌与令牌续期同样被拒绝。解除封禁后这些密钥恢复可用。封禁还会暂停该用户负责的 AI 服务账号、停用其注册的 OAuth 应用并吊销其创建的 SCIM 凭据；解除封禁不会恢复这些。",
         successMessage: "用户已封禁",
         params: {
           banReason: {
@@ -496,6 +496,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       revoke_reason: {
         label: "撤销原因",
         help: "会话被撤销的原因（idle_timeout、absolute_max、concurrent_cap、ip_not_allowed、user_revoked、admin、organization_membership_ended、admin_password_reset、password_reset 等）。"
+      },
+      sso_provider_id: {
+        label: "SSO 提供方",
+        help: "此会话登录时所经由的 SSO 提供方（如有）。删除该提供方会结束此会话。由系统管理。"
       },
       active_organization_id: {
         label: "当前组织"

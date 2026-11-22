@@ -358,6 +358,8 @@
     "normalizeFlowFunctionEntry": "src/automation/flow-function.zod.ts#normalizeFlowFunctionEntry (function)",
     "parseFlowNodeRegions": "src/automation/control-flow.zod.ts#parseFlowNodeRegions (function)",
     "predicateSlotRefusal": "src/automation/flow-node-expression-paths.ts#predicateSlotRefusal (function)",
+    "recordChangeTriggerFiresOnUpdate": "src/automation/record-change-trigger-events.ts#recordChangeTriggerFiresOnUpdate (function)",
+    "recordChangeTriggerHookEvents": "src/automation/record-change-trigger-events.ts#recordChangeTriggerHookEvents (function)",
     "reservedFlowNodeTypeRefusal": "src/automation/flow-reserved-node-types.ts#reservedFlowNodeTypeRefusal (function)",
     "resolveFlowNodeExpressions": "src/automation/flow-node-expression-paths.ts#resolveFlowNodeExpressions (function)",
     "resolveFlowNodeValueSlots": "src/automation/flow-node-expression-paths.ts#resolveFlowNodeValueSlots (function)",

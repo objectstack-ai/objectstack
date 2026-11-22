@@ -627,6 +627,7 @@ const workspaceAliases: Record<string, string> = {
   // `@object-ui/types/zod` above (objectui#13410).
   '@object-ui/plugin-chatbot/core': path.resolve(import.meta.dirname, '../../packages/plugin-chatbot/src/core.ts'),
   '@object-ui/plugin-chatbot': path.resolve(import.meta.dirname, '../../packages/plugin-chatbot/src'),
+  '@object-ui/plugin-detail/core': path.resolve(import.meta.dirname, '../../packages/plugin-detail/src/core.ts'),
   '@object-ui/plugin-detail': path.resolve(import.meta.dirname, '../../packages/plugin-detail/src'),
   '@object-ui/plugin-editor': path.resolve(import.meta.dirname, '../../packages/plugin-editor/src'),
   '@object-ui/plugin-gantt': path.resolve(import.meta.dirname, '../../packages/plugin-gantt/src'),
@@ -1506,6 +1507,30 @@ export default defineConfig({
               priority: 82,
               includeDependenciesRecursively: false,
             },
+            //
+            // ## The line-item grid leaves the eager line (objectstack#36102)
+            //
+            // The same mechanism as the date picker above, one widget over. The
+            // grid's body is `packages/fields/src/widgets/grid-field/`, and
+            // nothing reaches it but `loadGridFieldWidget`'s `import()` in
+            // `widgets/GridField.ts`: the `GridField` / `LineItemsField` the
+            // package exports by name are the small lazy face in that file, so
+            // the entry's named export no longer makes the body a static
+            // dependency of the eager graph. Without this group `ui-components`
+            // would still claim the directory by path. Its pure helpers, which
+            // the entry also exports, stay in `ui-components`. The record forms
+            // that draw line items preload it on mount.
+            // `PER_CHUNK_MEMBERSHIP_CARVE_OUTS` in
+            // `scripts/check-eager-closure-budget.mjs` holds the split to the
+            // module, and errors if this chunk ever joins the eager closure.
+            // `includeDependenciesRecursively: false` for the reason given on
+            // `fields-date-picker`.
+            {
+              name: 'fields-grid',
+              test: /[\\/]packages[\\/]fields[\\/]src[\\/]widgets[\\/]grid-field[\\/]/,
+              priority: 82,
+              includeDependenciesRecursively: false,
+            },
             { name: 'ui-components', test: /[\\/]packages[\\/](components|fields)[\\/]/, priority: 80 },
             { name: 'ui-layout', test: /[\\/]packages[\\/]layout[\\/]/, priority: 80 },
             { name: 'infrastructure', test: /[\\/]packages[\\/](auth|permissions|tenant)[\\/]/, priority: 80 },
@@ -1529,7 +1554,8 @@ export default defineConfig({
             // ## The form and view helpers stay out of their plugin chunks
             //
             // The console shell is eager and imports pure helpers through
-            // `@object-ui/plugin-form/core` and `@object-ui/plugin-view/core`.
+            // `@object-ui/plugin-form/core`, `@object-ui/plugin-view/core` and
+            // `@object-ui/plugin-detail/core`.
             // Left to the `plugin-form` / `plugin-view` groups above, those
             // modules would be co-tenants of the renderers and pull each whole
             // chunk back into every first load, the mechanism the chatbot group
@@ -1539,13 +1565,19 @@ export default defineConfig({
             // `core.ts` closure belongs in its list.
             {
               name: 'plugin-form-core',
-              test: /[\\/]packages[\\/]plugin-form[\\/]src[\\/](core|autoLayout|sanitize|deriveMasterDetail|schemaDefaults|sectionGroups|fieldGroups|initialFieldFocus)\.tsx?$/,
+              test: /[\\/]packages[\\/]plugin-form[\\/]src[\\/](core|autoLayout|sanitize|deriveMasterDetail|schemaDefaults|sectionGroups|fieldGroups|initialFieldFocus|formOwnerLineContext)\.tsx?$/,
               priority: 71,
               includeDependenciesRecursively: false,
             },
             {
               name: 'plugin-view-core',
               test: /[\\/]packages[\\/]plugin-view[\\/]src[\\/](core|recordSurface|config[\\/]view-config-utils)\.tsx?$/,
+              priority: 71,
+              includeDependenciesRecursively: false,
+            },
+            {
+              name: 'plugin-detail-core',
+              test: /[\\/]packages[\\/]plugin-detail[\\/]src[\\/](core|autoLayout|relatedListCompact|relatedListSort|queueClaim|ConcurrentUpdateDialog|useDetailTranslation|recordFieldAccess|useRecordEditable|useRelatedCounts|renderers[\\/]recordActivityFeed|synth[\\/](relatedListEntry|relatedArrangement|buildDefaultPageSchema))\.tsx?$/,
               priority: 71,
               includeDependenciesRecursively: false,
             },

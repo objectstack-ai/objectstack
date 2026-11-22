@@ -26,7 +26,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import React from 'react';
 import type { GridFieldMetadata } from '@object-ui/types';
-import { GridField } from './GridField';
+import { GridFieldWidget as GridField } from './grid-field/GridFieldWidget';
 
 const field: GridFieldMetadata = {
   type: 'grid',

@@ -118,6 +118,7 @@ const GRID_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'grid.readOnlyReason.objectReadOnly': 'These records can\'t be edited here.',
   'grid.readOnlyReason.noPermission': 'You don\'t have permission to edit these records.',
   'grid.readOnlyReason.approvalLocked': 'This record is locked while it\'s in approval.',
+  'grid.readOnlyReason.checking': 'Checking whether this record can be edited…',
   'grid.readOnlyReason.noRecordPermission': 'You don\'t have permission to edit this record.',
   // objectstack#35685 — the confirm before a list cell moves a state-machine
   // field (`objectGridStateConfirm`). Byte-identical to the `en` pack.

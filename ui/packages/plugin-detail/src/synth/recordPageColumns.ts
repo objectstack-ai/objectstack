@@ -60,12 +60,14 @@
  * the sidebar primitive in `@object-ui/components`. Measured on the console
  * (HotCRM contact record page, sidebar expanded, objectstack#27241): the
  * record page root is the window minus this — 1184 px in a 1440 px window.
- * Below 1416 px the console folds the sidebar to its 48 px icon rail
+ * Below 1280 px the console starts with the sidebar collapsed, and a
+ * collapsed sidebar is hidden and takes no width
  * (`CONSOLE_SIDEBAR_RAIL_BELOW_WIDTH` in `@object-ui/app-shell`,
- * objectstack#27593), so a 1280 px window gives the root 1232 px and a 1024 px
- * one 976 px; only a reader who keeps the sidebar open gets 1024 px in 1280
- * and 768 px in 1024. The floors below are derived for the expanded sidebar,
- * so the rail only ever gives the page more room than they assume.
+ * objectstack#36112, ruling 6973617688 on objectstack#35062), so a 1024 px
+ * window gives the root 1024 px; from 1280 px it starts expanded, 1024 px in
+ * 1280, and a reader who expands it on a narrower window gets 768 px in 1024.
+ * The floors below are derived for the expanded sidebar, so a collapsed one
+ * only ever gives the page more room than they assume.
  */
 const EXPANDED_SIDEBAR_WIDTH = 256;
 

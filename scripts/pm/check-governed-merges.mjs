@@ -502,12 +502,14 @@
  * enforces 3 there. `ui/.claude/**` and every other repository's `.claude/**`
  * are Tier H as before.
  *
- * ⛔ Two readers do NOT chain the split and still read the raw row's Tier S:
- * the relay's review-request plan (`fleet-write/execute.mjs`) and the
- * half-states patrol's landing row, both through `landingTierOf` on the
- * matched slice. Neither decides a landing — the queue guard does — so a
- * `Rule-change: yes` pull is refused at the queue but is not auto-routed to
- * the maintainer by the relay; CODEOWNERS routes the settings and hooks paths.
+ * The two readers that decide no landing chain the split too, on the same
+ * reading: the relay's review-request plan (`governedReviewPlan`,
+ * `fleet-write/execute.mjs`) requests the approvers for a `.claude/**` pull
+ * the split reads Tier H, and the half-states patrol's landing row H43 lists
+ * it. The record conjunct holds only where the queue's record leg would
+ * clear the same comment — it stands at its face's tier and reads a clean
+ * PASS (`recordLeg`, `ruleChangeRecordReasons`) — so no reader prints Tier S
+ * over a record the queue refuses.
  *
  * Published `skills/**` stays a Tier H ROW: the 2026-09-18 seat did not propose
  * moving it, and no row moved since. What moved on 2026-11-14 is a READING on
@@ -1258,7 +1260,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '⚖️ #33603: the sweep lists a low-risk arm landing APART and judges it on a same-head at-tier PASS record': 71,
   '⭐ the weekly audit card: every reading the job files on, both ways (#33814)': 54,
   '⚖️ #33539: the ADR leg of the low-risk arm — an add-only note lands Tier S, any other ADR change stays H': 52,
-  '⚖️ #35321: the guard instruments are Tier H, and `.claude/**` splits by declaration': 40,
+  // 40 → 44 (#35612, N1 of #35610): a record the queue's record leg refuses — a FAIL, below its tier, or a leg not
+  // read — keeps the split at Tier H however its `Rule-change-verified:` line reads; one case pins the words.
+  '⚖️ #35321: the guard instruments are Tier H, and `.claude/**` splits by declaration': 44,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -3175,11 +3179,13 @@ export const RULE_CHANGE_RECORD_STAGE_PENDING_REASON =
  * Why the record keeps the split at Tier H, or [] — the split's last conjunct. Pure.
  *
  * `record` is the reading the low-risk arm's record stage already takes (`lowRiskRecordStage`, the queue guard),
- * with two keys of this split's own: `ruleChangeVerified` (`readRuleChangeVerified` of the located comment) and
+ * with three keys of this split's own: `ruleChangeVerified` (`readRuleChangeVerified` of the located comment),
  * `ruleChangeCarried` (`null`, or `{ from, ok, reason }` for a record carried from an older head — it stands only
- * when the hops moved nothing under the split row). The conjunct holds only for a record FOUND on this head whose
- * line was READ and reads the value the body `declared`: missing, unreadable, `yes`, or the other seat value are
- * each a reason, as is a record that is absent, unsigned or unread.
+ * when the hops moved nothing under the split row) and `recordLeg` (`{ state, reason }`: the queue's own record leg
+ * on the same comment, `recordVerdict` then `recordPassVerdict` — `stands` only at its face's tier and on a clean
+ * PASS). The conjunct holds only for a record FOUND on this head that the record leg clears and whose line was READ
+ * and reads the value the body `declared`: missing, unreadable, `yes`, or the other seat value are each a reason,
+ * as is a record that is absent, unsigned, unread, below its tier, not a clean PASS, or whose leg was not read.
  */
 export function ruleChangeRecordReasons(record, declared) {
   const want = `${RULE_CHANGE_VERIFIED_KEY}: ${declared}`;
@@ -3195,6 +3201,15 @@ export function ruleChangeRecordReasons(record, declared) {
   const which = `its contract-review record (${record.where ?? 'a'} comment ${record.id ?? '(no id)'})`;
   const carried = record.ruleChangeCarried;
   if (carried && carried.ok !== true) reasons.push(`${which} ${carried.reason ?? 'was carried from an older head over hops that could not be read'}`);
+  // The queue's record leg on the same comment: ⛔ a caller that hands no leg reading gets no Tier S (N1 of #35610).
+  const leg = record.recordLeg;
+  if (leg?.state !== 'stands') {
+    const said = leg?.reason ? `: ${leg.reason}` : '';
+    if (!leg) reasons.push(`${which} was not read by the queue's record leg, so whether it stands at its tier and reads a clean PASS is unknown`);
+    else if (leg.state === 'not-pass') reasons.push(`${which} does not read a clean PASS${said}`);
+    else if (leg.state === 'below-tier') reasons.push(`${which} does not stand at its face's tier (its \`Served-tier:\` line)${said}`);
+    else reasons.push(`${which} does not stand on the queue's record leg (${leg.state})${said}`);
+  }
   const line = record.ruleChangeVerified;
   if (!line || line.state === 'missing') reasons.push(`${which} carries no \`${RULE_CHANGE_VERIFIED_KEY}:\` line`);
   else if (line.state !== 'read') reasons.push(`the \`${RULE_CHANGE_VERIFIED_KEY}:\` line of ${which} is unreadable: ${line.reason ?? 'no reason recorded'}`);
@@ -7420,7 +7435,7 @@ async function selfTest() {
   const REPO = SELF_REPO_ID;
   // The reading the `.claude/**` declaration split (2026-11-19) lands Tier S on: the body's one bare line, and a
   // record FOUND on this head whose own line verifies it. `ruleReading` moves one half at a time for the controls.
-  const ruleRecord = (value = 'none', over = {}) => ({ measured: true, reason: null, located: 'found', where: 'PR', id: 7, carried: null, ruleChangeCarried: null, ruleChangeVerified: value === null ? { state: 'missing' } : { state: 'read', value }, ...over });
+  const ruleRecord = (value = 'none', over = {}) => ({ measured: true, reason: null, located: 'found', where: 'PR', id: 7, carried: null, ruleChangeCarried: null, ruleChangeVerified: value === null ? { state: 'missing' } : { state: 'read', value }, recordLeg: { state: 'stands', reason: null }, ...over });
   const ruleReading = (body = 'Rule-change: none', record = ruleRecord()) => ({ measured: true, reason: null, body, ...(record === null ? {} : { record }) });
   const RULE_NONE = ruleReading();
   // Report fixtures take a REAL window from the real resolver, never a
@@ -8243,10 +8258,20 @@ async function selfTest() {
       'an unsigned record': ruleRecord('none', { located: 'unsigned' }),
       'a record that was not read': { measured: false, reason: 'the PR thread answered 502' },
       'a record carried over a hop that moved the tree': ruleRecord('none', { ruleChangeCarried: { from: 'a'.repeat(40), ok: false, reason: 'was carried over hops that moved .claude/x.md' } }),
+      // N1 of #35610: the record leg the queue reads on the same comment — the verified line alone is not enough.
+      'a record that reads FAIL': ruleRecord('none', { recordLeg: { state: 'not-pass', reason: 'it reads FAIL' } }),
+      'a record below its tier': ruleRecord('none', { recordLeg: { state: 'below-tier', reason: null } }),
+      'a record whose leg was not read': ruleRecord('none', { recordLeg: undefined }),
     };
     for (const [name, record] of Object.entries(unverified)) {
       assert(`⛔ unverified-is-Tier-H: ${name}`, tier([WORDING], ruleReading('Rule-change: none', record)) === GOVERNED_TIER_H && split([WORDING], ruleReading('Rule-change: none', record)).reasons.length === 1, why([WORDING], ruleReading('Rule-change: none', record)));
     }
+    assert('⛔ N1: the-record-legs-words-name-why-and-the-same-record-with-a-standing-leg-verifies',
+      /does not read a clean PASS: it reads FAIL/.test(why([WORDING], ruleReading('Rule-change: none', unverified['a record that reads FAIL']))) &&
+        /does not stand at its face's tier/.test(why([WORDING], ruleReading('Rule-change: none', unverified['a record below its tier']))) &&
+        /was not read by the queue's record leg/.test(why([WORDING], ruleReading('Rule-change: none', unverified['a record whose leg was not read']))) &&
+        tier([WORDING], ruleReading('Rule-change: none', ruleRecord('none'))) === GOVERNED_TIER_S,
+      why([WORDING], ruleReading('Rule-change: none', unverified['a record that reads FAIL'])));
     assert('control-a-carried-record-whose-hops-moved-nothing-under-the-row-still-verifies',
       tier([WORDING], ruleReading('Rule-change: none', ruleRecord('none', { ruleChangeCarried: { from: 'a'.repeat(40), ok: true, reason: null } }))) === GOVERNED_TIER_S);
     assert('⛔ the-record-not-handed-in-is-PENDING-Tier-H-never-none',

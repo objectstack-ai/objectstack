@@ -1355,11 +1355,11 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       navigation: {
         label: "Navegação",
-        helpText: "Configuração da navegação ao clicar em um item (painel lateral por padrão, page, new_window ou none)"
+        helpText: "Configuração da navegação ao clicar em um item: o tamanho do painel lateral e `preventNavigation` para uma lista cujas linhas não abrem nada (`mode` está obsoleto: o nome do registro abre a página completa; o ícone ao passar o cursor, o painel lateral)"
       },
       "navigation.mode": {
         label: "Modo",
-        helpText: "[DEPRECATED] No longer picks how an object's list opens a record: in the console the record name opens the full page and the hover icon beside it opens the side panel, for every reader. There `drawer`, `page` and `new_window` still parse and change nothing; `none` still means rows open nothing — prefer `preventNavigation: true`. Omit the key."
+        helpText: "[OBSOLETO] Na lista de um objeto (uma visualização de lista, os `listViews` de um objeto), não define mais como um registro é aberto: no console, para todos os leitores, o nome do registro abre a página completa e o ícone que aparece ao lado dele ao passar o cursor abre o painel lateral. Ali, `drawer`, `page` e `new_window` continuam sendo analisados e não mudam nada, então omita a chave; `none` continua significando que as linhas não abrem nada (prefira `preventNavigation: true`). Um bloco de página que traz `navigation` (um bloco de lista, a linha do tempo, uma visualização incorporada) continua respeitando todos os valores."
       },
       "navigation.preventNavigation": {
         label: "Impedir navegação",
