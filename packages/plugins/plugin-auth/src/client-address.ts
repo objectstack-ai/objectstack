@@ -185,7 +185,8 @@ export function readTrustProxy(value: unknown): ClientAddressTrust {
     refuse(
       `${everyAddress.map((entry) => JSON.stringify(entry)).join(', ')} `
         + `${everyAddress.length === 1 ? 'matches' : 'match'} every address (prefix length 0), which would trust `
-        + 'every connection as a proxy; name the proxies, or declare `true` if that is what you mean',
+        + 'every connection as a proxy; name the proxies. (`true` believes the leftmost entry from any connection, '
+        + 'so it is sound only behind a proxy that overwrites the header.)',
     );
   }
   const header = form.header === undefined ? 'x-forwarded-for' : form.header;

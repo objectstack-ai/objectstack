@@ -201,7 +201,8 @@ export const TrustedProxyNetworksSchema = lazySchema(() => strictObject(
         message:
           'is not an IP address or a CIDR range. Each entry is an address, or an address, "/" and a prefix length: '
           + '1 to 32 for IPv4, 1 to 128 for IPv6 (e.g. "10.20.0.0/28", "192.0.2.7", "2001:db8::10"). A prefix '
-          + 'length of 0 would trust every connection as a proxy: name the proxies, or declare `true`.',
+          + 'length of 0 would trust every connection as a proxy: name the proxies. (`true` believes the leftmost entry '
+          + 'from any connection, so it is sound only behind a proxy that overwrites the header.)',
       }),
     ).min(1, { message: 'lists at least one proxy address or range' }).describe(
       'The addresses or CIDR ranges (IPv4 or IPv6) of the reverse proxies this deployment runs, and nothing else. A '
