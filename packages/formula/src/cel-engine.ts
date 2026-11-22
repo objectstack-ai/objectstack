@@ -1060,7 +1060,7 @@ function comparesDateTextAgainstUndeclared(source: string, env: Environment): bo
     // A macro (`list.exists(x, …)`): `rcall` [name, receiver, [variable, …body]].
     const args = v.args;
     if (v.op === 'rcall' && Array.isArray(args) && args.length === 3 && Array.isArray(args[2])
-      && MACRO_NAMES.has(String(args[0]))) {
+      && COMPREHENSION_MACRO_NAMES.has(String(args[0]))) {
       const [variable, ...body] = args[2] as unknown[];
       const name = isCelNode(variable) && variable.op === 'id' && typeof variable.args === 'string' ? variable.args : null;
       visit(args[1], bound);
@@ -1073,8 +1073,12 @@ function comparesDateTextAgainstUndeclared(source: string, env: Environment): bo
   return found;
 }
 
-/** The CEL macros that bind a variable over a list's items (`list.exists(x, …)`). */
-const MACRO_NAMES: ReadonlySet<string> = new Set(['all', 'exists', 'exists_one', 'map', 'filter']);
+/**
+ * The CEL macros that bind a variable over a list's items (`list.exists(x, …)`).
+ * Package-internal (not re-exported from the entry): `validate.ts`'s
+ * list-equality pass reads the same set, so a name a macro binds is read alike.
+ */
+export const COMPREHENSION_MACRO_NAMES: ReadonlySet<string> = new Set(['all', 'exists', 'exists_one', 'map', 'filter']);
 
 /**
  * A typed environment for the soundness check. Each field carries a concrete

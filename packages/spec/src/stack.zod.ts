@@ -15,6 +15,7 @@ import { findNamespaceObjectNameClashes, namespacedHoldersMeet, validateObjectNa
 import { validateNamespaceNotAddressLiteral } from './kernel/address-grammar';
 import { PLATFORM_CAPABILITY_TOKENS, RETIRED_PLATFORM_CAPABILITY_GUIDANCE } from './kernel/platform-capabilities';
 import { DatasourceSchema } from './data/datasource.zod';
+import { isRecordPageBuiltinTab, relatedListEntryName } from './data/related-list-entry';
 import { TranslationBundleSchema, TranslationConfigSchema } from './system/translation.zod';
 import { StackServerConfigSchema } from './system/stack-server.zod';
 import { StackEmailConfigSchema } from './system/email-config.zod';
@@ -4604,7 +4605,13 @@ function collectRelatedListNameErrors(
       );
     };
     if (Array.isArray(parent.relatedLists)) {
-      parent.relatedLists.forEach((entry: unknown, i: number) => judge(entry, `relatedLists[${i}]`));
+      // [#35897 · #35899] An entry is a bare name or `{ list, … }`; the three
+      // built-in tab names name the record page's own tabs, not a child.
+      parent.relatedLists.forEach((entry: unknown, i: number) => {
+        const name = relatedListEntryName(entry);
+        if (isRecordPageBuiltinTab(name)) return;
+        judge(name, `relatedLists[${i}]`);
+      });
     }
     if (Array.isArray(parent.fieldGroups)) {
       parent.fieldGroups.forEach((group: unknown, i: number) => {

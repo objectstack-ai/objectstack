@@ -11,11 +11,10 @@
  *
  * ## Where it is kept
  *
- * One `sys_user_preference` row per object, key `ui.record.<object>`, beside
- * the list page's `ui.list.<object>` (objectui#12418) and through the same
- * mechanism: a key family the console's `UserStateBridge` attaches, loaded by
- * prefix in the console's ONE preference read per load, each object's row
- * written on its own.
+ * One `sys_user_preference` row per object, key `ui.record.<object>`: a key
+ * family the console's `UserStateBridge` attaches, loaded by prefix in the
+ * console's ONE preference read per load, each object's row written on its
+ * own.
  *
  * ```json
  * { "showEmptyFields": true,

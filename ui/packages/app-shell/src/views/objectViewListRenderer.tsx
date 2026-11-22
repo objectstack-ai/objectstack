@@ -12,12 +12,14 @@ import type { ColumnSummary } from '@objectstack/spec/ui';
 import { useCallback, useLayoutEffect, useRef, useState, useSyncExternalStore, lazy, Suspense, type ReactNode } from 'react';
 import { DENSITY_MODE_TO_ROW_HEIGHT, columnIdentity, normalizeListViewSchema, servedPackageId, type FilterTokenScope } from '@object-ui/core';
 import { listDraftPreference, type useListDraft } from './listDraftStore.js';
-import type { useObjectListPreferences, ListViewPreference, ListViewPreferencePatch } from '../context/ListPreferencesProvider.js';
+import { columnSummaryOf, columnsWithSummaries, declaredColumnFields } from './columnSummaryWrite.js';
+import type { useObjectListLayout } from './listLayoutStore.js';
+import type { ListViewPreference } from './listDraftStore.js';
 const ObjectChart = lazy(() =>
   import('@object-ui/plugin-charts').then((m) => ({ default: m.ObjectChart })),
 );
 import { ListView, type ListToolbarTrailingState } from '@object-ui/plugin-list';
-import type { ListViewSchema, TreeViewConfig } from '@object-ui/types';
+import type { ListColumn, ListViewSchema, TreeViewConfig } from '@object-ui/types';
 import type { FilterBuilderRowGroup } from '@object-ui/components';
 import type { useAuth } from '@object-ui/auth';
 import type { useActionTextLocalizer } from '@object-ui/react';
@@ -86,7 +88,7 @@ export function useObjectViewListRenderer({
     managedUsers,
     managedUserMarker,
     savedViews,
-    listPrefs,
+    listLayout,
     listDraft,
     derivedColumnViewIds,
     baseView,
@@ -126,7 +128,7 @@ export function useObjectViewListRenderer({
     managedUsers: ReturnType<typeof useObjectViewIdentity>['managedUsers'];
     managedUserMarker: ReturnType<typeof useObjectViewIdentity>['managedUserMarker'];
     savedViews: Parameters<typeof buildViewTabs>[0]['savedViews'];
-    listPrefs: ReturnType<typeof useObjectListPreferences>;
+    listLayout: ReturnType<typeof useObjectListLayout>;
     /** objectstack#35955 — the open list's unsaved changes, and their writer. */
     listDraft: ReturnType<typeof useListDraft>;
     derivedColumnViewIds: Set<string>;
@@ -189,12 +191,11 @@ export function useObjectViewListRenderer({
         save?: () => void;
         reset?: () => void;
         /**
-         * objectstack#35702 — save a footer calculation on the open view (wired
-         * only for a reader who may change it); resolves whether it was saved.
+         * objectstack#36194 — the footer's calculation picks go into the list's
+         * draft (`summaries`), on every column the saved body would carry:
+         * set where the list holds a draft. Nothing a pick does writes.
          */
-        pickSummary?: (field: string, summary: ColumnSummary | null) => boolean | Promise<boolean>;
-        /** objectstack#35702 — the columns the view declares: the only ones a pick may change. */
-        summaryPickFields?: readonly string[];
+        draftsSummaries?: boolean;
     };
 }) {
     // objectstack#35551 — the host hands fresh closures every render; the list
@@ -204,9 +205,7 @@ export function useObjectViewListRenderer({
     const offersRename = !!listViewActions?.rename;
     const offersSave = !!listViewActions?.save;
     const offersReset = !!listViewActions?.reset;
-    const offersSummaryPick = !!listViewActions?.pickSummary;
-    // Keyed on content, never the array's identity (a fresh one every render).
-    const summaryPickKey = (listViewActions?.summaryPickFields ?? []).join('\n');
+    const offersSummaryPick = !!listViewActions?.draftsSummaries;
     // objectstack#27058 — below `sm` the title switcher is the phone's one
     // view control, so the list offers no layout switcher of its own there.
     const wideViewport = useViewTabsFit();
@@ -332,23 +331,24 @@ export function useObjectViewListRenderer({
         // objectstack#35955 — the list's DRAFT (`./listDraftStore.ts`): its
         // sort, filters, grouping and search arrive through the seed below,
         // its columns and their order here. The column widths and the row
-        // height are the reader's own (`listPrefs`), never a draft: they are
-        // laid in from what the reader stored, and nothing else stored is.
+        // height are the reader's layout in this browser (`listLayout`), never
+        // a draft.
+        const viewOwnRowColor = viewDef.rowColor ?? listSchema.rowColor;
         const viewPref: ListViewPreference | undefined = listDraftPreference(
             listDraft.draft,
-            listPrefs.preference.perView?.[viewDef.id],
+            listLayout.layout.perView?.[viewDef.id],
         );
         const persistListSort = (sort: Array<{ field: string; order?: string }>) => {
             listDraft.patch({ sort: sort as ListViewPreference['sort'] });
         };
         // One report carries the order and the widths: the order is a draft,
-        // the widths are kept for the reader (a drag that changed only a width
+        // the widths are the reader's layout (a drag that changed only a width
         // hands back the order the draft already holds).
         const persistListColumnState = (state: { order?: string[]; widths?: Record<string, number> }) => {
             listDraft.patch({ columnOrder: state.order && state.order.length > 0 ? state.order : undefined });
-            const storedWidths = listPrefs.preference.perView?.[viewDef.id]?.columnState?.widths;
-            if (JSON.stringify(state.widths ?? {}) !== JSON.stringify(storedWidths ?? {})) {
-                listPrefs.patchView(viewDef.id, { columnState: state.widths ? { widths: state.widths } : null });
+            const keptWidths = listLayout.layout.perView?.[viewDef.id]?.widths;
+            if (JSON.stringify(state.widths ?? {}) !== JSON.stringify(keptWidths ?? {})) {
+                listLayout.patchView(viewDef.id, { widths: state.widths ?? null });
             }
         };
         // objectui#11860 — what the list opens with: the URL's state, else this
@@ -488,13 +488,6 @@ export function useObjectViewListRenderer({
             );
         }
 
-        // objectui#12418 — the list opens on the user's stored sort and
-        // filters, which are read in the console's one preference read; until
-        // that read has answered, there is nothing to open on yet.
-        if (!listPrefs.ready) {
-            return <div className="h-full w-full" aria-busy="true" data-testid="object-view-list-preferences-pending" />;
-        }
-
         // ADR-0053 wrong-context authoring: userFilters/quickFilters on an
         // object list view are suppressed below — say so instead of letting
         // the author stare at a toolbar with nothing where their filter
@@ -556,6 +549,25 @@ export function useObjectViewListRenderer({
             listSchema.columns,
             addedFieldsStored ? viewPref?.addedFields : undefined,
         );
+        /**
+         * objectstack#36194 — the footer's calculations are part of the draft
+         * too: a pick applies at once (the columns the list draws carry it)
+         * and is written nowhere; Discard drops it, Save keeps it. The menu is
+         * offered on the columns a saved body carries (the columns the list
+         * draws, the reader's added ones included), the only columns the draft
+         * can carry a calculation on. A pick of the view's own calculation
+         * drops the column from the draft.
+         */
+        const summaryColumns = columnsWithSummaries(listColumns.columns as ListColumn[] | string[] | undefined, listDraft.draft.summaries) as ListViewSchema['columns'];
+        const summaryPickFields = offersSummaryPick
+            ? declaredColumnFields(listColumns.columns as ListColumn[] | string[] | undefined)
+            : undefined;
+        const pickDraftSummary = (field: string, summary: ColumnSummary | null): boolean => {
+            const own = columnSummaryOf(listColumns.columns as ListColumn[] | string[] | undefined, field);
+            const { [field]: _replaced, ...rest } = listDraft.draft.summaries ?? {};
+            listDraft.patch({ summaries: (summary ?? null) === own ? rest : { ...rest, [field]: summary ?? null } });
+            return true;
+        };
         const persistAddedFields = (added: string[]) => {
             listDraft.patch({ addedFields: added.length > 0 ? added : undefined });
         };
@@ -584,22 +596,18 @@ export function useObjectViewListRenderer({
          * objectstack#28948 — a reset to the view's own is not a choice. The
          * list's "Reset to view default" (the Display control's, the sort
          * popover's) names the parts it put back, and they are CLEARED from
-         * this user's stored state rather than stored as the view's values, so
-         * a later change to the view reaches them. A view left with nothing is
-         * removed (`patchViewPreference`).
+         * the draft and the reader's layout rather than kept as the view's
+         * values, so a later change to the view reaches them.
          * The sort leaves the URL too, which would otherwise seed it again.
          * A deliberate `sort: []` or `hiddenFields: []` still arrives through
-         * `persistListSort` / `persistHiddenFields` and stays stored.
+         * `persistListSort` / `persistHiddenFields` and stays in the draft.
          */
         const restoreViewDefaults = (parts: ReadonlyArray<'sort' | 'hiddenFields' | 'rowHeight'>) => {
             // objectstack#35955 — the sort and the hidden fields leave the
-            // draft; the row height is the reader's stored choice.
+            // draft; the row height leaves the reader's layout.
             if (parts.includes('sort')) listDraft.patch({ sort: undefined });
             if (parts.includes('hiddenFields')) listDraft.patch({ hiddenFields: undefined });
-            if (parts.includes('rowHeight')) {
-                const patch: ListViewPreferencePatch = { rowHeight: null };
-                listPrefs.patchView(viewDef.id, patch);
-            }
+            if (parts.includes('rowHeight')) listLayout.patchView(viewDef.id, { rowHeight: null });
             if (parts.includes('sort')) writeListUrlState({ sort: null });
         };
 
@@ -641,7 +649,9 @@ export function useObjectViewListRenderer({
             // new object documents of equal content: hold it like the blocks.
             // objectstack#30077 — plus the fields this user added (see
             // `withAddedListColumns`).
-            columns: holdBlock('columns', listColumns.columns),
+            // objectstack#36194 — and the footer calculations the draft holds,
+            // drawn at once (`summaryColumns`).
+            columns: holdBlock('columns', summaryColumns),
             // objectui#10035 — the refresh signal, in place of the remount the
             // key used to force. The spread above carries only the plugin
             // ObjectView's counter; this page's own counter (actions, import,
@@ -686,12 +696,11 @@ export function useObjectViewListRenderer({
                 viewPref?.rowHeight
                 ?? (normalizeListViewSchema(viewDef ?? {}) as Pick<ListViewSchema, 'rowHeight'>).rowHeight
                 ?? listSchema.rowHeight,
-            // Hydrate the persisted settings so they survive reload. The sort
-            // and the column layout (objectui#12418), the density and the
-            // hidden fields (objectui#12474) are the USER's: they are read
-            // from and written to `listPrefs`, never `/meta/view`. No list
-            // toolbar control writes the shared view; the view editor's
-            // explicit save does.
+            // The sort, the column order and the hidden fields are the list's
+            // draft; the widths and the density are the reader's layout in
+            // this browser (`listLayout`). Neither writes `/meta/view`: no list
+            // toolbar control writes the shared view; Save and the view
+            // editor's explicit save do.
             //
             // objectui#11860 — a sort the URL carries is applied over the
             // view's: an opened link sorts as it was sorted. Without a link,
@@ -771,16 +780,16 @@ export function useObjectViewListRenderer({
             fieldOrder: activeViewDeclaresColumns
                 ? (viewDef.fieldOrder ?? listSchema.fieldOrder)
                 : undefined,
-            // objectui#12418 — the user's column layout over the view's. `{}`
-            // when neither has one: this host persists the layout, so the
+            // The draft's column order and the reader's widths over the view's.
+            // `{}` when neither has one: this host keeps the layout, so the
             // grid's own per-browser fallback must not stand in for it (and a
-            // "Reset view" must reach the grid).
+            // Discard must reach the grid).
             columnState: viewPref?.columnState ?? (viewDef as any).columnState ?? (listSchema as any).columnState ?? {},
             onDensityChange: (mode) => {
-                // objectui#12474 — the USER's density, on their own list state,
-                // never the shared view. Stored as the spec-canonical
-                // `rowHeight` (#2890), the vocabulary the rung above reads.
-                listPrefs.patchView(viewDef.id, {
+                // objectui#12474 — the reader's density, on their layout in
+                // this browser, never the shared view. Kept as the
+                // spec-canonical `rowHeight`, the vocabulary the rung above reads.
+                listLayout.patchView(viewDef.id, {
                     rowHeight: DENSITY_MODE_TO_ROW_HEIGHT[mode],
                 });
             },
@@ -860,7 +869,14 @@ export function useObjectViewListRenderer({
              * a different nesting level ('may the user open the colour panel'
              * versus 'what the colours are').
              */
-            rowColor: viewDef.rowColor ?? listSchema.rowColor,
+            // objectstack#35955 — the reader's unsaved row colour (the list's
+            // draft, `null` for "none") over the view's own; the view's own
+            // goes to `viewDefaults` below, for Discard and Save.
+            rowColor: listDraft.draft.rowColor !== undefined
+                ? (listDraft.draft.rowColor ?? undefined)
+                : viewOwnRowColor,
+            // objectstack#35955 — and the reader's unsaved layout.
+            viewType: listDraft.draft.viewType ?? listSchema.viewType,
             // objectui#11013 — the seven renderer flags this relay used to read
             // off the active view (`wrapHeaders`, `clickIntoRecordDetails`,
             // `addRecordViaForm`, `addDeleteRecordsInline`,
@@ -1084,21 +1100,28 @@ export function useObjectViewListRenderer({
                 // objectstack#28950 — and the view's own grouping, under a
                 // grouping the URL carries (the `grouping` rung above), so the
                 // list can tell the reader's from the view's.
-                viewDefaults={{ hiddenFields: viewHiddenFields, rowHeight: viewRowHeight, sort: viewSort, grouping: listSchema.grouping, filters: viewPanelFilters }}
+                // objectstack#35955 — and the view's own layout and row colour,
+                // under the draft's (`viewType` / `rowColor` above).
+                viewDefaults={{ hiddenFields: viewHiddenFields, rowHeight: viewRowHeight, sort: viewSort, grouping: listSchema.grouping, filters: viewPanelFilters, viewType: listSchema.viewType, rowColor: viewOwnRowColor }}
                 // objectstack#28948 — those resets clear the user's state.
                 onRestoreViewDefaults={restoreViewDefaults}
                 // objectstack#28950 — what of the list differs from the view,
                 // for Discard and Save (objectstack#35955), which then own the
                 // one reset (the Display control draws none of its own).
                 onPersonalizationChange={(parts) => handleListPersonalizationChange(identityKey, parts)}
+                // objectstack#35955 — the layout and the row colour the reader
+                // picks are the list's draft; picking the view's own again
+                // drops that part.
+                onViewChange={(view: string) => listDraft.patch({ viewType: view === listSchema.viewType ? undefined : view })}
+                onRowColorChange={(rowColor: { field: string; colors?: Record<string, string> } | null) => listDraft.patch({
+                    rowColor: (rowColor?.field ?? '') === (viewOwnRowColor?.field ?? '') ? undefined : rowColor,
+                })}
                 // objectstack#35551 — the view's rename, 保存 and full reset in the options menu.
                 onRenameView={offersRename ? (label: string) => listViewActionsRef.current?.rename?.(label) ?? false : undefined}
                 onSaveView={offersSave ? () => listViewActionsRef.current?.save?.() : undefined}
                 onResetView={offersReset ? () => listViewActionsRef.current?.reset?.() : undefined}
-                onColumnSummaryPick={offersSummaryPick
-                    ? (field: string, summary: ColumnSummary | null) => listViewActionsRef.current?.pickSummary?.(field, summary) ?? false
-                    : undefined}
-                columnSummaryPickFields={offersSummaryPick ? summaryPickKey.split('\n').filter(Boolean) : undefined}
+                onColumnSummaryPick={summaryPickFields && summaryPickFields.length > 0 ? pickDraftSummary : undefined}
+                columnSummaryPickFields={summaryPickFields}
                 className={className}
                 onEdit={editHandler}
                 // objectui#13089 — the view's Add button is the header New:
@@ -1209,7 +1232,7 @@ export function useObjectViewListRenderer({
                 dataSource={ds}
             />
         );
-    }, [hasViewBarTrailing, trailStore, rowEndStore, activeView, activeViewDeclaresColumns, activeViewIsSaved, objectDef, objectName, refreshKey, createRecord, urlFilters, initialUfSelections, handleUserFilterSelectionsChange, writeListUrlState, listPage, user?.id, pageOffersCreate, listAddRecordOpensCreate, listIdentityKey, listPrefs.ready, listPrefs.preference, listPrefs.patchView, listDraft.draft, listDraft.patch, managedUsers, managedUserMarker, openInPanel, openReferencedRecord, rowOpensRecord, handleListRowsChange, handleListTotalChange, hasPhoneTitle, leadStore, wideViewport, handleListPersonalizationChange, workspaceTimeZone, viewPanelFilters, offersRename, offersSave, offersReset, offersSummaryPick, summaryPickKey, previewDrafts, previewDataSource, unpublishedObjects]);
+    }, [hasViewBarTrailing, trailStore, rowEndStore, activeView, activeViewDeclaresColumns, activeViewIsSaved, objectDef, objectName, refreshKey, createRecord, urlFilters, initialUfSelections, handleUserFilterSelectionsChange, writeListUrlState, listPage, user?.id, pageOffersCreate, listAddRecordOpensCreate, listIdentityKey, listLayout.layout, listLayout.patchView, listDraft.draft, listDraft.patch, managedUsers, managedUserMarker, openInPanel, openReferencedRecord, rowOpensRecord, handleListRowsChange, handleListTotalChange, hasPhoneTitle, leadStore, wideViewport, handleListPersonalizationChange, workspaceTimeZone, viewPanelFilters, offersRename, offersSave, offersReset, offersSummaryPick, previewDrafts, previewDataSource, unpublishedObjects]);
 
     return { renderListView };
 }

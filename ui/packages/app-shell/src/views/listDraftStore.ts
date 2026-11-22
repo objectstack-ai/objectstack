@@ -7,10 +7,11 @@
  * (into the open view, or as a view of their own) or drops it with Discard.
  *
  * What a draft holds: the sort, the Filter panel's group, the grouping, the
- * search term, the columns shown (hidden ones, added ones), the column order
- * and (from PR 2) the Display panel's layout and row colour. What it never holds: the
- * column widths and the row height, which are remembered for the reader
- * (`ListPreferencesProvider`), and the view tab order.
+ * search term, the columns shown (hidden ones, added ones), the column order,
+ * the footer's calculations (objectstack#36194) and the Display panel's layout
+ * and row colour. What it never holds: the column widths, the row height and
+ * the view tab order, which are the reader's layout in this browser
+ * (`./listLayoutStore.ts`).
  *
  * ## How long it lives
  *
@@ -36,11 +37,50 @@
 
 import { useCallback, useSyncExternalStore } from 'react';
 import type { GroupingConfig } from '@objectstack/spec/ui';
-import type {
-  ListFilterGroupPreference,
-  ListSortPreference,
-  ListViewPreference,
-} from '../context/ListPreferencesProvider.js';
+import type { RowHeight } from '@object-ui/core';
+import type { ListViewLayout } from './listLayoutStore.js';
+import type { DraftColumnSummaries } from './columnSummaryWrite.js';
+
+/** One sort level, as the list emits it (the builder's row `id` is not kept). */
+export interface ListSortPreference {
+  field: string;
+  order: 'asc' | 'desc';
+}
+
+/** The Filter panel's group, kept verbatim so the panel can rehydrate it. */
+export interface ListFilterGroupPreference {
+  id?: string;
+  logic?: string;
+  conditions?: unknown[];
+}
+
+/** The grid's column layout: the order (a draft) and the widths (the reader's layout). */
+export interface ListColumnStatePreference {
+  order?: string[];
+  widths?: Record<string, number>;
+}
+
+/**
+ * The list on screen beyond its view's own body, in the shape the list relay
+ * and the view builders read: the draft's parts, with the column widths and
+ * the row height from the reader's layout (`./listLayoutStore.ts`). Built by
+ * {@link listDraftPreference}; stored nowhere in this shape.
+ */
+export interface ListViewPreference {
+  sort?: ListSortPreference[];
+  filters?: ListFilterGroupPreference;
+  columnState?: ListColumnStatePreference;
+  /** The reader's row height, in the spec's `rowHeight` vocabulary. */
+  rowHeight?: RowHeight;
+  /**
+   * The columns the reader hid: a SUBTRACTION from the columns the view
+   * declares. An empty list is "show every column", which is not the view's
+   * authored `hiddenFields`.
+   */
+  hiddenFields?: string[];
+  /** The object's fields the reader added as columns: an ADDITION to the view's. */
+  addedFields?: string[];
+}
 
 /** A list's unsaved changes. An absent part is the view's own. */
 export interface ListDraft {
@@ -54,17 +94,19 @@ export interface ListDraft {
   hiddenFields?: string[];
   /** The object's fields the reader added as columns. */
   addedFields?: string[];
-  /**
-   * The visualization the reader switched to (`ListView`'s layout control).
-   * Nothing writes it yet: the list hands its layout out from PR 2 of
-   * objectstack#35955, and Save keeps it from then.
-   */
+  /** The visualization the reader switched to (`ListView`'s layout control, `onViewChange`). */
   viewType?: string;
   /**
-   * The row colour the reader picked, or `null` for "none" over a view that
-   * colours its rows. Written from PR 2 of objectstack#35955, as `viewType`.
+   * The row colour the reader picked (`ListView`'s `onRowColorChange`), or
+   * `null` for "none" over a view that colours its rows.
    */
   rowColor?: { field: string; colors?: Record<string, string> } | null;
+  /**
+   * objectstack#36194 — the footer calculations the reader picked, by column
+   * (`null` = None over a column the view sums). Only the columns that differ
+   * from the view are held; picking the view's own again drops the column.
+   */
+  summaries?: DraftColumnSummaries;
 }
 
 /** A patch: a part set to `undefined` is dropped back to the view's own. */
@@ -121,6 +163,9 @@ function normalizePart(key: string, value: unknown): unknown {
   if (key === 'filters') {
     const conditions = (value as { conditions?: unknown } | null | undefined)?.conditions;
     return Array.isArray(conditions) && conditions.length > 0 ? value : undefined;
+  }
+  if (key === 'summaries') {
+    return value && typeof value === 'object' && Object.keys(value).length > 0 ? value : undefined;
   }
   return value;
 }
@@ -216,18 +261,15 @@ function sameAddress(a: string, b: string): boolean {
 }
 
 /**
- * The list's state in the reader-state shape the list relay and the view
- * builders read (`ListViewPreference`): the draft's columns, their order and
- * its sort and filters, with the two parts kept for the reader — the column
- * widths and the row height — from what they stored. Nothing else they
- * stored is read: a sort, filter, column order or hidden column stored
- * before objectstack#35955 no longer applies.
+ * The list's state in the shape the list relay and the view builders read
+ * ({@link ListViewPreference}): the draft's sort, filters and columns, with the
+ * reader's layout in this browser — the column widths and the row height.
  */
 export function listDraftPreference(
   draft: ListDraft,
-  stored: ListViewPreference | undefined,
+  layout: ListViewLayout | undefined,
 ): ListViewPreference | undefined {
-  const widths = stored?.columnState?.widths;
+  const widths = layout?.widths;
   const out: ListViewPreference = {};
   if (draft.sort) out.sort = draft.sort;
   if (draft.filters) out.filters = draft.filters;
@@ -239,7 +281,7 @@ export function listDraftPreference(
       ...(widths ? { widths } : {}),
     };
   }
-  if (stored?.rowHeight) out.rowHeight = stored.rowHeight;
+  if (layout?.rowHeight) out.rowHeight = layout.rowHeight;
   return Object.keys(out).length > 0 ? out : undefined;
 }
 
