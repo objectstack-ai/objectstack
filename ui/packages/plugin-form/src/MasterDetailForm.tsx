@@ -34,7 +34,7 @@ import React, { startTransition, useCallback, useContext, useEffect, useMemo, us
 import { createPortal } from 'react-dom';
 import type { BatchTransactionOperation, DataSource, GridFieldMetadata, I18nLabel } from '@object-ui/types';
 import { resolveAffordance, runBatchTransaction } from '@object-ui/core';
-import { isUntouchedNewRow, LineItemsField, lookupAutofillByField, columnHelpByField, UNTOUCHED_NEW_ROW, useBooleanValueLabel, type BooleanValueLabel, type ColumnHelp, type GridColumn, type LookupAutofillByField } from '@object-ui/fields';
+import { isUntouchedNewRow, LineItemsField, preloadGridField, lookupAutofillByField, columnHelpByField, UNTOUCHED_NEW_ROW, useBooleanValueLabel, type BooleanValueLabel, type ColumnHelp, type GridColumn, type LookupAutofillByField } from '@object-ui/fields';
 import { Button, Card, CardContent, CardHeader, CardTitle, cn, toast } from '@object-ui/components';
 import {
   formatDisplayNumber,
@@ -1319,6 +1319,9 @@ export const MasterDetailForm: React.FC<MasterDetailFormProps> = ({
   dataSource,
   className,
 }) => {
+  // The line grid's body loads on first use (objectstack#36102). Start it now,
+  // while the child schema is fetched, so the grid is there before its columns.
+  preloadGridField();
   const rawDetails = schema.details || [];
   const isEdit = schema.mode === 'edit' && !!schema.recordId;
   // `title` / `submitText` / `cancelText` are `I18nLabel` (see the schema

@@ -4,7 +4,8 @@ import React from 'react';
 import { UploadProvider } from './UploadProvider';
 import { Dialog, DialogContent, DialogTitle } from '@object-ui/components';
 import { formatDate, formatDateTime } from '@object-ui/core';
-import { GridField, LineItemsField, sumColumn, lookupAutofillPatch, UNTOUCHED_NEW_ROW, isUntouchedNewRow, columnHelpByField } from './GridField';
+import { GridFieldWidget as GridField } from './grid-field/GridFieldWidget';
+import { GridField as GridFieldFace, LineItemsField, sumColumn, lookupAutofillPatch, UNTOUCHED_NEW_ROW, isUntouchedNewRow, columnHelpByField } from './GridField';
 
 const columns = [
   { name: 'description', label: 'Description', type: 'text' as const },
@@ -15,7 +16,7 @@ const field = { columns, totalField: 'amount' } as any;
 
 describe('GridField / LineItemsField — editable line items', () => {
   it('is exported under both names', () => {
-    expect(LineItemsField).toBe(GridField);
+    expect(LineItemsField).toBe(GridFieldFace);
   });
 
   it('renders a column header per config and an empty hint', () => {

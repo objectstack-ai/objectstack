@@ -34,6 +34,7 @@ import { deriveHexBadgePalette } from './hexBadgePalette.js';
 import { formatNumberFieldValue, formatCurrency, formatPercentPoints, percentCellScale } from './widgets/number-format.js';
 import { useFieldTranslation } from './widgets/useFieldTranslation.js';
 import { useBooleanValueLabel } from './widgets/booleanValueLabel.js';
+import { loadGridFieldWidget } from './widgets/GridField.js';
 import { RecordHoverCard, type RecordHoverCardObjectDef } from './RecordHoverCard.js';
 
 // Module-level cache so multiple renderers fetching the same lookup ID
@@ -4820,7 +4821,9 @@ const fieldWidgetMap = {
   // Complex data types
   'object': () => import('./widgets/ObjectField.js').then(m => ({ default: m.ObjectField })),
   'vector': () => import('./widgets/VectorField.js').then(m => ({ default: m.VectorField })),
-  'grid': () => import('./widgets/GridField.js').then(m => ({ default: m.GridField })),
+  // The grid's body, through its public face's one loader so a lazy `GridField`
+  // mounted after this resolved renders without a boundary (objectstack#36102).
+  'grid': () => loadGridFieldWidget().then(m => ({ default: m.GridFieldWidget })),
   
   // Additional field types from @objectstack/spec
   'color': () => import('./widgets/ColorField.js').then(m => ({ default: m.ColorField })),
@@ -5499,7 +5502,10 @@ export * from './widgets/AutoNumberField.js';
 export * from './widgets/UserField.js';
 export * from './widgets/ObjectField.js';
 export * from './widgets/VectorField.js';
-export { evalArith, lookupAutofillPatch, computeRow, GridField, LineItemsField, UNTOUCHED_NEW_ROW, isUntouchedNewRow, columnHelpByField } from './widgets/GridField.js';
+// `GridField` / `LineItemsField` are the grid's lazy face: the body loads on
+// first use, or earlier through `preloadGridField` (objectstack#36102). The
+// pure helpers beside them are eager. See `widgets/GridField.tsx`.
+export { evalArith, lookupAutofillPatch, computeRow, GridField, LineItemsField, preloadGridField, UNTOUCHED_NEW_ROW, isUntouchedNewRow, columnHelpByField } from './widgets/GridField.js';
 export type { ColumnCurrencies, ColumnHelp } from './widgets/GridField.js';
 export type { GridColumn } from './widgets/GridField.js';
 export * from './widgets/lookupAutofill.js';
