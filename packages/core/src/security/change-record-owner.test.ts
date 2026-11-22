@@ -11,6 +11,7 @@ import {
   changeOwnerOffReason,
   changeRecordOwner,
   changeRecordsOwner,
+  transferCascadeRelations,
   type ChangeOwnerEngine,
 } from './change-record-owner.js';
 import { USER_WORK_TRANSFER_ROW_CAP, UserWorkTransferRefusal } from './user-assigned-work.js';
@@ -29,9 +30,15 @@ const orgOwned = { name: 'setting_row', ownership: 'org', fields: { name: { type
 const managed = { name: 'auth_session', managedBy: 'better-auth', fields: { user_id: { type: 'lookup', reference: 'sys_user' } } };
 const platform = { name: 'sys_team', fields: { name: { type: 'text' } } };
 const noQueue = { name: 'memo', fields: { owner_id: OWNER_FIELD_DEF } };
+// [#35315 phase 2] The cascade's children of `lead`: one declared cascade, one
+// plain lookup, and — registered raw, past the parse that refuses it — a
+// cascade on a controlled_by_parent detail, which is never a candidate.
+const leadTask = { name: 'lead_task', label: 'Task', sharingModel: 'private', fields: { lead: { type: 'lookup', reference: 'lead', label: 'Lead', transferBehavior: 'cascade' }, owner_id: OWNER_FIELD_DEF } };
+const leadCall = { name: 'lead_call', sharingModel: 'private', fields: { lead: { type: 'lookup', reference: 'lead' }, owner_id: OWNER_FIELD_DEF } };
+const leadLine = { name: 'lead_line', sharingModel: 'controlled_by_parent', fields: { lead: { type: 'master_detail', reference: 'lead', transferBehavior: 'cascade' }, owner_id: OWNER_FIELD_DEF } };
 
 const SCHEMAS: Record<string, unknown> = Object.fromEntries(
-  [lead, pinned, line, lineOptedIn, orgOwned, managed, platform, noQueue].map((o) => [o.name, o]),
+  [lead, pinned, line, lineOptedIn, orgOwned, managed, platform, noQueue, leadTask, leadCall, leadLine].map((o) => [o.name, o]),
 );
 
 const CALLER = { userId: 'u_manager', tenantId: 'org_1' };
@@ -43,22 +50,38 @@ function fakeEngine(opts: { refuse?: (id: string) => unknown; hiddenUsers?: stri
     lead: [{ id: 'l1', owner_id: 'u_a' }, { id: 'l2', owner_id: 'u_b' }, { id: 'l3', owner_id: 'u_a' }],
     contract_line: [{ id: 'c1', owner_id: 'u_a' }],
     memo: [{ id: 'm1', owner_id: 'u_a' }],
+    lead_task: [
+      { id: 't1', lead: 'l1', owner_id: 'u_a' },
+      { id: 't2', lead: 'l1', owner_id: 'u_b' },
+      { id: 't3', lead: 'l1', owner_id: 'u_a' },
+      { id: 't4', lead: 'l2', owner_id: 'u_b' },
+    ],
+    lead_call: [{ id: 'k1', lead: 'l1', owner_id: 'u_a' }],
+    lead_line: [{ id: 'n1', lead: 'l1', owner_id: 'u_a' }],
   };
+  // Equality on plain fields, and `{ $in: [...] }` on one; a combinator this double does not implement is refused, never read as a field.
+  const matches = (r: Row, where: Row | undefined) => Object.entries(where ?? {}).every(([k, v]) => {
+    if (k.startsWith('$')) throw new Error(`mock find: the ${k} combinator is not implemented`);
+    if (v !== null && typeof v === 'object' && Array.isArray((v as Row).$in)) return (v as Row).$in.includes(r[k]);
+    return r[k] === v;
+  });
   const calls: Array<{ op: string; object: string; data?: Row; where?: Row; context?: unknown }> = [];
   const engine: ChangeOwnerEngine & { tables: typeof tables; calls: typeof calls } = {
     tables,
     calls,
     getSchema: (name) => SCHEMAS[name],
+    getConfigs: () => SCHEMAS,
+    async count(object, q) {
+      calls.push({ op: 'count', object, where: q?.where, context: q?.context });
+      return (tables[object] ?? []).filter((r) => matches(r, q?.where)).length;
+    },
     async find(object, q) {
       calls.push({ op: 'find', object, where: q?.where, context: q?.context });
       // Equality on plain fields only; a combinator this double does not implement is refused, never read as a field.
       // A user the caller's read door does not return; an elevated read still finds it.
       const hidden = object === 'sys_user' && !(q?.context as any)?.isSystem ? (opts.hiddenUsers ?? []) : [];
       const reachable = (tables[object] ?? []).filter((r) => !hidden.includes(String(r.id)));
-      return reachable.filter((r) => Object.entries(q?.where ?? {}).every(([k, v]) => {
-        if (k.startsWith('$')) throw new Error(`mock find: the ${k} combinator is not implemented`);
-        return r[k] === v;
-      })).slice(0, q?.limit ?? Infinity);
+      return reachable.filter((r) => matches(r, q?.where)).slice(0, q?.limit ?? Infinity);
     },
     async update(object, data, o) {
       assertEngineUpdateDispatch(data, o);
@@ -288,5 +311,113 @@ describe('[#35402] notify', () => {
     });
     expect(failing.notified).toBe(false);
     expect(engine.tables.lead[0]!.owner_id).toBe('u_next');
+  });
+});
+
+describe('[#35315 phase 2] the Change Owner cascade', () => {
+  const ownersOf = (engine: ReturnType<typeof fakeEngine>, object: string) =>
+    Object.fromEntries(engine.tables[object]!.map((r) => [r.id, r.owner_id]));
+
+  it('offers only the declared cascades whose child offers Change Owner itself', () => {
+    expect(transferCascadeRelations(fakeEngine(), 'lead')).toEqual([
+      { object: 'lead_task', field: 'lead', label: 'Task', fieldLabel: 'Lead' },
+    ]);
+    expect(transferCascadeRelations(fakeEngine(), 'memo')).toEqual([]);
+    // A disabled package's child is no candidate.
+    const engine = Object.assign(fakeEngine(), { registry: { isObjectPackageDisabled: (n: string) => n === 'lead_task' } });
+    expect(transferCascadeRelations(engine, 'lead')).toEqual([]);
+  });
+
+  it('moves only the child rows owned by the previous owner, each by id under the caller\'s context', async () => {
+    const engine = fakeEngine();
+    const result = await changeRecordOwner(engine, 'lead', 'l1', { ownerId: 'u_next' }, CALLER, {
+      cascade: [{ object: 'lead_task', field: 'lead' }],
+    });
+    expect(result.cascade).toEqual([{ object: 'lead_task', field: 'lead', updated: 2, failed: 0, failures: [], remaining: 0 }]);
+    // t2 belongs to someone else and t4 to another lead: neither moves. The
+    // plain lookup's row is never touched.
+    expect(ownersOf(engine, 'lead_task')).toEqual({ t1: 'u_next', t2: 'u_b', t3: 'u_next', t4: 'u_b' });
+    expect(ownersOf(engine, 'lead_call')).toEqual({ k1: 'u_a' });
+    const childWrites = engine.calls.filter((c) => c.op === 'update' && c.object === 'lead_task');
+    expect(childWrites.map((w) => [w.where, w.data, w.context])).toEqual([
+      [{ id: 't1' }, { owner_id: 'u_next' }, CALLER],
+      [{ id: 't3' }, { owner_id: 'u_next' }, CALLER],
+    ]);
+    // The child rows were read by the parent and its PREVIOUS owner, as the caller.
+    expect(engine.calls.find((c) => c.op === 'find' && c.object === 'lead_task')).toMatchObject({
+      where: { lead: 'l1', owner_id: 'u_a' }, context: CALLER,
+    });
+  });
+
+  it('a child row the caller may not transfer is reported with its id and code, never skipped', async () => {
+    const engine = fakeEngine({ refuse: (id) => (id === 't3' ? transferDenied() : undefined) });
+    const result = await changeRecordOwner(engine, 'lead', 'l1', { ownerId: 'u_next' }, CALLER, {
+      cascade: [{ object: 'lead_task', field: 'lead' }],
+    });
+    expect(result.ownerId).toBe('u_next');
+    expect(result.cascade).toHaveLength(1);
+    expect(result.cascade![0]).toMatchObject({ updated: 1, failed: 1, remaining: 0 });
+    expect(result.cascade![0]!.failures.map((f) => [f.id, f.code])).toEqual([['t3', 'PERMISSION_DENIED']]);
+    expect(ownersOf(engine, 'lead_task')).toMatchObject({ t1: 'u_next', t3: 'u_a' });
+  });
+
+  it('the row cap holds: past it, rows stay with the previous owner and are counted in remaining', async () => {
+    const engine = fakeEngine();
+    const result = await changeRecordOwner(engine, 'lead', 'l1', { ownerId: 'u_next' }, CALLER, {
+      cascade: [{ object: 'lead_task', field: 'lead' }],
+      rowCap: 1,
+    });
+    expect(result.cascade![0]).toMatchObject({ updated: 1, failed: 0, remaining: 1 });
+    expect(engine.calls.filter((c) => c.op === 'update' && c.object === 'lead_task')).toHaveLength(1);
+    expect(ownersOf(engine, 'lead_task')).toEqual({ t1: 'u_next', t2: 'u_b', t3: 'u_a', t4: 'u_b' });
+  });
+
+  it('a relationship that is not a declared, eligible cascade is never cascaded: the whole call is refused before any write', async () => {
+    for (const rel of [{ object: 'lead_call', field: 'lead' }, { object: 'lead_line', field: 'lead' }, { object: 'lead_task', field: 'owner_id' }]) {
+      for (const run of [
+        (e: ReturnType<typeof fakeEngine>) => changeRecordOwner(e, 'lead', 'l1', { ownerId: 'u_next' }, CALLER, { cascade: [rel] }),
+        (e: ReturnType<typeof fakeEngine>) => changeRecordsOwner(e, 'lead', ['l1', 'l2'], { ownerId: 'u_next' }, CALLER, { cascade: [rel] }),
+      ]) {
+        const engine = fakeEngine();
+        const err = await refusalOf(run(engine));
+        expect(err).toBeInstanceOf(UserWorkTransferRefusal);
+        expect({ code: err.code, status: err.status }).toEqual({ code: 'VALIDATION_ERROR', status: 400 });
+        expect(err.message).toContain(`'${rel.object}.${rel.field}' is not a Change Owner cascade of 'lead'`);
+        expect(engine.calls.some((c) => c.op === 'update')).toBe(false);
+        expect(ownersOf(engine, 'lead_line')).toEqual({ n1: 'u_a' });
+      }
+    }
+  });
+
+  it('a cascade with a queue target, or naming one relationship twice, is refused before any write', async () => {
+    const rel = { object: 'lead_task', field: 'lead' };
+    for (const run of [
+      (e: ReturnType<typeof fakeEngine>) => changeRecordOwner(e, 'lead', 'l1', { queue: 'triage' }, CALLER, { cascade: [rel] }),
+      (e: ReturnType<typeof fakeEngine>) => changeRecordOwner(e, 'lead', 'l1', { ownerId: 'u_next' }, CALLER, { cascade: [rel, rel] }),
+    ]) {
+      const engine = fakeEngine();
+      const err = await refusalOf(run(engine));
+      expect({ code: err.code, status: err.status }).toEqual({ code: 'VALIDATION_ERROR', status: 400 });
+      expect(engine.calls.some((c) => c.op === 'update')).toBe(false);
+    }
+  });
+
+  it('the bulk form cascades from each moved record\'s own previous owner, and not from a record that did not move', async () => {
+    const engine = fakeEngine({ refuse: (id) => (id === 'l3' ? transferDenied() : undefined) });
+    const report = await changeRecordsOwner(engine, 'lead', ['l1', 'l2', 'l3'], { ownerId: 'u_next' }, CALLER, {
+      cascade: [{ object: 'lead_task', field: 'lead' }],
+    });
+    expect(report).toMatchObject({ updated: 2, failed: 1 });
+    // l1 was u_a's: t1 and t3 move. l2 was u_b's: t4 moves. t2 (u_b, under l1) stays.
+    expect(report.cascade).toEqual([{ object: 'lead_task', field: 'lead', updated: 3, failed: 0, failures: [], remaining: 0 }]);
+    expect(ownersOf(engine, 'lead_task')).toEqual({ t1: 'u_next', t2: 'u_b', t3: 'u_next', t4: 'u_next' });
+  });
+
+  it('a request that names no cascade answers no cascade member and reads no previous owner', async () => {
+    const engine = fakeEngine();
+    const result = await changeRecordOwner(engine, 'lead', 'l1', { ownerId: 'u_next' }, CALLER);
+    expect('cascade' in result).toBe(false);
+    expect(engine.calls.some((c) => c.op === 'find' && c.object === 'lead')).toBe(false);
+    expect(ownersOf(engine, 'lead_task')).toMatchObject({ t1: 'u_a' });
   });
 });
