@@ -89,8 +89,8 @@ export function StudioBackToApp({
   // Read once per visit: nothing in Studio is an app page, so the record
   // cannot change while the author is here.
   const [remembered] = React.useState(readAppReturnPage);
-  const landingPath = useHomePath();
-  const target = studioBackTarget({ remembered, packageId, apps, locale, landingPath });
+  const homePath = useHomePath();
+  const target = studioBackTarget({ remembered, packageId, apps, locale, landingPath: homePath });
   const title = target.appLabel
     ? tFormat('engine.studio.backToAppTitle', locale, { app: target.appLabel })
     : t('engine.studio.backToAppTitleNoApp', locale);
