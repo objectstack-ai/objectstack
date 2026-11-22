@@ -322,6 +322,18 @@ requires only a signed-in caller (`AUTH_REQUIRED`, 401, otherwise). A browser's
 rendering these files. Only a file marked `acl: 'public_read'` is served to a
 caller with no session: mark a file that way when it must render before sign-in.
 
+### How a downloaded file is answered
+
+A file opened from its signed URL is rendered in place only when its type is on
+the storage service's inline allow-list: raster images (PNG, JPEG, GIF, WebP,
+AVIF, BMP), PDF, plain text, and common audio and video types. Every other type,
+SVG and HTML included, and a file with no type, is answered as an
+`attachment`, so the browser saves it under its name instead of opening it. The
+local adapter's byte route sends `X-Content-Type-Options: nosniff` and a sandbox
+`Content-Security-Policy` on every answer. The S3 adapter's signed URL carries
+the same type and disposition; the other response headers are the bucket's to
+send.
+
 The upload entry points (presigned / chunked) likewise require a session when
 an auth service is wired, and stamp `owner_id` on the new `sys_file`. A stored
 file's uploader is the user who created it, as an attachment's is: a
