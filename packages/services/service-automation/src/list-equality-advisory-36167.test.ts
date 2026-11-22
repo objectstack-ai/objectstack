@@ -39,11 +39,15 @@ describe('registerFlow — a list compared with a scalar is reported (advisory)'
         return l;
     }
 
-    function makeFlow(condition: string) {
+    /** A record-triggered flow by default; `entrance` swaps in a flow no record write fires. */
+    function makeFlow(condition: string, entrance: { type: string; triggerType?: string } = { type: 'record_change', triggerType: 'record-after-update' }) {
         return {
-            name: 'ticket_flow', label: 'Ticket Flow', type: 'record_change',
+            name: 'ticket_flow', label: 'Ticket Flow', type: entrance.type,
             nodes: [
-                { id: 'start', type: 'start', label: 'Start', config: { objectName: 'ticket' } },
+                {
+                    id: 'start', type: 'start', label: 'Start',
+                    config: { objectName: 'ticket', ...(entrance.triggerType ? { triggerType: entrance.triggerType } : {}) },
+                },
                 { id: 'check', type: 'decision', label: 'Check', config: { condition } },
                 { id: 'end', type: 'end', label: 'End' },
             ],
@@ -54,11 +58,11 @@ describe('registerFlow — a list compared with a scalar is reported (advisory)'
         };
     }
 
-    function warningsFor(condition: string): string[] {
+    function warningsFor(condition: string, entrance?: { type: string; triggerType?: string }): string[] {
         const warns: string[] = [];
         const engine = new AutomationEngine(loggerCapturing(warns));
         engine.setObjectSchemaResolver((name) => (name === 'ticket' ? parseObjectFieldSchema(TICKET_FIELDS) : undefined));
-        expect(() => engine.registerFlow('ticket_flow', makeFlow(condition) as any)).not.toThrow();
+        expect(() => engine.registerFlow('ticket_flow', makeFlow(condition, entrance) as any)).not.toThrow();
         return warns.filter((m) => /holds a list/.test(m));
     }
 
@@ -83,6 +87,23 @@ describe('registerFlow — a list compared with a scalar is reported (advisory)'
         expect(w[0]).toContain(` in ${reference}`);
     });
 
+    it('the bare rewrite it prescribes is parenthesised whole, and is not reported itself', () => {
+        const [w] = warningsFor("stage == 'won' && labels != 'frontend'");
+        expect(w).toContain('write `(labels == null || !("frontend" in labels))`');
+        expect(warningsFor("stage == 'won' && (labels == null || !(\"frontend\" in labels))")).toEqual([]);
+    });
+
+    // A flow no record write fires runs on what its entrance handed it: the
+    // names are not proven to be the ticket's fields, so no verdict.
+    it.each([
+        ['an API flow', { type: 'api', triggerType: 'api' }],
+        ['a scheduled flow', { type: 'schedule', triggerType: 'schedule' }],
+        ['a trigger-less autolaunched flow', { type: 'autolaunched' }],
+    ])('CONTROL — %s: neither the bare nor the record. read is reported', (_label, entrance) => {
+        expect(warningsFor("labels == 'frontend'", entrance)).toEqual([]);
+        expect(warningsFor("record.labels == 'frontend'", entrance)).toEqual([]);
+    });
+
     it.each([
         "record.stage == 'won'", "record.owner == 'u1'", 'record.watchers != null', "'u1' in record.watchers",
         "stage == 'won'", "owner == 'u1'", 'labels != null', "'frontend' in labels",
@@ -103,9 +124,14 @@ describe('the premise at a flow condition — the run flattens the record, and a
         expect(run("record.labels == 'frontend'", labels)).toBe(false);
         expect(run("labels != 'frontend'", labels)).toBe(true);
     });
-    it('CONTROL — the membership rewrite answers per row', () => {
-        expect(run("labels != null && 'frontend' in labels", ['frontend', 'qa'])).toBe(true);
-        expect(run("labels != null && 'frontend' in labels", ['qa'])).toBe(false);
-        expect(run("labels != null && 'frontend' in labels", null)).toBe(false);
+    it('CONTROL — the prescribed bare rewrites answer per row, inside `&&` too', () => {
+        const member = '(labels != null && "frontend" in labels)';
+        const notMember = '(labels == null || !("frontend" in labels))';
+        for (const [labels, isMember] of [[['frontend', 'qa'], true], [['qa'], false], [[], false], [null, false]] as const) {
+            expect(run(member, labels)).toBe(isMember);
+            expect(run(notMember, labels)).toBe(!isMember);
+            expect(run(`true && ${notMember}`, labels)).toBe(!isMember);
+            expect(run(`false && ${notMember}`, labels)).toBe(false);
+        }
     });
 });
