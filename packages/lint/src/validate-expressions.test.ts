@@ -6966,6 +6966,90 @@ describe('validateStackExpressions — a flow condition\'s record. / previous. r
   });
 });
 
+// [#34946] A flow CONDITION reads the run's row through `record.<field>` /
+// `previous.<field>` as well as through the flattened bare name, and the
+// date-arithmetic verdict judged only the bare name: `record.due_date + 1 > 5`
+// got zero findings and fails every run on the `YYYY-MM-DD` text, while
+// `due_date + 1 > 5` was refused. The root read now takes the same finding,
+// at the same path and severity, under the same rule.
+describe('validateStackExpressions — a flow condition\'s record. / previous. read takes the date-arithmetic verdict (#34946)', () => {
+  const LOAN = {
+    name: 'library_loan',
+    fields: { due_date: { type: 'date', required: true }, picked_up_at: { type: 'datetime', required: true } },
+  };
+  type Site = 'start' | 'edge' | 'decision';
+  const stackWith = (site: Site, condition: string) => ({
+    objects: [LOAN],
+    flows: [{
+      name: 'loan_due',
+      nodes: [
+        {
+          id: 'start', type: 'start',
+          config: { objectName: 'library_loan', triggerType: 'record-after-update', ...(site === 'start' ? { condition } : {}) },
+        },
+        ...(site === 'decision'
+          ? [{ id: 'gate', type: 'decision', config: { conditions: [{ label: 'Due', expression: condition }] } }]
+          : []),
+        { id: 'end', type: 'end' },
+      ],
+      edges: site === 'decision'
+        ? [{ id: 'e1', source: 'start', target: 'gate' }, { id: 'e2', source: 'gate', target: 'end' }]
+        : [{ id: 'e1', source: 'start', target: 'end', ...(site === 'edge' ? { condition } : {}) }],
+    }],
+  });
+  const at = (issues: ExprIssue[]) => issues.map((i) => [i.severity, i.path ?? i.where]);
+
+  it.each(['start', 'edge', 'decision'] as const)(
+    'refuses date arithmetic on a date field through record. and previous. in a %s condition, as its bare name is',
+    (site) => {
+      const bare = validateStackExpressions(stackWith(site, 'due_date + 1 > 5'));
+      expect(at(bare)).toHaveLength(1);
+      expect(bare[0].severity).toBe('error');
+      expect(bare[0].message.startsWith('date arithmetic `google.protobuf.Timestamp + int` — `due_date` is a date')).toBe(true);
+      for (const root of ['record', 'previous']) {
+        const source = `${root}.due_date + 1 > 5`;
+        const issues = validateStackExpressions(stackWith(site, source));
+        expect(at(issues), source).toEqual(at(bare));
+        expect(issues[0].message, source).toBe(bare[0].message.replace('`due_date`', `\`${root}.due_date\``));
+      }
+    },
+  );
+
+  it('reports it under the expression rule id, as the bare name is', () => {
+    for (const source of ['due_date + 1 > 5', 'record.due_date + 1 > 5', 'previous.due_date + 1 > 5']) {
+      const stack = stackWith('start', source);
+      // The minimal fixture draws other rules' findings (region shape, sharing); this one's is the date arithmetic's.
+      const findings = runAuthoringRules('build', { normalized: stack, parsed: stack } as never)
+        .filter((f) => /^date arithmetic/.test(f.message));
+      expect(findings.map((f) => [f.rule, f.severity]), source).toEqual([[EXPRESSION_INVALID, 'error']]);
+    }
+  });
+
+  it('CONTROL: a datetime field\'s root reads take exactly the bare name\'s finding', () => {
+    for (const site of ['start', 'edge', 'decision'] as const) {
+      const bare = validateStackExpressions(stackWith(site, 'picked_up_at + 1 > 5'));
+      for (const root of ['record', 'previous']) {
+        const source = `${root}.picked_up_at + 1 > 5`;
+        const issues = validateStackExpressions(stackWith(site, source));
+        expect(at(issues), `${site}: ${source}`).toEqual(at(bare));
+        expect(issues.map((i) => i.message), `${site}: ${source}`)
+          .toEqual(bare.map((i) => i.message.replace('`picked_up_at`', `\`${root}.picked_up_at\``)));
+      }
+    }
+  });
+
+  it('CONTROL: an ordering against today() stays clean, and timestamp() over the date keeps its one date-text finding', () => {
+    for (const site of ['start', 'edge', 'decision'] as const) {
+      for (const root of ['record', 'previous']) {
+        expect(validateStackExpressions(stackWith(site, `${root}.due_date < today()`)), `${site}: ${root}`).toEqual([]);
+        const dateText = validateStackExpressions(stackWith(site, `timestamp(${root}.due_date) < now()`));
+        expect(dateText.map((i) => i.severity), `${site}: ${root}`).toEqual(['error']);
+        expect(dateText[0].message).toContain(`\`timestamp(${root}.due_date)\` — \`${root}.due_date\` is a date field`);
+      }
+    }
+  });
+});
+
 /**
  * [ADR-0113 D1, as amended] A `required` field's own `visibleWhen` decides its
  * requirement on the write, and a predicate the server cannot evaluate counts

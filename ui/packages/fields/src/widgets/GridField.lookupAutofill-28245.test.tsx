@@ -26,7 +26,8 @@ import { render, screen, cleanup, waitFor, act, fireEvent } from '@testing-libra
 import '@testing-library/jest-dom';
 import { SchemaRendererContext } from '@object-ui/react';
 import { LocalizationProvider } from '@object-ui/i18n';
-import { GridField, lookupAutofillPatch, planLookupAutofill } from './GridField';
+import { GridFieldWidget as GridField } from './grid-field/GridFieldWidget';
+import { lookupAutofillPatch, planLookupAutofill } from './GridField';
 import {
   amountCurrencyOf,
   crossCurrencyRefusal,

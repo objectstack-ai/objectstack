@@ -497,6 +497,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "Motivo de la revocación",
         help: "Por qué se revocó la sesión (idle_timeout, absolute_max, concurrent_cap, ip_not_allowed, user_revoked, admin, organization_membership_ended, admin_password_reset, password_reset, …)."
       },
+      sso_provider_id: {
+        label: "Proveedor SSO",
+        help: "El proveedor SSO a través del cual se inició esta sesión, si lo hay. Eliminar ese proveedor finaliza la sesión. Gestionado por el sistema."
+      },
       active_organization_id: {
         label: "Organización activa"
       },

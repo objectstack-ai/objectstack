@@ -33,7 +33,7 @@ import '@testing-library/jest-dom';
 
 import { isImeKey as componentsIsImeKey } from '@object-ui/components';
 import { isImeKey } from './imeKey';
-import { GridField } from './GridField';
+import { GridFieldWidget as GridField } from './grid-field/GridFieldWidget';
 import { DatePickerField } from './date-picker/DatePickerField';
 import { RecordPickerDialog } from './RecordPickerDialog';
 import { getCellRenderer } from '../index';

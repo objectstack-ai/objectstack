@@ -26,7 +26,7 @@ import {
   CardTitle,
   cn,
 } from '@object-ui/components';
-import { LineItemsField, lookupAutofillByField, columnHelpByField, useBooleanValueLabel, type GridColumn } from '@object-ui/fields';
+import { LineItemsField, preloadGridField, lookupAutofillByField, columnHelpByField, useBooleanValueLabel, type GridColumn } from '@object-ui/fields';
 import type { GridFieldMetadata } from '@object-ui/types';
 import { createSafeTranslation, useLocalization } from '@object-ui/i18n';
 import { useSchemaContext, useRecordContext, useFilterScope, useResolvedFilter, useDataInvalidation, usePrintPage, NonGridRowCeilingNote } from '@object-ui/react';
@@ -212,6 +212,9 @@ function describeRefusedRowLimit(authored: unknown, childObject: unknown): strin
 }
 
 export const LineItemsPanel: React.FC<{ schema: LineItemsPanelSchema }> = ({ schema }) => {
+  // The line grid's body loads on first use (objectstack#36102). Start it now,
+  // while the child schema is fetched, so the grid is there before its columns.
+  preloadGridField();
   const ctx = useSchemaContext() as any;
   const { t } = useLineItemsTranslation();
   // The session's word for a boolean value, which draws a hydrated `boolean` /

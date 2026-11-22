@@ -1507,6 +1507,30 @@ export default defineConfig({
               priority: 82,
               includeDependenciesRecursively: false,
             },
+            //
+            // ## The line-item grid leaves the eager line (objectstack#36102)
+            //
+            // The same mechanism as the date picker above, one widget over. The
+            // grid's body is `packages/fields/src/widgets/grid-field/`, and
+            // nothing reaches it but `loadGridFieldWidget`'s `import()` in
+            // `widgets/GridField.ts`: the `GridField` / `LineItemsField` the
+            // package exports by name are the small lazy face in that file, so
+            // the entry's named export no longer makes the body a static
+            // dependency of the eager graph. Without this group `ui-components`
+            // would still claim the directory by path. Its pure helpers, which
+            // the entry also exports, stay in `ui-components`. The record forms
+            // that draw line items preload it on mount.
+            // `PER_CHUNK_MEMBERSHIP_CARVE_OUTS` in
+            // `scripts/check-eager-closure-budget.mjs` holds the split to the
+            // module, and errors if this chunk ever joins the eager closure.
+            // `includeDependenciesRecursively: false` for the reason given on
+            // `fields-date-picker`.
+            {
+              name: 'fields-grid',
+              test: /[\\/]packages[\\/]fields[\\/]src[\\/]widgets[\\/]grid-field[\\/]/,
+              priority: 82,
+              includeDependenciesRecursively: false,
+            },
             { name: 'ui-components', test: /[\\/]packages[\\/](components|fields)[\\/]/, priority: 80 },
             { name: 'ui-layout', test: /[\\/]packages[\\/]layout[\\/]/, priority: 80 },
             { name: 'infrastructure', test: /[\\/]packages[\\/](auth|permissions|tenant)[\\/]/, priority: 80 },
@@ -1541,7 +1565,7 @@ export default defineConfig({
             // `core.ts` closure belongs in its list.
             {
               name: 'plugin-form-core',
-              test: /[\\/]packages[\\/]plugin-form[\\/]src[\\/](core|autoLayout|sanitize|deriveMasterDetail|schemaDefaults|sectionGroups|fieldGroups|initialFieldFocus)\.tsx?$/,
+              test: /[\\/]packages[\\/]plugin-form[\\/]src[\\/](core|autoLayout|sanitize|deriveMasterDetail|schemaDefaults|sectionGroups|fieldGroups|initialFieldFocus|formOwnerLineContext)\.tsx?$/,
               priority: 71,
               includeDependenciesRecursively: false,
             },

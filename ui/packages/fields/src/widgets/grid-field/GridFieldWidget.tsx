@@ -1,5 +1,5 @@
 import React, { useCallback, useRef } from 'react';
-import { FieldWidgetComponentProps } from './types.js';
+import { FieldWidgetComponentProps } from '../types.js';
 import {
   cn,
   Button,
@@ -17,35 +17,56 @@ import {
 import { Plus, Trash2, SlidersHorizontal, Maximize2, Copy, GripVertical, Info } from 'lucide-react';
 import { formatDate, formatDateTime, resolveFieldRuleState, toDisplayDate } from '@object-ui/core';
 import { useDisplayLocale, useLocalization, formatDisplayNumber } from '@object-ui/i18n';
-import { resolveFieldCurrency, currencyFractionDigits, currencySymbol } from '../currency.js';
-import { LookupField } from './LookupField.js';
+import { currencySymbol } from '../../currency.js';
+import { LookupField } from '../LookupField.js';
 import {
-  planDeclaredLookupAutofill,
   amountCurrencyOf,
   pickedAmountCurrencyOf,
-  crossCurrencyRefusal,
   type AmountCurrency,
   type AutofillCurrencyContext,
   type LookupAutofillByField,
-  type LookupAutofillPair,
-  type LookupAutofillPlan,
   type WithheldAutofill,
   withheldAutofillMessage,
-} from './lookupAutofill.js';
-import { FileCell } from './FileField.js';
-import { toDateInputValue, toDateTimeInputValue, fromDateTimeInputValue, isImpossibleStoredDay } from './nativeDateValue.js';
-import { useFieldTranslation } from './useFieldTranslation.js';
-import { toDomProps } from './toDomProps.js';
-import { PHONE_TOUCH_HEIGHT, PHONE_TOUCH_SQUARE } from './touchTarget.js';
-import { toHostGroupProps } from './toHostGroupProps.js';
-import { fieldHelpText } from '../fieldHelpText.js';
-import { GRID_CELL_CONTROL_CLASS, GridDateCell, GridSelectCell, GrowingCellInput } from './gridCellPanels.js';
-import { isImeKey } from './imeKey.js';
-import type { InlineGridColumn } from '@objectstack/spec/data';
+} from '../lookupAutofill.js';
+import { FileCell } from '../FileField.js';
+import { toDateInputValue, toDateTimeInputValue, fromDateTimeInputValue, isImpossibleStoredDay } from '../nativeDateValue.js';
+import { useFieldTranslation } from '../useFieldTranslation.js';
+import { toDomProps } from '../toDomProps.js';
+import { PHONE_TOUCH_HEIGHT, PHONE_TOUCH_SQUARE } from '../touchTarget.js';
+import { toHostGroupProps } from '../toHostGroupProps.js';
+import { GRID_CELL_CONTROL_CLASS, GridDateCell, GridSelectCell, GrowingCellInput } from '../gridCellPanels.js';
+import { isImeKey } from '../imeKey.js';
 import { GRID_FIELD_RETIRED_KEYS, type GridFieldMetadata, type GridFieldRetiredKey } from '@object-ui/types';
+// The grid's pure half: the column type, the computed-cell evaluator, the
+// lookup-pick patch and the row marks. They live beside the public face in
+// `../GridField.ts`, in the eager chunk, because `@object-ui/fields` exports
+// them by name and they import nothing heavy (objectstack#36102).
+import {
+  computeRow,
+  currencyOfColumn,
+  currencyWidth,
+  isUntouchedNewRow,
+  planLookupAutofill,
+  sumColumn,
+  UNTOUCHED_NEW_ROW,
+  type ColumnCurrencies,
+  type ColumnHelp,
+  type GridColumn,
+} from '../GridField.js';
 
 /**
  * GridField / LineItemsField — editable child-grid ("line items") widget.
+ *
+ * ## Where this module sits (objectstack#36102)
+ *
+ * This is the widget BODY, and it is reached only through `import()`: the
+ * `GridField` / `LineItemsField` that `@object-ui/fields` exports by name are
+ * the small lazy face in `../GridField.ts`, and the `grid` form-field loader
+ * imports this file through that face's one loader. ⛔ Do not import it
+ * statically from anything outside this directory and its tests: one static
+ * importer in the eager graph puts these bytes back on every console page
+ * load (`fields-grid` in `apps/console/vite.config.ts`, held to the module by
+ * `PER_CHUNK_MEMBERSHIP_CARVE_OUTS` in `scripts/check-eager-closure-budget.mjs`).
  *
  * ## Where the host's label and help text land, and why (objectui#4857)
  *
@@ -101,56 +122,6 @@ import { GRID_FIELD_RETIRED_KEYS, type GridFieldMetadata, type GridFieldRetiredK
  * spelling is refused by name instead of drawn (`RetiredGridFieldKeys`).
  */
 
-/**
- * One grid column — `@objectstack/spec`'s inline grid column
- * (`InlineGridColumn`, the element of `FieldSchema.inlineColumns`), BY
- * REFERENCE (objectui#11070). The spec declares that shape as the strict
- * mirror of this widget's column, so the widget's type IS the spec's: one
- * declaration, the same one `GridFieldMetadata.columns` and
- * `FormField.columns` (`@object-ui/types`) carry. This widget reads each
- * column by exactly the spec's keys — every key below is one the spec
- * declares, and there is no second spelling of any of them.
- *
- * How the widget reads the keys (the spec's own descriptions say what each
- * MEANS; these are the renderer's notes):
- *
- *  - `name` — the key a column reads and writes on each row object. There is
- *    deliberately no tolerant alias bridging the spelling objectui#3951
- *    retired to this one: a single spelling, enforced at the producer —
- *    AGENTS.md #0.1 (the spec refuses the retired spelling by name).
- *    (Wording note: do not restate that rule as an alternation expression over
- *    the two key names. `column-identity.ratchet.test.ts` (objectui#3104) scans
- *    these files line by line and cannot tell prose from code, so spelling the
- *    shape out here registers as a new dual read and fails the gate.)
- *  - `type` — the cell control and its read/write adapter. `date` /
- *    `datetime` / `time` are three DISTINCT controls, not one
- *    (objectui#3569): `<input type="date">` hands back a bare `YYYY-MM-DD` on
- *    change, so collapsing `datetime` onto it silently DELETED the time
- *    component from the record.
- *  - `prefix` — a symbol shown in a `currency` cell IN PLACE OF the resolved
- *    currency's own symbol. When absent, the cell shows the symbol of the
- *    currency it resolves (objectui#10355); there is no default symbol.
- *  - `defaultHidden` — collapsed into the column chooser, not dropped
- *    (`deriveColumns` sets it beyond the default-visible budget). Required
- *    columns are never default-hidden.
- *  - `computed` + `expr` — a read-only column recomputed live from sibling
- *    cells by this file's own safe arithmetic evaluator (`+ - * / %`,
- *    parentheses, numeric literals, `record.qty` or bare `qty`), and written
- *    back into the row so it persists and any running total reflects it.
- *  - `scale` — decimal places for a computed `number` result. ⛔ Not read on
- *    a `currency` column (objectui#10783): the resolved currency's CLDR
- *    fraction digits decide both the stored and the shown width
- *    (`currencyWidth`), and the spec refuses `scale` on a column declaring
- *    `type: 'currency'`. A column that takes `currency` from its child field
- *    at render time is reported by `hydrateColumns` in
- *    `@object-ui/plugin-form` instead of being read in silence.
- *  - `autofill` — for a `lookup` column: picking a record copies its fields
- *    into sibling columns of the same name. On unless set `false`.
- *  - `readonlyWhen` / `requiredWhen` — CEL predicates evaluated per row
- *    against the row as `record` plus the header as `parent`. Client-side UX;
- *    a predicate that faults fails open.
- */
-export type GridColumn = InlineGridColumn;
 
 type Row = Record<string, any>;
 
@@ -185,308 +156,6 @@ function widthStyle(c: GridColumn): React.CSSProperties {
   const w = MIN_WIDTH_BY_TYPE[c.type ?? 'text'] ?? 132;
   return { width: w, minWidth: w };
 }
-
-// ── Safe arithmetic evaluator for computed columns ──────────────────────────
-// A tiny recursive-descent parser over `+ - * / %`, parentheses, numeric
-// literals and field references (`record.qty` or bare `qty`). Deliberately NOT
-// eval()/Function() — only arithmetic, no code execution. Returns a finite
-// number, or null when the expression is unparseable or any referenced cell is
-// blank/non-numeric (so a computed amount reads "—" until its inputs exist).
-type Tok = { t: 'num' | 'id' | 'op' | 'lp' | 'rp'; v: string };
-
-function tokenize(s: string): Tok[] | null {
-  const toks: Tok[] = [];
-  let i = 0;
-  while (i < s.length) {
-    const c = s[i];
-    if (c === ' ' || c === '\t' || c === '\n') { i++; continue; }
-    if ((c >= '0' && c <= '9') || c === '.') {
-      let j = i + 1;
-      while (j < s.length && ((s[j] >= '0' && s[j] <= '9') || s[j] === '.')) j++;
-      toks.push({ t: 'num', v: s.slice(i, j) }); i = j; continue;
-    }
-    if (/[a-zA-Z_]/.test(c)) {
-      let j = i + 1;
-      while (j < s.length && /[a-zA-Z0-9_.]/.test(s[j])) j++;
-      toks.push({ t: 'id', v: s.slice(i, j) }); i = j; continue;
-    }
-    if (c === '+' || c === '-' || c === '*' || c === '/' || c === '%') { toks.push({ t: 'op', v: c }); i++; continue; }
-    if (c === '(') { toks.push({ t: 'lp', v: c }); i++; continue; }
-    if (c === ')') { toks.push({ t: 'rp', v: c }); i++; continue; }
-    return null; // unsupported character → bail (treat as non-computable)
-  }
-  return toks;
-}
-
-/** Resolve an identifier (`record.quantity` / `quantity`) to a numeric cell. */
-function resolveRef(id: string, row: Row): number | null {
-  const field = id.startsWith('record.') ? id.slice('record.'.length) : id;
-  const raw = row?.[field];
-  if (raw === null || raw === undefined || raw === '') return null;
-  const n = Number(raw);
-  return Number.isFinite(n) ? n : null;
-}
-
-/** Evaluate an arithmetic `expr` against `row`. null when blank/unparseable. */
-export function evalArith(expr: string, row: Row): number | null {
-  const toks = tokenize(expr);
-  if (!toks || toks.length === 0) return null;
-  let pos = 0;
-  let bad = false;
-  const peek = () => toks[pos];
-  const next = () => toks[pos++];
-
-  function factor(): number {
-    const tk = peek();
-    if (!tk) { bad = true; return NaN; }
-    if (tk.t === 'op' && tk.v === '-') { next(); return -factor(); }
-    if (tk.t === 'op' && tk.v === '+') { next(); return factor(); }
-    if (tk.t === 'num') { next(); return Number(tk.v); }
-    if (tk.t === 'id') { next(); const v = resolveRef(tk.v, row); if (v === null) { bad = true; return NaN; } return v; }
-    if (tk.t === 'lp') {
-      next();
-      const v = expression();
-      const close = next();
-      if (!close || close.t !== 'rp') bad = true;
-      return v;
-    }
-    bad = true; return NaN;
-  }
-  function term(): number {
-    let v = factor();
-    while (peek() && peek().t === 'op' && (peek().v === '*' || peek().v === '/' || peek().v === '%')) {
-      const op = next().v;
-      const r = factor();
-      v = op === '*' ? v * r : op === '/' ? v / r : v % r;
-    }
-    return v;
-  }
-  function expression(): number {
-    let v = term();
-    while (peek() && peek().t === 'op' && (peek().v === '+' || peek().v === '-')) {
-      const op = next().v;
-      const r = term();
-      v = op === '+' ? v + r : v - r;
-    }
-    return v;
-  }
-  const result = expression();
-  if (bad || pos !== toks.length || !Number.isFinite(result)) return null;
-  return result;
-}
-
-/**
- * Recompute every {@link GridColumn.computed} cell in `row` from its sibling
- * inputs, returning a new row. Called after each edit so computed columns and
- * the running total stay live, and so the computed value persists in the batch.
- */
-/**
- * Build the row patch for a lookup-cell selection: set the FK column to the
- * chosen record's id, and (unless the column opts out with `autofill: false`)
- * copy any of the record's fields whose names match a sibling column — the
- * catalog-typeahead behaviour (pick a product → its unit_price/description fill
- * in). Skips the lookup column itself and computed columns. Pure + exported so
- * it is unit-testable independent of the picker UI.
- *
- * `declared` carries the child field's `lookupAutofill` pairs, the row being
- * edited and the record the cell held from an earlier pick in this grid. Each
- * pair writes its target under the spec's overwrite rule
- * (`declaredLookupAutofillPatch`), whatever the column's `autofill` says, and
- * a declared target is taken out of the same-named copy, so one target never
- * has two writers on one pick.
- *
- * `currency` is the pick's cross-currency rule (`crossCurrencyRefusal`): a
- * value it refuses is left out of the patch, the same-named copy and the
- * declared pairs alike, and listed under `withheld` so the grid says why the
- * cell stayed empty. Without it every value copies as before.
- */
-export function planLookupAutofill(
-  columns: GridColumn[],
-  col: GridColumn,
-  record: any,
-  declared?: { pairs?: readonly LookupAutofillPair[]; row?: Row; previous?: Row | null },
-  currency?: AutofillCurrencyContext,
-): LookupAutofillPlan {
-  const patch: Row = { [col.name]: record?.value ?? record?.id ?? record?._id };
-  const withheld: WithheldAutofill[] = [];
-  const declaredTargets = new Set((declared?.pairs ?? []).map((p) => p.target));
-  if (col.autofill !== false && record && typeof record === 'object') {
-    for (const other of columns) {
-      if (other.name === col.name || other.computed || other.type === 'lookup') continue;
-      if (declaredTargets.has(other.name)) continue;
-      const v = record[other.name];
-      if (v === undefined || v === null || v === '') continue;
-      const refusal = currency
-        ? crossCurrencyRefusal(currency.sourceCurrency(other.name, v), currency.targetCurrency(other.name), currency.home)
-        : undefined;
-      if (refusal) withheld.push({ target: other.name, source: other.name, amount: Number(v), ...refusal });
-      else patch[other.name] = v;
-    }
-  }
-  const pairs = planDeclaredLookupAutofill(declared?.pairs, record, declared?.row, declared?.previous, currency);
-  return { patch: { ...patch, ...pairs.patch }, withheld: [...withheld, ...pairs.withheld] };
-}
-
-/** {@link planLookupAutofill}'s writes alone. */
-export function lookupAutofillPatch(
-  columns: GridColumn[],
-  col: GridColumn,
-  record: any,
-  declared?: { pairs?: readonly LookupAutofillPair[]; row?: Row; previous?: Row | null },
-  currency?: AutofillCurrencyContext,
-): Row {
-  return planLookupAutofill(columns, col, record, declared, currency).patch;
-}
-
-/**
- * The cross-currency context of a pick in this grid (`crossCurrencyRefusal`).
- *
- * - A picked value's currency is its field's on the referenced object
- *   (`sourceFields`, the schema the lookup cell read for its labels), read on
- *   the picked record. A value whose field the cell does not know is a value
- *   of unknown currency when it is a number.
- * - A cell's currency is its column's: a `currency` column the host resolved
- *   (`columnCurrencies`, a line amount following its header's currency) is in
- *   that code, or in none while the header holds no code. Any other `currency`
- *   column whose child field definition the host handed over (`columnFields`)
- *   is in that definition's currency, read on the line as the record form
- *   reads it (`amountCurrencyOf`): a `fixed` code, the code a sibling field on
- *   the line holds, or the home currency. A `currency` column the host named
- *   nothing for is in the home currency (see `columnCurrency`). A column of
- *   any other type holds no amount of money.
- */
-function gridAutofillCurrency(
-  columns: readonly GridColumn[],
-  sourceFields: Readonly<Record<string, unknown>> | null | undefined,
-  picked: Row | null | undefined,
-  columnCurrencies: ColumnCurrencies | undefined,
-  home: string | undefined,
-  columnFields?: Readonly<Record<string, unknown>>,
-  line?: Row,
-): AutofillCurrencyContext {
-  return {
-    home,
-    sourceCurrency: (source, value) =>
-      pickedAmountCurrencyOf(sourceFields?.[source] as never, value, picked),
-    targetCurrency: (target): AmountCurrency | undefined => {
-      const c = columns.find((x) => x.name === target);
-      if (!c || c.type !== 'currency') return undefined;
-      if (columnCurrencies && Object.prototype.hasOwnProperty.call(columnCurrencies, c.name)) {
-        const code = columnCurrencies[c.name];
-        return code ? { kind: 'code', code } : { kind: 'unset' };
-      }
-      const def = columnFields?.[c.name];
-      if (def && typeof def === 'object') return amountCurrencyOf(def as never, line) ?? { kind: 'home' };
-      return { kind: 'home' };
-    },
-  };
-}
-
-/**
- * The currency a `currency` column is denominated in (objectui#10355).
- *
- * Read through `resolveFieldCurrency` — the one precedence every currency face
- * shares (field `currency` → `currencyConfig.defaultCurrency` → a legacy
- * `defaultCurrency` → the tenant default) — ⛔ never a second copy of it.
- *
- * The field-level legs are handed nothing, deliberately: a grid column
- * declares none of those keys — not `GridColumn`, which is the spec's strict
- * `InlineGridColumnSchema` element by reference, and that schema refuses
- * them — and the column derivation in `@object-ui/plugin-form`
- * copies none of them from the child field. Reading them off the column would
- * add a renderer read that no authored metadata can reach. So the precedence
- * lands on the tenant default, and `undefined` when none is configured: the
- * caller then invents no currency, exactly as `CurrencyCellRenderer` does.
- */
-function columnCurrency(tenantCurrency: string | undefined): string | undefined {
-  return resolveFieldCurrency(undefined, tenantCurrency);
-}
-
-/**
- * The fraction width of a `currency` column (objectui#10355) — the ONE
- * decision behind both its stored computed value and its display.
- *
- * 1. The resolved currency's CLDR fraction digits (0 for JPY, 2 for USD, 3 for
- *    KWD), from `currencyFractionDigits`, the helper every currency face
- *    already uses. It replaced the old default of a literal `2`, under which a
- *    yen amount was stored with cents it does not have and a dinar amount lost
- *    its third digit (KWD 3 × 1.2345 stored `3.7`): a currency's decimal places
- *    are the currency's (ruling 乙 on objectstack-ai/objectstack#19910).
- * 2. Otherwise `undefined`: with no minor unit to round to, nothing is
- *    invented.
- *
- * ⛔ The column's own `scale` is not an input (objectui#10783). This read it
- * first, so an authored `scale` beat the minor unit. `@objectstack/spec` 17.5.0
- * refuses that key on a column declaring `type: 'currency'`, with the remedy
- * that the minor unit decides, so a spec-valid typed column never carries one.
- * A column that declares no `type` and hydrates to `currency` still can; its
- * `scale` is reported where the child field is known (`hydrateColumns` in
- * `@object-ui/plugin-form`), not read here.
- */
-function currencyWidth(currency: string | undefined): number | undefined {
-  return currency ? currencyFractionDigits(currency) : undefined;
-}
-
-/**
- * The fraction width a computed cell's STORED value is rounded to.
- *
- * - `currency` — {@link currencyWidth}; with no resolved currency the value is
- *   stored as computed. The column's `scale` is not read (objectui#10783).
- * - every other type — the column's declared `scale`, unrounded when absent
- *   (unchanged).
- *
- * No clamp to the engine's `toFixed` ceiling: the objectui#10071 one retired at
- * the objectui#9808 SUNSET (objectui#11073), since `@objectstack/spec` 17.5.0
- * refuses a `scale` above 100 at the declaration.
- */
-function storedFractionScale(
-  c: GridColumn,
-  tenantCurrency: string | undefined,
-  columnCurrencies?: ColumnCurrencies,
-): number | undefined {
-  if (c.type !== 'currency') return c.scale;
-  return currencyWidth(currencyOfColumn(c, tenantCurrency, columnCurrencies));
-}
-
-/**
- * The currencies a host resolved for some of its `currency` columns, by column
- * name: a line amount that follows its header's currency through the
- * `master_detail` (ADR-0144 D2 as amended) is in the header's code, which only
- * the host holding the header record and the child schema can say. A name
- * mapped to `undefined` is a column with no known currency (the header holds
- * no code yet): it shows no symbol, never the tenant's.
- */
-export type ColumnCurrencies = Readonly<Record<string, string | undefined>>;
-
-/** `c`'s currency: the host's answer for it when it gave one, else {@link columnCurrency}. */
-function currencyOfColumn(
-  c: GridColumn,
-  tenantCurrency: string | undefined,
-  columnCurrencies: ColumnCurrencies | undefined,
-): string | undefined {
-  return columnCurrencies && Object.prototype.hasOwnProperty.call(columnCurrencies, c.name)
-    ? columnCurrencies[c.name]
-    : columnCurrency(tenantCurrency);
-}
-
-/**
- * @param tenantCurrency the tenant's default currency (`useLocalization()`),
- *   the resolver's last step for a `currency` column — see
- *   {@link storedFractionScale}.
- */
-export function computeRow(columns: GridColumn[], row: Row, tenantCurrency?: string, columnCurrencies?: ColumnCurrencies): Row {
-  const computedCols = columns.filter((c) => c.computed && c.expr);
-  if (computedCols.length === 0) return row;
-  const next = { ...row };
-  for (const c of computedCols) {
-    const v = evalArith(c.expr!, next);
-    if (v === null) { next[c.name] = null; continue; }
-    const scale = storedFractionScale(c, tenantCurrency, columnCurrencies);
-    next[c.name] = scale != null ? Number(v.toFixed(scale)) : v;
-  }
-  return next;
-}
-
 /** True for the three temporal column types, which all need a formatter on the
  *  read-only surfaces rather than the raw stored string (objectui#3569). */
 const isTemporal = (t?: string) => t === 'date' || t === 'datetime' || t === 'time';
@@ -729,17 +398,62 @@ function coerce(type: string | undefined, raw: string): any {
   if (type === 'datetime') return fromDateTimeInputValue(raw);
   return raw;
 }
-
-/** Sum a numeric column across rows (ignoring blanks/NaN). */
-export function sumColumn(rows: Row[], field: string): number {
-  if (!Array.isArray(rows)) return 0;
-  return rows.reduce((acc, r) => {
-    const v = Number(r?.[field]);
-    return acc + (Number.isFinite(v) ? v : 0);
-  }, 0);
+/**
+ * The cross-currency context of a pick in this grid (`crossCurrencyRefusal`).
+ *
+ * - A picked value's currency is its field's on the referenced object
+ *   (`sourceFields`, the schema the lookup cell read for its labels), read on
+ *   the picked record. A value whose field the cell does not know is a value
+ *   of unknown currency when it is a number.
+ * - A cell's currency is its column's: a `currency` column the host resolved
+ *   (`columnCurrencies`, a line amount following its header's currency) is in
+ *   that code, or in none while the header holds no code. Any other `currency`
+ *   column whose child field definition the host handed over (`columnFields`)
+ *   is in that definition's currency, read on the line as the record form
+ *   reads it (`amountCurrencyOf`): a `fixed` code, the code a sibling field on
+ *   the line holds, or the home currency. A `currency` column the host named
+ *   nothing for is in the home currency. A column of any other type holds no
+ *   amount of money.
+ */
+function gridAutofillCurrency(
+  columns: readonly GridColumn[],
+  sourceFields: Readonly<Record<string, unknown>> | null | undefined,
+  picked: Row | null | undefined,
+  columnCurrencies: ColumnCurrencies | undefined,
+  home: string | undefined,
+  columnFields?: Readonly<Record<string, unknown>>,
+  line?: Row,
+): AutofillCurrencyContext {
+  return {
+    home,
+    sourceCurrency: (source, value) =>
+      pickedAmountCurrencyOf(sourceFields?.[source] as never, value, picked),
+    targetCurrency: (target): AmountCurrency | undefined => {
+      const c = columns.find((x) => x.name === target);
+      if (!c || c.type !== 'currency') return undefined;
+      if (columnCurrencies && Object.prototype.hasOwnProperty.call(columnCurrencies, c.name)) {
+        const code = columnCurrencies[c.name];
+        return code ? { kind: 'code', code } : { kind: 'unset' };
+      }
+      const def = columnFields?.[c.name];
+      if (def && typeof def === 'object') return amountCurrencyOf(def as never, line) ?? { kind: 'home' };
+      return { kind: 'home' };
+    },
+  };
 }
 
-type GridFieldProps = FieldWidgetComponentProps<Row[]> & {
+/**
+ * What the last pick on one line did not copy (objectstack#36249): the lookup
+ * column picked, the value it committed, and each withheld value. The note
+ * stands while the line still holds that pick and the withheld cell is empty.
+ */
+interface WithheldPick {
+  lookup: string;
+  picked: unknown;
+  items: readonly WithheldAutofill[];
+}
+
+export type GridFieldWidgetProps = FieldWidgetComponentProps<Row[]> & {
   /** When provided, each row shows an "expand" button that opens the row in a
    *  full form (the host — e.g. MasterDetailForm — renders the drawer/modal and
    *  writes the edited values back). Lets a "fat" child be edited in a real form
@@ -800,43 +514,6 @@ type GridFieldProps = FieldWidgetComponentProps<Row[]> & {
    *  {@link columnHelpByField}. A column it does not name draws no button. */
   columnHelp?: ColumnHelp;
 };
-
-/**
- * The help text of a grid's columns, by column name (objectstack#35804).
- * Each value is what the record form draws under the same field.
- */
-export type ColumnHelp = Readonly<Record<string, string>>;
-
-/**
- * What the last pick on one line did not copy (objectstack#36249): the lookup
- * column picked, the value it committed, and each withheld value. The note
- * stands while the line still holds that pick and the withheld cell is empty.
- */
-interface WithheldPick {
-  lookup: string;
-  picked: unknown;
-  items: readonly WithheldAutofill[];
-}
-
-/**
- * The {@link ColumnHelp} of a child object's fields: each field's help read
- * through {@link fieldHelpText}, the ONE read the record form's help line uses
- * (objectui#12213), so a grid header and the form show the same text. Hand it
- * the child object's definition as the server serves it, the one the record
- * form reads: another package's `objectExtensions.fieldPatches` are already
- * applied there, and the help is in the reader's language. A field with no
- * help is left out.
- */
-export function columnHelpByField(fields: Readonly<Record<string, unknown>> | null | undefined): Record<string, string> {
-  const out: Record<string, string> = {};
-  if (!fields || typeof fields !== 'object') return out;
-  for (const [name, def] of Object.entries(fields)) {
-    if (!def || typeof def !== 'object') continue;
-    const help = fieldHelpText(def as Parameters<typeof fieldHelpText>[0]);
-    if (help) out[name] = help;
-  }
-  return out;
-}
 
 /**
  * The info button beside a column's header label (objectstack#35804): the
@@ -928,23 +605,6 @@ function RetiredGridFieldKeys({ message, keys }: { message: string; keys: readon
   );
 }
 
-/**
- * objectstack#35816 — marks a line that `Add` started on the host's
- * `newRowValues` and that nobody has edited since. Such a line holds only its
- * defaults, and a host may skip it at save like a blank one; any edit to the
- * line takes the mark off, so a value the user typed counts as input even when
- * it equals the default. A symbol key: `Object.keys`/`Object.entries` and
- * `JSON.stringify` (so every write payload) skip it, while the spread copies a
- * host or a renumbering makes keep it. Set only when the host passes
- * `newRowValues`, so a host that passes none sees rows exactly as before.
- */
-export const UNTOUCHED_NEW_ROW: unique symbol = Symbol.for('@object-ui/fields.untouchedNewRow');
-
-/** True for a line `Add` started on its defaults and nobody has edited ({@link UNTOUCHED_NEW_ROW}). */
-export function isUntouchedNewRow(row: unknown): boolean {
-  return row != null && typeof row === 'object' && (row as Record<symbol, unknown>)[UNTOUCHED_NEW_ROW] === true;
-}
-
 /** The row without its {@link UNTOUCHED_NEW_ROW} mark: an edit makes it input. */
 function touched(row: Row): Row {
   if (!isUntouchedNewRow(row)) return row;
@@ -962,7 +622,7 @@ function rowHasId(row: Row): boolean {
  * snake_case keys is refused by name ({@link RetiredGridFieldKeys}); any other
  * field draws the grid.
  */
-export function GridField(props: GridFieldProps) {
+export function GridFieldWidget(props: GridFieldWidgetProps) {
   const retired = retiredGridFieldKeysOf(props.field);
   if (retired.length > 0) {
     const message = retiredGridFieldKeysMessage((props.field as { name?: unknown } | undefined)?.name, retired);
@@ -989,7 +649,7 @@ function GridFieldBody({
   newRowRequiredShown,
   columnHelp,
   ...props
-}: GridFieldProps) {
+}: GridFieldWidgetProps) {
   // The field-level keys, read as `GridFieldMetadata` declares them and as
   // nothing else, so a read of a key the type does not declare is a compile
   // error here rather than a second, unpublished contract (objectui#11070
@@ -2046,6 +1706,3 @@ function GridFieldBody({
     </div>
   );
 }
-
-/** Semantic alias — the master-detail subform's child grid. */
-export const LineItemsField = GridField;

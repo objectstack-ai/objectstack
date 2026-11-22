@@ -18,6 +18,8 @@
 import { describe, it, expect } from 'vitest';
 
 import { celEngine } from './cel-engine';
+import { compileCelToFilter } from './cel-to-filter';
+import { matchesFilterCondition } from './matches-filter';
 import { validateExpression, type ExprSchemaHint } from './validate';
 
 const MULTI_TYPES = ['multiselect', 'checkboxes', 'tags'] as const;
@@ -31,6 +33,9 @@ function hintFor(type: string, multi = false, scope: 'record' | 'flattened' = 'r
     fieldTypes: { f: type, name: 'text' },
     ...(multi ? { multiValueFields: ['f'] } : {}),
     scope,
+    // A flattened site is judged only where the run is proven to bind a row
+    // of the typed object; the unproven case is pinned on its own below.
+    ...(scope === 'flattened' ? { faultOutcome: 'run-fails' as const } : {}),
   };
 }
 
@@ -58,7 +63,7 @@ describe('the premise — on the evaluator, a list compared with a scalar is a c
     expect(run("record.labels == 'frontend'", labels)).toEqual({ ok: true, value: false });
     expect(run("record.labels != 'frontend'", labels)).toEqual({ ok: true, value: true });
   });
-  it('CONTROL — the prescribed membership test answers per row', () => {
+  it('CONTROL — a membership test answers per row', () => {
     const src = "record.labels != null && 'frontend' in record.labels";
     expect(run(src, ['frontend', 'qa'])).toEqual({ ok: true, value: true });
     expect(run(src, ['qa'])).toEqual({ ok: true, value: false });
@@ -80,7 +85,7 @@ describe('list-equality — refused on an inherently multi-value type', () => {
             expect(e.code === 'list-equality' && e.params.answer).toBe(op === '==' ? 'false' : 'true');
             expect(e.message).toContain(`\`${root}.f\``);
             expect(e.message).toContain(' in ');
-            expect(e.message).toContain(op === '==' ? `in ${root}.f\`` : `!(`);
+            expect(e.message).toContain(op === '==' ? `in ${root}.f)\`` : `!(`);
           });
         }
       }
@@ -220,6 +225,7 @@ describe('list-equality — a name a comprehension macro binds is an item of the
     fieldTypes: { items: 'tags', labels: 'multiselect', owners: 'user' },
     multiValueFields: ['owners'],
     scope,
+    ...(scope === 'flattened' ? { faultOutcome: 'run-fails' as const } : {}),
   });
   const refusedReferences = (source: string, scope: 'record' | 'flattened') =>
     refusalsOf(source, hint(scope)).filter((e) => e.code === 'list-equality').map((e) => e.params.reference);
@@ -261,5 +267,151 @@ describe('list-equality — a name a comprehension macro binds is an item of the
 
   it('record scope: a bound name named like a field is accepted (bare names are no field there)', () => {
     expect(refusedReferences("record.items.exists(labels, labels == 'a')", 'record')).toEqual([]);
+  });
+});
+
+describe('list-equality — the prescribed rewrite tests membership where it is read', () => {
+  /** The one `list-equality` refusal of `source` under `hint`, and its prescribed rewrite. */
+  const rewriteOf = (source: string, hint: ExprSchemaHint): string => {
+    const errors = refusalsOf(source, hint).filter((e) => e.code === 'list-equality');
+    expect(errors).toHaveLength(1);
+    const [e] = errors;
+    if (e.code !== 'list-equality') throw new Error('unreachable');
+    expect(e.message).toContain(`write \`${e.params.rewrite}\``);
+    return e.params.rewrite;
+  };
+  /** Rows a list field can hold, and whether `'a'` is a member. */
+  const ROWS: readonly (readonly [string, Record<string, unknown>, boolean])[] = [
+    ['[a, b]', { f: ['a', 'b'], name: 'x' }, true],
+    ['[b]', { f: ['b'], name: 'x' }, false],
+    ['[]', { f: [], name: 'x' }, false],
+    ['null', { f: null, name: 'x' }, false],
+    ['absent', { name: 'x' }, false],
+  ];
+  const evaluate = (source: string, vars: Record<string, unknown>) =>
+    celEngine.evaluate({ dialect: 'cel', source }, vars);
+
+  describe('a `record.` / `previous.` read evaluated as CEL', () => {
+    it('pins the text: has()-guarded and parenthesised whole', () => {
+      expect(rewriteOf("record.f == 'a'", hintFor('tags'))).toBe(
+        '(has(record.f) && record.f != null && "a" in record.f)',
+      );
+      expect(rewriteOf("record.f != 'a'", hintFor('tags'))).toBe(
+        '(!has(record.f) || record.f == null || !("a" in record.f))',
+      );
+    });
+    for (const op of ['==', '!='] as const) {
+      for (const [label, row, member] of ROWS) {
+        it(`\`${op}\` on row ${label}: answers ${op === '==' ? member : !member}, and stands inside \`&&\` / \`||\``, () => {
+          const rewrite = rewriteOf(`record.f ${op} 'a'`, hintFor('tags'));
+          const want = op === '==' ? member : !member;
+          expect(evaluate(rewrite, { record: row })).toEqual({ ok: true, value: want });
+          // Parenthesised whole: a conjunct before it does not split it.
+          expect(evaluate(`record.name == 'x' && ${rewrite}`, { record: row })).toEqual({ ok: true, value: want });
+          expect(evaluate(`record.name == 'y' && ${rewrite}`, { record: row })).toEqual({ ok: true, value: false });
+          expect(evaluate(`false || ${rewrite}`, { record: row })).toEqual({ ok: true, value: want });
+        });
+      }
+    }
+    it('on `previous`, which is null on a create, answers without faulting', () => {
+      expect(evaluate(rewriteOf("previous.f == 'a'", hintFor('tags')), { previous: null })).toEqual({ ok: true, value: false });
+      expect(evaluate(rewriteOf("previous.f != 'a'", hintFor('tags')), { previous: null })).toEqual({ ok: true, value: true });
+    });
+    it('the rewrite itself is accepted at the site', () => {
+      for (const op of ['==', '!='] as const) {
+        const rewrite = rewriteOf(`record.f ${op} 'a'`, hintFor('tags'));
+        expect(validateExpression('predicate', rewrite, hintFor('tags')).ok).toBe(true);
+      }
+    });
+  });
+
+  describe('a bare name at a flattened site proven to bind the typed row', () => {
+    const flat = hintFor('tags', false, 'flattened');
+    it('pins the text: null-guarded and parenthesised whole', () => {
+      expect(rewriteOf("f == 'a'", flat)).toBe('(f != null && "a" in f)');
+      expect(rewriteOf("f != 'a'", flat)).toBe('(f == null || !("a" in f))');
+    });
+    // The run binds every declared field (null when empty), so no row lacks `f`.
+    for (const op of ['==', '!='] as const) {
+      for (const [label, row, member] of ROWS.filter(([label]) => label !== 'absent')) {
+        it(`\`${op}\` on row ${label}: answers ${op === '==' ? member : !member}, inside \`&&\` too`, () => {
+          const rewrite = rewriteOf(`f ${op} 'a'`, flat);
+          const want = op === '==' ? member : !member;
+          // `extra` binds the row's fields as top-level names, as a flow run does.
+          expect(evaluate(rewrite, { extra: row })).toEqual({ ok: true, value: want });
+          expect(evaluate(`name == 'x' && ${rewrite}`, { extra: row })).toEqual({ ok: true, value: want });
+          expect(evaluate(`name == 'y' && ${rewrite}`, { extra: row })).toEqual({ ok: true, value: false });
+        });
+      }
+    }
+    it('the rewrite itself is accepted at the site', () => {
+      for (const op of ['==', '!='] as const) {
+        expect(validateExpression('predicate', rewriteOf(`f ${op} 'a'`, flat), flat).ok).toBe(true);
+      }
+    });
+  });
+
+  describe('a source compiled to a query filter (`filterCompiled`: a sharing rule condition)', () => {
+    const filtered: ExprSchemaHint = { ...hintFor('tags'), filterCompiled: true };
+    const FIELDS = { f: { type: 'tags' }, name: { type: 'text' } } as const;
+    /** Lower `source` as the sharing-rule path does, then match it against `row`. */
+    const matches = (source: string, row: Record<string, unknown>): boolean => {
+      const lowered = compileCelToFilter(source);
+      if (!lowered.ok) throw new Error(`not lowered: ${lowered.reason} — ${lowered.detail}`);
+      return matchesFilterCondition(row, lowered.filter, { fields: FIELDS });
+    };
+    it('pins the text: `contains`, null-guarded, parenthesised whole', () => {
+      expect(rewriteOf("record.f == 'a'", filtered)).toBe('(record.f != null && record.f.contains("a"))');
+      expect(rewriteOf("record.f != 'a'", filtered)).toBe('(record.f == null || !record.f.contains("a"))');
+    });
+    it('a number literal is passed as its text (`$contains` compares text)', () => {
+      expect(rewriteOf('record.f == 3', filtered)).toBe('(record.f != null && record.f.contains("3"))');
+    });
+    it('the CEL `in` spelling does not lower: the reason the site gets its own', () => {
+      const lowered = compileCelToFilter('record.f != null && "a" in record.f');
+      expect(lowered.ok).toBe(false);
+    });
+    for (const op of ['==', '!='] as const) {
+      for (const [label, row, member] of ROWS) {
+        it(`\`${op}\` on row ${label}: the lowered filter matches ${op === '==' ? member : !member}, inside \`&&\` too`, () => {
+          const rewrite = rewriteOf(`record.f ${op} 'a'`, filtered);
+          const want = op === '==' ? member : !member;
+          expect(matches(rewrite, row)).toBe(want);
+          expect(matches(`record.name == 'x' && ${rewrite}`, row)).toBe(want);
+          expect(matches(`record.name == 'y' && ${rewrite}`, row)).toBe(false);
+        });
+      }
+    }
+    it('the rewrite itself is accepted at the site', () => {
+      for (const op of ['==', '!='] as const) {
+        expect(validateExpression('predicate', rewriteOf(`record.f ${op} 'a'`, filtered), filtered).ok).toBe(true);
+      }
+    });
+    it('CONTROL — without `filterCompiled` the same comparison gets the CEL spelling', () => {
+      expect(rewriteOf("record.f == 'a'", hintFor('tags'))).toContain(' in record.f');
+    });
+  });
+});
+
+describe('list-equality — a flattened site with no proven row binding gets no verdict', () => {
+  // An API, scheduled or trigger-less flow runs on what its entrance handed
+  // it: `record` / the bare names are not proven to be the typed object's
+  // fields, so `labels == 'frontend'` can be correct code there.
+  const unproven: ExprSchemaHint = { ...hintFor('tags', false, 'flattened') };
+  delete (unproven as { faultOutcome?: unknown }).faultOutcome;
+  for (const source of ["f == 'a'", "record.f == 'a'", "'a' != f", "previous.f != 'a'"]) {
+    it(`accepts \`${source}\` (no list-equality)`, () => {
+      expect(refusalsOf(source, unproven).filter((e) => e.code === 'list-equality')).toEqual([]);
+    });
+  }
+  it(`a faultOutcome other than 'run-fails' is no proof either`, () => {
+    for (const faultOutcome of ['fail-closed', 'fail-open'] as const) {
+      expect(refusalsOf("f == 'a'", { ...unproven, faultOutcome }).filter((e) => e.code === 'list-equality')).toEqual([]);
+    }
+  });
+  it('CONTROL — the same sources at a proven site are refused', () => {
+    for (const source of ["f == 'a'", "record.f == 'a'"]) {
+      expect(refusalsOf(source, hintFor('tags', false, 'flattened')).map((e) => e.code)).toContain('list-equality');
+    }
   });
 });
