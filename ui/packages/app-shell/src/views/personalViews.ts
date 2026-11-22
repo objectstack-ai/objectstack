@@ -34,9 +34,10 @@ import { createAuthenticatedFetch } from '@object-ui/auth';
 import type { FilterBuilderRowGroup } from '@object-ui/components';
 import { builderRulesOfSpecFilter } from '@object-ui/core';
 import type { usePermissions } from '@object-ui/permissions';
-import type { DataSource } from '@object-ui/types';
+import type { DataSource, ListColumn } from '@object-ui/types';
 import { foldFilterGroupToSpecRules, type FilterFoldRefusal } from './viewFilterFold.js';
 import { buildViewConfigSaveBody } from './objectViewTabs.js';
+import { columnsWithSummaries, type DraftColumnSummaries } from './columnSummaryWrite.js';
 import type { ListSortRule, ListUrlState } from './userFilterUrlState.js';
 import type { ListViewPreference } from './listDraftStore.js';
 
@@ -172,6 +173,11 @@ export interface PersonalViewListState {
    */
   panelFilters?: FilterBuilderRowGroup;
   /**
+   * objectstack#36194 — the footer calculations the list's draft holds, laid
+   * over the saved columns ({@link columnsWithSummaries}).
+   */
+  summaries?: DraftColumnSummaries;
+  /**
    * objectstack#35955 — the Display panel's layout and row colour the list's
    * draft holds (`ListDraft.viewType` / `rowColor`). `viewType` retypes the
    * body; `rowColor: null` is "none" over a view that colours its rows. An
@@ -201,7 +207,8 @@ function columnName(column: unknown): string | undefined {
  *   the view's own.
  * - **columns**: the view's and the ones the reader added, in the reader's
  *   dragged order, without the columns they hid (so `hiddenFields` and
- *   `fieldOrder` are applied, not carried). **rowHeight**: the reader's density, else the view's.
+ *   `fieldOrder` are applied, not carried), with the footer calculations the
+ *   draft holds (objectstack#36194). **rowHeight**: the reader's density, else the view's.
  *
  * The body is narrowed to the keys spec's closed `ListViewSchema` declares and
  * bound to this object (`config.data.object`) by `buildViewConfigSaveBody`,
@@ -267,6 +274,9 @@ export function layListStateOverView(
         .map(({ c }) => c);
     }
     columns = columns.filter((c) => !hidden.has(columnName(c) ?? ''));
+    // objectstack#36194 — and the footer calculations the reader picked, on
+    // the columns the body keeps.
+    columns = columnsWithSummaries(columns as Array<string | ListColumn>, state.summaries);
   }
 
   const sort: ListSortRule[] | undefined = state.url.sort ?? view.sort;

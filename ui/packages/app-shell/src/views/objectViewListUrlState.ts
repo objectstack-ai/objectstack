@@ -376,6 +376,11 @@ export function useObjectViewListUrlState({
     if ((listDraft.columnOrder || listDraft.addedFields?.length) && !listDraftParts.includes('columns')) {
         listDraftParts.push('columns');
     }
+    // objectstack#36194 — so are the footer's calculations: one part, however
+    // many columns it holds.
+    if (listDraft.summaries && Object.keys(listDraft.summaries).length > 0) {
+        listDraftParts.push('summaries');
+    }
 
     /**
      * objectstack#35955 — Discard (objectstack#28950's "Reset to view" before

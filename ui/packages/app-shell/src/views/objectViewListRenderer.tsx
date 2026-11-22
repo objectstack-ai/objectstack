@@ -12,13 +12,14 @@ import type { ColumnSummary } from '@objectstack/spec/ui';
 import { useCallback, useLayoutEffect, useRef, useState, useSyncExternalStore, lazy, Suspense, type ReactNode } from 'react';
 import { DENSITY_MODE_TO_ROW_HEIGHT, columnIdentity, normalizeListViewSchema, servedPackageId, type FilterTokenScope } from '@object-ui/core';
 import { listDraftPreference, type useListDraft } from './listDraftStore.js';
+import { columnSummaryOf, columnsWithSummaries, declaredColumnFields } from './columnSummaryWrite.js';
 import type { useObjectListLayout } from './listLayoutStore.js';
 import type { ListViewPreference } from './listDraftStore.js';
 const ObjectChart = lazy(() =>
   import('@object-ui/plugin-charts').then((m) => ({ default: m.ObjectChart })),
 );
 import { ListView, type ListToolbarTrailingState } from '@object-ui/plugin-list';
-import type { ListViewSchema, TreeViewConfig } from '@object-ui/types';
+import type { ListColumn, ListViewSchema, TreeViewConfig } from '@object-ui/types';
 import type { FilterBuilderRowGroup } from '@object-ui/components';
 import type { useAuth } from '@object-ui/auth';
 import type { useActionTextLocalizer } from '@object-ui/react';
@@ -190,12 +191,11 @@ export function useObjectViewListRenderer({
         save?: () => void;
         reset?: () => void;
         /**
-         * objectstack#35702 — save a footer calculation on the open view (wired
-         * only for a reader who may change it); resolves whether it was saved.
+         * objectstack#36194 — the footer's calculation picks go into the list's
+         * draft (`summaries`), on every column the saved body would carry:
+         * set where the list holds a draft. Nothing a pick does writes.
          */
-        pickSummary?: (field: string, summary: ColumnSummary | null) => boolean | Promise<boolean>;
-        /** objectstack#35702 — the columns the view declares: the only ones a pick may change. */
-        summaryPickFields?: readonly string[];
+        draftsSummaries?: boolean;
     };
 }) {
     // objectstack#35551 — the host hands fresh closures every render; the list
@@ -205,9 +205,7 @@ export function useObjectViewListRenderer({
     const offersRename = !!listViewActions?.rename;
     const offersSave = !!listViewActions?.save;
     const offersReset = !!listViewActions?.reset;
-    const offersSummaryPick = !!listViewActions?.pickSummary;
-    // Keyed on content, never the array's identity (a fresh one every render).
-    const summaryPickKey = (listViewActions?.summaryPickFields ?? []).join('\n');
+    const offersSummaryPick = !!listViewActions?.draftsSummaries;
     // objectstack#27058 — below `sm` the title switcher is the phone's one
     // view control, so the list offers no layout switcher of its own there.
     const wideViewport = useViewTabsFit();
@@ -551,6 +549,25 @@ export function useObjectViewListRenderer({
             listSchema.columns,
             addedFieldsStored ? viewPref?.addedFields : undefined,
         );
+        /**
+         * objectstack#36194 — the footer's calculations are part of the draft
+         * too: a pick applies at once (the columns the list draws carry it)
+         * and is written nowhere; Discard drops it, Save keeps it. The menu is
+         * offered on the columns a saved body carries (the columns the list
+         * draws, the reader's added ones included), the only columns the draft
+         * can carry a calculation on. A pick of the view's own calculation
+         * drops the column from the draft.
+         */
+        const summaryColumns = columnsWithSummaries(listColumns.columns as ListColumn[] | string[] | undefined, listDraft.draft.summaries) as ListViewSchema['columns'];
+        const summaryPickFields = offersSummaryPick
+            ? declaredColumnFields(listColumns.columns as ListColumn[] | string[] | undefined)
+            : undefined;
+        const pickDraftSummary = (field: string, summary: ColumnSummary | null): boolean => {
+            const own = columnSummaryOf(listColumns.columns as ListColumn[] | string[] | undefined, field);
+            const { [field]: _replaced, ...rest } = listDraft.draft.summaries ?? {};
+            listDraft.patch({ summaries: (summary ?? null) === own ? rest : { ...rest, [field]: summary ?? null } });
+            return true;
+        };
         const persistAddedFields = (added: string[]) => {
             listDraft.patch({ addedFields: added.length > 0 ? added : undefined });
         };
@@ -632,7 +649,9 @@ export function useObjectViewListRenderer({
             // new object documents of equal content: hold it like the blocks.
             // objectstack#30077 — plus the fields this user added (see
             // `withAddedListColumns`).
-            columns: holdBlock('columns', listColumns.columns),
+            // objectstack#36194 — and the footer calculations the draft holds,
+            // drawn at once (`summaryColumns`).
+            columns: holdBlock('columns', summaryColumns),
             // objectui#10035 — the refresh signal, in place of the remount the
             // key used to force. The spread above carries only the plugin
             // ObjectView's counter; this page's own counter (actions, import,
@@ -1101,10 +1120,8 @@ export function useObjectViewListRenderer({
                 onRenameView={offersRename ? (label: string) => listViewActionsRef.current?.rename?.(label) ?? false : undefined}
                 onSaveView={offersSave ? () => listViewActionsRef.current?.save?.() : undefined}
                 onResetView={offersReset ? () => listViewActionsRef.current?.reset?.() : undefined}
-                onColumnSummaryPick={offersSummaryPick
-                    ? (field: string, summary: ColumnSummary | null) => listViewActionsRef.current?.pickSummary?.(field, summary) ?? false
-                    : undefined}
-                columnSummaryPickFields={offersSummaryPick ? summaryPickKey.split('\n').filter(Boolean) : undefined}
+                onColumnSummaryPick={summaryPickFields && summaryPickFields.length > 0 ? pickDraftSummary : undefined}
+                columnSummaryPickFields={summaryPickFields}
                 className={className}
                 onEdit={editHandler}
                 // objectui#13089 — the view's Add button is the header New:
@@ -1215,7 +1232,7 @@ export function useObjectViewListRenderer({
                 dataSource={ds}
             />
         );
-    }, [hasViewBarTrailing, trailStore, rowEndStore, activeView, activeViewDeclaresColumns, activeViewIsSaved, objectDef, objectName, refreshKey, createRecord, urlFilters, initialUfSelections, handleUserFilterSelectionsChange, writeListUrlState, listPage, user?.id, pageOffersCreate, listAddRecordOpensCreate, listIdentityKey, listLayout.layout, listLayout.patchView, listDraft.draft, listDraft.patch, managedUsers, managedUserMarker, openInPanel, openReferencedRecord, rowOpensRecord, handleListRowsChange, handleListTotalChange, hasPhoneTitle, leadStore, wideViewport, handleListPersonalizationChange, workspaceTimeZone, viewPanelFilters, offersRename, offersSave, offersReset, offersSummaryPick, summaryPickKey, previewDrafts, previewDataSource, unpublishedObjects]);
+    }, [hasViewBarTrailing, trailStore, rowEndStore, activeView, activeViewDeclaresColumns, activeViewIsSaved, objectDef, objectName, refreshKey, createRecord, urlFilters, initialUfSelections, handleUserFilterSelectionsChange, writeListUrlState, listPage, user?.id, pageOffersCreate, listAddRecordOpensCreate, listIdentityKey, listLayout.layout, listLayout.patchView, listDraft.draft, listDraft.patch, managedUsers, managedUserMarker, openInPanel, openReferencedRecord, rowOpensRecord, handleListRowsChange, handleListTotalChange, hasPhoneTitle, leadStore, wideViewport, handleListPersonalizationChange, workspaceTimeZone, viewPanelFilters, offersRename, offersSave, offersReset, offersSummaryPick, previewDrafts, previewDataSource, unpublishedObjects]);
 
     return { renderListView };
 }
