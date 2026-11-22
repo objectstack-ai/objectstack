@@ -220,6 +220,27 @@ export function withFavoriteOrder(items: FavoriteItem[], ids: string[]): Favorit
   return withNamedOrder(items, ids, byId);
 }
 
+/**
+ * The `record` favorite of record `recordId` of `objectName`, opened under the
+ * app at `appSegment` and named `title` (the record id until its title is
+ * known; the record page heals the label on its next visit). The record page's
+ * star and the ⌘K palette's current-page row (objectstack#36286) both toggle
+ * this one entry.
+ */
+export function recordFavoriteItem(
+  appSegment: string | undefined,
+  objectName: string,
+  recordId: string,
+  title: string | undefined,
+): Omit<FavoriteItem, 'favoritedAt'> {
+  return {
+    id: `record:${objectName}:${recordId}`,
+    label: title || recordId || '',
+    href: `/apps/${appSegment}/${objectName}/record/${recordId}`,
+    type: 'record',
+  };
+}
+
 /** `items` with the entries `byKey` finds for `keys` put in that order, in the positions they hold. */
 function withNamedOrder(
   items: FavoriteItem[],

@@ -302,10 +302,14 @@ export interface NavigationOverlayProps {
  * The one `storageKey` spelling every record overlay uses, keyed by object.
  *
  * `NavigationOverlay` prefixes it with `ov:` on the way to `localStorage`, so
- * the stored key is `ov:drawer-width:OBJECT`. The console's own object page
- * (`app-shell`'s `ObjectView`) has always used this spelling; after
- * objectui#9299 the five list-type renderers use it too, so one object has one
- * remembered overlay width no matter which view type the user resized it on.
+ * the stored key is `ov:drawer-width:OBJECT`. After objectui#9299 the five
+ * list-type renderers use it, so one object has one remembered overlay width
+ * no matter which of them the user resized it on. The console's own record
+ * preview (`app-shell`'s `ObjectView` and a record page's drawer) uses it only
+ * for an object that authors its drawer's width; every other object's preview
+ * shares one key of its own (objectstack#36149), so it no longer shares a
+ * width with that object's calendar, gantt, kanban, tree or grid overlay.
+ * This helper's spelling is unchanged.
  */
 export function recordOverlayWidthStorageKey(objectName: string): string {
   return `drawer-width:${objectName}`;
@@ -329,14 +333,15 @@ function resolveWidth(width: string | number | undefined): string | undefined {
   return width;
 }
 
-/** Hard floor for drag-resize — narrower than this and the body becomes unusable. */
-const DRAWER_MIN_PX = 360;
 /**
- * The widest a reader can drag the pane, as a share of the viewport
- * (objectstack#27545: wider than that is what the full page is for). A
- * remembered width beyond it draws at this bound.
+ * The drag range of the pane (objectstack#36149): 380 px to 900 px. Narrower
+ * and the body becomes unusable; wider is what the full page is for. A
+ * remembered width below it is not used, one above it draws at 900, and the
+ * pane never draws wider than the viewport leaves it
+ * (`sm:w-[calc(100%-1rem)]`).
  */
-const DRAWER_MAX_VW = 60;
+const DRAWER_MIN_PX = 380;
+const DRAWER_MAX_PX = 900;
 
 /**
  * Whether an `Esc` belongs to the element it was pressed in rather than to the
@@ -386,20 +391,30 @@ function useDrawerResize(
   // ⚠️ `parseInt` is deliberate for the legacy value: that is how
   // `RecordDetailDrawer` read its own key, and reading it with a stricter
   // parser than the writer used would drop widths rather than carry them over.
+  //
+  // objectstack#36149 — a host that keeps one pane mounted and switches its
+  // key (a record page's drawer, from one object's record to another's) gets
+  // the width the NEW key holds: a key with no usable width, or no key at
+  // all, drops the previous key's width, so the host's own width applies.
   React.useEffect(() => {
-    if (!storageKey || typeof window === 'undefined') return;
+    if (typeof window === 'undefined') return;
+    if (!storageKey) {
+      setWidth(null);
+      return;
+    }
     try {
       const raw = window.localStorage.getItem(`ov:${storageKey}`);
       if (raw) {
         const n = Number(raw);
-        if (Number.isFinite(n) && n >= DRAWER_MIN_PX) setWidth(n);
+        setWidth(Number.isFinite(n) && n >= DRAWER_MIN_PX ? n : null);
         return;
       }
-      if (!legacyStorageKey) return;
-      const legacyRaw = window.localStorage.getItem(legacyStorageKey);
-      if (!legacyRaw) return;
-      const legacy = parseInt(legacyRaw, 10);
-      if (!Number.isFinite(legacy) || legacy < DRAWER_MIN_PX) return;
+      const legacyRaw = legacyStorageKey ? window.localStorage.getItem(legacyStorageKey) : null;
+      const legacy = legacyRaw ? parseInt(legacyRaw, 10) : Number.NaN;
+      if (!legacyStorageKey || !Number.isFinite(legacy) || legacy < DRAWER_MIN_PX) {
+        setWidth(null);
+        return;
+      }
       setWidth(legacy);
       window.localStorage.setItem(`ov:${storageKey}`, String(legacy));
       // Removing it is what makes this a MIGRATION rather than a permanent
@@ -407,7 +422,8 @@ function useDrawerResize(
       // width must stay gone.
       window.localStorage.removeItem(legacyStorageKey);
     } catch {
-      // ignore (private mode / quota)
+      // private mode / quota: nothing remembered, the host's width applies
+      setWidth(null);
     }
   }, [storageKey, legacyStorageKey]);
 
@@ -416,7 +432,7 @@ function useDrawerResize(
     e.preventDefault();
     draggingRef.current = true;
 
-    const maxPx = Math.floor((window.innerWidth * DRAWER_MAX_VW) / 100);
+    const maxPx = DRAWER_MAX_PX;
     // The drawer is right-anchored, at the viewport's edge.
     const paneRight = e.currentTarget.parentElement?.getBoundingClientRect().right || window.innerWidth;
     document.body.style.cursor = 'col-resize';
@@ -563,7 +579,7 @@ export const NavigationOverlay: React.FC<NavigationOverlayProps> = ({
   // even when it was remembered at a wider viewport; otherwise the host's
   // width as given.
   const paneWidthCss = resize.width != null
-    ? `min(${resize.width}px, ${DRAWER_MAX_VW}vw)`
+    ? `${Math.min(resize.width, DRAWER_MAX_PX)}px`
     : resolveWidth(width) ?? '42rem';
   const widthStyle: React.CSSProperties = {
     ['--ov-w' as any]: paneWidthCss,

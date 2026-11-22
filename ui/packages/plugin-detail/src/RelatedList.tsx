@@ -31,6 +31,7 @@ import {
   useIsMobile,
   RelatedCountStore,
   ObjectIconTile,
+  RecordHeaderBarContext,
 } from '@object-ui/components';
 import { SchemaRenderer, ActionCtxReact, useCapabilityGate, useCondition, toPredicateInput, useSettledSchema, useFilterScope, useResolvedFilter, usePredicateScope, classifyLoadError, answeredLoadFailure, declaredUserMessage, type LoadErrorKind, type RelatedRowActionDef } from '@object-ui/react';
 import {
@@ -1481,6 +1482,11 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   // objectstack#27524 — drawn as the record page's active tab: the toolbar
   // face below (`RelatedListEnlargedContext`).
   const enlargedFace = React.useContext(RelatedListEnlargedContext) && !compact;
+  // objectstack#36149 — in a side preview (its header bar says so) the tab's
+  // rows are the phone's card rows, one per record: the title and one summary
+  // line, never a table cut off at the preview's edge.
+  const headerBar = React.useContext(RecordHeaderBarContext);
+  const previewFace = enlargedFace && !!headerBar?.preview;
   // objectstack#35601 — the related tab's add, decided by the relationship
   // when the page authored none (`derivedAddOf`). The rest of this component
   // reads `add` alone, so a derived add takes the authored one's path.
@@ -3792,8 +3798,10 @@ export const RelatedList: React.FC<RelatedListProps> = ({
     // tab's own query), and selection with the floating bar (bulk delete).
     // One growing window, no pager: `data` is every row loaded so far and
     // `rowCount` the match total, which the footer leads with.
+    const cardFace = previewFace ? { cardFace: true } : {};
     if (tabList) {
       return {
+        ...cardFace,
         manualPagination: true,
         rowCount: total ?? sortedData.length,
         page: 1,
@@ -3815,6 +3823,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
       };
     }
     return {
+      ...cardFace,
       manualPagination: true,
       rowCount,
       page: currentPage + 1,
@@ -3827,7 +3836,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
       ...(onRowDelete ? { onDelete: handleDeleteRow } : {}),
       ...(writeTabColumnState ? { onColumnStateChange: writeTabColumnState } : {}),
     };
-  }, [writeTabColumnState, enlargedGrid, windowed, total, currentPage, effectivePageSize, relatedData.length, hasMore, sortedData.length, paginatedData.length, activeSort, handleTableSort, objectSchema, onRowEdit, onRowDelete, handleDeleteRow, tabList, tabRecordCountLead, pickTabSummary, tabFindParams, handleBulkDeleteRows, tabBulkDelete]);
+  }, [writeTabColumnState, enlargedGrid, windowed, total, currentPage, effectivePageSize, relatedData.length, hasMore, sortedData.length, paginatedData.length, activeSort, handleTableSort, objectSchema, onRowEdit, onRowDelete, handleDeleteRow, tabList, tabRecordCountLead, pickTabSummary, tabFindParams, handleBulkDeleteRows, tabBulkDelete, previewFace]);
 
   // objectstack#35601 — a stateful child (tasks) is grouped by its status on
   // the related tab: open groups first, completed last (`statusGroupsOf`).

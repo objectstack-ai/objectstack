@@ -40,6 +40,7 @@ import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { isWriteEpochOperation } from './write-epoch.js';
 import { trioTransactionScopeOf } from './engine-execute-transactions.js';
 import { READABLE_IDS_WRITE_IN_FLIGHT } from './engine-readable-ids-permission-formula.js';
+import { isDetachedUnitHandle, trioCommitQueueOf } from './unit-detach.js';
 import { bridgeAuthzInvalidation } from './authz-invalidation-bridge.js';
 import { isMissingTableError } from '@objectstack/metadata/errors';
 import { ORGANIZATION_OBJECT, SystemWriteOrganizationRequiredError, carriesOrganization, resolveSystemWriteOrganization, resolveTenantFieldName, type SystemWriteOrganizationDecision } from './tenancy/system-write-organization.js';
@@ -118,7 +119,7 @@ export class MiddlewareAndContextFacet {
   /**
    * Execute an operation through the middleware chain
    */
-  static async executeWithMiddleware(this: Pick<MiddlewareAndContextHost, 'middlewares' | 'writeEpoch'>, ctx: OperationContext, executor: () => Promise<any>): Promise<any> {
+  static async executeWithMiddleware(this: Pick<MiddlewareAndContextHost, 'middlewares' | 'txStore' | 'writeEpoch'>, ctx: OperationContext, executor: () => Promise<any>): Promise<any> {
     // [#11968] Advance the write epoch FIRST — ahead of every middleware, and
     // so ahead of any `isSystem` bypass one of them applies. The writes most
     // likely to change what a caller may see are system ones: the platform
@@ -164,8 +165,10 @@ export class MiddlewareAndContextFacet {
     };
 
     // [#33696] A write's chain runs inside the write scope: its reads keep the chain.
-    if (isWriteEpochOperation(ctx.operation)) await READABLE_IDS_WRITE_IN_FLIGHT.run(true, next);
-    else await next();
+    const chain = isWriteEpochOperation(ctx.operation)
+      ? () => READABLE_IDS_WRITE_IN_FLIGHT.run(true, next)
+      : next;
+    await publishTrioHandleFor(this.txStore, ctx.context?.transaction, chain);
     return ctx.result;
   }
 
@@ -446,4 +449,43 @@ export class MiddlewareAndContextFacet {
     if (!scope) return true;
     return this.getDriver(object) === scope.driver;
   }
+}
+
+/**
+ * ADR-0034 D1 for the handle `ScopedContext`'s discrete trio opened: run one
+ * operation's chain with that handle PUBLISHED in the engine's ambient store,
+ * so every internal read and write the operation issues without a handle of
+ * its own (an automation run's settings read, a grants read, a nested
+ * `transaction()`) rides the transaction's connection instead of asking the
+ * pool for another one.
+ *
+ * The trio cannot publish its unit as a whole: no closure spans its begin to
+ * its commit (the sandbox runner threads the handle across host event-loop
+ * turns). But every operation made through the trio's context IS a closure,
+ * and the handle arrives on it explicitly, so this publishes it per
+ * operation. Without it, a single-connection pool (SQLite) waited for the
+ * connection the open transaction held, and the sandbox body stalled until
+ * its wall clock: a script action's first call answered `500` and its
+ * transaction rolled back, while a retry, finding the read cached, succeeded.
+ *
+ * Published only for an OPEN trio handle (`trioTransactionScopeOf` drops it
+ * at commit and rollback), never for a run detached from it (an `async`
+ * hook's), and never over a store that already carries a transaction. The
+ * entry has `runOpenedUnit`'s shape: the trio's scope, so the same-origin
+ * gate still attributes the handle, and its commit queue, so an `async`
+ * after-hook dispatched inside waits for the trio's commit. Emptied when the
+ * operation settles, as `runOpenedUnit` empties its entry, so work the
+ * operation started and did not await keeps no hold on the handle.
+ */
+function publishTrioHandleFor(
+  txStore: MiddlewareAndContextHost['txStore'],
+  explicit: unknown,
+  chain: () => Promise<void>,
+): Promise<void> {
+  const scope = explicit !== undefined ? trioTransactionScopeOf(explicit) : undefined;
+  if (!scope || isDetachedUnitHandle(explicit) || txStore.getStore()?.transaction !== undefined) return chain();
+  const commitQueue = trioCommitQueueOf(explicit);
+  const entry: { transaction: unknown; scope?: typeof scope; commitQueue?: typeof commitQueue } =
+    { transaction: explicit, scope, ...(commitQueue ? { commitQueue } : {}) };
+  return txStore.run(entry, chain).finally(() => { entry.transaction = undefined; entry.scope = undefined; });
 }

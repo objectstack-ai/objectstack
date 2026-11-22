@@ -77,7 +77,6 @@ function renderGrid(dataSource: any) {
     type: 'object-grid',
     objectName: OBJECT,
     editable: true,
-    singleClickEdit: true,
     columns: [
       { field: 'name', label: '工序', editable: false },
       { field: 'actual_start', label: '实际开始时间', type: 'date' },
@@ -86,7 +85,7 @@ function renderGrid(dataSource: any) {
   };
   return render(
     <ActionProvider>
-      <ObjectGrid schema={schema} dataSource={dataSource} />
+      <ObjectGrid cellSelection={false} schema={schema} dataSource={dataSource} />
     </ActionProvider>,
   );
 }
