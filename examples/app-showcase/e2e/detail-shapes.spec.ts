@@ -178,30 +178,28 @@ test('related-heavy: body tables, the tab row and the rail on Contoso', async ({
   //
   // The window and the sidebar are derived, not picked. A collapsed console
   // sidebar draws no icon rail from 768 px up — ruling 6973617688 on
-  // objectstack#35062: "Both collapsed states hide the sidebar completely:
-  // the manual collapse (`UnifiedSidebar` `collapsible="icon"`) and the
-  // automatic fold between 768 px and the record-drawer threshold (#27593,
-  // `consoleSidebarRail.ts`, below 1416 px). No icon column remains." So in a
-  // fresh browser context no desktop window stacks: measured on this harness,
-  // from a 768 px window (`MOBILE_BREAKPOINT`, the desktop shell) to 1415 px
-  // the sidebar folds hidden and the record view is the whole window (two
-  // columns at 768), and from 1416 px it is expanded and the view is at least
-  // 1160. The case therefore docks the sidebar the way a reader does — the
-  // app bar's trigger floats the menu and its "Keep sidebar open" keeps the
-  // 256 px sidebar beside the page — and the view is the window minus it:
-  // one column at 1015 px (759 of view), two at 1016 px (760), the same after
-  // a reload. So the docked stack tier is a window of 768 to 1015 px. 900
-  // sits inside it with headroom on both sides: 644 px of view against the
-  // 760 floor, 132 px above the mobile breakpoint. ⛔ Not 780 px with the
-  // sidebar left as it comes up: that window now draws two columns (780 px of
-  // view). ⛔ Not below 768 px: that is the mobile shell, where the off-canvas
-  // sidebar gives the view the whole window (stack below 760), but where the
-  // details draw no Invoices body table (measured at 720 and 740 px).
+  // objectstack#35062: "Both collapsed states hide the sidebar completely" —
+  // and a browser with no choice kept starts it collapsed below 1280 px and
+  // expanded from 1280 px (ruling 7069868269 on objectstack#36112,
+  // `consoleSidebarRail.ts` CONSOLE_SIDEBAR_RAIL_BELOW_WIDTH). So in a fresh
+  // browser context no window below 1280 px stacks: the sidebar is hidden and
+  // the record view is the whole window (two columns at 768). The case
+  // therefore docks the sidebar the way a reader does — the page header's
+  // expand button puts the 256 px sidebar beside the page, and this browser
+  // keeps that choice — and the view is the window minus it: one column at
+  // 1015 px (759 of view), two at 1016 px (760). So the docked stack tier is
+  // a window of 768 to 1015 px. 900 sits inside it with headroom on both
+  // sides: 644 px of view against the 760 floor, 132 px above the mobile
+  // breakpoint. ⛔ Not 780 px with the sidebar left as it comes up: that
+  // window draws two columns (780 px of view). ⛔ Not below 768 px: that is
+  // the mobile shell, where the off-canvas sidebar gives the view the whole
+  // window (stack below 760), but where the details draw no Invoices body
+  // table (measured at 720 and 740 px).
   await page.setViewportSize({ width: 900, height: 800 });
   const errors = await openRecord(page, recordUrl('showcase_account', contosoId));
-  await page.locator('[data-sidebar="trigger"]').click();
-  await page.getByTestId('sidebar-keep-open').click();
-  await expect(page.getByTestId('sidebar-keep-open')).toHaveAttribute('aria-pressed', 'true');
+  await page.getByTestId('shell-sidebar-expand').click();
+  await expect(page.getByTestId('sidebar-collapse')).toBeVisible();
+  await expect(page.getByTestId('shell-sidebar-expand')).toHaveCount(0);
 
   // objectstack#35891: no stage bar, no key-field strip; the heuristic stage
   // (account.status is a select named "status") is the header's tag.

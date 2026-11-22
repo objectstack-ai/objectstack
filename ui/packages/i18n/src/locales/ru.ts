@@ -3593,7 +3593,6 @@ const ru = {
     starred: "Отмеченные",
     removeFromFavorites: "Убрать {{name}} из избранного",
     allReports: "Все отчёты",
-    keepOpen: "Не сворачивать боковую панель",
     collapse: 'Свернуть боковую панель',
     expand: 'Развернуть боковую панель',
   },

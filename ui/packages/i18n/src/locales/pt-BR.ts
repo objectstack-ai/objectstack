@@ -3503,7 +3503,6 @@ const pt = {
     starred: "Favoritos",
     removeFromFavorites: "Remover {{name}} dos favoritos",
     allReports: "Todos os relatórios",
-    keepOpen: "Manter a barra lateral aberta",
     collapse: 'Recolher a barra lateral',
     expand: 'Expandir a barra lateral',
   },
