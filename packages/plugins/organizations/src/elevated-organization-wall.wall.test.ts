@@ -116,7 +116,9 @@ const remoteDriver = {
   async disconnect() {},
   async checkHealth() { return true; },
   async find(_object: string, query: any = {}) {
-    return remoteRows.filter((r) => matches(r, query.where)).map((r) => project(r, query.fields));
+    const rows = remoteRows.filter((r) => matches(r, query.where));
+    const page = typeof query?.limit === 'number' ? rows.slice(0, query.limit) : rows;
+    return page.map((r) => project(r, query.fields));
   },
   async findOne(_object: string, query: any = {}) {
     const hit = remoteRows.find((r) => matches(r, query.where));
