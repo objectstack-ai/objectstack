@@ -280,13 +280,28 @@ describe('CommentsPage — the long press', () => {
     fireEvent.click(el);
     const rows = () =>
       Array.from(sheet()!.querySelectorAll('[data-comment-action]')).map((row) => row.getAttribute('data-comment-action'));
-    // Grace's comment, before the host has its answer: the viewer moderates, so Delete only.
-    expect(rows()).toEqual(['delete']);
-    // The answer lands with the sheet still up.
+    // Grace's comment, before the host has its answer: Mark resolved (any
+    // thread the viewer reads, objectstack#36186) and Delete (the viewer moderates).
+    expect(rows()).toEqual(['resolve', 'delete']);
+    // The answer lands with the sheet still up: Edit of another's comment joins.
     rerender(view(true));
     expect(rows()).toEqual(['resolve', 'edit', 'delete']);
     fireEvent.click(sheet()!.querySelector('[data-comment-action="resolve"]')!);
     expect(writes.onResolveComment).toHaveBeenCalledWith('c2', true);
+  });
+
+  it("behind the own-comment delete door (objectstack#36191) Delete is offered on the viewer's own comment with no reply only", () => {
+    renderPage({ threadId: 'c1' }, { ownCommentDeletesOnly: true, moderatesComments: true });
+    const rowsOf = (id: string) => {
+      hold(commentEl(id));
+      return Array.from(sheet()!.querySelectorAll('[data-comment-action]')).map((el) => el.getAttribute('data-comment-action'));
+    };
+    // The viewer's own reply: Delete.
+    expect(rowsOf('r2')).toContain('delete');
+    // The viewer's own comment with replies under it: the door keeps it.
+    expect(rowsOf('c1')).not.toContain('delete');
+    // Grace's reply: not the viewer's, so no Delete even though they moderate.
+    expect(rowsOf('r1')).not.toContain('delete');
   });
 
   it('a read-only discussion raises no sheet and docks no box', () => {
