@@ -2,8 +2,8 @@
   "number": 36011,
   "kind": "issue",
   "title": "Manage views: after pinning, renaming or re-defaulting a factory view of a read-only package, the admin can restore the factory version from the list page",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -22,9 +22,13 @@
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-21T06:32:10Z",
-  "updated_at": "2026-11-22T07:30:09Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-22T08:32:10Z",
+  "closed_at": "2026-11-22T08:32:09Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 5,
   "locked": false,

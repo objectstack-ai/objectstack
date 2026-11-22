@@ -2,7 +2,7 @@
   "number": 36326,
   "kind": "pull_request",
   "title": "fix(messaging): a member's own \"no digest\" or \"no quiet hours\" beats the organization's default",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -21,10 +21,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-22T06:09:05Z",
-  "updated_at": "2026-11-22T08:21:01Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-22T08:49:28Z",
+  "closed_at": "2026-11-22T08:49:25Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-22T08:49:25Z",
   "comments": 9,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/36326",

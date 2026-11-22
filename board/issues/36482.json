@@ -1,0 +1,31 @@
+{
+  "number": 36482,
+  "kind": "issue",
+  "title": "Field history switch cannot show or return to unset (follow the default)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "enhancement",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-22T13:49:21Z",
+  "updated_at": "2026-11-22T13:49:21Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36482",
+  "body": "repo:objectstack#7 · zhuangjianguo · session_01QsR2jTeURPvEm465RcoYEC\n\nFollow-up from PR #36399 (card #36290 PR 1), contract review 7080007398. Filed by the seat.\n\n## What happens\n\nThe new `fieldHistory` switch on the object form, the object's field repeater and the field form is a plain on/off switch. Unset means ON for most field types, yet the switch shows OFF until someone toggles it. Once an admin sets it to off, the form cannot return it to unset (follow the default) either. The help text on each row says this today; the control itself cannot show it.\n\n## What should happen\n\nThe control shows three states: follow the default (shows what the default resolves to for this field type), on, off. Choosing \"follow the default\" removes the key.\n\n## Notes\n\n- The default is not ON for every type: media and JSON field types and credential fields default to off. The per-field help text currently says \"Unset means ON\" for every field; the three-state control should show the resolved default instead.\n- No PR on #36290 carries a three-state control, so this is its own card.\n"
+}

@@ -2,8 +2,8 @@
   "number": 36102,
   "kind": "issue",
   "title": "Console eager chunk: GridField sits in ui-components although it is dynamically imported (static export + sideEffects); carve it out and lower the ceiling",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:ux",
     "domain:ui",
     "enhancement",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-21T13:46:04Z",
-  "updated_at": "2026-11-22T07:32:47Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-22T13:42:00Z",
+  "closed_at": "2026-11-22T12:56:04Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36102",
   "body": "repo:objectstack#1 · os-sales · session_01L6bhgUkbQqRUUFSiu2HGob\n\nFollow-up owed by the maintainer's ruling 7063116595 on #36023 (option B: raise the eager `ui-components` ceiling by about 8 KB, in budget PR #36100, so #36039 can land; \"a separate card follows to take GridField out of the eager chunk, after which the ceiling can come back down\"). Evidence: the fable review `build-seat1/36023/S5/fable-budget.md` in the project folder.\n\n## What happens\n\n`GridField` (`ui/packages/fields/src/widgets/GridField.tsx`, about 90 KB of source) is in the console's eager `ui-components` chunk. `ui/packages/fields/src/index.tsx` imports it dynamically, but the same entry also exports it statically, and the package is `sideEffects: true`, so the dynamic import does nothing. The repo already lists it as an ineffective dynamic import (`ui/scripts/vite-ineffective-dynamic-imports.ts`). Also, `ui/apps/console/vite.config.ts` assigns every `packages/(components|fields)/` module to `ui-components` by path, so a lazy boundary alone saves nothing without a chunk group and a `PER_CHUNK_MEMBERSHIP_CARVE_OUTS` entry (precedent: `fields-date-picker`, objectui#12622). Main itself drifted about +5.4 KB on this line today, measured by #36100.\n\n## To do\n\n1. Measure GridField's in-chunk gzip size on main (two builds of one tree).\n2. Take it out of the eager chunk: drop the static export or route it through the lazy path, add its chunk group and carve-out, and make sure the record form's line-item table shows no blank or flash on first render (a preload when the form mounts is one way; measure it).\n3. Lower `PER_CHUNK_GZIP_CEILINGS['ui-components']` and its baseline by what was taken out, in the file's own \"Raising it\" style with the rows published.\n\n## Acceptance\n\n- `ui-components` eager gzip drops by GridField's measured size, and the ceiling comes down with it.\n- The line-item table in a create and an edit form renders on first open with no blank cell and no focus loss, pinned in an e2e."

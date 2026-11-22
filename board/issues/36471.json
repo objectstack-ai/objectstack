@@ -1,0 +1,32 @@
+{
+  "number": 36471,
+  "kind": "issue",
+  "title": "侧栏收起时从滑出的侧栏点应用名：侧栏收回去，应用菜单留在屏幕最左边被切掉一截",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-22T13:05:12Z",
+  "updated_at": "2026-11-22T13:52:39Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36471",
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#36107（外壳专题）。⛔ 不是认领。优先级 p2（协调席定的，维护者未指定：菜单还能用，但文字被切掉）。\n\n## 维护者说过的（2026-11-22）\n\n- 「现在更新最新的代码，验收开发成果」\n- 协调席汇报验收发现的缺陷后，维护者：「bug立卡」。\n\n## 现状（主干 `6a35635a33`（cloud `e9da58ce77`），本机托管环境，浏览器实测，账号是系统管理员，1440 宽）\n\n![滑出的侧栏](https://github.com/objectstack-ai/objectstack/blob/5fde13efd06417a8f69bd2d510caad999df9cf44/accept-1122/acc3-02-sidebar-peek.jpg?raw=true)\n\n![应用菜单被切掉](https://github.com/objectstack-ai/objectstack/blob/5fde13efd06417a8f69bd2d510caad999df9cf44/accept-1122/acc3-03-appmenu-clipped.jpg?raw=true)\n\n- 侧栏处于收起状态。鼠标移到屏幕最左边，侧栏滑出来（第一张图）。\n- 在滑出的侧栏上点左上角的应用名「CRM客户管理」：应用菜单打开了，但侧栏同时收了回去，菜单跟着停在屏幕最左边，左边一截在屏幕外面，每一项的图标和前一两个字看不到（第二张图）。\n- 侧栏钉住（展开）时点应用名：菜单位置正常。\n\n## 要做的\n\n1. 从滑出的侧栏打开应用菜单时，菜单打开期间侧栏不收回；菜单关闭后再按平时的规则收回。\n2. 头像菜单、通知面板、菜单项的「…」菜单从滑出的侧栏打开时同样检查一遍，有同样问题的一并修。\n\n## 不做的\n\n- 不改侧栏滑出、收回的时机规则本身。\n\n## 验收\n\n- 侧栏收起，鼠标移到最左边让它滑出，点应用名：应用菜单完整显示在屏幕内，侧栏还在；按 Esc 或选一个应用后菜单关闭，侧栏按平时的规则收回。\n- 同样的步骤点头像、点菜单项的「…」：弹出的菜单都完整可见。\n- PR 正文附修复后的截图。\n\n## 协调席自己加的\n\n- 「要做的」第 2 条里的头像菜单、通知面板、「…」菜单，协调席没有逐个试过，是推断它们可能有同样的问题。"
+}

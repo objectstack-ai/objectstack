@@ -14,18 +14,20 @@
     "area:ux",
     "domain:ui",
     "enhancement",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "zhuangjianguo"
+  ],
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-22T02:37:11Z",
-  "updated_at": "2026-11-22T02:49:16Z",
+  "updated_at": "2026-11-22T13:17:22Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 3,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36226",
   "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#35590（记录页专题，维护者直派）。⛔ 不是认领。优先级 p2（协调席定的，维护者未指定）。\n\n## 维护者说过的（2026-11-22）\n\n- 「然后记录详情页的左右栏时可以调节宽度的，你再想想还有哪些细节需要测试与确认」（说的是 Attio）\n- 协调席实测后建议「记录整页的属性栏可以拖动调宽，默认按比例，带最小宽度，双击复位」，维护者：「四条都立卡」。本卡是第 4 条。\n\n## 现状（主干 `6c7c6db250`，本机环境浏览器实测，自建应用「客户」记录整页）\n\n![我们的记录整页：字段区、右边栏、评论栏，都不能拖](https://github.com/objectstack-ai/objectstack/blob/5ef1288a78bc42aaba1ce459e85b9b23ad1cb13d/widths/2026-11-22-ours-record-page-1440.jpg?raw=true)\n\n- 1440 宽、评论栏开着：字段区加右边栏共 1060，其中右边栏（最近动态、相关记录）固定 320；评论栏固定 380。\n- 1920 宽：右边栏仍是 320，评论栏仍是 380，多出来的宽度全给字段区。\n- 页面上没有任何可以拖动的分隔线。\n\nAttio（同日浏览器实测）：\n\n![Attio 记录整页：属性栏、内容区、评论栏](https://github.com/objectstack-ai/objectstack/blob/5ef1288a78bc42aaba1ce459e85b9b23ad1cb13d/widths/2026-11-22-attio-record-page-comments-1440.jpg?raw=true)\n\n- 属性栏默认占页面宽度的 30%（1440 宽时 370，1920 宽时 514），最小 320，最大 60%。内容区最小 350。\n- 两栏之间的分隔线可以拖动，双击回到 30%。宽度按对象分别记住。\n- 属性栏拖宽后，动作按钮从图标变成带文字的按钮；内容区变窄后页签收进「更多」。\n- 评论栏固定 320，不能拖。\n\n## 要做的\n\n1. 字段区和右边栏之间加一条可以拖动的分隔线。\n2. 右边栏默认宽度不变（320），拖动范围 280 到 560；字段区最少保留 480。\n3. 双击分隔线回到默认。\n4. 宽度按对象记在浏览器里，下次打开同一个对象的记录沿用。\n5. 评论栏不动（固定宽度，不能拖）。\n\n## 不做的\n\n- 不改默认布局和默认宽度。\n- 不改右侧预览的宽度（objectstack-ai/objectstack#36149 管）。\n- 不做「右边栏拖宽后内容换排法」之类的自适应。\n- 没有右边栏的记录页不加分隔线。\n\n## 验收\n\n- 自建应用「客户」记录整页：拖字段区和右边栏之间的分隔线，两栏宽度跟着变；拖到头右边栏是 280 和 560。\n- 双击分隔线：右边栏回到 320。\n- 拖宽后打开另一条客户记录：宽度沿用；打开一条联系人记录：仍是默认。\n- 窗口缩到字段区不足 480 时，右边栏自动让出宽度，不出现横向滚动条。\n- 评论栏开着时拖动：评论栏宽度不变。\n- HotCRM 自己写的记录页（客户）同样试一次，有右边栏的就能拖。\n- PR 正文附拖宽前后的截图。\n\n## 协调席自己加的（不是维护者原话）\n\n- 「要做的」里的所有数字（280、560、480）和「按对象记」。维护者说的只是 Attio 的记录页左右栏可以调宽。\n- 默认宽度不变、评论栏不动。\n- 「不做的」四条。\n\n## 没有核对的\n\n- 我们的记录页在窗口变窄时右边栏什么时候掉到字段区下面，没有逐个宽度测；只看到 1100 宽时评论栏改成盖在内容上面。\n- HotCRM 自己写的记录页的右边栏是不是同一个组件，没有读代码确认。\n- Attio 的属性栏在左边、内容在右边，和我们左右相反；本卡不改左右顺序。\n\nReader: `domain:ui` 车道。`ui/packages/plugin-detail`（`RecordSummaryRail.tsx`）和 `ui/packages/app-shell/src/views/RecordDetailView.tsx`。\n\nDedupe: `属性栏 拖动 宽度`、`记录页 分隔线 拖动`（objectstack，open）→ 都是 0。相关：#36149。"

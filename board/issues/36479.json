@@ -1,0 +1,32 @@
+{
+  "number": 36479,
+  "kind": "issue",
+  "title": "Phone: tapping a record chip inside a lookup picker option's preview opens that record instead of selecting the option",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-22T13:31:40Z",
+  "updated_at": "2026-11-22T13:52:51Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36479",
+  "body": "repo:objectstack#7 · zhuangjianguo · session_01QsR2jTeURPvEm465RcoYEC\n\nFound by the #36151 dev (PR #36478) while running the phone record page at 375 px. Out of that card's scope. Filed by the seat.\n\n## What happens\n\nOn the showcase Field Zoo record at 375 px wide:\n\n1. Start inline edit of the Master-Detail field (target: Project).\n2. Tap the field to open the lookup picker.\n3. Inside an option's preview, tap the record chip `Account: Fabrikam`.\n\nThe Fabrikam account record page opens, in the middle of the edit. The option is not selected and the edit is left behind.\n\n## What should happen\n\nA tap anywhere on a picker option selects that option. A record chip inside an option's preview should not navigate while the picker is open (either it is not a link there, or the tap is taken as the option's own select).\n\n## Notes\n\n- Seen on a phone width. Desktop with a pointer was not checked; the fix should say whether the same click navigates there too.\n- Dedupe words: lookup picker option preview link navigates selects phone.\n- A screenshot exists in the f7-record thread if the dev needs one.\n"
+}

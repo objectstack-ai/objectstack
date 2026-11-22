@@ -2,8 +2,8 @@
   "number": 35948,
   "kind": "issue",
   "title": "Seat Tier H hand-off as one relay write: approval comment + pm:awaiting-merge + pr_request_reviewers, refused without ACCEPT and a same-head PASS",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -22,9 +22,13 @@
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-20T22:21:07Z",
-  "updated_at": "2026-11-22T07:56:41Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-22T08:47:34Z",
+  "closed_at": "2026-11-22T08:47:34Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
   "comments": 6,
   "locked": false,

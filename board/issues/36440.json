@@ -1,0 +1,36 @@
+{
+  "number": 36440,
+  "kind": "pull_request",
+  "title": "fix(console): a pre-dispatch action refusal toast shows the envelope's userMessage",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-22T12:02:59Z",
+  "updated_at": "2026-11-22T13:15:39Z",
+  "closed_at": "2026-11-22T13:15:37Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-22T13:15:37Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36440",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"zhuangjianguo\"} -->\n_Requested by **Steedos** · [project thread](https://claude.ai/code/project/chan_018ETKaNwMZCNRYD7D8Q9Ubb?thread=cmsg_018ETKaNwMZCNRYD7D8Q9Ubb3T2gwH6MWTYde4qF8edEDN)_\n\nFixes #36390\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户能看到什么变化:控制台里点一个操作,如果记录在打开页面后已被删除或无权访问,红色提示从英文开发者报错改为服务器给出的中文提示。\n- 为什么做:补上上一次多语言报错修复漏掉的一条路径,让非英文用户在所有操作失败场景下都看到本地化提示。\n- 出错会怎样:最坏情况是提示文字回到原来的英文报错,不影响数据,可直接撤回。\n- 要你做什么:无\n\n## What changes\n\nWhen the action route refuses a click **before** it hands it to the action's flow (the caller-scoped load of the subject record answers `404 RECORD_NOT_FOUND`; a denied or locked subject likewise), the console toast now shows the envelope's producer-marked `error.userMessage`, and falls back to `error.message` only when the envelope carries none.\n\nRoot cause, measured on `origin/main` at 4e55e4eb: a declared `type: 'flow'` click goes through `launchConsoleFlow`, which reads the door's raw answer with `interpretFlowResponse` (`ui/packages/app-shell/src/utils/flowResponse.ts`), not with core's `interpretActionResponse`. Only its `400 FLOW_FAILED` and 200-failed arms read `userMessage`. Its 404 arm, its other non-2xx arm and its 2xx `success:false` arm read `actionErrorDetail` (the message) alone. The same was true of `apiActionFailureMessage`'s non-`FLOW_FAILED` arm, which is what a `type: 'api'` click refused at the action door reaches.\n\nFix: one helper, `refusalEnvelopeMessage`, routes those four arms through the file's existing picker `flowFailureMessage`, with the envelope's `userMessage` (read by the same `declaredUserMessage` the FLOW_FAILED arm already uses) as the only carrier. No second picker is added. `ActionRunner`'s toast precedence is unchanged, so an action's authored `errorMessage` still wins.\n\nAction types, measured:\n- `flow`: affected on both doors (action door and trigger route), and on resume (`FlowRunner`). Fixed.\n- `api`: affected. The action door does the same subject load, and the refusal reached `apiActionRefusalResult`, which read the message only. Fixed, and RecordDetailView picks this up through the shared helper with no edit there.\n- `script`: already correct. `createServerActionHandler` → `interpretActionResponse` carries `userMessage` → the `ActionRunner` picker. A control test pins it.\n\nFiles to read first:\n1. `ui/packages/app-shell/src/utils/flowResponse.ts`: `refusalEnvelopeMessage` and the three `interpretFlowResponse` arms that now call it. This is the risk hunk, because every flow failure toast passes through it.\n2. `ui/packages/app-shell/src/utils/__tests__/flowLaunch.preDispatchRefusal-36390.test.tsx`\n\n## Tests\n\nNew `flowLaunch.preDispatchRefusal-36390.test.tsx` (dom project) drives a real `ActionRunner` and reads the toast it speaks:\n- a declared flow action, action door, 404 `RECORD_NOT_FOUND` (the shape is checked against `ApiErrorSchema`): with `userMessage` the toast shows it, without one it shows `message`, and a blank one counts as none;\n- `interpretFlowResponse` on a resume 404, a 403, a 409 and an outer `success:false` 200: `userMessage` when marked, `message` when not, with `retryable` unchanged;\n- `type: 'api'` through `apiActionRefusalResult`, and `type: 'script'` through `createServerActionHandler` (the control).\n\n<details><summary>Run on HEAD a80a13c39</summary>\n\n- `pnpm exec vitest run packages/app-shell/src/utils/__tests__/flowLaunch.preDispatchRefusal-36390.test.tsx packages/app-shell/src/utils/__tests__/flowResponse.test.ts` (from `ui/`, under the verify lock): VERDICT command-exit 0, Test Files 2 passed (2), Tests 78 passed (78).\n- `pnpm --filter @object-ui/app-shell run type-check` (both `tsc` projects, tests included): VERDICT command-exit 0.\n- Ablation: `flowResponse.ts` checked out from `origin/main` with a trap restoring from `HEAD` (`grep -c refusalEnvelopeMessage` gave 0 on the mutated file). The new file went red, Tests 6 failed | 3 passed (9). The 6 are exactly the userMessage-present cases; the fallback, blank and script-control cases stayed green. Restored: the hash equals the HEAD blob and `git diff HEAD` is empty.\n- Full `@object-ui/app-shell` suite: NOT MEASURED locally. The run was killed waiting in the shared lock queue; CI runs it.\n</details>\n\n## Acceptance notes\n\n- `declaredUserMessage` also reads `error.details.userMessage`; the FLOW_FAILED arm already used it, so the new arms now read the same members.\n\n## Verification\n\nTwo-minute check: from `ui/`, run `pnpm exec vitest run packages/app-shell/src/utils/__tests__/flowLaunch.preDispatchRefusal-36390.test.tsx`. Expected: 9 passed. In the browser (zh-CN): open a record that has a flow action, delete the record in another tab, then click the action. The toast should read 该记录不存在，或您无权访问它。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QsR2jTyyBmoPBsURQjeJGq)_\n\n<!-- signed: repo:objectstack#7 · zhuangjianguo · session_01QsR2jTyyBmoPBsURQjeJGq -->\n"
+}

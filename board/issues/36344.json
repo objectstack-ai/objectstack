@@ -2,8 +2,8 @@
   "number": 36344,
   "kind": "issue",
   "title": "List cell: a markdown value starting with a heading draws at heading size in the cell (truncated, and the row grows from 36 to 45 px)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,24 @@
     "area:ux",
     "bug",
     "domain:ui",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "zhuangjianguo"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-22T06:30:39Z",
-  "updated_at": "2026-11-22T06:50:23Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-22T12:21:46Z",
+  "closed_at": "2026-11-22T12:21:45Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36344",
   "body": "repo:objectstack#4 · os-project-manager · session_01FEkQ5oY5WCqqqBMtn9qt7m\n\n## What happens\n\nIn a list with a `markdown` column shown, a value such as `# Heading` draws at H1 size inside the list cell, truncated to `Headin…`, and that row is 45 px tall against 36 px for a row with no rich values. It happens with no editor open.\n\nReading: Chromium at 1280 px, the showcase field zoo list, on PR #36278's head `bc9b5c23` (that PR does not touch the display path: `MarkdownCellRenderer`, `prose-sm`). Found while dispatching #36023; not measured on main separately, but the display code is the same as main's.\n\n## Done when\n\n- A list cell draws markdown headings at the cell's own text size (a one-line preview), so a rich value does not change the row height.\n- A pin on the cell renderer with a heading value, with an ablation.\n- The record page and other full-size markdown displays keep their heading sizes.\n\nOut of scope: in-cell editing of rich-text fields (#36023)."

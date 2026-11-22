@@ -1,0 +1,36 @@
+{
+  "number": 36421,
+  "kind": "pull_request",
+  "title": "docs(ui): a kind full page is drawn as authored on the desktop full record page only",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-22T11:01:03Z",
+  "updated_at": "2026-11-22T11:42:25Z",
+  "closed_at": "2026-11-22T11:42:23Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-22T11:42:23Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36421",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"zhuangjianguo\"} -->\n_Requested by **Steedos** · [project thread](https://claude.ai/code/project/chan_018ETKaNwMZCNRYD7D8Q9Ubb?thread=cmsg_018ETKaNwMZCNRYD7D8Q9UbbGyo1s5XDjcEx7u8WDqbFTx)_\nFixes #36294\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n- 读文档的作者能看到:自建整页的记录页只在桌面完整页面按原样显示,手机和侧边预览显示标准记录页;只改了一句话。\n- 为什么做:让页面文档与已定的规则(自定义记录页只在桌面完整页面生效)一致,和规格里同一句的修正用同样的措辞。\n- 出错会怎样:只是文档文字,出错只会误导读者,可直接撤回。\n- 要你做什么:无。\n\n## What changes\nOne sentence in `content/docs/ui/pages.mdx` (the slots paragraph): \"A page that needs its own strip is `kind: 'full'`, drawn as authored\" now carries the desktop-only limit, in the same words the spec migration text and `page.zod.ts` already use: \"drawn as authored on the desktop full record page (a phone and the side preview draw the standard record page, with the composed strip)\". The rest of the paragraph is only re-wrapped. No other file changes; no locale copies of this page exist under `content/docs`.\n\nRead first: `content/docs/ui/pages.mdx` around line 299 (the only hunk).\n\nTwo-minute check: `grep -n \"drawn as authored\" content/docs/ui/pages.mdx content/docs/references/ui/page.mdx` shows the same wording in both files.\n\n## Why\nThe ruling (a custom record page applies on the desktop full page only) was already carried into the spec text; this page still read as \"drawn as authored\" everywhere.\n\n## Tests\nDocs-only; no tests apply.\n\n## Acceptance notes\n- No changeset: `content/docs/**` is not in any package's `files[]`, so nothing publishes; the PR carries `skip-changeset`.\n\n## Verification\nAt head e9b3ddb4, the 45 gate commands `dispatch-gates --commands` derives for this diff all exit 0.\n\n<details><summary>Gate reconciliation</summary>\n\n```\nRun reconciliation — 45 derived, 45 run, 0 NOT-MEASURED, 0 UNRUN.\n✓ dispatch-gates --ran: 45 derived famil(ies) accounted for — 45 run, 0 NOT-MEASURED (a DERIVED zero — all 45 recorded an exit code and none of them is 3).\n```\n\nFive gates first refused with PREREQUISITE NOT MET (unbuilt workspace packages). After building the `@objectstack/lint` and `@objectstack/client-react` dependency closures under the verify lock, all five exited 0. Typecheck lanes are left to CI.\n</details>\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01QsR2jTqAcPU4VyEPH7iVn2\n"
+}

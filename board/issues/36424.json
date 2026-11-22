@@ -1,0 +1,36 @@
+{
+  "number": 36424,
+  "kind": "pull_request",
+  "title": "fix(platform-objects): retranslate the view navigation help in seven locales",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-22T11:08:50Z",
+  "updated_at": "2026-11-22T12:16:04Z",
+  "closed_at": "2026-11-22T12:16:02Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-22T12:16:02Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36424",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"zhuangjianguo\"} -->\n_Requested by **Steedos** · [project thread](https://claude.ai/code/project/chan_018ETKaNwMZCNRYD7D8Q9Ubb?thread=cmsg_018ETKaNwMZCNRYD7D8Q9UbbGyo1s5XDjcEx7u8WDqbFTx)_\n\nFixes #35915\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用阿拉伯语、德语、法语、韩语、巴西葡语、俄语、繁体中文的管理员，在视图表单「导航」与「导航模式」的说明里，不再看到「默认用抽屉打开」，改为与英文一致的新说法。\n- 属于列表打开记录方式调整（视图导航模式废弃）的收尾，替这七种语言的管理员补齐译文。\n- 只改说明文字，出错只是某句译文不通顺，不影响任何功能，可直接撤回。\n- 无\n\n## What changes\n\n- `packages/platform-objects/src/apps/translations/{ar,de,fr,ko,pt-BR,ru,zh-Hant}.metadata-forms.generated.ts`: two leaf values each, `metadataForms.view.fields.navigation.helpText` (line 1358) and `\"navigation.mode\".helpText` (line 1362), re-translated from the current English source, following the zh-CN / ja-JP / es-ES renderings. Code tokens (`drawer`, `page`, `new_window`, `none`, `preventNavigation: true`, `listViews`, `navigation`, `mode`) are kept as written; the deprecation marker uses each locale's existing spelling (`[VERALTET]`, `[OBSOLÈTE]`, `[OBSOLETO]`, `[УСТАРЕЛО]`, `[사용 중단]`, `[مُهمَل]`, `[已棄用]`).\n- `{same seven}.source-hashes.generated.ts`: `node scripts/check-i18n-bundles.mjs --filter=platform-objects --write` dropped the one row `metadataForms.view.fields.navigation.mode.helpText` from each. That row recorded the leaf as a byte copy of an older English source; it is now a real translation, so the extractor drops the entry itself (no hand edit).\n- `.changeset/35915-navigation-help-seven-locales.md`: `@objectstack/platform-objects` patch (the bundles ship in that package).\n\n## Why\n\nThe view `navigation.mode` was deprecated under #35854 (ruling: the record name opens the full page, the hover icon the side panel; `none` still means rows open nothing). The English source and zh-CN, ja-JP, es-ES were rewritten then; these seven locales still said the drawer is the default, and `navigation.mode` served an older English copy.\n\n## Tests\n\n- `pnpm --filter @objectstack/platform-objects exec vitest run --maxWorkers=2 src/apps/translations` at 7fefd744: Test Files 26 passed (26), Tests 610 passed (610).\n- `node scripts/check-i18n-bundles.mjs --filter=platform-objects` at 7fefd744: EXIT=0, `platform-objects in sync (32 bundle(s))`.\n- No ablation: text-only change, no tested behaviour moved.\n\n## Acceptance notes\n\n- `grep` for the old phrasings (e.g. zh-Hant 「預設為抽屜」, de `standardmäßig Seitenleiste`) in the seven files: 0 hits. The new `navigation` help still names the drawer, as its size (\"drawer size\"), like the English.\n- German and Brazilian Portuguese use one word for both the drawer and the side panel (Seitenleiste / painel lateral), matching the existing drawer-width help in those files and the es-ES rendering.\n\n## Verification\n\nRead first: `zh-Hant.metadata-forms.generated.ts` lines 1358 and 1362 (compare with `zh-CN` at the same lines).\n\nTwo-minute check: `git grep -n '預設為抽屜\\|tiroir par défaut\\|standardmäßig Seitenleiste' -- packages/platform-objects/src/apps/translations` prints nothing.\n\n<details><summary>Local gates (derived by dispatch-gates for this diff)</summary>\n\n- 53 derived families ran locally with EXIT=0, among them `check:nul-bytes`, `check:issue-citations`, `check:published-files`, `check:cross-package-test-inputs`, the changeset families (`check-adr-0087-registration`, `check-changeset-no-major`, `check-empty-changeset`, `check:changeset-gate-self-tests`).\n- NOT MEASURED locally, left to CI: `pnpm check:i18n` across all nine packages (ran with `--filter=platform-objects`, the one package this diff touches; the other eight need their build closures); `pnpm check:dual-build-cjs-loads` (exit 3, needs a full `pnpm build`); `check-plugin-teardown-shape --self-test` (exit 3, shallow clone cannot reach its pinned control commit); `check-comment-mask-corpus` (did not finish within 240s).\n\n</details>\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01QsR2jTqAcPU4VyEPH7iVn2\n"
+}

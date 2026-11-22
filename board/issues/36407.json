@@ -1,0 +1,38 @@
+{
+  "number": 36407,
+  "kind": "issue",
+  "title": "Phone list cards: the pager shows \"Page 1 of 3\" but Next does nothing when the list declares no pagination",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-22T10:16:05Z",
+  "updated_at": "2026-11-22T13:35:50Z",
+  "closed_at": "2026-11-22T13:35:50Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36407",
+  "body": "repo:objectstack#7 · zhuangjianguo · session_01QsR2jTeURPvEm465RcoYEC\n\nFound by the f7-shell area's dev while measuring #36299 (os-dev-report 7077650228 on #36299; the card's own premise did not hold). Filed by the seat.\n\n## What happens\n\nAt phone width, an ObjectView list that declares no pagination draws its record cards with a pager reading \"Page 1 of 3\", but Next does nothing: no fetch, and row 51 is unreachable (measured with 120 rows). Read from code: `ListView` passes a no-op `onPageChange` when no pagination is declared, and the load-more hook watches only the table's scroll box, not `object-grid-card-scroller`. Every ObjectView list without declared pagination is hit on a phone.\n\n## To do\n\n1. Either load more as the card scroller nears its end (the desktop behaviour), or draw no pager when nothing pages. Pick the one that matches desktop and say why.\n2. Pin it at phone width with more than 50 rows: the 51st row is reachable.\n\n## Acceptance\n\n- On a phone, a list with 120 records and no declared pagination reaches record 120.\n\n## Grade\np1 · area:ux · domain:ui. A core feature (reading a list) cannot be completed on a phone past row 50, with no workaround in the page."
+}

@@ -2,8 +2,8 @@
   "number": 36308,
   "kind": "issue",
   "title": "Approvals: the decide refusal and the submitter notice still name a no-approver position by its internal name, and the approver-type word stays English in every pack",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:ux",
     "bug",
     "domain:ui",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "zhuangjianguo"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-22T05:17:15Z",
-  "updated_at": "2026-11-22T06:14:35Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-22T13:13:06Z",
+  "closed_at": "2026-11-22T13:11:59Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36308",
   "body": "repo:objectstack#4 · os-project-manager · session_01FEkQ5okniknzVVR3KTSVr1\n\nFiling gate: ① product defects with a named producer, found by the #36035 developer on PR #36306 (dev report on #36035, comment 7074647364, `out_of_scope_findings`). Filed as one family card on the seat's word. ⛔ Not a claim.\n\n## 维护者速读\n- 问题：#36035 让审批时间线上的「没有审批人」说明用岗位的显示名，但同一句话还出现在另外两处（审批被拒时的提示、给提交人的通知），那里仍是机器名；而且这句话里的「岗位」这个类型词在十一种语言里都是英文 `position`。\n- 影响：中文读者会看到「担任 position '销售经理' 的成员」这样中英混杂的句子，或者直接看到 `legal` 这类内部名。\n- 这一步做什么：让这几处共用同一个按读者语言命名的写法，并把类型词翻译进各语言包。\n- 要你做的：无。\n\n## What happens\n\n1. **Two more doors still show the machine name.** The decide refusal (POST decide, `FORBIDDEN`; its text ends with the no-approver remedy) and the submitter's `approval.comment` notice both compose the no-approver `who` from the slate with no labels. The code is `noApproverRemedy` and `noApproverSentence(noApproverNote)` at the notify site in `packages/plugins/plugin-approvals/src/approval-service.ts`. `exclude-submitter.integration.test.ts` pins \"…holds position 'legal'…\".\n2. **The approver-type word stays English in every language.** The `who` hole in `approvalNoApproverHolding` carries the English approver-type token in all eleven packs. A zh-CN read of an approvals actions list returns 目前还没有其他人能审批此请求。组织管理员需要添加一名担任 position '销售经理' 的成员… (pinned in PR #36306's test). The admin-rescue note translates the same thing (岗位「销售经理」). A fix needs a per-type clause in every catalog.\n\n## Asked\n\n- Every reader-facing place that names a no-approver slot names each position by the reader's pack label, then its declared label, then its name: the same order #36030 and #36035 use, through the same resolver (`notePositionLabels`), with no second one.\n- The approver-type word in that sentence is translated in all eleven packs, the way the admin-rescue note already does it.\n- Stored audit text stays as written.\n\n## Done when\n\n- The decide refusal and the submitter notice name a labelled position by its label in the reader's language; an unlabelled one keeps its name.\n- A zh-CN reader sees no English approver-type token in the no-approver sentence.\n\nReader: `domain:ui` / approvals, `area:ux`. Related: #36035 (PR #36306), #35418 (PR #36030), epic #34571.\n\nDedupe: `no-approver remedy position label`, `approvalNoApproverHolding notification label`, `refusal remedy machine name`, `approvalNoApproverHolding who type token`, `no-approver note mixed language`, `position type word untranslated` (objectstack issues, open) → none found at filing."

@@ -1,0 +1,36 @@
+{
+  "number": 36414,
+  "kind": "pull_request",
+  "title": "docs(grid): scope the rich text cell panel wording to the select-first grid",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-22T10:47:59Z",
+  "updated_at": "2026-11-22T11:41:30Z",
+  "closed_at": "2026-11-22T11:41:28Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-22T11:41:28Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36414",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"zhuangjianguo\"} -->\n_Requested by **Steedos** · [project thread](https://claude.ai/code/project/chan_018ETKaNwMZCNRYD7D8Q9Ubb?thread=cmsg_018ETKaNwMZCNRYD7D8Q9UbbGyo1s5XDjcEx7u8WDqbFTx)_\nFixes #36360\nPart of #35155 (item 3 only, the two \"(empty)\" doc comments; items 1-2 stay on that card)\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 读文档的开发者:说明从\"富文本单元格都在格子下方面板里编辑\"改为分开写清\"选中优先表格\"与普通表格两种行为;用户界面无感。\n- 属于列表单元格编辑富文本那项工作的收尾,替照着文档挂载普通表格的人纠正误导。\n- 只改文字与注释,出错只是说明不准,可直接撤回。\n- 要你做什么:无。\n\n## What changes\n\nText only, no code or behaviour change. Each text that described the rich-text cell panel now names the select-first grid (`cellSelection`) for the panel and its keys, and says in one sentence what a grid without `cellSelection` does:\n\n- `ui/packages/plugin-grid/README.md` (ships in the npm tarball): panel sentence scoped; adds the non-select-first sentence.\n- `ui/packages/fields/README.md` (ships): same.\n- `content/docs/frontend/plugins/plugin-grid.mdx`: panel sentence scoped (its keys sentence already was); adds the non-select-first sentence.\n- `ui/packages/fields/src/FieldEditWidget.tsx`: jsdoc on `IN_CELL_PANEL_EDIT_WIDGETS` only.\n- `.changeset/36023-rich-text-cell-panel.md` (pending, not yet consumed by a release): the \"Before\" line now says the \"This field can't be edited in a list\" notice was the select-first grid's.\n- `.changeset/36360-rich-text-panel-wording.md`: new patch note for the two published READMEs.\n- Second commit (rider, #35155 item 3): `GroupRowProps.label` in `ui/packages/plugin-grid/src/GroupRow.tsx` and the doc comment in `ui/packages/plugin-grid/src/temporalCellFace.ts` now say an empty group key is labelled with the grid's `grid.empty` string (\"Empty\" in English, `useGroupedData.ts` `emptyLabel = t('grid.empty')`), not \"(empty)\". Comments only.\n\n**DELIBERATE CORRECTION** of the pending note `.changeset/36023-rich-text-cell-panel.md` (Check Changeset's foreign-changeset rule stays red by design). Corrected sentence: \"Before, these cells opened no editor; on a select-first grid the cell said \"This field can't be edited in a list\".\" Reason: the notice comes from `cellSelection.describeCell`, which only a select-first grid has (`factsOf` in `data-table.tsx`).\n\nEvery clause was measured in `ui/packages/components/src/renderers/complex/data-table.tsx` at the base:\n- panel placement: `editsBelow = isEditing && selectFirst && editorBelow`, else `placement: 'cover'` (over the cell);\n- one click opens: the non-select-first `onClick` calls `startEdit` under `singleClickEdit`, which `ObjectGrid` defaults to `true`;\n- Ctrl/Cmd+Enter in the injected TEXTAREA commits only under `selectFirst && (ctrlKey || metaKey)`;\n- Esc: `exitEdit(true)` on both hosts;\n- click outside: the document `pointerdown` listener calls `saveEdit(true)`, which stages; without `autosaves` (`selectFirst && onRowSave`) the staged value waits for the save bar (`hasPendingChanges && !autosaves`).\n\n## Tests\n\nNo tested behaviour changed, so no tests and no ablation.\n\n## Acceptance notes\n\n- The select-first panel sentence says \"a click outside saves\"; measured, an immediate save needs `autosaves` (`selectFirst` plus `onRowSave`); a select-first grid wired with `onBatchSave` alone keeps the save bar. Not changed here (outside the card's wording); noted only.\n\n## Verification\n\nTwo-minute check: `git diff origin/main...HEAD -- ui/packages/plugin-grid/README.md` shows the panel bullet now opening \"on a select-first grid (`cellSelection`)\" and a second sentence for a grid without it.\n\nFiles to read first: `ui/packages/plugin-grid/README.md` (published), `.changeset/36023-rich-text-cell-panel.md` (the corrected pending note).\n\n<details><summary>Local gates at 83d66cf1</summary>\n\n- `dispatch-gates --commands` derived 66 commands; 59 exit 0.\n- `check-empty-changeset --base origin/main` exit 1: the expected DELIBERATE CORRECTION refusal above.\n- NOT MEASURED, reason PREREQUISITE NOT MET (unbuilt workspace `dist/`, shared verify lock contended): `check:doc-formula-expressions` (3), `check:doc-security-posture` (3), spec `check:docs` (1), spec `check:skill-examples` (3), `check:docs-transcript-drift` (3), `pnpm --dir ui exec vitest run scripts/` (all 56 failures import the unbuilt `@objectstack/spec` dist). CI builds and runs them.\n- `overlap-check`: VERDICT clean exit 0 (#36357, #36316 merge cleanly).\n- `check-nul-bytes`: OK.\n</details>\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01QsR2jTqAcPU4VyEPH7iVn2\n"
+}

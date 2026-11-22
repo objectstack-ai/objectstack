@@ -14,18 +14,20 @@
     "area:ux",
     "bug",
     "domain:ui",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "zhuangjianguo"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-21T06:01:50Z",
-  "updated_at": "2026-11-21T06:48:34Z",
+  "updated_at": "2026-11-22T14:05:26Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36004",
   "body": "repo:objectstack#5 · os-bill · session_01Utp6CZrgaiMgTJCnswR6jQ\n\nFollow-up of #35804 (PR #35998). Optional nit from L1-a, record 7058316549.\n\n## Problem\nThe inline line grid's column-header help button sits inside the `<th>`, and the help text is its `aria-label`. That label joins the column header's computed accessible name. A screen reader announcing a cell's column header may therefore read the whole help sentence with every cell in that column.\n\n## Done when\n- The header's accessible name stays the field label, plus at most a short \"Help\" word.\n- The help text stays reachable by keyboard and screen reader, through `aria-describedby` on the button or through the tooltip content, in the reader's language.\n- A pin reads the column header's accessible name (label only) and the button's description (the help).\n\n## Where\n`ui/packages/fields/src/widgets/GridField.tsx` (`ColumnHeaderHelp`) and its tests.\n"

@@ -14,18 +14,20 @@
     "area:ux",
     "domain:ui",
     "enhancement",
-    "pm:blocked",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "zhuangjianguo"
+  ],
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-21T16:37:37Z",
-  "updated_at": "2026-11-22T02:38:40Z",
+  "updated_at": "2026-11-22T14:07:24Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 3,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36149",
   "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#35590（专题：记录详情页重做，维护者直派）。⛔ 不是认领。优先级 p2（协调席定的，维护者未指定）。\n\n## 维护者说过的（2026-11-22）\n\n- 看着 Twenty 的窄屏记录页：「手机记录页是不是应该和，电脑端右侧drawer预览的效果，和宽屏左侧记录预览效果一致，只显示一列，」「而且可以切换子表」\n- 「字段区统一成一列、三处共用一个组件，我同意」\n- 「手机上那块两列的「重点字段」去掉，好像本来就不应该有」\n- 「现有的右侧界面也要看看如何进一步优化」\n- 看过效果图（设计板图 48）和协调席加的五条后：「可以，立卡」\n- 「自定义记录页在手机和右侧预览里不生效、统一用标准页」\n- 「字段分组下拉的位置，我觉得放在右边比较好看，你看右侧浏览器」\n\n## 现状（界面 `db9e34ad32`，本机环境浏览器实测，1440 宽）\n\n从列表在侧边打开一条记录：预览大约 700 多宽，盖住列表的右半边，左边只剩两三列看得见。头部第二行：对象图标、记录名、「复制编号」图标、阶段下拉，右边是「编辑」按钮和「更多」。\n\n![现状：右侧预览](https://github.com/objectstack-ai/objectstack/blob/130c6fcefb308e22a11bc98546e58c1ba76386cc/record-redo/onecol-now-drawer.png?raw=true)\n\n## 效果图（设计板图 48，维护者已同意）\n\n![右侧预览：收窄，头部精简](https://github.com/objectstack-ai/objectstack/blob/d050e50d22ed60e98ae745596f88287c8a453fc5/record-redo/onecol-1-drawer.png?raw=true)\n\n![预览里切到子表页签](https://github.com/objectstack-ai/objectstack/blob/d050e50d22ed60e98ae745596f88287c8a453fc5/record-redo/onecol-2-drawer-child.png?raw=true)\n\n## 要做的\n\n1. **默认宽度 460**。左边缘可以拖动调宽，范围 380 到 900；宽度记在浏览器里，下次打开沿用。\n2. **头部第二行**：对象色块、记录名、阶段下拉；右边是评论（评论专题 objectstack-ai/objectstack#36075 的图标，那边没做完前先空着）和「更多」。\n3. **去掉头部的「编辑」按钮**：字段点值直接改；整条进入编辑的入口放进「更多」。\n4. **去掉记录名后面的「复制编号」图标**，「复制编号」放进「更多」。\n5. **页签**：详情、每张子表各一个（带条数）、动态，和整页、手机是同一组；多了横向滑动，不换行。\n6. **子表页签里**：一行一条（标题加一行摘要），右上角「添加」。\n7. **点一条子表记录**：在同一个预览里打开它，头部左边出现「‹ 父记录名」可以回来。不再叠一层新的预览。\n8. 头部第一行（上下条、位置、打开整页、关闭）不变。\n\n## 不做的\n\n- 不改字段区的排法（另卡：字段区统一成一列）。\n- 不改整页记录页。\n- 不改手机。\n- 不改预览是悬浮卡片这件事（objectstack-ai/objectstack#35854 定的）。\n\n## 验收\n\n- 1440 宽的窗口里从列表在侧边打开一条记录：预览宽 460；列表左边至少三列完整可见。\n- 拖预览的左边缘：能调宽；关掉再打开另一条，宽度是上次拖的。\n- 头部没有「编辑」按钮、没有「复制编号」图标；「更多」里有「编辑」和「复制编号」。\n- 点一个可编辑字段的值：能直接改并保存。\n- 点「跟进记录」页签：列出子表记录；点其中一条：预览里换成那条记录，左上角有回到父记录的入口，点了回来，页签还停在「跟进记录」。\n- 屏幕上任何时候只有一个预览。\n- PR 正文附改动前后截图。\n\n## 协调席自己加的（不是维护者原话）\n\n维护者说的是「现有的右侧界面也要看看如何进一步优化」，并在看过效果图后说「可以，立卡」。具体每一项都是协调席提的：\n\n- 宽度 460、可拖、范围 380 到 900、记在浏览器里。\n- 去掉「编辑」按钮和「复制编号」图标。\n- 子表记录在同一个预览里打开、不叠新预览。\n- 第 6 项子表一行一条的排法。\n\n## 没有核对的\n\n- 现在点预览里的子表记录是叠一层新预览还是跳整页，没有试。代码里有 `recordDrawerStack`，推测是叠层。\n- 有审批、锁定状态的记录，头部按钮组现在是什么样，没有看；「去掉编辑」不应影响审批的「通过、拒绝」。\n- 宽度 460 时头部第二行放不放得下长的记录名加阶段加两个按钮，效果图里是放得下的，真实数据没有试。\n\nReader: `domain:ui` 车道。`ui/packages/app-shell/src/views/recordDrawerStack.tsx`、`objectViewRecordOverlay.tsx`、`recordDrawerContext.ts`、`RecordDetailView.tsx`（预览里的头部）。\n\nDedupe: `预览 宽度 抽屉`、`记录 抽屉 两列`（objectstack，open）→ 0。相关：objectstack-ai/objectstack#35854（预览改悬浮卡片，已关闭）、objectstack-ai/objectstack#36049（编辑按钮降一档，已关闭）。\n\nBlocked-by: #36147\n"

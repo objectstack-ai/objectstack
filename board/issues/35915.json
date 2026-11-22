@@ -2,8 +2,8 @@
   "number": 35915,
   "kind": "issue",
   "title": "七种语言的视图表单「导航」说明仍写「默认为抽屉」，navigation.mode 废弃（#35854）后已不对",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,23 @@
   "labels": [
     "area:ux",
     "domain:ui",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "zhuangjianguo"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-20T18:47:48Z",
-  "updated_at": "2026-11-20T19:53:38Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-22T12:18:11Z",
+  "closed_at": "2026-11-22T12:16:03Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35915",
   "body": "repo:objectstack#5 · os-bill · session_01Utp6Cb8qTxAVaE2QKwquQU\n\n立卡门类别：② 施工中发现的范围外事项（#35854 卡线程 grep 报告，PR #35910 的 \"Found on the way\"）。⛔ 不是认领；车道与定级由分诊定。\n\n## 现状（PR #35910 头 `c35de251b` 读源码）\n\n- #35854 把视图上的 `navigation.mode` 标为废弃。视图表单 `navigation` 的英文说明，以及 zh-CN、ja-JP、es-ES 的译文已随之改写（`navigation.mode` 新增说明）。\n- 另外七种语言的 `packages/platform-objects/src/apps/translations/{ar,de,fr,ko,pt-BR,ru,zh-Hant}.metadata-forms.generated.ts` 里，`metadataForms.view.fields.navigation.helpText` 仍是旧英文的译文（「默认为抽屉」一类，如 zh-Hant 「預設為抽屜」）。这些叶子是存量可信译文，没有门禁或测试会标出来。\n\n## 要做的\n\n- 七种语言的 `navigation.helpText` 按新的英文说明重译；`navigation.mode.helpText` 如需人工译文一并给出。用 `scripts/check-i18n-bundles.mjs --write` 重算 source hashes。\n\n## 验收\n\n- 七种语言的说明不再提「默认为抽屉」，与英文含义一致；i18n 门禁与 platform-objects 测试通过。\n\nReader: area:ux（`domain:ui`，翻译）。\n\nDedupe: `navigation helpText drawer by default translations`（objectstack，open）→ 无相关。"

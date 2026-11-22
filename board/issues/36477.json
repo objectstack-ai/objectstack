@@ -1,0 +1,31 @@
+{
+  "number": 36477,
+  "kind": "issue",
+  "title": "Console approvals inbox: the number shown on each request row is guessed from field names (first non-zero key matching /amount|total|price|…/), so it can show the wrong figure, and an app has no way to say which field to show",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-bob",
+    "id": 353326562,
+    "type": "User"
+  },
+  "labels": [
+    "area:workflow",
+    "domain:ui",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-22T13:23:45Z",
+  "updated_at": "2026-11-22T13:52:48Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36477",
+  "body": "## Summary\n\nEach row in the console's approvals inbox shows a figure after the object name, for example `<Object> · 81`. The console picks that figure by looking at **field names**. It does not use anything the app declares. As a result:\n\n- On some objects it shows the wrong figure;\n- An app cannot correct it without renaming or reordering its own fields.\n\nThe same guessed value also drives the inbox's \"amount (high to low)\" sort.\n\n## Where (18.6.0; unchanged on `main`)\n\n`ui/apps/console/src/pages/system/ApprovalsInboxPage.tsx`:\n\n- L337 `AMOUNT_KEY_RE = /(amount|total|price|value|cost|sum|budget|salary|fee|revenue|balance|金额|总额|价格|费用|预算|金额)/i`\n- L363–385 `decisionAmountEntry`: walks `Object.entries(payload)` in order. It skips bookkeeping keys and fields declared `hidden: true`, then returns the **first** key whose name matches the regex and whose value is a non-zero number.\n- Used for the row cell at L601 and L1701, and for the amount sort at L1259–1260.\n- In the 18.6.0 build: `@objectstack/console/dist/assets/ApprovalsInboxPage-*.js`, `var kt=/(amount|total|price|…)/i` / `function At`.\n\nThe payload is the record snapshot taken at submission (`plugin-approvals` `snapshotRecord`), so its key order is the object's field declaration order.\n\n## Repro\n\n1. An object has these two fields, declared in this order:\n   - `overdue_amount` (currency), an incidental fact;\n   - `total_score` (number), the figure approvers care about.\n2. The object's `highlightFields` lists `total_score`, not `overdue_amount`.\n3. Submit a record with `overdue_amount = 80000` and `total_score = 81` for approval.\n4. The approver's inbox row reads `<Object> · 80,000`, which approvers will read as a sum of money.\n5. A record with `overdue_amount = 0` reads `· 81`, because the zero is skipped.\n\nAny object with an incidental money-like field declared before its headline figure behaves the same way. Examples:\n- a leave request: a \"deduction amount\" shown instead of the days;\n- a purchase request: a \"shipping fee\" shown instead of the total.\n\n## Why an app cannot fix it\n\n- Nothing in `@objectstack/spec` 18.6.0 names the inbox figure:\n  - the approval node has no such config;\n  - the object's `highlightFields` is not read here.\n- The only levers are to rename the field, move it below the headline field, or mark it `hidden` / `internal`. Each one changes the data model for the sake of a display heuristic.\n\n## Expected\n\nThe inbox shows a figure the app chose, or none.\n\n- Option 1: read the object's `highlightFields` (or a new `approval.summaryField` / `listFigureField` on the object or the approval node) and show its first numeric field.\n- Option 2: when nothing is declared, show no figure rather than a name-based guess.\n\nThe amount sort should follow the same choice.\n\nRelation: #25950 plans to rebuild the approvals UI on the SDUI renderer. Whatever that rebuild ends up doing, this row figure should be declared, not guessed.\n\n## Suggested grade\n\np2:\n- It is a wrong number in an approver's decision surface, with no app-side remedy;\n- But the approval page itself (snapshot, fields) shows the right values once the approver opens the request."
+}

@@ -14,18 +14,20 @@
     "area:ux",
     "bug",
     "domain:ui",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "zhuangjianguo"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-22T06:31:13Z",
-  "updated_at": "2026-11-22T06:50:26Z",
+  "updated_at": "2026-11-22T14:00:34Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36346",
   "body": "repo:objectstack#4 · os-project-manager · session_01FEkQ5oY5WCqqqBMtn9qt7m\n\n## What happens\n\nA user whose display name contains a bracket or other punctuation (e.g. `Alice (Sales)`) gets initials such as `A(` on four faces. PR #36324 (#36046) fixes the people cell and the avatar widget by moving them onto `@object-ui/fields` `getPersonInitials` (letters only). Four naive copies remain (read from source on that PR's branch; not driven in a browser):\n\n- `ui/packages/plugin-kanban/src/KanbanCardOwner.ts` `ownerInitials` (kanban card owner)\n- `ui/packages/plugin-detail/src/HistoryTimeline.tsx` `initialsFromName` (history timeline)\n- `ui/packages/auth/src/types.ts` `getUserInitials` (user menu)\n- `ui/packages/collaboration/src/PresenceAvatars.tsx` (presence stack)\n\n## Done when\n\n- Each face draws letters-only initials by the same rule as `getPersonInitials`: call it where the package may depend on `@object-ui/fields`; where it may not, say which shared home the rule moves to (one rule, not a fifth copy).\n- One family pin across the faces with an `Alice (Sales)` name, with an ablation.\n\nBlocked by nothing; best picked up after PR #36324 lands (it is where `getPersonInitials` becomes letters-only)."

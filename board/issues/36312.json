@@ -2,7 +2,7 @@
   "number": 36312,
   "kind": "pull_request",
   "title": "fix(plugin-auth)!: an invited sign-up the audience posture admits receives the declared self-registration set, and is refused when that set cannot be resolved",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -21,10 +21,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-22T05:34:19Z",
-  "updated_at": "2026-11-22T08:11:09Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-22T08:47:34Z",
+  "closed_at": "2026-11-22T08:47:32Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-22T08:47:32Z",
   "comments": 9,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/36312",

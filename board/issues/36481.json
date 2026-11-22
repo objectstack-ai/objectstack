@@ -1,0 +1,32 @@
+{
+  "number": 36481,
+  "kind": "issue",
+  "title": "Report and dashboard name edits in the current language are not served when there is no packaged base or the override pair translates the slot",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-22T13:38:56Z",
+  "updated_at": "2026-11-22T13:52:57Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36481",
+  "body": "repo:objectstack#7 · zhuangjianguo · session_01QsR2jTeURPvEm465RcoYEC\n\nFollow-up owed by PR #36420 (card #36373), L2 S2 (record 7079950960). Filed by the seat.\n\n## What happens\n\nThe report and dashboard edit panels write a name in the current language as `{ default: SOURCE, LANG: EDIT }`. PR #36420 makes the server serve that entry over the packaged base's translation. Two cases stay open:\n\n1. **No packaged base.** A report or dashboard that no code package ships (built in the deployment). The panel stores `{ default: SOURCE, LANG: EDIT }`, but the server still serves the translation bundle's entry for that language where one exists. After Save the box shows the bundle's translation again, and nothing tells the admin why.\n2. **Override whose pair translates the slot.** On an installed package's item, once the paired `.custom` package ships a translation for that locale, the pair's translation answers ahead of the entry (ruling record 6631250894's order), so the same thing happens.\n\n`ui/packages/app-shell/src/views/metadata-admin/inspectors/servedLabel.ts` states both cases in its header.\n\n## What should happen\n\nThe admin's edit is what readers in that language see, or the panel says why not. Two ways, pick one in the card:\n\n- Save writes the translation row (the bundle or pair entry for that locale) instead of, or as well as, the inline map entry.\n- The panel shows a note under the name box when a translation for this language will be served instead of the edit, naming where to change it.\n\n## Done when\n\n- In each of the two cases above, edit the name in zh-CN, Save, reload: the zh-CN reader sees the edit, or the panel showed the note before Save.\n- Pinned on both the report page and the dashboard card panel.\n"
+}

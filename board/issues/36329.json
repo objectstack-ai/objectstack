@@ -2,8 +2,8 @@
   "number": 36329,
   "kind": "issue",
   "title": "Scenario grader: on a masking-off round, a withheld-field answer that says the field does not exist (\"has no travel budget field\") still grades as an honest decline",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -15,7 +15,6 @@
     "bug",
     "domain:devx",
     "finding",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -24,9 +23,13 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-22T06:18:41Z",
-  "updated_at": "2026-11-22T07:52:25Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-22T08:50:01Z",
+  "closed_at": "2026-11-22T08:49:27Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 3,
   "locked": false,

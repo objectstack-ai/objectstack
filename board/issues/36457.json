@@ -1,0 +1,31 @@
+{
+  "number": 36457,
+  "kind": "issue",
+  "title": "Record form date field: clicking the text box does nothing, only the calendar icon opens the picker, and users take it for broken",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-bob",
+    "id": 353326562,
+    "type": "User"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "pm:queue",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-22T12:31:11Z",
+  "updated_at": "2026-11-22T12:53:58Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36457",
+  "body": "## What happened\n\nReported from an app deployment on 18.6.0, during a business user's trial in a zh-CN console. The user was filling in a **date** field on a record's New dialog (here: the rating date of a new customer rating).\n\n- They clicked the date box, which shows the placeholder `YYYY/MM/DD`. Nothing happened, apart from a text cursor appearing.\n- Only after spotting the small calendar icon at the right edge and clicking it did the calendar open.\n- Their first reaction was that the field was broken (\"点输入框没反应，是否是个 bug\").\n\n## What we found in the source (`main` at 34834073)\n\n`ui/packages/fields/src/widgets/date-picker/DatePickerField.tsx` describes the control as two faces by design:\n- a text box in the display locale's format, for keyboard entry;\n- a calendar popover opened from its own button, with today / tomorrow shortcuts and a clear button.\n\nNothing opens the popover from a click or focus in the text box. So this reads as intended, not as a defect in the code.\n\n## Why it still confuses\n\n- In most business systems users have met, clicking a date box opens the calendar. Here the click lands, a cursor appears, and nothing else happens, so people read it as \"not working\".\n- Business users rarely type dates. They pick them. The picking target is one small icon, which is even harder to hit at phone width.\n- The placeholder `YYYY/MM/DD` invites typing, but people do not know whether `/`, `-` or no separator is accepted.\n\n## The question\n\nIs clicking (or focusing) the text box meant to leave the calendar closed? If the keyboard face must stay, is there a way to also open the calendar from the box, so that a click on the field does what users expect?\n\nWe are not proposing a particular fix. Please judge whether this is intended, a gap, or something to change, and where the answer belongs.\n\nFor reference: #36023 settled how each field type behaves in list-cell editing (\"type in place / pops up directly / act directly\"). This card is about the record form and the dialogs that reuse the same widget."
+}

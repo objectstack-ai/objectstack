@@ -1,0 +1,36 @@
+{
+  "number": 36427,
+  "kind": "pull_request",
+  "title": "fix(console): the data page's side drawer draws the open-as-full-page button",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-22T11:19:41Z",
+  "updated_at": "2026-11-22T12:49:52Z",
+  "closed_at": "2026-11-22T12:49:51Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-22T12:49:50Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36427",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"zhuangjianguo\"} -->\n_Requested by **Steedos** · [project thread](https://claude.ai/code/project/chan_018ETKaNwMZCNRYD7D8Q9Ubb?thread=cmsg_018ETKaNwMZCNRYD7D8Q9UbbUq2j5tRRVo3TVY3wcS1Fdg)_\nFixes #36300\n\nrepo:objectstack#7 · zhuangjianguo · session_01QsR2jV3scu6UYPb42n5okQ\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 控制台的裸数据页上,从右侧抽屉打开记录后,抽屉顶栏多出「整页打开」按钮;点它进记录整页,整页上点关闭回到原来带条件的数据页。\n- 属于「记录详情页重做」专题,让数据页的抽屉跟对象列表的抽屉一样,两处不再不一致。\n- 用数据页看记录的人会碰到;出错时最多是按钮不出现或进整页后回不到原页,改动可以整体撤回。\n- 无。\n\n## What changes\n\nThe bare data page (`ObjectDataPage`, the app's object `data` route) mounts its record drawer with `NavigationOverlay`, and now hands it `onExpand`: the drawer's top bar draws the same ⤢ 「Open as full page」 button (`record-pane-open-page`) the object list's drawer draws, because it is that same control of the shared overlay, not a copy.\n\n- **⤢ opens the record's full page with the origin a name click carries.** The name click's navigation (the record URL plus the history-state `from` built by `listOriginOf`, and the phone's pushed-page marker) moved into one callback, `openRecordPage`, which both the name click and the drawer's ⤢ call. So the two entries cannot drift: the page's top bar counts the record among the data page's rows, ↑ ↓ step through them, and ✕ returns to the data page with its conditions.\n- **The drawer closes first**, as the object list's ⤢ does (`handleOpenAsPage` closes the drawer, then navigates): `listOriginOf` already strips `?recordId=` from the origin, so the ✕ lands on the data page with no drawer.\n- The button is drawn only while a served record is open (`openedRecordId`); a list-only object still opens no drawer at all.\n\n## Tests\n\nPinned beside the data page's open rule, as a new top-level `describe` in `ObjectDataPage.openRule-35875.test.tsx` (it is the data page's open-path harness: the real `ObjectDataPage`, `ListView` grid and `MePermissionsProvider`, and a record-route probe reading the origin through `useRecordPageReturn`):\n\n- the drawer opened from the hover icon draws a button named 「Open as full page」 (`record-pane-open-page`); a click opens `.../record/a2` with `from` equal to the data page's URL with its condition, its name, its rows and its matched count, position 2 of the matched count, and the drawer gone;\n- the full page's ✕ after ⤢ returns to the data page with `filter[status]=active`, no `recordId`, and no drawer.\n\n<details><summary>Local runs (head 07ac145f6)</summary>\n\n- vitest, `ObjectDataPage.openRule-35875.test.tsx`: `Test Files 1 passed (1)`, `Tests 8 passed (8)` (lock VERDICT command-exit 0).\n- vitest, every test file under `ui/` that names `ObjectDataPage` (38 files, incl. `ListView.test.tsx`, `ObjectView.harness.test.tsx`, the `ObjectView.listOnlyRecordPage-33219` and `ObjectView.rowOpensNothing-33317` control cases): `Test Files 38 passed (38)`, `Tests 808 passed (808)` (lock VERDICT command-exit 0).\n- `pnpm --filter @object-ui/app-shell type-check` (both tsc programs, the test program included): exit 0, 0 `error TS`.\n- Ablation, through `scripts/ablation-replace.mjs`, the `onExpand` line deleted from the data page's drawer (the control not passed): anchor 1 -> 0, blob `b7c74b61cd04` -> `b535a4ea7f93`; 2 red, both new cases, each `Unable to find an accessible element with the role \"button\" and name \"Open as full page\"`; the 6 existing cases green. Restored: blob == HEAD `b7c74b61cd04`, `git diff HEAD` empty. The subject is `src`, imported relatively, so no build leg.\n- `dispatch-gates --ran`: 38 derived, 38 run, 0 NOT-MEASURED, every one exit 0 (a derived zero).\n- `check:nul-bytes`: OK. `overlap-check`: `VERDICT clean`, origin/main merges cleanly.\n</details>\n\n## Acceptance notes\n\n- Read first, by risk: `ui/packages/app-shell/src/views/ObjectDataPage.tsx` (`openRecordPage`, `openDrawerRecordAsPage`, the `NavigationOverlay` mount's `onExpand`).\n- Two-minute check: open any object's data page in the Console (`/apps/APP/OBJECT/data?filter[FIELD]=VALUE`), hover a row and click the small panel icon after the name: the drawer opens with a ⤢ in its top bar; click it: the record's full page opens; click ✕: back on the data page with the condition chip and no drawer.\n- The object list's drawer also offers 「Open as full page」 as the last item of the record header's ⋯ menu (`RecordPaneContext`, provided by `RecordStackDrawer`); the data page's drawer mounts `NavigationOverlay` directly and provides no pane context, so its ⋯ menu has no such item, before and after this change. The card asks for the ⤢ button only; noted, not filed. Read from code, not measured on a running page.\n- The claim's file surface named a new card-named test file; the pin is a top-level `describe` in the existing open-rule harness file instead, per the repository's rule that a new pin for a component with a harness goes into that file (ruling record 6583487846), so the harness is not copied.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QsR2jV3scu6UYPb42n5okQ)_\n"
+}

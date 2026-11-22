@@ -2,8 +2,8 @@
   "number": 34153,
   "kind": "issue",
   "title": "pm-dispatch: codify the maintainer's 2026-11-15 p3 standard (close no-user-effect p3 at first touch) and reconcile it with ruling B's checklist cards",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:fleet",
     "domain:skills",
-    "needs-user-decision",
     "priority:p3",
     "tooling"
   ],
@@ -21,11 +20,15 @@
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-15T22:12:11Z",
-  "updated_at": "2026-11-19T06:02:53Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-22T08:21:27Z",
+  "closed_at": "2026-11-22T08:21:27Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 14,
+  "comments": 15,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34153",
   "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nFiling gate: ③ maintainer-directed. On the triage thread, 2026-11-15, the maintainer reviewed the open p3 cards in batches, agreed to close what had no customer effect, then said 「剩下的p3你都按照这个标准完整的审核一遍吧」. About 85 cards were closed that day. Today the standard lives only in triage's patrol prompt. ⛔ Not a claim.\n\n## 维护者速读\n\n- **现状:** 您今天定的 p3 标准写在分诊自己的巡查任务里,仓库规则里没有。各席位照旧把复审小问题、补钉子、ADR 措辞单独立卡,分诊再在首触时关掉,来回浪费。\n- **冲突:** 裁决 B(#33718)要求每个复审过的 PR 一张「复审尾巴清单卡」。p3 标准要关掉的正是这类无用户影响的条目。\n- **要改的:** 把标准写进定级规则,并说清它和裁决 B 怎么配合。\n\n## The standard, as applied on 2026-11-15\n\n- **Close as not planned, each with its own reason:**\n  - work with no customer or user effect: pins only, ADR or jsdoc wording, internal refactors, test-title rewording;\n  - stale readings, or work superseded or already delivered;\n  - corners no user is measured reaching (for example two-holder edges, a newline inside a path segment).\n- **Keep:** user-visible defects, published docs and skills text, security items, maintainer-directed work, and anything an open PR names as its carrier or a seat has taken.\n\n## Change\n\n1. Grading reference (#32997 table, SKILL.md grade section, or triage-duties): add the standard as triage's first-touch rule for p3.\n2. Filing gates (`execution-duties.md`, review-checklist): a review nit or out-of-scope finding that meets the close criteria is written in the PR's own record, not filed as a card.\n3. Ruling B (#33718): the per-PR checklist card holds only items that pass the keep criteria. An empty checklist means no card.\n\n## Measure\n\nOpen p3 went from 170 to 94 on 2026-11-15. Track new p3 per day for a week.\n\n## os-decision-facets\n\n- ① 项目长远合理性:书面标准连同例子写进分诊规则,缩小「规则只活在会话里」的特例;+4 行。\n- ② 实际业务拉动:11-15 关约 85 张无用户影响 p3(170→94),各席位今天仍照旧立同类卡。\n- ③ 防 AI 犯错:书面标准默认留卡,出错可见;不写则新会话静默重新立卡。\n- ④ 创业阶段不扩散:+4 行永久维护,替代每天逐张立卡再关卡的往返。\nPrior rulings read: p3 标准 / 上限放宽 / 裁决 B → 4 hits; ADR none; thread: 6906416184\n"

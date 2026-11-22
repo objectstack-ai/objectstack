@@ -14,18 +14,21 @@
     "area:ux",
     "domain:ui",
     "enhancement",
-    "priority:p2"
+    "pm:dispatched",
+    "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "zhuangjianguo"
+  ],
   "milestone": null,
-  "type": null,
+  "type": "Feature",
   "created_at": "2026-11-22T08:16:30Z",
-  "updated_at": "2026-11-22T08:16:30Z",
+  "updated_at": "2026-11-22T11:58:40Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36373",
-  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#36255（专题：仪表盘和报表的使用体验，维护者直派）。⛔ 不是认领。优先级 p2（协调席定的，维护者未指定）。\n\n本卡属于「运行界面的设计模式」这套方案，总说明和全部效果图在 objectstack-ai/objectstack#36359。 本卡对应本专题候选清单的第 1 项和第 2 项。\n\n## 维护者说过的（2026-11-22）\n\n- 「重新评估我们的看板、报表的设计页面，对照 attio」\n- 看过图二、图三（面板里全是业务用词）后同意在页面上做「编辑」：「我同意先做页面上的「编辑」」\n\n## 效果图（设计板图 49 的图二、图三的右侧面板）\n\n![仪表盘卡片的属性栏：数据来源、指标、分组、只统计这些记录](https://github.com/objectstack-ai/objectstack/blob/b3583aa509be265d5bb8af55ae8bd0c152fb6df5/runtime-edit/2026-11-22-board49-fig2.jpg?raw=true)\n\n![报表搭建页的右侧面板](https://github.com/objectstack-ai/objectstack/blob/b3583aa509be265d5bb8af55ae8bd0c152fb6df5/runtime-edit/2026-11-22-board49-fig3.jpg?raw=true)\n\n## 现状（主干 `6c7c6db250`，本机环境 HotCRM 6.5.0，浏览器实测）\n\n运行界面报表页点「编辑」打开的面板，和 Studio 里仪表盘卡片的属性栏，是同一套：\n\n- 字段显示内部名：`total_amount`、`avg_probability`、`stage`、`account_industry`。\n- 分组叫「行（维度）」「维度」，指标叫「值（度量）」。\n- 图表类型写 `bar`。\n- 数据集写「商机指标 (opportunity_metrics)」，下面一段说明是「选择本组件取数的受治理数据集……强制行级安全（RLS）」。\n- 顶部筛选的绑定里出现 `dateRange`、`owner_id`、`lead_source`。\n- 名称、标题显示英文原文（`Executive Overview`、`Revenue by Industry`），而画布上是中文。\n- **缺陷**：打开报表的编辑面板后，页面标题从「各阶段商机」变成「Opportunities by Stage」，副标题也变成英文。\n\n## 要做的\n\n1. **字段**：一律显示字段的标签（当前语言），不显示内部名。鼠标悬停可以看到内部名。\n2. **用词**：\n   - 「行（维度）」「维度」→「分组」\n   - 「值（度量）」→「指标」，并写成「金额 · 合计」这样（字段加算法）\n   - 「数据集」→「数据来源」，只显示它的名称，不带括号里的内部名\n   - 「仪表盘过滤器绑定」→「跟着页面顶部的筛选变」，每项显示筛选的名称（时间、负责人、线索来源）\n3. **图表类型**：下拉里是中文名加小图标（柱状图、折线图、面积图、环形图、数字、表格），不显示 `bar` 这类写法。\n4. **说明文字**：数据来源下面那段改成一句人话，比如「报表从这里取数；每个人只能看到自己有权限的记录」。不出现「受治理」「RLS」。\n5. **名称和标题**：显示当前语言的文字；编辑时改的也是当前语言的文字。\n6. **修缺陷**：打开编辑面板时，页面标题和副标题保持当前语言，不变成英文。\n7. 这套用词同时用在三处：运行界面报表页的编辑面板、仪表盘页面编辑的属性栏、Studio 里对应的面板。\n\n## 不做的\n\n- 不改面板的结构和有哪些项。\n- 不做「直接选对象作为数据来源」（要负责数据的席位先评估）。\n- 不改数据集本身在 Studio「数据」里的设计界面。\n\n## 验收\n\n- 运行界面打开「各阶段商机」点「编辑」：页面标题仍是「各阶段商机」；面板里看到「数据来源：商机指标」「指标：金额 · 合计、平均赢单概率 · 平均」「分组：阶段」「图表：柱状图」。\n- 整个面板里搜不到 `total_amount`、`stage`、`bar`、`opportunity_metrics`、`RLS`、「维度」「度量」。\n- 把界面语言切成英文再看：标签是英文，仍然没有内部名。\n- Studio 里打开同一张报表、同一个仪表盘的卡片：用词相同。\n- 一个没有翻译的自建应用：标签显示作者填的名称，不是内部名。\n- PR 正文附改动前后的面板截图。\n\n## 协调席自己加的（不是维护者原话）\n\n- 具体的新用词（分组、指标、数据来源）和第 4 项的那句说明。\n- 第 1 项「悬停可以看到内部名」。\n- 第 7 项三处同时改。\n\n## 没有核对的\n\n- 面板里的英文原文和内部名是因为没接翻译，还是设计成给搭建者看的，没有读代码。\n- 改名称时，写回去的是翻译文件还是定义本身，没有查。\n\nReader: `domain:ui` 车道。报表编辑面板在 `ui/packages/plugin-report`；Studio 面板在 `ui/packages/app-shell/src/views/studio-design/`。\n\nDedupe: `报表 编辑面板 用词`（objectstack，open）→ 0。"
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#36255（专题：仪表盘和报表的使用体验，维护者直派）。⛔ 不是认领。优先级 p1（维护者 2026-11-22：「这几张卡都 p1」）。\n\n本卡属于「运行界面的设计模式」这套方案，总说明和全部效果图在 objectstack-ai/objectstack#36359。 本卡对应本专题候选清单的第 1 项和第 2 项。\n\n## 维护者说过的（2026-11-22）\n\n- 「重新评估我们的看板、报表的设计页面，对照 attio」\n- 看过图二、图三（面板里全是业务用词）后同意在页面上做「编辑」：「我同意先做页面上的「编辑」」\n\n## 效果图（设计板图 49 的图二、图三的右侧面板）\n\n![仪表盘卡片的属性栏：数据来源、指标、分组、只统计这些记录](https://github.com/objectstack-ai/objectstack/blob/b3583aa509be265d5bb8af55ae8bd0c152fb6df5/runtime-edit/2026-11-22-board49-fig2.jpg?raw=true)\n\n![报表搭建页的右侧面板](https://github.com/objectstack-ai/objectstack/blob/b3583aa509be265d5bb8af55ae8bd0c152fb6df5/runtime-edit/2026-11-22-board49-fig3.jpg?raw=true)\n\n## 现状（主干 `6c7c6db250`，本机环境 HotCRM 6.5.0，浏览器实测）\n\n运行界面报表页点「编辑」打开的面板，和 Studio 里仪表盘卡片的属性栏，是同一套：\n\n- 字段显示内部名：`total_amount`、`avg_probability`、`stage`、`account_industry`。\n- 分组叫「行（维度）」「维度」，指标叫「值（度量）」。\n- 图表类型写 `bar`。\n- 数据集写「商机指标 (opportunity_metrics)」，下面一段说明是「选择本组件取数的受治理数据集……强制行级安全（RLS）」。\n- 顶部筛选的绑定里出现 `dateRange`、`owner_id`、`lead_source`。\n- 名称、标题显示英文原文（`Executive Overview`、`Revenue by Industry`），而画布上是中文。\n- **缺陷**：打开报表的编辑面板后，页面标题从「各阶段商机」变成「Opportunities by Stage」，副标题也变成英文。\n\n## 要做的\n\n1. **字段**：一律显示字段的标签（当前语言），不显示内部名。鼠标悬停可以看到内部名。\n2. **用词**：\n   - 「行（维度）」「维度」→「分组」\n   - 「值（度量）」→「指标」，并写成「金额 · 合计」这样（字段加算法）\n   - 「数据集」→「数据来源」，只显示它的名称，不带括号里的内部名\n   - 「仪表盘过滤器绑定」→「跟着页面顶部的筛选变」，每项显示筛选的名称（时间、负责人、线索来源）\n3. **图表类型**：下拉里是中文名加小图标（柱状图、折线图、面积图、环形图、数字、表格），不显示 `bar` 这类写法。\n4. **说明文字**：数据来源下面那段改成一句人话，比如「报表从这里取数；每个人只能看到自己有权限的记录」。不出现「受治理」「RLS」。\n5. **名称和标题**：显示当前语言的文字；编辑时改的也是当前语言的文字。\n6. **修缺陷**：打开编辑面板时，页面标题和副标题保持当前语言，不变成英文。\n7. 这套用词同时用在三处：运行界面报表页的编辑面板、仪表盘页面编辑的属性栏、Studio 里对应的面板。\n\n## 不做的\n\n- 不改面板的结构和有哪些项。\n- 不做「直接选对象作为数据来源」（要负责数据的席位先评估）。\n- 不改数据集本身在 Studio「数据」里的设计界面。\n\n## 验收\n\n- 运行界面打开「各阶段商机」点「编辑」：页面标题仍是「各阶段商机」；面板里看到「数据来源：商机指标」「指标：金额 · 合计、平均赢单概率 · 平均」「分组：阶段」「图表：柱状图」。\n- 整个面板里搜不到 `total_amount`、`stage`、`bar`、`opportunity_metrics`、`RLS`、「维度」「度量」。\n- 把界面语言切成英文再看：标签是英文，仍然没有内部名。\n- Studio 里打开同一张报表、同一个仪表盘的卡片：用词相同。\n- 一个没有翻译的自建应用：标签显示作者填的名称，不是内部名。\n- PR 正文附改动前后的面板截图。\n\n## 协调席自己加的（不是维护者原话）\n\n- 具体的新用词（分组、指标、数据来源）和第 4 项的那句说明。\n- 第 1 项「悬停可以看到内部名」。\n- 第 7 项三处同时改。\n\n## 没有核对的\n\n- 面板里的英文原文和内部名是因为没接翻译，还是设计成给搭建者看的，没有读代码。\n- 改名称时，写回去的是翻译文件还是定义本身，没有查。\n\nReader: `domain:ui` 车道。报表编辑面板在 `ui/packages/plugin-report`；Studio 面板在 `ui/packages/app-shell/src/views/studio-design/`。\n\nDedupe: `报表 编辑面板 用词`（objectstack，open）→ 0。\n"
 }

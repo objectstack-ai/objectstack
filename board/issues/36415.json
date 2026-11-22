@@ -1,0 +1,35 @@
+{
+  "number": 36415,
+  "kind": "pull_request",
+  "title": "docs(qa): checklist item for the list column-header menu and the sort-level reorder",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-22T10:54:00Z",
+  "updated_at": "2026-11-22T11:37:32Z",
+  "closed_at": "2026-11-22T11:37:30Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-22T11:37:30Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36415",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"zhuangjianguo\"} -->\n_Requested by **Steedos** · [project thread](https://claude.ai/code/project/chan_018ETKaNwMZCNRYD7D8Q9Ubb?thread=cmsg_018ETKaNwMZCNRYD7D8Q9UbbGyo1s5XDjcEx7u8WDqbFTx)_\nFixes #35922\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户无感:只是测试清单多了一条列表页检查项(点列标题弹菜单、多级排序调先后),并改正了一句过时的步骤说明。\n- 属于列表页重做这一组工作,补上了列标题菜单功能上线后测试清单里缺的那一块。\n- 出错只会让测试人员按错的步骤操作,不影响任何用户,可以直接撤回。\n- 无\n\n## What changes\n\n- New item `records-forms.list-header-menu-and-sort-levels` (P2, browser, since v18.7), placed right after `records-forms.adhoc-filter-sort-builder`. It drives the two things #35876 added to the list page (PR #35909), read from the shipped source at base 4e55e4eb:\n  - a click on a column header opens the column menu (Sort ascending / Sort descending / Hide column) and changes no sort; a second click shuts it;\n  - the entry chosen is the server sort (`sort=-due_date`), and over two levels or more the picked column becomes the first level while every other level keeps its place (`withHeaderSortPick`);\n  - keyboard: Enter, Space or ArrowDown on the focused header opens the menu with focus on the first entry; Esc shuts it without touching the sort and gives focus back to the header;\n  - a header that does not sort (showcase_task's Project, a master_detail column) opens a menu with Hide column alone;\n  - a click on the sort chip opens every level in one panel and never flips a direction;\n  - the sort panel's handles reorder the levels by ArrowUp / ArrowDown (the handle keeps focus, nothing happens past either end) and by drag; a single level's handle is disabled.\n  It cites the four pins #35909 added as `automated` and an acceptance clause, and anchors `source` to `GridHeaderMenuProvider`, `openHeaderMenu`, `withHeaderSortPick`, `handleHeaderSort` and `moveItem`.\n- `ux-conventions.write-feedback` revision 17: `variants[8]` said a click on a Studio Records grid header \"sorts the column (QA run #33914)\". On main that click selects the field and opens its properties and never sorts; sort and hide are in the header's 'Sort and hide' caret menu. This was made false by #34794 (Studio's capture-phase header handler), not by #35876; #35876 only turned that caret menu into a `role=menu`. No clause changed.\n\n## Tests\n\nNo code changed. `pnpm check:platform-checklist` (self-tests and the ledger) passes at 0e001f01, and the new item's seven `#symbol` anchors resolve (1754/1764 before, 1761/1771 after).\n\n## Acceptance notes\n\n- The card listed \"add to the existing sort\" as a menu entry. The shipped menu has no such entry: with two levels or more a pick puts the column first and keeps the other levels. The item follows the code.\n- The record page's related list also opens the header menu (`headerMenu: true` in `ui/packages/plugin-detail/src/RelatedList.tsx`). No checklist item drives that host. Noted here only.\n- No live run was made. The item is authored from source, as its history row says.\n\n## Verification\n\nFiles to read first, riskiest first:\n1. `docs/qa/platform-checklist/areas/records-forms.json`: the new item's `acceptance[2]` (the three-level request strings).\n2. `docs/qa/platform-checklist/areas/ux-conventions.json`: `variants[8]`'s rewritten last clause.\n\nTwo-minute check: `node scripts/checklist-select.mjs records-forms.list-header-menu-and-sort-levels` resolves the item, and `pnpm check:platform-checklist` prints `check-platform-checklist: OK — 16 areas, 437 items`.\n\n<details><summary>Gate readings at 0e001f01</summary>\n\n```\ncheck-platform-checklist: OK — 16 areas, 437 items (429 active, 3 planned); coverage: 40 kinds mapped, 4 waived; traps: 19 documented, 19 in use; ... symbol anchors: 1761/1771 resolved\ndispatch-gates --ran: 17 derived famil(ies) accounted for — 17 run, 0 NOT-MEASURED\noverlap-check: VERDICT clean exit 0\n```\n\nEvery derived family exited 0: check-adr-links (and --self-test), check-closing-keyword-parity (and --self-test), check-comment-mask-corpus, plan-test-core-shards --self-test, lint check:doc-formula-expressions (after building formula and lint), check:adr-anchors, check:ci-filter-parity, check:cross-package-test-inputs, check:doc-authoring, check:driver-memory-census, check:gitlink-declared, check:nul-bytes, check:platform-checklist, check:refd-timer-probe, check:watch-hint-literal.\n\n</details>\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic.\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes. (No code changed; CI runs it.)\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset. (Nothing publishes: `skip-changeset`.)\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (Not touched.)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01QsR2jTqAcPU4VyEPH7iVn2\n"
+}

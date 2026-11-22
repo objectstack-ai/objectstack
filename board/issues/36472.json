@@ -1,0 +1,32 @@
+{
+  "number": 36472,
+  "kind": "issue",
+  "title": "右侧预览里正在编辑时按 Esc：整个预览被关掉，应该只取消编辑",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-22T13:05:54Z",
+  "updated_at": "2026-11-22T13:52:42Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36472",
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#35590（记录页专题）。⛔ 不是认领。优先级 p2（协调席定的，维护者未指定：没有改动时只是多点一次；有改动时可能丢输入，协调席没试）。\n\n## 维护者说过的（2026-11-22）\n\n- 「现在更新最新的代码，验收开发成果」\n- 协调席汇报验收发现的缺陷后，维护者：「bug立卡」。\n\n## 现状（主干 `6a35635a33`（cloud `e9da58ce77`），本机托管环境，浏览器实测，账号是系统管理员，1440 宽）\n\n- 自建应用「CRM客户管理」的客户列表，把一条记录在侧边打开（右侧预览）。\n- 在「客户备注」的值上点一下进入编辑（整个字段区变成输入框，底部出现「取消」「保存」）。\n- 什么都不改，按 Esc：整个预览关掉了，回到列表。\n- 同一条记录在整页里做同样的事：按 Esc 只退出编辑，页面还在。\n- 改了内容以后再按 Esc 会怎样（是否有提示、输入是否丢失），协调席没有试。\n\n## 要做的\n\n1. 预览里处于编辑状态时，Esc 先退出编辑，预览留着；不在编辑状态时 Esc 才关闭预览。\n2. 编辑里已经改了内容时按 Esc：和整页里的做法保持一致（整页里怎么处理未保存的改动，预览里就怎么处理），不能不提示就把输入丢掉并关掉预览。\n\n## 不做的\n\n- 不改「点一下进入编辑」本身的做法。\n\n## 验收\n\n- 预览里点一个字段进入编辑，不改内容按 Esc：回到查看状态，预览还开着；再按一次 Esc：预览关闭。\n- 预览里改了一个字段的内容按 Esc：行为和整页里相同，PR 正文写明是哪种（直接放弃 / 先确认）。\n- HotCRM「线索」的预览同样试一次。\n- PR 正文附一段说明或截图。\n\n## 协调席自己加的\n\n- 「要做的」第 2 条（有改动时的处理）：协调席没有实测现状，只要求和整页一致。"
+}

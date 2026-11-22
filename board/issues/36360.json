@@ -2,8 +2,8 @@
   "number": 36360,
   "kind": "issue",
   "title": "Scope the rich-text cell panel wording to the select-first grid in READMEs and docs",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:ux",
     "documentation",
     "domain:ui",
-    "pm:queue",
-    "priority:p3"
+    "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "zhuangjianguo"
+  ],
   "milestone": null,
-  "type": null,
+  "type": "Bug",
   "created_at": "2026-11-22T08:10:40Z",
-  "updated_at": "2026-11-22T08:10:40Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-22T11:42:23Z",
+  "closed_at": "2026-11-22T11:41:30Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36360",
   "body": "repo:objectstack#4 · os-project-manager · session_01FEkQ5oY5WCqqqBMtn9qt7m\n\n## What is wrong\n\nPR #36278 (card #36023) lets a list cell edit a rich-text field (`markdown`, `html`, `richtext`). On a select-first grid (`cellSelection`, which the list view and the related tab use) the text box opens in a panel under the cell; Ctrl/Cmd+Enter saves and a click outside saves. On an `ObjectGrid` mounted without `cellSelection`, one click opens the text box over the cell, Ctrl/Cmd+Enter does nothing, Esc discards, and a click outside keeps the text as a pending change for the grid's save buttons. The changeset now says both (contract record 7075978816 S1, closed in 7076344850). These texts still describe only the select-first behaviour, without saying so:\n\n- `ui/packages/plugin-grid/README.md` (ships in the npm tarball): \"opens the record form's text box in a panel under the cell (Enter is a new line, Ctrl/Cmd+Enter saves, Escape discards, a click outside saves)\".\n- `ui/packages/fields/README.md`: \"The list grid opens it in a panel under the cell\".\n- `content/docs/frontend/plugins/plugin-grid.mdx`: the panel sentence (its keys sentence is already scoped).\n- `.changeset/36023-rich-text-cell-panel.md` \"Before, these cells opened no editor and said 'This field can't be edited in a list'\": true only for select-first (no `describeCell`, so no notice, without `cellSelection`). If the changeset has already been consumed by a release, skip this line.\n- The jsdoc on `IN_CELL_PANEL_EDIT_WIDGETS` in `ui/packages/fields/src/FieldEditWidget.tsx` (\"the grid saves on Ctrl/Cmd+Enter or a click outside\").\n\nSource of truth for the two hosts: `ui/packages/components/src/renderers/complex/data-table.tsx` (`editsBelow = isEditing && selectFirst && editorBelow`; the injected-editor wrapper commits a TEXTAREA only under `selectFirst && (ctrlKey || metaKey)`; `autosaves = selectFirst && ...`).\n\nOrigin: seat 7's contract delta record 7076344850 on PR #36278, S2 (should-fix, non-blocking) and N1 (nit). Carried here by the maintainer's direction to put later small changes on their own card (2026-11-22T07:49Z).\n\n## Done when\n\n- Each text above names the select-first grid for the panel and its keys, and says in one sentence what a grid without `cellSelection` does.\n- Text only: no code or behaviour change, no changeset needed beyond a patch note if a published README moves."

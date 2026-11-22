@@ -2,8 +2,8 @@
   "number": 36225,
   "kind": "issue",
   "title": "右侧预览里去掉评论按钮和评论面板：评论只在记录整页里（Attio 的预览也没有评论）",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:ux",
     "domain:ui",
     "enhancement",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-22T02:36:36Z",
-  "updated_at": "2026-11-22T07:28:56Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-22T11:41:34Z",
+  "closed_at": "2026-11-22T11:40:37Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36225",
   "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#35590（记录页专题，维护者直派）。⛔ 不是认领。优先级 p2（协调席定的，维护者未指定）。\n\n## 维护者说过的（2026-11-22）\n\n- 「我发现右侧展开预览时，attio 不显示评论」\n- 协调席实测确认并建议「预览里去掉评论按钮，评论只在整页里」，维护者：「四条都立卡」。本卡是第 1 条。\n\n## 现状（主干 `6c7c6db250`，本机环境浏览器实测，1440 宽，自建应用「客户」）\n\n![我们的右侧预览：头部有评论按钮](https://github.com/objectstack-ai/objectstack/blob/5ef1288a78bc42aaba1ce459e85b9b23ad1cb13d/widths/2026-11-22-ours-preview-1440.jpg?raw=true)\n\n- 右侧预览头部（记录名右边）有评论按钮。点开后评论面板盖在记录内容上面，字段被挡住。\n- 记录整页里评论是右边单独一栏（380 宽），不挡内容。\n\nAttio（同日浏览器实测，1440 宽）：\n\n![Attio 的右侧预览：没有评论](https://github.com/objectstack-ai/objectstack/blob/5ef1288a78bc42aaba1ce459e85b9b23ad1cb13d/widths/2026-11-22-attio-preview-1440.jpg?raw=true)\n\n![Attio 记录整页：评论是右边第三栏](https://github.com/objectstack-ai/objectstack/blob/5ef1288a78bc42aaba1ce459e85b9b23ad1cb13d/widths/2026-11-22-attio-record-page-comments-1440.jpg?raw=true)\n\n- 预览头部只有关闭、上一条、下一条、位置、展开成整页。页签里也没有评论。\n- 评论只在记录整页：顶栏的评论按钮打开右边第三栏（320 宽），把中间内容挤窄，不盖内容。\n\n## 要做的\n\n1. 右侧预览头部去掉评论按钮，预览里不再有评论面板。\n2. 要看或写评论，从预览头部的「展开成整页」进整页。整页的评论栏不变。\n3. objectstack-ai/objectstack#36149「要做的」第 2 项里写的「右边是评论……和『更多』」随本卡改为「右边只有『更多』」。那张卡上已留言说明。\n\n## 不做的\n\n- 不改记录整页的评论栏。\n- 不改手机上的评论入口。\n- 不改列表行上的评论相关显示（如果有）。\n\n## 验收\n\n- 自建应用「客户」列表在侧边打开一条记录：头部没有评论按钮，预览里任何地方都打不开评论面板。\n- HotCRM「线索」同样试一次。\n- 从预览展开成整页：评论按钮和评论栏照常，能写一条评论。\n- 给一条记录写了评论后再在预览里打开它：预览正常显示，没有残留的评论面板。\n- PR 正文附预览头部的截图。\n\n## 协调席自己加的（不是维护者原话）\n\n- 「不做的」三条的范围划分。\n- 验收里 HotCRM 一条和「写了评论后再开预览」一条。\n\n## 没有核对的\n\n- 一条记录有未读评论时，预览里要不要有任何提示：本卡写的是没有。Attio 列表的名称格悬停时有一个评论图标，它点了做什么这次没有试。\n- 通知里点一条评论提醒现在落到哪里（整页还是预览），没有试；如果落到预览，要改成落到整页并打开评论栏。\n\nReader: `domain:ui` 车道。预览头部在 `ui/packages/app-shell/src/views/RecordDetailView.tsx`；评论入口来自 objectstack-ai/objectstack#36075。\n\nDedupe: `预览 评论 去掉`、`预览 评论按钮`（objectstack，open）→ 都是 0。相关：#36149、#36075。"

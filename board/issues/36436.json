@@ -1,0 +1,36 @@
+{
+  "number": 36436,
+  "kind": "pull_request",
+  "title": "test(ui/e2e): scope the list-no-actions-column mount wait to one element on every face",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-22T11:32:18Z",
+  "updated_at": "2026-11-22T12:16:48Z",
+  "closed_at": "2026-11-22T12:16:46Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-22T12:16:46Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36436",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"zhuangjianguo\"} -->\n_Requested by **Steedos** · [project thread](https://claude.ai/code/project/chan_018ETKaNwMZCNRYD7D8Q9Ubb?thread=cmsg_018ETKaNwMZCNRYD7D8Q9UbbD5gxSWeWGswbZYVzNvtqNM)_\n\nFixes #36119\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户无感:只改一份界面端到端测试,让它在任何执行顺序下都只等一个确定的元素。\n- 为什么做:列表页无操作列这组验收测试里,侧边记录面板的用例会随测试顺序偶发失败。\n- 出错会怎样:只影响这份测试是否误报,不影响产品;可直接撤回。\n- 要你做什么:无\n\n## What changes\n\n`ui/e2e/list-no-actions-column-35554.spec.ts` only. Both mount waits (the worker's first, throwaway mount and every mount after it) used `page.getByText('商机 1', { exact: true })`. On the `drawer` face that text is in two places — the list row's cell and the side record's `h1` — so whether strict mode throws depends on whether the first poll lands before or after the list's rows render. A new `mounted(page, c)` helper waits for exactly one element per face: the list row's cell (`page.locator('tr').getByText(...)`) on the list and drawer faces, the record header's `heading` on the `tab` face, which has no list. No source edit, no `data-*` hook.\n\nRead first: the `mounted` helper above `mount()` — the only risk hunk is that the `tab` face now waits on the heading by role instead of by text (same element, it was the only match there).\n\n## Tests\n\nLocal, chromium, `--trace off`, through a scratch Playwright config with no `webServer` (this spec bundles its own page with vite and needs no console build; `@objectstack/{spec,formula,client,sdui-parser,lint}` built first).\n\n<details><summary>Locator counts on the drawer face, after mount (probe copy of the pre-fix spec, deleted after)</summary>\n\n```\nPROBE drawer light 2 1 1   # getByText('商机 1') = 2 · tr-scoped = 1 · heading = 1\nPROBE tab 0 1              # tab face: tr-scoped = 0 · heading = 1\n```\n</details>\n\n<details><summary>Red reading on origin/main: NOT reproduced locally</summary>\n\nThe side-record cases run alone, first in their worker, on base `4e55e4eb`: 7 runs (light ×3, dark ×2, 375px ×2), 7 passed. The race goes the other way on this box (the first poll sees only the `h1`); the probe above shows the two-element match the card reports is real once the rows are in.\n</details>\n\n<details><summary>After the fix (head 395ea5d0, same spec bytes as the merge head)</summary>\n\n- `-g 'light: the side record' --workers=1` (first in its worker): 1 passed\n- `-g '375px, the side record' --workers=1`: 1 passed\n- `-g 'a record page' --workers=1` (tab face): 2 passed\n- whole spec `--workers=1`: 24 passed\n- `list-.*\\.spec\\.ts` (8 spec files) `--workers=2`: 57 passed\n</details>\n\n## Acceptance notes\n\n- Test-only; no published surface, so `skip-changeset`.\n\n## Verification\n\n`cd ui && npx playwright test --trace off --workers=1 list-no-actions-column-35554.spec.ts -g 'the side record'` — expect 3 passed (light, dark, 375px).\n\n---\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01QsR2jREBdDtYvSLn38xUCg\n"
+}

@@ -2,8 +2,8 @@
   "number": 36310,
   "kind": "issue",
   "title": "Record overlay (kanban, calendar, gantt, tree): save refusals, field hints and conflict rows show the field's machine name instead of its label",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:ux",
     "bug",
     "domain:ui",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-22T05:33:20Z",
-  "updated_at": "2026-11-22T07:27:29Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-22T10:41:43Z",
+  "closed_at": "2026-11-22T10:40:07Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36310",
   "body": "repo:objectstack#4 · os-project-manager · session_01FEkQ5oLLK7uoxp33riiBJL\n\nFiling gate: ② an out-of-scope finding while building #35995 (PR #36298, os-dev-report 7074757038 on #35995, PR `## Acceptance notes`), confirmed by the L1-d review (ACCEPT 7074798693, \"Out-of-scope items 1\"). ⛔ Not a claim; triage sets lane and grade.\nDedupe: `fieldLabelFor` (open: 1 hit, #35995 itself), `overlay machine name field` (open: 5 hits; #35995 #30806 #25921 #6015 and none on this). No card covers it.\n\n## What happens (read on `origin/main` 4ab12189; not driven in a browser)\n\n- `InlineEditSaveBar` (`ui/packages/plugin-detail/src/InlineEditSaveBar.tsx`) labels a field through its `fieldLabelFor` prop and falls back to the name: `(name) => fieldLabelFor?.(name) || name`.\n- The record page passes it (`ui/packages/app-shell/src/views/RecordDetailView.tsx`: `fieldLabelFor={(name) => objectDef?.fields?.[name]?.label || fieldLabel(objectName, name, name)}`).\n- `RecordDetailPanel` (`ui/packages/plugin-detail/src/RecordDetailPanel.tsx`), the record overlay of kanban, calendar, gantt and tree, passes none. So a per-field refusal in the overlay already reads with the machine name (for example `loss_reason`) on main.\n- After PR #36298 (#35995) the overlay's bar also gets `data`, so the same refusals now draw as field hints, and the new conflict dialog's rows fall back to the field name too: the gap is wider.\n\nreach: any user saving a field in the overlay of a kanban, calendar, gantt or tree view whose save is refused or meets a 409. Not measured live.\n\n## Ask\n\n- The overlay labels fields the way the record page does: the field's (translated) label, falling back to the name only when no label exists. The bar already reads `objectFields` from the record context `RecordDetailPanel` now provides, so a label fallback there (or passing `fieldLabelFor` from the panel) covers the refusal line, the field hint and the conflict rows. ⛔ No second labelling rule.\n- Pins: a refused save in the overlay names the field by its label; a conflict row names it by its label; CONTROL a field with no label still shows its name.\n- `Clause-②: no` and `Metadata-protocol: none` expected.\n\nReader: `domain:ui` (`ui/packages/plugin-detail`, record overlay) · area:ux · Bug."

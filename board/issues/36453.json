@@ -1,0 +1,36 @@
+{
+  "number": 36453,
+  "kind": "pull_request",
+  "title": "fix(grid): phone record cards load more as the card list scrolls",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-22T12:24:13Z",
+  "updated_at": "2026-11-22T13:35:50Z",
+  "closed_at": "2026-11-22T13:35:48Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-22T13:35:48Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36453",
+  "body": "Fixes #36407\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户能看到什么变化:手机上打开一个没有设置分页的列表,记录卡片滑到底会自动接着加载,能一直看到最后一条;原来那个点了没反应的「第 1 页,共 3 页」翻页条不再出现。\n- 为什么做:修复手机端列表只能看到前 50 条记录的问题,让手机和电脑上的列表一样边滚边加载。\n- 出错会怎样:最坏情况是手机卡片列表滑到底不再加载更多(回到修复前的样子),设置了分页的列表不受影响;改动可以直接撤回。\n- 要你做什么:无\n\n## What changes\n\nA list that declares no `pagination` loads window by window as it scrolls (desktop: no pager, the next window is asked for as the table's scroll box nears its end). At phone width the grid draws record cards in its own scroller, `object-grid-card-scroller`, and two things were wrong there:\n\n1. The load-more hook (`useInfiniteRowLoad`, `objectGridInfiniteLoad.ts`) looked only for the table's `data-table-scroll-box` under the grid root. On the card face the grid root IS the card scroller, so no box was found and nothing was ever asked for. `scrollBoxOf` now answers the root itself when the root is the card scroller.\n2. The card face drew its pager from `rowCount` / `pageSize` that `ListView` hands over in the load-as-you-scroll posture (`page: 1`, `pageSize: max(rows, window)`, a no-op `onPageChange`), so it read \"Page 1 of 3\" and Next did nothing. The card pager is now not drawn when the host passes `onLoadMore`, exactly as the table pager is not (`pagination: paginationEnabled && !onLoadMore`).\n\n**Route chosen (card To-do 1): both halves, because that is what desktop does.** Desktop draws no pager under `onLoadMore` AND loads more as its scroll box nears the end; matching it on a phone means the same two things on the card scroller. Only hiding the pager would leave row 51 unreachable; only loading more would leave a dead pager on screen.\n\n`ListView.tsx` is untouched: its no-op `onPageChange` in the infinite posture is now unread by both faces (the grid only calls it from a pager it no longer draws). No prop, export or metadata key changes, so `Clause-②: no` holds without a declaration diff.\n\n## Tests\n\nNew pin `ui/packages/plugin-list/src/__tests__/ListView.phoneCardsLoadMore-36407.test.tsx`, through the real `ListView` and the real `ObjectGrid` at 390 px with 120 records:\n\n- no declared pagination: 50 cards and no pager; scrolling the card scroller to its end loads cards 51-100, then 101-120; card 120 is `Row 120`; reads at `$skip` 0, 50, 100; a further scroll at the end reads nothing more; no pager at any point.\n- control: a list that declares `pagination: { pageSize: 50 }` keeps its card pager (\"Page 1 of 3\"), and Next turns to `Row 51` / \"Page 2 of 3\".\n\n<details><summary>Readings (head 58f68c60 before the main merge, 8c5f1b4f after)</summary>\n\n- `pnpm --dir ui exec vitest run --maxWorkers=2 packages/plugin-grid/ packages/plugin-list/` at 58f68c60: VERDICT command-exit 0, Test Files 487 passed (487), Tests 4702 passed (4702).\n- After merging origin/main (8c5f1b4f): closure rebuilt, `type-check` of `@object-ui/plugin-grid` and `@object-ui/plugin-list` Done (both `tsc --noEmit && tsc -p tsconfig.test.json`), and the 8 files nearest this change and main's incoming grid/list edits (the new pin, `phoneCardPager-29074`, `ListView.infiniteRereadPageCap-35554`, `ObjectGrid.cardScroller-13134`, `cardSelection-35883`, `ObjectGrid.cellSelection-35684`, `ObjectGrid.headerMenuHide-35955`, `ListView.harness`): VERDICT command-exit 0, Test Files 8 passed (8), Tests 186 passed (186).\n- Ablation, one leg per changed line, each through `scripts/ablation-replace.mjs` (the test resolves `@object-ui/plugin-grid` through the vitest source alias, so no `dist/` leg): (A) delete the card-scroller branch of `scrollBoxOf` (anchor x1 to x0): the no-pagination test fails, `expected [...50] to have a length of 100 but got 50` (row 51 never arrives), control passes; (B) drop `!onLoadMore` from the card page count (anchor x1 to x0): the no-pagination test fails at `expected` the pager element `to be null` (the pager is drawn), control passes. Both restored: blob == HEAD and `git diff HEAD` empty. Together the two legs are origin/main's behaviour, which re-measures the card's premise.\n\n</details>\n\n## Acceptance notes\n\n- The pin is its own file rather than a block of `ListView.harness.test.tsx`: it needs the real grid's registration, and `import '@object-ui/plugin-grid'` at module scope would register the real `object-grid` under every block of that harness (the same reason `ListView.parentCurrency-31912.test.tsx` stands alone).\n- Observation, not filed: the card face draws no refresh indicator while the next window loads (the table draws `RefreshIndicator` over loaded rows), so on a phone the next cards simply appear. Pre-existing for every card-face reload, polish.\n- The kept scroll position (`scrollRestoreKey`) is now written and restored for the card scroller too, under the same key the table uses; a reader does not switch between the two faces within one session in practice.\n\n## Verification\n\nRead first: `ui/packages/plugin-grid/src/objectGridInfiniteLoad.ts` (`scrollBoxOf`, the whole fix for \"nothing loads\"), then the `cardPageCount` line in `ObjectGrid.tsx`.\n\nTwo-minute check: `pnpm --dir ui exec vitest run packages/plugin-list/src/__tests__/ListView.phoneCardsLoadMore-36407.test.tsx` — expect 2 passed. In a browser: open any object list with no declared pagination at a phone width (390 px) with more than 50 records, scroll the cards to the end — more cards load, and no \"Page 1 of N\" bar is drawn.\n\n---\n\n_Generated by [Claude Code](https://claude.ai/code/session_01QsR2jUc3qp6bHKSWijbjds)_\n"
+}

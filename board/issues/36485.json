@@ -1,0 +1,31 @@
+{
+  "number": 36485,
+  "kind": "issue",
+  "title": "设计模式入口搬到左上角应用名菜单；页头的「编辑应用」「在 Studio 中查看」两个按钮去掉，自建应用和安装来的应用一样",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "enhancement",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-22T14:01:35Z",
+  "updated_at": "2026-11-22T14:03:29Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36485",
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#36359（运行界面的设计模式专题）。⛔ 不是认领。优先级 p2（协调席定的，维护者未指定）。\n\n## 维护者说过的（2026-11-22）\n\n- 「hotcrm 右上角的在 studio 中查看应该如何处理，设计布局模式应该在哪里进入」\n- 「你看右侧右上角有一个下拉菜单，可以设置对象，编辑布局是不是也可以放到哪里」（指 Attio 列表页右上角的「⋮」）\n- 「我们顶栏现在没有这个⋮，你具体看我们的页面。」\n- 「对象设置 已经包含字段，不需要管理字段。attio 是列表页可以设置对象，详情页下拉显示的是自定义布局。你具体测试一下。」\n- 协调席实测后建议三条：列表的「⋮」加「对象设置」；记录的「…」加「配置页面」；设计模式入口搬到左上角应用名菜单，页头的「编辑应用」和「在 Studio 中查看」两个按钮去掉。维护者：「立卡」。\n- 此前（同日）：「Studio「界面」整栏作废」。\n\n## 现状（主干 `6a35635a33`，本机环境浏览器实测，1440 宽，系统管理员）\n\n![HotCRM 列表页头：在 Studio 中查看 销售](https://github.com/objectstack-ai/objectstack/blob/aabdbc884af973e29412c993d85ae422eda474a9/accept-1122/acc3-09-hotcrm-no-edit-app.jpg?raw=true)\n\n![应用名菜单](https://github.com/objectstack-ai/objectstack/blob/aabdbc884af973e29412c993d85ae422eda474a9/accept-1122/acc3-05-app-menu.jpg?raw=true)\n\n- 每个页面右上角第一行是外壳的按钮。自建应用「CRM客户管理」上是：编辑应用、AI 助手、帮助。点「编辑应用」进设计模式（#36362）。\n- HotCRM（安装来的应用）上同一个位置是「在 Studio 中查看 销售」，点了跳 Studio；没有进设计模式的入口。列表、仪表盘、报表、自定义页面都是这样。\n- 点左上角应用名：出现应用列表（多时带搜索）、「系统设置」和「添加应用」。\n\nAttio（同日浏览器实测）：\n\n- 列表页右上角「⋮」：Object settings、Manage attributes、Notifications。前两项都进「设置 › 对象 › 这个对象」，只是落在不同页签。\n- 记录页右上角「⋮」：Configure page、Copy page URL、Copy record ID、Add to favorites、Delete record。Configure page 原地进入记录页布局编辑。\n- 规律：每个页面一个菜单，放「配置这一页所属的东西」；页面菜单里没有全局的东西。\n\n## 要做的\n\n1. 应用名菜单里加一项「编辑应用」，放在应用列表下面、和「添加应用」一组。点了进入当前应用的设计模式（就是 #36362 的那个模式）。\n2. 只有系统管理员看得到这一项（沿用现在「编辑应用」按钮的显示条件）。\n3. 自建应用和安装来的应用都有这一项，行为相同。安装来的应用能进模式、能改菜单这件事本身在 #36363 第 7 条里做；本卡只管入口。\n4. 页头第一行去掉「编辑应用」按钮，也去掉「在 Studio 中查看 某应用」按钮。去掉后第一行只剩 AI 助手、帮助，以及各页自己的按钮（评论、刷新、编辑等）。\n5. 已经在设计模式里时，菜单里这一项不显示或置灰。\n6. 手机宽度：不提供进入设计模式的入口（现在手机上也没有）。\n\n## 不做的\n\n- 不改设计模式本身（栏、取消、保存）。\n- 不改应用名菜单里已有的项。\n- 不动 Studio。\n\n## 验收\n\n- 自建应用任意页面：页头没有「编辑应用」；点应用名，菜单里有「编辑应用」，点了顶上出现设计模式的栏。\n- HotCRM 的列表、仪表盘、报表、自定义页面各看一次：页头没有「在 Studio 中查看」；应用名菜单里有「编辑应用」，点了进入设计模式（依赖 #36363；如果本卡先合并，请在 PR 里写明安装来的应用上这一项暂时的表现）。\n- 普通成员：应用名菜单里没有「编辑应用」。\n- 已在设计模式里：再点应用名，看不到可点的「编辑应用」。\n- 从滑出的侧栏（侧栏收起时）里同样能点到这一项（和 #36471 对齐）。\n- 新手引导里如果有指向「编辑应用」按钮的步骤，改成指向新位置或在 PR 里列出。\n- PR 正文附页头和应用名菜单的改动前后截图。\n\n## 协调席自己加的\n\n- 「要做的」第 5 条（已在模式里时不显示）、第 6 条（手机不提供）。\n- 验收里的滑出侧栏和新手引导两条。\n- 「放在和『添加应用』一组」这个具体位置。"
+}

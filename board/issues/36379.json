@@ -1,0 +1,36 @@
+{
+  "number": 36379,
+  "kind": "pull_request",
+  "title": "fix(plugin-detail): a record Overview body table keeps the totals of the summed columns it leaves out for width",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-22T08:52:24Z",
+  "updated_at": "2026-11-22T10:38:15Z",
+  "closed_at": "2026-11-22T10:38:13Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-22T10:38:13Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36379",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"zhuangjianguo\"} -->\n_Requested by **Steedos** · [project thread](https://claude.ai/code/project/chan_018ETKaNwMZCNRYD7D8Q9Ubb?thread=cmsg_018ETKaNwMZCNRYD7D8Q9UbbVF7sWPNE4HmjkgyaVxQYif)_\nrepo:objectstack#7 · zhuangjianguo · session_01QsR2jRaJbQ4vqdv4J5peqA\n\nFixes #35831\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 记录详情「概览」里的子表(如报价明细)放不下所有列时,被收起的金额列的合计现在写在表格下方一行,标着列名、按记录的币种显示;表里看得到的列合计不变,列都放得下的表不多出任何文字。\n- 这是记录页概览子表一组工作的后续,解决「金额列因为宽度被收起,合计也跟着从概览上消失」的问题。\n- 出错最坏是表格下方那行合计多出或缺少,只影响显示,不碰数据和保存;可直接撤回本改动。\n- 无。\n\n## What changes\n\nArm **(a)** of the card's Done-when: the totals of every left-out summed column stay on screen, labelled with the column's name. Built (a) over (b) because the p1 reason is that money is hidden, (a) keeps the figure visible with no click, and the line it uses is a wrapping flex line (`BodyTableTotalsLine`, the same component the enlarged face already draws its totals with), so it holds any number of labelled totals at the narrowest widths without touching the column measurement.\n\n`ui/packages/plugin-detail/src/RelatedList.tsx`, body-table face only:\n\n- `bodyOmittedTotals`: the server totals (`useBodyTableTotals`, unchanged) whose column key is in `tableColumns.slice(bodyTableColumnCap)`, the columns `bodyTableColumnsThatFit` left out. Empty whenever nothing is left out, so a table that fits draws nothing new.\n- Under the table (after the scroll-box host, before the row cap's \"Show all N\"), `BodyTableTotalsLine` draws those totals: the existing `form.masterDetail.total` lead, then each column's own header label and its figure. The figure is the same `BodyTableTotal.text` the column's summary cell would show, so currency follows exactly what the existing totals follow (fixed code, tenant default, the page record's code for a line amount that follows its parent, grouped `record` codes). The line carries `data-body-table-omitted-totals` instead of `data-body-table-totals`, so the enlarged face's marker keeps its one meaning.\n- `bodySummaryRow`: unchanged figures, but drawn only while a drawn column has one. With every summed column left out it would be the lead 「合计」 over empty cells; the line then carries all the totals instead.\n- No new string, no new key, no published export or type change: Clause-② stays `no` as claimed.\n\n## Tests\n\nNew `RelatedList.bodyTableOmittedTotals-35831.test.tsx` (6), using the stubbed scroll-box widths the body-table face's own pins use:\n\n- narrow (680 px): two trailing summed columns left out; the line names `Line amount` (EUR, the page record's currency) and `Tax` (USD) with their totals; the drawn `Unit price` total stays in its column and is not repeated on the line.\n- a left-out total reads byte-for-byte what the table draws in that column when it fits.\n- every summed column left out: the line carries them all and no empty totals row is drawn.\n- CONTROL: a table that leaves nothing out shows no added line and every total in its column.\n- CONTROL: the drawn columns' totals (and the row's lead) are identical with and without columns left out.\n- CONTROL: a table that leaves out only unsummed columns shows no added line.\n\nOn why a new file: AGENTS.md puts a new pin in a component's shared harness file when one exists (ruling record 6583487846). RelatedList has no shared harness file; each `RelatedList.*` test file mounts its own, so this follows the dispatch and the sibling files.\n\n<details><summary>Run readings</summary>\n\nAll readings on objectstack-ai/objectstack, head `51d2c17d` (the code commit `925193b5` plus the changeset commit; no code moved between them), under `scripts/pm/os-verify-lock.sh`, vitest root `ui/`, `--maxWorkers=1`.\n\n- New pins plus the body-table face's own and the parent-currency pins (3 files): `Test Files 3 passed (3)`, `Tests 41 passed (41)`, lock `VERDICT command-exit 0`.\n- Ablation (committed fix first; mutation through `scripts/ablation-replace.mjs`): `bodyOmittedTotals` forced to `[]` (anchor x1 -> x0, marker x0 -> x1, blob 5be8b162 -> 893f3ce8). New file: `Tests 4 failed | 2 passed (6)`. Red: the narrow case, the same-figure case, the every-column-left-out case, and the drawn-totals-unchanged control (it waits for the line first). Green: the fits-whole control and the only-unsummed control. Restored: blob == HEAD 5be8b162, `git diff HEAD` empty. A first attempt was a no-op (the replacement text was inside the anchor) and the tool refused it before running anything.\n- Every test that mounts `RelatedList` or a body table (85 files: the `RelatedList.*` files in plugin-detail, `RecordDetailView.harness`, `record-related-list.emptyFold-25895`, `buildDefaultPageSchema.bodyTables-27055`): `Test Files 84 passed | 1 skipped (85)`, `Tests 669 passed | 8 skipped (677)`, `VT_EXIT=0`.\n- `pnpm --filter @object-ui/plugin-detail run type-check` (`tsc --noEmit && tsc -p tsconfig.test.json`): `TC_EXIT=0`.\n- Not run locally: the rest of the plugin-detail package's 262 test files; `Test UI` runs them.\n\n</details>\n\n## Acceptance notes\n\n- Not in scope and untouched: the placement order and 33/32 density, and the non-body-table related list.\n- Docs: no hand-written page under `content/docs/` describes the body table's totals (only the auto-generated references mention body tables), so there is no docs page to update.\n- Screenshots: NOT MEASURED. No browser run against a dev app in this round; the pins drive the face through jsdom with stubbed widths.\n\n## Verification\n\nRead first (by risk):\n1. `RelatedList.tsx`, the `bodyOmittedTotals` / `bodySummaryRow` hunk: which totals count as left out, and the summary row's new condition.\n2. `RelatedList.tsx`, the `BodyTableTotalsLine` render under the table host.\n3. The new test file's narrow case.\n\nTwo-minute check: `pnpm --dir ui exec vitest run packages/plugin-detail/src/__tests__/RelatedList.bodyTableOmittedTotals-35831.test.tsx`, expect 6 passed. In a running app, open a record whose master-detail body table has more columns than fit in the details column, with a currency column last: under the table a line reads \"Total  COLUMN-NAME  AMOUNT\".\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01QsR2jRaJbQ4vqdv4J5peqA\n"
+}

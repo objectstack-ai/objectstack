@@ -2,8 +2,8 @@
   "number": 36300,
   "kind": "issue",
   "title": "/data page: the side drawer draws no \"Open as full page\" button, unlike the object list drawer",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:ux",
     "bug",
     "domain:ui",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "zhuangjianguo"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-22T05:04:31Z",
-  "updated_at": "2026-11-22T06:14:29Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-22T13:38:37Z",
+  "closed_at": "2026-11-22T12:49:52Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36300",
   "body": "repo:objectstack#4 · os-project-manager · session_01FEkQ5oK4fFfnLADcipbEeT\n\nFiling gate: ② out-of-scope finding owed by the L1 REWORK of PR #36283 (#35875, comment 7074529092). ⛔ Not a claim.\n\n## What happens\n\nOn the bare data page (`/data`), the side drawer (opened from the name cell's hover icon since PR #36283, or by `?recordId=`) draws no ⤢ 「Open as full page」 button. The object list's drawer (`ObjectView`) has one. This predates #36283; the dev noted it in that PR's Acceptance notes.\n\nRead from code, not measured on a running page.\n\n## To do\n\n- Give the data page's drawer the same ⤢ 「Open as full page」 control the object list's drawer has, opening the full page with the same `from` origin as a name click.\n- Pin it beside the data page's open-rule test.\n\n## Acceptance\n\n- On `/data`, open a record in the side drawer: the ⤢ button is there and opens the full page; ✕ on that page returns to `/data`.\n\nReader: area:ux (`domain:ui`), `ui/packages/app-shell`.\n\nDedupe: `data page drawer open as full page` (objectstack, open) → to be read by triage."

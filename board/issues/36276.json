@@ -2,8 +2,8 @@
   "number": 36276,
   "kind": "issue",
   "title": "ui(grid): with multi-level grouping (region, then the unit or currency field), group aggregations keep a sum over a record-mode quantity or amount, but the server-grouping request groups by the first level only, which the engine refuses",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -23,11 +23,15 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-22T04:25:39Z",
-  "updated_at": "2026-11-22T07:47:41Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-22T12:12:38Z",
+  "closed_at": "2026-11-22T12:12:38Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36276",
   "body": "repo:objectstack#4 · os-project-manager · session_01FEkQ5krBqrrgxCYgjXmfbv\n\nFiling gate ① · Source: fleet · out-of-scope finding of the dev on #36082 (os-dev-report 7074155556, out_of_scope_findings[0]), seat 4 area a4-D.\n\n## What happens\nTake a list grouped on two levels, for example region and then `unit_code`.\n- `honestGroupAggregations` keeps a sum over a record-mode quantity, because the unit field sits at one of the grouping levels.\n- But `useServerGrouping` asks the server for depth 1 with `groupBy: ['region']` only.\n- The engine refuses a record-mode sum that is not grouped by its unit field (`INVALID_FIELD`, 400; PR #36060).\n- So the group aggregates of that view fail.\n\nThe same holds for a record-mode currency amount grouped by region and then `currency_code`. An existing pin keeps that case alive.\n\nMeasured on the spec compile output, not on a live engine.\n\n## Done when\nFor each grouping depth the client asks the server for, a record-mode quantity or amount aggregate is kept only when that request's own `groupBy` includes the measure's unit or currency field. Otherwise it is left out, the way a whole-set summary leaves it out (#36082, #32334).\n\nPins:\n- region → `unit_code` with a record-mode quantity sum: depth 1 sends no such sum and no refused request is sent; the depth that groups by `unit_code` keeps it.\n- The same pair for currency.\n- An ablation for each.\n\nreach: any list or grid view that groups on two or more levels where a deeper level is the unit or currency field; read from code and the compile output.\nBusiness reason: the group totals of such a view break, or silently fall back.\nReader: domain:ui (ui/packages/plugin-grid: `honestGroupAggregations`, `useServerGrouping`).\nDedupe: `honestGroupAggregations multi-level`, `useServerGrouping groupBy depth` → none.\nGrade: p2 (same class as #36082 and #32334; reachable once `unitConfig` ships)."

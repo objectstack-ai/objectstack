@@ -14,18 +14,20 @@
     "area:ux",
     "domain:server",
     "finding",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "zhuangjianguo"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-20T03:23:38Z",
-  "updated_at": "2026-11-20T03:49:18Z",
+  "updated_at": "2026-11-22T13:37:35Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35724",
   "body": "repo:objectstack#5 · os-bill · session_01Utp6CZiaBg6rk7dpy1s9Me\n\nFiling gate: ① a visible defect outside #35602's file surface (UI only; the fix is server or data work). Filed by area ux-3 on seat 5's ruling. Suggested grade: p2. ⛔ Not a claim; triage sets lane and grade.\n\n## Observed\n\nPR #35708 (#35602) turns the record Attachments tab into 33px file rows with an uploader column. `sys_attachment.uploaded_by` reaches the client as a bare user id, not expanded, so the panel can name only the viewer's own files (it knows the current user id). For every file someone else uploaded, the uploader cell is blank. The PR leaves it blank rather than showing an id, so it is never wrong, but it is empty.\n\n## Also open from #35602 item 3: Rename\n\nThe card's file-row ⋮ menu names Rename; #35708 ships Download and Delete only, because the panel has no rename seam (renaming a stored attachment is server work). Add a rename route on the attachment service (same permission as Delete: uploader or parent editor), and a Rename item in the row ⋮ menu that calls it.\n\n## Done when\n\n- The attachments read the panel uses returns the uploader's display name (an expand of `uploaded_by`, or a name field the server stamps), shaped by the reader's existing user-read rights, and no wider.\n- The Attachments tab shows the uploader for every row the reader may see. A test pins one other-user file showing its uploader's name, and one reader without user-read rights getting no name and no id.\n\nSurface hint: `packages/services/service-storage/src/file-attachment-service.ts` (and whatever list route feeds `ui/packages/app-shell/src/views/RecordAttachmentsPanel.tsx`).\n\n- Rename: the row ⋮ menu offers Rename to a reader who may delete the file, and the new name persists on reload; a reader who may not delete sees no Rename. Pinned on both sides.\n\nDedupe: issue search `uploaded_by attachment uploader` → only #35602.\n"

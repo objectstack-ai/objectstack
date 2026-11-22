@@ -1,0 +1,36 @@
+{
+  "number": 36388,
+  "kind": "pull_request",
+  "title": "fix(plugin-detail): the record overlay names a field by its label in save refusals and conflict rows",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-22T09:14:23Z",
+  "updated_at": "2026-11-22T10:40:07Z",
+  "closed_at": "2026-11-22T10:40:05Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-22T10:40:05Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36388",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"zhuangjianguo\"} -->\n_Requested by **Steedos** · [project thread](https://claude.ai/code/project/chan_018ETKaNwMZCNRYD7D8Q9Ubb?thread=cmsg_018ETKaNwMZCNRYD7D8Q9UbbVF7sWPNE4HmjkgyaVxQYif)_\nrepo:objectstack#7 · zhuangjianguo · session_01QsR2jRaJbQ4vqdv4J5peqA\n\nFixes #36310\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户能看到什么变化:在看板、日历、甘特图、树形视图里打开记录快速查看并保存字段时,保存被拒的提示和\"他人已修改\"冲突对话框里的字段,改为显示字段名称(含翻译),不再显示内部字段代码;记录详情页不变。\n- 为什么做:记录快速查看与记录详情页的字段称呼保持一致,替使用这些视图的业务用户解决看不懂提示的问题。\n- 出错会怎样:最坏情况是某个字段的提示又显示成内部代码,数据不受影响,可直接撤回此改动。\n- 要你做什么:无\n\n## What changes\n\n- `InlineEditSaveBar` now names a field by ONE rule wherever it names one — the refusal summary line, the conflict dialog's rows (single-field and multi-field) and the required-fields dialog: the host's `fieldLabelFor` when it returns a label; otherwise `fieldLabel(objectName, name, declaredLabel || name)` over the record context's object fields — the translated label, then the declared label, then the machine name. That fallback is the rule `DetailSection` labels the same input by in the overlay body.\n- The rule already lived in the bar, local to the required-fields dialog; it is hoisted to component scope as `labelForField` and the three bare `fieldLabelFor?.(name) || name` / `fieldLabelFor?.(name)` copies now read it. ⛔ No second labelling rule: the diff removes copies, adds none.\n- `RecordDetailPanel` is untouched: it already provides the record context (`objectSchema`) the bar reads, so the overlay is covered without passing `fieldLabelFor`.\n- `isRecordField` asks the same rule (a name that resolves to a label other than itself is a field of the record). The record page passes `fieldLabelFor` (a truthy string for every name), so its answer is unchanged; in the overlay a refusal naming a labelled declared field the record does not carry now reads as that field's, labelled, as on the record page — before it fell through to an unlabelled record-level line.\n- Changeset: `@object-ui/plugin-detail` patch.\n\n## Tests\n\nNew pin file `ui/packages/plugin-detail/src/__tests__/RecordDetailPanel.fieldLabels-36310.test.tsx`, driving the real `RecordDetailPanel` (no `fieldLabelFor`):\n\n1. a refused save names the field by its label (`Deal Stage: Refused by rule`);\n2. a refusal naming a declared field the record does not carry is that field's, by its label (`Region: …`, no record-level line);\n3. a 409 of the combined write lists each conflict row by its label (`Deal Stage`, `Loss Reason`; neither machine name present);\n4. CONTROL: a field with no label still reads by its name (`memo: Too short`).\n\n<details><summary>Readings (head 71419abe)</summary>\n\n- pin file: `Test Files 1 passed (1) · Tests 4 passed (4)`.\n- ablation (fix committed first; `InlineEditSaveBar.tsx` restored to the base blob, re-run, restored to `HEAD` and proved by blob hash equal to the HEAD blob, `git diff HEAD` 0 bytes): `Tests 3 failed | 1 passed (4)` — pins 1–3 red, the control green.\n- narrowed plugin-detail run (every `InlineEditSaveBar.*`, `RecordDetailPanel.*`, `RecordDetailDrawer.*`, `ConcurrentUpdateDialog.*` test file): `Test Files 14 passed (14) · Tests 75 passed (75)`. The full plugin-detail suite did not get a turn on the shared verify lock (two queue timeouts) and is declared to CI's `Test UI`.\n- `pnpm --filter @object-ui/plugin-detail run type-check` (both `tsc --noEmit` and `tsc -p tsconfig.test.json`): exit 0.\n- derived gate families (`dispatch-gates.mjs --commands`, 38): 36 exit 0; `pnpm --dir ui exec vitest run scripts/` exit 0 (`Test Files 172 passed | 2 skipped`); `pnpm check:type-check-debt` NOT MEASURED (exit 3, its closure build never got a lock turn) — CI's `Lint & Repo Gates` carries it.\n</details>\n\n## Acceptance notes\n\n- The record page keeps its own `fieldLabelFor` (`RecordDetailView.tsx`: declared label first, then the translated one), which still wins in the bar. It differs from the body rule only when an object both declares a label and carries a translation for it; unifying the two is outside this card's file surface and is noted, not changed.\n- The per-input field hint draws the server's message beside an input the body already labels; it carries no field name of its own, so the label fix for hints is the summary line and the hint/record-level split above.\n- Not driven in a browser: NOT MEASURED (screenshot not taken); the pins drive the real panel in jsdom.\n\n## Verification\n\nRead first: `InlineEditSaveBar.tsx` — the `labelForField` callback (the one rule) and `isRecordField` (the only behaviour change outside labels).\n\nTwo-minute check: `pnpm --dir ui exec vitest run packages/plugin-detail/src/__tests__/RecordDetailPanel.fieldLabels-36310.test.tsx` → 4 passed.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01QsR2jRaJbQ4vqdv4J5peqA\n"
+}

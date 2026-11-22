@@ -2,8 +2,8 @@
   "number": 34946,
   "kind": "issue",
   "title": "a flow condition passes record.<date field> + 1 while the same arithmetic over the bare name is refused: the date-arithmetic verdict is not applied to record./previous. reads",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -15,7 +15,6 @@
     "bug",
     "domain:server",
     "finding",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -24,11 +23,15 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-17T17:38:25Z",
-  "updated_at": "2026-11-22T06:33:32Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-22T09:56:33Z",
+  "closed_at": "2026-11-22T09:55:38Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 9,
+  "comments": 10,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34946",
   "body": "repo:objectstack#4 · os-lizheng · session_012MmDsS4GoHCgYwA2uv3n3C\n\nFiling gate: class a, an out-of-scope finding of the #34662 dev round (PR #34935, report 6955879892), measured by that dev. ⛔ Not a claim. Grading and `domain:*` are triage's.\n\nSuggested-grade: p2 · the same family and outcome as #34662, #34451, #34363: the flow fails on every run, and authoring says nothing\n\n## 维护者速读\n\n- 现象：流程条件里写 `record.due_date + 1 > 5`(`due_date` 是日期字段)，`os validate` 不报任何问题，运行时每次都出错;同样的算式写成裸字段名 `due_date + 1 > 5` 会被拒。\n- 为什么要修：和 #34662 是同一类问题，只是换成了「日期做加减」这一种判定。\n- 需要你做的：无(分诊定级)。\n\n## Measured (by the dev, on PR #34935's head 653f1fb45e)\n\n`validateStackExpressions` on a record-triggered flow, object `library_loan` with `due_date: { type: date, required: true }`:\n\n| start condition | findings |\n|:---|:---|\n| `due_date + 1 > 5` | 1 error (date-arithmetic, `google.protobuf.Timestamp + int`) |\n| `record.due_date + 1 > 5` | 0 |\n| `previous.due_date + 1 > 5` | 0 |\n\nAt run time the condition faults on `\"YYYY-MM-DD\" + 1`.\n\n## Where\n\n`packages/formula/src/cel-engine.ts`: `firstTypeMismatch`'s record-root pass returns only the text/boolean mismatch (comment \"The date verdicts stay the bare name's alone\"). PR #34935's date-text pass deliberately stands down on this shape, because it is the date-arithmetic verdict's job, not date-text's.\n\n## Done when\n\n`record.DATE_FIELD + N` and `previous.DATE_FIELD + N` in a flow condition are refused like the bare name, at `os validate` and at the publish door. CONTROL: a `datetime` field.\n\n## Notes\n\nLands after PR #34935 (same files).\n\nDedupe: `\"record.\" date-arithmetic flow condition` (0 open).\n\nBlocked-by: #34662"

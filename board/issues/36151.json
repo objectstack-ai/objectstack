@@ -14,18 +14,20 @@
     "area:ux",
     "domain:ui",
     "enhancement",
-    "pm:blocked",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "zhuangjianguo"
+  ],
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-21T16:39:30Z",
-  "updated_at": "2026-11-22T02:45:14Z",
+  "updated_at": "2026-11-22T13:28:46Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 3,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36151",
   "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#35880（专题：手机端，维护者直派）。⛔ 不是认领。优先级 p2（协调席定的，维护者未指定）。\n\n## 维护者说过的（2026-11-22）\n\n- 「完整的测试一下手机版，对照之前 attio 的效果，提出优化改进意见。」\n- 「现有的右侧界面也要看看如何进一步优化」\n- 看过效果图（设计板图 48，其中第三张的 ③ 是本卡）和协调席加的五条后：「可以，立卡」\n\n## 现状（界面 `db9e34ad32`，本机环境浏览器实测，手机宽度）\n\n手机记录页底部永远固定一条按钮：「编辑」加「更多」；对象有自己的动作时是「编辑、主要动作、更多」（objectstack-ai/objectstack#34595、#35840 定的，默认露 2 个）。没有任何自定义动作的对象，底部一整行只有一个「编辑」。\n\n![现状：底部一整行「编辑」](https://github.com/objectstack-ai/objectstack/blob/130c6fcefb308e22a11bc98546e58c1ba76386cc/record-redo/onecol-now-phone.png?raw=true)\n\n## 参照（Attio 手机端，维护者截图，只参照行为）\n\n记录页没有底部按钮条；字段点一下就改，其余动作在右上角「更多」里。\n\n## 效果图\n\n![③ 是有主要动作时的样子；①② 没有主要动作，底部没有按钮条](https://github.com/objectstack-ai/objectstack/blob/d050e50d22ed60e98ae745596f88287c8a453fc5/record-redo/onecol-3-phone-wide.png?raw=true)\n\n## 要做的\n\n1. **「编辑」不再占底部一个按钮**：字段点值直接改；整条进入编辑的入口放进右上角「更多」。\n2. **底部按钮条只在对象有主要动作时出现**，只放主要动作（最多 2 个，沿用现在的规则），撑满一行。\n3. **没有主要动作时不画底部按钮条**，页面内容一直到屏幕底部。\n4. 审批中的记录：底部是「通过、拒绝」这类审批动作，照现在的规则，不受本卡影响。\n5. 其余动作都在右上角「更多」里。\n\n## 不做的\n\n- 不改电脑端。\n- 不改哪个动作算「主要动作」的判断。\n- 不改审批相关的按钮。\n\n## 验收\n\n- 手机宽度下打开一条没有自定义动作的记录：底部没有按钮条；右上角「更多」里有「编辑」。\n- 打开一条有主要动作的记录（HotCRM 的线索，「确认线索」）：底部只有这个动作，没有「编辑」。\n- 点一个可编辑字段的值：能直接改并保存。\n- 点「更多」里的「编辑」：进入整条编辑，和改动前点底部「编辑」一样。\n- 待我审批的记录：底部是审批动作，和改动前一样。\n- PR 正文附三种情况的截图。\n\n## 协调席自己加的（不是维护者原话）\n\n本卡的内容都是协调席提的（设计板图 48 的说明里标了「改」），维护者看过后说「可以，立卡」。\n\n## 没有核对的\n\n- 手机上字段就地编辑现在好不好用，没有逐个字段类型试。「编辑」从底部拿掉之后，就地编辑是主要入口；如果某些字段类型在手机上就地编辑不了，请在卡上说，不要先拿掉「编辑」。\n- 这一条改动了 objectstack-ai/objectstack#34595 里「底部操作栏第一个是编辑」的做法。\n\nReader: `domain:ui` 车道。`ui/packages/app-shell/src/views/RecordDetailView.tsx`（`phonePage`、底部按钮条）、`recordPhoneHeader.ts`、`RecordDetailView.phoneFace-27058.test.tsx`（现在钉住的行为）。\n\nDedupe: `手机 记录页 底部 编辑`（objectstack，open）→ 0。相关：objectstack-ai/objectstack#34595、#35840、#35419（都已关闭，定了现在的底栏规则）。\n\nBlocked-by: #36147\n"

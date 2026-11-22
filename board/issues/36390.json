@@ -1,0 +1,36 @@
+{
+  "number": 36390,
+  "kind": "issue",
+  "title": "Console: when an action is refused while loading its subject record (before it is handed to a flow), the toast shows the error `message` instead of `userMessage` — a path #34215 did not cover",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-bob",
+    "id": 353326562,
+    "type": "User"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "priority:p2"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-22T09:24:26Z",
+  "updated_at": "2026-11-22T13:18:16Z",
+  "closed_at": "2026-11-22T13:17:23Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36390",
+  "body": "## Summary\n\n#34215 made the console's failed single-record action toast show the refusal's `userMessage`. That works when the action's handler throws, but not on this path: the action route refuses **before** it hands the request to the action's flow, because the subject record can no longer be loaded. The server sends a translated `userMessage`, but the toast shows the English developer `message`.\n\n## Repro (18.6.0, zh-CN)\n\n1. An app defines a record action with `type: 'flow'` on some object `X`.\n2. User A opens a record of `X` in the console. Someone else deletes that record, or A loses access to it.\n3. A clicks the action. The page still shows the stale record.\n\nRequest:\n\n```\nPOST /api/v1/actions/X/<action_name>\nAccept-Language: zh-CN\n{\"recordId\":\"<id>\",\"params\":{}}\n```\n\nResponse, HTTP 404:\n\n```json\n{\"success\":false,\"error\":{\"code\":\"RECORD_NOT_FOUND\",\"message\":\"Record <id> not found in X\",\"httpStatus\":404,\"userMessage\":\"该记录不存在，或您无权访问它。\"}}\n```\n\nThe red toast shows `Record <id> not found in X`. Everything else on the page is in Chinese, and the browser and request language are both zh-CN. `@objectstack/console` and `@objectstack/runtime` are both 18.6.0.\n\n## Where it comes from\n\n- The refusal is raised in the action route, not in the flow. The flow's first node never runs, and the response carries no flow-run summary.\n- In `@objectstack/runtime` 18.6.0 `dist/index.js` (around lines 19109 and 19445), the path is: `refuseDeniedSubjectBeforeHandOff` → `refuseDeniedSubjectLoadBeforeDispatch` → `refuseDeniedSubjectLoad` → `recordNotFoundError`.\n- The envelope does carry `userMessage`. The console's toast on this path reads `error.message` instead.\n- I have not checked whether non-flow action types (script, api) reach the same pre-dispatch refusal and show the same toast. They may.\n\n## Expected\n\nOn every action-failure path, the console toast shows `error.userMessage` when it is present, and falls back to `message` only when it is absent. That covers refusals raised before dispatch (subject not found, denied, or locked), not only refusals the handler throws.\n\n## Suggested grade\n\np3. A user only sees this when the record went away after the page loaded. But it reaches every app's non-English users, and it is the same class as #34215."
+}

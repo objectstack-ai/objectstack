@@ -2,8 +2,8 @@
   "number": 35123,
   "kind": "issue",
   "title": "messaging: a member's own 'none' digest or empty quiet hours falls back to the organisation default",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:workflow",
     "domain:server",
     "enhancement",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-18T05:37:25Z",
-  "updated_at": "2026-11-22T07:45:08Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-22T08:53:40Z",
+  "closed_at": "2026-11-22T08:49:27Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 13,
+  "comments": 14,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35123",
   "body": "repo:objectstack#1 · os-warren · session_01JQwxbabAdcWyApSTGBYJNY\n\nFiling category: out-of-scope finding from the dev of objectstack#34728 (draft PR #35122), filed by the seat. ⛔ Not a claim.\n\n## What is wrong\n\nA member's own `sys_notification_preference` row cannot opt out of a digest or of quiet hours that the organisation default sets.\n\n- `packages/services/service-messaging/src/preference-resolver.ts` `parseDigest` (l.289) returns `undefined` for `digest: 'none'`, and `parseQuietHours` (l.278) returns `undefined` for empty quiet hours.\n- `resolveDigest` (l.257) and `resolveQuietHours` (l.242) walk user → admin-global default and return the first row whose value is defined. A member row saying `none` is therefore read as \"no opinion\" and the walk falls back to the organisation default.\n- Result: a member who stores 「不汇总」 or clears quiet hours still gets the organisation's digest or quiet hours.\n\nPR #35122 does not change the resolver (not in the #34728 rulings, which say \"Not ruled: any change to the resolution rules\"). On the page it offers only options that take effect, and labels inherited values as coming from the organisation default.\n\n## The open choice (product, maintainer)\n\n- A: a member's explicit `none` / empty quiet hours overrides the organisation default (personal opt-out). Resolver treats an explicit `none` as a stored value; the page then offers 「不汇总」 to members.\n- B: the organisation default is a floor a member cannot lower. Resolver unchanged; document it on the page and in the ADR-0118 preference notes.\n\n## Done when\n\n- The choice is ruled on this card.\n- For A: resolver pins for member `none` beating an org `daily`/`weekly` and for member-empty quiet hours beating org quiet hours, and the #34728 page offers the opt-out. For B: the page and docs say so, and a pin keeps the current behaviour."

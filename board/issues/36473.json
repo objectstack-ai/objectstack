@@ -1,0 +1,31 @@
+{
+  "number": 36473,
+  "kind": "issue",
+  "title": "Hosted environment: every app hook refusal reaches zh-Hans users in English, though the app ships its translation (fine on 18.6.0 locally)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-bob",
+    "id": 353326562,
+    "type": "User"
+  },
+  "labels": [
+    "area:ux",
+    "domain:server",
+    "pm:queue",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-22T13:12:50Z",
+  "updated_at": "2026-11-22T13:52:45Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36473",
+  "body": "## What happened\n\nAn app is deployed on a hosted ObjectOS environment. Per its operator, the environment runs platform `main` from about 2026-11-21, not the 18.6.0 release. The app declares hook refusal catalogues (`refusals` with `reasons` and `params`) and ships their translations under `hooks.<hook>.refusals.<CODE>[.reasons.<REASON>].message` in its zh-CN pack.\n\nEvery business user's `sys_user.locale` is `zh-Hans`, and the Console sends `Accept-Language: zh-Hans`. On the hosted environment, **every hook refusal they have met is shown in the declared English sentence**. Three cases, three objects, three doors:\n\n| # | What the user did | Hook (object) | Door |\n|---|---|---|---|\n| 1 | Edit dialog of an order with inline lines, set Status to Confirmed, Update | `cb_sales_order_gate` (`crm_sales_order`, app package), reason `missing_delivery`, param `count` | `POST /api/v1/batch` (the dialog's save) |\n| 2 | Record header action \"Submit for review\" on a certification row | `certification_review_gate` (module object), reason `no_report` | action door |\n| 3 | Record header action \"Complete\" on a task | `cb_cert_remediation_task_guard` (`crm_task`, app package object, hook from a module package), code-level message | action door (`operation: 'update'`) |\n\nOn the same pages, every other string from the **same module zh-CN pack** is in Chinese: the action's confirm text, field labels, option labels. Only the hook refusal sentence stays English.\n\n## Same app, 18.6.0, locally: translated\n\nThe app's `main` pins `@objectstack/*` 18.6.0. I booted it locally both ways and sent case 1 (a header PATCH to `confirmed` with one line missing its delivery date):\n\n| Boot | `Accept-Language: zh-Hans` | `zh-CN` | `en` |\n|---|---|---|---|\n| `objectstack dev` (source) | 订单不能确认：有 1 行明细没有填交期。… | same | English |\n| `objectstack build` then `objectstack start` (the artifact) | 订单不能确认：有 1 行明细没有填交期。… | same | English |\n\nThrough the Console on the `dev` boot, the same edit dialog (case 1, `POST /api/v1/batch`, request header `accept-language: zh-Hans`) answered `userMessage` in Chinese and showed it in Chinese.\n\nSo the app's catalogue and translations resolve on 18.6.0, from source and from the built artifact. The difference is the hosted environment: its platform build after 18.6.0, or the way the hosted install registers a module package's translations for hook refusals.\n\n## Leads, not conclusions\n\n- `#34030` (closed 2026-11-19, after 18.6.0) changed how validation and refusal messages resolve labels under a declared `i18n.sourceLocale`. It is in the window between 18.6.0 and the hosted build.\n- `a8126d24` (2026-11-20) changed the `/batch` refusal body (`failedOperation`). Case 1 goes through `/batch`, but cases 2 and 3 do not, so it cannot explain all three.\n- In 18.6.0, `pickTranslatedSentence` (runtime `hook-refusal-catalogue`) falls back to the declared message when the session locale is empty or the i18n service is not reachable from the hook's context. If the hosted runner reaches the hook without one of those, the result would look exactly like this.\n\n## What we would like to know\n\nWhy do app hook refusals on the hosted environment come back in the declared language, while the same app on 18.6.0 translates them? Is the hosted environment expected to need anything from the app to get them translated?\n\nWe are not proposing a fix. Please judge where this belongs."
+}

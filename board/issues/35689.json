@@ -23,11 +23,11 @@
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-19T23:08:07Z",
-  "updated_at": "2026-11-22T07:30:52Z",
+  "updated_at": "2026-11-22T13:23:51Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 5,
+  "comments": 12,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35689",
   "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单（专题：列表行内编辑重做，维护者直派，见本卡挂靠的父卡）。⛔ 不是认领。优先级 p2。\n\n维护者 2026-11-20 原话：「以上都同意」。本卡是行内编辑重做的收尾部分，排在交互、保存、键盘、浮层四张之后。\n\n## 现状（主干 `d96c878e33`）\n\n- 768 以下列表渲染成卡片，不是表格（`ui/packages/plugin-grid/src/ObjectGrid.tsx` 约 3431），不涉及行内编辑。触屏平板上是表格，没有悬停和键盘。\n- 可编辑时表格用 `role=\"grid\"` 和单一焦点（`data-table.tsx:2893-2914`）；没有保存结果的朗读区，只读格没有 `aria-readonly`。\n- 分组列表和表尾合计：改了分组字段或被合计的字段后是否刷新，未核实。\n\n## 要做的\n\n- **触屏平板**：点一下打开记录；行内编辑通过记录页或显式的编辑入口，不靠双击。\n- **无障碍**：表格 `role=\"grid\"`；只读格 `aria-readonly`；保存成功、失败用朗读区播报；浮层关闭后焦点回到原单元格；选中框的对比度达标。\n- **分组与合计**：改了分组字段，这一行在用户离开后移到新的分组；分组小计和表尾合计随保存更新。\n- **选择列**：勾选多行后再编辑某一格，只改这一格，不批量改；勾选状态保留。\n\n## 不做的\n\n- 手机卡片视图上的行内编辑。\n\n## 验收\n\n- iPad 尺寸、触摸：点一行打开记录，没有误进编辑。\n- 读屏软件下：移动到只读格读出只读；保存后读出结果。\n- 按阶段分组的列表里把一条的阶段从甲改成乙：离开这一行后它出现在乙组，两个组的条数和金额小计正确。\n- 表尾合计在改了金额后更新。\n\nReader: `domain:ui` 车道。`ui/packages/plugin-grid/src/ObjectGrid.tsx`、`ui/packages/components/src/renderers/complex/data-table.tsx`。依赖本专题的交互模型和保存模型两张子卡。\n\nDedupe: `行内编辑 触屏`、`aria-readonly grid`、`分组 合计 行内编辑`（objectstack，open）→ 0。"
