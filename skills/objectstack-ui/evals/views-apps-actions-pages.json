@@ -228,7 +228,7 @@
       "files": [],
       "assertions": {
         "must_contain": ["perRecord", "bulkActions: [", "ctx.record"],
-        "must_not_contain": ["succeeded:", "succeeded,"]
+        "must_not_contain": ["succeeded:", "{ succeeded", "{ failed"]
       }
     }
   ]
