@@ -219,12 +219,14 @@ export async function convertLegacyNoneDigestsOnce(
             try {
                 // A migration is an entry point, so it states the system
                 // context itself, with the row's own organization threaded.
-                await e.update(
+                // Compare-and-set: the predicate path honours both keys, so a
+                // digest written since the read is left alone (0 matched).
+                const matched = await e.update(
                     OBJECT,
                     { digest: null },
-                    { where: { id, digest: LEGACY_UNSET_DIGEST }, context: { ...SYSTEM_CONTEXT, tenantId: textOrUndefined(row.organization_id) } },
+                    { where: { id, digest: LEGACY_UNSET_DIGEST }, multi: true, context: { ...SYSTEM_CONTEXT, tenantId: textOrUndefined(row.organization_id) } },
                 );
-                converted += 1;
+                if (matched !== 0) converted += 1;
             } catch (err) {
                 failed.push(id);
                 logger?.error(
