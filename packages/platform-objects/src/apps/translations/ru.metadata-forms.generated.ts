@@ -1367,11 +1367,11 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       navigation: {
         label: "Навигация",
-        helpText: "Настройка навигации по щелчку на элементе (по умолчанию боковая панель, page, new_window или none)"
+        helpText: "Настройка навигации по щелчку на элементе: размер боковой панели и `preventNavigation` для списка, строки которого ничего не открывают (`mode` устарел — имя записи открывает страницу, значок при наведении — боковую панель)"
       },
       "navigation.mode": {
         label: "Режим",
-        helpText: "[DEPRECATED] No longer picks how an object's list opens a record: in the console the record name opens the full page and the hover icon beside it opens the side panel, for every reader. There `drawer`, `page` and `new_window` still parse and change nothing; `none` still means rows open nothing — prefer `preventNavigation: true`. Omit the key."
+        helpText: "[УСТАРЕЛО] В списке объекта (представление списка, `listViews` объекта) больше не определяет, как открывается запись: в консоли для всех читателей имя записи открывает полную страницу, а значок, появляющийся рядом с ним при наведении, — боковую панель. Там `drawer`, `page` и `new_window` по-прежнему разбираются, но ничего не меняют, поэтому опустите ключ; `none` по-прежнему означает, что строки ничего не открывают, — лучше используйте `preventNavigation: true`. Блок страницы, содержащий `navigation` (блок списка, временная шкала, встроенное представление), по-прежнему учитывает любое значение."
       },
       "navigation.preventNavigation": {
         label: "Запретить навигацию",

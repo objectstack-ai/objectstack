@@ -29,6 +29,10 @@
  *    only, so it never answers for the next URL.
  *  - `refusal` is set for `denied` alone. Every other verdict leaves the page's
  *    missing-item face: the server said absence, or said nothing.
+ *  - `absent` (objectstack#36409) is set for `not_found` alone: the server
+ *    says the item is not there for anyone, so a page may say it is gone (a
+ *    view deleted since the reader's address named it) rather than fall
+ *    back in silence. Unreachable and unknown answers say nothing.
  *
  * Nothing is cached across mounts: a verdict about the CALLER goes stale the
  * moment they are granted the capability.
@@ -50,10 +54,13 @@ export interface MetaItemRefusalReading {
   readonly checking: boolean;
   /** The server refused this caller the item; `null` for every other answer. */
   readonly refusal: MetaItemRefusal | null;
+  /** The server answered that no such item exists. */
+  readonly absent: boolean;
 }
 
-const NOT_REFUSED: MetaItemRefusalReading = Object.freeze({ checking: false, refusal: null });
-const CHECKING: MetaItemRefusalReading = Object.freeze({ checking: true, refusal: null });
+const NOT_REFUSED: MetaItemRefusalReading = Object.freeze({ checking: false, refusal: null, absent: false });
+const CHECKING: MetaItemRefusalReading = Object.freeze({ checking: true, refusal: null, absent: false });
+const ABSENT: MetaItemRefusalReading = Object.freeze({ checking: false, refusal: null, absent: true });
 
 export function useMetaItemRefusal(type: 'dashboard' | 'view', name: string | null): MetaItemRefusalReading {
   const adapter = useAdapter();
@@ -79,6 +86,7 @@ export function useMetaItemRefusal(type: 'dashboard' | 'view', name: string | nu
 
   if (!asked) return NOT_REFUSED;
   if (!answer || answer.type !== type || answer.name !== asked) return CHECKING;
+  if (answer.access.verdict === 'not_found') return ABSENT;
   if (answer.access.verdict !== 'denied') return NOT_REFUSED;
-  return { checking: false, refusal: { message: answer.access.message } };
+  return { checking: false, refusal: { message: answer.access.message }, absent: false };
 }

@@ -963,9 +963,11 @@ Every part reads the record's discussion off the host's `DiscussionContext`
 (`useRecordComments`) and offers each write exactly where the host hands it, so
 the panel needs no props beyond `onClose`. Where it sits and how wide is the
 host's to decide; the console's record page gives it 380 px beside the record
-from a 1280 px window, over the record's right edge in a narrower one, and the
-whole drawer body in a drawer narrower than 760 px. While the host wraps the
-page in `RecordCommentsInPanelContext` (value `true`), the default page's 动态
+from a 1280 px window, over the record's right edge in a narrower one. The
+console's record drawer (the side preview) draws no panel and no icon: the
+comments are the full page's (objectstack#36225). While the host wraps the
+page in `RecordCommentsInPanelContext` (value `true`; the console does so on
+the full page and in the drawer alike), the default page's 动态
 stream draws the system entries alone: no comment rows, no All / Activity /
 Discussion chips (the Changes chip stays, a toggle), no comment box, and its
 count leaves the comments out.

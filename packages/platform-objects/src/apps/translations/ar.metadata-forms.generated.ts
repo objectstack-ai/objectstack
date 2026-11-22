@@ -1367,11 +1367,11 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       navigation: {
         label: "التنقل",
-        helpText: "تهيئة التنقل عند النقر على عنصر (درج جانبي افتراضيًا، أو page، أو new_window، أو none)"
+        helpText: "تهيئة التنقل عند النقر على عنصر: حجم الدرج الجانبي، و`preventNavigation` لقائمة لا تفتح صفوفها أي شيء (`mode` مُهمَل — اسم السجل يفتح الصفحة، وأيقونة التمرير تفتح اللوحة الجانبية)"
       },
       "navigation.mode": {
         label: "الوضع",
-        helpText: "[DEPRECATED] No longer picks how an object's list opens a record: in the console the record name opens the full page and the hover icon beside it opens the side panel, for every reader. There `drawer`, `page` and `new_window` still parse and change nothing; `none` still means rows open nothing — prefer `preventNavigation: true`. Omit the key."
+        helpText: "[مُهمَل] لم يعد يحدد في قائمة الكائن (عرض قائمة، أو `listViews` الخاصة بالكائن) طريقة فتح السجل: في وحدة التحكم، ولكل قارئ، يفتح اسم السجل الصفحة الكاملة وتفتح الأيقونة التي تظهر بجانبه عند التمرير اللوحة الجانبية. هناك لا تزال `drawer` و`page` و`new_window` تُحلَّل ولا تغيّر شيئًا، لذا احذف المفتاح؛ ولا تزال `none` تعني أن الصفوف لا تفتح شيئًا — يُفضَّل `preventNavigation: true`. أما كتلة الصفحة التي تحمل `navigation` (كتلة قائمة، أو المخطط الزمني، أو عرض مضمَّن) فلا تزال تحترم كل القيم."
       },
       "navigation.preventNavigation": {
         label: "منع التنقل",

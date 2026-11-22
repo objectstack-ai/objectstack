@@ -469,6 +469,13 @@ The split pane beside an open record keeps the same switcher.
   `sys_personal_view` object, not view metadata, so a package never carries them. A user the
   server grants that object nothing (an external member, today) is offered neither the section
   nor the save.
+- **Shared views** are seen by everyone who can see the list, and only an administrator makes
+  one: a user whose session holds `manage_metadata`, the capability the view's write door
+  (`PUT /api/v1/meta/view/:name`) asks, so the server refuses everyone else whatever the
+  Console shows. For that administrator **Add view** offers **Shared** beside **My view**
+  (**My view** stays the default). A view created shared is published at once: there is no
+  draft to publish first. A user who opens a view that has since been deleted is told so, and
+  the list shows its default view.
 
 ## Form View
 
@@ -641,7 +648,10 @@ also holds Discard on a narrow list or a phone).
   widths into the view. When the view already has unpublished changes (a draft saved from
   the view settings, by anyone), nothing is saved: the Console says so and points to the view
   settings to publish or discard that draft first. Every other change to a shared view still
-  goes to a draft that the view settings publish.
+  goes to a draft that the view settings publish. A view settings save is pinned to the draft
+  the settings opened, so one that lands while a Save to this view is between its save and its
+  publish is refused, never published with it: the settings say the draft changed and offer
+  to reload it, overwrite it or keep editing.
 - A footer calculation is offered on every column the saved view would carry: the columns
   the list draws and the fields the user added. Picking the view's own calculation again
   takes that column out of the draft.

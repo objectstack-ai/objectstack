@@ -115,6 +115,7 @@ const EXPECTED_GRANT: Record<string, Grant> = {
   relatedRowDelete: 'delete',
   attachmentUpload: 'create',
   attachmentDelete: 'delete',
+  attachmentRename: 'update',
   // The rows the write census found: affordances that read no grant at all.
   calendarQuickCreate: 'create',
   calendarReschedule: 'update',

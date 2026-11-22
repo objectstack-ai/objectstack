@@ -15,6 +15,13 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  Input,
+  Label,
 } from '@object-ui/components';
 import {
   Paperclip,
@@ -27,6 +34,7 @@ import {
   Ban,
   RefreshCw,
   MoreVertical,
+  Pencil,
   File as FileIcon,
   FileText,
   FileImage,
@@ -69,6 +77,13 @@ import { RECORD_PAGE_ATTACHMENT_ROWS, recordAttachmentsCountField } from './reco
  * Downloads fetch a short-lived signed URL from `/storage/files/:fileId/url`
  * with the console's Bearer token (the endpoint requires an authenticated
  * session for attachments-scope files, objectstack-ai/objectstack#2970), then open it.
+ *
+ * The list read expands `uploaded_by` (the record page payload's attachments
+ * part does the same), so the uploader column names whoever uploaded a row
+ * when the reader may read that user; a reader who may not gets the bare id
+ * back and the column stays blank, never showing the id. A row's Rename sends
+ * the new name to the attachment rename door, `PATCH /api/v1/attachments/:id`
+ * (service-storage), which renames by the attachment delete rule.
  */
 
 interface AttachmentRow {
@@ -87,7 +102,10 @@ export interface RecordAttachmentsPanelProps {
   recordId: string;
   /** ObjectUI DataSource (the list read and the delete go through the generic data path; the attach does not). */
   dataSource: any;
-  /** Current user id. The server stamps `uploaded_by` from the session; the panel no longer sends it. */
+  /**
+   * Current user id. The server stamps `uploaded_by` from the session; the panel no longer sends it.
+   * It names the caller's own rows for Rename when no auth provider supplies the user.
+   */
   currentUserId?: string | null;
   className?: string;
 }
@@ -209,6 +227,7 @@ export const RecordAttachmentsPanel: React.FC<RecordAttachmentsPanelProps> = ({
   objectName,
   recordId,
   dataSource,
+  currentUserId,
   className,
 }) => {
   const { t } = useObjectTranslation();
@@ -279,6 +298,26 @@ export const RecordAttachmentsPanel: React.FC<RecordAttachmentsPanelProps> = ({
   const perms = usePermissions();
   const canUpload = resolveAffordance('attachmentUpload', { objectName: 'sys_attachment', perms }).allowed;
   const canDelete = resolveAffordance('attachmentDelete', { objectName: 'sys_attachment', perms }).allowed;
+  /**
+   * Rename follows the rename door's two limbs, behind the delete grant. The
+   * door renames the caller's OWN upload with no edit grant (written on their
+   * behalf, as the removal door removes), and writes anyone else's rename
+   * through the engine as the caller, which needs the edit grant on
+   * `sys_attachment`. So a row offers Rename to a reader who may delete and
+   * either uploaded it or holds the edit grant; offering it elsewhere would
+   * offer a door the server refuses. The edit-grant half is the map's
+   * `attachmentRename` row; with no provider mounted it reads open, and the
+   * server remains the gate.
+   */
+  const canEditAttachments = resolveAffordance('attachmentRename', { objectName: 'sys_attachment', perms }).allowed;
+  const callerId = user?.id ?? currentUserId ?? null;
+  const canRename = (row: AttachmentRow): boolean => {
+    if (!canDelete) return false;
+    if (canEditAttachments) return true;
+    const by = row.uploaded_by;
+    const uploaderId = by && typeof by === 'object' ? by.id : by;
+    return !!callerId && uploaderId === callerId;
+  };
 
   // Same base-URL convention as RecordDetailView's raw API fetches: the
   // Vite dev console proxies same-origin `/api` unless VITE_SERVER_URL
@@ -370,6 +409,7 @@ export const RecordAttachmentsPanel: React.FC<RecordAttachmentsPanelProps> = ({
             $filter: { parent_object: objectName, parent_id: recordId },
             $orderby: { created_at: 'desc' },
             $top: RECORD_PAGE_ATTACHMENT_ROWS,
+            $expand: ['uploaded_by'],
           });
       const items: AttachmentRow[] = Array.isArray(res) ? res : res?.data ?? [];
       // objectui#10684 — a superseded answer is dropped on arrival.
@@ -504,6 +544,51 @@ export const RecordAttachmentsPanel: React.FC<RecordAttachmentsPanelProps> = ({
       }
     },
     [dataSource, friendlyError, confirmDelete, t],
+  );
+
+  /**
+   * Rename: offered beside Delete, to a reader who may delete and either
+   * uploaded the row or holds the edit grant (`canRename`), because the server
+   * renames by the attachment delete rule — the uploader, or an editor of the
+   * record — and writes an editor's rename as the caller. The dialog closes on a stored name and
+   * stays open on a refusal, which the panel's error line names.
+   */
+  const [renaming, setRenaming] = React.useState<AttachmentRow | null>(null);
+  const handleRename = React.useCallback(
+    async (row: AttachmentRow, fileName: string): Promise<boolean> => {
+      setError(null);
+      try {
+        const res = await authFetch(`${baseUrl}/api/v1/attachments/${encodeURIComponent(row.id)}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ file_name: fileName }),
+        });
+        let body: { data?: { file_name?: string }; error?: { code?: string; message?: string } } | null = null;
+        try {
+          body = await res.json();
+        } catch {
+          /* non-JSON body */
+        }
+        if (!res.ok) {
+          const code = body?.error?.code;
+          throw Object.assign(new Error(body?.error?.message ?? `Rename failed (${res.status})`), { code });
+        }
+        const stored = body?.data?.file_name;
+        if (typeof stored !== 'string') throw new Error('The server renamed the attachment but did not answer its stored name');
+        setRows((prev) => prev.map((r) => (r.id === row.id ? { ...r, file_name: stored } : r)));
+        return true;
+      } catch (err: any) {
+        setError(
+          err?.code === 'RECORD_NOT_ACCESSIBLE'
+            ? t('detail.attachmentRenameDenied', {
+                defaultValue: 'Only the uploader or someone who can edit this record may rename this attachment.',
+              })
+            : friendlyError(err),
+        );
+        return false;
+      }
+    },
+    [authFetch, baseUrl, friendlyError, t],
   );
 
   const handleDownload = React.useCallback(
@@ -790,6 +875,17 @@ export const RecordAttachmentsPanel: React.FC<RecordAttachmentsPanelProps> = ({
                       <Download className="mr-2 h-4 w-4" />
                       {t('detail.downloadAttachment', { defaultValue: 'Download' })}
                     </DropdownMenuItem>
+                    {canRename(row) && (
+                      <DropdownMenuItem
+                        onSelect={() => {
+                          setError(null);
+                          setRenaming(row);
+                        }}
+                      >
+                        <Pencil className="mr-2 h-4 w-4" />
+                        {t('detail.renameAttachment', { defaultValue: 'Rename' })}
+                      </DropdownMenuItem>
+                    )}
                     {canDelete && (
                       <DropdownMenuItem
                         className="text-destructive focus:text-destructive"
@@ -812,8 +908,101 @@ export const RecordAttachmentsPanel: React.FC<RecordAttachmentsPanelProps> = ({
           if (!open) setConfirmState((s) => ({ ...s, open: false }));
         }}
       />
+      <AttachmentRenameDialog
+        row={renaming}
+        onOpenChange={(open) => {
+          if (!open) setRenaming(null);
+        }}
+        onSubmit={(name) => (renaming ? handleRename(renaming, name) : Promise.resolve(false))}
+        error={error}
+        t={t}
+      />
     </div>
   );
 };
+
+/**
+ * The name prompt of a row's Rename. It writes nothing: it hands the trimmed
+ * name to `onSubmit` and closes only when that resolves `true`. An empty name,
+ * or the name the row already has, cannot be submitted.
+ */
+function AttachmentRenameDialog({
+  row,
+  onOpenChange,
+  onSubmit,
+  error,
+  t,
+}: {
+  row: AttachmentRow | null;
+  onOpenChange: (open: boolean) => void;
+  onSubmit: (name: string) => Promise<boolean>;
+  error: string | null;
+  t: ReturnType<typeof useObjectTranslation>['t'];
+}) {
+  const inputId = React.useId();
+  const current = row ? row.file_name || row.file_id : '';
+  const [name, setName] = React.useState(current);
+  const [submitting, setSubmitting] = React.useState(false);
+  const submittingRef = React.useRef(false);
+
+  // Each opening starts from the row's current name.
+  React.useEffect(() => {
+    if (row) setName(current);
+  }, [row, current]);
+
+  const trimmed = name.trim();
+  const submittable = trimmed !== '' && trimmed !== current && !submitting;
+  const submit = async () => {
+    if (!submittable || submittingRef.current) return;
+    submittingRef.current = true;
+    setSubmitting(true);
+    try {
+      if (await onSubmit(trimmed)) onOpenChange(false);
+    } finally {
+      submittingRef.current = false;
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Dialog open={!!row} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-[420px]" data-testid="attachment-rename-dialog" aria-describedby={undefined}>
+        <DialogHeader>
+          <DialogTitle>{t('detail.renameAttachmentTitle', { defaultValue: 'Rename attachment' })}</DialogTitle>
+        </DialogHeader>
+        <form
+          className="grid gap-2 py-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void submit();
+          }}
+        >
+          <Label htmlFor={inputId}>{t('detail.attachmentNameLabel', { defaultValue: 'File name' })}</Label>
+          <Input
+            id={inputId}
+            autoFocus
+            value={name}
+            maxLength={255}
+            onChange={(e) => setName(e.target.value)}
+            data-testid="attachment-rename-input"
+          />
+          {error && (
+            <p className="text-xs text-destructive" role="alert">
+              {error}
+            </p>
+          )}
+        </form>
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+            {t('common.cancel', { defaultValue: 'Cancel' })}
+          </Button>
+          <Button type="button" disabled={!submittable} onClick={() => void submit()} data-testid="attachment-rename-submit">
+            {t('common.save', { defaultValue: 'Save' })}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 export default RecordAttachmentsPanel;

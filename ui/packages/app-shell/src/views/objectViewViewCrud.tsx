@@ -22,6 +22,7 @@ import type { useConsoleActionRuntime } from '../hooks/useConsoleActionRuntime.j
 import type { useMetadataClient } from './metadata-admin/useMetadata.js';
 import { persistRuntimeMetadata, createRuntimeMetadata, saveAndPublishRuntimeMetadata, viewEnvelope } from './runtime-metadata-persistence.js';
 import type { RuntimeCreateApp, SaveAndPublishOutcome } from './runtime-metadata-persistence.js';
+import type { DraftVersionGuard } from './metadata-admin/DraftConflictDialog.js';
 import { draftBarPackageOf } from '../preview/DraftPreviewBar.js';
 import { useMetadata } from '../providers/MetadataProvider.js';
 import { buildAddViewSpec, setDefaultViewPatches, buildViewConfigSaveBody } from './objectViewTabs.js';
@@ -137,8 +138,16 @@ export function useObjectViewViewCrud({
      * The view-config panel's edit Save. Resolves whether the draft was staged,
      * so the panel stays dirty, and announces no draft, on anything but `true`
      * (objectui#11583).
+     *
+     * objectstack#36137 — `saveDraft` is the panel's draft-version guard: the
+     * write is pinned to the draft the panel loaded, so a save that would
+     * cross another admin's 「Save to this view」 between its draft write and
+     * its publish is refused and asked about, never published with it.
      */
-    const handleViewConfigSave = useCallback(async (draft: Record<string, any>): Promise<boolean> => {
+    const handleViewConfigSave = useCallback(async (
+        draft: Record<string, any>,
+        saveDraft?: DraftVersionGuard['save'],
+    ): Promise<boolean> => {
         setViewDraft(draft);
         setRefreshKey(k => k + 1);
 
@@ -152,12 +161,13 @@ export function useObjectViewViewCrud({
         try {
             // `dataSource` + `objectName` let the seam drop this object's view
             // cache keys (#4373) — the adapter owns which keys those are.
-            await persistRuntimeMetadata('view', vid, buildViewConfigSaveBody(objectName, draft), {
+            const outcome = await persistRuntimeMetadata('view', vid, buildViewConfigSaveBody(objectName, draft), {
                 metadataClient,
                 dataSource,
                 objectName,
-            });
-            return true;
+            }, saveDraft);
+            // `'reloaded'`: the author chose the saved version, and the panel reads it again.
+            return outcome === 'saved';
         } catch (err) {
             console.error('[ViewConfigPanel] Failed to persist view config:', err);
             // objectui#11583: a refused save is SAID, as the Create View doors
@@ -414,6 +424,41 @@ export function useObjectViewViewCrud({
         }
     }, [dataSource, isSavedView, activeViewId, views, viewId, navigate, t, confirmHandler]);
 
+    /**
+     * objectstack#36011 — "Restore factory version" on a customized view of a
+     * read-only package (`ViewTabItem.customized`): after one confirm saying
+     * every user of the view sees the factory version again, the override
+     * the package's customization holds is removed
+     * (`restoreFactoryView`), and the views are read again. A refusal is
+     * said with the door's own message.
+     */
+    const handleRestoreFactoryView = useCallback(async (vid: string) => {
+        if (!dataSource || !objectName) return;
+        if (typeof (dataSource as any)?.restoreFactoryView !== 'function') return;
+        const targetView = views.find((v: any) => v.id === vid);
+        const viewLabel = targetView?.label || vid;
+        const confirmed = await confirmHandler(
+            t('console.objectView.restoreFactoryConfirm', { name: viewLabel }),
+            {
+                title: t('console.objectView.restoreFactoryTitle'),
+                confirmText: t('console.objectView.restoreFactory'),
+                cancelText: t('console.objectView.cancel'),
+            },
+        );
+        if (!confirmed) return;
+        try {
+            await (dataSource as any).restoreFactoryView(objectName, vid);
+            setRefreshKey(k => k + 1);
+            toast.success(t('console.objectView.restoreFactoryDone', { name: viewLabel }));
+        } catch (err) {
+            console.error('[ManageViews] Failed to restore the factory view:', err);
+            toast.error(t('objectViewActions.restoreFactoryFailed'), {
+                description: formatMetadataError(err),
+                classNames: { description: 'whitespace-pre-line' },
+            });
+        }
+    }, [dataSource, objectName, views, t, confirmHandler, setRefreshKey]);
+
     const handlePinView = useCallback(async (vid: string, pinned: boolean) => {
         if (!dataSource) return;
         if (!isSavedView(vid)) {
@@ -509,6 +554,7 @@ export function useObjectViewViewCrud({
         handleViewAction,
         handleRenameView,
         handleDeleteView,
+        handleRestoreFactoryView,
         handlePinView,
         handleSetDefaultView,
         handleReorderViews,

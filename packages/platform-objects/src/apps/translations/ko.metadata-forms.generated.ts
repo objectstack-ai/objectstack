@@ -1367,11 +1367,11 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       navigation: {
         label: "탐색",
-        helpText: "항목 클릭 탐색 구성(기본값 drawer, page, new_window 또는 none)"
+        helpText: "항목 클릭 탐색 구성: 드로어 크기, 그리고 행이 아무것도 열지 않는 목록을 위한 `preventNavigation`(`mode`는 사용 중단됨 — 레코드 이름은 페이지를, 마우스를 올리면 나타나는 아이콘은 사이드 패널을 엽니다)"
       },
       "navigation.mode": {
         label: "모드",
-        helpText: "[DEPRECATED] No longer picks how an object's list opens a record: in the console the record name opens the full page and the hover icon beside it opens the side panel, for every reader. There `drawer`, `page` and `new_window` still parse and change nothing; `none` still means rows open nothing — prefer `preventNavigation: true`. Omit the key."
+        helpText: "[사용 중단] 객체의 목록(목록 보기, 객체의 `listViews`)에서는 더 이상 레코드를 여는 방식을 정하지 않습니다. 콘솔에서는 모든 사용자에게 레코드 이름이 전체 페이지를 열고, 이름 옆에 마우스를 올리면 나타나는 아이콘이 사이드 패널을 엽니다. 여기서 `drawer`, `page`, `new_window`는 계속 구문 분석되지만 아무것도 바꾸지 않으므로 이 키는 생략하세요. `none`은 여전히 행이 아무것도 열지 않음을 의미합니다 — `preventNavigation: true`를 권장합니다. `navigation`을 지닌 페이지 블록(목록 블록, 타임라인, 포함된 보기)은 여전히 모든 값을 따릅니다."
       },
       "navigation.preventNavigation": {
         label: "탐색 방지",
