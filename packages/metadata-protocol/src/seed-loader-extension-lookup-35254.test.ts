@@ -182,10 +182,9 @@ describe('[#35254] a seed resolves a lookup an object extension adds like an aut
       expect(order.indexOf('ext_account')).toBeLessThan(order.indexOf('ext_order'));
       const node = result.dependencyGraph.nodes.find((n) => n.object === 'ext_order')!;
       expect([...node.dependsOn].sort()).toEqual(['ext_account', 'ext_quote']);
-      expect(node.references.map((r) => `${r.field}->${r.targetObject}`).sort()).toEqual([
-        'account_ref->ext_account',
-        'quote_ref->ext_quote',
-      ]);
+      // (The injected `owner_id` → `sys_user` reference rides along on both; it is not this pin's subject.)
+      expect(node.references.filter((r) => r.targetObject.startsWith('ext_')).map((r) => `${r.field}->${r.targetObject}`).sort())
+        .toEqual(['account_ref->ext_account', 'quote_ref->ext_quote']);
     });
   }
 
@@ -206,23 +205,40 @@ describe('[#35254] a seed resolves a lookup an object extension adds like an aut
 
   it('a target that loads after the order (a cycle) is deferred to pass 2 and resolved, as an authored lookup is', async () => {
     // `ext_quote.order_ref` points back at the order, so the graph has a cycle
-    // only once the extension lookup is read: one side loads first and its
-    // reference waits for pass 2.
-    const { loader, store } = loaderFor(true);
-    const result = await loader.load({
-      seeds: [
-        { object: 'ext_order', externalId: 'name', mode: 'upsert', env: ENV, records: [{ name: 'O-1', quote_ref: 'Q-ACME' }] },
-        { object: 'ext_quote', externalId: 'name', mode: 'upsert', env: ENV, records: [{ name: 'Q-ACME', order_ref: 'O-1' }] },
-      ] as any[],
-      config: CONFIG,
-    });
+    // only once the extension lookup is read: one side loads first, its
+    // reference waits for pass 2, and pass 2 writes it back. CONTROL: the same
+    // cycle with `quote_ref` authored on the order itself.
+    const run = async (authoredQuoteRef: boolean) => {
+      const { engine, store } = createFaithfulEngine(servedObjects(true));
+      const authored = authoredObjects(true);
+      if (authoredQuoteRef) authored.ext_order = servedObjects(true).ext_order;
+      const loader = new SeedLoaderService(engine, createMetadata(authored), createLogger());
+      const result = await loader.load({
+        seeds: [
+          { object: 'ext_order', externalId: 'name', mode: 'upsert', env: ENV, records: [{ name: 'O-1', quote_ref: 'Q-ACME' }] },
+          { object: 'ext_quote', externalId: 'name', mode: 'upsert', env: ENV, records: [{ name: 'Q-ACME', order_ref: 'O-1' }] },
+        ] as any[],
+        config: CONFIG,
+      });
+      const order = store.ext_order.find((r) => r.name === 'O-1')!;
+      const quote = store.ext_quote.find((r) => r.name === 'Q-ACME')!;
+      const backfills = (engine.update as any).mock.calls.map(([object, data]: [string, any]) =>
+        [object, Object.keys(data).filter((k) => k !== 'id').sort()]);
+      return { result, order, quote, backfills };
+    };
+    const extension = await run(false);
+    const control = await run(true);
 
-    expect(result.summary.totalErrored).toBe(0);
-    const order = store.ext_order.find((r) => r.name === 'O-1')!;
-    const quote = store.ext_quote.find((r) => r.name === 'Q-ACME')!;
-    expect(order.quote_ref).toBe(quote.id);
-    expect(quote.order_ref).toBe(order.id);
-    expect(result.summary.totalReferencesDeferred).toBeGreaterThanOrEqual(1);
+    for (const { result, order, quote } of [extension, control]) {
+      expect(result.summary.totalErrored).toBe(0);
+      expect(result.dependencyGraph.circularDependencies.length).toBeGreaterThan(0);
+      expect(order.quote_ref).toBe(quote.id);
+      expect(quote.order_ref).toBe(order.id);
+    }
+    // One side was written in pass 2, and the extension lookup took the same path the authored one does.
+    expect(extension.backfills.length).toBeGreaterThan(0);
+    expect(extension.backfills).toEqual(control.backfills);
+    expect(extension.result.dependencyGraph.insertOrder).toEqual(control.result.dependencyGraph.insertOrder);
   });
 
   it('an unknown natural key is refused exactly as the authored lookup refuses it, and no raw key is stored', async () => {
