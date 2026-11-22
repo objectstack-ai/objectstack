@@ -469,6 +469,16 @@ The split pane beside an open record keeps the same switcher.
   `sys_personal_view` object, not view metadata, so a package never carries them. A user the
   server grants that object nothing (an external member, today) is offered neither the section
   nor the save.
+- **Shared views** are seen by everyone who can see the list, and only an administrator makes
+  one: a user whose session holds `manage_metadata`, the capability the view's write door
+  (`PUT /api/v1/meta/view/:name`) asks, so the server refuses everyone else whatever the
+  Console shows. For that administrator **Add view** offers **Shared** beside **My view**
+  (**My view** stays the default), each of their own views offers **Make shared**, and a shared
+  view saved in the app offers **Unshare**, which moves it back into their **My views**. A
+  view your app authors, a read-only package ships, or a package view's customization has no
+  **Unshare**. A view created shared, or made shared, is published at once: there is no draft
+  to publish first. A user who has a view open when it is unshared or deleted is told so, and
+  the list shows its default view.
 
 ## Form View
 
