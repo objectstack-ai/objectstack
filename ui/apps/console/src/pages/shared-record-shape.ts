@@ -52,9 +52,17 @@ export function canSendSharePassword(password: string): boolean {
 /**
  * The headers for a request to one of the public share-link routes. The password
  * header is present only when the visitor has entered a password.
+ *
+ * `Accept-Language` is the console's UI language, read from `<html lang>` — the
+ * one source the console's authenticated fetch (`createAuthenticatedFetch`) and
+ * the settings calls read — so the resolve answer's object label
+ * (`link.object_label`) arrives in the language the rest of the page is in.
+ * When it is empty the header is left out and the browser's own goes.
  */
 export function shareRequestHeaders(password?: string): Record<string, string> {
   const headers: Record<string, string> = { Accept: 'application/json' };
+  const lang = typeof document !== 'undefined' ? document.documentElement.lang : '';
+  if (lang) headers['Accept-Language'] = lang;
   if (password) headers[SHARE_PASSWORD_HEADER] = password;
   return headers;
 }
@@ -103,6 +111,12 @@ export interface ShareLink {
   audience: string;
   expires_at?: string | null;
   label?: string | null;
+  /**
+   * The shared object's label, in the request's locale (objectstack#33552).
+   * Absent when the object declares none, or from an older server: the page
+   * then names the object by `object_name`.
+   */
+  object_label?: string;
 }
 
 /**
@@ -127,6 +141,8 @@ export interface SharedFieldDisplay {
   /** A lookup's target object. The record's value stays the stored id. */
   reference?: string;
   displayField?: string;
+  /** The object declares the field hidden (objectstack#33552): the page leaves it off, as the record page does. */
+  hidden?: true;
 }
 
 /**

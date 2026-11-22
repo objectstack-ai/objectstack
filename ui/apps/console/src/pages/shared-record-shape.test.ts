@@ -104,6 +104,18 @@ describe('share-link request headers and 401 gates (objectui#11649)', () => {
     expect(shareRequestHeaders('')).toEqual({ Accept: 'application/json' });
   });
 
+  it('states the console UI language (`<html lang>`) as Accept-Language, and leaves it to the browser when unset', () => {
+    const before = document.documentElement.lang;
+    try {
+      document.documentElement.lang = 'zh-CN';
+      expect(shareRequestHeaders()).toEqual({ Accept: 'application/json', 'Accept-Language': 'zh-CN' });
+      document.documentElement.lang = '';
+      expect(shareRequestHeaders()).toEqual({ Accept: 'application/json' });
+    } finally {
+      document.documentElement.lang = before;
+    }
+  });
+
   it('reads each 401 code as its gate', () => {
     const refusal = (code: string) => ({ success: false, error: { code, message: 'm' } });
     expect(resolveGateOf(refusal('NEEDS_PASSWORD'))).toBe('needs-password');

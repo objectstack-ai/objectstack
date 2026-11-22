@@ -12,6 +12,7 @@ import type { FieldContainerLike } from '@object-ui/core';
 import { SchemaRenderer, toRenderableSchema, useRecordContext, useRecordPagePreferences } from '@object-ui/react';
 import {
   RECORD_PAGE_DETAILS_MIN_WIDTH,
+  RECORD_PAGE_DETAILS_WIDTH,
   RECORD_PAGE_PINNED_GAP,
   RECORD_PAGE_TABS_MIN_WIDTH,
   RECORD_PAGE_TIMELINE_PANEL,
@@ -363,7 +364,9 @@ const DETAILS_WIDTH_KEY_STEP = 16;
  * 拖宽，拖过的宽度按人记住」), sitting in the gap between the columns: a
  * vertical separator, dragged with the pointer or moved with ← → (Home / End
  * to either end). `onPreview` follows the drag; `onCommit` keeps the width
- * once the drag ends.
+ * once the drag ends. A double-click keeps {@link RECORD_PAGE_DETAILS_WIDTH},
+ * the width the page has when nothing is kept (objectstack#36226), and ends
+ * any drag it interrupts.
  */
 const DetailsWidthHandle: React.FC<{
   width: number;
@@ -407,6 +410,11 @@ const DetailsWidthHandle: React.FC<{
       onPointerCancel={() => {
         drag.current = null;
         onPreview(null);
+      }}
+      onDoubleClick={() => {
+        drag.current = null;
+        onPreview(null);
+        onCommit(RECORD_PAGE_DETAILS_WIDTH);
       }}
       onKeyDown={(event) => {
         const next =

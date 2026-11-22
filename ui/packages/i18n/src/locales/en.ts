@@ -746,6 +746,10 @@ const en = {
     // one key, read by both its `aria-label` and its `title`. The chooser's
     // button reads `table.columns`, the footer `form.masterDetail.total` and
     // the drag handle `view.dragToReorder`.
+    //
+    // objectstack#36004 — `columnHelp` names a column header's info button
+    // with one short word; the help itself is the button's description, so it
+    // stays out of the column name a screen reader reads with every cell.
     grid: {
       addLine: 'Add line',
       noItems: 'No items',
@@ -755,6 +759,7 @@ const en = {
       openRow: 'Open row',
       duplicateRow: 'Duplicate row',
       removeRow: 'Remove row',
+      columnHelp: 'Help',
     },
   },
   table: {
@@ -1953,6 +1958,10 @@ const en = {
     deleteAttachment: 'Delete attachment',
     deleteAttachmentConfirm: 'Are you sure you want to delete the attachment "{{name}}"?',
     attachmentDeleteDenied: 'Only the uploader or someone who can edit this record may delete this attachment.',
+    renameAttachment: 'Rename',
+    renameAttachmentTitle: 'Rename attachment',
+    attachmentNameLabel: 'File name',
+    attachmentRenameDenied: 'Only the uploader or someone who can edit this record may rename this attachment.',
     attachmentParentAccessDenied: "You don't have access to attach files to this record.",
     attachmentDownloadDenied: "You don't have access to download this attachment.",
     attachmentAuthRequired: 'Please sign in to download this attachment.',
@@ -6546,6 +6555,12 @@ const en = {
       object: 'Object',
       unknownType: 'Unknown metadata view type. Expected {{a}}, {{b}} or {{c}}.',
       unknownTypeNamed: 'Unknown metadata view type “{{type}}”. Expected {{a}}, {{b}} or {{c}}.',
+      condition: 'condition',
+      otherwise: 'otherwise',
+      conditionAnd: 'and',
+      conditionOr: 'or',
+      conditionMore: 'other conditions',
+      runsWhen: 'Runs when {{condition}}',
     },
   },
   // `kind:'react'` page renderer's notices (`react-page.tsx`, #25916). A

@@ -344,12 +344,19 @@ export function registerRecordPageEndpoints(this: RecordPageRouteHost, basePath:
                     return 'error' in answer ? answer : { total: answer.total, records: answer.records };
                 };
 
+                // [#35724] `uploaded_by` expanded, as the activity's actor is:
+                // the expansion is a read of `sys_user` as the caller, so a
+                // reader who may read the uploader gets the user row (its name
+                // for the panel's uploader column), and one who may not keeps
+                // the stored bare id — shaped by the reader's own user-read
+                // rights, and no wider.
                 const answerAttachments = async (top: number) => {
                     const answer = await readStream(ATTACHMENT_OBJECT, {
                         where: { parent_object: object, parent_id: id },
                         orderBy: [{ field: 'created_at', order: 'desc' }],
                         limit: top,
                         count: true,
+                        expand: relationMap(['uploaded_by']),
                     });
                     return 'error' in answer ? answer : { total: answer.total, records: answer.records };
                 };
