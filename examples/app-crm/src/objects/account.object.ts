@@ -57,7 +57,9 @@ export const Account = ObjectSchema.create({
   // The record page's tabs, declared in one place: only the lists named here
   // show, in this order. An entry may carry its own columns (fields of the
   // child); the built-in tabs are named by object. Leaving a list out hides its
-  // tab. Without this key every related list is a tab, in the automatic order.
+  // tab, except a child list another package brings: that one still shows, at
+  // the end of the tabs or where that package's extension places it. Without
+  // this key every related list is a tab, in the automatic order.
   relatedLists: [
     { list: 'crm_contact', columns: ['full_name', 'email'] },
     'crm_opportunity',
