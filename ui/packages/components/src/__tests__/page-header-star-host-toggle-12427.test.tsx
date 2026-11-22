@@ -32,6 +32,9 @@ import { ComponentRegistry } from '@object-ui/core';
 // Registers every renderer at module scope, not in a hook
 // (object-ui/no-dynamic-import-in-test-hook, objectui#3010).
 import '../renderers';
+// `page`'s react-page loads it with a dynamic import; paid at collection, not
+// inside a case's clocked window (check:test-source-alias).
+import '@object-ui/react-runtime';
 
 afterEach(() => {
   cleanup();
