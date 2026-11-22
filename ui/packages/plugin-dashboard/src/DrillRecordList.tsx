@@ -84,7 +84,7 @@ export const DrillRecordList: React.FC<DrillRecordListProps> = ({
   const scope = useFilterScope();
   // One resolution per mount: a chip shows the value the query compares.
   const resolved = React.useMemo(
-    () => resolveFilterPlaceholders(filter, scope) as Record<string, unknown> | undefined,
+    () => resolveFilterPlaceholders(filter, scope) as unknown,
     // The drill's filter is fixed for the life of this mount (the dialog keys it).
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],

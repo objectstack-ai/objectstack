@@ -57,6 +57,25 @@ describe('drillListConditions', () => {
     ]);
   });
 
+  it("lowers a page block's rule array, and an AST node, to chips", () => {
+    // HotCRM's 销售主页 KPI tile: the spec's rule-array form, handed as written.
+    expect(drillListConditions([{ field: 'stage', operator: 'equals', value: 'closed_won' }]).chips.conditions
+      .map(({ field, operator, value }) => ({ field, operator, value })))
+      .toEqual([{ field: 'stage', operator: 'equals', value: 'closed_won' }]);
+    expect(drillListConditions([['stage', '=', 'closed_won'], ['amount', '>', 5]]).chips.conditions
+      .map(({ field, operator, value }) => ({ field, operator, value })))
+      .toEqual([
+        { field: 'stage', operator: 'equals', value: 'closed_won' },
+        { field: 'amount', operator: 'greater_than', value: 5 },
+      ]);
+  });
+
+  it('keeps a filter it cannot lower as the base filter, exactly as it arrived', () => {
+    // A scalar on a list operator: the spec's lowering refuses it.
+    const refused = [['stage', 'in', 'won']];
+    expect(drillListConditions(refused)).toEqual({ chips: { logic: 'and', conditions: [] }, rest: refused });
+  });
+
   it('answers no rows and no rest for no filter', () => {
     expect(drillListConditions(undefined)).toEqual({ chips: { logic: 'and', conditions: [] }, rest: undefined });
   });

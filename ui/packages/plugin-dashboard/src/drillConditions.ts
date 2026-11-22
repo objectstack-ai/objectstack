@@ -21,11 +21,18 @@
  * as it was. Both are ANDed, so the list matches the drill exactly until the
  * reader edits a chip.
  *
+ * A filter that is not the object form (a page block's authored rule array
+ * `[{ field, operator, value }]`, an AST node) is lowered to it first, through
+ * the drill's own composition (`composeDrillFilter`: `mergeFilterNodes`, then
+ * the spec's `parseFilterAST`). A shape that cannot be lowered stays the base
+ * `filter` exactly as it arrived. No condition is ever dropped.
+ *
  * Values must already be resolved (`resolveFilterPlaceholders`): a chip shows
  * what the query compares, never a `{token}`.
  */
 
 import type { FilterBuilderRow, FilterBuilderRowGroup } from '@object-ui/components';
+import { composeDrillFilter, FilterOperatorError } from '@object-ui/core';
 
 /** The row operator each comparison operator of the filter dialect reads as. */
 const ROW_OPERATOR: Readonly<Record<string, FilterBuilderRow['operator']>> = {
@@ -47,10 +54,14 @@ const isScalar = (v: unknown): v is string | number | boolean =>
 const isPlainObject = (v: unknown): v is Record<string, unknown> =>
   !!v && typeof v === 'object' && !Array.isArray(v);
 
-/** Split a filter into its ANDed single-key parts: `$and` members and the keys of one object. */
-function andParts(filter: unknown): Record<string, unknown>[] {
-  if (!isPlainObject(filter)) return [];
-  const parts: Record<string, unknown>[] = [];
+/**
+ * Split a filter into its ANDed parts: `$and` members and the keys of one
+ * object, each `{ field: condition }`. A member that is not an object is one
+ * part as it is, never dropped.
+ */
+function andParts(filter: unknown): unknown[] {
+  if (!isPlainObject(filter)) return [filter];
+  const parts: unknown[] = [];
   for (const [key, value] of Object.entries(filter)) {
     if (key === '$and' && Array.isArray(value)) {
       for (const member of value) parts.push(...andParts(member));
@@ -59,6 +70,26 @@ function andParts(filter: unknown): Record<string, unknown>[] {
     }
   }
   return parts;
+}
+
+/** Does every ANDed part read as `{ field: condition }`? */
+const splits = (filter: unknown): filter is Record<string, unknown> =>
+  isPlainObject(filter) && andParts(filter).every(isPlainObject);
+
+/**
+ * The filter in the object form, or `null` when it cannot be lowered (see the
+ * file header). `undefined` is no filter.
+ */
+function objectFormOf(filter: unknown): Record<string, unknown> | undefined | null {
+  if (filter === undefined || filter === null) return undefined;
+  if (splits(filter)) return filter;
+  try {
+    const lowered: unknown = composeDrillFilter(filter, undefined);
+    return lowered === undefined || splits(lowered) ? lowered : null;
+  } catch (error) {
+    if (error instanceof FilterOperatorError) return null;
+    throw error;
+  }
 }
 
 /** The rows one `{ field: condition }` part reads as, or `null` when it is no row. */
@@ -87,7 +118,7 @@ export interface DrillListConditions {
   /** The conditions drawn as the list's chips, its `initialFilters`. */
   chips: FilterBuilderRowGroup;
   /** What no chip can say, kept as the list's base `filter`; `undefined` when nothing is left. */
-  rest: Record<string, unknown> | undefined;
+  rest: Record<string, unknown> | unknown[] | undefined;
 }
 
 /**
@@ -108,13 +139,18 @@ export interface DrillListConditionOptions {
 
 /** Split a resolved drill filter into chip rows and the rest (see the file header). */
 export function drillListConditions(
-  filter: Record<string, unknown> | undefined,
+  filter: unknown,
   { dateFields }: DrillListConditionOptions = {},
 ): DrillListConditions {
   const conditions: FilterBuilderRow[] = [];
+  const lowered = objectFormOf(filter);
+  // Not lowered: the list's base filter, exactly as it arrived.
+  if (lowered === null) {
+    return { chips: { logic: 'and', conditions }, rest: filter as Record<string, unknown> | unknown[] };
+  }
   const rest: Record<string, unknown>[] = [];
   const seen = new Set<string>();
-  for (const part of andParts(filter)) {
+  for (const part of andParts(lowered ?? {}) as Record<string, unknown>[]) {
     const [field, condition] = Object.entries(part)[0];
     const rows = rowsOf(field, condition);
     if (!rows) {
