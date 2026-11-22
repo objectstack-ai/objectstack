@@ -88,6 +88,7 @@ const OUTSIDE_OPTIONS = 'outside';
  *   still has none.
  */
 function SettingsPicker({
+  id,
   value,
   options,
   onPick,
@@ -96,6 +97,8 @@ function SettingsPicker({
   testId,
   ariaLabel,
 }: {
+  /** The trigger's id, for a `<label htmlFor>` that names it. */
+  id?: string;
   value: string;
   options: ReadonlyArray<{ value: string; label: string }>;
   onPick: (value: string) => void;
@@ -116,7 +119,7 @@ function SettingsPicker({
       }}
       disabled={disabled}
     >
-      <SelectTrigger data-testid={testId} className={className} aria-label={ariaLabel}>
+      <SelectTrigger id={id} data-testid={testId} className={className} aria-label={ariaLabel}>
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
@@ -136,6 +139,39 @@ const PICKER_FULL = 'h-7 px-2 py-1 text-[12px]';
 
 /** The classes the inline "add field" picker takes, sized to its label as the native control was. */
 const PICKER_INLINE = 'h-6 w-auto gap-1 px-1.5 py-0.5 text-[11px] text-muted-foreground';
+
+/**
+ * The metadata key a setting writes, drawn as small print beside its title:
+ * the developer's handle on the setting (what code and the API spell), kept
+ * out of the title itself, which speaks the author's language. One click
+ * selects the whole key for copying. It sits OUTSIDE the setting's `<label>`,
+ * so selecting it never opens a picker or flips a switch, and the control's
+ * accessible name stays the title alone.
+ */
+export function SettingKey({ name }: { name: string }) {
+  return (
+    <code
+      data-testid={`setting-key-${name}`}
+      className="select-all rounded bg-muted px-1 font-mono text-[10px] text-muted-foreground"
+    >
+      {name}
+    </code>
+  );
+}
+
+/** A setting's title (its control's label when `htmlFor` is given) and its key. */
+function SettingHeading({ title, settingKey, htmlFor }: { title: string; settingKey: string; htmlFor?: string }) {
+  return (
+    <div className="mb-1 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+      {htmlFor ? (
+        <label htmlFor={htmlFor} className="text-[11px] text-muted-foreground">{title}</label>
+      ) : (
+        <span className="text-[11px] text-muted-foreground">{title}</span>
+      )}
+      <SettingKey name={settingKey} />
+    </div>
+  );
+}
 
 /** A field as a picker option: its label and name, or its name alone. */
 function fieldOption(e: FieldEntry): { value: string; label: string } {
@@ -174,6 +210,8 @@ export function ObjectSettingsPanel({
   // Observed (objectui#11939): an object inspector registered after this panel
   // mounted replaces the "not registered" note below without a remount.
   const DefaultInspector = useRegisteredMetadataDefaultInspector('object');
+  const idBase = React.useId();
+  const controlId = (key: string) => `${idBase}-${key}`;
 
   const fields = React.useMemo(() => readFields(draft.fields).entries, [draft.fields]);
   const selectFields = fields.filter((e) => (e.def.type ?? 'text') === 'select');
@@ -286,11 +324,14 @@ export function ObjectSettingsPanel({
           </span>
         </header>
         <div className="grid max-w-xl gap-2 p-3">
-          <label className="block">
-            <span className="mb-1 block text-[11px] text-muted-foreground">
-              {t('engine.studio.settings.sharingModel', locale)}
-            </span>
+          <div>
+            <SettingHeading
+              title={t('engine.studio.settings.sharingModel', locale)}
+              settingKey="sharingModel"
+              htmlFor={controlId('sharingModel')}
+            />
             <SettingsPicker
+              id={controlId('sharingModel')}
               testId="owd-internal-select"
               value={sharingModel}
               disabled={disabled}
@@ -298,7 +339,7 @@ export function ObjectSettingsPanel({
               className={PICKER_FULL}
               options={owdOptions}
             />
-          </label>
+          </div>
           {/* An UNSET internal OWD is not a neutral state — the publish door
               refuses it (`security-owd-unset`). Styled as the problem it is:
               "this authoring choice will be rejected at publish" — reading it
@@ -331,11 +372,14 @@ export function ObjectSettingsPanel({
         </header>
         <div className="grid max-w-xl gap-4 p-3">
           {/* nameField */}
-          <label className="block">
-            <span className="mb-1 block text-[11px] text-muted-foreground">
-              {t('engine.studio.settings.nameField', locale)}
-            </span>
+          <div>
+            <SettingHeading
+              title={t('engine.studio.settings.nameField', locale)}
+              settingKey="nameField"
+              htmlFor={controlId('nameField')}
+            />
             <SettingsPicker
+              id={controlId('nameField')}
               testId="name-field-select"
               value={nameField}
               disabled={disabled}
@@ -346,14 +390,17 @@ export function ObjectSettingsPanel({
                 ...fields.map(fieldOption),
               ]}
             />
-          </label>
+          </div>
 
           {/* stageField */}
-          <label className="block">
-            <span className="mb-1 block text-[11px] text-muted-foreground">
-              {t('engine.studio.settings.stageField', locale)}
-            </span>
+          <div>
+            <SettingHeading
+              title={t('engine.studio.settings.stageField', locale)}
+              settingKey="stageField"
+              htmlFor={controlId('stageField')}
+            />
             <SettingsPicker
+              id={controlId('stageField')}
               testId="stage-field-select"
               value={stageField === false ? '__none__' : (stageField ?? '')}
               disabled={disabled}
@@ -365,13 +412,11 @@ export function ObjectSettingsPanel({
                 ...selectFields.map(fieldOption),
               ]}
             />
-          </label>
+          </div>
 
           {/* highlightFields */}
           <div>
-            <span className="mb-1 block text-[11px] text-muted-foreground">
-              {t('engine.studio.settings.highlightFields', locale)}
-            </span>
+            <SettingHeading title={t('engine.studio.settings.highlightFields', locale)} settingKey="highlightFields" />
             <HighlightFieldsEditor
               value={highlightFields}
               fields={fields}
@@ -398,9 +443,7 @@ export function ObjectSettingsPanel({
 
           {/* relatedLists (objectstack#27069) */}
           <div>
-            <span className="mb-1 block text-[11px] text-muted-foreground">
-              {t('engine.studio.settings.relatedLists', locale)}
-            </span>
+            <SettingHeading title={t('engine.studio.settings.relatedLists', locale)} settingKey="relatedLists" />
             <RelatedListsEditor
               name={name}
               draft={draft}
@@ -439,9 +482,13 @@ export function ObjectSettingsPanel({
           {CAPABILITIES.map(({ key, optIn, labelKey, descKey }) => {
             const raw = enable[key];
             const checked = optIn ? raw === true : raw !== false;
+            // The title and the description both label the switch; the key
+            // between them does not (see `SettingKey`).
+            const id = controlId(`enable.${key}`);
             return (
-              <label key={key} className="flex items-start gap-2">
+              <div key={key} className="flex items-start gap-2">
                 <input
+                  id={id}
                   type="checkbox"
                   checked={checked}
                   disabled={disabled}
@@ -450,10 +497,13 @@ export function ObjectSettingsPanel({
                   className="mt-0.5"
                 />
                 <span className="min-w-0">
-                  <span className="block text-[12px]">{t(labelKey, locale)}</span>
-                  <span className="block text-[11px] text-muted-foreground">{t(descKey, locale)}</span>
+                  <span className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                    <label htmlFor={id} className="text-[12px]">{t(labelKey, locale)}</label>
+                    <SettingKey name={`enable.${key}`} />
+                  </span>
+                  <label htmlFor={id} className="block text-[11px] text-muted-foreground">{t(descKey, locale)}</label>
                 </span>
-              </label>
+              </div>
             );
           })}
         </div>
