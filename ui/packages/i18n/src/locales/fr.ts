@@ -1530,6 +1530,7 @@ const fr = {
     approvalPendingEditable: "En approbation · modifiable",
     approvalPendingTooltip: "Cet enregistrement a une demande d'approbation en attente ; cette étape autorise encore la modification",
     approvalPending: "En approbation",
+    approvalPendingStep: "En approbation · {{step}}",
     approvalPendingNotEditableTooltip: "Cet enregistrement a une demande d'approbation en attente",
     approvalProgress: "Approbations — {{got}} sur {{need}}",
     approvalProgressGroups: "Validation — {{got}} sur {{need}} groupes",
@@ -1636,7 +1637,8 @@ const fr = {
     relatedHiddenCount_other: "{{count}} masquées",
     relatedShowHidden: "Afficher",
     recordTabs: "Onglets de l'enregistrement",
-    recordTabOverview: "Aperçu",
+    recordTabOverview: "Détails",
+    detailsColumnResize: "Redimensionner la colonne des détails",
     recordTabMoveBefore: "Déplacer à gauche",
     recordTabMoveAfter: "Déplacer à droite",
     recordTabsMore: "{{count}} onglets de plus",
@@ -1648,7 +1650,9 @@ const fr = {
     recordTabsMoreTrigger_one: "Plus {{count}}",
     recordTabsMoreTrigger_many: "Plus {{count}}",
     recordTabsMoreTrigger_other: "Plus {{count}}",
-    // objectstack#35596 — the 概览 tab's summary rail.
+    // objectstack#35596 — the 概览 tab's summary rail. objectstack#35890 retired the rail;
+    // these keys (and relatedColumn, relatedHiddenCount, relatedShowHidden,
+    // shortcuts.toggleRelated) stay published, unread, until a separate change retires them.
     summaryApprovalDone: "Approuvé",
     summaryApprovalMine: "En attente de vous",
     summaryApprovalWaitingOn: "En attente de {{name}}",

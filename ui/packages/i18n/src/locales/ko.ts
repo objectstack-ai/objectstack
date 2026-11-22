@@ -1487,6 +1487,7 @@ const ko = {
     approvalPendingEditable: "승인 진행 중 · 편집 가능",
     approvalPendingTooltip: "이 레코드에 대기 중인 승인 요청이 있지만 이 단계에서는 편집할 수 있습니다",
     approvalPending: "승인 진행 중",
+    approvalPendingStep: "승인 진행 중 · {{step}}",
     approvalPendingNotEditableTooltip: "이 레코드에 대기 중인 승인 요청이 있습니다",
     approvalProgress: "승인 — {{need}}건 중 {{got}}건",
     approvalProgressGroups: "합의 — {{need}}개 그룹 중 {{got}}개",
@@ -1589,7 +1590,8 @@ const ko = {
     relatedHiddenCount_other: "{{count}}개 숨김",
     relatedShowHidden: "표시",
     recordTabs: "레코드 탭",
-    recordTabOverview: "개요",
+    recordTabOverview: "상세정보",
+    detailsColumnResize: "세부 정보 열 너비 조정",
     recordTabMoveBefore: "왼쪽으로 이동",
     recordTabMoveAfter: "오른쪽으로 이동",
     recordTabsMore: "탭 {{count}}개 더",
@@ -1599,7 +1601,9 @@ const ko = {
     recordTabsMoreTrigger: "더보기 {{count}}",
     recordTabsMoreTrigger_one: "더보기 {{count}}",
     recordTabsMoreTrigger_other: "더보기 {{count}}",
-    // objectstack#35596 — the 概览 tab's summary rail.
+    // objectstack#35596 — the 概览 tab's summary rail. objectstack#35890 retired the rail;
+    // these keys (and relatedColumn, relatedHiddenCount, relatedShowHidden,
+    // shortcuts.toggleRelated) stay published, unread, until a separate change retires them.
     summaryApprovalDone: "승인됨",
     summaryApprovalMine: "내 승인 대기",
     summaryApprovalWaitingOn: "{{name}} 승인 대기",
