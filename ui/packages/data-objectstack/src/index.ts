@@ -6520,6 +6520,10 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
             if (spec[key] !== undefined) row[key] = spec[key];
           }
           row.isDefault = !!spec.isDefault;
+          // objectstack#36011 — the record's override declaration (ADR-0146
+          // D2, on the record's top level), so the list can tell a view a
+          // package's customization overrides from the package's own.
+          if (spec.overrides !== undefined) row.overrides = spec.overrides;
           if (isDraft) row._draft = true;
           if (packageId !== undefined) row._packageId = packageId;
           return row;
