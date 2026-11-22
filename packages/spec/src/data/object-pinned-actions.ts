@@ -112,7 +112,8 @@ function pinnedArm(page: ObjectPinnedActionPage) {
 export const OBJECT_PINNED_ACTIONS_SCHEMA = strictObject(
   {
     surface: "this object's `pinnedActions`",
-    history: 'Closed from its first release (objectstack#36366): no key here was ever dropped silently.',
+    // Closed from its first release (objectstack#36366).
+    history: 'Closed from its first release: no key here was ever dropped silently.',
     aliases: { listPage: 'list', recordPage: 'record' },
   },
   {
