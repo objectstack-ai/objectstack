@@ -7,7 +7,7 @@
 
 fix(fields): a lookup pick no longer copies an amount into a field in another currency; the field stays empty and the form says why
 
-Clause-②: yes (narrowing) — a copy that happens today stops: a pick that copied a picked amount into an amount in another currency (a home-currency product price onto a EUR invoice line) now leaves the target empty and says why. Same-currency picks, and every pick on a home-currency document, are unchanged. The three new `@object-ui/i18n` sentences widen the typed locale surface.
+Clause-②: yes (narrowing) — a cross-currency price copy that happens today stops and the line is left empty with a stated reason (ruled B); the new `@object-ui/i18n` keys widen the typed locale surface
 Metadata-protocol: semantic
 
 <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed or renamed, and nothing stored is rewritten: what moved is what a pick copies in the browser. The fix for an author is in the body: the price on a line in another currency is entered by hand. -->
