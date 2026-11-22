@@ -193,6 +193,22 @@ describe('an app-authored elevation sees through the organization wall what its 
       expect([e.code, e.status]).toEqual(['PERMISSION_DENIED', 403]);
     });
 
+    it('a union member’s insert with no active organization lands where every row names an organization it holds', async () => {
+      await expect(
+        applyAppAutomationOrganizationWall(
+          { object: 'task', operation: 'insert', context: actionBody(), data: [{ organization_id: 'org_a' }, { organization_id: 'org_b' }] },
+          depsFor(UNION),
+        ),
+      ).resolves.toBeUndefined();
+      const e = await refusalOf(() =>
+        applyAppAutomationOrganizationWall(
+          { object: 'task', operation: 'insert', context: actionBody(), data: [{ organization_id: 'org_a' }, { name: 'nowhere' }] },
+          depsFor(UNION),
+        ),
+      );
+      expect([e.code, e.status]).toEqual(['PERMISSION_DENIED', 403]);
+    });
+
     it('an insert with no active organization has nowhere to land on a walled tenant object, a crossing operator’s included', async () => {
       for (const deps of [depsFor(UNION), depsFor(NONE, { crossed: true })]) {
         const e = await refusalOf(() =>
@@ -333,7 +349,104 @@ describe('an app-authored elevation sees through the organization wall what its 
     });
   });
 
+  describe('the stored image a write’s before-hooks leave', () => {
+    const member = () => actionBody({ tenantId: 'org_a' });
+
+    it('a judging seam is installed on every judged insert and update, and asks nothing for the caller’s own organization', async () => {
+      for (const operation of ['insert', 'update']) {
+        const deps = depsFor(ORG_A);
+        const opCtx: any = { object: 'task', operation, context: member(), data: { id: 't_1', name: 'x' }, ast: { object: 'task' } };
+        await applyAppAutomationOrganizationWall(opCtx, deps);
+        expect(typeof opCtx.postHookWriteImageCheck?.evaluate).toBe('function');
+        await opCtx.postHookWriteImageCheck.evaluate([{ id: 't_1', organization_id: 'org_a' }]);
+        expect(deps.callerLayer0).not.toHaveBeenCalled();
+      }
+    });
+
+    it('a stored row a before-hook placed in another organization is refused 403; an update left in none is refused', async () => {
+      const insert: any = { object: 'task', operation: 'insert', context: member(), data: { name: 'x' } };
+      await applyAppAutomationOrganizationWall(insert, depsFor(ORG_A));
+      const placed = await refusalOf(() => insert.postHookWriteImageCheck.evaluate([{ name: 'x', organization_id: 'org_b' }]));
+      expect([placed.code, placed.status]).toEqual(['PERMISSION_DENIED', 403]);
+      const update: any = { object: 'task', operation: 'update', context: member(), data: { id: 't_1', touched: 'x' } };
+      await applyAppAutomationOrganizationWall(update, depsFor(ORG_A, { inScope: true }));
+      const emptied = await refusalOf(() => update.postHookWriteImageCheck.evaluate([{ id: 't_1', organization_id: null }]));
+      expect([emptied.code, emptied.status]).toEqual(['PERMISSION_DENIED', 403]);
+    });
+
+    it('a seam installed before it is kept: it runs first, and is told it ran', async () => {
+      const prior = { evaluate: vi.fn(), honoured: false };
+      const opCtx: any = { object: 'task', operation: 'insert', context: member(), data: { name: 'x' }, postHookWriteImageCheck: prior };
+      await applyAppAutomationOrganizationWall(opCtx, depsFor(ORG_A));
+      await opCtx.postHookWriteImageCheck.evaluate([{ name: 'x' }]);
+      expect(prior.evaluate).toHaveBeenCalledOnce();
+      expect(prior.honoured).toBe(true);
+    });
+
+    it('control: where the caller’s wall has no parts, any stored organization passes', async () => {
+      const opCtx: any = { object: 'catalog', operation: 'insert', context: member(), data: { name: 'x' } };
+      await applyAppAutomationOrganizationWall(opCtx, depsFor(NONE));
+      await expect(opCtx.postHookWriteImageCheck.evaluate([{ organization_id: 'org_b' }])).resolves.toBeUndefined();
+    });
+  });
+
+  describe('the option bag’s tenant keys', () => {
+    const member = () => actionBody({ tenantId: 'org_a' });
+
+    it('a read whose bag names another organization matches nothing; a write is refused 403', async () => {
+      const read: any = { object: 'task', operation: 'find', context: member(), options: { tenantId: 'org_b' }, ast: { object: 'task', where: { a: 1 } } };
+      await applyAppAutomationOrganizationWall(read, depsFor(ORG_A));
+      expect(read.ast.where).toEqual({ $and: [{ a: 1 }, RLS_DENY_FILTER] });
+      for (const operation of ['update', 'delete']) {
+        const e = await refusalOf(() =>
+          applyAppAutomationOrganizationWall(
+            { object: 'task', operation, context: member(), options: { tenantIds: ['org_a', 'org_b'] }, ast: { object: 'task' } },
+            depsFor(ORG_A),
+          ),
+        );
+        expect([e.code, e.status]).toEqual(['PERMISSION_DENIED', 403]);
+      }
+    });
+
+    it('a key a before-hook writes later is judged as it is written', async () => {
+      const write: any = { object: 'task', operation: 'update', context: member(), options: {}, ast: { object: 'task' } };
+      await applyAppAutomationOrganizationWall(write, depsFor(ORG_A));
+      expect(() => {
+        write.options.tenantId = 'org_b';
+      }).toThrow(/organization/);
+      write.options.tenantId = 'org_a';
+      expect(write.options.tenantId).toBe('org_a');
+      const read: any = { object: 'task', operation: 'find', context: member(), options: {}, ast: { object: 'task' } };
+      await applyAppAutomationOrganizationWall(read, depsFor(ORG_A));
+      read.options.tenantId = 'org_b';
+      expect(read.options.tenantId).toBe(RLS_DENY_FILTER.id);
+    });
+
+    it('a guarded key the bag does not carry stays out of its keys until written', async () => {
+      const opCtx: any = { object: 'task', operation: 'find', context: member(), options: { where: {} }, ast: { object: 'task' } };
+      await applyAppAutomationOrganizationWall(opCtx, depsFor(ORG_A));
+      expect(Object.keys(opCtx.options)).toEqual(['where']);
+      opCtx.options.tenantId = 'org_a';
+      expect(Object.keys(opCtx.options)).toEqual(['where', 'tenantId']);
+    });
+
+    it('control: a bag naming the caller’s own organization passes', async () => {
+      const opCtx: any = { object: 'task', operation: 'update', context: member(), options: { tenantId: 'org_a' }, ast: { object: 'task' } };
+      await expect(applyAppAutomationOrganizationWall(opCtx, depsFor(ORG_A))).resolves.toBeUndefined();
+    });
+  });
+
   describe('the by-id check is read where the write runs', () => {
+    it('a transaction the write names in its option bag is carried when its context threads none', async () => {
+      const deps = depsFor(ORG_A, { inScope: true });
+      const context = actionBody({ tenantId: 'org_a', posture: 'PLATFORM_ADMIN' });
+      await applyAppAutomationOrganizationWall(
+        { object: 'task', operation: 'update', context, data: { id: 't_1', touched: 'x' }, options: { transaction: 'trx_2' } },
+        deps,
+      );
+      expect((vi.mocked(deps.rowInScope).mock.calls[0]?.[3] as any)?.transaction).toBe('trx_2');
+    });
+
     it('the write’s own context, transaction included, is handed to the check', async () => {
       const deps = depsFor(ORG_A, { inScope: true });
       const context = { ...actionBody({ tenantId: 'org_a', posture: 'PLATFORM_ADMIN' }), transaction: { handle: 'trx_1' } };

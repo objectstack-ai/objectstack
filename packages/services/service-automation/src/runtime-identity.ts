@@ -291,6 +291,24 @@ export interface SeededRunContext extends AutomationContext {
    * trigger user ({@link runTriggerUserId}).
    */
   triggerUserId?: string | null;
+  /**
+   * The run began for no caller although it names a user: a run that a write
+   * of a decided segment of a run that began for no caller started (the
+   * record-change trigger sets it, from the run-caller mark on the write's hook
+   * session). Its `userId` is that writer — its attribution user and, for every
+   * reader of the run's trigger user (`runTriggerUserId`: an approval's
+   * submitter, the run-state reader, the run history), its trigger user, as on
+   * any run a write starts. Only the organization wall reads this fact: the run
+   * is not judged by the writer's wall, and run setup and the run's data
+   * context take none of the writer's organization facts. Persisted with the
+   * run's context; no launch door can spell it.
+   */
+  beganForNoCaller?: true;
+}
+
+/** Did the run begin for no caller although it names a user ({@link SeededRunContext.beganForNoCaller})? */
+export function runBeganForNoCaller(context: AutomationContext | undefined): boolean {
+  return (context as SeededRunContext | undefined)?.beganForNoCaller === true;
 }
 
 /**
@@ -308,6 +326,8 @@ export interface SeededRunContext extends AutomationContext {
  */
 export function runDecidedSegmentCaller(context: AutomationContext | undefined): string | null | undefined {
   const seeded = context as SeededRunContext | undefined;
+  // A run that began for no caller names none, in every segment.
+  if (runBeganForNoCaller(seeded)) return null;
   if (!seeded || !Object.prototype.hasOwnProperty.call(seeded, 'triggerUserId')) return undefined;
   return typeof seeded.triggerUserId === 'string' && seeded.triggerUserId !== '' ? seeded.triggerUserId : null;
 }
@@ -536,8 +556,12 @@ export function resolveRunDataContext(context: AutomationContext | undefined): R
       // engine scopes the run's driver calls by the same set under `group`.
       // Carried only when the run context carries them; the wall resolves them
       // for the user otherwise.
-      ...(context.userId && runAccessibleOrgIds(context) ? { accessible_org_ids: runAccessibleOrgIds(context) } : {}),
-      ...(context.userId && runPosture(context) ? { posture: runPosture(context) } : {}),
+      // The run user's organization facts, for the wall the run meets — none
+      // for a run that began for no caller: its user is attribution only.
+      ...(context.userId && !runBeganForNoCaller(context) && runAccessibleOrgIds(context)
+        ? { accessible_org_ids: runAccessibleOrgIds(context) }
+        : {}),
+      ...(context.userId && !runBeganForNoCaller(context) && runPosture(context) ? { posture: runPosture(context) } : {}),
       ...(flowRunId ? { flowRunId } : {}),
       ...(locale ? { locale } : {}),
       ...(impersonatedBy ? { impersonatedBy } : {}),

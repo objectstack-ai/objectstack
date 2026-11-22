@@ -32,6 +32,7 @@ import { OrganizationsPlugin } from './organizations-plugin.js';
 const TASK = 'eop_task';
 const NOTE = 'eop_note';
 const PING = 'eop_ping';
+const SWEEP_PING = 'eop_sweep_ping';
 
 const APP = {
   manifest: { id: 'com.example.eop', namespace: 'eop', version: '0.0.1', type: 'app', name: 'Elevated Org Wall Postures Fixture' },
@@ -42,6 +43,14 @@ const APP = {
       label: 'Task',
       sharingModel: 'public_read_write',
       fields: { name: { type: 'text', label: 'Name' }, touched: { type: 'text', label: 'Touched' } },
+    },
+    {
+      // Outside tenancy: a caller-less run's decided segment writes it.
+      name: SWEEP_PING,
+      label: 'Sweep ping',
+      sharingModel: 'public_read_write',
+      tenancy: { enabled: false },
+      fields: { name: { type: 'text', label: 'Name' } },
     },
     {
       name: PING,
@@ -113,6 +122,62 @@ const APP = {
         { id: 'e2', source: 'hold', target: 'read' },
         { id: 'e3', source: 'read', target: 'report' },
         { id: 'e4', source: 'report', target: 'end' },
+      ],
+    },
+    {
+      // A run that begins for no caller and, after a human decision, writes a
+      // record whose change starts another system run.
+      name: 'eop_sys_sweep_ping',
+      label: 'System sweep ping',
+      type: 'autolaunched',
+      status: 'active',
+      runAs: 'system',
+      nodes: [
+        { id: 'start', type: 'start', label: 'Start' },
+        { id: 'hold', type: 'wait', label: 'Hold', waitEventConfig: { eventType: 'signal', signalName: 'eop.decided.ping' } },
+        { id: 'ping', type: 'create_record', label: 'Ping', config: { objectName: SWEEP_PING, fields: { name: 'from-decided' } } },
+        { id: 'end', type: 'end', label: 'End' },
+      ],
+      edges: [
+        { id: 'e1', source: 'start', target: 'hold' },
+        { id: 'e2', source: 'hold', target: 'ping' },
+        { id: 'e3', source: 'ping', target: 'end' },
+      ],
+    },
+    {
+      name: 'eop_rc_sweep_count',
+      label: 'Record-change count',
+      type: 'record_change',
+      status: 'active',
+      runAs: 'system',
+      variables: [
+        { name: 'found', type: 'record_collection', isInput: false, isOutput: false },
+        { name: 'foundA1', type: 'record_collection', isInput: false, isOutput: false },
+      ],
+      nodes: [
+        { id: 'start', type: 'start', label: 'Start', config: { objectName: SWEEP_PING, triggerType: 'record-after-create' } },
+        { id: 'read', type: 'get_record', label: 'Read', config: { objectName: TASK, limit: 100, outputVariable: 'found' } },
+        { id: 'readA1', type: 'get_record', label: 'Read A1', config: { objectName: TASK, filter: { name: 'A1' }, limit: 100, outputVariable: 'foundA1' } },
+        {
+          id: 'report',
+          type: 'create_record',
+          label: 'Report',
+          config: { objectName: NOTE, fields: { name: 'seen-sweep-rc', seen: { dialect: 'cel', source: 'string(size(found))' } } },
+        },
+        {
+          id: 'reportA1',
+          type: 'create_record',
+          label: 'Report A1',
+          config: { objectName: NOTE, fields: { name: 'seen-sweep-rc-a1', seen: { dialect: 'cel', source: 'string(size(foundA1))' } } },
+        },
+        { id: 'end', type: 'end', label: 'End' },
+      ],
+      edges: [
+        { id: 'e1', source: 'start', target: 'read' },
+        { id: 'e2', source: 'read', target: 'readA1' },
+        { id: 'e3', source: 'readA1', target: 'report' },
+        { id: 'e4', source: 'report', target: 'reportA1' },
+        { id: 'e5', source: 'reportA1', target: 'end' },
       ],
     },
     {
@@ -331,6 +396,31 @@ describe('group: a system flow run for a member of two organizations reads exact
     }
     expect(seen).toBe('2');
   });
+
+  // A caller-less run decided by a member of ONE organization (carol): the run
+  // its post-decision write starts begins for no caller, so it is bounded by
+  // nothing of the decider's — not her memberships, not her organization.
+  for (const leg of ['no organization', 'an organization the decider does not hold'] as const) {
+    it(`a run a caller-less run’s decided segment starts by its write takes nothing of the decider (${leg})`, async () => {
+      await clearNotes(orgA);
+      const automation: any = await stack.kernel.getServiceAsync('automation');
+      const [carol] = await ql.find('sys_user', { where: { email: 'eop-carol@verify.test' }, limit: 1 }, SYS);
+      const paused = await automation.execute('eop_sys_sweep_ping', leg === 'no organization' ? {} : { tenantId: orgA });
+      expect(paused.status, JSON.stringify(paused)).toBe('paused');
+      const resumed = await automation.resume(paused.runId, { [RESUME_AUTHORITY_SERVICE]: true, resumedBy: carol.id });
+      expect(resumed.success, JSON.stringify(resumed)).toBe(true);
+      let seenA1: unknown;
+      for (let i = 0; i < 50 && seenA1 === undefined; i++) {
+        seenA1 = await noteSeen('seen-sweep-rc-a1');
+        if (seenA1 === undefined) await new Promise((done) => setTimeout(done, 100));
+      }
+      // No organization: every organization's row. The run's own organization
+      // (A, which the decider does not hold): that organization's row, as the
+      // run's own context scopes it — never the decider's.
+      expect(await noteSeen('seen-sweep-rc')).toBe(leg === 'no organization' ? '3' : '1');
+      expect(seenA1).toBe('1');
+    });
+  }
 
   it('after a decision by another user, the run is still judged by the member it began for', async () => {
     await clearNotes(orgA);

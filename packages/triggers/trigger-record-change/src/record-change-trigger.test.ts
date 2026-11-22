@@ -178,8 +178,11 @@ describe('RecordChangeTrigger', () => {
 
         expect(seen).toHaveLength(2);
         expect(seen[0].userId).toBe('u_decider');
-        expect((seen[0] as Record<string, unknown>).triggerUserId).toBeNull();
-        expect('triggerUserId' in seen[1]).toBe(false);
+        // The caller-less fact rides its own key; the writer stays the run's
+        // trigger user for every other reader (no `triggerUserId` is written).
+        expect((seen[0] as Record<string, unknown>).beganForNoCaller).toBe(true);
+        expect('triggerUserId' in seen[0]).toBe(false);
+        expect('beganForNoCaller' in seen[1]).toBe(false);
     });
 
     it('does not register a hook for an unsupported trigger event', () => {

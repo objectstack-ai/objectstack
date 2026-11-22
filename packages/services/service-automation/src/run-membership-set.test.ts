@@ -89,6 +89,14 @@ describe('[ADR-0093 D8.1] a runAs:\'user\' run carries the acting user\'s member
         expect(data.positions).toBeUndefined();
     });
 
+    it('a runAs:\'system\' run that began for no caller resolves nothing of the user it names', async () => {
+        const run: any = { userId: 'u_writer', tenantId: 'org_1', runAs: 'system', beganForNoCaller: true };
+        const h = host({ ...MEMBER_GRANTS, posture: 'MEMBER' });
+        await seedRunGrants.call(h, 'downstream', run, 'triggering');
+        expect(h.userGrantsResolver).not.toHaveBeenCalled();
+        expect('accessible_org_ids' in (resolveRunDataContext(run) as object)).toBe(false);
+    });
+
     it('a runAs:\'system\' run that names no user resolves nothing and carries no set', async () => {
         const run: any = { tenantId: 'org_1', runAs: 'system' };
         const h = host(MEMBER_GRANTS);

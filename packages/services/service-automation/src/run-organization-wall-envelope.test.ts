@@ -59,6 +59,18 @@ describe('a system run carries what the organization wall reads about its caller
     expect(runCallerOf(ctx)).toBeNull();
   });
 
+  it('a run that began for no caller though it names a user carries none of that user’s organization facts, and is marked as having no caller', () => {
+    const ctx = resolveRunDataContext(
+      system({ userId: 'u_writer', tenantId: 'org_x', accessible_org_ids: ['org_c'], posture: 'MEMBER', beganForNoCaller: true }),
+    ) as unknown as Record<string, unknown>;
+    expect(ctx).toMatchObject({ isSystem: true, userId: 'u_writer', tenantId: 'org_x' });
+    expect(ctx.accessible_org_ids).toBeUndefined();
+    expect(ctx.posture).toBeUndefined();
+    expect(runCallerOf(ctx)).toBeNull();
+    // …after a decision too, whoever decides.
+    expect(runCallerOf(resolveRunDataContext(system({ userId: 'u_decider', triggerUserId: 'u_writer', beganForNoCaller: true })))).toBeNull();
+  });
+
   it('a decided segment of a run that began for a caller names that caller, not the decider', () => {
     const ctx = resolveRunDataContext(system({ userId: 'u_decider', triggerUserId: 'u_alice' }));
     expect((ctx as unknown as Record<string, unknown>).userId).toBe('u_decider');

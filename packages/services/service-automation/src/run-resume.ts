@@ -20,7 +20,7 @@ import type { FlowParsed, FlowRunSummary } from '@objectstack/spec/automation';
 import type { DroppedFieldsEvent } from '@objectstack/spec/data';
 import type { AutomationContext, AutomationResult, ResumeSignal } from '@objectstack/spec/contracts';
 import { RESUME_AUTHORITY_SERVICE } from '@objectstack/spec/contracts';
-import { runIsUnscopedUserMode, flowTouchesData, runAccessibleOrgIds, runOrgUserIds, runTriggerUserId, type SeededRunContext } from './runtime-identity.js';
+import { runIsUnscopedUserMode, flowTouchesData, runAccessibleOrgIds, runBeganForNoCaller, runOrgUserIds, runTriggerUserId, type SeededRunContext } from './runtime-identity.js';
 import { refuseNode } from './guard-refusal.js';
 import { describeThrownForLog } from './thrown-cause-diagnostics.js';
 import { carriedRefusalOfResult, readCarriedRefusal } from './inner-refusal.js';
@@ -254,7 +254,9 @@ export async function seedRunGrants(
     // span the union of the user's memberships, as the user's request does.
     // A run that names no user gains nothing; a decided segment keeps the
     // facts of the run it belongs to (the wall judges it by that run's caller).
-    if (runContext.runAs === 'system' && whose === 'triggering' && runContext.userId && this.userGrantsResolver) {
+    // A run that began for no caller takes nothing of the user it names (its
+    // writer, attribution only): no set, no rung (`runBeganForNoCaller`).
+    if (runContext.runAs === 'system' && whose === 'triggering' && runContext.userId && !runBeganForNoCaller(runContext) && this.userGrantsResolver) {
         const needsRung = (runContext as SeededRunContext).posture === undefined;
         if (needsMembership || needsRung) {
             try {
