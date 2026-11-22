@@ -10,7 +10,7 @@
  * `HonoHttpServer` production resolves as `http.server`); the error-reporting
  * case adds the REAL `RuntimeConfigPlugin`, so the `connect-src` follows what
  * that door serves; the storage cases add the REAL `StorageServicePlugin`, so
- * the `connect-src` follows the adapter it builds.
+ * the `connect-src` and `frame-src` follow the adapter it builds.
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
@@ -522,6 +522,97 @@ describe('connect-src names the host the storage service presigns browser upload
       'https://glyphs.example.com',
     ]);
   });
+});
+
+/** A storage service whose adapter answers `origin` for its presigned uploads, as a fake for answers no real adapter gives. */
+function storageAnswering(origin: unknown): Map<string, unknown> {
+  return new Map<string, unknown>([['storage', { getPresignedUploadOrigin: async () => origin }]]);
+}
+
+describe('frame-src names the storage origin the file preview frames a PDF from, and nothing wider', () => {
+  const TURNSTILE = 'https://challenges.cloudflare.com';
+  const R2_ORIGIN = 'https://csp-uploads.acct123.r2.cloudflarestorage.com';
+
+  it('is left to default-src \'self\' when the deployment stores files on the local disk', async () => {
+    const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'os-test-console-csp-frame-'));
+    try {
+      const request = await mount({ services: await storageServices({ adapter: 'local', local: { rootDir } }) });
+      const policy = directives((await request('/_console/')).headers.get('content-security-policy'));
+      expect(policy.has('frame-src')).toBe(false);
+      expect(policy.get('default-src')).toEqual(["'self'"]);
+    } finally {
+      fs.rmSync(rootDir, { recursive: true, force: true });
+    }
+  });
+
+  it('gains exactly the store\'s origin, beside \'self\', when the deployment stores files in S3', async () => {
+    const request = await mount({ services: await storageServices(R2_STORAGE) });
+    const policy = directives((await request('/_console/')).headers.get('content-security-policy'));
+    expect(policy.get('frame-src')).toEqual(["'self'", R2_ORIGIN]);
+  });
+
+  it('names exactly the origin of a real signed download link from the same storage service', async () => {
+    process.env.AWS_ACCESS_KEY_ID = 'AKIAFAKEFAKEFAKEFAKE';
+    process.env.AWS_SECRET_ACCESS_KEY = 'fake-secret-access-key';
+    for (const options of [
+      R2_STORAGE,
+      { adapter: 's3', s3: { bucket: 'csp-uploads', region: 'eu-west-2', keyPrefix: null } },
+      { adapter: 's3', s3: { bucket: 'csp.uploads.example', region: 'us-east-1', keyPrefix: null } },
+      { adapter: 's3', s3: { bucket: 'csp-uploads', region: 'us-east-1', endpoint: 'http://127.0.0.1:9000', keyPrefix: null } },
+      { adapter: 's3', s3: { bucket: 'csp-uploads', region: 'auto', endpoint: 'https://minio.example.com', forcePathStyle: true, keyPrefix: null } },
+    ] satisfies StorageServicePluginOptions[]) {
+      const services = await storageServices(options);
+      // The link the download doors and the record-file read hand the preview.
+      const signed = await (services.get('storage') as S3StorageAdapter).getPresignedDownload(
+        'a/contract.pdf', 60, { filename: 'contract.pdf', contentType: 'application/pdf' },
+      );
+      const request = await mount({ services });
+      const policy = directives((await request('/_console/')).headers.get('content-security-policy'));
+      expect(policy.get('frame-src'), options.s3?.endpoint ?? options.s3?.region).toEqual([
+        "'self'",
+        new URL(signed.downloadUrl).origin,
+      ]);
+    }
+  });
+
+  it('keeps \'self\' and the Turnstile frame beside the store\'s origin while both are on, and nothing more', async () => {
+    process.env.OS_TURNSTILE_SITE_KEY = 'site-key-csp';
+    process.env.OS_TURNSTILE_SECRET_KEY = 'secret-key-csp';
+    const request = await mount({ services: await storageServices(R2_STORAGE) });
+    const policy = directives((await request('/_console/register')).headers.get('content-security-policy'));
+    expect(policy.get('frame-src')).toEqual(["'self'", TURNSTILE, R2_ORIGIN]);
+  });
+
+  it('never takes the hosts an operator names for connect-src', async () => {
+    process.env.OS_CONSOLE_CSP_CONNECT_SRC = 'https://glyphs.example.com https:';
+    const request = await mount({ services: await storageServices(R2_STORAGE) });
+    const policy = directives((await request('/_console/')).headers.get('content-security-policy'));
+    expect(policy.get('connect-src')).toContain('https://glyphs.example.com');
+    expect(policy.get('frame-src')).toEqual(["'self'", R2_ORIGIN]);
+  });
+
+  it('is not widened, in either directive, when the store\'s endpoint is one the presigner refuses', async () => {
+    const warnings: string[] = [];
+    const services = await storageServices({ adapter: 's3', s3: { bucket: 'csp-uploads', region: 'auto', endpoint: 'not a url', keyPrefix: null } });
+    const request = await mount({ services, warnings });
+    const policy = directives((await request('/_console/')).headers.get('content-security-policy'));
+    expect(policy.has('frame-src')).toBe(false);
+    expect(policy.get('connect-src')).toEqual(["'self'", 'https://demotiles.maplibre.org']);
+    expect(warnings.filter((w) => w.includes('presigns uploads to'))).toHaveLength(1);
+  });
+
+  for (const answer of ['https:', 'https://*.example.com', 'https://store.example.com/bucket', 'wss://store.example.com', 42]) {
+    it(`is not widened, in either directive, when the storage service answers ${JSON.stringify(answer)}, and says so once`, async () => {
+      const warnings: string[] = [];
+      const request = await mount({ services: storageAnswering(answer), warnings });
+      for (let i = 0; i < 2; i += 1) {
+        const policy = directives((await request('/_console/')).headers.get('content-security-policy'));
+        expect(policy.has('frame-src')).toBe(false);
+        expect(policy.get('connect-src')).toEqual(["'self'", 'https://demotiles.maplibre.org']);
+      }
+      expect(warnings.filter((w) => w.includes('presigns uploads to'))).toHaveLength(1);
+    });
+  }
 });
 
 describe('the opt-in Turnstile challenge on sign-up', () => {
