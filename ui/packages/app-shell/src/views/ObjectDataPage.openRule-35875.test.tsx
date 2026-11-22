@@ -132,11 +132,12 @@ function RecordPageProbe() {
   const recordId = location.pathname.split('/').pop();
   const pageReturn = useRecordPageReturn(recordId);
   const from = (location.state as { from?: unknown } | null)?.from;
+  const position = pageReturn.stepper?.position;
   return (
     <div data-testid="record-page">
       <output data-testid="record-from">{JSON.stringify(from ?? null)}</output>
       <output data-testid="record-position">
-        {pageReturn.stepper ? `${pageReturn.stepper.position.index + 1}/${pageReturn.stepper.position.total}` : ''}
+        {position ? `${position.index + 1}/${position.total}` : ''}
       </output>
       {pageReturn.toList && (
         <button type="button" data-testid="record-close" onClick={pageReturn.toList}>close</button>
