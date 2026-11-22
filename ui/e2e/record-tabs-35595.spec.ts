@@ -10,21 +10,24 @@ import { uiRoot } from '../scripts/ui-root.mjs';
 
 /**
  * GEOMETRY and INTERACTION pin for objectstack#35595 (the record page's tab
- * row) and objectstack#35596 (the 概览 tab's right rail), zh-CN.
+ * row) and objectstack#35890 (the pinned details; the 概览 right rail of
+ * objectstack#35596 is retired), zh-CN.
  *
  *   - The tab row folds by WIDTH only: a row sized from its own measured
  *     tabs to hold the first eight draws exactly those and folds the tail
  *     into 「更多 N ▾」, whose items keep their counts; CONTROL, the same page
  *     at the 1184 px a 1440 window leaves draws every tab.
- *   - On 概览 the stage path and the key fields are at the top across the
- *     whole width — both columns; CONTROL, the details column beside the rail
- *     is narrower than they are. Since objectstack#35891 the default page
- *     draws no strip, so the fixture places one in the `highlights` slot, as
- *     an authored page does.
- *   - The rail is the 概览 tab's: another tab open draws no rail and no
- *     strip; CONTROL, back on 概览 both are drawn again.
- *   - A rail card's title opens its tab; CONTROL, the 概览 tab returns.
- *   - A card measures radius 8, a 14 px title with a grey count, 26 px rows.
+ *   - Not a full page (the drawer): one column. The stage path and the key
+ *     fields sit at the top of 「详情」 across the details' width, and no
+ *     page draws a rail. Since objectstack#35891 the default page draws no
+ *     strip, so the fixture places one in the `highlights` slot, as an
+ *     authored page does.
+ *   - The strip is 「详情」's: another tab open draws no strip; CONTROL, back
+ *     on 「详情」 it is drawn again.
+ *   - objectstack#35890: a full page wide enough pins the details 400 px on
+ *     the left and draws the other tabs beside them, opening on the first
+ *     list; dragging the separator widens the details and never leaves the
+ *     tabs less than 400 px.
  *   - objectstack#35783: an open list's tab is its menu — 「左移」 / 「右移」
  *     move it, 「隐藏」 sends it to 「更多」 — and 「更多」's 「恢复默认顺序」
  *     brings the default back. Order only: no width is read.
@@ -36,8 +39,7 @@ import { uiRoot } from '../scripts/ui-root.mjs';
  *
  * ## What is real here and what is a fixture
  *
- * REAL: plugin-detail's `RecordPageColumns`, `RecordTabRow` and
- * `RecordSummaryRail`, the page synthesizer (`buildDefaultPageSchema` →
+ * REAL: plugin-detail's `RecordPageColumns` and `RecordTabRow`, the page synthesizer (`buildDefaultPageSchema` →
  * `buildDefaultPageColumns`), the related-count store and the zh-Hans pack
  * through `I18nProvider`, bundled by Vite from their source files and mounted
  * in Chromium with React's client renderer; the stylesheet is real Tailwind,
@@ -58,7 +60,8 @@ import { uiRoot } from '../scripts/ui-root.mjs';
  *     fold, a width computed from what the row measures its own tabs at
  *     (below); 1184 px (a 1440 window with the sidebar open) for its
  *     CONTROL; and 1024 px (a 1280 × 800 window with the sidebar open) for
- *     the 概览 placement and the rail.
+ *     the 「详情」 placement and the pinned layout. The host is the drawer's
+ *     (`fullPage` off) unless the case says `fullPage`.
  *   - Fonts are whatever the machine has, and the fold does not depend on
  *     them. A CJK label is about 13 px a glyph where a CJK font is installed
  *     and about 8 px where none is (measured: 概览 26 px against 16 px), so
@@ -99,19 +102,21 @@ interface Case {
   name: string;
   viewport: number;
   frame: number;
+  /** objectstack#35890 — the full record page, which pins its details when it fits. */
+  fullPage?: boolean;
 }
 
-const ENTRY = '\0record-tabs-rail:entry';
-const REACT_SHIM = '\0record-tabs-rail:react';
-const STUB = '\0record-tabs-rail:stub';
+const ENTRY = '\0record-tabs-35595:entry';
+const REACT_SHIM = '\0record-tabs-35595:react';
+const STUB = '\0record-tabs-35595:stub';
 
 /** `@object-ui/<pkg>` to `packages/<pkg>/src`; the page's `@object-ui/react` to the shim. */
 function workspaceSources(): Plugin {
   return {
-    name: 'record-tabs-rail-workspace-src',
+    name: 'record-tabs-35595-workspace-src',
     enforce: 'pre',
     async resolveId(id, importer) {
-      if (id === 'record-tabs-rail:react-real') {
+      if (id === 'record-tabs-35595:react-real') {
         return this.resolve(REACT_BINDINGS, importer, { skipSelf: true });
       }
       const m = /^@object-ui\/([a-z0-9-]+)(?:\/(.+))?$/.exec(id);
@@ -156,7 +161,7 @@ export function SchemaRenderer({ schema }) {
 `;
 
 const SHIM_CODE = `
-export * from 'record-tabs-rail:react-real';
+export * from 'record-tabs-35595:react-real';
 export { SchemaRenderer } from ${JSON.stringify(STUB)};
 `;
 
@@ -165,7 +170,7 @@ function entry(): Plugin {
   const code = `
 import * as React from 'react';
 import { createRoot } from 'react-dom/client';
-import { RecordContextProvider } from 'record-tabs-rail:react-real';
+import { RecordContextProvider } from 'record-tabs-35595:react-real';
 import { I18nProvider } from ${JSON.stringify(I18N)};
 import { RelatedCountStore } from ${JSON.stringify(COUNT_STORE)};
 import { RecordPageColumns } from ${JSON.stringify(PAGE_COLUMNS)};
@@ -219,6 +224,7 @@ function Host() {
   const [open, setOpen] = React.useState(undefined);
   return h(RecordPageColumns, {
     tier: recordPageTierFor(c.frame),
+    fullPage: !!c.fullPage,
     columns,
     enlargedRelated: open,
     onEnlargeRelated: setOpen,
@@ -242,8 +248,8 @@ window.__remount = () => {
 window.__remount();
 `;
   return {
-    name: 'record-tabs-rail-entry',
-    resolveId: (id) => (id === 'record-tabs-rail:entry' ? ENTRY : id === REACT_SHIM || id === STUB ? id : null),
+    name: 'record-tabs-35595-entry',
+    resolveId: (id) => (id === 'record-tabs-35595:entry' ? ENTRY : id === REACT_SHIM || id === STUB ? id : null),
     load: (id) => (id === ENTRY ? code : id === REACT_SHIM ? SHIM_CODE : id === STUB ? STUB_CODE : null),
   };
 }
@@ -254,7 +260,7 @@ async function bundlePage(): Promise<string> {
     configFile: false,
     root: REPO_ROOT,
     // Out of the tree: this run must leave nothing behind in the checkout.
-    cacheDir: path.join(os.tmpdir(), 'objectui-record-tabs-rail'),
+    cacheDir: path.join(os.tmpdir(), 'objectui-record-tabs-35595'),
     logLevel: 'error',
     mode: 'production',
     define: { 'process.env.NODE_ENV': JSON.stringify('production') },
@@ -266,7 +272,7 @@ async function bundlePage(): Promise<string> {
       modulePreload: false,
       reportCompressedSize: false,
       rollupOptions: {
-        input: 'record-tabs-rail:entry',
+        input: 'record-tabs-35595:entry',
         output: { format: 'es', codeSplitting: false },
       },
     },
@@ -330,11 +336,8 @@ const face = (page: Page) =>
   page.evaluate(() => {
     const tabs = [...document.querySelectorAll('[role="tab"]')].map((el) => el.textContent).join('|');
     const more = document.querySelector('[data-record-tab-more]')?.textContent ?? '';
-    const cards = [...document.querySelectorAll('[data-record-summary-card]')]
-      .filter((el) => !(el as HTMLElement).hidden)
-      .map((el) => el.textContent)
-      .join('|');
-    return `${tabs}#${more}#${cards}`;
+    const columns = document.querySelector('[data-record-columns]')?.getAttribute('style') ?? '';
+    return `${tabs}#${more}#${columns}`;
   });
 
 async function settle(page: Page, compiled: Set<string>): Promise<void> {
@@ -348,7 +351,7 @@ async function settle(page: Page, compiled: Set<string>): Promise<void> {
   await styleUntilStable(page, compiled);
 }
 
-/** Mount the case, style it, and wait until the row and the rail hold still. */
+/** Mount the case, style it, and wait until the row and the columns hold still. */
 async function mount(page: Page, c: Case): Promise<Set<string>> {
   await page.setViewportSize({ width: c.viewport, height: 800 });
   await page.setContent('<!doctype html><html lang="zh-CN"><head><style>html,body{margin:0}</style></head><body><div id="root"></div></body></html>');
@@ -403,7 +406,7 @@ const readRow = (page: Page): Promise<RowReading> =>
     };
   });
 
-/** Every tab the page offers, in order: 概览, the eight lists, 附件, 审批, 动态. */
+/** Every tab the page offers, in order: 详情, the eight lists, 附件, 审批, 动态. */
 const ALL_TABS = [
   'overview',
   'contact.account_id',
@@ -420,8 +423,8 @@ const ALL_TABS = [
 ];
 
 function report(testInfo: import('@playwright/test').TestInfo, name: string, reading: unknown): void {
-  testInfo.annotations.push({ type: `record-tabs-rail@${name}`, description: JSON.stringify(reading) });
-  process.stdout.write(`[record-tabs-rail ${name}] ${JSON.stringify(reading)}\n`);
+  testInfo.annotations.push({ type: `record-tabs-35595@${name}`, description: JSON.stringify(reading) });
+  process.stdout.write(`[record-tabs-35595 ${name}] ${JSON.stringify(reading)}\n`);
 }
 
 const box = (page: Page, selector: string) =>
@@ -432,7 +435,7 @@ const box = (page: Page, selector: string) =>
     return { left: Math.round(r.left), right: Math.round(r.right), top: Math.round(r.top), width: Math.round(r.width) };
   }, selector);
 
-test.describe('the record page\'s tabs and 概览 rail, zh-CN (objectstack#35595, objectstack#35596)', () => {
+test.describe('the record page\'s tabs and pinned details, zh-CN (objectstack#35595, objectstack#35890)', () => {
   test.skip(({ browserName }) => browserName !== 'chromium', 'one engine is enough for a layout pin');
 
   test.beforeAll(async () => {
@@ -480,11 +483,13 @@ test.describe('the record page\'s tabs and 概览 rail, zh-CN (objectstack#35595
     );
     report(testInfo, 'fold-menu', menu);
     expect(menu.map((m) => m.id)).toEqual(ALL_TABS.slice(r.shown.length));
-    // The folded lists keep their numbers; 审批 its dot; 动态 its size.
+    // The folded lists keep their numbers; 审批 its dot. (动态's number is
+    // the host's stream count, which this fixture has no discussion for:
+    // `RecordDetailView.timelineCount-28737` pins it on the real host.)
     const byId = Object.fromEntries(menu.map((m) => [m.id, m]));
     expect(byId['task.what_id']?.count).toBe('6');
     expect(byId['approvals']?.dot).toBe(true);
-    expect(byId['timeline']?.count).toBe('4');
+    expect(byId['timeline']).toBeTruthy();
   });
 
   test('CONTROL: the same page at 1184 px draws every tab, the empty ones muted, and no 「更多」', async ({ page }, testInfo) => {
@@ -504,99 +509,108 @@ test.describe('the record page\'s tabs and 概览 rail, zh-CN (objectstack#35595
     expect(await page.locator('[data-record-tab="case.account_id"] [data-record-tab-count]').count()).toBe(0);
   });
 
-  test('1280 × 800: on 概览 the stage path and the key fields span both columns, above them', async ({ page }, testInfo) => {
+  test('not a full page, 1024 px: one column, the strip at the top of 「详情」 across the details, and no rail', async ({ page }, testInfo) => {
     test.setTimeout(120_000);
     await mount(page, { name: 'overview1280', viewport: 1280, frame: PAGE_1280 });
     const strip = await box(page, '[data-record-overview-strip]');
     const details = await box(page, '[data-record-column="details"]');
-    const rail = await box(page, '[data-record-column="right"]');
     const row = await box(page, '[data-record-tab-row]');
-    report(testInfo, 'overview1280', { strip, details, rail, row });
-    expect(strip && details && rail && row).toBeTruthy();
-    // Across the whole width: from the details' left edge to the rail's right edge.
+    const rail = await page.evaluate(() => ({
+      right: document.querySelectorAll('[data-record-column="right"]').length,
+      cards: document.querySelectorAll('[data-record-summary-card]').length,
+      pinned: document.querySelectorAll('[data-record-page-pinned]').length,
+      shown: document.querySelector('[data-record-columns]')?.getAttribute('data-record-columns-shown') ?? null,
+    }));
+    report(testInfo, 'overview1280', { strip, details, row, rail });
+    expect(strip && details && row).toBeTruthy();
+    expect(rail).toEqual({ right: 0, cards: 0, pinned: 0, shown: 'details' });
+    // Across the details' width, below the tab row.
     expect(Math.abs(strip!.left - details!.left)).toBeLessThanOrEqual(1);
-    expect(Math.abs(strip!.right - rail!.right)).toBeLessThanOrEqual(1);
-    // Below the tab row, above both columns.
+    expect(Math.abs(strip!.right - details!.right)).toBeLessThanOrEqual(1);
     expect(strip!.top).toBeGreaterThanOrEqual(row!.top);
-    expect(details!.top).toBeGreaterThan(strip!.top);
-    expect(rail!.top).toBeGreaterThan(strip!.top);
-    // CONTROL: the details column beside the rail is narrower than the strip.
-    expect(details!.width).toBeLessThan(strip!.width - 200);
+    await expect(page.locator('[data-record-tab="overview"]')).toHaveAttribute('aria-selected', 'true');
+    await expect(page.locator('[data-record-tab="overview"]')).toContainText('详情');
   });
 
-  test('the rail and the strip are 概览\'s: another tab draws neither; CONTROL, 概览 brings both back', async ({ page }, testInfo) => {
+  test('the strip is 「详情」\'s: another tab draws none; CONTROL, 「详情」 brings it back', async ({ page }, testInfo) => {
     test.setTimeout(120_000);
     const compiled = await mount(page, { name: 'otherTab1280', viewport: 1280, frame: PAGE_1280 });
-    // CONTROL first: on 概览 both are drawn.
-    await expect(page.locator('[data-record-column="right"]')).toHaveCount(1);
+    // CONTROL first: on 「详情」 the strip is drawn.
     await expect(page.locator('[data-record-overview-strip]')).toHaveCount(1);
     await page.locator('[data-record-tab="contact.account_id"]').click();
     await expect(page.locator('[data-record-tab="contact.account_id"]')).toHaveAttribute('aria-selected', 'true');
     await settle(page, compiled);
     const opened = await page.evaluate(() => ({
-      rail: document.querySelectorAll('[data-record-column="right"]').length,
-      cards: document.querySelectorAll('[data-record-summary-card]').length,
       strip: document.querySelectorAll('[data-record-overview-strip], [data-node="record:highlights"], [data-node="record:path"]').length,
       face: document.querySelector('[data-related-enlarged]')?.getAttribute('data-related-enlarged') ?? null,
     }));
     report(testInfo, 'otherTab1280', opened);
-    expect(opened).toEqual({ rail: 0, cards: 0, strip: 0, face: 'contact.account_id' });
+    expect(opened).toEqual({ strip: 0, face: 'contact.account_id' });
     await page.locator('[data-record-tab="overview"]').click();
-    await expect(page.locator('[data-record-column="right"]')).toHaveCount(1);
     await expect(page.locator('[data-record-overview-strip]')).toHaveCount(1);
   });
 
-  test('a rail card\'s title opens its tab; the rail reads 审批, 附件, 最近动态, 其他相关, sized 8 / 13 / 26', async ({ page }, testInfo) => {
+  test('a full page at 1024 px pins the details 400 px left, the tabs beside them on the first list; the separator drags, the tabs keep 400 px (objectstack#35890)', async ({ page }, testInfo) => {
     test.setTimeout(120_000);
-    await mount(page, { name: 'railClick1280', viewport: 1280, frame: PAGE_1280 });
-    const rail = await page.evaluate(() => {
-      const cards = [...document.querySelectorAll<HTMLElement>('[data-record-summary-card]')].filter((el) => !el.hidden);
-      const first = cards[0];
-      const title = first.querySelector<HTMLElement>('[data-record-summary-card-title]')!;
-      const row = document.querySelector<HTMLElement>('[data-record-summary-row]')!;
-      const count = document.querySelector<HTMLElement>('[data-record-summary-card-count]')!;
-      return {
-        order: cards.map((el) => el.getAttribute('data-record-summary-card')),
-        rows: cards.map((el) => el.querySelectorAll('[data-record-summary-row]').length),
-        radius: getComputedStyle(first).borderTopLeftRadius,
-        titleSize: getComputedStyle(title).fontSize,
-        rowHeight: Math.round(row.getBoundingClientRect().height),
-        countColor: getComputedStyle(count).color,
-        titleColor: getComputedStyle(title).color,
-        other: document.querySelector('[data-record-summary-other]')?.textContent ?? null,
-        emptyLine: /还有\s*\d+\s*个空关联/.test(document.body.textContent ?? ''),
-      };
-    });
-    report(testInfo, 'railClick1280', rail);
-    // 审批, 附件, 最近动态, then 其他相关: the six lists with records, in their order.
-    expect(rail.order).toEqual([
-      'approvals',
-      'attachments',
-      'timeline',
-      'contact.account_id',
-      'opportunity.account_id',
-      'contract.account_id',
-      'quote.account_id',
-      'campaign_member.account_id',
-      'task.what_id',
-    ]);
-    expect(Math.max(...rail.rows)).toBeLessThanOrEqual(3);
-    expect(rail.radius).toBe('8px');
-    expect(rail.titleSize).toBe('14px');
-    expect(rail.rowHeight).toBe(26);
-    expect(rail.countColor).not.toBe(rail.titleColor);
-    expect(rail.other).toBe('其他相关');
-    expect(rail.emptyLine).toBe(false);
-    // The whole title opens the tab.
-    await page.locator('[data-record-summary-card="quote.account_id"] [data-record-summary-card-title]').click();
-    await expect(page.locator('[data-record-tab="quote.account_id"]')).toHaveAttribute('aria-selected', 'true');
-    await expect(page.locator('[data-related-enlarged="quote.account_id"]')).toHaveCount(1);
-    // CONTROL: 概览 returns, and the rail with it.
-    await page.locator('[data-record-tab="overview"]').click();
-    await expect(page.locator('[data-record-tab="overview"]')).toHaveAttribute('aria-selected', 'true');
-    await expect(page.locator('[data-record-summary-card="quote.account_id"]')).toHaveCount(1);
-    await page.locator('[data-record-summary-card="approvals"] [data-record-summary-card-title]').click();
-    await expect(page.locator('[data-record-tab="approvals"]')).toHaveAttribute('aria-selected', 'true');
+    const compiled = await mount(page, { name: 'pinned1280', viewport: 1280, frame: PAGE_1280, fullPage: true });
+    const read = () =>
+      page.evaluate(() => {
+        const r = (sel: string) => {
+          const el = document.querySelector(sel);
+          if (!el) return null;
+          const b = el.getBoundingClientRect();
+          return { left: Math.round(b.left), right: Math.round(b.right), top: Math.round(b.top), width: Math.round(b.width) };
+        };
+        return {
+          pinned: !!document.querySelector('[data-record-page-pinned]'),
+          shown: document.querySelector('[data-record-columns]')?.getAttribute('data-record-columns-shown') ?? null,
+          details: r('[data-record-column="details"]'),
+          handle: r('[data-record-details-resize]'),
+          tabs: r('[data-record-column="tabs"]'),
+          row: r('[data-record-tab-row]'),
+          tabIds: [...document.querySelectorAll('[data-record-tab-row] [role="tab"]')].map((el) => el.getAttribute('data-record-tab')),
+          active: document.querySelector('[data-record-tab-row] [aria-selected="true"]')?.getAttribute('data-record-tab') ?? null,
+          face: document.querySelector('[data-record-column="tabs"] [data-related-enlarged]')?.getAttribute('data-related-enlarged') ?? null,
+          strip: document.querySelector('[data-record-column="details"] [data-record-overview-strip]') ? 'in details' : null,
+          rail: document.querySelectorAll('[data-record-summary-card], [data-record-column="right"]').length,
+        };
+      });
+    const at = await read();
+    report(testInfo, 'pinned1280', at);
+    expect(at.pinned).toBe(true);
+    expect(at.shown).toBe('details tabs');
+    expect(at.rail).toBe(0);
+    expect(at.details!.width).toBe(400);
+    expect(at.handle!.width).toBe(24);
+    expect(at.handle!.left).toBe(at.details!.right);
+    expect(at.tabs!.left).toBe(at.handle!.right);
+    // The tab row is the right column's; 「详情」 is the left column, so it has no tab.
+    expect(at.row!.left).toBeGreaterThanOrEqual(at.tabs!.left);
+    expect(at.tabIds).not.toContain('overview');
+    expect(at.active).toBe('contact.account_id');
+    expect(at.face).toBe('contact.account_id');
+    expect(at.strip).toBe('in details');
+    // Drag the separator 300 px right: the details widen until the tabs have 400 px left.
+    const h = at.handle!;
+    await page.mouse.move(h.left + h.width / 2, h.top + 40);
+    await page.mouse.down();
+    await page.mouse.move(h.left + h.width / 2 + 150, h.top + 40, { steps: 5 });
+    await page.mouse.move(h.left + h.width / 2 + 300, h.top + 40, { steps: 5 });
+    await page.mouse.up();
+    await settle(page, compiled);
+    const dragged = await read();
+    report(testInfo, 'pinned1280-dragged', dragged);
+    expect(dragged.details!.width).toBeGreaterThan(400);
+    expect(dragged.tabs!.width).toBe(400);
+    expect(dragged.details!.width + 24 + 400).toBe(at.details!.width + 24 + at.tabs!.width);
+    // CONTROL: another tab opens in the right column, the details stay. The last
+    // tab still on the 400 px row (the rest are in 「更多」; how many fit follows
+    // the tab text size, 14 px since objectstack#36047).
+    const other = dragged.tabIds.at(-1)!;
+    expect(other).not.toBe(dragged.active);
+    await page.locator(`[data-record-tab-row] [role="tab"][data-record-tab="${other}"]`).click();
+    await expect(page.locator(`[data-record-column="tabs"] [data-related-enlarged="${other}"]`)).toHaveCount(1);
+    await expect(page.locator('[data-record-column="details"]')).toHaveCount(1);
   });
 });
 
@@ -635,7 +649,7 @@ test.describe('a related tab\'s menu moves and hides it, and 「更多」 restor
     expect(moved.slice(0, 2)).toEqual(['opportunity.account_id', 'contact.account_id']);
     await arrange(page, 'contact.account_id', '左移');
     expect(await listTabs(page)).toEqual(lists);
-    // CONTROL: 概览 opens no menu.
+    // CONTROL: 「详情」 opens no menu.
     await page.locator('[role="tab"][data-record-tab="overview"]').click();
     await page.locator('[role="tab"][data-record-tab="overview"]').click();
     await expect(page.locator('[data-record-tab-arrange-menu]')).toHaveCount(0);

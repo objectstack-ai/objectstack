@@ -1480,7 +1480,8 @@ const ru = {
     relatedHiddenCount_other: "Скрыто: {{count}}",
     relatedShowHidden: "Показать",
     recordTabs: "Вкладки записи",
-    recordTabOverview: "Обзор",
+    recordTabOverview: "Детали",
+    detailsColumnResize: "Изменить ширину столбца сведений",
     recordTabMoveBefore: "Переместить влево",
     recordTabMoveAfter: "Переместить вправо",
     recordTabsMore: "Ещё вкладок: {{count}}",
@@ -1494,7 +1495,9 @@ const ru = {
     recordTabsMoreTrigger_few: "Ещё {{count}}",
     recordTabsMoreTrigger_many: "Ещё {{count}}",
     recordTabsMoreTrigger_other: "Ещё {{count}}",
-    // objectstack#35596 — the 概览 tab's summary rail.
+    // objectstack#35596 — the 概览 tab's summary rail. objectstack#35890 retired the rail;
+    // these keys (and relatedColumn, relatedHiddenCount, relatedShowHidden,
+    // shortcuts.toggleRelated) stay published, unread, until a separate change retires them.
     summaryApprovalDone: "Одобрено",
     summaryApprovalMine: "Ожидает вас",
     summaryApprovalWaitingOn: "Ожидает: {{name}}",
@@ -1679,6 +1682,7 @@ const ru = {
     approvalPendingEditable: "На согласовании · редактирование доступно",
     approvalPendingTooltip: "У этой записи есть ожидающий запрос на согласование, но этот шаг всё ещё разрешает редактирование",
     approvalPending: "На согласовании",
+    approvalPendingStep: "На согласовании · {{step}}",
     approvalPendingNotEditableTooltip: "У этой записи есть ожидающий запрос на согласование",
     approvalProgress: "Согласования — {{got}} из {{need}}",
     approvalProgressGroups: "Подписи — {{got}} из {{need}} групп",

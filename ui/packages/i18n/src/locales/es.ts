@@ -1537,6 +1537,7 @@ const es = {
     approvalPendingEditable: "En aprobación · editable",
     approvalPendingTooltip: "Este registro tiene una solicitud de aprobación pendiente; este paso todavía permite la edición",
     approvalPending: "En aprobación",
+    approvalPendingStep: "En aprobación · {{step}}",
     approvalPendingNotEditableTooltip: "Este registro tiene una solicitud de aprobación pendiente",
     approvalProgress: "Aprobaciones — {{got}} de {{need}}",
     approvalProgressGroups: "Firmas — {{got}} de {{need}} grupos",
@@ -1643,7 +1644,8 @@ const es = {
     relatedHiddenCount_other: "{{count}} ocultas",
     relatedShowHidden: "Mostrar",
     recordTabs: "Pestañas del registro",
-    recordTabOverview: "Resumen",
+    recordTabOverview: "Detalles",
+    detailsColumnResize: "Cambiar el ancho de la columna de detalles",
     recordTabMoveBefore: "Mover a la izquierda",
     recordTabMoveAfter: "Mover a la derecha",
     recordTabsMore: "{{count}} pestañas más",
@@ -1655,7 +1657,9 @@ const es = {
     recordTabsMoreTrigger_one: "Más {{count}}",
     recordTabsMoreTrigger_many: "Más {{count}}",
     recordTabsMoreTrigger_other: "Más {{count}}",
-    // objectstack#35596 — the 概览 tab's summary rail.
+    // objectstack#35596 — the 概览 tab's summary rail. objectstack#35890 retired the rail;
+    // these keys (and relatedColumn, relatedHiddenCount, relatedShowHidden,
+    // shortcuts.toggleRelated) stay published, unread, until a separate change retires them.
     summaryApprovalDone: "Aprobado",
     summaryApprovalMine: "Pendiente de usted",
     summaryApprovalWaitingOn: "Esperando a {{name}}",

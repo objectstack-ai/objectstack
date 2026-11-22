@@ -1491,6 +1491,7 @@ const de = {
     approvalPendingEditable: "In Genehmigung · bearbeitbar",
     approvalPendingTooltip: "Dieser Datensatz hat eine ausstehende Genehmigungsanfrage; dieser Schritt erlaubt weiterhin die Bearbeitung",
     approvalPending: "In Genehmigung",
+    approvalPendingStep: "In Genehmigung · {{step}}",
     approvalPendingNotEditableTooltip: "Dieser Datensatz hat eine ausstehende Genehmigungsanfrage",
     approvalProgress: "Genehmigungen — {{got}} von {{need}}",
     approvalProgressGroups: "Freigabe — {{got}} von {{need}} Gruppen",
@@ -1593,7 +1594,8 @@ const de = {
     relatedHiddenCount_other: "{{count}} ausgeblendet",
     relatedShowHidden: "Anzeigen",
     recordTabs: "Datensatz-Tabs",
-    recordTabOverview: "Übersicht",
+    recordTabOverview: "Details",
+    detailsColumnResize: "Breite der Detailspalte ändern",
     recordTabMoveBefore: "Nach links verschieben",
     recordTabMoveAfter: "Nach rechts verschieben",
     recordTabsMore: "{{count}} weitere Tabs",
@@ -1603,7 +1605,9 @@ const de = {
     recordTabsMoreTrigger: "Mehr {{count}}",
     recordTabsMoreTrigger_one: "Mehr {{count}}",
     recordTabsMoreTrigger_other: "Mehr {{count}}",
-    // objectstack#35596 — the 概览 tab's summary rail.
+    // objectstack#35596 — the 概览 tab's summary rail. objectstack#35890 retired the rail;
+    // these keys (and relatedColumn, relatedHiddenCount, relatedShowHidden,
+    // shortcuts.toggleRelated) stay published, unread, until a separate change retires them.
     summaryApprovalDone: "Genehmigt",
     summaryApprovalMine: "Wartet auf Sie",
     summaryApprovalWaitingOn: "Wartet auf {{name}}",

@@ -1339,6 +1339,7 @@ const zhHant = {
     approvalPendingEditable: '審批中 · 可編輯',
     approvalPendingTooltip: '該記錄有待審批的請求，但當前審批節點仍允許編輯',
     approvalPending: '審批中',
+    approvalPendingStep: '審批中 · {{step}}',
     approvalPendingNotEditableTooltip: '該記錄有待審批的請求',
     approvalProgress: '審批 — 已通過 {{got}} / 共需 {{need}}',
     approvalProgressGroups: '會籤 — 已完成 {{got}} / 共 {{need}} 個組',
@@ -1495,7 +1496,8 @@ const zhHant = {
     relatedHiddenCount_other: '已隱藏 {{count}} 張',
     relatedShowHidden: '顯示',
     recordTabs: '記錄頁籤',
-    recordTabOverview: '概覽',
+    recordTabOverview: '詳情',
+    detailsColumnResize: '調整詳情欄寬度',
     recordTabMoveBefore: '左移',
     recordTabMoveAfter: '右移',
     recordTabsMore: '另外 {{count}} 個頁籤',
@@ -1505,7 +1507,9 @@ const zhHant = {
     recordTabsMoreTrigger: '更多 {{count}}',
     recordTabsMoreTrigger_one: '更多 {{count}}',
     recordTabsMoreTrigger_other: '更多 {{count}}',
-    // objectstack#35596 — the 概覽 tab's summary rail.
+    // objectstack#35596 — the 概覽 tab's summary rail. objectstack#35890 retired the rail;
+    // these keys (and relatedColumn, relatedHiddenCount, relatedShowHidden,
+    // shortcuts.toggleRelated) stay published, unread, until a separate change retires them.
     summaryApprovalDone: '已通過',
     summaryApprovalMine: '待你審批',
     summaryApprovalWaitingOn: '等待 {{name}}',

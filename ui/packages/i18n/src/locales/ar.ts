@@ -1669,6 +1669,7 @@ const ar = {
     approvalPendingEditable: "قيد الموافقة · قابل للتعديل",
     approvalPendingTooltip: "يحتوي هذا السجل على طلب موافقة معلق، لكن هذه الخطوة لا تزال تسمح بالتعديل",
     approvalPending: "قيد الموافقة",
+    approvalPendingStep: "قيد الموافقة · {{step}}",
     approvalPendingNotEditableTooltip: "يحتوي هذا السجل على طلب موافقة معلق",
     approvalProgress: "الموافقات — {{got}} من {{need}}",
     approvalProgressGroups: "التوقيعات — {{got}} من {{need}} مجموعات",
@@ -1787,7 +1788,8 @@ const ar = {
     relatedHiddenCount_other: "المخفية: {{count}}",
     relatedShowHidden: "إظهار",
     recordTabs: "علامات تبويب السجل",
-    recordTabOverview: "نظرة عامة",
+    recordTabOverview: "التفاصيل",
+    detailsColumnResize: "تغيير عرض عمود التفاصيل",
     // objectstack#35783 — before / after in the row; an RTL row runs right to left, so before is to the right.
     recordTabMoveBefore: "نقل إلى اليمين",
     recordTabMoveAfter: "نقل إلى اليسار",
@@ -1806,7 +1808,9 @@ const ar = {
     recordTabsMoreTrigger_few: "المزيد {{count}}",
     recordTabsMoreTrigger_many: "المزيد {{count}}",
     recordTabsMoreTrigger_other: "المزيد {{count}}",
-    // objectstack#35596 — the 概览 tab's summary rail.
+    // objectstack#35596 — the 概览 tab's summary rail. objectstack#35890 retired the rail;
+    // these keys (and relatedColumn, relatedHiddenCount, relatedShowHidden,
+    // shortcuts.toggleRelated) stay published, unread, until a separate change retires them.
     summaryApprovalDone: "تمت الموافقة",
     summaryApprovalMine: "بانتظارك",
     summaryApprovalWaitingOn: "بانتظار {{name}}",

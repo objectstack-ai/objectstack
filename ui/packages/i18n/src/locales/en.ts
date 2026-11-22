@@ -1613,6 +1613,7 @@ const en = {
     approvalPendingEditable: 'In approval · editable',
     approvalPendingTooltip: 'This record has a pending approval request; this step still allows editing',
     approvalPending: 'In approval',
+    approvalPendingStep: 'In approval · {{step}}',
     approvalPendingNotEditableTooltip: 'This record has a pending approval request',
     approvalProgress: 'Approvals — {{got}} of {{need}}',
     approvalProgressGroups: 'Sign-off — {{got}} of {{need}} groups',
@@ -1794,7 +1795,8 @@ const en = {
     relatedHiddenCount_other: '{{count}} hidden',
     relatedShowHidden: 'Show',
     recordTabs: 'Record tabs',
-    recordTabOverview: 'Overview',
+    recordTabOverview: 'Details',
+    detailsColumnResize: 'Resize details column',
     // objectstack#35783 — a related tab's menu: one place before / after it in the row.
     recordTabMoveBefore: 'Move left',
     recordTabMoveAfter: 'Move right',
@@ -1805,7 +1807,9 @@ const en = {
     recordTabsMoreTrigger: 'More {{count}}',
     recordTabsMoreTrigger_one: 'More {{count}}',
     recordTabsMoreTrigger_other: 'More {{count}}',
-    // objectstack#35596 — the 概览 tab's summary rail.
+    // objectstack#35596 — the 概览 tab's summary rail. objectstack#35890 retired the rail;
+    // these keys (and relatedColumn, relatedHiddenCount, relatedShowHidden,
+    // shortcuts.toggleRelated) stay published, unread, until a separate change retires them.
     summaryApprovalDone: 'Approved',
     summaryApprovalMine: 'Awaiting you',
     summaryApprovalWaitingOn: 'Waiting on {{name}}',

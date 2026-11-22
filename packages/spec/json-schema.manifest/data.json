@@ -152,6 +152,8 @@
     "data/ReferenceNameOnlyValue",
     "data/ReferenceResolution",
     "data/ReferenceResolutionError",
+    "data/RelatedListEntry",
+    "data/RelatedListEntryObject",
     "data/ReplicationConfig",
     "data/RowCrudActionOverride",
     "data/SQLDialect",

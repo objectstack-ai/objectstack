@@ -1393,7 +1393,8 @@ const ja = {
     relatedHiddenCount_other: "{{count}} 件非表示",
     relatedShowHidden: "表示",
     recordTabs: "レコードのタブ",
-    recordTabOverview: "概要",
+    recordTabOverview: "詳細",
+    detailsColumnResize: "詳細列の幅を調整",
     recordTabMoveBefore: "左へ移動",
     recordTabMoveAfter: "右へ移動",
     recordTabsMore: "他 {{count}} 個のタブ",
@@ -1403,7 +1404,9 @@ const ja = {
     recordTabsMoreTrigger: "さらに {{count}}",
     recordTabsMoreTrigger_one: "さらに {{count}}",
     recordTabsMoreTrigger_other: "さらに {{count}}",
-    // objectstack#35596 — the 概览 tab's summary rail.
+    // objectstack#35596 — the 概览 tab's summary rail. objectstack#35890 retired the rail;
+    // these keys (and relatedColumn, relatedHiddenCount, relatedShowHidden,
+    // shortcuts.toggleRelated) stay published, unread, until a separate change retires them.
     summaryApprovalDone: "承認済み",
     summaryApprovalMine: "あなたの承認待ち",
     summaryApprovalWaitingOn: "{{name}} の承認待ち",
@@ -1572,6 +1575,7 @@ const ja = {
     approvalPendingEditable: "承認中 · 編集可能",
     approvalPendingTooltip: "このレコードには承認待ちのリクエストがありますが、このステップでは編集できます",
     approvalPending: "承認中",
+    approvalPendingStep: "承認中 · {{step}}",
     approvalPendingNotEditableTooltip: "このレコードには承認待ちのリクエストがあります",
     approvalProgress: "承認 — {{need}} 件中 {{got}} 件",
     approvalProgressGroups: "合議 — {{need}} グループ中 {{got}} グループ",
