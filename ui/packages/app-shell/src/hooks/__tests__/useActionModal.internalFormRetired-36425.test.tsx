@@ -95,8 +95,9 @@ async function open(descriptor: Record<string, unknown>) {
 describe('useActionModal reads no internal form view (#36425)', () => {
   it('a create lays out by the field groups: the form view\'s section is gone, its left-out field is back', async () => {
     const dialog = await open({ objectName: 'project', mode: 'create' });
-    expect(within(dialog).getByText('Basics group')).toBeInTheDocument();
-    expect(within(dialog).getByText('More group')).toBeInTheDocument();
+    // Each group is named twice: its heading and its chip in the section nav.
+    expect(within(dialog).getAllByText('Basics group').length).toBeGreaterThan(0);
+    expect(within(dialog).getAllByText('More group').length).toBeGreaterThan(0);
     expect(within(dialog).queryByText('Curated form section')).toBeNull();
     expect(within(dialog).getByText('Secret Internal')).toBeInTheDocument();
   });

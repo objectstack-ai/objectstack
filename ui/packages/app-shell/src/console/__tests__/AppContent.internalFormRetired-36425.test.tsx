@@ -22,7 +22,7 @@
 import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vitest';
 import React from 'react';
-import { render, cleanup, waitFor, screen } from '@testing-library/react';
+import { render, cleanup, waitFor, screen, within } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { registerAllFields } from '@object-ui/fields';
 
@@ -225,7 +225,7 @@ describe('#36425 — the New / Edit dialog reads no internal form view', () => {
     expect(dialog.textContent).toContain('Tracking');
     expect(dialog.textContent).not.toContain('Form main section');
     expect(dialog.textContent).not.toContain('Internal note');
-    expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Create' })).toBeInTheDocument();
   });
 
   it('CONTROL: an object with no form view gets the same dialog', async () => {

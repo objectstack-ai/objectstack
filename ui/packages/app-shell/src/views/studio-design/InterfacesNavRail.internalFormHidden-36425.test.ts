@@ -35,7 +35,7 @@ function client(): PackageSurfaceClient {
 
 describe('Studio Interfaces leaves out internal forms, keeps public and named ones (#36425)', () => {
   it('the default and the create form of an object are internal; nothing else is', async () => {
-    const rail = await loadPackageSurfaces(client(), 'com.qa.app', 'view');
+    const rail = await loadPackageSurfaces(client(), 'view', 'com.qa.app');
     const hidden = rail.filter(offNavViewIsInternalForm).map((s) => s.name);
     const listed = rail.filter((s) => !offNavViewIsInternalForm(s)).map((s) => s.name);
     expect(hidden).toEqual(['account.form', 'account.create']);
