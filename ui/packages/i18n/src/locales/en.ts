@@ -2796,6 +2796,14 @@ const en = {
       systemTheme: 'System Theme',
       actions: 'Actions',
       openFullSearch: 'Open Full Search Page',
+      create: 'Create',
+      createAs: 'Create "{{query}}" as {{object}}',
+      previewEmpty: 'Select a record to see its details.',
+      enterOpenRecord: 'Open record',
+      enterCreate: 'Create',
+      enterSwitchApp: 'Switch app',
+      enterApplyTheme: 'Apply theme',
+      enterOpen: 'Open',
     },
     ai: {
       pendingDrafts: {

@@ -2354,6 +2354,14 @@ const zh = {
       systemTheme: '系统主题',
       actions: '操作',
       openFullSearch: '打开完整搜索页面',
+      create: '新建',
+      createAs: '新建「{{query}}」为{{object}}',
+      previewEmpty: '选中一条记录即可查看详情。',
+      enterOpenRecord: '打开记录',
+      enterCreate: '新建',
+      enterSwitchApp: '切换应用',
+      enterApplyTheme: '应用主题',
+      enterOpen: '打开',
     },
     ai: {
       pendingDrafts: {
