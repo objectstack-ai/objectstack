@@ -82,14 +82,22 @@ transforms — see objectstack-data), not an expression dialect.
 | Key existence (NOT null-safety) | `has(record.foo)` |
 | Null check | `record.foo == null` or `isBlank(record.foo)` |
 
-**`==` / `!=` between a list field and a scalar is refused** (`list-equality`, "list compared with a
-scalar": one constant on every row) — `multiselect` / `checkboxes` / `tags`, or `select` / `lookup` /
-`user` with `multiple: true`. Test membership behind a null guard; `in` and `.exists()` fault on `null`:
+**`==` / `!=` between a list field and a scalar literal is refused** (`list-equality`, "list compared
+with a scalar": one constant on every row) — `multiselect` / `checkboxes` / `tags`, or `select` /
+`radio` / `lookup` / `user` / `file` / `image` with `multiple: true`. Test membership, null-guarded
+(`in` faults on `null`) and parenthesised, per site — the `==` rewrite, then the `!=` one:
 
 ```text
-record.tags == 'vip'                             # REFUSED
-record.tags != null && 'vip' in record.tags      # RIGHT, or … && record.tags.exists(t, t == 'vip')
-record.tags == null || !('vip' in record.tags)   # RIGHT, replaces != 'vip'
+record.tags == 'vip'   # REFUSED
+# evaluated as CEL; has() covers a sparse action row and a null `previous`
+(has(record.tags) && record.tags != null && 'vip' in record.tags)
+(!has(record.tags) || record.tags == null || !('vip' in record.tags))
+# bare name in a flow condition (has() takes no bare name)
+(tags != null && 'vip' in tags)
+(tags == null || !('vip' in tags))
+# SharingRule `condition`: compiled to a query filter, where has() and a literal-first `in` do not lower
+(record.tags != null && record.tags.contains('vip'))
+(record.tags == null || !record.tags.contains('vip'))
 ```
 
 The org context is `{ id, tier }` — there is no `os.org.slug` or `os.org.name`.
@@ -147,8 +155,7 @@ has(record.viewer) && has(record.viewer.can_approve) && record.viewer.can_approv
 
 ## ObjectStack CEL standard library
 
-Registered automatically by `@objectstack/formula`, which ships `dist` only —
-there is no `src/` to read in an installed app. Its exported
+Registered automatically by `@objectstack/formula`, which ships `dist` only. Its exported
 `CEL_STDLIB_FUNCTIONS` is the advertised bare-callable subset, pinned by two
 tests: every entry resolves at runtime, and this table documents them all.
 
@@ -173,7 +180,7 @@ tests: every entry resolves at runtime, and this table documents them all.
 
 > **No date arithmetic.** The build refuses `date + n` and `end - start`: a
 > date or date-time mixed with a number, or minus another, reads `null`, and
-> `today()` / `now()` minus a date field reads `{}`. Use `daysBetween(a, b)` for whole days, two `datetime(…)` for hours (row below).
+> `today()` / `now()` minus a date field reads `{}`.
 
 | Want | Write — never bare `end - start`, `date + n`, `today() + 30` |
 |:---|:---|
@@ -181,7 +188,7 @@ tests: every entry resolves at runtime, and this table documents them all.
 | Shift a date | `daysFromNow(n)` / `addDays(d, n)` / `addMonths(d, n)` |
 | Tenure in years | `daysBetween(record.hire_date, today()) / 365` |
 | Hours between | `double((datetime(record.end_at) - datetime(record.start_at)).getMinutes()) / 60.0` |
-| Sub-day offset | `now() + duration("3h")` — the calendar helpers land on UTC midnight |
+| Sub-day offset | `now() + duration("3h")` |
 
 **Numbers**
 
@@ -341,7 +348,7 @@ already-escalated record. Comparing against `previous` is the only way to say
 | `before*` hook `condition` on a predicate (`multi: true`) write | **that row's pre-write row** — `beforeUpdate` / `beforeDelete` dispatch once PER MATCHED ROW too, each on a single-record-shaped context whose `input.id` names the row (ADR-0058 Addendum II, D1/D2); `record` is that row's state, stored ⊕ payload, as on any update. Only the *payload* stays batch-scoped — see below the table |
 
 ⚠️ **An unevaluable condition ABORTS the operation.** A column read off
-`previous` on an insert (`previous.status`, where `previous` is `null`) — like
+`previous` on an insert — like
 a typo'd key (`record.stauts`), a retired field, or a comparison CEL has no
 overload for — does **not** degrade to "the hook did not fire": it **fails the
 write**, with an error naming the hook and the key — `before*` and `after*`
@@ -350,13 +357,7 @@ the condition is evaluated before any handler runs).
 
 **A transition condition needs no special handling for bulk writes.**
 Write it once, on a `before*` or an `after*` event, and it means the same thing
-whether the write carries an id or a predicate:
-
-<!-- os:check -->
-```ts
-import { P } from '@objectstack/spec';
-P`previous.status != 'done' && record.status == 'done'`
-```
+whether the write carries an id or a predicate.
 
 A predicate (`multi: true`) write is N record changes, so every record-scoped
 declaration on it is evaluated **per row** — `previous` is that row's own
@@ -399,9 +400,8 @@ When migrating Salesforce-flavor metadata, apply these rules in order:
 | `ISCHANGED(x)` | `previous.x != record.x` |
 | `MONTH_DIFF`, `MID`, `LEFT`, `RIGHT`, `SUBSTITUTE` | _not in stdlib — propose addition_ |
 
-> ⚠️ `OLD.x` and `ISCHANGED(x)` both land on `previous.x`, which is `null` on an
-> insert event and **fails the write** there unless guarded by `previous != null
-> &&` (§5).
+> ⚠️ `previous.x` **fails the write** on an insert unless guarded by
+> `previous != null &&` (§5).
 
 > ⚠️ **Flow conditions are the exception to row 1.** The engine spreads the
 > trigger record's fields, nulls included, to top level wherever no flow variable
