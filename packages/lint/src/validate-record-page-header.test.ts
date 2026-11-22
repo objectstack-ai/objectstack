@@ -151,6 +151,13 @@ describe('validateRecordPageHeader · the actions', () => {
     );
   });
 
+  it('compares the row of buttons and the overflow menu apart, as they are drawn', () => {
+    // `archive_lead` is overflow-only: wherever the list names it, it is drawn after every button.
+    const actions = [...leadActions(), { name: 'archive_lead', objectName: 'crm_lead', locations: ['record_more'] }];
+    const list = ['archive_lead', 'convert_lead', 'qualify_lead', 'schedule_followup'];
+    expect(validateRecordPageHeader(stackOf(leadPage({ actions: list }), actions))).toEqual([]);
+  });
+
   it('counts an unlisted placed action that leads the standard page', () => {
     const actions = [{ name: 'log_call', objectName: 'crm_lead', locations: ['record_header'], order: -5 }, ...leadActions()];
     const list = ['convert_lead', 'qualify_lead', 'schedule_followup'];

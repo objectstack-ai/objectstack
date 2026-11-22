@@ -31,7 +31,8 @@ import { walkPageComponents } from './page-walk.js';
  *   action declaration order, and the standard page draws every action the
  *   object places at `record_header` / `record_more`, listed or not. When that
  *   gives a different primary button, or the listed actions in a different
- *   order, the header lists them in an order the actions do not declare:
+ *   order within the row of buttons or within the `⋯` (the two are drawn
+ *   apart), the header lists them in an order the actions do not declare:
  *   `record-page-header-actions-differ`.
  *
  * Both are `warning`s: nothing is broken, the page renders as written, and a
@@ -140,15 +141,30 @@ function headerSort(actions: readonly AnyRec[]): AnyRec[] {
 }
 
 /**
- * The header's primary button, as the renderer picks it: among the actions
- * that draw as buttons (not `record_more`-only, not pinned into the `⋯` by
- * `component: 'action:menu'`, not destructive), the first declaring
+ * An action the header draws as a button in its row: placed at
+ * `record_header`, and not pinned into the `⋯` by `component: 'action:menu'`.
+ * The rest (`record_more`-only, menu-pinned) are drawn in the `⋯` only.
+ */
+function isButton(action: AnyRec): boolean {
+  return placedIn(action, 'record_header') && action.component !== 'action:menu';
+}
+
+/**
+ * The order a reader sees: the row's buttons, then the `⋯`-only actions, each
+ * group in the sorted order. The two groups are drawn apart, so an order that
+ * differs only ACROSS them is not a difference anybody sees.
+ */
+function seenOrder(sorted: readonly AnyRec[]): string[] {
+  return [...sorted.filter(isButton), ...sorted.filter((a) => !isButton(a))].map((a) => a.name as string);
+}
+
+/**
+ * The header's primary button, as the renderer picks it: among the buttons
+ * ({@link isButton}) that are not destructive, the first declaring
  * `variant: 'primary'`, else the first.
  */
 function primaryOf(sorted: readonly AnyRec[]): string | undefined {
-  const candidates = sorted.filter(
-    (a) => placedIn(a, 'record_header') && a.component !== 'action:menu' && a.variant !== 'danger',
-  );
+  const candidates = sorted.filter((a) => isButton(a) && a.variant !== 'danger');
   const primary = candidates.find((a) => a.variant === 'primary') ?? candidates[0];
   return primary ? strName(primary.name) : undefined;
 }
@@ -221,8 +237,8 @@ export function validateRecordPageHeader(stack: AnyRec): RecordPageHeaderFinding
       if (fullPage.length === 0) continue;
       const standard = headerSort(universe.filter(isPlaced));
       const listedSet = new Set(fullPage.map((a) => a.name as string));
-      const fullOrder = fullPage.map((a) => a.name as string);
-      const standardOrder = standard.map((a) => a.name as string).filter((n) => listedSet.has(n));
+      const fullOrder = seenOrder(fullPage);
+      const standardOrder = seenOrder(standard).filter((n) => listedSet.has(n));
       const fullPrimary = primaryOf(fullPage);
       const standardPrimary = primaryOf(standard);
 
