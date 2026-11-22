@@ -127,6 +127,7 @@ import {
 } from './validate-flow-trigger-readiness.js';
 import { validateApprovalApprovers } from './validate-approval-approvers.js';
 import { validateRecordTitle, validateTitleFormatRetired } from './validate-record-title.js';
+import { validateRecordPageHeader } from './validate-record-page-header.js';
 import { validateFieldConsumers } from './validate-field-consumers.js';
 import { validateSemanticRoles } from './validate-semantic-roles.js';
 import { validateFormLayout } from './validate-form-layout.js';
@@ -1728,6 +1729,28 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     surfaces: CLI_ONLY,
     surfaceReason: RUNTIME_OBJECT_ADVISORY_VOLUME,
     run: (stack) => validateRecordTitle(stack),
+  },
+  // A full record page's hand-written header whose title or action order
+  // differs from what the standard page (the phone, the drawer, the preview)
+  // draws for the same record: the record's name field, and the actions sorted
+  // by their own `order` / `variant`. Advisory: the page renders as written,
+  // and a static read sees neither visibility nor the actions other packages
+  // attach (`validate-record-page-header.ts` lists what it cannot see).
+  //
+  // Runtime publish gate: a `page` write's snapshot carries `objects` as
+  // context, which is every input but the stack-level `actions` collection;
+  // a header naming an action the snapshot does not show on its object is
+  // not judged, so a partial snapshot can only make the rule quieter, never
+  // invent a finding. Both findings ride back on the 2xx `advisories`.
+  {
+    name: 'validateRecordPageHeader',
+    tier: 'advisory',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-record-page-header.ts',
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['page'],
+    run: (stack) => validateRecordPageHeader(stack),
   },
   // [#15922] A declared field that nothing in the stack reads or displays —
   // the field-level remainder of #4698's "declared but never read" class,

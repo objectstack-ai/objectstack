@@ -49,7 +49,7 @@ async function offeredValues(page: Page, dialog: Locator, fieldName: string): Pr
 
 test('province options re-filter live as country changes, and the stale value clears', async ({ page }) => {
   await page.goto(`/apps/showcase_app/${OBJECT}`);
-  await page.getByRole('button', { name: /^(New|新建)$/i }).first().click();
+  await page.getByTestId('object-view-new-button').first().click();
 
   const dialog = page.getByRole('dialog');
   // `showcase_cascade` has no child collection, so New opens the flat

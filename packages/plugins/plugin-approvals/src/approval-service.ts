@@ -142,7 +142,9 @@ import {
   namesNoOneBut,
   noApproverNoteOf,
   noApproverNoteText,
+  noApproverPositions,
   noApproverSentence,
+  noApproverSlots,
   noApproverWho,
   type NoApproverNote,
 } from './no-approver-note.js';
@@ -154,6 +156,7 @@ import {
   type ReaderLabels,
 } from './reader-locale-labels.js';
 import type { SlotLabelSource } from './display-label-backfill.js';
+import { recordsHeldByLockingApproval } from './lifecycle-hooks.js';
 import {
   redactSnapshot,
   resolveReadableSnapshotFields,
@@ -164,7 +167,8 @@ import { nodeConfigLocksRecord, recordHeldByLockingApproval } from './lifecycle-
 import { PendingApproverReadGrantSource, type PendingApproverReadGrants } from './pending-approver-read-grant.js';
 // The ADR-0043 pages — the ONE copy of their text, rendered by the plugin's
 // self-hosted mount and by `handleActionPage` alike.
-import { renderConfirmPage, renderResultPage } from './action-link-pages.js';
+import { APPROVALS_INBOX_PATH, renderConfirmPage, renderResultPage } from './action-link-pages.js';
+import { consolePageLink, type ConsolePageComposer } from './public-base-url.js';
 import { APPROVAL_EMAIL_CHANNELS, EMAILED_APPROVAL_TOPICS } from './approval-email-templates.js';
 import { enMessages } from './translations/messages.js';
 import {
@@ -572,7 +576,8 @@ type ApprovalNotificationPayload = {
   readonly actionUrl: string;
   /**
    * [#30509] The same request page as `actionUrl`, prefixed with the
-   * deployment's public origin when one resolves (`publicBaseUrl`), for a
+   * deployment's public origin when one resolves (`publicBaseUrl`) and
+   * [#34862] the Console's mount (`consolePageLink`), for a
    * channel read outside the Console: the approval e-mail's link
    * (`approval-email-templates.ts`). Set by `notify()` beside the
    * deep-linked `actionUrl` on the notices that go by e-mail
@@ -2022,6 +2027,14 @@ export interface ApprovalServiceOptions {
    */
   publicBaseUrl?: string;
   /**
+   * [#34862] The auth service's Console page composer (`getConsoleUrl`,
+   * `${origin}${uiBasePath}${path}`), read for the Console's MOUNT only: the
+   * approval e-mail's link and the action-link pages' inbox link open a
+   * Console page under {@link publicBaseUrl} plus that mount
+   * (`consolePageLink`). Absent, or answering nothing, they carry no mount.
+   */
+  getConsoleUrl?: ConsolePageComposer;
+  /**
    * [ADR-0105 D9] The tenancy posture in force. Cross-organization approver
    * targeting is a `group`-posture capability; the resolver refuses the
    * declaration under any other posture rather than silently ignoring it.
@@ -2211,6 +2224,7 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
   private automation?: ApprovalResumeSurface;
   private messaging?: ApprovalMessagingSurface;
   private publicBaseUrl: string;
+  private readonly getConsoleUrl?: ConsolePageComposer;
   private tenancyPosture?: () => string | undefined;
   private fieldVisibility?: FieldVisibilitySource;
   /** [#23637] Lazily-resolved object-level read admission ({@link attachObjectReadAdmission}). */
@@ -2265,6 +2279,7 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     this.automation = opts.automation;
     this.messaging = opts.messaging;
     this.publicBaseUrl = (opts.publicBaseUrl ?? '').replace(/\/$/, '');
+    this.getConsoleUrl = opts.getConsoleUrl;
     this.tenancyPosture = opts.tenancyPosture;
     this.fieldVisibility = opts.fieldVisibility;
     this.messageTranslator = opts.messageTranslator;
@@ -2557,7 +2572,10 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
           ...payload,
           actionUrl,
           // [#30509] The e-mail's link: only the notices that go by e-mail carry it.
-          ...(EMAILED_APPROVAL_TOPICS.has(event.topic) ? { approvalUrl: `${this.publicBaseUrl}${actionUrl}` } : {}),
+          // [#34862] A Console page, so under the Console's mount as well.
+          ...(EMAILED_APPROVAL_TOPICS.has(event.topic)
+            ? { approvalUrl: consolePageLink(this.publicBaseUrl, this.getConsoleUrl, actionUrl) }
+            : {}),
         };
       }
       // A dedup key names ONE event: a notice split per name keys each part by
@@ -5352,8 +5370,8 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
           slateSource = 'administrators';
         } else {
           slateSource = 'no_one';
-          const who = noApproverWho(approvers);
-          noApproverNote = { action_id: uid('aact'), ...(who ? { who } : {}) };
+          const slots = noApproverSlots(approvers);
+          noApproverNote = { action_id: uid('aact'), ...(slots ? { slots } : {}) };
           // Break-glass stays break-glass (#3424): an organization whose
           // administrators' slate resolves to nobody opens the request on the
           // slate that names no one — the only option that neither waves the
@@ -8092,7 +8110,7 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     if (request.method === 'GET') {
       const token = new URL(request.url).searchParams.get('token') ?? '';
       const peek = await this.peekActionToken(token);
-      if (!peek.ok) return actionPageResponse(renderResultPage(peek.reason, peek.request));
+      if (!peek.ok) return actionPageResponse(renderResultPage(peek.reason, peek.request, this.approvalsInboxLink()));
       return actionPageResponse(renderConfirmPage({
         request: peek.request, action: peek.action, approverId: peek.approverId,
         token, actPath: ACTION_PAGE_PATH,
@@ -8107,10 +8125,22 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
         token = String(fields[fields.length - 1] ?? '');
       } catch { /* not a form body: no token, told "invalid" below */ }
       const out = await this.redeemActionToken(token);
-      if (!out.ok) return actionPageResponse(renderResultPage(out.reason, out.request));
-      return actionPageResponse(renderResultPage(out.action === 'approve' ? 'approved' : 'rejected', out.request));
+      if (!out.ok) return actionPageResponse(renderResultPage(out.reason, out.request, this.approvalsInboxLink()));
+      return actionPageResponse(
+        renderResultPage(out.action === 'approve' ? 'approved' : 'rejected', out.request, this.approvalsInboxLink()),
+      );
     }
     return new Response(null, { status: 405, headers: { Allow: 'GET, POST' } });
+  }
+
+  /**
+   * [#34862] The action-link pages' "Open the Approvals Inbox" link: the
+   * Console's inbox under the approval links' base and the Console's mount,
+   * built as the plugin's raw-app mount builds it (`consolePageLink`), so the
+   * two doors still answer the same bytes.
+   */
+  private approvalsInboxLink(): string {
+    return consolePageLink(this.publicBaseUrl, this.getConsoleUrl, APPROVALS_INBOX_PATH);
   }
 
   /**
@@ -10963,6 +10993,37 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     return fresh;
   }
 
+  /**
+   * `IApprovalService.getRecordLocks` — {@link getRecordLock} for a page of
+   * rows, in two reads whatever the page size: the caller's read of the ids
+   * (the same #8652 anchor, one `$in` read AS THE CALLER, so an unreadable row
+   * and a missing one both answer `null` and stay indistinguishable) and one
+   * pending-request lookup judged by the record-lock hook's own judgement
+   * ({@link recordsHeldByLockingApproval}). Entry `i` answers `recordIds[i]`.
+   *
+   * The cap is the door's to refuse loudly; here a blank id answers `null`.
+   */
+  async getRecordLocks(
+    object: string,
+    recordIds: readonly string[],
+    context: ExecutionContext,
+  ): Promise<Array<{ locked: boolean } | null>> {
+    const objectName = String(object ?? '').trim();
+    const ids = recordIds.map((recordId) => String(recordId ?? '').trim());
+    const asked = Array.from(new Set(ids.filter((id) => id !== '')));
+    if (!objectName || asked.length === 0) return ids.map(() => null);
+    // The anchor. As the CALLER — see getRecordLock's doc block.
+    const readable = await this.engine.find(objectName, {
+      where: { id: { $in: asked } }, fields: ['id'], limit: asked.length, context,
+    });
+    const readableIds = new Set((Array.isArray(readable) ? readable : []).map((row: any) => String(row?.id)));
+    const readableAsked = asked.filter((id) => readableIds.has(id));
+    const held = readableAsked.length > 0
+      ? await recordsHeldByLockingApproval(this.engine, objectName, readableAsked)
+      : new Set<string>();
+    return ids.map((id) => (readableIds.has(id) ? { locked: held.has(id) } : null));
+  }
+
   async getRequest(requestId: string, context: ExecutionContext): Promise<ApprovalRequestRow | null> {
     return this.loadRequest(requestId, context, true);
   }
@@ -11385,7 +11446,10 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     const exclusion = submitterExclusionNoteOf(snapshot);
     if (exclusion) overlay(exclusion.action_id, () => submitterExclusionNoteText(exclusion, labels.sentence));
     const noApprover = noApproverNoteOf(snapshot);
-    if (noApprover) overlay(noApprover.action_id, () => noApproverNoteText(noApprover, labels.sentence));
+    if (noApprover) {
+      const positionLabels = await this.notePositionLabels(noApproverPositions(noApprover), labels);
+      overlay(noApprover.action_id, () => noApproverNoteText(noApprover, labels.sentence, (name) => positionLabels.get(name)));
+    }
   }
 
   /**

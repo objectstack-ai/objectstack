@@ -629,9 +629,11 @@ function seedRowTenantColumn(definition: unknown): string | null {
  * its definition declares, plus `owner_id` when the system-column pass injects
  * it and the object does not declare it.
  *
- * The definition the loader resolves is the metadata service's, which is what
- * the author wrote. An object that relies on the platform's owner has no
- * `owner_id` there: objectql adds it at registration, from the same
+ * The definition the loader resolves is the engine's registered schema, which
+ * already carries the injected column, and otherwise the metadata service's
+ * copy ([#35254] `resolveObjectDefinition`), which is what the author wrote.
+ * An object that relies on the platform's owner has no `owner_id` in that
+ * copy: objectql adds it at registration, from the same
  * `resolveInjectedSystemColumns` plan read here, as {@link OWNER_FIELD_DEF} (a
  * `sys_user` lookup). Read from the declared fields alone, a seed value naming
  * a person in that column was written as the name itself, while a declared
@@ -1658,26 +1660,40 @@ export class SeedLoaderService implements ISeedLoaderService {
   }
 
   /**
-   * Object definition for reference-graph construction: the metadata service
-   * first, then the engine's own schema registry.
+   * The object definition every per-field decision of a load reads: the
+   * reference graph, natural-key resolution, required-on-insert, the tenant
+   * column, the roll-up strip, the replay comparands. It is the object AS THE
+   * ENGINE SERVES IT — the engine's own schema registry, object extensions
+   * folded in — and the metadata service's copy only when the engine has no
+   * schema for the name.
    *
-   * The engine fallback matters for marketplace-installed packages: their
-   * objects are registered through the `manifest` service straight into the
-   * ObjectQL registry AFTER `bridgeObjectsToMetadataService` ran at boot, so
-   * the metadata service has never heard of them. Resolving only via metadata
-   * left the reference graph empty for those objects — every lookup /
-   * master_detail seed value was written verbatim (the raw externalId string,
-   * e.g. `crm_contact.crm_account = 'Acme Corporation'`) instead of the target
-   * record's id. Dangling references break parent joins, and under
+   * [#35254] The engine comes FIRST because it is the one store that holds the
+   * object a write lands on. A boot that ingests a compiled artifact (`os dev`,
+   * `os serve`, the cloud runtime) gives the metadata service each object as
+   * its package authored it, and the fields another package adds through
+   * `objectExtensions` (ADR-0130 D5) live only in the registry's fold. Read
+   * from that copy, a lookup an extension adds was no reference at all: no
+   * dependency edge, no natural-key resolution, and the raw key written into
+   * the foreign-key column — while the in-process boot, whose metadata service
+   * is bridged from the folded registry, resolved the same seed. The loader
+   * does not merge extensions itself: the registry's fold is the one source.
+   *
+   * The metadata service stays the fallback for an engine that exposes no
+   * schema registry (the `IDataEngine` contract does not require one) or does
+   * not know the name. The fallback the other way round predates this order:
+   * marketplace-installed packages register straight into the ObjectQL
+   * registry AFTER `bridgeObjectsToMetadataService` ran at boot, so the
+   * metadata service never hears of them, and resolving through it alone left
+   * their reference graph empty — every lookup / master_detail seed value
+   * written verbatim (e.g. `crm_contact.crm_account = 'Acme Corporation'`).
+   * Dangling references break parent joins, and under
    * `sharingModel: controlled_by_parent` RLS that makes the whole object
    * invisible to everyone, admins included.
    */
   private async resolveObjectDefinition(objectName: string): Promise<any> {
-    const fromMetadata = (await this.metadata.getObject(objectName)) as any;
-    if (fromMetadata?.fields) return fromMetadata;
-    const engineSchema = this.engineSchemaOf(objectName) as any;
-    if (engineSchema?.fields) return engineSchema;
-    return fromMetadata;
+    const served = this.engineSchemaOf(objectName) as any;
+    if (served?.fields) return served;
+    return (await this.metadata.getObject(objectName)) as any;
   }
 
   /**
@@ -2137,14 +2153,11 @@ export class SeedLoaderService implements ISeedLoaderService {
     // [#35655] The roll-up columns a seed never writes (`summaryFieldNames`),
     // the values this dataset's records supplied for them, and which of them
     // did — reported once, after the record loop. Read from the resolved
-    // definition AND the engine's merged schema: the metadata service's copy
-    // wins `resolveObjectDefinition` whenever it has `fields`, and it can lack
-    // a roll-up an object extension contributed, which the engine still
-    // computes — so a seed must not write it either.
-    const summaryFields = [...new Set([
-      ...summaryFieldNames(objectDefinition),
-      ...summaryFieldNames(this.engineSchemaOf(objectName)),
-    ])];
+    // definition, which is the engine's merged schema whenever the engine has
+    // one ([#35254] `resolveObjectDefinition`), so a roll-up an object
+    // extension contributes, which the engine computes, is never written by a
+    // seed either.
+    const summaryFields = summaryFieldNames(objectDefinition);
     let summaryValuesDropped = 0;
     const summaryFieldsDropped = new Set<string>();
     // How a replay compares each field (`isNoOpReplay`): [#24562] a temporal
@@ -3717,17 +3730,16 @@ export class SeedLoaderService implements ISeedLoaderService {
    * The one question {@link resolveFromDatabase} must be able to answer before
    * it may add the `name` leg to its probe chain. Answered from the SAME
    * definition resolver the reference graph is built from
-   * ({@link resolveObjectDefinition} — the metadata service first, then the
-   * engine's own schema registry), so the loader cannot form one opinion about
+   * ({@link resolveObjectDefinition} — the engine's own schema registry first,
+   * then the metadata service), so the loader cannot form one opinion about
    * an object's columns here and a different one two methods up. That resolver
    * is already imported and already called at boot, so this asks the registry
    * a question it is standing right next to; no new dependency, no new seam.
    *
    * **`true` on an unknown**, deliberately. Three populations reach here: an
-   * object the metadata service knows (authoritative), one only the engine's
-   * registry knows (marketplace-installed packages — the reason
-   * `resolveObjectDefinition` has its fallback at all), and one NEITHER can
-   * describe. For the third the honest answer is "unknown", and an unknown is
+   * object the engine's registry knows (the served object), one only the
+   * metadata service knows (an engine with no schema registry), and one
+   * NEITHER can describe. For the third the honest answer is "unknown", and an unknown is
    * not a denial: keeping the leg preserves today's behaviour exactly, and the
    * probe against a genuinely absent object fails on its first leg regardless.
    * Answering `false` there would be this file making up a column list.

@@ -206,3 +206,33 @@ describe('validateRelatedListRefs — built-in tabs and an entry\'s columns', ()
     expect(findings(stackOf(lead({ relatedLists: [{ list: 'rlo_elsewhere', columns: ['nope'] }] })))).toEqual([]);
   });
 });
+
+describe('[#35901] an object extension\'s list placement: its columns are judged as a relatedLists entry\'s are (L2 S4)', () => {
+  const findings = (stack: Record<string, unknown>) =>
+    validateRelatedListRefs(stack).map((f) => [f.severity, f.rule, f.path]);
+  const placing = (place: unknown[], at: 'top' | 'package' = 'top') => {
+    const ext = { extend: 'rlo_lead', place };
+    return at === 'top'
+      ? stackOf(lead(), { objectExtensions: [ext] })
+      : stackOf(lead(), { packages: [{ manifest: { objectExtensions: [ext] } }] });
+  };
+
+  it('a child field, an injected column and a resolving path are the control', () => {
+    expect(findings(placing([{ list: 'rlo_task', columns: ['lead_id', 'created_at', 'lead_id.name'] }]))).toEqual([]);
+  });
+
+  it('refuses a column that is no field of the child, at the placement, at the top level and in a package body', () => {
+    expect(findings(placing([{ list: 'rlo_task', after: 'rlo_event', columns: ['lead_id', 'nope'] }]))).toEqual([
+      ['error', RELATED_LIST_COLUMN_UNKNOWN, 'objectExtensions[0].place[0].columns[1]'],
+    ]);
+    expect(findings(placing([{ list: 'rlo_task.lead_id', columns: ['lead_id.nope'] }], 'package'))).toEqual([
+      ['error', RELATED_LIST_COLUMN_UNKNOWN, 'packages[0].manifest.objectExtensions[0].place[0].columns[0]'],
+    ]);
+    const [finding] = validateRelatedListRefs(placing([{ list: 'rlo_task', columns: ['nope'] }]));
+    expect(finding.message).toContain("Object extension of 'rlo_lead' place[0].columns[0] 'nope' is not a field of 'rlo_task'");
+  });
+
+  it('leaves a child outside the stack unjudged, as an entry\'s', () => {
+    expect(findings(placing([{ list: 'rlo_elsewhere', columns: ['nope'] }]))).toEqual([]);
+  });
+});

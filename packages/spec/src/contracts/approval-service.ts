@@ -73,6 +73,16 @@ export const APPROVAL_STATUSES = [
 export type ApprovalStatus = (typeof APPROVAL_STATUSES)[number];
 
 /**
+ * The most record ids one {@link IApprovalService.getRecordLocks} call — and
+ * one `POST {basePath}/approvals/records/:object/locks` request — carries. A
+ * longer list is refused whole (`400 VALIDATION_ERROR`), never truncated; a
+ * caller with more rows sends them in batches under it. The same cap as the
+ * record-grained explain batch, so a list page that asks both questions splits
+ * its rows the same way.
+ */
+export const APPROVAL_RECORD_LOCKS_MAX_RECORD_IDS = 200;
+
+/**
  * Authored English display label for each {@link APPROVAL_STATUSES} entry —
  * what an English reader sees in the `sys_approval_request.status` select,
  * badges, and the Approvals Inbox (#8543).
@@ -1119,6 +1129,36 @@ export interface IApprovalService {
     recordId: string,
     context: ExecutionContext,
   ): Promise<{ locked: boolean } | null>;
+
+  /**
+   * **Are these records held by a locking approval?** — {@link getRecordLock}
+   * for a page of rows of one object, in one call, so a list that must know
+   * the lock before it opens a cell editor asks once per page and never once
+   * per row.
+   *
+   * Entry `i` of the answer answers `recordIds[i]` with exactly what
+   * {@link getRecordLock} answers for that id: `{ locked }` when the caller
+   * can read the record, `null` when it cannot or when it does not exist,
+   * ⛔ never an entry that tells the two apart. The same judgement, off the
+   * same snapshot, the record-lock `beforeUpdate` hook enforces. A repeated id
+   * is answered at each of its positions. A caller refused the object's read
+   * outright is refused the same way for every id.
+   *
+   * At most {@link APPROVAL_RECORD_LOCKS_MAX_RECORD_IDS} ids per call; a caller
+   * with more pages under the cap.
+   *
+   * **Optional, and its absence is loud:** a door probes for presence and
+   * answers `501`, never a guess and never one {@link getRecordLock} per id.
+   *
+   * @param object - The target object's name
+   * @param recordIds - The target records' ids, at least one
+   * @returns One entry per id, in order
+   */
+  getRecordLocks?(
+    object: string,
+    recordIds: readonly string[],
+    context: ExecutionContext,
+  ): Promise<Array<{ locked: boolean } | null>>;
 
   /**
    * Record a decision on a node-driven request. Honours the node's

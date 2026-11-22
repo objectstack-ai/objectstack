@@ -67,11 +67,22 @@ import {
 function Badges({ named, locale }: { named: readonly DerivedRelatedList[]; locale?: SupportedLocale }) {
   const hidden = named.length > 0 && named.every((r) => r.isHidden);
   const primary = !hidden && named.length > 0 && named.every((r) => r.isPrimary);
-  if (!hidden && !primary) return null;
+  // objectstack#35901 — a list another package brings: shown read-only with its source.
+  const fromPackage = named.find((r) => r.fromPackage !== undefined)?.fromPackage;
+  if (!hidden && !primary && fromPackage === undefined) return null;
   return (
-    <span className="ml-1 rounded bg-muted px-1 text-[10px] text-muted-foreground">
-      {hidden ? t('engine.studio.settings.relatedListsHidden', locale) : t('engine.studio.settings.relatedListsPrimary', locale)}
-    </span>
+    <>
+      {(hidden || primary) && (
+        <span className="ml-1 rounded bg-muted px-1 text-[10px] text-muted-foreground">
+          {hidden ? t('engine.studio.settings.relatedListsHidden', locale) : t('engine.studio.settings.relatedListsPrimary', locale)}
+        </span>
+      )}
+      {fromPackage !== undefined && (
+        <span className="ml-1 rounded bg-muted px-1 text-[10px] text-muted-foreground" data-testid="related-lists-from-package">
+          {tFormat('engine.studio.settings.relatedListsFromPackage', locale, { package: fromPackage })}
+        </span>
+      )}
+    </>
   );
 }
 
@@ -227,8 +238,14 @@ export function RelatedListsEditor({
     }),
   ];
 
-  // What the record page will draw: its own derivation, over what a write keeps.
-  const preview = deriveRelatedLists({ ...draft, name, relatedLists: listed }, catalog as never[]);
+  // What the record page will draw: its own derivation, over what a write keeps
+  // (with the served object's package, so a list another package brings shows
+  // as it will, objectstack#35901).
+  const servedPackage = catalog.find((o) => (o as { name?: unknown }).name === name)?._packageId;
+  const preview = deriveRelatedLists(
+    { ...draft, name, relatedLists: listed, ...(servedPackage !== undefined ? { _packageId: servedPackage } : {}) },
+    catalog as never[],
+  );
   const body = preview.filter((r) => r.isPrimary);
   const side = preview.filter((r) => !r.isPrimary);
   // The tab strip after the overview: the listed tabs in order, then
@@ -236,9 +253,13 @@ export function RelatedListsEditor({
   // show only when listed and the object enables files.
   const tabs: string[] = [];
   const placedSide = new Set<DerivedRelatedList>();
+  // Where the unlisted side lists go (objectstack#35901: before a trailing run
+  // of listed approvals / stream tabs, as the record page arranges them).
+  let unlistedAt = 0;
   for (const entry of listedNames) {
     if (isRecordPageBuiltinTab(entry)) {
       if (entry !== 'sys_attachment' || filesOn) tabs.push(builtinLabel(entry));
+      if (entry !== 'sys_approval_request' && entry !== 'sys_activity') unlistedAt = tabs.length;
       continue;
     }
     for (const r of side) {
@@ -246,8 +267,9 @@ export function RelatedListsEditor({
       placedSide.add(r);
       tabs.push(relationshipLabel(r));
     }
+    unlistedAt = tabs.length;
   }
-  for (const r of side) if (!placedSide.has(r)) tabs.push(relationshipLabel(r));
+  tabs.splice(unlistedAt, 0, ...side.filter((r) => !placedSide.has(r)).map(relationshipLabel));
   if (listedNames.length === 0 && filesOn) tabs.push(builtinLabel('sys_attachment'));
   for (const tab of ['sys_approval_request', 'sys_activity'] as const) {
     if (!listedNames.includes(tab)) tabs.push(builtinLabel(tab));

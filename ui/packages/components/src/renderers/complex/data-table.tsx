@@ -3720,11 +3720,42 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
   // Why the cell an edit was asked of opens no editor, drawn on that cell.
   const [cellNotice, setCellNotice] = useState<{ rowIndex: number; colIndex: number; text: string } | null>(null);
 
+  // objectstack#35795 — an edit or a write asked while the host still reads
+  // what decides it (`GridCellFacts.checking`), asked again when that read
+  // settles. One at a time: a newer ask, another selected cell or an open
+  // editor drops it.
+  type WaitingAct = { rowKey: PendingRowKey; columnKey: string; run: (rowIndex: number, colIndex: number) => void };
+  const waitingEditRef = useRef<WaitingAct | null>(null);
+  const retryWaitingEditRef = useRef<(waiting: WaitingAct) => void>(() => {});
+  /** Say on the cell that it is being checked, and ask `run` again once `settled` settles. */
+  const waitForChecking = (
+    rowIndex: number,
+    colIndex: number,
+    row: any,
+    col: TableColumn,
+    checking: { text: string; settled: Promise<unknown> },
+    run: WaitingAct['run'],
+  ) => {
+    setCellNotice({ rowIndex, colIndex, text: checking.text });
+    const waiting: WaitingAct = { rowKey: pendingRowKeyOf(row), columnKey: col.accessorKey, run };
+    waitingEditRef.current = waiting;
+    const retry = () => {
+      if (waitingEditRef.current !== waiting) return;
+      waitingEditRef.current = null;
+      retryWaitingEditRef.current(waiting);
+    };
+    checking.settled.then(retry, retry);
+  };
+
   const selectCell = (rowIndex: number, colIndex: number) => {
     const row = paginatedData[rowIndex];
     const col = columns[colIndex];
     if (row === undefined || col === undefined) return;
     setCellNotice(null);
+    const waiting = waitingEditRef.current;
+    if (waiting && (waiting.rowKey !== pendingRowKeyOf(row) || waiting.columnKey !== col.accessorKey)) {
+      waitingEditRef.current = null;
+    }
     // objectstack#35685 — a selected cell whose edit a refusal kept says why.
     const rowKey = pendingRowKeyOf(row);
     setFailureNotice(cellErrors.get(rowKey)?.[col.accessorKey] !== undefined ? { rowKey, columnKey: col.accessorKey } : null);
@@ -3806,6 +3837,13 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
       setCellNotice({ rowIndex, colIndex, text: reason });
       return;
     }
+    // Asked again when what decides it has been read; it says so meanwhile.
+    const checking = factsOf(row, col)?.checking;
+    if (checking) {
+      waitForChecking(rowIndex, colIndex, row, col, checking, (r, c) => attemptEdit(r, c, seed));
+      return;
+    }
+    waitingEditRef.current = null;
     // A rating is set in place (digits, a click on a star); it opens no editor.
     if (starsOf(row, col) !== null) return;
     setCellNotice(null);
@@ -3819,6 +3857,16 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     setEditorBelow(below);
     setSelectedCell({ rowIndex, colIndex });
     startEdit(row, col.accessorKey, seed);
+  };
+  // Read at settle time, so the retry sees the rows, the selection and the
+  // editor as they are then, not as they were when the edit was asked.
+  retryWaitingEditRef.current = (waiting) => {
+    if (editingCellRef.current) return;
+    if (!selectedCell || selectedCell.rowKey !== waiting.rowKey || selectedCell.columnKey !== waiting.columnKey) return;
+    const rowIndex = paginatedData.findIndex((r) => pendingRowKeyOf(r) === waiting.rowKey);
+    const colIndex = columns.findIndex((c) => c.accessorKey === waiting.columnKey);
+    if (rowIndex < 0 || colIndex < 0) return;
+    waiting.run(rowIndex, colIndex);
   };
 
   /** Write a value into a cell without an editor: the commit `saveEdit` makes. */
@@ -3849,7 +3897,16 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
       return;
     }
     const value = valueOf(row, col);
-    if (value !== undefined) commitCellValue(row, col.accessorKey, value);
+    if (value === undefined) return;
+    // Written once what decides the write has been read, the value worked out
+    // again then; it says so meanwhile.
+    const checking = factsOf(row, col)?.checking;
+    if (checking) {
+      waitForChecking(rowIndex, colIndex, row, col, checking, (r, c) => writeCell(r, c, valueOf));
+      return;
+    }
+    waitingEditRef.current = null;
+    commitCellValue(row, col.accessorKey, value);
   };
 
   const togglesCell = (row: any, col: TableColumn) => factsOf(row, col)?.toggles ?? col.type === 'boolean';

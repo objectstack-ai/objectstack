@@ -291,15 +291,16 @@ export function useObjectGridGrouping({
     }
   }, [groupRowQueryKey]);
   const groupReloadKey = `${refreshKey}:${invalidationNonce}`;
-  // [ADR-0144 D6] A money aggregate over a `record`-mode amount stands only in
-  // groups bucketed by that amount's code field; elsewhere it would add
-  // amounts in different currencies, so it is dropped before either the
-  // server or the client bucketing computes it. Keyed on what it reads, so a
+  // [ADR-0144 D6, ADR-0158 U7 R1] A measure aggregate over a `record`-mode
+  // amount or quantity stands only in groups bucketed by its code or unit
+  // field; elsewhere it would add amounts in different currencies or
+  // quantities in different units, so it is dropped before either the server
+  // or the client bucketing computes it. Keyed on what it reads, so a
   // host that rebuilds `schema` every render does not re-key the header query.
   // [objectstack#32119] Per aggregated field whose cell paints a date-family
   // face, that face, resolved as the group headings' faces are: a `min` /
   // `max` over it is a time, drawn as the cell draws it, and a `sum` / `avg`
-  // over it is no figure at all, so it is dropped here with the money
+  // over it is no figure at all, so it is dropped here with the measure
   // aggregates, before either path computes it or the server is asked.
   const groupAggregationKey = JSON.stringify({
     aggregations: schema.aggregations ?? null,

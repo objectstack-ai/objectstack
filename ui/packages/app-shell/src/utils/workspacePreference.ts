@@ -12,7 +12,7 @@ import {
   relatedArrangementFromRecord,
   relatedArrangementToRecord,
   type RelatedArrangement,
-} from '@object-ui/plugin-detail';
+} from '@object-ui/plugin-detail/core';
 
 /**
  * The console's per-reader workspace preferences — how a reader likes the
