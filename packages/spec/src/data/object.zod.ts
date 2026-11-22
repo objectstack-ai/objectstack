@@ -332,13 +332,32 @@ export const ObjectCapabilities = strictObject({
    * Changes filter; that page has no separate History tab. A page an author
    * assigns is drawn as authored: a `record:history` or `record:activity`
    * block placed there shows the record's field changes from its own activity
-   * (`sys_activity`), and neither reads this flag. Pair with per-field
-   * `trackHistory: true` to select which field diffs render as human-readable
-   * timeline summaries (ADR-0052 §5b). Audit *capture* into `sys_audit_log` is
+   * (`sys_activity`), and neither reads this flag. Whether the activity
+   * stream shows a changed field's old → new values is not this flag's
+   * question: it is {@link fieldHistory}'s, and the field's own
+   * `trackHistory` (ADR-0052 §5b, #36290). Audit *capture* into `sys_audit_log` is
    * a compliance ledger and stays on regardless of this flag; retention is
    * governed by data lifecycle (ADR-0057), not by hiding the UI.
    */
-  trackHistory: z.boolean().default(false).describe('Show the record\'s field changes (audit-trail UI): on the default record page they join the record\'s one timeline stream, under its Changes filter. On an authored page, a record:history or record:activity block shows the record\'s field changes from its own activity, and neither reads this flag. Pair with per-field trackHistory to pick which field diffs are summarized; audit capture itself is always on for compliance'),
+  trackHistory: z.boolean().default(false).describe('Show the record\'s field changes (audit-trail UI): on the default record page they join the record\'s one timeline stream, under its Changes filter. On an authored page, a record:history or record:activity block shows the record\'s field changes from its own activity, and neither reads this flag. Whether the activity stream shows a changed field\'s old → new values is enable.fieldHistory\'s question, not this flag\'s; audit capture itself is always on for compliance'),
+
+  /**
+   * Field-change values on the record's activity stream — on unless turned off
+   * (#36290, ruling 7076513167, reversing ADR-0052 §5b.1's opt-in default).
+   *
+   * Absent: every changed field's old → new values show on the record's
+   * activity stream (`sys_activity`); a field turns its own off with its
+   * own `fieldHistory: false`. `false`: off for the object — a change names
+   * its fields, never their values, whatever a field says. Deliberately no `.default()`: a parsed body
+   * that materialized a default would persist it into every built artifact
+   * and stored definition, where it could not be told from an authored value.
+   *
+   * Independent of {@link trackHistory}, which keeps its meaning (the ledger
+   * view on the record page and the derived `history` API verb): an object
+   * writing `trackHistory: false` alone shows values. Who reads a value is the
+   * field's read rule, per reader; a credential field never shows one.
+   */
+  fieldHistory: z.boolean().optional().describe('Field-change values on the record activity stream. Absent: each changed field\'s old → new values show (a field opts out with its own fieldHistory: false). false: off for this object, a change names its fields only, whatever a field says. Independent of trackHistory, which does not turn values off. Who reads a value is the field\'s read rule; a credential field never shows one'),
 
   /** Enable global search indexing */
   searchable: z.boolean().default(true).describe('Index records for global search'),

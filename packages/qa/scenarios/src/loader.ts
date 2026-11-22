@@ -925,6 +925,13 @@ function checkCard(
       checkRef(op.object, field, value, [...at, 'values', field]);
     }
     if (!personas.has(op.actingAs)) refuse([...at, 'actingAs'], `no persona \`${op.actingAs}\``);
+    if (op.via !== undefined) {
+      if (op.outcome.kind === 'refused') {
+        refuse([...at, 'via'], `a \`refused\` write goes through no route: \`via\` names the agent action an applied or confirmation-gated write is designed to go through`);
+      } else if (!(run.agentActions ?? []).some((a) => a.name === op.via && a.object === op.object)) {
+        refuse([...at, 'via'], `\`${op.via}\` is not one of the card's \`run.agentActions\` on \`${op.object}\``);
+      }
+    }
     const actor = run.personas.find((p) => p.id === op.actingAs);
     if (actor !== undefined) checkReach(op, actor, at);
     const out = op.outcome;

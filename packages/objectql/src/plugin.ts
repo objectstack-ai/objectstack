@@ -32,6 +32,10 @@ import { viewContainerNameRefusal } from './view-container-name-refusal.js';
 // [ADR-0150 D2, #31720] The residual as one holder of the stack's namespace,
 // for the namespace name rule (see the residual registration below).
 import { residualNamespacePackageOf } from './namespace-co-owner-names.js';
+// [ADR-0130 D4] The one reading of an `objectExtensions` entry, and the equality
+// `registerApp`'s same-target line reads — the residual's extensions register
+// and are judged as a body's are.
+import { equalByValue, objectExtensionContribution } from './engine-registration.js';
 import { StorageNameMapping } from '@objectstack/spec/system';
 import { applyProtection } from '@objectstack/spec/shared';
 // [#21777] The ONE "is this schema the remote's?" predicate, shared with `ObjectQL.syncSchemas`.
@@ -198,6 +202,31 @@ function unclaimedTopLevelObjects(
 }
 
 /**
+ * The `objectExtensions` entries of a multi-package stack's residual, and the
+ * id they are owned by — the residual rule's answer (`unclaimedTopLevel`, which
+ * lists an entry no body carries an equal of), read the way
+ * {@link unclaimedTopLevelObjects} reads it. ⛔ Never re-derived here.
+ *
+ * Why the engine needs them: no door registered a residual extension, so a
+ * `composeStacks(…, { manifest: 'preserve' })` artifact with an input that has
+ * no `manifest` (and `os build`'s output of it) served the target without the
+ * extension's fields, and nothing said so.
+ *
+ * @returns `undefined` when the stack has no residual extension.
+ */
+function unclaimedTopLevelExtensions(
+  residual: UnclaimedTopLevel | undefined,
+): { ownerId: string | undefined; ownerVersion: string | undefined; extensions: Array<{ index: number; item: Record<string, unknown> }> } | undefined {
+  if (!residual) return undefined;
+  const extensions = residual.items
+    .filter((entry) => entry.type === 'object_extension')
+    .map((entry) => ({ index: entry.index, item: entry.item as Record<string, unknown> }));
+  return extensions.length > 0
+    ? { ownerId: residual.ownerId, ownerVersion: residual.ownerVersion, extensions }
+    : undefined;
+}
+
+/**
  * The residual types the engine does NOT register through
  * {@link unclaimedTopLevelItems}, each because it has a path of its own:
  *
@@ -210,9 +239,11 @@ function unclaimedTopLevelObjects(
  *    would change which objects the data door serves. A residual list no
  *    object field names is refused instead
  *    ({@link unreferencedResidualPicklistRefusal});
- *  - `object_extension`: an extension has no slot of its own (it is keyed by
- *    `extend`, and its `name` spelling is a retired alias the schema refuses),
- *    so the residual rule never lists one.
+ *  - `object_extension`: {@link unclaimedTopLevelExtensions}, through the
+ *    registry's `extend` verb a body's `objectExtensions` take — an extension
+ *    is no item: it has no slot of its own (it is keyed by `extend`, and its
+ *    `name` spelling is a retired alias the schema refuses), and it registers
+ *    as a contribution to its target object.
  */
 const RESIDUAL_TYPES_WITH_OWN_PATH: ReadonlySet<string> = new Set(['object', 'picklist', 'object_extension']);
 
@@ -956,13 +987,16 @@ export class ObjectQLPlugin implements Plugin {
         // which readers of the registry alone see only through this. See
         // {@link unclaimedTopLevelItems}.
         const residualItems = unclaimedTopLevelItems(residualAnswer);
+        // …and its `objectExtensions` entries, which register as `extend`
+        // contributions, not as items. See {@link unclaimedTopLevelExtensions}.
+        const residualExtensions = unclaimedTopLevelExtensions(residualAnswer);
         // …and its picklists, which neither of those registers: one that no
         // object field names is refused here, before anything registers. See
         // {@link unreferencedResidualPicklistRefusal}.
         const unreferencedPicklists = unreferencedResidualPicklistRefusal(residualAnswer, ordered);
         if (unreferencedPicklists) throw unreferencedPicklists;
 
-        if (ordered.length === 0 && residual === undefined && residualItems === undefined) {
+        if (ordered.length === 0 && residual === undefined && residualItems === undefined && residualExtensions === undefined) {
           // An artifact that declared `packages: []` registers nothing. Said out
           // loud rather than returning quietly: "the install did nothing" is not
           // a state anyone should have to infer from an absence.
@@ -1075,6 +1109,10 @@ export class ObjectQLPlugin implements Plugin {
           // id, through the registration a body's own item of that type takes.
           // See {@link registerUnclaimedTopLevelItems}.
           if (residualItems) this.registerUnclaimedTopLevelItems(ctx, residualItems);
+          // [ADR-0130 D4] …and the residual's object extensions, last, under
+          // the same id, through the verb a body's `objectExtensions` take
+          // (`registerApp` step 2b). See {@link registerUnclaimedTopLevelExtensions}.
+          if (residualExtensions) this.registerUnclaimedTopLevelExtensions(ctx, residualExtensions, ordered);
         }));
         // [#28534] …and the door's statement of where the residual's owner
         // came from: no package row answers the id, and a reader of an item's
@@ -1085,7 +1123,7 @@ export class ObjectQLPlugin implements Plugin {
         // it (the bridge below, every reader after the door answers). The
         // residual is not an artifact entry, so it states no source of its
         // own; the door's word, `code` when it states none, is its origin.
-        const residualOwnerId = residual?.ownerId ?? residualItems?.ownerId;
+        const residualOwnerId = residual?.ownerId ?? residualItems?.ownerId ?? residualExtensions?.ownerId;
         if (residualOwnerId !== undefined) ql.recordResidualOwner(residualOwnerId, options?.source ?? 'code');
         // [ADR-0130 D4, epic #31527 R2] …and what the residual's owner
         // declares it depends on (the stack's own manifest): no package record
@@ -3625,6 +3663,113 @@ export class ObjectQLPlugin implements Plugin {
         throw viewsEntryNotContainerRefusal(name, 'manifest', ownerId);
       }
       ql.registry.registerItem(type, stamp(toRegister), 'name' as any, ownerId);
+    }
+  }
+
+  /**
+   * [ADR-0130 D4] Register the `objectExtensions` entries of a stack's
+   * residual ({@link unclaimedTopLevelExtensions}) in the engine, the way
+   * `registerApp` step 2b registers a body's: each one an `extend`
+   * contribution to its target under the residual rule's id, with the stack's
+   * version stamped beside it ({@link objectExtensionContribution}, the one
+   * reading of an entry). Before this, no door registered one, so the target
+   * was served without its fields and nothing was said.
+   *
+   * The registry keeps one extension of a target per package (the extend
+   * splice replaces the package's earlier contribution, which a reload relies
+   * on). The residual's id is a package of its own only in name: under
+   * `manifest: 'preserve'` it is the last input's manifest id, which is also
+   * that input's body. So a residual entry for a target that body extends too,
+   * or two residual entries for one target, keep only the LAST one's fields —
+   * the residual registering after every body. Authoring refuses both shapes
+   * (`composeStacks`' residual door, the #22934 sentence); an artifact built
+   * before that still loads, and the outcome is said once per target at
+   * `error`, as `registerApp` says it of one body (#35228 ruling A, arm A1):
+   * the boot looks healthy while the earlier entries' fields are absent.
+   *
+   * One class is NOT registered, the residual objects' own rule: an entry
+   * whose field names a picklist none of the stack's package bodies declares,
+   * because the residual's own picklists are metadata only and the boot's
+   * picklist audit at `kernel:ready` would refuse the field. It is named at
+   * boot instead. Any refusal the registry's `extend` verb raises propagates,
+   * as a body's does.
+   */
+  private registerUnclaimedTopLevelExtensions(
+    ctx: PluginContext,
+    residual: { ownerId: string | undefined; ownerVersion: string | undefined; extensions: Array<{ index: number; item: Record<string, unknown> }> },
+    bodies: unknown[],
+  ): void {
+    const ql = this.ql;
+    if (!ql) return;
+    const { ownerId, ownerVersion } = residual;
+    const bodyPicklists = new Set<string>();
+    for (const body of bodies) for (const name of collectManifestPicklistNames(body)) bodyPicklists.add(name);
+    const unserved: string[] = [];
+    const registered: Array<{ index: number; item: Record<string, unknown> }> = [];
+    for (const entry of residual.extensions) {
+      const dangling = collectManifestPicklistReferences({ objectExtensions: [entry.item] }, ownerId)
+        .find((ref) => !bodyPicklists.has(ref.picklist));
+      if (dangling) {
+        unserved.push(
+          `objectExtensions[${entry.index}] of '${String(entry.item.extend)}' (field '${dangling.field}' names picklist `
+          + `'${dangling.picklist}', which no package body declares)`,
+        );
+        continue;
+      }
+      registered.push(entry);
+    }
+    this.logResidualSameTargetExtensions(ctx, ownerId, registered, bodies);
+    for (const { item } of registered) {
+      const { definition, priority } = objectExtensionContribution(item);
+      if (ownerVersion !== undefined) applyProtection(definition as any, { packageId: ownerId, packageVersion: ownerVersion });
+      ql.registry.registerObject(definition as any, ownerId as string, undefined, 'extend', priority);
+      ctx.logger.debug('Registered residual Object Extension', { target: definition.name, priority, from: ownerId });
+    }
+    if (unserved.length === 0) return;
+    ctx.logger.warn(
+      `[ObjectQLPlugin] ${unserved.length} top-level object extension(s) of stack '${ownerId ?? '<none>'}' that no `
+      + `package body declares are NOT registered, so the target does not serve their fields: ${unserved.join(', ')}. `
+      + 'Declare each one inside the `packages[]` entry of the package that owns it, together with every picklist '
+      + 'its fields name.',
+    );
+  }
+
+  /**
+   * The one error line per target that the residual's extensions
+   * ({@link registerUnclaimedTopLevelExtensions}) owe when two or more
+   * contributions under the residual's id extend it — the body that carries
+   * that id first, then the residual, in registration order — and they are not
+   * all equal by value: only the last one's fields are served.
+   */
+  private logResidualSameTargetExtensions(
+    ctx: PluginContext,
+    ownerId: string | undefined,
+    residual: ReadonlyArray<{ index: number; item: Record<string, unknown> }>,
+    bodies: unknown[],
+  ): void {
+    const owner = ownerId === undefined ? undefined : bodies.find((body) => artifactPackageId(body) === ownerId);
+    const ownerEntries = (owner as { objectExtensions?: unknown } | undefined)?.objectExtensions;
+    const byTarget = new Map<string, Array<{ at: string; item: unknown }>>();
+    const add = (target: unknown, at: string, item: unknown): void => {
+      if (typeof target !== 'string' || target === '') return;
+      byTarget.set(target, [...(byTarget.get(target) ?? []), { at, item }]);
+    };
+    if (Array.isArray(ownerEntries)) {
+      ownerEntries.forEach((item, i) => add((item as { extend?: unknown } | null)?.extend, `package '${ownerId}' objectExtensions[${i}]`, item));
+    }
+    for (const { index, item } of residual) add(item.extend, `the top-level objectExtensions[${index}] no package body declares`, item);
+    for (const [target, entries] of byTarget) {
+      if (entries.length < 2) continue;
+      if (entries.every((e) => equalByValue(e.item, entries[0]!.item))) continue;
+      const named = `${entries.slice(0, -1).map((e) => e.at).join(', ')} and ${entries[entries.length - 1]!.at}`;
+      ctx.logger.error(
+        `[ObjectQLPlugin] stack '${ownerId ?? '<none>'}' registers ${entries.length} extensions of object '${target}' under `
+        + `that one id (${named}): one extension of an object registers per package, so only the last one's fields are `
+        + 'served and the fields of the others are missing, while the stack keeps loading. Merge them into a single '
+        + `objectExtensions entry for '${target}' inside the \`packages[]\` entry of the package that owns it.`,
+        undefined,
+        { package: ownerId, target },
+      );
     }
   }
 
