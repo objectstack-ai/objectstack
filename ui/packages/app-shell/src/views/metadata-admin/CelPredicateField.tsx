@@ -75,7 +75,9 @@ import {
   type CelValueType,
 } from './celAuthoring.js';
 import { useServerHoldAt, type ServerDiagnosticEntry } from './draftVerdict.js';
-import { isMultiValueField } from '@objectstack/spec/data';
+// The draft check's own derivation, so the editor and the save judge the same
+// fields as lists (`celAuthoring.ts` stays free of any import at load).
+import { multiValueFieldsOf, type CelFieldDef } from './clientValidation.js';
 
 const LINT_DEBOUNCE_MS = 250;
 
@@ -195,21 +197,7 @@ export interface CelPredicateFieldProps {
   id?: string;
 }
 
-/** One field definition {@link CelPredicateFieldProps.fieldDefs} reads. */
-export interface CelFieldDef {
-  name: string;
-  type?: unknown;
-  multiple?: unknown;
-}
-
 const EMPTY_FIELDS: string[] = [];
-
-/** The list-valued fields among `defs`, by `isMultiValueField`. */
-export function multiValueFieldsOf(defs: ReadonlyArray<CelFieldDef>): string[] {
-  return defs
-    .filter((d) => typeof d.type === 'string' && isMultiValueField({ type: d.type, multiple: d.multiple === true }))
-    .map((d) => d.name);
-}
 
 /**
  * A finding's words: the producer's own message as written, or — for an
