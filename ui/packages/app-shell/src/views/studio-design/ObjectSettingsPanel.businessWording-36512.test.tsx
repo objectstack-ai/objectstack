@@ -78,7 +78,14 @@ describe('ObjectSettingsPanel — business wording (objectstack#36512)', () => {
     ['zh-CN', 'unset'],
     ['zh-CN', 'controlled_by_parent'],
   ] as const)('the rendered tab (%s, sharing %s) shows no ADR number', (locale, sharing) => {
-    renderPanel(sharing === 'unset' ? draft : { ...draft, sharingModel: sharing }, locale);
+    // A controlled-by-parent object that derives its one master, so the spec's
+    // own refusal (its message is the spec's text, not this tab's) is not drawn.
+    const cbp = {
+      sharingModel: sharing,
+      fields: { ...draft.fields, account: { type: 'master_detail', reference: 'crm_account', required: true } },
+    };
+    renderPanel(sharing === 'unset' ? draft : cbp, locale);
+    expect(screen.queryByTestId('owd-cbp-refusal')).toBeNull();
     expect(document.body.textContent).not.toMatch(/ADR/);
     expect(document.body.textContent).not.toMatch(/security-owd-unset/);
   });
