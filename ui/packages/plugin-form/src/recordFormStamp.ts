@@ -26,8 +26,12 @@
  *   `lookupFilters`, so the face the widget reads carries its own stamp.
  * - A field whose faces neither read `{ $record }` nor carry the key comes
  *   back as the same object.
+ * - A lookup declaring `lookupAutofill` also carries the definitions of its
+ *   targets (`withLookupAutofillTargets`), read off the same field map: a
+ *   pick copies an amount only into a target in the same currency
+ *   (objectstack#36249), and a target's currency is its definition's.
  */
-import { RECORD_BEING_EDITED_KEY, withRecordBeingEdited } from '@object-ui/fields';
+import { RECORD_BEING_EDITED_KEY, withLookupAutofillTargets, withRecordBeingEdited } from '@object-ui/fields';
 
 type Def = Record<string, unknown>;
 
@@ -40,7 +44,7 @@ function restamp(face: Def, objectFields: Readonly<Record<string, unknown>> | nu
     const { [RECORD_BEING_EDITED_KEY]: _authored, ...rest } = face;
     clean = rest;
   }
-  return withRecordBeingEdited(clean, objectFields);
+  return withLookupAutofillTargets(withRecordBeingEdited(clean, objectFields), objectFields);
 }
 
 /**

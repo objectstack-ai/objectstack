@@ -19,7 +19,18 @@ import { formatDate, formatDateTime, resolveFieldRuleState, toDisplayDate } from
 import { useDisplayLocale, useLocalization, formatDisplayNumber } from '@object-ui/i18n';
 import { resolveFieldCurrency, currencyFractionDigits, currencySymbol } from '../currency.js';
 import { LookupField } from './LookupField.js';
-import { declaredLookupAutofillPatch, type LookupAutofillByField, type LookupAutofillPair } from './lookupAutofill.js';
+import {
+  planDeclaredLookupAutofill,
+  pickedAmountCurrencyOf,
+  crossCurrencyRefusal,
+  type AmountCurrency,
+  type AutofillCurrencyContext,
+  type LookupAutofillByField,
+  type LookupAutofillPair,
+  type LookupAutofillPlan,
+  type WithheldAutofill,
+  withheldAutofillMessage,
+} from './lookupAutofill.js';
 import { FileCell } from './FileField.js';
 import { toDateInputValue, toDateTimeInputValue, fromDateTimeInputValue, isImpossibleStoredDay } from './nativeDateValue.js';
 import { useFieldTranslation } from './useFieldTranslation.js';
@@ -282,24 +293,84 @@ export function evalArith(expr: string, row: Row): number | null {
  * (`declaredLookupAutofillPatch`), whatever the column's `autofill` says, and
  * a declared target is taken out of the same-named copy, so one target never
  * has two writers on one pick.
+ *
+ * `currency` is the pick's cross-currency rule (`crossCurrencyRefusal`): a
+ * value it refuses is left out of the patch, the same-named copy and the
+ * declared pairs alike, and listed under `withheld` so the grid says why the
+ * cell stayed empty. Without it every value copies as before.
  */
-export function lookupAutofillPatch(
+export function planLookupAutofill(
   columns: GridColumn[],
   col: GridColumn,
   record: any,
   declared?: { pairs?: readonly LookupAutofillPair[]; row?: Row; previous?: Row | null },
-): Row {
+  currency?: AutofillCurrencyContext,
+): LookupAutofillPlan {
   const patch: Row = { [col.name]: record?.value ?? record?.id ?? record?._id };
+  const withheld: WithheldAutofill[] = [];
   const declaredTargets = new Set((declared?.pairs ?? []).map((p) => p.target));
   if (col.autofill !== false && record && typeof record === 'object') {
     for (const other of columns) {
       if (other.name === col.name || other.computed || other.type === 'lookup') continue;
       if (declaredTargets.has(other.name)) continue;
       const v = record[other.name];
-      if (v !== undefined && v !== null && v !== '') patch[other.name] = v;
+      if (v === undefined || v === null || v === '') continue;
+      const refusal = currency
+        ? crossCurrencyRefusal(currency.sourceCurrency(other.name, v), currency.targetCurrency(other.name), currency.home)
+        : undefined;
+      if (refusal) withheld.push({ target: other.name, source: other.name, amount: Number(v), ...refusal });
+      else patch[other.name] = v;
     }
   }
-  return { ...patch, ...declaredLookupAutofillPatch(declared?.pairs, record, declared?.row, declared?.previous) };
+  const pairs = planDeclaredLookupAutofill(declared?.pairs, record, declared?.row, declared?.previous, currency);
+  return { patch: { ...patch, ...pairs.patch }, withheld: [...withheld, ...pairs.withheld] };
+}
+
+/** {@link planLookupAutofill}'s writes alone. */
+export function lookupAutofillPatch(
+  columns: GridColumn[],
+  col: GridColumn,
+  record: any,
+  declared?: { pairs?: readonly LookupAutofillPair[]; row?: Row; previous?: Row | null },
+  currency?: AutofillCurrencyContext,
+): Row {
+  return planLookupAutofill(columns, col, record, declared, currency).patch;
+}
+
+/**
+ * The cross-currency context of a pick in this grid (`crossCurrencyRefusal`).
+ *
+ * - A picked value's currency is its field's on the referenced object
+ *   (`sourceFields`, the schema the lookup cell read for its labels), read on
+ *   the picked record. A value whose field the cell does not know is a value
+ *   of unknown currency when it is a number.
+ * - A cell's currency is its column's: a `currency` column the host resolved
+ *   (`columnCurrencies`, a line amount following its header's currency) is in
+ *   that code, or in none while the header holds no code; any other
+ *   `currency` column is in the home currency (see `columnCurrency`). A column
+ *   of any other type holds no amount of money.
+ */
+function gridAutofillCurrency(
+  columns: readonly GridColumn[],
+  sourceFields: Readonly<Record<string, unknown>> | null | undefined,
+  picked: Row | null | undefined,
+  columnCurrencies: ColumnCurrencies | undefined,
+  home: string | undefined,
+): AutofillCurrencyContext {
+  return {
+    home,
+    sourceCurrency: (source, value) =>
+      pickedAmountCurrencyOf(sourceFields?.[source] as never, value, picked),
+    targetCurrency: (target): AmountCurrency | undefined => {
+      const c = columns.find((x) => x.name === target);
+      if (!c || c.type !== 'currency') return undefined;
+      if (columnCurrencies && Object.prototype.hasOwnProperty.call(columnCurrencies, c.name)) {
+        const code = columnCurrencies[c.name];
+        return code ? { kind: 'code', code } : { kind: 'unset' };
+      }
+      return { kind: 'home' };
+    },
+  };
 }
 
 /**
@@ -719,6 +790,17 @@ type GridFieldProps = FieldWidgetComponentProps<Row[]> & {
 export type ColumnHelp = Readonly<Record<string, string>>;
 
 /**
+ * What the last pick on one line did not copy (objectstack#36249): the lookup
+ * column picked, the value it committed, and each withheld value. The note
+ * stands while the line still holds that pick and the withheld cell is empty.
+ */
+interface WithheldPick {
+  lookup: string;
+  picked: unknown;
+  items: readonly WithheldAutofill[];
+}
+
+/**
  * The {@link ColumnHelp} of a child object's fields: each field's help read
  * through {@link fieldHelpText}, the ONE read the record form's help line uses
  * (objectui#12213), so a grid header and the form show the same text. Hand it
@@ -1086,19 +1168,31 @@ function GridFieldBody({
    * than its index, so adding, removing or reordering rows cannot misattribute it.
    */
   const pickedLookupRecords = useRef(new Map<string, Row>());
+  // The values the last pick on each line did not copy, because the picked
+  // amount is in another currency than the cell (objectstack#36249): said
+  // under the line while that pick still stands and the cell is still empty.
+  const [withheldFills, setWithheldFills] = React.useState<ReadonlyMap<number, WithheldPick>>(() => new Map());
   const applyLookupSelection = useCallback(
-    (rowIdx: number, col: GridColumn, record: any) => {
+    (rowIdx: number, col: GridColumn, record: any, picked?: { sourceFields?: Readonly<Record<string, unknown>> | null }) => {
       const row = rows[rowIdx] ?? blankRow();
       const pickKey = (id: unknown) => `${col.name}\u0000${String(id)}`;
       const heldId = row[col.name];
       const previous = heldId == null || heldId === '' ? null : pickedLookupRecords.current.get(pickKey(heldId)) ?? null;
-      const patch = lookupAutofillPatch(columns, col, record, { pairs: lookupAutofill?.[col.name], row, previous });
+      const currency = gridAutofillCurrency(columns, picked?.sourceFields, record, columnCurrencies, tenantCurrency);
+      const { patch, withheld } = planLookupAutofill(columns, col, record, { pairs: lookupAutofill?.[col.name], row, previous }, currency);
       if (record && typeof record === 'object' && patch[col.name] != null) {
         pickedLookupRecords.current.set(pickKey(patch[col.name]), record);
       }
+      setWithheldFills((prev) => {
+        if (withheld.length === 0 && !prev.has(rowIdx)) return prev;
+        const next = new Map(prev);
+        if (withheld.length === 0) next.delete(rowIdx);
+        else next.set(rowIdx, { lookup: col.name, picked: patch[col.name], items: withheld });
+        return next;
+      });
       applyPatch(rowIdx, patch);
     },
-    [columns, rows, blankRow, lookupAutofill, applyPatch],
+    [columns, rows, blankRow, lookupAutofill, applyPatch, columnCurrencies, tenantCurrency],
   );
 
   /** Set a cell to an already-typed value (lookup ids, etc.) without coercion. */
@@ -1530,7 +1624,7 @@ function GridFieldBody({
         <LookupField
           value={val}
           onChange={(v: any) => setCellValue(rowIdx, c.name, v)}
-          onSelectRecord={(rec: any) => applyLookupSelection(rowIdx, c, rec)}
+          onSelectRecord={(rec: any, picked?: { sourceFields?: Readonly<Record<string, unknown>> | null }) => applyLookupSelection(rowIdx, c, rec, picked)}
           compact
           field={{ reference: c.reference, displayField: c.displayField, idField: c.idField, multiple: c.multiple, options: c.options, placeholder: '—' } as any}
           disabled={locked}
@@ -1729,9 +1823,16 @@ function GridFieldBody({
               displayRows.map((row, rowIdx) => {
                 const isGhost = hasGhost && rowIdx === rows.length;
                 const reorderable = allowReorder && !isGhost && !isList;
+                // objectstack#36249 — the values this line's pick did not copy,
+                // while the pick stands and the cell is still empty.
+                const withheldPick = withheldFills.get(rowIdx);
+                const withheldShown =
+                  withheldPick && !isList && String(row[withheldPick.lookup] ?? '') === String(withheldPick.picked ?? '')
+                    ? withheldPick.items.filter((w) => row[w.target] == null || row[w.target] === '')
+                    : [];
                 return (
+                  <React.Fragment key={rowIdx}>
                   <tr
-                    key={rowIdx}
                     className={cn('group', !isGhost && 'hover:bg-muted/30')}
                     {...(allowReorder && !isGhost
                       ? {
@@ -1864,6 +1965,26 @@ function GridFieldBody({
                       </td>
                     )}
                   </tr>
+                  {withheldShown.length > 0 && (
+                    <tr data-testid={`line-items-autofill-withheld-${rowIdx}`}>
+                      <td />
+                      <td
+                        colSpan={columns.length + (hasRowActions ? 1 : 0)}
+                        className="px-2 pb-1.5 pt-0 text-xs text-muted-foreground"
+                        role="status"
+                      >
+                        {withheldShown.map((w) => {
+                          const target = columns.find((x) => x.name === w.target);
+                          return (
+                            <p key={w.target} data-withheld-target={w.target}>
+                              {withheldAutofillMessage(w, target?.label || w.target, t, displayLocale)}
+                            </p>
+                          );
+                        })}
+                      </td>
+                    </tr>
+                  )}
+                  </React.Fragment>
                 );
               })
             )}
