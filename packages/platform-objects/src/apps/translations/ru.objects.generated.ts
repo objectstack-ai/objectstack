@@ -497,6 +497,10 @@ export const ruObjects: NonNullable<TranslationData['objects']> = {
         label: "Причина отзыва",
         help: "Почему сеанс был отозван (idle_timeout, absolute_max, concurrent_cap, ip_not_allowed, user_revoked, admin, organization_membership_ended, admin_password_reset, password_reset, …)."
       },
+      sso_provider_id: {
+        label: "Поставщик SSO",
+        help: "Поставщик SSO, через который был выполнен вход в этом сеансе, если есть. Удаление этого поставщика завершает сеанс. Управляется системой."
+      },
       active_organization_id: {
         label: "Активная организация"
       },

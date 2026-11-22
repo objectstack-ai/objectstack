@@ -1968,7 +1968,7 @@ export const UserActionsConfigSchema = lazySchema(() => strictObject({
   sort: z.boolean().default(true).describe('Allow users to sort records'),
   search: z.boolean().default(true).describe('Allow users to search records'),
   filter: z.boolean().default(true).describe('Allow users to filter records'),
-  refresh: z.boolean().default(true).describe('Allow users to reload the view data from the backend without a full page reload'),
+  refresh: z.boolean().default(true).describe('Allow users to reload the view data from the backend without a full page reload. Governs only the wide toolbar\'s Refresh button (`compactToolbar: false`): the default toolbar has no Refresh, so the toggle changes nothing there.'),
   rowHeight: z.boolean().default(true).describe('Allow users to toggle row height/density'),
   group: z.boolean().default(true).describe('Allow users to change record grouping from the toolbar. Toggle only — the grouping itself is configured in the view-level `grouping` block.'),
   addRecordForm: z.boolean().default(false).describe('Add records through a form instead of inline'),

@@ -22,6 +22,9 @@ import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { signUpEmail } from 'better-auth/api';
 import { AuthManager } from './auth-manager.js';
+// The SSO discovery egress guard the source loads with a dynamic import, paid
+// here, during collection (check-test-source-alias, "The source reach").
+import '@objectstack/core/egress';
 import { authIdentityObjects } from './manifest.js';
 import { SELF_REGISTRATION_CLOSED } from './audience-posture.js';
 import { createCopyInvitationLinkHandler } from './invitation-link-action.js';
@@ -345,7 +348,7 @@ describe('under invite_only, the other creation doors', () => {
   });
 });
 
-describe('open and email_domain match an invitation by address, as before', () => {
+describe('email_domain matches an invitation by address, as before', () => {
   const gate = (manager: AuthManager, email: string) =>
     (manager as unknown as {
       validateAudienceAdmission(data: unknown, ctx?: unknown): Promise<{ error: string } | undefined>;
@@ -354,20 +357,23 @@ describe('open and email_domain match an invitation by address, as before', () =
       { body: {} },
     );
 
-  // Under `open` an uninvited sign-up is admitted WITH the declared set, which
-  // this store cannot resolve (it would answer AUTH_CONFIG_ERROR), and under
-  // `email_domain` this address is off the list: so `undefined` below can only
-  // be the invitation carve-out, matched by address.
-  for (const audience of [
-    { posture: 'open', selfRegistrationPermissionSet: 'member_default' },
-    { posture: 'email_domain', allowedEmailDomains: ['elsewhere.example'], selfRegistrationPermissionSet: 'member_default' },
-  ]) {
-    it(`${audience.posture}: an email-and-password sign-up holding an invitation is admitted with no id`, async () => {
-      const d = await deployment();
-      await d.invite(INVITEE);
-      const manager = makeManager(d.engine, { audience });
-      expect(await gate(manager, INVITEE)).toBeUndefined();
-      expect((await gate(manager, OTHER))?.error).not.toBeUndefined();
-    });
-  }
+  // This address is off the list, and this store cannot resolve the declared
+  // set (a sign-up the posture's rule admits would answer AUTH_CONFIG_ERROR):
+  // so `undefined` below can only be the invitation carve-out, matched by
+  // address, which asks for no set. Under `open` the posture's rule admits
+  // every address, so an invitation decides nothing there: an invited sign-up
+  // asks for the declared set like an uninvited one, and an unresolvable set
+  // refuses both (`audience-posture.test.ts`, the end of the chain).
+  const audience = {
+    posture: 'email_domain',
+    allowedEmailDomains: ['elsewhere.example'],
+    selfRegistrationPermissionSet: 'member_default',
+  };
+  it('email_domain: an email-and-password sign-up off the list holding an invitation is admitted with no id', async () => {
+    const d = await deployment();
+    await d.invite(INVITEE);
+    const manager = makeManager(d.engine, { audience });
+    expect(await gate(manager, INVITEE)).toBeUndefined();
+    expect((await gate(manager, OTHER))?.error).not.toBeUndefined();
+  });
 });

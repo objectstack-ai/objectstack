@@ -979,12 +979,17 @@ function useBodyTableTotals(opts: {
  * The totals of a body table as a line under it — the enlarged face's form;
  * the table face draws the same figures as the table's own last row, each in
  * its column (`summaryRow`). Labelled as the list's total, never as a page's.
+ * `omitted`: the table face's line for the columns it left out for width
+ * (objectstack#35831), the same figures under their columns' names.
  */
-const BodyTableTotalsLine: React.FC<{ totals: readonly BodyTableTotal[] }> = ({ totals }) => {
+const BodyTableTotalsLine: React.FC<{ totals: readonly BodyTableTotal[]; omitted?: boolean }> = ({ totals, omitted }) => {
   const { t } = useDetailTranslation();
   if (totals.length === 0) return null;
   return (
-    <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 border-t pt-2 text-xs" data-body-table-totals="">
+    <div
+      className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 border-t pt-2 text-xs"
+      {...(omitted ? { 'data-body-table-omitted-totals': '' } : { 'data-body-table-totals': '' })}
+    >
       <span className="font-medium text-muted-foreground">{t('form.masterDetail.total', { defaultValue: 'Total' })}</span>
       {totals.map((total) => (
         <span key={total.key} className="inline-flex items-center gap-1" data-body-table-total={total.key}>
@@ -3557,13 +3562,25 @@ export const RelatedList: React.FC<RelatedListProps> = ({
     refreshKey: `${refreshNonce}:${windowed && total != null ? total : relatedData.length}`,
   });
   const totalLabel = t('form.masterDetail.total', { defaultValue: 'Total' });
+  // objectstack#35831 — a summed column the table left out for width
+  // (`bodyTableColumnCap`) keeps its total on the Overview: the totals of the
+  // columns not drawn go on a line under the table, each labelled with its
+  // column's name (`BodyTableTotalsLine`). A table that leaves no column out
+  // has none, and the drawn columns keep theirs in the table's last row.
+  const bodyOmittedTotals = React.useMemo(() => {
+    if (!bodyTableColumnsOmitted || bodyTotals.length === 0) return [];
+    const omitted = new Set((tableColumns ?? []).slice(bodyTableColumnCap!).map((col: any) => String(col?.accessorKey ?? '')));
+    return bodyTotals.filter((entry) => omitted.has(entry.key));
+  }, [bodyTableColumnsOmitted, bodyTableColumnCap, tableColumns, bodyTotals]);
   // The totals as the table's own last row, each under its column
-  // (objectstack#35548's `summaryRow`): 「合计行，与列对齐」.
+  // (objectstack#35548's `summaryRow`): 「合计行，与列对齐」. Drawn only while
+  // a drawn column has a figure in it: with every summed column left out the
+  // line under the table carries them all, and an empty 「合计」 row says nothing.
   const bodySummaryRow = React.useMemo(
-    () => (bodyTotals.length > 0
+    () => (bodyTotals.length > bodyOmittedTotals.length
       ? { lead: totalLabel, cells: Object.fromEntries(bodyTotals.map((entry) => [entry.key, entry.text])) }
       : undefined),
-    [bodyTotals, totalLabel],
+    [bodyTotals, bodyOmittedTotals, totalLabel],
   );
 
   // The column headers an empty body table still draws (objectstack#35597).
@@ -4732,6 +4749,9 @@ export const RelatedList: React.FC<RelatedListProps> = ({
             <SchemaRenderer schema={viewSchema} />
           </div>
         )}
+        {/* objectstack#35831 — the totals of the summed columns left out for
+            width, each named, under the table that left them out. */}
+        {bodyTableDrawn && <BodyTableTotalsLine totals={bodyOmittedTotals} omitted />}
 
         {/* objectstack#35597 — a body table past its row cap offers
             「显示全部 N 条」, which expands it in place (no pages); a list

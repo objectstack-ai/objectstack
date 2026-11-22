@@ -1932,6 +1932,74 @@ describe('ApprovalService (node era)', () => {
     await expect(svc.reassign(req.id, { actorId: 'u9', to: 'u2' }, asUser('u9'))).rejects.toThrow(/VALIDATION_FAILED/);
   });
 
+  describe('reassign: an approver hands over only their own slot', () => {
+    const PLATFORM_ADMIN_CTX = { userId: 'root', tenantId: 't1', positions: [], permissions: ['admin_full_access'] } as any;
+    const openUnanimous = async () => {
+      const req = await svc.openNodeRequest(openInput(['u9', 'u2'], {}, { behavior: 'unanimous' }), CTX);
+      staffDirectory(engine, 'u7');
+      return (req as { id: string }).id;
+    };
+    const slate = (id: string) => (engine._tables['sys_approval_request'] ?? []).find(r => r.id === id)?.pending_approvers;
+    const moves = (id: string) =>
+      (engine._tables['sys_approval_action'] ?? []).filter(r => r.request_id === id && r.action === 'reassign');
+
+    it('refuses a slot holder naming another approver\'s slot, and moves nothing', async () => {
+      const id = await openUnanimous();
+      await expect(svc.reassign(id, { actorId: 'u9', from: 'u2', to: 'u7' }, asUser('u9')))
+        .rejects.toThrow(/^FORBIDDEN: actor 'u9' may move only a slot it holds/);
+      expect(slate(id)).toBe('u9,u2');
+      expect(moves(id)).toEqual([]);
+    });
+
+    it('CONTROL: the same holder naming their own slot moves it', async () => {
+      const id = await openUnanimous();
+      const out = await svc.reassign(id, { actorId: 'u9', from: 'u9', to: 'u7' }, asUser('u9'));
+      expect(out.request.pending_approvers).toEqual(['u7', 'u2']);
+      expect(moves(id)).toHaveLength(1);
+    });
+
+    it('the administrator override still moves another approver\'s slot', async () => {
+      const id = await openUnanimous();
+      const out = await svc.reassign(id, { actorId: 'root', from: 'u2', to: 'u7' }, PLATFORM_ADMIN_CTX);
+      expect(out.request.pending_approvers).toEqual(['u9', 'u7']);
+    });
+
+    describe('a position slot', () => {
+      const FIN = { userId: 'u_fin', tenantId: 't1', positions: ['finance'], permissions: [] } as any;
+      const openOnPosition = async () => {
+        const req = await svc.openNodeRequest(openInput(['u2'], {}, {
+          approvers: [{ type: 'position' as const, value: 'finance' }, { type: 'user' as const, value: 'u2' }],
+          behavior: 'unanimous',
+        }), CTX);
+        staffDirectory(engine, 'u7');
+        const id = (req as { id: string }).id;
+        expect(slate(id), 'precondition: the slate holds the position slot and a user slot').toBe('position:finance,u2');
+        return id;
+      };
+
+      it('its holder moves it', async () => {
+        const id = await openOnPosition();
+        const out = await svc.reassign(id, { actorId: 'u_fin', from: 'position:finance', to: 'u7' }, FIN);
+        expect(out.request.pending_approvers).toEqual(['u7', 'u2']);
+        expect(moves(id)).toHaveLength(1);
+      });
+
+      it('its holder cannot move another approver\'s slot, and nothing moves', async () => {
+        const id = await openOnPosition();
+        await expect(svc.reassign(id, { actorId: 'u_fin', from: 'u2', to: 'u7' }, FIN))
+          .rejects.toThrow(/^FORBIDDEN: actor 'u_fin' may move only a slot it holds/);
+        expect(slate(id)).toBe('position:finance,u2');
+        expect(moves(id)).toEqual([]);
+      });
+    });
+
+    it('the system still moves another approver\'s slot', async () => {
+      const id = await openUnanimous();
+      const out = await svc.reassign(id, { actorId: 'system', from: 'u2', to: 'u7' }, SYS);
+      expect(out.request.pending_approvers).toEqual(['u9', 'u7']);
+    });
+  });
+
   // ── reassign target resolution (#25485) ─────────────────────────
   //
   // A `to` that resolves to no one used to be written onto the slate, so the

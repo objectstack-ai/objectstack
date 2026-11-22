@@ -1929,6 +1929,7 @@ const en = {
     updatedTime: 'Updated on',
     recordNumber: 'Record ID',
     clickToEdit: 'Click to edit',
+    setField: 'Set {{field}}',
     // Attachments
     dropFilesToUpload: 'Drop files here or click to upload',
     attachmentCount: '{{count}} attachment',
@@ -2822,6 +2823,14 @@ const en = {
       systemTheme: 'System Theme',
       actions: 'Actions',
       openFullSearch: 'Open Full Search Page',
+      create: 'Create',
+      createAs: 'Create "{{query}}" as {{object}}',
+      previewEmpty: 'Select a record to see its details.',
+      enterOpenRecord: 'Open record',
+      enterCreate: 'Create',
+      enterSwitchApp: 'Switch app',
+      enterApplyTheme: 'Apply theme',
+      enterOpen: 'Open',
     },
     ai: {
       pendingDrafts: {
@@ -4136,6 +4145,11 @@ const en = {
     allReports: 'All reports',
     collapse: 'Collapse sidebar',
     expand: 'Expand sidebar',
+  },
+  designMode: {
+    title: 'Design mode',
+    leaveUnsaved: 'Leave design mode? Your unsaved changes will be lost.',
+    saveFailed: 'Some changes were not saved: {{reason}}',
   },
   topbar: {
     aiAssistant: 'AI Assistant',
@@ -6516,9 +6530,7 @@ const en = {
     digestNone: "No digest",
     digestDaily: "Daily",
     digestWeekly: "Weekly",
-    digestNoOff: "\"No digest\" is not offered: saving it does not turn off a digest your organization sets, so it might not take effect.",
     quietHours: "Quiet hours",
-    quietHoursNoClear: "An empty window cannot be saved: it does not turn off quiet hours your organization sets, so it might not take effect. Set a start and an end time instead.",
     save: "Save",
     matrix: "Topics and channels",
     topic: "Topic",
