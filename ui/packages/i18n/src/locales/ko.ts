@@ -2657,6 +2657,7 @@ const ko = {
       enterSwitchApp: "앱 전환",
       enterApplyTheme: "테마 적용",
       enterOpen: "열기",
+      currentPage: "현재 페이지",
       searching: "검색 중…",
       records: "레코드",
       recentRecords: "최근 본 항목",
@@ -5236,6 +5237,7 @@ const ko = {
       dragSort: '드래그하여 정렬 우선순위 변경',
       viewOwn: '이 보기의 조건이므로 여기서 제거할 수 없음',
       viewFilter: '보기 필터',
+      relationPath: '{{lookup}}의 {{field}}',
     },
   },
   sortBuilder: {

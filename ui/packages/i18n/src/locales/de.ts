@@ -2657,6 +2657,7 @@ const de = {
       enterSwitchApp: "App wechseln",
       enterApplyTheme: "Design anwenden",
       enterOpen: "Öffnen",
+      currentPage: "Aktuelle Seite",
       searching: "Suche…",
       records: "Datensätze",
       recentRecords: "Zuletzt angesehen",
@@ -5237,6 +5238,7 @@ const de = {
       dragSort: 'Ziehen, um die Sortierpriorität zu ändern',
       viewOwn: 'Teil dieser Ansicht; hier nicht entfernbar',
       viewFilter: 'Ansichtsfilter',
+      relationPath: '{{lookup}} › {{field}}',
     },
   },
   sortBuilder: {

@@ -2727,6 +2727,7 @@ const fr = {
       enterSwitchApp: "Changer d'application",
       enterApplyTheme: "Appliquer le thème",
       enterOpen: "Ouvrir",
+      currentPage: "Page actuelle",
       searching: "Recherche…",
       records: "Enregistrements",
       recentRecords: "Récemment consultés",
@@ -5388,6 +5389,7 @@ const fr = {
       dragSort: 'Faire glisser pour changer la priorité du tri',
       viewOwn: 'Fait partie de cette vue ; impossible à retirer ici',
       viewFilter: 'Filtre de la vue',
+      relationPath: '{{lookup}} › {{field}}',
     },
   },
   sortBuilder: {

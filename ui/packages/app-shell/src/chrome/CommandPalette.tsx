@@ -95,6 +95,7 @@ import {
 } from './paletteCreate.js';
 import { PalettePreviewPane, type PalettePreviewTarget } from './PalettePreviewPane.js';
 import { PaletteEnterHint } from './PaletteEnterHint.js';
+import { PaletteCurrentPageGroup, paletteCurrentPage } from './PaletteCurrentPage.js';
 
 /** A recent row names its object by name (objectstack#29121). */
 const RECENT_ROW_LABELS: NavTargetLabelOptions = { byName: true };
@@ -517,6 +518,14 @@ function CommandPaletteBody(props: CommandPaletteProps & { gates: NavMemberGates
     if (firstHitValue !== '') setSelectedValue(firstHitValue);
   }
 
+  // objectstack#36286 — what the page behind the palette offers (its list's
+  // or its record's favorites entry), above everything else on the empty
+  // palette; nothing once something is typed.
+  const currentPage =
+    open && !inStudio && inputValue.trim() === ''
+      ? paletteCurrentPage(location.pathname, (name) => objectsByName.has(name))
+      : null;
+
   // objectstack#36286 — the app's objects the member may create a record of,
   // the object of the page the palette was opened on first. Only once
   // something is typed: the empty palette is the recent records' screen.
@@ -588,6 +597,14 @@ function CommandPaletteBody(props: CommandPaletteProps & { gates: NavMemberGates
             t('console.commandPalette.noResults')
           )}
         </CommandEmpty>
+
+        {currentPage && (
+          <PaletteCurrentPageGroup
+            page={currentPage}
+            objectDef={objectsByName.get(currentPage.objectName)}
+            run={runCommand}
+          />
+        )}
 
         {/* Recently visited records (cloud-synced via sys_user_preference).
             Only renders when the input is empty so search results don't

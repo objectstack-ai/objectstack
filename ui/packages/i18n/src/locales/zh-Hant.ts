@@ -2400,6 +2400,7 @@ const zhHant = {
       enterSwitchApp: '切換應用',
       enterApplyTheme: '應用主題',
       enterOpen: '開啟',
+      currentPage: '當前頁面',
     },
     ai: {
       pendingDrafts: {
@@ -5296,6 +5297,7 @@ const zhHant = {
       dragSort: '拖動以調整排序優先順序',
       viewOwn: '檢視自帶的條件，不能在這裡刪除',
       viewFilter: '檢視篩選',
+      relationPath: '{{lookup}}的{{field}}',
     },
   },
   sortBuilder: {

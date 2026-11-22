@@ -2807,6 +2807,7 @@ const ru = {
       enterSwitchApp: "Переключить приложение",
       enterApplyTheme: "Применить тему",
       enterOpen: "Открыть",
+      currentPage: "Текущая страница",
       searching: "Поиск…",
       records: "Записи",
       recentRecords: "Недавно просмотренные",
@@ -5556,6 +5557,7 @@ const ru = {
       dragSort: 'Перетащите, чтобы изменить приоритет сортировки',
       viewOwn: 'Условие этого представления; удалить здесь нельзя',
       viewFilter: 'Фильтр представления',
+      relationPath: '{{field}} ({{lookup}})',
     },
   },
   sortBuilder: {

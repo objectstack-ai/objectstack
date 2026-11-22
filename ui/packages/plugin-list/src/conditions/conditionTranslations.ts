@@ -90,6 +90,7 @@ export const LIST_CONDITION_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'listConditions.chips.dragSort': 'Drag to change the sort priority',
   'listConditions.chips.viewOwn': 'Part of this view; it cannot be removed here',
   'listConditions.chips.viewFilter': 'View filter',
+  'listConditions.chips.relationPath': '{{lookup}} › {{field}}',
   'dashboard.filters.range.today': 'Today',
   'dashboard.filters.range.this_week': 'This week',
   'dashboard.filters.range.this_month': 'This month',

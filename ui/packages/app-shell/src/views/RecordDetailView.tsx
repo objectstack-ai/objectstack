@@ -110,6 +110,7 @@ import './record-approvals-renderer.js';
 import { getRecordDisplayName } from '../utils/index.js';
 import { parseAuditValue, collectAuditChanges, collectLookupIds, formatAuditValue, auditImpersonatorId } from '../utils/auditHistoryDisplay.js';
 import { useFavorites } from '../hooks/useFavorites.js';
+import { recordFavoriteItem } from '../context/FavoritesProvider.js';
 import {
   RECORD_DETAILS_WIDTH_PREFERENCE,
   RECORD_RELATED_ARRANGEMENT_PREFERENCE,
@@ -1198,12 +1199,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
 
   const favoriteRecord = useMemo(() => {
     if (!objectName || !pureRecordId) return null;
-    return {
-      id: `record:${objectName}:${pureRecordId}`,
-      label: recordTitle || pureRecordId || '',
-      href: `/apps/${appName}/${objectName}/record/${pureRecordId}`,
-      type: 'record' as const,
-    };
+    return recordFavoriteItem(appName, objectName, pureRecordId, recordTitle);
   }, [appName, objectName, pureRecordId, recordTitle]);
   const isRecordFavorite = favoriteRecord ? isFavorite(favoriteRecord.id) : false;
   const handleToggleRecordFavorite = useCallback(() => {

@@ -2400,6 +2400,7 @@ const zh = {
       enterSwitchApp: '切换应用',
       enterApplyTheme: '应用主题',
       enterOpen: '打开',
+      currentPage: '当前页面',
     },
     ai: {
       pendingDrafts: {
@@ -5296,6 +5297,7 @@ const zh = {
       dragSort: '拖动以调整排序优先级',
       viewOwn: '视图自带的条件，不能在这里删除',
       viewFilter: '视图筛选',
+      relationPath: '{{lookup}}的{{field}}',
     },
   },
   sortBuilder: {
