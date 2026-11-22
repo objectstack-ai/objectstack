@@ -36,8 +36,8 @@
 - 竞态三招:动手前重 fetch 正文、审计评论时间戳先到先得、写后回读。
 - 收班 = 状态 flush + 在飞 `Release:`+`Resume-from:` 回队待兄弟席、不等落地;简报非继承裁决。
 - 坐席同笔:建自绑巡查 routine、开信箱并订阅、存根记 `Patrol:` 与 `Mailbox:`、发 `seat-online`。
-- 分诊席与车道席会话 effort 恒 `high`;坐席时低于即登记行注明,请账号主人以 `high` 重开。
-- 席会话 ⛔ 中途不改 effort;要另一档就起隔离子代理(`execution-duties.md`)。
+- 席会话的档位与 effort 照 `execution-duties.md` 定档节;坐席时低于即登记行注明,请账号主人照该值重开。
+- 席会话 ⛔ 中途不改 effort;要另一档就起隔离子代理。
 - 收班同笔删 routine、关信箱、发 `seat-offline`;强制接管者代发 `seat-online`(`project-forms.md`)。
 - 下班席(`seat-offline`,或两敲 `Request: progress` 无答走接管四件)的在飞归同车道在线兄弟席。
 - 兄弟席 `Resume-from:` 引简报或轮次记录认领;待裁先等字;无兄弟席「待席」;公告归安全席。
