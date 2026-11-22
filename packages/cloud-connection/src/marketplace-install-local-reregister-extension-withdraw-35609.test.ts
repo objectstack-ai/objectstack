@@ -170,7 +170,7 @@ describe('[#35609] install-local: a version that no longer extends an object ser
         try {
             expect((await k.post(mod('1.0.0', { extends: true }))).payload?.data?.hotLoaded).toBe(true);
             expect(k.servedFields()).toEqual(['cb_account', 'name']);
-            await k.ql.insert('crm_line', { id: 'l1', name: 'one', cb_account: 'ACME', organization_id: 'org_a' }, SYSTEM as any);
+            await k.ql.insert('crm_line', { id: 'l1', name: 'one', cb_account: 'ACME', organization_id: 'org_a' }, SYSTEM);
 
             // The dry run already said so (unchanged by this fix): the field is removed, its column holds a row.
             const dry = await k.post({ ...mod('1.0.1', { extends: false }), dryRun: true });
@@ -183,7 +183,7 @@ describe('[#35609] install-local: a version that no longer extends an object ser
             expect(upgraded.payload.data.hotLoaded).toBe(true);
 
             expect(k.servedFields()).toEqual(['name']);
-            const [row] = (await k.ql.find('crm_line', { where: {}, ...SYSTEM } as any)) as Array<Record<string, unknown>>;
+            const [row] = (await k.ql.find('crm_line', { where: {}, ...SYSTEM })) as Array<Record<string, unknown>>;
             expect(row).toMatchObject({ id: 'l1', name: 'one' });
             expect(row).not.toHaveProperty('cb_account');
             // Stored data is untouched: nothing drops the column.
