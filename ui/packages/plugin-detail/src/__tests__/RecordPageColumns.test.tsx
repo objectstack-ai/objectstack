@@ -270,6 +270,51 @@ describe('RecordPageColumns — the details pinned left on a wide full page (obj
     expect(onDetailsWidthChange).toHaveBeenCalledWith(460);
   });
 
+  it('a double-click on the handle keeps the default 400 again, ends a drag, and the default holds on the next open (objectstack#36226)', () => {
+    harness.width = 1184;
+    // The host's per-reader store, read again by every mount (the console's
+    // workspace preference; 400 when nothing is kept).
+    const store: { width?: number } = {};
+    const Host = () => {
+      const [width, setWidth] = React.useState(store.width ?? 400);
+      return (
+        <RecordPageColumns
+          tier="wide"
+          columns={columns}
+          fullPage
+          detailsWidth={width}
+          onDetailsWidthChange={(next) => { store.width = next; setWidth(next); }}
+        />
+      );
+    };
+    const drawHost = () => render(
+      <RecordContextProvider objectName="lead" recordId={`lead-${++draws}`} dataSource={{ find } as any}>
+        <Host />
+      </RecordContextProvider>,
+    );
+    const first = drawHost();
+    const handle = () => screen.getByRole('separator');
+    fireEvent.pointerDown(handle(), { button: 0, clientX: 400, pointerId: 1 });
+    fireEvent.pointerMove(handle(), { clientX: 520, pointerId: 1 });
+    fireEvent.pointerUp(handle(), { clientX: 520, pointerId: 1 });
+    expect(handle().getAttribute('aria-valuenow')).toBe('520');
+    expect(store.width).toBe(520);
+    // The double-click's second press is still down when it lands: no drag
+    // outlives it, so the moves after it neither preview nor keep a width.
+    fireEvent.pointerDown(handle(), { button: 0, clientX: 520, pointerId: 1 });
+    fireEvent.doubleClick(handle());
+    expect(handle().getAttribute('aria-valuenow')).toBe('400');
+    expect(grid(first.container).style.gridTemplateColumns).toBe('400px 24px minmax(0,1fr)');
+    fireEvent.pointerMove(handle(), { clientX: 600, pointerId: 1 });
+    fireEvent.pointerUp(handle(), { clientX: 600, pointerId: 1 });
+    expect(handle().getAttribute('aria-valuenow')).toBe('400');
+    expect(store.width).toBe(400);
+    first.unmount();
+    const second = drawHost();
+    expect(handle().getAttribute('aria-valuenow')).toBe('400');
+    expect(grid(second.container).style.gridTemplateColumns).toBe('400px 24px minmax(0,1fr)');
+  });
+
   it('a drawer or pane (no `fullPage`) never pins: the details stay its first tab', () => {
     harness.width = 1600;
     const { container } = drawPage(columns, { fullPage: false });
