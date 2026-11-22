@@ -55,7 +55,7 @@ function expectOneIssue(r: Refusal | null): asserts r is Refusal {
 
 const JOB_CONSEQUENCE_AND_REMEDY =
   'The runtime keys jobs by name: the metadata keeps only the last of these entries, and the job scheduler ' +
-  'refuses a name two enabled jobs share, so none of them runs. Rename one of them, or merge them into a single entry.';
+  'refuses a name two enabled jobs share, so when both are enabled neither runs. Rename one of them, or merge them into a single entry.';
 
 const EXTENSION_CONSEQUENCE_AND_REMEDY =
   "The runtime applies one extension of a target object per package, so only the last of these entries' fields " +
@@ -106,6 +106,27 @@ describe('residual jobs under `preserve` are judged as one package', () => {
   });
 });
 
+describe('the residual door is not `preserve`-only: a multi-package input carries `packages[]` under every strategy', () => {
+  const nested = () => composeStacks(
+    [defineStack({ manifest: sales, objects: [line] }), defineStack({ manifest: billing })],
+    { manifest: 'preserve' },
+  );
+
+  it.each(['first', 'last'] as const)('`%s`: two residual jobs of one name beside a nested artifact\'s packages[] are refused', (strategy) => {
+    const r = refusalOf(() =>
+      composeStacks([nested(), defineStack({ jobs: [job('First')] }), defineStack({ jobs: [job('Second')] })], { manifest: strategy }),
+    );
+    expectOneIssue(r);
+    expect(r.issues![0]).toMatch(/^Job 'crm_nightly' is declared twice in `jobs`: /);
+    expect(r.issues![0]).toContain(JOB_CONSEQUENCE_AND_REMEDY);
+  });
+
+  it('CONTROL: `last` with a nested artifact and one residual job composes, packages[] carried', () => {
+    const composed = composeStacks([nested(), defineStack({ jobs: [job('Only')] })], { manifest: 'last' }) as unknown as { packages?: unknown[] };
+    expect(composed.packages, 'anti-vacuity: the artifact carries packages[]').toHaveLength(2);
+  });
+});
+
 describe('a residual `objectExtensions` entry shares the slot of the body that carries `manifest.id`', () => {
   it('a residual extension of a target that body extends too: refused, the body\'s entry first', () => {
     // `'last'` keeps billing's manifest, so the residual registers as billing.
@@ -150,6 +171,25 @@ describe('a residual `objectExtensions` entry shares the slot of the body that c
         { manifest: 'preserve' },
       ),
     )).toBeNull();
+  });
+
+  it('two residual extensions of a target another body extends: refused as the residual\'s pair (claimed by value, not by target)', () => {
+    const r = refusalOf(() =>
+      composeStacks(
+        [
+          defineStack({ manifest: billing, objectExtensions: [extension('cb_billing')] }),
+          defineStack({ objectExtensions: [extension('cb_first')] }),
+          defineStack({ objectExtensions: [extension('cb_second')] }),
+          defineStack({ manifest: sales, objects: [line] }),
+        ],
+        { manifest: 'preserve' },
+      ),
+    );
+    expectOneIssue(r);
+    expect(r.issues![0]).toBe(
+      "Object extension of 'crm_line' is declared twice in `objectExtensions`: stack #1 objectExtensions[0] and " +
+        `stack #2 objectExtensions[0]. ${EXTENSION_CONSEQUENCE_AND_REMEDY}`,
+    );
   });
 
   it('CONTROL: a package-claimed extension is unchanged — two packages each extending one target compose', () => {

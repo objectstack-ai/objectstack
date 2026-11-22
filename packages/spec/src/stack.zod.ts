@@ -3386,7 +3386,7 @@ const SAME_STACK_ENTRY_IDENTITY = Object.freeze({
     subject: (name) => `Job '${name}'`,
     consequence: () =>
       'The runtime keys jobs by name: the metadata keeps only the last of these entries, and the job ' +
-      'scheduler refuses a name two enabled jobs share, so none of them runs.',
+      'scheduler refuses a name two enabled jobs share, so when both are enabled neither runs.',
     remedy: RENAME_OR_MERGE,
   },
   // An i18n bundle is one `name` across several `locale` tags, so the identity
@@ -3713,6 +3713,16 @@ function composedPackageBodies(composedPackages: unknown): Record<string, unknow
  * is never read as a second entry of the residual, while two entries that no
  * body declares are judged as one package's: the boot's job binder schedules
  * neither of two enabled jobs of one name.
+ *
+ * ⚠ Known gap, left to the binder and NOT judged here: the claim is by NAME, so
+ * a residual job whose name a package body's job also carries is read as that
+ * body's copy even when the two differ, and composes. The boot reads jobs off
+ * the stack whole, so it holds two enabled jobs of that name and its binder
+ * (`jobNameCollisions`, `@objectstack/runtime`) schedules neither — read from
+ * code, not driven. Two package bodies each declaring the name meet the same
+ * binder outcome and compose too (cross-package reuse, ADR-0048 §3.4). Whether
+ * composition should refuse a job name shared across packages is a follow-up
+ * card's question, not this door's.
  */
 function residualEntryPredicate(composedPackages: unknown): (key: string, entry: unknown) => boolean {
   const bodies = composedPackageBodies(composedPackages);
