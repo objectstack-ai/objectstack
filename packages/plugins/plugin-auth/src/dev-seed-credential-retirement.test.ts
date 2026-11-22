@@ -47,6 +47,7 @@ import 'better-auth/plugins/organization';
 import 'better-auth/plugins/admin';
 import '@better-auth/core/context';
 import '@better-auth/core/error';
+import '@objectstack/core/egress';
 
 const SYS = { isSystem: true } as const;
 const ORIGIN = 'http://localhost:3000';
