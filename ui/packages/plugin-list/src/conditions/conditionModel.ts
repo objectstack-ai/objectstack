@@ -25,6 +25,7 @@ import {
   FILTER_SELECT_LIKE_TYPES,
 } from '@object-ui/types';
 import { jsonColumnFilterOperators } from '@object-ui/components';
+import { isPlainRecord } from '@objectstack/spec/data';
 import type { FilterBuilderRow, FilterBuilderRowGroup, SortItem } from '@object-ui/components';
 
 /** One field the condition controls can name: the shape the list's field lists already carry. */
@@ -251,10 +252,6 @@ function readElement(element: unknown, key: string): ViewConditionChip {
     if (nested) return nested;
   }
   return { key };
-}
-
-function isPlainRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === 'object' && !Array.isArray(value);
 }
 
 /** The nested-relation form as written, `{ <lookup>: { <field>: V } }`, as a path chip. */
