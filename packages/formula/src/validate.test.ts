@@ -1397,7 +1397,11 @@ describe('a flow condition\'s record.<field> / previous.<field> read takes the d
   });
 
   it('CONTROL: an ordering against today() and the date-text shapes keep their verdicts, with no second finding', () => {
-    for (const source of ['record.due_date < today()', 'previous.due_date < today()', 'date(record.due_date) < now()']) {
+    for (const source of [
+      'record.due_date < today()', 'previous.due_date < today()', 'date(record.due_date) < now()',
+      // The rewrites the verdict prescribes (the changeset's FROM → TO).
+      'daysBetween(record.due_date, today()) > 5', 'addDays(record.due_date, 1) < today()', 'addDays(previous.due_date, -7) < today()',
+    ]) {
       expect(validateExpression('predicate', source, CONDITION), source).toEqual({ ok: true, errors: [], warnings: [] });
     }
     expect(codes('timestamp(record.borrow_date) < now()')).toEqual(['date-text-call-run-fails']);
