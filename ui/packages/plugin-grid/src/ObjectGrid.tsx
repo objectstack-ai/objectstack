@@ -4328,6 +4328,15 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
             }
             toggleCardRow(row);
           }}
+          // objectstack#36315 — a key is a tap too: the 「⋮」 opens on keydown
+          // (Enter, Space, ArrowDown), so while selecting the card keeps those
+          // keys from the controls inside it. Enter and Space still make the
+          // browser's click, which the capture above turns into a tick.
+          onKeyDownCapture={(event) => {
+            if (!cardSelecting || event.target === event.currentTarget) return;
+            if (!event.currentTarget.contains(event.target as Node)) return;
+            if (event.key === 'Enter' || event.key === ' ' || event.key === 'ArrowDown') event.stopPropagation();
+          }}
           onPointerDown={(event) => {
             const press = longPress.current;
             // A fresh press never inherits the last one's flag: a long press

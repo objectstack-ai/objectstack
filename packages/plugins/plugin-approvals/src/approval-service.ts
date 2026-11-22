@@ -130,6 +130,7 @@ import {
   adminRescueNoteText,
   adminRescuePositions,
   adminRescueReason,
+  slatePositions,
   type AdminRescueNote,
 } from './admin-rescue-note.js';
 import {
@@ -143,8 +144,8 @@ import {
   namesNoOneBut,
   noApproverNoteOf,
   noApproverNoteText,
+  noApproverNotice,
   noApproverPositions,
-  noApproverSentence,
   noApproverSlots,
   noApproverWho,
   type NoApproverNote,
@@ -5658,8 +5659,14 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     // an organization administrator does about it. Under the thread's own
     // topic, since the note is a comment on the request's thread; no actor,
     // as no person wrote it.
+    //
+    // [#36308] A position is named as the timeline note names it: the
+    // recipient's pack label (resolved per recipient, at delivery, from the
+    // key the notice carries), else its declared label, else its name. The
+    // declared half is read here, once, through the timeline's resolver.
     if (noApproverNote && submitterId) {
-      const { id: body, params } = noApproverSentence(noApproverNote);
+      const declared = await this.notePositionLabels(noApproverPositions(noApproverNote), undefined);
+      const { id: body, params } = noApproverNotice(noApproverNote, (name) => declared.get(name));
       await this.notify({
         topic: 'approval.comment',
         organizationId: requestOrg,
@@ -5902,17 +5909,23 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     // When no one but the submitter is on the slate, both refusals below name
     // the remedy the request's timeline note names (`no-approver-note.ts`)
     // instead of an approver who does not exist.
+    // [#36308] Composed only when it is said, naming a position as the
+    // timeline note does: the decider's pack label, else the declared label,
+    // else its name. The sentence stays the English the note stores.
     const noOneElse = namesNoOneBut(pendingApprovers, String(raw.submitter_id ?? ''));
-    const noApproverRemedy = noApproverNoteText({ who: noApproverWho(pendingApprovers) });
+    const noApproverRemedy = async (): Promise<string> => {
+      const labels = await this.notePositionLabels(slatePositions(pendingApprovers), this.readerLabels(context));
+      return noApproverNoteText({ who: noApproverWho(pendingApprovers, (name) => labels.get(name)) });
+    };
     if (
       input.decision === 'approve' && config.excludeSubmitter === true
       && raw.submitter_id && decider && decider === String(raw.submitter_id)
     ) {
+      const remedy = noOneElse ? await noApproverRemedy() : undefined;
       throw new Error(
         `FORBIDDEN: '${decider}' submitted this request, and its approval step sets excludeSubmitter, so they `
-        + `cannot approve it. ${noOneElse
-          ? noApproverRemedy
-          : 'Another approver on the step decides it; if the submitter holds the only slot, reassign it to someone else.'}`,
+        + `cannot approve it. ${remedy
+          ?? 'Another approver on the step decides it; if the submitter holds the only slot, reassign it to someone else.'}`,
       );
     }
     // [Maintainer ruling 2026-11-17, option B] The #3424 override never
@@ -5925,10 +5938,11 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     // `attachViewers` computes `viewer.can_override_approve` from the same
     // predicate, so the Approve control is not offered where this refuses.
     if (input.decision === 'approve' && viaOverride && overrideApprovesOwnRequest(raw, decider)) {
+      const remedy = noOneElse ? await noApproverRemedy() : undefined;
       throw new Error(
         `FORBIDDEN: '${decider}' submitted this request and holds no slot on it, so they cannot approve it `
-        + `through the administrator override. ${noOneElse
-          ? `${noApproverRemedy} To withdraw it instead, reject it or recall it.`
+        + `through the administrator override. ${remedy !== undefined
+          ? `${remedy} To withdraw it instead, reject it or recall it.`
           : 'An approver on the step decides it. To move it, reassign it to someone else, reject it, or recall '
             + 'it and send the record for approval again.'}`,
       );
@@ -11482,14 +11496,19 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
    * `label` ({@link ApprovalServiceOptions.positionLabelSource}). A position
    * neither answers is left out, and the note names it by its name. Display
    * only: a failed read leaves the name standing, never fails the read.
+   *
+   * [#36308] With no `labels` (a caller who asked in no language, or the
+   * submitter's notice, whose pack half is rendered per recipient at
+   * delivery) only the declared label is read. The one resolver for every
+   * door that names a no-approver slot.
    */
   private async notePositionLabels(
     positions: readonly string[],
-    labels: ReaderLabels,
+    labels: ReaderLabels | undefined,
   ): Promise<Map<string, string>> {
     const out = new Map<string, string>();
     for (const name of positions) {
-      let label = labels.positionLabel(name);
+      let label = labels?.positionLabel(name);
       if (!label && this.positionLabelSource) {
         try {
           const declared = await this.positionLabelSource(name);
