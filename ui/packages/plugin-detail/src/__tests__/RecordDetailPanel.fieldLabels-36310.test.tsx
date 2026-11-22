@@ -70,8 +70,9 @@ function editAndSave(from: string, to: string) {
   fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 }
 
+/** The save bar's summary line for `field` (the input's own hint is a second alert). */
 const summaryLine = (field: string) =>
-  screen.getByRole('alert').querySelector<HTMLElement>(`[data-inline-field-error="${field}"]`);
+  document.querySelector<HTMLElement>(`[data-inline-field-error="${field}"]`);
 
 describe('the record overlay names a field by its label (objectstack#36310)', () => {
   it('a refused save names the field by its label', async () => {
@@ -93,7 +94,7 @@ describe('the record overlay names a field by its label (objectstack#36310)', ()
     editAndSave('open', 'pending');
     await waitFor(() => expect(summaryLine('region_code')).not.toBeNull());
     expect(summaryLine('region_code')).toHaveTextContent(/^Region: Pick a region first$/);
-    expect(screen.getByRole('alert').querySelector('[data-inline-record-error]')).toBeNull();
+    expect(document.querySelector('[data-inline-record-error]')).toBeNull();
   });
 
   it('a 409 of the combined write lists each conflict row by its label', async () => {
