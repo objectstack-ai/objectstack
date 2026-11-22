@@ -15,8 +15,7 @@
  *
  * [#36198] The restriction profile, `GET {basePath}/discovery/restriction-profile`,
  * is the one route here that is NOT mounted twice: the discovery registrar
- * mounts it on the unscoped base only (ADR-0138 D2, as amended 2026-11-22), and
- * its registration below says why.
+ * mounts it on the unscoped base only, and its registration below says why.
  *
  * A MOVE, not a redesign. The two functions below are the bodies of
  * `RestServer#registerDiscoveryEndpoints` and
@@ -464,17 +463,18 @@ export function registerDiscoveryEndpoints(this: DiscoveryRouteHost, basePath: s
     // row. Its one new anonymous fact is the spec version; the anonymous peer
     // is `/discovery`'s `version`, which already answers without a credential.
     //
-    // [#36198] Mounted on the UNSCOPED base only (ADR-0138 D2, as amended
-    // 2026-11-22). This registrar also runs for the environment-scoped base,
-    // and the handler reads no host input: mounted there it answered this
-    // constant for any environment id, including on a host that enforces a
-    // narrower profile and serves it through its own route on the unscoped
-    // path, which wins there by mount order. Nothing reads the scoped path
-    // (`os validate --target` fetches the unscoped route at the URL's origin),
-    // so it is not mounted, and a request to it meets the host's ordinary
-    // not-found answer. A server under `projectResolution: 'required'`
-    // registers the scoped base alone, so it mounts no restriction-profile
-    // route. `discovery-schema-conformance.test.ts` pins all three shapes.
+    // [#36198] Mounted on the UNSCOPED base only; the environment-scoped twin
+    // this route was first mounted with is withdrawn. This registrar also runs
+    // for the environment-scoped base, and the handler reads no host input:
+    // mounted there it answered this constant for any environment id,
+    // including on a host that enforces a narrower profile and serves it
+    // through its own route on the unscoped path, which wins there by mount
+    // order. Nothing reads the scoped path (`os validate --target` fetches the
+    // unscoped route at the URL's origin), so it is not mounted, and a request
+    // to it meets the host's ordinary not-found answer. A server under
+    // `projectResolution: 'required'` registers the scoped base alone, so it
+    // mounts no restriction-profile route.
+    // `discovery-schema-conformance.test.ts` pins all three shapes.
     if (!isScoped) {
         this.routeManager.register({
             method: 'GET',

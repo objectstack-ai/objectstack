@@ -2,7 +2,7 @@
 '@objectstack/rest': patch
 ---
 
-fix(rest)!: the restriction profile is served on the unscoped route only; its environment-scoped twin is no longer mounted (ADR-0138 D2, as amended)
+fix(rest)!: the restriction profile is served on the unscoped route only; its environment-scoped twin is no longer mounted
 
 Clause-②: no (narrowing)
 Metadata-protocol: none

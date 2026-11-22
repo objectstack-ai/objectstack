@@ -473,11 +473,10 @@ describe('[#34774] the open runtime serves the restriction profile the CLI reads
 });
 
 /**
- * [#36198] The restriction profile is mounted on the UNSCOPED base only
- * (ADR-0138 D2, as amended 2026-11-22). The handler reads no host input, so
- * its environment-scoped twin answered the constant open profile for any
- * environment id, on a host that enforces a narrower one. Nothing read the
- * twin, so it is no longer mounted:
+ * [#36198] The restriction profile is mounted on the UNSCOPED base only. The
+ * handler reads no host input, so its environment-scoped twin answered the
+ * constant open profile for any environment id, on a host that enforces a
+ * narrower one. Nothing read the twin, so it is no longer mounted:
  *
  *  - NOT REGISTERED on the scoped base: not in the route table the server
  *    reports (`getRoutes()`), not in the route manager's own lookup, and not
