@@ -1288,10 +1288,12 @@ export function createObjectQLAdapterFactory(
       // still does. Contention that outlasts the attempts throws, as the
       // contract asks, rather than answering `null` for a guard that may hold.
       //
-      // Keep this method (and `consumeOne`) native: without them better-auth
-      // falls back to snapshot-guarded `updateMany` / `deleteMany` calls that
-      // need an exact affected count, and those two answer the rows they
-      // FOUND, not the rows they changed.
+      // The answer is the row as read, with this call's values over it and
+      // its internal columns re-attached as every other read here does; its
+      // `updated_at` is the value read before the write.
+      //
+      // This method and `consumeOne` stay native: the adapter answers both
+      // itself, never through better-auth's fallbacks for them.
       incrementOne: async <T>(
         { model, where, increment, set }: {
           model: string; where: CleanedWhere[];
@@ -1321,7 +1323,13 @@ export function createObjectQLAdapterFactory(
             multi: true,
           });
           if (written === 1) {
-            const norm = normaliseLegacyDates(model, { ...(record as Record<string, any>), ...patch });
+            // Same internal-field read-back as `findOne` and
+            // `consumeOne`: the row handed back keeps the columns the engine's
+            // read strips (a second factor's `secret`, its `backup_codes`).
+            const row: Record<string, any> = { ...(record as Record<string, any>) };
+            await reattachInternalFieldsOnRead(internalFieldEngine, objectName, row);
+            Object.assign(row, patch);
+            const norm = normaliseLegacyDates(model, row);
             return (bridged ? remapKeys(norm, snakeToCamel) : norm) as T;
           }
           // A predicate update answers its affected count. Anything but 0 or

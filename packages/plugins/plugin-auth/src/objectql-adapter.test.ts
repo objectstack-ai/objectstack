@@ -1069,6 +1069,18 @@ describe('a guarded increment is one atomic conditional write, even across proce
     expect(await incrementUnguarded(adapter, 'no-such-row'), 'a row that does not exist').toBeNull();
   });
 
+  it('the row a guarded increment answers keeps the internal columns every other read re-attaches', async () => {
+    const { adapter } = await oneReplica();
+    const row = await twoFactorRow(adapter);
+
+    expect(await incrementUnguarded(adapter, row.id)).toMatchObject({
+      id: row.id, secret: 'totp-secret', backupCodes: 'codes-v1', failedVerificationCount: 1,
+    });
+    expect(await swapGuardedValue(adapter, row.id, 'codes-v1', 'codes-v2')).toMatchObject({
+      id: row.id, secret: 'totp-secret', backupCodes: 'codes-v2',
+    });
+  });
+
   it('a counter stored as null counts from zero', async () => {
     const { adapter, driver } = await oneReplica();
     const row = await twoFactorRow(adapter);
