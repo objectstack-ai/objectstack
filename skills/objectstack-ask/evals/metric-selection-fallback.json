@@ -200,6 +200,36 @@
         "must_contain": ["query_dataset", "describe_object", "aggregate_records", "非指标口径"],
         "must_not_contain": ["您是指", "你是指", "您指的是", "你指的是", "do you mean", "Do you mean"]
       }
+    },
+    {
+      "id": 21,
+      "prompt": "The user asks: \"How many sales orders are in each status?\" You called `list_datasets({ terms: ['sales orders', 'status'] })`. The answer lists one dataset, `order_book` (label Order Book, `object: 'sales_order'`), with `matches: []`; its one measure is `booked_amount`, labelled Booked Amount, and its one dimension is `order_status`, labelled Order Status. The answer carries `candidates: [{ term: 'status', dataset: 'order_book', member: 'dimensions.order_status' }]` and nothing for 'sales orders'. Its `nextStep` has `decision: 'candidates_only'`, `terms: ['status']` and this `note`: \"status\" matches no member exactly; it may name a grouping: Order Status (dataset: Order Book). A possible grouping is not a question: do not ask the user about it, and it does not stop a matched measure; group the answer only as the question asks. \"sales orders\" equals no measure and has no possible reading. For those words, use the object query tools (query_records, aggregate_records) and say in the answer that no governed metric was used for them. `list_objects` shows `sales_order`. What do you do next, and how does the answer open?",
+      "expected_output": "The word for the thing measured, sales orders, has no match and no candidates, so this is the fallback, and nobody is asked anything: the user named the number (a count of sales orders), and one listed object holds those records. The word for the grouping has only a dimension among its candidates, which is at most a possible grouping and is no reason to ask; the `note` says the same. Calls `describe_object({ objectName: 'sales_order' })` and reads the fields, then `aggregate_records` once for a count grouped by the status field, instead of paging `query_records`. The reply carries no question back: it opens with one line saying the figures are not from a governed metric, computed from the Sales Order object's status field, then shows the count per status label. Because `sales_order` is the `object` of the listed dataset Order Book, it adds one line naming that dataset and its measure (Booked Amount), so the user can ask for the governed figure. No dataset query is made: no measure matched.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["describe_object", "aggregate_records", "status"],
+        "must_not_contain": ["query_dataset(", "Do you mean", "do you mean", "Which number", "which number"]
+      }
+    },
+    {
+      "id": 22,
+      "prompt": "The user asks: \"How does the outstanding balance break down by aging bucket?\" You called `list_datasets({ terms: ['outstanding balance', 'aging bucket'] })`. The answer lists one dataset, `billing` (label Billing, `object: 'invoice'`), with `matches: [{ term: 'aging bucket', member: 'dimensions.aging', matchedOn: 'label' }]`; its measures are `billed_amount`, labelled Billed Amount, and `open_balance`, labelled Open Balance. 'outstanding balance' matched nothing in any dataset, and the answer has no `candidates`. `list_objects` shows `invoice`. What do you do next, and how does the answer open?",
+      "expected_output": "The question has a word for the thing measured, outstanding balance, and that word has no match and no candidates: this is the fallback, without asking. The match on aging bucket is a grouping word's match, which picks a grouping and is no reason to ask about the number; that question is only for a question with no word for a thing measured. Open Balance is not offered as a reading either: the answer lists no candidate for the user's word, and a match is never made by similarity. Calls `describe_object({ objectName: 'invoice' })` and reads the fields, then `aggregate_records` once for the sum of the balance field grouped by the aging bucket field, instead of paging `query_records`. The reply carries no question back: it opens with one line saying the figures are not from a governed metric, computed from the Invoice object's balance and aging bucket fields. Because `invoice` is the `object` of the listed dataset Billing, it adds one line naming that dataset and its measures (Billed Amount, Open Balance), so the user can ask for the governed figure.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["describe_object", "aggregate_records"],
+        "must_not_contain": ["query_dataset(", "Do you mean", "do you mean", "Which number", "which number"]
+      }
+    },
+    {
+      "id": 23,
+      "prompt": "The user asks: \"What is the number of claims by status?\" You have called no tool yet. What is your first tool call, with what arguments, and why those words?",
+      "expected_output": "The first call is `list_datasets` with `terms: ['number of claims', 'status']`. A term is the user's noun phrase for the thing, kept whole: the counting head stays in it, because a dataset's owner may have declared the whole phrase as a measure's name, label or synonym, and a match is an equality, never a similarity. Sent whole, the phrase can equal exactly one measure, which is then computed with no question back. Cut down to its last noun, the word would equal nothing and could come back near several measures, an amount and a count among them, and the user would be asked to choose between readings of a word they did not write. The verb and the question words (\"What is the\") are left out, and `status` is sent as the grouping word. No object tool is called before this lookup.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["list_datasets", "number of claims"],
+        "must_not_contain": ["'claims'", "\"claims\"", "list_objects(", "describe_object(", "aggregate_records("]
+      }
     }
   ]
 }
