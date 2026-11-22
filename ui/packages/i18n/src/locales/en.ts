@@ -6002,6 +6002,7 @@ const en = {
       dragSort: 'Drag to change the sort priority',
       viewOwn: 'Part of this view; it cannot be removed here',
       viewFilter: 'View filter',
+      relationPath: '{{lookup}} › {{field}}',
     },
   },
   sortBuilder: {

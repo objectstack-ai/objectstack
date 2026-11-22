@@ -5388,6 +5388,7 @@ const fr = {
       dragSort: 'Faire glisser pour changer la priorité du tri',
       viewOwn: 'Fait partie de cette vue ; impossible à retirer ici',
       viewFilter: 'Filtre de la vue',
+      relationPath: '{{lookup}} › {{field}}',
     },
   },
   sortBuilder: {

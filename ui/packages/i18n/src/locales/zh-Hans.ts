@@ -5296,6 +5296,7 @@ const zh = {
       dragSort: '拖动以调整排序优先级',
       viewOwn: '视图自带的条件，不能在这里删除',
       viewFilter: '视图筛选',
+      relationPath: '{{lookup}} › {{field}}',
     },
   },
   sortBuilder: {

@@ -5239,6 +5239,7 @@ const ja = {
       dragSort: 'ドラッグして並べ替えの優先順位を変更',
       viewOwn: 'このビューの条件のため、ここでは削除できません',
       viewFilter: 'ビューのフィルター',
+      relationPath: '{{lookup}} › {{field}}',
     },
   },
   sortBuilder: {

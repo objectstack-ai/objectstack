@@ -37,6 +37,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { operatorsForField } from '@object-ui/components';
 import { en as enPack, zh as zhPack } from '@object-ui/i18n/locales';
+import { I18nProvider } from '@object-ui/i18n';
 import { parseFilterAST } from '@objectstack/spec/data';
 import { convertFilterGroupToAST } from '../../ListView';
 
@@ -871,5 +872,132 @@ describe('ConditionChipRow — the resident row of the two-row toolbar (objectst
     render(<TwoRow filters={stageFilter} />);
     const row = screen.getByTestId('condition-chips');
     expect(row.className.split(/\s+/)).toEqual(expect.arrayContaining(['flex-nowrap', 'overflow-x-auto']));
+  });
+});
+
+describe('ConditionChipRow — a view condition on a related record\'s field (objectstack#36507)', () => {
+  // The HotCRM industry-donut drill: the drilled list is a child of
+  // `crm_account`, its slice is a condition on the account's industry. The
+  // base object's lookup is labelled by the host (as the list translates its
+  // own fields); the related field and its options live on `crm_account`.
+  const LOOKUP_EN: ConditionField = { value: 'crm_account', label: 'Account', type: 'lookup', referenceTo: 'crm_account' };
+  const LOOKUP_ZH: ConditionField = { ...LOOKUP_EN, label: '所属客户' };
+  const AMOUNT: ConditionField = { value: 'amount', label: 'Amount', type: 'currency' };
+  const ACCOUNT_DEF = {
+    name: 'crm_account',
+    fields: {
+      name: { type: 'text', label: 'Account Name' },
+      industry: {
+        type: 'select',
+        label: 'Industry',
+        options: [
+          { value: 'technology', label: 'Technology' },
+          { value: 'finance', label: 'Finance' },
+        ],
+      },
+    },
+  };
+  const ZH_BUNDLE = {
+    'zh-CN': {
+      crm: {
+        fields: { crm_account: { industry: '行业' } },
+        fieldOptions: { crm_account: { industry: { technology: '科技' } } },
+      },
+    },
+  };
+  // The drill's base filter as the list receives it: the nested form
+  // `{ crm_account: { industry: 'technology' } }`, lowered by `toFilterNode`.
+  const DRILLED = ['crm_account', '=', { industry: 'technology' }];
+
+  function source(def: () => Promise<unknown>) {
+    return { find: vi.fn(async () => ({ data: [] })), getObjectSchema: vi.fn(def) };
+  }
+
+  function Row(props: Partial<React.ComponentProps<typeof ConditionChipRow>>) {
+    return (
+      <ConditionChipRow
+        sort={[]}
+        sortFields={[LOOKUP_EN, AMOUNT]}
+        filters={EMPTY}
+        filterFields={[LOOKUP_EN, AMOUNT]}
+        onFiltersChange={() => {}}
+        renderAdvanced={() => <div />}
+        renderSortLevels={() => <div />}
+        {...props}
+      />
+    );
+  }
+
+  it('reads the nested-relation form, as written and as lowered, into one chip on the path', () => {
+    const chip = { key: 'view-0', field: 'crm_account.industry', operator: 'equals', value: 'technology' };
+    expect(readViewConditions(DRILLED)).toEqual([chip]);
+    expect(readViewConditions({ crm_account: { industry: 'technology' } })).toEqual([chip]);
+    expect(readViewConditions([{ crm_account: { industry: 'technology' } }, ['amount', '>=', 10]])).toEqual([
+      chip,
+      { key: 'view-1', field: 'amount', operator: '>=', value: 10 },
+    ]);
+    // A nested condition it cannot say as one equality is the view's
+    // condition, never a value printed as `[object Object]`.
+    expect(readViewConditions(['crm_account', '=', { industry: { $in: ['technology'] } }])).toEqual([{ key: 'view-0' }]);
+    expect(readViewConditions(['crm_account', '=', { industry: 'technology', name: 'Acme' }])).toEqual([{ key: 'view-0' }]);
+    // CONTROL: a condition on the list's own field reads as before.
+    expect(readViewConditions(['amount', '>=', 10])).toEqual([{ key: 'view-0', field: 'amount', operator: '>=', value: 10 }]);
+  });
+
+  it('en: labels the chip from the lookup, the related field and its option', async () => {
+    const ds = source(async () => ACCOUNT_DEF);
+    render(<Row viewFilter={DRILLED} dataSource={ds as never} />);
+    const chip = screen.getByTestId('view-condition-chip');
+    expect(chip.getAttribute('data-field')).toBe('crm_account.industry');
+    expect(chip.getAttribute('data-locked')).toBe('true');
+    await vi.waitFor(() => expect(chip.textContent).toBe('Account › Industry: Technology'));
+    expect(ds.getObjectSchema).toHaveBeenCalledTimes(1);
+    expect(ds.getObjectSchema).toHaveBeenCalledWith('crm_account');
+    // No record-name read for it: the value is an option, not a record id.
+    expect(ds.find).not.toHaveBeenCalled();
+  });
+
+  it('zh-CN: the related field and option labels come from the locale bundle', async () => {
+    const ds = source(async () => ACCOUNT_DEF);
+    render(
+      <I18nProvider config={{ defaultLanguage: 'zh-CN', detectBrowserLanguage: false, resources: ZH_BUNDLE }} persistLanguage={false}>
+        <Row viewFilter={DRILLED} filterFields={[LOOKUP_ZH, AMOUNT]} dataSource={ds as never} />
+      </I18nProvider>,
+    );
+    const chip = await screen.findByTestId('view-condition-chip');
+    await vi.waitFor(() => expect(chip.textContent).toBe('所属客户 › 行业：科技'));
+    expect(chip.getAttribute('aria-label')).toContain('所属客户 › 行业：科技');
+  });
+
+  it('falls back to the raw names when the lookup is not among the list\'s fields', async () => {
+    const ds = source(async () => {
+      throw new Error('offline');
+    });
+    render(<Row viewFilter={DRILLED} filterFields={[AMOUNT]} dataSource={ds as never} />);
+    await act(async () => {});
+    // No lookup in the field list (one the reader may not read) ⇒ no target
+    // to read, and every name raw.
+    expect(ds.getObjectSchema).not.toHaveBeenCalled();
+    expect(screen.getByTestId('view-condition-chip').textContent).toBe('crm_account › industry: equals technology');
+  });
+
+  it('falls back to the raw related names when the definition read fails', async () => {
+    const ds = source(async () => {
+      throw new Error('offline');
+    });
+    render(<Row viewFilter={DRILLED} dataSource={ds as never} />);
+    await vi.waitFor(() => expect(ds.getObjectSchema).toHaveBeenCalledWith('crm_account'));
+    await act(async () => {});
+    expect(screen.getByTestId('view-condition-chip').textContent).toBe('Account › industry: equals technology');
+  });
+
+  it('CONTROL: a condition on the list\'s own field beside it is unchanged, and reads no definition', async () => {
+    const ds = source(async () => ACCOUNT_DEF);
+    render(<Row viewFilter={[['amount', '>=', 10]]} dataSource={ds as never} />);
+    const chip = screen.getByTestId('view-condition-chip');
+    expect(chip.getAttribute('data-field')).toBe('amount');
+    expect(chip.textContent).toBe('Amount: >= 10');
+    await act(async () => {});
+    expect(ds.getObjectSchema).not.toHaveBeenCalled();
   });
 });
