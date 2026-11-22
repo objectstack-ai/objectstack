@@ -70,14 +70,51 @@ describe('drillListConditions', () => {
       ]);
   });
 
+  it('lowers an `and` node to chips, and keeps an `or` node and an any-of group as the base filter', () => {
+    expect(drillListConditions(['and', ['stage', '=', 'closed_won'], ['amount', '>', 5]]).chips.conditions
+      .map(({ field, operator, value }) => ({ field, operator, value })))
+      .toEqual([
+        { field: 'stage', operator: 'equals', value: 'closed_won' },
+        { field: 'amount', operator: 'greater_than', value: 5 },
+      ]);
+    expect(drillListConditions(['or', ['stage', '=', 'closed_won'], ['stage', '=', 'negotiation']])).toEqual({
+      chips: { logic: 'and', conditions: [] },
+      rest: { $or: [{ stage: 'closed_won' }, { stage: 'negotiation' }] },
+    });
+    // A rule array with an any-of group (`{ or: [rule, ...] }`): the rule is a
+    // chip, the group the base filter's `$or`.
+    const { chips, rest } = drillListConditions([
+      { field: 'stage', operator: 'equals', value: 'closed_won' },
+      { or: [
+        { field: 'lead_source', operator: 'equals', value: 'web' },
+        { field: 'lead_source', operator: 'equals', value: 'referral' },
+      ] },
+    ]);
+    expect(chips.conditions.map(({ field, operator, value }) => ({ field, operator, value })))
+      .toEqual([{ field: 'stage', operator: 'equals', value: 'closed_won' }]);
+    expect(rest).toEqual({ $or: [{ lead_source: 'web' }, { lead_source: 'referral' }] });
+  });
+
   it('keeps a filter it cannot lower as the base filter, exactly as it arrived', () => {
     // A scalar on a list operator: the spec's lowering refuses it.
     const refused = [['stage', 'in', 'won']];
     expect(drillListConditions(refused)).toEqual({ chips: { logic: 'and', conditions: [] }, rest: refused });
   });
 
-  it('answers no rows and no rest for no filter', () => {
-    expect(drillListConditions(undefined)).toEqual({ chips: { logic: 'and', conditions: [] }, rest: undefined });
+  it.each([
+    ['an array that is neither rules nor AST', [{ stage: 'closed_won' }]],
+    ['a rule with a blank field', [{ field: '', operator: 'equals', value: 'closed_won' }]],
+    ['a rule with no field', [{ operator: 'equals', value: 'closed_won' }]],
+    ['a valid rule beside a malformed one', [{ field: 'stage', operator: 'equals', value: 'closed_won' }, { stage: 'x' }]],
+    ['a string', 'stage = closed_won'],
+    ['a number', 7],
+  ])('keeps a filter the conversion answers nothing for as the base filter, exactly as it arrived: %s', (_, filter) => {
+    // Not empty, so never read as no filter: that would list every record.
+    expect(drillListConditions(filter)).toEqual({ chips: { logic: 'and', conditions: [] }, rest: filter });
+  });
+
+  it.each([undefined, null, [], {}])('answers no rows and no rest for no filter: %j', (filter) => {
+    expect(drillListConditions(filter)).toEqual({ chips: { logic: 'and', conditions: [] }, rest: undefined });
   });
 });
 

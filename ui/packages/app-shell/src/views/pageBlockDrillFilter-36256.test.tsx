@@ -37,7 +37,7 @@ const ROWS = [
 ];
 const WON = ROWS.filter((r) => r.stage === 'closed_won');
 
-function mount() {
+function mount(filter: unknown = [{ field: 'stage', operator: 'equals', value: 'closed_won' }]) {
   const matcher = new ValueDataSource({ items: ROWS });
   const ds = {
     find: vi.fn((object: string, params?: Record<string, unknown>) => matcher.find(object, params as never)),
@@ -54,7 +54,7 @@ function mount() {
           objectName: 'opp_36256',
           label: 'Revenue won',
           aggregate: { field: 'amount', function: 'sum' },
-          filter: [{ field: 'stage', operator: 'equals', value: 'closed_won' }],
+          filter,
           drillDown: { enabled: true, target: 'dialog', columns: ['name', 'stage', 'amount'] },
         } as never}
       />
@@ -80,5 +80,34 @@ describe("a page block's rule-array filter reaches its drill's read (#36256)", (
     const reads = ds.find.mock.calls.filter(([object]) => object === 'opp_36256');
     expect(reads.length).toBeGreaterThan(0);
     expect(JSON.stringify(reads.at(-1)?.[1]?.$filter)).toContain('closed_won');
+  });
+
+  it.each([
+    ['an array that is neither rules nor AST', [{ stage: 'closed_won' }]],
+    ['a rule with a blank field', [{ field: '', operator: 'equals', value: 'closed_won' }]],
+    ['a valid rule beside a malformed one', [{ field: 'stage', operator: 'equals', value: 'closed_won' }, { stage: 'x' }]],
+  ])('hands a filter the conversion answers nothing for to the list as its base filter, never an unfiltered read: %s', async (_, filter) => {
+    const ds = mount(filter);
+    fireEvent.click(await screen.findByRole('button', { name: /revenue won|470,000/i }));
+    const dialog = await screen.findByTestId('drill-down-dialog');
+    await waitFor(() => expect(ds.find.mock.calls.some(([object]) => object === 'opp_36256')).toBe(true));
+    // Every read carries the filter (a server refuses it as malformed; it is
+    // never read as no filter).
+    for (const [object, params] of ds.find.mock.calls) {
+      if (object === 'opp_36256') expect(params?.$filter).toBeDefined();
+    }
+    await waitFor(() => expect(within(dialog).queryByText('Apex Logistics Data Hub')).toBeNull());
+  });
+
+  it.each([
+    ['a string', 'stage = closed_won'],
+    ['a number', 7],
+  ])('lists nothing for a filter no read can carry, and sends no read: %s', async (_, filter) => {
+    const ds = mount(filter);
+    fireEvent.click(await screen.findByRole('button', { name: /revenue won|470,000/i }));
+    const dialog = await screen.findByTestId('drill-down-dialog');
+    expect(within(dialog).getByTestId('drill-down-notice')).toHaveAttribute('data-notice', 'unavailable');
+    await new Promise((r) => setTimeout(r, 50));
+    expect(ds.find.mock.calls.filter(([object]) => object === 'opp_36256')).toEqual([]);
   });
 });

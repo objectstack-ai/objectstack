@@ -25,7 +25,14 @@
  * `[{ field, operator, value }]`, an AST node) is lowered to it first, through
  * the drill's own composition (`composeDrillFilter`: `mergeFilterNodes`, then
  * the spec's `parseFilterAST`). A shape that cannot be lowered stays the base
- * `filter` exactly as it arrived. No condition is ever dropped.
+ * `filter` exactly as it arrived: one the conversion refuses (a
+ * `FilterOperatorError`), and one it answers with nothing although it is not
+ * empty (an array that is neither rules nor AST, a rule with no field beside a
+ * valid one, a string or a number; the drill drawer lists nothing for the
+ * last two, since no list reads them). The spec's `parseFilterAST` answers
+ * `undefined` for such an array, the hazard `ObjectMetricWidget`'s
+ * `specShapeWhere` guards its own read against, and reading that as "no
+ * filter" would list every record. No condition is ever dropped.
  *
  * Values must already be resolved (`resolveFilterPlaceholders`): a chip shows
  * what the query compares, never a `{token}`.
@@ -76,16 +83,22 @@ function andParts(filter: unknown): unknown[] {
 const splits = (filter: unknown): filter is Record<string, unknown> =>
   isPlainObject(filter) && andParts(filter).every(isPlainObject);
 
+/** No filter: absent, an empty array or an empty object. */
+const isEmptyFilter = (v: unknown): boolean =>
+  v === undefined || v === null || (Array.isArray(v) && v.length === 0) || (isPlainObject(v) && Object.keys(v).length === 0);
+
 /**
  * The filter in the object form, or `null` when it cannot be lowered (see the
  * file header). `undefined` is no filter.
  */
 function objectFormOf(filter: unknown): Record<string, unknown> | undefined | null {
-  if (filter === undefined || filter === null) return undefined;
+  if (isEmptyFilter(filter)) return undefined;
   if (splits(filter)) return filter;
   try {
     const lowered: unknown = composeDrillFilter(filter, undefined);
-    return lowered === undefined || splits(lowered) ? lowered : null;
+    // A filter that is not empty never lowers to no filter: kept as it arrived.
+    if (isEmptyFilter(lowered)) return null;
+    return splits(lowered) ? lowered : null;
   } catch (error) {
     if (error instanceof FilterOperatorError) return null;
     throw error;

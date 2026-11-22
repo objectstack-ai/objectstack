@@ -26,9 +26,13 @@
  * mounts no navigation) opens the record in a dialog showing the fields the
  * list lists: the list reads only those (`$select`), so a field it did not
  * read is not drawn as empty.
+ *
+ * Inside a page the list draws in full as well: the page region's posture
+ * (compact or capped) is cleared for the drill (`PageRegionPostureReset`).
  */
 
 import React from 'react';
+import { PageRegionPostureReset } from '@object-ui/components';
 import { ComponentRegistry, resolveFilterPlaceholders, resolveNameField } from '@object-ui/core';
 import { SchemaRenderer, SchemaRendererContext, useDrillNavigation, useFilterScope } from '@object-ui/react';
 import { FILTER_DATE_LIKE_TYPES } from '@object-ui/types';
@@ -146,7 +150,10 @@ export const DrillRecordList: React.FC<DrillRecordListProps> = ({
   };
 
   return (
-    <>
+    // The drill is not a part of the page region that holds the block it was
+    // opened from: its list draws in full there too (chips, pager, no
+    // 「View all」 link to an unfiltered list), not in the region's posture.
+    <PageRegionPostureReset>
     <SchemaRenderer
       schema={schema as any}
       dataSource={dataSource}
@@ -190,6 +197,6 @@ export const DrillRecordList: React.FC<DrillRecordListProps> = ({
         onClose={() => setOpened(null)}
       />
     )}
-    </>
+    </PageRegionPostureReset>
   );
 };

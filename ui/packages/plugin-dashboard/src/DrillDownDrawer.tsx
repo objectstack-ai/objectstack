@@ -162,8 +162,14 @@ export const DrillDownDrawer: React.FC<DrillDownDrawerProps> = ({
   maxRows,
   className,
   report,
-  notice,
+  notice: givenNotice,
 }) => {
+  // A filter that is neither an object nor an array (a string, a number)
+  // names no condition any read can carry: every list below would read it as
+  // no filter and list every record (objectstack-ai/objectstack#36256). So no
+  // list is drawn, and no read is sent.
+  const notice: DrillDownNotice | undefined =
+    givenNotice ?? (filter != null && typeof filter !== 'object' ? 'unavailable' : undefined);
   const phone = useIsMobile();
   const { openRecordList, canOpenRecordList, openRecord } = useDrillNavigation();
   const tt = useSafeTranslate();
