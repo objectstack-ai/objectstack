@@ -858,6 +858,7 @@
     "system/ObjectStorageConfig:quota",
     "system/ObjectStorageConfig:scope",
     "system/ObjectTranslationData:_actions",
+    "system/ObjectTranslationData:_relatedLists",
     "system/ObjectTranslationData:_sections",
     "system/ObjectTranslationData:_tabs",
     "system/ObjectTranslationData:_validations",

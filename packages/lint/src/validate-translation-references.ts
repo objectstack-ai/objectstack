@@ -2098,9 +2098,8 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
             `${inLocale} · object "${objectName}" · related list "${listName}"`,
             `${objPath}._relatedLists.${listName}`,
             named
-              ? `Translations are keyed to related list "${listName}", which object "${objectName}" ` +
-                `names in \`relatedLists\` without a \`label\`, so nothing reads this key: the tab ` +
-                `shows the child's own related-list title or plural label.`
+              ? `Related list "${listName}" of object "${objectName}" carries no \`label\` in ` +
+                `\`relatedLists\`, so no title reads this key.`
               : `Translations are keyed to related list "${listName}", which no \`relatedLists\` entry ` +
                 `of object "${objectName}" names, so nothing reads this key.` +
                 suggest(listName, facts.relatedListLabels),
