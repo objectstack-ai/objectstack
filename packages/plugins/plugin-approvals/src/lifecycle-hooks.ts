@@ -527,6 +527,23 @@ async function lockingRequestsForRecords(
 }
 
 /**
+ * {@link recordHeldByLockingApproval} for many records of one object at once:
+ * the ids among `recordIds` held by a LOCKING pending approval. One
+ * pending-request lookup for the whole list and the same judgement, so a page
+ * asked at once and a record asked alone cannot disagree.
+ *
+ * ⚠️ Like the one-record form, it answers for the records, not for a caller.
+ */
+export async function recordsHeldByLockingApproval(
+  engine: Pick<MinimalEngine, 'find'>,
+  objectName: string,
+  recordIds: ReadonlyArray<string>,
+): Promise<Set<string>> {
+  const held = await lockingRequestsForRecords(engine, objectName, recordIds);
+  return new Set(held.map((pending) => String(pending?.record_id ?? '')));
+}
+
+/**
  * Narrow `candidates` (pending requests) to the ones whose record the caller's
  * predicate actually matches — asked of the engine as an intersection, so the
  * query is bounded by the number of LOCKED rows, not by the update's match set.

@@ -549,6 +549,7 @@ const ko = {
       objectReadOnly: "이 레코드는 여기에서 편집할 수 없습니다.",
       noPermission: "이 레코드를 편집할 권한이 없습니다.",
       approvalLocked: "이 레코드는 승인 중이라 잠겨 있습니다.",
+      checking: "이 레코드를 편집할 수 있는지 확인하는 중…",
       noRecordPermission: "이 레코드를 편집할 권한이 없습니다.",
     },
     stateChange: {

@@ -178,6 +178,56 @@ async function writeAs(rig: Rig, userId: string, object: string, recordId: strin
   }
 }
 
+/**
+ * `ApprovalService.getRecordLocks` — the same read for a page of rows: entry
+ * `i` is what `getRecordLock` answers for `recordIds[i]`, so a list asking a
+ * page at once and a record page asking one record cannot disagree.
+ */
+describe('ApprovalService.getRecordLocks — the lock read for a page of rows', () => {
+  it('answers each id in order exactly as getRecordLock answers it, for every caller', async () => {
+    const rig = await boot();
+    const ids = [recordA(HELD), recordB(HELD), MISSING, recordA(HELD)];
+    for (const caller of [SUBMITTER, APPROVER, READER]) {
+      const page = await rig.svc.getRecordLocks(HELD, ids, asUser(caller));
+      const oneByOne = [];
+      for (const id of ids) oneByOne.push(await rig.svc.getRecordLock(HELD, id, asUser(caller)));
+      expect(page, caller).toEqual(oneByOne);
+    }
+    // The reader: `_a` locked; `_b` unreadable and `MISSING` absent read alike.
+    expect(await rig.svc.getRecordLocks(HELD, ids, asUser(READER))).toEqual([{ locked: true }, null, null, { locked: true }]);
+    expect(await rig.svc.getRecordLocks(OPEN, [recordA(OPEN), recordB(OPEN)], asUser(SUBMITTER)))
+      .toEqual([{ locked: false }, { locked: false }]);
+  });
+
+  it('reads the page in two engine reads whatever its size, never one per row', async () => {
+    const rig = await boot();
+    const find = rig.engine.find.bind(rig.engine);
+    const reads: string[] = [];
+    (rig.engine as any).find = (object: string, query: any) => {
+      reads.push(object);
+      return find(object, query);
+    };
+    await rig.svc.getRecordLocks(HELD, [recordA(HELD), recordB(HELD), MISSING], asUser(SUBMITTER));
+    expect(reads).toEqual([HELD, 'sys_approval_request']);
+  });
+
+  it('refuses a caller with no read on the object as getRecordLock does, and answers a blank id null', async () => {
+    const rig = await boot();
+    const refusal = await rig.svc.getRecordLocks(HELD, [recordA(HELD)], asUser(OUTSIDER)).then(
+      () => 'answered', (err: any) => `${err?.code} ${err?.status}`,
+    );
+    expect(refusal).toBe('PERMISSION_DENIED 403');
+    expect(await rig.svc.getRecordLocks(HELD, ['', recordA(HELD)], asUser(READER))).toEqual([null, { locked: true }]);
+  });
+
+  it('unlocks the page once the request is decided, as the hook does', async () => {
+    const rig = await boot();
+    await rig.svc.decide(rig.requests.get(HELD)!, { decision: 'approve', actorId: APPROVER }, asUser(APPROVER));
+    expect(await rig.svc.getRecordLocks(HELD, [recordA(HELD)], asUser(READER))).toEqual([{ locked: false }]);
+    expect(await writeAs(rig, READER, HELD, recordA(HELD))).toBe('written');
+  });
+});
+
 describe('[#26314] ApprovalService.getRecordLock', () => {
   it('tells a non-participant reader the record is locked, and nothing about the request', async () => {
     const rig = await boot();

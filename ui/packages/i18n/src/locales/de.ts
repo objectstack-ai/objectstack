@@ -549,6 +549,7 @@ const de = {
       objectReadOnly: "Diese Datensätze können hier nicht bearbeitet werden.",
       noPermission: "Sie haben keine Berechtigung, diese Datensätze zu bearbeiten.",
       approvalLocked: "Dieser Datensatz ist während der Genehmigung gesperrt.",
+      checking: "Es wird geprüft, ob dieser Datensatz bearbeitet werden kann…",
       noRecordPermission: "Sie haben keine Berechtigung, diesen Datensatz zu bearbeiten.",
     },
     stateChange: {

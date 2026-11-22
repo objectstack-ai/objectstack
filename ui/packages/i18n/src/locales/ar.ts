@@ -583,6 +583,7 @@ const ar = {
       objectReadOnly: "لا يمكن تحرير هذه السجلات هنا.",
       noPermission: "ليس لديك إذن بتحرير هذه السجلات.",
       approvalLocked: "هذا السجل مقفل أثناء الموافقة عليه.",
+      checking: "جارٍ التحقق مما إذا كان يمكن تعديل هذا السجل…",
       noRecordPermission: "ليس لديك إذن بتحرير هذا السجل.",
     },
     stateChange: {

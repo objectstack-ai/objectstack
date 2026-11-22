@@ -556,6 +556,7 @@ const fr = {
       objectReadOnly: "Ces enregistrements ne peuvent pas être modifiés ici.",
       noPermission: "Vous n'avez pas l'autorisation de modifier ces enregistrements.",
       approvalLocked: "Cet enregistrement est verrouillé pendant son approbation.",
+      checking: "Vérification de la possibilité de modifier cet enregistrement…",
       noRecordPermission: "Vous n'avez pas l'autorisation de modifier cet enregistrement.",
     },
     stateChange: {

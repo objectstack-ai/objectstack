@@ -1376,6 +1376,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
         describeCell: (row, columnKey) => {
           const fieldDef = objectFields?.[columnKey];
           const recordId = rowRecordId(row);
+          const recordUpdate = recordVerdict(recordId, 'update');
           const kind = cellReadOnlyKind({
             fieldDef,
             fieldWritable: !objectName || resolveFieldAffordance('listInlineEdit', perms, objectName, columnKey),
@@ -1383,12 +1384,20 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
             objectEditable: objectInlineEditable,
             canUpdate: resolveAffordanceGrant('listInlineEdit', affordanceSource),
             approvalLocked: approvalLocks.isLocked(recordId, row),
-            recordUpdate: recordVerdict(recordId, 'update'),
+            recordUpdate,
           });
+          // objectstack#35795 — while the row's lock or `update` verdict is on
+          // its way, an edit waits for it rather than opening an editor the
+          // answer may refuse.
+          const reads = kind ? [] : [
+            approvalLocks.settling(recordId),
+            recordUpdate === undefined ? recordVerdict.settling() : null,
+          ].filter((read): read is Promise<void> => read !== null);
           const fromText = choiceFromText(fieldDef);
           const type = fieldDef?.type;
           return {
             readOnlyReason: kind ? readOnlyReasonText(kind, t) : null,
+            ...(reads.length > 0 ? { checking: { text: t('grid.readOnlyReason.checking'), settled: Promise.all(reads) } } : {}),
             typing: inlineTyping(type),
             ...(type === 'boolean' || type === 'toggle' ? { toggles: true } : {}),
             // objectstack#36023 — a rating is set in place: digits, or a click on a star.
@@ -1403,7 +1412,8 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
         },
         onCellSelect: (row) => {
           recordVerdict.requestVerdicts();
-          approvalLocks.probe(rowRecordId(row));
+          // objectstack#35795 — one lock read for the page, not one per row selected.
+          approvalLocks.probe([rowRecordId(row), ...pageRecordIds]);
         },
         // objectstack#35685 — a move of a state-machine field is confirmed
         // before anything is written (`./objectGridStateConfirm`). A move that

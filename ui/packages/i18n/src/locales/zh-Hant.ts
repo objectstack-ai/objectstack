@@ -562,6 +562,7 @@ const zhHant = {
       objectReadOnly: '這些記錄不能在這裡編輯。',
       noPermission: '您沒有編輯這些記錄的權限。',
       approvalLocked: '此記錄正在審批中，已鎖定。',
+      checking: '正在確認這筆記錄能否編輯…',
       noRecordPermission: '您沒有編輯此記錄的權限。',
     },
     stateChange: {

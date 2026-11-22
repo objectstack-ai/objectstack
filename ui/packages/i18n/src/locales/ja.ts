@@ -549,6 +549,7 @@ const ja = {
       objectReadOnly: "これらのレコードはここでは編集できません。",
       noPermission: "これらのレコードを編集する権限がありません。",
       approvalLocked: "このレコードは承認中のためロックされています。",
+      checking: "このレコードを編集できるか確認しています…",
       noRecordPermission: "このレコードを編集する権限がありません。",
     },
     stateChange: {
