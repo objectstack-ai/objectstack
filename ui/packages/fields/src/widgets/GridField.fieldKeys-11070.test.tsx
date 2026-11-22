@@ -52,7 +52,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import React from 'react';
 import type { GridFieldMetadata } from '@object-ui/types';
-import { GridField } from './GridField';
+import { GridFieldWidget as GridField } from './grid-field/GridFieldWidget';
 
 const columns: NonNullable<GridFieldMetadata['columns']> = [
   { name: 'description', label: 'Description', type: 'text' },

@@ -155,7 +155,7 @@ describe('formatIneffectiveDynamicImportStandDown', () => {
       missing: [...DEFEATED_LAZY_FIELD_WIDGETS],
     });
     expect(text).not.toContain('\n');
-    expect(text).not.toContain('packages/fields/src/widgets/GridField.tsx');
+    expect(text).not.toContain(DEFEATED_LAZY_FIELD_WIDGETS[0]);
     expect(text).toContain(`${DEFEATED_LAZY_FIELD_WIDGETS.length} did not fire`);
   });
 });
