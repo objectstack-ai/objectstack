@@ -183,3 +183,85 @@ describe('localizeActivityRow — the read-side overlay', () => {
     expect(unprojected).not.toHaveProperty('summary');
   });
 });
+
+/**
+ * [#35384] The object, field and option labels inside a reader's summary are
+ * resolved the way the metadata route serves them — `translateObject` over
+ * every locale the service holds, with `/meta`'s `ResolveOptions` (the
+ * reader's locale, the declared fallback chain, and the authored language:
+ * the declared `sourceLocale`, else `defaultLocale`) — and never through
+ * `t()`.
+ *
+ * The scenario: an app authored in English (`sourceLocale: 'en'`) that
+ * defaults its users to Chinese (`defaultLocale: 'zh-CN'`, the fallback `t()`
+ * falls to) and ships `zh-CN` labels only. `/meta` answers an `en` request
+ * with the authored labels (`packages/rest/src/meta-i18n-declared-fallback-chain.test.ts`
+ * §6 pins that half); the summary must name the same ones. CONTROLS: a
+ * `zh-CN` reader still reads the `zh-CN` labels, and with no `sourceLocale`
+ * declared an `en` reader walks the declared fallback to them, as `/meta`
+ * does.
+ */
+describe('[#35384] a reader in the declared sourceLocale reads the labels as authored', () => {
+  /** The real in-memory service, declared as `AppPlugin.loadTranslations` declares it. */
+  const declaredMemory = () => {
+    const i18n = makeI18n();
+    i18n.setDefaultLocale('zh-CN');
+    i18n.setFallbackLocale('zh-CN');
+    i18n.setSourceLocale('en');
+    return i18n;
+  };
+  /** The served adapter's shape (`FileI18nAdapter`): the declared fallback, read back by `getFallbackLocale()`. */
+  const served = (declared: { sourceLocale?: string }) => {
+    const i18n = makeI18n();
+    i18n.setDefaultLocale('zh-CN');
+    i18n.setFallbackLocale('zh-CN');
+    if (declared.sourceLocale) i18n.setSourceLocale(declared.sourceLocale);
+    return Object.assign(i18n, { getFallbackLocale: () => 'zh-CN' });
+  };
+
+  it('an en reader names the object, the fields and the option as authored', () => {
+    const i18n = declaredMemory();
+    // The defect's precondition, read at the same service: `t()` falls to the zh-CN rows.
+    expect(i18n.t('objects.biz_deal.label', 'en')).toBe('商机');
+    expect(i18n.t('objects.biz_deal.fields.stage.options.won', 'en')).toBe('赢单');
+    const en = readerSummaryLocale(i18n, 'en', getObjectDef)!;
+    expect(composeActivitySummary(CREATED, en)).toBe('Created Deal "Acme"');
+    expect(composeActivitySummary(NAMED, en)).toBe('Updated Deal "Acme": Amount, Owner, and 2 more fields');
+    expect(composeActivitySummary(CHANGES, en)).toBe('Stage: ∅ → Won; Owner: 张伟 → Ana');
+  });
+
+  it('the same, through a service that declares its fallback chain', () => {
+    const en = readerSummaryLocale(served({ sourceLocale: 'en' }), 'en', getObjectDef)!;
+    expect(composeActivitySummary(CREATED, en)).toBe('Created Deal "Acme"');
+    expect(composeActivitySummary(CHANGES, en)).toBe('Stage: ∅ → Won; Owner: 张伟 → Ana');
+  });
+
+  it('CONTROL: a zh-CN reader still reads the zh-CN labels', () => {
+    const zhReader = readerSummaryLocale(declaredMemory(), 'zh-CN', getObjectDef)!;
+    expect(composeActivitySummary(CREATED, zhReader)).toBe('创建了 商机 "Acme"');
+    expect(composeActivitySummary(CHANGES, zhReader)).toBe('阶段: ∅ → 赢单; Owner: 张伟 → Ana');
+  });
+
+  it('CONTROL: with no sourceLocale declared, an en reader walks the declared fallback to the zh-CN labels', () => {
+    const en = readerSummaryLocale(served({}), 'en', getObjectDef)!;
+    expect(composeActivitySummary(CREATED, en)).toBe('Created 商机 "Acme"');
+    expect(composeActivitySummary(CHANGES, en)).toBe('阶段: ∅ → 赢单; Owner: 张伟 → Ana');
+  });
+
+  it('reads no label through t(): a service that cannot hand its translations over keeps the authored labels', () => {
+    const i18n = makeI18n();
+    const tOnly = { t: i18n.t.bind(i18n), getLocales: i18n.getLocales.bind(i18n) };
+    const zhReader = readerSummaryLocale(tOnly, 'zh-CN', getObjectDef)!;
+    expect(composeActivitySummary(CREATED, zhReader)).toBe('创建了 Deal "Acme"');
+  });
+
+  it('a service whose translations throw keeps the authored labels, never a failed read', () => {
+    const i18n = makeI18n();
+    const throwing = {
+      t: i18n.t.bind(i18n),
+      getLocales: i18n.getLocales.bind(i18n),
+      getTranslations: () => { throw new Error('translations exploded'); },
+    };
+    expect(composeActivitySummary(CREATED, readerSummaryLocale(throwing, 'zh-CN', getObjectDef)!)).toBe('创建了 Deal "Acme"');
+  });
+});
