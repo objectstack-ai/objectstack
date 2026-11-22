@@ -475,7 +475,8 @@ export interface ObjectGridComponentProps extends ObjectGridExternalPaginationPr
    * select-first by default, and there each edited cell saves on its own
    * through {@link ObjectGridComponentProps.onRowSave} (or, when the host
    * passes none, the grid's own write through `dataSource.update`). No
-   * "Save All" is drawn, so this handler is never called and nothing says so.
+   * "Save All" is drawn, so this handler is never called and no runtime
+   * notice says so.
    * Pass `onRowSave` to own the write per cell, or pass `cellSelection={false}`
    * to keep the staged model, where this handler is still called.
    */
