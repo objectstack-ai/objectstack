@@ -5,15 +5,12 @@
  * own label (`flows.<flow>.label`) and an `approval` node's step label
  * (`flows.<flow>.approvals.<node_id>.label`), in the viewer's language.
  *
- * The bundle is the one `FlowRunner` reads, `activeFlowsBundle` over the
- * i18next resource tree the console already loaded, and the flow label goes
- * through the spec's `translateFlow`, the runner's resolution path. So the
- * designer and the runner cannot disagree about a flow's name, and there is no
- * second loader.
- *
- * Only those two keys exist in the spec's `flows` group for a label the
- * designer draws. A decision or other node's label and an edge label have no
- * key, so they stay the authored text.
+ * The resolution itself is `@object-ui/i18n`'s (`flowLabelTranslations` over
+ * `activeFlowsBundle`), the one the runner and the docs viewer's flow embed
+ * read too, so no two surfaces can disagree about a flow's name and there is
+ * no second loader. This module adds only what the designer needs on top:
+ * a per-row reader for the Automations rail and a context that hands the
+ * translations to the canvas.
  *
  * Display only: the draft is never rewritten with a translation, so an edit,
  * a rename or a save keeps working on the authored label. Studio is the
@@ -23,48 +20,13 @@
 
 import * as React from 'react';
 import { useObjectTranslation } from '@object-ui/react';
-import { translateFlow, type TranslationBundle } from '@objectstack/spec/system';
-import { activeFlowsBundle } from '../../../utils/flowsBundle.js';
+import {
+  activeFlowsBundle,
+  flowLabelTranslations,
+  type FlowLabelTranslations,
+} from '@object-ui/i18n';
 
-/** A flow's translated labels in one language. Every member answers `undefined` where the bundle carries nothing. */
-export interface FlowLabelTranslations {
-  /** `flows.<flow>.label`. */
-  flowLabel?: string;
-  /** `flows.<flow>.approvals.<node_id>.label`, for an `approval` node only. */
-  stepLabel: (node: { id?: unknown; type?: unknown }) => string | undefined;
-}
-
-/**
- * The translated labels for `flowName` out of `bundle` in `language`, or
- * `undefined` when there is no bundle (nothing to translate with).
- */
-export function flowLabelTranslations(
-  bundle: TranslationBundle | undefined,
-  flowName: string,
-  language: string,
-): FlowLabelTranslations | undefined {
-  if (!bundle || !flowName) return undefined;
-  const flowLabel = translateFlow<{ name: string; label?: string }>({ name: flowName }, bundle, { locale: language }).label;
-  const approvals = bundle[language]?.flows?.[flowName]?.approvals;
-  return {
-    flowLabel: typeof flowLabel === 'string' && flowLabel ? flowLabel : undefined,
-    stepLabel: (node) => {
-      if (node.type !== 'approval' || typeof node.id !== 'string' || !node.id) return undefined;
-      const label = approvals?.[node.id]?.label;
-      return typeof label === 'string' && label ? label : undefined;
-    },
-  };
-}
-
-/**
- * {@link flowLabelTranslations} for `flowName` in the console's active
- * language. Recomputed on every render: a handful of property reads that
- * follow the live resource tree and a language switch.
- */
-export function useFlowLabelTranslations(flowName: string): FlowLabelTranslations | undefined {
-  const { i18n, language } = useObjectTranslation();
-  return flowLabelTranslations(activeFlowsBundle(i18n, language, flowName), flowName, language);
-}
+export { useFlowLabelTranslations, type FlowLabelTranslations } from '@object-ui/i18n';
 
 /**
  * The flow label of any flow, by name, for a surface that lists many: the
@@ -73,7 +35,8 @@ export function useFlowLabelTranslations(flowName: string): FlowLabelTranslation
  * the reading the designer header makes for the open flow, so a row and the
  * flow it opens cannot disagree. `undefined` where the bundle carries no label
  * for that flow, and the caller keeps the authored label. A fresh function on
- * every render, for the reason above.
+ * every render: a handful of property reads that follow the live resource tree
+ * and a language switch.
  */
 export function useFlowLabelOf(): (flowName: string) => string | undefined {
   const { i18n, language } = useObjectTranslation();

@@ -21,7 +21,7 @@
 import * as React from 'react';
 import { ComponentRegistry } from '@object-ui/core';
 import { useMetadataItem, resolveInlineAriaProps } from '@object-ui/react';
-import { useDisplayLocale, useObjectTranslation } from '@object-ui/i18n';
+import { useDisplayLocale, useFlowLabelTranslations, useObjectTranslation } from '@object-ui/i18n';
 import type { AriaProps } from '@object-ui/types';
 import {
   ArrowRight,
@@ -384,6 +384,10 @@ const TECHNICAL_NODE_TYPES = new Set([
 function FlowView({ name, detail }: ViewerProps) {
   const { item: flow, loading, error } = useMetadataItem('flow', name ?? null);
   const { t, ...view } = useViewStates();
+  // The package's `flows` translations in the reader's language: the flow label
+  // and each `approval` step's label, the resolution the Studio designer and
+  // the runner share. Any other step has no key and keeps its authored label.
+  const translated = useFlowLabelTranslations(name ?? '');
 
   if (!name) return view.missing('name');
   if (loading) return view.loading(name);
@@ -399,7 +403,7 @@ function FlowView({ name, detail }: ViewerProps) {
     <Shell
       hint={t('element.metadataViewer.flow', { defaultValue: 'Flow' })}
       icon={GitBranch}
-      title={flow.label ?? flow.name ?? name}
+      title={translated?.flowLabel ?? flow.label ?? flow.name ?? name}
       subtitle={
         flow.description ??
         t('element.metadataViewer.steps', { defaultValue: 'Steps: {{count}}', count: allNodes.length })
@@ -415,7 +419,10 @@ function FlowView({ name, detail }: ViewerProps) {
                 {i + 1}
               </span>
               <span className="text-sm">
-                {n?.label ?? n?.id ?? t('element.metadataViewer.untitledStep', { defaultValue: '(step)' })}
+                {(n && translated?.stepLabel(n)) ??
+                  n?.label ??
+                  n?.id ??
+                  t('element.metadataViewer.untitledStep', { defaultValue: '(step)' })}
               </span>
               {n?.type && (
                 <span className="ml-auto rounded border bg-background px-1.5 py-0.5 font-mono text-xs text-muted-foreground">

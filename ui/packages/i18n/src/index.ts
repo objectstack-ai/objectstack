@@ -83,6 +83,18 @@ export type { TranslateFn } from './translateFn.js';
 // Convention-based object/field label i18n
 export { useObjectLabel, useSafeFieldLabel } from './useObjectLabel.js';
 
+// An app's `flows` translation group and the flow labels a surface that draws a
+// flow reads from it: the one reader for the console's runner, the Studio flow
+// designer and the docs viewer's `type: flow` embed.
+export {
+  activeFlowsBundle,
+  flowLabelTranslations,
+  useFlowLabelTranslations,
+  type FlowLabelTranslations,
+  type FlowsTranslation,
+  type TranslationResourceReader,
+} from './flowLabels.js';
+
 // The record-named save message every record save surface toasts.
 export { recordSaveMessage, type RecordSaveMessageInput } from './recordSaveMessage.js';
 
