@@ -29,9 +29,9 @@
  *    only, so it never answers for the next URL.
  *  - `refusal` is set for `denied` alone. Every other verdict leaves the page's
  *    missing-item face: the server said absence, or said nothing.
- *  - `absent` (objectstack#36371) is set for `not_found` alone: the server
+ *  - `absent` (objectstack#36409) is set for `not_found` alone: the server
  *    says the item is not there for anyone, so a page may say it is gone (a
- *    view unshared or deleted while a reader had it open) rather than fall
+ *    view deleted since the reader's address named it) rather than fall
  *    back in silence. Unreachable and unknown answers say nothing.
  *
  * Nothing is cached across mounts: a verdict about the CALLER goes stale the

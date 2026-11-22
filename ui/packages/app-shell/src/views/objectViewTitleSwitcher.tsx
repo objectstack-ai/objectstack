@@ -56,7 +56,6 @@ import type { buildViewTabs } from './objectViewTabs.js';
 import type { ConsoleObjectViewProps } from './ObjectView.js';
 import { FOOTER_ITEM, ObjectViewSwitcherMenu, type SwitcherCreateOptions } from './objectViewSwitcherMenu.js';
 import { useCreateViewInPlace } from './objectViewViewCrud.js';
-import { isUnsharableView } from './objectViewViewSharing.js';
 
 type TFn = ReturnType<typeof useObjectTranslation>['t'];
 
@@ -83,8 +82,6 @@ export interface TitleSwitcherView {
     authored: boolean;
     /** One of the reader's own views (My views, a `sys_personal_view` row). */
     personal?: boolean;
-    /** objectstack#36371 — a shared view saved here, which may be unshared (`isUnsharableView`). */
-    unsharable?: boolean;
 }
 
 export interface ObjectViewTitleSwitcherProps {
@@ -118,10 +115,6 @@ export interface ObjectViewTitleSwitcherProps {
     onRenamePersonalView?: (viewId: string) => void;
     /** Delete one of the reader's own views. Absent ⇒ not offered. */
     onDeletePersonalView?: (viewId: string) => void;
-    /** objectstack#36371 — 「Make shared」 on one of the reader's own views. Absent ⇒ not offered. */
-    onMakeSharedView?: (viewId: string) => void;
-    /** objectstack#36371 — 「Unshare」 on a view marked `unsharable`. Absent ⇒ not offered. */
-    onUnshareView?: (viewId: string) => void;
     /**
      * 「Add view」 as the in-place create card (objectstack#35553); Save as my
      * view folds into it. Absent ⇒ `onAddView`, if any.
@@ -145,8 +138,6 @@ export function ObjectViewTitleSwitcher({
     onManageViews,
     onRenamePersonalView,
     onDeletePersonalView,
-    onMakeSharedView,
-    onUnshareView,
     create,
     t,
 }: ObjectViewTitleSwitcherProps) {
@@ -178,8 +169,6 @@ export function ObjectViewTitleSwitcher({
             onManageViews={onManageViews}
             onRenamePersonalView={onRenamePersonalView}
             onDeletePersonalView={onDeletePersonalView}
-            onMakeSharedView={onMakeSharedView}
-            onUnshareView={onUnshareView}
             create={create}
             onAddView={onAddView}
             phone={phone}
@@ -274,13 +263,10 @@ export function ObjectViewTitleSwitcher({
                     </button>
                 </PopoverTrigger>
                 {/* The dropdown's body (objectstack#35553): the views, grouped, and
-                    「Add view」, which turns it into the in-place create card.
-                    w-80, not w-72 (objectstack#36371): a personal row's hidden
-                    actions keep their width, and 「Make shared」 is a sixth
-                    icon, so at w-72 a two-word name broke onto three lines. */}
+                    「Add view」, which turns it into the in-place create card. */}
                 <PopoverContent
                     align="start"
-                    className="w-80 p-0"
+                    className="w-72 p-0"
                     data-testid="list-view-switcher-menu"
                     aria-label={t('view.switcher.label', { defaultValue: 'Views' })}
                 >
@@ -333,8 +319,6 @@ export function useObjectViewTitleSwitcher({
     create,
     onRenamePersonalView,
     onDeletePersonalView,
-    onMakeSharedView,
-    onUnshareView,
 }: {
     views: ReturnType<typeof buildViewTabs>;
     savedViews: Parameters<typeof buildViewTabs>[0]['savedViews'];
@@ -370,13 +354,6 @@ export function useObjectViewTitleSwitcher({
     };
     onRenamePersonalView?: (viewId: string) => void;
     onDeletePersonalView?: (viewId: string) => void;
-    /**
-     * objectstack#36371 — for a reader who may share views: 「Make shared」 on
-     * their own views, and 「Unshare」 on each shared view `isUnsharableView`
-     * admits, judged from the same item Manage views lists.
-     */
-    onMakeSharedView?: (viewId: string) => void;
-    onUnshareView?: (viewId: string) => void;
 }) {
     const createInPlace = useCreateViewInPlace({
         objectName: objectDef.name,
@@ -464,19 +441,14 @@ export function useObjectViewTitleSwitcher({
             const customized = saved?.overrides?.package === packageId;
             return { ...item, definitionReadonly: true, ...(customized ? { customized: true } : {}) };
         });
-    const manageItemOf = new Map(viewTabItems.map((item) => [item.id, item]));
     const switcherViews: TitleSwitcherView[] = viewItems.map((item) => {
         const personal = personalViewIds.has(item.id);
-        const manageItem = personal ? undefined : manageItemOf.get(item.id);
-        const unsharable = !!onUnshareView && !!manageItem
-            && isUnsharableView(manageItem, savedViews.find((sv: any) => viewRowId(sv) === item.id));
         return {
             id: item.id,
             label: item.label,
             type: item.type,
             authored: !personal && !!item.readonly,
             ...(personal ? { personal: true } : {}),
-            ...(unsharable ? { unsharable: true } : {}),
         };
     });
     const viewIds = switcherViews.map((v) => v.id);
@@ -518,8 +490,6 @@ export function useObjectViewTitleSwitcher({
             create={createOptions}
             onRenamePersonalView={onRenamePersonalView}
             onDeletePersonalView={onDeletePersonalView}
-            onMakeSharedView={onMakeSharedView}
-            onUnshareView={onUnshareView}
             t={t}
         />
     ) : null;

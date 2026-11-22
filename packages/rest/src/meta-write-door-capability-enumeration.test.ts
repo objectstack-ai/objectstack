@@ -706,10 +706,10 @@ describe('#30675 — the data doors refuse on their own capability, not `manage_
 });
 
 /**
- * [objectstack#36371] Only an administrator makes a list view everyone sees.
+ * [objectstack#36409] Only an administrator makes a list view everyone sees.
  * A shared view is `view` metadata, so the door that shares one is this
  * surface's save (the Console saves `?mode=draft` and publishes at once), the
- * door that unshares one is the delete, and the publish promotes it. Driven
+ * publish promotes it, and the delete removes it. Driven
  * with the systemPermissions the SHIPPED sets grant, not hand-written ones: a
  * member (`member_default`), an organization administrator (that baseline
  * plus `organization_admin`, which withholds `manage_metadata`) and the
@@ -717,7 +717,7 @@ describe('#30675 — the data doors refuse on their own capability, not `manage_
  * the same capability before it offers Shared (`useCanAuthorMetadata`), so the
  * organization administrator's refusal here is why that control is hidden.
  */
-describe('#36371 — sharing a list view is an administrator\'s act', () => {
+describe('#36409 — sharing a list view is an administrator\'s act', () => {
     const grants = (...names: string[]): string[] => {
         const held = new Set<string>();
         for (const name of names) {

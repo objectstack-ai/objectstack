@@ -108,11 +108,6 @@ const LEDGER: Row[] = [
     reason: 'Delete: the translated `objectViewActions.deleteFailed` title, with the door\'s message as the description (objectui#12398).',
   },
   {
-    file: 'objectViewViewSharing.ts', symbol: 'unshare', callee: 'deleteView', calls: 1,
-    kind: 'surfaces', pin: 'objectViewViewSharing.test.tsx',
-    reason: 'Unshare (objectstack#36371): a refused delete, or one answered `deleted: false`, takes the My views copy back and toasts the translated `view.switcher.unshareFailed` title with the door\'s message.',
-  },
-  {
     file: 'objectViewViewCrud.tsx', symbol: 'handlePinView', callee: 'updateView', calls: 1,
     kind: 'surfaces', pin: 'ObjectView.viewWriteRefusal-11583.test.tsx',
     reason: 'Pin and unpin: a toast with the door\'s message (objectui#11583).',

@@ -531,8 +531,8 @@ export type SaveAndPublishOutcome = 'published' | 'pending-draft';
  * it wrote is discarded (it was the only one, by the pin) and the refusal is
  * rethrown. Any other refusal is rethrown as it came.
  *
- * objectstack#36371 — a NEW view shared at once (the view dropdown's create
- * and its 「Make shared」) passes the app it was made in
+ * objectstack#36409 — a NEW view shared at once (the view dropdown's create)
+ * passes the app it was made in
  * ({@link RuntimePersistCtx.app}): its first write is saved into the app's
  * package as {@link createRuntimeMetadata} saves it. The publish names no
  * package (ADR-0146 D8 addresses the name's one holder). When no package can be

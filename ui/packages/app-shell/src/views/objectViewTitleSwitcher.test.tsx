@@ -17,10 +17,6 @@
 import * as React from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, cleanup, screen, fireEvent, within } from '@testing-library/react';
-// The switcher's module reaches a dynamic `import('@objectstack/lint')` (the
-// draft bar's publish lint): pay its load at collection, never inside a case's
-// clocked window (`check:test-source-alias`).
-import '@objectstack/lint';
 import { ObjectViewTitleSwitcher, type ObjectViewTitleSwitcherProps, type TitleSwitcherView } from './objectViewTitleSwitcher';
 import type { ListViewFavorites } from '../layout/listViewFavorites';
 
@@ -237,46 +233,5 @@ describe('objectstack#30046 — a host with no reader of its own hands no pin an
     const { menu, onViewChange } = mountStudio();
     fireEvent.click(within(within(menu).getByTestId('view-switcher-row-board')).getAllByRole('button')[0]);
     expect(onViewChange).toHaveBeenCalledWith('board');
-  });
-});
-
-describe('objectstack#36371 — 「Make shared」 and 「Unshare」 on the dropdown rows', () => {
-  const SHARING_VIEWS: TitleSwitcherView[] = [
-    { id: 'all', label: 'All Leads', type: 'grid', authored: true },
-    { id: 'crm_lead.team', label: 'Team', type: 'grid', authored: false, unsharable: true },
-    { id: 'crm_lead.packaged', label: 'Packaged', type: 'grid', authored: false },
-    { id: 'pv_1', label: 'Mine', type: 'grid', authored: false, personal: true },
-  ];
-
-  it('a reader who may share gets Make shared on their own views and Unshare on an unsharable shared view only', () => {
-    const onMakeSharedView = vi.fn();
-    const onUnshareView = vi.fn();
-    const { menu } = mount({ views: SHARING_VIEWS, onMakeSharedView, onUnshareView });
-    const row = (id: string) => within(menu).getByTestId(`view-switcher-row-${id}`);
-    expect(within(row('pv_1')).getByTestId('view-switcher-make-shared')).toBeInTheDocument();
-    expect(within(row('pv_1')).queryByTestId('view-switcher-unshare')).toBeNull();
-    expect(within(row('crm_lead.team')).getByTestId('view-switcher-unshare')).toBeInTheDocument();
-    expect(within(row('crm_lead.team')).queryByTestId('view-switcher-make-shared')).toBeNull();
-    // A view the object authors, and a shared view not marked unsharable (a
-    // package's), offer neither.
-    for (const id of ['all', 'crm_lead.packaged']) {
-      expect(within(row(id)).queryByTestId('view-switcher-unshare')).toBeNull();
-      expect(within(row(id)).queryByTestId('view-switcher-make-shared')).toBeNull();
-    }
-    fireEvent.click(within(row('pv_1')).getByTestId('view-switcher-make-shared'));
-    expect(onMakeSharedView).toHaveBeenCalledWith('pv_1');
-  });
-
-  it('Unshare hands the view id to the host', () => {
-    const onUnshareView = vi.fn();
-    const { menu } = mount({ views: SHARING_VIEWS, onUnshareView });
-    fireEvent.click(within(within(menu).getByTestId('view-switcher-row-crm_lead.team')).getByTestId('view-switcher-unshare'));
-    expect(onUnshareView).toHaveBeenCalledWith('crm_lead.team');
-  });
-
-  it('a reader who may not share (no handlers) is offered neither, whatever the rows say', () => {
-    const { menu } = mount({ views: SHARING_VIEWS });
-    expect(within(menu).queryByTestId('view-switcher-make-shared')).toBeNull();
-    expect(within(menu).queryByTestId('view-switcher-unshare')).toBeNull();
   });
 });

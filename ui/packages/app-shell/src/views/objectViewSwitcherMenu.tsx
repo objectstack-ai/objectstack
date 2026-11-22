@@ -12,16 +12,14 @@
  *
  * Each row offers on hover the reader's ☆ (sidebar Favorites) and 📌 (the
  * view this object's list opens by default), and on the reader's own views
- * Rename and Delete. For a reader who may share views (objectstack#36371),
- * the reader's own views add 「Make shared」 and a shared view saved here adds
- * 「Unshare」 (`./objectViewViewSharing.ts`). The trigger (type icon, name, count, caret) and the
+ * Rename and Delete. The trigger (type icon, name, count, caret) and the
  * popover around this body are the switcher's (`./objectViewTitleSwitcher.tsx`).
  */
 
 import { lazy, Suspense, useState, type ComponentType, type ReactNode } from 'react';
 import { cn, Input } from '@object-ui/components';
 import type { useObjectTranslation } from '@object-ui/i18n';
-import { Check, ListOrdered, Lock, Pencil, Pin, Plus, Share2, Star, Trash2 } from 'lucide-react';
+import { Check, ListOrdered, Pencil, Pin, Plus, Star, Trash2 } from 'lucide-react';
 import type { ListViewFavorites } from '../layout/listViewFavorites.js';
 import { VIEW_TYPE_ICONS } from './objectViewHelpers.js';
 import type { CreateViewCardProps } from './CreateViewDialog.js';
@@ -60,10 +58,6 @@ export interface ObjectViewSwitcherMenuProps {
     onManageViews?: () => void;
     onRenamePersonalView?: (viewId: string) => void;
     onDeletePersonalView?: (viewId: string) => void;
-    /** objectstack#36371 — 「Make shared」 on the reader's own views. Absent ⇒ not offered. */
-    onMakeSharedView?: (viewId: string) => void;
-    /** objectstack#36371 — 「Unshare」 on the shared views marked `unsharable`. Absent ⇒ not offered. */
-    onUnshareView?: (viewId: string) => void;
     /** 「Add view」 and its card. Absent ⇒ `onAddView`, if any. */
     create?: SwitcherCreateOptions;
     /** 「Add view」 for a host with no card to offer: the dropdown closes and this runs (the Create View dialog). */
@@ -112,8 +106,6 @@ export function ObjectViewSwitcherMenu({
     onManageViews,
     onRenamePersonalView,
     onDeletePersonalView,
-    onMakeSharedView,
-    onUnshareView,
     create,
     onAddView,
     phone = false,
@@ -170,8 +162,6 @@ export function ObjectViewSwitcherMenu({
             : t('view.switcher.pin', { defaultValue: 'Pin: open this view by default' });
         const renameLabel = t('view.rename', { defaultValue: 'Rename' });
         const deleteLabel = t('view.deleteView', { defaultValue: 'Delete View' });
-        const makeSharedLabel = t('view.switcher.makeShared', { defaultValue: 'Make shared' });
-        const unshareLabel = t('view.switcher.unshare', { defaultValue: 'Unshare' });
         const iconButton = 'flex h-7 w-7 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:text-foreground max-sm:h-11 max-sm:w-11 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
         // Shown on hover or focus, and always while set; a touch screen has no
         // hover, so there they always show.
@@ -243,30 +233,6 @@ export function ObjectViewSwitcherMenu({
                         className={cn(iconButton, reveal)}
                     >
                         <Pencil className="h-3.5 w-3.5" />
-                    </button>
-                )}
-                {view.personal && onMakeSharedView && (
-                    <button
-                        type="button"
-                        data-testid="view-switcher-make-shared"
-                        aria-label={makeSharedLabel}
-                        title={makeSharedLabel}
-                        onClick={() => { onClose(); onMakeSharedView(view.id); }}
-                        className={cn(iconButton, reveal)}
-                    >
-                        <Share2 className="h-3.5 w-3.5" />
-                    </button>
-                )}
-                {!view.personal && view.unsharable && onUnshareView && (
-                    <button
-                        type="button"
-                        data-testid="view-switcher-unshare"
-                        aria-label={unshareLabel}
-                        title={unshareLabel}
-                        onClick={() => { onClose(); onUnshareView(view.id); }}
-                        className={cn(iconButton, reveal)}
-                    >
-                        <Lock className="h-3.5 w-3.5" />
                     </button>
                 )}
                 {view.personal && onDeletePersonalView && (

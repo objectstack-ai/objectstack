@@ -700,9 +700,9 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         ? (requestedViewId.includes('.') ? requestedViewId : `${objectDef.name}.${requestedViewId}`)
         : null;
     const viewAccess = useMetaItemRefusal('view', missedViewName);
-    // objectstack#36371 — a view the address names that the server says is
-    // gone (unshared or deleted while the reader had it open): the list opens
-    // its default view, and says why once per name.
+    // objectstack#36409 — a view the address names that the server says is
+    // gone (deleted, or never there): the list opens its default view, and
+    // says why once per name.
     const goneViewNoticed = useRef<string | null>(null);
     useEffect(() => {
         if (!viewAccess.absent || !missedViewName || goneViewNoticed.current === missedViewName) return;
@@ -1137,30 +1137,21 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         listSeedRef,
     });
 
-    // objectstack#36371 — only an administrator holding the shared view's write
-    // capability shares views: creates one shared, makes one of their own
-    // shared, or unshares one (`./objectViewViewSharing.ts`).
+    // objectstack#36409 — only an administrator holding the shared view's write
+    // capability creates a shared view, and it is published at once
+    // (`./objectViewViewSharing.ts`).
     const canAuthorMetadata = useCanAuthorMetadata();
     const canShareViews = mayShareViews(isAdmin, canAuthorMetadata);
     const sharingApp = useRuntimeCreateApp(t);
-    const viewTabItemsRef = useRef<ReadonlyArray<{ id: string; label?: unknown }>>([]);
     const viewSharing = useViewSharing({
         objectName: objectDef.name,
         objectDef,
         metadataClient,
         dataSource,
         app: sharingApp,
-        personalViews,
-        savedViews,
-        viewIds: views.map((v: any) => String(v.id)),
-        labelOf: (id) => String(viewTabItemsRef.current.find((item) => item.id === id)?.label ?? id),
-        activeViewId,
         routeViewId: viewId,
         navigate,
-        pinnedViewId,
-        setPinnedViewId: setPinnedViewChoice,
         refresh: () => setRefreshKey((k) => k + 1),
-        confirmHandler,
         t,
     });
 
@@ -1206,18 +1197,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
             ? (id: string) => setPersonalViewDialog({ mode: 'rename', viewId: id })
             : undefined,
         onDeletePersonalView: personalViewsReady ? (id: string) => { void handleDeletePersonalView(id); } : undefined,
-        onMakeSharedView: canShareViews && personalViewsReady
-            ? (id: string) => { void viewSharing.makeShared(id); }
-            : undefined,
-        // Unsharing makes the view one of the reader's own, so it needs their create.
-        onUnshareView: canShareViews && personalViewsReady && personalGrant('create')
-            ? (id: string) => { void viewSharing.unshare(id); }
-            : undefined,
     });
-    // Read when an unshare asks for the view's name, after this render.
-    useEffect(() => {
-        viewTabItemsRef.current = viewTabItems;
-    }, [viewTabItems]);
 
     // objectstack#35974 — the view panel is read-only on a view a read-only
     // package ships, judged from the SAME answer that drew its Manage views
