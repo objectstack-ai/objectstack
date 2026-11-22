@@ -4746,10 +4746,14 @@ const ObjectSchemaBase = strictObject(
    * that list its own title and columns on the parent; the two forms mix. A
    * built-in takes only the bare name.
    *
-   * A child list another package adds is no exception: once this list is
-   * declared, it shows no tab until an entry names it, and `defineStack`
-   * accepts that name only when the package is in the stack. Letting an
-   * extension package place its own list is epic #35896's child card #35901.
+   * [#35901] A child list another package brings is the exception: this
+   * list does not hide it. That package places it with its object
+   * extension's `place` (`{ list, after | before }`), which the registry merge
+   * splices into this list; an unplaced one shows after the listed tabs
+   * (before unlisted approvals and the stream). This object may also name it
+   * (`defineStack` accepts that name only when the package is in the stack),
+   * and then this object's position wins. A child of THIS object's package,
+   * or one no package owns, still shows only when an entry names it.
    *
    * The FK's `relatedList: false` still hides a list whatever this says. Body
    * tables a field group places in the overview (`fieldGroups[].relatedList`)
@@ -4782,7 +4786,7 @@ const ObjectSchemaBase = strictObject(
    * (`ui/packages/app-shell/src/utils/deriveRelatedLists.ts`) and the
    * synthesized page's tab list (`buildDefaultTabs`).
    */
-  relatedLists: z.array(RelatedListEntrySchema).optional().describe('The record page\'s tabs beside the overview, in order. Absent: every related list shows (owned master_detail children, then lookup children), then attachments, approvals and the activity stream, as before. Declared: only the lists named here show, in this order; leaving one out hides its tab. That includes a child list another package adds: it is hidden until this object names it, which a build accepts only when that package is in the stack (letting a package place its own list is a later change). Each entry is a child object name (e.g. "task"), object.field when that child has more than one relationship to this object (e.g. "event.related_to"), or a built-in tab: "sys_attachment" (attachments, still only when enable.files is on; not shown when unlisted), "sys_approval_request" (approvals, still only when the record has requests; when unlisted it follows the listed tabs), "sys_activity" (the activity stream of activities, discussion and changes; when unlisted it comes last). An entry may instead be { list, label?, columns? } to give that list its own title and child-field columns (wins over the child FK\'s relatedListTitle / relatedListColumns, used wherever the list is drawn); a built-in tab is written only as its bare name. relatedList: false on the FK still hides a list; body tables placed by fieldGroups are not hidden by this list. A name whose child is in the stack but has no inbound lookup / master_detail field to this object is refused everywhere; one whose child exists nowhere is refused by os validate / os build (which leave a sys_ / cloud_ / ai_ name to the runtime) and by a metadata write that names no package; a write into a package stores it and the record page places nothing for it. A columns name that resolves to no field of the child (a dotted name is walked through the child\'s relationships, as relatedListColumns is) is refused.'),
+  relatedLists: z.array(RelatedListEntrySchema).optional().describe('The record page\'s tabs beside the overview, in order. Absent: every related list shows (owned master_detail children, then lookup children), then attachments, approvals and the activity stream, as before. Declared: only the lists named here show, in this order; leaving one out hides its tab. A child list another package brings is not hidden by it: that package places the list with its object extension\'s place entry (an { list, after | before } entry), and an unplaced one shows after the listed tabs; this object may also name it, which a build accepts only when that package is in the stack, and then its own position wins. Each entry is a child object name (e.g. "task"), object.field when that child has more than one relationship to this object (e.g. "event.related_to"), or a built-in tab: "sys_attachment" (attachments, still only when enable.files is on; not shown when unlisted), "sys_approval_request" (approvals, still only when the record has requests; when unlisted it follows the listed tabs), "sys_activity" (the activity stream of activities, discussion and changes; when unlisted it comes last). An entry may instead be { list, label?, columns? } to give that list its own title and child-field columns (wins over the child FK\'s relatedListTitle / relatedListColumns, used wherever the list is drawn); a built-in tab is written only as its bare name. relatedList: false on the FK still hides a list; body tables placed by fieldGroups are not hidden by this list. A name whose child is in the stack but has no inbound lookup / master_detail field to this object is refused everywhere; one whose child exists nowhere is refused by os validate / os build (which leave a sys_ / cloud_ / ai_ name to the runtime) and by a metadata write that names no package; a write into a package stores it and the record page places nothing for it. A columns name that resolves to no field of the child (a dotted name is walked through the child\'s relationships, as relatedListColumns is) is refused.'),
   /**
    * [ADR-0085] Semantic role: the field that represents the record's LINEAR
    * lifecycle (an ordered pipeline / stage progression). A string names the
@@ -6370,6 +6374,253 @@ function fieldPatchesDescription(): string {
   );
 }
 
+// =================================================================
+// Extension placement (#35901, epic #35896)
+// =================================================================
+
+/**
+ * [#35901] Place ONE field this extension adds (a key of its own `fields`)
+ * into a field group of the extended object, after or before another member
+ * of that group. The group may be the target's own (`basic`) or one this
+ * extension adds with a group placement.
+ */
+export const ObjectExtensionFieldPlacementSchema = lazySchema(() => strictObject({
+  surface: 'this field placement',
+  history:
+    'A placement key nobody reads would be dropped silently: the field would still arrive, at the end of ' +
+    'its group, and the author would believe the position they wrote had been applied.',
+  aliases: { name: 'field', fieldName: 'field', section: 'group', fieldGroup: 'group', below: 'after', above: 'before' },
+}, {
+  field: FieldNameKeySchema.describe('A field this extension adds: a key of its own `fields`. An extension places only what it brings.'),
+  group: z.string().regex(FIELD_GROUP_KEY_PATTERN, {
+    message: 'A field placement\'s group is a field group key of the extended object (snake_case, e.g. "basic")',
+  }).describe('The field group it joins: a group key of the extended object, or of a group this extension adds.'),
+  after: FieldNameKeySchema.optional().describe('Place it right after this member of the group (any field of the group, whoever declares it).'),
+  before: FieldNameKeySchema.optional().describe('Place it right before this member of the group. Write `after` or `before`, not both.'),
+}));
+
+/**
+ * [#35901] Add ONE field group of this extension's own to the extended
+ * object, after or before one of its groups. The group is a whole
+ * {@link ObjectFieldGroupSchema}: its `fields` may name only fields this
+ * extension adds, and its `relatedList` only a child list this extension's
+ * package brings (judged where the package's objects are known).
+ */
+export const ObjectExtensionGroupPlacementSchema = lazySchema(() => strictObject({
+  surface: 'this group placement',
+  history:
+    'A placement key nobody reads would be dropped silently: the group would still arrive, last, and the ' +
+    'author would believe the position they wrote had been applied.',
+  aliases: { fieldGroup: 'group', section: 'group', below: 'after', above: 'before' },
+}, {
+  group: ObjectFieldGroupSchema.describe('The field group this extension adds (key, label, and optionally fields or relatedList).'),
+  after: z.string().regex(FIELD_GROUP_KEY_PATTERN).optional().describe('Place it right after this group of the extended object (a group key).'),
+  before: z.string().regex(FIELD_GROUP_KEY_PATTERN).optional().describe('Place it right before this group. Write `after` or `before`, not both.'),
+}));
+
+/**
+ * [#35901] Place ONE child list this extension's package brings (a child
+ * object of the package that points at the extended object, or
+ * `object.field` for one of its relationships) among the extended object's
+ * record-page tabs, after or before one of them, with that list's own title
+ * and columns as a `relatedLists` entry carries them.
+ */
+export const ObjectExtensionListPlacementSchema = lazySchema(() => strictObject({
+  surface: 'this list placement',
+  history:
+    'A placement key nobody reads would be dropped silently: the list would still show, in the automatic ' +
+    'order, and the author would believe the position they wrote had been applied.',
+  aliases: { name: 'list', object: 'list', relationship: 'list', title: 'label', fields: 'columns', below: 'after', above: 'before' },
+}, {
+  list: z.string().regex(RELATED_LIST_ENTRY_PATTERN, { message: RELATED_LIST_ENTRY_NAME_MESSAGE })
+    .regex(RELATED_LIST_OBJECT_ENTRY_NAME_PATTERN, {
+      message:
+        `${RECORD_PAGE_BUILTIN_TABS.map((n) => `'${n}'`).join(', ')} are the record page's built-in tabs, placed by ` +
+        'the extended object itself: a list placement names a child list this package brings.',
+    })
+    .describe('The child list this package brings: a child object of this package that points at the extended object, or object.field.'),
+  after: z.string().regex(RELATED_LIST_ENTRY_PATTERN, { message: RELATED_LIST_ENTRY_NAME_MESSAGE }).optional()
+    .describe('Place it right after this tab: a relatedLists entry name of the extended object (a child object, object.field, or a built-in tab).'),
+  before: z.string().regex(RELATED_LIST_ENTRY_PATTERN, { message: RELATED_LIST_ENTRY_NAME_MESSAGE }).optional()
+    .describe('Place it right before this tab. Write `after` or `before`, not both.'),
+  label: z.string().min(1).optional().describe("This list's title on the record page, as a relatedLists entry's label."),
+  columns: z.array(z.string().min(1)).min(1).optional()
+    .describe("This list's columns, as field names of the child object, as a relatedLists entry's columns."),
+}));
+
+/**
+ * [#35901] One `place` entry of an object extension: a field, a group or a
+ * child list this extension brings, and where it goes. Told apart by its
+ * subject key: `field`, `list`, or `group` (an object).
+ */
+export const ObjectExtensionPlacementSchema = lazySchema(() => z.union([
+  ObjectExtensionFieldPlacementSchema,
+  ObjectExtensionListPlacementSchema,
+  ObjectExtensionGroupPlacementSchema,
+]));
+/** One `place` entry as an author writes it. */
+export type ObjectExtensionPlacement = z.input<typeof ObjectExtensionPlacementSchema>;
+/** One `place` entry after parse. */
+export type ObjectExtensionPlacementParsed = z.infer<typeof ObjectExtensionPlacementSchema>;
+
+/** A plain (non-array) object, as a placement entry or a field map is read before the root refinement. */
+function isPlacementRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * [#35901] The `place` description: what each entry form says, where an item
+ * lands when its anchor is missing, how several items at one anchor order,
+ * what applies when the extended object declares no arrangement of its own,
+ * and the one rule that an extension arranges only what it brings.
+ */
+function objectExtensionPlaceDescription(): string {
+  return (
+    'Where the fields, groups and child lists this extension brings go on the extended object. Each entry ' +
+    'is one of: `{ field, group, after | before }` — a field of this extension\'s own `fields`, into a field ' +
+    'group (the extended object\'s, or one this extension adds), right after or before a member of that group; ' +
+    '`{ group: { key, label, … }, after | before }` — a field group of this extension\'s own (its `fields` may ' +
+    'name only fields this extension adds, its `relatedList` only a child list of this package), right after ' +
+    'or before a group of the extended object; `{ list, after | before, label?, columns? }` — a child list of ' +
+    'this package (a child object of the same package that points at the extended object, or object.field), ' +
+    'right after or before a tab of the extended object (a relatedLists entry name, a built-in tab included), ' +
+    'with that tab\'s own title and columns. Write `after` or `before`, or neither for the end. An anchor that ' +
+    'does not exist puts the item at the end of its group, of the groups, or of the tabs (before the approvals ' +
+    'and activity-stream tabs); a group that does not exist puts the field among the ungrouped fields. Nothing ' +
+    'is dropped. Several items at one anchor follow ascending `priority`, then package name, so every build ' +
+    'gives the same order. Placement arranges what the extended object declares: list placements apply when it ' +
+    'declares `relatedLists`, group and field placements when it declares `fieldGroups`. Where it declares ' +
+    'none, its automatic arrangement stays as it is and the item still shows there (the list in the automatic ' +
+    'tab order, the field among the ungrouped ones); the boot log and `os validate` name each placement that ' +
+    'did not apply. A child list another package brings shows even when the extended object\'s `relatedLists` ' +
+    'does not name it: placed, at its place; unplaced, after the listed tabs. An extension places only its own ' +
+    'items: a field outside its own `fields`, a group key the extended object or another package already ' +
+    'declares, or a list that is not a child object of its package is refused (here, or at `defineStack` where ' +
+    'the package\'s objects are known) and skipped by the merge with a warning naming whose item it is. Applied ' +
+    'once, by the registry merge, so the record page, the forms and Studio show one arrangement; uninstalling ' +
+    'the package removes its items and leaves the extended object\'s own order as it was. Example: ' +
+    '`place: [{ field: \'tax_id\', group: \'basic\', after: \'industry\' }, { list: \'contract\', after: ' +
+    '\'opportunity\', columns: [\'name\', \'amount\'] }]`.'
+  );
+}
+
+/**
+ * [#35901] Refuse a placement this extension may not write, located at the
+ * entry: one naming a field outside the extension's own `fields` (an
+ * extension places only what it brings; a field of the extended object or of
+ * another package's extension is its owner's to arrange), a group whose
+ * `fields` names such a field, an entry writing both `after` and `before`, an
+ * item placed twice (a field by two entries, or by an entry and its group's
+ * `fields`), an item anchored at itself, and a field whose own `group` names
+ * another group than its placement (two answers to one question, the rule the
+ * object parse holds for a group's `fields`).
+ *
+ * Shape only: whether a group key is already the extended object's, and
+ * whether a list is a child of this package, are judged where the other
+ * objects are known (`defineStack`; the registry merge for every door).
+ * Judged on the extension's root refinement, where `ObjectExtensionSchema`
+ * already carries one, so the published JSON Schema gains no
+ * dropped-refinement site.
+ */
+function refuseForeignPlacements(fields: unknown, place: unknown, ctx: z.RefinementCtx): void {
+  if (!Array.isArray(place)) return;
+  const own = isPlacementRecord(fields) ? fields : {};
+  const isOwn = (name: string): boolean => Object.prototype.hasOwnProperty.call(own, name);
+  const placedField = new Set<string>();
+  const placedGroup = new Set<string>();
+  const placedList = new Set<string>();
+  const foreignField = (name: string): string =>
+    `\`${name}\` is not a field this extension adds, so it cannot place it: an extension places only what it ` +
+    'brings (a key of its own `fields`). A field of the extended object, or of another package\'s extension, is ' +
+    'arranged by its owner. Add the field to this extension\'s `fields`, or remove the placement.';
+  const twice = (what: string): string =>
+    `${what} is placed twice: place each item this extension brings once.`;
+  place.forEach((entry: unknown, i: number) => {
+    if (!isPlacementRecord(entry)) return;
+    if (entry.after !== undefined && entry.before !== undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['place', i, 'before'],
+        message: 'A placement writes `after` or `before`, not both: name the one item it sits next to.',
+      });
+    }
+    const anchoredAtItself = (name: string): boolean => entry.after === name || entry.before === name;
+    if (typeof entry.field === 'string') {
+      const name = entry.field;
+      if (!isOwn(name)) {
+        ctx.addIssue({ code: 'custom', path: ['place', i, 'field'], message: foreignField(name) });
+        return;
+      }
+      if (placedField.has(name)) {
+        ctx.addIssue({ code: 'custom', path: ['place', i, 'field'], message: twice(`Field \`${name}\``) });
+      }
+      placedField.add(name);
+      if (anchoredAtItself(name)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['place', i, entry.after === name ? 'after' : 'before'],
+          message: `Field \`${name}\` is placed next to itself: name another member of the group, or leave the anchor out for the end.`,
+        });
+      }
+      const declared = own[name];
+      const ownGroup = isPlacementRecord(declared) && typeof declared.group === 'string' ? declared.group : undefined;
+      if (ownGroup !== undefined && typeof entry.group === 'string' && ownGroup !== entry.group) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['place', i, 'group'],
+          message:
+            `Field \`${name}\` declares \`group: '${ownGroup}'\` and this placement puts it in \`${entry.group}\`: ` +
+            'write its group once, in the placement, and drop the field\'s own `group`.',
+        });
+      }
+      return;
+    }
+    if (typeof entry.list === 'string') {
+      const name = entry.list;
+      if (placedList.has(name)) {
+        ctx.addIssue({ code: 'custom', path: ['place', i, 'list'], message: twice(`List \`${name}\``) });
+      }
+      placedList.add(name);
+      if (anchoredAtItself(name)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['place', i, entry.after === name ? 'after' : 'before'],
+          message: `List \`${name}\` is placed next to itself: name another tab, or leave the anchor out for the end.`,
+        });
+      }
+      return;
+    }
+    if (isPlacementRecord(entry.group)) {
+      const key = typeof entry.group.key === 'string' ? entry.group.key : undefined;
+      if (key !== undefined) {
+        if (placedGroup.has(key)) {
+          ctx.addIssue({ code: 'custom', path: ['place', i, 'group', 'key'], message: twice(`Group \`${key}\``) });
+        }
+        placedGroup.add(key);
+        if (anchoredAtItself(key)) {
+          ctx.addIssue({
+            code: 'custom',
+            path: ['place', i, entry.after === key ? 'after' : 'before'],
+            message: `Group \`${key}\` is placed next to itself: name another group, or leave the anchor out for the end.`,
+          });
+        }
+      }
+      const members = Array.isArray(entry.group.fields) ? entry.group.fields : [];
+      members.forEach((member: unknown, j: number) => {
+        if (typeof member !== 'string') return;
+        if (!isOwn(member)) {
+          ctx.addIssue({ code: 'custom', path: ['place', i, 'group', 'fields', j], message: foreignField(member) });
+          return;
+        }
+        if (placedField.has(member)) {
+          ctx.addIssue({ code: 'custom', path: ['place', i, 'group', 'fields', j], message: twice(`Field \`${member}\``) });
+        }
+        placedField.add(member);
+      });
+    }
+  });
+}
+
 /**
  * Object Extension Entry — used in `objectExtensions` array.
  * Declares fields/config to merge into an existing object owned by another package.
@@ -6432,10 +6683,17 @@ export const ObjectExtensionSchema = lazySchema(() => strictObject({
       'carry them. Declare the views as a top-level `view` in the stack that defines the ' +
       'target object. `defineStack()` refuses a top-level `view` whose `list` or `form` data ' +
       'source is an object the stack does not define, an extended one included.',
+    // [#35901] An extension's groups, and where its fields and child lists go,
+    // are its `place` entries; the owner's own arrangement is the owner's.
     fieldGroups:
-      '`fieldGroups` cannot be contributed through an object extension — the merge does ' +
-      'not carry them. Add the fields here and declare the groups on the owning object, ' +
-      'or assign a Page for the layout.',
+      '`fieldGroups` is not an object extension key: an extension adds a group of its own with a ' +
+      '`place` entry — `place: [{ group: { key: \'tax\', label: \'Tax\' }, after: \'basic\' }]` — and puts a field ' +
+      'it adds into a group with `{ field: \'tax_id\', group: \'basic\', after: \'industry\' }`. The extended ' +
+      'object\'s own groups stay its owner\'s.',
+    relatedLists:
+      '`relatedLists` is not an object extension key: an extension places a child list its package brings ' +
+      'with a `place` entry — `place: [{ list: \'contract\', after: \'opportunity\' }]`. The extended object\'s ' +
+      'own tab list stays its owner\'s.',
     // A membership key belongs to the package that owns the roster object, so a
     // key cannot reach into another package's object (the ruled refusal 10).
     membershipKeys:
@@ -6525,6 +6783,20 @@ export const ObjectExtensionSchema = lazySchema(() => strictObject({
   /** Additional indexes to add */
   indexes: z.array(IndexSchema).optional().describe('Additional indexes to merge into the target object'),
   
+  /**
+   * [#35901] Where the fields, groups and child lists this extension brings go
+   * on the extended object's record page and forms: each entry names ONE item
+   * of this extension's own and an anchor (`after` or `before`). An extension
+   * places only what it brings — a field of its own `fields`, a group it adds,
+   * a child list of its own package — and never moves or hides the extended
+   * object's items or another package's (refused here, at `defineStack`, and
+   * skipped with a warning by the registry merge). Applied once, by the
+   * registry merge (`foldExtendersOntoDefinition` in `@objectstack/objectql`),
+   * so every reader of the object gets one arrangement. See
+   * {@link objectExtensionPlaceDescription} for the rules.
+   */
+  place: z.array(ObjectExtensionPlacementSchema).optional().describe(objectExtensionPlaceDescription()),
+
   /** Merge priority. Higher number applied later (wins on conflict). Default: 200 */
   priority: z.number().int().min(0).max(999).default(200).describe('Merge priority (higher = applied later)'),
 }).superRefine((extension, ctx) => {
@@ -6535,6 +6807,8 @@ export const ObjectExtensionSchema = lazySchema(() => strictObject({
   refuseExtensionFieldPatchKeys(extension.fieldPatches, ctx);
   // …and a field the extension takes over in `fields` is not one either.
   refuseFieldPatchOfReplacedField(extension.fields, extension.fieldPatches, ctx);
+  // [#35901] An extension places only what it brings, each item once, with one anchor.
+  refuseForeignPlacements(extension.fields, extension.place, ctx);
 }).overwrite((extension) => {
   // [#23065] …and the object a referenceless `tree` field references. See
   // {@link materializeTreeSelfReferences}.
