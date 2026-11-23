@@ -17,6 +17,13 @@
  * an app whose package Studio lists, a read-only one included), not while the
  * mode is on. Real subjects added: `useAppStudioEntry`'s gate over a stubbed
  * package list, and the shell's real design-mode controller.
+ *
+ * objectstack#36758 — the design mode edits the layout only, so its door reads
+ * 「Design layout」 (zh 「设计布局」), the bar's own word; 「Edit app」 beside
+ * it opens this app's package in Studio on the app switcher's target and
+ * posture, and reads 「View in Studio」 (zh 「在 Studio 中查看」) for an
+ * installed (read-only) package. Real subject added: the built-in en and
+ * zh-Hans packs, for the words.
  */
 
 import '@testing-library/jest-dom/vitest';
@@ -86,6 +93,7 @@ vi.mock('../../runtime-config', async (importOriginal) => ({
   isMarketplaceEnabled: () => true,
 }));
 
+import { builtInLocales } from '@object-ui/i18n/locales';
 import { SidebarAppMenu, APP_MENU_SEARCH_FROM } from '../SidebarAppMenu';
 import { DesignModeProvider, useDesignModeController } from '../designMode';
 
@@ -148,10 +156,10 @@ describe('the sidebar app menu only switches apps (objectstack#36112)', () => {
     expect(menu().getByTestId('sidebar-app-menu-row-service').querySelector('svg.lucide-check')).toBeNull();
   });
 
-  it('offers no way home, no 「All apps」 and no Studio entry', () => {
+  it('offers no way home and no 「All apps」; a member gets no Studio entry', () => {
     apps = [CRM, SERVICE, SETUP];
     renderMenu('crm');
-    for (const text of ['Back to home', 'All apps', 'Edit CRM in Studio', 'Open CRM in Studio']) {
+    for (const text of ['Back to home', 'All apps', 'Edit app', 'View in Studio', 'Edit CRM in Studio', 'Open CRM in Studio']) {
       expect(menu().queryByText(text)).toBeNull();
     }
   });
@@ -208,7 +216,7 @@ describe('the sidebar app menu only switches apps (objectstack#36112)', () => {
   });
 });
 
-describe('「Edit app」 in the app menu enters the design mode (objectstack#36485)', () => {
+describe('「Design layout」 in the app menu enters the design mode (objectstack#36485, objectstack#36758)', () => {
   /** The shell's hold on the mode, as `ConsoleLayout` keeps it, and whether it is on. */
   function Shell({ children }: { children: ReactNode }) {
     const mode = useDesignModeController({ appName: 'crm', appBasePath: '/apps/crm', enabled: true });
@@ -228,7 +236,7 @@ describe('「Edit app」 in the app menu enters the design mode (objectstack#364
     await act(() => new Promise<void>((resolve) => setTimeout(resolve, 0)));
   }
 
-  const editApp = () => menu().queryByTestId('sidebar-app-menu-edit-app');
+  const editApp = () => menu().queryByTestId('sidebar-app-menu-design-layout');
 
   beforeEach(() => {
     apps = [CRM, SERVICE, SETUP];
@@ -239,14 +247,18 @@ describe('「Edit app」 in the app menu enters the design mode (objectstack#364
     await mountMenu();
     const item = editApp();
     expect(item).not.toBeNull();
-    expect(item).toHaveTextContent('Edit app');
-    expect(item!.querySelector('svg.lucide-blocks')).not.toBeNull();
+    expect(item).toHaveTextContent('Design layout');
+    expect(item!.querySelector('svg.lucide-pencil-ruler')).not.toBeNull();
     const lastRow = menu().getByTestId('sidebar-app-menu-row-setup');
     const add = menu().getByTestId('sidebar-app-menu-add');
     const rule = item!.previousElementSibling;
     expect(rule?.tagName).toBe('HR');
     expect(lastRow.compareDocumentPosition(rule!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(item!.compareDocumentPosition(add) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // 「Edit app」 (Studio) sits between the two, in the same group.
+    const studio = menu().getByTestId('sidebar-app-menu-edit-app');
+    expect(item!.compareDocumentPosition(studio) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(studio.compareDocumentPosition(add) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     // One group: the rule above it is the menu's only one, none between it and 「Add app」.
     expect(screen.getByTestId('sidebar-app-menu').querySelectorAll('hr')).toHaveLength(1);
   });
@@ -299,5 +311,97 @@ describe('「Edit app」 in the app menu enters the design mode (objectstack#364
     cleanup();
     await mountMenu({ held: false });
     expect(editApp()).toBeNull();
+  });
+});
+
+describe('「Edit app」 in the app menu opens this app in Studio (objectstack#36758)', () => {
+  async function mountMenu({ route = '/apps/crm/crm_lead', active = 'crm' } = {}) {
+    render(
+      <MemoryRouter initialEntries={[route]}>
+        <SidebarAppMenu activeAppName={active} onAppChange={vi.fn()} />
+      </MemoryRouter>,
+    );
+    await act(() => new Promise<void>((resolve) => setTimeout(resolve, 0)));
+    await act(() => new Promise<void>((resolve) => setTimeout(resolve, 0)));
+  }
+
+  const editInStudio = () => menu().queryByTestId('sidebar-app-menu-edit-app');
+  const viewInStudio = () => menu().queryByTestId('sidebar-app-menu-view-in-studio');
+
+  beforeEach(() => {
+    apps = [CRM, SERVICE, SETUP];
+    admin = true;
+  });
+
+  it('a writable package\'s app: 「Edit app」 behind a pencil, linking to the package in Studio', async () => {
+    await mountMenu();
+    const item = editInStudio();
+    expect(item).not.toBeNull();
+    expect(item).toHaveTextContent(/^Edit app$/);
+    expect(item!.querySelector('svg.lucide-pencil')).not.toBeNull();
+    // The app switcher's target: the object route opens the package's Data tab on that object.
+    expect(item).toHaveAttribute('href', '/studio/com.acme.crm/data?surface=object:crm_lead');
+    expect(viewInStudio()).toBeNull();
+  });
+
+  it('it follows the route the way the app switcher\'s Studio row does: a dashboard opens its design surface', async () => {
+    await mountMenu({ route: '/apps/crm/dashboard/pipeline' });
+    expect(editInStudio()).toHaveAttribute('href', '/studio/com.acme.crm/interfaces?surface=dashboard:pipeline');
+  });
+
+  it('an installed (read-only) package\'s app: 「View in Studio」 behind an eye, never the pencil', async () => {
+    writable = false;
+    await mountMenu();
+    expect(editInStudio()).toBeNull();
+    const item = viewInStudio();
+    expect(item).not.toBeNull();
+    expect(item).toHaveTextContent(/^View in Studio$/);
+    expect(item!.querySelector('svg.lucide-eye')).not.toBeNull();
+    expect(item).toHaveAttribute('href', '/studio/com.acme.crm/data?surface=object:crm_lead');
+  });
+
+  it('it is drawn with no shell holding the design mode: its gate is Studio\'s, not the mode\'s', async () => {
+    await mountMenu();
+    expect(menu().queryByTestId('sidebar-app-menu-design-layout')).toBeNull();
+    expect(editInStudio()).not.toBeNull();
+  });
+
+  it('control: a member, an admin who may not author, and the console\'s own Setup get none', async () => {
+    admin = false;
+    await mountMenu();
+    expect(editInStudio()).toBeNull();
+    expect(viewInStudio()).toBeNull();
+    cleanup();
+    admin = true;
+    canAuthor = false;
+    await mountMenu();
+    expect(editInStudio()).toBeNull();
+    expect(viewInStudio()).toBeNull();
+    cleanup();
+    canAuthor = true;
+    await mountMenu({ active: 'setup', route: '/apps/setup/system' });
+    expect(editInStudio()).toBeNull();
+    expect(viewInStudio()).toBeNull();
+  });
+});
+
+describe('the words: the door and the bar share one name (objectstack#36758)', () => {
+  type Pack = Record<string, Record<string, string>>;
+  const EN = builtInLocales.en as unknown as Pack;
+  const ZH = builtInLocales['zh-Hans'] as unknown as Pack;
+
+  it('zh-Hans: 「设计布局」 for the door and the bar, 「编辑应用」 and 「在 Studio 中查看」 for Studio', () => {
+    expect(ZH.topbar.designLayout).toBe('设计布局');
+    expect(ZH.designMode.title).toBe('设计布局');
+    expect(ZH.topbar.editApp).toBe('编辑应用');
+    expect(ZH.topbar.viewInStudio).toBe('在 Studio 中查看');
+  });
+
+  it('every built-in pack names the door as its bar', () => {
+    for (const [locale, pack] of Object.entries(builtInLocales as unknown as Record<string, Pack>)) {
+      expect(pack.topbar.designLayout, locale).toBe(pack.designMode.title);
+      expect(pack.topbar.designLayout, locale).not.toBe(pack.topbar.editApp);
+    }
+    expect(EN.designMode.title).toBe('Design layout');
   });
 });

@@ -3651,8 +3651,8 @@ const pt = {
     resize: 'Redimensionar a barra lateral',
   },
   designMode: {
-    title: 'Modo de design',
-    leaveUnsaved: 'Sair do modo de design? As alterações não salvas serão perdidas.',
+    title: 'Projetar layout',
+    leaveUnsaved: 'Sair do design do layout? As alterações não salvas serão perdidas.',
     saveFailed: 'Algumas alterações não foram salvas: {{reason}}',
     menu: {
       title: 'Menu',
@@ -3764,8 +3764,10 @@ const pt = {
     },
     aiAssistant: "Assistente de IA",
     designInStudio: "Projetar no Studio",
+    designLayout: "Projetar layout",
     editApp: "Editar aplicativo",
     openAppInStudio: "Ver {{app}} no Studio",
+    viewInStudio: "Ver no Studio",
   },
   home: {
     build: {
@@ -3999,7 +4001,7 @@ const pt = {
     appOpensFromMenuDescription: "Este aplicativo não tem uma página própria. Escolha uma entrada no menu para abrir um link ou executar uma ação.",
     // objectstack#36748 — an app whose stored menu is empty, for a caller who can fill it.
     appMenuEmpty: "O menu de {{app}} ainda está vazio",
-    appMenuEmptyDescription: "Crie objetos para este aplicativo no Studio e eles entram no menu, ou adicione itens no modo de design.",
+    appMenuEmptyDescription: "Crie objetos para este aplicativo no Studio e eles entram no menu, ou adicione itens em “Projetar layout”.",
     openInStudio: "Abrir no Studio",
     openSetup: "Abrir a configuração",
     createFirstApp: "Criar primeiro aplicativo",

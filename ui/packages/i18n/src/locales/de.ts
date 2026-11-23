@@ -3574,8 +3574,8 @@ const de = {
     resize: 'Breite der Seitenleiste ändern',
   },
   designMode: {
-    title: 'Designmodus',
-    leaveUnsaved: 'Designmodus verlassen? Nicht gespeicherte Änderungen gehen verloren.',
+    title: 'Layout gestalten',
+    leaveUnsaved: 'Layout-Gestaltung verlassen? Nicht gespeicherte Änderungen gehen verloren.',
     saveFailed: 'Einige Änderungen wurden nicht gespeichert: {{reason}}',
     menu: {
       title: 'Menü',
@@ -3687,8 +3687,10 @@ const de = {
     },
     aiAssistant: "KI-Assistent",
     designInStudio: "Im Studio gestalten",
+    designLayout: "Layout gestalten",
     editApp: "App bearbeiten",
     openAppInStudio: "{{app}} im Studio ansehen",
+    viewInStudio: "Im Studio ansehen",
   },
   home: {
     build: {
@@ -3918,7 +3920,7 @@ const de = {
     appOpensFromMenuDescription: "Diese App hat keine eigene Seite. Wählen Sie einen Eintrag im Menü, um einen Link zu öffnen oder eine Aktion auszuführen.",
     // objectstack#36748 — an app whose stored menu is empty, for a caller who can fill it.
     appMenuEmpty: "Das Menü von {{app}} ist noch leer",
-    appMenuEmptyDescription: "Legen Sie in Studio Objekte für diese App an; sie erscheinen automatisch im Menü. Einträge lassen sich auch im Designmodus hinzufügen.",
+    appMenuEmptyDescription: "Legen Sie in Studio Objekte für diese App an; sie erscheinen automatisch im Menü. Einträge lassen sich auch unter „Layout gestalten“ hinzufügen.",
     openInStudio: "In Studio öffnen",
     openSetup: "Einrichtung öffnen",
     createFirstApp: "Erste App erstellen",

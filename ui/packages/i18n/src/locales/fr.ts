@@ -3652,8 +3652,8 @@ const fr = {
     resize: 'Redimensionner la barre latérale',
   },
   designMode: {
-    title: 'Mode conception',
-    leaveUnsaved: 'Quitter le mode conception ? Les modifications non enregistrées seront perdues.',
+    title: 'Concevoir la mise en page',
+    leaveUnsaved: 'Quitter la conception de la mise en page ? Les modifications non enregistrées seront perdues.',
     saveFailed: 'Certaines modifications n’ont pas été enregistrées : {{reason}}',
     menu: {
       title: 'Menu',
@@ -3765,8 +3765,10 @@ const fr = {
     },
     aiAssistant: "Assistant IA",
     designInStudio: "Concevoir dans Studio",
+    designLayout: "Concevoir la mise en page",
     editApp: "Modifier l'application",
     openAppInStudio: "Voir {{app}} dans Studio",
+    viewInStudio: "Voir dans Studio",
   },
   home: {
     build: {
@@ -4000,7 +4002,7 @@ const fr = {
     appOpensFromMenuDescription: "Cette application n'a pas de page propre. Choisissez une entrée de son menu pour ouvrir un lien ou lancer une action.",
     // objectstack#36748 — an app whose stored menu is empty, for a caller who can fill it.
     appMenuEmpty: "Le menu de {{app}} est encore vide",
-    appMenuEmptyDescription: "Créez des objets pour cette application dans Studio : ils rejoignent son menu. Vous pouvez aussi ajouter des entrées en mode conception.",
+    appMenuEmptyDescription: "Créez des objets pour cette application dans Studio : ils rejoignent son menu. Vous pouvez aussi ajouter des entrées dans « Concevoir la mise en page ».",
     openInStudio: "Ouvrir dans Studio",
     openSetup: "Ouvrir la configuration",
     createFirstApp: "Créer la première application",

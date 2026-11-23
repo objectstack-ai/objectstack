@@ -2334,8 +2334,8 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.data.newFieldLabel': '新字段',
   'engine.studio.data.nameFieldLabel': '名称',
   // objectstack#36748 — 新建的对象自动加入所属软件包唯一应用的菜单。
-  'engine.studio.data.appMenu.failed': '「{object}」已创建，但没能加入应用「{app}」的菜单：{reason}可以在应用的设计模式里添加。',
-  'engine.studio.data.appMenu.failedNoApp': '「{object}」已创建，但没能加入所属应用的菜单：{reason}可以在应用的设计模式里添加。',
+  'engine.studio.data.appMenu.failed': '「{object}」已创建，但没能加入应用「{app}」的菜单：{reason}可以在应用的设计布局里添加。',
+  'engine.studio.data.appMenu.failedNoApp': '「{object}」已创建，但没能加入所属应用的菜单：{reason}可以在应用的设计布局里添加。',
   'engine.studio.data.appMenu.pendingDraft': '这个应用在 Studio 里有尚未发布的改动。',
   'engine.studio.data.appMenu.unreadable': '读不到这个应用的菜单。',
   'engine.studio.data.fieldCount': '{count} 个字段',
