@@ -670,7 +670,7 @@ export const RecordAttachmentsPanel: React.FC<RecordAttachmentsPanelProps> = ({
         return await signedUrlFor(row);
       } catch (err) {
         // The download's own copy for the download's own refusal.
-        throw new Error(friendlyError(err), { cause: err });
+        throw Object.assign(new Error(friendlyError(err)), { cause: err });
       }
     },
     [rows, signedUrlFor, friendlyError, t],
