@@ -283,9 +283,12 @@
  *     nothing), a list the versions may not replace whole, a publish whose
  *     versions are not set (the `versions` fence), or a publish whose
  *     description still carries a seat signature line (the `notes` fence,
- *     `advisoryNoteSectionCount` — the count named, never the text) stops the
- *     action with the PATCH NOT SENT: its row says `not sent`, zero writes,
- *     exit 5.
+ *     `advisoryNoteSectionCount` — the count named, never the text), or one
+ *     whose description is neither text nor none, stops the action with the
+ *     PATCH NOT SENT: its row says `not sent`, zero writes, exit 5. A
+ *     publish's residual window is its one read: a note landing between that
+ *     GET and the PATCH is published, because the read-back judges the state
+ *     and the versions, never the description.
  *     The collaborators' logins are merged case-insensitively
  *     (`advisoryCollaboratorPlan`): when every login asked for is already a
  *     collaborator nothing is sent, the row `not sent` and its result saying

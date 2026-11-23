@@ -2053,9 +2053,12 @@ const publishes = (c) => c.to === ADVISORY_PUBLISHED_STATE;
 export const ADVISORY_NOTE_STAMP_SHAPE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
 
 /**
- * A seat signature line in ANY lane — `LANE#N · ACCOUNT · SESSION`, the lane any word without a space. Looser than the
- * signature check's live lane list on purpose: a lane retired from that list later still signs the notes already
- * sealed under it, and the `notes` fence must still see them.
+ * A seat signature line in ANY lane — `LANE#N · ACCOUNT · SESSION`, the lane any word without a space. A superset of
+ * `SEAT_SIGNATURE_LINE` (`check-half-states.mjs`): every line that check accepts, this one does too
+ * (`validate.mjs --self-test` pins it). Looser on purpose: retiring a lane word from that list would let notes already
+ * signed under it pass a fence that read the live list, so lane words are only ever added there, and this shape does
+ * not depend on them. Public text carries no signature line (the rewrite's contract), so the extra reach refuses no
+ * legitimate publish.
  */
 export const ADVISORY_SEAT_SIGNATURE_SHAPE = /^\S+#[1-9][0-9]* · [A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38} · session_[A-Za-z0-9]{6,}$/u;
 

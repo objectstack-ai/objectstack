@@ -2156,6 +2156,7 @@ export async function selfTest() {
       [`${SIG}\n2026-11-12T04:00Z\n\nNOTES MARKER: a minute-grain stamp`, 1],
       [`${SIG}\n2026-11-12T04:00:00Z\nNOTES MARKER: no blank line under the stamp`, 1],
       [`NOTES MARKER: public text\n\n${SIG}`, 1],
+      [`NOTES MARKER: public text\n\n\n${SIG}\n2026-11-12T04:00:00Z\n\nNOTES MARKER: a blank line put above the signature`, 1],
       ['oldlane#3 · os-dev-a · session_01ABCDEFGH\n2026-11-12T04:00:00Z\n\nNOTES MARKER: a lane retired from the live list', 1],
     ];
     const clear = [
@@ -2167,6 +2168,9 @@ export async function selfTest() {
       null,
     ];
     t("the seat-signature count — on the signature line alone, each line trimmed: a note after the separator, alone, two of them, saved with CRLF, its head padded, its stamp or blank line edited away, its stamp at minute grain, its body deleted, and one signed in a lane retired from the live list are each counted; public text, a stamp-shaped line with no signature, signature-like punctuation and an empty or absent description are not", [counted.map(([d]) => advisoryNoteSectionCount(d)), clear.map(advisoryNoteSectionCount)], [counted.map(([, n]) => n), clear.map(() => 0)]);
+    const { SEAT_SIGNATURE_LINE } = await import('../check-half-states.mjs');
+    const LIVE = ['domain:security#2 · os-dev-a · session_01ABCDEFGHJKMNPQRSTVWXYZ', 'triage#1 · sunhaolin · session_01ABCDEF', 'epic:#36662#3 · os-x · session_ABCDEFG', 'l2-review#12 · a-b-c · session_0123456789', 'repo:hotcrm#2 · x · session_abcdef'];
+    t('the shape is a SUPERSET of the live signature check: every line SEAT_SIGNATURE_LINE accepts is counted — so retiring a lane word from that list never lets a note signed under it through', [LIVE.map((l) => SEAT_SIGNATURE_LINE.test(l)), LIVE.map((l) => advisoryNoteSectionCount(`public text\n${l}`))], [LIVE.map(() => true), LIVE.map(() => 1)]);
     const publishFence = (description, to = 'published') => advisoryFenceFailures({ ghsaId: GHSA, answer: answer(advisory({ state: to === 'published' ? 'draft' : 'closed', description, vulnerabilities: onWire(VERSION) })), from: ADVISORY_TRANSITIONS[to], to });
     const noted = publishFence(`NOTES MARKER: the finder's text${ADVISORY_NOTE_SEPARATOR}${SECTION(1)}`);
     t("⛔ fence notes, judged for a publish alone: a draft whose description still carries a seat signature line is refused by the notes fence, naming the count and no byte of the text; a description that is neither text nor none is refused too; the same draft rewritten passes; a reopen to draft with a note in it is not judged by it", [noted.map((f) => f.fence), advisoryFenceText(noted).includes('still carries 1 seat signature line(s)'), advisoryFenceText(noted).includes('MARKER'), publishFence(['NOTES MARKER']).map((f) => f.fence), advisoryFenceText(publishFence({ text: 'NOTES MARKER' })).includes('is object, so it cannot be judged free of seat notes'), publishFence('NOTES MARKER: the public text').map((f) => f.fence), publishFence(null).map((f) => f.fence), publishFence(SECTION(1), 'draft').map((f) => f.fence)], [['notes'], true, false, ['notes'], true, [], [], []]);
