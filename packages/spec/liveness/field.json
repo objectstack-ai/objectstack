@@ -116,6 +116,12 @@
       "evidence": "packages/objectql/src/engine.ts",
       "note": "reference cascade/restrict."
     },
+    "transferBehavior": {
+      "status": "live",
+      "verifiedAt": "2026-11-23",
+      "evidenceScope": "in-repo",
+      "evidence": "packages/core/src/security/change-record-owner.ts#transferCascadeRelations; packages/spec/src/data/field.zod.ts#transferBehavior; packages/spec/src/data/object.zod.ts#refuseIneligibleTransferCascades; packages/spec/src/data/field-transfer-behavior.test.ts"
+    },
     "expression": {
       "status": "live",
       "evidence": "packages/objectql/src/engine.ts",
