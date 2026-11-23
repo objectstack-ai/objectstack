@@ -32,6 +32,7 @@ export const SysUserPermissionSet = ObjectSchema.create({
   label: 'User Permission Set',
   pluralLabel: 'User Permission Sets',
   icon: 'user-check',
+  color: 'purple',
   isSystem: true,
   // [ADR-0103, #3355] Admin/user-writable DATA on a platform-defined schema:
   // delegated direct grants (a scope's `manageAssignments`) write this under

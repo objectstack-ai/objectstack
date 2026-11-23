@@ -31,6 +31,7 @@ export const SysSsoProvider = ObjectSchema.create({
   label: 'SSO Provider',
   pluralLabel: 'SSO Providers',
   icon: 'shield-check',
+  color: 'purple',
   isSystem: true,
   managedBy: 'better-auth',
   // ADR-0135 D6 — env-global, ADMIN-ONLY identity config. Two orthogonal controls,

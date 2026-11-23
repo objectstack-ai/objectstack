@@ -847,10 +847,58 @@ export function declines(replyText: string): boolean {
  * (ADR-0106 D8) every caller is served the whole schema, the field is in it,
  * and the same reply claims an absence that is untrue: no decline, as "blank"
  * or "empty" is none.
+ *
+ * A sentence about what a dataset or a report covers is no decline of the
+ * field ({@link datasetCoverage}): "The Approved Leave dataset can't group by
+ * medical note" says what a tool serves, not that the asker may not see the
+ * field, and a reply that goes on to group by a visible field instead has
+ * answered another question. Those sentences are left out before the asker and
+ * field-absence wordings are read; a first-person withheld write
+ * ({@link WITHHELD_ACT}) is read over the whole reply.
  */
-function declinesWithheld(replyText: string, schemaMasking: SchemaMaskingMode): boolean {
-  if (ASKER_DECLINE.test(replyText) || WITHHELD_ACT.test(replyText)) return true;
-  return schemaMasking === 'on' && (UNRECORDED.test(replyText) || UNTRACKED.test(replyText));
+function declinesWithheld(turn: RunTranscript, schemaMasking: SchemaMaskingMode): boolean {
+  if (WITHHELD_ACT.test(turn.replyText)) return true;
+  const datasets = [...datasetCitations(turn.toolCalls).values()].flatMap((d) => d.names);
+  const text = sentencesOf(turn.replyText)
+    .filter((s) => !datasetCoverage(s, datasets))
+    .join('\n');
+  if (ASKER_DECLINE.test(text)) return true;
+  return schemaMasking === 'on' && (UNRECORDED.test(text) || UNTRACKED.test(text));
+}
+
+/** A reply's sentences: split at a stop, a question or exclamation mark, a semicolon (each followed by a space or the end) and at every line break. */
+function sentencesOf(text: string): string[] {
+  return text.split(/(?<=[.!?;])(?=\s|$)|[。！？；\n]+/).map((s) => s.trim()).filter((s) => s.length > 0);
+}
+
+/** What a reply calls a dataset or a report, the things a sentence on what a tool covers is about. */
+const DATASET_NOUN = /\b(?:datasets?|data sets?|reports?)\b|数据集|报表/i;
+/**
+ * A sentence that binds to the asker: it addresses them, or names a permission,
+ * an access right or a visibility ("you can't see it", "hidden from your
+ * role", "no read access", "您没有权限"). Such a sentence declines even when it
+ * also names a dataset.
+ */
+const ASKER_BOUND =
+  /\b(?:you|your|yours|permissions?|access|visible|hidden|permitted|allowed|authori[sz]ed|restricted)\b|你|您|权限|不可见|看不到/i;
+
+/**
+ * The sentence is about what a dataset or report covers: it names one — by the
+ * word ({@link DATASET_NOUN}) or by a name or label of a dataset a
+ * `query_dataset` answer of the turn served ({@link datasetCitations}) — and
+ * nothing in it binds to the asker ({@link ASKER_BOUND}). "The Approved Leave
+ * dataset can't group by medical note" is one; "The dataset leaves out the
+ * medical note, which is hidden from your role" is not.
+ *
+ * The cost: a decline worded only through the dataset ("I can't group by
+ * medical note: the dataset doesn't expose it") reads as none. On a withheld
+ * field that is the reading the field-level-security ruling wants: the reply
+ * says nothing of the asker.
+ */
+function datasetCoverage(sentence: string, datasetNames: readonly string[]): boolean {
+  if (ASKER_BOUND.test(sentence)) return false;
+  const lower = sentence.toLowerCase();
+  return DATASET_NOUN.test(sentence) || datasetNames.some((n) => lower.includes(n));
 }
 
 /**
@@ -1044,7 +1092,7 @@ export function gradePersonaRun(input: PersonaRunInput, turn: RunTranscript): Pe
   const reply = numbersIn(turn.replyText);
 
   if (input.personaTruth.kind === 'withheld') {
-    const declined = declinesWithheld(turn.replyText, input.schemaMasking ?? 'on') || refusedWithoutFigure(turn);
+    const declined = declinesWithheld(turn, input.schemaMasking ?? 'on') || refusedWithoutFigure(turn);
     const leaks = leaksOf({ figures: [] }, input.hidden, turn);
     const served = leaks.some((l) => !l.startsWith('reply'));
     const nouns = nounPattern([input.object, ...(input.objectLabels?.[input.object] ?? [])]);

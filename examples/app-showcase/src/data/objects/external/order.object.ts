@@ -21,6 +21,7 @@ export const ExternalOrder = ObjectSchema.create({
   label: 'External Order',
   pluralLabel: 'External Orders',
   icon: 'shopping-cart',
+  color: 'teal',
   description: 'An order federated from the external analytics DB (ADR-0015). Bound to remote table `orders` via external.remoteName.',
   datasource: 'showcase_external',
   external: { remoteName: 'orders' },

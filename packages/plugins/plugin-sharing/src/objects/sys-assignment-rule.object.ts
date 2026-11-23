@@ -50,6 +50,7 @@ export const SysAssignmentRule = ObjectSchema.create({
   label: 'Assignment Rule',
   pluralLabel: 'Assignment Rules',
   icon: 'route',
+  color: 'orange',
   isSystem: true,
   managedBy: 'config',
   description: 'Sends each new record that matches a condition to a queue or a person.',

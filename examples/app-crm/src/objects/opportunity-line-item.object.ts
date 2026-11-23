@@ -23,6 +23,7 @@ export const OpportunityLineItem = ObjectSchema.create({
   label: 'Line Item',
   pluralLabel: 'Line Items',
   icon: 'list',
+  color: 'green',
   description: 'A single product line on an opportunity quote.',
 
   fields: {

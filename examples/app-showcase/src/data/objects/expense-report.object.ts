@@ -49,6 +49,7 @@ export const ExpenseReport = ObjectSchema.create({
   label: 'Expense Report',
   pluralLabel: 'Expense Reports',
   icon: 'wallet',
+  color: 'green',
   description: 'An expense report whose parent totals are filtered roll-ups of its line items.',
 
   fields: {
@@ -156,6 +157,7 @@ export const ExpenseLine = ObjectSchema.create({
   label: 'Expense Line',
   pluralLabel: 'Expense Lines',
   icon: 'receipt',
+  color: 'green',
   description: 'A single expense on a report; the parent report rolls these up with filters.',
 
   // ADR-0055: a line's access is CONTROLLED BY ITS PARENT report — the same

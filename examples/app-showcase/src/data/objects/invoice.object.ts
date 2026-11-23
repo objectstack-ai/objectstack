@@ -20,6 +20,7 @@ export const Product = ObjectSchema.create({
   label: 'Product',
   pluralLabel: 'Products',
   icon: 'package',
+  color: 'green',
   description: 'A sellable product with a catalog price.',
 
   fields: {
@@ -56,6 +57,7 @@ export const Invoice = ObjectSchema.create({
   label: 'Invoice',
   pluralLabel: 'Invoices',
   icon: 'receipt',
+  color: 'green',
   description: 'A customer invoice entered together with its line items.',
 
   // Files on an invoice: its printed PDF is archived as an attachment of the
@@ -322,6 +324,7 @@ export const InvoiceLine = ObjectSchema.create({
   label: 'Invoice Line',
   pluralLabel: 'Invoice Lines',
   icon: 'list',
+  color: 'green',
   description: 'A single billable line on an invoice.',
 
   // ADR-0055: a line's access is CONTROLLED BY ITS PARENT invoice — a user sees

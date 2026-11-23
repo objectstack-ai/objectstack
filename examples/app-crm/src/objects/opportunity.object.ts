@@ -13,6 +13,7 @@ export const Opportunity = ObjectSchema.create({
   label: 'Opportunity',
   pluralLabel: 'Opportunities',
   icon: 'trending-up',
+  color: 'green',
   description: 'A potential sale tied to an account.',
   // The record's most important fields: the hover card, list columns and
   // the record picker read them. The stage is not here: the record header
