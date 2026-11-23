@@ -2598,6 +2598,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.data.nameFieldLabel': 'Name',
   // objectstack#36748 — a new object joins its package's one app menu.
   'engine.studio.data.appMenu.failed': '“{object}” was created, but it could not be added to the menu of “{app}”: {reason} You can add it in the app’s design mode.',
+  'engine.studio.data.appMenu.failedNoApp': '“{object}” was created, but it could not be added to its app’s menu: {reason} You can add it in the app’s design mode.',
   'engine.studio.data.appMenu.pendingDraft': 'The app has unpublished changes in Studio.',
   'engine.studio.data.appMenu.unreadable': 'The app’s menu could not be read.',
   'engine.studio.data.fieldCount': '{count} fields',

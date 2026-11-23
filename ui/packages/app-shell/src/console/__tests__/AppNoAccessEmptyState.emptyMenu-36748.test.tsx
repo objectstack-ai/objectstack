@@ -6,7 +6,8 @@
  * access, the no-navigation screen reads the app's stored menu (`/layers`);
  * empty there too, it says the menu is empty and opens the app's package in
  * Studio. A stored menu with entries (filtered away for this caller), a caller
- * who cannot grant, or a failed read keep the access answer.
+ * who cannot grant, a caller who can grant but not author (`/layers` serves
+ * them the PRUNED app), or a failed read keep the access answer.
  *
  * The `t` mock returns each call site's `defaultValue` (the `en` pack value).
  */
@@ -27,6 +28,12 @@ vi.mock('@object-ui/i18n', async (importOriginal) => ({
   }),
 }));
 
+const viewer = vi.hoisted(() => ({ canAuthor: true }));
+vi.mock('../../hooks/useCanAuthorMetadata', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  useCanAuthorMetadata: () => viewer.canAuthor,
+}));
+
 import { AppNoAccessEmptyState, storedMenuIsEmpty } from '../AppNoAccessEmptyState';
 
 const PKG = 'com.example.visits';
@@ -38,7 +45,10 @@ function stubLayers(status: number, body: unknown) {
   return fetchMock;
 }
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  viewer.canAuthor = true;
+});
 
 function renderState(props: Partial<ComponentProps<typeof AppNoAccessEmptyState>> = {}) {
   return render(
@@ -79,6 +89,19 @@ describe('an empty stored menu is said as such, not as missing access (objectsta
     const fetchMock = stubLayers(200, { effective: { navigation: [] } });
     renderState({ setupPath: null });
     expect(screen.getByRole('status')).toHaveAttribute('data-reason', 'no-navigation');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('an administrator who cannot author (no manage_metadata) is never read for: the access answer with Setup', () => {
+    // `/layers` would serve this caller the app PRUNED to what they may see,
+    // so an empty read is the access case, and Studio would refuse them.
+    viewer.canAuthor = false;
+    const fetchMock = stubLayers(200, { effective: { navigation: [] } });
+    renderState();
+    const status = screen.getByRole('status');
+    expect(status).toHaveAttribute('data-reason', 'no-navigation');
+    expect(screen.getByTestId('app-no-access-open-setup')).toHaveAttribute('href', '/setup');
+    expect(screen.queryByTestId('app-empty-menu-open-studio')).toBeNull();
     expect(fetchMock).not.toHaveBeenCalled();
   });
 

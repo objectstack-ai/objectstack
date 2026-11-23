@@ -4,8 +4,8 @@
  * objectstack#36748 — Studio's 新建对象 adds the new object to the menu of its
  * package's one app, after the object is live: the object's draft and publish,
  * then the app's draft (its stored menu plus the object's entry) and publish.
- * With no app nothing more is written; a refused menu save keeps the object
- * and says so in a warning.
+ * With no app nothing more is written; a refused menu save, or a failed read
+ * of the package's apps, keeps the object and says so in a warning.
  *
  * The REAL `DataPillar` over a recording client; the package list the menu
  * save reads (`GET /api/v1/packages`) is a fetch stub.
@@ -25,12 +25,16 @@ const PKG = 'com.test.visits';
 const srv = vi.hoisted(() => ({
   apps: [] as Array<Record<string, unknown>>,
   appSave: null as null | (() => Promise<unknown>),
+  appListFails: false,
   calls: [] as string[],
   appBodies: [] as Array<Record<string, unknown>>,
 }));
 
 const mockClient = {
-  list: vi.fn(async (type: string) => (type === 'app' ? srv.apps : [])),
+  list: vi.fn(async (type: string) => {
+    if (type === 'app' && srv.appListFails) throw Object.assign(new Error('unavailable'), { status: 503 });
+    return type === 'app' ? srv.apps : [];
+  }),
   listDrafts: vi.fn(async () => []),
   layered: vi.fn(async (type: string) =>
     type === 'app'
@@ -73,6 +77,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   srv.apps = [];
   srv.appSave = null;
+  srv.appListFails = false;
   srv.calls = [];
   srv.appBodies = [];
   vi.stubGlobal(
@@ -139,5 +144,19 @@ describe('新建对象 joins the package’s one app menu (objectstack#36748)', 
     expect(srv.calls).toEqual(['save object draft', 'publish object', 'save app draft']);
     // The object is open on the rail all the same.
     expect(await screen.findByTestId('form-toolbar')).toBeInTheDocument();
+  });
+
+  it('a failed read of the package’s apps keeps the object, warns, and draws no refusal over it', async () => {
+    srv.appListFails = true;
+    await createObject('Visit');
+    await waitFor(() => expect(toast.warning).toHaveBeenCalledWith(
+        expect.stringMatching(/^“Visit” was created, but it could not be added to its app’s menu: /),
+      ));
+    expect(srv.calls).toEqual(['save object draft', 'publish object']);
+    expect(await screen.findByTestId('form-toolbar')).toBeInTheDocument();
+    // The create's own refusal strip is not drawn over the live object.
+    expect(toast.error).not.toHaveBeenCalled();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.queryByTestId('studio-refusal')).toBeNull();
   });
 });

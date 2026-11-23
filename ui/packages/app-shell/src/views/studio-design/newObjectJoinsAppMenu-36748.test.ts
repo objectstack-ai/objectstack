@@ -5,7 +5,8 @@
  * through the design mode's menu save (`saveAppMenu`): the stored menu plus one
  * object entry, a draft under the first-write pin, then that app's publish.
  * With no app, several apps, or an entry already opening the object, nothing
- * is written; a refused save is answered, never thrown.
+ * is written; a refused save, or a failed read of the package's apps, is
+ * answered, never thrown.
  */
 
 import { describe, expect, it, vi } from 'vitest';
@@ -26,13 +27,16 @@ const TEXTS: AppMenuSaveTexts = {
 };
 
 function fixture({
-  apps = [{ name: 'visits', label: 'Visits' }] as Array<Record<string, unknown>>,
+  apps = [{ name: 'visits', label: 'Visits' }] as Array<Record<string, unknown>> | Error,
   stored = [] as unknown[],
   save = vi.fn(async (..._args: unknown[]): Promise<unknown> => ({})),
 } = {}) {
   const calls: string[] = [];
   const client = {
-    list: vi.fn(async () => apps),
+    list: vi.fn(async () => {
+      if (apps instanceof Error) throw apps;
+      return apps;
+    }),
     layered: vi.fn(async () => ({ effective: { name: 'visits', label: 'Visits', navigation: stored }, code: null })),
     save: vi.fn(async (type: string, name: string, body: unknown, options: Record<string, unknown>) => {
       calls.push(`save ${type} ${name} ${String(options.mode)} ${String(options.packageId)}`);
@@ -108,6 +112,15 @@ describe('a new object joins its package’s one app menu (objectstack#36748)', 
     const { client, doors } = fixture({ save: vi.fn(async () => Promise.reject(conflict)) });
     const join = await addNewObjectToAppMenu(client, { packageId: PKG, objectName: 'o' }, TEXTS, doors);
     expect(join.kind).toBe('failed');
+    expect(client.publish).not.toHaveBeenCalled();
+  });
+
+  it('a failed read of the package’s apps is answered as a failure, never thrown, and nothing is written', async () => {
+    const down = Object.assign(new Error('unavailable'), { status: 503 });
+    const { client, doors } = fixture({ apps: down });
+    const join = await addNewObjectToAppMenu(client, { packageId: PKG, objectName: 'o' }, TEXTS, doors);
+    expect(join).toEqual({ kind: 'failed', app: null, error: down });
+    expect(client.save).not.toHaveBeenCalled();
     expect(client.publish).not.toHaveBeenCalled();
   });
 

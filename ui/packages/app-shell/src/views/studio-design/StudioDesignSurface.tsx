@@ -6683,12 +6683,15 @@ export function DataPillar({
             },
           );
           if (join.kind === 'failed') {
+            const reason = plainRefusal(join.error).message;
             toast.warning(
-              tFormat('engine.studio.data.appMenu.failed', locale, {
-                object: label,
-                app: navItemLabelText(join.app.label, locale) || join.app.name,
-                reason: plainRefusal(join.error).message,
-              }),
+              join.app
+                ? tFormat('engine.studio.data.appMenu.failed', locale, {
+                    object: label,
+                    app: navItemLabelText(join.app.label, locale) || join.app.name,
+                    reason,
+                  })
+                : tFormat('engine.studio.data.appMenu.failedNoApp', locale, { object: label, reason }),
             );
           }
         }

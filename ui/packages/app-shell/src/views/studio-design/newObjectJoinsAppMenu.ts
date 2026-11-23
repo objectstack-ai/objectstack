@@ -41,7 +41,8 @@ import type { I18nLabel } from '@objectstack/spec/ui';
 export type AppMenuJoin =
   | { kind: 'added'; app: { name: string; label: I18nLabel } }
   | { kind: 'skipped'; why: 'no-app' | 'several-apps' | 'already-there' }
-  | { kind: 'failed'; app: { name: string; label: I18nLabel }; error: unknown };
+  /** `app` is `null` when the package's apps could not be read, so which menu is unknown. */
+  | { kind: 'failed'; app: { name: string; label: I18nLabel } | null; error: unknown };
 
 /** Every entry of a menu, its groups' children included. */
 function entriesOf(menu: Menu): MenuEntry[] {
@@ -63,7 +64,13 @@ export async function addNewObjectToAppMenu(
   doors: AppMenuSaveDoors = consoleAppMenuDoors(client),
 ): Promise<AppMenuJoin> {
   const { packageId, objectName } = input;
-  const listed = (await client.list('app', { packageId })) as Array<Record<string, unknown>> | null;
+  let listed: Array<Record<string, unknown>> | null;
+  try {
+    listed = (await client.list('app', { packageId })) as Array<Record<string, unknown>> | null;
+  } catch (error) {
+    // Which app's menu is unknown: answered, never thrown over the live object.
+    return { kind: 'failed', app: null, error };
+  }
   const apps = (listed ?? [])
     .filter((a) => typeof a?.name === 'string' && a.name)
     .map((a) => ({ name: String(a.name), label: (a.label ?? a.name) as I18nLabel }));

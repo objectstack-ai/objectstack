@@ -53,6 +53,7 @@ import { Lock, PanelLeft } from 'lucide-react';
 import { Button, DataEmptyState } from '@object-ui/components';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { useServedAppLabel } from '../hooks/useServedAppLabel.js';
+import { useCanAuthorMetadata } from '../hooks/useCanAuthorMetadata.js';
 
 export interface AppNoAccessEmptyStateProps {
   /** The active app, as the console's metadata list carries it (`_packageId` as served). */
@@ -117,7 +118,14 @@ export function AppNoAccessEmptyState({ app, setupPath, reason = 'no-navigation'
   // The same label the header's app switcher shows for this app.
   const label = appLabel(app);
   const packageId = typeof app._packageId === 'string' && app._packageId ? app._packageId : null;
-  const menuEmpty = useStoredMenuEmpty(app.name, packageId, reason === 'no-navigation' && setupPath !== null);
+  // Only an AUTHOR is asked for: `/layers` serves the stored, unpruned app only
+  // to a caller who may write it (`manage_metadata`); anyone else gets the app
+  // pruned to what they may see, whose emptiness is the access case, and could
+  // not open the Studio the empty-menu answer links to. An organization admin
+  // without `manage_metadata` (the hosted posture, objectstack#8270) keeps the
+  // access answer.
+  const canAuthor = useCanAuthorMetadata();
+  const menuEmpty = useStoredMenuEmpty(app.name, packageId, reason === 'no-navigation' && setupPath !== null && canAuthor);
 
   if (menuEmpty === null) {
     // The stored menu is being read: no answer is drawn until it decides which.
