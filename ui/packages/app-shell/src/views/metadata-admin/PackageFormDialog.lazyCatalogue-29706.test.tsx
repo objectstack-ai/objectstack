@@ -24,6 +24,11 @@ import { act, cleanup, render, screen } from '@testing-library/react';
 import { I18nProvider, createI18n } from '@object-ui/i18n';
 import { isStudioCatalogueLoaded, loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
 import { ManifestSchema } from '@objectstack/spec/kernel';
+// The form reaches the console's dynamic `@objectstack/formula` and
+// `@objectstack/lint` imports (CEL authoring); their first load is paid here,
+// at collection, never inside a case's clock (`check:test-source-alias`).
+import '@objectstack/formula';
+import '@objectstack/lint';
 import { PackageFormDialog } from './PackageFormDialog';
 
 beforeEach(() => {

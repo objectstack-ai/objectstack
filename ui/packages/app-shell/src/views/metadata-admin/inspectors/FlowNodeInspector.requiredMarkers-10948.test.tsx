@@ -28,6 +28,11 @@ vi.mock('../previews/useObjectFields', () => ({
   useObjectFields: () => ({ fields: [], loading: false, error: null }),
 }));
 
+// The inspector reaches the console's dynamic `@objectstack/formula` and
+// `@objectstack/lint` imports (CEL authoring); their first load is paid here,
+// at collection, never inside a case's clock (`check:test-source-alias`).
+import '@objectstack/formula';
+import '@objectstack/lint';
 import { FlowNodeInspector } from './FlowNodeInspector';
 import { fieldsForNodeType } from './flow-node-config';
 import { specRequiredColumns, specRequiresField } from './flow-required-keys';
