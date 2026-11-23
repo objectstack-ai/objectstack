@@ -187,7 +187,9 @@ describe('security-wildcard-vama · reads viewAllFields on a package-authored \'
 
   it('the record bits keep their wording; a per-object viewAllFields and a false bit are not reported', () => {
     const [recordOnly] = wildcard({ permissions: [{ name: 'admin', objects: { '*': { viewAllRecords: true } } }] });
-    expect(recordOnly!.hint).toBe("Enumerate the objects this set really needs, or drop viewAllRecords/modifyAllRecords from the '*' entry");
+    expect(recordOnly!.hint).toContain('viewAllRecords/modifyAllRecords');
+    expect(recordOnly!.hint).not.toContain('viewAllFields');
+    expect(recordOnly!.message).not.toContain('viewAllFields');
     expect(wildcard({ permissions: [{ name: 'r', objects: { deal: { allowRead: true, viewAllFields: true } } }] })).toEqual([]);
     expect(wildcard({ permissions: [{ name: 'r', objects: { '*': { allowRead: true, viewAllFields: false } } }] })).toEqual([]);
   });

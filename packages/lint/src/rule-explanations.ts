@@ -964,12 +964,18 @@ const SECURITY_WILDCARD_VAMA_EXPLANATION: RuleExplanation = {
       'superuser over the whole deployment, objects other packages own included. Only the platform\'s own ' +
       'admin set may combine the two, and it lives outside every package, so the rule is an error on any ' +
       'set a stack authors.',
+    '`viewAllFields` on the `\'*\'` entry is reported the same way. It is the field half of the same superuser: ' +
+      'a read vote on every field of every object, other packages\' objects included, so a field another ' +
+      'package hides with `readable: false` is read by every holder of the set that also reaches the object. ' +
+      'The organization boundary refuses to distribute such a set as it refuses the two record bits, and the ' +
+      'platform\'s own admin set carries it on its wildcard. On an object entry the bit is not reported here.',
     'An app needs no wildcard of its own: platform admins already reach every installed package\'s objects ' +
       'through that platform set. An app-level admin (`crm_admin`, say) is an ordinary set that names the ' +
       'objects it needs and that the customer binds to a position of their own choosing (ADR-0090 D9), ' +
       'because "who runs this app" and "who runs the platform" are rarely the same people.',
     'To fix it, enumerate the objects the set really needs, with `viewAllRecords` / `modifyAllRecords` only ' +
-      'on the entries where the bypass is meant, or drop the two flags from the `\'*\'` entry.',
+      'on the entries where the bypass is meant (and `viewAllFields` on the entries whose every field the set ' +
+      'should read), or drop the flags from the `\'*\'` entry.',
   ],
 };
 
@@ -1012,14 +1018,50 @@ const SECURITY_SUPERUSER_FIELD_MASK_INERT_EXPLANATION: RuleExplanation = {
       'it binds as well.',
     'The set\'s bypass is read the way the runtime reads it: its own entry for the object when it has one, ' +
       'otherwise its `\'*\'` entry, as a lookup and never a merge. Only the set that declares the entry is ' +
-      'judged: a holder of two sets is unmasked by the other set\'s View All or Modify All too, but no ' +
-      'author wrote an inert entry there.',
+      'judged here. A holder of two sets is unmasked by the other set\'s View All, Modify All or ' +
+      '`viewAllFields` too; that is `security-cross-set-field-reopen`, which skips a row this rule reports, ' +
+      'so one row earns one finding.',
     'This is a warning, not an error: the pair is legal and no door refuses it. To fix it, decide which half ' +
       'is meant. If the field must stay hidden or read-only, remove `modifyAllRecords` from the object entry ' +
       'and reach every row another way, with `readScope: \'org\'` / `writeScope: \'org\'` on the entry or a ' +
       '`rowLevelSecurity` policy whose condition every row satisfies; the mask then binds. `viewAllRecords` ' +
       'may stay, since the set\'s own `readable: false` binds beside it. If the bypass is meant, delete the ' +
       'field entry, which never took effect.',
+  ],
+};
+
+const SECURITY_CROSS_SET_FIELD_REOPEN_EXPLANATION: RuleExplanation = {
+  rule: 'security-cross-set-field-reopen',
+  covers: 'why a field one set hides is still read through another set',
+  paragraphs: [
+    'Field permissions from every set a caller holds are merged as a union, with no deny. A set that holds ' +
+      '`viewAllRecords` (View All), `modifyAllRecords` (Modify All) or `viewAllFields` on an object votes ' +
+      '`readable: true` on every field of it, and Modify All votes `editable: true` as well. So when one set ' +
+      'hides a field (`readable: false`) or locks it (`editable: false`, or `editable` omitted, which parses ' +
+      'to false), a caller who also holds a second set with one of those bits on the object reads the field ' +
+      '(and, under Modify All, edits it). The first set still reads as protecting the field, and nothing ' +
+      'refuses the pair, which is why an author takes the field to be hidden.',
+    'The bits are read the way the runtime reads them: the second set\'s own entry for the object when it ' +
+      'has one, otherwise its `\'*\'` entry, as a lookup and never a merge. Inside one set the specific row ' +
+      'beats the general bit: a second set whose own row declares the field `readable: false` beside View ' +
+      'All or `viewAllFields` casts no read vote on it, so it is not reported. View All and `viewAllFields` ' +
+      'never vote an edit, so an edit lock beside them binds and is not reported either. A row its own set\'s ' +
+      'Modify All already unbinds is `security-superuser-field-mask-inert`, not this rule, so one row earns ' +
+      'one finding.',
+    'What is not reported: a field that declares `requiredPermissions` (ADR-0066 D3), because that AND-gate ' +
+      'is applied after the merge and no set\'s bit opens it to a caller without the capabilities; a key on ' +
+      'an object this stack does not define, or naming a field the object does not declare; and any field ' +
+      'judged by its name. The rule reads only the declared two-set shape.',
+    'This is a warning, not an error: the pair is legal and no door refuses it. To fix it, decide what the ' +
+      'second set means. If it should not read the field, drop the bit from its entry (reach the rows with ' +
+      '`readScope` / `writeScope` or a row-level policy instead of View All or Modify All), or give it its own ' +
+      '`readable: false` row on the field, which binds beside View All and `viewAllFields` but not beside ' +
+      'Modify All. If it really should read every field, say so with `viewAllFields: true` on its entry: that ' +
+      'read then survives the major release in which View All and Modify All stop voting on fields. A field ' +
+      'that must stay hidden from everyone without a capability, such as a salary or an ID number, is ' +
+      'protected on the field itself: declare `requiredPermissions` on it (ADR-0066 D3), and add a ' +
+      '`maskingRule` where a partial value is needed, so the rule no longer depends on which sets a caller ' +
+      'holds.',
   ],
 };
 
@@ -6967,6 +7009,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [FLOW_CREATE_UPDATE_PAIR_EXPLANATION.rule]: FLOW_CREATE_UPDATE_PAIR_EXPLANATION,
   [STATE_MACHINE_NO_INITIAL_STATES_EXPLANATION.rule]: STATE_MACHINE_NO_INITIAL_STATES_EXPLANATION,
   [ACTION_NO_OBJECT_BINDING_EXPLANATION.rule]: ACTION_NO_OBJECT_BINDING_EXPLANATION,
+  [SECURITY_CROSS_SET_FIELD_REOPEN_EXPLANATION.rule]: SECURITY_CROSS_SET_FIELD_REOPEN_EXPLANATION,
 });
 
 /** The explanation for `rule`, or `undefined` when the rule has none. Exact id match. */
