@@ -17,6 +17,7 @@ import { useObjectTranslation } from '@object-ui/i18n';
 import type { ComponentInput, KanbanConditionalFormattingRule } from '@object-ui/types';
 import { ObjectKanban } from './ObjectKanban';
 import { KanbanBoardCore } from './KanbanBoardCore';
+import { laneKeyOf } from './kanbanReferenceLanes';
 
 /**
  * Sentinel column id for records whose `groupBy` value matches no declared
@@ -142,7 +143,8 @@ export function bucketCardsIntoColumns(
   // ⚠️ The repair keeps every record: an offending one keeps its own value as its
   // group key and still surfaces in the trailing lane, never discarded (#2792).
   const groups = data.reduce((acc, item) => {
-    const rawKey = String(item[groupBy] ?? '');
+    // objectstack#36430 — an expanded reference is keyed by its foreign key.
+    const rawKey = laneKeyOf(item[groupBy]);
     const key = laneIdByFoldedId[rawKey.toLowerCase()] ?? rawKey;
     if (!acc[key]) acc[key] = [];
     acc[key].push(mapCoverImage(item));

@@ -41,6 +41,7 @@ import {
 import {
   extractRecords,
   buildExpandFields,
+  isExpandableFieldType,
   convertSortToQueryParams,
   getRecordDisplayName,
   isEmptyValue,
@@ -82,6 +83,7 @@ import {
 } from './KanbanLanePaging';
 import { resolveCardOwner, type KanbanCardOwner } from './KanbanCardOwner';
 import { lanesFromOptions, type LaneLifecycleKind } from './kanbanLaneLifecycle';
+import { lanesFromRecords, laneValueOf } from './kanbanReferenceLanes';
 
 /**
  * English fallbacks for the record-detail drawer heading this board opens on
@@ -1130,6 +1132,25 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
   const ownerReference = ownerField ? objectDef?.fields?.[ownerField]?.reference : undefined;
   const ownerPersonObject = typeof ownerReference === 'string' && ownerReference ? ownerReference : 'sys_user';
 
+  /**
+   * objectstack#36430 — a lane field that is a reference (lookup, user,
+   * master-detail, tree): the object it points at, read so each lane is titled
+   * by that object's declared name field (`referencedRecordTitle`), and the
+   * field's own `displayField`. A user field names no object: it is a person.
+   */
+  const laneFieldDef = schema.groupBy ? objectDef?.fields?.[schema.groupBy] : undefined;
+  const laneFieldIsReference = isExpandableFieldType(laneFieldDef);
+  const laneTargetObject = !laneFieldIsReference
+    ? ''
+    : typeof laneFieldDef?.reference === 'string' && laneFieldDef.reference
+      ? laneFieldDef.reference
+      : laneFieldDef?.type === 'user' ? 'sys_user' : '';
+  const laneDisplayField =
+    laneFieldIsReference && typeof laneFieldDef?.displayField === 'string' && laneFieldDef.displayField
+      ? (laneFieldDef.displayField as string)
+      : undefined;
+  const { def: laneTargetDef } = useSettledSchema<any>(laneTargetObject, dataSource);
+
   // Enhance data with title mapping and ensure IDs
   // The host predicate scope a card's declared deadline is judged in
   // (objectui#11815).
@@ -1576,17 +1597,17 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
         );
     }
 
-    // If no columns, but we have groupBy and data, generate from data
+    // If no columns, but we have groupBy and data, generate from data: one
+    // lane per distinct value. A reference value is expanded (the referenced
+    // record), so its lane is keyed by the foreign key and titled by the
+    // record's name (objectstack#36430); before, it was stringified to
+    // "[object Object]" for both.
     if (schema.groupBy && effectiveData.length > 0) {
-        const groups = new Set(effectiveData.map(item => item[schema.groupBy!]));
-        return Array.from(groups).map(g => ({
-            id: String(g),
-            title: String(g)
-        }));
+        return lanesFromRecords(effectiveData, schema.groupBy, laneTargetDef ?? undefined, laneDisplayField);
     }
 
     return [];
-  }, [schema.columns, schema.groupBy, schema.objectName, effectiveData, objectDef, translateOptions]);
+  }, [schema.columns, schema.groupBy, schema.objectName, effectiveData, objectDef, translateOptions, laneTargetDef, laneDisplayField]);
 
   /**
    * objectui#11629 — the lane total each column header paints, from the
@@ -1812,6 +1833,14 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
       const objectName = schema.objectName;
       if (!groupBy) return MOVED;
 
+      // objectstack#36430 — on a reference lane field the lane id is the
+      // foreign key, and that is what the write sends; the record held locally
+      // keeps the referenced record expanded, as a refetch would return it, so
+      // the card goes on naming it (and the rollback restores what it held).
+      const loaded: Array<Record<string, unknown>> = Array.isArray(rawData) ? rawData : [];
+      const priorValue = loaded.find((r) => String(r?.id ?? r?._id) === String(cardId))?.[groupBy];
+      const movedValue = laneValueOf(loaded, groupBy, toColumnId);
+
       // Optimistic local update so the card visibly stays in the new column.
       // Skipped when data is owned by a parent (ListView): `fetchedData` is not
       // what renders on that path (`rawData` prefers `externalData`, :219), and
@@ -1823,7 +1852,7 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
         setFetchedData((prev) =>
           prev.map((r) =>
             String(r.id ?? r._id) === String(cardId)
-              ? { ...r, [groupBy]: toColumnId }
+              ? { ...r, [groupBy]: movedValue }
               : r,
           ),
         );
@@ -1897,14 +1926,14 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
         setFetchedData((prev) =>
           prev.map((r) =>
             String(r.id ?? r._id) === String(cardId)
-              ? { ...r, [groupBy]: fromColumnId }
+              ? { ...r, [groupBy]: priorValue !== undefined && typeof priorValue === 'object' ? priorValue : fromColumnId }
               : r,
           ),
         );
         return { kind: 'refused', message: refusal };
       }
     },
-    [schema.groupBy, schema.objectName, dataSource, hasExternalData, tt],
+    [schema.groupBy, schema.objectName, dataSource, hasExternalData, tt, rawData],
   );
 
   /**
