@@ -78,11 +78,13 @@ describe('drillRecordOrigin (#36554)', () => {
     expect(ds.find.mock.calls.map(([, params]) => (params as { $top?: number }).$top)).toEqual([250, 250]);
   });
 
-  it('control: a result all drawn reads nothing and hands the rows drawn with the count', async () => {
+  it('control: a result all drawn reads nothing and hands the rows drawn with the count, at once', () => {
     const ds = source(3);
-    const origin = await drillRecordOrigin({
+    const origin = drillRecordOrigin({
       dataSource: ds, objectName: 'deal', recordId: 'd2', drawn: ['d1', 'd2', 'd3'], total: 3, findParams: QUERY,
     });
+    // No read owed, so no promise: the record page opens on the click itself.
+    expect(origin).not.toBeInstanceOf(Promise);
     expect(origin).toEqual({ siblings: ['d1', 'd2', 'd3'], total: 3 });
     expect(ds.find).not.toHaveBeenCalled();
   });

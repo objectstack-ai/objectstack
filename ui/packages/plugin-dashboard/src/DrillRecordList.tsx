@@ -36,6 +36,7 @@ import React from 'react';
 import { PageRegionPostureReset } from '@object-ui/components';
 import { ComponentRegistry, resolveFilterPlaceholders, resolveNameField } from '@object-ui/core';
 import { SchemaRenderer, SchemaRendererContext, useDrillNavigation, useFilterScope } from '@object-ui/react';
+import type { DrillRecordOrigin } from '@object-ui/react';
 import { FILTER_DATE_LIKE_TYPES } from '@object-ui/types';
 import { Loader2 } from 'lucide-react';
 import { RecordDetailDrawer } from './RecordDetailDrawer';
@@ -189,14 +190,15 @@ export const DrillRecordList: React.FC<DrillRecordListProps> = ({
         if (!openRecord) return setOpened(record);
         const id = rowId(record);
         if (!id || opening.current) return;
-        opening.current = true;
+        const open = (origin: DrillRecordOrigin) => {
+          openRecord(objectName, id, origin);
+          onNavigate?.();
+        };
         const { ids, total, findParams } = shown.current;
-        void drillRecordOrigin({ dataSource, objectName, recordId: id, drawn: ids, total, findParams })
-          .then((origin) => {
-            openRecord(objectName, id, origin);
-            onNavigate?.();
-          })
-          .finally(() => { opening.current = false; });
+        const origin = drillRecordOrigin({ dataSource, objectName, recordId: id, drawn: ids, total, findParams });
+        if (!(origin instanceof Promise)) return open(origin);
+        opening.current = true;
+        void origin.then(open).finally(() => { opening.current = false; });
       }}
     />
     {!openRecord && (

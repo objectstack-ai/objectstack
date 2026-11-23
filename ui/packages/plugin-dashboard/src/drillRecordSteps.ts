@@ -70,8 +70,12 @@ const rowsOf = (result: unknown): Row[] => {
 const positiveInt = (value: unknown): number | undefined =>
   typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : undefined;
 
-/** The origin a drilled record's page opens with (see the file header). */
-export async function drillRecordOrigin(input: DrillRecordStepInput): Promise<DrillRecordOrigin> {
+/**
+ * The origin a drilled record's page opens with (see the file header). Answered
+ * at once, with no read, when the rows drawn are the whole result; a promise
+ * only when the rest has to be read.
+ */
+export function drillRecordOrigin(input: DrillRecordStepInput): DrillRecordOrigin | Promise<DrillRecordOrigin> {
   const { dataSource, objectName, recordId, drawn, total, findParams } = input;
   const siblings = drawn.includes(recordId) ? [...drawn] : [recordId];
   const drawnOrigin: DrillRecordOrigin = { siblings, ...(total != null ? { total } : {}) };
@@ -86,6 +90,17 @@ export async function drillRecordOrigin(input: DrillRecordStepInput): Promise<Dr
     return drawnOrigin;
   }
 
+  return readWholeResult(ds, objectName, recordId, total, findParams, drawnOrigin);
+}
+
+async function readWholeResult(
+  ds: FindCapable,
+  objectName: string,
+  recordId: string,
+  total: number,
+  findParams: Readonly<Record<string, unknown>>,
+  drawnOrigin: DrillRecordOrigin,
+): Promise<DrillRecordOrigin> {
   const query: Record<string, unknown> = { ...findParams };
   for (const key of ['$top', '$skip', '$select', '$expand', '$count']) delete query[key];
   const window = Math.max(positiveInt(findParams.$top) ?? 0, MIN_STEP_WINDOW);
