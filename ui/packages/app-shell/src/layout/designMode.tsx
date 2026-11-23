@@ -219,7 +219,7 @@ export function useDesignModeController({
 
   // Leaving the app drops what is staged; a page of the same app keeps it.
   const leaveMessage = t('designMode.leaveUnsaved', {
-    defaultValue: 'Leave design mode? Your unsaved changes will be lost.',
+    defaultValue: 'Leave Design layout? Your unsaved changes will be lost.',
   });
   React.useEffect(() => {
     if (!dirty) return undefined;

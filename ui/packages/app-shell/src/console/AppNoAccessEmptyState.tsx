@@ -143,7 +143,7 @@ export function AppNoAccessEmptyState({ app, setupPath, reason = 'no-navigation'
             defaultValue: '{{app}} has nothing in its menu yet',
           })}
           description={t('empty.appMenuEmptyDescription', {
-            defaultValue: 'Create objects for this app in Studio and they join its menu, or add entries in design mode.',
+            defaultValue: 'Create objects for this app in Studio and they join its menu, or add entries in Design layout.',
           })}
           action={
             <Button asChild variant="outline">

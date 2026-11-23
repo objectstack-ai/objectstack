@@ -264,7 +264,7 @@ describe('leaving with something staged (objectstack#36362)', () => {
       inApp.click();
       expect(confirmSpy).not.toHaveBeenCalled();
       home.click();
-      expect(confirmSpy).toHaveBeenCalledWith('Leave design mode? Your unsaved changes will be lost.');
+      expect(confirmSpy).toHaveBeenCalledWith('Leave Design layout? Your unsaved changes will be lost.');
     } finally {
       window.removeEventListener('click', stop);
       inApp.remove();
