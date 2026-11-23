@@ -14,7 +14,7 @@ feat: an object arranges its actions per scope (`actionLayout`: pinned buttons a
 
 Clause-②: yes (widening)
 Metadata-protocol: added
-Skills-docs: follow-up owed — skills/objectstack-ui/rules/actions.md
+Skills-docs: follow-up #36630
 
 A page header draws at most three of its actions as buttons and puts the rest in its 「More」 menu. An object now arranges them itself with the new optional key `actionLayout` on `ObjectSchema` and `ObjectExtensionSchema`: `{ list?: Arm, record?: Arm }`, where `Arm = { pinned: string[], more?: string[] }`. `pinned` names the buttons in the order drawn, at most three (`[]` draws none); `more` orders the 「More」 menu; an action the scope places that neither part names goes to the end of 「More」 in its default order. A pinned action that is hidden leaves its button out, and no other action takes its place.
 
