@@ -24,8 +24,8 @@ export const entry: SemanticMigration = {
     + '(the context): read the params as input, or give the local another name (const params = ctx.input || {}); '
     + 'var input = … also compiles. Fix any other compile error the finding names at the line of body.source it '
     + 'names. Refused at error as `action-body-does-not-compile` (422 INVALID_METADATA at the doors). A regular '
-    + 'expression whose pattern the host engine refuses as a duplicate named capture group or a modifier group is '
-    + 'reported at warning; any other pattern failure is refused (body-regexp-pattern-refused), and so is a literal '
+    + 'expression whose pattern the host engine refuses as a duplicate named capture group, a modifier group or a '
+    + 'Unicode property name only the runtime\'s engine knows is reported at warning; any other pattern failure is refused (body-regexp-pattern-refused), and so is a literal '
     + 'that never closes or whose flags are not a flag set (action-body-regexp-literal-token-refused).',
   reason:
     'The runtime never runs body.source as a script of its own: it compiles it inside an async arrow function with '

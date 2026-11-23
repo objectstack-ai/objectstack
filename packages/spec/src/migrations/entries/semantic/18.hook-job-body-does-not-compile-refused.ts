@@ -27,9 +27,10 @@ export const entry: SemanticMigration = {
     + 'or give the local another name (const input = ctx.input || {} in a hook, const api = ctx.api in a job), and '
     + 'declare each name once. Fix any other compile error the finding names at the line of body.source it names. '
     + 'Refused at error as `hook-body-does-not-compile` or `job-body-does-not-compile` (422 INVALID_METADATA at the '
-    + 'hook door). A regular expression whose pattern the host engine refuses as a duplicate named capture group or '
-    + 'a modifier group is reported at warning; any other pattern failure, and a literal that never closes or whose '
-    + 'flags are not a flag set, is refused (body-regexp-pattern-refused).',
+    + 'hook door). A regular expression whose pattern the host engine refuses as a duplicate named capture group, a '
+    + 'modifier group or a Unicode property name only the runtime\'s engine knows is reported at warning; any other '
+    + 'pattern failure, and a literal that never closes or whose flags are not a flag set, is refused '
+    + '(body-regexp-pattern-refused).',
   reason:
     'The runtime never runs a hook or job body.source as a script of its own: it compiles it inside an async arrow '
     + 'function with the one parameter ctx, and a source that redeclares it, or otherwise fails to compile there, '

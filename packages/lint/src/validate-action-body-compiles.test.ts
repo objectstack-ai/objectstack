@@ -219,10 +219,53 @@ describe('action-body-does-not-compile · a regular-expression failure is refuse
     ['an unknown unicode property', 'return /\\p{Nope}/u.test(input.s);', 'Invalid property name'],
     ['an incomplete quantifier under u', 'return /a{/u.test(input.s);', 'Incomplete quantifier'],
   ])('refuses %s at error: the runtime\'s engine refuses the pattern too', (_label, source, reason) => {
+    // A property name is judged against this host's Unicode tables only where they are the measured ones (17.0);
+    // the `.nvmrc` Node 22 carries them, and an older host reports the unknown property as a warning.
+    const property = reason === 'Invalid property name';
+    if (property && Number(process.versions.node.split('.')[0]) === 22 && process.env.CI) {
+      expect(Number.parseFloat(String(process.versions.unicode)), 'CI host Unicode tables').toBeGreaterThanOrEqual(17);
+    }
     const f = only(source);
-    expect([f.rule, f.severity, f.path]).toEqual([ACTION_BODY_DOES_NOT_COMPILE, 'error', 'actions[0].body.source']);
+    const severity = property && !(Number.parseFloat(String(process.versions.unicode)) >= 17) ? 'warning' : 'error';
+    expect([f.rule, f.severity, f.path]).toEqual([ACTION_BODY_DOES_NOT_COMPILE, severity, 'actions[0].body.source']);
     expect(f.message).toContain(reason);
-    expect(f.hint).toContain('the runtime\'s engine refuses it too');
+    if (severity === 'error') expect(f.hint).toContain('the runtime\'s engine refuses it too');
+  });
+
+  // A Unicode property name is judged by name: V8 resolves it against its own list and this host's Unicode tables,
+  // QuickJS against its own. Every name in quickjs-emscripten 0.32.0's tables, in every key form, under `u` and `v`,
+  // bare and in a class, was compiled in the action wrapper on both engines (Node 22.23.5, Unicode 17.0): these
+  // twelve spellings are the only ones V8 refuses and QuickJS compiles. The list was measured on Unicode 17.0
+  // tables; a host with older tables judges every refused name a warning, which this pin reads first.
+  const measuredTables = Number.parseFloat(String(process.versions.unicode)) >= 17;
+
+  it.each([
+    'IDS_Unary_Operator', 'IDSU', 'Modifier_Combining_Mark', 'MCM',
+    'sc=Katakana_Or_Hiragana', 'sc=Hrkt', 'Script=Katakana_Or_Hiragana', 'Script=Hrkt',
+    'scx=Katakana_Or_Hiragana', 'scx=Hrkt', 'Script_Extensions=Katakana_Or_Hiragana', 'Script_Extensions=Hrkt',
+  ])('only warns on the property %s, which this host refuses and the runtime\'s engine runs', (name) => {
+    const hostRefuses = (() => {
+      try {
+        new RegExp(`\\p{${name}}`, 'u');
+        return false;
+      } catch {
+        return true;
+      }
+    })();
+    if (Number(process.versions.node.split('.')[0]) <= 22) expect(hostRefuses, `Node ${process.versions.node}`).toBe(true);
+    for (const source of [`return /\\p{${name}}/u.test(input.s);`, `return /[\\P{${name}}a]/v.test(input.s);`]) {
+      const findings = validateActionBodyCompiles({ actions: [scriptAction('p', source)] });
+      if (!hostRefuses) {
+        expect(findings, source).toEqual([]);
+        continue;
+      }
+      expect(findings.map((f) => [f.rule, f.severity]), source).toEqual([[ACTION_BODY_DOES_NOT_COMPILE, 'warning']]);
+    }
+  });
+
+  it('refuses a property name neither engine knows beside one only the runtime\'s engine knows', () => {
+    const f = only('return /\\p{IDSU}\\p{Nope}/u.test(input.s);');
+    expect([f.rule, f.severity]).toEqual([ACTION_BODY_DOES_NOT_COMPILE, measuredTables ? 'error' : 'warning']);
   });
 
   it('accepts the flags both engines take', () => {

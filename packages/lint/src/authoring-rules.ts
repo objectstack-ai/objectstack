@@ -2992,9 +2992,10 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   // failed every run, on every door; `const input = ctx.input || {}` is the
   // shape an AI author writes, a redeclared parameter. Gating: no reading of
   // the metadata behaves as written, because the body never starts. A
-  // regular-expression pattern the host refuses for one of the two measured
-  // dialect-gap reasons (a duplicate named group, a modifier group: Node 22's
-  // V8 refuses them, QuickJS runs them) is the one `warning` arm; every other
+  // regular-expression pattern the host refuses for a measured dialect gap (a
+  // duplicate named group, a modifier group, a Unicode property name only
+  // QuickJS knows: Node 22's V8 refuses them, QuickJS runs them) is the one
+  // `warning` arm; every other
   // pattern failure, a literal that never closes and a bad flag set are
   // refused (see the module). Across the runtime publish gate for `action` writes and for
   // `object` writes, whose inline `actions[]` the same walk reads; the

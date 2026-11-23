@@ -30,8 +30,9 @@
  * function, is compiled with the host engine as a script and never run, and the
  * failure is read through the one {@link judgeBodyCompile}. So the severity
  * split is the action rule's: a regular-expression pattern the host refuses for
- * one of the two measured dialect-gap reasons (a duplicate named capture group,
- * a modifier group: Node 22's V8 refuses them, QuickJS runs them) is a
+ * a measured dialect gap (a duplicate named capture group, a modifier group, a
+ * Unicode property name only QuickJS knows: Node 22's V8 refuses them, QuickJS
+ * runs them) is a
  * `warning`, and every other compile failure, every other pattern failure
  * included, is an `error`.
  *
@@ -58,7 +59,7 @@ export const HOOK_BODY_DOES_NOT_COMPILE = 'hook-body-does-not-compile';
 export const JOB_BODY_DOES_NOT_COMPILE = 'job-body-does-not-compile';
 
 export interface HookBodyCompileFinding {
-  /** `error`, except a regular-expression pattern refused for a measured dialect-gap reason (`warning`). */
+  /** `error`, except a regular-expression pattern refused for a measured dialect gap (`warning`). */
   severity: 'error' | 'warning';
   rule: string;
   /** e.g. `hook "stamp_owner" › body`, `job "nightly_close" › body`. */

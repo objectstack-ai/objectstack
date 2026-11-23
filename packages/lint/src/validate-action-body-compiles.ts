@@ -38,37 +38,52 @@
  * implement the same early errors, and over a probe of 36 bodies the two agreed
  * on every redeclaration, every grammar error, every strict-mode error and every
  * misplaced `new.target` / `super`. They disagree inside the PATTERN of a
- * regular-expression literal, in one direction, and only for two constructs:
- * Node 22's V8 (12.4) refuses duplicate named capture groups in different
- * alternatives (`/(?<a>x)|(?<a>y)/`) and modifier groups (`/(?i:a)/`), both of
- * which QuickJS (quickjs-emscripten 0.32.0) accepts and runs. V8 reports a
- * pattern failure as `Invalid regular expression: /PATTERN/FLAGS: REASON`, and
- * the two constructs answer the REASONs in {@link REGEXP_DIALECT_GAP_REASONS}
- * (`Duplicate capture group name`, `Invalid group`). Those two reasons are the
- * one `warning` arm: that is where a host refusal measurably does not predict a
- * runtime refusal, and an `error` there would refuse a body that runs.
+ * regular-expression literal, in one direction (V8 refuses, QuickJS runs), and
+ * there in two kinds of place. Two constructs: Node 22's V8 (12.4) refuses
+ * duplicate named capture groups in different alternatives
+ * (`/(?<a>x)|(?<a>y)/`) and modifier groups (`/(?i:a)/`), both of which QuickJS
+ * (quickjs-emscripten 0.32.0) accepts and runs; V8 reports a pattern failure as
+ * `Invalid regular expression: /PATTERN/FLAGS: REASON`, and the two constructs
+ * answer the REASONs in {@link REGEXP_DIALECT_GAP_REASONS} (`Duplicate capture
+ * group name`, `Invalid group`). And twelve Unicode property names: V8 judges a
+ * `\p{…}` name against its own list and the host's Unicode tables, QuickJS
+ * against its own, and `IDS_Unary_Operator`, `Modifier_Combining_Mark` and the
+ * script `Katakana_Or_Hiragana` (with their aliases and keys) answer V8
+ * `Invalid property name` while QuickJS compiles them
+ * ({@link REGEXP_PROPERTY_NAMES_ONLY_QUICKJS_KNOWS}, measured over every name in
+ * QuickJS's own tables). Those are the one `warning` arm: that is where a host
+ * refusal measurably does not predict a runtime refusal, and an `error` there
+ * would refuse a body that runs. On a property-name reason the rule compiles
+ * each `\p{…}` of the pattern alone to find the name the host refused, so
+ * `/\p{Nope}/u` (a name neither engine knows) stays an `error` beside a name
+ * only QuickJS knows.
  *
  * Every other pattern REASON is an `error`, because QuickJS refuses the pattern
  * too. Measured over the same wrapper text on both engines (V8 12.4 · QuickJS
  * quickjs-emscripten 0.32.0): `Unterminated group` (`/(/`, `/(?:/`), `Nothing
  * to repeat` (`a**`), `Range out of order in character class` (`/[b-a]/`),
  * `Invalid named capture referenced` (`/\k<x>/u`), `Invalid property name`
- * (`/\p{Nope}/u`), `Incomplete quantifier` (`/a{/u`), `Unmatched ')'`,
- * `numbers out of order in {} quantifier`, `Invalid Unicode escape`, `Invalid
- * capture group name`, `Invalid character class`, `Invalid escape` and
- * `Invalid quantifier` — QuickJS refused every one. The allow-list is the
- * narrow side on purpose: a reason it does not name is judged an `error`, so a
- * later V8 that accepts more only removes findings, and a NEW reason a later V8
- * invents for a construct QuickJS accepts has to be measured and added here.
+ * for a name not on the list (`/\p{Nope}/u`), `Incomplete quantifier`
+ * (`/a{/u`), `Unmatched ')'`, `numbers out of order in {} quantifier`,
+ * `Invalid Unicode escape`, `Invalid capture group name`, `Invalid character
+ * class`, `Invalid escape` and `Invalid quantifier` — QuickJS refused every
+ * one. The lists are the narrow side on purpose: a reason or a name they do not
+ * hold is judged an `error`, so a later V8 that accepts more only removes
+ * findings, and a NEW reason or name a later V8 refuses for a construct QuickJS
+ * accepts has to be measured and added here.
  *
- * What the allow-list costs, measured too: V8 names only the FIRST failure of
- * a pattern, and the two allow-listed reasons are wider than the two
- * constructs. `/(?<a>x)(?<a>y)/` (one alternative), `(?ii:a)`, `(?x)`, an
- * unterminated `(?i:` and a modifier group followed by `/[b-a]/` all answer an
- * allow-listed reason and are refused by QuickJS, so they stay `warning`
- * findings — a refusal missed, never a body that runs refused. Judging those
- * would mean parsing the pattern a second time here, a second regular-expression
- * grammar this rule would own; the warning names the risk instead.
+ * What the lists cost, measured too: V8 names only the FIRST failure of a
+ * pattern, and the two allow-listed reasons are wider than the two constructs.
+ * `/(?<a>x)(?<a>y)/` (one alternative), `(?ii:a)`, `(?x)`, an unterminated
+ * `(?i:` and a modifier group followed by `/[b-a]/` all answer an allow-listed
+ * reason and are refused by QuickJS, so they stay `warning` findings — a
+ * refusal missed, never a body that runs refused. Judging those would mean
+ * parsing the pattern a second time here, a second regular-expression grammar
+ * this rule would own; the warning names the risk instead. The property-name
+ * list was measured on a host with Unicode 17.0 tables; a host with older
+ * tables (an early Node 22 ships Unicode 15.1) can refuse a script or property
+ * Unicode added since that QuickJS knows, which was not measured, so there
+ * every refused property name is a `warning` ({@link HOST_UNICODE_MEASURED}).
  *
  * The literal's own TOKEN is not a dialect question. A literal that never closes
  * on its line (`return /abc;` — V8 `Invalid regular expression: missing /`) and
@@ -99,9 +114,9 @@ export const ACTION_BODY_DOES_NOT_COMPILE = 'action-body-does-not-compile';
 
 export interface ActionBodyCompileFinding {
   /**
-   * `error`, except a regular-expression pattern the host refuses for one of the two measured dialect-gap reasons
-   * (`warning`; see the module note). Every other pattern failure, a literal that never closes and a flag set that is
-   * not one are an `error`.
+   * `error`, except a regular-expression pattern the host refuses for a measured dialect gap — one of two reasons,
+   * or a Unicode property name only the runtime's engine knows (`warning`; see the module note). Every other pattern
+   * failure, a literal that never closes and a flag set that is not one are an `error`.
    */
   severity: 'error' | 'warning';
   rule: string;
@@ -287,8 +302,8 @@ const REDECLARED = /^SyntaxError: Identifier '([^']+)' has already been declared
 /** How a compile failure is classified; every body kind's rule reads the same classes. */
 export type BodyCompileShape =
   /**
-   * A regular-expression PATTERN the host refuses for a measured dialect-gap reason
-   * ({@link REGEXP_DIALECT_GAP_REASONS}) — the one `warning` arm.
+   * A regular-expression PATTERN the host refuses for a measured dialect gap ({@link REGEXP_DIALECT_GAP_REASONS},
+   * {@link REGEXP_PROPERTY_NAMES_ONLY_QUICKJS_KNOWS}) — the one `warning` arm.
    */
   | 'regexp-dialect-gap'
   /** A regular-expression PATTERN the host refuses for any other reason; the runtime's engine refuses it too. */
@@ -374,11 +389,12 @@ export function bodyCompileHint(
       return own.redeclared(verdict.parameter!);
     case 'regexp-dialect-gap':
       return 'Rewrite the regular expression in a form both engines accept (a group name used once, no `(?i:…)` ' +
-        'modifier group), or build it with new RegExp(…) at run time';
+        'modifier group, a Unicode property name this host knows too), or build it with new RegExp(…) at run time';
     case 'regexp-pattern':
       return 'Fix the regular expression\'s pattern: the runtime\'s engine refuses it too. Close every `(` with `)`, ' +
         'give `*` / `+` / `?` / `{n}` something to repeat (or write it as `\\*`), write a class range low to high ' +
-        '(`[a-z]`), name only a group the pattern declares in `\\k<…>`, and under `u` use a Unicode property that exists';
+        '(`[a-z]`), name only a group the pattern declares in `\\k<…>`, and under `u` use a Unicode property that ' +
+        'exists (a name only the runtime\'s engine knows is reported as a warning, never refused)';
     case 'regexp-unterminated':
       return 'A `/` opens a regular-expression literal that never closes on its line: close it with `/`, write a ' +
         '`/` inside it as `\\/`, keep the literal on one line (a `\\n` written with one backslash in a quoted or ' +

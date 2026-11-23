@@ -25,8 +25,8 @@ export const entry: SemanticMigration = {
     + 'literal: write it with two backslashes), or, when the / is a division, give it a left-hand operand; write the '
     + 'flags as letters from dgimsuvy, each at most once, never u with v. Refused at error as '
     + '`action-body-does-not-compile` (422 INVALID_METADATA at the doors). A literal whose pattern the host engine '
-    + 'refuses as a duplicate named capture group or a modifier group is still reported at warning; any other pattern '
-    + 'failure is refused (body-regexp-pattern-refused).',
+    + 'refuses as a duplicate named capture group, a modifier group or a Unicode property name only the runtime\'s '
+    + 'engine knows is still reported at warning; any other pattern failure is refused (body-regexp-pattern-refused).',
   reason:
     'The rule compiles the body with the host JavaScript engine and reported every failure whose sentence opens '
     + '"Invalid regular expression" at warning, because the host\'s V8 and the runtime\'s QuickJS differ on some '
