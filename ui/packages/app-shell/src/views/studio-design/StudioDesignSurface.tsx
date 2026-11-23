@@ -455,6 +455,7 @@ import { ObjectSettingsPanel } from './ObjectSettingsPanel.js';
 import { PackageOwdOverviewPanel } from './PackageOwdOverviewPanel.js';
 import { ObjectApiPanel } from './ObjectApiPanel.js';
 import { ObjectHooksPanel } from './ObjectHooksPanel.js';
+import { useObjectHooksBuffer } from './objectHooksBuffer.js';
 import { ObjectActionsPanel } from './ObjectActionsPanel.js';
 import { getIcon } from '../../utils/getIcon.js';
 import {
@@ -6979,16 +6980,26 @@ export function DataPillar({
         }
       : null,
   );
-  // objectstack#36511 — opening another object replaces the buffer the open
+  // objectstack#36511 — the Hooks tab's buffer lives here, not in its panel,
+  // so an edit outlives a tab switch and the top bar's Save still sends it.
+  const hooksBuffer = useObjectHooksBuffer({
+    objectName: current?.name ?? '',
+    packageId,
+    active: viewMode === 'hooks',
+    disabled: readOnly,
+    publishNonce,
+  });
+  // objectstack#36511 — opening another object replaces the buffers the open
   // object's unsaved edits live in, so the author is asked first, as every
   // departure asks (objectstack#26705); nothing is sent by the switch.
+  const pageDirty = dirty || extDirty || hooksBuffer.dirty;
   const openObject = React.useCallback(
     (next: Surface): boolean => {
-      if (next.name !== current?.name && !confirmDropUnsavedWork(dirty || extDirty, locale)) return false;
+      if (next.name !== current?.name && !confirmDropUnsavedWork(pageDirty, locale)) return false;
       setCurrent(next);
       return true;
     },
-    [current, dirty, extDirty, locale],
+    [current, pageDirty, locale],
   );
   // The live request's apply (see `requestedSurface` above). objectstack#26845
   // — another object's load replaces the buffer a held edit lives in, so it
@@ -7702,14 +7713,7 @@ export function DataPillar({
                   onBlockingIssuesChange={reportPanelBlocking}
                 />
               ) : viewMode === 'hooks' ? (
-                <ObjectHooksPanel
-                  objectName={current.name}
-                  packageId={packageId}
-                  disabled={readOnly}
-                  hookSchema={typeSchemas.hook}
-                  publishNonce={publishNonce}
-                  onDraftSaved={onDraftSaved}
-                />
+                <ObjectHooksPanel buffer={hooksBuffer} disabled={readOnly} hookSchema={typeSchemas.hook} />
               ) : viewMode === 'actions' ? (
                 <div ref={actionsPanelRef} className="contents">
                   <ObjectActionsPanel
