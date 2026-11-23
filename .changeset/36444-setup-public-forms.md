@@ -6,7 +6,7 @@
 
 feat(setup): Setup → Configuration → Public forms lists every public form of the environment and switches it on or off
 
-Clause-②: no
+Clause-②: yes (widening) — a new Setup navigation id `nav_public_forms`, a new component id `forms:public-forms`, and new language-pack keys (the `publicFormsSetup` block and the nav label) in every shipped locale
 Metadata-protocol: none
 
 A system administrator (`manage_platform_settings`, the capability the Setup entry asks) now has one page for the operations side of public forms. It lists every public form of the environment: its name, the object a submission creates a record of, its address, and whether it is on. Per row: switch it on or off, copy its address, or open it in a new tab. A form is designed (created, deleted, its fields and title changed) in Studio, not here.
