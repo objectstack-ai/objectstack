@@ -3996,6 +3996,10 @@ const pt = {
     appNoReadableObjectGrantDescription: "Sua conta ainda não pode ler nenhum registro deste aplicativo. Você pode conceder acesso na configuração.",
     appOpensFromMenu: "{{app}} é usado pelo menu",
     appOpensFromMenuDescription: "Este aplicativo não tem uma página própria. Escolha uma entrada no menu para abrir um link ou executar uma ação.",
+    // objectstack#36748 — an app whose stored menu is empty, for a caller who can fill it.
+    appMenuEmpty: "O menu de {{app}} ainda está vazio",
+    appMenuEmptyDescription: "Crie objetos para este aplicativo no Studio e eles entram no menu, ou adicione itens no modo de design.",
+    openInStudio: "Abrir no Studio",
     openSetup: "Abrir a configuração",
     createFirstApp: "Criar primeiro aplicativo",
     systemSettings: "Configurações do sistema",

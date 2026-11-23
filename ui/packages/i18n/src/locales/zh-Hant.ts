@@ -4066,6 +4066,10 @@ const zhHant = {
     appNoReadableObjectGrantDescription: '你的賬號暫時無法讀取此應用中的任何記錄。你可以在 Setup 中授予訪問權限。',
     appOpensFromMenu: '{{app}} 的內容都在選單裡',
     appOpensFromMenuDescription: '此應用沒有自己的頁面。請在選單中選擇一個條目，開啟連結或執行操作。',
+    // objectstack#36748 — an app whose stored menu is empty, for a caller who can fill it.
+    appMenuEmpty: "{{app}} 的選單還是空的",
+    appMenuEmptyDescription: "在 Studio 裡為這個應用新建物件，它們會自動加入選單；也可以在設計模式裡新增。",
+    openInStudio: "在 Studio 中開啟",
     openSetup: '開啟 Setup',
     createFirstApp: '建立您的第一個應用',
     systemSettings: '系統設定',

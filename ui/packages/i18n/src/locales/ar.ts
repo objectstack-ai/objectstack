@@ -4257,6 +4257,10 @@ const ar = {
     appNoReadableObjectGrantDescription: "لا يمكن لحسابك قراءة أي سجلات في هذا التطبيق بعد. يمكنك منح حق الوصول من الإعداد.",
     appOpensFromMenu: "يُستخدم {{app}} من قائمته",
     appOpensFromMenuDescription: "لا يحتوي هذا التطبيق على صفحة خاصة به. اختر عنصرًا من قائمته لفتح رابط أو تنفيذ إجراء.",
+    // objectstack#36748 — an app whose stored menu is empty, for a caller who can fill it.
+    appMenuEmpty: "قائمة {{app}} فارغة حتى الآن",
+    appMenuEmptyDescription: "أنشئ كائنات لهذا التطبيق في Studio وستنضم إلى قائمته، أو أضف عناصر في وضع التصميم.",
+    openInStudio: "فتح في Studio",
     openSetup: "فتح الإعداد",
     createFirstApp: "إنشاء أول تطبيق",
     systemSettings: "إعدادات النظام",

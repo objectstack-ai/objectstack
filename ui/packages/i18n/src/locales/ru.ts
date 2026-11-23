@@ -4096,6 +4096,10 @@ const ru = {
     appNoReadableObjectGrantDescription: "Ваша учётная запись пока не может читать записи в этом приложении. Доступ можно предоставить в разделе настройки.",
     appOpensFromMenu: "{{app}} работает через меню",
     appOpensFromMenuDescription: "У этого приложения нет собственной страницы. Выберите пункт в его меню, чтобы открыть ссылку или выполнить действие.",
+    // objectstack#36748 — an app whose stored menu is empty, for a caller who can fill it.
+    appMenuEmpty: "Меню {{app}} пока пустое",
+    appMenuEmptyDescription: "Создайте объекты для этого приложения в Studio — они появятся в меню. Пункты можно добавить и в режиме дизайна.",
+    openInStudio: "Открыть в Studio",
     openSetup: "Открыть настройку",
     createFirstApp: "Создать приложение",
     systemSettings: "Системные настройки",
