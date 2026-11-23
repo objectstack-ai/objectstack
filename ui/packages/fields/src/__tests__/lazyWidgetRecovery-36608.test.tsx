@@ -17,6 +17,9 @@
 import React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+// Paid at collection, not inside a test's clock: the registry pin imports it
+// again after `vi.resetModules` (check:test-source-alias).
+import '@object-ui/core';
 
 afterEach(() => cleanup());
 
