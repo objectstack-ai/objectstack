@@ -37,7 +37,21 @@
  *   Switching such a form back on removes the override when the override held
  *   nothing but the switch ("Restore package original"), so the app's own form,
  *   upgrades included, is served again. An override that also carries design
- *   changes keeps them, with the switch turned on.
+ *   changes keeps them, with the switch turned on; when it was taken from an
+ *   earlier version of the app than the one installed, the switch says the
+ *   form stays on that earlier version (the app's earlier document cannot be
+ *   read to tell a switch-only override from a design one).
+ *
+ * ## A form the app ships switched off
+ *
+ * An installed app that ships a form with its address and anonymous access
+ * but its switch off (`enabled: false`, or no `enabled`, which the stack
+ * schema reads as `false`) WITHDRAWS it: the anonymous routes judge the app's
+ * own document as a kill switch that no override re-opens
+ * (`anonymousFormIntakeWithdrawnIn`, pinned in
+ * `packages/rest/src/public-form-withdrawal-effective-read.test.ts`). Such a
+ * form is listed, never as on ({@link markShippedOff}), and switching it on
+ * writes nothing and says the app ships it switched off.
  *
  * A switch is refused, and nothing is written, over a draft already pending
  * where it would save: that draft is its saver's and is never published on
@@ -60,6 +74,7 @@ import {
   type SaveAndPublishOutcome,
 } from '../runtime-metadata-persistence.js';
 import { declaredOverrideOf, overrideDraftBody } from '../studio-design/StudioCustomizeControls.js';
+import { fetchListedPackageManifests } from '../studio-design/packages-io.js';
 
 type FormDoc = Record<string, any>;
 
@@ -79,6 +94,12 @@ export interface PublicFormRow {
   on: boolean;
   /** The package that serves the item (`_packageId`), or `null` when it names none. */
   packageId: string | null;
+  /**
+   * The installed app this form belongs to ships it switched off, so the
+   * routes keep it closed whatever this environment saves (module header).
+   * Set by {@link markShippedOff}; absent until then.
+   */
+  shippedOff?: boolean;
 }
 
 /** `form` with its switch set to `on`: the only key a switch writes. */
@@ -152,13 +173,17 @@ export interface PublicFormSwitchClient {
   reset(type: string, name: string, options?: Record<string, unknown>): Promise<unknown>;
 }
 
-/** What a switch did. */
-export type PublicFormSwitchOutcome = SaveAndPublishOutcome | 'restored';
+/**
+ * What a switch did. `earlier-version`: switched on, and the form stays on the
+ * app's earlier version `basedOn` that this environment's customization was
+ * taken from (module header).
+ */
+export type PublicFormSwitchOutcome = SaveAndPublishOutcome | 'restored' | { kind: 'earlier-version'; basedOn: string };
 
 /** A switch the console refuses before writing anything. */
 export class PublicFormSwitchRefusal extends Error {
   constructor(
-    readonly reason: 'no-package' | 'no-version' | 'load-failed',
+    readonly reason: 'no-package' | 'no-version' | 'load-failed' | 'shipped-off',
     detail?: string,
   ) {
     super(detail ?? reason);
@@ -196,6 +221,73 @@ export function overrideHoldsOnlySwitch(override: FormDoc, base: FormDoc): boole
 }
 
 /**
+ * Whether an installed app's own document `base` of the form `name` ships it
+ * switched off (module header): its switch on would open it, yet as shipped it
+ * is not open. A switch the document omits counts as off, as the stack schema
+ * parses it, so the console fails closed where the routes do.
+ */
+export function baseShipsFormOff(base: unknown, name: string): boolean {
+  if (!isDoc(base) || !isDoc(base.config)) return false;
+  const named = { ...base, name };
+  const wouldOpen = anonymousFormIntakeCandidates({ ...named, config: withSwitch(base.config, true) }).some((c) => c.key === name);
+  return wouldOpen && !anonymousFormIntakeCandidates(named).some((c) => c.key === name);
+}
+
+type FormLayers = { code?: unknown; effective?: unknown; draft?: unknown };
+type ResolvedTarget = Exclude<Awaited<ReturnType<typeof resolveDashboardEditTarget>>, { kind: 'refused' }>;
+
+/**
+ * The layers of the form `name` where its target serves it: its package, the
+ * app's pair when the package list lists one (it then serves the override, if
+ * any, and the base's own document as `code`), else the base.
+ */
+async function readFormLayers(name: string, target: ResolvedTarget, client: Pick<PublicFormSwitchClient, 'layered'>): Promise<FormLayers> {
+  const at =
+    target.kind === 'unbound'
+      ? {}
+      : target.kind === 'package'
+        ? { packageId: target.packageId }
+        : { packageId: target.pair ?? target.base };
+  const layers = await client.layered('view', name, at);
+  // A listed pair that does not hold the form yet holds nothing: its base's document is read.
+  if (target.kind === 'customization' && target.pair && !isDoc(layers.effective) && !isDoc(layers.code)) {
+    return client.layered('view', name, { packageId: target.base });
+  }
+  return layers;
+}
+
+/**
+ * `rows` with each installed app's form that the app ships switched off marked
+ * `shippedOff` and shown off (module header): the list read serves the
+ * effective item, which an override may switch on although the routes keep the
+ * form closed. Reads the package list once and the layers of each installed
+ * app's form; a row whose layers cannot be read is left as listed.
+ */
+export async function markShippedOff(
+  rows: readonly PublicFormRow[],
+  client: Pick<PublicFormSwitchClient, 'layered'>,
+  doors?: Pick<DashboardSaveTargetDoors, 'listPackages'>,
+): Promise<PublicFormRow[]> {
+  if (!rows.some((r) => r.packageId)) return [...rows];
+  const listPackages = doors?.listPackages ?? fetchListedPackageManifests;
+  let listing: ReturnType<typeof listPackages> | undefined;
+  const once = { listPackages: () => (listing ??= listPackages()) };
+  return Promise.all(
+    rows.map(async (row) => {
+      if (!row.packageId) return row;
+      const target = await resolveDashboardEditTarget(row.packageId, once);
+      if (target.kind !== 'customization') return row;
+      try {
+        const layers = await readFormLayers(row.name, target, client);
+        return baseShipsFormOff(layers.code, row.name) ? { ...row, on: false, shippedOff: true } : row;
+      } catch {
+        return row;
+      }
+    }),
+  );
+}
+
+/**
  * Switch the public form `row` on or off for everyone at once (module header).
  * Resolves what was done; rejects with the server's refusal, or with a
  * {@link PublicFormSwitchRefusal} when nothing could be written.
@@ -211,22 +303,9 @@ export async function switchPublicForm(
   if (target.kind === 'refused') throw new PublicFormSwitchRefusal('no-package', target.reason);
   const persist: RuntimePersistCtx = { ...ctx, metadataClient: client, objectName: row.object ?? null };
 
-  // The address the form is read at: its package, the app's pair when the
-  // package list lists one (it then serves the override, if any, and the
-  // base's own document as `code`), else the base.
-  const at =
-    target.kind === 'unbound'
-      ? {}
-      : target.kind === 'package'
-        ? { packageId: target.packageId }
-        : { packageId: target.pair ?? target.base };
-  let layers: { code?: unknown; effective?: unknown; draft?: unknown };
+  let layers: FormLayers;
   try {
-    layers = await client.layered('view', row.name, at);
-    // A listed pair that does not hold the form yet holds nothing: its base's document is read.
-    if (target.kind === 'customization' && target.pair && !isDoc(layers.effective) && !isDoc(layers.code)) {
-      layers = await client.layered('view', row.name, { packageId: target.base });
-    }
+    layers = await readFormLayers(row.name, target, client);
   } catch (err) {
     throw new PublicFormSwitchRefusal('load-failed', err instanceof Error ? err.message : String(err));
   }
@@ -238,10 +317,13 @@ export async function switchPublicForm(
   if (target.kind === 'package') return saveAndPublishInPackage('view', row.name, switched, target.packageId, persist);
 
   // An installed app: this environment's customization, in the app's pair.
-  const override = declaredOverrideOf(effective, target.base) ? effective : null;
+  const declared = declaredOverrideOf(effective, target.base);
+  const override = declared ? effective : null;
   const base = isDoc(layers.code) ? layers.code : null;
+  // The app ships the form switched off: no override re-opens it, so nothing is written.
+  if (on && baseShipsFormOff(base, row.name)) throw new PublicFormSwitchRefusal('shipped-off', target.base);
   if (on && override && base && isDoc(base.config)) {
-    const baseOn = anonymousFormIntakeCandidates(base).some((c) => c.key === row.name);
+    const baseOn = anonymousFormIntakeCandidates({ ...base, name: row.name }).some((c) => c.key === row.name);
     if (baseOn && overrideHoldsOnlySwitch(override, base) && target.pair) {
       // A draft pending over the override is its saver's: nothing is removed under it.
       if (isDoc(layers.draft)) return 'pending-draft';
@@ -256,5 +338,10 @@ export async function switchPublicForm(
   if (body === null) throw new PublicFormSwitchRefusal('no-version', target.base);
   const saveTarget = await ensureDashboardSaveTarget(target, doors);
   if (saveTarget.kind !== 'customization') throw new PublicFormSwitchRefusal('no-package', target.base);
-  return saveAndPublishInPackage('view', row.name, body, saveTarget.packageId, persist);
+  const outcome = await saveAndPublishInPackage('view', row.name, body, saveTarget.packageId, persist);
+  // Switched on over an override taken from an earlier version of the app: the form stays on that version.
+  if (on && outcome === 'published' && declared && target.basedOn && declared.basedOn !== target.basedOn) {
+    return { kind: 'earlier-version', basedOn: declared.basedOn };
+  }
+  return outcome;
 }

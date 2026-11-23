@@ -5985,6 +5985,12 @@ const zh = {
     refusalNoPackage: "找不到这个表单所属的应用。",
     refusalNoVersion: "这个表单所属的应用没有声明版本，无法保存本环境的定制。",
     refusalLoadFailed: "读取表单失败。",
+    refusalShippedOff: "所属应用发布时就关闭了这个表单，无法在这里开启。",
+    refusalForbidden: "你没有修改应用配置的权限。",
+    refusalServer: "服务器拒绝了这次修改。请重试，或联系管理员。",
+    switchedOnEarlierVersion: "{{name}} 已开启。它仍沿用本环境定制时的应用旧版本 {{version}}；如需使用应用当前版本的表单，请在 Studio 中恢复原样。",
+    noSwitchPermission: "开启或关闭表单需要修改应用配置的权限，你目前没有。",
+    shippedOff: "关闭（应用自带关闭）",
   },
   slackSetup: {
     title: "Slack 私信",

@@ -3,6 +3,8 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
   PublicFormSwitchRefusal,
+  baseShipsFormOff,
+  markShippedOff,
   overrideHoldsOnlySwitch,
   publicFormRowOf,
   publicFormRowsOf,
@@ -178,7 +180,7 @@ describe('switchPublicForm', () => {
 
   it('switching back on keeps an override that also carries design changes, with the switch on', async () => {
     const base = formItem();
-    const override = { ...stripped(formItem({ label: 'Talk to us' }, false)), overrides: { package: 'crm', basedOn: '2.0.0' } };
+    const override = { ...stripped(formItem({ label: 'Talk to us' }, false)), overrides: { package: 'crm', basedOn: '3.0.0' } };
     const client = clientOf(() => ({ code: base, effective: override }));
     const doors = listed({ crm: { writable: false, version: '3.0.0' }, 'crm.custom': { writable: true, version: '0.0.0' } });
     const out = await switchPublicForm(row, true, client, {}, doors);
@@ -188,8 +190,88 @@ describe('switchPublicForm', () => {
     expect(options).toMatchObject({ packageId: 'crm.custom' });
     expect(body.label).toBe('Talk to us');
     expect(body.config.sharing).toEqual(sharing(true));
+    expect(body.overrides).toEqual({ package: 'crm', basedOn: '3.0.0' });
+  });
+
+  it('after an app upgrade, switching back on says the form stays on the earlier version its override was taken from', async () => {
+    // Switched off at 2.0.0 (a switch-only copy of the 2.0.0 form); the app is now 3.0.0 with a changed form.
+    const base = formItem({ label: 'Contact sales' });
+    const override = { ...stripped(formItem({}, false)), overrides: { package: 'crm', basedOn: '2.0.0' } };
+    const client = clientOf(() => ({ code: base, effective: override }));
+    const doors = listed({ crm: { writable: false, version: '3.0.0' }, 'crm.custom': { writable: true, version: '0.0.0' } });
+    const out = await switchPublicForm(row, true, client, {}, doors);
+    expect(out).toEqual({ kind: 'earlier-version', basedOn: '2.0.0' });
+    expect(client.reset).not.toHaveBeenCalled();
+    const [, , body] = client.save.mock.calls[0] as unknown as [string, string, any];
+    expect(body.config.sharing).toEqual(sharing(true));
     // The override keeps the version it declared: re-basing is a person's call.
     expect(body.overrides).toEqual({ package: 'crm', basedOn: '2.0.0' });
+  });
+
+  it('after an app upgrade that left the form as it was, switching back on restores the app\'s own form', async () => {
+    const base = formItem();
+    const override = { ...stripped(formItem({}, false)), overrides: { package: 'crm', basedOn: '2.0.0' } };
+    const client = clientOf(() => ({ code: base, effective: override, draft: null }));
+    const doors = listed({ crm: { writable: false, version: '3.0.0' }, 'crm.custom': { writable: true, version: '0.0.0' } });
+    await expect(switchPublicForm(row, true, client, {}, doors)).resolves.toBe('restored');
+    expect(client.save).not.toHaveBeenCalled();
+  });
+
+  describe('a form the installed app ships switched off', () => {
+    const shippedOff = {
+      'enabled: false': formItem({}, false),
+      'no enabled': formItem({ config: { title: 'Contact us', data: { object: 'crm_lead' }, sharing: { allowAnonymous: true, publicLink: 'contact-us' } } }),
+    };
+    const doors = () => listed({ crm: { writable: false, version: '3.0.0' }, 'crm.custom': { writable: true, version: '0.0.0' } });
+
+    for (const [how, base] of Object.entries(shippedOff)) {
+      it(`(${how}) is never switched on: nothing is written, and the refusal says the app ships it off`, async () => {
+        expect(baseShipsFormOff(base, 'web_to_lead')).toBe(true);
+        // No override yet: the list serves the app's own document.
+        const fresh = clientOf(() => ({ code: base, effective: base }));
+        const freshDoors = doors();
+        await expect(switchPublicForm(row, true, fresh, {}, freshDoors)).rejects.toMatchObject({
+          name: 'PublicFormSwitchRefusal',
+          reason: 'shipped-off',
+        });
+        // An override that switches it on already (saved before this page knew better): still refused.
+        const override = { ...stripped(formItem()), overrides: { package: 'crm', basedOn: '3.0.0' } };
+        const overridden = clientOf(() => ({ code: base, effective: override }));
+        await expect(switchPublicForm(row, true, overridden, {}, doors())).rejects.toMatchObject({ reason: 'shipped-off' });
+        for (const c of [fresh, overridden]) {
+          expect(c.save).not.toHaveBeenCalled();
+          expect(c.reset).not.toHaveBeenCalled();
+        }
+        expect(freshDoors.ensureCustomization).not.toHaveBeenCalled();
+      });
+
+      it(`(${how}) is listed, never as on, even when an override switches it on`, async () => {
+        const override = { ...stripped(formItem()), overrides: { package: 'crm', basedOn: '3.0.0' } };
+        const client = clientOf(() => ({ code: base, effective: override }));
+        const listedDoors = doors();
+        const served = publicFormRowOf({ ...override, _packageId: 'crm' })!;
+        expect(served.on).toBe(true);
+        const [marked] = await markShippedOff([served], client, listedDoors);
+        expect(marked).toMatchObject({ name: 'web_to_lead', on: false, shippedOff: true });
+      });
+    }
+
+    it('leaves a form the app ships on, a writable package\'s form and a form with no package as listed', async () => {
+      const on = formItem();
+      expect(baseShipsFormOff(on, 'web_to_lead')).toBe(false);
+      const client = clientOf((name) => ({ code: name === 'own' ? formItem({}, false) : on, effective: on }));
+      const listedDoors = listed({ crm: { writable: false, version: '3.0.0' }, mine: { writable: true } });
+      const rows = [
+        publicFormRowOf(on)!,
+        { ...publicFormRowOf(formItem({}, false))!, name: 'own', packageId: 'mine' },
+        { ...publicFormRowOf(on)!, name: 'loose', packageId: null },
+      ];
+      const marked = await markShippedOff(rows, client, listedDoors);
+      expect(marked).toEqual(rows);
+      // The package list is read once for the whole page, and only an installed app's form is read.
+      expect(listedDoors.listPackages).toHaveBeenCalledTimes(1);
+      expect(client.layered).toHaveBeenCalledTimes(1);
+    });
   });
 
   it('writes nothing over a draft pending in the pair: neither the restore nor a save', async () => {

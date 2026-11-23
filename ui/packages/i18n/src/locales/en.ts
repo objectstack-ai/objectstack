@@ -6862,6 +6862,12 @@ const en = {
     refusalNoPackage: "the app this form belongs to could not be found.",
     refusalNoVersion: "the app this form belongs to declares no version, so its customization cannot be saved.",
     refusalLoadFailed: "the form could not be read.",
+    refusalShippedOff: "its app ships it switched off, so it cannot be switched on here.",
+    refusalForbidden: "you don't have permission to change app configuration.",
+    refusalServer: "the server refused the change. Try again, or ask an administrator.",
+    switchedOnEarlierVersion: "{{name}} is on. It stays on the app's earlier version {{version}}, which this environment customized; to take the app's current form, restore the original in Studio.",
+    noSwitchPermission: "Switching forms on or off needs permission to change app configuration, which you don't have.",
+    shippedOff: "Off (switched off by its app)",
   },
   slackSetup: {
     title: "Slack direct messages",

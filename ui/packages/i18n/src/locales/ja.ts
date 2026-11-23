@@ -5927,6 +5927,12 @@ const ja = {
     refusalNoPackage: "このフォームが属するアプリが見つかりません。",
     refusalNoVersion: "このフォームが属するアプリはバージョンを宣言していないため、カスタマイズを保存できません。",
     refusalLoadFailed: "フォームを読み込めませんでした。",
+    refusalShippedOff: "所属アプリがオフの状態で提供しているため、ここではオンにできません。",
+    refusalForbidden: "アプリ構成を変更する権限がありません。",
+    refusalServer: "サーバーが変更を拒否しました。再試行するか、管理者に問い合わせてください。",
+    switchedOnEarlierVersion: "{{name}} をオンにしました。この環境でカスタマイズしたアプリの以前のバージョン {{version}} のままです。アプリの現在のフォームを使うには、Studio で元に戻してください。",
+    noSwitchPermission: "フォームのオン/オフにはアプリ構成を変更する権限が必要ですが、お持ちではありません。",
+    shippedOff: "オフ（アプリによりオフ）",
   },
   slackSetup: {
     title: "Slack のダイレクトメッセージ",

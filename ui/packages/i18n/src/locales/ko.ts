@@ -5924,6 +5924,12 @@ const ko = {
     refusalNoPackage: "이 양식이 속한 앱을 찾을 수 없습니다.",
     refusalNoVersion: "이 양식이 속한 앱이 버전을 선언하지 않아 사용자 지정을 저장할 수 없습니다.",
     refusalLoadFailed: "양식을 읽지 못했습니다.",
+    refusalShippedOff: "소속 앱이 꺼진 상태로 제공하므로 여기서 켤 수 없습니다.",
+    refusalForbidden: "앱 구성을 변경할 권한이 없습니다.",
+    refusalServer: "서버가 변경을 거부했습니다. 다시 시도하거나 관리자에게 문의하세요.",
+    switchedOnEarlierVersion: "{{name}}을(를) 켰습니다. 이 환경에서 사용자 지정한 앱의 이전 버전 {{version}}이(가) 계속 사용됩니다. 앱의 현재 양식을 사용하려면 Studio에서 원본으로 복원하세요.",
+    noSwitchPermission: "양식을 켜거나 끄려면 앱 구성을 변경할 권한이 필요하지만 권한이 없습니다.",
+    shippedOff: "꺼짐(앱에서 꺼짐)",
   },
   slackSetup: {
     title: "Slack 다이렉트 메시지",

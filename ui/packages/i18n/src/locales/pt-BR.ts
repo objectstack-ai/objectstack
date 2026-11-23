@@ -6083,6 +6083,12 @@ const pt = {
     refusalNoPackage: "o aplicativo ao qual este formulário pertence não foi encontrado.",
     refusalNoVersion: "o aplicativo ao qual este formulário pertence não declara versão, então a personalização não pode ser salva.",
     refusalLoadFailed: "não foi possível ler o formulário.",
+    refusalShippedOff: "o aplicativo o entrega desativado, então ele não pode ser ativado aqui.",
+    refusalForbidden: "você não tem permissão para alterar a configuração do aplicativo.",
+    refusalServer: "o servidor recusou a alteração. Tente novamente ou fale com um administrador.",
+    switchedOnEarlierVersion: "{{name}} está ativado. Ele continua na versão anterior {{version}} do aplicativo, que este ambiente personalizou; para usar o formulário atual do aplicativo, restaure o original no Studio.",
+    noSwitchPermission: "Ativar ou desativar formulários exige permissão para alterar a configuração do aplicativo, que você não tem.",
+    shippedOff: "Desativado (pelo aplicativo)",
   },
   slackSetup: {
     title: "Mensagens diretas do Slack",

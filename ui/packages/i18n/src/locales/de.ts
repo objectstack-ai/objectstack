@@ -5926,6 +5926,12 @@ const de = {
     refusalNoPackage: "die App, zu der dieses Formular gehört, wurde nicht gefunden.",
     refusalNoVersion: "die App, zu der dieses Formular gehört, gibt keine Version an, daher kann die Anpassung nicht gespeichert werden.",
     refusalLoadFailed: "das Formular konnte nicht gelesen werden.",
+    refusalShippedOff: "die App liefert es ausgeschaltet aus, daher kann es hier nicht eingeschaltet werden.",
+    refusalForbidden: "Sie haben keine Berechtigung, die App-Konfiguration zu ändern.",
+    refusalServer: "der Server hat die Änderung abgelehnt. Versuchen Sie es erneut oder wenden Sie sich an einen Administrator.",
+    switchedOnEarlierVersion: "{{name}} ist eingeschaltet. Es bleibt bei der früheren App-Version {{version}}, die diese Umgebung angepasst hat; um das aktuelle Formular der App zu verwenden, stellen Sie das Original in Studio wieder her.",
+    noSwitchPermission: "Zum Ein- oder Ausschalten von Formularen ist die Berechtigung zum Ändern der App-Konfiguration nötig, die Sie nicht haben.",
+    shippedOff: "Aus (von der App ausgeschaltet)",
   },
   slackSetup: {
     title: "Slack-Direktnachrichten",

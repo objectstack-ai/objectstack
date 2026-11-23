@@ -6088,6 +6088,12 @@ const es = {
     refusalNoPackage: "no se encontró la aplicación a la que pertenece este formulario.",
     refusalNoVersion: "la aplicación a la que pertenece este formulario no declara versión, así que no se puede guardar la personalización.",
     refusalLoadFailed: "no se pudo leer el formulario.",
+    refusalShippedOff: "su aplicación lo incluye desactivado, así que no se puede activar aquí.",
+    refusalForbidden: "no tiene permiso para cambiar la configuración de la aplicación.",
+    refusalServer: "el servidor rechazó el cambio. Inténtelo de nuevo o consulte a un administrador.",
+    switchedOnEarlierVersion: "{{name}} está activado. Sigue en la versión anterior {{version}} de la aplicación, que este entorno personalizó; para usar el formulario actual de la aplicación, restaure el original en Studio.",
+    noSwitchPermission: "Para activar o desactivar formularios se necesita permiso para cambiar la configuración de la aplicación, y usted no lo tiene.",
+    shippedOff: "Desactivado (por su aplicación)",
   },
   slackSetup: {
     title: "Mensajes directos de Slack",

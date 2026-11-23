@@ -6084,6 +6084,12 @@ const fr = {
     refusalNoPackage: "l'application à laquelle appartient ce formulaire est introuvable.",
     refusalNoVersion: "l'application à laquelle appartient ce formulaire ne déclare aucune version : la personnalisation ne peut pas être enregistrée.",
     refusalLoadFailed: "le formulaire n'a pas pu être lu.",
+    refusalShippedOff: "son application le livre désactivé, il ne peut donc pas être activé ici.",
+    refusalForbidden: "vous n'avez pas l'autorisation de modifier la configuration de l'application.",
+    refusalServer: "le serveur a refusé la modification. Réessayez ou contactez un administrateur.",
+    switchedOnEarlierVersion: "{{name}} est activé. Il reste sur la version antérieure {{version}} de l'application, que cet environnement a personnalisée ; pour utiliser le formulaire actuel de l'application, restaurez l'original dans Studio.",
+    noSwitchPermission: "Activer ou désactiver des formulaires nécessite l'autorisation de modifier la configuration de l'application, que vous n'avez pas.",
+    shippedOff: "Désactivé (par son application)",
   },
   slackSetup: {
     title: "Messages directs Slack",

@@ -5985,6 +5985,12 @@ const zhHant = {
     refusalNoPackage: "找不到這個表單所屬的應用。",
     refusalNoVersion: "這個表單所屬的應用沒有宣告版本，無法儲存本環境的定製。",
     refusalLoadFailed: "讀取表單失敗。",
+    refusalShippedOff: "所屬應用釋出時就關閉了這個表單，無法在這裡開啟。",
+    refusalForbidden: "你沒有修改應用配置的權限。",
+    refusalServer: "伺服器拒絕了這次修改。請重試，或聯絡管理員。",
+    switchedOnEarlierVersion: "{{name}} 已開啟。它仍沿用本環境定製時的應用舊版本 {{version}}；如需使用應用當前版本的表單，請在 Studio 中恢復原樣。",
+    noSwitchPermission: "開啟或關閉表單需要修改應用配置的權限，你目前沒有。",
+    shippedOff: "關閉（應用自帶關閉）",
   },
   slackSetup: {
     title: "Slack 私信",
