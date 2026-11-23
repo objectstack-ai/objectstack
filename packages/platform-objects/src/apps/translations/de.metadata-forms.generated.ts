@@ -278,7 +278,7 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fields.fieldHistory": {
         label: "Feldänderungswerte",
-        helpText: "Alte → neue Werte dieses Felds in der Aktivitätszeitleiste des Datensatzes. Standard folgt der Plattform: an für die meisten Typen, aus für ein Medien-, JSON- oder Zugangsdaten-Feld. Aus nennt die Änderung nur mit dem Feldnamen; An zeigt auch die Werte eines Medien- oder JSON-Felds. Ist die Einstellung des Objekts selbst aus, gilt diese."
+        helpText: "Alte → neue Werte dieses Felds in der Aktivitätszeitleiste des Datensatzes. Standard folgt der Plattform: an für die meisten Typen, aus für ein Medien-, JSON- oder Zugangsdaten-Feld. Aus nennt die Änderung nur mit dem Feldnamen; An zeigt auch die Werte eines Medien- oder JSON-Felds. Ein Zugangsdaten-Feld zeigt nie Werte, und ist die Einstellung des Objekts selbst aus, gilt diese."
       },
       "fields.trackHistory": {
         label: "Verlauf verfolgen",
@@ -911,7 +911,7 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       fieldHistory: {
         label: "Feldänderungswerte",
-        helpText: "Alte → neue Werte dieses Felds in der Aktivitätszeitleiste des Datensatzes. Standard folgt der Plattform: an für die meisten Typen, aus für ein Medien-, JSON- oder Zugangsdaten-Feld. Aus nennt die Änderung nur mit dem Feldnamen; An zeigt auch die Werte eines Medien- oder JSON-Felds. Ist die Einstellung des Objekts selbst aus, gilt diese."
+        helpText: "Alte → neue Werte dieses Felds in der Aktivitätszeitleiste des Datensatzes. Standard folgt der Plattform: an für die meisten Typen, aus für ein Medien-, JSON- oder Zugangsdaten-Feld. Aus nennt die Änderung nur mit dem Feldnamen; An zeigt auch die Werte eines Medien- oder JSON-Felds. Ein Zugangsdaten-Feld zeigt nie Werte, und ist die Einstellung des Objekts selbst aus, gilt diese."
       },
       trackHistory: {
         label: "Verlauf verfolgen",

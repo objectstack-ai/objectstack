@@ -278,7 +278,7 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       },
       "fields.fieldHistory": {
         label: "欄位修改值",
-        helpText: "在記錄的活動時間軸上顯示該欄位的舊值 → 新值。預設跟隨平台：大多數類型為開，媒體、JSON 或憑證欄位為關。關：只寫出欄位名；開：媒體或 JSON 欄位也顯示值。物件本身的欄位修改值設為關時，以物件為準。"
+        helpText: "在記錄的活動時間軸上顯示該欄位的舊值 → 新值。預設跟隨平台：大多數類型為開，媒體、JSON 或憑證欄位為關。關：只寫出欄位名；開：媒體或 JSON 欄位也顯示值。憑證欄位始終不顯示值；物件本身的欄位修改值設為關時，以物件為準。"
       },
       "fields.trackHistory": {
         label: "歷史追蹤",
@@ -911,7 +911,7 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       },
       fieldHistory: {
         label: "欄位修改值",
-        helpText: "在記錄的活動時間軸上顯示該欄位的舊值 → 新值。預設跟隨平台：大多數類型為開，媒體、JSON 或憑證欄位為關。關：只寫出欄位名；開：媒體或 JSON 欄位也顯示值。物件本身的欄位修改值設為關時，以物件為準。"
+        helpText: "在記錄的活動時間軸上顯示該欄位的舊值 → 新值。預設跟隨平台：大多數類型為開，媒體、JSON 或憑證欄位為關。關：只寫出欄位名；開：媒體或 JSON 欄位也顯示值。憑證欄位始終不顯示值；物件本身的欄位修改值設為關時，以物件為準。"
       },
       trackHistory: {
         label: "記錄變更歷史",

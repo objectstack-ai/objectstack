@@ -278,7 +278,7 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "fields.fieldHistory": {
         label: "Valores de alterações de campo",
-        helpText: "Valores antigo → novo deste campo na linha do tempo de atividades do registro. Padrão segue a plataforma: ligado para a maioria dos tipos, desligado para um campo de mídia, JSON ou credencial. Desligado nomeia a alteração só pelo rótulo; Ligado também mostra os valores de um campo de mídia ou JSON. Se o próprio objeto desligar, vale o objeto."
+        helpText: "Valores antigo → novo deste campo na linha do tempo de atividades do registro. Padrão segue a plataforma: ligado para a maioria dos tipos, desligado para um campo de mídia, JSON ou credencial. Desligado nomeia a alteração só pelo rótulo; Ligado também mostra os valores de um campo de mídia ou JSON. Um campo de credencial nunca mostra valores, e se o próprio objeto desligar, vale o objeto."
       },
       "fields.trackHistory": {
         label: "Acompanhar histórico",
@@ -911,7 +911,7 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       fieldHistory: {
         label: "Valores de alterações de campo",
-        helpText: "Valores antigo → novo deste campo na linha do tempo de atividades do registro. Padrão segue a plataforma: ligado para a maioria dos tipos, desligado para um campo de mídia, JSON ou credencial. Desligado nomeia a alteração só pelo rótulo; Ligado também mostra os valores de um campo de mídia ou JSON. Se o próprio objeto desligar, vale o objeto."
+        helpText: "Valores antigo → novo deste campo na linha do tempo de atividades do registro. Padrão segue a plataforma: ligado para a maioria dos tipos, desligado para um campo de mídia, JSON ou credencial. Desligado nomeia a alteração só pelo rótulo; Ligado também mostra os valores de um campo de mídia ou JSON. Um campo de credencial nunca mostra valores, e se o próprio objeto desligar, vale o objeto."
       },
       trackHistory: {
         label: "Acompanhar histórico",

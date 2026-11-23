@@ -278,7 +278,7 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fields.fieldHistory": {
         label: "Valeurs des modifications de champ",
-        helpText: "Valeurs ancienne → nouvelle de ce champ dans la chronologie d’activité de l’enregistrement. Par défaut suit la plateforme : activé pour la plupart des types, désactivé pour un champ média, JSON ou d’identifiants. Désactivé ne nomme la modification que par son libellé ; Activé affiche aussi les valeurs d’un champ média ou JSON. Si l’objet lui-même le désactive, l’objet l’emporte."
+        helpText: "Valeurs ancienne → nouvelle de ce champ dans la chronologie d’activité de l’enregistrement. Par défaut suit la plateforme : activé pour la plupart des types, désactivé pour un champ média, JSON ou d’identifiants. Désactivé ne nomme la modification que par son libellé ; Activé affiche aussi les valeurs d’un champ média ou JSON. Un champ d’identifiants n’affiche jamais de valeurs, et si l’objet lui-même le désactive, l’objet l’emporte."
       },
       "fields.trackHistory": {
         label: "Suivre l’historique",
@@ -911,7 +911,7 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       fieldHistory: {
         label: "Valeurs des modifications de champ",
-        helpText: "Valeurs ancienne → nouvelle de ce champ dans la chronologie d’activité de l’enregistrement. Par défaut suit la plateforme : activé pour la plupart des types, désactivé pour un champ média, JSON ou d’identifiants. Désactivé ne nomme la modification que par son libellé ; Activé affiche aussi les valeurs d’un champ média ou JSON. Si l’objet lui-même le désactive, l’objet l’emporte."
+        helpText: "Valeurs ancienne → nouvelle de ce champ dans la chronologie d’activité de l’enregistrement. Par défaut suit la plateforme : activé pour la plupart des types, désactivé pour un champ média, JSON ou d’identifiants. Désactivé ne nomme la modification que par son libellé ; Activé affiche aussi les valeurs d’un champ média ou JSON. Un champ d’identifiants n’affiche jamais de valeurs, et si l’objet lui-même le désactive, l’objet l’emporte."
       },
       trackHistory: {
         label: "Suivre l’historique",

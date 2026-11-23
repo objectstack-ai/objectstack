@@ -278,7 +278,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "fields.fieldHistory": {
         label: "Valores de cambios de campo",
-        helpText: "Valores anterior → nuevo de este campo en la cronología de actividad del registro. Predeterminado sigue a la plataforma: activado para la mayoría de los tipos, desactivado para un campo multimedia, JSON o de credenciales. Desactivado nombra el cambio solo con la etiqueta; Activado también muestra los valores de un campo multimedia o JSON. Si el propio objeto lo desactiva, manda el objeto."
+        helpText: "Valores anterior → nuevo de este campo en la cronología de actividad del registro. Predeterminado sigue a la plataforma: activado para la mayoría de los tipos, desactivado para un campo multimedia, JSON o de credenciales. Desactivado nombra el cambio solo con la etiqueta; Activado también muestra los valores de un campo multimedia o JSON. Un campo de credenciales nunca muestra valores, y si el propio objeto lo desactiva, manda el objeto."
       },
       "fields.trackHistory": {
         label: "Seguimiento de historial",
@@ -911,7 +911,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       fieldHistory: {
         label: "Valores de cambios de campo",
-        helpText: "Valores anterior → nuevo de este campo en la cronología de actividad del registro. Predeterminado sigue a la plataforma: activado para la mayoría de los tipos, desactivado para un campo multimedia, JSON o de credenciales. Desactivado nombra el cambio solo con la etiqueta; Activado también muestra los valores de un campo multimedia o JSON. Si el propio objeto lo desactiva, manda el objeto."
+        helpText: "Valores anterior → nuevo de este campo en la cronología de actividad del registro. Predeterminado sigue a la plataforma: activado para la mayoría de los tipos, desactivado para un campo multimedia, JSON o de credenciales. Desactivado nombra el cambio solo con la etiqueta; Activado también muestra los valores de un campo multimedia o JSON. Un campo de credenciales nunca muestra valores, y si el propio objeto lo desactiva, manda el objeto."
       },
       trackHistory: {
         label: "Registrar historial",

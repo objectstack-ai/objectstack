@@ -278,7 +278,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "fields.fieldHistory": {
         label: "字段修改值",
-        helpText: "在记录的活动时间线上显示该字段的旧值 → 新值。默认跟随平台：大多数类型为开，媒体、JSON 或凭据字段为关。关：只写出字段名；开：媒体或 JSON 字段也显示值。对象自身的字段修改值设为关时，以对象为准。"
+        helpText: "在记录的活动时间线上显示该字段的旧值 → 新值。默认跟随平台：大多数类型为开，媒体、JSON 或凭据字段为关。关：只写出字段名；开：媒体或 JSON 字段也显示值。凭据字段始终不显示值；对象自身的字段修改值设为关时，以对象为准。"
       },
       "fields.trackHistory": {
         label: "历史跟踪",
@@ -911,7 +911,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       fieldHistory: {
         label: "字段修改值",
-        helpText: "在记录的活动时间线上显示该字段的旧值 → 新值。默认跟随平台：大多数类型为开，媒体、JSON 或凭据字段为关。关：只写出字段名；开：媒体或 JSON 字段也显示值。对象自身的字段修改值设为关时，以对象为准。"
+        helpText: "在记录的活动时间线上显示该字段的旧值 → 新值。默认跟随平台：大多数类型为开，媒体、JSON 或凭据字段为关。关：只写出字段名；开：媒体或 JSON 字段也显示值。凭据字段始终不显示值；对象自身的字段修改值设为关时，以对象为准。"
       },
       trackHistory: {
         label: "记录变更历史",

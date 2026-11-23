@@ -8,11 +8,10 @@
  *
  * Values show by default. An object turns them off for every field with
  * `enable.fieldHistory: false`; a field turns its own off with
- * `fieldHistory: false`. Two classes never show them, whatever the flags say
- * on the field's default: a credential field (masked on read, so both sides
- * are the same mask) never, and a type in {@link FIELD_HISTORY_DEFAULT_OFF_TYPES}
- * only when the field opts in with `fieldHistory: true` or
- * `trackHistory: true`.
+ * `fieldHistory: false`. A credential field (masked on read, so both sides
+ * are the same mask) never shows them, whatever its flags say. A type in
+ * {@link FIELD_HISTORY_DEFAULT_OFF_TYPES} shows them only when the field opts
+ * in with `fieldHistory: true` or `trackHistory: true`.
  *
  * # Why it lives in `spec`
  *
