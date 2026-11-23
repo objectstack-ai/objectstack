@@ -104,6 +104,8 @@ vi.mock('@object-ui/react', async (importOriginal) => {
   return { ...mod, useAdapter: () => dataSource };
 });
 
+// The source reaches a dynamic import of it: its first load is paid at collection (`check:test-source-alias`).
+import '@objectstack/lint';
 import { DataPillar } from './StudioDesignSurface';
 import { StudioSaveHarness, pressStudioSave } from './__tests__/studioSaveHarness';
 import { createEmptyDataSource, failOnAbsorbedFetchError } from './__tests__/emptyDataSource';

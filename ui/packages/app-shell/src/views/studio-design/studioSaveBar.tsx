@@ -33,7 +33,7 @@ import { cn } from '@object-ui/components';
 import type { MetadataClient } from '@object-ui/data-objectstack';
 import { emitMetadataRefresh } from '../../assistant/assistantBus.js';
 import { t, tFormat } from '../metadata-admin/i18n.js';
-import { LINT_DEBOUNCE_MS } from '../metadata-admin/CelPredicateField.js';
+import { LINT_DEBOUNCE_MS } from '../metadata-admin/celLintDebounce.js';
 
 /** Past the editors' expression check of the last keystroke, and its report. */
 const VERDICT_SETTLE_MS = LINT_DEBOUNCE_MS + 50;

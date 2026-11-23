@@ -53,6 +53,8 @@ vi.mock('../../components/SuggestedBindingsPanel', () => ({ SuggestedBindingsPan
 vi.mock('../metadata-admin/AccessExplainPanel', () => ({ AccessExplainPanel: () => null }));
 vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => null }));
 
+// The source reaches a dynamic import of it: its first load is paid at collection (`check:test-source-alias`).
+import '@objectstack/lint';
 import { StudioDesignSurface } from './StudioDesignSurface';
 
 // The designer rows this suite reads in zh live in `@object-ui/i18n`'s `studio`

@@ -121,6 +121,8 @@ vi.mock('sonner', () => ({
   Toaster: () => null,
 }));
 
+// The source reaches a dynamic import of it: its first load is paid at collection (`check:test-source-alias`).
+import '@objectstack/lint';
 import { DataPillar } from './StudioDesignSurface';
 import { StudioSaveHarness, pressStudioSave } from './__tests__/studioSaveHarness';
 import { addFieldFromGrid } from './__tests__/dataPillarAddField';
