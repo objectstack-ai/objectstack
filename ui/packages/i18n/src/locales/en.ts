@@ -488,6 +488,24 @@ const en = {
       button: 'Scan code',
       failed: 'Could not scan',
     },
+    // The in-page file preview dialog (objectstack#36442).
+    filePreview: {
+      title: 'File preview',
+      previous: 'Previous file',
+      next: 'Next file',
+      download: 'Download',
+      openInNewTab: 'Open in new tab',
+      loading: 'Loading preview…',
+      tooLarge: 'This file is too large to preview. Please download it.',
+      unsupported: 'This file type cannot be previewed. Please download it.',
+      denied: 'You do not have access to this file.',
+      loadFailed: 'The preview could not be loaded.',
+      blocked: 'This file cannot be read in the page. Open it in a new tab instead.',
+      pdfOutside: 'On this device, a PDF opens in a new tab or in the device viewer.',
+      truncatedRows: 'Showing the first {{limit}} rows.',
+      truncatedLines: 'Showing the first {{limit}} lines.',
+      empty: 'This file is empty.',
+    },
     image: {
       upload: 'Upload image',
       addMore: 'Add more images',
@@ -2043,6 +2061,13 @@ const en = {
     foldedMoreFields_other: '{{count}} more',
     expandFolded: 'Show each update',
     collapseFolded: 'Hide updates',
+    // objectstack#36290 — one line per changed field under an activity entry:
+    // the field's label before its values, the word for an empty side, and
+    // the control that shows a long value in full and clamps it again.
+    fieldChangeLabel: '{{field}}:',
+    fieldChangeEmpty: 'Empty',
+    fieldChangeExpand: 'Show all',
+    fieldChangeCollapse: 'Show less',
     // Replies
     replyCount: '{{count}} reply',
     replyCount_one: '{{count}} reply',
@@ -2488,7 +2513,10 @@ const en = {
       unique: 'Unique',
       readOnly: 'Read Only',
       hidden: 'Hidden',
-      trackHistory: 'Track History',
+      fieldHistory: 'Field Change Values',
+      fieldHistoryDefault: 'Default ({{state}})',
+      fieldHistoryOn: 'On',
+      fieldHistoryOff: 'Off',
       defaultValue: 'Default Value',
       placeholder: 'Placeholder',
       referenceTo: 'Reference To',
@@ -2567,7 +2595,8 @@ const en = {
       copyLink: 'Copy link',
       linkCopied: 'Link copied to clipboard',
       linkCopyFailed: 'Failed to copy link',
-      design: 'Design',
+      // objectstack#36487 — an object entry's Studio door, in this menu and first in a list's ⋮.
+      objectSettings: 'Object settings',
     },
     settingsHub: {
       title: 'Settings',
@@ -4284,6 +4313,11 @@ const en = {
       renameSourceOnly: 'Tab names are changed in the app\'s source language',
       builtinFixed: 'The platform draws this tab last, under its own name.',
       adjustFieldGroups: 'Adjust field groups',
+      pairNotWritable: 'This app\'s customization package cannot be written, so its tabs cannot be saved.',
+      builtinMoves: 'A built-in tab can be moved, not hidden or renamed.',
+      sourceBase: 'Original package',
+      sourcePackage: 'From {{name}}',
+      sourceEnvironment: 'This environment',
     },
   },
   topbar: {

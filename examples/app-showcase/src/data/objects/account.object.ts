@@ -21,6 +21,7 @@ export const Account = ObjectSchema.create({
   label: 'Account',
   pluralLabel: 'Accounts',
   icon: 'building',
+  color: 'blue',
   description: 'A company the org delivers projects for.',
 
   // ADR-0061: which fields `$search` matches. Includes the two selects

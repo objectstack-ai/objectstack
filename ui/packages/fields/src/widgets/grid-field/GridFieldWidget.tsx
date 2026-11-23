@@ -42,6 +42,8 @@ import { RatingField } from '../RatingField.js';
 import { useBooleanValueLabel } from '../booleanValueLabel.js';
 import { isImeKey } from '../imeKey.js';
 import { GRID_FIELD_RETIRED_KEYS, type GridFieldMetadata, type GridFieldRetiredKey } from '@object-ui/types';
+import { SchemaRendererContext } from '@object-ui/react';
+import { lineReferenceSource } from './lineReferenceReads.js';
 // The grid's pure half: the column type, the computed-cell evaluator, the
 // lookup-pick patch and the row marks. They live beside the public face in
 // `../GridField.ts`, in the eager chunk, because `@object-ui/fields` exports
@@ -138,7 +140,8 @@ const isEmptyCell = (value: unknown) =>
 
 /** The star count of a `rating` column: its `max`, else `Field.rating`'s own 5 (objectstack#36043). */
 const ratingMax = (c: GridColumn) => c.max ?? 5;
-/** A list cell emptied by the user writes `null`, not `[]` (objectstack#36043):
+/** A list cell emptied by the user writes `null`, not `[]` (objectstack#36043;
+ *  the multi-record lookup cell too since objectstack#36552):
  *  the field contract stores a cleared multi-value field as `null`, and the
  *  save path's blank-line check (`isBlankRow`) reads only `null` / `''` as
  *  empty, so a `[]` would send a line the user emptied as a child record. */
@@ -351,7 +354,6 @@ function cellDisplayText(c: GridColumn, value: any, locale: string, fileText: Ce
   }
   // A multi-select cell names each value by its option's label (objectstack#36043).
   if (c.type === 'multiselect' && Array.isArray(value)) {
-    if (value.length === 0) return '—';
     return value.map((v) => c.options?.find((o) => String(o.value) === String(v))?.label ?? String(v)).join(', ');
   }
   // A check cell reads as its option's word (the session's, from the derive),
@@ -757,6 +759,14 @@ function GridFieldBody({
   };
   const displayText = (c: GridColumn, value: any, locale: string, cellCurrency?: string) =>
     cellDisplayText(c, value, locale, fileText, cellCurrency);
+  // The data source every people and lookup cell reads its records through
+  // (objectstack#36552): the page's, with the by-id read each cell makes to
+  // draw a name gathered into one `$in` read per referenced object, so a grid
+  // draws its names with one read per column instead of one per line.
+  // `undefined` without a page data source: the cells then resolve their own,
+  // as before. The same object on every render (`lineReferenceSource` keeps
+  // one per page source), so no cell sees a new source it would re-read for.
+  const cellSource = lineReferenceSource(React.useContext(SchemaRendererContext)?.dataSource);
   /**
    * The read-only face of a cell that is not text (objectstack#36043): people
    * by name, a rating as its stars; `null` for every other cell, which reads
@@ -765,7 +775,7 @@ function GridFieldBody({
   const readOnlyFace = (c: GridColumn, value: any): React.ReactNode | null => {
     if (isEmptyCell(value)) return null;
     if (c.type === 'user') {
-      return <UserField value={value} onChange={() => {}} readonly field={{ type: 'user', multiple: c.multiple } as any} />;
+      return <UserField value={value} onChange={() => {}} readonly field={{ type: 'user', multiple: c.multiple } as any} dataSource={cellSource} />;
     }
     if (c.type === 'rating') {
       return <RatingField value={Number(value)} onChange={() => {}} readonly field={{ type: 'rating', max: ratingMax(c) } as any} />;
@@ -1246,6 +1256,7 @@ function GridFieldBody({
                           onChange={() => {}}
                           readonly
                           field={{ reference: c.reference, displayField: c.displayField, idField: c.idField } as any}
+                          dataSource={cellSource}
                         />
                       ) : (
                         // Every other cell reads through `displayText`, as the
@@ -1353,13 +1364,16 @@ function GridFieldBody({
       if (c.type === 'lookup' && val != null && val !== '') {
         return (
           <LookupField value={val} onChange={() => {}} readonly
-            field={{ reference: c.reference, displayField: c.displayField, idField: c.idField } as any} />
+            field={{ reference: c.reference, displayField: c.displayField, idField: c.idField } as any}
+            dataSource={cellSource} />
         );
       }
       const face = readOnlyFace(c, val);
       if (face) return face;
       return (
-        <span className={cn('px-2 text-sm text-foreground', isNumeric(c.type) && 'tabular-nums', (val == null || val === '') && 'text-muted-foreground')}>
+        // Muted exactly when the text is the em dash an empty cell reads as,
+        // a stored empty list included (objectstack#36552).
+        <span className={cn('px-2 text-sm text-foreground', isNumeric(c.type) && 'tabular-nums', isEmptyCell(val) && 'text-muted-foreground')}>
           {displayText(c, val, displayLocale, currencyOf(c))}
         </span>
       );
@@ -1380,7 +1394,10 @@ function GridFieldBody({
       return (
         <LookupField
           value={val}
-          onChange={(v: any) => setCellValue(rowIdx, c.name, v)}
+          // A multi-record lookup emptied by the user writes `null`, as the
+          // multi-select, tags and people cells do (objectstack#36552).
+          onChange={(v: any) => setCellValue(rowIdx, c.name, emptyListAsNull(v))}
+          dataSource={cellSource}
           onSelectRecord={(rec: any, picked?: { sourceFields?: Readonly<Record<string, unknown>> | null }) => applyLookupSelection(rowIdx, c, rec, picked)}
           compact
           field={{ reference: c.reference, displayField: c.displayField, idField: c.idField, multiple: c.multiple, options: c.options, placeholder: '—' } as any}
@@ -1475,7 +1492,7 @@ function GridFieldBody({
           panelTestId="line-items-user-panel"
         >
           {({ draft, setDraft, commit }) => (
-            <UserField inCell value={draft} onChange={(next: any) => setDraft(next)} onCommit={commit} field={field} />
+            <UserField inCell value={draft} onChange={(next: any) => setDraft(next)} onCommit={commit} field={field} dataSource={cellSource} />
           )}
         </GridPanelCell>
       );

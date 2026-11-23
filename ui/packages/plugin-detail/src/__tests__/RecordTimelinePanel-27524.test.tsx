@@ -91,7 +91,7 @@ describe('the 动态 panel (objectstack#27524, Target 5)', () => {
     // Newest first: the change (00:20), Note 5 (00:05), Note 4 — the reply (00:30) is not a root.
     const lines = peekLines(container);
     expect(lines).toHaveLength(3);
-    expect(lines[0]).toContain('Status New → Contacted');
+    expect(lines[0]).toContain('Status: New → Contacted');
     expect(lines[1]).toContain('Note 5');
     expect(lines[2]).toContain('Note 4');
     expect(lines.join(' ')).not.toContain('A reply');

@@ -175,6 +175,21 @@ export const PageRegionPostureProvider: React.FC<{
 };
 
 /**
+ * Clears the page-region posture for its subtree, so a block under it reads
+ * `null` and draws its full rendering, as it would outside any page.
+ *
+ * For a surface a page block opens over the page that is not a part of the
+ * block's region: a drill dialog (objectstack-ai/objectstack#36256). React
+ * context crosses a dialog's portal, so without this the dialog's list would
+ * take the posture of the region that holds the block that opened it, and
+ * draw the compact or capped list there: no toolbar, no chips, no pager, and
+ * a 「View all」 link to a list that does not carry the dialog's condition.
+ */
+export const PageRegionPostureReset: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+  <PageRegionPostureContext.Provider value={null}>{children}</PageRegionPostureContext.Provider>
+);
+
+/**
  * The posture of the page region this block renders in: `'compact'` when the
  * region is narrower than half the page, `'full'` when it is not, `null`
  * outside a page region or before the width is known — read `null` as

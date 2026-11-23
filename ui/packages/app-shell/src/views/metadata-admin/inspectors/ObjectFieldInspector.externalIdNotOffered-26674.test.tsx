@@ -26,6 +26,9 @@ vi.mock('../previews/useObjectFields', () => ({
   useObjectFields: () => ({ fields: [], loading: false, error: null }),
 }));
 
+// Paid at collection, not inside a case's clock (check:test-source-alias).
+import '@objectstack/formula';
+import '@objectstack/lint';
 import { ObjectFieldInspector } from './ObjectFieldInspector';
 
 afterEach(cleanup);
@@ -58,7 +61,8 @@ describe('ObjectFieldInspector · no External ID switch (objectstack#26674)', ()
     expect(screen.queryByText('External ID')).toBeNull();
     expect(screen.getByText('Read-only')).toBeInTheDocument();
     expect(screen.getByText('Hidden')).toBeInTheDocument();
-    expect(screen.getByText('Track history')).toBeInTheDocument();
+    // objectstack#36290 — the Track history box became the Field change values choice.
+    expect(screen.getByText('Field change values')).toBeInTheDocument();
   });
 
   it('a stored externalId does not resurrect the control', () => {

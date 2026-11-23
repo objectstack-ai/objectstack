@@ -3,7 +3,7 @@
 import type { AutomationContext } from '@objectstack/spec/contracts';
 import { AuthzPostureSchema, type AuthzPosture } from '@objectstack/spec/security';
 import type { PermissionSetAddressParsed } from '@objectstack/spec/kernel';
-import { markFlowWriteReferenceCheck } from '@objectstack/core';
+import { markFlowWriteReferenceCheck, markRunCaller } from '@objectstack/core';
 import { markGuardRefusal } from './guard-refusal.js';
 
 /**
@@ -97,8 +97,11 @@ export interface RunIdentityContext {
    * ledger's deployment-level rows among them (`PLATFORM_ADMIN` alone is
    * served those). Present on a `runAs:'user'` run whose setup seeded it
    * ({@link runPosture}); without it every such reader answers as for a
-   * principal below the rung, which narrows. Never set on a `runAs:'system'`
-   * run, whose `isSystem` short-circuit precedes every reader of it.
+   * principal below the rung, which narrows. On a `runAs:'system'` run that
+   * names a user it is carried when the run context carries it: the
+   * organization wall (plugin-security) judges such a run by that user's
+   * door, the platform operator's crossing included, while every other reader
+   * stands down for `isSystem`.
    */
   posture?: AuthzPosture;
   /**
@@ -124,9 +127,11 @@ export interface RunIdentityContext {
    * access requires a current membership in the organization. Present on a
    * `runAs:'user'` run whose context carries it (the launch door hands the
    * request's; run setup resolves it otherwise, {@link runAccessibleOrgIds});
-   * the wall then judges the run as it judges the same user's request. Never
-   * set on a `runAs:'system'` run, whose `isSystem` short-circuit precedes the
-   * wall.
+   * the wall then judges the run as it judges the same user's request. On a
+   * `runAs:'system'` run that names a user it is carried when the run context
+   * carries it: elevation lifts the user's business rules, never the
+   * organization wall, which plugin-security holds the run to (ADR-0095 D1),
+   * and under `group` the engine scopes the run's driver calls by this set.
    */
   accessible_org_ids?: string[];
   /** Acting user's tenant/org id. */
@@ -286,6 +291,24 @@ export interface SeededRunContext extends AutomationContext {
    * trigger user ({@link runTriggerUserId}).
    */
   triggerUserId?: string | null;
+  /**
+   * The run began for no caller although it names a user: a run that a write
+   * of a decided segment of a run that began for no caller started (the
+   * record-change trigger sets it, from the run-caller mark on the write's hook
+   * session). Its `userId` is that writer — its attribution user and, for every
+   * reader of the run's trigger user (`runTriggerUserId`: an approval's
+   * submitter, the run-state reader, the run history), its trigger user, as on
+   * any run a write starts. Only the organization wall reads this fact: the run
+   * is not judged by the writer's wall, and run setup and the run's data
+   * context take none of the writer's organization facts. Persisted with the
+   * run's context; no launch door can spell it.
+   */
+  beganForNoCaller?: true;
+}
+
+/** Did the run begin for no caller although it names a user ({@link SeededRunContext.beganForNoCaller})? */
+export function runBeganForNoCaller(context: AutomationContext | undefined): boolean {
+  return (context as SeededRunContext | undefined)?.beganForNoCaller === true;
 }
 
 /**
@@ -295,6 +318,20 @@ export interface SeededRunContext extends AutomationContext {
  * construction. Attribution of the run, not of its writes: the writes of the
  * current segment are `userId`'s.
  */
+/**
+ * The user a decided segment's run began for: the trigger's user a decision
+ * recorded when it switched the segment to its decider (`triggerUserId`), or
+ * `null` when the trigger resolved none. `undefined` on a segment no decision
+ * switched, whose own `userId` is the caller.
+ */
+export function runDecidedSegmentCaller(context: AutomationContext | undefined): string | null | undefined {
+  const seeded = context as SeededRunContext | undefined;
+  // A run that began for no caller names none, in every segment.
+  if (runBeganForNoCaller(seeded)) return null;
+  if (!seeded || !Object.prototype.hasOwnProperty.call(seeded, 'triggerUserId')) return undefined;
+  return typeof seeded.triggerUserId === 'string' && seeded.triggerUserId !== '' ? seeded.triggerUserId : null;
+}
+
 export function runTriggerUserId(context: AutomationContext | undefined): string | undefined {
   const seeded = context as SeededRunContext | undefined;
   if (seeded && Object.prototype.hasOwnProperty.call(seeded, 'triggerUserId')) {
@@ -364,7 +401,12 @@ export function runPrincipalKind(context: AutomationContext | undefined): 'agent
  *    PLUS the trigger's `userId` / `tenantId` when the trigger resolved them
  *    (#5494; after an approval decision `userId` is the decider, the run's
  *    elevation unchanged) — the security middleware short-circuits on `isSystem`, so the
- *    run reads/writes with full access, bypassing RLS — save its writes to the
+ *    run bypasses RLS (its business rules: object and field permissions,
+ *    ownership, sharing) — but not the organization wall: its reads and writes
+ *    are judged by the organization wall of the user it runs for
+ *    (plugin-security's app-automation wall; a run that began for no caller is
+ *    not judged by it) —
+ *    and save its writes to the
  *    identity-assignment objects (`sys_user_position`, `sys_user_permission_set`,
  *    `sys_invitation`, `sys_member`), which plugin-security refuses for a system
  *    context that carries a `flowRunId` (#25251), so assigning authority from a
@@ -450,12 +492,15 @@ export function resolveRunDataContext(context: AutomationContext | undefined): R
     // `userId` is absent, which is what keeps a genuinely user-less run's
     // writes attributable instead of "Unknown user" (#4366).
     const actor = `svc:flow:${context.flowName ?? 'automation'}`;
+    // The run's caller as the run-caller mark reads it: `undefined` where the
+    // run's own user is its caller.
+    const caller = runDecidedSegmentCaller(context);
     // [#28881] Elevation is for authorization, not for links to rows that do
     // not exist: the mark keeps the engine's write-time reference check on
     // this run's record writes (`reference_not_found`, as on the user path),
     // while `isSystem` keeps every authorization exemption below. Not an
     // authorable key; see `markFlowWriteReferenceCheck` (@objectstack/core).
-    return markFlowWriteReferenceCheck<RunDataContext>({
+    const elevated = markFlowWriteReferenceCheck<RunDataContext>({
       isSystem: true,
       actor,
       // #5494 — elevation is not anonymity. When the trigger resolved a user
@@ -481,7 +526,9 @@ export function resolveRunDataContext(context: AutomationContext | undefined): R
       // hotcrm#548-family fix): the tenant wall survives elevation for an
       // org-triggered run.
       // A run that must genuinely cross orgs is a user-less one (a schedule
-      // carries no org, nothing narrows) or sets explicit fields.
+      // carries no org, nothing narrows). A run for a user does not: naming
+      // another organization in a written row is judged against that user's
+      // organization wall (plugin-security), as the user's own request is.
       ...(context.tenantId ? { tenantId: context.tenantId } : {}),
       // Elevation grants this run everything, so no `positions` /
       // `permissions` are read for its own operations. They matter only to a
@@ -506,10 +553,32 @@ export function resolveRunDataContext(context: AutomationContext | undefined): R
       // person's. `isSystem` has answered before any gate reads it, so for
       // the run's own operations it is attribution and nothing else.
       ...(runPrincipalKind(context) ? { principalKind: 'agent' as const } : {}),
+      // [ADR-0095 D1, ADR-0123 D2] Elevation lifts the user's business rules,
+      // never the organization wall: plugin-security holds a system run to the
+      // wall of the user it runs for, and reads that user's membership set and
+      // posture rung for it, as the user's own request would carry them. The
+      // engine scopes the run's driver calls by the same set under `group`.
+      // Carried only when the run context carries them; the wall resolves them
+      // for the user otherwise.
+      // The run user's organization facts, for the wall the run meets — only
+      // where that user is the run's caller: none for a decided segment, a run
+      // that began for no caller, or a child run of either (`caller` below).
+      ...(context.userId && caller === undefined && runAccessibleOrgIds(context)
+        ? { accessible_org_ids: runAccessibleOrgIds(context) }
+        : {}),
+      ...(context.userId && caller === undefined && runPosture(context) ? { posture: runPosture(context) } : {}),
       ...(flowRunId ? { flowRunId } : {}),
       ...(locale ? { locale } : {}),
       ...(impersonatedBy ? { impersonatedBy } : {}),
     });
+    // Wherever the run's own user is not its caller — a decided segment (its
+    // user is the decider, attribution only), a run recorded as begun for no
+    // caller, in every segment, and a child run of either — the run carries
+    // the run-caller mark: the wall goes on judging the run by the user it
+    // began for, and a run that began for no caller stays unjudged. The run
+    // context records the trigger's user (`triggerUserId`, `null` for none)
+    // when a decision switches the user.
+    return caller === undefined ? elevated : markRunCaller(elevated, caller);
   }
   if (!context?.userId) {
     // #3760 — FAIL CLOSED. There is no identity to present. Presenting none

@@ -12,6 +12,7 @@ export const Account = ObjectSchema.create({
   label: 'Account',
   pluralLabel: 'Accounts',
   icon: 'building',
+  color: 'blue',
   description: 'A company that the org sells to or supports.',
   // What the record page shows at a glance, under the title.
   highlightFields: ['industry', 'annual_revenue', 'website'],
