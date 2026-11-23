@@ -27,6 +27,12 @@ import { createStandaloneStack, Runtime } from '@objectstack/runtime';
 import Compile from '../src/commands/compile';
 import { defineStackSourceFromLiteral, linkSpec } from './helpers/define-stack-fixture.js';
 
+// Pay the first transform of these dist-resolved workspace deps at MODULE LOAD:
+// the build and the boot below import them lazily, inside a clocked hook
+// (`scripts/check-test-source-alias.mjs`, the clocked-window rule).
+import '@objectstack/objectql/core';
+import '@objectstack/plugin-security';
+
 const CLI_ROOT = resolve(fileURLToPath(import.meta.url), '..', '..');
 const APP_ID = 'com.test.issue-36647-build';
 const VECTOR = 'com.test.issue-36647-build.vector';
