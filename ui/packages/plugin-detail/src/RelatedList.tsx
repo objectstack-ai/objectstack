@@ -92,7 +92,7 @@ import { useSafeFieldLabel, useRecordContext, useRecordPagePreferences, type Rel
 import { usePermissions } from '@object-ui/permissions';
 import { useObjectLabel, useDisplayLocale, useLocalization, resolveFieldCurrency, recordCurrencyField, recordCurrencyPath, withFollowedParent } from '@object-ui/i18n';
 import { useDetailTranslation } from './useDetailTranslation';
-import { isMaskedDetailFieldType } from './fieldEnrichment';
+import { isComputedFieldType, isMaskedDetailFieldType } from './fieldEnrichment';
 import {
   COMPACT_RELATED_ROWS,
   RELATED_CARD_DROP_LINE,
@@ -1066,6 +1066,10 @@ interface RelationFieldDef {
   multiple?: unknown;
   hidden?: unknown;
   readonly?: unknown;
+  defaultValue?: unknown;
+  options?: unknown;
+  dependsOn?: unknown;
+  lookupFilters?: unknown;
 }
 
 function relationFieldEntries(fields: unknown): Array<[string, RelationFieldDef]> {
@@ -1085,13 +1089,37 @@ function relationFieldEntries(fields: unknown): Array<[string, RelationFieldDef]
  *    lists only UNLINKED children (this relationship empty): a row already
  *    here would be a no-op pick, and a row under another parent would move
  *    silently. Moving a child between parents stays on the child's own
- *    form, where the change is visible (seat ruling on L1-a S1, #35725);
+ *    form, where the change is visible (seat ruling on L1-a S1, #35725).
+ *    When the relationship lookup is scoped by the child's own fields
+ *    (`dependsOn`: a contract's opportunity `dependsOn` the contract's
+ *    account), the picker lists only children that lookup could name this
+ *    parent from: each `dependsOn` field equal to the parent's value
+ *    (objectstack#36707 — the opportunity's 合同 tab listed every account's
+ *    unlinked contracts, and a pick linked another customer's contract).
+ *    A scope it cannot resolve (the parent's value is empty or not read, or
+ *    a `lookupFilters` comparand reads `$record`) offers no picker;
  *  - `master_detail` with a source catalog: the picker lists the catalog and
  *    a pick creates a row of this list naming it (`linkField`). The catalog
  *    is the child's one other REQUIRED single-valued `lookup` (a line's
  *    product): the field every row must name, so a pick is a whole row;
  *  - `master_detail` with no catalog (none, or more than one required
  *    lookup): `undefined`, and 「+ 添加」 creates a new row directly.
+ *
+ * A required lookup is a catalog only when both halves of "a pick is a whole
+ * row" hold (objectstack#36659 — a contract's required primary contact was
+ * read as its catalog, so the account's 合同 tab listed every account's
+ * contacts and a pick would have created a contract from a contact):
+ *
+ *  - its candidates are the same for every row: no `dependsOn` and no
+ *    `lookupFilters` entry reading `$record`. A lookup scoped by the row (the
+ *    contact `dependsOn` the contract's account) is a party of that row, and
+ *    the picker, which lists the catalog for the list, cannot apply the scope;
+ *  - the pick leaves nothing for a person to write: every OTHER required
+ *    field of the child has a default the insert applies (`defaultValue`, or
+ *    a select option marked `default`), is `readonly`, or is computed.
+ *    `required` is the writer's contract, so a child that still needs a
+ *    start date or an amount is a record someone fills in on its form, not a
+ *    line a pick completes.
  *
  * `undefined` too for any other field type and for a multi-valued
  * relationship, whose membership a pick cannot write.
@@ -1100,12 +1128,17 @@ export function derivedAddOf(
   childFields: unknown,
   referenceField: string | undefined,
   childObject: string | undefined,
+  parentRecord?: Record<string, unknown>,
 ): RelatedListAdd | undefined {
   if (!referenceField || !childObject) return undefined;
   const entries = relationFieldEntries(childFields);
   const rel = entries.find(([name]) => name === referenceField)?.[1];
   if (!rel || rel.multiple === true) return undefined;
-  if (rel.type === 'lookup') return { picker: { object: childObject, filter: [{ field: referenceField, operator: 'is_empty' }] } };
+  if (rel.type === 'lookup') {
+    const scope = parentScopeOf(rel, parentRecord);
+    if (!scope) return undefined;
+    return { picker: { object: childObject, filter: [{ field: referenceField, operator: 'is_empty' }, ...scope] } };
+  }
   if (rel.type !== 'master_detail') return undefined;
   const catalogs = entries.filter(([name, def]) =>
     name !== referenceField
@@ -1117,7 +1150,81 @@ export function derivedAddOf(
     && typeof def.reference === 'string' && def.reference !== '');
   if (catalogs.length !== 1) return undefined;
   const [catalogField, catalogDef] = catalogs[0];
+  if (scopedByRow(catalogDef)) return undefined;
+  const leftToWrite = entries.some(([name, def]) =>
+    name !== referenceField
+    && name !== catalogField
+    && def.required === true
+    && !insertDefaults(def)
+    && def.readonly !== true
+    && !isComputedFieldType(undefined, def.type));
+  if (leftToWrite) return undefined;
   return { picker: { object: catalogDef.reference as string }, linkField: catalogField };
+}
+
+/**
+ * The candidate rules a `lookup` relationship's own scope adds to the derived
+ * picker of children (`derivedAddOf`), seen from the parent: `[]` when the
+ * lookup is unscoped, `undefined` when the scope cannot be resolved here.
+ *
+ * `dependsOn` scopes the lookup's candidates by equality — a `{ field, param }`
+ * entry (a bare string names both) sends the child's `field` value as the
+ * parent object's `param` (`LookupField`'s `dependentFilter`). Reversed, a
+ * child can name this parent only when its `field` equals the parent's
+ * `param`, so each entry becomes `field equals <parent's param>`. With the
+ * parent's value empty or not read yet no child could name it: no picker,
+ * never an unscoped one. A `lookupFilters` comparand reading `$record` relates
+ * the parent's columns to the child's by any operator, and this side does not
+ * invert it: no picker either.
+ */
+function parentScopeOf(rel: RelationFieldDef, parentRecord: Record<string, unknown> | undefined): ViewFilterElement[] | undefined {
+  if (Array.isArray(rel.lookupFilters) && rel.lookupFilters.some(readsRecord)) return undefined;
+  if (!Array.isArray(rel.dependsOn) || rel.dependsOn.length === 0) return [];
+  const rules: ViewFilterElement[] = [];
+  for (const entry of rel.dependsOn) {
+    const field = typeof entry === 'string' ? entry : (entry as { field?: unknown } | null)?.field;
+    const param = typeof entry === 'string' ? entry : ((entry as { param?: unknown }).param ?? field);
+    if (typeof field !== 'string' || field === '' || typeof param !== 'string' || param === '') return undefined;
+    const value = referenceValueOf(parentRecord?.[param]);
+    if (value === undefined) return undefined;
+    rules.push({ field, operator: 'equals', value });
+  }
+  return rules;
+}
+
+/** A record field's value as a filter comparand: an expanded reference reads as its id. */
+function referenceValueOf(raw: unknown): string | number | boolean | undefined {
+  const value = raw && typeof raw === 'object' && !Array.isArray(raw)
+    ? ((raw as { id?: unknown; _id?: unknown }).id ?? (raw as { _id?: unknown })._id)
+    : raw;
+  if (typeof value === 'number' || typeof value === 'boolean') return value;
+  return typeof value === 'string' && value !== '' ? value : undefined;
+}
+
+/** Does this `lookupFilters` entry compare with a `{ $record }` value? */
+function readsRecord(entry: unknown): boolean {
+  const value = (entry as { value?: unknown } | null)?.value;
+  return !!value && typeof value === 'object' && '$record' in (value as object);
+}
+
+/**
+ * Does the insert fill this field when a create omits it — the engine's
+ * `applyFieldDefaults`: a non-null `defaultValue`, else a select option marked
+ * `default: true`?
+ */
+function insertDefaults(def: RelationFieldDef): boolean {
+  if (def.defaultValue != null) return true;
+  return Array.isArray(def.options) && def.options.some((o) => (o as { default?: unknown } | null)?.default === true);
+}
+
+/**
+ * Does this lookup's candidate set depend on the row it is written on — a
+ * `dependsOn` entry, or a `lookupFilters` comparand `{ $record }`? Such a
+ * lookup is no catalog (`derivedAddOf`).
+ */
+function scopedByRow(def: RelationFieldDef): boolean {
+  if (Array.isArray(def.dependsOn) && def.dependsOn.length > 0) return true;
+  return Array.isArray(def.lookupFilters) && def.lookupFilters.some(readsRecord);
 }
 
 /** One group of a stateful child list (`statusGroupsOf`). */
@@ -1491,8 +1598,8 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   // when the page authored none (`derivedAddOf`). The rest of this component
   // reads `add` alone, so a derived add takes the authored one's path.
   const derivedAdd = React.useMemo(
-    () => (enlargedFace && !authoredAdd && !schema ? derivedAddOf(objectSchema?.fields, referenceField, api) : undefined),
-    [enlargedFace, authoredAdd, schema, objectSchema, referenceField, api],
+    () => (enlargedFace && !authoredAdd && !schema ? derivedAddOf(objectSchema?.fields, referenceField, api, parentRecord) : undefined),
+    [enlargedFace, authoredAdd, schema, objectSchema, referenceField, api, parentRecord],
   );
   const add = authoredAdd ?? derivedAdd;
   // objectstack#27056 — the card's count, asked up front with the column's
@@ -2065,7 +2172,12 @@ export const RelatedList: React.FC<RelatedListProps> = ({
     });
     return () => { cancelled = true; };
   }, [pickerOpen, pickerObject, pickerSchema, dataSource]);
-  const pickerDisplayField = add?.picker?.labelField || 'name';
+  // The label column is the picked object's name field (ADR-0079: declared
+  // `nameField`, else derived) when the add names no `labelField` — a derived
+  // add never does (objectstack#36707: a contract's 合同 tab picker led with an
+  // empty 「NAME」, the contract's name being `contract_number`). `name` only
+  // until the schema is read.
+  const pickerDisplayField = add?.picker?.labelField || resolveNameField(pickerSchema) || 'name';
   const pickerColumns = React.useMemo(() => {
     const derived = deriveLookupColumns(pickerSchema, { displayField: pickerDisplayField });
     return derived.length > 0 ? derived : undefined;

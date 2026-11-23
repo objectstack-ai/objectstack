@@ -124,7 +124,9 @@ describe('the post-save advisory toast shows the producer’s localized sentence
 
     const text = await toastText();
     expect(text).toContain(USER_TEXT_ZH);
-    expect(text).toContain(FINDING.rule);
+    // The rule id and `where` are the developer face's locators (objectstack#36746).
+    expect(text).not.toContain(FINDING.rule);
+    expect(text).not.toContain(FINDING.where);
     expect(text).not.toContain(FINDING.message);
     expect(text).not.toContain(FINDING.hint);
   });

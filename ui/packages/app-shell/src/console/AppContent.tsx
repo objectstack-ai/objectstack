@@ -67,6 +67,8 @@ import {
   navEntriesShownOncePendingReadsShow,
 } from '../hooks/useNavMemberGates.js';
 import { resolveSetupAppPath } from './ConsoleShell.js';
+import { isLandingPath, useSetupFirstPageSlot } from './setupFirstPageSlot.js';
+import { useInSetupApp } from './setupApp.js';
 import { useSetupAliasApprovalsTarget } from './setupAliasApprovals.js';
 import { APP_ROUTE_METADATA_READS, collectRoutePaths, metadataReadsForAppRoute } from './appRouteMetadataReads.js';
 import { enterAppBundle, objectViewRouteObject, prefetchObjectViewRows, readAppObjectScope } from './appObjectScope.js';
@@ -1626,6 +1628,7 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
                   // view, with the sentence that says so.
                   <ObjectNotFoundState objectName={routeObjectRefusal.objectName} packageDisabled />
                 ) : (
+                <SetupFirstPageTop app={activeApp} ctx={{ currentUserId: user?.id ?? null }}>
                 <Routes>
                 <Route
                   path="/"
@@ -1725,6 +1728,7 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
                     page so users always know when a URL didn't resolve. */}
                 <Route path="*" element={<RouteNotFound />} />
               </Routes>
+                </SetupFirstPageTop>
                 )}
                 {/* objectstack#32685 — after the route's element in the same
                     boundary: shown in the commit that shows the route, never
@@ -1965,6 +1969,55 @@ function carryQueryOntoLanding(target: string, search: string, hash: string): st
   for (const key of new Set(arriving.keys())) params.delete(key);
   arriving.forEach((value, key) => params.append(key, value));
   return `${beforeHash.slice(0, queryAt)}?${params.toString()}${carriedHash}`;
+}
+
+/**
+ * The route an app's root lands on for this member: `resolveLandingRoute` over
+ * the trees the member is shown, as `AppRootLanding` asks it once the reads
+ * are decided.
+ */
+function memberLandingRoute(app: any, gates: ReturnType<typeof useNavMemberGates>, ctx: NavTemplateContext): string {
+  const areas = (app?.areas || []) as Array<{ navigation?: NavigationItem[] } | null | undefined>;
+  const trees = [
+    navEntriesShownToMember(app?.navigation || [], gates),
+    ...areas.map((area) => navEntriesShownToMember(area?.navigation || [], gates)),
+  ];
+  return resolveLandingRoute(app, trees, gates.evaluateVisibility, ctx);
+}
+
+/**
+ * objectstack#36732 (item 5, option A) — the host's element above the Setup
+ * app's first page (`setupFirstPageSlot.ts`): the page Setup's root lands on
+ * for this member, asked the way `AppRootLanding` asks it, over the trees the
+ * member is shown. Drawn from 768 px up only (a phone is unchanged), and only
+ * in Setup. Where it is drawn, the page scrolls as one
+ * column: the element first, the route's page at its full height below it.
+ */
+function SetupFirstPageTop({
+  app,
+  ctx,
+  children,
+}: {
+  app: any;
+  ctx: NavTemplateContext;
+  children: ReactNode;
+}) {
+  const slot = useSetupFirstPageSlot();
+  const inSetup = useInSetupApp();
+  const phone = usePhoneViewport();
+  const gates = useNavMemberGates();
+  const location = useLocation();
+  // The path below `/apps/SEGMENT/`, the base every landing route is relative to.
+  const inAppPath = location.pathname.split('/').slice(3).join('/');
+  const onFirstPage = Boolean(slot) && inSetup && !phone && isLandingPath(inAppPath, memberLandingRoute(app, gates, ctx));
+  // The same two wrappers on every route, the slot's place held by `null`
+  // elsewhere, so moving onto or off the first page never remounts the routes.
+  return (
+    <div className={onFirstPage ? 'h-full overflow-y-auto' : 'h-full'}>
+      {onFirstPage && slot ? <div data-testid="setup-first-page">{slot()}</div> : null}
+      <div className="h-full">{children}</div>
+    </div>
+  );
 }
 
 /**

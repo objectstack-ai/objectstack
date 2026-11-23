@@ -106,4 +106,24 @@ describe('datasetFilterCondition', () => {
     expect(conditionToGroup({ amount: { $gt: 1, $lt: 9 } }).representable).toBe(false);
     expect(conditionToGroup({ $and: [{ $or: [{ a: { $eq: 1 } }] }] }).representable).toBe(false);
   });
+
+  it('`$and` is the group only when it is the only key: siblings send the filter to the source editor (objectstack#36645)', () => {
+    // The spec's FilterCondition is a field record intersected with optional
+    // `$and` / `$or` / `$not`, so these are valid. Read as just their `$and`
+    // rows, the next commit of any row would drop the siblings.
+    for (const stored of [
+      { $and: [{ stage: { $eq: 'won' } }], amount: { $gt: 5 } },
+      { $and: [{ stage: { $eq: 'won' } }], $not: { stage: { $eq: 'lost' } } },
+      { $and: { stage: { $eq: 'won' } } },
+      { $not: { stage: { $eq: 'lost' } } },
+      { $not: { $eq: 'lost' } },
+    ]) {
+      expect(conditionToGroup(stored as never).representable, JSON.stringify(stored)).toBe(false);
+    }
+    // CONTROL: a lone `$and` still opens as its rows and writes back as it was.
+    const lone = { $and: [{ stage: { $eq: 'won' } }, { amount: { $gt: 5 } }] };
+    const read = conditionToGroup(lone);
+    expect(read.representable).toBe(true);
+    expect(groupToCondition(read.group)).toEqual(lone);
+  });
 });

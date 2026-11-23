@@ -15,11 +15,18 @@
  * romanised, as the Studio inspector derives it) and made unique against the
  * reports the console already knows, so a new report never writes over one.
  *
+ * Opened from the design mode's 「Add menu item → Reports → New report…」
+ * (objectstack#36364), the page fills the menu's held place: a slot is
+ * offered for this app (`designModeReportSlot`), and Save hands the report to
+ * it, which creates the report in the menu's package and saves its menu entry
+ * with every other staged design change. Close cancels the place and writes
+ * nothing.
+ *
  * @module
  */
 
 import * as React from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { Loader2 } from 'lucide-react';
 import { Empty, EmptyDescription, EmptyTitle } from '@object-ui/components';
@@ -29,6 +36,7 @@ import { formatMetadataError } from '@object-ui/data-objectstack';
 import type { DataSource } from '@object-ui/types';
 import type { ReportDraft } from '@object-ui/plugin-report';
 import { ReportBuilderHost } from './ReportBuilderHost.js';
+import { useNewReportSlot } from '../layout/designModeReportSlot.js';
 import { saveAndPublishRuntimeMetadata } from './runtime-metadata-persistence.js';
 import { useMetadataClient } from './metadata-admin/useMetadata.js';
 import { useMetadata } from '../providers/MetadataProvider.js';
@@ -83,11 +91,17 @@ export function ReportNewPage({ dataSource }: { dataSource?: DataSource }) {
   const metadataClient = useMetadataClient();
   const { reports, loading, refresh } = useMetadata();
   const { isAdmin, isResolved } = useWorkspaceAdminStatus();
+  /** The menu place this report fills, when the design mode opened the page for one. */
+  const slot = useNewReportSlot(useLocation().pathname);
 
   const backToReports = React.useCallback(() => {
-    if (appName) navigate(`/apps/${appName}/reports`);
+    if (slot) {
+      // Back to the page the design mode was on; the held place is dropped.
+      slot.cancel();
+      navigate(-1);
+    } else if (appName) navigate(`/apps/${appName}/reports`);
     else navigate(-1);
-  }, [navigate, appName]);
+  }, [navigate, appName, slot]);
 
   const handleSave = React.useCallback(
     async (draft: ReportDraft): Promise<boolean> => {
@@ -110,13 +124,18 @@ export function ReportNewPage({ dataSource }: { dataSource?: DataSource }) {
           return false;
         }
         const body = { ...draft, label, name };
-        const outcome = await saveAndPublishRuntimeMetadata('report', name, body, {
-          metadataClient,
-          dataSource: dataSource as any,
-        });
-        if (outcome === 'pending-draft') {
-          toast.error(t('form.saveError'), { description: t('report.builder.pendingDraft') });
-          return false;
+        if (slot) {
+          // The design mode creates it with its menu entry, and says why when it cannot.
+          if (!(await slot.save(name, typed || String(label), body))) return false;
+        } else {
+          const outcome = await saveAndPublishRuntimeMetadata('report', name, body, {
+            metadataClient,
+            dataSource: dataSource as any,
+          });
+          if (outcome === 'pending-draft') {
+            toast.error(t('form.saveError'), { description: t('report.builder.pendingDraft') });
+            return false;
+          }
         }
       } catch (err) {
         toast.error(t('form.saveError'), {
@@ -131,7 +150,7 @@ export function ReportNewPage({ dataSource }: { dataSource?: DataSource }) {
       });
       return true;
     },
-    [metadataClient, reports, language, dataSource, refresh, navigate, appName, t],
+    [metadataClient, reports, language, dataSource, refresh, navigate, appName, t, slot],
   );
 
   if (loading || !isResolved) {
@@ -159,6 +178,13 @@ export function ReportNewPage({ dataSource }: { dataSource?: DataSource }) {
       onSave={handleSave}
       onClose={backToReports}
       dataSource={dataSource}
+      banner={
+        slot ? (
+          <p className="mb-3 text-sm text-muted-foreground" data-testid="report-new-adds-to-menu">
+            {t('report.builder.addsToMenu')}
+          </p>
+        ) : undefined
+      }
     />
   );
 }

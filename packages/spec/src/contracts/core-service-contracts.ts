@@ -44,6 +44,7 @@ import type { IObjectQLEngine } from './objectql-engine';
 import type { IWebhookService } from './webhook-service';
 import type { ITriggerApiService } from './trigger-api-service';
 import type { ICommentDoorsService } from './comment-doors-service';
+import type { IPersonalViewDoorsService } from './personal-view-doors-service';
 
 /**
  * The evidenced slot → contract bindings.
@@ -208,6 +209,17 @@ export interface ServiceSlotContracts extends CoreServiceContracts {
      * (`handleCommentDoor`).
      */
     comments: ICommentDoorsService;
+    /**
+     * {@link IPersonalViewDoorsService}, registered by `@objectstack/plugin-auth`:
+     * `AuthPlugin` registers its personal-view delete door under
+     * `personal-views`, typed as this contract, so the runtime dispatcher's
+     * `/personal-views` domain reaches it on a kernel with no `http.server`
+     * (#36506).
+     *
+     * Every member is optional, so a reader still probes for the one it calls
+     * (`handlePersonalViewDoor`).
+     */
+    'personal-views': IPersonalViewDoorsService;
 }
 
 /**

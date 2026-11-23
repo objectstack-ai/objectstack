@@ -442,7 +442,7 @@ const STUDIO_EN: Record<string, string> = {
   'designer.field.hint.pickTarget': 'Pick the object to link to. Changes are saved once the field has one.',
   'designer.field.hint.stageKinds': 'This is the object’s lifecycle field: give every option a kind (Open for a step, Won or Lost for an end). The object is saved once every option has one.',
   'designer.field.relatedObject': 'Related object',
-  'designer.field.objectNamePlaceholder': 'object_name',
+  'designer.field.objectNamePlaceholder': 'Select object…',
   // Lookup "Picker config" advanced sub-panel
   'designer.field.lookup.pickerConfig': 'Picker config',
   'designer.field.lookup.displayField': 'Display field',
@@ -477,7 +477,6 @@ const STUDIO_EN: Record<string, string> = {
   'designer.field.relatedList.help.shown': 'Listed with the other related records on the {ref} record page.',
   'designer.field.relatedList.help.hidden': 'Not listed on the {ref} record page.',
   'designer.field.relatedList.help.primary': 'A core relationship: the {ref} record page shows it most prominently, in the record body as a full-width table.',
-  'designer.field.relatedList.parentFallback': 'parent',
   'designer.field.relatedList.filter': 'Related list filter',
   'designer.field.relatedList.filterHelp': 'Only child records matching these conditions are listed, on top of the match on the parent record; the tab count matches the list.',
   'designer.field.relatedList.filterAdvanced': 'This filter uses nested or OR conditions the builder cannot show; it is kept exactly as stored.',
@@ -2596,6 +2595,11 @@ const STUDIO_EN: Record<string, string> = {
   // Data pillar
   'engine.studio.data.newFieldLabel': 'New field',
   'engine.studio.data.nameFieldLabel': 'Name',
+  // objectstack#36748 — a new object joins its package's one app menu.
+  'engine.studio.data.appMenu.failed': '“{object}” was created, but it could not be added to the menu of “{app}”: {reason} You can add it in the app’s design mode.',
+  'engine.studio.data.appMenu.failedNoApp': '“{object}” was created, but it could not be added to its app’s menu: {reason} You can add it in the app’s design mode.',
+  'engine.studio.data.appMenu.pendingDraft': 'The app has unpublished changes in Studio.',
+  'engine.studio.data.appMenu.unreadable': 'The app’s menu could not be read.',
   'engine.studio.data.fieldCount': '{count} fields',
   'engine.studio.data.fieldCountOne': '{count} field',
   // The platform's own columns, counted apart from the author's fields.
@@ -2615,7 +2619,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.data.readOnlyPackage': 'This package is read-only — switch to or create a writable package to add objects',
   'engine.studio.data.firstObjectTitle': 'Start with your first object',
   'engine.studio.data.firstObjectHint':
-    'Objects are your app’s data foundation (e.g. “Orders”, “Customers”). Create one below; then design its fields, forms, and automations, and publish once at the end.',
+    'Objects are your app’s data foundation (e.g. “Orders”, “Customers”). Create one below; then design its fields, forms, and automations. Each Save is live at once.',
   'engine.studio.data.tab.records': 'Records',
   'engine.studio.data.tab.form': 'Form',
   'engine.studio.data.tab.rules': 'Validations',
@@ -2745,6 +2749,8 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.auto.disableTitle': 'Disable this automation. It takes effect at once.',
   'engine.studio.auto.enabledToast': 'Switched on, live now',
   'engine.studio.auto.disabledToast': 'Switched off, live now',
+  // objectstack#36742 — a new flow is published but born switched off: the create toast says so.
+  'engine.studio.auto.createdOff': 'Created: {name} (switched off; it runs once you switch it on)',
   'engine.studio.auto.newTitle': 'New automation',
   'engine.studio.auto.none': 'No automations yet — click “+” above to create one',
   'engine.studio.auto.emptyMain': 'No automations in this package yet.',
@@ -2776,17 +2782,17 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.access.title': 'Permission matrix',
   'engine.studio.access.subtitle': 'Object permissions · field-level read/write',
   'engine.studio.access.bannerTitle':
-    'Only this app’s objects are listed here, and saving changes only this app’s grants — grants from other apps stay as they are. Changes are saved as a draft and go live when you Publish the app (top bar), as in Data and Interfaces.',
-  'engine.studio.access.banner': 'This app’s objects · live on publish',
+    'Only this app’s objects are listed here, and saving changes only this app’s grants — grants from other apps stay as they are. Changes go live when you press Save in the top bar, as in Data and Interfaces.',
+  'engine.studio.access.banner': 'This app’s objects · live on save',
   // objectstack#29674 — the note on an open set the base's pair adds: its matrix lists the base's objects too.
-  'engine.studio.access.bannerPair': 'This app’s and {package}’s objects · live on publish',
+  'engine.studio.access.bannerPair': 'This app’s and {package}’s objects · live on save',
   // objectstack#35018 — the open set's origin in the builder's words (the Studio title note).
   'engine.studio.access.origin.app': 'Included with the app',
   // objectstack#35018 — the word before the open item's label on the copilot's "Viewing" line.
   'engine.studio.copilot.subject.access': 'Access',
   'engine.studio.copilot.subject.flow': 'Flow',
   'engine.studio.access.bannerTitlePair':
-    'This permission set is part of the customization of {package}, so {package}’s objects are listed as well as this app’s, and saving changes only these grants — grants from other apps stay as they are. Changes are saved as a draft and go live when you Publish (top bar).',
+    'This permission set is part of the customization of {package}, so {package}’s objects are listed as well as this app’s, and saving changes only these grants — grants from other apps stay as they are. Changes go live when you press Save in the top bar.',
   // objectui#11781 — a read-only package saves no draft; objectui#12453 makes this the header link's title.
   'engine.studio.access.bannerTitleReadOnly':
     'Only this app’s objects are listed here. This app is read-only: you can view its permission sets but not change them.',
@@ -3364,6 +3370,19 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.save.confirmRemoveField': '• Delete the field “{field}”: its values on every record are removed.',
   'engine.studio.save.confirmRetypeField':
     '• Change “{field}” from {from} to {to}: values already stored may be converted or cleared.',
+  // objectstack#36511 item 6 — an item the AI assistant left an unpublished
+  // draft on: the page shows that version, says Save makes it live too, and
+  // offers to drop that one item's draft.
+  'engine.studio.aiDraft.notice': 'This item has unpublished changes from the AI assistant. Saving makes them live too.',
+  'engine.studio.aiDraft.discard': 'Discard the AI’s changes',
+  'engine.studio.aiDraft.discardTitle': 'Drop this item’s unpublished draft and go back to the live version',
+  'engine.studio.aiDraft.discardConfirmUnsaved':
+    'Discarding the AI’s changes also drops the changes on this page that you have not saved. Discard anyway?',
+  'engine.studio.aiDraft.discardFailed': 'The AI’s changes were not discarded: {reason}',
+  // objectstack#36511 — the create dialogs of the editors whose Save is live
+  // (objects, automations, permission sets): the item is created and live at
+  // once, so the confirm says Create, never Save as draft.
+  'engine.studio.createLive': 'Create',
   'engine.studio.held.lineExplicit': 'Not ready to save: {clause}. Your changes are kept here; fill it in, then Save.',
   'engine.studio.loading': 'Loading…',
   'engine.studio.loadFailed': 'Failed to load',
@@ -3606,6 +3625,26 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.landing.ownHeading': 'Your own apps',
   'engine.studio.landing.newApp': 'New app of your own',
   'engine.studio.landing.newAppDescription': 'Start from a blank app.',
+  // objectstack#36748 — the Studio landing's new-app door: one dialog creates
+  // the package and its app, worded for an app throughout.
+  'engine.studio.newApp.title': 'New app',
+  'engine.studio.newApp.description': 'Give your app a name; everything else is filled in for you. It opens as soon as it is created.',
+  'engine.studio.newApp.advancedHint': 'App ID, namespace, version and type, filled in from the name.',
+  'engine.studio.newApp.id': 'App ID',
+  'engine.studio.newApp.help.id': 'The app’s unique ID, in reverse-domain form. It is also the app’s address.',
+  'engine.studio.newApp.help.name': 'The app’s name, as people see it.',
+  'engine.studio.newApp.help.description': 'What the app is for.',
+  'engine.studio.newApp.help.namespace': 'A short identifier that starts the name of every object in this app (e.g. “todo” → “todo_task”, “todo_project”).',
+  'engine.studio.newApp.help.version': 'The app’s version (semantic versioning).',
+  'engine.studio.newApp.help.type': 'The app’s kind.',
+  'engine.studio.newApp.help.defaultDatasource': 'Where every object in this app stores its data by default.',
+  'engine.studio.newApp.help.dependencies': 'Other apps or modules this app builds on.',
+  'engine.studio.newApp.nsDerived': 'Filled in from the app ID until you edit it.',
+  'engine.studio.newApp.created': 'Created app “{name}”.',
+  'engine.studio.newApp.exists': 'An app with the same ID already exists.',
+  'engine.studio.newApp.failed': 'Could not create the app',
+  'engine.studio.newApp.nameTaken': 'The app “{label}” already uses the identifier “{name}”. Change the namespace under Advanced.',
+  'engine.studio.newApp.appFailed': '“{name}” was created, but its app could not go live: {reason}. Use Create app in the Studio top bar to try again.',
   'engine.studio.landing.outsideHeading': 'Outside any app',
   'engine.studio.landing.rolesPermissions.name': 'Positions and permissions',
   'engine.studio.landing.rolesPermissions.description': 'Positions, permission sets and sharing rules, shared by every app.',
@@ -3735,6 +3774,8 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.rules.transitions': 'Allowed transitions (from → next states)',
   'engine.studio.rules.transitionFrom': 'From state',
   'engine.studio.rules.transitionTo': 'Next states (comma-separated)',
+  'engine.studio.rules.transitionClearable': 'May be cleared',
+  'engine.studio.rules.transitionClearableHint': 'Lets a user clear the field while the record is in this state',
   'engine.studio.rules.addTransition': 'Add transition',
   'engine.studio.rules.jsonSchema': 'JSON Schema',
   'engine.studio.rules.invalidJson': 'Invalid JSON',
@@ -3916,14 +3957,11 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.owd.title': 'Who can see which records',
   'engine.studio.owd.subtitle': 'Record visibility of each object in this package',
   'engine.studio.owd.description':
-    'Who can see which records, for every object this package owns — check it at a glance and change it in bulk. Changes save as per-object drafts and go live with the package Publish, exactly like the object’s Settings tab.',
+    'Who can see which records, for every object this package owns — check it at a glance and change it in bulk. Save makes the changes live at once, exactly like the object’s Settings tab.',
   'engine.studio.owd.colObject': 'Object',
   'engine.studio.owd.colInternal': 'Who can see which records',
   'engine.studio.owd.none': 'This package declares no objects.',
   'engine.studio.owd.loadFailed': 'Failed to load this package’s objects.',
-  'engine.studio.owd.save': 'Save {count} change(s)',
-  'engine.studio.owd.saveNone': 'No changes',
-  'engine.studio.owd.saved': 'Saved {count} object draft(s).',
   'engine.studio.owd.unsaved': 'Unsaved',
   'engine.studio.owd.byParent': 'Follows its {master}',
   'engine.studio.owd.cbpPrereqTitle': 'Make the relationship required?',

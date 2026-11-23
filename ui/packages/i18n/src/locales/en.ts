@@ -2068,6 +2068,11 @@ const en = {
     fieldChangeEmpty: 'Empty',
     fieldChangeExpand: 'Show all',
     fieldChangeCollapse: 'Show less',
+    // objectstack#36290 — one field's change-history card: its entry point's
+    // name and what it says for a field never changed.
+    fieldHistory: 'Change history',
+    fieldHistoryNone: 'No changes recorded',
+    fieldHistoryNoneRecent: 'No changes in the recent activity',
     // Replies
     replyCount: '{{count}} reply',
     replyCount_one: '{{count}} reply',
@@ -2195,6 +2200,7 @@ const en = {
       settings: 'Report settings',
       pendingDraft: 'This report has unpublished changes. Publish or discard them above, then save.',
       nameTaken: 'Every name made from this one is already taken. Give the report another name, then save.',
+      addsToMenu: 'Saving creates this report and adds it to the menu where you placed it, with your other design changes.',
       adminOnlyTitle: 'Only workspace admins can build reports',
       adminOnly: 'A report is shared with everyone in the workspace, so an admin builds it.',
       type: {
@@ -2206,6 +2212,10 @@ const en = {
         placeholder: 'Choose a data source',
         loading: 'Loading data sources…',
         none: 'No data sources yet',
+        addFilter: 'Filter',
+        filterAdvanced: 'This filter cannot be changed here. It is kept as saved.',
+        filterLoading: 'Loading fields…',
+        filterNoFields: 'This data source has no fields to filter on.',
       },
       measure: {
         label: 'Measure',
@@ -4309,6 +4319,7 @@ const en = {
     allReports: 'All reports',
     collapse: 'Collapse sidebar',
     expand: 'Expand sidebar',
+    resize: 'Resize sidebar',
   },
   designMode: {
     title: 'Design mode',
@@ -4354,11 +4365,30 @@ const en = {
       notWritable: 'This app\'s customization package cannot be written, so its menu cannot be saved.',
       newDashboard: 'New dashboard…',
       newDashboardTitle: 'New dashboard',
+      newReport: 'New report…',
       newItemSavesAll: 'Creating it saves your other design changes too, then opens it for editing.',
       create: 'Create',
       creating: 'Creating…',
       newItemPendingDraft: 'A draft with this name is already pending. Try again.',
       newItemLeft: 'The new dashboard "{{name}}" could not be removed again; remove it in Studio.',
+      newReportLeft: 'The new report "{{name}}" could not be removed again; remove it in Studio.',
+    },
+    pins: {
+      button: 'Header buttons',
+      pinned: 'Pinned to header',
+      other: 'Other',
+      nonePinned: 'No button is pinned: every action is in More.',
+      noneOther: 'Every action is pinned.',
+      pin: 'Pin {{name}} to the header',
+      unpin: 'Move {{name}} to More',
+      drag: 'Drag {{name}} to reorder',
+      full: 'At most {{cap}} buttons are pinned to the header. Unpin one first.',
+      notListed: 'This object\'s package is not listed, so its header buttons cannot be saved.',
+      pendingDraft: 'This object has unpublished changes in Studio. Publish or discard them there, then save again.',
+      pairNotWritable: 'This app\'s customization package cannot be written, so its header buttons cannot be saved.',
+      unknown: '"{{name}}" is no longer an action of this object. Unpin it, then save again.',
+      notPlaced: '"{{name}}" is no longer offered on this page. Unpin it, then save again.',
+      stale: 'No longer offered here, left out when you save: {{names}}',
     },
     recordTabs: {
       entry: 'Configure tabs',
@@ -4472,6 +4502,7 @@ const en = {
     welcomeAdminDescriptionNoAi: 'Set up your first application from the Administration menu on the left.',
     noAppsTitle: 'No applications yet',
     noAppsDescription: 'The system is being set up — apps your admin shares with you will show up here.',
+    noAppsAddDescription: 'Build your first app, or start from a template or the app marketplace.',
     buildWithAI: 'Build with AI',
     askAI: 'Ask AI',
     recoveryReminder: {
@@ -4661,6 +4692,10 @@ const en = {
     // objectstack-ai/objectstack#29771 — the app root when every entry it shows is a `url` or `action` link (`AppNoAccessEmptyState`, reason `menu-only`).
     appOpensFromMenu: '{{app}} opens from its menu',
     appOpensFromMenuDescription: 'This app has no page of its own. Choose an entry in its menu to open a link or run an action.',
+    // objectstack#36748 — an app whose stored menu is empty, for a caller who can fill it.
+    appMenuEmpty: "{{app}} has nothing in its menu yet",
+    appMenuEmptyDescription: "Create objects for this app in Studio and they join its menu, or add entries in design mode.",
+    openInStudio: "Open in Studio",
     openSetup: 'Open Setup',
     createFirstApp: 'Create Your First App',
     systemSettings: 'System Settings',

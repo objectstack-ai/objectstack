@@ -70,6 +70,8 @@ export interface ObjectViewSwitcherMenuProps {
     phone?: boolean;
     /** A last footer row (the phone's 「View settings」, objectstack#35883). */
     footerEnd?: ReactNode;
+    /** Open on the create card rather than the views (the ⌘K palette's 「Add view」, objectstack#36286). */
+    startOnCreate?: boolean;
     t: TFn;
 }
 
@@ -110,9 +112,16 @@ export function ObjectViewSwitcherMenu({
     onAddView,
     phone = false,
     footerEnd,
+    startOnCreate = false,
     t,
 }: ObjectViewSwitcherMenuProps) {
-    const [mode, setMode] = useState<'list' | 'create'>('list');
+    const [mode, setMode] = useState<'list' | 'create'>(startOnCreate && create ? 'create' : 'list');
+    // A body kept mounted while closed (the phone's sheet) is asked again.
+    const [askedOnCreate, setAskedOnCreate] = useState(startOnCreate);
+    if (startOnCreate !== askedOnCreate) {
+        setAskedOnCreate(startOnCreate);
+        if (startOnCreate && create) setMode('create');
+    }
     const [query, setQuery] = useState('');
 
     const byId = new Map(views.map((v) => [v.id, v]));
