@@ -127,7 +127,7 @@ describe('#36647 — an artifact boot names every listed plugin it does not run'
         expect(booted.warnings).toEqual([]);
     }, BOOT_TIMEOUT);
 
-    it('CONTROL: a config boot (no artifactBoot) never judges its plugins — the host materializes them', async () => {
+    it('CONTROL: a config boot (the default registrar) never judges its plugins — the host materializes them', async () => {
         // `os serve objectstack.config.ts` with no compiled artifact: the door
         // finds none and pushes no AppPlugin, and the CLI wraps the config.
         const dir = mkdtempSync(join(tmpdir(), 'os-36647-config-'));
