@@ -89,6 +89,7 @@ vi.mock('../../preview/DraftChangesPanel', () => ({
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() } }));
 
 import { StudioDesignSurface } from './StudioDesignSurface';
+import { pressStudioSave } from './__tests__/studioSaveHarness';
 import { createEmptyDataSource } from './__tests__/emptyDataSource';
 import { registerMetadataPreview } from '../metadata-admin/preview-registry';
 import { registerMetadataInspector } from '../metadata-admin/inspector-registry';
@@ -218,6 +219,8 @@ describe('Publish refuses while an edit is held, naming it (objectui#11786)', ()
     fireEvent.change(within(rail).getByPlaceholderText('Your request was approved'), {
       target: { value: 'Request approved' },
     });
+    // objectstack#36511 — saved by the top bar's Save.
+    await pressStudioSave();
     await waitFor(() => expect(mockClient.save).toHaveBeenCalledTimes(1), { timeout: 4000 });
     await waitFor(() => expect(screen.queryByTestId('studio-held')).toBeNull());
 

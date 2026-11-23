@@ -240,7 +240,7 @@ describe('Flows — Save and Cancel in the top bar, live at once (objectstack#36
     const dialog = await screen.findByRole('dialog');
     fireEvent.click(within(dialog).getByTestId('create-flow-preset-manual'));
     fireEvent.change(dialog.querySelectorAll('input')[0], { target: { value: 'Escalate' } });
-    fireEvent.click(within(dialog).getByRole('button', { name: en('engine.studio.save.save') }));
+    fireEvent.click(within(dialog).getByRole('button', { name: en('engine.studio.createDraft') }));
 
     await waitFor(() => expect(server.log).toEqual(['save flow/escalate', 'publish flow/escalate']), { timeout: 8000 });
     expect(mockClient.save.mock.calls[0][3]).toMatchObject({ mode: 'draft', packageId: PKG, ifNoneMatch: '*' });

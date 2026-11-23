@@ -5,13 +5,10 @@
  * REAL `AutomationsPillar` with the REAL registered `FlowPreview` and
  * `FlowInspector` (the harness of `StudioDesignSurface.autosaveInFlight-11204`).
  *
- * Item 8 — a landed flow autosave settles the header's 正在保存 spinner into
- * an 已保存 badge instead of raising a "Draft saved" toast. Seat ruling
- * 6954475081 on #34818 holds the badge to ruling 6545938831 ② on #28345 (write
- * feedback names the item): the badge sits in the flow header's own title row,
- * beside the flow's title, and its accessible text names the flow. A refused
- * save keeps its strip and raises one error toast. Controls: a second edit
- * clears the badge, and an Interfaces page (a leaf) autosave still toasts.
+ * Item 8 — an Interfaces page (a leaf) autosave toasts by its label. The
+ * flow header's 已保存 badge retired with the flow's autosave
+ * (objectstack#36511): a flow is sent by the top bar's Save, whose toast names
+ * it (`AutomationsPillar.saveCancel-36511.test.tsx`).
  *
  * Item 6 — the Debug section takes the Configuration aside's place; leaving
  * Debug brings the aside back with the selection kept. Control: Canvas keeps it.
@@ -187,51 +184,7 @@ async function selectStart(): Promise<HTMLElement> {
   return within(screen.getByTestId('auto-config-aside')).findByLabelText('Label', undefined, { timeout: 8000 });
 }
 
-const flowToasts = () =>
-  vi.mocked(toast.success).mock.calls.filter(([text]) => String(text).includes(FLOW.label) || String(text).includes(FLOW.name));
-
-describe('a landed flow autosave says 已保存 in the header, not in a toast (#34818 item 8)', () => {
-  it('shows the badge in the flow header title row, naming the flow, and raises no toast', async () => {
-    await renderOpenFlow();
-    editText(await selectStart(), 'Kick-off');
-    const badge = await screen.findByTestId('auto-autosaved', undefined, { timeout: 8000 });
-    expect(server.saves.filter((s) => s.type === 'flow')).toHaveLength(1);
-
-    // Beside the flow's title: the header's own title row holds both.
-    const titleRow = screen.getByTestId('auto-flow-header').firstElementChild as HTMLElement;
-    expect(titleRow.contains(badge)).toBe(true);
-    expect(within(titleRow).getByRole('heading', { level: 1 })).toHaveTextContent(FLOW.label);
-    // Seen: "Saved". Heard: the sentence that names the flow.
-    expect(badge).toHaveAttribute('role', 'status');
-    expect(badge).toHaveTextContent(en('engine.studio.autoSaved'));
-    expect(within(badge).getByText(tFormat('engine.studio.flowSavedNamed', 'en', { item: FLOW.label }))).toHaveClass('sr-only');
-
-    expect(flowToasts(), 'no "Draft saved" toast for a flow').toEqual([]);
-    expect(toast.error).not.toHaveBeenCalled();
-  });
-
-  it('a second edit clears the badge until that edit lands', async () => {
-    await renderOpenFlow();
-    const label = await selectStart();
-    editText(label, 'Kick-off');
-    await screen.findByTestId('auto-autosaved', undefined, { timeout: 8000 });
-    editText(label, 'Kick-off two');
-    expect(screen.queryByTestId('auto-autosaved')).toBeNull();
-    await screen.findByTestId('auto-autosaved', undefined, { timeout: 8000 });
-    expect(server.saves.filter((s) => s.type === 'flow')).toHaveLength(2);
-  });
-
-  it('a refused save keeps its strip, raises one error toast and shows no badge', async () => {
-    server.refuse = 'Flow "notify_owner" is invalid: label too long.';
-    await renderOpenFlow();
-    editText(await selectStart(), 'Kick-off');
-    await waitFor(() => expect(toast.error).toHaveBeenCalledTimes(1), { timeout: 8000 });
-    expect(vi.mocked(toast.error).mock.calls[0][0]).toBe(tFormat('engine.studio.flowSaveFailed', 'en', { item: FLOW.label }));
-    expect(await screen.findByText(/label too long/, undefined, { timeout: 8000 })).toBeInTheDocument();
-    expect(screen.queryByTestId('auto-autosaved')).toBeNull();
-    expect(flowToasts()).toEqual([]);
-  });
-
+describe('an Interfaces page (a leaf) autosave toasts by its label (#34818 item 8)', () => {
   it('the control: an Interfaces page (a leaf) autosave still toasts by its label', async () => {
     render(
       <MemoryRouter initialEntries={[`/studio/${PKG}/interfaces`]}>

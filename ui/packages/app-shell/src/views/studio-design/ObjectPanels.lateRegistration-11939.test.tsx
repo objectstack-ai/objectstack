@@ -40,6 +40,8 @@ const mockClient = {
   getDraft: vi.fn(async () => null),
   get: vi.fn(async () => null),
   save: vi.fn(async () => ({})),
+  publish: vi.fn(async () => ({ success: true })),
+  reset: vi.fn(async () => ({ success: true })),
 };
 
 vi.mock('../metadata-admin/useMetadata', async (importOriginal) => {
@@ -49,7 +51,7 @@ vi.mock('../metadata-admin/useMetadata', async (importOriginal) => {
 
 import { ObjectSettingsPanel } from './ObjectSettingsPanel';
 import { ObjectActionsPanel } from './ObjectActionsPanel';
-import { ObjectHooksPanel } from './ObjectHooksPanel';
+import { HooksPanelHost } from './__tests__/hooksPanelHost';
 import {
   getMetadataDefaultInspector,
   registerMetadataDefaultInspector,
@@ -122,7 +124,7 @@ describe('ObjectHooksPanel — a late hook inspector replaces the generic form (
     assertModuleGraphLoaded();
     expect(getMetadataDefaultInspector('hook')).toBeUndefined();
 
-    render(<ObjectHooksPanel objectName="showcase_task" packageId="com.example.showcase" />);
+    render(<HooksPanelHost objectName="showcase_task" packageId="com.example.showcase" />);
     fireEvent.click(await screen.findByText('Guard'));
     // Before: the generic SchemaForm, recognisable by its synthesised controls.
     expect(await screen.findByLabelText('Handler')).toHaveValue('guard_fn');

@@ -4,7 +4,8 @@
  * objectui#11820 — a new hook made from a package object targets that object,
  * and its target picker knows which objects are this package's.
  *
- * End to end through the panel: "New" saves a hook whose `object` is the
+ * End to end through the panel: "New" starts a hook (written by the top bar's
+ * Save, objectstack#36511) whose `object` is the
  * object the panel is open on (never `*`), and the curated hook editor it opens
  * splits the target list into this package's objects — the package's own list,
  * published and draft, read by the panel — and every other object, other
@@ -49,6 +50,8 @@ const mockClient = vi.hoisted(() => ({
     state.hooks = [...state.hooks, body];
     return {};
   }),
+  publish: vi.fn(async () => ({ success: true })),
+  reset: vi.fn(async () => ({ success: true })),
 }));
 
 vi.mock('../metadata-admin/useMetadata', async (importOriginal) => {
@@ -56,7 +59,8 @@ vi.mock('../metadata-admin/useMetadata', async (importOriginal) => {
   return { ...mod, useMetadataClient: () => mockClient };
 });
 
-import { ObjectHooksPanel } from './ObjectHooksPanel';
+import { HooksPanelHost } from './__tests__/hooksPanelHost';
+import { pressStudioSave } from './__tests__/studioSaveHarness';
 import { registerBuiltinInspectors } from '../metadata-admin/inspectors';
 
 registerBuiltinInspectors();
@@ -69,8 +73,10 @@ afterEach(() => {
 
 describe('ObjectHooksPanel — a new hook (objectui#11820)', () => {
   it('targets the object it is created from, never every object', async () => {
-    render(<ObjectHooksPanel objectName="invoice" packageId={PACKAGE} />);
+    render(<HooksPanelHost objectName="invoice" packageId={PACKAGE} />);
     fireEvent.click(screen.getByRole('button', { name: /New/ }));
+    // objectstack#36511 — written by the top bar's Save.
+    await pressStudioSave();
     await waitFor(() => expect(mockClient.save).toHaveBeenCalledTimes(1));
     const [type, , body, opts] = mockClient.save.mock.calls[0] as unknown as [string, string, Record<string, unknown>, Record<string, unknown>];
     expect(type).toBe('hook');
@@ -79,9 +85,8 @@ describe('ObjectHooksPanel — a new hook (objectui#11820)', () => {
   });
 
   it('opens with this package’s objects first and every other object under the reach warning', async () => {
-    render(<ObjectHooksPanel objectName="invoice" packageId={PACKAGE} />);
+    render(<HooksPanelHost objectName="invoice" packageId={PACKAGE} />);
     fireEvent.click(screen.getByRole('button', { name: /New/ }));
-    await waitFor(() => expect(mockClient.save).toHaveBeenCalledTimes(1));
 
     // Two reads answer at their own pace (objectui#11978): the panel's read of
     // this package's objects draws the "This package" group, and the editor's

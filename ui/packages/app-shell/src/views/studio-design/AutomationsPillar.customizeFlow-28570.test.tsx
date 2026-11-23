@@ -92,6 +92,7 @@ const srv = vi.hoisted(() => ({
   saveRefusal: null as null | { status: number; message: string },
   saves: [] as Array<{ name: string; body: Record<string, unknown>; opts: Record<string, unknown> }>,
   resets: [] as Array<{ name: string; opts: Record<string, unknown> }>,
+  publishes: [] as Array<{ name: string; opts: Record<string, unknown> }>,
   version: 0,
   /** Whether the engine's `_status` answer holds a row for the flow. */
   statusRow: true,
@@ -137,6 +138,16 @@ const mockClient = vi.hoisted(() => ({
     srv.version += 1;
     return { success: true, version: `v${srv.version}`, state: 'draft' };
   }),
+  // objectstack#36511 — a Save publishes the one flow it wrote: the pair's draft
+  // becomes its published row.
+  publish: vi.fn(async (_type: string, name: string, opts: Record<string, unknown> = {}) => {
+    srv.publishes.push({ name, opts: clone(opts) });
+    if (opts.packageId === PAIR && srv.pairDraft) {
+      srv.pairActive = srv.pairDraft;
+      srv.pairDraft = null;
+    }
+    return { success: true };
+  }),
   reset: vi.fn(async (_type: string, name: string, opts: Record<string, unknown> = {}) => {
     srv.resets.push({ name, opts: clone(opts) });
     if (opts.packageId === PAIR) {
@@ -165,6 +176,7 @@ import { registerMetadataPreview } from '../metadata-admin/preview-registry';
 import { publishRefusal } from './metadataError';
 import { t, tFormat } from '../metadata-admin/i18n';
 import { createEmptyDataSource } from './__tests__/emptyDataSource';
+import { StudioSaveHarness, pressStudioSave } from './__tests__/studioSaveHarness';
 
 const dataSource = createEmptyDataSource();
 
@@ -221,6 +233,7 @@ beforeEach(() => {
   srv.saveRefusal = null;
   srv.saves.length = 0;
   srv.resets.length = 0;
+  srv.publishes.length = 0;
   srv.version = 0;
   srv.statusRow = true;
   for (const fn of Object.values(mockClient)) (fn as unknown as { mockClear: () => void }).mockClear();
@@ -262,9 +275,11 @@ function Host({
 
 function mount(props: React.ComponentProps<typeof Host> = {}) {
   return render(
-    <MemoryRouter initialEntries={[`/studio/${BASE}/automations`]}>
-      <Host {...props} />
-    </MemoryRouter>,
+    <StudioSaveHarness>
+      <MemoryRouter initialEntries={[`/studio/${BASE}/automations`]}>
+        <Host {...props} />
+      </MemoryRouter>
+    </StudioSaveHarness>,
   );
 }
 
@@ -331,7 +346,12 @@ describe('Customize a read-only base’s flow into its pair (objectstack#28570)'
     await customize();
 
     patchFlow();
+    await sleep(1500);
+    expect(srv.saves, 'nothing is written before Save (objectstack#36511)').toEqual([]);
+    await pressStudioSave();
     await waitFor(() => expect(srv.saves).toHaveLength(1), { timeout: 8000 });
+    // Then that one flow is published at the pair: the override is live.
+    await waitFor(() => expect(srv.publishes).toEqual([{ name: FLOW_NAME, opts: { packageId: PAIR } }]));
     expect(srv.ensure).toEqual([201]);
     const [saved] = srv.saves;
     expect(saved!.name).toBe(FLOW_NAME);
@@ -353,11 +373,13 @@ describe('Customize a read-only base’s flow into its pair (objectstack#28570)'
     await waitFor(() => expect(screen.queryByTestId('studio-override-popover')).toBeNull());
     await expectLedgerSwitchAlone();
 
-    // A later edit asks the door no more, and is pinned to the version it was answered.
+    // A later edit asks the door no more; its draft was published, so the next
+    // save asserts no draft again.
     patchFlow();
+    await pressStudioSave();
     await waitFor(() => expect(srv.saves).toHaveLength(2), { timeout: 8000 });
     expect(srv.ensure).toEqual([201]);
-    expect(srv.saves[1]!.opts).toMatchObject({ packageId: PAIR, ifMatch: 'v1' });
+    expect(srv.saves[1]!.opts).toMatchObject({ packageId: PAIR, ifNoneMatch: '*' });
     expect(srv.saves[1]!.body.overrides).toEqual(DECLARATION);
     expect(calls('/toggle')).toHaveLength(0);
   });
@@ -385,6 +407,7 @@ describe('Customize a read-only base’s flow into its pair (objectstack#28570)'
     // Its editors are open: an edit is saved into the pair, keeping the declaration.
     fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
     patchFlow();
+    await pressStudioSave();
     await waitFor(() => expect(srv.saves).toHaveLength(1), { timeout: 8000 });
     expect(srv.saves[0]!.opts.packageId).toBe(PAIR);
     expect(srv.saves[0]!.body.overrides).toEqual(DECLARATION);
@@ -436,6 +459,7 @@ describe('Customize a read-only base’s flow into its pair (objectstack#28570)'
     await customize();
     expect(within(header()).queryByRole('switch')).toBeNull();
     patchFlow();
+    await pressStudioSave();
     await waitFor(() => expect(srv.saves).toHaveLength(1), { timeout: 8000 });
     await within(header()).findByTestId('studio-override-chip', undefined, { timeout: 8000 });
     expect(within(header()).queryByRole('switch')).toBeNull();
@@ -470,6 +494,7 @@ describe('Customize a read-only base’s flow into its pair (objectstack#28570)'
     await openFlow();
     await customize();
     patchFlow();
+    await pressStudioSave();
     expect(await screen.findByTestId('studio-refusal-message', undefined, { timeout: 8000 })).toHaveTextContent(sentence);
     expect(within(header()).queryByTestId('studio-override-chip')).toBeNull();
   });

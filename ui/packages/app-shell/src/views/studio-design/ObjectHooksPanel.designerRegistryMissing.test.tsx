@@ -9,7 +9,7 @@
  * a control per top-level key of the selected hook. That is a working editor,
  * not an empty state — so the pin has to prove it WORKS, not merely that
  * something rendered: an edit in the generic form dirties the panel, and the
- * panel's autosave (objectui#11787) writes the edited value through.
+ * top bar's Save (objectstack#36511) writes the edited value through.
  *
  * "Something rendered" would pass on the hook's bare label — exactly the shape
  * of the `ObjectActionsPanel` defect the card repaired — which is why the
@@ -43,6 +43,8 @@ const mockClient = {
   getDraft: vi.fn(async () => null),
   get: vi.fn(async () => null),
   save: vi.fn(async () => ({})),
+  publish: vi.fn(async () => ({ success: true })),
+  reset: vi.fn(async () => ({ success: true })),
 };
 
 vi.mock('../metadata-admin/useMetadata', async (importOriginal) => {
@@ -50,7 +52,8 @@ vi.mock('../metadata-admin/useMetadata', async (importOriginal) => {
   return { ...mod, useMetadataClient: () => mockClient };
 });
 
-import { ObjectHooksPanel } from './ObjectHooksPanel';
+import { HooksPanelHost } from './__tests__/hooksPanelHost';
+import { pressStudioSave } from './__tests__/studioSaveHarness';
 import { listMetadataPreviewTypes } from '../metadata-admin/preview-registry';
 import { listMetadataInspectorTypes } from '../metadata-admin/inspector-registry';
 import { getMetadataDefaultInspector } from '../metadata-admin/default-inspector-registry';
@@ -75,7 +78,7 @@ describe('ObjectHooksPanel — no curated hook editor registered (#6846)', () =>
   it('falls back to the generic SchemaForm, and that form edits and saves the hook', async () => {
     assertRegistriesEmptyWithControl();
 
-    render(<ObjectHooksPanel objectName="showcase_task" packageId="com.example.showcase" />);
+    render(<HooksPanelHost objectName="showcase_task" packageId="com.example.showcase" />);
     fireEvent.click(await screen.findByText('Guard'));
 
     // The generic form: one labelled control per top-level key of the hook,
@@ -91,12 +94,13 @@ describe('ObjectHooksPanel — no curated hook editor registered (#6846)', () =>
     // state — it is an editor.
     expect(document.body.textContent ?? '').not.toMatch(/loading|try again/i);
 
-    // "Working": an edit in the generic form dirties the panel, and its
-    // autosave (objectui#11787 — no Save button) writes the edited value
-    // through, as a draft of THIS hook, after the shared autosave's pause.
-    expect(screen.queryByRole('button', { name: /Save/i })).toBeNull();
+    // "Working": an edit in the generic form dirties the panel, and the top
+    // bar's Save (objectstack#36511) writes the edited value through, as a
+    // draft of THIS hook, then publishes it.
+    expect(screen.queryByTestId('studio-save')).toBeNull();
     expect(mockClient.save).not.toHaveBeenCalled();
     fireEvent.change(handler, { target: { value: 'guard_fn_v2' } });
+    await pressStudioSave();
     await waitFor(() => expect(mockClient.save).toHaveBeenCalledTimes(1), { timeout: 4000 });
     expect(mockClient.save).toHaveBeenCalledWith(
       'hook',
@@ -106,5 +110,6 @@ describe('ObjectHooksPanel — no curated hook editor registered (#6846)', () =>
       // first save is the first-write pin.
       { mode: 'draft', packageId: 'com.example.showcase', ifNoneMatch: '*', surface: 'studio' },
     );
+    expect(mockClient.publish).toHaveBeenCalledWith('hook', 'guard_hook', { packageId: 'com.example.showcase' });
   });
 });

@@ -171,14 +171,15 @@ describe('Hooks — Save and Cancel in the top bar, live at once (objectstack#36
 
   it('Cancel sends nothing and puts the hook back as the server holds it', async () => {
     const box = await openGuardExpression();
-    const before = box.value;
     fireEvent.change(box, { target: { value: "record.status == 'open'" } });
     await screen.findByTestId('studio-save');
+    expect(screen.getByDisplayValue("record.status == 'open'")).toBeInTheDocument();
 
     await pressStudioCancel();
     await waitFor(() => expect(screen.queryByTestId('studio-save')).toBeNull());
-    const after = screen.getAllByRole('combobox').find((el) => el.tagName === 'TEXTAREA') as HTMLTextAreaElement;
-    expect(after.value).toBe(before);
+    // The hook as the server holds it: no condition, the edit gone from the page.
+    expect(screen.queryByDisplayValue("record.status == 'open'")).toBeNull();
+    expect(screen.getByTestId('hook-name')).toHaveValue('guard_hook');
     await waitPastTheOldAutosave();
     expect(writes.map(describeWrite)).toEqual([]);
   });

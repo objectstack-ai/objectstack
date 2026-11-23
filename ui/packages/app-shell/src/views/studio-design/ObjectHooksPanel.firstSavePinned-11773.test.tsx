@@ -15,8 +15,9 @@
  *    unpinned, as before).
  *
  * The door double answers as the published 18.0.0-next.0 door was measured to
- * (readings on the pull request); the guard keeps each hook's own pin, so a
- * hook saved, left and re-opened is still pinned to its last receipt.
+ * (readings on the pull request); the guard keeps each hook's own pin. Since
+ * objectstack#36511 a Save publishes the hook it wrote, so a hook saved, left
+ * and re-opened asserts no draft again.
  */
 
 import '@testing-library/jest-dom/vitest';
@@ -63,6 +64,12 @@ const mockClient = {
       return { success: true, version, seq: door.seq, state: 'draft' };
     },
   ),
+  // objectstack#36511 — Save publishes the hook it wrote: its draft is gone.
+  publish: vi.fn(async (_type: string, name: string) => {
+    door.drafts.delete(name);
+    return { success: true };
+  }),
+  reset: vi.fn(async () => ({ success: true })),
 };
 
 vi.mock('../metadata-admin/useMetadata', async (importOriginal) => {
@@ -70,7 +77,8 @@ vi.mock('../metadata-admin/useMetadata', async (importOriginal) => {
   return { ...mod, useMetadataClient: () => mockClient };
 });
 
-import { ObjectHooksPanel } from './ObjectHooksPanel';
+import { HooksPanelHost } from './__tests__/hooksPanelHost';
+import { pressStudioSave } from './__tests__/studioSaveHarness';
 import { registerBuiltinInspectors } from '../metadata-admin/inspectors';
 import { __setCelFormulaLoader } from '../metadata-admin/celAuthoring';
 
@@ -97,20 +105,21 @@ afterEach(() => {
 
 const AUTOSAVE = { timeout: 4000 };
 
-/** Open a hook by its label and send one edit through the autosave. */
+/** Open a hook by its label and send one edit with the top bar's Save (objectstack#36511). */
 async function editAndSave(label: string, condition: string): Promise<Sent> {
   fireEvent.click(await screen.findByText(label));
   fireEvent.click(await screen.findByText('Expression'));
   const box = screen.getAllByRole('combobox').find((el) => el.tagName === 'TEXTAREA') as HTMLTextAreaElement;
   const before = door.sent.length;
   fireEvent.change(box, { target: { value: condition } });
+  await pressStudioSave();
   await waitFor(() => expect(door.sent.length).toBe(before + 1), AUTOSAVE);
-  await waitFor(() => expect(screen.getByTestId('hooks-saved-at')).toBeInTheDocument());
+  await waitFor(() => expect(screen.queryByTestId('studio-save')).toBeNull());
   return door.sent[door.sent.length - 1]!;
 }
 
 function openPanel() {
-  render(<ObjectHooksPanel objectName="invoice" packageId={PKG} />);
+  render(<HooksPanelHost objectName="invoice" packageId={PKG} />);
 }
 
 describe('ObjectHooksPanel — the first save after the list load is pinned (objectui#11773)', () => {
@@ -129,7 +138,10 @@ describe('ObjectHooksPanel — the first save after the list load is pinned (obj
     expect(mockClient.getDraft).toHaveBeenCalledWith('hook', 'guard_hook', { packageId: PKG });
   });
 
-  it('each hook keeps its own pin: a hook saved, left and re-opened is pinned to its last receipt', async () => {
+  // objectstack#36511 — a Save publishes the hook, so no draft is left: the
+  // hook's next save asserts none again (`If-None-Match: *`), and a hook that
+  // was never saved keeps the pin its own read served.
+  it('each hook keeps its own pin: a hook saved and published, left and re-opened, asserts no draft again', async () => {
     openPanel();
     const g1 = await editAndSave('Guard', "record.status == 'open'");
     const a1 = await editAndSave('Audit', "record.status == 'closed'");
@@ -137,8 +149,9 @@ describe('ObjectHooksPanel — the first save after the list load is pinned (obj
     expect([g1, a1, g2]).toEqual([
       { name: 'guard_hook', ifMatch: undefined, ifNoneMatch: '*' },
       { name: 'audit_hook', ifMatch: undefined, ifNoneMatch: '*' },
-      { name: 'guard_hook', ifMatch: 'hmac-sha256:v1', ifNoneMatch: undefined },
+      { name: 'guard_hook', ifMatch: undefined, ifNoneMatch: '*' },
     ]);
+    expect(mockClient.publish.mock.calls.map(([, name]) => name)).toEqual(['guard_hook', 'audit_hook', 'guard_hook']);
   });
 
   it('control: an unreadable drafts ledger pins nothing, and the first save goes unpinned as before', async () => {
@@ -152,6 +165,8 @@ describe('ObjectHooksPanel — the first save after the list load is pinned (obj
     openPanel();
     await screen.findByText('Guard');
     fireEvent.click(screen.getByRole('button', { name: /New/ }));
+    expect(door.sent, 'nothing is written before Save').toHaveLength(0);
+    await pressStudioSave();
     await waitFor(() => expect(door.sent).toHaveLength(1));
     expect(door.sent[0]).toMatchObject({ ifMatch: undefined, ifNoneMatch: '*' });
   });

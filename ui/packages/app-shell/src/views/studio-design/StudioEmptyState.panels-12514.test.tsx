@@ -33,6 +33,8 @@ const mockClient = vi.hoisted(() => ({
     state.hooks = [...state.hooks, body];
     return {};
   }),
+  publish: vi.fn(async () => ({ success: true })),
+  reset: vi.fn(async () => ({ success: true })),
 }));
 
 vi.mock('../metadata-admin/useMetadata', async (importOriginal) => {
@@ -42,7 +44,8 @@ vi.mock('../metadata-admin/useMetadata', async (importOriginal) => {
 
 import { ObjectValidationsPanel } from './ObjectValidationsPanel';
 import { ObjectActionsPanel } from './ObjectActionsPanel';
-import { ObjectHooksPanel } from './ObjectHooksPanel';
+import { HooksPanelHost } from './__tests__/hooksPanelHost';
+import { pressStudioSave } from './__tests__/studioSaveHarness';
 import { registerBuiltinInspectors } from '../metadata-admin/inspectors';
 import { t } from '../metadata-admin/i18n';
 
@@ -181,11 +184,15 @@ describe('objectui#12514 — Actions: the empty block opens the header’s New m
 });
 
 describe('objectui#12514 — Hooks: the empty block runs the header’s New', () => {
-  it('shows one block once the read answers, and its button saves the new hook', async () => {
-    render(<ObjectHooksPanel objectName="invoice" packageId="com.example.invoicing" />);
+  it('shows one block once the read answers, and its button starts the new hook Save writes', async () => {
+    render(<HooksPanelHost objectName="invoice" packageId="com.example.invoicing" />);
     const block = await screen.findByTestId('hooks-empty');
     expect(block).toHaveTextContent(t('engine.studio.hooks.none', 'en'));
     fireEvent.click(screen.getByTestId('hooks-empty-new'));
+    // objectstack#36511 — listed and open at once; written by the top bar's Save.
+    await waitFor(() => expect(screen.queryByTestId('hooks-empty')).toBeNull());
+    expect(mockClient.save).not.toHaveBeenCalled();
+    await pressStudioSave();
     await waitFor(() => expect(mockClient.save).toHaveBeenCalledTimes(1));
     const [type, , body, opts] = mockClient.save.mock.calls[0] as unknown as [string, string, Record<string, unknown>, Record<string, unknown>];
     expect(type).toBe('hook');
@@ -196,14 +203,14 @@ describe('objectui#12514 — Hooks: the empty block runs the header’s New', ()
   });
 
   it('read-only: the sentence alone, no button', async () => {
-    render(<ObjectHooksPanel objectName="invoice" packageId="com.example.invoicing" disabled />);
+    render(<HooksPanelHost objectName="invoice" packageId="com.example.invoicing" disabled />);
     expect(await screen.findByTestId('hooks-empty')).toBeInTheDocument();
     expect(screen.queryByTestId('hooks-empty-new')).toBeNull();
   });
 
   it('CONTROL: an object a hook targets keeps the list and the pick prompt', async () => {
     state.hooks = [{ name: 'h1', label: 'H1', object: 'invoice', events: ['beforeInsert'], body: { language: 'js', source: 'return;' } }];
-    render(<ObjectHooksPanel objectName="invoice" packageId="com.example.invoicing" />);
+    render(<HooksPanelHost objectName="invoice" packageId="com.example.invoicing" />);
     expect(await screen.findByText('H1')).toBeInTheDocument();
     expect(screen.queryByTestId('hooks-empty')).toBeNull();
     // A hook is there to pick, so the prompt to pick it stays.

@@ -126,6 +126,7 @@ vi.mock('../metadata-admin/previews/useObjectFields', () => ({
 
 import { AutomationsPillar } from './StudioDesignSurface';
 import { createEmptyDataSource } from './__tests__/emptyDataSource';
+import { StudioSaveHarness, pressStudioSave } from './__tests__/studioSaveHarness';
 import { getMetadataPreview, registerMetadataPreview } from '../metadata-admin/preview-registry';
 import { registerMetadataInspector } from '../metadata-admin/inspector-registry';
 import { FlowInspector } from '../metadata-admin/inspectors/FlowInspector';
@@ -173,9 +174,11 @@ afterEach(() => {
 /** Open the flow, select Update Records, add the value `id` and switch it to a blank expression. */
 async function writeBlankExpression() {
   render(
-    <MemoryRouter initialEntries={[`/studio/${PKG}/automations`]}>
-      <AutomationsPillar packageId={PKG} />
-    </MemoryRouter>,
+    <StudioSaveHarness>
+      <MemoryRouter initialEntries={[`/studio/${PKG}/automations`]}>
+        <AutomationsPillar packageId={PKG} />
+      </MemoryRouter>
+    </StudioSaveHarness>,
   );
   fireEvent.click(await screen.findByRole('button', { name: 'select write' }, { timeout: 8000 }));
   // The node has two maps (Filter, Field values); the value goes in Field values.
@@ -209,7 +212,9 @@ describe('Automations page — Problems and the node agree on a blank expression
     // The node: business words, not the envelope's wire shape.
     expect(within(map).getByRole('alert').textContent).toBe(NEEDED());
 
-    // The draft is stored, and its verdict read again …
+    // Saved (objectstack#36511: by the top bar's Save), and its verdict read
+    // again. The double keeps serving the stored draft with its verdict.
+    await pressStudioSave();
     await waitFor(() => expect(mockClient.save).toHaveBeenCalled(), { timeout: 6000 });
     await waitFor(() => expect(server.draftReads).toBeGreaterThan(readsBefore), { timeout: 6000 });
 
@@ -227,6 +232,7 @@ describe('Automations page — Problems and the node agree on a blank expression
 
   it('control: once the expression is written, the cell and the Problems list clear together', async () => {
     const { map } = await writeBlankExpression();
+    await pressStudioSave();
     await waitFor(() => expect(mockClient.save).toHaveBeenCalled(), { timeout: 6000 });
     fireEvent.click(screen.getByTestId('auto-tab-problems'));
     await screen.findByTestId('flow-problem-target', {}, { timeout: 6000 });
@@ -237,6 +243,7 @@ describe('Automations page — Problems and the node agree on a blank expression
     fireEvent.blur(source);
 
     expect(within(map).queryByRole('alert')).toBeNull();
+    await pressStudioSave();
     await waitFor(() => expect(mockClient.save.mock.calls.length).toBeGreaterThan(saves), { timeout: 6000 });
     expect(await screen.findByText(EMPTY(), {}, { timeout: 6000 })).toBeInTheDocument();
     expect(screen.queryByTestId('flow-problem-target')).toBeNull();

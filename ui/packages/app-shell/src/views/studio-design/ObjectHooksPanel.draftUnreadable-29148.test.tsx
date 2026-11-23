@@ -5,7 +5,8 @@
  * its package's drafts ledger lists. A draft the server refuses to read (`403
  * PERMISSION_DENIED`) is never taken for "no draft": that hook opens no
  * buffer, so its published row is not offered to edit, the strip says why
- * with the server's sentence behind Details, and the autosave sends nothing.
+ * with the server's sentence behind Details, and nothing is sent (no Save is
+ * offered for it, objectstack#36511).
  *
  * A PARTIAL refusal holds only the refused hook: the other hooks of the list,
  * with or without a readable draft, load, edit and save as before.
@@ -63,6 +64,8 @@ const mockClient = {
       return { success: true, version: 'hmac-sha256:receipt', state: 'draft' };
     },
   ),
+  publish: vi.fn(async () => ({ success: true })),
+  reset: vi.fn(async () => ({ success: true })),
 };
 
 vi.mock('../metadata-admin/useMetadata', async (importOriginal) => {
@@ -70,7 +73,8 @@ vi.mock('../metadata-admin/useMetadata', async (importOriginal) => {
   return { ...mod, useMetadataClient: () => mockClient };
 });
 
-import { ObjectHooksPanel } from './ObjectHooksPanel';
+import { HooksPanelHost } from './__tests__/hooksPanelHost';
+import { pressStudioSave } from './__tests__/studioSaveHarness';
 import { registerBuiltinInspectors } from '../metadata-admin/inspectors';
 import { __setCelFormulaLoader } from '../metadata-admin/celAuthoring';
 
@@ -99,7 +103,7 @@ afterEach(() => {
 
 const AUTOSAVE = { timeout: 4000 };
 
-/** Longer than the autosave's debounce, so a save that was going to leave has left. */
+/** Longer than the retired autosave's debounce, so a save that was going to leave has left. */
 async function pastTheAutosave() {
   await act(async () => {
     await new Promise((resolve) => setTimeout(resolve, 2500));
@@ -107,7 +111,7 @@ async function pastTheAutosave() {
 }
 
 function openPanel() {
-  render(<ObjectHooksPanel objectName="invoice" packageId={PKG} />);
+  render(<HooksPanelHost objectName="invoice" packageId={PKG} />);
 }
 
 describe('ObjectHooksPanel — a hook draft the server refuses to read is not "no draft" (objectstack#29148)', () => {
@@ -128,6 +132,7 @@ describe('ObjectHooksPanel — a hook draft the server refuses to read is not "n
     expect(mockClient.getDraft).toHaveBeenCalledWith('hook', 'guard_hook', { packageId: PKG });
 
     await pastTheAutosave();
+    expect(screen.queryByTestId('studio-save'), 'no Save is offered for it').toBeNull();
     expect(door.sent).toEqual([]);
     expect(door.drafts.get('guard_hook')?.body).toStrictEqual(GATED_GUARD);
   });
@@ -142,6 +147,7 @@ describe('ObjectHooksPanel — a hook draft the server refuses to read is not "n
     expect(screen.queryByTestId('hooks-draft-unreadable')).toBeNull();
     const box = screen.getAllByRole('combobox').find((el) => el.tagName === 'TEXTAREA') as HTMLTextAreaElement;
     fireEvent.change(box, { target: { value: "record.status == 'closed'" } });
+    await pressStudioSave();
     await waitFor(() => expect(door.sent).toHaveLength(1), AUTOSAVE);
     expect(door.sent[0]).toEqual({ name: 'audit_hook', ifMatch: undefined, ifNoneMatch: '*' });
     // The refused one is still held.
@@ -156,6 +162,7 @@ describe('ObjectHooksPanel — a hook draft the server refuses to read is not "n
     expect(screen.queryByTestId('hooks-draft-unreadable')).toBeNull();
     const box = screen.getAllByRole('combobox').find((el) => el.tagName === 'TEXTAREA') as HTMLTextAreaElement;
     fireEvent.change(box, { target: { value: "record.status == 'open'" } });
+    await pressStudioSave();
     await waitFor(() => expect(door.sent).toHaveLength(1), AUTOSAVE);
     expect(door.sent[0]).toEqual({ name: 'guard_hook', ifMatch: undefined, ifNoneMatch: '*' });
   });

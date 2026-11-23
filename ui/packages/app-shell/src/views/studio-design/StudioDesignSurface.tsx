@@ -8894,14 +8894,10 @@ export function AutomationsPillar({
 
   // objectui#5813 — local dirty flag: auto-save arms only after a real edit.
   const [autoDirty, setAutoDirty] = React.useState(false);
-  // objectstack#34818 — the flow whose last autosave landed with nothing edited
-  // since: its header row says 已保存 in place of a toast. The next edit clears it.
-  const [flowSavedFor, setFlowSavedFor] = React.useState<string | null>(null);
   const onPatch = React.useCallback(
     (patch: Record<string, unknown>) => {
       setDraft((d) => ({ ...d, ...patch }));
       setAutoDirty(true);
-      setFlowSavedFor(null);
     },
     [],
   );
@@ -8986,11 +8982,11 @@ export function AutomationsPillar({
       flowStoredRef.current = body;
       // The engine's row for the flow is read again: the publish armed or disarmed it.
       setStatusNonce((n) => n + 1);
-      // objectstack#34818 — the header says 已保存 once nothing was edited since.
-      if (JSON.stringify(flowDraftRef.current) === JSON.stringify(body)) {
-        setAutoDirty(false);
-        setFlowSavedFor(current.name);
-      }
+      // objectstack#26858 — and the verdict: the one held described the body before this Save.
+      rereadFlowVerdict(current.name, target.packageId);
+      // objectstack#36511 — clean once nothing was edited since; the top bar's
+      // toast says the flow is saved (the header's 已保存 badge retired with it).
+      if (JSON.stringify(flowDraftRef.current) === JSON.stringify(body)) setAutoDirty(false);
       return { kind: 'saved' };
     } catch (e) {
       // objectui#11785 — read against `body`, the body this save sent.
@@ -9833,26 +9829,11 @@ export function AutomationsPillar({
             status={flowDraftStatus}
             actions={
               <>
-                {/* objectui#5813 — drafts auto-save; the spinner is the affordance. */}
+                {/* objectstack#36511 — a Save or a switch flip in flight. */}
                 {saving === 'draft' && (
                   <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground" data-testid="auto-autosaving">
                     <Loader2 className="h-3 w-3 animate-spin" />
                     {t('engine.studio.autoSaving', locale)}
-                  </span>
-                )}
-                {/* objectstack#34818 — the landed autosave, said in the flow's own
-                    title row instead of a toast; read aloud with the flow's name. */}
-                {saving !== 'draft' && current && flowSavedFor === current.name && (
-                  <span
-                    role="status"
-                    className="inline-flex items-center gap-1 text-[11px] text-muted-foreground"
-                    data-testid="auto-autosaved"
-                  >
-                    <Check className="h-3 w-3" aria-hidden="true" />
-                    <span aria-hidden="true">{t('engine.studio.autoSaved', locale)}</span>
-                    <span className="sr-only">
-                      {tFormat('engine.studio.flowSavedNamed', locale, { item: current.label || current.name })}
-                    </span>
                   </span>
                 )}
                 {/* objectstack#28570 — Customize unlocks the flow's editors; nothing is saved until an edit. */}
@@ -10156,7 +10137,7 @@ export function AutomationsPillar({
         labelPlaceholder={t('engine.studio.auto.namePlaceholder', locale)}
         idFieldLabel={t('engine.studio.auto.idLabel', locale)}
         idPlaceholder={t('engine.studio.auto.idPlaceholder', locale)}
-        submitLabel={t('engine.studio.save.save', locale)}
+        submitLabel={t('engine.studio.createDraft', locale)}
         submittingLabel={t('engine.studio.creating', locale)}
         busy={createBusy}
         error={newNeeds ?? error?.message ?? null}

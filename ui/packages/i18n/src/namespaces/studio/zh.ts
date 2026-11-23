@@ -2958,10 +2958,6 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.createDraft': '存为草稿',
   'engine.studio.saveDraft': '保存草稿',
   'engine.studio.autoSaving': '保存中…',
-  // objectstack#34818 — 流程标题行的「已保存」、读屏时念出的完整说法，以及唯一保留的提示（保存失败）。
-  'engine.studio.autoSaved': '已保存',
-  'engine.studio.flowSavedNamed': '流程「{item}」已保存',
-  'engine.studio.flowSaveFailed': '「{item}」的草稿没有保存成功',
   // Standard create-dialog field labels (shared by object / app / flow / permission).
   'engine.studio.app.nameLabel': '应用名称',
   'engine.studio.app.idLabel': '标识',
