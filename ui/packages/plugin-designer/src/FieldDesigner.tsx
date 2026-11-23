@@ -15,7 +15,8 @@
  */
 
 import React, { useState, useCallback, useMemo } from 'react';
-import type { DesignerFieldDefinition, DesignerFieldType } from '@object-ui/types';
+import { DESIGNER_FIELD_TYPES, type DesignerFieldDefinition, type DesignerFieldType } from '@object-ui/types';
+import { resolveFieldHistory } from '@objectstack/spec/data';
 import type { ObjectGridSchema, ListColumn } from '@object-ui/types';
 import { ObjectGrid } from '@object-ui/plugin-grid';
 import { DrawerForm } from '@object-ui/plugin-form';
@@ -173,6 +174,49 @@ interface TypeFilterGroup {
  * - It stays enabled in read-only mode, as the native control did: it filters
  *   the list and writes nothing.
  */
+// ============================================================================
+// Field change values (`fieldHistory`, objectstack#36290)
+// ============================================================================
+
+/**
+ * The drawer's Field Change Values row offers the same three choices as the
+ * Studio's other `fieldHistory` controls (`fieldHistoryChoice.ts` in
+ * `@object-ui/app-shell`): Default removes the key and names what it resolves
+ * to for the field's type, On writes `true`, Off writes `false`. That module
+ * cannot be imported here — app-shell depends on this package — so what is
+ * shared is the rule itself, `resolveFieldHistory` from `@objectstack/spec/data`,
+ * the predicate the activity writer keeps or drops values with; the three-way
+ * mapping below is the same two lines.
+ *
+ * Default's label depends on the TYPE, which the author can change in the same
+ * drawer, and a select's options are static. So the row is drawn twice under
+ * two form-local names, one per resolved default, each shown by `visibleWhen`
+ * for the types it covers; the save reads the row visible for the saved type,
+ * which is the one on screen at the click. Neither name is ever written.
+ */
+type FieldHistoryChoice = 'default' | 'on' | 'off';
+const FIELD_HISTORY_ROW_DEFAULT_ON = 'fieldHistoryDefaultOn';
+const FIELD_HISTORY_ROW_DEFAULT_OFF = 'fieldHistoryDefaultOff';
+
+function fieldHistoryChoiceOf(value: unknown): FieldHistoryChoice {
+  return value === true ? 'on' : value === false ? 'off' : 'default';
+}
+
+function fieldHistoryValueOf(choice: unknown): boolean | undefined {
+  return choice === 'on' ? true : choice === 'off' ? false : undefined;
+}
+
+/** Whether Default resolves to on for `type`, given the field's stored `trackHistory`. */
+function fieldHistoryDefaultOn(type: unknown, trackHistory: unknown): boolean {
+  return resolveFieldHistory({ type, trackHistory }, undefined);
+}
+
+/** The `fieldHistory` the drawer's submitted values choose, read from the row shown for the saved type. */
+function fieldHistoryFromForm(data: Record<string, unknown>, type: unknown, trackHistory: unknown): boolean | undefined {
+  const row = fieldHistoryDefaultOn(type, trackHistory) ? FIELD_HISTORY_ROW_DEFAULT_ON : FIELD_HISTORY_ROW_DEFAULT_OFF;
+  return fieldHistoryValueOf(data[row]);
+}
+
 function TypeFilterPicker({
   value,
   allLabel,
@@ -342,8 +386,13 @@ export function FieldDesigner({
         hidden: data.hidden === true,
         // No `externalId` here (objectstack#26674): the drawer no longer
         // offers it, so the spread above carries a stored value through an
-        // edit untouched.
-        trackHistory: data.trackHistory === true,
+        // edit untouched. Nor `trackHistory` (objectstack#36290): the spread
+        // carries a stored one, and the drawer writes `fieldHistory` instead.
+        fieldHistory: fieldHistoryFromForm(
+          data,
+          (data.type as DesignerFieldType) || editingField.type,
+          editingField.trackHistory,
+        ),
         defaultValue: data.defaultValue ? String(data.defaultValue) : undefined,
         placeholder: data.placeholder ? String(data.placeholder) : undefined,
         referenceTo: data.referenceTo ? String(data.referenceTo) : undefined,
@@ -362,7 +411,7 @@ export function FieldDesigner({
         unique: data.unique === true,
         readonly: data.readonly === true,
         hidden: data.hidden === true,
-        trackHistory: data.trackHistory === true,
+        fieldHistory: fieldHistoryFromForm(data, (data.type as DesignerFieldType) || 'text', undefined),
         defaultValue: data.defaultValue ? String(data.defaultValue) : undefined,
         placeholder: data.placeholder ? String(data.placeholder) : undefined,
         referenceTo: data.referenceTo ? String(data.referenceTo) : undefined,
@@ -406,6 +455,29 @@ export function FieldDesigner({
         .filter((o) => drawerOffersType(o.value, editingField?.type)),
     [typeOptionsByCategory, editingField],
   );
+
+  // objectstack#36290 — the two Field Change Values rows (see
+  // `fieldHistoryFromForm`): which types each covers, and their options.
+  const fieldHistoryRows = useMemo(() => {
+    const storedTrackHistory = editingField?.trackHistory;
+    const offTypes = DESIGNER_FIELD_TYPES.filter((ft) => !fieldHistoryDefaultOn(ft, storedTrackHistory));
+    const inOff = `record.type in [${offTypes.map((ft) => `'${ft}'`).join(', ')}]`;
+    const options = (defaultOn: boolean) => [
+      {
+        label: t('appDesigner.fieldDesigner.fieldHistoryDefault', {
+          state: t(defaultOn ? 'appDesigner.fieldDesigner.fieldHistoryOn' : 'appDesigner.fieldDesigner.fieldHistoryOff'),
+        }),
+        value: 'default',
+      },
+      { label: t('appDesigner.fieldDesigner.fieldHistoryOn'), value: 'on' },
+      { label: t('appDesigner.fieldDesigner.fieldHistoryOff'), value: 'off' },
+    ];
+    const label = t('appDesigner.fieldDesigner.fieldHistory');
+    return [
+      { name: FIELD_HISTORY_ROW_DEFAULT_ON, label, type: 'select' as const, options: options(true), disabled: readOnly, visibleWhen: `!(${inOff})` },
+      { name: FIELD_HISTORY_ROW_DEFAULT_OFF, label, type: 'select' as const, options: options(false), disabled: readOnly, visibleWhen: inOff },
+    ];
+  }, [editingField, readOnly, t]);
 
   // DrawerForm schema — right-side panel with Basic / Type-specific / Advanced sections
   const drawerSchema = useMemo<DrawerFormSchema>(() => ({
@@ -479,7 +551,10 @@ export function FieldDesigner({
           // the switch only invited an author to rely on it. A stored value
           // is carried through an edit by `handleFormSuccess`'s spread, never
           // stripped.
-          { name: 'trackHistory', label: t('appDesigner.fieldDesigner.trackHistory'), type: 'boolean', disabled: readOnly },
+          // objectstack#36290 — Field Change Values (`fieldHistory`) in
+          // place of the old Track History switch, whose `false` no longer
+          // turns values off; a stored `trackHistory` rides the edit spread.
+          ...fieldHistoryRows,
           { name: 'readonly', label: t('appDesigner.fieldDesigner.readOnly'), type: 'boolean', disabled: readOnly },
           { name: 'hidden', label: t('appDesigner.fieldDesigner.hidden'), type: 'boolean', disabled: readOnly },
         ],
@@ -496,16 +571,23 @@ export function FieldDesigner({
           unique: editingField.unique || false,
           readonly: editingField.readonly || false,
           hidden: editingField.hidden || false,
-          trackHistory: editingField.trackHistory || false,
+          [FIELD_HISTORY_ROW_DEFAULT_ON]: fieldHistoryChoiceOf(editingField.fieldHistory),
+          [FIELD_HISTORY_ROW_DEFAULT_OFF]: fieldHistoryChoiceOf(editingField.fieldHistory),
           defaultValue: editingField.defaultValue != null ? String(editingField.defaultValue) : '',
           placeholder: editingField.placeholder || '',
           referenceTo: editingField.referenceTo || '',
         }
-      : { type: 'text', required: false, unique: false },
+      : {
+          type: 'text',
+          required: false,
+          unique: false,
+          [FIELD_HISTORY_ROW_DEFAULT_ON]: 'default',
+          [FIELD_HISTORY_ROW_DEFAULT_OFF]: 'default',
+        },
     onSuccess: handleFormSuccess,
     onCancel: () => handleFormClose(false),
     readOnly,
-  }), [editingField, formOpen, handleFormClose, handleFormSuccess, flatTypeOptions, readOnly, t]);
+  }), [editingField, formOpen, handleFormClose, handleFormSuccess, flatTypeOptions, fieldHistoryRows, readOnly, t]);
 
   return (
     <div

@@ -310,7 +310,7 @@ const FULL = [
         id: 'f1', name: 'rating', label: 'Rating', type: 'select', group: 'General', description: 'How hot',
         required: false, unique: false, readonly: false, hidden: false, defaultValue: 'warm', placeholder: 'Pick',
         options: [{ label: 'Warm', value: 'warm', color: 'orange' }],
-        isSystem: false, externalId: false, trackHistory: true, referenceTo: 'account',
+        isSystem: false, externalId: false, trackHistory: true, fieldHistory: false, referenceTo: 'account',
       },
     ],
     readOnly: false,

@@ -314,6 +314,7 @@ describe('objectui#6488 · the mirror — carry-over must NOT resurrect what the
         options: [{ label: 'One', value: '1' }],
         externalId: true,
         trackHistory: true,
+        fieldHistory: false,
         reference: 'opportunity',
         // …and one key the designer does not model, as the positive control.
         expression: 'price * quantity',
@@ -334,6 +335,7 @@ describe('objectui#6488 · the mirror — carry-over must NOT resurrect what the
     'options',
     'externalId',
     'trackHistory',
+    'fieldHistory',
     'reference',
   ] as const;
 
