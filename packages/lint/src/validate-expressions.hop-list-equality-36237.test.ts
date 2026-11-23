@@ -17,7 +17,7 @@ import { describe, it, expect } from 'vitest';
 
 import { ObjectStackSchema } from '@objectstack/spec';
 
-import { validateStackExpressions } from './validate-expressions.js';
+import { runStackExpressionPasses, validateStackExpressions } from './validate-expressions.js';
 
 const MANIFEST = { id: 'com.example.hop-list-equality', name: 'hop_list_equality_probe', version: '1.0.0', type: 'app' } as const;
 
@@ -127,6 +127,21 @@ describe('publish lint — list-equality through a lookup hop', () => {
       ],
     });
     expect(errors.map((e) => e.source).sort()).toEqual(["record.account.labels == 'vip'", "record.account.owners == 'u1'"]);
+  });
+
+  it('the object save door (`runtimeWriteType: object`) refuses the same hop, rule and formula', () => {
+    const stack = specValid({
+      objects: [
+        account,
+        contactWith({
+          fields: { is_vip: { type: 'formula', label: 'Is VIP', expression: "record.account.labels == 'vip'" } },
+          validations: [{ name: 'probe_rule', type: 'script', severity: 'error', message: 'm', condition: "record.account.owners != 'u1'" }],
+        }),
+      ],
+    });
+    const errors = runStackExpressionPasses(stack, { runtimeWriteType: 'object' })
+      .filter((i) => i.severity === 'error' && i.message.includes('holds a list'));
+    expect(errors.map((e) => e.source).sort()).toEqual(["record.account.labels == 'vip'", "record.account.owners != 'u1'"]);
   });
 
   // A reference that is itself multi-valued holds a list of ids: its hop is
