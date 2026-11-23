@@ -873,6 +873,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Hidden",
         helpText: "Hide field from default UI views"
       },
+      showOnCreate: {
+        label: "Show On Create",
+        helpText: "Ask for this field when a record is created. Off: the create dialog, the full-page create and an action-opened create leave it out; editing, the record page and lists still show it. A required field is always asked for, so it cannot be turned off."
+      },
       searchable: {
         label: "Searchable",
         helpText: "Include in global search results"

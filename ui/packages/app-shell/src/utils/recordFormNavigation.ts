@@ -139,35 +139,26 @@ export function resolveRecordFormTarget(opts: {
 }
 
 /**
- * Subset of the default form-view shape consumed by
- * {@link resolveFormViewLayout}. This is the flattened `config` body of the
- * object's default `viewKind: 'form'` ViewItem (ADR-0017), merged onto the
- * object by `MetadataProvider` as `objectDef.form` (and mirrored under
- * `objectDef.formViews.default` for the legacy aggregated-container shape).
+ * The form-view body a NAMED form carries (ADR-0017's `viewKind: 'form'`
+ * item, flattened): what {@link resolveFormViewChrome} reads for a form that
+ * is opened by its own name — a public form, a form an action of type `form`
+ * opens, the Setup preview of a form view.
+ *
+ * ⛔ No record create or edit reads one (objectstack-ai/objectstack#36425): an
+ * object's internal form views are not loaded by the console's create dialog,
+ * full-page create, action-opened create or edit. Those lay out by the object's
+ * `fieldGroups` and follow the rules on its fields.
  */
 export interface FormViewDefinition {
   /**
    * The served view item's id (`OBJECT.KEY`), which `MetadataProvider`
-   * stamps on every form view it merges: the name its draft is read and saved
-   * under (objectstack#30057).
+   * stamps on every form view it merges (objectstack#30057).
    */
   name?: string;
-  /**
-   * Layout family declared by the form view (`simple` | `tabbed` | `wizard`
-   * | `split`). Only `tabbed` changes the *modal's* internal layout; the
-   * others still render their curated sections, just stacked.
-   */
+  /** Layout family declared by the form view (`simple` | `tabbed` | `wizard` | `split`). */
   type?: string;
-  /** Curated field sections — the selection, order, and grouping to render. */
+  /** Curated field sections. */
   sections?: any[];
-  /** Inline child collections (master-detail). */
-  subforms?: any[];
-  /** The modal's size bucket, as the spec's `FormView.modalSize` declares it. */
-  modalSize?: FormView['modalSize'];
-  /** Initially active tab of a `tabbed` form view (a section name). */
-  defaultTab?: FormView['defaultTab'];
-  /** Tab strip position of a `tabbed` form view. */
-  tabPosition?: FormView['tabPosition'];
   /** Field layout direction — see {@link resolveFormViewChrome}. */
   layout?: FormView['layout'];
   /** Per-button visibility and label — see {@link resolveFormViewChrome}. */
@@ -177,186 +168,85 @@ export interface FormViewDefinition {
 }
 
 /**
- * Object metadata subset carrying the default form view, as merged onto the
- * runtime objects list (`useMetadata().objects`).
+ * The slice of a served object (`useMetadata().objects`) the record create
+ * and edit forms read for their layout: its name, and the child collections
+ * its field groups place (`groupSubforms`, derived by `MetadataProvider`'s
+ * `attachInlineSubforms` from `fieldGroups[].relatedList`).
  */
-export interface ObjectDefinitionForFormView {
-  /** API name — the prefix of the object's served form-view names. */
+export interface ObjectDefinitionForRecordForm {
   name?: string;
-  form?: FormViewDefinition | null;
-  /**
-   * The object's form views by served name. A container's named form views
-   * arrive as `OBJECT.KEY` (`expandViewContainer` in `@objectstack/spec/ui`,
-   * merged by `MetadataProvider`); `default` is the legacy container shape.
-   */
-  formViews?: Record<string, FormViewDefinition | null | undefined> | null;
+  groupSubforms?: any[] | null;
 }
 
-/**
- * Which record flow a form view is selected for (objectui#13099). A create
- * and an edit can read different form views, so every caller states the
- * flow it opens rather than leaving the resolver to infer it.
- */
+/** Which record flow a form host opens. */
 export type RecordFormFlow = 'create' | 'edit';
 
 /**
- * Select the form view a record flow renders (objectui#13099, ruling B′ on
- * objectstack-ai/objectstack#24692).
+ * The inline child collections (master-detail) a record's create and edit
+ * forms carry: the ones the object's field groups place
+ * (`fieldGroups[].relatedList`, objectstack#35889), as `MetadataProvider`
+ * derives them onto the served object. `undefined` when none.
  *
- *   - EDIT (and a caller that names no flow): the default form view —
- *     `objectDef.form`, else the legacy `objectDef.formViews.default`.
- *   - CREATE: the object's `create` form view when it declares one, else that
- *     same default. This is the documented create-vs-edit model: author
- *     `formViews.create` on the view container and the create entry uses it.
- *
- * The `create` form view is looked up under the name it is SERVED by: a
- * container's `formViews.create` expands to the form item `OBJECT.create`
- * (`expandViewContainer` in `@objectstack/spec/ui`), and `MetadataProvider`
- * keys `formViews` by that served name. No other named form view is ever
- * picked for a create — a named form (a public intake form, a wizard) is
- * reached only by its name.
+ * This is the only source. An object's internal form view, and any `subforms`
+ * it declares, is no longer read (objectstack-ai/objectstack#36425).
  */
-export function selectRecordFormView(
-  objectDef: ObjectDefinitionForFormView | null | undefined,
-  flow: RecordFormFlow = 'edit',
-): FormViewDefinition | undefined {
-  if (flow === 'create' && objectDef?.name) {
-    const createView = objectDef.formViews?.[`${objectDef.name}.create`];
-    if (createView) return createView;
-  }
-  return objectDef?.form ?? objectDef?.formViews?.default ?? undefined;
+export function recordFormSubforms(
+  objectDef: ObjectDefinitionForRecordForm | null | undefined,
+): any[] | undefined {
+  const subforms = objectDef?.groupSubforms;
+  return Array.isArray(subforms) && subforms.length > 0 ? subforms : undefined;
 }
 
 /**
- * Layout props derived from an object's default form view, ready to spread
- * into a `<ModalForm>` schema.
+ * Whether a record flow asks for `field` (objectstack-ai/objectstack#36425):
+ * a field declaring `showOnCreate: false` is left out of every create surface
+ * (the create dialog, the full-page create, an action-opened create); an edit
+ * asks for it as before. Absent or `true`: asked for.
  */
-export interface FormViewModalLayout {
-  /** Curated sections to render (omitted when the form view declares none). */
-  sections?: any[];
-  /** `'tabbed'` when the form view is tabbed; omitted otherwise (stacked). */
-  contentLayout?: 'tabbed';
-  /** Inline child collections for a master-detail modal. */
+export function isFieldAskedOnFlow(
+  field: { showOnCreate?: unknown } | null | undefined,
+  flow: RecordFormFlow,
+): boolean {
+  return flow !== 'create' || field?.showOnCreate !== false;
+}
+
+/**
+ * Layout props for the console's create / edit `<ModalForm>`.
+ *
+ * The layout itself is the object's: `ModalForm` lays the fields out by the
+ * object's `fieldGroups` and follows each field's rules. An internal form view
+ * steers nothing — not its sections, tabs, wizard steps, `subforms` or
+ * `modalSize` (objectstack-ai/objectstack#36425). What is left:
+ *
+ *   - `subforms`: the child collections the field groups place
+ *     ({@link recordFormSubforms});
+ *   - `modalSize: 'full'` when the flow surface the host derived is `'full'`
+ *     (the phone posture of `deriveRecordFlowSurface`). Otherwise no
+ *     `modalSize` key, so `<ModalForm>` sizes the dialog itself.
+ */
+export interface RecordFormModalLayout {
   subforms?: any[];
-  /**
-   * The form view's authored `modalSize` (objectui#12803), copied only when
-   * it is a value the spec's `FormView.modalSize` enum allows. Omitted when
-   * the form view authors none, so the modal keeps its own default size.
-   */
-  modalSize?: FormView['modalSize'];
-  /**
-   * A `tabbed` form view's `defaultTab` and `tabPosition`
-   * (objectstack-ai/objectstack#26843), copied only beside
-   * `contentLayout: 'tabbed'` — the one layout that draws a tab strip.
-   */
-  defaultTab?: string;
-  tabPosition?: FormView['tabPosition'];
+  modalSize?: 'full';
 }
 
-/**
- * Resolve a `<ModalForm>`'s layout props from the form view the record flow
- * selects ({@link selectRecordFormView}): the object's DEFAULT FORM VIEW, or
- * for a create its `create` form view when declared (objectui#13099) —
- * curated sections + field selection/order, plus master-detail subforms.
- *
- * The create / edit record modal otherwise falls back to the raw object
- * schema — rendering every field in schema order and ignoring the curated
- * form view entirely. This resolver lets the New/Edit modal honor the same
- * view-driven layout the full-screen record page (`RecordFormPage`) does.
- *
- * The default resolution mirrors `RecordFormPage`: prefer `objectDef.form`
- * (the default ViewItem) and fall back to `objectDef.formViews.default`
- * (legacy container). `flow` is the flow being opened; a caller that names
- * none gets the default form view.
- *
- * Returns an EMPTY object when the object has no form view, or a form view
- * that declares no sections, subforms or `modalSize` — the caller then keeps
- * its existing behavior (a flat field list, i.e. the raw object schema, at the
- * modal's own default size). Empty `sections` / `subforms` arrays are treated
- * as absent so an empty curation never blanks out the form.
- *
- * `modalSize` is copied independently of `sections` (objectui#12803): a form
- * view can size the dialog without curating its fields. Only a value the
- * spec's `FormView.modalSize` enum accepts is copied; the enum is read from
- * `FormViewSchema` itself, so this file keeps no second copy of it. Where the
- * console's create / edit modal combines it with the derived flow surface,
- * see {@link resolveRecordFormModalLayout}.
- */
-export function resolveFormViewLayout(
-  objectDef: ObjectDefinitionForFormView | null | undefined,
-  flow?: RecordFormFlow,
-): FormViewModalLayout {
-  const formView = selectRecordFormView(objectDef, flow);
-  if (!formView) return {};
-
-  const layout: FormViewModalLayout = {};
-
-  if (Array.isArray(formView.sections) && formView.sections.length > 0) {
-    layout.sections = formView.sections;
-    // Only 'tabbed' maps to a modal content layout; 'wizard'/'split' have no
-    // modal equivalent and degrade to a stacked section list.
-    if (formView.type === 'tabbed') {
-      layout.contentLayout = 'tabbed';
-      // objectstack-ai/objectstack#26843: the tab the form opens on and where
-      // its strip sits, which the modal dropped. A position is copied only when
-      // the spec's enum allows it, read from `FormViewSchema` as `modalSize` is.
-      if (typeof formView.defaultTab === 'string' && formView.defaultTab) {
-        layout.defaultTab = formView.defaultTab;
-      }
-      if (
-        formView.tabPosition !== undefined
-        && FormViewSchema.shape.tabPosition.safeParse(formView.tabPosition).success
-      ) {
-        layout.tabPosition = formView.tabPosition;
-      }
-    }
-  }
-
-  if (Array.isArray(formView.subforms) && formView.subforms.length > 0) {
-    layout.subforms = formView.subforms;
-  }
-
-  const authoredSize = formView.modalSize;
-  if (authoredSize !== undefined && FormViewSchema.shape.modalSize.safeParse(authoredSize).success) {
-    layout.modalSize = authoredSize;
-  }
-
+export function resolveRecordFormModalLayout(
+  objectDef: ObjectDefinitionForRecordForm | null | undefined,
+  derivedSize: RecordFlowSurface['size'],
+): RecordFormModalLayout {
+  const layout: RecordFormModalLayout = {};
+  const subforms = recordFormSubforms(objectDef);
+  if (subforms) layout.subforms = subforms;
+  if (derivedSize === 'full') layout.modalSize = 'full';
   return layout;
 }
 
 /**
- * The layout the console's create / edit `<ModalForm>` is handed: the default
- * form view's layout ({@link resolveFormViewLayout}) with its `modalSize`
- * resolved against the record flow's derived surface (objectui#12803).
- *
- * Precedence, stated here rather than left to spread order:
- *
- *   1. a derived `size: 'full'` — the phone posture of `deriveRecordFlowSurface`
- *      — stays `'full'`. It is a viewport rule, not an authored bucket, so an
- *      authored size never shrinks a phone's full-screen modal;
- *   2. otherwise the form view's authored `modalSize` wins on desktop;
- *   3. otherwise no `modalSize` key at all, so `<ModalForm>` sizes the dialog
- *      itself (its bounded default) exactly as before.
- *
- * `derivedSize` is the `size` of `deriveRecordFlowSurface(objectDef, flow)`
- * for the flow being opened; `flow` selects the form view
- * ({@link selectRecordFormView}, objectui#13099).
- */
-export function resolveRecordFormModalLayout(
-  objectDef: ObjectDefinitionForFormView | null | undefined,
-  derivedSize: RecordFlowSurface['size'],
-  flow?: RecordFormFlow,
-): FormViewModalLayout {
-  const { modalSize: authoredSize, ...layout } = resolveFormViewLayout(objectDef, flow);
-  const modalSize = derivedSize === 'full' ? 'full' : authoredSize;
-  return modalSize ? { ...layout, modalSize } : layout;
-}
-
-/**
- * The form chrome a console form host draws from the form view it opens
- * (objectstack-ai/objectstack#26843), ready to spread into an `<ObjectForm>` or
- * `<ModalForm>` schema: the action buttons' visibility and labels, the field
- * layout, and a create's opening values.
+ * The form chrome a console form host draws (objectstack-ai/objectstack#26843),
+ * ready to spread into an `<ObjectForm>` or `<ModalForm>` schema: the action
+ * buttons' visibility and labels, the field layout, and a create's opening
+ * values. A named form takes it from its own definition
+ * ({@link resolveFormViewChrome}); a record create or edit from the console's
+ * defaults ({@link resolveRecordFormChrome}).
  */
 export interface FormViewChrome {
   showSubmit: boolean;
@@ -397,7 +287,8 @@ function createSeed(
 }
 
 /**
- * Resolve the {@link FormViewChrome} of the form view a record flow opens.
+ * Resolve the {@link FormViewChrome} of a named form view (the Setup preview
+ * of a form view reads it this way, so the canvas and a named form agree).
  *
  * Every console form host used to hard-set these props — `showSubmit: true`,
  * its own submit label, `layout: 'vertical'` — over the keys the form view
@@ -450,6 +341,23 @@ export function resolveFormViewChrome(
     : opts.createValues;
   if (initialValues) chrome.initialValues = initialValues;
   return chrome;
+}
+
+/**
+ * The {@link FormViewChrome} of a record create or edit
+ * (objectstack-ai/objectstack#36425): the host's own buttons and labels, the
+ * vertical layout, and on a create the values the host opens it with (a URL
+ * prefill, a parent pre-link, a seeded day). No internal form view's
+ * `buttons`, `layout` or `defaults` is read; a create's opening values beyond
+ * the host's come from each field's `defaultValue`, which the form applies.
+ */
+export function resolveRecordFormChrome(opts: {
+  flow: RecordFormFlow;
+  submitText: string;
+  cancelText: string;
+  createValues?: Record<string, unknown>;
+}): FormViewChrome {
+  return resolveFormViewChrome(null, { ...opts, language: '' });
 }
 
 /**

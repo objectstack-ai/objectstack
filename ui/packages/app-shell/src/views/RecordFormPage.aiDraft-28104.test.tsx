@@ -14,8 +14,10 @@
  * fields the page names through `SuggestedFieldsContext` (the form renderer's
  * own test pins how a named field is drawn). Pinned:
  *
- *   1. the draft's values seed the create, typed, over the form view's
- *      defaults, and every one of them is named as AI-suggested;
+ *   1. the draft's values seed the create, typed, and every one of them is
+ *      named as AI-suggested (since objectstack-ai/objectstack#36425 the
+ *      internal form view's `defaults` are not read, so the draft is all
+ *      that seeds it);
  *   2. a query-string prefill wins per field, and a field it fills is not
  *      named as AI-suggested;
  *   3. the page says once, above the form, that the draft is unsaved;
@@ -113,7 +115,7 @@ function openPage(entry: string | { pathname: string; search?: string; state?: u
 }
 
 describe('RecordFormPage opens on an AI chat draft from router state (objectstack#28104)', () => {
-  it('the draft seeds the create over the form defaults, and every drafted field is named', () => {
+  it('the draft seeds the create, and every drafted field is named', () => {
     const last = openPage({ pathname: '/apps/crm/crm_lead/new', state: DRAFT_STATE });
     expect(last.schema.initialValues).toStrictEqual({
       status: 'contacted',
@@ -166,7 +168,10 @@ describe('RecordFormPage opens on an AI chat draft from router state (objectstac
   it('CONTROL: no draft names nothing and shows no notice', () => {
     const last = openPage('/apps/crm/crm_lead/new?name=typed');
     expect(last.suggested).toBeUndefined();
-    expect(last.schema.initialValues).toStrictEqual({ status: 'new', name: 'typed' });
+    // objectstack-ai/objectstack#36425: the internal form's `defaults`
+    // ({ status: 'new' } in the fixture) are retired with the form and no
+    // longer seed a create; only the URL prefill does.
+    expect(last.schema.initialValues).toStrictEqual({ name: 'typed' });
     expect(screen.queryByTestId('record-form-ai-draft-notice')).toBeNull();
   });
 
