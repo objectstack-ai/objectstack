@@ -2771,17 +2771,17 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.access.title': 'Permission matrix',
   'engine.studio.access.subtitle': 'Object permissions · field-level read/write',
   'engine.studio.access.bannerTitle':
-    'Only this app’s objects are listed here, and saving changes only this app’s grants — grants from other apps stay as they are. Changes go live when you press Save in the top bar, as in Data and Interfaces.',
-  'engine.studio.access.banner': 'This app’s objects · live on save',
+    'Only this app’s objects are listed here, and saving changes only this app’s grants — grants from other apps stay as they are. Changes are saved as a draft and go live when you Publish the app (top bar), as in Data and Interfaces.',
+  'engine.studio.access.banner': 'This app’s objects · live on publish',
   // objectstack#29674 — the note on an open set the base's pair adds: its matrix lists the base's objects too.
-  'engine.studio.access.bannerPair': 'This app’s and {package}’s objects · live on save',
+  'engine.studio.access.bannerPair': 'This app’s and {package}’s objects · live on publish',
   // objectstack#35018 — the open set's origin in the builder's words (the Studio title note).
   'engine.studio.access.origin.app': 'Included with the app',
   // objectstack#35018 — the word before the open item's label on the copilot's "Viewing" line.
   'engine.studio.copilot.subject.access': 'Access',
   'engine.studio.copilot.subject.flow': 'Flow',
   'engine.studio.access.bannerTitlePair':
-    'This permission set is part of the customization of {package}, so {package}’s objects are listed as well as this app’s, and saving changes only these grants — grants from other apps stay as they are. Changes go live when you press Save in the top bar.',
+    'This permission set is part of the customization of {package}, so {package}’s objects are listed as well as this app’s, and saving changes only these grants — grants from other apps stay as they are. Changes are saved as a draft and go live when you Publish (top bar).',
   // objectui#11781 — a read-only package saves no draft; objectui#12453 makes this the header link's title.
   'engine.studio.access.bannerTitleReadOnly':
     'Only this app’s objects are listed here. This app is read-only: you can view its permission sets but not change them.',

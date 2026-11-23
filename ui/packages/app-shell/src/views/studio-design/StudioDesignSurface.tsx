@@ -11190,17 +11190,6 @@ export function AccessPillar({
                 // reload.
                 void load();
               }}
-              onSaved={() => {
-                // objectstack#36511 — the top bar's Save published the set: no
-                // draft of it is left, and the rail reads its label again.
-                setDraftNames((names) => {
-                  if (!names.has(current)) return names;
-                  const next = new Set(names);
-                  next.delete(current);
-                  return next;
-                });
-                void load();
-              }}
               readOnly={readOnly}
               onDirtyChange={setMatrixDirty}
               embedded

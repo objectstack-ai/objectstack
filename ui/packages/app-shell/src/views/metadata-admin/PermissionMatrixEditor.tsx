@@ -103,9 +103,6 @@ import {
 } from './draftVerdict.js';
 // objectui#11787 — the package door autosaves through the pillars' own autosave.
 import { useDraftAutoSave, type DraftSend } from '../studio-design/useDraftAutoSave.js';
-// objectstack#36511 — in the Studio the set is sent by the top bar's Save, which makes it live.
-import { publishSavedItem, useStudioSaveEntry, type StudioSaveResult } from '../studio-design/studioSaveBar.js';
-import { publishFailureOf, publishRefusal } from '../studio-design/metadataError.js';
 // objectui#12456 — the Studio Access pillar's presentation draws the shared item header.
 import { StudioItemHeader, StudioTab } from '../studio-design/StudioItemHeader.js';
 import type { CustomizationMarkKind } from '../studio-design/customizationMarks.js';
@@ -579,14 +576,6 @@ export interface PermissionMatrixEditPageProps {
   onDraftSaved?: () => void;
   publishNonce?: number;
   /**
-   * objectstack#36511 — in the Studio (`studio` with a `packageId`) the set is
-   * not autosaved: the top bar's Save writes its draft and publishes that one
-   * set, so it is live at once, and Cancel puts back what the server holds.
-   * `onSaved` fires when such a Save made the set live (no draft is left);
-   * a refused publish that keeps the draft reports `onDraftSaved` instead.
-   */
-  onSaved?: () => void;
-  /**
    * objectui#2505 — when provided, the per-object OWD badge becomes a link that
    * opens the package-level Record Sharing Baseline (OWD) overview, scrolled to
    * that object. Set only by the Studio Access pillar (which hosts the sibling
@@ -642,14 +631,11 @@ export interface PermissionMatrixEditPageProps {
   customizationMark?: CustomizationMarkKind | null;
 }
 
-/** objectstack#36511 — a set is saved after the objects it grants on. */
-const PERMISSION_SET_SAVE_ORDER = 4;
-
 /* ────────────────────────────────────────────────────────────────── */
 /* Component                                                          */
 /* ────────────────────────────────────────────────────────────────── */
 
-export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, onSaved, publishNonce, onOpenOwd, onDirtyChange, readOnly: readOnlyProp = false, embedded = false, studio, customizationMark = null }: PermissionMatrixEditPageProps) {
+export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, publishNonce, onOpenOwd, onDirtyChange, readOnly: readOnlyProp = false, embedded = false, studio, customizationMark = null }: PermissionMatrixEditPageProps) {
   // objectstack ADR-0146 D1 (#28561) — Studio's "All metadata" area mounts this
   // editor through the routed item page, which hands it no `readOnly`: a
   // read-only package's area is the host gate here, as a pillar's prop is.
@@ -938,11 +924,6 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
   // objectui#11787 — when the package door's last draft save landed, for the
   // status line that replaces its Save button ("Saved 10:42").
   const [savedAt, setSavedAt] = React.useState<Date | null>(null);
-  // objectstack#36511 — the Studio's Save sends this door's edit and publishes it.
-  const saveByTopBar = !!packageId && !!studio;
-  // Whether the set held a pending draft before this editor's Save wrote one:
-  // a refused publish discards only the draft the Save itself wrote.
-  const hadDraftRef = React.useRef(false);
   const displayLocale = useDisplayLocale();
   const [error, setError] = React.useState<string | null>(null);
   // objectstack#29148 — the server refused to read this set's pending package
@@ -1116,7 +1097,6 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
           return;
         }
         const pendingDraft = pendingRead?.answer ?? null;
-        hadDraftRef.current = !!pendingDraft;
         verdictReadSeq.current += 1;
         setServedVerdict(
           editedItemDiagnostics({
@@ -1594,11 +1574,9 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
   /**
    * `sent` is the autosave's claim on the buffer it sent (objectui#11787, the
    * package door only); the environment door's Save and the destructive
-   * dialog's force-save pass none. Under the Studio's Save (`saveByTopBar`)
-   * the draft is published at once (objectstack#36511); the answer is what the
-   * top bar reports.
+   * dialog's force-save pass none.
    */
-  async function doSave(force: boolean, pending?: PermissionSetDraft, sent?: DraftSend): Promise<StudioSaveResult> {
+  async function doSave(force: boolean, pending?: PermissionSetDraft, sent?: DraftSend) {
     const payload = pending ?? draft;
     setSaving(true);
     setError(null);
@@ -1675,33 +1653,8 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
         ...(packageId && embedded ? { surface: 'studio' as const } : {}),
       });
       // The author chose the saved version; the load replaces the matrix.
-      if (outcome === 'reloaded') return { kind: 'declined' };
-      if (packageId && saveByTopBar) {
-        // objectstack#36511 — the draft just written is published alone, so
-        // the set is live; a refused publish drops the draft this Save wrote
-        // (one that was pending before stays, listed under Changes).
-        const live = await publishSavedItem(client, { type, name: payload.name, packageId }, hadDraftRef.current);
-        if (!live.ok) {
-          hadDraftRef.current = !live.draftDiscarded;
-          if (live.draftDiscarded) recordSetRead(type, payload.name, packageId, { ifNoneMatch: '*' });
-          else onDraftSaved?.();
-          const refusal = publishRefusal(
-            publishFailureOf(type, payload.name, live.error),
-            type,
-            toSave as unknown as Record<string, unknown>,
-            locale,
-          );
-          setError(refusal.message);
-          return { kind: 'refused', reason: refusal.message };
-        }
-        hadDraftRef.current = false;
-        recordSetRead(type, payload.name, packageId, { ifNoneMatch: '*' });
-        resetDraftBaseline(toDisplayDraft(toSave));
-        verdictReadSeq.current += 1;
-        setServedVerdict(undefined);
-        setServedVerdictBody(toSave);
-        onSaved?.();
-      } else if (packageId) {
+      if (outcome === 'reloaded') return;
+      if (packageId) {
         setSavedAt(new Date());
         if (sent && !sent.unmoved()) {
           // objectui#11787 (the objectui#11204 rule) — the author edited while
@@ -1783,13 +1736,10 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
       // key the editor on the server's prose.
       setCloned((c) => (c && c.name === payload.name ? null : c));
       setDestructive(null);
-      return { kind: 'saved' };
     } catch (err: any) {
       if (err?.status === 409 && errorCodeIs(err, 'DESTRUCTIVE_CHANGE')) {
         const issues = err?.body?.issues ?? [];
         setDestructive({ issues: Array.isArray(issues) ? issues : [], pending: payload });
-        // The author is asked; the dialog's own button sends the set.
-        return { kind: 'declined' };
       } else if (!packageId && err?.status === 403 && errorCodeIs(err, 'NOT_OVERRIDABLE')) {
         // objectui#5987 (the card's item 3) — the environment door refused the
         // write because a code package ships this set: the same condition the
@@ -1805,7 +1755,6 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
         // own issue messages, a policy's in the author's words.
         setError(refusalText(err, locale) ?? err?.message ?? String(err));
       }
-      return { kind: 'refused', reason: refusalText(err, locale) ?? err?.message ?? String(err) };
     } finally {
       setSaving(false);
     }
@@ -1828,49 +1777,10 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
     target: autosaveTarget,
     loadedFor: loading || draftRefused ? '' : autosaveTarget,
     dirty: isDirty,
-    blocked: saveByTopBar || !packageId || !writable || saving || saveHeld || destructive !== null || draftRefused !== null,
+    blocked: !packageId || !writable || saving || saveHeld || destructive !== null || draftRefused !== null,
     snapshot: draft,
-    save: async (sent) => {
-      await doSave(false, undefined, sent);
-    },
+    save: (sent) => doSave(false, undefined, sent),
   });
-
-  /* ── The Studio's Save and Cancel (objectstack#36511) ──────────── */
-  // The set is one buffer of the top bar's: nothing is written before Save,
-  // Save writes the draft and publishes this set alone, and Cancel puts back
-  // the body the editor last read or saved. Held while a finding the door
-  // would refuse is on the page, in the words the status line shows.
-  const heldClause =
-    celErrorTotal > 0
-      ? t('perm.cel.saveBlocked')
-      : rlsUnnamedCount > 0
-      ? t('perm.rls.nameNeeded')
-      : rlsClauseRefusedCount > 0
-      ? t('perm.rls.clauseHeld')
-      : null;
-  const cancelEdits = () => {
-    const snap = baselineRef.current;
-    if (snap == null) return;
-    try {
-      setDraft(JSON.parse(snap) as PermissionSetDraft);
-    } catch {
-      return;
-    }
-    setError(null);
-    setDestructive(null);
-  };
-  useStudioSaveEntry(
-    saveByTopBar && writable && !loading && draftRefused === null
-      ? {
-          label: typeof headerLabel === 'string' && headerLabel ? headerLabel : name,
-          order: PERMISSION_SET_SAVE_ORDER,
-          dirty: isDirty,
-          held: isDirty ? heldClause : null,
-          save: () => doSave(false),
-          cancel: cancelEdits,
-        }
-      : null,
-  );
 
   /* ── Clone to customize (objectui#5987, objectui#7611) ─────────── */
   /**

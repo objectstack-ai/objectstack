@@ -63,8 +63,6 @@ const client = {
   getDraft: async () => null,
   get: async () => null,
   save: (...args: Parameters<MetadataClient['save']>) => wire.save(...args),
-  publish: (...args: Parameters<MetadataClient['publish']>) => wire.publish(...args),
-  reset: (...args: Parameters<MetadataClient['reset']>) => wire.reset(...args),
 };
 
 vi.mock('./useMetadata', async (importOriginal) => {
@@ -87,7 +85,6 @@ vi.mock('../studio-design/StudioAiCopilot', () => ({ StudioChatDock: () => null 
 import '../../services/builtinComponents.js';
 import { MetadataResourceEditPage } from './ResourceEditPage';
 import { AccessPillar } from '../studio-design/StudioDesignSurface';
-import { StudioSaveHarness, pressStudioSave } from '../studio-design/__tests__/studioSaveHarness';
 
 window.matchMedia = ((query: string) => ({
   matches: false,
@@ -114,17 +111,13 @@ afterEach(cleanup);
 describe('the permission matrix states `surface` only under the Studio host (objectui#12725)', () => {
   it('Studio’s Access pillar: the draft save sends `?surface=studio`, once', async () => {
     render(
-      <StudioSaveHarness>
-        <MemoryRouter>
-          <AccessPillar packageId={PKG} />
-        </MemoryRouter>
-      </StudioSaveHarness>,
+      <MemoryRouter>
+        <AccessPillar packageId={PKG} />
+      </MemoryRouter>,
     );
     await waitFor(() => expect(readBox()).toBeInTheDocument(), AUTOSAVE);
 
     fireEvent.click(readBox());
-    // objectstack#36511 — sent by the top bar's Save.
-    await pressStudioSave();
     await waitFor(() => expect(puts).toHaveLength(1), AUTOSAVE);
     expect(puts[0]!.get('mode')).toBe('draft');
     expect(puts[0]!.get('package')).toBe(PKG);
