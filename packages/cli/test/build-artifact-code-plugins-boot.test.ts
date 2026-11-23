@@ -39,7 +39,7 @@ const BOOT_TIMEOUT = 120_000;
  */
 const CONFIG_LITERAL = `{
   manifest: { id: '${APP_ID}', name: 'Plugin Build Probe', version: '1.0.0', type: 'app', namespace: 'probeb' },
-  objects: [{ name: 'probeb_clause', label: 'Clause', fields: { title: { type: 'text', label: 'Title' } } }],
+  objects: [{ name: 'probeb_clause', label: 'Clause', sharingModel: 'private', fields: { title: { type: 'text', label: 'Title' } } }],
   plugins: [
     { name: '${VECTOR}', version: '1.0.0', dependencies: [], options: { dimensions: 1536 }, init: async () => {} },
     { name: '${INDEXER}', version: '1.0.0', dependencies: ['${VECTOR}'], init: async () => {} },
@@ -49,9 +49,11 @@ const CONFIG_LITERAL = `{
 let root = '';
 let artifactPath = '';
 
-/** Runs `os build` in-process; answers the exit code (0 when the command returned). */
-async function build(configPath: string, output: string): Promise<number> {
-  const spy = vi.spyOn(process.stdout, 'write').mockImplementation(((_chunk: unknown, ...rest: unknown[]) => {
+/** Runs `os build` in-process; answers the exit code (0 when the command returned) and what it printed. */
+async function build(configPath: string, output: string): Promise<{ code: number; stdout: string }> {
+  const chunks: string[] = [];
+  const spy = vi.spyOn(process.stdout, 'write').mockImplementation(((chunk: unknown, ...rest: unknown[]) => {
+    chunks.push(String(chunk));
     const done = rest.find((a) => typeof a === 'function') as ((e?: Error | null) => void) | undefined;
     done?.(null);
     return true;
@@ -59,11 +61,11 @@ async function build(configPath: string, output: string): Promise<number> {
   const exitCodeBefore = process.exitCode;
   try {
     await Compile.run([configPath, '--output', output], { root: CLI_ROOT });
-    return 0;
+    return { code: 0, stdout: chunks.join('') };
   } catch (error) {
     const exit = (error as { oclif?: { exit?: unknown } }).oclif?.exit;
     if (typeof exit !== 'number') throw error;
-    return exit;
+    return { code: exit, stdout: chunks.join('') };
   } finally {
     spy.mockRestore();
     process.exitCode = exitCodeBefore;
@@ -77,8 +79,10 @@ beforeAll(async () => {
   const configPath = join(dir, 'objectstack.config.ts');
   writeFileSync(configPath, defineStackSourceFromLiteral(CONFIG_LITERAL));
   linkSpec(dir);
+  mkdirSync(join(root, 'host'), { recursive: true });
   artifactPath = join(dir, 'dist', 'objectstack.json');
-  expect(await build(configPath, artifactPath)).toBe(0);
+  const built = await build(configPath, artifactPath);
+  expect(built.code, built.stdout).toBe(0);
 }, 60_000);
 
 afterAll(() => {
@@ -97,7 +101,8 @@ describe('#36647 — os build, then an artifact boot of what it wrote', () => {
     try {
       const standalone = await createStandaloneStack({
         artifactPath,
-        projectRoot: root,
+        // A directory of its own: the boot's root, apart from the source tree the build read.
+        projectRoot: join(root, 'host'),
         databaseUrl: ':memory:',
         skipSeedData: true,
         runPlatformMigrations: false,
