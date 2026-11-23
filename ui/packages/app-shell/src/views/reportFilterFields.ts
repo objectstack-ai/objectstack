@@ -11,6 +11,12 @@
  * (`conditionCandidatesOf`): the same translated labels, the same option
  * pickers for a select, the same record picker for a lookup.
  *
+ * The list's Filter panel also sets the ORDER, and so does this: the business
+ * fields first, then the system ones (`isSystemManagedField` — created by,
+ * modified at, owner …), each in the definition's order. "Add filter" seeds
+ * its row on the first field, so a new condition starts on a business field
+ * rather than on 「Created by」.
+ *
  * Two narrowings on top of that mapping, both because the builder writes
  * through the console's `FilterCondition` bridge (`datasetFilterCondition`),
  * not through the list's own filter dialect:
@@ -29,7 +35,7 @@
  */
 
 import * as React from 'react';
-import type { DataSource } from '@object-ui/types';
+import { isSystemManagedField, type DataSource } from '@object-ui/types';
 import { useObjectLabel } from '@object-ui/i18n';
 import { conditionCandidatesOf, conditionOptionsOf, type ConditionCandidateField } from '@object-ui/plugin-list';
 
@@ -48,12 +54,14 @@ export function reportFilterFields(
 ): ReportFilterField[] {
   const defs = def?.fields;
   if (!defs || typeof defs !== 'object' || Array.isArray(defs)) return [];
-  const shown: Record<string, unknown> = {};
+  const business: Array<[string, unknown]> = [];
+  const system: Array<[string, unknown]> = [];
   for (const [name, field] of Object.entries(defs)) {
     if (!field || typeof field !== 'object') continue;
     if ((field as { hidden?: unknown }).hidden === true) continue;
-    shown[name] = field;
+    (isSystemManagedField(name, field as { system?: boolean }) ? system : business).push([name, field]);
   }
+  const shown: Record<string, unknown> = Object.fromEntries([...business, ...system]);
   return conditionCandidatesOf(shown, label, options).map(({ currencyField: _paired, ...field }) => field);
 }
 

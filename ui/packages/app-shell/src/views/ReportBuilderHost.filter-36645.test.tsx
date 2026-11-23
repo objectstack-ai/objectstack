@@ -86,6 +86,13 @@ describe('the report filter fields (objectstack#36645)', () => {
   it('are the object\'s own fields, minus the hidden ones, with no currency pairing', () => {
     const fields = reportFilterFields(OBJECT_DEF, (_f, fallback) => fallback, (_f, raw) => (Array.isArray(raw) ? raw : undefined));
     expect(fields.map((f) => f.value)).toEqual(['name', 'stage', 'amount', 'account']);
+    // Business fields first, system fields after, as the list's Filter panel orders them.
+    const withSystem = reportFilterFields(
+      { fields: { created_by: { type: 'lookup', label: 'Created by', system: true }, ...OBJECT_DEF.fields } },
+      (_f, fallback) => fallback,
+      () => undefined,
+    );
+    expect(withSystem.map((f) => f.value)).toEqual(['name', 'stage', 'amount', 'account', 'created_by']);
     expect(fields.find((f) => f.value === 'stage')?.options).toEqual([{ value: 'won', label: 'Won' }, { value: 'lost', label: 'Lost' }]);
     expect(fields.find((f) => f.value === 'account')?.referenceTo).toBe('account');
     expect(fields.find((f) => f.value === 'amount')).not.toHaveProperty('currencyField');
