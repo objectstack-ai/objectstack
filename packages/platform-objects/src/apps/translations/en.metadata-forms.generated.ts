@@ -475,7 +475,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "actionLayout.list": {
         label: "List",
-        helpText: "The list page toolbar, as {\"pinned\": [...], \"more\": [...]}: action names placed on the list toolbar, or $import / $export. At most 3 pinned. os validate refuses a name that is no action of this object or is not placed on the list toolbar; such a name draws nothing."
+        helpText: "The list page toolbar, as {\"pinned\": [...], \"more\": [...]}: action names placed on the list toolbar; $import / $export only in pinned. At most 3 pinned. Not pinned, the page still draws its own Import / Export menu. os validate refuses a name that is no action of this object or is not placed on the list toolbar; such a name draws nothing."
       },
       "actionLayout.record": {
         label: "Record",

@@ -251,9 +251,9 @@ function listPinBuiltins(importShown: boolean, exportShown: boolean, t: ObjectVi
  * each pinned action of the toolbar (`arrangedHeaderActions`), and the page's
  * pinned Import and Export where they are offered. Every other toolbar action
  * is in the toolbar's own ⋯ menu, drawn after them, the ones `more` names
- * first, in that order. A `$import` / `$export` named in `more` stays in the
- * page's Import / Export entries. A name naming nothing this reader is
- * offered draws nothing.
+ * first, in that order. A `$import` / `$export` is only ever pinned (the
+ * schema refuses one in `more`); not pinned, it stays in the page's Import /
+ * Export entries. A name naming nothing this reader is offered draws nothing.
  */
 function PinnedListHeaderActions({
     arm,

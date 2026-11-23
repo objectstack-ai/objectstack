@@ -26,7 +26,7 @@ import { strictObject } from '../shared/strict-object';
  *
  * Each arm has two parts. `pinned` names the buttons, at most
  * {@link OBJECT_ACTION_LAYOUT_PINNED_LIMIT}, in the order they are drawn;
- * `pinned: []` draws none. `more` names the order of the 「More」 menu; an
+ * `pinned: []` pins none. `more` names the order of the 「More」 menu; an
  * action the scope places that neither part names goes to the end of 「More」,
  * in its default order (`order`, then declaration). A pinned action hidden by
  * its `visible` predicate or its permissions leaves its button out; no other
@@ -36,19 +36,24 @@ import { strictObject } from '../shared/strict-object';
  * An entry is an action `name` of the object (lowercase snake_case, the
  * action's own spelling), or one of the scope's built-ins, spelled with a
  * leading `$` so it can never collide with an action name:
- * {@link OBJECT_ACTION_LAYOUT_BUILTINS}. The record scope has none: New, Edit
+ * {@link OBJECT_ACTION_LAYOUT_BUILTINS}. A built-in is only ever pinned: not
+ * pinned, the list page draws it in its own Import / Export menu, as without
+ * the key, so `more` names actions only. The record scope has none: New, Edit
  * and Delete keep their fixed places.
  *
  * What the shape refuses here, at every door: more than three pinned, an
  * entry named twice (in one part or in both), an entry that is neither an
- * action name nor a `$` built-in, and a `$` built-in the scope does not have.
+ * action name nor a `$` built-in, a `$` built-in the scope does not have, and
+ * a `$` built-in in `more`.
  * Whether an action name names an action of this object placed in that scope
  * is a reference, judged where the whole stack is visible
  * (`@objectstack/lint`'s `validateObjectActionLayout`).
  *
  * Declared in its own module so the object extension (`ObjectExtensionSchema`,
  * an installed object's customization, ADR-0146 D10) carries exactly the shape
- * the object does. An extension's arm replaces the object's arm whole.
+ * the object does. Only the base's paired `.custom` package writes it there
+ * (`CUSTOM_ARRANGEMENT_KEYS`); each arm it writes replaces the object's arm
+ * for that scope whole, applied last.
  */
 
 /** The most actions one arm pins as buttons. */
@@ -99,6 +104,29 @@ function entries(scope: ObjectActionLayoutScope) {
   return z.array(z.string().regex(entryPattern(scope), { error: (issue) => entryRefusal(scope, issue.input) }));
 }
 
+/** An action name: what `more` accepts, a built-in being only ever pinned. */
+const ACTION_NAME_PATTERN = /^[a-z][a-z0-9_]+$/;
+
+/** Why `entry` is no entry of the `scope` arm's `more`. */
+function moreEntryRefusal(scope: ObjectActionLayoutScope, entry: unknown): string {
+  const text = String(entry);
+  if (OBJECT_ACTION_LAYOUT_BUILTINS[scope].includes(text)) {
+    return `\`${text}\` cannot be ordered in \`${scope}.more\`: a built-in is only ever pinned. Not pinned, the ` +
+      `${scope} page draws it in its own Import / Export menu, so remove it from \`more\`, or move it to \`pinned\`.`;
+  }
+  return entryRefusal(scope, entry);
+}
+
+function moreEntries(scope: ObjectActionLayoutScope) {
+  return z.array(z.string().regex(ACTION_NAME_PATTERN, { error: (issue) => moreEntryRefusal(scope, issue.input) }));
+}
+
+/** What `pinned: []` leaves drawn, per scope. */
+const PINNED_NONE: Readonly<Record<ObjectActionLayoutScope, string>> = {
+  list: '`[]` pins none: every action goes to 「More」, and the list page still draws its own Import / Export menu.',
+  record: '`[]` pins none: every action goes to 「More」; New, Edit and Delete keep their fixed places.',
+};
+
 function layoutArm(scope: ObjectActionLayoutScope) {
   return strictObject(
     {
@@ -116,13 +144,13 @@ function layoutArm(scope: ObjectActionLayoutScope) {
             `Keep the first ${OBJECT_ACTION_LAYOUT_PINNED_LIMIT} and move the rest to \`more\`.`,
         })
         .describe(
-          `The ${scope} scope's buttons, in order, at most ${OBJECT_ACTION_LAYOUT_PINNED_LIMIT}. \`[]\` draws none.`,
+          `The ${scope} scope's buttons, in order, at most ${OBJECT_ACTION_LAYOUT_PINNED_LIMIT}. ${PINNED_NONE[scope]}`,
         ),
-      more: entries(scope)
+      more: moreEntries(scope)
         .optional()
         .describe(
-          "The order of the scope's 「More」 menu. An action named in neither part goes to the end of 「More」, " +
-            'in its default order.',
+          "The order of the scope's 「More」 menu: action names only (a built-in is only ever pinned). An action " +
+            'named in neither part goes to the end of 「More」, in its default order.',
         ),
     },
   ).superRefine((arm, ctx) => {
@@ -163,8 +191,9 @@ export const OBJECT_ACTION_LAYOUT_SCHEMA = strictObject(
     list: layoutArm('list')
       .optional()
       .describe(
-        "The list scope's arrangement: actions of the object placed at `list_toolbar`, and `$import` / `$export`, " +
-          'as drawn on the list page toolbar. Omit to draw it as before.',
+        "The list scope's arrangement: actions of the object placed at `list_toolbar`, as drawn on the list page " +
+          'toolbar, and `$import` / `$export` as pinned buttons (not pinned, they stay in the page\'s own Import / ' +
+          'Export menu). Omit to draw it as before.',
       ),
     record: layoutArm('record')
       .optional()

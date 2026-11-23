@@ -475,7 +475,7 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "actionLayout.list": {
         label: "Liste",
-        helpText: "La barre d’outils de la page de liste, sous la forme {\"pinned\": [...], \"more\": [...]} : noms d’actions placées dans la barre de la liste, ou $import / $export. Au plus 3 épinglées. os validate refuse un nom qui n’est pas une action de cet objet ou qui n’est pas placé dans la barre de la liste ; un tel nom n’affiche rien."
+        helpText: "La barre d’outils de la page de liste, sous la forme {\"pinned\": [...], \"more\": [...]} : noms d’actions placées dans la barre de la liste ; $import / $export seulement dans pinned. Au plus 3 épinglées. Non épinglés, la page affiche toujours son propre menu Importer / Exporter. os validate refuse un nom qui n’est pas une action de cet objet ou qui n’est pas placé dans la barre de la liste ; un tel nom n’affiche rien."
       },
       "actionLayout.record": {
         label: "Enregistrement",

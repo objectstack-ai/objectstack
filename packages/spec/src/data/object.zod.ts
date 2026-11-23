@@ -6850,6 +6850,20 @@ const CUSTOM_ARRANGEMENT_WRITER =
   'refused at those doors: the registry merge does not apply what it writes here, alone or beside the pair, ' +
   'and the boot log names it.';
 
+/** [#36366, ADR-0146 D10] The extension's `actionLayout` description. */
+function objectExtensionActionLayoutDescription(): string {
+  return (
+    'The arrangement of the extended object\'s actions, per scope (`list`, `record`), in the object\'s own shape. ' +
+    'Written only by the object extension of the paired `.custom` package of the App the object belongs to ' +
+    '(ADR-0146 D10). An extension in a package that is not a `.custom` package is refused at publish, by ' +
+    '`os validate` / `os build` and at install, and the registry merge skips it with a warning; an action that ' +
+    'package brings is placed by its own `locations` and `order`. A `.custom` package that is not this object\'s ' +
+    'pair is not applied. Each arm written replaces the arm the object serves for that scope, whole, after ' +
+    'every other layer; an arm not written stays as the object gives it, and removing the key, or uninstalling ' +
+    'or disabling the package, restores it.'
+  );
+}
+
 /** [ADR-0146 D10] The extension's `fieldGroups` description. */
 function objectExtensionFieldGroupsDescription(): string {
   return (
@@ -7053,13 +7067,15 @@ export const ObjectExtensionSchema = lazySchema(() => strictObject({
   description: z.string().optional().describe('Override description for the extended object'),
 
   /**
-   * [#36366] Re-arrange the extended object's actions, as on the object
-   * itself (`ObjectSchema.actionLayout`). Folded arm by arm: an extension's
-   * `list` or `record` arm replaces the object's arm whole, the last extender
-   * by `priority` wins, and a value the tenant authored on the base stays
-   * (ADR-0029 D9.2a).
+   * [#36366, ADR-0146 D10] The arrangement of the extended object's actions,
+   * as on the object itself (`ObjectSchema.actionLayout`), written by the
+   * object extension of the base's paired `.custom` package and by no other
+   * (`CUSTOM_ARRANGEMENT_KEYS`). Applied by role, last, arm by arm: each arm
+   * it writes replaces the arm the object serves for that scope, whole; an
+   * arm it leaves out stays. Refused for any other writer where `fieldGroups`
+   * is. See {@link objectExtensionActionLayoutDescription}.
    */
-  actionLayout: OBJECT_ACTION_LAYOUT_SCHEMA,
+  actionLayout: OBJECT_ACTION_LAYOUT_SCHEMA.describe(objectExtensionActionLayoutDescription()),
   
   /** Additional validation rules to add */
   validations: z.array(ValidationRuleSchema).optional().describe('Additional validation rules to merge into the target object'),

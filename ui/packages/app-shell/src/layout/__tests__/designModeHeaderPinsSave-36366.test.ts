@@ -133,6 +133,48 @@ describe('saving the header pins (objectstack#36366)', () => {
     expect(save?.[3]).toEqual({ extend: 'crm_lead', fields: { score__c: { type: 'number' } }, actionLayout: { record: { pinned: ['log_call'] } } });
   });
 
+  it('S3: only the arm the administrator changed is written: the served arm of another scope is not copied in', async () => {
+    const served = { ...SERVED, actionLayout: { list: { pinned: ['mass_assign'] }, record: { pinned: ['log_call'] } } };
+    const { d, calls } = doors({ writable: false });
+    await saveObjectPins(
+      { ...input({ list: { pinned: ['mass_assign'] }, record: { pinned: ['convert'] } }), served },
+      TEXTS,
+      d,
+    );
+    const save = calls.find((c) => c[0] === 'save');
+    expect(save?.[3]).toEqual({ extend: 'crm_lead', actionLayout: { record: { pinned: ['convert'] } } });
+  });
+
+  it('S3: an arm the target document already holds for an unchanged scope stays as it holds it', async () => {
+    const served = { ...SERVED, actionLayout: { list: { pinned: ['mass_assign'] }, record: { pinned: ['log_call'] } } };
+    const extension = { extend: 'crm_lead', actionLayout: { list: { pinned: ['mass_assign'] } } };
+    const { d, calls } = doors({ writable: false, extension });
+    await saveObjectPins(
+      { ...input({ list: { pinned: ['mass_assign'] }, record: { pinned: [], more: ['convert'] } }), served },
+      TEXTS,
+      d,
+    );
+    const save = calls.find((c) => c[0] === 'save');
+    expect(save?.[3]).toEqual({
+      extend: 'crm_lead',
+      actionLayout: { list: { pinned: ['mass_assign'] }, record: { pinned: [], more: ['convert'] } },
+    });
+  });
+
+  it('S3: a staged value that arranges as the object is served writes nothing', async () => {
+    const served = { ...SERVED, actionLayout: { record: { pinned: ['log_call'] } } };
+    const { d, calls } = doors({ writable: true });
+    await saveObjectPins({ ...input({ record: { pinned: ['log_call'] } }), served }, TEXTS, d);
+    expect(calls).toEqual([]);
+  });
+
+  it('S4: a built-in is only ever pinned: `more` is written with action names only', async () => {
+    const { d, calls } = doors({ writable: false });
+    await saveObjectPins(input({ list: { pinned: ['mass_assign'], more: ['$import', '$export'] } }), TEXTS, d);
+    const save = calls.find((c) => c[0] === 'save');
+    expect(save?.[3]).toEqual({ extend: 'crm_lead', actionLayout: { list: { pinned: ['mass_assign'], more: [] } } });
+  });
+
   it('a name the header cannot draw is refused before anything is read or written, with its reason', async () => {
     const { d, calls } = doors({ writable: true });
     await expect(saveObjectPins(input({ record: { pinned: ['ghost'] } }), TEXTS, d)).rejects.toThrow('unknown ghost');

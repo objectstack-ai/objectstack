@@ -3,10 +3,15 @@
 /**
  * The write behind the design mode's 「Save」 for an object's action
  * arrangement (objectstack#36366): the object's `actionLayout`, written into
- * its customization layer and published at once, so everyone sees it. Each
- * arm the administrator changed is written whole (`{ pinned, more }`); an
- * object extension's arm replaces the object's arm whole in the fold, and
- * removing it restores the package's own.
+ * its customization layer and published at once, so everyone sees it. Only
+ * the arms the administrator changed are written, each whole
+ * (`{ pinned, more }`): an arm the staged value carries as the object serves
+ * it is left as the target document holds it (or absent), so the served arm
+ * of the base or of another layer is never copied in, where it would mask a
+ * later change of its owner. The pair's arm replaces the object's arm whole
+ * in the fold, and removing it restores the package's own. A built-in
+ * (`$import`) is only ever pinned, so `more` is written with action names
+ * only.
  *
  * Where it is written follows ADR-0146 D10 (objects are extended, never
  * replaced), as Studio's object editing does:
@@ -48,7 +53,7 @@ import {
   type EnsuredCustomizationPackage,
   type ListedPackageManifest,
 } from '../views/studio-design/packages-io.js';
-import { pinsRefusal, type ObjectPins } from './designModeHeaderPins.js';
+import { pinsRefusal, servedPins, type ObjectPins, type PinPage } from './designModeHeaderPins.js';
 
 /** The doors the save goes through; the defaults are the console's own. */
 export interface ObjectPinsSaveDoors {
@@ -83,14 +88,45 @@ function documentOf(read: unknown): Record<string, unknown> {
   return doc;
 }
 
-/** One arm as written: its `pinned`, and its `more` when it has one. */
+/** One arm as written: its `pinned`, and its `more` (action names only, a built-in being only ever pinned) when it has one. */
 function armValue(arm: NonNullable<ObjectPins['list']>): NonNullable<ObjectPins['list']> {
-  return arm.more ? { pinned: [...arm.pinned], more: [...arm.more] } : { pinned: [...arm.pinned] };
+  const more = arm.more?.filter((name) => !name.startsWith('$'));
+  return more ? { pinned: [...arm.pinned], more } : { pinned: [...arm.pinned] };
 }
 
-/** `pins` as written: an arm the object sets, nothing for an arm it does not. */
-function actionLayoutValue(pins: ObjectPins): ObjectPins {
-  return { ...(pins.list ? { list: armValue(pins.list) } : {}), ...(pins.record ? { record: armValue(pins.record) } : {}) };
+const SCOPES: readonly PinPage[] = ['list', 'record'];
+
+/** One arm as compared: absent and a value are different arrangements. */
+function armKey(arm: ObjectPins['list']): string {
+  return arm ? JSON.stringify(armValue(arm)) : '';
+}
+
+/** The scopes whose arm `pins` stages differently from the arm the object is served with. */
+export function changedScopes(pins: ObjectPins, served: unknown): PinPage[] {
+  const before = servedPins(served);
+  return SCOPES.filter((scope) => armKey(pins[scope]) !== armKey(before[scope]));
+}
+
+/**
+ * The `actionLayout` the target document is written with: the one it holds,
+ * with each changed scope's arm as staged (taken off where the staged value
+ * has none). `undefined` when it then arranges nothing.
+ */
+function actionLayoutValue(held: unknown, pins: ObjectPins, changed: readonly PinPage[]): ObjectPins | undefined {
+  const out: Record<string, unknown> =
+    held && typeof held === 'object' && !Array.isArray(held) ? { ...(held as Record<string, unknown>) } : {};
+  for (const scope of changed) {
+    const arm = pins[scope];
+    if (arm) out[scope] = armValue(arm);
+    else delete out[scope];
+  }
+  return Object.keys(out).length > 0 ? (out as ObjectPins) : undefined;
+}
+
+/** `body` with its `actionLayout` set to `layout`, or without the key when `layout` is `undefined`. */
+function withActionLayout(body: Record<string, unknown>, layout: ObjectPins | undefined): Record<string, unknown> {
+  const { actionLayout: _held, ...rest } = body;
+  return layout ? { ...rest, actionLayout: layout } : rest;
 }
 
 /** Whether `err` says the item is not there (`404`). */
@@ -107,6 +143,8 @@ export async function saveObjectPins(
   const { objectName, packageId, served, pins } = input;
   const refusal = pinsRefusal(served, pins, texts);
   if (refusal) throw new Error(refusal);
+  const changed = changedScopes(pins, served);
+  if (changed.length === 0) return;
   const manifests = await doors.listPackages();
   const listed = manifests.get(packageId);
   if (!listed) throw new Error(texts.notListed);
@@ -117,7 +155,8 @@ export async function saveObjectPins(
   if (listed.writable) {
     const layers = (await doors.client.layered('object', objectName, { packageId })) as AuthoredLayers | null;
     if (layers && 'draft' in layers && layers.draft) throw new Error(texts.pendingDraft);
-    body = { ...authoredPublished('object', layers), name: objectName, actionLayout: actionLayoutValue(pins) };
+    const authored = authoredPublished('object', layers) as Record<string, unknown>;
+    body = withActionLayout({ ...authored, name: objectName }, actionLayoutValue(authored.actionLayout, pins, changed));
   } else {
     const pair = await doors.ensureCustomization(packageId);
     type = OBJECT_EXTENSION_TYPE;
@@ -128,7 +167,8 @@ export async function saveObjectPins(
     } catch (err) {
       if (!isNotFound(err)) throw err;
     }
-    body = { ...documentOf(published), extend: objectName, actionLayout: actionLayoutValue(pins) };
+    const doc = documentOf(published);
+    body = withActionLayout({ ...doc, extend: objectName }, actionLayoutValue(doc.actionLayout, pins, changed));
   }
   try {
     await doors.client.save(type, objectName, body, { mode: 'draft', packageId: target, ifNoneMatch: '*' });

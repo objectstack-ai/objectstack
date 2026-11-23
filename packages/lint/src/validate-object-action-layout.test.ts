@@ -39,7 +39,7 @@ const rules = (s: Record<string, unknown>) => validateObjectActionLayout(s).map(
 
 describe('validateObjectActionLayout (objectstack#36366)', () => {
   it('passes pins of placed actions, own and stack-bound, and the $ built-ins', () => {
-    expect(rules(stack({}, { record: { pinned: ['convert_lead', 'log_call'], more: ['send_email'] }, list: { pinned: ['$export', 'mass_assign'], more: ['$import', 'send_email'] } }))).toEqual([]);
+    expect(rules(stack({}, { record: { pinned: ['convert_lead', 'log_call'], more: ['send_email'] }, list: { pinned: ['$export', 'mass_assign'], more: ['send_email'] } }))).toEqual([]);
     expect(rules(stack())).toEqual([]);
   });
 

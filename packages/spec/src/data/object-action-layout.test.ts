@@ -100,6 +100,16 @@ describe('actionLayout (objectstack#36366)', () => {
     ]);
   });
 
+  it('refuses a built-in in `more`: a built-in is only ever pinned, not pinned it keeps the page\'s own menu', () => {
+    expect(refusal({ list: { pinned: [], more: ['mass_assign', '$import'] } })).toEqual([
+      'actionLayout.list.more.1: `$import` cannot be ordered in `list.more`: a built-in is only ever pinned. Not pinned, ' +
+        'the list page draws it in its own Import / Export menu, so remove it from `more`, or move it to `pinned`.',
+    ]);
+    expect(refusal({ list: { pinned: ['$import'], more: ['$export'] } })).toHaveLength(1);
+    // CONTROL: the same built-in pinned, and an action in `more`, are accepted.
+    expect(refusal({ list: { pinned: ['$import', '$export'], more: ['mass_assign'] } })).toEqual([]);
+  });
+
   it('is a closed shape at both levels: an unknown arm or part is refused, a near-miss pointed at its key', () => {
     expect(refusal({ detail: { pinned: ['convert_lead'] } }).join()).toMatch(/record/);
     expect(refusal({ recordPage: { pinned: ['convert_lead'] } }).join()).toMatch(/record/);

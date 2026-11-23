@@ -764,7 +764,7 @@ export const objectForm = defineForm({
           type: 'composite',
           helpText: 'The order of this object\'s actions and which are buttons, per scope: pinned (at most 3 buttons, in order) and more (the More menu\'s order; an action named in neither follows in its default order). Unset: each surface picks its buttons by the actions\' order, as before.',
           fields: [
-            { field: 'list', label: 'List', widget: 'json', helpText: 'The list page toolbar, as {"pinned": [...], "more": [...]}: action names placed on the list toolbar, or $import / $export. At most 3 pinned. os validate refuses a name that is no action of this object or is not placed on the list toolbar; such a name draws nothing.' },
+            { field: 'list', label: 'List', widget: 'json', helpText: 'The list page toolbar, as {"pinned": [...], "more": [...]}: action names placed on the list toolbar; $import / $export only in pinned. At most 3 pinned. Not pinned, the page still draws its own Import / Export menu. os validate refuses a name that is no action of this object or is not placed on the list toolbar; such a name draws nothing.' },
             { field: 'record', label: 'Record', widget: 'json', helpText: 'The record header (record page, side preview, phone bar), as {"pinned": [...], "more": [...]}: action names placed in the record header or its More menu. At most 3 pinned. os validate refuses a name that is no action of this object or is not placed on the record page; such a name draws nothing.' },
           ],
         },

@@ -475,7 +475,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "actionLayout.list": {
         label: "リスト",
-        helpText: "リストページのツールバー。{\"pinned\": [...], \"more\": [...]} の形で書きます：リストのツールバーに配置されたアクション名、または $import / $export。固定は最大 3 個。os validate は、このオブジェクトのアクションでない名前やリストのツールバーに配置されていない名前を拒否します。そのような名前は何も表示しません。"
+        helpText: "リストページのツールバー。{\"pinned\": [...], \"more\": [...]} の形で書きます：リストのツールバーに配置されたアクション名。$import / $export は pinned にのみ書けます。固定は最大 3 個。固定しない場合も、ページは独自のインポート / エクスポートメニューを表示します。os validate は、このオブジェクトのアクションでない名前やリストのツールバーに配置されていない名前を拒否します。そのような名前は何も表示しません。"
       },
       "actionLayout.record": {
         label: "レコード",
