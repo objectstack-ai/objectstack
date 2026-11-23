@@ -2976,9 +2976,9 @@ export function InterfacesPillar({
   // served `action` type row (`/meta/types`), its schema and its form, as the
   // full-page editor and the object's Actions view hand it over: the action
   // designer draws its "More fields" from the schema and its refusal catalogue
-  // and declared texts from their served form rows. Scoped to `action`, the
-  // one leaf type this card measured; the page, report and dashboard home
-  // inspectors keep the bundled forms they draw here today.
+  // and declared texts from their served form rows. Scoped to `action`: the
+  // page, report and dashboard home inspectors keep drawing their bundled
+  // forms on this rail.
   const { entries: servedTypes } = useMetadataTypes(client);
   const servedActionType = React.useMemo(
     () => servedTypes.find((e) => e.type === 'action'),
