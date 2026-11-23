@@ -36,12 +36,12 @@ Also vendor-integration callbacks and **assignment rules**.
 | Type | When to Use |
 |:-----|:------------|
 | `autolaunched` | Runs without user interaction — triggered by events, APIs, or other flows |
-| `screen` | Interactive — presents UI screens |
+| `screen` | Presents UI screens |
 | `schedule` | Runs on a cron/interval cadence declared on the **start node's `config.schedule`** — or a **per-record date sweep** via `config.timeRelative` |
-| `record_change` | Fires automatically on record create/update/delete. `autolaunched` + the same `record-*` binding behaves identically; `record_change` also opts into the trigger-readiness lint |
+| `record_change` | Fires on record create/update/delete. `autolaunched` + the same `record-*` binding behaves identically; `record_change` also opts into the trigger-readiness lint |
 | `api` | Inbound **webhook** (*Inbound webhook triggers*); a flow only ever started explicitly is `autolaunched` |
 
-**A stepped form over one object that never branches** is no flow: an **objectstack-ui** form view, `type: 'wizard'`.
+**A stepped form over one object that never branches** is no flow: an **objectstack-ui** named form view (`type: 'wizard'`) a `type: 'form'` action opens.
 
 **A flow an installed package ships** is read-only. To change what it does, save
 a same-named flow in the base's paired `.custom` package declaring

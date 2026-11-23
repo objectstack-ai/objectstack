@@ -257,6 +257,7 @@ export const DrillDownDrawer: React.FC<DrillDownDrawerProps> = ({
             maxRows={maxRows}
             dataSource={dataSource}
             onNavigate={onClose}
+            open={open}
           />
         )
         : (

@@ -18,9 +18,13 @@
  * on the same condition, and read back through the Setup app fold the
  * `/api/v1/meta/app` door serves (`SchemaRegistry.getApp`): listed under
  * Integrations with connector-slack composed, absent without it.
+ *
+ * [#36301] The mounted channel's DM link goes under the Console's mount the
+ * composition's auth service composes (`getConsoleUrl`), and carries none on a
+ * composition whose auth service has no composer.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import {
     assertEngineDeleteDispatch,
     assertEngineFindOnePredicate,
@@ -33,6 +37,7 @@ import { ManifestSchema } from '@objectstack/spec/kernel';
 import { PLATFORM_CAPABILITIES } from '@objectstack/spec/security';
 import { MessagingServicePlugin } from './messaging-service-plugin.js';
 import { SLACK_ADMIN_CAPABILITY } from './slack-link-routes.js';
+import { SlackLinkStore } from './slack-links.js';
 import { SLACK_SETUP_COMPONENT_REF, SLACK_SETUP_UI_BUNDLE } from './slack-setup-ui.js';
 import type { MessagingService } from './messaging-service.js';
 import { MY_PREFERENCES_ROUTE } from './my-preferences-routes.js';
@@ -42,7 +47,7 @@ const USER = 'usr_alice';
 const ORG = 'org_a';
 
 /** A plugin context with a fake engine, an HTTP server that keeps its handlers, and a session for one member. */
-async function compose(opts: { slack: boolean }) {
+async function compose(opts: { slack: boolean; getConsoleUrl?: (path: string) => string }) {
     const tables = new Set<string>();
     const engine = {
         async syncObjectSchema(name: string) { tables.add(name); },
@@ -71,6 +76,7 @@ async function compose(opts: { slack: boolean }) {
         ['manifest', { register: (m: { id?: string }) => { manifests.push(m); } }],
         ['http-server', { get: mount('GET'), post: mount('POST'), put: mount('PUT'), delete: mount('DELETE'), patch: mount('PATCH'), use() {} }],
         ['auth', {
+            ...(opts.getConsoleUrl ? { getConsoleUrl: opts.getConsoleUrl } : {}),
             api: {
                 getSession: async ({ headers }: { headers: Headers }) => headers.get('authorization') === 'Bearer alice'
                     ? { user: { id: USER, email: `${USER}@example.test` }, session: { id: 'ses_alice', userId: USER, activeOrganizationId: ORG } }
@@ -129,6 +135,41 @@ describe('the slack channel is known only where connector-slack is composed', ()
         expect(c.messaging.getChannel('slack')?.id).toBe('slack');
         expect(await c.optionChannels()).toContain('slack');
         expect(await c.myChannels()).toContain('slack');
+    });
+});
+
+describe('the composed slack channel links the DM under the Console mount', () => {
+    afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); });
+
+    /** Sends one approval DM through the mounted channel, over a confirmed link Slack answers; returns the posted text. */
+    async function postedText(getConsoleUrl?: (path: string) => string): Promise<unknown> {
+        vi.stubEnv('OS_AUTH_URL', 'https://os.example.com');
+        const account = { id: 'acc_1', organizationId: ORG, displayName: 'Acme', externalId: 'T1', status: 'active' as const };
+        const link = { id: 'l_1', accountId: 'acc_1', userId: USER, externalUserId: 'UALICE', state: 'confirmed' as const };
+        const posted: Array<Record<string, unknown> | undefined> = [];
+        vi.spyOn(SlackLinkStore.prototype, 'deliveryTarget').mockResolvedValue({ account, link } as never);
+        vi.spyOn(SlackLinkStore.prototype, 'slackFor').mockResolvedValue((async (method: string, params?: Record<string, unknown>) => {
+            if (method === 'chat.postMessage') posted.push(params);
+            return { ok: true, status: 200, body: { ok: true, channel: { id: 'D1' }, ts: '1700.1' } };
+        }) as never);
+        const c = await compose({ slack: true, getConsoleUrl });
+        const result = await c.messaging.getChannel('slack')!.send({} as never, {
+            channel: 'slack',
+            recipient: USER,
+            notification: { organizationId: ORG, title: 'Approve PO-7', body: '', recipients: [USER], actionUrl: '/system/approvals?request=r1' },
+        });
+        expect(result).toEqual({ ok: true, externalId: '1700.1' });
+        expect(posted).toHaveLength(1);
+        return posted[0]?.text;
+    }
+
+    it('with an auth service that composes Console pages: the link is under its mount', async () => {
+        const getConsoleUrl = (path: string) => `http://localhost:3000/_console${path}`;
+        expect(await postedText(getConsoleUrl)).toBe('*<https://os.example.com/_console/system/approvals?request=r1|Approve PO-7>*');
+    });
+
+    it('with an auth service that composes none: the link carries no mount, as before', async () => {
+        expect(await postedText()).toBe('*<https://os.example.com/system/approvals?request=r1|Approve PO-7>*');
     });
 });
 

@@ -9,7 +9,8 @@
  *    column still carries the old physical DEFAULT 'none' (the temporary
  *    owner-side hook, `preference-digest-unset.ts`, until #36245);
  *  - the legacy `none` nobody chose becomes empty ONCE, across every
- *    organization, recorded in `sys_migration`; a `none` written after that
+ *    organization, recorded in `sys_migration`; only the rows read before the
+ *    claim are rewritten, so a `none` written during the pass, or after it,
  *    survives every later boot (`preference-digest-conversion.ts`).
  */
 
@@ -91,6 +92,29 @@ async function insert(ql: ObjectQL, organization: string, row: Record<string, un
     return String((await ql.insert(PREF, row, sys(organization))).id);
 }
 
+/**
+ * The engine `ql` with one interception: the first `method` call on `object`
+ * runs `before` first (whatever it throws is that call's failure), then the
+ * call itself. Every other member is `ql`'s own.
+ */
+function interceptOnce(ql: ObjectQL, method: 'update' | 'insert', object: string, before: () => Promise<void>): never {
+    let fired = false;
+    return new Proxy(ql, {
+        get(target, prop) {
+            const value = Reflect.get(target, prop, target);
+            if (typeof value !== 'function') return value;
+            if (prop !== method) return value.bind(target);
+            return async (name: string, ...rest: unknown[]) => {
+                if (name === object && !fired) {
+                    fired = true;
+                    await before();
+                }
+                return (value as (...args: unknown[]) => unknown).call(target, name, ...rest);
+            };
+        },
+    }) as never;
+}
+
 describe('an upgraded database: the digest column still carries the physical DEFAULT none', () => {
     it('an insert that leaves the digest unset stores it empty, an explicit none stays none', async () => {
         const file = dbFile();
@@ -150,6 +174,76 @@ describe('the one-time conversion of the legacy none', () => {
         expect(await convertLegacyNoneDigestsOnce(second as never, silent)).toEqual({ status: 'already-run', converted: 0, failed: [] });
         expect(await digestOf(second, 'org_a', row)).toBe('none');
         expect(await digestOf(second, 'org_a', fresh)).toBe('none');
+    });
+
+    it('a none written during the pass is not rewritten: only the rows read before the claim are', async () => {
+        const file = dbFile();
+        const legacy = await boot(file, LEGACY_PREFERENCE, { seed: true });
+        const old = await insert(legacy, 'org_a', { user_id: 'u1', topic: '*', channel: '*', enabled: true });
+        const daily = await insert(legacy, 'org_a', { user_id: 'u2', topic: 'chosen', channel: '*', enabled: true, digest: 'daily' });
+        await close(legacy);
+
+        const ql = await boot(file, NotificationPreference, { hook: true });
+        let created: string | undefined;
+        // While the pass is rewriting, the deployment is serving: a new row
+        // with an explicit none, and a member switching daily to none.
+        const engine = interceptOnce(ql, 'update', PREF, async () => {
+            created = await insert(ql, 'org_b', { user_id: 'u2', topic: '*', channel: '*', enabled: true, digest: 'none' });
+            await ql.update(PREF, { digest: 'none' }, { where: { id: daily }, ...sys('org_a') } as never);
+        });
+        expect(await convertLegacyNoneDigestsOnce(engine, silent)).toEqual({ status: 'converted', converted: 1, failed: [] });
+        expect(created).toBeDefined();
+        expect(await digestOf(ql, 'org_a', old)).toBeNull();
+        expect(await digestOf(ql, 'org_b', created!)).toBe('none');
+        expect(await digestOf(ql, 'org_a', daily)).toBe('none');
+    });
+
+    it('reads the snapshot in pages by id, so every legacy none past the first page is converted', async () => {
+        const file = dbFile();
+        const legacy = await boot(file, LEGACY_PREFERENCE, { seed: true });
+        const rows: Array<[string, string]> = [];
+        for (const [organization, user, topic] of [['org_a', 'u1', '*'], ['org_a', 'u2', '*'], ['org_b', 'u1', '*'], ['org_b', 'u2', '*'], ['org_a', 'u1', 'other']]) {
+            rows.push([organization, await insert(legacy, organization, { user_id: user, topic, channel: '*', enabled: true })]);
+        }
+        await close(legacy);
+
+        const ql = await boot(file, NotificationPreference, { hook: true });
+        expect(await convertLegacyNoneDigestsOnce(ql as never, silent, { pageSize: 2 })).toEqual({ status: 'converted', converted: 5, failed: [] });
+        for (const [organization, id] of rows) expect(await digestOf(ql, organization, id)).toBeNull();
+    });
+
+    it('a claim that fails after the read rewrites nothing, and leaves no record', async () => {
+        const file = dbFile();
+        const legacy = await boot(file, LEGACY_PREFERENCE, { seed: true });
+        const row = await insert(legacy, 'org_a', { user_id: 'u1', topic: '*', channel: '*', enabled: true });
+        await close(legacy);
+
+        const ql = await boot(file, NotificationPreference, { hook: true });
+        const errors: string[] = [];
+        const engine = interceptOnce(ql, 'insert', 'sys_migration', async () => {
+            throw new Error('ledger is read-only');
+        });
+        const out = await convertLegacyNoneDigestsOnce(engine, { ...silent, error: (m: string) => errors.push(m) });
+        expect(out).toEqual({ status: 'claim-failed', converted: 0, failed: [] });
+        expect(errors).toHaveLength(1);
+        expect(await digestOf(ql, 'org_a', row)).toBe('none');
+        expect(await ql.findOne('sys_migration', { where: { id: PREFERENCE_DIGEST_NONE_CONVERSION_ID } }, { context: { isSystem: true } as ExecutionContext })).toBeFalsy();
+    });
+
+    it('another node claiming between the read and the claim counts as run, and this pass rewrites nothing', async () => {
+        const file = dbFile();
+        const legacy = await boot(file, LEGACY_PREFERENCE, { seed: true });
+        const row = await insert(legacy, 'org_a', { user_id: 'u1', topic: '*', channel: '*', enabled: true });
+        await close(legacy);
+
+        const ql = await boot(file, NotificationPreference, { hook: true });
+        // The other node's claim lands first; this node's insert of the same
+        // ledger id is then refused by the store.
+        const engine = interceptOnce(ql, 'insert', 'sys_migration', async () => {
+            await ql.insert('sys_migration', { id: PREFERENCE_DIGEST_NONE_CONVERSION_ID, last_run_at: new Date().toISOString(), blocking: 0 }, { context: { isSystem: true } as ExecutionContext });
+        });
+        expect(await convertLegacyNoneDigestsOnce(engine, silent)).toEqual({ status: 'already-run', converted: 0, failed: [] });
+        expect(await digestOf(ql, 'org_a', row)).toBe('none');
     });
 
     it('without a ledger on the kernel it does not run, so nothing it could not record is rewritten', async () => {

@@ -16,7 +16,8 @@ export interface FieldChangeItemProps {
   /**
    * The field's label as the reader reads it, drawn as given (a host adds its
    * own separator, e.g. `Status:`). Absent: `change.fieldLabel`, else the
-   * field key made readable.
+   * field key made readable. `''` draws no label: a host that names the field
+   * once above its lines (a field's change-history card).
    */
   label?: string;
   /**
@@ -115,11 +116,15 @@ export const FieldChangeItem: React.FC<FieldChangeItemProps> = ({
       data-field-change={change.field}
       data-field-change-expanded={expanded ? 'true' : 'false'}
     >
-      <span className="shrink-0 font-medium text-foreground" data-field-change-label="">
-        {shownLabel}
-      </span>
-      {/* A space a flex line does not lay out, so the line reads and copies as `Label: old → new`. */}
-      {' '}
+      {shownLabel !== '' && (
+        <>
+          <span className="shrink-0 font-medium text-foreground" data-field-change-label="">
+            {shownLabel}
+          </span>
+          {/* A space a flex line does not lay out, so the line reads and copies as `Label: old → new`. */}
+          {' '}
+        </>
+      )}
       {value(before, 'old', oldRef)}
       {/* The arrow is text, so the line reads and copies as `Label: old → new`. */}
       <span className="shrink-0 text-muted-foreground" data-field-change-arrow="">

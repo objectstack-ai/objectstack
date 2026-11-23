@@ -6,6 +6,7 @@ import type {
   ISecurityService,
   AttachFileInput,
   AttachedFile,
+  IAttachmentDoorsService,
   IDataEngine,
   IFileAttachmentService,
   IObjectQLEngine,
@@ -174,6 +175,14 @@ export interface FileAttachmentServiceDeps {
     RecordFileAccessDeps,
     'judgeFileRead' | 'isServable' | 'resolveUserContext' | 'getDownloadTtl' | 'getBasePath' | 'getI18n'
   >;
+  /**
+   * [#36506] The attachment's own doors (removal and rename), served
+   * transport-neutrally: the member {@link FileAttachmentService.handleAttachmentDoor}
+   * is, built by the plugin over the same registration its `http.server` mount
+   * runs. Absent: the service has no such member, and the dispatcher's
+   * `/attachments` domain answers `501`.
+   */
+  attachmentDoors?: (request: Request) => Promise<Response>;
 }
 
 /**
@@ -318,11 +327,25 @@ function validateAttachUploadInput(input: AttachUploadInput): AttachUploadInput 
 }
 
 export class FileAttachmentService
-  implements IFileAttachmentService, ICallerFileAttachmentService, ICallerRecordFileService, UploadLinkDoor
+  implements
+    IFileAttachmentService,
+    IAttachmentDoorsService,
+    ICallerFileAttachmentService,
+    ICallerRecordFileService,
+    UploadLinkDoor
 {
   private readonly recordFiles: RecordFileAccess | null;
 
+  /**
+   * [#36506] `IAttachmentDoorsService.handleAttachmentDoor`: the attachment's
+   * removal and rename doors for a kernel with no `http.server`, reached through
+   * the runtime dispatcher's `/attachments` domain. Present exactly when the
+   * composition supplied {@link FileAttachmentServiceDeps.attachmentDoors}.
+   */
+  readonly handleAttachmentDoor?: (request: Request) => Promise<Response>;
+
   constructor(private readonly deps: FileAttachmentServiceDeps) {
+    if (deps.attachmentDoors) this.handleAttachmentDoor = deps.attachmentDoors;
     // The host bound is judged where the verb is built, as at every host door.
     parseHostMaxUploadMb(deps.hostMaxUploadMb, 'FileAttachmentService');
     const bound = deps.recordFiles;
