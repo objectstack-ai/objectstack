@@ -45,7 +45,7 @@ import {
   objectColorOrDefault,
   cn,
 } from '@object-ui/components';
-import { OBJECT_COLORS, type ObjectColor } from '@objectstack/spec/data';
+import { OBJECT_COLORS, fieldChangeValuesShown, type ObjectColor } from '@objectstack/spec/data';
 import type { RegistryComponentMeta } from '@object-ui/core';
 import { builderRulesOfSpecFilter } from '@object-ui/core';
 import { AlertTriangle, ChevronDown, ChevronsUpDown, ChevronUp, Eye, EyeOff, Plus, Search, Trash2 } from 'lucide-react';
@@ -3554,6 +3554,60 @@ function DynamicConfigWidget({ value, onChange, readOnly, fieldSpec, formData, c
   );
 }
 
+/* -------------------------------------------------------------------------- */
+/* field-history — follow the default / on / off for `fieldHistory` (#36482)  */
+/* -------------------------------------------------------------------------- */
+
+type FieldHistoryChoice = 'default' | 'on' | 'off';
+
+/**
+ * The three-way control for a `fieldHistory` key — the object's
+ * `enable.fieldHistory` and a field's own (#36290). The key has no default on
+ * purpose: unset follows the platform, and only an author who chose writes
+ * `true` or `false`. A switch drew unset as off and had no way back to it
+ * once toggled; this control makes unset a state of its own.
+ *
+ *  - Default — removes the key (`onChange(undefined)`), and names what it
+ *    resolves to for the row in front of it. A field row (one carrying a
+ *    `type`) asks `fieldChangeValuesShown` from `@objectstack/spec/data`, the
+ *    same predicate the activity writer keeps or drops values with, so the
+ *    label cannot drift from the writer: off for a media, JSON or credential
+ *    type unless `trackHistory: true`. The object's `enable` block resolves to
+ *    on. The row cannot see the object's own `enable.fieldHistory` (a field
+ *    form, a repeater row); the help text says the object's off wins.
+ *  - On / Off — write `true` / `false`.
+ *
+ * A stored value that is not a boolean reads as Default, as the writer reads
+ * it (only a literal `false` turns values off).
+ */
+function FieldHistoryWidget({ value, onChange, readOnly, formData, id, ariaLabelledBy, required }: WidgetProps) {
+  const locale = useMetadataLocale();
+  const choice: FieldHistoryChoice = value === true ? 'on' : value === false ? 'off' : 'default';
+  const row = formData ?? {};
+  const defaultOn = typeof row.type === 'string'
+    ? fieldChangeValuesShown({ type: row.type, trackHistory: row.trackHistory }, undefined)
+    : true;
+  const defaultLabel = tFormat('engine.form.fieldHistoryDefault', locale, {
+    state: t(defaultOn ? 'engine.form.fieldHistoryOn' : 'engine.form.fieldHistoryOff', locale),
+  });
+  return (
+    <Select
+      value={choice}
+      onValueChange={(next) => onChange(next === 'on' ? true : next === 'off' ? false : undefined)}
+      disabled={readOnly}
+    >
+      <SelectTrigger {...controlNaming({ id, ariaLabelledBy, required })} data-testid="field-history-choice" className="h-8 text-sm">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="default" data-default-on={defaultOn ? 'true' : 'false'}>{defaultLabel}</SelectItem>
+        <SelectItem value="on">{t('engine.form.fieldHistoryOn', locale)}</SelectItem>
+        <SelectItem value="off">{t('engine.form.fieldHistoryOff', locale)}</SelectItem>
+      </SelectContent>
+    </Select>
+  );
+}
+
 // `satisfies` (not a `Record<string, …>` annotation) so the KEY SET survives as
 // a literal union — that union is what makes `WIDGET_LABELLING` below exhaustive
 // BY CONSTRUCTION: adding a widget here without deciding how the host's label
@@ -3583,6 +3637,7 @@ export const WIDGETS = {
   'code': CodeWidget,
   'secret': SecretWidget,
   'dynamic-config': DynamicConfigWidget,
+  'field-history': FieldHistoryWidget,
 } satisfies Record<string, WidgetRenderer>;
 
 /** Every key of {@link WIDGETS}, as a literal union. */
@@ -3696,6 +3751,7 @@ export const WIDGET_LABELLING: Record<RegisteredWidgetKey, WidgetLabelling> = {
   'code': 'group',
   'secret': 'control',
   'dynamic-config': 'group',
+  'field-history': 'control',
 };
 
 /**

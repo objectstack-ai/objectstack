@@ -278,7 +278,7 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "fields.fieldHistory": {
         label: "Valores de alterações de campo",
-        helpText: "Valores antigo → novo deste campo na linha do tempo de atividades do registro. Não definido significa LIGADO, embora o interruptor pareça desligado: só um interruptor ligado e depois desligado grava false, e então a alteração é nomeada só pelo rótulo. Ligado também mostra os valores de um campo de mídia ou JSON."
+        helpText: "Valores antigo → novo deste campo na linha do tempo de atividades do registro. Padrão segue a plataforma: ligado para a maioria dos tipos, desligado para um campo de mídia, JSON ou credencial. Desligado nomeia a alteração só pelo rótulo; Ligado também mostra os valores de um campo de mídia ou JSON. Se o próprio objeto desligar, vale o objeto."
       },
       "fields.trackHistory": {
         label: "Acompanhar histórico",
@@ -305,7 +305,7 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "enable.fieldHistory": {
         label: "Valores de alterações de campo",
-        helpText: "Valores antigo → novo dos campos alterados na linha do tempo de atividades do registro. Não definido significa LIGADO, embora o interruptor pareça desligado: só um interruptor ligado e depois desligado grava false, e então o objeto inteiro deixa de mostrar valores."
+        helpText: "Valores antigo → novo dos campos alterados na linha do tempo de atividades do registro. Padrão é ligado. Desligado deixa de mostrar valores em todo o objeto, seja o que for que um campo diga."
       },
       "enable.searchable": {
         label: "Pesquisável"
@@ -911,7 +911,7 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       fieldHistory: {
         label: "Valores de alterações de campo",
-        helpText: "Valores antigo → novo deste campo na linha do tempo de atividades do registro. Não definido significa LIGADO, embora o interruptor pareça desligado: só um interruptor ligado e depois desligado grava false, e então a alteração é nomeada só pelo rótulo. Ligado também mostra os valores de um campo de mídia ou JSON."
+        helpText: "Valores antigo → novo deste campo na linha do tempo de atividades do registro. Padrão segue a plataforma: ligado para a maioria dos tipos, desligado para um campo de mídia, JSON ou credencial. Desligado nomeia a alteração só pelo rótulo; Ligado também mostra os valores de um campo de mídia ou JSON. Se o próprio objeto desligar, vale o objeto."
       },
       trackHistory: {
         label: "Acompanhar histórico",

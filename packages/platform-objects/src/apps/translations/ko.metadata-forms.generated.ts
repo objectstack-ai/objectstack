@@ -278,7 +278,7 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fields.fieldHistory": {
         label: "필드 변경 값",
-        helpText: "레코드 활동 타임라인에 이 필드의 이전 값 → 새 값을 표시합니다. 설정하지 않으면 켜져 있으며 스위치는 꺼진 것처럼 보입니다. 켰다가 다시 끈 경우에만 false가 기록되고, 변경은 필드 이름으로만 표시됩니다. 켜면 미디어나 JSON 필드도 값을 표시합니다."
+        helpText: "레코드 활동 타임라인에 이 필드의 이전 값 → 새 값을 표시합니다. 기본값은 플랫폼을 따르며, 대부분의 유형은 켜짐, 미디어·JSON·자격 증명 필드는 꺼짐입니다. 끄면 변경이 필드 이름으로만 표시되고, 켜면 미디어나 JSON 필드도 값을 표시합니다. 객체 자체의 필드 변경 값이 꺼져 있으면 그것이 우선합니다."
       },
       "fields.trackHistory": {
         label: "기록 추적",
@@ -305,7 +305,7 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "enable.fieldHistory": {
         label: "필드 변경 값",
-        helpText: "레코드 활동 타임라인에 변경된 필드의 이전 값 → 새 값을 표시합니다. 설정하지 않으면 켜져 있으며 스위치는 꺼진 것처럼 보입니다. 켰다가 다시 끈 경우에만 false가 기록되고, 객체 전체에서 값이 표시되지 않습니다."
+        helpText: "레코드 활동 타임라인에 변경된 필드의 이전 값 → 새 값을 표시합니다. 기본값은 켜짐입니다. 끄면 필드 설정과 관계없이 객체 전체에서 값이 표시되지 않습니다."
       },
       "enable.searchable": {
         label: "검색 가능"
@@ -911,7 +911,7 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       fieldHistory: {
         label: "필드 변경 값",
-        helpText: "레코드 활동 타임라인에 이 필드의 이전 값 → 새 값을 표시합니다. 설정하지 않으면 켜져 있으며 스위치는 꺼진 것처럼 보입니다. 켰다가 다시 끈 경우에만 false가 기록되고, 변경은 필드 이름으로만 표시됩니다. 켜면 미디어나 JSON 필드도 값을 표시합니다."
+        helpText: "레코드 활동 타임라인에 이 필드의 이전 값 → 새 값을 표시합니다. 기본값은 플랫폼을 따르며, 대부분의 유형은 켜짐, 미디어·JSON·자격 증명 필드는 꺼짐입니다. 끄면 변경이 필드 이름으로만 표시되고, 켜면 미디어나 JSON 필드도 값을 표시합니다. 객체 자체의 필드 변경 값이 꺼져 있으면 그것이 우선합니다."
       },
       trackHistory: {
         label: "기록 추적",

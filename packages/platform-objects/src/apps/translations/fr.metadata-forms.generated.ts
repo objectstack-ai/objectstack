@@ -278,7 +278,7 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fields.fieldHistory": {
         label: "Valeurs des modifications de champ",
-        helpText: "Valeurs ancienne → nouvelle de ce champ dans la chronologie d’activité de l’enregistrement. Non défini signifie ACTIVÉ, même si l’interrupteur paraît éteint : seul un interrupteur allumé puis éteint écrit false, et la modification n’est alors nommée que par son libellé. Allumé, il affiche aussi les valeurs d’un champ média ou JSON."
+        helpText: "Valeurs ancienne → nouvelle de ce champ dans la chronologie d’activité de l’enregistrement. Par défaut suit la plateforme : activé pour la plupart des types, désactivé pour un champ média, JSON ou d’identifiants. Désactivé ne nomme la modification que par son libellé ; Activé affiche aussi les valeurs d’un champ média ou JSON. Si l’objet lui-même le désactive, l’objet l’emporte."
       },
       "fields.trackHistory": {
         label: "Suivre l’historique",
@@ -305,7 +305,7 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "enable.fieldHistory": {
         label: "Valeurs des modifications de champ",
-        helpText: "Valeurs ancienne → nouvelle des champs modifiés dans la chronologie d’activité de l’enregistrement. Non défini signifie ACTIVÉ, même si l’interrupteur paraît éteint : seul un interrupteur allumé puis éteint écrit false, et l’objet entier n’affiche alors plus de valeurs."
+        helpText: "Valeurs ancienne → nouvelle des champs modifiés dans la chronologie d’activité de l’enregistrement. Par défaut, activé. Désactivé n’affiche plus de valeurs pour tout l’objet, quoi que dise un champ."
       },
       "enable.searchable": {
         label: "Recherchable"
@@ -911,7 +911,7 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       fieldHistory: {
         label: "Valeurs des modifications de champ",
-        helpText: "Valeurs ancienne → nouvelle de ce champ dans la chronologie d’activité de l’enregistrement. Non défini signifie ACTIVÉ, même si l’interrupteur paraît éteint : seul un interrupteur allumé puis éteint écrit false, et la modification n’est alors nommée que par son libellé. Allumé, il affiche aussi les valeurs d’un champ média ou JSON."
+        helpText: "Valeurs ancienne → nouvelle de ce champ dans la chronologie d’activité de l’enregistrement. Par défaut suit la plateforme : activé pour la plupart des types, désactivé pour un champ média, JSON ou d’identifiants. Désactivé ne nomme la modification que par son libellé ; Activé affiche aussi les valeurs d’un champ média ou JSON. Si l’objet lui-même le désactive, l’objet l’emporte."
       },
       trackHistory: {
         label: "Suivre l’historique",
