@@ -278,7 +278,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fields.fieldHistory": {
         label: "Field History",
-        helpText: "Old → new values for this field on the record activity timeline. Unset means ON, though the switch shows off: only a switch turned on and then off writes false, which names the change by label only. On also shows a media or JSON field's values."
+        helpText: "Old → new values for this field on the record activity timeline. Default follows the platform: on for most types, off for a media, JSON or credential field. Off names the change by label only; On also shows a media or JSON field's values. A credential field never shows values, and the object's own Field History off wins."
       },
       "fields.trackHistory": {
         label: "Track History",
@@ -305,7 +305,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "enable.fieldHistory": {
         label: "Field History",
-        helpText: "Old → new values of changed fields on the record activity timeline. Unset means ON, though the switch shows off: only a switch turned on and then off writes false, which turns values off for the whole object."
+        helpText: "Old → new values of changed fields on the record activity timeline. Default is on. Off turns values off for the whole object, whatever a field says."
       },
       "enable.searchable": {
         label: "Searchable"
@@ -911,7 +911,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       fieldHistory: {
         label: "Field History",
-        helpText: "Old → new values for this field on the record activity timeline. Unset means ON, though the switch shows off: only a switch turned on and then off writes false, which names the change by label only. On also shows a media or JSON field's values."
+        helpText: "Old → new values for this field on the record activity timeline. Default follows the platform: on for most types, off for a media, JSON or credential field. Off names the change by label only; On also shows a media or JSON field's values. A credential field never shows values, and the object's own Field History off wins."
       },
       trackHistory: {
         label: "Track History",
