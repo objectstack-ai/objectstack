@@ -207,14 +207,16 @@ describe('[#36601] two Studio Saves over one published item', () => {
 
     it('no active row: `/layers` serves `null`, `If-None-Match: *` pins the first publish, and a second such publish is refused', async () => {
         const h = await boot();
-        // `task` is registered in code and holds no stored row.
-        const codeOnly = ok(await h.layers('object', 'task'));
-        expect(codeOnly.overlayVersion).toBeNull();
+        // A never-published item: its draft is the one layer behind the name.
+        ok(await h.save(view('first'), { mode: 'draft' }, { 'if-none-match': '*' }));
+        const lay = ok(await h.layers());
+        expect(lay.overlayVersion).toBeNull();
+        expect(GetMetaItemLayeredResponseSchema.parse(lay).overlayVersion).toBeNull();
 
-        expect(ok(await h.layers()).overlayVersion).toBeNull();
-        const first = ok(await h.studioSave('first', { 'if-none-match': '*' }));
+        const first = ok(await h.publish({ 'if-none-match': '*' }));
         const again = refusedConflict(await h.studioSave('second', { 'if-none-match': '*' }));
         expect(again.currentVersion).toBe(first.version);
+        expect(MetadataConflictErrorSchema.parse(again).currentVersion).toBe(first.version);
         expect(await h.stored('active')).toEqual(['first']);
         expect(await h.stored('draft')).toEqual(['second']);
     }, 60_000);
