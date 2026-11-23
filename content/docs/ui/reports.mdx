@@ -248,6 +248,14 @@ same custom-range switch, on by default.
 - **The window is a filter, not a bucket.** It is applied with the report's `runtimeFilter`
   and the dataset's own filter. How rows are grouped by date stays with the dimension's
   `dateGranularity` and the report's `rows` / `columns`.
+- **Compare with the previous period** is a switch beside the period chip, not a report key.
+  It is offered when the report's chart can draw a second series (`bar`, `column`,
+  `horizontal-bar`, `line`, `area`) or is a single number (`metric`, `kpi`), and the chart has no
+  `seriesBy` split. Like the chip's own pick, it belongs to the viewer and is not saved. While it
+  is on and the period names a window, the chart asks the dataset for
+  `compareTo: { kind: 'previousPeriod' }` on the window's dimension: a bar or line chart draws
+  the earlier window as a muted series, and a single number shows the previous value and the
+  change under it. All time names no window, so nothing is compared.
 
 **`exportOptions`** uses the list export's key and member names: `formats`,
 `includeHeaders`, `fileNamePrefix`. A report table downloads as `csv` or `xlsx`. Export is on
