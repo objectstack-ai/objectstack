@@ -368,12 +368,6 @@ export default class McpConnect extends Command {
         );
       }
 
-      // Both paths already hold these; checked once more where the line is built.
-      if (!SERVER_NAME.test(name) || !LINE_SAFE_URL.test(mcpUrl)) {
-        printError('The server name or address holds characters the Connect line cannot carry. Nothing was registered.');
-        this.exit(1);
-        return;
-      }
       const line = claudeMcpAddLine(name, mcpUrl);
       console.log(`  Endpoint  ${mcpUrl}`);
       console.log(`  Name      ${name}`);
