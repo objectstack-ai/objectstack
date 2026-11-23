@@ -2201,7 +2201,7 @@ const zhHant = {
       copyLink: '複製連結',
       linkCopied: '連結已複製到剪貼簿',
       linkCopyFailed: '複製連結失敗',
-      design: '設計',
+      objectSettings: '物件設定',
     },
     settingsHub: {
       title: '設定',

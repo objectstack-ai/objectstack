@@ -3097,7 +3097,7 @@ const pt = {
       copyLink: "Copiar link",
       linkCopied: "Link copiado para a área de transferência",
       linkCopyFailed: "Falha ao copiar o link",
-      design: "Projetar",
+      objectSettings: "Configurações do objeto",
     },
   },
   auth: {

@@ -1,12 +1,13 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * The sidebar ⋯ menu's Design entry follows the app bar's Edit app rule
- * (objectui#12615): it is listed only when the package the entry's designer
- * opens is one Studio lists as writable, for a principal who may author
- * metadata. A Setup entry and a read-only package's entry list no Design; a
- * writable base's entry does. A favorite is judged by the package its own
- * designer opens, which need not be the sidebar's.
+ * The sidebar ⋯ menu's Object settings entry follows the app bar's Studio
+ * entry rule (objectui#12615, objectstack#36487): it is listed when Studio
+ * lists the package the entry opens, writable or read-only, for a principal
+ * who may author metadata. A Setup entry lists none; an installed
+ * (read-only) package's entry and a writable base's entry both do. A
+ * favorite is judged by the package its own entry opens, which need not be
+ * the sidebar's.
  *
  * Harness: the real component in a real `SidebarMenuItem` row under the real
  * router, as `SidebarItemMenu-12427` draws it; the two principal answers are
@@ -100,7 +101,7 @@ async function menuOf(designPath: string | null): Promise<string[]> {
   return items;
 }
 
-const WITH_DESIGN = ['Add to favorites', 'Open in new tab', 'Copy link', 'Design'];
+const WITH_DESIGN = ['Add to favorites', 'Open in new tab', 'Copy link', 'Object settings'];
 const WITHOUT_DESIGN = ['Add to favorites', 'Open in new tab', 'Copy link'];
 
 beforeEach(() => {
@@ -121,27 +122,35 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('the sidebar\'s Design entry follows the app bar\'s Edit app rule (objectui#12615)', () => {
-  it('no Design for an entry of the Setup app', async () => {
+describe('the sidebar\'s Object settings follows the app bar\'s Studio entry rule (objectui#12615, objectstack#36487)', () => {
+  it('no Object settings for an entry of the Setup app', async () => {
     expect(await menuOf(sidebarItemDesignPath(LEADS, SETUP))).toEqual(WITHOUT_DESIGN);
   });
 
-  it('no Design for an entry of a read-only package\'s app', async () => {
-    expect(await menuOf(sidebarItemDesignPath(LEADS, HOTCRM))).toEqual(WITHOUT_DESIGN);
+  it('Object settings for an entry of an installed (read-only) package\'s app, which Studio opens to look at', async () => {
+    expect(await menuOf(sidebarItemDesignPath(LEADS, HOTCRM))).toEqual(WITH_DESIGN);
   });
 
-  it('CONTROL — Design for an entry of a writable base\'s app', async () => {
+  it('Object settings for an entry of a writable base\'s app', async () => {
     expect(await menuOf(sidebarItemDesignPath(LEADS, BASE_APP))).toEqual(WITH_DESIGN);
   });
 
-  it('a favorite is judged by the package its own designer opens', async () => {
+  it('a favorite is judged by the package its own entry opens', async () => {
+    const kernel = favoriteDesignPath({ id: 'object:deal', href: '/apps/com.objectstack.setup/deal' }, APPS);
     const readOnly = favoriteDesignPath({ id: 'object:deal', href: '/apps/app.objectstack.hotcrm/deal' }, APPS);
     const writable = favoriteDesignPath({ id: 'object:deal', href: '/apps/com.example.my_base/deal' }, APPS);
-    expect(await menuOf(readOnly)).toEqual(WITHOUT_DESIGN);
+    expect(await menuOf(kernel)).toEqual(WITHOUT_DESIGN);
+    expect(await menuOf(readOnly)).toEqual(WITH_DESIGN);
     expect(await menuOf(writable)).toEqual(WITH_DESIGN);
   });
 
-  it('the principal half still stands: no Design for an admin the server refuses authoring', async () => {
+  it('the principal half still stands: no Object settings for a member', async () => {
+    viewer.isAdmin = false;
+    expect(await menuOf(sidebarItemDesignPath(LEADS, BASE_APP))).toEqual(WITHOUT_DESIGN);
+    expect(await menuOf(sidebarItemDesignPath(LEADS, HOTCRM))).toEqual(WITHOUT_DESIGN);
+  });
+
+  it('the principal half still stands: no Object settings for an admin the server refuses authoring', async () => {
     viewer.canAuthorMetadata = false;
     expect(await menuOf(sidebarItemDesignPath(LEADS, BASE_APP))).toEqual(WITHOUT_DESIGN);
   });

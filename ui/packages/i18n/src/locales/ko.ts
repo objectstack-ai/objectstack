@@ -3022,7 +3022,7 @@ const ko = {
       copyLink: "링크 복사",
       linkCopied: "링크가 클립보드에 복사됨",
       linkCopyFailed: "링크 복사 실패",
-      design: "디자인",
+      objectSettings: "오브젝트 설정",
     },
   },
   auth: {

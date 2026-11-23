@@ -3022,7 +3022,7 @@ const de = {
       copyLink: "Link kopieren",
       linkCopied: "Link in die Zwischenablage kopiert",
       linkCopyFailed: "Link konnte nicht kopiert werden",
-      design: "Gestalten",
+      objectSettings: "Objekteinstellungen",
     },
   },
   auth: {

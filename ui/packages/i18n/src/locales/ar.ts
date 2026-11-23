@@ -3337,7 +3337,7 @@ const ar = {
       copyLink: "نسخ الرابط",
       linkCopied: "تم نسخ الرابط إلى الحافظة",
       linkCopyFailed: "فشل نسخ الرابط",
-      design: "تصميم",
+      objectSettings: "إعدادات الكائن",
     },
   },
   auth: {

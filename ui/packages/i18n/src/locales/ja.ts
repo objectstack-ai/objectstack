@@ -3024,7 +3024,7 @@ const ja = {
       copyLink: "リンクをコピー",
       linkCopied: "リンクをクリップボードにコピーしました",
       linkCopyFailed: "リンクのコピーに失敗しました",
-      design: "デザイン",
+      objectSettings: "オブジェクト設定",
     },
   },
   auth: {
