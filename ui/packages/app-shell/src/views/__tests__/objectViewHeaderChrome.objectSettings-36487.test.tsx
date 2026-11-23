@@ -15,7 +15,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import React from 'react';
-import { act, cleanup, renderHook } from '@testing-library/react';
+import { act, cleanup, renderHook, screen } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import type { ActionBarSchema } from '@object-ui/types';
 
@@ -50,12 +50,13 @@ const PACKAGES = {
 
 const t = (key: string, options?: Record<string, unknown>) => String(options?.defaultValue ?? key);
 
-let where = '';
 function Where() {
   const location = useLocation();
-  where = `${location.pathname}${location.search}`;
-  return null;
+  return <output data-testid="where">{`${location.pathname}${location.search}`}</output>;
 }
+
+/** Where the router is, once the list's route has been left; `''` while still on it. */
+const where = () => screen.queryByTestId('where')?.textContent ?? '';
 
 /** The hook on `/apps/<app>/account`, with New shown so the header has a folded face. */
 function renderChrome(appSegment: string) {
@@ -106,7 +107,6 @@ let release: (() => void) | null = null;
 beforeEach(() => {
   viewer.isAdmin = true;
   viewer.canAuthorMetadata = true;
-  where = '';
   vi.stubGlobal(
     'fetch',
     vi.fn(async (url: unknown) => ({
@@ -158,10 +158,10 @@ describe('the folded list menu leads with Object settings (objectstack#36487)', 
 
     act(() => entry.onClick());
     expect(confirm).toHaveBeenCalledWith('Discard your changes?');
-    expect(where).toBe('');
+    expect(where()).toBe('');
 
     confirm.mockReturnValue(true);
     act(() => entry.onClick());
-    expect(where).toBe('/studio/com.example.my_base/data?surface=object:account');
+    expect(where()).toBe('/studio/com.example.my_base/data?surface=object:account');
   });
 });
