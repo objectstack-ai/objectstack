@@ -186,10 +186,10 @@ export function ReportBuilder({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [members, membersLoading, dataset]);
 
-  const [showSecondLayer, setShowSecondLayer] = React.useState(!!grouping.second);
-  React.useEffect(() => {
-    if (grouping.second) setShowSecondLayer(true);
-  }, [grouping.second]);
+  // The second-layer picker shows while the report has a second layer, or
+  // once 「Add another layer」 was pressed and before one is picked.
+  const [secondLayerAsked, setShowSecondLayer] = React.useState(false);
+  const showSecondLayer = secondLayerAsked || !!grouping.second;
 
   const measures = members?.measures ?? [];
   const dimensions = members?.dimensions ?? [];
