@@ -1,7 +1,7 @@
 ---
-'@object-ui/plugin-report': minor
-'@object-ui/app-shell': minor
-'@object-ui/i18n': minor
+'@object-ui/plugin-report': patch
+'@object-ui/app-shell': patch
+'@object-ui/i18n': patch
 ---
 
 feat(console): the report builder — one page to build a new report or edit an existing one, with the report drawn live on the left and five settings on the right
