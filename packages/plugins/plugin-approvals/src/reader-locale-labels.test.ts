@@ -110,10 +110,12 @@ describe('[#24863] the pick', () => {
 
   it('negotiates through `resolveBundleLocale` even for a service that resolves exactly', () => {
     // A service that answers only the exact tag it holds, as `FileI18nAdapter` does.
-    // [#35384] Asked of the step's label, the one label still read through `t()`.
+    // [#35384] Asked of the step's label, now read off the service's translations.
+    const packs: Record<string, Record<string, unknown>> = { en: {}, 'zh-CN': packOf({ [approvalStepLabelKey('f', 'n')]: '步骤' }) };
     const exact: ReaderLabelI18n = {
-      t: (key, locale) => (locale === 'zh-CN' && key === approvalStepLabelKey('f', 'n') ? '步骤' : key),
+      t: (key) => key,
       getLocales: () => ['en', 'zh-CN'],
+      getTranslations: (locale) => packs[locale] ?? {},
     };
     expect(readerLabelsFor(exact, 'zh')!.stepLabel('f', 'n')).toBe('步骤');
   });
@@ -144,13 +146,19 @@ describe('[#24863] the pick', () => {
     expect(readerLabelsFor(undefined, 'zh-CN')).toBeUndefined();
   });
 
-  it('asks the service once per key per read', () => {
+  it('asks the service once per read, and never through t()', () => {
     const asked: string[] = [];
-    const counting: ReaderLabelI18n = { t: (key) => { asked.push(key); return key; } };
+    let reads = 0;
+    const counting: ReaderLabelI18n = {
+      t: (key) => { asked.push(key); return key; },
+      getLocales: () => ['zh-CN'],
+      getTranslations: () => { reads += 1; return packOf(ZH); },
+    };
     const labels = readerLabelsFor(counting, 'zh-CN')!;
-    labels.stepLabel('f', 'n');
-    labels.stepLabel('f', 'n');
-    expect(asked).toEqual([approvalStepLabelKey('f', 'n')]);
+    expect(labels.stepLabel('account_approval', 'manager_review')).toBe('经理审核');
+    labels.stepLabel('account_approval', 'manager_review');
+    expect(reads).toBe(1);
+    expect(asked).toEqual([]);
   });
 });
 
@@ -285,11 +293,13 @@ describe('[#35384] the object label in the declared sourceLocale reads as author
 });
 
 /**
- * [#35384] The flow's and the position's labels are metadata too, so they are
- * resolved by the spec translators of their types — `translateFlow` (the
- * flow runner's reading of `flows.<flow>.label`; `/meta` serves a flow
- * document untranslated) and `translatePosition` (what `GET /meta/position`
- * serves) — with `/meta`'s `ResolveOptions`, and never through `t()`.
+ * [#35384] The flow's, the approval step's and the position's labels are
+ * metadata too, so they are resolved by the spec readers of their keys —
+ * `translateFlow` (the flow runner's reading of `flows.<flow>.label`; `/meta`
+ * serves a flow document untranslated), `resolveFlowApprovalStepLabel` (the
+ * one reading of `flows.<flow>.approvals.<node_id>.label`) and
+ * `translatePosition` (what `GET /meta/position` serves) — with `/meta`'s
+ * `ResolveOptions`, and never through `t()`.
  *
  * The scenario: an app authored in English (`sourceLocale: 'en'`) that
  * defaults its users to Chinese (`defaultLocale: 'zh-CN'`, declared fallback
@@ -301,7 +311,7 @@ describe('[#35384] the object label in the declared sourceLocale reads as author
  * read by an `en` reader, and with no `sourceLocale` declared an `en` reader
  * walks the declared fallback to the `zh-CN` rows.
  */
-describe('[#35384] the flow and position labels in the declared sourceLocale read as authored', () => {
+describe('[#35384] the flow, approval step and position labels in the declared sourceLocale read as authored', () => {
   const EN = { [flowLabelKey('other_flow')]: 'Other flow' };
   const declared = (sourceLocale: string | undefined, en: Record<string, string> = EN) => {
     const i18n = i18nWith({ 'zh-CN': ZH, en });
@@ -320,6 +330,7 @@ describe('[#35384] the flow and position labels in the declared sourceLocale rea
   it('the defect\'s precondition: t() answers an en reader with the zh-CN rows', () => {
     const i18n = declared('en');
     expect(i18n.t(flowLabelKey('account_approval'), 'en')).toBe('客户审批');
+    expect(i18n.t(approvalStepLabelKey('account_approval', 'manager_review'), 'en')).toBe('经理审核');
     expect(i18n.t(positionLabelKey('crm_sales_manager'), 'en')).toBe('销售经理');
   });
 
@@ -328,27 +339,36 @@ describe('[#35384] the flow and position labels in the declared sourceLocale rea
   });
 
   for (const locale of ['en', 'en-US']) {
-    it(`an ${locale} reader picks no defaultLocale row: the flow and position labels stand as authored`, () => {
+    it(`an ${locale} reader picks no defaultLocale row: the flow, step and position labels stand as authored`, () => {
       const labels = readerLabelsFor(declared('en'), locale)!;
       expect(labels.flowLabel('account_approval')).toBeUndefined();
+      expect(labels.stepLabel('account_approval', 'manager_review')).toBeUndefined();
       expect(labels.positionLabel('crm_sales_manager')).toBeUndefined();
       const row = served();
       localizeRequestLabels(row, labels);
       expect(row.process_label).toBe('Account Approval');
+      expect(row.step_label).toBe('Manager Review');
+      expect(row.current_step_label).toBe('Manager Review');
     });
   }
 
   it('CONTROL: a zh-CN reader still reads the zh-CN rows', () => {
     const labels = readerLabelsFor(declared('en'), 'zh-CN')!;
     expect(labels.flowLabel('account_approval')).toBe('客户审批');
+    expect(labels.stepLabel('account_approval', 'manager_review')).toBe('经理审核');
     expect(labels.positionLabel('crm_sales_manager')).toBe('销售经理');
   });
 
   it('CONTROL: an en pack entry is what an en and an en-US reader read', () => {
-    const en = { [flowLabelKey('account_approval')]: 'Account sign-off', [positionLabelKey('crm_sales_manager')]: 'Sales lead' };
+    const en = {
+      [flowLabelKey('account_approval')]: 'Account sign-off',
+      [approvalStepLabelKey('account_approval', 'manager_review')]: 'Manager sign-off',
+      [positionLabelKey('crm_sales_manager')]: 'Sales lead',
+    };
     for (const locale of ['en', 'en-US']) {
       const labels = readerLabelsFor(declared('en', en), locale)!;
       expect(labels.flowLabel('account_approval')).toBe('Account sign-off');
+      expect(labels.stepLabel('account_approval', 'manager_review')).toBe('Manager sign-off');
       expect(labels.positionLabel('crm_sales_manager')).toBe('Sales lead');
     }
   });
@@ -356,13 +376,18 @@ describe('[#35384] the flow and position labels in the declared sourceLocale rea
   it('CONTROL: with no sourceLocale declared, an en reader walks the declared fallback to the zh-CN rows', () => {
     const labels = readerLabelsFor(declared(undefined), 'en')!;
     expect(labels.flowLabel('account_approval')).toBe('客户审批');
+    expect(labels.stepLabel('account_approval', 'manager_review')).toBe('经理审核');
     expect(labels.positionLabel('crm_sales_manager')).toBe('销售经理');
   });
 
-  it('reads neither label through t(): a service that cannot hand its translations over picks none', () => {
-    const tOnly: ReaderLabelI18n = { t: (key) => (key === flowLabelKey('f') ? '流程' : key === positionLabelKey('p') ? '岗位' : key) };
+  it('reads no label through t(): a service that cannot hand its translations over picks none', () => {
+    const tOnly: ReaderLabelI18n = {
+      t: (key) => (key === flowLabelKey('f') ? '流程' : key === positionLabelKey('p') ? '岗位'
+        : key === approvalStepLabelKey('f', 'n') ? '步骤' : key),
+    };
     const labels = readerLabelsFor(tOnly, 'zh-CN')!;
     expect(labels.flowLabel('f')).toBeUndefined();
+    expect(labels.stepLabel('f', 'n')).toBeUndefined();
     expect(labels.positionLabel('p')).toBeUndefined();
   });
 

@@ -20,8 +20,17 @@
  *  - A buffer that holds an edit it cannot send yet (`held`) refuses the whole
  *    Save before anything is written, naming what it needs. The held state is
  *    read once the expression checks of the last keystroke have run (they run
- *    {@link LINT_DEBOUNCE_MS} after it): a Save pressed at once never sends a
- *    formula its check has not judged yet (objectui#4306).
+ *    {@link LINT_DEBOUNCE_MS} after it) AND their verdicts have reached the
+ *    buffers: a Save pressed at once never sends a formula its check has not
+ *    judged yet (objectui#4306).
+ *  - A verdict climbs to its buffer through effects, one render per hop (an
+ *    action predicate's: the CEL field, the condition builder, the action
+ *    inspector, the actions panel, then the Data pillar's `held`). Those
+ *    renders run at default priority, so Save waits for a render of its own
+ *    at transition priority ({@link useRendersSettled}): React commits it only
+ *    once no default-priority render is left, the last hop included. A fixed
+ *    margin past the debounce lost that race on a busy main thread and sent
+ *    the unparsable text (objectstack#36619).
  *  - Cancel drops every dirty buffer's edits: each goes back to what the
  *    server holds.
  */
@@ -116,12 +125,50 @@ export interface StudioSaveCoordinator {
   cancel: () => void;
 }
 
+/**
+ * objectstack#36619 — an answer that resolves once React has no render more
+ * urgent than a transition left: the caller's component renders at transition
+ * priority, and React reaches that render only after every default-priority
+ * one, including those scheduled by the effects of the renders before it. So
+ * an effect chain already under way (a CEL verdict climbing to the buffer that
+ * holds it) has run to its end when the answer resolves. Unmounted first, it
+ * resolves at once: nothing is left to wait for.
+ */
+function useRendersSettled(): () => Promise<void> {
+  const [tick, setTick] = React.useState(0);
+  const seq = React.useRef(0);
+  const waiters = React.useRef<Array<{ tick: number; resolve: () => void }>>([]);
+  React.useEffect(() => {
+    const due = waiters.current.filter((w) => w.tick <= tick);
+    if (due.length === 0) return;
+    waiters.current = waiters.current.filter((w) => w.tick > tick);
+    for (const w of due) w.resolve();
+  }, [tick]);
+  React.useEffect(
+    () => () => {
+      for (const w of waiters.current) w.resolve();
+      waiters.current = [];
+    },
+    [],
+  );
+  return React.useCallback(
+    () =>
+      new Promise<void>((resolve) => {
+        const next = ++seq.current;
+        waiters.current.push({ tick: next, resolve });
+        React.startTransition(() => setTick(next));
+      }),
+    [],
+  );
+}
+
 /** The surface's side: the registered buffers, and the Save and Cancel over them. */
 export function useStudioSaveCoordinator(locale: string): StudioSaveCoordinator {
   const entriesRef = React.useRef(new Map<number, React.MutableRefObject<StudioSaveEntry | null>>());
   const [dirty, setDirty] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
   const savingRef = React.useRef(false);
+  const rendersSettled = useRendersSettled();
   const readDirty = React.useCallback(() => {
     for (const ref of entriesRef.current.values()) if (ref.current?.dirty) return true;
     return false;
@@ -152,6 +199,8 @@ export function useStudioSaveCoordinator(locale: string): StudioSaveCoordinator 
     savingRef.current = true;
     setSaving(true);
     await new Promise((settled) => setTimeout(settled, VERDICT_SETTLE_MS));
+    // The checks have run; their verdicts may still be climbing to the buffers.
+    await rendersSettled();
     const entries = dirtyEntries();
     const held = entries.find((e) => e.held !== null);
     if (held || entries.length === 0) {
@@ -189,7 +238,7 @@ export function useStudioSaveCoordinator(locale: string): StudioSaveCoordinator 
     } else if (saved.length > 0) {
       toast.success(tFormat('engine.studio.save.done', locale, { items: names(saved) }), { id: STUDIO_SAVE_TOAST_ID });
     }
-  }, [dirtyEntries, locale, readDirty]);
+  }, [dirtyEntries, locale, readDirty, rendersSettled]);
   const cancel = React.useCallback(() => {
     if (savingRef.current) return;
     for (const entry of dirtyEntries()) entry.cancel();
