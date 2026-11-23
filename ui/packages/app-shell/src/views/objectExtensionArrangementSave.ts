@@ -2,13 +2,15 @@
 
 /**
  * The ONE write of an installed object's arrangement (ADR-0146 D2/D3/D10): the
- * keys `CUSTOM_ARRANGEMENT_KEYS` names (`fieldGroups`, `relatedLists`), written
+ * keys `CUSTOM_ARRANGEMENT_KEYS` names (`fieldGroups`, `relatedLists`,
+ * `actionLayout`), written
  * into the object extension of the base's paired `.custom` package and
  * published at once, so everyone sees it.
  *
  * Every arrangement editor of an installed object is a caller of this one
  * writer, never a second writer: the record page's 「Configure tabs」 hands it
- * `relatedLists` (objectstack#36499); a field-layout editor hands it
+ * `relatedLists` (objectstack#36499); the design mode's 「Header buttons」
+ * hands it `actionLayout` (objectstack#36366); a field-layout editor hands it
  * `fieldGroups` the same way.
  *
  * - Where: the pair the ensure door answers for the object's package
@@ -36,7 +38,7 @@
  */
 
 import { stripReadDecorations } from '@objectstack/spec/kernel';
-import type { CustomArrangementKey } from '@objectstack/spec/data';
+import type { CustomArrangementKey, ObjectActionLayout } from '@objectstack/spec/data';
 import { isDraftVersionConflict } from './metadata-admin/DraftConflictDialog.js';
 import { OBJECT_EXTENSION_TYPE, objectExtensionBodyOf, type ObjectExtensionBody } from './studio-design/StudioCustomizeControls.js';
 import type { EnsuredCustomizationPackage, ListedPackageManifest } from './studio-design/packages-io.js';
@@ -74,8 +76,16 @@ export interface StoredArrangement {
   readonly object: Record<string, unknown>;
 }
 
+/**
+ * The value an arrangement key is written with: a list for `fieldGroups` and
+ * `relatedLists`, an object of arms for `actionLayout`.
+ */
+export type ExtensionArrangementValue<K extends CustomArrangementKey> = K extends 'actionLayout'
+  ? ObjectActionLayout
+  : unknown[];
+
 /** The arrangement keys to write: a key present replaces the stored one; `undefined` takes it off. */
-export type ExtensionArrangementPatch = Partial<Record<CustomArrangementKey, unknown[] | undefined>>;
+export type ExtensionArrangementPatch = { [K in CustomArrangementKey]?: ExtensionArrangementValue<K> | undefined };
 
 /** A document as stored, less what a read adds and what belongs to its package. */
 function documentOf(read: unknown): Record<string, unknown> {

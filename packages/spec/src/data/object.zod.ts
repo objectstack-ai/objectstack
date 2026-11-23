@@ -6951,12 +6951,16 @@ export const ObjectExtensionSchema = lazySchema(() => strictObject({
   guidance: {
     // The merge in `objectql/src/engine.ts` copies EXACTLY the declared keys
     // (extend / fields / fieldPatches / label / pluralLabel / description /
-    // actionLayout / validations / indexes / priority) onto the extension def. Anything else
-    // is not "unsupported yet" — there is no slot for it to arrive through.
+    // validations / indexes / priority, and the paired `.custom` package's
+    // fieldGroups / relatedLists / actionLayout) onto the extension def.
+    // Anything else is not "unsupported yet" — there is no slot for it to
+    // arrive through.
     actions:
       '`actions` cannot be contributed through an object extension — the merge carries ' +
-      '`fields`, `label`, `pluralLabel`, `description`, `actionLayout`, `validations` and ' +
-      '`indexes`, and applies `fieldPatches`, and nothing else. ' +
+      '`fields`, `label`, `pluralLabel`, `description`, `validations` and `indexes`, and ' +
+      'applies `fieldPatches`; only the base\'s paired `.custom` package also writes ' +
+      '`fieldGroups`, `relatedLists` and `actionLayout` (the order of the object\'s actions, ' +
+      'never a new one); nothing else. ' +
       "Declare a top-level action with `objectName: '<target>'` in the same stack: " +
       '`defineStack()` accepts it because the stack extends the target, keeps it in the ' +
       'top-level `actions`, and the engine\'s schema registry attaches it to the target ' +
@@ -6978,9 +6982,9 @@ export const ObjectExtensionSchema = lazySchema(() => strictObject({
       'carry them. Declare the views as a top-level `view` in the stack that defines the ' +
       'target object. `defineStack()` refuses a top-level `view` whose `list` or `form` data ' +
       'source is an object the stack does not define, an extended one included.',
-    // [#35901, ADR-0146 D10] `fieldGroups` and `relatedLists` are KEYS of this
-    // schema, not guidance: the paired `.custom` package's extension writes
-    // them, and which package an extension belongs to is not in its body, so
+    // [#35901, #36366, ADR-0146 D10] `fieldGroups`, `relatedLists` and
+    // `actionLayout` are KEYS of this schema, not guidance: the paired
+    // `.custom` package's extension writes them, and which package an extension belongs to is not in its body, so
     // the refusal of any other writer is the server's (`CUSTOM_ARRANGEMENT_KEYS`
     // and its judge, at publish, `os validate` / `os build` and install).
     // A membership key belongs to the package that owns the roster object, so a

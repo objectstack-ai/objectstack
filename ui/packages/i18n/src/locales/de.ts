@@ -3599,6 +3599,7 @@ const de = {
       full: 'Höchstens {{cap}} Schaltflächen sind in der Kopfzeile angeheftet. Lösen Sie zuerst eine.',
       notListed: 'Das Paket dieses Objekts ist nicht gelistet, daher können seine Kopfzeilen-Schaltflächen nicht gespeichert werden.',
       pendingDraft: 'Dieses Objekt hat unveröffentlichte Änderungen in Studio. Veröffentlichen oder verwerfen Sie sie dort und speichern Sie dann erneut.',
+      pairNotWritable: 'Das Anpassungspaket dieser App ist nicht beschreibbar, daher können die Kopfzeilen-Schaltflächen nicht gespeichert werden.',
       unknown: '„{{name}}“ ist keine Aktion dieses Objekts mehr. Lösen Sie sie und speichern Sie erneut.',
       notPlaced: '„{{name}}“ wird auf dieser Seite nicht mehr angeboten. Lösen Sie sie und speichern Sie erneut.',
       stale: 'Hier nicht mehr angeboten, beim Speichern weggelassen: {{names}}',

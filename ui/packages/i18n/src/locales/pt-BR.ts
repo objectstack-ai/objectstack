@@ -3676,6 +3676,7 @@ const pt = {
       full: 'No máximo {{cap}} botões ficam fixados no cabeçalho. Desafixe um primeiro.',
       notListed: 'O pacote deste objeto não está listado, então os botões do cabeçalho não podem ser salvos.',
       pendingDraft: 'Este objeto tem alterações não publicadas no Studio. Publique ou descarte-as lá e salve novamente.',
+      pairNotWritable: 'O pacote de personalização deste app não pode ser gravado, então os botões do cabeçalho não podem ser salvos.',
       unknown: '"{{name}}" não é mais uma ação deste objeto. Desafixe-a e salve novamente.',
       notPlaced: '"{{name}}" não é mais oferecida nesta página. Desafixe-a e salve novamente.',
       stale: 'Não é mais oferecido aqui; fica de fora ao salvar: {{names}}',

@@ -4284,6 +4284,7 @@ const en = {
       full: 'At most {{cap}} buttons are pinned to the header. Unpin one first.',
       notListed: 'This object\'s package is not listed, so its header buttons cannot be saved.',
       pendingDraft: 'This object has unpublished changes in Studio. Publish or discard them there, then save again.',
+      pairNotWritable: 'This app\'s customization package cannot be written, so its header buttons cannot be saved.',
       unknown: '"{{name}}" is no longer an action of this object. Unpin it, then save again.',
       notPlaced: '"{{name}}" is no longer offered on this page. Unpin it, then save again.',
       stale: 'No longer offered here, left out when you save: {{names}}',

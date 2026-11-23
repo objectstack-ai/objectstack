@@ -3681,6 +3681,7 @@ const es = {
       full: 'Se fijan como máximo {{cap}} botones en el encabezado. Desfija uno primero.',
       notListed: 'El paquete de este objeto no está en la lista, así que sus botones del encabezado no se pueden guardar.',
       pendingDraft: 'Este objeto tiene cambios sin publicar en Studio. Publícalos o descártalos allí y vuelve a guardar.',
+      pairNotWritable: 'No se puede escribir en el paquete de personalización de esta app, así que sus botones del encabezado no se pueden guardar.',
       unknown: '"{{name}}" ya no es una acción de este objeto. Desfíjala y vuelve a guardar.',
       notPlaced: '"{{name}}" ya no se ofrece en esta página. Desfíjala y vuelve a guardar.',
       stale: 'Ya no se ofrece aquí; se omite al guardar: {{names}}',

@@ -3680,6 +3680,7 @@ const zhHant = {
       full: '頁頭最多固定 {{cap}} 個按鈕，請先取消固定一個。',
       notListed: '這個物件所在的包不在列表中，頁頭按鈕無法儲存。',
       pendingDraft: '這個物件在 Studio 裡有未釋出的改動。請先在那裡釋出或丟棄，再儲存。',
+      pairNotWritable: '這個應用的定製包不可寫，頁頭按鈕無法儲存。',
       unknown: '「{{name}}」已不是這個物件的動作。請取消固定後再儲存。',
       notPlaced: '「{{name}}」已不在這個頁面上。請取消固定後再儲存。',
       stale: '已不在這個頁面上，儲存時會去掉：{{names}}',

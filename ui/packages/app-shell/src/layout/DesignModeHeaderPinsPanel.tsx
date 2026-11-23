@@ -79,6 +79,9 @@ export default function HeaderPinsPanel({ objectDef, page, actions, builtins = [
       pendingDraft: t('designMode.pins.pendingDraft', {
         defaultValue: 'This object has unpublished changes in Studio. Publish or discard them there, then save again.',
       }),
+      pairNotWritable: t('designMode.pins.pairNotWritable', {
+        defaultValue: "This app's customization package cannot be written, so its header buttons cannot be saved.",
+      }),
       unknown: (name: string) =>
         t('designMode.pins.unknown', { name, defaultValue: '"{{name}}" is no longer an action of this object. Unpin it, then save again.' }),
       notPlaced: (name: string) =>

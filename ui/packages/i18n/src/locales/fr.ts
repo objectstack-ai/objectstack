@@ -3677,6 +3677,7 @@ const fr = {
       full: 'Au plus {{cap}} boutons sont épinglés dans l’en-tête. Désépinglez-en un d’abord.',
       notListed: 'Le package de cet objet n’est pas listé : ses boutons d’en-tête ne peuvent pas être enregistrés.',
       pendingDraft: 'Cet objet a des modifications non publiées dans Studio. Publiez-les ou annulez-les là-bas, puis enregistrez à nouveau.',
+      pairNotWritable: 'Le package de personnalisation de cette app n\'est pas modifiable : ses boutons d’en-tête ne peuvent pas être enregistrés.',
       unknown: '« {{name}} » n’est plus une action de cet objet. Désépinglez-la, puis enregistrez à nouveau.',
       notPlaced: '« {{name}} » n’est plus proposée sur cette page. Désépinglez-la, puis enregistrez à nouveau.',
       stale: 'N’est plus proposé ici, omis à l’enregistrement : {{names}}',

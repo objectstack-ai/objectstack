@@ -20,18 +20,23 @@
  *   its author wrote it (`overlay ?? code` of its layered read, never the
  *   served object, which folds other packages' actions and fields in), with
  *   the new `actionLayout`;
- * - else the base's paired customization package, asked of the ensure door
- *   (which creates it on first use and names it): the pair's
- *   `object_extension` of the object, as published there (or a new one), with
- *   the new `actionLayout`. The fold carries it onto the object.
+ * - else the base's paired customization package: `actionLayout` is one of
+ *   the keys `CUSTOM_ARRANGEMENT_KEYS` names, so this save is a caller of the
+ *   one writer of an installed object's arrangement
+ *   (`saveObjectExtensionArrangement`, `../views/objectExtensionArrangementSave.ts`),
+ *   never a second writer: it asks the ensure door for the pair, refuses a pair
+ *   the server does not list writable, and keeps every key the pair's stored
+ *   extension holds. This module only composes the `actionLayout` it hands
+ *   over, from the one the stored extension holds. The fold carries it onto
+ *   the object.
  *
  * How it is written is the runtime's confirmed-save rule, as the app menu's
- * save (`designModeMenuSave.ts`): the draft is written with the first-write
- * pin, so a draft somebody left pending is refused, never overwritten nor
- * published on its saver's behalf, and the refusal is said; a publish the
- * server refuses discards the draft this save wrote. A landed publish
- * announces itself (`emitMetadataRefresh`), and the console re-reads the
- * object.
+ * save (`designModeMenuSave.ts`) and the one writer: the draft is written with
+ * the first-write pin, so a draft somebody left pending is refused, never
+ * overwritten nor published on its saver's behalf, and the refusal is said; a
+ * publish the server refuses discards the draft this save wrote. A landed
+ * publish announces itself (`emitMetadataRefresh`), and the console re-reads
+ * the object.
  *
  * Before anything is written, every name of both parts is checked against the
  * object as served (every package's actions): a name that is no action of the
@@ -42,11 +47,11 @@
  * @module
  */
 
-import { stripReadDecorations } from '@objectstack/spec/kernel';
+import type { ObjectActionLayout } from '@objectstack/spec/data';
 import { emitMetadataRefresh } from '../assistant/assistantBus.js';
 import { isDraftVersionConflict } from '../views/metadata-admin/DraftConflictDialog.js';
 import { authoredPublished, type AuthoredLayers } from '../views/metadata-admin/authoredObjectBuffer.js';
-import { OBJECT_EXTENSION_TYPE } from '../views/studio-design/StudioCustomizeControls.js';
+import { saveObjectExtensionArrangement } from '../views/objectExtensionArrangementSave.js';
 import {
   ensureCustomizationPackage,
   fetchListedPackageManifests,
@@ -74,18 +79,12 @@ export interface ObjectPinsSaveTexts {
   readonly notListed: string;
   /** A draft of the object (or of its extension) is already pending. */
   readonly pendingDraft: string;
+  /** The customization package the server answered for an installed object is not writable. */
+  readonly pairNotWritable: string;
   /** `name` is no action of the object. */
   readonly unknown: (name: string) => string;
   /** `name` is an action of the object not placed in that arm's scope. */
   readonly notPlaced: (name: string) => string;
-}
-
-/** A document as stored, less what a read adds and what belongs to its package. */
-function documentOf(read: unknown): Record<string, unknown> {
-  const body = stripReadDecorations((read ?? {}) as Record<string, unknown>) as Record<string, unknown>;
-  const doc: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(body)) if (!key.startsWith('_')) doc[key] = value;
-  return doc;
 }
 
 /** One arm as written: its `pinned`, and its `more` (action names only, a built-in being only ever pinned) when it has one. */
@@ -112,7 +111,7 @@ export function changedScopes(pins: ObjectPins, served: unknown): PinPage[] {
  * with each changed scope's arm as staged (taken off where the staged value
  * has none). `undefined` when it then arranges nothing.
  */
-function actionLayoutValue(held: unknown, pins: ObjectPins, changed: readonly PinPage[]): ObjectPins | undefined {
+function actionLayoutValue(held: unknown, pins: ObjectPins, changed: readonly PinPage[]): ObjectActionLayout | undefined {
   const out: Record<string, unknown> =
     held && typeof held === 'object' && !Array.isArray(held) ? { ...(held as Record<string, unknown>) } : {};
   for (const scope of changed) {
@@ -120,18 +119,13 @@ function actionLayoutValue(held: unknown, pins: ObjectPins, changed: readonly Pi
     if (arm) out[scope] = armValue(arm);
     else delete out[scope];
   }
-  return Object.keys(out).length > 0 ? (out as ObjectPins) : undefined;
+  return Object.keys(out).length > 0 ? (out as ObjectActionLayout) : undefined;
 }
 
 /** `body` with its `actionLayout` set to `layout`, or without the key when `layout` is `undefined`. */
-function withActionLayout(body: Record<string, unknown>, layout: ObjectPins | undefined): Record<string, unknown> {
+function withActionLayout(body: Record<string, unknown>, layout: ObjectActionLayout | undefined): Record<string, unknown> {
   const { actionLayout: _held, ...rest } = body;
   return layout ? { ...rest, actionLayout: layout } : rest;
-}
-
-/** Whether `err` says the item is not there (`404`). */
-function isNotFound(err: unknown): boolean {
-  return (err as { status?: unknown } | null | undefined)?.status === 404;
 }
 
 /** Save `pins` as the action layout of the object `objectName` of the package `packageId`, and publish them. */
@@ -149,38 +143,35 @@ export async function saveObjectPins(
   const listed = manifests.get(packageId);
   if (!listed) throw new Error(texts.notListed);
 
-  let type = 'object';
-  let target = packageId;
-  let body: Record<string, unknown>;
-  if (listed.writable) {
-    const layers = (await doors.client.layered('object', objectName, { packageId })) as AuthoredLayers | null;
-    if (layers && 'draft' in layers && layers.draft) throw new Error(texts.pendingDraft);
-    const authored = authoredPublished('object', layers) as Record<string, unknown>;
-    body = withActionLayout({ ...authored, name: objectName }, actionLayoutValue(authored.actionLayout, pins, changed));
-  } else {
-    const pair = await doors.ensureCustomization(packageId);
-    type = OBJECT_EXTENSION_TYPE;
-    target = pair.packageId;
-    let published: unknown = null;
-    try {
-      published = await doors.client.get(OBJECT_EXTENSION_TYPE, objectName, { packageId: target });
-    } catch (err) {
-      if (!isNotFound(err)) throw err;
-    }
-    const doc = documentOf(published);
-    body = withActionLayout({ ...doc, extend: objectName }, actionLayoutValue(doc.actionLayout, pins, changed));
+  if (!listed.writable) {
+    // An installed object: the one writer of its arrangement writes the pair.
+    await saveObjectExtensionArrangement(
+      {
+        objectName,
+        basePackageId: packageId,
+        arrange: ({ extension }) => ({ actionLayout: actionLayoutValue(extension?.actionLayout, pins, changed) }),
+      },
+      { notListed: texts.notListed, pendingDraft: texts.pendingDraft, notWritable: texts.pairNotWritable },
+      { ...doors, listPackages: async () => manifests, refreshed: emitMetadataRefresh },
+    );
+    return;
   }
+
+  const layers = (await doors.client.layered('object', objectName, { packageId })) as AuthoredLayers | null;
+  if (layers && 'draft' in layers && layers.draft) throw new Error(texts.pendingDraft);
+  const authored = authoredPublished('object', layers) as Record<string, unknown>;
+  const body = withActionLayout({ ...authored, name: objectName }, actionLayoutValue(authored.actionLayout, pins, changed));
   try {
-    await doors.client.save(type, objectName, body, { mode: 'draft', packageId: target, ifNoneMatch: '*' });
+    await doors.client.save('object', objectName, body, { mode: 'draft', packageId, ifNoneMatch: '*' });
   } catch (err) {
     if (isDraftVersionConflict(err)) throw Object.assign(new Error(texts.pendingDraft), { cause: err });
     throw err;
   }
   try {
-    await doors.client.publish(type, objectName, { packageId: target });
+    await doors.client.publish('object', objectName, { packageId });
   } catch (err) {
     try {
-      await doors.client.reset(type, objectName, { state: 'draft', packageId: target });
+      await doors.client.reset('object', objectName, { state: 'draft', packageId });
     } catch (discardErr) {
       console.error('[design-mode] a refused publish left the action layout draft pending:', discardErr);
     }

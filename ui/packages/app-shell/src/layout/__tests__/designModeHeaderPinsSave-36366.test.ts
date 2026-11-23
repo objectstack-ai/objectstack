@@ -22,6 +22,7 @@ import type { ObjectPins } from '../designModeHeaderPins';
 const TEXTS = {
   notListed: 'not listed',
   pendingDraft: 'pending draft',
+  pairNotWritable: 'pair not writable',
   unknown: (n: string) => `unknown ${n}`,
   notPlaced: (n: string) => `not placed ${n}`,
 };
@@ -42,6 +43,7 @@ function doors(opts: {
   writable: boolean;
   layers?: unknown;
   extension?: unknown;
+  pairWritable?: boolean;
   save?: () => Promise<unknown>;
   publish?: () => Promise<unknown>;
 }) {
@@ -51,7 +53,7 @@ function doors(opts: {
       new Map([['com.acme.crm', { id: 'com.acme.crm', name: 'CRM', writable: opts.writable, manifest: { version: '1.0.0' } }]]),
     ensureCustomization: async (base) => {
       calls.push(['ensure', base]);
-      return { basePackageId: base, packageId: `${base}.custom`, namespace: 'crm_custom', created: false, writable: true };
+      return { basePackageId: base, packageId: `${base}.custom`, namespace: 'crm_custom', created: false, writable: opts.pairWritable ?? true };
     },
     client: {
       layered: async (...args) => {
@@ -60,8 +62,8 @@ function doors(opts: {
       },
       get: async (...args) => {
         calls.push(['get', ...args]);
-        if (opts.extension === undefined) throw Object.assign(new Error('not found'), { status: 404 });
-        return opts.extension;
+        // The console's client answers `null` for an item that is not there.
+        return opts.extension === undefined ? null : opts.extension;
       },
       save: async (...args) => {
         calls.push(['save', ...args]);
@@ -109,6 +111,7 @@ describe('saving the header pins (objectstack#36366)', () => {
     expect(calls).toEqual([
       ['ensure', 'com.acme.crm'],
       ['get', 'object_extension', 'crm_lead', { packageId: 'com.acme.crm.custom' }],
+      ['layered', 'object', 'crm_lead', { packageId: 'com.acme.crm' }],
       [
         'save',
         'object_extension',
@@ -175,6 +178,31 @@ describe('saving the header pins (objectstack#36366)', () => {
     expect(save?.[3]).toEqual({ extend: 'crm_lead', actionLayout: { list: { pinned: ['mass_assign'], more: [] } } });
   });
 
+  it('S5: an installed object is written through the one writer of its arrangement: a pair the server answers not writable is refused before anything is read or written to it', async () => {
+    const { d, calls } = doors({ writable: false, pairWritable: false });
+    await expect(saveObjectPins(input({ record: { pinned: ['convert'] } }), TEXTS, d)).rejects.toThrow('pair not writable');
+    expect(calls).toEqual([['ensure', 'com.acme.crm']]);
+    expect(emitMetadataRefresh).not.toHaveBeenCalled();
+  });
+
+  it('S5: through the one writer, every key the stored extension holds is kept, and a landed publish announces itself', async () => {
+    const extension = {
+      extend: 'crm_lead',
+      relatedLists: [{ objectName: 'crm_task', relationshipField: 'lead' }],
+      fieldGroups: [{ key: 'main', fields: ['name'] }],
+      actionLayout: { list: { pinned: ['mass_assign'] } },
+    };
+    const { d, calls } = doors({ writable: false, extension });
+    await saveObjectPins(input({ record: { pinned: ['convert'] } }), TEXTS, d);
+    const save = calls.find((c) => c[0] === 'save');
+    expect(save?.[3]).toEqual({
+      ...extension,
+      actionLayout: { list: { pinned: ['mass_assign'] }, record: { pinned: ['convert'] } },
+    });
+    expect(calls.at(-1)).toEqual(['publish', 'object_extension', 'crm_lead', { packageId: 'com.acme.crm.custom' }]);
+    expect(emitMetadataRefresh).toHaveBeenCalledTimes(1);
+  });
+
   it('a name the header cannot draw is refused before anything is read or written, with its reason', async () => {
     const { d, calls } = doors({ writable: true });
     await expect(saveObjectPins(input({ record: { pinned: ['ghost'] } }), TEXTS, d)).rejects.toThrow('unknown ghost');
@@ -195,7 +223,7 @@ describe('saving the header pins (objectstack#36366)', () => {
     const conflict = Object.assign(new Error('conflict'), { status: 409, code: 'METADATA_CONFLICT' });
     const pair = doors({ writable: false, save: () => Promise.reject(conflict) });
     await expect(saveObjectPins(input({ record: { pinned: ['convert'] } }), TEXTS, pair.d)).rejects.toThrow('pending draft');
-    expect(pair.calls.map((c) => c[0])).toEqual(['ensure', 'get', 'save']);
+    expect(pair.calls.map((c) => c[0])).toEqual(['ensure', 'get', 'layered', 'save']);
     expect(emitMetadataRefresh).not.toHaveBeenCalled();
   });
 
