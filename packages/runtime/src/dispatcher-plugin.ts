@@ -10,6 +10,7 @@ import { deferRequestBody } from './deferred-request-body.js';
 import { validationFailureDetails, VALIDATION_FAILED_STATUS } from './validation-failure.js';
 import { buildApiError } from './error-envelope.js';
 import { appEndpointMountPrefix, isAppEndpointPath, runAppEndpointStep } from './api-endpoint-step.js';
+import { matchForwardedDoorPath, sendWebResponse, toWebRequest } from './forwarded-door-fallback.js';
 import type { EndpointExecutorDeps } from './endpoint-executor.js';
 import { callData } from './action-execution.js';
 import { createEndpointRateLimiterRegistry } from './endpoint-policy.js';
@@ -2467,6 +2468,30 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                                 req.query,
                                 { request: req },
                             );
+                            sendResult(result, res);
+                            return;
+                        }
+                        // ── [#36469] A forwarded door on a multi-tenant host ────
+                        // A door whose plugin lives on the per-environment
+                        // kernel (the comment doors) is mounted on no route table
+                        // here, and this host has no `createHonoApp` catch-all to
+                        // carry it into `dispatch()`. Exact door shapes only, so
+                        // a miss still writes nothing; multi-tenant only, so a
+                        // single-kernel host keeps today's answers byte for byte.
+                        // See `forwarded-door-fallback.ts`.
+                        if (dispatcher.isMultiTenantHost() && matchForwardedDoorPath(req.method, path, prefix)) {
+                            const result = await dispatcher.dispatch(
+                                req.method,
+                                path.substring(prefix.length),
+                                undefined,
+                                req.query,
+                                { request: await toWebRequest(req) },
+                                prefix,
+                            );
+                            if (result.handled && result.result instanceof Response) {
+                                await sendWebResponse(result.result, res);
+                                return;
+                            }
                             sendResult(result, res);
                             return;
                         }

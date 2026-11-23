@@ -13,7 +13,7 @@
 import { describe, expect, it } from 'vitest';
 import { RECORD_PAGE_BUILTIN_TABS } from '@objectstack/spec/data';
 import { deriveRelatedLists } from '../../utils/deriveRelatedLists';
-import { editRecordTabsDraft, recordTabsCatalog } from '../recordTabsConfig';
+import { editRecordTabsDraft, recordTabsCatalog } from '../recordTabsConfigModel';
 import {
   initialInstalledTabsDraft,
   installedTabsEntries,

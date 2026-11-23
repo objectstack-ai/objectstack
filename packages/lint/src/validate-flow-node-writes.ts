@@ -97,7 +97,8 @@ import {
 } from './validate-hook-body-writes.js';
 import { indexUnprovisionedAnchors, unprovisionedAnchorFix } from './system-fields.js';
 import { walkFlowNodes, flowNodeLabel } from './flow-walk.js';
-import { recordsOf } from './object-graph.js';
+import { indexServedObjectGraph, recordsOf, type ObjectGraph } from './object-graph.js';
+import { indexSelectOptions, type SelectOptions } from './flow-select-options.js';
 import type { UserTextParams } from './finding-user-text.js';
 
 /**
@@ -144,6 +145,30 @@ export const FLOW_NODE_WRITE_UNKNOWN_FIELD = 'flow-node-write-unknown-field';
  * ignored.
  */
 export const FLOW_NODE_WRITE_UNPROVISIONED_ANCHOR = 'flow-node-write-unprovisioned-anchor';
+
+/**
+ * #35143 — a literal written to a select field that is not one of its option
+ * values, most often the option's LABEL (`stage: 'Closed Lost'` where the
+ * option stores `closed_lost`). The record validator judges the write's
+ * option membership and refuses it `invalid_option`, so the step fails the
+ * run. `error`, at the certainty the unknown-field verdict gates on: a
+ * literal value against the literal options of a literal object. The options
+ * read is `flow-select-options.ts`'s, shared with the start-condition rule.
+ */
+export const FLOW_NODE_WRITE_UNKNOWN_OPTION = 'flow-node-write-unknown-option';
+
+/**
+ * #35143 — a date helper written inside a plain string (`due: 'today()'`,
+ * `'daysFromNow(7)'`) into a `date` / `datetime` field. A bare string in a
+ * value slot is the literal it spells (`FlowRecordFieldValueSchema`), so the
+ * helper is never evaluated, the record validator refuses the text
+ * `invalid_date`, and the step fails the run. The CEL value envelope is the
+ * spelling that evaluates it.
+ */
+export const FLOW_NODE_WRITE_DATE_HELPER_TEXT = 'flow-node-write-date-helper-text';
+
+/** [#35143] A call to a clock or date helper, as it appears inside a plain string. */
+const DATE_HELPER_CALL = /\b(?:today|now|daysFromNow|daysAgo|isoDate|isoDatetime|addDays|addMonths|date|datetime)\s*\(/;
 
 // ─── The covered-node ledger ────────────────────────────────────────────────
 //
@@ -219,6 +244,9 @@ export function validateFlowNodeWrites(stack: AnyRec): FlowNodeWriteFinding[] {
   let objectFields: Map<string, Set<string>> | null = null;
   // [commit 192213f66] Non-empty only for a stack carrying an ADR-0015 `external` object.
   let anchors: ReadonlyMap<string, ReadonlySet<string>> | null = null;
+  // [#35143] The value verdicts' two indexes, also built on first use.
+  let selectOptions: ReadonlyMap<string, ReadonlyMap<string, SelectOptions>> | null = null;
+  let graph: ObjectGraph | null = null;
 
   flows.forEach((flow, flowIndex) => {
     const flowName = typeof flow.name === 'string' && flow.name ? flow.name : `#${flowIndex}`;
@@ -260,7 +288,24 @@ export function validateFlowNodeWrites(stack: AnyRec): FlowNodeWriteFinding[] {
       for (const fieldName of written) {
         // An author-DECLARED column wins outright — on a federated object it
         // maps a remote column the author vouches for (#7859's direction).
-        if (known.has(fieldName)) continue;
+        if (known.has(fieldName)) {
+          // [#35143] Then the VALUE, where a literal value settles it.
+          selectOptions ??= indexSelectOptions(stack);
+          graph ??= indexServedObjectGraph(stack);
+          findings.push(
+            ...writtenValueFindings({
+              value: fields[fieldName],
+              options: selectOptions.get(objectName)?.get(fieldName),
+              type: graph.get(objectName)?.fields.get(fieldName)?.type,
+              nodeType: node.type,
+              objectName,
+              fieldName,
+              where: `flow "${flowName}" › ${nodeWhere}`,
+              path: `${nodePath}.config.fields.${fieldName}`,
+            }),
+          );
+          continue;
+        }
         if (IMPLICIT_FIELDS.has(fieldName)) {
           // [commit 192213f66] Implicitly writable SOMEWHERE is not provisioned HERE.
           if (!anchors.get(objectName)?.has(fieldName)) continue;
@@ -306,6 +351,72 @@ export function validateFlowNodeWrites(stack: AnyRec): FlowNodeWriteFinding[] {
   });
 
   return findings;
+}
+
+/**
+ * [#35143] The two verdicts on a declared field's written VALUE: a select
+ * literal that is no option value, and a date helper inside a plain string
+ * written to a date field. A CEL or text envelope is evaluated at run time
+ * and judged by `validate-expressions`, so only literals are read here.
+ */
+function writtenValueFindings(at: {
+  value: unknown;
+  options: SelectOptions | undefined;
+  type: string | undefined;
+  nodeType: string;
+  objectName: string;
+  fieldName: string;
+  where: string;
+  path: string;
+}): FlowNodeWriteFinding[] {
+  const out: FlowNodeWriteFinding[] = [];
+  const { value, options, objectName, fieldName } = at;
+  if (options && !options.readonly) {
+    const literals = Array.isArray(value) && options.multiple ? value : [value];
+    for (const literal of literals) {
+      if (typeof literal !== 'string' && typeof literal !== 'number' && typeof literal !== 'boolean') continue;
+      const written = String(literal);
+      if (written === '' || options.values.has(written)) continue;
+      const meant = options.labels.get(written);
+      out.push({
+        severity: 'error',
+        rule: FLOW_NODE_WRITE_UNKNOWN_OPTION,
+        where: at.where,
+        path: at.path,
+        message:
+          `${at.nodeType} writes '${written}' to '${objectName}.${fieldName}', ` +
+          (meant !== undefined ? `which is an option's label, not its value; ` : `which is not one of its options; `) +
+          `the record validator refuses the write (invalid_option) and the step fails the run`,
+        hint:
+          meant !== undefined
+            ? `Write the option's value: '${meant}'`
+            : `Write one of the option values of '${fieldName}': ${[...options.values].map((v) => `'${v}'`).join(', ')}`,
+      });
+    }
+  }
+  if (
+    (at.type === 'date' || at.type === 'datetime') &&
+    typeof value === 'string' &&
+    DATE_HELPER_CALL.test(value)
+  ) {
+    const source = value.trim();
+    out.push({
+      severity: 'error',
+      rule: FLOW_NODE_WRITE_DATE_HELPER_TEXT,
+      where: at.where,
+      path: at.path,
+      message:
+        `${at.nodeType} writes the text '${source}' to the ${at.type} field '${objectName}.${fieldName}'; a plain ` +
+        `string is written as it is, so the helper is never evaluated, the write is refused (invalid_date) and ` +
+        `the step fails the run`,
+      hint:
+        at.type === 'date'
+          ? `Write a CEL value envelope: { dialect: 'cel', source: 'isoDate(today())' } (a day offset is ` +
+            `'isoDate(daysFromNow(7))')`
+          : `Write a CEL value envelope: { dialect: 'cel', source: 'isoDatetime(now())' }`,
+    });
+  }
+  return out;
 }
 
 /** Did-you-mean (declared + system columns as candidates) plus the fix. */

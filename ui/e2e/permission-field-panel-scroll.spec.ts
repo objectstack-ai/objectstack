@@ -26,11 +26,17 @@ import { uiRoot } from '../scripts/ui-root.mjs';
  * The whole field panel is now pinned at the cell's inset and no wider than
  * the pane shows (`FIELD_PANEL` in `PermissionMatrixEditor.tsx`).
  *
- * objectstack#35061 (item 2): below a 1000 px pane the Studio rendering folds
+ * objectstack#35061 (item 2): below the fold width the Studio rendering folds
  * to the four CRUD columns and drops the floor (`permissionMatrixFold.ts`), so
  * it no longer scrolls sideways there. The Studio 720 px case reads that
  * form: the matrix fits the pane and every box answers at scrollLeft 0. The
  * metadata-admin rendering does not fold and keeps its 720 px sweep.
+ *
+ * objectstack#36744: the fold width is the floor itself (it was 1000 px, so a
+ * 1000–1304 px pane drew the flat form and overflowed, the right-pinned bulk
+ * column covering the write-scope column). The Studio rendering therefore
+ * never scrolls sideways: the 1200 px case (a 1440 px window) reads the folded
+ * form, and the 1304 px case reads the flat form exactly filling the pane.
  *
  * ## Why a Playwright spec and not a vitest test
  *
@@ -418,9 +424,8 @@ test.beforeAll(async () => {
 test.describe('an expanded object’s field boxes stay reachable while the matrix scrolls sideways (objectstack#29677)', () => {
   test.setTimeout(120_000);
 
-  // The Studio rendering under 1000 px is folded, not scrolled: its own case below.
+  // The Studio rendering under the floor is folded, not scrolled: its own cases below.
   const scrolled = [
-    { host: 'studio', width: 1000 },
     { host: 'environment', width: 1000 },
     { host: 'environment', width: 720 },
   ] as const;
@@ -439,13 +444,28 @@ test.describe('an expanded object’s field boxes stay reachable while the matri
     });
   }
 
-  test('studio rendering, 720 px pane: the matrix folds to fit the pane (objectstack#35061), nothing scrolls and every Read and Edit box answers', async ({
+  // 720 px: a narrow pane (objectstack#35061). 1200 px: a 1440 px window, the
+  // band where the flat form used to overflow (objectstack#36744).
+  for (const width of [720, 1200]) {
+    test(`studio rendering, ${width} px pane: the matrix folds to fit the pane (objectstack#35061, #36744), nothing scrolls and every Read and Edit box answers`, async ({
+      page,
+    }, testInfo) => {
+      const readings = await sweep(page, { name: `studio-${width}`, host: 'studio', width }, testInfo);
+      // The folded form: the row's More permissions toggle is drawn, and the
+      // matrix is no wider than the pane, so there is no offset to sweep.
+      await expect(page.getByTestId(`perm-more-toggle-${OBJECT}`)).toBeVisible();
+      expect(readings).toHaveLength(1);
+      expect(readings[0].scrollLeft).toBe(0);
+      expect(readings[0].pane.scrollWidth).toBeLessThanOrEqual(readings[0].pane.clientWidth);
+      expectAllReachable(readings);
+    });
+  }
+
+  test('studio rendering, a pane exactly the floor wide: the flat form is drawn and fits, nothing scrolls (objectstack#36744)', async ({
     page,
   }, testInfo) => {
-    const readings = await sweep(page, { name: 'studio-720', host: 'studio', width: 720 }, testInfo);
-    // The folded form: the row's More permissions toggle is drawn, and the
-    // matrix is no wider than the pane, so there is no offset to sweep.
-    await expect(page.getByTestId(`perm-more-toggle-${OBJECT}`)).toBeVisible();
+    const readings = await sweep(page, { name: `studio-${FLOOR}`, host: 'studio', width: FLOOR }, testInfo);
+    await expect(page.getByTestId(`perm-more-toggle-${OBJECT}`)).toBeHidden();
     expect(readings).toHaveLength(1);
     expect(readings[0].scrollLeft).toBe(0);
     expect(readings[0].pane.scrollWidth).toBeLessThanOrEqual(readings[0].pane.clientWidth);

@@ -115,7 +115,7 @@ import {
 } from '@object-ui/components';
 import { Plus, X, ArrowUp, ArrowDown, Copy, AlertTriangle, ChevronRight, MoreHorizontal, Trash2 } from 'lucide-react';
 import { InspectorComboField, type InspectorComboOption } from './InspectorComboField.js';
-import { ObjectPicker } from './ObjectPicker.js';
+import { ObjectPicker, useObjectCatalog } from './ObjectPicker.js';
 import { useObjectFields } from '../previews/useObjectFields.js';
 import {
   readFields,
@@ -2830,6 +2830,18 @@ function readDependsOn(def: Record<string, unknown>): string[] {
  * dependent-lookup links to other fields on the same record (`dependsOn`).
  * Every field choice is picked from the referenced object's live schema.
  */
+/**
+ * The label an object is shown by in the author's sentences: its catalog
+ * label, else its name; `undefined` while no object is named. Reads the same
+ * catalog the object picker beside it reads, so the request is shared.
+ */
+function useObjectLabel(name: string | undefined): string | undefined {
+  const catalog = useObjectCatalog();
+  if (!name) return undefined;
+  const entry = catalog.status === 'loaded' ? catalog.data.find((e) => e.name === name) : undefined;
+  return entry?.label || name;
+}
+
 function LookupConfigFields({
   def,
   patchDef,
@@ -2846,6 +2858,7 @@ function LookupConfigFields({
   const tr = (key: string) => t(key, locale);
   const reference = typeof def.reference === 'string' ? (def.reference as string) : undefined;
   const { fields: targetFields, loading } = useObjectFields(reference);
+  const referenceLabel = useObjectLabel(reference);
 
   const fieldOptions: InspectorComboOption[] = React.useMemo(
     () => targetFields.filter((f) => !f.hidden).map((f) => ({ value: f.name, label: f.label, hint: f.type })),
@@ -2930,7 +2943,9 @@ function LookupConfigFields({
         </div>
         {filters.length === 0 ? (
           <p className="rounded-md border border-dashed bg-muted/30 px-3 py-2 text-center text-[11px] text-muted-foreground">
-            {tFormat('designer.field.lookup.noFilter', locale, { ref: reference || 'related' })}
+            {referenceLabel
+              ? tFormat('designer.field.lookup.noFilter', locale, { ref: referenceLabel })
+              : tr('designer.field.lookup.setTargetFirst')}
           </p>
         ) : (
           filters.map((f, i) => (
@@ -3164,6 +3179,7 @@ function RelatedListFields({
   // so a field group of the parent can still place it (objectstack#35889).
   const defaultMode = readRelatedListMode(undefined);
   const reference = typeof def.reference === 'string' && def.reference ? (def.reference as string) : '';
+  const referenceLabel = useObjectLabel(reference || undefined);
   const setMode = (next: RelatedListMode) => {
     if (next === mode) return;
     if (next === defaultMode) unsetDefKey('relatedList');
@@ -3206,13 +3222,12 @@ function RelatedListFields({
           </button>
         ))}
       </div>
-      <p className="text-[10px] text-muted-foreground">
-        {tFormat(
-          RELATED_LIST_MODES.find((r) => r.mode === mode)!.helpKey,
-          locale,
-          { ref: reference || tr('designer.field.relatedList.parentFallback') },
-        )}
-      </p>
+      {/* Says which record page the list lands on: nothing to say until a target is set. */}
+      {referenceLabel && (
+        <p className="text-[10px] text-muted-foreground" data-testid="field-related-list-help">
+          {tFormat(RELATED_LIST_MODES.find((r) => r.mode === mode)!.helpKey, locale, { ref: referenceLabel })}
+        </p>
+      )}
       {mode !== 'hidden' && (
         <FilterConditionField
           testId="field-related-list-filter"

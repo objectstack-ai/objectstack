@@ -760,6 +760,20 @@ export interface ListViewProps {
     groups?: ReadonlyArray<ListViewRowGroup>,
   ) => void;
   /**
+   * Called with the params of the read behind the rows `onRowsChange`
+   * reported — the filter, sort and search that matched them, and the window
+   * they came in — each time that query settles with a different answer
+   * (objectstack#36554). A host that reads past the rows on show re-issues
+   * it: the dashboard drill reads the ids of its whole result with it, so the
+   * record page it opens steps through every record the drill matched, not
+   * only the page drawn. Answered where `onRowsChange` answers with a row
+   * sequence, a paged grid that draws the rows it fetched; any other kind
+   * answers `null`, so a host never replays a query that is not on screen.
+   *
+   * A HOST prop, never a schema key: the query is the list's runtime state.
+   */
+  onFindParamsChange?: (findParams: Readonly<Record<string, unknown>> | null) => void;
+  /**
    * The page a paged grid shows, 1-based, for a host that keeps it
    * (objectstack#30850): the console keeps it in the address, so Back from a
    * record opened as a full page, a reload and a copied link land on it.
@@ -2423,6 +2437,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   capped = false,
   onTotalChange,
   onRowsChange,
+  onFindParamsChange,
   viewDefaults,
   onRestoreViewDefaults,
   onPersonalizationChange,
@@ -7118,6 +7133,22 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     }
     onRowsChangeRef.current?.(shownRowsRef.current);
   }, [shownRowsKey, shownRowsSettled]);
+  // objectstack#36554 — the query behind those rows, reported beside them and
+  // keyed the same way: on its content, never on the identity of the params
+  // object or of the callback (AGENTS.md #10). Not serialised for a host that
+  // does not ask.
+  const onFindParamsChangeRef = React.useRef(onFindParamsChange);
+  React.useEffect(() => {
+    onFindParamsChangeRef.current = onFindParamsChange;
+  });
+  const shownFindParams = rowSequenceShown ? lastFindParams : null;
+  const shownFindParamsRef = React.useRef(shownFindParams);
+  shownFindParamsRef.current = shownFindParams;
+  const shownFindParamsKey = onFindParamsChange && shownFindParams ? JSON.stringify(shownFindParams) : null;
+  React.useEffect(() => {
+    if (!shownRowsSettled) return;
+    onFindParamsChangeRef.current?.(shownFindParamsRef.current);
+  }, [shownFindParamsKey, shownRowsSettled]);
 
   // The Display panel (objectui#12423) is the default form of the toolbar's
   // settings cluster, drawn whenever it has a control to offer. Refresh is not

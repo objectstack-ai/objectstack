@@ -162,6 +162,19 @@ export { CommentAttachment } from './CommentAttachment';
 export { RecordActivityTimeline } from './RecordActivityTimeline';
 export { RecordChatterPanel } from './RecordChatterPanel';
 export { FieldChangeItem } from './FieldChangeItem';
+// objectstack#36290 — one field's change history, opened in place: the record
+// page's field button, and the card a list cell's context menu opens.
+export {
+  FieldHistoryButton,
+  FieldHistoryCard,
+  FieldHistoryPopover,
+  fieldHistoryOffered,
+  useFieldHistory,
+  useFieldHistoryOffered,
+  FIELD_HISTORY_PAGE_SIZE,
+  FIELD_HISTORY_SCAN_BATCH,
+  FIELD_HISTORY_SCAN_BATCHES_PER_LOAD,
+} from './FieldHistory';
 export { SubscriptionToggle } from './SubscriptionToggle';
 export { ReactionPicker } from './ReactionPicker';
 export { ThreadedReplies } from './ThreadedReplies';
@@ -187,6 +200,15 @@ export type { CommentAttachmentProps, Attachment } from './CommentAttachment';
 export type { RecordActivityTimelineProps, FeedFilterMode } from './RecordActivityTimeline';
 export type { RecordChatterPanelProps } from './RecordChatterPanel';
 export type { FieldChangeItemProps } from './FieldChangeItem';
+export type {
+  FieldHistoryButtonProps,
+  FieldHistoryCardProps,
+  FieldHistoryCreation,
+  FieldHistoryEntry,
+  FieldHistoryPopoverProps,
+  FieldHistoryState,
+  UseFieldHistoryOptions,
+} from './FieldHistory';
 export type { SubscriptionToggleProps } from './SubscriptionToggle';
 export type { ReactionPickerProps } from './ReactionPicker';
 export type { ThreadedRepliesProps } from './ThreadedReplies';

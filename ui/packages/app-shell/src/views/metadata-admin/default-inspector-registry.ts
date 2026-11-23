@@ -20,10 +20,11 @@
  * `getMetadataDefaultInspector` reads the registry as it is at the moment of the
  * call, for non-render code.
  */
-import type { ComponentType, ReactNode } from 'react';
+import type { ComponentType } from 'react';
 import type { SupportedLocale } from './i18n.js';
 import { createObservableTypeRegistry, type MetadataSelection } from './preview-registry.js';
 import type { SchemaFormIssue } from './SchemaForm.js';
+import type { FormViewSpec } from './form-spec.js';
 
 export interface MetadataDefaultInspectorProps {
   /** Metadata type, e.g. 'view'. */
@@ -74,6 +75,16 @@ export interface MetadataDefaultInspectorProps {
    */
   serverSchema?: Record<string, unknown>;
   /**
+   * The served FormView layout for this type (`RichMetadataTypeEntry.form`,
+   * from `/meta/types`), the form a generic host hands `SchemaForm` beside
+   * {@link serverSchema}. A curated inspector reads the rows it names from it,
+   * so a row the server declares a face for (a widget, help text, a
+   * visibility predicate) is drawn with that face rather than the one the
+   * bare schema implies (objectstack#35650). Undefined when the host has no
+   * served form: such an inspector draws those keys as it did without one.
+   */
+  serverForm?: FormViewSpec;
+  /**
    * The host's issues on the draft (a refused save, the live pass), paths
    * relative to the draft — what the host's fallback form is handed. An
    * inspector draws each on the row that edits its path (objectstack#35628).
@@ -94,12 +105,13 @@ export interface MetadataDefaultInspectorProps {
    * Draw one half of the panel, for a host that lays the two halves out apart
    * (objectstack#36512: the object Settings tab puts the rows a developer
    * reads — internal name, access — in a section of their own, below the
-   * business rows). `renderKey` draws, beside a row's title, the metadata key
-   * that row writes. Omitted: the whole panel, as every other host gets it.
+   * business rows). `keysOnHover` puts the metadata key a row writes into its
+   * title's hover text (objectstack#36746). Omitted: the whole panel, as
+   * every other host gets it.
    * Only an inspector that splits reads it (today: `object`); one that does
    * not draws its whole panel on each mount.
    */
-  split?: { part: 'business' | 'developer'; renderKey?: (key: string) => ReactNode };
+  split?: { part: 'business' | 'developer'; keysOnHover?: boolean };
 }
 
 export type MetadataDefaultInspector = ComponentType<MetadataDefaultInspectorProps>;

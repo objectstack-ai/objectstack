@@ -301,7 +301,7 @@ export const NON_DISPATCH_MOUNT_PREFIXES = [
 /**
  * The ledger.
  *
- * CENSUS (generated): this list holds 153 rows.
+ * CENSUS (generated): this list holds 156 rows.
  *
  * ⛔ THAT NUMBER IS WRITTEN BY A TOOL — never by hand.
  * `pnpm check:route-ledger-census` counts the rows below and fails when the two
@@ -735,6 +735,14 @@ export const ROUTE_LEDGER: readonly RouteLedgerEntry[] = [
     note: 'the resolution door: whoever can read a thread (and may post on it) resolves or reopens it, body exactly { resolved: boolean }. Same forwarding, credential, absence and door notes as the unreact row' },
   { route: 'DELETE /comments/:id', domain: '/comments', disposition: 'server-only',
     note: 'the own-comment delete door: a member removes a comment they wrote, with no object delete grant. Same forwarding, credential, absence and door notes as the unreact row' },
+
+  // ── personal-view and attachment doors (the hosted doors) ────────────────
+  { route: 'DELETE /personal-views/:id', domain: '/personal-views', disposition: 'server-only',
+    note: 'the personal-view delete door: a member removes a personal view they saved, and only theirs, with no object delete grant. Forwarded with its body UNREAD to the REQUEST kernel\'s personal-views slot (IPersonalViewDoorsService.handlePersonalViewDoor; plugin-auth registers it in init, whatever registerRoutes says), read per request and never from the host kernel\'s scoped fallback, and the member\'s Response returned as it is: the member runs the very registration the self-hosted mount runs, so the caller (resolved from the request\'s own credentials, 401 with none), every refusal and every answer are the mount\'s. No preamble-gate exemption: the credential is the session, so the ADR-0069 auth gate and the project-membership gate both apply, which makes this door stricter than the self-hosted mount, never looser. An absent slot or member answers 501 NOT_IMPLEMENTED, never the dispatcher\'s 404 ROUTE_NOT_FOUND; a body consumed before it got here is a transport fault, answered 500 and logged. This is the door for a kernel with no http.server; a self-hosted kernel serves the same path from plugin-auth\'s own mount on its http.server, which never passes through the dispatcher. NOT JS-SDK surface here: the SDK gap is acknowledged once, on the mount\'s own ledger row (plugin-auth personal-view-route-ledger.ts). Pinned in `domains/own-door-bridge.test.ts`' },
+  { route: 'DELETE /attachments/:id', domain: '/attachments', disposition: 'server-only',
+    note: 'the uploader\'s removal door: a member removes an attachment they uploaded, and only theirs, with no object delete grant. Forwarded with its body UNREAD to the REQUEST kernel\'s file-attachments service (IAttachmentDoorsService.handleAttachmentDoor; service-storage builds it in init), read per request and never from the host kernel\'s scoped fallback, and the member\'s Response returned as it is: the member runs the very mount the self-hosted kernel runs, so the caller, every refusal and every answer are the mount\'s. Same credential, preamble-gate, absence and body notes as the personal-view row. This is the door for a kernel with no http.server; a self-hosted kernel serves the same path from service-storage\'s own mount on its http.server, and a hosted host\'s storage bridge covers /api/v1/storage only. NOT JS-SDK surface here: the mount\'s own ledger rows (service-storage attachment-removal-route-ledger.ts) carry the disposition. Pinned in `domains/own-door-bridge.test.ts`' },
+  { route: 'PATCH /attachments/:id', domain: '/attachments', disposition: 'server-only',
+    note: 'the rename door: rename an attachment from the Attachments panel, body exactly { file_name }. Same forwarding, credential, absence and door notes as the removal row' },
 
   // ── ai (dynamic route table, owned by another repo) ───────────────────────
   { route: '* /ai/**', domain: '/ai', disposition: 'dynamic',
