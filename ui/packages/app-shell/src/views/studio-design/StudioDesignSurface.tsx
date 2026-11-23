@@ -5012,7 +5012,7 @@ export function InterfacesPillar({
         !readOnly || currentAddedIn !== null
           ? t('engine.studio.inspector.draftFooter', locale)
           : headerUnlocked
-            ? t('engine.studio.customize.draftFooter', locale)
+            ? t('engine.studio.customize.saveFooter', locale)
             : null
       }
       bodyClassName="flex min-h-0 flex-1 flex-col"
@@ -10111,7 +10111,7 @@ export function AutomationsPillar({
                 editLocked
                   ? null
                   : readOnly
-                    ? t('engine.studio.customize.draftFooter', locale)
+                    ? t('engine.studio.customize.saveFooter', locale)
                     : t('engine.studio.inspector.draftFooter', locale)
               }
               // objectui#12454 — a selection's inspector brings its own padding
@@ -11192,6 +11192,17 @@ export function AccessPillar({
                 // objectstack#26846 — and the rail reads the sets again, so a
                 // label this save changed shows there without a publish or a
                 // reload.
+                void load();
+              }}
+              onSaved={() => {
+                // objectstack#36511 — the top bar's Save published the set: no
+                // draft of it is left, and the rail reads its label again.
+                setDraftNames((names) => {
+                  if (!names.has(current)) return names;
+                  const next = new Set(names);
+                  next.delete(current);
+                  return next;
+                });
                 void load();
               }}
               readOnly={readOnly}

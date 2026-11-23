@@ -362,6 +362,7 @@ describe('one word per state, the second pass (objectstack#29729)', () => {
     'engine.studio.customize.walled',
     'engine.studio.customize.noVersion',
     'engine.studio.customize.draftFooter',
+    'engine.studio.customize.saveFooter',
     'engine.studio.customize.restoreBody',
     'engine.studio.customize.restoreFlowBody',
     'engine.edit.resetConfirmBody',

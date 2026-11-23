@@ -2451,17 +2451,17 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.access.title': '权限矩阵',
   'engine.studio.access.subtitle': '对象权限 · 字段级读写',
   'engine.studio.access.bannerTitle':
-    '这里只列出本应用的对象，保存时只改本应用的授权，其他应用给出的授权保持不变。改动先保存为草稿，点击顶栏「发布」后随应用一起生效（与数据、界面一致）。',
-  'engine.studio.access.banner': '本应用对象 · 发布后生效',
+    '这里只列出本应用的对象，保存时只改本应用的授权，其他应用给出的授权保持不变。改动在点击顶栏「保存」后立即生效（与数据、界面一致）。',
+  'engine.studio.access.banner': '本应用对象 · 保存后生效',
   // objectstack#29674 — the note on an open set the base's pair adds: its matrix lists the base's objects too.
-  'engine.studio.access.bannerPair': '本应用及 {package} 对象 · 发布后生效',
+  'engine.studio.access.bannerPair': '本应用及 {package} 对象 · 保存后生效',
   // objectstack#35018 — the open set's origin in the builder's words (the Studio title note).
   'engine.studio.access.origin.app': '随应用提供',
   // objectstack#35018 — the word before the open item's label on the copilot's 「正在看」 line.
   'engine.studio.copilot.subject.access': '权限',
   'engine.studio.copilot.subject.flow': '流程',
   'engine.studio.access.bannerTitlePair':
-    '这个权限集属于 {package} 的定制，所以除本应用的对象外也列出 {package} 的对象；保存时只改这部分授权，其他应用给出的授权保持不变。改动先保存为草稿，点击顶栏「发布」后生效。',
+    '这个权限集属于 {package} 的定制，所以除本应用的对象外也列出 {package} 的对象；保存时只改这部分授权，其他应用给出的授权保持不变。改动在点击顶栏「保存」后立即生效。',
   'engine.studio.access.bannerTitleReadOnly':
     '这里只列出本应用的对象。这个应用是只读的：可以查看它的权限集，但不能修改。',
   // ADR-0090 D5/D9 — 待确认的受众绑定建议(isDefault 权限集,管理员确认后生效,服务端绝不自动绑定)
@@ -3087,6 +3087,8 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.customize.overrides': '覆盖 {package}',
   'engine.studio.customize.overridesTitle': '此项在本部署中替换 {package} 中的同名项，取自 {package} {basedOn}。',
   'engine.studio.customize.draftFooter': '编辑会保存为本部署定制的草稿；发布后生效。',
+  // objectstack#36511 — 同一行脚注在 Studio 各栏里:点顶栏「保存」即生效。
+  'engine.studio.customize.saveFooter': '点击顶栏「保存」后，编辑写入本部署的定制并生效。',
   'engine.studio.customize.restore': '恢复软件包原版',
   'engine.studio.customize.restoreConfirm': '恢复 {package} 的「{item}」？',
   'engine.studio.customize.restoreBody': '本部署对「{item}」的定制会被删除，重新使用 {package} 的版本。',
@@ -3144,7 +3146,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.landing.envCatalog.name': '环境目录',
   'engine.studio.landing.envCatalog.description': '岗位、能力、权限集与共享规则，覆盖所有软件包。',
   // objectstack#34715 — the landing ordered by what the author came to do.
-  'engine.studio.landing.lead': '改已安装的应用，或者新建自己的应用。改动先存草稿，发布后生效。',
+  'engine.studio.landing.lead': '改已安装的应用，或者新建自己的应用。改动点击「保存」后立即生效。',
   'engine.studio.landing.appsHeading': '已安装的应用',
   'engine.studio.landing.appsHint': '应用本身由厂商升级；你的改动单独保存，升级不会冲掉。',
   'engine.studio.landing.marketplaceInstall': '从应用市场安装',
@@ -4128,7 +4130,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.draftConflict.back': '返回',
   'engine.draftConflict.notSaved': '未保存：{type}「{name}」在你打开后已在别处保存。',
   'engine.studio.inspector.props': '属性',
-  'engine.studio.inspector.draftFooter': '编辑先保存为草稿，发布包后生效。',
+  'engine.studio.inspector.draftFooter': '编辑在点击顶栏「保存」后生效。',
   'engine.studio.inspector.collapse': '收起属性',
   'engine.studio.inspector.expand': '展开属性',
   'engine.studio.inspector.emptyLine1': '在画布里点选一个积木,',

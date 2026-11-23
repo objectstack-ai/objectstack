@@ -2741,17 +2741,17 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.access.title': 'Permission matrix',
   'engine.studio.access.subtitle': 'Object permissions · field-level read/write',
   'engine.studio.access.bannerTitle':
-    'Only this app’s objects are listed here, and saving changes only this app’s grants — grants from other apps stay as they are. Changes are saved as a draft and go live when you Publish the app (top bar), as in Data and Interfaces.',
-  'engine.studio.access.banner': 'This app’s objects · live on publish',
+    'Only this app’s objects are listed here, and saving changes only this app’s grants — grants from other apps stay as they are. Changes go live when you press Save in the top bar, as in Data and Interfaces.',
+  'engine.studio.access.banner': 'This app’s objects · live on save',
   // objectstack#29674 — the note on an open set the base's pair adds: its matrix lists the base's objects too.
-  'engine.studio.access.bannerPair': 'This app’s and {package}’s objects · live on publish',
+  'engine.studio.access.bannerPair': 'This app’s and {package}’s objects · live on save',
   // objectstack#35018 — the open set's origin in the builder's words (the Studio title note).
   'engine.studio.access.origin.app': 'Included with the app',
   // objectstack#35018 — the word before the open item's label on the copilot's "Viewing" line.
   'engine.studio.copilot.subject.access': 'Access',
   'engine.studio.copilot.subject.flow': 'Flow',
   'engine.studio.access.bannerTitlePair':
-    'This permission set is part of the customization of {package}, so {package}’s objects are listed as well as this app’s, and saving changes only these grants — grants from other apps stay as they are. Changes are saved as a draft and go live when you Publish (top bar).',
+    'This permission set is part of the customization of {package}, so {package}’s objects are listed as well as this app’s, and saving changes only these grants — grants from other apps stay as they are. Changes go live when you press Save in the top bar.',
   // objectui#11781 — a read-only package saves no draft; objectui#12453 makes this the header link's title.
   'engine.studio.access.bannerTitleReadOnly':
     'Only this app’s objects are listed here. This app is read-only: you can view its permission sets but not change them.',
@@ -3490,6 +3490,8 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.customize.overrides': 'Overrides {package}',
   'engine.studio.customize.overridesTitle': 'This item replaces {package}’s item of the same name on this deployment. It was taken from {package} {basedOn}.',
   'engine.studio.customize.draftFooter': 'Edits save as a draft of this deployment’s customization; Publish applies them.',
+  // objectstack#36511 — the same footer in a Studio pillar, where the top bar's Save makes an edit live.
+  'engine.studio.customize.saveFooter': 'Edits go into this deployment’s customization when you press Save in the top bar.',
   'engine.studio.customize.restore': 'Restore package original',
   'engine.studio.customize.restoreConfirm': 'Restore {package}’s “{item}”?',
   'engine.studio.customize.restoreBody': 'This deployment’s customization of “{item}” is deleted, and {package}’s version is served again.',
@@ -3560,7 +3562,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.landing.envCatalog.description': 'Positions, capabilities, permission sets and sharing rules, across every package.',
   // objectstack#34715 — the landing ordered by what the author came to do, in
   // words that name no package mechanism.
-  'engine.studio.landing.lead': 'Change an installed app, or build an app of your own. Changes save as drafts and take effect when you publish.',
+  'engine.studio.landing.lead': 'Change an installed app, or build an app of your own. Changes take effect when you press Save.',
   'engine.studio.landing.appsHeading': 'Installed apps',
   'engine.studio.landing.appsHint': 'Each app is upgraded by its vendor. Your changes are kept separately, so an upgrade does not overwrite them.',
   'engine.studio.landing.marketplaceInstall': 'Install from the marketplace',
@@ -4584,7 +4586,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.draftConflict.back': 'Back',
   'engine.draftConflict.notSaved': 'Not saved: {type} “{name}” was saved elsewhere after you opened it.',
   'engine.studio.inspector.props': 'Properties',
-  'engine.studio.inspector.draftFooter': 'Edits save as drafts. Publish the package to apply them.',
+  'engine.studio.inspector.draftFooter': 'Edits go live when you press Save in the top bar.',
   'engine.studio.inspector.collapse': 'Collapse properties',
   'engine.studio.inspector.expand': 'Show properties',
   'engine.studio.inspector.emptyLine1': 'Click a block on the canvas,',
