@@ -20,6 +20,7 @@ export const SysBusinessUnitMember = ObjectSchema.create({
   label: 'Business Unit Member',
   pluralLabel: 'Business Unit Members',
   icon: 'user-cog',
+  color: 'blue',
   isSystem: true,
   managedBy: 'platform',
   description: 'User assignment to a business unit (matrix-org friendly, effective-dated).',

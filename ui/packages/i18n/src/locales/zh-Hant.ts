@@ -1733,6 +1733,10 @@ const zhHant = {
     foldedMoreFields_other: '其他 {{count}} 項',
     expandFolded: '展開每次更新',
     collapseFolded: '收起更新',
+    fieldChangeLabel: '{{field}}：',
+    fieldChangeEmpty: '空',
+    fieldChangeExpand: '展開',
+    fieldChangeCollapse: '收起',
     // Replies
     replyCount: '{{count}} 條回覆',
     replyCount_one: '{{count}} 條回覆',
@@ -2197,7 +2201,7 @@ const zhHant = {
       copyLink: '複製連結',
       linkCopied: '連結已複製到剪貼簿',
       linkCopyFailed: '複製連結失敗',
-      design: '設計',
+      objectSettings: '物件設定',
     },
     settingsHub: {
       title: '設定',
@@ -3684,6 +3688,11 @@ const zhHant = {
       renameSourceOnly: '頁簽名稱只能在應用的源語言下修改',
       builtinFixed: '此頁籤由平台繪製，固定在最後，名稱不可改。',
       adjustFieldGroups: '調整欄位分組',
+      pairNotWritable: '這個應用的定製包不可寫，頁籤無法儲存。',
+      builtinMoves: '內建頁籤可以移動，不能隱藏或改名。',
+      sourceBase: '原始包',
+      sourcePackage: '來自{{name}}',
+      sourceEnvironment: '本環境',
     },
   },
   topbar: {

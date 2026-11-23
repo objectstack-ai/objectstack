@@ -632,9 +632,9 @@ export const NavigationOverlay: React.FC<NavigationOverlayProps> = ({
   /* The bar — the record's top bar (objectstack#27524, Target 7, after
      objectstack#26679): the left end holds `←` and the host's breadcrumb; the
      right end the counter and ↓ ↑, the host's panel switches, then ⤢ and ✕.
-     With a `recordRow` it is two rows (objectstack#35853): `←`, the
-     breadcrumb, ↑ ↓ and the counter over the record, ⤢ and ✕ at the far
-     right of the first. */
+     With a `recordRow` it is two rows (objectstack#35853): ✕, `←`, the
+     breadcrumb, ↑ ↓ and the counter over the record, ⤢ at the right of the
+     first (✕ moved to the left by objectstack#36557). */
   const bar = (
     <RecordTopBar
       leadingTestId="record-drawer-leading"
@@ -654,16 +654,16 @@ export const NavigationOverlay: React.FC<NavigationOverlayProps> = ({
       toggles={toggles}
       comments={comments}
       frame={
-        <>
-          {onExpand && (
-            <RecordTopBarButton label={resolvedExpandLabel} onClick={() => onExpand()} data-testid="record-pane-open-page">
-              <Maximize2 className="h-3.5 w-3.5" />
-            </RecordTopBarButton>
-          )}
-          <RecordTopBarButton label={closeLabel} onClick={close}>
-            <X className="h-3.5 w-3.5" />
+        onExpand ? (
+          <RecordTopBarButton label={resolvedExpandLabel} onClick={() => onExpand()} data-testid="record-pane-open-page">
+            <Maximize2 className="h-3.5 w-3.5" />
           </RecordTopBarButton>
-        </>
+        ) : undefined
+      }
+      close={
+        <RecordTopBarButton label={closeLabel} onClick={close}>
+          <X className="h-3.5 w-3.5" />
+        </RecordTopBarButton>
       }
     />
   );

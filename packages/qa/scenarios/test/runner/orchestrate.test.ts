@@ -91,7 +91,9 @@ function artifact(opts: { degraded?: boolean; iterated?: boolean; ns?: string; b
     manifest: { id: `com.example.${ns}`, namespace: ns },
     objects,
     permissions: [
-      { name: n('sdr'), objects: { [n('account')]: { allowRead: true }, [n('contact')]: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true } }, fields: { [`${n('contact')}.email`]: { readable: false } } },
+      // `writeScope: 'org'` lifts the platform's owner-only delete floor for the sdr's
+      // card deletes of admin-owned contacts, as Modify All would without unmasking `email`.
+      { name: n('sdr'), objects: { [n('account')]: { allowRead: true }, [n('contact')]: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true, writeScope: 'org' } }, fields: { [`${n('contact')}.email`]: { readable: false } } },
       { name: n('partner_user'), objects: { [n('contact')]: { allowRead: true, allowCreate: true } } },
     ],
     // A build that names a view and a dashboard bare: the objects are prefixed (defineStack insists), these are not.

@@ -43,10 +43,14 @@
 
 import type { LoadedScenario } from '../loader.js';
 import { PERSON_USER_FIELD, scenarioNamespace, type LocalizedText, type ScenarioCard, type ScenarioExpect } from '../schema.js';
+import { personLookups, rowOwner, userHandleFields } from '../row-owner.js';
 import { permissionSetName } from './namespace.js';
 import { cycleText, referenceCycles } from './seed.js';
 
 type Card = ScenarioCard;
+
+// The seed rows' owners, read by the scorer too: kept where both reach them, re-exported here for the runner.
+export { rowOwner, userHandleFields };
 type Persona = Card['run']['personas'][number];
 
 const code = (name: string): string => `\`${name}\``;
@@ -282,50 +286,6 @@ export function personaRecords(card: Card): Map<string, string> {
   return out;
 }
 
-/** The declared lookups (`expect.lookups`) that point at a person object, the object of some persona's `record` (`ticket.assignee` → `agent`). */
-function personLookups(card: Card): Array<{ object: string; field: string; to: string }> {
-  const people = new Set(card.run.personas.flatMap((p) => (p.record ? [p.record.object] : [])));
-  return (card.expect.lookups ?? []).filter((l) => people.has(l.to)).map(({ object, field, to }) => ({ object, field, to }));
-}
-
-/**
- * The persona a seed row is loaded as owned by (`owner_id`), or undefined
- * when it names no person and the inserter (the admin) keeps it. A row names a
- * persona when it IS that persona's record, when a declared direct lookup on
- * it holds that record's id (`ticket.assignee` = `a02`), or when a declared
- * user-handle field on it holds that persona's handle (`account.owner` =
- * `u_sam`). The first persona in `run.personas` order the row names owns it.
- * An option value (`ticket_comment.visibility` = `public`), a row id scope
- * (`department.id` = `dep_sales`) and a lookup to a row no persona is (a
- * department, a group) name nobody.
- */
-export function rowOwner(card: Card, object: string, row: Readonly<Record<string, unknown>>): string | undefined {
-  const lookups = personLookups(card).filter((l) => l.object === object);
-  const handles = userHandleFields(card);
-  for (const p of card.run.personas) {
-    const rec = p.record;
-    if (rec !== undefined) {
-      if (rec.object === object && row.id === rec.id) return p.id;
-      if (lookups.some((l) => l.to === rec.object && row[l.field] === rec.id)) return p.id;
-    }
-    for (const sc of p.scope ?? []) {
-      if (sc.object === object && !sc.field.includes('.') && handles.has(`${object}.${sc.field}`) && row[sc.field] === sc.value) return p.id;
-    }
-  }
-  return undefined;
-}
-
-/**
- * The seed fields whose values are user handles, `object.field`: the card's
- * declared `run.userHandleFields`, read and never inferred. In the crm card
- * that is `account.owner` (`u_sam`, `u_tia`). Every other field holds a row id
- * or an option value (`asset.custodian` = `e06`, an employee row;
- * `ticket_comment.visibility` = `public`), which the seed loads verbatim.
- */
-export function userHandleFields(card: Card): Set<string> {
-  return new Set((card.run.userHandleFields ?? []).map((h) => `${h.object}.${h.field}`));
-}
-
 /** The handles a seed row names in a {@link userHandleFields} field that no persona signs in as (`u_tia`): the seed loads each as the admin user. */
 export function unheldHandles(card: Card): string[] {
   const held = personaHandles(card);
@@ -504,7 +464,7 @@ export function dataContract(card: Card): string {
   }
   if (card.run.agentActions?.length) {
     lines.push('');
-    lines.push('Business actions an AI agent may call (expose each to AI; ask before acting where marked):');
+    lines.push('Business actions an AI agent may call (expose each to AI; ask before acting where marked, and only there: an unmarked action runs at once, with no confirmation gate):');
     for (const a of card.run.agentActions) lines.push(`- \`${a.name}\` on \`${a.object}\`: ${a.summary}${a.confirm ? ` (${CONFIRM_FIRST_LOCK})` : ''}`);
   }
   return lines.join('\n');

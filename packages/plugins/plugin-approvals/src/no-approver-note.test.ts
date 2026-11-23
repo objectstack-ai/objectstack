@@ -42,6 +42,8 @@ const deliveredIn = (
   const params: Record<string, string> = {};
   for (const [name, param] of Object.entries(notice.params)) {
     if (typeof param === 'string') { params[name] = param; continue; }
+    // [#35384] An object-label param is resolved off the object's metadata, which no notice here names.
+    if ('object' in param) { params[name] = param.fallback; continue; }
     const looked = param.key.startsWith('messages.') ? catalog[param.key.slice('messages.'.length)] : pack[param.key];
     params[name] = looked ?? param.fallback;
   }

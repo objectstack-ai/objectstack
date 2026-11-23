@@ -7,8 +7,7 @@
  *
  * Publish stays review-then-confirm (objectui#2261): the header click opens the
  * sheet and publishes nothing; only the sheet's footer button does. With
- * nothing pending, Publish stays disabled and described by
- * `publish-none-reason` (objectui#12303).
+ * nothing pending, neither door is drawn (objectstack#36511).
  *
  * Real: the surface, `useMetadataClient` and `usePendingDrafts`. Stubbed:
  * `globalThis.fetch`, `packages-io`'s package list, `sonner`, the dock and
@@ -171,19 +170,19 @@ describe('objectui#12517 — Publish opens the sheet to confirm, Changes opens i
   });
 });
 
-describe('objectui#12517 keeps objectui#12303 — nothing pending', () => {
+describe('objectui#12517 — nothing pending', () => {
   beforeEach(() => {
     pending = [];
   });
 
-  it('Publish stays disabled and described by publish-none-reason; no count pill', async () => {
+  it('neither Changes nor Publish is drawn, and no count pill (objectstack#36511)', async () => {
     renderSurface();
-    const reason = await screen.findByTestId('publish-none-reason');
-    expect(publishButton()).toBeDisabled();
-    expect(publishButton()).toHaveAttribute('aria-describedby', reason.id);
+    // The ledger was read and answered nothing.
+    await waitFor(() => expect(vi.mocked(fetch).mock.calls.some(([u]) => String(u) === DRAFTS)).toBe(true));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.queryByRole('button', { name: new RegExp(`^${t('engine.studio.changes', 'en')}`) })).toBeNull();
+    expect(screen.queryByRole('button', { name: t('engine.studio.publish', 'en') })).toBeNull();
     expect(screen.queryByTestId('studio-changes-count')).toBeNull();
-    // Changes still opens the sheet, to review.
-    fireEvent.click(changesButton());
-    expect(await screen.findByTestId('probe-changes-panel')).toHaveAttribute('data-posture', 'review');
+    expect(screen.queryByTestId('publish-none-reason')).toBeNull();
   });
 });

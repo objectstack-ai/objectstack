@@ -133,9 +133,12 @@ export function StudioHeldNotice<Target extends MetadataSelection | null = Metad
   locale,
   onShow,
   className,
+  explicitSave = false,
 }: {
   held: StudioHeld<Target>;
   locale: string;
+  /** objectstack#36511 — the pillar saves with the top bar's Save, not by itself. */
+  explicitSave?: boolean;
   /** Opens the held input; omitted while that input is the one open. */
   onShow?: (target: Target) => void;
   /** Spacing and type size, which differ by pillar. */
@@ -148,7 +151,7 @@ export function StudioHeldNotice<Target extends MetadataSelection | null = Metad
       className={cn('flex items-start gap-2 rounded-md border bg-muted/40 text-muted-foreground', className)}
     >
       <p data-testid="studio-held-message" className="min-w-0 flex-1">
-        {tFormat('engine.studio.held.line', locale, { clause: held.clause })}
+        {tFormat(explicitSave ? 'engine.studio.held.lineExplicit' : 'engine.studio.held.line', locale, { clause: held.clause })}
       </p>
       {onShow && (
         <button

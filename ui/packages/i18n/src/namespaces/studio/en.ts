@@ -375,7 +375,7 @@ const STUDIO_EN: Record<string, string> = {
   'designer.field.section.developer': 'Developer info',
   'designer.field.section.developerHint': 'The internal name the API and formulas refer to. Everyday edits do not need it.',
   'designer.field.removeConfirmTitle': 'Delete the field “{label}”?',
-  'designer.field.removeConfirmBody': 'The field leaves this object\'s draft. The change takes effect when you publish.',
+  'designer.field.removeConfirmBody': 'The field leaves this object once the change is saved and live.',
   'designer.field.section.advanced': 'Advanced',
   'designer.field.section.options': '{type} options',
   'designer.field.section.computed': 'Computed value',
@@ -3343,6 +3343,26 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.pkg.manageRefreshFailed':
     'Package {id} could not be refreshed after that change — closing the panel rather than showing the pre-change record as current. {error}',
   'engine.studio.publish': 'Publish',
+  // objectstack#36511 — the top bar's Save and Cancel (`studioSaveBar.tsx`):
+  // one pair for the open page, where Publish was; a Save is live at once.
+  'engine.studio.save.save': 'Save',
+  'engine.studio.save.saving': 'Saving…',
+  'engine.studio.save.cancel': 'Cancel',
+  'engine.studio.save.title': 'Save the changes on this page. They take effect at once.',
+  'engine.studio.save.cancelTitle': 'Discard the changes on this page that are not saved',
+  'engine.studio.save.done': 'Saved, live now: {items}',
+  'engine.studio.save.refused': 'Not saved: {items}',
+  'engine.studio.save.refusedLine': '{item}: {reason}',
+  'engine.studio.save.savedLine': 'Saved and live: {items}',
+  'engine.studio.save.itemSeparator': ', ',
+  'engine.studio.save.held': 'Not saved: {clause}. Your changes are kept on the page.',
+  'engine.studio.save.publishFirst': 'Save or cancel the changes on this page before you publish.',
+  'engine.studio.save.confirmIrreversible':
+    'Saving makes these changes live at once, and Cancel cannot undo them afterwards:\n{changes}\n\nSave anyway?',
+  'engine.studio.save.confirmRemoveField': '• Delete the field “{field}”: its values on every record are removed.',
+  'engine.studio.save.confirmRetypeField':
+    '• Change “{field}” from {from} to {to}: values already stored may be converted or cleared.',
+  'engine.studio.held.lineExplicit': 'Not ready to save: {clause}. Your changes are kept here; fill it in, then Save.',
   'engine.studio.loading': 'Loading…',
   'engine.studio.loadFailed': 'Failed to load',
   // objectui#11785 — a refused save, in the author's words. The strip shows one

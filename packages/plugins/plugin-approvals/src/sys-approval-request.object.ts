@@ -42,6 +42,7 @@ export const SysApprovalRequest = ObjectSchema.create({
   label: 'Approval Request',
   pluralLabel: 'Approval Requests',
   icon: 'inbox',
+  color: 'orange',
   isSystem: true,
   managedBy: 'engine-owned',
   description: 'Live approval instance tracked per submission',
