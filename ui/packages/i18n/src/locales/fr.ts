@@ -3783,6 +3783,7 @@ const fr = {
     welcomeAdminDescriptionNoAi: "Configurez votre première application depuis le menu Administration à gauche.",
     noAppsTitle: "Aucune application pour l'instant",
     noAppsDescription: "Le système est en cours de configuration — les applications partagées par votre administrateur apparaîtront ici.",
+    noAppsAddDescription: "Créez votre première application, ou partez d'un modèle ou de la place de marché.",
     buildWithAI: "Créer avec l'IA",
     askAI: "Demander à l'IA",
     recoveryReminder: {
@@ -3997,6 +3998,10 @@ const fr = {
     appNoReadableObjectGrantDescription: "Votre compte ne peut encore lire aucun enregistrement de cette application. Vous pouvez accorder l'accès dans la configuration.",
     appOpensFromMenu: "{{app}} s'utilise depuis son menu",
     appOpensFromMenuDescription: "Cette application n'a pas de page propre. Choisissez une entrée de son menu pour ouvrir un lien ou lancer une action.",
+    // objectstack#36748 — an app whose stored menu is empty, for a caller who can fill it.
+    appMenuEmpty: "Le menu de {{app}} est encore vide",
+    appMenuEmptyDescription: "Créez des objets pour cette application dans Studio : ils rejoignent son menu. Vous pouvez aussi ajouter des entrées en mode conception.",
+    openInStudio: "Ouvrir dans Studio",
     openSetup: "Ouvrir la configuration",
     createFirstApp: "Créer la première application",
     systemSettings: "Paramètres système",
@@ -4188,6 +4193,10 @@ const fr = {
         placeholder: "Choisir une source de données",
         loading: "Chargement des sources de données…",
         none: "Aucune source de données pour l’instant",
+        addFilter: "Filtre",
+        filterAdvanced: "Ce filtre ne peut pas être modifié ici. Il est conservé tel qu’il a été enregistré.",
+        filterLoading: "Chargement des champs…",
+        filterNoFields: "Cette source de données n’a aucun champ à filtrer.",
       },
       measure: {
         label: "Mesure",

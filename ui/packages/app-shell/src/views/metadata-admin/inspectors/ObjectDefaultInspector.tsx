@@ -23,9 +23,10 @@
  * panel twice — the business rows (label, plural label, icon and colour,
  * description) on top, and the rows a developer reads (internal name, access)
  * in a "Developer options" section below. Each half draws its rows only (the
- * host's section is the frame), and each row shows the metadata key it writes
- * through the host's `renderKey`. Without `split` the panel is drawn whole, as
- * before, for every other host.
+ * host's section is the frame). With `keysOnHover`, the metadata key a row
+ * writes is its title's hover text, never drawn on the panel at rest
+ * (objectstack#36746). Without `split` the panel is drawn whole, as before,
+ * for every other host.
  */
 
 import * as React from 'react';
@@ -78,8 +79,8 @@ export function ObjectDefaultInspector({
   const nameFollowsLabel = createMode && (str('name') === '' || str('name') === deriveName(str('label')));
   const iconFieldId = React.useId();
   const descriptionId = React.useId();
-  // The key a row writes, drawn beside its title — split mode only.
-  const keyOf = (key: string): React.ReactNode => split?.renderKey?.(key);
+  // The key(s) a row writes, as its title's hover text — split mode with `keysOnHover` only.
+  const keyOf = (...keys: string[]): string | undefined => (split?.keysOnHover ? keys.join(' · ') : undefined);
 
   const setLabel = (v: string) => {
     const patch: Record<string, unknown> = { label: v || undefined };
@@ -104,7 +105,7 @@ export function ObjectDefaultInspector({
   const nameRow = (
     <Field hint={tr('designer.object.nameHint')}>
       <KeyedTextField
-        aside={keyOf('name')}
+        keys={keyOf('name')}
         label={tr('designer.object.name')}
         value={nameValue}
         onCommit={setName}
@@ -119,7 +120,7 @@ export function ObjectDefaultInspector({
   const businessRows = (
     <>
       <KeyedTextField
-        aside={keyOf('label')}
+        keys={keyOf('label')}
         label={tr('designer.object.label')}
         value={str('label')}
         onCommit={setLabel}
@@ -128,7 +129,7 @@ export function ObjectDefaultInspector({
       />
       {issueLines('label', tr('designer.object.label'))}
       <KeyedTextField
-        aside={keyOf('pluralLabel')}
+        keys={keyOf('pluralLabel')}
         label={tr('designer.object.pluralLabel')}
         value={str('pluralLabel')}
         onCommit={(v) => onPatch({ pluralLabel: v || undefined })}
@@ -145,7 +146,7 @@ export function ObjectDefaultInspector({
           as the tile it becomes. A colour is written only when picked; an
           object without one is drawn in the neutral gray. */}
       <div className="space-y-1">
-        <RowTitle aside={split && <>{keyOf('icon')}{keyOf('color')}</>}>
+        <RowTitle keys={keyOf('icon', 'color')}>
           <Label htmlFor={iconFieldId} className="text-xs text-muted-foreground">{tr('designer.object.iconAndColor')}</Label>
         </RowTitle>
         <IconPickerWidget
@@ -161,7 +162,7 @@ export function ObjectDefaultInspector({
         {issueLines('color', tr('engine.form.iconColor'))}
       </div>
       <div className="space-y-1">
-        <RowTitle aside={keyOf('description')}>
+        <RowTitle keys={keyOf('description')}>
           <Label htmlFor={split ? descriptionId : undefined} className="text-xs text-muted-foreground">{tr('designer.object.description')}</Label>
         </RowTitle>
         <textarea
@@ -270,8 +271,8 @@ function AccessSection({
   tr: (key: string) => string;
   /** The issue lines of the row editing a top-level key (objectstack#35628). */
   issueLines: (key: string, rowLabel: string) => React.ReactNode;
-  /** The key a row writes, drawn beside its title (split mode only). */
-  keyOf: (key: string) => React.ReactNode;
+  /** The key a row writes, as its title's hover text (split mode only). */
+  keyOf: (...keys: string[]) => string | undefined;
 }) {
   const perOpSupported = usePerOpSupport();
 
@@ -323,7 +324,7 @@ function AccessSection({
     >
       <Field hint={posture === 'private' ? tr('designer.object.posture.privateHint') : tr('designer.object.posture.publicHint')}>
         <div className="space-y-1">
-          <RowTitle aside={keyOf('access.default')}>
+          <RowTitle keys={keyOf('access.default')}>
             <Label className="text-xs text-muted-foreground">{tr('designer.object.posture')}</Label>
           </RowTitle>
           {/*
@@ -353,7 +354,7 @@ function AccessSection({
       <Field hint={tr('designer.object.reqPerms.hint')}>
         <div className="space-y-1">
           <div className="flex items-center justify-between">
-            <RowTitle aside={keyOf('requiredPermissions')}>
+            <RowTitle keys={keyOf('requiredPermissions')}>
               <Label className="text-xs text-muted-foreground">{tr('designer.object.reqPerms')}</Label>
             </RowTitle>
             {perOpSupported && (
@@ -442,29 +443,34 @@ function Section({
 }
 
 /**
- * A row's title, with `aside` (the key the row writes, split mode) beside it
- * and outside the label, so selecting the key never focuses or opens the
- * control. Without `aside` the title is drawn alone, exactly as before.
+ * A row's title, with `keys` (the key the row writes, split mode) as its hover
+ * text. The hover text rides on a wrapper, not on the label, so the control's
+ * accessible name stays the title alone. Without `keys` the title is drawn
+ * alone, exactly as before.
  */
-function RowTitle({ aside, children }: { aside?: React.ReactNode; children: React.ReactNode }) {
-  if (!aside) return <>{children}</>;
-  return <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">{children}{aside}</div>;
+function RowTitle({ keys, children }: { keys?: string; children: React.ReactNode }) {
+  if (!keys) return <>{children}</>;
+  return (
+    <div title={keys} data-setting-key={keys} className="w-fit">
+      {children}
+    </div>
+  );
 }
 
 /**
- * `InspectorTextField`, with the row's key beside its title when `aside` is
- * given. Without it this IS `InspectorTextField`, so whole-panel hosts draw
- * exactly what they drew before.
+ * `InspectorTextField`, with the row's key as its title's hover text when
+ * `keys` is given. Without it this IS `InspectorTextField`, so whole-panel
+ * hosts draw exactly what they drew before.
  */
 function KeyedTextField({
-  aside,
+  keys,
   ...props
-}: React.ComponentProps<typeof InspectorTextField> & { aside?: React.ReactNode }) {
+}: React.ComponentProps<typeof InspectorTextField> & { keys?: string }) {
   const id = React.useId();
-  if (!aside) return <InspectorTextField {...props} />;
+  if (!keys) return <InspectorTextField {...props} />;
   return (
     <div className="space-y-1">
-      <RowTitle aside={aside}>
+      <RowTitle keys={keys}>
         <Label htmlFor={id} className="text-xs text-muted-foreground">{props.label}</Label>
       </RowTitle>
       <Input

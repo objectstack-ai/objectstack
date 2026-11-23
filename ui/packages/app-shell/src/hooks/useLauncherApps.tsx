@@ -231,6 +231,20 @@ export function useServedApps<T extends LauncherAppLike>(apps: readonly T[]): T[
   return narrowByAnswer(useContext(LauncherAppsContext), apps);
 }
 
+/**
+ * Whether {@link useServedApps} answers from a SETTLED `/me/apps` read: a
+ * {@link LauncherAppsProvider} is mounted above and its first read is not
+ * out. `false` outside a provider — where the list passes unnarrowed — and
+ * while the first read is pending. A surface that must not name an app a
+ * permission set hides (the desktop Home target, objectstack#36732) acts on
+ * its narrowed list only when this is `true`, and otherwise defers to a route
+ * that waits for the answer.
+ */
+export function useServedAppsSettled(): boolean {
+  const state = useContext(LauncherAppsContext);
+  return state !== null && state.status !== 'pending';
+}
+
 function narrowByAnswer<T extends LauncherAppLike>(state: LauncherAppsState | null, apps: readonly T[]): T[] {
   if (state?.status !== 'ready') return [...apps];
   const { served, asked } = state.answer;

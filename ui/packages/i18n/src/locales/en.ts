@@ -2212,6 +2212,10 @@ const en = {
         placeholder: 'Choose a data source',
         loading: 'Loading data sources…',
         none: 'No data sources yet',
+        addFilter: 'Filter',
+        filterAdvanced: 'This filter cannot be changed here. It is kept as saved.',
+        filterLoading: 'Loading fields…',
+        filterNoFields: 'This data source has no fields to filter on.',
       },
       measure: {
         label: 'Measure',
@@ -4498,6 +4502,7 @@ const en = {
     welcomeAdminDescriptionNoAi: 'Set up your first application from the Administration menu on the left.',
     noAppsTitle: 'No applications yet',
     noAppsDescription: 'The system is being set up — apps your admin shares with you will show up here.',
+    noAppsAddDescription: 'Build your first app, or start from a template or the app marketplace.',
     buildWithAI: 'Build with AI',
     askAI: 'Ask AI',
     recoveryReminder: {
@@ -4687,6 +4692,10 @@ const en = {
     // objectstack-ai/objectstack#29771 — the app root when every entry it shows is a `url` or `action` link (`AppNoAccessEmptyState`, reason `menu-only`).
     appOpensFromMenu: '{{app}} opens from its menu',
     appOpensFromMenuDescription: 'This app has no page of its own. Choose an entry in its menu to open a link or run an action.',
+    // objectstack#36748 — an app whose stored menu is empty, for a caller who can fill it.
+    appMenuEmpty: "{{app}} has nothing in its menu yet",
+    appMenuEmptyDescription: "Create objects for this app in Studio and they join its menu, or add entries in design mode.",
+    openInStudio: "Open in Studio",
     openSetup: 'Open Setup',
     createFirstApp: 'Create Your First App',
     systemSettings: 'System Settings',

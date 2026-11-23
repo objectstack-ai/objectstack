@@ -17,7 +17,7 @@ vi.mock('../../assistant/assistantBus', async (importOriginal) => ({
 }));
 
 import { saveObjectPins, type ObjectPinsSaveDoors } from '../designModeHeaderPinsSave';
-import type { ObjectPins } from '../designModeHeaderPins';
+import type { ObjectPins } from '../designModeHeaderPinsModel';
 
 const TEXTS = {
   notListed: 'not listed',

@@ -191,6 +191,18 @@ describe('AppContent — an app with empty navigation lands on an empty state (o
   it('links a caller who can grant access to Setup, at the URL the /setup deep link resolves', async () => {
     isWorkspaceAdmin = true;
     metadataApps = [CLM_EMPTY, SETUP];
+    // objectstack#36748 — for a caller who can grant, the screen reads the
+    // app's STORED menu first. HotCLM's holds entries (every group gated
+    // away from this caller), so the access answer stands.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({ effective: { name: 'clm', navigation: [{ id: 'g', type: 'group', requiredPermissions: ['clm.admin'], children: [] }] } }),
+          { status: 200 },
+        ),
+      ),
+    );
     renderConsoleAt('/apps/clm');
 
     const emptyState = await screen.findByTestId('app-no-access-empty-state');
@@ -199,6 +211,7 @@ describe('AppContent — an app with empty navigation lands on an empty state (o
     expect(link).toHaveTextContent('Open Setup');
     // `resolveSetupAppPath` — the Setup app's canonical `/apps/PACKAGE_ID` URL.
     expect(link).toHaveAttribute('href', '/apps/com.objectstack.setup');
+    vi.unstubAllGlobals();
   });
 
   it('reads the admin verdict, not whether Setup is in the app list', async () => {

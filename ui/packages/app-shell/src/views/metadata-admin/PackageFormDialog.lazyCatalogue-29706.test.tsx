@@ -24,6 +24,11 @@ import { act, cleanup, render, screen } from '@testing-library/react';
 import { I18nProvider, createI18n } from '@object-ui/i18n';
 import { isStudioCatalogueLoaded, loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
 import { ManifestSchema } from '@objectstack/spec/kernel';
+// The form reaches the console's dynamic `@objectstack/formula` and
+// `@objectstack/lint` imports (CEL authoring); their first load is paid here,
+// at collection, never inside a case's clock (`check:test-source-alias`).
+import '@objectstack/formula';
+import '@objectstack/lint';
 import { PackageFormDialog } from './PackageFormDialog';
 
 beforeEach(() => {
@@ -60,7 +65,7 @@ describe('the New package form after the lazy zh catalogue lands (objectstack#29
     await screen.findByTestId('package-form');
 
     expect(screen.getByText('新建软件包')).toBeInTheDocument();
-    expect(screen.getByText('显示名称')).toBeInTheDocument();
+    expect(screen.getByText('显示名')).toBeInTheDocument();
     expect(screen.getByText('软件包的可读名称。')).toBeInTheDocument();
     // The card's exact complaint, read from the installed spec so it cannot
     // go vacuous when the spec rewords a `.describe()`.

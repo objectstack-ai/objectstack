@@ -39,7 +39,7 @@ import {
   fetchListedPackageManifests,
   type ListedPackageManifest,
 } from './studio-design/packages-io.js';
-import { recordTabsEntries, type RecordTabsCatalog, type RecordTabsDraft } from './recordTabsConfig.js';
+import { recordTabsEntries, type RecordTabsCatalog, type RecordTabsDraft } from './recordTabsConfigModel.js';
 import { saveObjectExtensionArrangement, type ExtensionArrangementDoors } from './objectExtensionArrangementSave.js';
 import { installedTabsEntries } from './recordTabsInstalled.js';
 import { OBJECT_EXTENSION_TYPE, objectExtensionBodyOf } from './studio-design/StudioCustomizeControls.js';

@@ -10,13 +10,19 @@
  *
  * ## Where it is drawn
  *
- * Home (`/home`), in the slot Home's page gives its host's checklist
- * (app-shell's `HomePage`, `checklist`). Home is the environment's own home
- * (ObjectUI ADR-0075): every deployment that declares no landing app opens
- * there after sign-in, the Setup-only one included (`RootLandingRedirect`).
- * Mounted by the console's Home route (`App.tsx`), inside the
- * `ConsolePermissionsScope` that route already sits under: that provider is
- * what answers which capabilities this session holds.
+ * From 768 px up, at the top of the Setup app's first page (objectstack#36732,
+ * item 5, option A): the desktop's platform home page retired, so an
+ * administrator who has an app lands in it, and Setup's first page is where
+ * the platform is set up. Handed to app-shell's `SetupFirstPageSlotProvider`
+ * by the console's app route (`AppContent.tsx`).
+ *
+ * And Home (`/home`), in the slot Home's page gives its host's checklist
+ * (app-shell's `HomePage`, `checklist`): on a desktop that is the no-apps
+ * empty state, so a new environment's first administrator meets it on the
+ * first screen. Mounted by the console's Home route (`App.tsx`).
+ *
+ * Both mounts sit inside `ConsolePermissionsScope`: that provider is what
+ * answers which capabilities this session holds.
  *
  * Home names the placement (`placement`). `top`, above the page's sections
  * (a desktop, or a page with no app yet), draws the card as it always was.

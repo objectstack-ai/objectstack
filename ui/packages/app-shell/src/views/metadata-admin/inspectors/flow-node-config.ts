@@ -1278,20 +1278,29 @@ const FLOW_NODE_CONFIG: Record<string, FlowConfigField[]> = {
     // takes a string or a string array), so `mergeServerFlowFields` keeps this
     // editor for it rather than leaving the key to Advanced (JSON).
     cfg('recipients', 'Recipients', 'recipients', { help: 'Who receives the notification: a field of the trigger record, a user, a team or an email address. At least one is required.' }),
-    cfg('title', 'Title', 'text', { placeholder: 'Your request was approved', help: 'Notification title (required).', refMode: 'hole' }),
-    cfg('message', 'Message', 'textarea', { placeholder: 'Supports {{ var }} template holes.', help: 'Notification body.', refMode: 'hole' }),
-    cfg('channels', 'Channels', 'stringList', { help: 'Channels to fan out to (default: inbox — e.g. inbox · email · push).' }),
-    cfg('topic', 'Topic', 'text', { placeholder: 'notify', help: 'Event topic (default: "notify").' }),
+    // objectstack#36746 — the help rows speak the author's words: what the
+    // recipient sees and what a setting changes, never a key alias or a
+    // default spelled as a literal.
+    cfg('title', 'Title', 'text', { placeholder: 'Your request was approved', help: 'The headline the recipient sees. Required.', refMode: 'hole' }),
+    cfg('message', 'Message', 'textarea', {
+      placeholder: 'Can include values from the record, e.g. {{ record.name }}',
+      help: 'The text shown under the title.',
+      refMode: 'hole',
+    }),
+    cfg('channels', 'Channels', 'stringList', { help: 'Where the notification is delivered: inbox, email or push. Inbox when left empty.' }),
+    cfg('topic', 'Category', 'text', {
+      help: 'The kind of notification. Recipients can turn each kind on or off in their notification settings. Leave empty for general notifications.',
+    }),
     cfg('severity', 'Severity', 'select', {
       options: [
         { value: 'info', label: 'Info' },
         { value: 'warning', label: 'Warning' },
         { value: 'critical', label: 'Critical' },
       ],
-      help: 'Notification severity.',
+      help: 'How important the notification is.',
     }),
     // Click-through target (objectstack-ai/objectstack#2675): deep-link the notification to a record.
-    cfg('sourceObject', 'Link object', 'text', { placeholder: 'sys_approval_request', help: 'Object of the record the notification links to (requires Link record id).' }),
+    cfg('sourceObject', 'Link object', 'text', { placeholder: 'sys_approval_request', help: 'The object whose record opens when the notification is clicked. Needs the record to link as well.' }),
     // objectui#12372 — a value slot: the id as a string, or a CEL value envelope.
     cfg('sourceId', 'Link record id', 'text', {
       help: 'Record id the notification links to (requires Link object): the id as text, or a CEL expression (e.g. record.id).',

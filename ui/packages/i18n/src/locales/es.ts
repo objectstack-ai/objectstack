@@ -3787,6 +3787,7 @@ const es = {
     welcomeAdminDescriptionNoAi: "Configure su primera aplicación desde el menú de Administración de la izquierda.",
     noAppsTitle: "Todavía no hay aplicaciones",
     noAppsDescription: "El sistema se está preparando — las aplicaciones que su administrador comparta aparecerán aquí.",
+    noAppsAddDescription: "Cree su primera aplicación, o empiece con una plantilla o el mercado de aplicaciones.",
     buildWithAI: "Crear con IA",
     askAI: "Preguntar a la IA",
     recoveryReminder: {
@@ -4001,6 +4002,10 @@ const es = {
     appNoReadableObjectGrantDescription: "Su cuenta aún no puede leer ningún registro de esta aplicación. Puede conceder el acceso en la configuración.",
     appOpensFromMenu: "{{app}} se usa desde su menú",
     appOpensFromMenuDescription: "Esta aplicación no tiene una página propia. Elija una entrada de su menú para abrir un enlace o ejecutar una acción.",
+    // objectstack#36748 — an app whose stored menu is empty, for a caller who can fill it.
+    appMenuEmpty: "El menú de {{app}} todavía está vacío",
+    appMenuEmptyDescription: "Crea objetos para esta aplicación en Studio y se añadirán a su menú, o añade entradas en el modo de diseño.",
+    openInStudio: "Abrir en Studio",
     openSetup: "Abrir la configuración",
     createFirstApp: "Crear primera aplicación",
     systemSettings: "Configuración del sistema",
@@ -4192,6 +4197,10 @@ const es = {
         placeholder: "Elige un origen de datos",
         loading: "Cargando orígenes de datos…",
         none: "Aún no hay orígenes de datos",
+        addFilter: "Filtro",
+        filterAdvanced: "Este filtro no se puede cambiar aquí. Se conserva tal como se guardó.",
+        filterLoading: "Cargando campos…",
+        filterNoFields: "Este origen de datos no tiene campos para filtrar.",
       },
       measure: {
         label: "Medida",

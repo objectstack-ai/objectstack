@@ -1850,6 +1850,10 @@ const zh = {
         placeholder: '选一个数据来源',
         loading: '正在读取数据来源…',
         none: '还没有数据来源',
+        addFilter: '筛选',
+        filterAdvanced: '这个筛选条件不能在这里修改，会按保存时的样子保留。',
+        filterLoading: '正在读取字段…',
+        filterNoFields: '这个数据来源没有可以筛选的字段。',
       },
       measure: {
         label: '指标',
@@ -3878,6 +3882,7 @@ const zh = {
     welcomeAdminDescriptionNoAi: '从左侧的「管理」菜单创建你的第一个应用。',
     noAppsTitle: '还没有应用',
     noAppsDescription: '系统正在准备中——管理员共享给你的应用会显示在这里。',
+    noAppsAddDescription: '搭建你的第一个应用，或者从模板、应用市场开始。',
     buildWithAI: '用 AI 搭建',
     askAI: '问 AI',
     recoveryReminder: {
@@ -4062,6 +4067,10 @@ const zh = {
     appNoReadableObjectGrantDescription: '你的账号暂时无法读取此应用中的任何记录。你可以在 Setup 中授予访问权限。',
     appOpensFromMenu: '{{app}} 的内容都在菜单里',
     appOpensFromMenuDescription: '此应用没有自己的页面。请在菜单中选择一个条目，打开链接或执行操作。',
+    // objectstack#36748 — an app whose stored menu is empty, for a caller who can fill it.
+    appMenuEmpty: "{{app}} 的菜单还是空的",
+    appMenuEmptyDescription: "在 Studio 里为这个应用新建对象，它们会自动加入菜单；也可以在设计模式里添加。",
+    openInStudio: "在 Studio 中打开",
     openSetup: '打开 Setup',
     createFirstApp: '创建您的第一个应用',
     systemSettings: '系统设置',
