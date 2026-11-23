@@ -195,6 +195,33 @@ function refusalText(error: Error, errorMessages: Record<string, string> | undef
 const SSO_SIGN_IN_TIMEOUT_MS = 20_000;
 const SSO_SIGN_IN_TIMEOUT_TEXT = 'Sign-in timed out — the server did not respond. Please try again.';
 
+/**
+ * Where the identity provider sends the browser back after "Sign in with SSO".
+ *
+ * A sign-in page that carries a safe `?redirect=` (the link a signed-out
+ * person opened) gets the browser back on itself with that redirect, the
+ * return the provider buttons and direct sign-in already use: the host page
+ * then finishes sign-in its own way and lands the person on the link
+ * (objectstack#36754). Only the redirect travels, never the rest of the query
+ * (a previous attempt's `error`, for one).
+ *
+ * Without one, or with an unsafe one, it is the console root, which lands the
+ * person where any sign-in does: the last-used app, the declared default, the
+ * first app (objectstack#36732).
+ *
+ * "Safe" is the console sign-in page's own post-login rule, unchanged: a
+ * same-origin path, never an absolute or protocol-relative (`//host`) URL.
+ * That page applies it again on the final hop.
+ */
+function ssoCallbackURL(): string {
+  const { pathname, search } = window.location;
+  const redirect = new URLSearchParams(search).get('redirect');
+  if (redirect && redirect.startsWith('/') && !redirect.startsWith('//')) {
+    return `${pathname}?redirect=${encodeURIComponent(redirect)}`;
+  }
+  return pathname.replace(/\/login(?:\/.*)?$/, '') + '/';
+}
+
 const DefaultLink = ({ href, className, children }: AuthLinkComponentProps) => (
   <a href={href} className={className}>{children}</a>
 );
@@ -554,14 +581,10 @@ export function LoginForm({
       controller.abort();
     }, SSO_SIGN_IN_TIMEOUT_MS);
     try {
-      const base = window.location.pathname.replace(/\/login(?:\/.*)?$/, '');
-      // Back at the console root, which lands the person where any sign-in
-      // does: the last-used app, the declared default, the first app
-      // (objectstack#36732). The platform home page it named is retired.
       const res = await fetch('/api/v1/auth/sign-in/sso', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ email: identifier, callbackURL: base + '/' }),
+        body: JSON.stringify({ email: identifier, callbackURL: ssoCallbackURL() }),
         credentials: 'include',
         signal: controller.signal,
       });
