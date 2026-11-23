@@ -59,9 +59,11 @@ import type { DurationMeasureSpec } from './strategies/types.js';
 // the same gate, every other arm of the shared comparand-shape face. [#20035]
 // And the comparand-TYPE face, through the same gate again.
 import { invalidFilterError, normalizeWhereComparands } from './strategies/filter-normalizer.js';
-import { comparisonColumnClass, refusePreviewJsonColumnComparisons } from './json-column-comparison-refusal.js';
+import { refusePreviewJsonColumnComparisons } from './json-column-comparison-refusal.js';
 import type { AnalyticsQuery, AnalyticsResult } from '@objectstack/spec/contracts';
 import { emptyGroupValueFor, lowerFilterCondition, type Cube, type FilterLoweringOptions, type ValueShapeFieldDef } from '@objectstack/spec/data';
+// [#36190] Which class of JSON column a comparison meets, from the declared shape and the storing driver's answer.
+import { comparisonColumnClass } from './json-column-comparison-refusal.js';
 
 type Row = Record<string, unknown>;
 
