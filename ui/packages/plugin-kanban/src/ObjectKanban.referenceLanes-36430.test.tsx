@@ -155,7 +155,8 @@ describe('a board grouped by a reference field (objectstack#36430)', () => {
 
     expect(update).toHaveBeenCalledTimes(1);
     expect(update).toHaveBeenCalledWith('deal', 'd1', { owner_id: 'u2' });
-    await waitFor(() => expect(cardsIn('Bob')).toEqual(['Deal two', 'Deal one']));
+    // Lanes hold their cards in fetch order, so d1 sorts ahead of d2.
+    await waitFor(() => expect(cardsIn('Bob')).toEqual(['Deal one', 'Deal two']));
     expect(cardsIn('Alice')).toEqual(['Deal three']);
   });
 
