@@ -1144,13 +1144,15 @@ const SELF_TEST_BATTERIES = Object.freeze({
   "advisory_read: ghsa_id and public_key alone — the key its own kind, an X25519 key in base64 SPKI DER; a malformed key or id refused before any request and never echoed; ONE GET of one advisory; a stroke of its own whose token alone carries repository-advisories READ; the seal opening byte for byte for its own read and key alone, the parts inside the runner's caps, the sender gate's one setting with every other closed, and the fences, printing no id, state or field": 28,
   "advisory_list: public_key alone — no state, page, cursor or query the caller can pass; a stroke of its own whose token alone carries repository-advisories READ under the read's sender gate; the listing page's one path shape per listed state; the next cursor taken only from one rel=next link on this API's collection and this state, in its closed shape; each page fenced; each advisory projected to five fields before the seal; the JSON padded to one constant sealed size, ten parts, whatever the count, and one more advisory than fits refused; the shared associated data, advisory_read's byte for byte; and no id, count, state or cursor in any sentence": 28,
   "advisory_note: ghsa_id and sealed_note alone — the note its own kind, ciphertext of a capped length in canonical base64url, refused before any request and never echoed or opened here; ONE PATCH of one advisory whose body is the executor's; a stroke of its own minting repository-advisories write and marked advisory_note=yes, EMPTY for every other; the workflow handing the relay's note key to the execute step for that stroke alone, and no artifact; the seal opening for its own request, action, advisory and key alone and never as a read; the key judged against the committed half; the fences, the description, the read-back and the keyed digest, printing no byte of either text": 22,
+  "advisory_rewrite: ghsa_id and sealed_note alone — the note's field, seal, key and mark, so the workflow hands it the relay's note key unchanged; ONE PATCH of one advisory whose fields are the executor's; alone; a payload carrying no plaintext and no file key; the rewrite's own associated data, so a note never opens as a rewrite; the fences refusing a published or withdrawn advisory; the text judged, an empty description refused; the read-back and the round-trip keyed digest over the stored text, printing no byte of either field":14,
 });
 // Raised 11 → 12 with the run_rerun_failed battery, 12 → 13 with the hierarchy rows' battery, 13 → 15 with the event
 // file's battery and the advisory rows' battery, 15 → 16 with advisory_read's, 16 → 17 with mailbox_branch_delete's,
 // 17 → 18 with advisory_list's, 18 → 19 with pr_enqueue_front's: one battery, one row; 19 → 20 with the workflow
-// table's repository key; 20 → 21 with advisory_note's; 21 → 22 with pr_dequeue's.
-const SELF_TEST_BATTERY_FLOOR = 22;
+// table's repository key; 20 → 21 with advisory_note's; 21 → 22 with pr_dequeue's; 22 → 23 with advisory_rewrite's.
+const SELF_TEST_BATTERY_FLOOR = 23;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
+const REWRITE_BATTERY = "advisory_rewrite: ghsa_id and sealed_note alone — the note's field, seal, key and mark, so the workflow hands it the relay's note key unchanged; ONE PATCH of one advisory whose fields are the executor's; alone; a payload carrying no plaintext and no file key; the rewrite's own associated data, so a note never opens as a rewrite; the fences refusing a published or withdrawn advisory; the text judged, an empty description refused; the read-back and the round-trip keyed digest over the stored text, printing no byte of either field";
 
 const batteryCases = new Map();
 let openBattery = null;
@@ -2497,6 +2499,75 @@ export async function selfTest() {
     t("the keyed digest: HMAC-SHA256 of the section under the seat's digest key, 64 hex — never the bare SHA-256 a reader could test a guess against, and another key's differs", [digest === createHmac('sha256', KEY).update(SECTION, 'utf8').digest('hex'), /^[0-9a-f]{64}$/.test(digest), digest === createHash('sha256').update(SECTION, 'utf8').digest('hex'), digest === advisoryNoteDigest({ digestKey: Buffer.alloc(32, 8), section: SECTION })], [true, true, false, false]);
     const landed = advisoryNoteLandedText({ ghsaId: GHSA, state: 'draft', existingBytes: 30, sectionBytes: 90, storedBytes: 127, digest });
     t('⛔ the landed row: the id, the state, three byte counts and the keyed digest — no byte of the note or the description', [landed, landed.includes(MARKER)], [`${GHSA} · state draft · appended a 90-byte note to a 30-byte description — 127 bytes stored, read back byte for byte · keyed digest ${digest}`, false]);
+  }
+
+  // ── advisory_rewrite: the one row that replaces an advisory's text, sealed through the note's path ─────────────
+  battery(REWRITE_BATTERY);
+  {
+    const REPO = `${TARGET_OWNER}/objectstack`;
+    const MARKER = 'REWRITE MARKER';
+    const rewrite = (extra = {}) => ({ op: 'advisory_rewrite', ghsa_id: GHSA, sealed_note: REWRITE_SEALED, ...extra });
+    const one = (action) => fixturePayload({ actions: [action] });
+    const aad = (over = {}) => advisorySealAad({ requestId: 'fw-test-1', action: 1, op: 'advisory_rewrite', ghsaId: GHSA, ...over });
+    const opens = (sealed, aadOf = aad()) => {
+      try {
+        return openAdvisoryNote({ sealed, privateKey: RELAY.privateKey, aad: aadOf }).section;
+      } catch (e) {
+        return e.message === ADVISORY_NOTE_OPEN_FAILED ? 'refused' : `threw: ${e.message}`;
+      }
+    };
+    // The row and the field: the note's.
+    t("the row: ghsa_id and sealed_note — the note's own field, kind sealed — nothing optional; repository-advisories at write, alone, the stroke's target-write gate, no second repository; and it is one of the two rows sealed to the relay's note key", [OPS.advisory_rewrite.required, OPS.advisory_rewrite.optional, OPS.advisory_rewrite.permission, OPS.advisory_rewrite.grant ?? null, OPS.advisory_rewrite.alone, OPS.advisory_rewrite.senderGate ?? null, OPS.advisory_rewrite.secondRepo ?? null, OPS.advisory_rewrite.alsoSpends ?? null, SEALED_TO_RELAY_OPS], [['ghsa_id', 'sealed_note'], [], 'repository-advisories', null, true, null, null, null, ['advisory_note', 'advisory_rewrite']]);
+    const req = OPS.advisory_rewrite.requests(rewrite(), REPO);
+    t("its ONE request is a PATCH of that one advisory carrying the id and the ciphertext to the executor — and NO body: the fields are the executor's, sent after its reads", [req.length, req[0].verb, req[0].path, req[0].advisoryRewrite, 'body' in req[0], 'advisoryNote' in req[0]], [1, 'PATCH', `/repos/${REPO}/security-advisories/${GHSA}`, { ghsaId: GHSA, sealedNote: REWRITE_SEALED }, false, false]);
+    // ⭐ The payload carries no plaintext.
+    const accepted = validatePayload(one(rewrite()));
+    const wire = JSON.stringify(accepted.payload ?? {});
+    t('⭐ a payload carrying NO plaintext: the id and the seal pass, unchanged, and neither the summary nor the description is in the payload — as characters, or in the decoded seal — while the opened seal holds both (the positive control)', [accepted.ok, accepted.payload?.actions?.[0], wire.includes(MARKER), Buffer.from(REWRITE_SEALED, 'base64url').includes(Buffer.from(MARKER)), opens(REWRITE_SEALED) === REWRITE_TEXT, REWRITE_TEXT.includes(MARKER)], [true, rewrite(), false, false, true, true]);
+    t("⛔ the actions file's own keys and the plaintext never reach the payload: summary_file, description_file, note_file, summary, description and body are each refused as keys the row does not take", ['summary_file', 'description_file', 'note_file', 'summary', 'description', 'body'].map((k) => validatePayload(one(rewrite({ [k]: `${MARKER} x` }))).errors.some((e) => e.includes(`actions[0].${k} is not a key \`advisory_rewrite\` takes`) && !e.includes(MARKER))), [true, true, true, true, true, true]);
+    t('⛔ alone: a rewrite beside a comment, beside a note, and two rewrites, are each refused — one rewrite per stroke', [refuses(fixturePayload({ actions: [rewrite(), { op: 'comment', issue: 1, body: 'x' }] }), 'a stroke carries exactly ONE `advisory_rewrite` and nothing else'), refuses(fixturePayload({ actions: [rewrite(), { op: 'advisory_note', ghsa_id: GHSA, sealed_note: NOTE_SEALED }] }), 'and nothing else'), refuses(fixturePayload({ actions: [rewrite(), rewrite()] }), 'a stroke carries exactly ONE `advisory_rewrite` and nothing else')], [true, true, true]);
+    t("⭐ the grant and the mark: its stroke mints repository-advisories WRITE for ONE repository and is marked advisory_note=yes, so the workflow's existing line hands it the relay's note key — no workflow change", [tokenPermissionsOf(accepted.payload)['repository-advisories'], tokenRepositoriesOf(accepted.payload), outputLine(accepted.payload, 'permission_repository_advisories'), outputLine(accepted.payload, ADVISORY_NOTE_OUTPUT)], ['write', [REPO], 'permission_repository_advisories=write', 'advisory_note=yes']);
+    // The seal: the note's path, the rewrite's associated data.
+    t("the associated data: the rewrite's own prefix, the request, the action, the op and the id", [aad().toString('utf8')], [`fleet-write:advisory_rewrite:v1 request=fw-test-1 action=1 op=advisory_rewrite ghsa_id=${GHSA}`]);
+    const noteAad = advisorySealAad({ requestId: 'fw-test-1', action: 1, op: 'advisory_note', ghsaId: GHSA });
+    t("⛔ the two directions of the one key never cross: a note's seal does not open as a rewrite, a rewrite's does not open as a note, and a rewrite opens for ITS request, action and advisory alone", [opens(NOTE_SEALED), opens(REWRITE_SEALED, noteAad), opens(REWRITE_SEALED, aad({ requestId: 'fw-test-2' })), opens(REWRITE_SEALED, aad({ action: 2 })), opens(REWRITE_SEALED, aad({ ghsaId: 'GHSA-wxyz-2345-abcd' }))], ['refused', 'refused', 'refused', 'refused', 'refused']);
+    // The fences.
+    const answer = (json, status = 200) => ({ status, json: { ghsa_id: GHSA, state: 'draft', summary: `${MARKER} the working summary`, description: `${MARKER} the working text`, ...json } });
+    const fence = (a) => advisoryRewriteFenceFailures({ ghsaId: GHSA, answer: a, from: ADVISORY_REWRITE_STATES }).map((f) => f.fence);
+    t('⛔ the fences: triage, draft and closed pass, a null summary and description too; a PUBLISHED advisory and a withdrawn one fail the state fence, another advisory the advisory fence, a 404 every fence after the read, a summary that is not text its own', [ADVISORY_REWRITE_STATES, ['triage', 'draft', 'closed'].map((state) => fence(answer({ state }))), fence(answer({ summary: null, description: null })), fence(answer({ state: 'published' })), fence(answer({ state: 'withdrawn' })), fence(answer({ ghsa_id: 'GHSA-wxyz-2345-abcd' })), fence({ status: 404, json: { message: 'Not Found' } }), fence(answer({ summary: ['x'] }))], [['triage', 'draft', 'closed'], [[], [], []], [], ['state'], ['state'], ['advisory'], ['read', 'advisory', 'state', 'description', 'summary'], ['summary']]);
+    const publishedText = advisoryFenceText(advisoryRewriteFenceFailures({ ghsaId: GHSA, answer: answer({ state: 'published' }), from: ADVISORY_REWRITE_STATES }));
+    t('…the refusal of a published advisory names the fence and the state, and no byte of its text', [publishedText, publishedText.includes(MARKER)], ['fence `state`: the advisory reads state published, and the relay writes only to an unpublished advisory — state triage or draft or closed; never published or withdrawn', false]);
+    // The text.
+    const judged = [
+      advisoryRewriteText({ summary: 'S', description: 'D' }),
+      advisoryRewriteText({ description: 'D' }),
+      advisoryRewriteText({ summary: 'S' }),
+      advisoryRewriteText({ summary: 'S', description: '' }),
+      advisoryRewriteText({ description: '  \n\t' }),
+      advisoryRewriteText({ summary: '' }),
+      advisoryRewriteText({}),
+      advisoryRewriteText({ summary: `${MARKER} one\nline two` }),
+      advisoryRewriteText({ summary: ` ${MARKER}` }),
+      advisoryRewriteText({ description: `${MARKER} ends in a space ` }),
+      advisoryRewriteText({ description: `${MARKER}\r\nCRLF` }),
+      advisoryRewriteText({ summary: 'x'.repeat(ADVISORY_SUMMARY_MAX_CHARS + 1) }),
+      advisoryRewriteText({ description: 'x'.repeat(MAX_ADVISORY_NOTE_BYTES) }),
+      JSON.stringify({ description: 'D', summary: 'S' }),
+      JSON.stringify({ summary: 'S', credits: [] }),
+      `${MARKER} not JSON`,
+    ].map(advisoryRewriteFailure);
+    t('the text judged: a summary and a description, either alone, pass; an EMPTY description, a blank one, an empty summary, no field, a summary of two lines or with surrounding whitespace, a description ending in whitespace or carrying a carriage return, a summary over 1024 characters, the whole over 30,000 bytes, another spelling, another field and prose are each refused — and no reason carries a byte of the text', [judged.map((w) => w === null), judged[3], judged.some((w) => w && w.includes(MARKER))], [[true, true, true, false, false, false, false, false, false, false, false, false, false, false, false, false], 'the description is empty', false]);
+    // The read-back and its keyed digest.
+    const SENT = { summary: `${MARKER} the public summary`, description: `${MARKER} the public text` };
+    const BEFORE = answer({}).json;
+    const back = (json, status = 200, sent = SENT) => advisoryRewriteReadBack({ ghsaId: GHSA, sent, before: BEFORE, answer: { status, json: { ghsa_id: GHSA, state: 'draft', ...json } } });
+    const backs = [back(SENT), back({ ...SENT, description: `${SENT.description} ` }), back({ ...SENT, summary: 'x' }), back({ summary: BEFORE.summary, description: SENT.description }, 200, { description: SENT.description }), back({ summary: 'raced', description: SENT.description }, 200, { description: SENT.description }), back(SENT, 422), back({ ...SENT, ghsa_id: 'GHSA-wxyz-2345-abcd' })];
+    t('the read-back: exactly the fields sent land; a byte more in the description, another summary, a refusal or another advisory is no read-back; a description alone lands with the summary as read, and a summary changed under it is a raced write — no reason carries a byte of any text', [backs.map((b) => b.ok), backs[1].why.includes('-byte description that is not the'), backs[4].why.includes('another write raced this one'), backs.some((b) => b.why.includes(MARKER))], [[true, false, false, true, false, false, false], true, true, false]);
+    const KEY = Buffer.alloc(32, 5);
+    const sealedDigest = advisoryNoteDigest({ digestKey: KEY, section: advisoryRewriteText(SENT) });
+    t("⭐ the round-trip digest: the keyed digest of the text the advisory STORES equals the seat's digest of the text it sealed when they match byte for byte, and differs for one byte more, for the other field's text, and under another key", [advisoryRewriteStoredDigest({ digestKey: KEY, json: { ...BEFORE, ...SENT }, fields: ['summary', 'description'] }) === sealedDigest, advisoryRewriteStoredDigest({ digestKey: KEY, json: { ...BEFORE, ...SENT, description: `${SENT.description}.` }, fields: ['summary', 'description'] }) === sealedDigest, advisoryRewriteStoredDigest({ digestKey: KEY, json: { ...BEFORE, ...SENT }, fields: ['description'] }) === sealedDigest, advisoryRewriteStoredDigest({ digestKey: Buffer.alloc(32, 6), json: { ...BEFORE, ...SENT }, fields: ['summary', 'description'] }) === sealedDigest, ADVISORY_REWRITE_FIELDS], [true, false, false, false, ['summary', 'description']]);
+    const landed = advisoryRewriteLandedText({ ghsaId: GHSA, state: 'draft', fields: [{ key: 'summary', beforeBytes: 40, afterBytes: 30 }, { key: 'description', beforeBytes: 900, afterBytes: 600 }], digest: sealedDigest });
+    t('⛔ the landed row: the id, the state, each field\'s byte counts and the keyed digest — no byte of any text', [landed, landed.includes(MARKER)], [`${GHSA} · state draft · replaced the summary (40 → 30 bytes) and the description (900 → 600 bytes), read back byte for byte · keyed digest ${sealedDigest}`, false]);
   }
 
   // ── the floor, BEFORE the verdict ─────────────────────────────────────────

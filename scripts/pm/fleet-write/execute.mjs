@@ -685,6 +685,7 @@ import {
   advisoryRewriteOf,
   advisoryRewriteReadBack,
   advisoryRewriteStoredDigest,
+  advisoryRewriteText,
   advisorySummaryOf,
   codePoints,
   openAdvisoryNote,
@@ -2869,13 +2870,15 @@ const SELF_TEST_BATTERIES = Object.freeze({
   "advisory_read: ONE GET after the sender gate and nothing written; the read, advisory and sender fences judged on that answer — target-write by the maintainer's ruling, a sender off the advisory's collaborators sealed for, one without write refused before the GET, any other gate closed — then the answer sealed to the seat's key and emitted as notice parts the reader parses back, opening byte for byte for that key and read alone; a failed or unsealed seal and an over-cap answer FAILED with nothing emitted; ⛔ the marker in the summary, description and vulnerabilities, and the advisory's id, reach no log line, row, step summary or annotation, and the sealed answer alone carries no marker": 18,
   "advisory_list: the row's gate before any request, then one walk per listed state on the platform's own cursor, nothing written; a short page or a full one with no next link ends a walk; a refused, unreached or off-shape page, a next link off this API's collection, a repeated advisory, the page cap and the channel's cap each FAILED with nothing emitted; each advisory projected to five fields, the JSON padded and sealed to the seat's key as exactly ten notice parts the reader parses back and opens; ⛔ the marker, every listed id, the cursor and the count reach no log line, row, step summary or annotation, and the row reads the same whatever the count": 27,
   "advisory_note: the relay's key judged against the committed half before any request; the advisory's GET and its fences, the open, the section judged again and the mask (sparing the note's own notice), a second GET immediately before ONE PATCH of { description } — the text read, byte for byte, the separator and the section — then that PATCH's answer and a GET after it read back byte for byte; a key, fence, open, section, race, cap, refusal or read-back failure each FAILED with no write or no second one, and no byte of the note, the description or the key on any line, row, summary, annotation, pace line or real process's output": 25,
+  "advisory_rewrite: the note's key judged first; the advisory's GET and the rewrite's fences — a published or withdrawn advisory refused, triage, draft and closed landing; the open under the rewrite's own associated data, so a note's seal never opens as one; the text judged again and masked; a second GET immediately before ONE PATCH of exactly the fields sealed, byte for byte; the read-back of each field sent and of the one not sent; ONE notice whose keyed digest is of the text the advisory stores, read back by the seat's parser; and no byte of the new text or the old on any line, row, summary, annotation or pace line": 15,
 });
 // Raised 17 → 18 with the governed-review follow-up battery, 18 → 19 with the run_rerun_failed battery, 19 → 20 with the
 // hierarchy link battery, 20 → 21 with the advisory rows' battery, 21 → 22 with advisory_read's, 22 → 23 with the mailbox
 // branch delete's, 23 → 24 with the private-repository issue body's, 24 → 25 with advisory_list's, 25 → 26 with
 // pr_enqueue_front's, 26 → 27 with the cloud staging deploy's, 27 → 28 with advisory_note's: one battery, one row;
-// 28 → 30 with the jump's SIZE lift and pr_dequeue's.
-const SELF_TEST_BATTERY_FLOOR = 30;
+// 28 → 30 with the jump's SIZE lift and pr_dequeue's; 30 → 31 with advisory_rewrite's.
+const SELF_TEST_BATTERY_FLOOR = 31;
+const REWRITE_BATTERY = "advisory_rewrite: the note's key judged first; the advisory's GET and the rewrite's fences — a published or withdrawn advisory refused, triage, draft and closed landing; the open under the rewrite's own associated data, so a note's seal never opens as one; the text judged again and masked; a second GET immediately before ONE PATCH of exactly the fields sealed, byte for byte; the read-back of each field sent and of the one not sent; ONE notice whose keyed digest is of the text the advisory stores, read back by the seat's parser; and no byte of the new text or the old on any line, row, summary, annotation or pace line";
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 const batteryCases = new Map();
@@ -5053,6 +5056,91 @@ export async function selfTest() {
         cli(SELF_PATH, [], { [EVENT_PATH_ENV]: VALID, [SENDER_ENV]: 'os-dev-a', [ADVISORY_NOTE_KEY_ENV]: RELAY.text }),
       ];
       t("⛔ …and the real processes: the validator accepting a note — its output minting repository-advisories WRITE and marking advisory_note=yes — and refusing one, and the executor stopping at its prerequisite with the relay's key in its environment, print neither marker nor the key — stdout, stderr, GITHUB_OUTPUT or the step summary", [cliRuns.map((r) => r.status), cliRuns[0].output.split('\n').filter((l) => /^(permission_repository_advisories|advisory_note)=/.test(l)), cliRuns.map((r) => ['MARKER', RELAY.text, RELAY.text.slice(21)].some((m) => r.text.includes(m)))], [[0, EXIT_REFUSED, EXIT_PREREQUISITE], ['permission_repository_advisories=write', 'advisory_note=yes'], [false, false, false]]);
+    }
+
+    // ── advisory_rewrite ────────────────────────────────────────────────────
+    battery(REWRITE_BATTERY);
+    {
+      const { generateKeyPairSync } = await import('node:crypto');
+      // Made-up ids: the fixture names no real advisory.
+      const GHSA = 'GHSA-abcd-2345-wxyz';
+      const MARKER = 'REWRITE MARKER: the public text, never to be logged';
+      const WORKING = 'WORKING MARKER: the working text, never to be logged';
+      const ADV = `/repos/${REPO}/security-advisories/${GHSA}`;
+      const A_GET = `GET ${ADV}`;
+      const A_PATCH = `PATCH ${ADV}`;
+      const pair = () => {
+        const k = generateKeyPairSync('x25519');
+        return { text: k.privateKey.export({ format: 'der', type: 'pkcs8' }).toString('base64'), spki: k.publicKey.export({ format: 'der', type: 'spki' }).toString('base64') };
+      };
+      const RELAY = pair();
+      const SUMMARY = `${MARKER} — the summary, 漢字`;
+      const DESCRIPTION = `${MARKER}\n\n## Impact\nline two — 🎉, a quote " and a backslash \\`;
+      const DIGEST_KEY = Buffer.alloc(32, 3);
+      const sealFor = (text, { op = 'advisory_rewrite' } = {}) => sealAdvisoryNote({ section: text, digestKey: Buffer.from(DIGEST_KEY), publicKey: RELAY.spki, aad: advisorySealAad({ requestId: 'fw-test-1', action: 1, op, ghsaId: GHSA }) });
+      const BOTH = advisoryRewriteText({ summary: SUMMARY, description: DESCRIPTION });
+      const rewrite = (text = BOTH, extra = {}) => ({ op: 'advisory_rewrite', ghsa_id: GHSA, sealed_note: sealFor(text), ...extra });
+      const bytes = (s) => Buffer.byteLength(s, 'utf8');
+      const advisory = (extra = {}, status = 200) => ({ status, json: { ghsa_id: GHSA, state: 'draft', summary: WORKING, description: `${WORKING}\nmore`, ...extra } });
+      const notices = (r) => r.logs.filter((l) => l.startsWith('::notice '));
+      const swept = [];
+      const rewriteRun = async (actions, answers, { key = RELAY.text, relayPublicKey = RELAY.spki } = {}) => {
+        const paceLines = [];
+        const masked = [];
+        const file = join(dir, `pace-rewrite-${paceCase++}.jsonl`);
+        const r = await run(base(actions), answers, { file, pace: { ...paceFor(file), log: (l) => paceLines.push(l) }, advisoryNoteKey: key, advisoryNote: { relayPublicKey }, mask: (v) => masked.push(v) });
+        swept.push({ r, paceLines, answers });
+        return { ...r, masked };
+      };
+      const stored = (fields = { summary: SUMMARY, description: DESCRIPTION }, extra = {}) => advisory({ ...fields, ...extra });
+      const lands = (fields, extra = {}) => ({ ...allowed, [A_GET]: [advisory(extra), advisory(extra), stored(fields, extra)], [A_PATCH]: stored(fields, extra) });
+      const failed = (r) => [r.exit, r.rows.length, r.rows[0]?.status, r.annotations?.length ?? 0, notices(r).length];
+      // ⭐ Landed: both fields.
+      const landed = await rewriteRun([rewrite()], lands());
+      const patch = landed.seen.find((s) => s.call === A_PATCH);
+      t("⭐ a rewrite is the sender gate, the advisory's GET, a second GET, ONE PATCH and a GET after it, under the App token — exit 0, one write", [landed.exit, landed.seen.map((s) => s.call), landed.seen.every((s) => s.auth === `Bearer ${TOKEN}`), writes(landed.seen).length], [EXIT_OK, [PERM, A_GET, A_GET, A_PATCH, A_GET], true, 1]);
+      t('⭐ REPLACE: the PATCH carries { summary, description } and nothing else, each BYTE FOR BYTE as the seat sealed it (CJK, an emoji, a quote and a backslash among them) — the working text nowhere in it', [Object.keys(patch?.body ?? {}), Buffer.compare(Buffer.from(patch?.body?.summary ?? '', 'utf8'), Buffer.from(SUMMARY, 'utf8')), Buffer.compare(Buffer.from(patch?.body?.description ?? '', 'utf8'), Buffer.from(DESCRIPTION, 'utf8')), JSON.stringify(patch?.body ?? {}).includes('WORKING')], [['summary', 'description'], 0, 0, false]);
+      const digest = advisoryNoteDigest({ digestKey: DIGEST_KEY, section: BOTH });
+      t("⭐ its row: the PATCH call, its status and the landed text — the id, the state, each field's byte counts and the keyed digest", landed.rows, [{ action: 1, op: 'advisory_rewrite', call: A_PATCH, status: 200, result: advisoryRewriteLandedText({ ghsaId: GHSA, state: 'draft', fields: [{ key: 'summary', beforeBytes: bytes(WORKING), afterBytes: bytes(SUMMARY) }, { key: 'description', beforeBytes: bytes(`${WORKING}\nmore`), afterBytes: bytes(DESCRIPTION) }], digest }) }]);
+      const parsedBack = notices(landed).map((l) => parseRelayAdvisoryNoteAnnotation(l.slice(l.indexOf('::', 2) + 2)));
+      t("⭐ the round trip: ONE notice titled `fleet-write advisory_rewrite`, in the note's spelling, that the seat's own parser reads back as the action, the sealed text's byte count and a keyed digest of what the advisory STORES — equal to the seat's digest of what it sealed", [notices(landed).map((l) => l.slice(0, l.indexOf('::', 2) + 2)), parsedBack, parsedBack[0]?.noteDigest === digest], [['::notice title=fleet-write advisory_rewrite::'], [{ action: 1, op: 'advisory_rewrite', noteBytes: bytes(BOTH), noteDigest: digest }], true]);
+      t('the mask: every line of each field of six characters or more, trimmed, handed to the runner before the PATCH', [landed.masked], [[...new Set(`${SUMMARY}\n${DESCRIPTION}`.split('\n').map((l) => l.trim()).filter((l) => l.length >= ADVISORY_NOTE_MASK_MIN_CHARS))]]);
+      // A description alone: the summary left as read, and held to it.
+      const ALONE = advisoryRewriteText({ description: DESCRIPTION });
+      const alone = await rewriteRun([rewrite(ALONE)], lands({ summary: WORKING, description: DESCRIPTION }));
+      t('a description alone: the PATCH carries { description } alone, the summary left as read, and the notice digests the description stored', [alone.exit, Object.keys(alone.seen.find((s) => s.call === A_PATCH)?.body ?? {}), alone.annotations[0]?.noteDigest === advisoryNoteDigest({ digestKey: DIGEST_KEY, section: ALONE })], [EXIT_OK, ['description'], true]);
+      t('…and triage and closed pass the state fence as draft does — each lands', [(await rewriteRun([rewrite()], lands(undefined, { state: 'triage' }))).exit, (await rewriteRun([rewrite()], lands(undefined, { state: 'closed' }))).exit], [EXIT_OK, EXIT_OK]);
+      // ⛔ A published advisory, and the other fences.
+      const fenceRuns = [
+        await rewriteRun([rewrite()], { ...allowed, [A_GET]: advisory({ state: 'published' }) }),
+        await rewriteRun([rewrite()], { ...allowed, [A_GET]: advisory({ state: 'withdrawn' }) }),
+        await rewriteRun([rewrite()], { ...allowed, [A_GET]: advisory({ summary: { text: WORKING } }) }),
+        await rewriteRun([rewrite()], { ...allowed, [A_GET]: { status: 404, json: { message: MARKER } } }),
+      ];
+      t("⛔ a PUBLISHED advisory, a withdrawn one, a summary that is not text and a 404 — each FAILED with ONE GET, ZERO writes, nothing opened or masked, the published one naming the state fence", [fenceRuns.map((r) => [...failed(r), r.seen.map((s) => s.call), r.masked.length]), fenceRuns[0].rows[0].result.includes('fence `state`: the advisory reads state published'), fenceRuns[2].rows[0].result.includes('fence `summary`')], [fenceRuns.map(() => [EXIT_ACTION_FAILED, 1, 'not sent', 0, 0, [PERM, A_GET], 0]), true, true]);
+      // ⛔ A note's seal never opens as a rewrite; the key first.
+      const asNote = await rewriteRun([rewrite(BOTH, { sealed_note: sealFor(BOTH, { op: 'advisory_note' }) })], lands());
+      const keyless = await rewriteRun([rewrite()], lands(), { key: '' });
+      t("⛔ a seal made for a note — the same key, request, action and advisory — does not open as a rewrite: FAILED after the one read with the fixed sentence, ZERO writes; and no relay key is FAILED before any read", [[...failed(asNote), asNote.seen.map((s) => s.call), asNote.rows[0]?.result], [...failed(keyless), keyless.seen.map((s) => s.call)]], [[EXIT_ACTION_FAILED, 1, 'not sent', 0, 0, [PERM, A_GET], `FAILED: FAILED, nothing sent: ${ADVISORY_NOTE_OPEN_FAILED}`], [EXIT_ACTION_FAILED, 1, 'not sent', 0, 0, [PERM]]]);
+      // ⛔ The text, judged again after the open.
+      const judged = [];
+      for (const text of [advisoryRewriteText({ description: '' }), advisoryRewriteText({ summary: `${MARKER}\ntwo lines` }), advisoryRewriteText({}), `${MARKER} not JSON`]) judged.push(await rewriteRun([rewrite(text)], lands()));
+      t("⛔ the text judged AGAIN after the open — an EMPTY description, a summary of two lines, no field and prose — each FAILED with ZERO writes and nothing masked", judged.map((r) => [...failed(r), writes(r.seen).length, r.masked.length, r.rows[0]?.result?.startsWith('FAILED: REFUSED after the open, nothing sent: the seal holds no rewrite this relay writes — ')]), judged.map(() => [EXIT_ACTION_FAILED, 1, 'not sent', 0, 0, 0, 0, true]));
+      t('…the empty description named as such', judged[0].rows[0].result.endsWith('the description is empty'), true);
+      // ⛔ The concurrency read.
+      const raced = await rewriteRun([rewrite()], { ...lands(), [A_GET]: [advisory(), advisory({ summary: `${WORKING} — edited between the reads` })] });
+      t('⛔ the second read: a summary changed since the first is FAILED with TWO GETs and ZERO writes, named by its byte counts', [...failed(raced), raced.seen.map((s) => s.call), raced.rows[0]?.result?.includes("summary changed between the relay's two reads")], [EXIT_ACTION_FAILED, 1, 'not sent', 0, 0, [PERM, A_GET, A_GET], true]);
+      // ⛔ The read-back.
+      const notStored = await rewriteRun([rewrite()], { ...lands(), [A_PATCH]: stored({ summary: SUMMARY, description: `${DESCRIPTION} ` }) });
+      const overtaken = await rewriteRun([rewrite(ALONE)], { ...lands({ summary: WORKING, description: DESCRIPTION }), [A_GET]: [advisory(), advisory(), stored({ summary: `${WORKING}x`, description: DESCRIPTION })] });
+      t('⛔ the read-back: a PATCH answer whose description is not the one sent is NOT STORED, with no GET after it; a GET after the PATCH whose summary — not sent — moved is a raced write; each FAILED at the 200, no notice, never re-sent', [notStored, overtaken].map((r) => [...failed(r), r.seen.map((s) => s.call).slice(3), r.rows[0]?.result?.includes(ADVISORY_REWRITE_NOT_RESENT)]), [[EXIT_ACTION_FAILED, 1, 200, 0, 0, [A_PATCH], true], [EXIT_ACTION_FAILED, 1, 200, 0, 0, [A_PATCH, A_GET], true]]);
+      // ⛔ The sweep.
+      const emitted = swept.map(({ r, paceLines }) => [...(r.logs ?? []), ...(r.lines ?? []), r.summary ?? '', JSON.stringify(r.rows ?? []), ...(r.annotations ?? []).map((n) => (n?.noteDigest ? relayAdvisoryNoteAnnotationMessage(n) : JSON.stringify(n))), ...paceLines].join('\n'));
+      const decodes = (text) => [...text.matchAll(/[A-Za-z0-9+/_-]{16,}={0,2}/g)].some(([m]) => ['base64', 'base64url'].some((enc) => Buffer.from(m, enc).toString('latin1').includes('MARKER')));
+      const hexOf = (s) => Buffer.from(s, 'utf8').toString('hex');
+      const leaks = emitted.map((text, i) => (['REWRITE MARKER', 'WORKING MARKER', encodeURIComponent(MARKER).slice(0, 20), hexOf('REWRITE MARKER'), hexOf('WORKING MARKER'), RELAY.text].some((m) => text.toLowerCase().includes(m.toLowerCase())) || decodes(text) ? i : null)).filter((i) => i !== null);
+      t("⛔ THE MARKER TEST: across every run of this battery — landed, alone, each state, fence, open, judgment, race and read-back failure — no log line, transcript line, step summary, row, annotation or pace line carries a byte of the new text or the old, as text, URI-encoded, hex or base64, nor the relay's key", leaks, [], leaks.map((i) => emitted[i].split('\n').find((l) => l.includes('MARKER'))).join(' | '));
+      t("…positive control: the answers served carried both markers, the PATCH carried the new text to the platform — where it belongs — and the mask was handed it", [['REWRITE MARKER', 'WORKING MARKER'].every((m) => JSON.stringify(swept[0].answers).includes(m)), patch?.body?.description?.includes('REWRITE MARKER'), landed.masked.some((v) => v.includes('REWRITE MARKER'))], [true, true, true]);
     }
 
     // ── the CLI ─────────────────────────────────────────────────────────────
