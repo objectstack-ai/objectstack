@@ -180,7 +180,8 @@ afterEach(() => {
 });
 
 describe.each([
-  ['the synthesized default page', false],
+  // Mounted `embedded`, as the side preview (`objectViewRecordOverlay`) mounts it.
+  ['the synthesized default page, in the side preview', false],
   ['an authored page:header with placedActions: true', true],
 ] as const)('#36366 record header pins: %s', (_face, authored) => {
   it('CONTROL — no pins: the header draws as before (record_header inline by order, record_more in ⋯)', async () => {
@@ -196,6 +197,20 @@ describe.each([
     expect(inline).toEqual(['Log Call', 'Share']);
     expect(menu).toEqual(expect.arrayContaining(['Convert', 'Mark Won']));
     expect(menu).toHaveLength(2);
+  });
+
+  it('`more` orders the ⋯: the names it gives first, in its order, then the rest in their own order', async () => {
+    mount({ record: { pinned: ['convert'], more: ['log_call', 'share'] } }, authored);
+    const { inline, menu } = await headerFaces();
+    expect(inline).toEqual(['Convert']);
+    expect(menu).toEqual(['Log Call', 'Share', 'Mark Won']);
+  });
+
+  it('CONTROL — the same pins without `more`: the ⋯ keeps the actions\' own order', async () => {
+    mount({ record: { pinned: ['convert'] } }, authored);
+    const { inline, menu } = await headerFaces();
+    expect(inline).toEqual(['Convert']);
+    expect(menu).toEqual(['Mark Won', 'Share', 'Log Call']);
   });
 
   it('a list-page arm alone leaves the record header as it was', async () => {

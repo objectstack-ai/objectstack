@@ -97,6 +97,15 @@ describe('the list header reads the list-page pins (objectstack#36366)', () => {
     expect(screen.getAllByTestId('bar')[0]).toHaveAttribute('data-max', '1');
   });
 
+  it('`more` orders the toolbar ⋯: the names it gives first, in its order, then the rest in their own order', () => {
+    mount({ list: { pinned: ['new_task'], more: ['export_csv'] } });
+    expect(drawn()).toEqual(['bar(new_task)', 'bar(⋯export_csv ⋯mass_assign)']);
+    cleanup();
+    // CONTROL — the same pins without `more`: the ⋯ keeps the toolbar's own order.
+    mount({ list: { pinned: ['new_task'] } });
+    expect(drawn()).toEqual(['bar(new_task)', 'bar(⋯mass_assign ⋯export_csv)']);
+  });
+
   it('a pinned Import is a button of its own and leaves the Import / Export menu', () => {
     mount({ list: { pinned: ['$import'] } });
     expect(drawn()).toEqual(['object-view-import-pinned', 'bar(⋯new_task ⋯mass_assign ⋯export_csv)']);

@@ -69,7 +69,7 @@ check that spelling first.
 | `label` | Replaces the target's label — with one exception, [below](#extensions-and-tenant-customization). A new `label` with no `pluralLabel` beside it also takes the target's plural off, since that plural names the old label: the object is served as one that declares no plural, and lists title it by its label. Set `pluralLabel` too to serve one. A plural the tenant set stays. |
 | `pluralLabel` | Same as `label`. |
 | `description` | Same as `label`. |
-| `actionLayout` | **Applied arm by arm.** An extension's `list` or `record` list replaces the target's list for that page; an arm it leaves out keeps the target's. Yields to a tenant's own pins as `label` does. See [choosing the header's buttons](/docs/ui/actions#choose-the-headers-buttons). |
+| `actionLayout` | **Applied arm by arm.** An extension's `list` or `record` arm (`{ pinned, more }`) replaces the target's arm for that scope whole; an arm it leaves out keeps the target's. Yields to a tenant's own arrangement as `label` does. See [choosing the header's buttons](/docs/ui/actions#choose-the-headers-buttons). |
 | `place` | **Applied once, after every extension's fields are merged.** Says where the fields, groups and child lists this extension brings go on the target — [below](#placing-what-you-bring). |
 | `fieldGroups`, `relatedLists` | **Only in a base's paired `.custom` package. Each replaces, whole.** The complete field arrangement and the complete tab list of the target, applied last — [below](#arranging-the-whole-record-page). In any other package they are refused, and `place` is the key to use. |
 | `priority` | Not merged — it *orders* the merge. `0`–`999`, default `200`. |

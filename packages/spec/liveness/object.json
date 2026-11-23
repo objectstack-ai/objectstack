@@ -32,24 +32,56 @@
     },
     "actionLayout": {
       "status": "live",
-      "verifiedAt": "2026-11-22",
+      "verifiedAt": "2026-11-23",
       "evidenceScope": "in-repo",
-      "evidence": "ui/packages/types/src/ui-action.ts#arrangedHeaderActions (the ONE reader: pinned actions become the header's buttons in pin order, every other placed action goes to the overflow); ui/packages/app-shell/src/views/RecordDetailView.tsx#RecordDetailView (the synthesized record header reads `actionLayout.record`, staged pins included); ui/packages/components/src/renderers/layout/containers.tsx#PageHeaderActions (an authored `page:header` with `placedActions: true` reads the same arm); ui/packages/app-shell/src/views/objectViewPageHeader.tsx#PinnedListHeaderActions (the list header reads `actionLayout.list`, `$import` and `$export` among the actions); packages/objectql/src/registry.ts#mergeObjectDefinitions (an `object_extension`'s pins fold onto the object, arm by arm); ui/packages/app-shell/src/layout/DesignModeHeaderPins.tsx#DesignModeHeaderPins (the design mode writes it)",
-      "note": "objectstack#36366: the page header's buttons per page type, at most three in order; every other action the page places is in 「More」. Absent (or an arm absent): the header's own choice, as before. An installed object is pinned through its customization package's `object_extension`.",
+      "evidence": "ui/packages/types/src/ui-action.ts#arrangedHeaderActions (the ONE reader: an arm's `pinned` actions become the header's buttons in pin order, the ones `more` names lead the overflow in that order, every other placed action follows in its default order); ui/packages/app-shell/src/views/RecordDetailView.tsx#RecordDetailView (the record header reads `actionLayout.record`, staged arrangement included; the side preview and the phone's bottom bar draw the same header); ui/packages/components/src/renderers/layout/containers.tsx#PageHeaderActions (an authored `page:header` with `placedActions: true` reads the same arm); ui/packages/app-shell/src/views/objectViewPageHeader.tsx#PinnedListHeaderActions (the list header reads `actionLayout.list`, `$import` and `$export` among the actions); packages/objectql/src/registry.ts#mergeObjectDefinitions (an `object_extension`'s arms fold onto the object, each arm replaced whole); ui/packages/app-shell/src/layout/DesignModeHeaderPins.tsx#DesignModeHeaderPins (the design mode writes it)",
+      "note": "objectstack#36366: the order of the object's actions and which are buttons, per action scope (`list`, `record`): `pinned` is at most three buttons in order, `more` orders the 「More」 menu, and an action named in neither follows at the end of 「More」 in its default order. Absent (or an arm absent): the scope draws as before. An installed object is arranged through its customization package's `object_extension`.",
       "children": {
         "list": {
           "status": "live",
-          "verifiedAt": "2026-11-22",
+          "verifiedAt": "2026-11-23",
           "evidenceScope": "in-repo",
           "evidence": "ui/packages/app-shell/src/views/objectViewPageHeader.tsx#PinnedListHeaderActions (the list header draws the pinned toolbar actions and `$import` / `$export` as its buttons, in pin order); ui/packages/types/src/ui-action.ts#arrangedHeaderActions (the unpinned toolbar actions go to the bar's overflow)",
-          "note": "objectstack#36366: the list page header's buttons."
+          "note": "objectstack#36366: the list scope, drawn on the list page toolbar.",
+          "children": {
+            "pinned": {
+              "status": "live",
+              "verifiedAt": "2026-11-23",
+              "evidenceScope": "in-repo",
+              "evidence": "ui/packages/app-shell/src/views/objectViewPageHeader.tsx#PinnedListHeaderActions (the list header draws the pinned toolbar actions and a pinned `$import` / `$export` as its buttons, in pin order); ui/packages/types/src/ui-action.ts#arrangedHeaderActions (a pinned toolbar action leads the bar's sort)",
+              "note": "objectstack#36366: the list toolbar's buttons, at most three, in order."
+            },
+            "more": {
+              "status": "live",
+              "verifiedAt": "2026-11-23",
+              "evidenceScope": "in-repo",
+              "evidence": "ui/packages/types/src/ui-action.ts#arrangedHeaderActions (the toolbar actions `more` names lead the toolbar's ⋯ in that order, unnamed ones after); ui/packages/app-shell/src/views/objectViewPageHeader.tsx#PinnedListHeaderActions (draws them in the toolbar's ⋯)",
+              "note": "objectstack#36366: the order of the list toolbar's ⋯ menu."
+            }
+          }
         },
         "record": {
           "status": "live",
-          "verifiedAt": "2026-11-22",
+          "verifiedAt": "2026-11-23",
           "evidenceScope": "in-repo",
           "evidence": "ui/packages/app-shell/src/views/RecordDetailView.tsx#RecordDetailView (the synthesized record header reads the arm); ui/packages/components/src/renderers/layout/containers.tsx#PageHeaderActions (an authored `page:header` with `placedActions: true` reads it); ui/packages/types/src/ui-action.ts#arrangedHeaderActions (pinned actions placed at `record_header` in pin order, the rest at `record_more`)",
-          "note": "objectstack#36366: the record page header's buttons."
+          "note": "objectstack#36366: the record scope, drawn in the record header: the record page, the side preview and the phone's bottom bar.",
+          "children": {
+            "pinned": {
+              "status": "live",
+              "verifiedAt": "2026-11-23",
+              "evidenceScope": "in-repo",
+              "evidence": "ui/packages/types/src/ui-action.ts#arrangedHeaderActions (a pinned action is placed at `record_header` and leads the sort, in pin order); ui/packages/app-shell/src/views/RecordDetailView.tsx#RecordDetailView (the record header, side preview and phone bar draw them as buttons); ui/packages/components/src/renderers/layout/containers.tsx#PageHeaderActions (an authored `placedActions: true` header too)",
+              "note": "objectstack#36366: the record header's buttons, at most three, in order."
+            },
+            "more": {
+              "status": "live",
+              "verifiedAt": "2026-11-23",
+              "evidenceScope": "in-repo",
+              "evidence": "ui/packages/types/src/ui-action.ts#arrangedHeaderActions (an unpinned action is placed at `record_more`, the ones `more` names first in that order); ui/packages/app-shell/src/views/RecordDetailView.tsx#RecordDetailView (the record header's ⋯ draws them)",
+              "note": "objectstack#36366: the order of the record header's ⋯ menu."
+            }
+          }
         }
       }
     },
