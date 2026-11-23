@@ -31,17 +31,33 @@
  * the one recipient the text is built for may read it, else the record id
  * (`ApprovalService.notify` resolves it per recipient); the #23556 / #23594
  * ruling B form, label and id for every reader, stands only on the
- * reader-less action-link pages. The label rides as a keyed param — `objects.<object>.label`, the key the reader-language
- * labels (`reader-locale-labels.ts`) and objectql's refusals name an object
- * by — so a recipient whose language pack holds it reads it in their language;
- * the schema label (the API name when there is none) stands otherwise.
+ * reader-less action-link pages. [#35384] The label rides as the messaging
+ * service's typed object-label param, `{ objectLabel: <object>, fallback }`,
+ * which it resolves per recipient as `GET /meta/object/:name` serves the
+ * object (`translateObject` with the metadata route's resolve options and the
+ * packaged base), the way the reader-language labels (`reader-locale-labels.ts`)
+ * name an object; so a recipient in the deployment's `sourceLocale` reads the
+ * authored label, a renamed packaged object its rename, and the schema label
+ * (the API name when there is none) stands when nothing resolves.
  */
 
-import { objectLabelKey } from '@objectstack/spec/system';
 import { enMessages, type ApprovalMessageId } from './translations/messages.js';
 
-/** One `{{hole}}` value: the text itself, or a catalog key with the text it falls back to. */
-export type ApprovalTextParam = string | { readonly key: string; readonly fallback: string };
+/**
+ * One `{{hole}}` value: the text itself, a catalog key with the text it falls
+ * back to, or [#35384] an object's label by the object's name with the text it
+ * falls back to (the messaging service's `NotificationObjectLabelParam`).
+ */
+export type ApprovalTextParam =
+  | string
+  | { readonly key: string; readonly fallback: string }
+  | ApprovalObjectLabelParam;
+
+/** [#35384] The structural mirror of the messaging service's `NotificationObjectLabelParam`. */
+export interface ApprovalObjectLabelParam {
+  readonly objectLabel: string;
+  readonly fallback: string;
+}
 
 /**
  * The keyed half — the structural mirror of the messaging service's
@@ -68,7 +84,7 @@ export interface ApprovalNotificationText {
  * not an interface, so it spreads into a sentence's params as it stands.
  */
 export type ApprovalSubjectParams = {
-  readonly object: { readonly key: string; readonly fallback: string };
+  readonly object: ApprovalObjectLabelParam;
   readonly record: string;
 };
 
@@ -78,9 +94,9 @@ export function approvalMessageKey(id: ApprovalMessageId): string {
 }
 
 /**
- * The record of `objectName` a notification names: the object's label — keyed
- * by `objects.<object>.label`, falling back to `objectLabel` (the schema
- * label), else the API name — and `record`, the name its recipient reads for
+ * The record of `objectName` a notification names: the object's label — the
+ * typed object-label param naming `objectName`, falling back to `objectLabel`
+ * (the schema label), else the API name — and `record`, the name its recipient reads for
  * it (its title as they may read it, else its id).
  */
 export function subjectParams(
@@ -89,7 +105,7 @@ export function subjectParams(
   record: string,
 ): ApprovalSubjectParams {
   return {
-    object: { key: objectLabelKey(objectName), fallback: objectLabel ?? objectName },
+    object: { objectLabel: objectName, fallback: objectLabel ?? objectName },
     record,
   };
 }
