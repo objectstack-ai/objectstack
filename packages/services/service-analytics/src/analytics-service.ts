@@ -29,7 +29,6 @@ import {
   type FilterTokenResolutionContext,
   type JsonColumnFieldClass,
 } from '@objectstack/core';
-import { comparisonColumnClass } from './json-column-comparison-refusal.js';
 // [#6615] The Postgres `"x" of relation "y"` phrase, owned once. This is the
 // only reason this package depends on `@objectstack/types` — see the module's
 // docblock for why the edge is acyclic and why it was worth adding.
@@ -3348,20 +3347,20 @@ export class AnalyticsService implements IAnalyticsService {
             // faces refuse it (`json-column-comparison-refusal.ts`), and
             // [#36190] the storing driver's answer, so a single-value media
             // column it keeps as JSON is refused in the live faces' words too.
-            const jsonColumnClass = (field: string) => {
+            const declaredShape = (field: string) => {
               const meta = this.sourceFieldMeta?.(dataset.object, field);
-              const shape = typeof meta?.type === 'string' && meta.type !== ''
+              return typeof meta?.type === 'string' && meta.type !== ''
                 ? { type: meta.type, multiple: meta.multiple === true }
                 : undefined;
-              let stored: unknown;
-              try {
-                stored = this.jsonColumnFieldClass?.(dataset.object, field);
-              } catch {
-                stored = undefined;
-              }
-              return comparisonColumnClass(shape, stored);
             };
-            const rowFilters = lowerPreviewRowFilters(q, previewCube, declaredType, whereColumns, jsonColumnClass);
+            const storedJsonClass = (field: string) => {
+              try {
+                return this.jsonColumnFieldClass?.(dataset.object, field);
+              } catch {
+                return undefined;
+              }
+            };
+            const rowFilters = lowerPreviewRowFilters(q, previewCube, declaredType, whereColumns, declaredShape, storedJsonClass);
             // [#28765, #28798] …and a selection asking one column for two
             // values under one name (raw beside its own bucket, or two buckets
             // of it), with the refusal the ObjectQL strategy gives both live
