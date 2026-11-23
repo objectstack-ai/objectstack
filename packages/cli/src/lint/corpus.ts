@@ -5,8 +5,9 @@
  *
  * Each case pairs a natural-language authoring prompt with a fixture stack that
  * represents the *ideal* generated output — schema-valid and following the
- * platform's modelling conventions (master-detail ownership, inlineEdit for
- * line items, relatedList/no-inlineEdit for associations, roll-up summaries,
+ * platform's modelling conventions (master-detail ownership, a parent field
+ * group naming line items so the parent's form inlines them, associations left
+ * as record-page tabs, roll-up summaries,
  * select options, name fields, labels). Offline, the harness asserts these
  * golden stacks clear the quality bar; live, the same prompts benchmark a real
  * model against them.
@@ -52,7 +53,7 @@ export const DEFAULT_METADATA_EVAL_CORPUS: MetadataEvalCase[] = [
     id: 'invoice_with_line_items',
     prompt:
       'Model an invoicing app: an invoice with multiple line items (product, quantity, unit price, amount). The invoice total should sum its line amounts, and line items are entered together with the invoice.',
-    note: 'master_detail + inlineEdit + roll-up summary',
+    note: 'master_detail + a parent field group placing the lines + roll-up summary',
     fixture: {
       manifest: manifest('com.example.invoicing', 'invoicing', 'Invoicing'),
       objects: [
@@ -60,6 +61,9 @@ export const DEFAULT_METADATA_EVAL_CORPUS: MetadataEvalCase[] = [
           name: 'invoice',
           label: 'Invoice',
           sharingModel: 'private',
+          // The lines are entered with the invoice: a field group of the
+          // parent naming the child is what inlines it in the invoice's form.
+          fieldGroups: [{ key: 'lines', label: 'Line Items', relatedList: 'invoice_line' }],
           fields: {
             name: { type: 'text', label: 'Invoice Number', required: true },
             account: { type: 'lookup', label: 'Account', reference: 'account' },
@@ -90,7 +94,6 @@ export const DEFAULT_METADATA_EVAL_CORPUS: MetadataEvalCase[] = [
               reference: 'invoice',
               required: true,
               deleteBehavior: 'cascade',
-              inlineEdit: true,
               relatedListTitle: 'Line Items',
             },
             product: { type: 'text', label: 'Product', required: true },
@@ -113,7 +116,7 @@ export const DEFAULT_METADATA_EVAL_CORPUS: MetadataEvalCase[] = [
     id: 'project_with_tasks',
     prompt:
       'A project management app: a project owns many tasks (title, status, estimate in hours). Tasks are edited inline within the project, and the project shows a task count and total estimate.',
-    note: 'master_detail + inlineEdit + count/sum roll-ups',
+    note: 'master_detail + a parent field group placing the tasks + count/sum roll-ups',
     fixture: {
       manifest: manifest('com.example.pm', 'pm_app', 'Project Management'),
       objects: [
@@ -121,6 +124,7 @@ export const DEFAULT_METADATA_EVAL_CORPUS: MetadataEvalCase[] = [
           name: 'project',
           label: 'Project',
           sharingModel: 'private',
+          fieldGroups: [{ key: 'tasks', label: 'Tasks', relatedList: 'task' }],
           fields: {
             name: { type: 'text', label: 'Project Name', required: true },
             status: {
@@ -156,7 +160,6 @@ export const DEFAULT_METADATA_EVAL_CORPUS: MetadataEvalCase[] = [
               reference: 'project',
               required: true,
               deleteBehavior: 'cascade',
-              inlineEdit: true,
             },
             status: {
               type: 'select',
@@ -178,7 +181,7 @@ export const DEFAULT_METADATA_EVAL_CORPUS: MetadataEvalCase[] = [
     id: 'blog_post_with_comments',
     prompt:
       'A blog: posts have a title and body. Readers leave comments on a post (author, body). Comments belong to the post but are an activity stream, not something you fill in when writing the post.',
-    note: 'association child: master_detail WITHOUT inlineEdit (related list on detail page)',
+    note: 'association child: master_detail that no parent field group names (a tab of the record page)',
     fixture: {
       manifest: manifest('com.example.blog', 'blog_app', 'Blog'),
       objects: [
@@ -196,8 +199,9 @@ export const DEFAULT_METADATA_EVAL_CORPUS: MetadataEvalCase[] = [
           label: 'Comment',
           sharingModel: 'controlled_by_parent',
           fields: {
-            // Association: owned by the post (cascade) but NOT inlineEdit —
-            // surfaced as a related list on the post's detail page.
+            // Association: owned by the post (cascade) but named by no field
+            // group of the post — a tab of the post's record page, not a part
+            // of its form.
             post: {
               type: 'master_detail',
               label: 'Post',
@@ -217,7 +221,7 @@ export const DEFAULT_METADATA_EVAL_CORPUS: MetadataEvalCase[] = [
     id: 'expense_report_with_lines',
     prompt:
       'An expense report app: a report has a title and a submitter. It contains expense lines (category, description, amount, date). The report total sums the line amounts and lines are entered inline.',
-    note: 'master_detail + inlineEdit + sum roll-up + select options',
+    note: 'master_detail + a parent field group placing the lines + sum roll-up + select options',
     fixture: {
       manifest: manifest('com.example.expenses', 'expenses', 'Expenses'),
       objects: [
@@ -225,6 +229,7 @@ export const DEFAULT_METADATA_EVAL_CORPUS: MetadataEvalCase[] = [
           name: 'expense_report',
           label: 'Expense Report',
           sharingModel: 'private',
+          fieldGroups: [{ key: 'lines', label: 'Expense Lines', relatedList: 'expense_line' }],
           fields: {
             name: { type: 'text', label: 'Title', required: true },
             submitter: { type: 'text', label: 'Submitter', required: true },
@@ -246,7 +251,6 @@ export const DEFAULT_METADATA_EVAL_CORPUS: MetadataEvalCase[] = [
               reference: 'expense_report',
               required: true,
               deleteBehavior: 'cascade',
-              inlineEdit: true,
             },
             category: {
               type: 'select',
@@ -270,7 +274,7 @@ export const DEFAULT_METADATA_EVAL_CORPUS: MetadataEvalCase[] = [
     id: 'crm_account_with_contacts',
     prompt:
       'A simple CRM: accounts and their contacts. A contact belongs to an account but can exist independently and is not entered inline with the account.',
-    note: 'lookup (independent child) — should NOT be master_detail/inlineEdit',
+    note: 'lookup (independent child) — should NOT be master_detail or placed by a parent field group',
     fixture: {
       manifest: manifest('com.example.crm', 'crm_app', 'CRM'),
       objects: [
