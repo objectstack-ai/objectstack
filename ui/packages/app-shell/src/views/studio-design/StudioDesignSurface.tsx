@@ -290,6 +290,7 @@ import {
   useRegisteredMetadataInspectorTypes,
 } from '../metadata-admin/inspector-registry.js';
 import { useRegisteredMetadataDefaultInspector } from '../metadata-admin/default-inspector-registry.js';
+import type { FormViewSpec } from '../metadata-admin/form-spec.js';
 import { getMetadataResource } from '../metadata-admin/registry.js';
 import { useMetadataClient, useMetadataTypes } from '../metadata-admin/useMetadata.js';
 // objectui#11773 — every draft save of an existing item sends the version its buffer was built on.
@@ -5627,6 +5628,13 @@ export function DataPillar({
     for (const e of metaTypes) idx[e.type] = e.schema;
     return idx;
   }, [metaTypes]);
+  // objectstack#35650 — the served form layouts beside them, so a panel's
+  // curated inspector draws a row the server declares a face for with it.
+  const typeForms = React.useMemo(() => {
+    const idx: Record<string, FormViewSpec | undefined> = {};
+    for (const e of metaTypes) idx[e.type] = e.form;
+    return idx;
+  }, [metaTypes]);
   // Below the mobile breakpoint the Objects rail overlays the canvas instead
   // of a permanent 208px column (which otherwise squeezed the grid/form
   // canvas down to almost nothing on phones) — closed by default, toggled by
@@ -7821,6 +7829,7 @@ export function DataPillar({
                     disabled={readOnly}
                     focus={actionFocus}
                     actionSchema={typeSchemas.action}
+                    actionForm={typeForms.action}
                     onCelVerdictsChange={reportPanelVerdicts}
                     // objectstack#30088 — a base object's new actions are items of the pair.
                     pair={pairDoor}
