@@ -10,8 +10,8 @@ import { transferCascadeIneligibilityReason } from './user-action-transfer';
  * declared per relationship on the child's reference field beside
  * `deleteBehavior`. Accepted where it can act; refused at parse where it never
  * could (ADR-0049): off `lookup` / `master_detail`, on a reference to a `sys_*`
- * object, and `'cascade'` on a field of an object that does not offer Change
- * Owner itself.
+ * object, `'cascade'` on a multi-value relationship, and `'cascade'` on a field
+ * of an object that does not offer Change Owner itself.
  */
 
 const TO_ACCOUNT = { type: 'lookup', reference: 'account' } as const;
@@ -56,6 +56,20 @@ describe('FieldSchema — transferBehavior, the type half', () => {
     expect(refused).toHaveLength(1);
     expect(refused[0]!.message).toContain("'sys_user'");
     expect(FieldSchema.safeParse({ type: 'lookup', reference: 'sys_user', transferBehavior: 'none' }).success).toBe(true);
+  });
+
+  it('refuses cascade on a multi-value relationship, located at the key, and accepts none there', () => {
+    // A multi-value lookup stores its targets as one JSON array, which the SQL
+    // driver refuses to compare by equality, so the cascade's child read could
+    // never find a row there.
+    const refused = FieldSchema.safeParse({ ...TO_ACCOUNT, multiple: true, transferBehavior: 'cascade' });
+    expect(refused.success).toBe(false);
+    const issues = issuesAt(refused as never, 'transferBehavior');
+    expect(issues).toHaveLength(1);
+    expect(issues[0]!.message).toContain('multiple: true');
+    expect(FieldSchema.safeParse({ ...TO_ACCOUNT, multiple: true, transferBehavior: 'none' }).success).toBe(true);
+    // The control: the same field single-valued takes the cascade.
+    expect(FieldSchema.safeParse({ ...TO_ACCOUNT, multiple: false, transferBehavior: 'cascade' }).success).toBe(true);
   });
 });
 
@@ -123,7 +137,6 @@ describe('transferCascadeIneligibilityReason', () => {
   it('answers undefined for an object that offers Change Owner, and a clause otherwise', () => {
     expect(transferCascadeIneligibilityReason({ name: 'opportunity', fields: {} })).toBeUndefined();
     expect(transferCascadeIneligibilityReason({ name: 'opportunity', fields: {}, sharingModel: 'controlled_by_parent' })).toContain('controlled_by_parent');
-    expect(transferCascadeIneligibilityReason({ name: 'opportunity', fields: {}, security: { sharingModel: 'controlled_by_parent' } })).toContain('controlled_by_parent');
     expect(transferCascadeIneligibilityReason({ name: 'sys_thing', fields: {} })).toContain("'sys_'");
     expect(transferCascadeIneligibilityReason(null)).toBeDefined();
   });

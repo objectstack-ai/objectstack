@@ -2316,7 +2316,8 @@ export const FieldSchema = lazySchema(() => {
    *
    * Refused where it could never act (ADR-0049): on any type but `lookup` and
    * `master_detail` (here), on a reference to a `sys_*` object (no `sys_*`
-   * object offers Change Owner), and — on `ObjectSchema`, where the declaring
+   * object offers Change Owner), `'cascade'` on a multi-value relationship
+   * (`multiple: true`: its targets are one stored list, never one parent), and — on `ObjectSchema`, where the declaring
    * object is known — `'cascade'` on a field of an object that does not offer
    * Change Owner itself: one that is not structurally eligible, a
    * `controlled_by_parent` detail (its access already follows its master, so
@@ -3423,6 +3424,19 @@ export const FieldSchema = lazySchema(() => {
           `\`transferBehavior: 'cascade'\` cannot act on a reference to '${field.reference}': no sys_ object ` +
           'offers the Change Owner action, so its owner never changes through it and nothing would cascade. ' +
           "Drop the key, or set it to 'none'.",
+      });
+    } else if (field.transferBehavior === 'cascade' && field.multiple === true) {
+      // A multi-value relationship stores its targets as one JSON array, which
+      // the SQL driver refuses to compare by equality: the cascade's child read
+      // could never find a row there (the `lookupAutofill` precedent below).
+      ctx.addIssue({
+        code: 'custom',
+        path: ['transferBehavior'],
+        message:
+          "`transferBehavior: 'cascade'` is not valid on a multi-value relationship (`multiple: true`): a " +
+          'record here can point at several parents with different owners, so no single Change Owner decides ' +
+          "who it goes to, and its stored list of targets cannot be matched to one parent. Drop the key, set it " +
+          "to 'none', or make the field single-value if each record has one parent.",
       });
     }
   }

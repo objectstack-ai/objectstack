@@ -382,7 +382,10 @@ function targetOf(field: AnyRec): string | undefined {
  * declaration on any other child; this reads the registered definitions again,
  * because a definition can reach the registry without that parse. Objects of a
  * disabled package are left out, as the data door serves none of their rows,
- * and so is a child whose declared API exposure does not serve `update`.
+ * and so is a child whose declared API exposure does not serve `update`. A
+ * multi-value (`multiple: true`) reference is never a candidate: the parse
+ * refuses `'cascade'` there, its targets are one stored list rather than one
+ * parent, and the SQL driver refuses the equality read the cascade probes with.
  * In registration and declaration order.
  */
 export function transferCascadeRelations(engine: Pick<ChangeOwnerEngine, 'getConfigs' | 'registry'>, parent: string): ChangeOwnerCascadeCandidate[] {
@@ -395,7 +398,8 @@ export function transferCascadeRelations(engine: Pick<ChangeOwnerEngine, 'getCon
     if (!child || !name) continue;
     if (disabled && disabled(name) === true) continue;
     const declared = fieldEntries(child).filter(([, f]) =>
-      f.transferBehavior === 'cascade' && (f.type === 'lookup' || f.type === 'master_detail') && targetOf(f) === parent);
+      f.transferBehavior === 'cascade' && (f.type === 'lookup' || f.type === 'master_detail')
+      && f.multiple !== true && targetOf(f) === parent);
     if (declared.length === 0) continue;
     if (transferCascadeIneligibilityReason(child) !== undefined) continue;
     // The child is a second object: its rows are read and written here, so it
@@ -480,6 +484,19 @@ async function previousOwners(
  * Move, for each moved record, the rows of each named relationship that point
  * at it and are owned by its previous owner, to `newOwner` — as the caller,
  * one by-id update each, at most `cap` rows in all. Every refused row is listed.
+ *
+ * The probe is grouped by previous owner: the moved records that shared one
+ * owner are read together, one `find` per (previous owner, relationship) with
+ * `{ [field]: { $in: parentIds }, owner_id: previousOwner }` (bare equality for
+ * a single parent), so a bulk move of N records owned by K people reads K × R
+ * times, not N × R. Grouping changes no row's verdict: the reference field is
+ * single-valued (a multi-value one is never a candidate), so each child row
+ * points at exactly one parent and belongs to exactly one group, and the
+ * owner a row must carry is that parent's previous owner, which is the group's
+ * key. The writes stay one by-id update per row, because a predicate update
+ * carrying `owner_id` has no pre-image for the owner guard to judge and each
+ * row owes its own verdict. Once the cap is spent, each group's relationship
+ * still holding previous-owner rows is counted into `remaining`.
  */
 async function runCascade(
   engine: ChangeOwnerEngine,
@@ -493,13 +510,24 @@ async function runCascade(
   const outcomes: ChangeOwnerCascadeOutcome[] = relations.map((r) => ({
     object: r.object, field: r.field, updated: 0, failed: 0, failures: [], remaining: 0,
   }));
-  let budget = cap;
-  for (const { id: parentId, previousOwner } of moved) {
+  // Moved records by previous owner, in first-seen order. A record whose
+  // previous owner was nobody (a queue) or is already the new owner cascades nothing.
+  const byOwner = new Map<string, string[]>();
+  for (const { id, previousOwner } of moved) {
     if (!previousOwner || previousOwner === newOwner) continue;
+    const group = byOwner.get(previousOwner);
+    if (group) group.push(id);
+    else byOwner.set(previousOwner, [id]);
+  }
+  let budget = cap;
+  for (const [previousOwner, parentIds] of byOwner) {
     for (let i = 0; i < relations.length; i++) {
       const rel = relations[i]!;
       const outcome = outcomes[i]!;
-      const where = { [rel.field]: parentId, [SystemFieldName.OWNER_ID]: previousOwner };
+      const where = {
+        [rel.field]: parentIds.length === 1 ? parentIds[0] : { $in: [...parentIds] },
+        [SystemFieldName.OWNER_ID]: previousOwner,
+      };
       let failedHere = 0;
       if (budget > 0) {
         let rows: unknown[];
@@ -507,7 +535,7 @@ async function runCascade(
           rows = await engine.find(rel.object, { where, fields: ['id'], limit: budget, context });
         } catch (err) {
           if (!outcome.readFailure) {
-            const { code, message } = failureOf(parentId, err, rel.object, describe);
+            const { code, message } = failureOf(parentIds[0]!, err, rel.object, describe);
             outcome.readFailure = { code, message };
           }
           continue;
@@ -530,7 +558,7 @@ async function runCascade(
           if (budget === 0) break;
         }
       }
-      // The cap is spent: count what this parent's relationship still holds
+      // The cap is spent: count what this group's relationship still holds
       // with the previous owner, past the rows that were tried and refused.
       if (budget === 0 && typeof engine.count === 'function') {
         try {

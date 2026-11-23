@@ -239,9 +239,8 @@ export function resolveUserActionTransfer(def: unknown): UserActionTransferResol
 export function transferCascadeIneligibilityReason(def: unknown): string | undefined {
   const structural = transferIneligibilityReason(def);
   if (structural !== undefined) return structural;
-  const obj = asRecord(def) ?? {};
-  const sharingModel = obj.sharingModel ?? asRecord(obj.security)?.sharingModel;
-  if (sharingModel === 'controlled_by_parent') {
+  // `sharingModel` read where `ObjectSchema` declares it, as `derivedTransferDefault` reads it.
+  if (asRecord(def)?.sharingModel === 'controlled_by_parent') {
     return 'it is a controlled_by_parent detail, whose access already follows its master, so it is not ' +
       'cascaded for access';
   }

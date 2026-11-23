@@ -427,6 +427,87 @@ describe('[#35315 phase 2] the Change Owner cascade', () => {
     expect(ownersOf(engine, 'lead_task')).toEqual({ t1: 'u_next', t2: 'u_b', t3: 'u_next', t4: 'u_next' });
   });
 
+  it('a multi-value reference that declares cascade is never offered, and a request naming it is refused before any write', async () => {
+    // Registered raw, past the parse that refuses `'cascade'` with `multiple: true`.
+    const multi = { name: 'lead_tag', sharingModel: 'private', fields: { lead: { type: 'lookup', reference: 'lead', multiple: true, transferBehavior: 'cascade' }, owner_id: OWNER_FIELD_DEF } };
+    const engine = Object.assign(fakeEngine(), { getConfigs: () => ({ ...SCHEMAS, lead_tag: multi }) });
+    engine.tables.lead_tag = [{ id: 'g1', lead: ['l1'], owner_id: 'u_a' }];
+    expect(transferCascadeRelations(engine, 'lead').map((c) => c.object)).toEqual(['lead_task']);
+    const err = await refusalOf(changeRecordOwner(engine, 'lead', 'l1', { ownerId: 'u_next' }, CALLER, {
+      cascade: [{ object: 'lead_tag', field: 'lead' }],
+    }));
+    expect({ code: err.code, status: err.status }).toEqual({ code: 'VALIDATION_ERROR', status: 400 });
+    expect(engine.calls.some((c) => c.op === 'update')).toBe(false);
+    expect(ownersOf(engine, 'lead_tag')).toEqual({ g1: 'u_a' });
+    // The control: the same field single-valued is offered.
+    const single = Object.assign(fakeEngine(), {
+      getConfigs: () => ({ ...SCHEMAS, lead_tag: { ...multi, fields: { ...multi.fields, lead: { ...multi.fields.lead, multiple: false } } } }),
+    });
+    expect(transferCascadeRelations(single, 'lead').map((c) => c.object)).toEqual(['lead_task', 'lead_tag']);
+  });
+
+  it('a relationship whose child rows cannot be read is reported as readFailure, and none of its rows is written', async () => {
+    const engine = fakeEngine();
+    const find = engine.find.bind(engine);
+    engine.find = async (object, q) => {
+      if (object === 'lead_task') throw Object.assign(new Error('the child read failed'), { code: 'DRIVER_UNAVAILABLE', status: 503 });
+      return find(object, q);
+    };
+    const result = await changeRecordOwner(engine, 'lead', 'l1', { ownerId: 'u_next' }, CALLER, {
+      cascade: [{ object: 'lead_task', field: 'lead' }],
+    });
+    // The parent's own move stands; the relationship reports its failed read.
+    expect(result.ownerId).toBe('u_next');
+    expect(engine.tables.lead!.find((r) => r.id === 'l1')!.owner_id).toBe('u_next');
+    expect(result.cascade).toHaveLength(1);
+    expect(result.cascade![0]).toMatchObject({ updated: 0, failed: 0, failures: [], remaining: 0 });
+    expect(result.cascade![0]!.readFailure?.code).toBe('DRIVER_UNAVAILABLE');
+    expect(engine.calls.filter((c) => c.op === 'update' && c.object === 'lead_task')).toEqual([]);
+    expect(ownersOf(engine, 'lead_task')).toEqual({ t1: 'u_a', t2: 'u_b', t3: 'u_a', t4: 'u_b' });
+  });
+
+  it('a record that sat in a queue (no previous owner) cascades nothing: a child with no owner stays untouched', async () => {
+    const engine = fakeEngine();
+    engine.tables.lead!.push({ id: 'l4', owner_id: null, queue: 'triage' });
+    engine.tables.lead_task!.push({ id: 't5', lead: 'l4', owner_id: null });
+    const result = await changeRecordOwner(engine, 'lead', 'l4', { ownerId: 'u_next' }, CALLER, {
+      cascade: [{ object: 'lead_task', field: 'lead' }],
+    });
+    expect(result.ownerId).toBe('u_next');
+    expect(result.cascade).toEqual([{ object: 'lead_task', field: 'lead', updated: 0, failed: 0, failures: [], remaining: 0 }]);
+    expect(ownersOf(engine, 'lead_task')).toMatchObject({ t5: null });
+    expect(engine.calls.filter((c) => c.object === 'lead_task')).toEqual([]);
+  });
+
+  it('the bulk form reads each relationship once per previous owner, the moved records that shared one read together', async () => {
+    const engine = fakeEngine();
+    engine.tables.lead_task!.push({ id: 't5', lead: 'l3', owner_id: 'u_a' });
+    const report = await changeRecordsOwner(engine, 'lead', ['l1', 'l2', 'l3'], { ownerId: 'u_next' }, CALLER, {
+      cascade: [{ object: 'lead_task', field: 'lead' }],
+    });
+    expect(report.cascade).toEqual([{ object: 'lead_task', field: 'lead', updated: 4, failed: 0, failures: [], remaining: 0 }]);
+    // l1 and l3 were u_a's: one read for both. l2 was u_b's: one read.
+    expect(engine.calls.filter((c) => c.op === 'find' && c.object === 'lead_task').map((c) => c.where)).toEqual([
+      { lead: { $in: ['l1', 'l3'] }, owner_id: 'u_a' },
+      { lead: 'l2', owner_id: 'u_b' },
+    ]);
+    expect(ownersOf(engine, 'lead_task')).toEqual({ t1: 'u_next', t2: 'u_b', t3: 'u_next', t4: 'u_next', t5: 'u_next' });
+  });
+
+  it('the row cap holds across a grouped read: rows past it are counted in remaining, the refused ones not twice', async () => {
+    const engine = fakeEngine({ refuse: (id) => (id === 't1' ? transferDenied() : undefined) });
+    engine.tables.lead_task!.push({ id: 't5', lead: 'l3', owner_id: 'u_a' });
+    const report = await changeRecordsOwner(engine, 'lead', ['l1', 'l3'], { ownerId: 'u_next' }, CALLER, {
+      cascade: [{ object: 'lead_task', field: 'lead' }],
+      rowCap: 2,
+    });
+    // u_a's rows under l1 and l3: t1 (refused), t3, t5. The cap of 2 tries t1
+    // and t3; t5 is left and counted; t1 is listed as refused, not counted.
+    expect(report.cascade![0]).toMatchObject({ updated: 1, failed: 1, remaining: 1 });
+    expect(report.cascade![0]!.failures.map((f) => f.id)).toEqual(['t1']);
+    expect(ownersOf(engine, 'lead_task')).toMatchObject({ t1: 'u_a', t3: 'u_next', t5: 'u_a' });
+  });
+
   it('a request that names no cascade answers no cascade member and reads no previous owner', async () => {
     const engine = fakeEngine();
     const result = await changeRecordOwner(engine, 'lead', 'l1', { ownerId: 'u_next' }, CALLER);
