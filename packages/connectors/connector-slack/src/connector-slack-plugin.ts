@@ -20,7 +20,21 @@ export interface ConnectorRegistrySurface {
     unregisterConnector(name: string): void;
 }
 
-export interface ConnectorSlackPluginOptions extends SlackConnectorOptions {}
+/**
+ * The plugin's options: the connector's, with the static bot `token` optional.
+ *
+ * The token feeds only the flow `connector_action` connector registered in
+ * start(). The `slack` client service init() registers takes each caller's own
+ * token, so a deployment that only delivers Slack DMs with per-organization
+ * tokens composes the plugin without one — the flow connector is then skipped.
+ */
+export interface ConnectorSlackPluginOptions extends Omit<SlackConnectorOptions, 'token'> {
+    /**
+     * Slack bot token (`xoxb-…`) for the flow connector. Omit it (or pass an
+     * empty string) to register only the `slack` client service.
+     */
+    token?: string;
+}
 
 /**
  * ConnectorSlackPlugin — registers a Slack Web API connector on the automation
@@ -29,7 +43,9 @@ export interface ConnectorSlackPluginOptions extends SlackConnectorOptions {}
  * can dispatch to `slack.chat.postMessage` without the messaging stack.
  *
  * If no automation engine is present the plugin logs and skips — the connector
- * has nowhere to register, which is not an error.
+ * has nowhere to register, which is not an error. Likewise without a static
+ * `token`: the flow connector has no credential, so start() says so once and
+ * registers only the `slack` client service (init()).
  */
 export class ConnectorSlackPlugin implements Plugin {
     name = 'com.objectstack.connector.slack';
@@ -44,7 +60,7 @@ export class ConnectorSlackPlugin implements Plugin {
     private connectorName?: string;
     private automation?: ConnectorRegistrySurface;
 
-    constructor(options: ConnectorSlackPluginOptions) {
+    constructor(options: ConnectorSlackPluginOptions = {}) {
         this.options = options;
     }
 
@@ -57,6 +73,15 @@ export class ConnectorSlackPlugin implements Plugin {
     }
 
     async start(ctx: PluginContext): Promise<void> {
+        const { token, ...shared } = this.options;
+        if (!token) {
+            ctx.logger.info(
+                'ConnectorSlackPlugin: no static bot token — flow Slack connector not registered; '
+                + "the 'slack' client service serves caller-held tokens only",
+            );
+            return;
+        }
+
         let automation: ConnectorRegistrySurface | undefined;
         try {
             automation = ctx.getService<ConnectorRegistrySurface>('automation');
@@ -69,7 +94,7 @@ export class ConnectorSlackPlugin implements Plugin {
             return;
         }
 
-        const { def, handlers } = createSlackConnector(this.options);
+        const { def, handlers } = createSlackConnector({ ...shared, token });
         automation.registerConnector(def, handlers);
         this.automation = automation;
         this.connectorName = def.name;
