@@ -99,27 +99,60 @@ export const STORED_MEDIA_CONTENT_SECURITY_POLICY =
 
 type Signature = (head: Uint8Array) => boolean;
 
-/** Whether `head` carries `expected` (ASCII text or byte values) at offset `at`. */
-function carries(head: Uint8Array, at: number, expected: string | readonly number[]): boolean {
-  const want = typeof expected === 'string' ? [...expected].map((c) => c.charCodeAt(0)) : expected;
-  return head.length >= at + want.length && want.every((byte, i) => head[at + i] === byte);
+/**
+ * The most bytes any signature test is handed: the WHATWG MIME Sniffing
+ * standard's resource header, which the plain-text test reads in full. The
+ * body is cut to it before any test runs, so no entry reads past it.
+ */
+export const LEADING_WINDOW = 1445;
+
+/** A byte sequence, spelled once when the table is built: ASCII text or byte values. */
+const seq = (expected: string | readonly number[]): Uint8Array =>
+  typeof expected === 'string' ? Uint8Array.from(expected, (c) => c.charCodeAt(0)) : Uint8Array.from(expected);
+
+/** Whether `head` carries `want` at offset `at`. */
+function carries(head: Uint8Array, at: number, want: Uint8Array): boolean {
+  if (head.length < at + want.length) return false;
+  for (let i = 0; i < want.length; i++) if (head[at + i] !== want[i]) return false;
+  return true;
 }
 
 const oneOf = (...tests: Signature[]): Signature => (head) => tests.some((test) => test(head));
-const at = (offset: number, expected: string | readonly number[]): Signature => (head) => carries(head, offset, expected);
+const at = (offset: number, expected: string | readonly number[]): Signature => {
+  const want = seq(expected);
+  return (head) => carries(head, offset, want);
+};
 
-const RIFF = (form: string): Signature => (head) => carries(head, 0, 'RIFF') && carries(head, 8, form);
+const RIFF = (form: string): Signature => {
+  const riff = at(0, 'RIFF');
+  const body = at(8, form);
+  return (head) => riff(head) && body(head);
+};
 const OGG = at(0, 'OggS');
 const EBML = at(0, [0x1a, 0x45, 0xdf, 0xa3]);
 const ID3 = at(0, 'ID3');
 /** An ISO base media file: a leading `ftyp` box. */
 const FTYP = at(4, 'ftyp');
-/** A leading `ftyp` box whose major or compatible brands name one of `brands`. */
-const ftypBrand = (...brands: string[]): Signature => (head) => {
-  if (!FTYP(head)) return false;
-  const end = Math.min(((head[0] << 24) | (head[1] << 16) | (head[2] << 8) | head[3]) >>> 0, head.length);
-  for (let i = 8; i + 4 <= end; i += 4) if (i !== 12 && brands.some((brand) => carries(head, i, brand))) return true;
-  return false;
+/**
+ * Where a brand scan stops: the box's end, the head's end, or the major
+ * brand, the minor version and 31 compatible brands, whichever comes first.
+ */
+const FTYP_SCAN_END = 8 + 4 * 32;
+/**
+ * A leading `ftyp` box, at least 16 bytes long by its own size field, whose
+ * major or compatible brands name one of `brands`; the minor-version slot is
+ * not a brand. Only brands inside {@link FTYP_SCAN_END} count.
+ */
+const ftypBrand = (...brands: string[]): Signature => {
+  const wanted = brands.map(seq);
+  return (head) => {
+    if (!FTYP(head)) return false;
+    const size = ((head[0] << 24) | (head[1] << 16) | (head[2] << 8) | head[3]) >>> 0;
+    if (size < 16) return false;
+    const end = Math.min(size, head.length, FTYP_SCAN_END);
+    for (let i = 8; i + 4 <= end; i += 4) if (i !== 12 && wanted.some((brand) => carries(head, i, brand))) return true;
+    return false;
+  };
 };
 /** An MPEG audio frame header: an 11-bit sync, a defined version and a defined layer. */
 const MPEG_FRAME: Signature = (head) =>
@@ -127,16 +160,16 @@ const MPEG_FRAME: Signature = (head) =>
 /** An ADTS frame header: a 12-bit sync and layer `00`. */
 const ADTS_FRAME: Signature = (head) => head.length >= 2 && head[0] === 0xff && (head[1] & 0xf6) === 0xf0;
 
-/** The window the text test reads, and the bytes text never carries: the WHATWG MIME Sniffing standard's resource header and binary data bytes. */
-const TEXT_WINDOW = 1445;
+/** The bytes text never carries: the WHATWG MIME Sniffing standard's binary data bytes. */
 const isBinaryDataByte = (b: number) => b <= 0x08 || b === 0x0b || (b >= 0x0e && b <= 0x1a) || (b >= 0x1c && b <= 0x1f);
-/** Plain text has no signature; its test is the standard text-or-binary one: a byte-order mark, or no binary data byte in the window. */
+const BYTE_ORDER_MARK = oneOf(at(0, [0xef, 0xbb, 0xbf]), at(0, [0xfe, 0xff]), at(0, [0xff, 0xfe]));
+/**
+ * Plain text has no signature; its test is the standard text-or-binary one
+ * over the first {@link LEADING_WINDOW} bytes: a byte-order mark, or no binary
+ * data byte.
+ */
 const TEXT: Signature = (head) =>
-  head.length > 0 &&
-  (carries(head, 0, [0xef, 0xbb, 0xbf]) ||
-    carries(head, 0, [0xfe, 0xff]) ||
-    carries(head, 0, [0xff, 0xfe]) ||
-    !head.subarray(0, TEXT_WINDOW).some(isBinaryDataByte));
+  head.length > 0 && (BYTE_ORDER_MARK(head) || !head.subarray(0, LEADING_WINDOW).some(isBinaryDataByte));
 
 /**
  * The leading-signature test for every allow-listed type (rule 4), keyed by
@@ -167,9 +200,9 @@ export const LEADING_SIGNATURES: ReadonlyMap<string, Signature> = new Map<string
   ['video/quicktime', oneOf(FTYP, ...['moov', 'mdat', 'wide', 'free', 'skip'].map((atom) => at(4, atom)))],
 ]);
 
-/** Whether the bytes begin with the leading signature of their served type (rule 4); false for a type with no entry. */
+/** Whether the bytes begin with the leading signature of their served type (rule 4), judged on their first {@link LEADING_WINDOW} bytes; false for a type with no entry. */
 export function bytesBeginWithTheirTypeSignature(declared: string | null | undefined, bytes: Uint8Array): boolean {
-  return LEADING_SIGNATURES.get(servedContentType(declared).split(';')[0])?.(bytes) ?? false;
+  return LEADING_SIGNATURES.get(servedContentType(declared).split(';')[0])?.(bytes.subarray(0, LEADING_WINDOW)) ?? false;
 }
 
 /** The type answered for bytes whose declared type is missing or is not a media type. */

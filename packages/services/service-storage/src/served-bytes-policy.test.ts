@@ -19,6 +19,7 @@ import type { IHttpRequest, IHttpResponse, RouteHandler } from '@objectstack/spe
 import {
   INLINE_CONTENT_TYPES,
   LEADING_SIGNATURES,
+  LEADING_WINDOW,
   STORED_BYTES_CONTENT_SECURITY_POLICY,
   STORED_MEDIA_CONTENT_SECURITY_POLICY,
   bytesBeginWithTheirTypeSignature,
@@ -185,6 +186,65 @@ describe('an allow-listed type is previewed in place only when the bytes begin w
     expect(bytesBeginWithTheirTypeSignature('text/plain', hex('fffe 6800 6900'))).toBe(true);
     expect(bytesBeginWithTheirTypeSignature('text/plain', hex('68 69 00 21'))).toBe(false);
     expect(bytesBeginWithTheirTypeSignature('text/plain', Buffer.concat([Buffer.alloc(1445, 0x61), hex('00')]))).toBe(true);
+  });
+
+  it('every alternate a type accepts is pinned with one head it accepts and one it refuses', () => {
+    const ftyp = (size: string, ...brands: string[]) => Buffer.concat([hex(size), Buffer.from('ftyp'), ...brands.map((b) => Buffer.from(b))]);
+    const atom = (name: string) => Buffer.concat([hex('00000014'), Buffer.from(name), hex('0000000000000000')]);
+    const cases: [type: string, accepted: Buffer, refused: Buffer][] = [
+      ['audio/mpeg', hex('fffb9064'), hex('fff09064')],
+      ['audio/mpeg', hex('fffb9064'), hex('ffea9064')],
+      ['audio/aac', hex('fff15080'), hex('fff35080')],
+      ['audio/aac', Buffer.from('ADIF\x00', 'latin1'), Buffer.from('ADIX\x00', 'latin1')],
+      ['audio/aac', Buffer.from('ID3\x03\x00', 'latin1'), Buffer.from('ID4\x03\x00', 'latin1')],
+      ['image/gif', Buffer.from('GIF87a\x01\x00', 'latin1'), Buffer.from('GIF88a\x01\x00', 'latin1')],
+      ...['moov', 'mdat', 'wide', 'free', 'skip'].map((name) => ['video/quicktime', atom(name), atom(name.slice(0, 3) + 'x')] as [string, Buffer, Buffer]),
+      ['image/avif', ftyp('00000018', 'mif1', '\x00\x00\x00\x00', 'avif'), ftyp('00000018', 'mif1', '\x00\x00\x00\x00', 'miaf')],
+      ['image/avif', ftyp('00000018', 'avis', '\x00\x00\x00\x00', 'msf1'), ftyp('00000018', 'mif1', 'avif', 'miaf')],
+      ['image/avif', ftyp('00000010', 'avif', '\x00\x00\x00\x00'), ftyp('0000000c', 'avif', '\x00\x00\x00\x00')],
+      ['text/plain', hex('efbbbf 00'), hex('68 00')],
+      ['text/plain', hex('feff 0068'), hex('0068')],
+      ['text/plain', hex('fffe 6800'), hex('fe 6800')],
+    ];
+    for (const [type, accepted, refused] of cases) {
+      expect(bytesBeginWithTheirTypeSignature(type, accepted), `${type} accepts ${accepted.toString('hex')}`).toBe(true);
+      expect(bytesBeginWithTheirTypeSignature(type, refused), `${type} refuses ${refused.toString('hex')}`).toBe(false);
+    }
+  });
+
+  it('an ftyp brand counts only inside the fixed scan window, whatever size the box states', () => {
+    const padded = (brandAt: number) => {
+      const head = Buffer.alloc(brandAt + 4);
+      head.writeUInt32BE(0xffffffff, 0);
+      head.write('ftypmif1', 4, 'latin1');
+      for (let i = 16; i < brandAt; i += 4) head.write('miaf', i, 'latin1');
+      head.write('avif', brandAt, 'latin1');
+      return head;
+    };
+    expect(bytesBeginWithTheirTypeSignature('image/avif', padded(132))).toBe(true);
+    expect(bytesBeginWithTheirTypeSignature('image/avif', padded(136))).toBe(false);
+  });
+
+  it('a body is judged on its first LEADING_WINDOW bytes, whatever its length', () => {
+    const body = Buffer.alloc(1 << 20, 0x61);
+    body.writeUInt32BE(0xffffffff, 0);
+    body.write('ftypmif1', 4, 'latin1');
+    body.write('avif', body.length - 4, 'latin1');
+    expect(bytesBeginWithTheirTypeSignature('image/avif', body)).toBe(false);
+
+    const handed: number[] = [];
+    const get = Map.prototype.get;
+    const spy = vi.spyOn(LEADING_SIGNATURES as Map<string, (head: Uint8Array) => boolean>, 'get').mockImplementation(function (this: Map<string, (head: Uint8Array) => boolean>, key: string) {
+      const test = get.call(LEADING_SIGNATURES, key) as ((head: Uint8Array) => boolean) | undefined;
+      return test && ((head: Uint8Array) => (handed.push(head.length), test(head)));
+    });
+    try {
+      for (const type of INLINE_CONTENT_TYPES) bytesBeginWithTheirTypeSignature(type, body);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(handed).toHaveLength(INLINE_CONTENT_TYPES.size);
+    expect(Math.max(...handed)).toBe(LEADING_WINDOW);
   });
 
   it('a type off the allow-list matches no signature', () => {
