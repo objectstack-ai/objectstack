@@ -3737,8 +3737,8 @@ const ru = {
     resize: 'Изменить ширину боковой панели',
   },
   designMode: {
-    title: 'Режим дизайна',
-    leaveUnsaved: 'Выйти из режима дизайна? Несохранённые изменения будут потеряны.',
+    title: 'Дизайн макета',
+    leaveUnsaved: 'Выйти из дизайна макета? Несохранённые изменения будут потеряны.',
     saveFailed: 'Некоторые изменения не сохранены: {{reason}}',
     menu: {
       title: 'Меню',
@@ -3781,7 +3781,7 @@ const ru = {
       newDashboard: 'Новая панель…',
       newDashboardTitle: 'Новая панель',
       newReport: 'Новый отчёт…',
-      newItemSavesAll: 'При создании сохраняются и другие изменения режима дизайна, затем панель открывается для редактирования.',
+      newItemSavesAll: 'При создании сохраняются и другие изменения дизайна макета, затем панель открывается для редактирования.',
       create: 'Создать',
       creating: 'Создание…',
       newItemPendingDraft: 'Под этим именем уже есть неопубликованный черновик. Повторите попытку.',
@@ -3850,8 +3850,10 @@ const ru = {
     },
     aiAssistant: "ИИ-ассистент",
     designInStudio: "Дизайн в Studio",
+    designLayout: "Дизайн макета",
     editApp: "Редактировать приложение",
     openAppInStudio: "Открыть {{app}} в Studio",
+    viewInStudio: "Открыть в Studio",
   },
   home: {
     build: {
@@ -4093,7 +4095,7 @@ const ru = {
     appOpensFromMenuDescription: "У этого приложения нет собственной страницы. Выберите пункт в его меню, чтобы открыть ссылку или выполнить действие.",
     // objectstack#36748 — an app whose stored menu is empty, for a caller who can fill it.
     appMenuEmpty: "Меню {{app}} пока пустое",
-    appMenuEmptyDescription: "Создайте объекты для этого приложения в Studio — они появятся в меню. Пункты можно добавить и в режиме дизайна.",
+    appMenuEmptyDescription: "Создайте объекты для этого приложения в Studio — они появятся в меню. Пункты можно добавить и в «Дизайне макета».",
     openInStudio: "Открыть в Studio",
     openSetup: "Открыть настройку",
     createFirstApp: "Создать приложение",

@@ -1839,7 +1839,7 @@ const zhHant = {
       settings: '報表設定',
       pendingDraft: '這張報表有一份還沒釋出的修改。先在上方釋出或丟棄它，再儲存。',
       nameTaken: '由這個名稱生成的標識都已被佔用。請給報表換個名稱再儲存。',
-      addsToMenu: '儲存後會建好這張報表，放進選單裡你佔好的位置，並一併儲存設計模式裡的其他改動。',
+      addsToMenu: '儲存後會建好這張報表，放進選單裡你佔好的位置，並一併儲存設計佈局裡的其他改動。',
       adminOnlyTitle: '只有系統管理員能搭建報表',
       adminOnly: '報表對工作區裡所有人生效，所以由系統管理員搭建。',
       type: {
@@ -3711,8 +3711,8 @@ const zhHant = {
     resize: '調整側邊欄寬度',
   },
   designMode: {
-    title: '設計模式',
-    leaveUnsaved: '離開設計模式？未儲存的改動將會丟失。',
+    title: '設計佈局',
+    leaveUnsaved: '離開設計佈局？未儲存的改動將會丟失。',
     saveFailed: '部分改動沒有儲存：{{reason}}',
     menu: {
       title: '選單',
@@ -3755,7 +3755,7 @@ const zhHant = {
       newDashboard: '新建儀表盤…',
       newDashboardTitle: '新建儀表盤',
       newReport: '新建報表…',
-      newItemSavesAll: '建立時會一併儲存設計模式裡的其他改動，然後開啟它進行編輯。',
+      newItemSavesAll: '建立時會一併儲存設計佈局裡的其他改動，然後開啟它進行編輯。',
       create: '建立',
       creating: '正在建立…',
       newItemPendingDraft: '這個名稱下已有一份未釋出的草稿，請再試一次。',
@@ -3809,8 +3809,10 @@ const zhHant = {
   topbar: {
     aiAssistant: 'AI 助手',
     designInStudio: '在 Studio 中設計',
+    designLayout: '設計佈局',
     editApp: '編輯應用',
     openAppInStudio: '在 Studio 中檢視 {{app}}',
+    viewInStudio: '在 Studio 中檢視',
     openAssistant: '開啟{{name}}助手',
     offline: '離線',
     usersOnline: '當前線上使用者',
@@ -4064,7 +4066,7 @@ const zhHant = {
     appOpensFromMenuDescription: '此應用沒有自己的頁面。請在選單中選擇一個條目，開啟連結或執行操作。',
     // objectstack#36748 — an app whose stored menu is empty, for a caller who can fill it.
     appMenuEmpty: "{{app}} 的選單還是空的",
-    appMenuEmptyDescription: "在 Studio 裡為這個應用新建物件，它們會自動加入選單；也可以在設計模式裡新增。",
+    appMenuEmptyDescription: "在 Studio 裡為這個應用新建物件，它們會自動加入選單；也可以在設計佈局裡新增。",
     openInStudio: "在 Studio 中開啟",
     openSetup: '開啟 Setup',
     createFirstApp: '建立您的第一個應用',

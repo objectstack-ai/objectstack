@@ -1839,7 +1839,7 @@ const zh = {
       settings: '报表设置',
       pendingDraft: '这张报表有一份还没发布的修改。先在上方发布或丢弃它，再保存。',
       nameTaken: '由这个名称生成的标识都已被占用。请给报表换个名称再保存。',
-      addsToMenu: '保存后会建好这张报表，放进菜单里你占好的位置，并一并保存设计模式里的其他改动。',
+      addsToMenu: '保存后会建好这张报表，放进菜单里你占好的位置，并一并保存设计布局里的其他改动。',
       adminOnlyTitle: '只有系统管理员能搭建报表',
       adminOnly: '报表对工作区里所有人生效，所以由系统管理员搭建。',
       type: {
@@ -3711,8 +3711,8 @@ const zh = {
     resize: '调整侧边栏宽度',
   },
   designMode: {
-    title: '设计模式',
-    leaveUnsaved: '离开设计模式？未保存的改动将会丢失。',
+    title: '设计布局',
+    leaveUnsaved: '离开设计布局？未保存的改动将会丢失。',
     saveFailed: '部分改动没有保存：{{reason}}',
     menu: {
       title: '菜单',
@@ -3755,7 +3755,7 @@ const zh = {
       newDashboard: '新建仪表盘…',
       newDashboardTitle: '新建仪表盘',
       newReport: '新建报表…',
-      newItemSavesAll: '创建时会一并保存设计模式里的其他改动，然后打开它进行编辑。',
+      newItemSavesAll: '创建时会一并保存设计布局里的其他改动，然后打开它进行编辑。',
       create: '创建',
       creating: '正在创建…',
       newItemPendingDraft: '这个名称下已有一份未发布的草稿，请再试一次。',
@@ -3809,8 +3809,10 @@ const zh = {
   topbar: {
     aiAssistant: 'AI 助手',
     designInStudio: '在 Studio 中设计',
+    designLayout: '设计布局',
     editApp: '编辑应用',
     openAppInStudio: '在 Studio 中查看 {{app}}',
+    viewInStudio: '在 Studio 中查看',
     openAssistant: '打开{{name}}助手',
     offline: '离线',
     usersOnline: '当前在线用户',
@@ -4064,7 +4066,7 @@ const zh = {
     appOpensFromMenuDescription: '此应用没有自己的页面。请在菜单中选择一个条目，打开链接或执行操作。',
     // objectstack#36748 — an app whose stored menu is empty, for a caller who can fill it.
     appMenuEmpty: "{{app}} 的菜单还是空的",
-    appMenuEmptyDescription: "在 Studio 里为这个应用新建对象，它们会自动加入菜单；也可以在设计模式里添加。",
+    appMenuEmptyDescription: "在 Studio 里为这个应用新建对象，它们会自动加入菜单；也可以在设计布局里添加。",
     openInStudio: "在 Studio 中打开",
     openSetup: '打开 Setup',
     createFirstApp: '创建您的第一个应用',

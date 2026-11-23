@@ -3568,8 +3568,8 @@ const ko = {
     resize: '사이드바 너비 조정',
   },
   designMode: {
-    title: '디자인 모드',
-    leaveUnsaved: '디자인 모드를 종료할까요? 저장하지 않은 변경 사항은 사라집니다.',
+    title: '레이아웃 디자인',
+    leaveUnsaved: '레이아웃 디자인을 종료할까요? 저장하지 않은 변경 사항은 사라집니다.',
     saveFailed: '일부 변경 사항이 저장되지 않았습니다: {{reason}}',
     menu: {
       title: '메뉴',
@@ -3612,7 +3612,7 @@ const ko = {
       newDashboard: '새 대시보드…',
       newDashboardTitle: '새 대시보드',
       newReport: '새 보고서…',
-      newItemSavesAll: '만들면 디자인 모드의 다른 변경 사항도 함께 저장되고 편집할 수 있게 열립니다.',
+      newItemSavesAll: '만들면 레이아웃 디자인의 다른 변경 사항도 함께 저장되고 편집할 수 있게 열립니다.',
       create: '만들기',
       creating: '만드는 중…',
       newItemPendingDraft: '이 이름으로 게시되지 않은 초안이 이미 있습니다. 다시 시도하세요.',
@@ -3681,8 +3681,10 @@ const ko = {
     },
     aiAssistant: "AI 어시스턴트",
     designInStudio: "Studio에서 디자인",
+    designLayout: "레이아웃 디자인",
     editApp: "앱 편집",
     openAppInStudio: "Studio에서 {{app}} 보기",
+    viewInStudio: "Studio에서 보기",
   },
   home: {
     build: {
@@ -3911,7 +3913,7 @@ const ko = {
     appOpensFromMenuDescription: "이 앱에는 자체 페이지가 없습니다. 메뉴에서 항목을 선택해 링크를 열거나 작업을 실행하세요.",
     // objectstack#36748 — an app whose stored menu is empty, for a caller who can fill it.
     appMenuEmpty: "{{app}} 메뉴가 아직 비어 있습니다",
-    appMenuEmptyDescription: "Studio에서 이 앱의 개체를 만들면 메뉴에 자동으로 추가됩니다. 디자인 모드에서 추가할 수도 있습니다.",
+    appMenuEmptyDescription: "Studio에서 이 앱의 개체를 만들면 메뉴에 자동으로 추가됩니다. 레이아웃 디자인에서 추가할 수도 있습니다.",
     openInStudio: "Studio에서 열기",
     openSetup: "설정 열기",
     createFirstApp: "첫 번째 앱 만들기",

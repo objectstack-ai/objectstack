@@ -3575,7 +3575,10 @@ export function InterfacesPillar({
   const listViewAsked = customizing && listViewTargetId !== null;
   const listViewServed = useServedOverride(
     client,
-    listViewAsked && listViewTargetId ? { type: 'view', name: listViewTargetId } : null,
+    // objectstack#36750 — the fallback default view has no published layer to ask.
+    listViewAsked && listViewTargetId
+      ? { type: 'view', name: listViewTargetId, ...(listView.targetIsFallback ? { unpublished: true } : {}) }
+      : null,
     customizeBase,
     customizePair,
     `${servedKey}:${listViewRestoreNonce}`,
@@ -9951,6 +9954,8 @@ export function AutomationsPillar({
             // Canvas tab's description and title), so the row still reads it
             // whole as objectui#11665 pins. Without designers the line says
             // so, and yields to the label on a narrow row as it did.
+            // objectstack#36745 — the meta wrapper is a block-level flex, so
+            // the give-way row inside it reads the slot's whole width.
             meta={
               isEditable ? (
                 <>
@@ -9958,7 +9963,7 @@ export function AutomationsPillar({
                     {t('engine.studio.auto.canvasHint', locale)}
                   </span>
                   {flowOpen && headerRunStatus && (
-                    <span data-testid="auto-flow-meta" className="inline-flex min-w-0">
+                    <span data-testid="auto-flow-meta" className="flex min-w-0">
                       <FlowMetaPills draft={draft} runStatus={headerRunStatus} locale={locale} variant="header" />
                     </span>
                   )}

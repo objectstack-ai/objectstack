@@ -93,6 +93,8 @@ function wire() {
   });
 }
 let client: MetadataClient;
+/** objectstack#36448 — the principal's `manage_metadata` answer, set per case. */
+const viewer = vi.hoisted(() => ({ canAuthorMetadata: true }));
 
 vi.mock('./metadata-admin/useMetadata', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -110,10 +112,14 @@ vi.mock('@object-ui/permissions', async (importOriginal) => {
     useFieldPermissions: () => ({ canRead: () => true, canWrite: () => true, permissions: [] }),
   };
 });
+vi.mock('../hooks/useCanAuthorMetadata', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  useCanAuthorMetadata: () => viewer.canAuthorMetadata,
+}));
 vi.mock('@object-ui/auth', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useAuth: () => ({ user: { id: 'u1', name: 'Ada' }, activeOrganization: null }),
-  // "Save as view" and its dialog are admin-only.
+  // "Save as view" and its dialog are for an admin holding `manage_metadata`.
   useWorkspaceAdminStatus: () => ({ isAdmin: true, isResolved: true }),
   createAuthenticatedFetch: () => vi.fn(),
 }));
@@ -177,6 +183,7 @@ async function saveAsView() {
 beforeEach(() => {
   cleanup();
   puts.length = 0;
+  viewer.canAuthorMetadata = true;
   client = new MetadataClient({ baseUrl: 'http://localhost', fetch: wire() as unknown as typeof fetch });
   vi.spyOn(console, 'error').mockImplementation(() => {});
   // objectstack#35624 — the create asks the package list where the app saves
@@ -219,5 +226,33 @@ describe('"Save as view" says a refused save, and never reports it as saved (obj
     await waitFor(() => expect(where()).toBe('/apps/demo/crm_deal/view/crm_deal.pipeline_board?preview=draft'));
     expect(toast.error).not.toHaveBeenCalled();
     expect(screen.queryByTestId('create-view-dialog')).toBeNull();
+  });
+});
+
+describe('objectstack#36448 — "Save as view" is offered to an administrator holding manage_metadata', () => {
+  const mount = () => render(
+    <ExpressionProvider user={{ id: 'u1', name: 'Ada' }}>
+      <MemoryRouter initialEntries={[PAGE]}>
+        <Routes>
+          <Route
+            path="/apps/:appName/:objectName/data"
+            element={<ObjectDataPage dataSource={{ find: vi.fn(async () => ({ data: [] })) }} objects={[DEAL]} />}
+          />
+        </Routes>
+      </MemoryRouter>
+    </ExpressionProvider>,
+  );
+
+  it('an organization administrator without it is not offered the save the server refuses', () => {
+    viewer.canAuthorMetadata = false;
+    mount();
+    expect(screen.queryByTestId('object-data-save-as-view')).toBeNull();
+    expect(screen.queryByTestId('object-data-save-as-view-menu-item')).toBeNull();
+    expect(screen.queryByTestId('create-view-dialog')).toBeNull();
+  });
+
+  it('with it, the entry is offered (control)', () => {
+    mount();
+    expect(screen.getByTestId('object-data-save-as-view')).toBeTruthy();
   });
 });

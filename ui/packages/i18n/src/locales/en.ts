@@ -4317,8 +4317,8 @@ const en = {
     resize: 'Resize sidebar',
   },
   designMode: {
-    title: 'Design mode',
-    leaveUnsaved: 'Leave design mode? Your unsaved changes will be lost.',
+    title: 'Design layout',
+    leaveUnsaved: 'Leave Design layout? Your unsaved changes will be lost.',
     saveFailed: 'Some changes were not saved: {{reason}}',
     menu: {
       title: 'Menu',
@@ -4415,8 +4415,10 @@ const en = {
   topbar: {
     aiAssistant: 'AI Assistant',
     designInStudio: 'Design in Studio',
+    designLayout: 'Design layout',
     editApp: 'Edit app',
     openAppInStudio: 'Open {{app}} in Studio',
+    viewInStudio: 'View in Studio',
     openAssistant: 'Open {{name}} assistant',
     offline: 'Offline',
     usersOnline: 'Users currently online',
@@ -4689,7 +4691,7 @@ const en = {
     appOpensFromMenuDescription: 'This app has no page of its own. Choose an entry in its menu to open a link or run an action.',
     // objectstack#36748 — an app whose stored menu is empty, for a caller who can fill it.
     appMenuEmpty: "{{app}} has nothing in its menu yet",
-    appMenuEmptyDescription: "Create objects for this app in Studio and they join its menu, or add entries in design mode.",
+    appMenuEmptyDescription: "Create objects for this app in Studio and they join its menu, or add entries in Design layout.",
     openInStudio: "Open in Studio",
     openSetup: 'Open Setup',
     createFirstApp: 'Create Your First App',

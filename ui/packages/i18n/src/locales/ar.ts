@@ -3891,8 +3891,8 @@ const ar = {
     resize: 'تغيير حجم الشريط الجانبي',
   },
   designMode: {
-    title: 'وضع التصميم',
-    leaveUnsaved: 'هل تريد مغادرة وضع التصميم؟ ستفقد التغييرات غير المحفوظة.',
+    title: 'تصميم التخطيط',
+    leaveUnsaved: 'هل تريد مغادرة تصميم التخطيط؟ ستفقد التغييرات غير المحفوظة.',
     saveFailed: 'لم يتم حفظ بعض التغييرات: {{reason}}',
     menu: {
       title: 'القائمة',
@@ -4004,8 +4004,10 @@ const ar = {
     },
     aiAssistant: "مساعد الذكاء الاصطناعي",
     designInStudio: "التصميم في Studio",
+    designLayout: "تصميم التخطيط",
     editApp: "تعديل التطبيق",
     openAppInStudio: "عرض {{app}} في Studio",
+    viewInStudio: "عرض في Studio",
   },
   home: {
     build: {
@@ -4254,7 +4256,7 @@ const ar = {
     appOpensFromMenuDescription: "لا يحتوي هذا التطبيق على صفحة خاصة به. اختر عنصرًا من قائمته لفتح رابط أو تنفيذ إجراء.",
     // objectstack#36748 — an app whose stored menu is empty, for a caller who can fill it.
     appMenuEmpty: "قائمة {{app}} فارغة حتى الآن",
-    appMenuEmptyDescription: "أنشئ كائنات لهذا التطبيق في Studio وستنضم إلى قائمته، أو أضف عناصر في وضع التصميم.",
+    appMenuEmptyDescription: "أنشئ كائنات لهذا التطبيق في Studio وستنضم إلى قائمته، أو أضف عناصر في «تصميم التخطيط».",
     openInStudio: "فتح في Studio",
     openSetup: "فتح الإعداد",
     createFirstApp: "إنشاء أول تطبيق",
