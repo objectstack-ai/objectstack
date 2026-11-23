@@ -95,6 +95,7 @@ import {
   analyzeRelationshipTraversals,
   buildScope,
   declaresOptionsOnceServed,
+  findHopListEquality,
 } from '@objectstack/formula';
 import type { ExprFaultOutcome, RelationshipTraversalAnalysis } from '@objectstack/formula';
 import {
@@ -2808,6 +2809,40 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     }
   };
 
+  /**
+   * [#36237] The `list-equality` refusal one hop away: `==` / `!=` between a
+   * read of a list-valued field on a hop target (`record.account.labels`) and
+   * a scalar, at the same two sites that serve a hop as
+   * {@link refuseUndeclaredHopField}. The hop loader hydrates the related
+   * row, so the read is the stored list and the comparison answers one
+   * constant on every row — the root case's defect, which the shared
+   * validator cannot see here because its hint carries the root object's
+   * fields only. Its words and code are the root case's
+   * (`findHopListEquality`).
+   *
+   * The reference and its target are read as {@link refuseUndeclaredHopField}
+   * reads them (the objects as served); a reference that is itself
+   * multi-valued, and a target outside the index or in the stored-metadata
+   * family, are not judged.
+   */
+  const refuseHopListEquality = (where: string, raw: unknown, objectName: string): void => {
+    const source = celSourceOf(raw);
+    if (!source) return;
+    const listLeaves = new Map<string, ReadonlySet<string>>();
+    const ownLists = multiValueFieldIndex.get(objectName) ?? [];
+    for (const obj of typedObjects) {
+      if (obj.name !== objectName) continue;
+      for (const [field, def] of fieldEntries(obj)) {
+        const target = ownLists.includes(field) ? undefined : referenceTargetOf(def)?.trim();
+        const leaves = target && !isStoredMetadataBodyObject(target) ? multiValueFieldIndex.get(target) : undefined;
+        if (leaves && leaves.length > 0) listLeaves.set(field, new Set(leaves));
+      }
+    }
+    for (const e of findHopListEquality(source, listLeaves)) {
+      issues.push({ where, message: e.message, source: e.source, severity: 'error' });
+    }
+  };
+
   // [#8116] object name → the injected anchors registered with NO storage
   // behind them (non-empty only for ADR-0015 `external` objects). The other
   // half of {@link buildFieldIndex}'s #5378 widening: the anchors ARE
@@ -3050,6 +3085,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     }
     if (objectName && traversalHydration) refuseStoredMetadataBodyHop(where, raw, objectName, 'rule');
     if (objectName && traversalHydration) refuseUndeclaredHopField(where, raw, objectName, 'rule');
+    if (objectName && traversalHydration) refuseHopListEquality(where, raw, objectName);
     // [#8116] Provenance rides every object-bound predicate this helper
     // validates, whichever scope: the `record`/`previous` roots are explicit
     // in the source, so flattened flow conditions are covered without ever
@@ -3943,6 +3979,8 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
       if (objectName) refuseStoredMetadataBodyHop(fieldWhere, f.expression, objectName, 'formula');
       // [#24410] And a hop to a field the target does not declare.
       if (objectName) refuseUndeclaredHopField(fieldWhere, f.expression, objectName, 'formula');
+      // [#36237] And a list-valued hop target field compared with a scalar.
+      if (objectName) refuseHopListEquality(fieldWhere, f.expression, objectName);
       // [#8116] Formulas read the same record binding the predicates do, so
       // a `record.<anchor>` read inside one degrades identically.
       warnUnprovisionedAnchors(fieldWhere, f.expression, objectName);
