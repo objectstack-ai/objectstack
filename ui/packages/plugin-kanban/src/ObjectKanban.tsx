@@ -41,7 +41,6 @@ import {
 import {
   extractRecords,
   buildExpandFields,
-  isExpandableFieldType,
   convertSortToQueryParams,
   getRecordDisplayName,
   isEmptyValue,
@@ -1133,20 +1132,16 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
   const ownerPersonObject = typeof ownerReference === 'string' && ownerReference ? ownerReference : 'sys_user';
 
   /**
-   * objectstack#36430 — a lane field that is a reference (lookup, user,
-   * master-detail, tree): the object it points at, read so each lane is titled
-   * by that object's declared name field (`referencedRecordTitle`), and the
-   * field's own `displayField`. A user field names no object: it is a person.
+   * objectstack#36430 — a lane field that names the object it references
+   * (`reference`): that object, read so each lane is titled by its declared
+   * name field (`referencedRecordTitle`), and the field's own `displayField`.
+   * A field that names none (a person field left on its default) is titled
+   * off the expanded record alone. No read when the lane field names no object.
    */
   const laneFieldDef = schema.groupBy ? objectDef?.fields?.[schema.groupBy] : undefined;
-  const laneFieldIsReference = isExpandableFieldType(laneFieldDef);
-  const laneTargetObject = !laneFieldIsReference
-    ? ''
-    : typeof laneFieldDef?.reference === 'string' && laneFieldDef.reference
-      ? laneFieldDef.reference
-      : laneFieldDef?.type === 'user' ? 'sys_user' : '';
+  const laneTargetObject = typeof laneFieldDef?.reference === 'string' ? laneFieldDef.reference : '';
   const laneDisplayField =
-    laneFieldIsReference && typeof laneFieldDef?.displayField === 'string' && laneFieldDef.displayField
+    laneTargetObject && typeof laneFieldDef?.displayField === 'string' && laneFieldDef.displayField
       ? (laneFieldDef.displayField as string)
       : undefined;
   const { def: laneTargetDef } = useSettledSchema<any>(laneTargetObject, dataSource);
