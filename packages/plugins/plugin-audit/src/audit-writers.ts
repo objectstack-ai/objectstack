@@ -32,7 +32,7 @@ import { omitSideCopyFromCopy } from './side-copy-columns.js';
 // `nameField` — the same argument the SECRET_MASK import above makes.
 // [#22738] `canServeApiOperation` is the spec's one exposure decision (ADR-0049),
 // asked of a referenced object before its title is read into a summary.
-import { canServeApiOperation, referenceTargetOf, resolveDisplayField } from '@objectstack/spec/data';
+import { canServeApiOperation, resolveFieldHistory, referenceTargetOf, resolveDisplayField } from '@objectstack/spec/data';
 // [#22510] The acting user's object, named by the registry constant rather
 // than a literal — `sys_activity.actor_name` is resolved from its title.
 import { SystemObjectName } from '@objectstack/spec/system';
@@ -1103,17 +1103,6 @@ function renderTrackedChangeSummary(
 type ChangeValuesShown = (key: string, field: any) => boolean;
 
 /**
- * [#36290] The field types whose value has no one-line text — media, embedded
- * structured values, vectors, a signature. Their change is named by label
- * only, unless the field itself turns them on (`fieldHistory: true`, or the
- * `trackHistory: true` opt-in it always was).
- */
-const NO_LINE_VALUE_TYPES: ReadonlySet<string> = new Set([
-  'image', 'file', 'avatar', 'video', 'audio', 'signature',
-  'composite', 'repeater', 'record', 'location', 'address', 'code', 'json', 'vector',
-]);
-
-/**
  * [#36290, ruling 7076513167] ADR-0052 §5b.1 with its default reversed: a
  * changed field's old → new values render on the record's activity stream
  * unless the object turns it off (`enable.fieldHistory: false`) or the field
@@ -1123,25 +1112,19 @@ const NO_LINE_VALUE_TYPES: ReadonlySet<string> = new Set([
  * `false` on every object with an `enable` block; the field's `false` was
  * written by the field designer on every save while it meant nothing, so a
  * stored one cannot be told from a choice and reads like an absent key. A
- * field's `trackHistory: true` still forces a no-line type on. Two classes
- * never render values, whatever the flags say:
+ * field's `trackHistory: true` still forces a no-line type on. A credential
+ * field never renders values, and a no-line type only when it opts in.
  *
- *  - a credential field (`collectMaskedReadFields`): both sides are the same
- *    mask, so the change is named by label only, never `•••• → ••••`;
- *  - a type in {@link NO_LINE_VALUE_TYPES}, unless the field declares
- *    `fieldHistory: true` or `trackHistory: true` itself.
+ * [#36482] The rule itself is `resolveFieldHistory` in
+ * `@objectstack/spec/data`, beside the no-line type list: the metadata form
+ * asks the same predicate what an unset `fieldHistory` resolves to, so the
+ * default it shows cannot drift from what this writer keeps.
  *
  * Who may READ the values is not decided here: the row is redacted per reader,
  * field by field (`activity-field-redaction.ts`).
  */
 function changeValuesShownFor(objectDef: any): ChangeValuesShown {
-  if (objectDef?.enable?.fieldHistory === false) return () => false;
-  const credentials = new Set(collectMaskedReadFields(objectDef));
-  return (key, field) => {
-    if (!field || field.fieldHistory === false || credentials.has(key)) return false;
-    if (field.fieldHistory === true || field.trackHistory === true) return true;
-    return !(typeof field.type === 'string' && NO_LINE_VALUE_TYPES.has(field.type));
-  };
+  return (_key, field) => resolveFieldHistory(field, objectDef);
 }
 
 /**

@@ -438,7 +438,8 @@ export const objectForm = defineForm({
             // named the `auditTrail` / `dataQuality` / `encryptionConfig` family
             // pruned in 2026-06 as dead in both layers (see the FieldSchema
             // tombstone); at-rest protection is `type: 'secret'`, not a flag.
-            { field: 'fieldHistory', type: 'boolean', helpText: "Old → new values for this field on the record activity timeline. Unset means ON, though the switch shows off: only a switch turned on and then off writes false, which names the change by label only. On also shows a media or JSON field's values." },
+            // [#36482] Three-way, as on the field form: Default removes the key.
+            { field: 'fieldHistory', widget: 'field-history', helpText: "Old → new values for this field on the record activity timeline. Default follows the platform: on for most types, off for a media, JSON or credential field. Off names the change by label only; On also shows a media or JSON field's values. A credential field never shows values, and the object's own Field History off wins." },
             { field: 'trackHistory', type: 'boolean', helpText: "Opt a media or JSON field (image, file, json, …) into old → new values on the activity timeline. Every other field shows them already, and off does not hide them: use Field History." },
             { field: 'visibleWhen', type: 'code', language: 'expression', helpText: 'CEL predicate — field is shown only when TRUE' },
             { field: 'readonlyWhen', type: 'code', language: 'expression', helpText: 'CEL predicate — field is read-only when TRUE (enforced server-side)' },
@@ -463,7 +464,7 @@ export const objectForm = defineForm({
           helpText: 'Enable/disable system features',
           fields: [
             { field: 'trackHistory', type: 'boolean' },
-            { field: 'fieldHistory', type: 'boolean', helpText: "Old → new values of changed fields on the record activity timeline. Unset means ON, though the switch shows off: only a switch turned on and then off writes false, which turns values off for the whole object." },
+            { field: 'fieldHistory', widget: 'field-history', helpText: "Old → new values of changed fields on the record activity timeline. Default is on. Off turns values off for the whole object, whatever a field says." },
             { field: 'searchable', type: 'boolean' },
             { field: 'apiEnabled', type: 'boolean' },
             { field: 'files', type: 'boolean' },

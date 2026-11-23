@@ -60,8 +60,8 @@ import {
 } from '@object-ui/components';
 import { useRegisteredMetadataDefaultInspector } from '../metadata-admin/default-inspector-registry.js';
 import { readFields, type FieldEntry } from '../metadata-admin/previews/object-fields-io.js';
-import { t, type SupportedLocale } from '../metadata-admin/i18n.js';
-import { cbpMasterRefusal, requireCbpMasterDetails } from './owd-sharing.js';
+import { t, tFormat, type SupportedLocale } from '../metadata-admin/i18n.js';
+import { CBP_REFUSAL_KEYS, cbpMasterRefusal, requireCbpMasterDetails, type CbpMasterRefusal } from './owd-sharing.js';
 import { HighlightFieldsEditor } from './HighlightFieldsEditor.js';
 import { RelatedListsEditor } from './RelatedListsEditor.js';
 
@@ -179,6 +179,29 @@ function SettingHeading({ title, settingKey, htmlFor }: { title: string; setting
   );
 }
 
+/**
+ * The controlled-by-parent refusal in the author's words: the row its shape
+ * selects ({@link CBP_REFUSAL_KEYS}), naming each field by its label (its name
+ * when it has none). With no shape on the spec's issue, the spec's own message.
+ */
+function cbpRefusalText(refusal: CbpMasterRefusal, locale: SupportedLocale | string | undefined): string {
+  if (!refusal.shape) return refusal.message;
+  const names = refusal.fields.map((e) =>
+    tFormat('engine.studio.settings.cbpRefusalField', locale, {
+      name: typeof e.def.label === 'string' && e.def.label ? e.def.label : e.name,
+    }),
+  );
+  // The en row for one required lookup speaks of one field; several take their own row.
+  const key =
+    refusal.shape === 'required-lookup-only' && names.length > 1
+      ? 'engine.studio.settings.cbpRefusalRequiredLookupsOnly'
+      : CBP_REFUSAL_KEYS[refusal.shape];
+  return tFormat(key, locale, {
+    fields: names.join(t('engine.studio.settings.cbpRefusalFieldSeparator', locale)),
+    field: names[0] ?? '',
+  });
+}
+
 /** A field as a picker option: its label and name, or its name alone. */
 function fieldOption(e: FieldEntry): { value: string; label: string } {
   return {
@@ -274,12 +297,16 @@ export function ObjectSettingsPanel({
   };
   // The spec's own refusal when the object still does not derive exactly one
   // master: no `master_detail` at all, or two or more (the designer never picks
-  // one of them for the author).
+  // one of them for the author). Shown in business wording chosen by the
+  // refusal's code and shape, in the tab's language.
   const objectName = draft.name ?? name;
-  const cbpRefusal = React.useMemo(
+  // Only the verdict is memoised: the text is drawn on every render, as every
+  // other string here is, so a catalogue that lands later re-words it.
+  const cbpVerdict = React.useMemo(
     () => (sharingModel === 'controlled_by_parent' ? cbpMasterRefusal(objectName, draft.fields) : undefined),
     [sharingModel, objectName, draft.fields],
   );
+  const cbpRefusal = cbpVerdict ? cbpRefusalText(cbpVerdict, locale) : undefined;
 
   // Capabilities (`enable.*`, framework#2707/#2727). Checked = the flag's
   // EFFECTIVE runtime value; toggling writes an explicit boolean into the

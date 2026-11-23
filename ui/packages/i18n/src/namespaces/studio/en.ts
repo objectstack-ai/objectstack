@@ -1905,6 +1905,9 @@ const STUDIO_EN: Record<string, string> = {
   'engine.form.hideValue': 'Hide value',
   'engine.form.revealValue': 'Reveal value',
   'engine.form.clear': 'Clear',
+  'engine.form.fieldHistoryDefault': 'Default ({state})',
+  'engine.form.fieldHistoryOn': 'On',
+  'engine.form.fieldHistoryOff': 'Off',
   'engine.form.anOption': 'an option',
   'engine.form.selectDepToConfigure': 'Select {dep} to configure.',
   'engine.form.noConfigNeeded': 'No configuration needed for "{value}".',
@@ -2421,6 +2424,26 @@ const STUDIO_EN: Record<string, string> = {
     'Every user in the organization can see and edit all records.',
   'engine.studio.settings.sharingDescControlledByParent':
     'Who can see a record follows the parent record it belongs to, through its master-detail relationship.',
+  // The controlled-by-parent refusal, one row per refusal shape the spec stamps
+  // on its issue (`params.shape`); `ObjectSettingsPanel` picks the row and
+  // falls back to the spec's own message for a shape with no row.
+  'engine.studio.settings.cbpRefusalSeveralRequiredMasters':
+    'This object is set to “Follows its parent record”, but {fields} are all required master-detail fields, so it cannot tell which parent decides who sees its records, and saving it is refused. Keep master-detail on the one parent that decides access, and change the others to lookup fields.',
+  'engine.studio.settings.cbpRefusalSeveralMasters':
+    'This object is set to “Follows its parent record”, but {fields} are all master-detail fields and none of them is required, so none of them is the parent that decides who sees its records, and saving it is refused. Keep master-detail on the one parent that decides access, and change the others to lookup fields.',
+  'engine.studio.settings.cbpRefusalMasterNotRequired':
+    'This object is set to “Follows its parent record”, but the master-detail field {field} does not say whether every record must have a parent, and saving it is refused. Mark {field} as required, so every record has a parent, or as not required, so a record may have none.',
+  // One required lookup; `…RequiredLookupsOnly` below is the row for several.
+  'engine.studio.settings.cbpRefusalRequiredLookupOnly':
+    'This object is set to “Follows its parent record”, but it has no master-detail field, only the required lookup field {fields}, and a lookup does not pass access on from a parent, so saving it is refused. Change it into a master-detail field (its records are then deleted with the parent), or, if these records should outlive their parent, pick another sharing option.',
+  'engine.studio.settings.cbpRefusalRequiredLookupsOnly':
+    'This object is set to “Follows its parent record”, but it has no master-detail field, only the required lookup fields {fields}, and a lookup does not pass access on from a parent, so saving it is refused. Change the one that points to the parent into a master-detail field (its records are then deleted with the parent), or, if these records should outlive their parent, pick another sharing option.',
+  'engine.studio.settings.cbpRefusalNoMaster':
+    'This object is set to “Follows its parent record”, but it has no master-detail field to follow, so saving it is refused. Add a master-detail field that points to the parent object, or, if these records stand on their own, pick another sharing option.',
+  'engine.studio.settings.cbpRefusalMasterNotWritable':
+    'This object is set to “Follows its parent record” through {field}, but that field is read-only or a system field, so a user saving a record cannot fill it in, and saving the object is refused. Make {field} editable, or, if these records should outlive their parent, pick another sharing option.',
+  'engine.studio.settings.cbpRefusalField': '“{name}”',
+  'engine.studio.settings.cbpRefusalFieldSeparator': ', ',
   'engine.studio.settings.capabilities': 'Features',
   'engine.studio.settings.capabilitiesHint': 'Turn record-page features on or off for this object; every switch really takes effect',
   'engine.studio.settings.capTrackHistory': 'Field change history',
