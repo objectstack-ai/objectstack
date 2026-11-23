@@ -2738,9 +2738,12 @@ const DatasetReportRendererBody: React.FC<DatasetReportRendererProps> = ({
     report.chart && typeof report.chart === 'object' && (report.chart as { type?: unknown }).type
       ? (report.chart as Record<string, unknown>)
       : null;
-  // Offered beside the period chip only when the chart can draw it; sent only
-  // while the period names a window to step back from.
-  const compareOffered = !!dateRangeDecl && reportChartComparable(chartCfg);
+  // Offered beside the period chip only when the chart can draw it over the
+  // window's dimension; sent only while the period names a window to step
+  // back from.
+  const compareOffered =
+    !!dateRangeDecl &&
+    reportChartComparable(chartCfg, dateDimension.status === 'ready' ? dateDimension.dimension : undefined);
   const compareTo = compareOffered ? reportCompareTo(compareOn, timeWindow) : undefined;
   const chart = chartCfg ? (
     <DatasetReportChart

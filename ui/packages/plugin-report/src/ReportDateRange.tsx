@@ -283,17 +283,31 @@ const COMPARABLE_SINGLE_VALUE_CHART_TYPES: ReadonlySet<string> = new Set(['metri
 
 /**
  * Whether a report's embedded `chart` can draw "compare with the previous
- * period" (objectstack#36645). A `seriesBy` split is excluded: its series are
- * values of the split dimension, not the measure, so no one series pairs with
- * the measure's earlier window.
+ * period" (objectstack#36645) over a window on `windowDimension`.
+ *
+ * - A `seriesBy` split is excluded: its series are values of the split
+ *   dimension, not the measure, so no one series pairs with the measure's
+ *   earlier window.
+ * - A series chart whose x axis IS the window's own date dimension is
+ *   excluded. The earlier window is the same number of days just before the
+ *   current one, and its date buckets pair with the current ones by position
+ *   from each window's start; when the two windows split into a different
+ *   number of buckets (a 31-day month against the 31 days before it, by
+ *   month) the bars would pair with the wrong period. A category axis, or a
+ *   single number, compares clean totals and stays offered.
+ * - The window's dimension must be known: until it is, nothing is offered.
  */
-export function reportChartComparable(chart: Record<string, unknown> | null | undefined): boolean {
-  if (!chart) return false;
+export function reportChartComparable(
+  chart: Record<string, unknown> | null | undefined,
+  windowDimension: string | undefined,
+): boolean {
+  if (!chart || !windowDimension) return false;
   const type = chart.type;
   if (typeof type !== 'string') return false;
   if (COMPARABLE_SINGLE_VALUE_CHART_TYPES.has(type)) return true;
   if (!COMPARABLE_SERIES_CHART_TYPES.has(type)) return false;
-  return !(typeof chart.seriesBy === 'string' && chart.seriesBy);
+  if (typeof chart.seriesBy === 'string' && chart.seriesBy) return false;
+  return chart.xAxis !== windowDimension;
 }
 
 /**
