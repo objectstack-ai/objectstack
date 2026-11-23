@@ -5331,12 +5331,14 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           : onEdit({ id: pureRecordId }, objectName)),
       } as any);
     }
-    // objectstack#36499 — 「Configure tabs」, the first of the host's entries
-    // in the `⋯`, for an administrator who may arrange this object's tabs
-    // (`useRecordTabsConfig`'s gate: never on a phone, a drawer or a pane).
+    // objectstack#36499 — 「Configure tabs」, the first item of the `⋯`
+    // (`leadsMenu`, ahead of Refresh), for an administrator who may arrange
+    // this object's tabs (`useRecordTabsConfig`'s gate: never on a phone, a
+    // drawer or a pane).
     if (tabsConfig.offered && !tabsConfig.active && !recordEditState) {
       items.push({
         name: RECORD_TABS_CONFIG_ACTION,
+        leadsMenu: true,
         label: t('designMode.recordTabs.entry', { defaultValue: 'Configure tabs' }),
         icon: 'panels-top-left',
         type: 'script',

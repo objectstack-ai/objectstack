@@ -27,6 +27,36 @@ export interface ImageLightboxProps {
 }
 
 /**
+ * The one image element a preview draws: the lightbox below, and the image
+ * view of the file preview dialog (`FilePreviewDialog`). ⛔ Always an `img`
+ * element, never inlined markup: an SVG drawn through `img` runs no script.
+ */
+export function LightboxImageView({
+  url,
+  name,
+  index,
+  className,
+  onError,
+}: {
+  url: string;
+  name?: string;
+  /** Position in its set, for the translated alt a nameless image falls back to. */
+  index: number;
+  className?: string;
+  onError?: () => void;
+}) {
+  const { t } = useObjectTranslation();
+  return (
+    <img
+      src={url}
+      alt={name || t('fields.image.imageAlt', { index: index + 1 })}
+      onError={onError}
+      className={className ?? 'max-h-[85vh] max-w-full rounded-md object-contain'}
+    />
+  );
+}
+
+/**
  * Full-screen image preview with prev/next navigation for a set of images.
  *
  * Controlled: the caller owns `open` and the current `index`. Built on the
@@ -72,11 +102,7 @@ export function ImageLightbox({ images, index, open, onOpenChange, onIndexChange
         {/* Title is required for a labelled dialog but visually redundant here. */}
         <DialogTitle className="sr-only">{current.name || t('fields.image.preview')}</DialogTitle>
         <div className="relative flex items-center justify-center">
-          <img
-            src={current.url}
-            alt={current.name || t('fields.image.imageAlt', { index: index + 1 })}
-            className="max-h-[85vh] max-w-full rounded-md object-contain"
-          />
+          <LightboxImageView url={current.url} name={current.name} index={index} />
 
           {count > 1 && (
             <>
