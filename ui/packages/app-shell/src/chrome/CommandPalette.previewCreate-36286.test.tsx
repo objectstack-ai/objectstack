@@ -50,6 +50,17 @@ vi.mock('@object-ui/permissions', async (importOriginal) => ({
   usePermissions: () => PERMS,
 }));
 
+// The switcher's create card reads the dataset catalog (a chart view's
+// source): answered empty here, with no network.
+vi.mock('../views/metadata-admin/useMetadata', async (importOriginal) => {
+  const { MetadataClient } = await import('@object-ui/data-objectstack');
+  const client = new MetadataClient({
+    baseUrl: 'http://localhost',
+    fetch: (async () => new Response('[]', { status: 200, headers: { 'content-type': 'application/json' } })) as unknown as typeof fetch,
+  });
+  return { ...(await importOriginal<Record<string, unknown>>()), useMetadataClient: () => client };
+});
+
 // The preview's key fields draw through `lazy()`: load the detail entry at
 // module scope, so its cost is paid at import (ui/AGENTS.md, lazy boundaries).
 import '@object-ui/plugin-detail';
