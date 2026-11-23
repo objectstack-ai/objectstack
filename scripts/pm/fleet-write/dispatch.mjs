@@ -617,6 +617,9 @@ import {
   advisoryReadAad,
   advisorySealAad,
   advisoryNoteDigest,
+  advisoryRewriteFailure,
+  advisoryRewriteText,
+  ADVISORY_REWRITE_FIELDS,
   MAX_ADVISORY_NOTE_BYTES,
   openAdvisoryRead,
   sealAdvisoryNote,
@@ -1626,6 +1629,36 @@ export function parseRelayAdvisoryReadAnnotation(message) {
 export const ADVISORY_NOTE_OPS = Object.freeze(OP_NAMES.filter((op) => OPS[op].required.includes('sealed_note')));
 /** The key of the ACTIONS FILE naming a note's file — never a payload key: this door replaces it with `sealed_note`. */
 export const ADVISORY_NOTE_FILE_KEY = 'note_file';
+/**
+ * The keys of the ACTIONS FILE naming a rewrite's files (`ops.mjs`, "The one row that REPLACES an advisory's text"),
+ * one per field it may replace — never payload keys: this door replaces them with `sealed_note`.
+ */
+export const ADVISORY_REWRITE_FILE_KEYS = Object.freeze({ summary: 'summary_file', description: 'description_file' });
+
+/**
+ * A rewrite's sealed text, from its files' texts (`texts`: `{ summary?, description? }`, each a file's whole text):
+ * `{ text }` — the summary with its surrounding whitespace dropped, the description with its leading blank lines and
+ * trailing whitespace dropped, spelled by `advisoryRewriteText` and judged by `advisoryRewriteFailure` — or
+ * `{ refusal }`, naming what to fix. No signature line and no stamp: this is the advisory's public text. Pure.
+ */
+export function advisoryRewriteCompose(texts = {}) {
+  const fields = {};
+  for (const key of ADVISORY_REWRITE_FIELDS) {
+    const raw = texts[key];
+    if (raw === undefined) continue;
+    if (typeof raw !== 'string') return { refusal: `the ${key} is not text` };
+    if (raw.includes('\r')) return { refusal: `the ${key} file carries a carriage return — save it with LF line endings` };
+    if (key === 'summary') fields.summary = raw.trim();
+    else {
+      const lines = raw.split('\n');
+      while (lines.length && lines[0].trim() === '') lines.shift();
+      fields.description = lines.join('\n').trimEnd();
+    }
+  }
+  const text = advisoryRewriteText(fields);
+  const why = advisoryRewriteFailure(text);
+  return why ? { refusal: why } : { text };
+}
 
 const RELAY_ADVISORY_NOTE_SHAPE = new RegExp(`^${RELAY_ANNOTATION_PREFIX} action=([1-9][0-9]*) op=([a-z_]+) note_bytes=([1-9][0-9]*) note_digest=([0-9a-f]{64})$`);
 
@@ -1757,48 +1790,86 @@ export function armAdvisoryNotes(actions, { requestId, relayPublicKey = ADVISORY
       refused.push(said(`sealed_note is set in the actions file: a note is sealed by this door, from the file ${ADVISORY_NOTE_FILE_KEY} names, so a seal made elsewhere is refused, not sent. Drop it and name the file.`));
       return a;
     }
-    const path = a[ADVISORY_NOTE_FILE_KEY];
-    if (typeof path !== 'string' || path === '') {
-      refused.push(said(`${ADVISORY_NOTE_FILE_KEY} must name the note's file — ⛔ the note itself never goes in the actions file, which the payload is packed from`));
-      return a;
-    }
-    // ⛔ The note's plaintext never lives in a repository's files: a file that resolves inside any git work tree, or
-    // one git cannot place, is refused before it is read.
-    const where = place(path);
-    if (where.place === 'unreadable') {
-      refused.push(said(`${ADVISORY_NOTE_FILE_KEY} ${JSON.stringify(path)} cannot be read as UTF-8 text (${where.code})`));
-      return a;
-    }
-    if (where.place !== 'outside') {
-      refused.push(
-        said(
-          `${ADVISORY_NOTE_FILE_KEY} ${JSON.stringify(path)} ${where.place === 'inside' ? 'resolves inside a git repository (its work tree or git dir, after symlinks)' : 'cannot be placed: git could not say whether it lies inside a repository'} — ⛔ a note's plaintext never lives in a repository's files. Keep it outside every checkout (the session's scratchpad) and name that path.`,
-        ),
-      );
-      return a;
-    }
-    let text;
-    try {
-      text = strictNoteUtf8.decode(read(where.real));
-    } catch (e) {
-      refused.push(said(`${ADVISORY_NOTE_FILE_KEY} ${JSON.stringify(path)} cannot be read as UTF-8 text (${e?.code ?? 'not UTF-8'})`));
-      return a;
-    }
-    const composed = advisoryNoteSection(text, advisoryNoteStamp(now()));
-    if (composed.refusal) {
-      refused.push(said(`the note file ${JSON.stringify(path)}: ${composed.refusal}`));
-      return a;
+    // ⛔ The plaintext never lives in a repository's files: a file that resolves inside any git work tree, or one git
+    // cannot place, is refused before it is read. One door for the note's file and the rewrite's files alike.
+    const readOutside = (key, path) => {
+      const where = place(path);
+      if (where.place === 'unreadable') return { refusal: `${key} ${JSON.stringify(path)} cannot be read as UTF-8 text (${where.code})` };
+      if (where.place !== 'outside') {
+        return {
+          refusal: `${key} ${JSON.stringify(path)} ${where.place === 'inside' ? 'resolves inside a git repository (its work tree or git dir, after symlinks)' : 'cannot be placed: git could not say whether it lies inside a repository'} — ⛔ ${a.op === 'advisory_rewrite' ? "a rewrite's" : "a note's"} plaintext never lives in a repository's files. Keep it outside every checkout (the session's scratchpad) and name that path.`,
+        };
+      }
+      try {
+        return { text: strictNoteUtf8.decode(read(where.real)) };
+      } catch (e) {
+        return { refusal: `${key} ${JSON.stringify(path)} cannot be read as UTF-8 text (${e?.code ?? 'not UTF-8'})` };
+      }
+    };
+    let sealedText;
+    let fileKeys;
+    if (a.op === 'advisory_rewrite') {
+      // The rewrite (`ops.mjs`, "The one row that REPLACES"): one file per field it replaces, at least one; a note's
+      // file key is no rewrite's.
+      fileKeys = Object.values(ADVISORY_REWRITE_FILE_KEYS);
+      if (Object.hasOwn(a, ADVISORY_NOTE_FILE_KEY)) {
+        refused.push(said(`${ADVISORY_NOTE_FILE_KEY} is a note's key — a rewrite names ${fileKeys.join(' and/or ')}, one file per field it replaces`));
+        return a;
+      }
+      const texts = {};
+      for (const [field, key] of Object.entries(ADVISORY_REWRITE_FILE_KEYS)) {
+        if (!Object.hasOwn(a, key)) continue;
+        const path = a[key];
+        if (typeof path !== 'string' || path === '') {
+          refused.push(said(`${key} must name the ${field}'s file — ⛔ the text itself never goes in the actions file, which the payload is packed from`));
+          return a;
+        }
+        const got = readOutside(key, path);
+        if (got.refusal) {
+          refused.push(said(got.refusal));
+          return a;
+        }
+        texts[field] = got.text;
+      }
+      if (Object.keys(texts).length === 0) {
+        refused.push(said(`a rewrite names ${fileKeys.join(' and/or ')} — the file of each field it replaces; ⛔ the text itself never goes in the actions file, which the payload is packed from`));
+        return a;
+      }
+      const composed = advisoryRewriteCompose(texts);
+      if (composed.refusal) {
+        refused.push(said(`the rewrite's files: ${composed.refusal}`));
+        return a;
+      }
+      sealedText = composed.text;
+    } else {
+      fileKeys = [ADVISORY_NOTE_FILE_KEY];
+      const path = a[ADVISORY_NOTE_FILE_KEY];
+      if (typeof path !== 'string' || path === '') {
+        refused.push(said(`${ADVISORY_NOTE_FILE_KEY} must name the note's file — ⛔ the note itself never goes in the actions file, which the payload is packed from`));
+        return a;
+      }
+      const got = readOutside(ADVISORY_NOTE_FILE_KEY, path);
+      if (got.refusal) {
+        refused.push(said(got.refusal));
+        return a;
+      }
+      const composed = advisoryNoteSection(got.text, advisoryNoteStamp(now()));
+      if (composed.refusal) {
+        refused.push(said(`the note file ${JSON.stringify(path)}: ${composed.refusal}`));
+        return a;
+      }
+      sealedText = composed.section;
     }
     if (relayPublicKey === null) {
       prerequisite.push(
-        `fleet-write/dispatch: PREREQUISITE NOT MET — actions[${i}] (${a.op}): the note file passes, but the relay's note key is not committed yet (ADVISORY_NOTE_RELAY_PUBLIC_KEY in scripts/pm/fleet-write/ops.mjs is null; the maintainer makes the pair, commits its public half and sets the repository secret ${ADVISORY_NOTE_KEY_SECRET}), so there is nothing to seal it to. ⛔ The key is never invented.`,
+        `fleet-write/dispatch: PREREQUISITE NOT MET — actions[${i}] (${a.op}): the ${a.op === 'advisory_rewrite' ? "rewrite's files pass" : 'note file passes'}, but the relay's note key is not committed yet (ADVISORY_NOTE_RELAY_PUBLIC_KEY in scripts/pm/fleet-write/ops.mjs is null; the maintainer makes the pair, commits its public half and sets the repository secret ${ADVISORY_NOTE_KEY_SECRET}), so there is nothing to seal it to. ⛔ The key is never invented.`,
       );
       return a;
     }
     const key = digestKey();
-    const { [ADVISORY_NOTE_FILE_KEY]: _file, ...rest } = a;
-    const sealed = sealAdvisoryNote({ section: composed.section, digestKey: key, publicKey: relayPublicKey, aad: advisorySealAad({ requestId, action: i + 1, op: a.op, ghsaId: a.ghsa_id }) });
-    notes.set(i + 1, { bytes: Buffer.byteLength(composed.section, 'utf8'), digest: advisoryNoteDigest({ digestKey: key, section: composed.section }) });
+    const rest = Object.fromEntries(Object.entries(a).filter(([k]) => !fileKeys.includes(k)));
+    const sealed = sealAdvisoryNote({ section: sealedText, digestKey: key, publicKey: relayPublicKey, aad: advisorySealAad({ requestId, action: i + 1, op: a.op, ghsaId: a.ghsa_id }) });
+    notes.set(i + 1, { bytes: Buffer.byteLength(sealedText, 'utf8'), digest: advisoryNoteDigest({ digestKey: key, section: sealedText }) });
     key.fill(0);
     return { ...rest, sealed_note: sealed };
   });
@@ -1834,9 +1905,12 @@ export function confirmRunAdvisoryNotes(payload, parsed, notes = new Map()) {
 /** The line a note's read-back earns on stderr — the byte count alone, ⛔ never the text. Pure. */
 export function advisoryNoteLine(row, { runId = '?' } = {}) {
   if (row.state === 'confirmed') {
+    if (row.op === 'advisory_rewrite') {
+      return `fleet-write: run ${runId}'s notice confirms action ${row.action} ${row.op}: the advisory's stored text is the ${row.bytes}-byte rewrite this process sealed, byte for byte — its keyed digest matches.`;
+    }
     return `fleet-write: run ${runId}'s notice confirms action ${row.action} ${row.op}: the advisory's stored description ends with the ${row.bytes}-byte section this process sealed, byte for byte — its keyed digest matches.`;
   }
-  return `fleet-write: run ${runId}'s note for action ${row.action} ${row.op} is UNVERIFIED — ${row.why}; ⛔ never re-send it: the run succeeded, so its PATCH was sent — read the advisory (advisory_read) first.`;
+  return `fleet-write: run ${runId}'s ${row.op === 'advisory_rewrite' ? 'rewrite' : 'note'} for action ${row.action} ${row.op} is UNVERIFIED — ${row.why}; ⛔ never re-send it: the run succeeded, so its PATCH was sent — read the advisory (advisory_read) first.`;
 }
 
 /**
@@ -4870,7 +4944,10 @@ export async function main(argv, deps = {}) {
     console.error('fleet-write/dispatch: nothing was sent.');
     return noting.refused.length > 0 ? EXIT_USAGE : EXIT_PREREQUISITE;
   }
-  for (const [action, n] of noting.notes) console.error(`fleet-write/dispatch: action ${action} (advisory_note): sealed a ${n.bytes}-byte section to the relay's committed key — the text and its digest key stay in this process; the payload carries the ciphertext alone.`);
+  for (const [action, n] of noting.notes) {
+    const op = actions[action - 1]?.op;
+    console.error(`fleet-write/dispatch: action ${action} (${op}): sealed a ${n.bytes}-byte ${op === 'advisory_rewrite' ? 'rewrite' : 'section'} to the relay's committed key — the text and its digest key stay in this process; the payload carries the ciphertext alone.`);
+  }
   actions = noting.actions;
   const session = opts.session ?? sessionFrom(env);
   if (!session || !SESSION_SHAPE.test(session)) {

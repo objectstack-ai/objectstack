@@ -676,6 +676,16 @@ import {
   advisoryNoteLandedText,
   advisoryNotePrivateKey,
   advisoryNoteReadBack,
+  ADVISORY_REWRITE_FIELDS,
+  ADVISORY_REWRITE_NOT_RESENT,
+  ADVISORY_REWRITE_STATES,
+  advisoryRewriteFailure,
+  advisoryRewriteFenceFailures,
+  advisoryRewriteLandedText,
+  advisoryRewriteOf,
+  advisoryRewriteReadBack,
+  advisoryRewriteStoredDigest,
+  advisorySummaryOf,
   codePoints,
   openAdvisoryNote,
   sealAdvisoryNote,
@@ -2091,6 +2101,92 @@ export async function advisoryNoteAction(req, { payload, index, api, t, privateK
   }
 }
 
+/** What a rewrite whose GET never reached the platform prints — ⛔ never the exception's message, which carries the path. */
+export const ADVISORY_REWRITE_UNREACHED =
+  "REFUSED, nothing sent: a read of the advisory did not reach the platform (the runner's call threw before any answer) — re-send the rewrite, which reads it afresh";
+
+/**
+ * The rewrite (header: "The rewrite"): the note's key, the advisory's GET and the rewrite's fences, the open under the
+ * rewrite's associated data, the text judged again, the mask, the concurrency read, ONE PATCH of the fields sealed and
+ * the read-back — `ops.mjs`'s seven steps, in order. Returns `advisoryNoteAction`'s shape, `{ ok, status, call, result,
+ * why, note }` — `note` the ONE notice a landing emits: its action, the sealed text's byte count and the keyed digest
+ * of what the advisory STORES (`advisoryRewriteStoredDigest`). ⛔ No string it returns carries a byte of the summary or
+ * the description, old or new. Never throws.
+ */
+export async function advisoryRewriteAction(req, { payload, index, api, t, privateKey = '', relayPublicKey = ADVISORY_NOTE_RELAY_PUBLIC_KEY, mask = () => {} }) {
+  const { ghsaId, sealedNote } = req.advisoryRewrite;
+  const call = `${req.verb} ${req.path}`;
+  const notSent = (why) => ({ ok: false, status: 'not sent', call, why, note: null });
+  // 1. The note's key — before any request.
+  const keyWhy = advisoryNoteKeyFailure(privateKey, relayPublicKey);
+  if (keyWhy) return notSent(`REFUSED before any request: ${keyWhy}, so nothing was opened, read or sent`);
+  // 2. The advisory's GET and the rewrite's fences: the advisory named, unpublished, a summary and a description that are text.
+  const fenced = async (which) => {
+    const r = await rest(api, req.path, {}, t);
+    if (r.status === 0) return { fail: ADVISORY_REWRITE_UNREACHED };
+    const failures = advisoryRewriteFenceFailures({ ghsaId, answer: r, from: ADVISORY_REWRITE_STATES });
+    if (failures.length === 0) return { read: r };
+    const refused = !(r.status >= 200 && r.status < 300);
+    return { fail: `REFUSED at the relay's fence on ${ghsaId} (${which}), nothing sent — ${advisoryFenceText(failures)}${refused ? `${advisoryPlatformText(r.detail)}; ${ADVISORY_ACCESS_REMEDY}` : ''}` };
+  };
+  const first = await fenced('its read');
+  if (first.fail) return notSent(first.fail);
+  // 3. The open, under the rewrite's own associated data: a note's seal never opens here.
+  let opened;
+  try {
+    opened = openAdvisoryNote({ sealed: sealedNote, privateKey: advisoryNotePrivateKey(privateKey), aad: advisorySealAad({ requestId: payload.request_id, action: index, op: 'advisory_rewrite', ghsaId }) });
+  } catch {
+    return notSent(`FAILED, nothing sent: ${ADVISORY_NOTE_OPEN_FAILED}`);
+  }
+  const { section: text, digestKey } = opened;
+  try {
+    // 4. The text judged again: the seat's check is never trusted alone — before any of it reaches the runner.
+    const unfit = advisoryRewriteFailure(text);
+    if (unfit) return notSent(`REFUSED after the open, nothing sent: the seal holds no rewrite this relay writes — ${unfit}`);
+    const sent = advisoryRewriteOf(text);
+    const fields = ADVISORY_REWRITE_FIELDS.filter((k) => sent[k] !== undefined);
+    const noteBytes = Buffer.byteLength(text, 'utf8');
+    // The mask — the runner's net behind the first, that nothing below prints the text — every line of each field,
+    // sparing what the notice's fixed words print (`advisoryNoteMaskValues`), so the runner never stars the one line
+    // the seat confirms from. The digest it will carry is the stored text's, known only after the read-back.
+    const notice = annotationCommand({ action: index, op: 'advisory_rewrite', noteBytes, noteDigest: '' });
+    for (const value of advisoryNoteMaskValues(fields.map((k) => sent[k]).join('\n'), notice)) mask(value);
+    // 5. The concurrency read, immediately before the PATCH: the platform offers no conditional write on it.
+    const second = await fenced('its second read, just before the write');
+    if (second.fail) return notSent(second.fail);
+    for (const read of [advisorySummaryOf, advisoryDescriptionOf]) {
+      const was = read(first.read.json);
+      const now = read(second.read.json);
+      if (now !== was) {
+        return notSent(`REFUSED, nothing sent: ${ghsaId}'s ${read === advisorySummaryOf ? 'summary' : 'description'} changed between the relay's two reads (${Buffer.byteLength(was, 'utf8')} → ${Buffer.byteLength(now, 'utf8')} bytes) — another write is at work; re-send the rewrite, which reads it afresh`);
+      }
+    }
+    // 6. ONE PATCH of the fields sealed, and nothing else.
+    const body = Object.fromEntries(fields.map((k) => [k, sent[k]]));
+    const before = second.read.json;
+    const r = await rest(api, req.path, { method: 'PATCH', body }, t);
+    if (r.status === 0) return { ok: false, status: ADVISORY_READ_UNREACHED_STATUS, call, why: `UNCONFIRMED: the PATCH's call threw before any answer — ${ADVISORY_REWRITE_NOT_RESENT}`, note: null };
+    if (!(r.status >= 200 && r.status < 300)) return { ok: false, status: r.status, call, why: `HTTP ${r.status}${advisoryPlatformText(r.detail)}; ${ADVISORY_ACCESS_REMEDY}`, note: null };
+    // 7. The read-back: the PATCH's answer, then a GET after it — each field sent byte for byte, the other as read.
+    const answered = advisoryRewriteReadBack({ ghsaId, sent: body, before, answer: r, read: 'the PATCH answer' });
+    if (!answered.ok) return { ok: false, status: r.status, call, why: `NOT STORED as sent: ${answered.why} — ${ADVISORY_REWRITE_NOT_RESENT}`, note: null };
+    const after = await rest(api, req.path, {}, t);
+    const stored = advisoryRewriteReadBack({ ghsaId, sent: body, before, answer: after, read: 'the GET after the PATCH' });
+    if (!stored.ok) return { ok: false, status: r.status, call, why: `${stored.why} — ${ADVISORY_REWRITE_NOT_RESENT}`, note: null };
+    // The digest is the STORED text's, so the seat's match is a read-back of what the advisory holds.
+    const noteDigest = advisoryRewriteStoredDigest({ digestKey, json: after.json, fields });
+    const result = advisoryRewriteLandedText({
+      ghsaId,
+      state: after.json.state,
+      fields: fields.map((k) => ({ key: k, beforeBytes: Buffer.byteLength(k === 'summary' ? advisorySummaryOf(before) : advisoryDescriptionOf(before), 'utf8'), afterBytes: Buffer.byteLength(body[k], 'utf8') })),
+      digest: noteDigest,
+    });
+    return { ok: true, status: r.status, call, result, why: '', note: { action: index, op: 'advisory_rewrite', noteBytes, noteDigest } };
+  } finally {
+    digestKey.fill(0);
+  }
+}
+
 /** The one thing a seat needs from an answer: the id / number / url of what was written — or that a bodiless 204 accepted it. */
 export function resultOf(req, json, status = null) {
   if (status === 204 && (json === null || json === undefined)) return 'accepted (HTTP 204, no body)';
@@ -2605,6 +2701,22 @@ export async function executeFleetWrite({ payload: raw, sender, token, api = DEF
         log(`  ✓ action ${i + 1} ${action.op}: ${noted.call} -> HTTP ${noted.status} · ${rows[rows.length - 1].result}`);
         annotations.push(noted.note);
         log(annotationCommand(noted.note));
+        continue;
+      }
+      // The rewrite (header): the note's door — the key, two fenced reads, the open and the mask, ONE PATCH of the
+      // fields sealed and their byte read-back; its notice names the action, the sealed text's byte count and the keyed
+      // digest of what the advisory stores.
+      if (req.advisoryRewrite) {
+        const rewritten = await advisoryRewriteAction(req, { payload, index: i + 1, api, t, privateKey: deps.advisoryNoteKey ?? '', mask: deps.mask ?? maskLine, ...(deps.advisoryNote ?? {}) });
+        rows.push({ action: i + 1, op: action.op, call: rewritten.call, status: rewritten.status, result: rewritten.ok ? scrub(rewritten.result, [token]) : `FAILED: ${scrub(rewritten.why, [token])}` });
+        if (!rewritten.ok) {
+          stoppedAt = { action: i + 1, op: action.op, why: scrub(rewritten.why, [token]) };
+          log(`  ✗ action ${i + 1} ${action.op}: ${rewritten.call} -> ${stoppedAt.why}`);
+          break;
+        }
+        log(`  ✓ action ${i + 1} ${action.op}: ${rewritten.call} -> HTTP ${rewritten.status} · ${rows[rows.length - 1].result}`);
+        annotations.push(rewritten.note);
+        log(annotationCommand(rewritten.note));
         continue;
       }
       // The advisory PATCHes (header): the advisory's fences, judged HERE on its own GET before the PATCH — refused, NOT SENT.
