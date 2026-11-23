@@ -16,12 +16,10 @@
  * other half of the row, is pinned in
  * `StudioDesignSurface.automationsReadOnly-11124.test.tsx`.
  *
- * objectstack#31495 — the other disabled state, a writable package with
- * nothing pending ("No drafts pending publish"), kept the `title` on the
- * disabled button: no wrapper, no tooltip on hover, and Tab skipped Publish.
- * It now takes the same wrapper, described by the same `sr-only` reason
- * (`publish-none-reason`); with a draft pending Publish is a plain enabled
- * button again. Pinned in the last block below.
+ * objectstack#36511 — Publish is drawn only while drafts are pending, so the
+ * read-only cases below hold one, and with nothing pending there is no Publish
+ * and no "No drafts pending publish" reason (which objectstack#31495 had
+ * wrapped the same way). Pinned in the last block below.
  *
  * The REAL `StudioDesignSurface` over a fetch stub (the harness of
  * `StudioDesignSurface.interfacePolish.test.tsx`); only the package list's
@@ -93,7 +91,7 @@ function json(body: unknown, status = 200) {
 
 beforeEach(() => {
   pkg.writable = false;
-  drafts = [];
+  drafts = [{ type: 'dashboard', name: 'acme_dashboard', packageId: PACKAGE_ID }];
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: unknown) => {
@@ -134,11 +132,7 @@ const describedBy = (el: HTMLElement) => {
   return id ? document.getElementById(id) : null;
 };
 
-/**
- * Publish once its wrapper gives `reason`. The wrapper alone is not enough to
- * wait on: before the package list answers, an empty ledger already wraps
- * Publish in the "nothing pending" reason (objectstack#31495).
- */
+/** Publish once its wrapper gives `reason`. */
 async function wrappedPublish(reason: string): Promise<HTMLElement> {
   renderWorkbench();
   return waitFor(
@@ -191,52 +185,28 @@ describe('Studio header Publish on a read-only package — the reason reaches th
       for (let i = 0; i < 10; i++) await new Promise((r) => setTimeout(r, 0));
     });
     const btn = publish();
+    expect(btn).toBeEnabled();
     expect(btn).not.toHaveAttribute('title', REASON);
-    // An empty ledger still wraps it, in its own reason (objectstack#31495).
-    expect(describedBy(btn.parentElement as HTMLElement)).toHaveTextContent(NONE_PENDING);
-    expect(describedBy(btn)).not.toHaveTextContent(REASON);
+    expect(btn.parentElement).not.toHaveAttribute('data-disabled-reason');
     expect(screen.queryByText(REASON)).toBeNull();
   });
 });
 
-describe('Studio header Publish with nothing pending — the reason reaches the author (objectstack#31495)', () => {
+describe('Studio header with nothing pending: no Publish, so no reason (objectstack#31495, objectstack#36511)', () => {
   beforeEach(() => {
     pkg.writable = true;
   });
 
-  /** Publish on a writable package once the empty ledger has wrapped it. */
-  const nonePendingPublish = () => wrappedPublish(NONE_PENDING);
-
-  it('the wrapper is a tab stop, and it and the button are described by "No drafts pending publish"', async () => {
-    const btn = await nonePendingPublish();
-    expect(btn).toBeDisabled();
-    // The disabled button cannot show a `title`; the reason is the wrapper's.
-    expect(btn).not.toHaveAttribute('title');
-    expect(btn).toHaveAccessibleDescription(NONE_PENDING);
-    const wrapper = btn.parentElement as HTMLElement;
-    expect(wrapper).toHaveAttribute('tabindex', '0');
-    expect(wrapper).toHaveAccessibleDescription(NONE_PENDING);
-    // One reason element, the `sr-only` one both point at.
-    expect(describedBy(wrapper)).toBe(screen.getByTestId('publish-none-reason'));
-    expect(describedBy(btn)).toBe(describedBy(wrapper));
-    // The wrapper takes the hover: the disabled button lets it through.
-    expect(btn.className).toMatch(/(^|\s)disabled:pointer-events-none(\s|$)/);
-  });
-
-  it('hovering Publish opens a tooltip with the reason', async () => {
-    const user = userEvent.setup();
-    const btn = await nonePendingPublish();
-    await user.hover(btn.parentElement as HTMLElement);
-    expect(await screen.findByRole('tooltip')).toHaveTextContent(NONE_PENDING);
-  });
-
-  it('a keyboard user reaches the reason: Tab from "Changes" lands on Publish’s wrapper, which opens the tooltip', async () => {
-    const user = userEvent.setup();
-    const btn = await nonePendingPublish();
-    screen.getByRole('button', { name: /^Changes/ }).focus();
-    await user.tab();
-    expect(btn.parentElement).toHaveFocus();
-    expect(await screen.findByRole('tooltip')).toHaveTextContent(NONE_PENDING);
+  it('a writable package with an empty ledger draws no Publish and no "No drafts pending publish"', async () => {
+    drafts = [];
+    renderWorkbench();
+    await waitFor(() => expect(fetchPackages).toHaveBeenCalled(), { timeout: 8000 });
+    await act(async () => {
+      for (let i = 0; i < 10; i++) await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(screen.queryByRole('button', { name: /^Publish/ })).toBeNull();
+    expect(screen.queryByTestId('publish-none-reason')).toBeNull();
+    expect(screen.queryByText(NONE_PENDING)).toBeNull();
   });
 
   it('CONTROL — a draft pending: a plain enabled Publish, no wrapper and no reason', async () => {

@@ -32,6 +32,7 @@ const mockClient = {
   listDrafts: vi.fn(async () => []),
   layered: vi.fn(async () => ({ effective: servedObject, code: servedObject })),
   getDraft: vi.fn(async () => null),
+  publish: vi.fn(async () => ({})), reset: vi.fn(async () => ({})),
   save: vi.fn(async () => ({ ok: true })),
 };
 
@@ -68,7 +69,10 @@ vi.mock('@object-ui/plugin-view', async (importOriginal) => {
   return { ...mod, ObjectView: GridDouble };
 });
 
+// The source reaches a dynamic import of it: its first load is paid at collection (`check:test-source-alias`).
+import '@objectstack/lint';
 import { DataPillar } from './StudioDesignSurface';
+import { StudioSaveHarness, pressStudioSave } from './__tests__/studioSaveHarness';
 import { t } from '../metadata-admin/i18n';
 import { readFields } from '../metadata-admin/previews/object-fields-io';
 import { addFieldFromFormToolbar, addFieldFromGrid } from './__tests__/dataPillarAddField';
@@ -98,9 +102,9 @@ afterEach(() => {
 
 async function renderPillar(props: { readOnly?: boolean } = {}) {
   render(
-    <MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
+    <StudioSaveHarness><MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
       <DataPillar packageId="com.example.showcase" readOnly={props.readOnly} />
-    </MemoryRouter>,
+    </MemoryRouter></StudioSaveHarness>,
   );
   await waitFor(() => expect(screen.getByTestId('records-panel')).toBeInTheDocument(), { timeout: 8000 });
 }
@@ -115,6 +119,7 @@ const toolbarAddField = () => within(screen.getByTestId('form-toolbar')).getByRo
 
 /** The fields of the latest object draft the pillar saved. */
 async function savedFields(): Promise<Record<string, Record<string, unknown>>> {
+  await pressStudioSave();
   await waitFor(() => expect(mockClient.save).toHaveBeenCalled(), { timeout: 8000 });
   const calls = mockClient.save.mock.calls as unknown as Array<[string, string, Record<string, unknown>]>;
   const body = calls[calls.length - 1][2];
@@ -205,11 +210,8 @@ describe('Data pillar — Add field asks for the label and type first (objectui#
     expect(within(inspector).getByText('full_name')).toBeInTheDocument();
     await addFieldFromFormToolbar(undefined, { label: 'ヘルススコア', apiName: 'health_score' });
     await waitFor(() => expect(within(screen.getByTestId('data-field-inspector')).getByText('health_score')).toBeInTheDocument());
-    const fields = await waitFor(async () => {
-      const f = await savedFields();
-      expect(Object.keys(f)).toEqual(['name', 'full_name', 'health_score']);
-      return f;
-    }, { timeout: 8000 });
+    const fields = await savedFields();
+    expect(Object.keys(fields)).toEqual(['name', 'full_name', 'health_score']);
     expect(fields.full_name).toMatchObject({ type: 'text', label: 'Name' });
     expect(fields.health_score).toMatchObject({ type: 'text', label: 'ヘルススコア' });
   });
