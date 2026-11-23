@@ -2174,7 +2174,7 @@ const zh = {
       copyLink: '复制链接',
       linkCopied: '链接已复制到剪贴板',
       linkCopyFailed: '复制链接失败',
-      design: '设计',
+      objectSettings: '对象设置',
     },
     settingsHub: {
       title: '设置',

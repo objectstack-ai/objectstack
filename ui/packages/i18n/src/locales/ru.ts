@@ -3159,7 +3159,7 @@ const ru = {
       copyLink: "Копировать ссылку",
       linkCopied: "Ссылка скопирована в буфер обмена",
       linkCopyFailed: "Не удалось скопировать ссылку",
-      design: "Дизайн",
+      objectSettings: "Настройки объекта",
     },
   },
   auth: {

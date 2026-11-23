@@ -3074,7 +3074,7 @@ const es = {
       copyLink: "Copiar enlace",
       linkCopied: "Enlace copiado al portapapeles",
       linkCopyFailed: "No se pudo copiar el enlace",
-      design: "Diseñar",
+      objectSettings: "Configuración del objeto",
     },
   },
   auth: {

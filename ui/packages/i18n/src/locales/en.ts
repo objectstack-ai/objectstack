@@ -2544,7 +2544,8 @@ const en = {
       copyLink: 'Copy link',
       linkCopied: 'Link copied to clipboard',
       linkCopyFailed: 'Failed to copy link',
-      design: 'Design',
+      // objectstack#36487 — an object entry's Studio door, in this menu and first in a list's ⋮.
+      objectSettings: 'Object settings',
     },
     settingsHub: {
       title: 'Settings',

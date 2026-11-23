@@ -3070,7 +3070,7 @@ const fr = {
       copyLink: "Copier le lien",
       linkCopied: "Lien copié dans le presse-papiers",
       linkCopyFailed: "Impossible de copier le lien",
-      design: "Concevoir",
+      objectSettings: "Paramètres de l'objet",
     },
   },
   auth: {
