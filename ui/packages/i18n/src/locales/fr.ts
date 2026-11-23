@@ -3646,6 +3646,7 @@ const fr = {
     allReports: "Tous les rapports",
     collapse: 'Réduire la barre latérale',
     expand: 'Développer la barre latérale',
+    resize: 'Redimensionner la barre latérale',
   },
   designMode: {
     title: 'Mode conception',

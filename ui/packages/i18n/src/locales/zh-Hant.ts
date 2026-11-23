@@ -3706,6 +3706,7 @@ const zhHant = {
     allReports: '全部報表',
     collapse: '收起側邊欄',
     expand: '展開側邊欄',
+    resize: '調整側邊欄寬度',
   },
   designMode: {
     title: '設計模式',

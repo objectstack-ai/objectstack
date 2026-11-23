@@ -3706,6 +3706,7 @@ const zh = {
     allReports: '全部报表',
     collapse: '收起侧边栏',
     expand: '展开侧边栏',
+    resize: '调整侧边栏宽度',
   },
   designMode: {
     title: '设计模式',
