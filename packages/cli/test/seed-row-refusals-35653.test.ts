@@ -116,11 +116,7 @@ describe('os validate / os build: seed records against the package\'s own valida
   });
 });
 
-/**
- * A metadata service holding the two objects, and an engine that answers the
- * dry run's reads with an empty database and refuses every write: a dry run
- * writes nothing, so a write reaching it is the failure.
- */
+/** A metadata service holding the two objects, and an engine the dry run must never reach. */
 function dryRunLoader(): SeedLoaderService {
   const objects: Record<string, AnyRec> = { xt_invoice: INVOICE, xt_payment: PAYMENT };
   const metadata = {
@@ -129,14 +125,10 @@ function dryRunLoader(): SeedLoaderService {
     list: vi.fn(async () => Object.values(objects)),
     listObjects: vi.fn(async () => Object.values(objects)),
   } as unknown as IMetadataService;
-  const reads: Record<string, () => Promise<unknown>> = {
-    find: async () => [],
-    findOne: async () => null,
-    count: async () => 0,
-    aggregate: async () => [],
-  };
+  // Every engine verb refuses: a dry run into a named organization reads and
+  // writes nothing, so any call reaching the engine is the failure.
   const engine = new Proxy({}, {
-    get: (_target, verb) => reads[String(verb)] ?? (() => { throw new Error(`a dry run wrote: ${String(verb)}`); }),
+    get: (_target, verb) => () => { throw new Error(`a dry run reached the engine: ${String(verb)}`); },
   }) as unknown as IDataEngine;
   const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
   return new SeedLoaderService(engine, metadata, logger as never);
@@ -151,7 +143,7 @@ describe('os validate / os build: a keyed seed record with a blank key field (#3
     expect(out.refusals.map(({ rule, location, object, recordIndex, field }) => ({ rule, location, object, recordIndex, field })))
       .toEqual([{ rule: SEED_RECORD_KEY_FIELD_BLANK, location: 'data[0].records[1]', object: 'xt_payment', recordIndex: 1, field: 'name' }]);
 
-    const loaded = await dryRunLoader().validate((stack.data as never[]));
+    const loaded = await dryRunLoader().validate(stack.data as never[], { organizationId: 'org_seed_rules' } as never);
     const loaderSentence = loaded.errors.find((e) => e.recordIndex === 1 && e.sourceObject === 'xt_payment')?.message;
     expect(loaderSentence).toBeDefined();
     expect(out.refusals[0].message).toBe(loaderSentence);

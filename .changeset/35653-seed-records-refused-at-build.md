@@ -5,7 +5,7 @@
 
 feat(cli): `os validate` and `os build` refuse seed records the seed load would drop: one its own validation rule refuses, or a keyed one with a blank key field
 
-Clause-②: no
+Clause-②: no (narrowing)
 Metadata-protocol: narrowed
 
 <!-- adr-0087: registered seed-record-refused-before-load -->
