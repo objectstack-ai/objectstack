@@ -795,7 +795,8 @@ describe('the design-mode menu in the sidebar order (objectstack#36591)', () => 
     const saved = await save();
     expect(orderKeys(saved)).toEqual([]);
     cleanup();
-    expect(sidebarOrder(saved)).toEqual(shown);
+    // The sidebar draws no empty group: Insights is the editor's alone.
+    expect(sidebarOrder(saved)).toEqual(shown.filter((label) => label !== 'Insights'));
   });
 
   it('a level where some entries carry `order` and some do not: one save, and the sidebar reads as the design mode', async () => {
