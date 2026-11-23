@@ -38,6 +38,9 @@ vi.mock('../previews/useObjectFields', () => ({
   useObjectFields: () => ({ fields: [], loading: false, error: null }),
 }));
 
+// Paid at collection, not inside a case's clock (check:test-source-alias).
+import '@objectstack/formula';
+import '@objectstack/lint';
 import { ObjectFieldInspector } from './ObjectFieldInspector';
 
 afterEach(cleanup);
@@ -72,7 +75,8 @@ describe('ObjectFieldInspector · the Indexed toggle is retired (objectui#4644)'
     // targeted retirement, not a section that failed to render.
     expect(screen.getByText('Read-only')).toBeInTheDocument();
     expect(screen.getByText('Hidden')).toBeInTheDocument();
-    expect(screen.getByText('Track history')).toBeInTheDocument();
+    // objectstack#36290 — the Track history box became the Field change values choice.
+    expect(screen.getByText('Field change values')).toBeInTheDocument();
   });
 
   it('renders no Indexed control even on a draft that already carries the key', () => {
