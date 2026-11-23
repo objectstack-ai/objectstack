@@ -148,6 +148,60 @@ describe('Hook.texts — a key the source asks for literally is refused at save 
   });
 });
 
+// A key is literal only when its closing quote ends the argument: `,` or `)`
+// follows, after optional whitespace. Anything else after the quote (`+`, a
+// member access) makes the argument a computed key, which the run-time refusal
+// decides; a template with a `${}` hole is never a literal at all.
+describe('Hook.texts — a literal ask ends at its closing quote; a key built from a literal is computed', () => {
+  const texts = { follow_up_subject: { message: 'Follow up', params: ['lead'] } };
+
+  const LITERAL = [
+    ['a lone argument', "await ctx.text('follow_up');"],
+    ['a first argument', "await ctx.text('follow_up', { lead: ctx.input.name });"],
+    ['whitespace before the comma', "await ctx.text('follow_up' , { lead: ctx.input.name });"],
+    ['a line break before the close', "await ctx.text(\n  'follow_up'\n);"],
+    ['a comment before the close', "await ctx.text('follow_up' /* the task subject */);"],
+    ['a backtick with no hole', 'await ctx.text(`follow_up`);'],
+    ['the optional call', "await ctx.text?.('follow_up', { lead: ctx.input.name });"],
+  ] as const;
+
+  it.each(LITERAL)('lit: refuses an undeclared literal key asked for as %s, at body.source', (_shape, source) => {
+    expect(hookTextKeysAskedIn(source)).toEqual(['follow_up']);
+    const r = HookSchema.safeParse({ ...base, body: body(source), texts });
+    expect(r.success).toBe(false);
+    const issue = r.error!.issues.find((i) => i.path.join('.') === 'body.source')!;
+    expect(issue.message).toBe(undeclaredHookTextKeyAtSave('follow_up', ['follow_up_subject'], 'body.source'));
+  });
+
+  const COMPUTED = [
+    ['a concatenation', "await ctx.text('follow_up' + suffix);"],
+    ['a concatenation on the next line', "await ctx.text('follow_up'\n  + suffix, { lead: ctx.input.name });"],
+    ['a concatenation in the optional call', "await ctx.text?.('follow_up' + suffix);"],
+    ['a backtick concatenation', 'await ctx.text(`follow_up` + suffix);'],
+    ['a member access', "await ctx.text('follow_up'.concat(suffix));"],
+    ['a template hole', 'await ctx.text(`follow_up_${suffix}`);'],
+    ['a template hole in the optional call', 'await ctx.text?.(`follow_up_${suffix}`, { lead: ctx.input.name });'],
+  ] as const;
+
+  it.each(COMPUTED)('dark: passes the save for a key built from a literal by %s (the run-time refusal decides it)', (_shape, source) => {
+    expect(hookTextKeysAskedIn(source)).toEqual([]);
+    expect(HookSchema.safeParse({ ...base, body: body(`const suffix = '_subject';\n${source}`), texts }).success).toBe(true);
+  });
+
+  it('dark: an inline handler building its key by concatenation passes the save, at handler', () => {
+    const handler = async (ctx: any) => { const suffix = '_subject'; await ctx.text?.('follow_up' + suffix); };
+    expect(HookSchema.safeParse({ ...base, handler, texts }).success).toBe(true);
+  });
+
+  it('CONTROL: a literal ask beside a computed one in the same body is still refused, once', () => {
+    const source = "await ctx.text('follow_up' + suffix);\nawait ctx.text('follow_up');";
+    expect(hookTextKeysAskedIn(source)).toEqual(['follow_up']);
+    const r = HookSchema.safeParse({ ...base, body: body(source), texts });
+    expect(r.success).toBe(false);
+    expect(r.error!.issues.filter((i) => i.path.join('.') === 'body.source')).toHaveLength(1);
+  });
+});
+
 describe('hooks.<hook>.texts.<key>.message — the translation face', () => {
   it('spells the key the runtime reads', () => {
     expect(hookTextMessageKey('lead_follow_up', 'follow_up_subject')).toBe('hooks.lead_follow_up.texts.follow_up_subject.message');
