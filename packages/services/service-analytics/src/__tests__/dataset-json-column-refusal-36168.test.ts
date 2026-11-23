@@ -362,12 +362,13 @@ describe('[#36264] svc.query and svc.generateSql refuse it too, on a named diale
     name: OBJECT,
     sql: OBJECT,
     measures: { cnt: { label: 'Count', type: 'count', sql: '*' } },
-    dimensions: { seen: { label: 'Seen', type: 'time', sql: 'seen' } },
+    dimensions: { seen: { label: 'Seen', type: 'time', sql: 'seen' }, day: { label: 'Day', type: 'time', sql: 'day' } },
     public: true,
   } as unknown as Cube;
   const SHAPES: Record<string, ValueShapeFieldDef> = {
     tags: { type: 'select', multiple: true },
     seen: { type: 'tags' },
+    day: { type: 'datetime' },
   };
   const svc = new AnalyticsService({
     cubes: [CUBE],
@@ -390,9 +391,13 @@ describe('[#36264] svc.query and svc.generateSql refuse it too, on a named diale
     });
   }
 
-  it('query: a timeDimensions dateRange on such a member → 400 INVALID_FILTER (its window is a $gte / $lte filter)', async () => {
-    const err = await refusalOf(ask('query', { timeDimensions: [{ dimension: 'seen', dateRange: ['2026-01-01', '2026-02-01'] }] }));
-    expect(err.code, err.message).toBe('INVALID_FILTER');
-    expect(err.status).toBe(400);
-  });
+  for (const door of ['query', 'generateSql'] as const) {
+    it(`${door}: a timeDimensions dateRange on such a member → 400 INVALID_FILTER; CONTROL: on a scalar time column it answers`, async () => {
+      const window = (dimension: string) => ({ timeDimensions: [{ dimension, dateRange: ['2026-01-01', '2026-02-01'] }] });
+      const err = await refusalOf(ask(door, window('seen')));
+      expect(err.code, err.message).toBe('INVALID_FILTER');
+      expect(err.status).toBe(400);
+      await expect(ask(door, window('day'))).resolves.toBeDefined();
+    });
+  }
 });
