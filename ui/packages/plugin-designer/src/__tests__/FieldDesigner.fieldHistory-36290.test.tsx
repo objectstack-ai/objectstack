@@ -27,7 +27,21 @@ import { evalFieldPredicate } from '@object-ui/core';
 import { resolveFieldHistory } from '@objectstack/spec/data';
 import { FieldDesigner } from '../FieldDesigner';
 
-const drawer = vi.hoisted(() => ({ schema: undefined as undefined | Record<string, any> }));
+/** The parts of the drawer schema this file reads. */
+interface DrawerRow {
+  name: string;
+  label?: string;
+  options?: Array<{ label: string; value: string }>;
+  visibleWhen?: string;
+}
+interface SeenDrawerSchema {
+  open?: boolean;
+  initialValues: Record<string, unknown>;
+  onSuccess: (values: Record<string, unknown>) => void;
+  sections: Array<{ name: string; fields: DrawerRow[] }>;
+}
+
+const drawer = vi.hoisted(() => ({ schema: undefined as undefined | SeenDrawerSchema }));
 
 vi.mock('@object-ui/plugin-grid', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -35,7 +49,7 @@ vi.mock('@object-ui/plugin-grid', async (importOriginal) => ({
 }));
 vi.mock('@object-ui/plugin-form', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  DrawerForm: ({ schema }: { schema: Record<string, any> }) => {
+  DrawerForm: ({ schema }: { schema: SeenDrawerSchema }) => {
     drawer.schema = schema;
     return schema.open === false ? null : <div data-testid="mock-drawer-form" />;
   },
@@ -71,11 +85,11 @@ async function openCreate() {
   await waitFor(() => expect(screen.getByTestId('mock-drawer-form')).toBeTruthy());
 }
 
-function advancedRows(): Array<Record<string, any>> {
-  return drawer.schema!.sections.find((s: { name: string }) => s.name === 'advanced').fields;
+function advancedRows(): DrawerRow[] {
+  return drawer.schema!.sections.find((s) => s.name === 'advanced')!.fields;
 }
 
-function row(name: string): Record<string, any> {
+function row(name: string): DrawerRow {
   return advancedRows().find((f) => f.name === name)!;
 }
 
@@ -96,8 +110,8 @@ describe('FieldDesigner · Field Change Values rows (#36290)', () => {
     expect(names).toEqual(expect.arrayContaining([ON_ROW, OFF_ROW]));
     expect(names).not.toContain('trackHistory');
     expect(row(ON_ROW).label).toBe('Field Change Values');
-    expect(row(ON_ROW).options.map((o: { label: string }) => o.label)).toEqual(['Default (On)', 'On', 'Off']);
-    expect(row(OFF_ROW).options.map((o: { label: string }) => o.label)).toEqual(['Default (Off)', 'On', 'Off']);
+    expect(row(ON_ROW).options!.map((o) => o.label)).toEqual(['Default (On)', 'On', 'Off']);
+    expect(row(OFF_ROW).options!.map((o) => o.label)).toEqual(['Default (Off)', 'On', 'Off']);
   });
 
   it('for every designer type exactly one row shows, and it is the one resolveFieldHistory names', async () => {
