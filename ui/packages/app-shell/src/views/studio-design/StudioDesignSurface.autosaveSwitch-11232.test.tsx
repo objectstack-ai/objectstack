@@ -358,21 +358,26 @@ describe('Automations pillar — a flow switch inside the debounce (objectui#112
     return within(screen.getByRole('complementary')).findByLabelText('Label', undefined, SLOW);
   }
 
-  it('sends nothing to the newly opened flow; the edit after its load saves to it', async () => {
+  it('sends nothing to the newly opened flow; the edit after its load saves to it on Save (objectstack#36511)', async () => {
     render(
-      <MemoryRouter initialEntries={[`/studio/${PKG}/automations`]}>
-        <AutomationsPillar packageId={PKG} />
-      </MemoryRouter>,
+      <StudioSaveHarness>
+        <MemoryRouter initialEntries={[`/studio/${PKG}/automations`]}>
+          <AutomationsPillar packageId={PKG} />
+        </MemoryRouter>
+      </StudioSaveHarness>,
     );
     await waitFor(() => expect(document.querySelector('[data-node-id="start"]')).toHaveTextContent('Start'), SLOW);
 
     editText(await openStartNode(), 'Kick-off');
     const release = holdLoad('flow', 'nightly_digest');
+    // The unsaved edit is asked about; confirmed, it is dropped with the switch.
+    confirmSpy.mockReturnValue(true);
     fireEvent.click(screen.getByRole('button', { name: /Nightly digest/ }));
+    expect(confirmSpy).toHaveBeenCalledTimes(1);
     await pastDebounce();
 
     // Nothing is written to the flow the author only opened, and the previous
-    // flow's pending edit is dropped with the switch, as the Data pillar's is.
+    // flow's unsaved edit is dropped with the switch, as the Data pillar's is.
     expect(savesOf('flow', 'nightly_digest')).toEqual([]);
     expect(server.saves).toEqual([]);
 
@@ -383,6 +388,7 @@ describe('Automations pillar — a flow switch inside the debounce (objectui#112
 
     // The control: an edit after the switch saves normally, to its own flow.
     editText(await openStartNode(), 'Go');
+    await pressStudioSave();
     await waitFor(() => expect(server.saves).toHaveLength(1), SLOW);
     expect(savesOf('flow', 'nightly_digest').map((b) => [b.label, startLabel(b)])).toEqual([['Nightly digest', 'Go']]);
   }, 30000);
@@ -779,6 +785,7 @@ describe('a package switch: Automations and Data open nothing of the previous pa
     // right slot, itself an `aside`: two complementary landmarks, so the
     // Configuration is found by its own test id.
     editText(await within(screen.getByTestId('auto-config-aside')).findByLabelText('Label', undefined, SLOW), 'Kick-off');
+    await pressStudioSave();
     await waitFor(() => expect(server.saves).toHaveLength(1), SLOW);
     expect(server.saves.map((s) => [s.type, s.name, s.packageId, s.body.label, startLabelOf(s.body)])).toEqual([
       ['flow', 'beta_sync', PKG_B, 'Beta sync', 'Kick-off'],

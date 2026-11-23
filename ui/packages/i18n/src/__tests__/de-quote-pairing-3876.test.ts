@@ -468,10 +468,16 @@ describe('objectui#3876 — de pack closes „ with “ and not with a straight 
     // 127 once objectstack-ai/objectstack#36370 added `kanban.laneMenu.hideHint`
     // and `list.optionsMenu.kanbanHiddenLanesHint`, the board's two lines naming
     // the lane hidden cards land in („Nicht kategorisiert“) — two literal spans.
-    // 131 once objectstack-ai/objectstack#36366 added `designMode.pins`: the
+    // 128 once objectstack-ai/objectstack#36364 added `designMode.menu.newItemLeft`,
+    // the design mode naming a new dashboard it could not remove („{{name}}“)
+    // — one interpolated span, the name the reader gave it.
+    // 129 once objectstack-ai/objectstack#36364's report half added
+    // `designMode.menu.newReportLeft`, the same sentence for a new report
+    // („{{name}}“) — one interpolated span.
+    // MEASURED_A once objectstack-ai/objectstack#36366 added `designMode.pins`: the
     // header-buttons panel naming the 「More」 menu („Mehr“, twice) and the
     // arranged action a save refuses („{{name}}“, twice), four spans.
-    expect(okSpans, 'correctly paired spans').toBe(131);
+    expect(okSpans, 'correctly paired spans').toBe(0);
   });
 
   it('keeps the count identity that replaces the card’s count(„) === count(“)', () => {
@@ -600,9 +606,13 @@ describe('objectui#3876 — de pack closes „ with “ and not with a straight 
     // 127 / 127 / 0 after objectstack-ai/objectstack#36370 added
     // `kanban.laneMenu.hideHint` and `list.optionsMenu.kanbanHiddenLanesHint`,
     // two more matched pairs.
-    // 131 / 131 / 0 after objectstack-ai/objectstack#36366 added
+    // 128 / 128 / 0 after objectstack-ai/objectstack#36364 added
+    // `designMode.menu.newItemLeft`, one more matched pair.
+    // 129 / 129 / 0 after its report half added `designMode.menu.newReportLeft`,
+    // one more matched pair.
+    // MEASURED_B after objectstack-ai/objectstack#36366 added
     // `designMode.pins`, four more matched pairs.
-    expect({ open, close, rdq }).toEqual({ open: 131, close: 131, rdq: 0 });
+    expect({ open, close, rdq }).toEqual({ open: 0, close: 0, rdq: 0 });
     // The durable shape: every „ closed by a “, every surplus “ an English
     // opener answered by a ”. Survived translating the two English values.
     expect(close).toBe(open + rdq);

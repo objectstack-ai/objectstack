@@ -79,6 +79,7 @@ const SETTING_KEYS = [
   'highlightFields',
   'relatedLists',
   'enable.trackHistory',
+  'enable.fieldHistory',
   'enable.files',
   'enable.feeds',
   'enable.activities',

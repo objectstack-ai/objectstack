@@ -393,7 +393,9 @@ const STUDIO_EN: Record<string, string> = {
   'designer.field.description': 'Description',
   'designer.field.readonly': 'Read-only',
   'designer.field.hidden': 'Hidden',
-  'designer.field.trackHistory': 'Track history',
+  'designer.field.fieldHistory': 'Field change values',
+  'designer.field.fieldHistoryObjectOff':
+    'This object turns field change values off for every field, so changes to this field name the field only, whatever is chosen here.',
   'designer.field.showOnCreate': 'Show on create',
   'designer.field.showOnCreateRequired': 'A required field is always asked for when a record is created, so Show on create stays on.',
   'designer.field.placeholder': 'Placeholder',
@@ -2448,7 +2450,10 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.settings.capabilitiesHint': 'Turn record-page features on or off for this object; every switch really takes effect',
   'engine.studio.settings.capTrackHistory': 'Field change history',
   'engine.studio.settings.capTrackHistoryDesc':
-    "Shows the record's field changes: on the default record page they join the record's one timeline stream, under its Changes filter. Pair with per-field history tracking to pick which field diffs are summarized; audit capture itself is always on for compliance.",
+    "Shows the record's field changes: on the default record page they join the record's one timeline stream, under its Changes filter. Whether a change shows its old → new values is Field change values, below; audit capture itself is always on for compliance.",
+  'engine.studio.settings.capFieldHistory': 'Field change values',
+  'engine.studio.settings.capFieldHistoryDesc':
+    "Shows each changed field's old → new values in the record's activity. On by default, and a single field can turn its own off. Off = a change names its fields only, for every field of this object.",
   'engine.studio.settings.capFiles': 'Attachments',
   'engine.studio.settings.capFilesDesc':
     'Generic Attachments panel on record pages (upload/download/delete). Off = the server also rejects new attachments targeting this object.',
@@ -2735,10 +2740,11 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.auto.unregisteredTitle': 'The automation engine on this deployment holds no registration for this flow',
   'engine.studio.auto.enabled': 'Switched on',
   'engine.studio.auto.disabled': 'Switched off',
-  'engine.studio.auto.enableTitle': 'Enable this automation (publish to apply)',
-  'engine.studio.auto.disableTitle': 'Disable this automation (publish to apply)',
-  'engine.studio.auto.enabledToast': 'Switched on — publish to apply',
-  'engine.studio.auto.disabledToast': 'Switched off — publish to apply',
+  // objectstack#36511 — the switch is live at once, as an installed app's is.
+  'engine.studio.auto.enableTitle': 'Enable this automation. It takes effect at once.',
+  'engine.studio.auto.disableTitle': 'Disable this automation. It takes effect at once.',
+  'engine.studio.auto.enabledToast': 'Switched on, live now',
+  'engine.studio.auto.disabledToast': 'Switched off, live now',
   'engine.studio.auto.newTitle': 'New automation',
   'engine.studio.auto.none': 'No automations yet — click “+” above to create one',
   'engine.studio.auto.emptyMain': 'No automations in this package yet.',
@@ -2770,17 +2776,17 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.access.title': 'Permission matrix',
   'engine.studio.access.subtitle': 'Object permissions · field-level read/write',
   'engine.studio.access.bannerTitle':
-    'Only this app’s objects are listed here, and saving changes only this app’s grants — grants from other apps stay as they are. Changes are saved as a draft and go live when you Publish the app (top bar), as in Data and Interfaces.',
-  'engine.studio.access.banner': 'This app’s objects · live on publish',
+    'Only this app’s objects are listed here, and saving changes only this app’s grants — grants from other apps stay as they are. Changes go live when you press Save in the top bar, as in Data and Interfaces.',
+  'engine.studio.access.banner': 'This app’s objects · live on save',
   // objectstack#29674 — the note on an open set the base's pair adds: its matrix lists the base's objects too.
-  'engine.studio.access.bannerPair': 'This app’s and {package}’s objects · live on publish',
+  'engine.studio.access.bannerPair': 'This app’s and {package}’s objects · live on save',
   // objectstack#35018 — the open set's origin in the builder's words (the Studio title note).
   'engine.studio.access.origin.app': 'Included with the app',
   // objectstack#35018 — the word before the open item's label on the copilot's "Viewing" line.
   'engine.studio.copilot.subject.access': 'Access',
   'engine.studio.copilot.subject.flow': 'Flow',
   'engine.studio.access.bannerTitlePair':
-    'This permission set is part of the customization of {package}, so {package}’s objects are listed as well as this app’s, and saving changes only these grants — grants from other apps stay as they are. Changes are saved as a draft and go live when you Publish (top bar).',
+    'This permission set is part of the customization of {package}, so {package}’s objects are listed as well as this app’s, and saving changes only these grants — grants from other apps stay as they are. Changes go live when you press Save in the top bar.',
   // objectui#11781 — a read-only package saves no draft; objectui#12453 makes this the header link's title.
   'engine.studio.access.bannerTitleReadOnly':
     'Only this app’s objects are listed here. This app is read-only: you can view its permission sets but not change them.',
@@ -3323,10 +3329,6 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.createDraft': 'Save as draft',
   'engine.studio.saveDraft': 'Save draft',
   'engine.studio.autoSaving': 'Saving…',
-  // objectstack#34818 — the flow header's landed-autosave mark, its spoken form, and the one toast left (a failed save).
-  'engine.studio.autoSaved': 'Saved',
-  'engine.studio.flowSavedNamed': 'Flow "{item}" saved',
-  'engine.studio.flowSaveFailed': 'The draft of "{item}" was not saved',
   // Standard create-dialog field labels (shared by object / app / flow / permission).
   'engine.studio.app.nameLabel': 'App name',
   'engine.studio.app.idLabel': 'Identifier',
@@ -3362,6 +3364,19 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.save.confirmRemoveField': '• Delete the field “{field}”: its values on every record are removed.',
   'engine.studio.save.confirmRetypeField':
     '• Change “{field}” from {from} to {to}: values already stored may be converted or cleared.',
+  // objectstack#36511 item 6 — an item the AI assistant left an unpublished
+  // draft on: the page shows that version, says Save makes it live too, and
+  // offers to drop that one item's draft.
+  'engine.studio.aiDraft.notice': 'This item has unpublished changes from the AI assistant. Saving makes them live too.',
+  'engine.studio.aiDraft.discard': 'Discard the AI’s changes',
+  'engine.studio.aiDraft.discardTitle': 'Drop this item’s unpublished draft and go back to the live version',
+  'engine.studio.aiDraft.discardConfirmUnsaved':
+    'Discarding the AI’s changes also drops the changes on this page that you have not saved. Discard anyway?',
+  'engine.studio.aiDraft.discardFailed': 'The AI’s changes were not discarded: {reason}',
+  // objectstack#36511 — the create dialogs of the editors whose Save is live
+  // (objects, automations, permission sets): the item is created and live at
+  // once, so the confirm says Create, never Save as draft.
+  'engine.studio.createLive': 'Create',
   'engine.studio.held.lineExplicit': 'Not ready to save: {clause}. Your changes are kept here; fill it in, then Save.',
   'engine.studio.loading': 'Loading…',
   'engine.studio.loadFailed': 'Failed to load',
@@ -3419,6 +3434,10 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.held.celInvalidRule': 'an expression on the rule “{rule}” has an error to fix',
   'engine.studio.held.celInvalidAction': 'an expression on the action “{action}” has an error to fix',
   'engine.studio.held.inspectorInvalid': '“{item}” has an error to fix in its inspector',
+  // objectstack#36511 — a hook's Save held: an expression error, or a name changed from the one it is stored under.
+  'engine.studio.held.celInvalidHook': 'an expression on the hook “{hook}” has an error to fix',
+  'engine.studio.held.hookRename': 'the hook {name} keeps the name it was created with',
+  'engine.studio.held.pairActionRename': 'the action {name} keeps the name it was created with',
   'engine.studio.held.line': 'Not saved yet: {clause}. Your changes are kept here and saved once it is filled in.',
   'engine.studio.held.publish': 'Not published: {clause}, so that change is not saved yet. Finish it, then publish.',
   'engine.studio.held.inputHint': 'Required. Changes are saved once this has a value.',
@@ -3515,6 +3534,8 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.customize.overrides': 'Overrides {package}',
   'engine.studio.customize.overridesTitle': 'This item replaces {package}’s item of the same name on this deployment. It was taken from {package} {basedOn}.',
   'engine.studio.customize.draftFooter': 'Edits save as a draft of this deployment’s customization; Publish applies them.',
+  // objectstack#36511 — the same footer in a Studio pillar, where the top bar's Save makes an edit live.
+  'engine.studio.customize.saveFooter': 'Edits go into this deployment’s customization when you press Save in the top bar.',
   'engine.studio.customize.restore': 'Restore package original',
   'engine.studio.customize.restoreConfirm': 'Restore {package}’s “{item}”?',
   'engine.studio.customize.restoreBody': 'This deployment’s customization of “{item}” is deleted, and {package}’s version is served again.',
@@ -3585,7 +3606,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.landing.envCatalog.description': 'Positions, capabilities, permission sets and sharing rules, across every package.',
   // objectstack#34715 — the landing ordered by what the author came to do, in
   // words that name no package mechanism.
-  'engine.studio.landing.lead': 'Change an installed app, or build an app of your own. Changes save as drafts and take effect when you publish.',
+  'engine.studio.landing.lead': 'Change an installed app, or build an app of your own. Changes take effect when you press Save.',
   'engine.studio.landing.appsHeading': 'Installed apps',
   'engine.studio.landing.appsHint': 'Each app is upgraded by its vendor. Your changes are kept separately, so an upgrade does not overwrite them.',
   'engine.studio.landing.marketplaceInstall': 'Install from the marketplace',
@@ -3859,7 +3880,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.actions.presets': 'Common actions',
   'engine.studio.actions.notSaved': 'Not saved — needs “{input}”',
   'engine.studio.actions.heldNeeds': 'the action “{action}” needs “{input}”',
-  'engine.studio.actions.renameHeld': 'Not saved yet: an action added to an installed app keeps the name it was created with. Change the name back to {name} to save your changes.',
+  'engine.studio.actions.renameHeld': 'Not ready to save: an action added to an installed app keeps the name it was created with. Change the name back to {name}, then Save.',
   'engine.studio.actions.preset.change': 'Change a picklist field',
   'engine.studio.actions.preset.changeHint': 'Asks for a new “{field}”, then saves it.',
   'engine.studio.actions.preset.changeNeeds': 'Needs a picklist field on this object.',
@@ -3880,7 +3901,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.api.body': 'Example body',
   'engine.studio.api.bodyOmitted': 'Required fields come first. Optional fields not shown: {fields}',
   // Hooks view
-  'engine.studio.hooks.renameHeld': 'Not saved yet: a hook keeps the name it was created with. Change the name back to {name} to save your changes.',
+  'engine.studio.hooks.renameHeld': 'Not ready to save: a hook keeps the name it was created with. Change the name back to {name}, then Save.',
   'engine.studio.hooks.none': 'No hooks target this object.',
   'engine.studio.hooks.newButton': 'New hook',
   'engine.studio.hooks.async': 'async',
@@ -3908,14 +3929,11 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.owd.title': 'Who can see which records',
   'engine.studio.owd.subtitle': 'Record visibility of each object in this package',
   'engine.studio.owd.description':
-    'Who can see which records, for every object this package owns — check it at a glance and change it in bulk. Changes save as per-object drafts and go live with the package Publish, exactly like the object’s Settings tab.',
+    'Who can see which records, for every object this package owns — check it at a glance and change it in bulk. Save makes the changes live at once, exactly like the object’s Settings tab.',
   'engine.studio.owd.colObject': 'Object',
   'engine.studio.owd.colInternal': 'Who can see which records',
   'engine.studio.owd.none': 'This package declares no objects.',
   'engine.studio.owd.loadFailed': 'Failed to load this package’s objects.',
-  'engine.studio.owd.save': 'Save {count} change(s)',
-  'engine.studio.owd.saveNone': 'No changes',
-  'engine.studio.owd.saved': 'Saved {count} object draft(s).',
   'engine.studio.owd.unsaved': 'Unsaved',
   'engine.studio.owd.byParent': 'Follows its {master}',
   'engine.studio.owd.cbpPrereqTitle': 'Make the relationship required?',
@@ -4609,7 +4627,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.draftConflict.back': 'Back',
   'engine.draftConflict.notSaved': 'Not saved: {type} “{name}” was saved elsewhere after you opened it.',
   'engine.studio.inspector.props': 'Properties',
-  'engine.studio.inspector.draftFooter': 'Edits save as drafts. Publish the package to apply them.',
+  'engine.studio.inspector.draftFooter': 'Edits go live when you press Save in the top bar.',
   'engine.studio.inspector.collapse': 'Collapse properties',
   'engine.studio.inspector.expand': 'Show properties',
   'engine.studio.inspector.emptyLine1': 'Click a block on the canvas,',

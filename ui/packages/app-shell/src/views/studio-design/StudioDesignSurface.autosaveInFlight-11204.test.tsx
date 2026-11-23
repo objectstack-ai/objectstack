@@ -255,16 +255,23 @@ function editText(el: HTMLElement, value: string): void {
   fireEvent.blur(el);
 }
 
-describe('Automations pillar — an edit taken while a flow save is in flight (objectui#11204)', () => {
+/**
+ * objectstack#36511 — a flow saves with the top bar's Save too: an edit taken
+ * while a Save is in flight stays on screen, and the flow stays dirty once that
+ * Save lands, so the next Save sends it.
+ */
+describe('Automations pillar — an edit taken while a flow Save is in flight (objectui#11204)', () => {
   function startLabel(body: Record<string, unknown>): string {
     return String((body.nodes as Array<{ id: string; label?: string }>).find((n) => n.id === 'start')?.label);
   }
 
-  it('stays on screen and lands in the next save', async () => {
+  it('stays on screen, unsent, and the next Save sends it', async () => {
     render(
-      <MemoryRouter initialEntries={[`/studio/${PKG}/automations`]}>
-        <AutomationsPillar packageId={PKG} />
-      </MemoryRouter>,
+      <StudioSaveHarness>
+        <MemoryRouter initialEntries={[`/studio/${PKG}/automations`]}>
+          <AutomationsPillar packageId={PKG} />
+        </MemoryRouter>
+      </StudioSaveHarness>,
     );
     // Loaded once the Status pill reads the flow's `active` status — in the
     // switch's words, with no runtime reading (objectui#11779).
@@ -272,17 +279,21 @@ describe('Automations pillar — an edit taken while a flow save is in flight (o
     fireEvent.click(document.querySelector('[data-node-id="start"] [role="button"]') as HTMLElement);
     const label = await within(screen.getByRole('complementary')).findByLabelText('Label', undefined, { timeout: 8000 });
 
-    const release = holdNextSave();
     editText(label, 'Kick-off');
-    await screen.findByTestId('auto-autosaving', undefined, { timeout: 8000 });
-    expect(savesOf('flow').map(startLabel)).toEqual(['Kick-off']);
+    const release = holdNextSave();
+    await pressStudioSave({ settle: false });
+    await waitFor(() => expect(savesOf('flow').map(startLabel)).toEqual(['Kick-off']), { timeout: 8000 });
     editText(label, 'Kick-off two');
     await waitFor(() => expect(document.querySelector('[data-node-id="start"]')).toHaveTextContent('Kick-off two'), { timeout: 8000 });
 
     await release();
+    await waitFor(() => expect(screen.getByTestId('studio-save')).toBeEnabled(), { timeout: 8000 });
     await settle();
     expect(document.querySelector('[data-node-id="start"]')).toHaveTextContent('Kick-off two');
-    expect(savesOf('flow').map(startLabel)).toEqual(['Kick-off', 'Kick-off two']);
+    expect(savesOf('flow').map(startLabel), 'nothing sends it by itself').toEqual(['Kick-off']);
+
+    await pressStudioSave();
+    await waitFor(() => expect(savesOf('flow').map(startLabel)).toEqual(['Kick-off', 'Kick-off two']), { timeout: 8000 });
   });
 });
 

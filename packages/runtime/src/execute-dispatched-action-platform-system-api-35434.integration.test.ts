@@ -45,8 +45,15 @@ const MEMBER = PermissionSetSchema.parse({
   objects: { qa_note: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true } },
 });
 
-/** The invoking user's envelope, as an action door receives it. */
-const CALLER = { userId: 'usr_plain', tenantId: 'org_default', positions: [], permissions: ['qa_member'], isSystem: false };
+/** The invoking user's envelope, as an action door receives it. Its membership set rides the envelope as every transport's does (`assembleExecutionContext`). */
+const CALLER = {
+  userId: 'usr_plain',
+  tenantId: 'org_default',
+  accessible_org_ids: ['org_default'],
+  positions: [],
+  permissions: ['qa_member'],
+  isSystem: false,
+};
 
 /** A row of each of the four identity-assignment objects. */
 const ROWS: Record<string, (id: string) => Record<string, unknown>> = {

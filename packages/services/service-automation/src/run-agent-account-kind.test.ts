@@ -78,8 +78,10 @@ describe('[ADR-0151 Non-goals] an elevated run an AI service account started car
 
         expect(run.principalKind).toBe('agent');
         expect(resolveRunDataContext(run)).toMatchObject({ isSystem: true, userId: 'u_bot', principalKind: 'agent' });
-        // Elevation reads no grants: nothing was resolved for the account.
-        expect(h.userGrantsResolver).not.toHaveBeenCalled();
+        // Elevation reads no grants: run setup asks the account's membership set
+        // and rung for the organization wall, and takes nothing else from it.
+        expect(h.userGrantsResolver).toHaveBeenCalledTimes(1);
+        expect(run.permissions).toBeUndefined();
     });
 
     it('the kind is the door\'s, never one setup looks up: an elevated run handed only a user carries none', async () => {
@@ -90,7 +92,9 @@ describe('[ADR-0151 Non-goals] an elevated run an AI service account started car
 
         expect(run.principalKind).toBeUndefined();
         expect('principalKind' in (resolveRunDataContext(run) as object)).toBe(false);
-        expect(h.userGrantsResolver).not.toHaveBeenCalled();
+        // The resolver is asked for the membership set and rung only: the kind it
+        // answers is never taken.
+        expect(h.userGrantsResolver).toHaveBeenCalledTimes(1);
     });
 
     it('CONTROL: a person\'s elevated run carries no kind', async () => {

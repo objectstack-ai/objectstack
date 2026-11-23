@@ -66,6 +66,10 @@ export const APP_ROUTE_METADATA_READS: ReadonlyArray<{ path: string; reads: read
   // AppReportIndexView (objectui#13020): the report list, and the dataset
   // list its read verdict needs, which it waits for itself; never the objects.
   { path: 'reports', reads: ['report'] },
+  // ReportNewPage (objectstack#36374): the report builder for a new report —
+  // the report list it names the new report against; the datasets it offers
+  // are read by the builder itself.
+  { path: 'reports/new', reads: ['report'] },
   // A page reads the objects its page binds, through its object scope
   // (`appObjectScope.ts`, objectui#12980), not the whole registry; `object`
   // stays for the routes where the scope does not apply (a record overlay).

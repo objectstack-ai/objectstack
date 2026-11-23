@@ -315,7 +315,8 @@ const STUDIO_ZH: Record<string, string> = {
   'designer.field.description': '描述',
   'designer.field.readonly': '只读',
   'designer.field.hidden': '隐藏',
-  'designer.field.trackHistory': '记录历史',
+  'designer.field.fieldHistory': '字段修改值',
+  'designer.field.fieldHistoryObjectOff': '该对象已对所有字段关闭修改值，所以无论这里怎么选，该字段的修改都只写出字段名。',
   'designer.field.showOnCreate': '新建时显示',
   'designer.field.showOnCreateRequired': '必填字段新建时总要填写，所以「新建时显示」保持开启。',
   'designer.field.placeholder': '占位符',
@@ -2229,7 +2230,10 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.settings.capabilitiesHint': '为本对象打开或关闭记录页上的功能;每个开关都会真正生效',
   'engine.studio.settings.capTrackHistory': '字段变更历史',
   'engine.studio.settings.capTrackHistoryDesc':
-    '显示记录的字段变更:在默认记录页上,它们并入记录唯一的时间线,归在「变更」筛选下。配合字段级历史跟踪可选择汇总哪些字段的差异;审计采集本身始终开启(合规要求)。',
+    '显示记录的字段变更:在默认记录页上,它们并入记录唯一的时间线,归在「变更」筛选下。变更是否显示旧值 → 新值由下方的「字段修改值」决定;审计采集本身始终开启(合规要求)。',
+  'engine.studio.settings.capFieldHistory': '字段修改值',
+  'engine.studio.settings.capFieldHistoryDesc':
+    '在记录的动态里显示每个被修改字段的旧值 → 新值。默认开启,单个字段可以自行关闭。关闭后,该对象所有字段的修改都只写出字段名。',
   'engine.studio.settings.capFiles': '附件',
   'engine.studio.settings.capFilesDesc':
     '记录页通用附件面板(上传/下载/删除)。关闭后服务端同时拒绝指向该对象的新附件。',
@@ -2445,10 +2449,10 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.auto.unregisteredTitle': '此部署的自动化引擎未注册该流程',
   'engine.studio.auto.enabled': '已启用',
   'engine.studio.auto.disabled': '已停用',
-  'engine.studio.auto.enableTitle': '启用此自动化(发布后生效)',
-  'engine.studio.auto.disableTitle': '停用此自动化(发布后生效)',
-  'engine.studio.auto.enabledToast': '已设为启用 — 发布后生效',
-  'engine.studio.auto.disabledToast': '已设为停用 — 发布后生效',
+  'engine.studio.auto.enableTitle': '启用此自动化，立即生效',
+  'engine.studio.auto.disableTitle': '停用此自动化，立即生效',
+  'engine.studio.auto.enabledToast': '已启用，立即生效',
+  'engine.studio.auto.disabledToast': '已停用，立即生效',
   'engine.studio.auto.newTitle': '新建自动化',
   'engine.studio.auto.none': '还没有自动化 — 点上方的「+」新建',
   'engine.studio.auto.emptyMain': '这个软件包还没有自动化。',
@@ -2476,17 +2480,17 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.access.title': '权限矩阵',
   'engine.studio.access.subtitle': '对象权限 · 字段级读写',
   'engine.studio.access.bannerTitle':
-    '这里只列出本应用的对象，保存时只改本应用的授权，其他应用给出的授权保持不变。改动先保存为草稿，点击顶栏「发布」后随应用一起生效（与数据、界面一致）。',
-  'engine.studio.access.banner': '本应用对象 · 发布后生效',
+    '这里只列出本应用的对象，保存时只改本应用的授权，其他应用给出的授权保持不变。改动在点击顶栏「保存」后立即生效（与数据、界面一致）。',
+  'engine.studio.access.banner': '本应用对象 · 保存后生效',
   // objectstack#29674 — the note on an open set the base's pair adds: its matrix lists the base's objects too.
-  'engine.studio.access.bannerPair': '本应用及 {package} 对象 · 发布后生效',
+  'engine.studio.access.bannerPair': '本应用及 {package} 对象 · 保存后生效',
   // objectstack#35018 — the open set's origin in the builder's words (the Studio title note).
   'engine.studio.access.origin.app': '随应用提供',
   // objectstack#35018 — the word before the open item's label on the copilot's 「正在看」 line.
   'engine.studio.copilot.subject.access': '权限',
   'engine.studio.copilot.subject.flow': '流程',
   'engine.studio.access.bannerTitlePair':
-    '这个权限集属于 {package} 的定制，所以除本应用的对象外也列出 {package} 的对象；保存时只改这部分授权，其他应用给出的授权保持不变。改动先保存为草稿，点击顶栏「发布」后生效。',
+    '这个权限集属于 {package} 的定制，所以除本应用的对象外也列出 {package} 的对象；保存时只改这部分授权，其他应用给出的授权保持不变。改动在点击顶栏「保存」后立即生效。',
   'engine.studio.access.bannerTitleReadOnly':
     '这里只列出本应用的对象。这个应用是只读的：可以查看它的权限集，但不能修改。',
   // ADR-0090 D5/D9 — 待确认的受众绑定建议(isDefault 权限集,管理员确认后生效,服务端绝不自动绑定)
@@ -2961,10 +2965,6 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.createDraft': '存为草稿',
   'engine.studio.saveDraft': '保存草稿',
   'engine.studio.autoSaving': '保存中…',
-  // objectstack#34818 — 流程标题行的「已保存」、读屏时念出的完整说法，以及唯一保留的提示（保存失败）。
-  'engine.studio.autoSaved': '已保存',
-  'engine.studio.flowSavedNamed': '流程「{item}」已保存',
-  'engine.studio.flowSaveFailed': '「{item}」的草稿没有保存成功',
   // Standard create-dialog field labels (shared by object / app / flow / permission).
   'engine.studio.app.nameLabel': '应用名称',
   'engine.studio.app.idLabel': '标识',
@@ -2988,6 +2988,14 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.save.confirmIrreversible': '保存后以下改动立即生效，之后无法用「取消」撤回：\n{changes}\n\n仍要保存吗？',
   'engine.studio.save.confirmRemoveField': '• 删除字段「{field}」：所有记录上这个字段的值都会被删除。',
   'engine.studio.save.confirmRetypeField': '• 把字段「{field}」从{from}改成{to}：已存的值可能被转换或清空。',
+  // objectstack#36511 第 6 项 — 见英文条目。
+  'engine.studio.aiDraft.notice': '这一项有 AI 未发布的改动，保存会一并生效',
+  'engine.studio.aiDraft.discard': '放弃 AI 的改动',
+  'engine.studio.aiDraft.discardTitle': '丢弃这一项未发布的草稿，回到已生效的版本',
+  'engine.studio.aiDraft.discardConfirmUnsaved': '放弃 AI 的改动会一并丢掉本页还没保存的改动。仍要放弃吗？',
+  'engine.studio.aiDraft.discardFailed': '没有放弃 AI 的改动：{reason}',
+  // objectstack#36511 — 见英文条目。
+  'engine.studio.createLive': '创建',
   'engine.studio.held.lineExplicit': '还不能保存：{clause}。改动已保留在此处，补全后再点保存。',
   'engine.studio.loading': '加载中…',
   'engine.studio.loadFailed': '加载失败',
@@ -3027,6 +3035,9 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.held.celInvalidRule': '规则「{rule}」的表达式有错误需要修正',
   'engine.studio.held.celInvalidAction': '动作「{action}」的表达式有错误需要修正',
   'engine.studio.held.inspectorInvalid': '「{item}」在检查器中有错误需要修正',
+  'engine.studio.held.celInvalidHook': '钩子「{hook}」的表达式有错误需要修正',
+  'engine.studio.held.hookRename': '钩子 {name} 需保留创建时的名称',
+  'engine.studio.held.pairActionRename': '操作 {name} 需保留创建时的名称',
   'engine.studio.held.line': '尚未保存：{clause}。更改已保留在此处，补全后会自动保存。',
   'engine.studio.held.publish': '未发布：{clause}，该更改尚未保存。请先补全，再发布。',
   'engine.studio.held.inputHint': '必填。填写后才会保存更改。',
@@ -3109,6 +3120,8 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.customize.overrides': '覆盖 {package}',
   'engine.studio.customize.overridesTitle': '此项在本部署中替换 {package} 中的同名项，取自 {package} {basedOn}。',
   'engine.studio.customize.draftFooter': '编辑会保存为本部署定制的草稿；发布后生效。',
+  // objectstack#36511 — 同一行脚注在 Studio 各栏里:点顶栏「保存」即生效。
+  'engine.studio.customize.saveFooter': '点击顶栏「保存」后，编辑写入本部署的定制并生效。',
   'engine.studio.customize.restore': '恢复软件包原版',
   'engine.studio.customize.restoreConfirm': '恢复 {package} 的「{item}」？',
   'engine.studio.customize.restoreBody': '本部署对「{item}」的定制会被删除，重新使用 {package} 的版本。',
@@ -3166,7 +3179,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.landing.envCatalog.name': '环境目录',
   'engine.studio.landing.envCatalog.description': '岗位、能力、权限集与共享规则，覆盖所有软件包。',
   // objectstack#34715 — the landing ordered by what the author came to do.
-  'engine.studio.landing.lead': '改已安装的应用，或者新建自己的应用。改动先存草稿，发布后生效。',
+  'engine.studio.landing.lead': '改已安装的应用，或者新建自己的应用。改动点击「保存」后立即生效。',
   'engine.studio.landing.appsHeading': '已安装的应用',
   'engine.studio.landing.appsHint': '应用本身由厂商升级；你的改动单独保存，升级不会冲掉。',
   'engine.studio.landing.marketplaceInstall': '从应用市场安装',
@@ -3414,7 +3427,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.actions.presets': '常用操作',
   'engine.studio.actions.notSaved': '未保存 —— 需要「{input}」',
   'engine.studio.actions.heldNeeds': '操作「{action}」需要「{input}」',
-  'engine.studio.actions.renameHeld': '尚未保存：给已安装应用新增的操作会保留创建时的名称。把名称改回 {name} 即可保存更改。',
+  'engine.studio.actions.renameHeld': '还不能保存：给已安装应用新增的操作会保留创建时的名称。把名称改回 {name}，再点保存。',
   'engine.studio.actions.preset.change': '修改下拉选择字段',
   'engine.studio.actions.preset.changeHint': '询问新的「{field}」,然后保存。',
   'engine.studio.actions.preset.changeNeeds': '需要该对象有一个下拉选择字段。',
@@ -3435,7 +3448,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.api.body': '示例请求体',
   'engine.studio.api.bodyOmitted': '必填字段排在最前。未列出的可选字段：{fields}',
   // Hooks view
-  'engine.studio.hooks.renameHeld': '尚未保存：钩子会保留创建时的名称。把名称改回 {name} 即可保存更改。',
+  'engine.studio.hooks.renameHeld': '还不能保存：钩子会保留创建时的名称。把名称改回 {name}，再点保存。',
   'engine.studio.hooks.none': '没有钩子作用于该对象。',
   'engine.studio.hooks.newButton': '新建钩子',
   'engine.studio.hooks.async': '异步',
@@ -3463,14 +3476,11 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.owd.title': '谁能看到哪些记录',
   'engine.studio.owd.subtitle': '本包每个对象的记录可见范围',
   'engine.studio.owd.description':
-    '本包每个对象「谁能看到哪些记录」的设置 —— 在一屏里核对并批量修改。改动按对象保存为草稿，随包发布生效，与对象「设置」页一致。',
+    '本包每个对象「谁能看到哪些记录」的设置 —— 在一屏里核对并批量修改。点「保存」后改动立即生效，与对象「设置」页一致。',
   'engine.studio.owd.colObject': '对象',
   'engine.studio.owd.colInternal': '谁能看到哪些记录',
   'engine.studio.owd.none': '本包未声明任何对象。',
   'engine.studio.owd.loadFailed': '加载本包对象失败。',
-  'engine.studio.owd.save': '保存 {count} 处改动',
-  'engine.studio.owd.saveNone': '无改动',
-  'engine.studio.owd.saved': '已保存 {count} 个对象草稿。',
   'engine.studio.owd.unsaved': '未保存',
   'engine.studio.owd.byParent': '跟随所属的{master}',
   'engine.studio.owd.cbpPrereqTitle': '将该关系设为必填？',
@@ -4150,7 +4160,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.draftConflict.back': '返回',
   'engine.draftConflict.notSaved': '未保存：{type}「{name}」在你打开后已在别处保存。',
   'engine.studio.inspector.props': '属性',
-  'engine.studio.inspector.draftFooter': '编辑先保存为草稿，发布包后生效。',
+  'engine.studio.inspector.draftFooter': '编辑在点击顶栏「保存」后生效。',
   'engine.studio.inspector.collapse': '收起属性',
   'engine.studio.inspector.expand': '展开属性',
   'engine.studio.inspector.emptyLine1': '在画布里点选一个积木,',

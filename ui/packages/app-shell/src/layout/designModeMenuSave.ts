@@ -24,6 +24,13 @@
  * replayed on its navigation by entry id (`rebaseMenuEdits`); an entry
  * naming no target is left out (`navPayloadOf`, as Studio's nav save).
  *
+ * The order written is the order the editor showed (objectstack#36591). The
+ * sidebar sorts each level by `order`, so the editor shows each level, and the
+ * edits are replayed on each stored level, in that order (`inShownOrder`);
+ * each level whose entries carry `order` then has it rewritten from the
+ * result's order (`withOrderRewritten`). A level with no `order` is saved by
+ * array order alone, as before.
+ *
  * Nothing is created before every check has passed: the base's version is
  * read before the customization package is asked for, and a pair the server
  * does not list writable is refused before anything is written to it.
@@ -51,7 +58,7 @@ import {
   type ListedPackageManifest,
 } from '../views/studio-design/packages-io.js';
 import { navPayloadOf } from '../views/metadata-admin/previews/AppNavCanvas.js';
-import { rebaseMenuEdits, type Menu } from './designModeMenuModel.js';
+import { inShownOrder, rebaseMenuEdits, withOrderRewritten, type Menu } from './designModeMenuModel.js';
 
 /** The doors the save goes through; the defaults are the console's own. */
 export interface AppMenuSaveDoors {
@@ -92,15 +99,32 @@ function storedApp(layers: unknown): Record<string, unknown> {
 }
 
 /**
- * Save the menu edits that turned `served` (the menu the editor was seeded
- * from) into `navigation`, as the menu of the app `appName` of the package
- * `packageId`, and publish it.
+ * The menu save once every check has passed: the package it writes to and
+ * the app document it writes there. Nothing has been written yet, save the
+ * customization package the ensure door creates on first use.
  */
-export async function saveAppMenu(
+export interface PreparedAppMenuSave {
+  readonly appName: string;
+  /**
+   * The package the menu is written to: the app's own when the server lists
+   * it writable, else its customization package. A thing created in design
+   * mode for the menu to open is saved here too (objectstack#36364).
+   */
+  readonly target: string;
+  readonly body: Record<string, unknown>;
+}
+
+/**
+ * Every check of a save of the menu edits that turned `served` (the menu the
+ * editor was seeded from) into `navigation`, as the menu of the app `appName`
+ * of the package `packageId`, and its body. Throws, in the viewer's language,
+ * where the menu cannot be saved; nothing is written then.
+ */
+export async function prepareAppMenuSave(
   input: { appName: string; packageId: string; served: Menu; navigation: Menu },
   texts: AppMenuSaveTexts,
   doors: AppMenuSaveDoors,
-): Promise<void> {
+): Promise<PreparedAppMenuSave> {
   const { appName, packageId, served, navigation } = input;
   const manifests = await doors.listPackages();
   const listed = manifests.get(packageId);
@@ -108,7 +132,11 @@ export async function saveAppMenu(
   // The app as stored, a customization of an installed app folded in.
   const stored = storedApp(await doors.client.layered('app', appName, { packageId }));
   const storedNav = Array.isArray(stored.navigation) ? (stored.navigation as Menu) : [];
-  const nextNav = navPayloadOf(rebaseMenuEdits(served, navigation, storedNav) as unknown[]);
+  // The stored menu in its shown order, as the editor's is (`inShownOrder`),
+  // so the edits land where the editor showed them; the result's order is
+  // then written as `order` on each level that carries it (objectstack#36591).
+  const rebased = rebaseMenuEdits(served, navigation, inShownOrder(storedNav));
+  const nextNav = withOrderRewritten(navPayloadOf(rebased as unknown[]) as Menu);
   let body: Record<string, unknown> | null = { ...stored, name: appName, navigation: nextNav };
   let target = packageId;
   if (!listed.writable) {
@@ -118,6 +146,16 @@ export async function saveAppMenu(
     if (!pair.writable) throw new Error(texts.notWritable);
     target = pair.packageId;
   }
+  return { appName, target, body };
+}
+
+/** Write and publish a prepared menu save ({@link prepareAppMenuSave}). */
+export async function writeAppMenu(
+  prepared: PreparedAppMenuSave,
+  texts: Pick<AppMenuSaveTexts, 'pendingDraft'>,
+  doors: Pick<AppMenuSaveDoors, 'client'>,
+): Promise<void> {
+  const { appName, target, body } = prepared;
   try {
     await doors.client.save('app', appName, body, { mode: 'draft', packageId: target, ifNoneMatch: '*' });
   } catch (err) {
@@ -136,6 +174,19 @@ export async function saveAppMenu(
     throw err;
   }
   emitMetadataRefresh();
+}
+
+/**
+ * Save the menu edits that turned `served` (the menu the editor was seeded
+ * from) into `navigation`, as the menu of the app `appName` of the package
+ * `packageId`, and publish it.
+ */
+export async function saveAppMenu(
+  input: { appName: string; packageId: string; served: Menu; navigation: Menu },
+  texts: AppMenuSaveTexts,
+  doors: AppMenuSaveDoors,
+): Promise<void> {
+  await writeAppMenu(await prepareAppMenuSave(input, texts, doors), texts, doors);
 }
 
 /** The console's doors, around `client` (`useMetadataClient()`). */

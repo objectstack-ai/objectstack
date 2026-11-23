@@ -129,7 +129,27 @@ describe('objectstack#28434 · a host renderer decides alone', () => {
     // The host's items only — the table's own are not mixed in.
     expect(itemIds(menu)).toEqual(['host-item']);
     expect(menu).toHaveTextContent('Host item for r2');
-    expect(renderRowContextMenu).toHaveBeenCalledWith(expect.objectContaining({ id: 'r2' }), { selected: false });
+    // objectstack#36290 — the context also names the data cell's column.
+    expect(renderRowContextMenu).toHaveBeenCalledWith(expect.objectContaining({ id: 'r2' }), { selected: false, column: 'name' });
+  });
+
+  it('objectstack#36290 · names the column of the data cell it opened on, and none off a data cell', async () => {
+    const renderRowContextMenu = vi.fn(() => <DropdownMenuItem data-testid="host-item">Host item</DropdownMenuItem>);
+    renderTable({
+      ...RELATED_LIST_SCHEMA,
+      columns: [{ header: 'Name', accessorKey: 'name' }, { header: 'Code', accessorKey: 'code' }],
+      data: ROWS.map((row) => ({ ...row, code: `C-${row.id}` })),
+      renderRowContextMenu,
+    });
+    act(() => { rightClick(cellOf('C-r1')); });
+    await screen.findByTestId('row-context-menu');
+    expect(renderRowContextMenu).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'r1' }), { selected: false, column: 'code' });
+    await userEvent.keyboard('{Escape}');
+    await waitFor(() => expect(contextMenu()).toBeNull());
+    // The row's own "⋮" cell is not a data cell: no column.
+    act(() => { rightClick(within(rowOf('Open contract')).getByTestId('data-table-row-actions').closest('td') as HTMLElement); });
+    await screen.findByTestId('row-context-menu');
+    expect(renderRowContextMenu).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'r1' }), { selected: false });
   });
 
   it('a host answering null keeps the browser\'s menu', () => {

@@ -4,14 +4,17 @@
  * objectstack#29690 — the one Chinese step every Studio create door takes
  * before it derives an identifier from a display name (`romanizeHan`).
  *
- * The cases run in file order on purpose: the first describe reads the module
- * BEFORE the pinyin dictionary is loaded (its state is module-wide, as it is
- * in the Console), the rest after `loadHanRomanizer()` resolved. The door
- * sanitizers are the real ones, so each expectation is the identifier a door
- * offers, not an intermediate string.
+ * The first describe reads the module BEFORE the pinyin dictionary is loaded
+ * (its state is module-wide, as it is in the Console), the rest after
+ * `loadHanRomanizer()` resolved. The `unit` project runs files with
+ * `isolate: false`, so an earlier file in the same worker may already have
+ * loaded the dictionary into the shared module instance: the first describe
+ * therefore reads a fresh instance (`vi.resetModules()` + a dynamic import),
+ * never the one other files share. The door sanitizers are the real ones, so
+ * each expectation is the identifier a door offers, not an intermediate string.
  */
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { loadHanRomanizer, romanizeHan, romanizerPending } from './romanizeHan';
 import { toFieldName, toFieldNameLoose, toFieldNameOrEmpty } from './previews/object-fields-io';
 import { slugify } from './createDerive';
@@ -20,16 +23,29 @@ import { slugify } from './createDerive';
 const fieldName = (label: string) => toFieldNameLoose(romanizeHan(label).trim());
 
 describe('romanizeHan before the dictionary has loaded', () => {
+  /** A module instance no other file has touched: nothing has loaded the dictionary into it. */
+  let fresh: typeof import('./romanizeHan');
+  beforeAll(async () => {
+    vi.resetModules();
+    fresh = await import('./romanizeHan');
+  });
+
   it('returns the text unchanged and reports the Chinese text as pending', () => {
-    expect(romanizeHan('维修中心')).toBe('维修中心');
-    expect(romanizerPending('维修中心')).toBe(true);
+    expect(fresh.romanizeHan('维修中心')).toBe('维修中心');
+    expect(fresh.romanizerPending('维修中心')).toBe(true);
   });
 
   it('is never pending for text that needs no dictionary', () => {
-    expect(romanizerPending('Repair Center')).toBe(false);
-    expect(romanizerPending('カスタマー')).toBe(false);
-    expect(romanizerPending('顧客リスト')).toBe(false);
-    expect(romanizerPending('')).toBe(false);
+    expect(fresh.romanizerPending('Repair Center')).toBe(false);
+    expect(fresh.romanizerPending('カスタマー')).toBe(false);
+    expect(fresh.romanizerPending('顧客リスト')).toBe(false);
+    expect(fresh.romanizerPending('')).toBe(false);
+  });
+
+  it('stays unchanged and pending until its own instance has loaded', async () => {
+    await fresh.loadHanRomanizer();
+    expect(fresh.romanizerPending('维修中心')).toBe(false);
+    expect(fresh.romanizeHan('维修中心')).not.toBe('维修中心');
   });
 });
 
