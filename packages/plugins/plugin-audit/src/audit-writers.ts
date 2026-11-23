@@ -32,7 +32,7 @@ import { omitSideCopyFromCopy } from './side-copy-columns.js';
 // `nameField` — the same argument the SECRET_MASK import above makes.
 // [#22738] `canServeApiOperation` is the spec's one exposure decision (ADR-0049),
 // asked of a referenced object before its title is read into a summary.
-import { canServeApiOperation, fieldChangeValuesShown, referenceTargetOf, resolveDisplayField } from '@objectstack/spec/data';
+import { canServeApiOperation, resolveFieldHistory, referenceTargetOf, resolveDisplayField } from '@objectstack/spec/data';
 // [#22510] The acting user's object, named by the registry constant rather
 // than a literal — `sys_activity.actor_name` is resolved from its title.
 import { SystemObjectName } from '@objectstack/spec/system';
@@ -1115,7 +1115,7 @@ type ChangeValuesShown = (key: string, field: any) => boolean;
  * field's `trackHistory: true` still forces a no-line type on. A credential
  * field never renders values, and a no-line type only when it opts in.
  *
- * [#36482] The rule itself is `fieldChangeValuesShown` in
+ * [#36482] The rule itself is `resolveFieldHistory` in
  * `@objectstack/spec/data`, beside the no-line type list: the metadata form
  * asks the same predicate what an unset `fieldHistory` resolves to, so the
  * default it shows cannot drift from what this writer keeps.
@@ -1124,7 +1124,7 @@ type ChangeValuesShown = (key: string, field: any) => boolean;
  * field by field (`activity-field-redaction.ts`).
  */
 function changeValuesShownFor(objectDef: any): ChangeValuesShown {
-  return (_key, field) => fieldChangeValuesShown(field, objectDef);
+  return (_key, field) => resolveFieldHistory(field, objectDef);
 }
 
 /**

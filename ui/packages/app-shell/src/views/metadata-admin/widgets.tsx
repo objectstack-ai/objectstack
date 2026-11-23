@@ -45,7 +45,7 @@ import {
   objectColorOrDefault,
   cn,
 } from '@object-ui/components';
-import { OBJECT_COLORS, fieldChangeValuesShown, type ObjectColor } from '@objectstack/spec/data';
+import { OBJECT_COLORS, resolveFieldHistory, type ObjectColor } from '@objectstack/spec/data';
 import type { RegistryComponentMeta } from '@object-ui/core';
 import { builderRulesOfSpecFilter } from '@object-ui/core';
 import { AlertTriangle, ChevronDown, ChevronsUpDown, ChevronUp, Eye, EyeOff, Plus, Search, Trash2 } from 'lucide-react';
@@ -3569,7 +3569,7 @@ type FieldHistoryChoice = 'default' | 'on' | 'off';
  *
  *  - Default — removes the key (`onChange(undefined)`), and names what it
  *    resolves to for the row in front of it. A field row (one carrying a
- *    `type`) asks `fieldChangeValuesShown` from `@objectstack/spec/data`, the
+ *    `type`) asks `resolveFieldHistory` from `@objectstack/spec/data`, the
  *    same predicate the activity writer keeps or drops values with, so the
  *    label cannot drift from the writer: off for a media, JSON or credential
  *    type unless `trackHistory: true`. The object's `enable` block resolves to
@@ -3585,7 +3585,7 @@ function FieldHistoryWidget({ value, onChange, readOnly, formData, id, ariaLabel
   const choice: FieldHistoryChoice = value === true ? 'on' : value === false ? 'off' : 'default';
   const row = formData ?? {};
   const defaultOn = typeof row.type === 'string'
-    ? fieldChangeValuesShown({ type: row.type, trackHistory: row.trackHistory }, undefined)
+    ? resolveFieldHistory({ type: row.type, trackHistory: row.trackHistory }, undefined)
     : true;
   const defaultLabel = tFormat('engine.form.fieldHistoryDefault', locale, {
     state: t(defaultOn ? 'engine.form.fieldHistoryOn' : 'engine.form.fieldHistoryOff', locale),

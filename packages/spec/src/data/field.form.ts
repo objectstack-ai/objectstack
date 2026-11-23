@@ -473,7 +473,7 @@ export const fieldForm = defineForm({
         // [#36290] The off switch is `fieldHistory` (no default); `trackHistory`
         // only opts a no-line type in. [#36482] `field-history` is a three-way
         // choice, so unset is a state of its own: "Default" removes the key and
-        // names what it resolves to for this field's type (`fieldChangeValuesShown`).
+        // names what it resolves to for this field's type (`resolveFieldHistory`).
         { field: 'fieldHistory', widget: 'field-history', colSpan: 1, helpText: "Old → new values for this field on the record activity timeline. Default follows the platform: on for most types, off for a media, JSON or credential field. Off names the change by label only; On also shows a media or JSON field's values. The object's own Field History off wins." },
         { field: 'trackHistory', colSpan: 1, helpText: "Opt a media or JSON field (image, file, json, …) into old → new values on the activity timeline. Every other field shows them already, and off does not hide them: use Field History." },
         { field: 'widget', colSpan: 2, helpText: 'Form widget override — names a registered field component, looked up as `field:` plus this name, to render the field instead of the type default. An unregistered name degrades to the type renderer.' },

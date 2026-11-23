@@ -10,7 +10,7 @@
  * `enable.fieldHistory: false`; a field turns its own off with
  * `fieldHistory: false`. Two classes never show them, whatever the flags say
  * on the field's default: a credential field (masked on read, so both sides
- * are the same mask) never, and a type in {@link NO_LINE_VALUE_FIELD_TYPES}
+ * are the same mask) never, and a type in {@link FIELD_HISTORY_DEFAULT_OFF_TYPES}
  * only when the field opts in with `fieldHistory: true` or
  * `trackHistory: true`.
  *
@@ -34,22 +34,22 @@ import { isMaskedOnReadFieldType } from './masked-field-types';
  * field's label only, unless the field itself turns values on
  * (`fieldHistory: true`, or the older `trackHistory: true` opt-in).
  */
-export const NO_LINE_VALUE_FIELD_TYPES: readonly FieldType[] = Object.freeze([
+export const FIELD_HISTORY_DEFAULT_OFF_TYPES: readonly FieldType[] = Object.freeze([
   'image', 'file', 'avatar', 'video', 'audio', 'signature',
   'composite', 'repeater', 'record', 'location', 'address', 'code', 'json', 'vector',
 ] as const satisfies readonly FieldType[]);
 
-const NO_LINE_VALUE_FIELD_TYPE_SET: ReadonlySet<unknown> = new Set(NO_LINE_VALUE_FIELD_TYPES);
+const FIELD_HISTORY_DEFAULT_OFF_TYPE_SET: ReadonlySet<unknown> = new Set(FIELD_HISTORY_DEFAULT_OFF_TYPES);
 
-/** The field keys {@link fieldChangeValuesShown} reads. */
-export interface FieldChangeValuesField {
+/** The field keys {@link resolveFieldHistory} reads. */
+export interface FieldHistoryField {
   readonly type?: unknown;
   readonly fieldHistory?: unknown;
   readonly trackHistory?: unknown;
 }
 
-/** The object keys {@link fieldChangeValuesShown} reads. */
-export interface FieldChangeValuesObject {
+/** The object keys {@link resolveFieldHistory} reads. */
+export interface FieldHistoryObject {
   readonly managedBy?: unknown;
   readonly enable?: { readonly fieldHistory?: unknown } | null;
 }
@@ -67,13 +67,13 @@ export interface FieldChangeValuesObject {
  * To ask what an UNSET `fieldHistory` resolves to — the default the form
  * shows — pass the field with `fieldHistory` removed.
  */
-export function fieldChangeValuesShown(
-  field: FieldChangeValuesField | undefined | null,
-  object: FieldChangeValuesObject | undefined | null,
+export function resolveFieldHistory(
+  field: FieldHistoryField | undefined | null,
+  object: FieldHistoryObject | undefined | null,
 ): boolean {
   if (object?.enable?.fieldHistory === false) return false;
   if (!field || field.fieldHistory === false) return false;
   if (isMaskedOnReadFieldType(field.type, object?.managedBy)) return false;
   if (field.fieldHistory === true || field.trackHistory === true) return true;
-  return !NO_LINE_VALUE_FIELD_TYPE_SET.has(field.type);
+  return !FIELD_HISTORY_DEFAULT_OFF_TYPE_SET.has(field.type);
 }
