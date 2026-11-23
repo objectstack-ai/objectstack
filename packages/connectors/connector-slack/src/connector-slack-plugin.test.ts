@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
-import { LiteKernel } from '@objectstack/core';
+import { LiteKernel, type PluginContext } from '@objectstack/core';
 import { AutomationServicePlugin, type AutomationEngine } from '@objectstack/service-automation';
 import { ConnectorSlackPlugin } from './connector-slack-plugin.js';
 import type { SlackClientService } from './slack-connector.js';
@@ -97,5 +97,90 @@ describe('ConnectorSlackPlugin — the `slack` client service', () => {
         expect(calls[0].init.body).toBe('{"users":"U1"}');
 
         await kernel.shutdown();
+    });
+});
+
+describe('ConnectorSlackPlugin — composed without a static bot token', () => {
+    it('registers only the client service: no flow connector, and the client still sends with the caller\'s token', async () => {
+        const { impl, calls } = stubSlack();
+        const kernel = new LiteKernel();
+        kernel.use(new AutomationServicePlugin());
+        kernel.use(new ConnectorSlackPlugin({ fetchImpl: impl }));
+        await kernel.bootstrap();
+
+        const engine = kernel.getService<AutomationEngine>('automation');
+        // The automation engine is up (positive control), yet no Slack connector was registered.
+        expect(engine.getRegisteredNodeTypes()).toContain('connector_action');
+        expect(engine.getRegisteredConnectors()).not.toContain('slack');
+
+        const slack = kernel.getService<SlackClientService>('slack');
+        const out = await slack.client('xoxb-organization-token').call({ method: 'chat.postMessage', params: { channel: 'D1', text: 'hi' } });
+        expect(out.ok).toBe(true);
+        expect(calls).toHaveLength(1);
+        expect((calls[0].init.headers as Record<string, string>).Authorization).toBe('Bearer xoxb-organization-token');
+
+        await kernel.shutdown();
+    });
+
+    it('composes with no options at all', async () => {
+        const kernel = new LiteKernel();
+        kernel.use(new AutomationServicePlugin());
+        kernel.use(new ConnectorSlackPlugin());
+        await kernel.bootstrap();
+
+        expect(kernel.getService<AutomationEngine>('automation').getRegisteredConnectors()).not.toContain('slack');
+        expect(typeof kernel.getService<SlackClientService>('slack').client).toBe('function');
+
+        await kernel.shutdown();
+    });
+
+    it.each([
+        ['omitted', undefined],
+        ['empty', ''],
+    ])('says so once at boot and never touches the connector registry (token %s)', async (_label, token) => {
+        const infos: string[] = [];
+        const registered: string[] = [];
+        const services = new Map<string, unknown>();
+        services.set('automation', {
+            registerConnector: (def: { name: string }) => { registered.push(def.name); },
+            unregisterConnector: () => {},
+        });
+        const ctx = {
+            registerService: (name: string, svc: unknown) => { services.set(name, svc); },
+            getService: (name: string) => services.get(name),
+            logger: { info: (msg: string) => { infos.push(msg); }, warn: () => {}, error: () => {}, debug: () => {} },
+        } as unknown as PluginContext;
+
+        const plugin = new ConnectorSlackPlugin(token === undefined ? {} : { token });
+        await plugin.init(ctx);
+        await plugin.start(ctx);
+
+        expect(registered).toEqual([]);
+        expect(services.has('slack')).toBe(true);
+        const tokenLines = infos.filter((m) => m.includes('no static bot token'));
+        expect(tokenLines).toHaveLength(1);
+        expect(infos).toHaveLength(1);
+
+        // Teardown with nothing registered is a no-op, not a throw.
+        await plugin.destroy();
+    });
+
+    it('with a token, the same harness registers the connector (control for the skip)', async () => {
+        const registered: string[] = [];
+        const services = new Map<string, unknown>([[
+            'automation',
+            { registerConnector: (def: { name: string }) => { registered.push(def.name); }, unregisterConnector: () => {} },
+        ]]);
+        const ctx = {
+            registerService: (name: string, svc: unknown) => { services.set(name, svc); },
+            getService: (name: string) => services.get(name),
+            logger: { info: () => {}, warn: () => {}, error: () => {}, debug: () => {} },
+        } as unknown as PluginContext;
+
+        const plugin = new ConnectorSlackPlugin({ token: 'xoxb-flow-token' });
+        await plugin.init(ctx);
+        await plugin.start(ctx);
+
+        expect(registered).toEqual(['slack']);
     });
 });

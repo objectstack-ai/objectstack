@@ -36,6 +36,7 @@
  */
 
 import { createContext, createElement, useContext, useMemo, useState, type ComponentType, type Dispatch, type ReactNode, type SetStateAction } from 'react';
+import { usePublishPageCommand } from '../chrome/paletteCommands.js';
 import { cn, Popover, PopoverContent, PopoverTrigger } from '@object-ui/components';
 import type { ViewTabItem } from '@object-ui/plugin-view';
 import { resolveViewId } from '@object-ui/core';
@@ -141,7 +142,14 @@ export function ObjectViewTitleSwitcher({
     create,
     t,
 }: ObjectViewTitleSwitcherProps) {
-    const [open, setOpen] = useState(false);
+    const [open, setOpenState] = useState(false);
+    // The ⌘K palette's 「Add view」 opens the dropdown on its create card; any
+    // other open shows the views.
+    const [startOnCreate, setStartOnCreate] = useState(false);
+    const setOpen = (next: boolean) => {
+        setOpenState(next);
+        if (!next) setStartOnCreate(false);
+    };
     const listState = useContext(ListRecordCountContext);
     const displayLocale = useDisplayLocale();
 
@@ -173,9 +181,25 @@ export function ObjectViewTitleSwitcher({
             onAddView={onAddView}
             phone={phone}
             footerEnd={footerEnd}
+            startOnCreate={startOnCreate}
             t={t}
         />
     );
+
+    // objectstack#36286 — 「Add view」 in the ⌘K palette's Current page group,
+    // offered exactly where the dropdown offers it, running what it runs: the
+    // create card in the dropdown, or the host's Create View dialog.
+    usePublishPageCommand(create || onAddView ? {
+        id: 'add-view',
+        run: () => {
+            if (create) {
+                setStartOnCreate(true);
+                setOpenState(true);
+            } else {
+                onAddView?.();
+            }
+        },
+    } : null);
 
     // objectstack#35883 / #35884 — in the list's phone toolbar the switcher is
     // its first pill (the view's name, its count, the caret) and opens the

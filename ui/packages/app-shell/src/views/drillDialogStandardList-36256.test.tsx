@@ -102,3 +102,148 @@ describe('the drill dialog draws the standard list (#36256)', () => {
     expect(headers.slice(0, 3)).toEqual(['Name', 'Stage', 'Amount']);
   });
 });
+
+/**
+ * objectstack-ai/objectstack#36554 — a record opened from a drill steps
+ * through the drill's whole result. The real list draws one page of the
+ * drill (2 of 40 rows); the record page the host opens is handed all 40 ids,
+ * read with the drill list's own query (its filter and sort, ids only), and
+ * the count the list matched, so it reads 「1 of 40」 and ↑ ↓ walk every
+ * record. A drill whose result is all drawn reads nothing more.
+ */
+describe('a record opened from a drill steps through the whole drill (#36554)', () => {
+  const ALL = Array.from({ length: 40 }, (_, i) => ({
+    id: `d${i + 1}`,
+    name: i === 0 ? 'Acme' : `Deal ${i + 1}`,
+    stage: 'negotiation',
+    amount: i + 1,
+  }));
+
+  function mountPaged(rows: typeof ALL, pageSize: number, { holdIdReads = false } = {}) {
+    // With `holdIdReads`, the drill's id reads wait until `releaseIdReads()`.
+    let releaseIdReads = () => {};
+    const idReadsHeld = new Promise<void>((resolve) => { releaseIdReads = resolve; });
+    const ds = {
+      find: vi.fn(async (_object: string, params: { $top?: number; $skip?: number; $select?: string[] } = {}) => {
+        if (holdIdReads && JSON.stringify(params.$select) === '["id"]') await idReadsHeld;
+        const skip = params.$skip ?? 0;
+        const top = params.$top ?? rows.length;
+        const page = rows.slice(skip, skip + top);
+        const select = params.$select;
+        return {
+          data: select ? page.map((row) => Object.fromEntries(select.map((f) => [f, (row as Record<string, unknown>)[f]]))) : page,
+          total: rows.length,
+        };
+      }),
+      findOne: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+      delete: vi.fn(),
+      bulk: vi.fn(),
+      getObjectSchema: vi.fn(async () => structuredClone(DEFINITION)),
+    };
+    const openRecord = vi.fn();
+    const onClose = vi.fn();
+    const drill = (open: boolean) => (
+      <SchemaRendererProvider dataSource={ds as any}>
+        <DrillNavigationProvider value={{ openRecord }}>
+          <DrillDownDrawer
+            open={open}
+            target="dialog"
+            onClose={onClose}
+            title="Negotiation"
+            objectName="deal_36256"
+            filter={{ stage: 'negotiation' }}
+            defaultColumns={['stage', 'amount']}
+            maxRows={pageSize}
+            dataSource={ds}
+          />
+        </DrillNavigationProvider>
+      </SchemaRendererProvider>
+    );
+    const view = render(drill(true));
+    return { ds, openRecord, onClose, releaseIdReads, close: () => view.rerender(drill(false)), unmount: view.unmount };
+  }
+
+  const idReads = (ds: { find: ReturnType<typeof vi.fn> }) =>
+    ds.find.mock.calls.filter(([, params]) => JSON.stringify((params as { $select?: unknown })?.$select) === '["id"]');
+
+  it('hands the record page every record the drill matched, with its count, read by the drill list\'s own query', async () => {
+    const { ds, openRecord } = mountPaged(ALL, 2);
+    const dialog = await screen.findByTestId('drill-down-dialog');
+    await within(dialog).findByText('Acme');
+    // The list drew one page: 2 of the 40 rows.
+    expect(within(dialog).queryByText('Deal 3')).toBeNull();
+    await act(async () => fireEvent.click(within(dialog).getByText('Acme')));
+    await waitFor(() => expect(openRecord).toHaveBeenCalledTimes(1));
+
+    const [objectName, recordId, origin] = openRecord.mock.calls[0];
+    expect(objectName).toBe('deal_36256');
+    expect(recordId).toBe('d1');
+    expect(origin.total).toBe(40);
+    expect(origin.siblings).toEqual(ALL.map((row) => row.id));
+
+    // The ids came from the drill's query: its condition, no other read shape.
+    const reads = idReads(ds);
+    expect(reads.length).toBeGreaterThan(0);
+    for (const [object, params] of reads) {
+      expect(object).toBe('deal_36256');
+      expect(JSON.stringify((params as { $filter?: unknown }).$filter)).toContain('negotiation');
+    }
+    for (const write of [ds.create, ds.update, ds.delete, ds.bulk]) expect(write).not.toHaveBeenCalled();
+  });
+
+  it('opens no record when the drill is closed while its result is read', async () => {
+    const { ds, openRecord, onClose, releaseIdReads, close } = mountPaged(ALL, 2, { holdIdReads: true });
+    const dialog = await screen.findByTestId('drill-down-dialog');
+    await within(dialog).findByText('Acme');
+    await act(async () => fireEvent.click(within(dialog).getByText('Acme')));
+    await waitFor(() => expect(idReads(ds).length).toBeGreaterThan(0));
+
+    // The reader closes the drill (Esc, an outside click) before the ids come back.
+    act(() => close());
+    await waitFor(() => expect(screen.queryByTestId('drill-down-dialog')).toBeNull());
+    await act(async () => { releaseIdReads(); await Promise.resolve(); });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(openRecord).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('opens no record when the drill is gone while its result is read', async () => {
+    const { ds, openRecord, onClose, releaseIdReads, unmount } = mountPaged(ALL, 2, { holdIdReads: true });
+    const dialog = await screen.findByTestId('drill-down-dialog');
+    await within(dialog).findByText('Acme');
+    await act(async () => fireEvent.click(within(dialog).getByText('Acme')));
+    await waitFor(() => expect(idReads(ds).length).toBeGreaterThan(0));
+
+    unmount();
+    await act(async () => { releaseIdReads(); await Promise.resolve(); });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(openRecord).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('opens the record clicked last when a second record is clicked while the first is read', async () => {
+    const { openRecord, releaseIdReads } = mountPaged(ALL, 2, { holdIdReads: true });
+    const dialog = await screen.findByTestId('drill-down-dialog');
+    await within(dialog).findByText('Deal 2');
+    await act(async () => fireEvent.click(within(dialog).getByText('Acme')));
+    await act(async () => fireEvent.click(within(dialog).getByText('Deal 2')));
+    await act(async () => { releaseIdReads(); await Promise.resolve(); });
+    await waitFor(() => expect(openRecord).toHaveBeenCalled());
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(openRecord).toHaveBeenCalledTimes(1);
+    expect(openRecord.mock.calls[0][1]).toBe('d2');
+    expect(openRecord.mock.calls[0][2]).toEqual({ siblings: ALL.map((row) => row.id), total: 40 });
+  });
+
+  it('control: a drill whose result is all drawn hands those rows and reads nothing more', async () => {
+    const { ds, openRecord } = mountPaged(ALL.slice(0, 3), 10);
+    const dialog = await screen.findByTestId('drill-down-dialog');
+    await within(dialog).findByText('Deal 3');
+    await act(async () => fireEvent.click(within(dialog).getByText('Acme')));
+    await waitFor(() => expect(openRecord).toHaveBeenCalledTimes(1));
+    expect(openRecord.mock.calls[0][2]).toEqual({ siblings: ['d1', 'd2', 'd3'], total: 3 });
+    expect(idReads(ds)).toHaveLength(0);
+  });
+});

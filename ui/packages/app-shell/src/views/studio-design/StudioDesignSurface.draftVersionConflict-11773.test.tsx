@@ -370,13 +370,13 @@ describe('Data pillar — a draft saved elsewhere is not overwritten in silence 
 });
 
 describe('Data pillar — a create sends If-None-Match: * (objectui#11773)', () => {
-  it('the new object\'s skeleton is sent with the first-write pin; its first edit after the load is pinned to the read', async () => {
+  it('the new object\'s skeleton is sent with the first-write pin; it is live at once, so each Save after the load asserts no draft', async () => {
     server.active.clear();
     const a = openEditor();
     fireEvent.click(await within(a).findByTestId('empty-state-new-object', undefined, { timeout: 8000 }));
     const dialog = await screen.findByRole('dialog');
     fireEvent.change(dialog.querySelectorAll('input')[0]!, { target: { value: 'Ticket' } });
-    fireEvent.click(within(dialog).getByRole('button', { name: /save as draft/i }));
+    fireEvent.click(within(dialog).getByRole('button', { name: /^create$/i }));
     await waitFor(() => expect(server.saves).toHaveLength(1), { timeout: 8000 });
     expect([server.saves[0]!.ifMatch, server.saves[0]!.ifNoneMatch]).toEqual([undefined, '*']);
 
@@ -384,10 +384,12 @@ describe('Data pillar — a create sends If-None-Match: * (objectui#11773)', () 
     fireEvent.click(within(a).getAllByRole('button', { name: 'Form' })[0]!);
     await addFieldAndSave(a, addFieldFromFormToolbar);
     await addFieldAndSave(a, addFieldFromFormToolbar, SECOND);
-    // The skeleton's draft, then the first Save over it, which publishes it.
+    // The skeleton's draft, which the create publishes at once (objectstack#36511):
+    // no draft is left, so each Save after the load asserts none.
+    expect(mockClient.publish).toHaveBeenCalledWith('object', expect.stringMatching(/ticket$/), expect.anything());
     expect(server.saves.map((s) => [s.ifMatch, s.ifNoneMatch])).toEqual([
       [undefined, '*'],
-      ['hmac-sha256:v1', undefined],
+      [undefined, '*'],
       [undefined, '*'],
     ]);
   });

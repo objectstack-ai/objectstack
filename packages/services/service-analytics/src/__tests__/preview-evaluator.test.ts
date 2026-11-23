@@ -149,7 +149,9 @@ describe('evaluateAnalyticsQueryOverRows', () => {
     expect(bucketDate('not-a-date', 'month')).toBeNull();
     expect(matchesWhere({ a: 'x' }, { $or: [{ a: 'y' }, { a: 'x' }] })).toBe(true);
     expect(matchesWhere({ a: 5 }, { a: { $in: [1, 5] } })).toBe(true);
-    expect(matchesWhere({ a: 'Hello World' }, { a: { $contains: 'world' } })).toBe(true);
+    expect(matchesWhere({ a: 'Hello World' }, { a: { $contains: 'World' } })).toBe(true);
+    // [#36189] case-EXACT, as every live face answers it (#4706 Q2 = A).
+    expect(matchesWhere({ a: 'Hello World' }, { a: { $contains: 'world' } })).toBe(false);
   });
 
   it('a bare-day $lte covers the whole day on a declared datetime — the shared lowering\'s rule, not the matcher\'s (#3777, #5930 step 4)', () => {

@@ -27,6 +27,7 @@ vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
 import { t } from '../metadata-admin/i18n';
 import { PackageOwdOverviewPanel } from './PackageOwdOverviewPanel';
+import { StudioSaveHarness } from './__tests__/studioSaveHarness';
 
 /** Pick a dial's option by its label, through the trigger, as a user does; the dials are the shared Select (objectui#11865). */
 async function pickOwd(testId: string, label: string): Promise<void> {
@@ -60,6 +61,8 @@ function makeClient() {
       effective: name === PUBLISHED.name ? PUBLISHED : {},
       code: null,
     }),
+    publish: async () => ({}),
+    reset: async () => ({}),
     getDraft: async (_t: string, name: string) =>
       name === PUBLISHED.name ? { type: 'object', name, item: SERVED_DRAFT } : null,
     save: async (_t: string, name: string, body: Record<string, unknown>, opts?: Record<string, unknown>) => {
@@ -80,7 +83,7 @@ afterEach(() => {
 
 describe('PackageOwdOverviewPanel — the pending draft is read and re-saved as-is (objectui#10765)', () => {
   it('LIST LOAD: a model the draft cleared reads as unset, not as the published value', async () => {
-    render(<PackageOwdOverviewPanel client={makeClient()} packageId="com.example.showcase" locale="en-US" />);
+    render(<StudioSaveHarness><PackageOwdOverviewPanel client={makeClient()} packageId="com.example.showcase" locale="en-US" /></StudioSaveHarness>);
     await screen.findByTestId('owd-row-crm_contact');
 
     const internal = screen.getByTestId('owd-internal-crm_contact');
@@ -91,11 +94,11 @@ describe('PackageOwdOverviewPanel — the pending draft is read and re-saved as-
   });
 
   it('SAVE: an edit lands on the draft alone — the published model and description the draft deleted do not come back', async () => {
-    render(<PackageOwdOverviewPanel client={makeClient()} packageId="com.example.showcase" locale="en-US" />);
+    render(<StudioSaveHarness><PackageOwdOverviewPanel client={makeClient()} packageId="com.example.showcase" locale="en-US" /></StudioSaveHarness>);
     await screen.findByTestId('owd-row-crm_contact');
 
     await pickOwd('owd-internal-crm_contact', t('engine.studio.settings.sharingPublicRead', 'en-US'));
-    fireEvent.click(screen.getByTestId('owd-save'));
+    fireEvent.click(await screen.findByTestId('studio-save'));
 
     await waitFor(() => expect(saved).toHaveLength(1));
     const { name, body, opts } = saved[0]!;

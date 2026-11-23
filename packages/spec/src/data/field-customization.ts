@@ -19,7 +19,7 @@
  * 3. **Only the paired `.custom` package arranges the whole record page**
  *    (maintainer, verbatim: 「软件包字段、子表自定义分三种，原始软件包，继承软件包和环境管理员覆盖，
  *    继承软件包 我记得已经有一套标准，只能申明插入位置，原始软件包、环境管理员 应该可以申明完整的配置」).
- *    {@link CUSTOM_ARRANGEMENT_KEYS} are the two keys its object extension
+ *    {@link CUSTOM_ARRANGEMENT_KEYS} are the keys its object extension
  *    writes, in an object's own shape; any other package's extension places
  *    what it brings with `place`, and outside a `.custom` package is refused
  *    these keys at publish, at `os validate` and at the install door. The
@@ -113,15 +113,19 @@ export type BaseFieldOptionDisplayProperty = (typeof BASE_FIELD_DISPLAY_WHITELIS
  * [ADR-0146 D10] The keys of an object extension only a base's paired
  * `.custom` package writes: the whole field arrangement and the whole tab
  * list of the extended object, each in the shape an object declares it in
- * (`ObjectExtensionSchema.fieldGroups` / `.relatedLists`). Written, a key
- * replaces what the owner declares and the other extensions' `place` entries
- * add to, whole; not written, that arrangement stays.
+ * (`ObjectExtensionSchema.fieldGroups` / `.relatedLists`), and
+ * [objectstack#36366] the arrangement of its actions
+ * (`ObjectExtensionSchema.actionLayout`). Written, a list key replaces what
+ * the owner declares and the other extensions' `place` entries add to,
+ * whole; `actionLayout` replaces the owner's arm for each scope it writes
+ * (`list`, `record`), and an arm it does not write stays. Not written, that
+ * arrangement stays.
  *
  * The ONE list: the registry fold that applies the keys, and the judge that
  * refuses them outside `.custom` (publish, `os validate` / `os build`, the
  * install door), read it through {@link extensionArrangementKeys}.
  */
-export const CUSTOM_ARRANGEMENT_KEYS = Object.freeze(['fieldGroups', 'relatedLists'] as const);
+export const CUSTOM_ARRANGEMENT_KEYS = Object.freeze(['fieldGroups', 'relatedLists', 'actionLayout'] as const);
 
 /** One of {@link CUSTOM_ARRANGEMENT_KEYS}. */
 export type CustomArrangementKey = (typeof CUSTOM_ARRANGEMENT_KEYS)[number];
@@ -129,8 +133,8 @@ export type CustomArrangementKey = (typeof CUSTOM_ARRANGEMENT_KEYS)[number];
 /**
  * [ADR-0146 D10] The {@link CUSTOM_ARRANGEMENT_KEYS} an object extension body
  * writes, in the list's order. A key counts as written when the body carries
- * any value under it (an empty array included: it declares an arrangement
- * with nothing in it); `undefined` and `null` do not. Tolerant of an unparsed
+ * any value under it (an empty array or object included: it declares an
+ * arrangement with nothing in it); `undefined` and `null` do not. Tolerant of an unparsed
  * body, so every door and the fold share one reading.
  */
 export function extensionArrangementKeys(extension: unknown): CustomArrangementKey[] {
