@@ -367,7 +367,7 @@ describe('[#36264] svc.query and svc.generateSql refuse it too, on a named diale
   } as unknown as Cube;
   const SHAPES: Record<string, ValueShapeFieldDef> = {
     tags: { type: 'select', multiple: true },
-    seen: { type: 'datetime', multiple: true },
+    seen: { type: 'tags' },
   };
   const svc = new AnalyticsService({
     cubes: [CUBE],
@@ -390,8 +390,9 @@ describe('[#36264] svc.query and svc.generateSql refuse it too, on a named diale
     });
   }
 
-  it('PROBE dateRange', async () => {
+  it('query: a timeDimensions dateRange on such a member → 400 INVALID_FILTER (its window is a $gte / $lte filter)', async () => {
     const err = await refusalOf(ask('query', { timeDimensions: [{ dimension: 'seen', dateRange: ['2026-01-01', '2026-02-01'] }] }));
-    expect(err.message).toBe('x');
+    expect(err.code, err.message).toBe('INVALID_FILTER');
+    expect(err.status).toBe(400);
   });
 });
