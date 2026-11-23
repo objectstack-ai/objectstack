@@ -42,7 +42,7 @@ import {
   cn,
 } from '@object-ui/components';
 import { History, Loader2 } from 'lucide-react';
-import { useDisplayLocale } from '@object-ui/i18n';
+import { useDisplayLocale, useSafeTranslate } from '@object-ui/i18n';
 import { usePermissions } from '@object-ui/permissions';
 import type { DataSource } from '@object-ui/types';
 import { FieldChangeItem } from './FieldChangeItem';
@@ -117,10 +117,12 @@ function rowsOf(res: unknown): SysActivityRow[] {
  * (see the file header for why the rows are read by record).
  */
 export function useFieldHistory({ dataSource, objectName, recordId, field }: UseFieldHistoryOptions): FieldHistoryState {
-  const { t } = useDetailTranslation();
-  const systemActorLabel = t('detail.systemActor', { defaultValue: 'System' });
-  const impersonatedActorTemplate = t('detail.impersonatedActor', { defaultValue: IMPERSONATED_ACTOR_FALLBACK });
-  const unknownUserLabel = t('detail.unknownUser', { defaultValue: 'Unknown' });
+  // The actor words `record:activity` reads, read the same way: the
+  // impersonation line is a template its caller fills, so it is read raw.
+  const tt = useSafeTranslate();
+  const systemActorLabel = tt('detail.systemActor', 'System');
+  const impersonatedActorTemplate = tt('detail.impersonatedActor', IMPERSONATED_ACTOR_FALLBACK);
+  const unknownUserLabel = tt('detail.unknownUser', 'Unknown');
 
   const [wanted, setWanted] = React.useState(FIELD_HISTORY_PAGE_SIZE);
   const [entries, setEntries] = React.useState<FieldHistoryEntry[]>([]);
