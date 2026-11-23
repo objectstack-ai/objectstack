@@ -2247,6 +2247,42 @@ describe('ApprovalService (node era)', () => {
     expect(await svc.redeemActionToken(approve)).toMatchObject({ ok: false, reason: 'consumed' });
   });
 
+  it('redeem: a reject records the reason typed on the confirm page as its comment', async () => {
+    const resumed: any[] = [];
+    svc.attachAutomation({ async resume(runId, signal) { resumed.push({ runId, signal }); } });
+    const req = await svc.openNodeRequest(openInput(['u9']), CTX);
+    const { reject } = await svc.issueActionTokens(req.id, 'u9');
+    const out = await svc.redeemActionToken(reject, { comment: 'Over budget for this quarter.' });
+    expect(out).toMatchObject({ ok: true, action: 'reject', approverId: 'u9' });
+    expect((out as any).request.status).toBe('rejected');
+    expect(resumed[0]?.signal?.branchLabel).toBe('reject');
+    const acts = await svc.listActions(req.id, SYS);
+    expect(acts.at(-1)).toMatchObject({ action: 'reject', actor_id: 'u9', comment: 'Over budget for this quarter.' });
+    expect(acts.some(a => a.comment === 'Via action link')).toBe(false);
+  });
+
+  it('redeem: a reject with no reason is refused before the token is consumed — nothing decided, the link stays live', async () => {
+    const req = await svc.openNodeRequest(openInput(['u9']), CTX);
+    const { reject } = await svc.issueActionTokens(req.id, 'u9');
+    for (const input of [undefined, {}, { comment: '' }, { comment: '   \n\t ' }, { comment: 42 }, { comment: ['why'] }]) {
+      const out = await svc.redeemActionToken(reject, input as any);
+      expect(out, JSON.stringify(input)).toMatchObject({ ok: false, reason: 'reason_required', action: 'reject', approverId: 'u9' });
+      expect((out as any).request.id).toBe(req.id);
+    }
+    expect(engine._tables['sys_approval_token'].every(r => r.consumed_at == null)).toBe(true);
+    expect((await svc.getRequest(req.id, SYS))?.status).toBe('pending');
+    expect((await svc.listActions(req.id, SYS)).filter(a => a.action === 'reject')).toEqual([]);
+    // Still live: the same link decides once a reason comes with it.
+    expect(await svc.redeemActionToken(reject, { comment: 'Missing receipts.' })).toMatchObject({ ok: true, action: 'reject' });
+  });
+
+  it('redeem: an approve reads no reason and keeps its fixed comment', async () => {
+    const req = await svc.openNodeRequest(openInput(['u9']), CTX);
+    const { approve } = await svc.issueActionTokens(req.id, 'u9');
+    expect(await svc.redeemActionToken(approve, { comment: 'typed anyway' })).toMatchObject({ ok: true, action: 'approve' });
+    expect((await svc.listActions(req.id, SYS)).at(-1)).toMatchObject({ action: 'approve', comment: 'Via action link' });
+  });
+
   it('peek: validates without consuming (GET never mutates)', async () => {
     const req = await svc.openNodeRequest(openInput(['u9']), CTX);
     const { reject } = await svc.issueActionTokens(req.id, 'u9');

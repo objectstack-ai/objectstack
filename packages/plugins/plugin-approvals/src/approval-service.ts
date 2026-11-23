@@ -8216,7 +8216,8 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
         const form = await request.formData();
         const tokens = form.getAll('token');
         token = String(tokens[tokens.length - 1] ?? '');
-        comment = form.getAll('comment').at(-1);
+        const comments = form.getAll('comment');
+        comment = comments[comments.length - 1];
       } catch { /* not a form body: no token, told "invalid" below */ }
       const out = await this.redeemActionToken(token, { comment });
       const page = actionRedemptionPage(out, { token, actPath: ACTION_PAGE_PATH, inboxHref: this.approvalsInboxLink() });
