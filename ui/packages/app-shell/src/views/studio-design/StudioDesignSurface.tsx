@@ -321,6 +321,7 @@ import { emitMetadataRefresh, subscribeMetadataRefresh } from '../../assistant/a
 import { STUDIO_CHANGES_PARAM, STUDIO_CHANGES_REVIEW } from './studioChangesLink.js';
 import {
   publishSavedItem,
+  STUDIO_SAVE_TOAST_ID,
   StudioSaveControls,
   StudioSaveProvider,
   useStudioSaveCoordinator,
@@ -8769,6 +8770,13 @@ export function AutomationsPillar({
           ifNoneMatch: '*',
           surface: 'studio',
         });
+        // objectstack#36511 — and published at once, switched off as it was
+        // born: no draft is left for a package publish, and the switch arms it.
+        const live = await publishSavedItem(client, { type: 'flow', name, packageId: target ?? railPackageId }, false);
+        if (!live.ok) {
+          setError(plainRefusal(live.error));
+          return;
+        }
         const item: Surface = target === null ? { type: 'flow', name, label } : { type: 'flow', name, label, addedIn: target };
         setFlows((fs) => [...fs.filter((f) => f.name !== name), item]);
         // objectstack#28572 — the rail reads again after the save, so the
@@ -8777,10 +8785,9 @@ export function AutomationsPillar({
         // objectui#12454 — and groups by what it was born with.
         setFlowDefinitions((m) => new Map([...m, [name, skeleton]]));
         setCurrent(item);
-        setHasDraft(true);
+        setHasDraft(false);
         setCreating(false);
-        onDraftSaved?.();
-        toast.success(tFormat('engine.studio.auto.savedDraft', locale, { label }));
+        toast.success(tFormat('engine.studio.save.done', locale, { items: label }), { id: STUDIO_SAVE_TOAST_ID });
       } catch (e) {
         // Shown in the create dialog, which prints the message only: kept whole.
         setError(plainRefusal(e));
@@ -8788,7 +8795,7 @@ export function AutomationsPillar({
         setCreateBusy(false);
       }
     },
-    [client, railPackageId, packageReadOnly, customization, onDraftSaved, locale, flows],
+    [client, railPackageId, packageReadOnly, customization, locale, flows],
   );
 
   React.useEffect(() => {
@@ -8838,6 +8845,7 @@ export function AutomationsPillar({
         const baseline = (lay?.effective ?? lay?.code ?? {}) as Record<string, unknown>;
         // Served draft as-is, baseline only without one (objectui#10765).
         setDraft(draftBody ?? baseline);
+        flowStoredRef.current = draftBody ?? baseline;
         setDraftFor(`flow:${current.name}`);
         flowVerdictSeq.current += 1;
         setFlowVerdict(
@@ -8882,37 +8890,44 @@ export function AutomationsPillar({
     },
     [],
   );
-  const doSave = React.useCallback(async (sent: DraftSend) => {
-    if (!current) return;
+  // objectstack#36511 — the flow as the server holds it (as loaded, or as last
+  // saved): what the enable switch writes its status onto, so a flip never
+  // carries an edit Save has not sent.
+  const flowStoredRef = React.useRef<Record<string, unknown>>({});
+  const flowDraftRef = React.useRef(draft);
+  React.useLayoutEffect(() => {
+    flowDraftRef.current = draft;
+  });
+  // objectstack#36511 — the top bar's Save for the open flow (canvas and
+  // properties): its draft, then that flow's own publish, so it is live at
+  // once. A refused publish keeps the edits on the page with the reason.
+  const doSave = React.useCallback(async (): Promise<StudioSaveResult> => {
+    if (!current) return { kind: 'declined' };
     setSaving('draft');
     setError(null);
-    // objectstack#34818 — a landed autosave raises no toast (the header says
-    // 已保存); a failed one does, once per flow, beside its refusal strip.
-    const announceFailed = () =>
-      toast.error(tFormat('engine.studio.flowSaveFailed', locale, { item: current.label || current.name }), {
-        id: `studio-draft-failed:flow:${current.name}`,
-      });
+    const body = draft;
+    const hadDraft = hasDraft;
     try {
       // objectstack#28570 — a read-only base's flow is saved into the pair the
       // ensure door answers, under its own name, declaring the override. A
       // refused door is shown as it was sent, and nothing is saved.
       const custom = readOnly ? customizationRef.current : null;
-      let target: { packageId: string | undefined; body: Record<string, unknown> } = { packageId: draftPackageId, body: draft };
+      let target: { packageId: string | undefined; body: Record<string, unknown> } = { packageId: draftPackageId, body };
       let entering = false;
       if (custom) {
         let pair: string;
         try {
           pair = await pairForFlow(custom, current.name);
         } catch (e) {
-          setError(plainRefusal(e));
-          announceFailed();
-          return;
+          const refusal = plainRefusal(e);
+          setError(refusal);
+          return { kind: 'refused', reason: refusal.message };
         }
-        const declared = overrideDraftBody(draft, custom.base, custom.basedOn);
+        const declared = overrideDraftBody(body, custom.base, custom.basedOn);
         if (declared === null) {
-          setError({ message: tFormat('engine.studio.customize.noVersion', locale, { package: custom.baseLabel }) });
-          announceFailed();
-          return;
+          const refusal = { message: tFormat('engine.studio.customize.noVersion', locale, { package: custom.baseLabel }) };
+          setError(refusal);
+          return { kind: 'refused', reason: refusal.message };
         }
         // The buffer was read at another package (the base, before its pair
         // was listed): the pair is taken to hold no draft of the flow, so a
@@ -8932,30 +8947,45 @@ export function AutomationsPillar({
         surface: 'studio',
       });
       // objectui#11773 — the author chose the saved version; the load replaces the buffer.
-      if (outcome === 'reloaded') return;
+      if (outcome === 'reloaded') return { kind: 'declined' };
       // The badge reads the declaration the server now serves.
       if (entering) setServedNonce((n) => n + 1);
-      setHasDraft(true);
-      // objectstack#26858 — the stored draft carries its own verdict now.
-      rereadFlowVerdict(current.name, target.packageId);
-      // objectui#11204 — clean only if nothing was edited while it was in flight.
-      // objectstack#34818 — and only then does the header say 已保存: an edit
-      // made in flight is not saved yet. The header row names the flow, which
-      // is what ruling 6545938831 ② on #28345 asks of write feedback, so the
-      // flow pillar raises no "Draft of X saved" toast (seat ruling 6954475081).
-      if (sent.unmoved()) {
+      setSaving('publish');
+      const live = await publishSavedItem(
+        client,
+        { type: 'flow', name: current.name, packageId: target.packageId ?? null },
+        hadDraft,
+      );
+      if (!live.ok) {
+        setHasDraft(!live.draftDiscarded);
+        if (live.draftDiscarded) recordFlowRead('flow', current.name, target.packageId, { ifNoneMatch: '*' });
+        // objectstack#26858 — what the pending draft now says, or the live flow's verdict.
+        rereadFlowVerdict(current.name, target.packageId);
+        const refusal = publishRefusal(publishFailureOf('flow', current.name, live.error), 'flow', target.body, locale);
+        setError(refusal);
+        return { kind: 'refused', reason: refusal.message };
+      }
+      // Live: no draft is left, so the next save asserts none.
+      setHasDraft(false);
+      recordFlowRead('flow', current.name, target.packageId, { ifNoneMatch: '*' });
+      flowStoredRef.current = body;
+      // The engine's row for the flow is read again: the publish armed or disarmed it.
+      setStatusNonce((n) => n + 1);
+      // objectstack#34818 — the header says 已保存 once nothing was edited since.
+      if (JSON.stringify(flowDraftRef.current) === JSON.stringify(body)) {
         setAutoDirty(false);
         setFlowSavedFor(current.name);
       }
-      onDraftSaved?.({ type: 'flow', name: current.name });
+      return { kind: 'saved' };
     } catch (e) {
-      // objectui#11785 — read against `draft`, the body this save sent.
-      setError(flowSaveRefusal(e, draft, locale));
-      announceFailed();
+      // objectui#11785 — read against `body`, the body this save sent.
+      const refusal = flowSaveRefusal(e, body, locale);
+      setError(refusal);
+      return { kind: 'refused', reason: refusal.message };
     } finally {
       setSaving(false);
     }
-  }, [saveFlowDraft, current, draft, draftPackageId, onDraftSaved, locale, rereadFlowVerdict, readOnly, pairForFlow, recordFlowRead]);
+  }, [saveFlowDraft, client, current, draft, hasDraft, draftPackageId, locale, rereadFlowVerdict, readOnly, pairForFlow, recordFlowRead]);
   // objectui#11786 — an edit that leaves a step's required input out (a step
   // just added, before it is filled in) is held, not sent: the server would
   // refuse the flow with a 422 naming that input. The step's inspector hints the
@@ -8965,17 +8995,28 @@ export function AutomationsPillar({
     () => (autoDirty ? flowHeldEdit(draft, locale) : null),
     [autoDirty, draft, locale],
   );
-  const { sending: sendingFlowDraft, loaded: flowLoaded } = useDraftAutoSave({
-    // objectui#11232 — the flow `doSave` addresses.
-    target: `flow:${current?.name ?? ''}`,
-    loadedFor: draftFor,
-    dirty: autoDirty,
-    blocked: !current || !isEditable || !!saving || editLocked || restoring || flowIncomplete !== null,
-    snapshot: draft,
-    save: doSave,
-  });
+  // objectui#11272 — the buffer is the open flow's own once its load installed it.
+  const flowLoaded = current !== null && draftFor === `flow:${current.name}`;
   // Only the open flow's own buffer is held (objectui#11272).
   const flowHeld = flowLoaded ? flowIncomplete : null;
+  // objectstack#36511 — what opening another flow (or a new one) would drop.
+  const flowUnsaved = flowLoaded && autoDirty;
+  useStudioSaveEntry(
+    current && flowLoaded && isEditable && !editLocked && !restoring
+      ? {
+          label: current.label || current.name,
+          order: 0,
+          dirty: autoDirty,
+          held: flowHeld?.clause ?? null,
+          save: () => doSave(),
+          cancel: () => {
+            setAutoDirty(false);
+            setError(null);
+            reloadFlowDraft();
+          },
+        }
+      : null,
+  );
   useHeldEditReport(onHeldEditChange, flowHeld?.clause ?? null);
   // objectui#12725 — the header's draft line reads the badge's ledger.
   const flowDraftStatus = useStudioItemDraftStatus(
@@ -8985,9 +9026,10 @@ export function AutomationsPillar({
   );
 
   // Enable/disable persists via the flow's deployment `status` (active = on,
-  // obsolete = off) — the engine honors it on the next publish. The switch flips
-  // it and saves the draft immediately; the change goes live when the package is
-  // published (so "review before enabling" is preserved).
+  // obsolete = off). objectstack#36511 — the switch is live at once, as an
+  // installed app's ledger switch is: it writes the status onto the flow as
+  // the server holds it, never onto an edit Save has not sent, and publishes
+  // that one flow. The edits on the page keep the new status and stay unsaved.
   const flowEnabled = draft.status !== 'obsolete' && draft.status !== 'invalid';
   // The flow the draft on screen belongs to — read by the toggle's rollback
   // below, so a refusal that lands after the author opened another flow never
@@ -8998,42 +9040,54 @@ export function AutomationsPillar({
   }, [current]);
   const toggleEnabled = React.useCallback(async () => {
     // Guarded in addition to being disabled (objectui#11124): a read-only
-    // package refuses the draft save, so the flip would only be rolled back.
+    // package refuses the save, so the flip would only be rolled back.
     if (!current || readOnly) return;
-    const flowName = current.name;
-    const prevDraft = draft;
-    const next = !(draft.status !== 'obsolete' && draft.status !== 'invalid');
-    const nextStatus = next ? 'active' : 'obsolete';
-    const nextDraft = { ...draft, status: nextStatus };
     // objectui#11272 — refused on a buffer that is not this flow's document
     // (its load is not in yet): the switch is not offered then either.
-    if (!sendingFlowDraft(nextDraft)) return;
-    setDraft(nextDraft);
+    if (draftFor !== `flow:${current.name}`) return;
+    const flowName = current.name;
+    const prevStatus = draft.status;
+    const next = !(draft.status !== 'obsolete' && draft.status !== 'invalid');
+    const nextStatus = next ? 'active' : 'obsolete';
+    const stored = { ...flowStoredRef.current, status: nextStatus };
+    const hadDraft = hasDraft;
+    setDraft((d) => ({ ...d, status: nextStatus }));
     setSaving('draft');
     setError(null);
-    try {
-      // objectui#11773 — a reload replaced the buffer the flip was taken on.
-      if ((await saveFlowDraft('flow', flowName, nextDraft, { mode: 'draft', packageId: draftPackageId, surface: 'studio' })) === 'reloaded') return;
-      setHasDraft(true);
-      rereadFlowVerdict(flowName, draftPackageId);
-      onDraftSaved?.({ type: 'flow', name: flowName });
-      toast.success(next ? t('engine.studio.auto.enabledToast', locale) : t('engine.studio.auto.disabledToast', locale));
-    } catch (e) {
-      // objectui#11124 — the save was refused, so roll the optimistic flip
-      // back: the switch and the canvas status (both read `draft.status`) must
-      // never show a status the server refused. Only `status` is put back, so
-      // an edit made while the save was in flight survives; and only on the
-      // same flow, still holding the refused status.
+    // objectui#11124 — the switch and the canvas status (both read
+    // `draft.status`) never show a status the server refused. Only `status`
+    // is put back, and only on the same flow, still holding the refused one.
+    const rollBack = () =>
       setDraft((d) => {
         if (draftFlowRef.current !== flowName || d.status !== nextStatus) return d;
         const { status: _refused, ...rest } = d;
-        return 'status' in prevDraft ? { ...rest, status: prevDraft.status } : rest;
+        return prevStatus !== undefined ? { ...rest, status: prevStatus } : rest;
       });
-      setError(flowSaveRefusal(e, nextDraft, locale));
+    try {
+      // objectui#11773 — a reload replaced the buffer the flip was taken on.
+      if ((await saveFlowDraft('flow', flowName, stored, { mode: 'draft', packageId: draftPackageId, surface: 'studio' })) === 'reloaded') return;
+      setSaving('publish');
+      const live = await publishSavedItem(client, { type: 'flow', name: flowName, packageId: draftPackageId ?? null }, hadDraft);
+      if (!live.ok) {
+        setHasDraft(!live.draftDiscarded);
+        if (live.draftDiscarded) recordFlowRead('flow', flowName, draftPackageId, { ifNoneMatch: '*' });
+        rollBack();
+        setError(publishRefusal(publishFailureOf('flow', flowName, live.error), 'flow', stored, locale));
+        return;
+      }
+      setHasDraft(false);
+      recordFlowRead('flow', flowName, draftPackageId, { ifNoneMatch: '*' });
+      if (draftFlowRef.current === flowName) flowStoredRef.current = stored;
+      setStatusNonce((n) => n + 1);
+      rereadFlowVerdict(flowName, draftPackageId);
+      toast.success(next ? t('engine.studio.auto.enabledToast', locale) : t('engine.studio.auto.disabledToast', locale));
+    } catch (e) {
+      rollBack();
+      setError(flowSaveRefusal(e, stored, locale));
     } finally {
       setSaving(false);
     }
-  }, [saveFlowDraft, current, draft, draftPackageId, onDraftSaved, locale, readOnly, sendingFlowDraft, rereadFlowVerdict]);
+  }, [saveFlowDraft, client, current, draft, draftFor, hasDraft, draftPackageId, locale, readOnly, recordFlowRead, rereadFlowVerdict]);
 
   // The rail's "+" — and the empty block's button, which runs this same
   // handler (objectui#12514). objectui#11553 — no "New" in the package-less
@@ -9045,7 +9099,7 @@ export function AutomationsPillar({
           // objectstack#26845 — the created flow opens at once, and its load
           // replaces the buffer a held step lives in: asked before the dialog
           // opens, so Cancel costs nothing and the create itself asks nothing.
-          if (!confirmDropUnsavedWork(flowHeld !== null, locale)) return;
+          if (!confirmDropUnsavedWork(flowUnsaved, locale)) return;
           setError(null);
           setNewTrigger('');
           setNewTriggerObject('');
@@ -9640,7 +9694,7 @@ export function AutomationsPillar({
                       onClick={() => {
                         // objectstack#26705 — another flow's load replaces the
                         // buffer the held step lives in; the open one keeps it.
-                        if (!active && !confirmDropUnsavedWork(flowHeld !== null, locale)) return;
+                        if (!active && !confirmDropUnsavedWork(flowUnsaved, locale)) return;
                         setCurrent(f);
                         if (isMobile) setRailOpen(false);
                       }}
@@ -9836,7 +9890,7 @@ export function AutomationsPillar({
                       blocked: canAuthorFlows ? null : t('engine.edit.capabilityReadOnly', locale),
                       // The copy opens in place of this flow, which drops a
                       // held edit; asked before the dialog, as New is.
-                      confirmOpen: () => confirmDropUnsavedWork(flowHeld !== null, locale),
+                      confirmOpen: () => confirmDropUnsavedWork(flowUnsaved, locale),
                       onCopied: onFlowCopied,
                     }}
                   />
@@ -10087,7 +10141,7 @@ export function AutomationsPillar({
         labelPlaceholder={t('engine.studio.auto.namePlaceholder', locale)}
         idFieldLabel={t('engine.studio.auto.idLabel', locale)}
         idPlaceholder={t('engine.studio.auto.idPlaceholder', locale)}
-        submitLabel={t('engine.studio.createDraft', locale)}
+        submitLabel={t('engine.studio.save.save', locale)}
         submittingLabel={t('engine.studio.creating', locale)}
         busy={createBusy}
         error={newNeeds ?? error?.message ?? null}
