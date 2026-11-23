@@ -4357,6 +4357,23 @@ const ko = {
     filterUnread: "읽지 않음",
     filterAll: "전체",
   },
+  // objectstack#36741 — the full-page inbox the bell opens from 768 px up.
+  inboxPage: {
+    backToList: '목록으로 돌아가기',
+    openFullRecord: '전체 레코드 열기',
+    occurrences: '발송된 각 회',
+    moreApprovals: '나머지는 결재함에서 보기',
+    goApprove: '결재하기 ›',
+    loadEarlier: '이전 알림 불러오기',
+    loadEarlierFailed: '불러오지 못했습니다. 다시 시도',
+    pickApproval: '요청을 선택하면 여기서 처리할 수 있습니다.',
+    pickItem: '항목을 선택하면 여기에 표시됩니다.',
+    openRequest: '요청 열기',
+    nextHint: '처리 후 다음 항목으로 이동 · J / K로 이동',
+    openLink: '열기',
+    unreadOnly: '읽지 않음만',
+    allApprovals: '모든 결재',
+  },
   // objectui#13460 — the share-link dialog (`@object-ui/components` `ShareDialog`).
   shareDialog: {
     title: '{{label}} 공유',

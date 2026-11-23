@@ -143,6 +143,8 @@ const ReportView = routeChunk.lazy(() => import('../views/ReportView.js').then(m
 const AppReportIndexView = routeChunk.lazy(() => import('../views/AppReportIndexView.js').then(m => m.AppReportIndexView));
 const ReportNewPage = routeChunk.lazy(() => import('../views/ReportNewPage.js').then(m => m.ReportNewPage));
 const SearchResultsPage = routeChunk.lazy(() => import('../views/SearchResultsPage.js').then(m => m.SearchResultsPage));
+// objectstack#36741 — the full-page inbox the sidebar's bell opens from 768 px up.
+const InboxPage = routeChunk.lazy(() => import('../views/inbox/InboxPage.js').then(m => m.InboxPage));
 const RecordFormPage = routeChunk.lazy(() => import('../views/RecordFormPage.js').then(m => m.RecordFormPage));
 const ComponentNavView = routeChunk.lazy(() => import('../views/ComponentNavView.js').then(m => m.ComponentNavView));
 const ObjectDataPage = routeChunk.lazy(() => import('../views/ObjectDataPage.js').then(m => m.ObjectDataPage));
@@ -192,6 +194,8 @@ const APP_ROUTE_CHUNKS: ReadonlyArray<{ path: string; chunk: { preload: () => Pr
   { path: 'component/:ns/:name/*', chunk: ComponentNavView },
   { path: 'design/dashboard/:dashboardName', chunk: DashboardDesignPage },
   { path: 'search', chunk: SearchResultsPage },
+  { path: 'inbox', chunk: InboxPage },
+  { path: 'inbox/:inboxTab', chunk: InboxPage },
   { path: 'create-app', chunk: CreateAppPage },
   { path: 'edit-app/:editAppName', chunk: EditAppPage },
   { path: 'system/marketplace', chunk: MarketplacePage },
@@ -1709,6 +1713,8 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
                 <Route path="component/metadata/resource/*" element={<LegacyMetadataRedirect mode="resource" />} />
                 <Route path="design/dashboard/:dashboardName" element={<DashboardDesignPage />} />
                 <Route path="search" element={<SearchResultsPage />} />
+                <Route path="inbox" element={<InboxPage dataSource={dataSource} objects={allObjects} />} />
+                <Route path="inbox/:inboxTab" element={<InboxPage dataSource={dataSource} objects={allObjects} />} />
                 <Route path="create-app" element={<CreateAppPage />} />
                 <Route path="edit-app/:editAppName" element={<EditAppPage />} />
                 <Route path="system/marketplace" element={<MarketplacePage />} />

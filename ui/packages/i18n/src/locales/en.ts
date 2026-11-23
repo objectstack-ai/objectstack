@@ -5289,6 +5289,23 @@ const en = {
     desktopBlocked: 'Blocked. Allow notifications for this site in your browser settings.',
     desktopUnsupported: 'This browser does not support desktop notifications.',
   },
+  // objectstack#36741 — the full-page inbox the bell opens from 768 px up.
+  inboxPage: {
+    backToList: 'Back to the list',
+    openFullRecord: 'Open full record',
+    occurrences: 'Each time it was sent',
+    moreApprovals: 'See the rest in the Approvals inbox',
+    goApprove: 'Review ›',
+    loadEarlier: 'Load earlier notifications',
+    loadEarlierFailed: 'Could not load. Try again',
+    pickApproval: 'Pick a request to review it here.',
+    pickItem: 'Pick an item to see it here.',
+    openRequest: 'Open request',
+    nextHint: 'Moves to the next once decided · J / K to move',
+    openLink: 'Open',
+    unreadOnly: 'Unread only',
+    allApprovals: 'All approvals',
+  },
   // objectui#13460 — the share-link dialog (`@object-ui/components` `ShareDialog`).
   shareDialog: {
     title: 'Share {{label}}',

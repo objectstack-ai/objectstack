@@ -4616,6 +4616,23 @@ const zh = {
     desktopBlocked: '已被拦截。请在浏览器设置中允许本站发送通知。',
     desktopUnsupported: '当前浏览器不支持桌面通知。',
   },
+  // objectstack#36741 — the full-page inbox the bell opens from 768 px up.
+  inboxPage: {
+    backToList: '返回列表',
+    openFullRecord: '打开完整记录',
+    occurrences: '每一次推送',
+    moreApprovals: '其余的到审批中心查看',
+    goApprove: '去审批 ›',
+    loadEarlier: '加载更早的通知',
+    loadEarlierFailed: '加载失败，点此重试',
+    pickApproval: '选一条审批，在这里处理。',
+    pickItem: '选一条，在这里查看。',
+    openRequest: '打开审批单',
+    nextHint: '处理后自动跳到下一条 · J / K 上下切换',
+    openLink: '打开',
+    unreadOnly: '只看未读',
+    allApprovals: '全部审批',
+  },
   // objectui#13460 — the share-link dialog (`@object-ui/components` `ShareDialog`).
   shareDialog: {
     title: '分享{{label}}',

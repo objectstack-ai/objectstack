@@ -4358,6 +4358,23 @@ const de = {
     filterUnread: "Ungelesen",
     filterAll: "Alle",
   },
+  // objectstack#36741 — the full-page inbox the bell opens from 768 px up.
+  inboxPage: {
+    backToList: 'Zurück zur Liste',
+    openFullRecord: 'Vollständigen Datensatz öffnen',
+    occurrences: 'Jedes Mal, als sie gesendet wurde',
+    moreApprovals: 'Den Rest im Genehmigungseingang ansehen',
+    goApprove: 'Prüfen ›',
+    loadEarlier: 'Ältere Benachrichtigungen laden',
+    loadEarlierFailed: 'Laden fehlgeschlagen. Erneut versuchen',
+    pickApproval: 'Wählen Sie eine Anfrage, um sie hier zu prüfen.',
+    pickItem: 'Wählen Sie einen Eintrag, um ihn hier zu sehen.',
+    openRequest: 'Anfrage öffnen',
+    nextHint: 'Springt nach der Entscheidung zur nächsten · J / K zum Wechseln',
+    openLink: 'Öffnen',
+    unreadOnly: 'Nur ungelesene',
+    allApprovals: 'Alle Genehmigungen',
+  },
   // objectui#13460 — the share-link dialog (`@object-ui/components` `ShareDialog`).
   shareDialog: {
     title: '{{label}} teilen',
