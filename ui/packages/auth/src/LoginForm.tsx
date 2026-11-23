@@ -555,10 +555,13 @@ export function LoginForm({
     }, SSO_SIGN_IN_TIMEOUT_MS);
     try {
       const base = window.location.pathname.replace(/\/login(?:\/.*)?$/, '');
+      // Back at the console root, which lands the person where any sign-in
+      // does: the last-used app, the declared default, the first app
+      // (objectstack#36732). The platform home page it named is retired.
       const res = await fetch('/api/v1/auth/sign-in/sso', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ email: identifier, callbackURL: base + '/home' }),
+        body: JSON.stringify({ email: identifier, callbackURL: base + '/' }),
         credentials: 'include',
         signal: controller.signal,
       });

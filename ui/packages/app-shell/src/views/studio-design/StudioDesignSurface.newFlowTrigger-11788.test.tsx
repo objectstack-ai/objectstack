@@ -19,6 +19,9 @@
  * binds a trigger.
  */
 
+// Warmed at module top so the first load of the console's lazily loaded
+// authoring code is paid during collection, not inside a test's clock.
+import '@objectstack/lint';
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -138,7 +141,7 @@ async function pickTrigger(trigger: HTMLElement, value: string): Promise<void> {
 }
 
 async function submitAndReadSave(): Promise<Record<string, unknown>> {
-  fireEvent.click(screen.getByRole('button', { name: en('engine.studio.createDraft') }));
+  fireEvent.click(screen.getByRole('button', { name: en('engine.studio.createLive') }));
   await waitFor(() => expect(server.saves).toHaveLength(1), { timeout: 8000 });
   const { body } = server.saves[0]!;
   const parsed = FlowSchema.safeParse(body);

@@ -125,7 +125,7 @@ describe('[#19810] an operator the draft preview cannot evaluate', () => {
     for (const where of [
       { $or: [{ name: { $startsWith: 'Ac' } }, { amount: { $eq: -1 } }] },
       { $and: [{ name: { $endsWith: 'Corp' } }] },
-      { $not: { name: { $notContains: 'zzz' } } },
+      { $not: { name: { $icontains: 'zzz' } } },
     ]) {
       expect(refusalFor(where)).toMatchObject({ code: 'INVALID_FILTER', status: 400 });
     }
@@ -146,12 +146,14 @@ describe('[#19810] an operator the draft preview cannot evaluate', () => {
    * the protocol without an arm here lands in this table by itself instead of
    * going silent.
    */
-  const EVALUATED = ['$eq', '$ne', '$gt', '$gte', '$lt', '$lte', '$between', '$in', '$nin', '$contains'];
+  // [#36189] `$notContains` joined the table, measured against the shared text
+  // kit (`preview-contains-membership-36189.test.ts`).
+  const EVALUATED = ['$eq', '$ne', '$gt', '$gte', '$lt', '$lte', '$between', '$in', '$nin', '$contains', '$notContains'];
   const UNEVALUATED = [...FILTER_OPERATORS, '$like', '$ilike'].filter((op) => !EVALUATED.includes(op));
 
   it('has a non-empty unevaluated set — otherwise the table below asserts nothing', () => {
     expect(UNEVALUATED).toEqual(
-      expect.arrayContaining(['$notContains', '$startsWith', '$endsWith', '$icontains', '$null', '$exists', '$like', '$ilike']),
+      expect.arrayContaining(['$startsWith', '$endsWith', '$icontains', '$null', '$exists', '$like', '$ilike']),
     );
   });
 
@@ -182,6 +184,7 @@ describe('[#19810] the operators the draft preview DOES evaluate are unchanged',
     ['$in', { name: { $in: ['Acme Corp', 'Globex'] } }, { name: { $in: ['Globex'] } }],
     ['$nin', { name: { $nin: ['Globex'] } }, { name: { $nin: ['Acme Corp'] } }],
     ['$contains', { name: { $contains: 'cme' } }, { name: { $contains: 'zzz' } }],
+    ['$notContains', { name: { $notContains: 'zzz' } }, { name: { $notContains: 'cme' } }],
     ['implicit equality', { name: 'Acme Corp' }, { name: 'Globex' }],
     ['$and', { $and: [{ amount: { $gt: 700 } }] }, { $and: [{ amount: { $gt: 900 } }] }],
     ['$or', { $or: [{ amount: { $gt: 900 } }, { name: { $contains: 'cme' } }] }, { $or: [{ amount: { $gt: 900 } }] }],

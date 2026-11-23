@@ -20,6 +20,9 @@
  * metadata client is a double that records each save.
  */
 
+// Warmed at module top so the first load of the console's lazily loaded
+// authoring code is paid during collection, not inside a test's clock.
+import '@objectstack/lint';
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -133,7 +136,7 @@ async function pickObject(name: string): Promise<void> {
 }
 
 function create(): void {
-  fireEvent.click(screen.getByRole('button', { name: en('engine.studio.createDraft') }));
+  fireEvent.click(screen.getByRole('button', { name: en('engine.studio.createLive') }));
 }
 
 /** Wait for save number `n` and return its body, judged by the spec. */

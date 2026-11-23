@@ -19,6 +19,11 @@ import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+// The form reaches the console's dynamic `@objectstack/formula` and
+// `@objectstack/lint` imports (CEL authoring); their first load is paid here,
+// at collection, never inside a case's clock (`check:test-source-alias`).
+import '@objectstack/formula';
+import '@objectstack/lint';
 import { PackageFormDialog } from './PackageFormDialog';
 // The package form rows this suite reads in zh live in `@object-ui/i18n`'s `studio`
 // namespace, whose `zh` catalogue is fetched on demand (objectstack#25922).
@@ -69,7 +74,7 @@ describe('PackageFormDialog — validation timing (objectui#5416 defect 1)', () 
     expect(screen.getByTestId('package-form-submit')).toBeDisabled();
 
     fireEvent.change(screen.getByLabelText(/软件包 ID/), { target: { value: 'com.acme.crm' } });
-    fireEvent.change(screen.getByLabelText(/显示名称/), { target: { value: 'Acme CRM' } });
+    fireEvent.change(screen.getByLabelText(/^显示名/), { target: { value: 'Acme CRM' } });
 
     await waitFor(() => expect(screen.getByTestId('package-form-submit')).toBeEnabled());
   });
@@ -78,7 +83,7 @@ describe('PackageFormDialog — validation timing (objectui#5416 defect 1)', () 
     render(<PackageFormDialog mode="create" open onOpenChange={vi.fn()} />);
     await screen.findByTestId('package-form');
 
-    fireEvent.blur(screen.getByLabelText(/显示名称/));
+    fireEvent.blur(screen.getByLabelText(/^显示名/));
 
     // Exactly one line — the field the author actually left, not the whole form.
     await waitFor(() => expect(issueLines()).toHaveLength(1));
@@ -89,7 +94,7 @@ describe('PackageFormDialog — validation timing (objectui#5416 defect 1)', () 
     await screen.findByTestId('package-form');
 
     // Typing then clearing leaves the field invalid AND touched.
-    const name = screen.getByLabelText(/显示名称/);
+    const name = screen.getByLabelText(/^显示名/);
     fireEvent.change(name, { target: { value: 'x' } });
     fireEvent.change(name, { target: { value: '' } });
 

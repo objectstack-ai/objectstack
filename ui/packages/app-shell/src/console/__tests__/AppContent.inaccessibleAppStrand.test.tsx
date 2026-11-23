@@ -152,6 +152,18 @@ vi.mock('@object-ui/react', async (importOriginal) => ({
   useMutationInvalidationBridge: () => {},
 }));
 
+// objectstack#36732 — on `/apps/*` the console's chrome sits under
+// `LauncherAppsProvider`, whose `/me/apps` answer is held once the first read
+// lands; this host mounts none, so the held answer is stated here. Without one
+// a desktop's Home names `/home` (pinned in `useHomePath.servedAnswer-36732`).
+vi.mock('../../hooks/useLauncherApps', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  useServedAppsSettled: () => true,
+}));
+
+// The page reaches a dynamic `@objectstack/lint` import; its first load is paid
+// here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@objectstack/lint';
 import { AppContent } from '../AppContent';
 
 /**

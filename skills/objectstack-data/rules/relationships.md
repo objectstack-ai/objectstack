@@ -275,7 +275,7 @@ Name only true line-item / composition children (invoice lines, order items,
 expense lines); leave associations (comments, attachments, activity, audit) as
 tabs.
 
-The rendering side, `subforms` overrides included: objectstack-ui → Master-Detail Forms.
+The rendering side: objectstack-ui → Master-Detail Forms.
 
 #### Inline-edit form factor (`grid` vs `form`)
 

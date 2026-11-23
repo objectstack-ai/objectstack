@@ -51,6 +51,8 @@ const server = vi.hoisted(() => ({
   drafts: new Map<string, Record<string, unknown>>(),
   /** Every write, in order: `save TYPE/NAME`, `publish TYPE/NAME`, `reset TYPE/NAME`. */
   log: [] as string[],
+  /** The `draftChanges` a draft read serves beside the draft, by `TYPE/NAME`. */
+  draftChanges: new Map<string, unknown[]>(),
 }));
 
 const mockClient = vi.hoisted(() => {
@@ -75,7 +77,8 @@ const mockClient = vi.hoisted(() => {
     }),
     getDraft: vi.fn(async (type: string, name: string) => {
       const draft = server.drafts.get(k(type, name));
-      if (draft) return { item: JSON.parse(JSON.stringify(draft)) as Record<string, unknown> };
+      const draftChanges = server.draftChanges.get(k(type, name));
+      if (draft) return { item: JSON.parse(JSON.stringify(draft)) as Record<string, unknown>, ...(draftChanges ? { draftChanges } : {}) };
       throw Object.assign(new Error(`No pending draft exists for ${type}/${name}.`), { code: 'NO_DRAFT', status: 404 });
     }),
     save: vi.fn(async (type: string, name: string, item: unknown) => {
@@ -135,6 +138,7 @@ beforeEach(() => {
   server.active.clear();
   server.drafts.clear();
   server.log.length = 0;
+  server.draftChanges.clear();
   for (const fn of Object.values(mockClient)) (fn as unknown as { mockClear: () => void }).mockClear();
   vi.mocked(toast.success).mockClear();
   vi.mocked(toast.error).mockClear();
@@ -240,7 +244,7 @@ describe('Flows — Save and Cancel in the top bar, live at once (objectstack#36
     const dialog = await screen.findByRole('dialog');
     fireEvent.click(within(dialog).getByTestId('create-flow-preset-manual'));
     fireEvent.change(dialog.querySelectorAll('input')[0], { target: { value: 'Escalate' } });
-    fireEvent.click(within(dialog).getByRole('button', { name: en('engine.studio.createDraft') }));
+    fireEvent.click(within(dialog).getByRole('button', { name: en('engine.studio.createLive') }));
 
     await waitFor(() => expect(server.log).toEqual(['save flow/escalate', 'publish flow/escalate']), { timeout: 8000 });
     expect((mockClient.save.mock.calls[0] as unknown[])[3]).toMatchObject({ mode: 'draft', packageId: PKG, ifNoneMatch: '*' });
@@ -256,5 +260,39 @@ describe('Flows — Save and Cancel in the top bar, live at once (objectstack#36
     expect(server.active.get('flow/escalate')?.status, 'switched on, live').toBe('active');
     expect(toast.success).toHaveBeenCalledWith(en('engine.studio.auto.enabledToast'));
     expect(screen.queryByTestId('studio-save'), 'nothing is left to Save').toBeNull();
+  }, 40_000);
+});
+
+describe('Flows — the AI assistant’s unpublished draft (objectstack#36511 item 6)', () => {
+  function serveAiDraft(by: string): void {
+    server.drafts.set(`flow/${FLOW.name}`, { ...JSON.parse(JSON.stringify(FLOW)), label: 'Notify the owner (AI)' });
+    server.draftChanges.set(`flow/${FLOW.name}`, [{ path: ['label'], by, actor: 'usr_1', at: new Date().toISOString() }]);
+  }
+
+  it('the page says Save makes the AI’s changes live too; 放弃 AI 的改动 drops that flow’s draft, back to the live version', async () => {
+    serveAiDraft('copilot');
+    mockClient.reset.mockImplementationOnce(async (type: string, name: string) => {
+      server.log.push(`reset ${type}/${name}`);
+      server.drafts.delete(`${type}/${name}`);
+      server.draftChanges.delete(`${type}/${name}`);
+      return {};
+    });
+    mount();
+    expect(await screen.findByTestId('studio-ai-draft-notice', undefined, { timeout: 8000 })).toHaveTextContent(
+      en('engine.studio.aiDraft.notice'),
+    );
+    fireEvent.click(screen.getByTestId('studio-ai-draft-discard'));
+    await waitFor(() => expect(server.log).toEqual([`reset flow/${FLOW.name}`]));
+    expect(mockClient.reset).toHaveBeenCalledWith('flow', FLOW.name, { state: 'draft', packageId: PKG });
+    await waitFor(() => expect(screen.queryByTestId('studio-ai-draft-notice')).toBeNull());
+    expect(mockClient.save, 'a discard writes nothing').not.toHaveBeenCalled();
+    expect(mockClient.publish).not.toHaveBeenCalled();
+  }, 40_000);
+
+  it('CONTROL: a draft a person wrote draws no notice', async () => {
+    serveAiDraft('studio');
+    await openFlow();
+    await waitFor(() => expect(mockClient.getDraft).toHaveBeenCalled());
+    expect(screen.queryByTestId('studio-ai-draft-notice')).toBeNull();
   }, 40_000);
 });

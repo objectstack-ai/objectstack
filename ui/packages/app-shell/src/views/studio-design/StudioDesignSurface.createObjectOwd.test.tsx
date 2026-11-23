@@ -14,6 +14,9 @@
  * claim is that the SAVED DRAFT carries an authored baseline.
  */
 
+// Warmed at module top so the first load of the console's lazily loaded
+// authoring code is paid during collection, not inside a test's clock.
+import '@objectstack/lint';
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -97,7 +100,7 @@ function fillAndSubmit(label: string) {
   // sr-only close button AFTER the footer, so "the last button" is Close and a
   // positional pick silently dismisses the dialog instead of submitting it.
   // Matched loosely so the suite survives either of the Studio catalog's two locales.
-  fireEvent.click(within(dialog).getByRole('button', { name: /save as draft|存为草稿/i }));
+  fireEvent.click(within(dialog).getByRole('button', { name: /^(create|创建)$/i }));
 }
 
 /** The body `client.save` was called with for the object draft. */

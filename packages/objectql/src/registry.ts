@@ -232,7 +232,7 @@ export {
  * Declarative authors never reach that silence, though: `ObjectExtensionSchema`
  * (`packages/spec/src/data/object.zod.ts`) is `.strict()` — its shape is
  * exactly `extend` / `fields` / `fieldPatches` / `label` / `pluralLabel` /
- * `description` / `validations` / `indexes` / `place` / `fieldGroups` / `relatedLists` / `priority`, so an `objectExtensions` entry
+ * `description` / `actionLayout` / `validations` / `indexes` / `place` / `fieldGroups` / `relatedLists` / `priority`, so an `objectExtensions` entry
  * naming `tenancy`, `permissions`, or any other key outside that list fails
  * LOUDLY at authoring time with a prescription (#4001; the same rule is
  * documented at `content/docs/data-modeling/object-extensions.mdx`). This
