@@ -21,7 +21,7 @@ vi.mock('../../assistant/assistantBus', async (importOriginal) => ({
 }));
 
 import { loadHanRomanizer } from '../../views/metadata-admin/romanizeHan';
-import type { Menu } from '../designModeMenuModel';
+import { inShownOrder, insertEntry, withEntryIds, type Menu } from '../designModeMenuModel';
 import type { AppMenuSaveDoors } from '../designModeMenuSave';
 import {
   freeItemName,
@@ -51,6 +51,7 @@ function doors(opts: {
   writable: boolean;
   version?: string;
   pairWritable?: boolean;
+  stored?: Menu;
   ensure?: () => Promise<never>;
   refuse?: (call: Call) => unknown;
 }) {
@@ -75,7 +76,7 @@ function doors(opts: {
     },
     client: {
       layered: async () => {
-        const code = { name: 'crm', label: 'CRM', navigation: SERVED };
+        const code = { name: 'crm', label: 'CRM', navigation: opts.stored ?? SERVED };
         return { code, effective: code };
       },
       save: (...args) => record(['save', ...args]),
@@ -198,5 +199,26 @@ describe('the new dashboard’s machine name (objectstack#36364)', () => {
       throw new Error('read failed');
     });
     await expect(freeItemName('dashboard', 'Payment analysis', [], { get })).rejects.toThrow('read failed');
+  });
+});
+
+describe('the new dashboard’s entry in a menu that carries `order` (objectstack#36364 over objectstack#36591)', () => {
+  const object = (id: string, label: string, order: number) => ({ id, type: 'object', objectName: `crm_${id}`, label, order });
+  /** As stored, authored out of `order`; the sidebar reads Customers, Contacts, Opportunities. */
+  const STORED: Menu = [object('opportunity', 'Opportunities', 2), object('contact', 'Contacts', 1), object('customer', 'Customers', 0)];
+
+  it('the entry held between two entries is numbered in that place, and every entry of the level gets its shown place', async () => {
+    const served = withEntryIds(inShownOrder(STORED));
+    const navigation = insertEntry(served, null, 1, ENTRY);
+    const { d, calls } = doors({ writable: true, stored: STORED });
+    await saveAppMenuWithNewItem({ ...input, served, navigation }, TEXTS, d);
+    expect(calls.map(([verb, type]) => `${verb} ${type}`)).toEqual(['save dashboard', 'publish dashboard', 'save app', 'publish app']);
+    const saved = (calls[2][3] as { navigation: Array<{ id: string; order?: number }> }).navigation;
+    expect(saved.map((e) => [e.id, e.order])).toEqual([
+      ['customer', 0],
+      ['nav_item_1', 1],
+      ['contact', 2],
+      ['opportunity', 3],
+    ]);
   });
 });
