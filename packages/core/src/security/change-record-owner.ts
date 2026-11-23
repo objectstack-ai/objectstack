@@ -64,23 +64,6 @@
  * refuses it.
  *
  * Cascade to related records is phase 2 (a separate card), not here.
- *
- * ## The answer is what was saved, not what was asked
- *
- * Every owner write passes `strictReadonlyWrites: true` ({@link OWNER_WRITE_OPTIONS}).
- * A `readonlyWhen` lock on `owner_id` or `queue` that holds for the row makes
- * the engine strip that key; without the flag the write would commit without
- * it and this module would still answer "moved" — and tell the new owner — for
- * a record that never moved. Under the flag the strip is the row's refusal,
- * `ERR_READONLY_FIELD_REJECTED`, before anything is written: the single form
- * throws it, the bulk form lists the row under `failures` with that code, and
- * no notification names it. A queue target writes both keys, so a lock on
- * either refuses the whole row rather than half-moving it.
- *
- * `notified` is read off the messaging service's answer, not off the call
- * returning: true only when the emit reports a delivery the channel accepted
- * or a row the outbox took (`delivered` / `enqueued`). A muted topic or an
- * unavailable channel answers zero of both, so `notified: false`.
  */
 
 import { resolveUserActionTransfer, transferIneligibilityReason } from '@objectstack/spec/data';
@@ -104,9 +87,17 @@ export const CHANGE_OWNER_DISABLED = 'CHANGE_OWNER_DISABLED';
 const QUEUE_FIELD = 'queue';
 
 /**
- * The write options every owner change passes besides its address and context:
- * a key the engine would strip (a `readonlyWhen` lock that holds for the row)
- * refuses the row instead of committing it without that key.
+ * The write options every owner change passes besides its address and context.
+ *
+ * The answer is what was saved, not what was asked. A `readonlyWhen` lock on
+ * `owner_id` or `queue` that holds for the row makes the engine strip that
+ * key; without `strictReadonlyWrites` the write would commit without it and
+ * this module would still answer "moved", and tell the new owner, for a record
+ * that never moved. Under the flag the strip is the row's refusal,
+ * `ERR_READONLY_FIELD_REJECTED`, before anything is written: the single form
+ * throws it, the bulk form lists the row under `failures` with that code, and
+ * no notification names it. A queue target writes both keys, so a lock on
+ * either refuses the whole row rather than half-moving it.
  */
 const OWNER_WRITE_OPTIONS = { strictReadonlyWrites: true } as const;
 

@@ -44,16 +44,19 @@ const CALLER = { userId: 'u_manager', tenantId: 'org_1' };
  * `ERR_READONLY_FIELD_REJECTED`, under `strictReadonlyWrites`.
  */
 function fakeEngine(opts: { refuse?: (id: string) => unknown; hiddenUsers?: string[]; locked?: (row: Row) => string[] } = {}) {
+  /** Per update call, in order: whether it passed `strictReadonlyWrites: true`. */
+  const strictWrites: boolean[] = [];
   const tables: Record<string, Row[]> = {
     sys_user: [{ id: 'u_next', banned: false }, { id: 'u_gone', banned: true }, { id: 'u_manager', banned: false }],
     lead: [{ id: 'l1', owner_id: 'u_a' }, { id: 'l2', owner_id: 'u_b' }, { id: 'l3', owner_id: 'u_a' }],
     contract_line: [{ id: 'c1', owner_id: 'u_a' }],
     memo: [{ id: 'm1', owner_id: 'u_a' }],
   };
-  const calls: Array<{ op: string; object: string; data?: Row; where?: Row; context?: unknown; strict?: boolean }> = [];
-  const engine: ChangeOwnerEngine & { tables: typeof tables; calls: typeof calls } = {
+  const calls: Array<{ op: string; object: string; data?: Row; where?: Row; context?: unknown }> = [];
+  const engine: ChangeOwnerEngine & { tables: typeof tables; calls: typeof calls; strictWrites: typeof strictWrites } = {
     tables,
     calls,
+    strictWrites,
     getSchema: (name) => SCHEMAS[name],
     async find(object, q) {
       calls.push({ op: 'find', object, where: q?.where, context: q?.context });
@@ -68,7 +71,8 @@ function fakeEngine(opts: { refuse?: (id: string) => unknown; hiddenUsers?: stri
     },
     async update(object, data, o) {
       assertEngineUpdateDispatch(data, o);
-      calls.push({ op: 'update', object, data, where: o?.where, context: o?.context, strict: o?.strictReadonlyWrites === true });
+      calls.push({ op: 'update', object, data, where: o?.where, context: o?.context });
+      strictWrites.push(o?.strictReadonlyWrites === true);
       const row = (tables[object] ?? []).find((r) => r.id === o?.where?.id);
       if (!row) return null;
       const refusal = opts.refuse?.(row.id);
@@ -146,7 +150,8 @@ describe('[#35402] changeRecordOwner — one record', () => {
     const result = await changeRecordOwner(engine, 'lead', 'l1', { ownerId: 'u_next' }, CALLER);
     expect(result).toEqual({ object: 'lead', id: 'l1', ownerId: 'u_next', notified: false });
     const writes = engine.calls.filter((c) => c.op === 'update');
-    expect(writes).toEqual([{ op: 'update', object: 'lead', data: { owner_id: 'u_next' }, where: { id: 'l1' }, context: CALLER, strict: true }]);
+    expect(writes).toEqual([{ op: 'update', object: 'lead', data: { owner_id: 'u_next' }, where: { id: 'l1' }, context: CALLER }]);
+    expect(engine.strictWrites).toEqual([true]);
   });
 
   it('[ADR-0142 D3] a queue target leaves the owner empty and names the queue', async () => {
@@ -221,6 +226,7 @@ describe('[#35402] changeRecordsOwner — the bulk form', () => {
     const writes = engine.calls.filter((c) => c.op === 'update');
     expect(writes.map((w) => w.where)).toEqual([{ id: 'l1' }, { id: 'l2' }, { id: 'l9' }]);
     expect(writes.every((w) => w.context === CALLER)).toBe(true);
+    expect(engine.strictWrites).toEqual([true, true, true]);
     expect(engine.tables.lead.map((r) => r.owner_id)).toEqual(['u_next', 'u_b', 'u_a']);
   });
 
@@ -248,67 +254,6 @@ describe('[#35402] changeRecordsOwner — the bulk form', () => {
     const report = await changeRecordsOwner(engine, 'lead', ['l1', 'l3'], { queue: 'triage' }, CALLER);
     expect(report).toMatchObject({ ownerId: null, queue: 'triage', updated: 2, failed: 0 });
     expect(engine.tables.lead.filter((r) => r.queue === 'triage').map((r) => r.owner_id)).toEqual([null, null]);
-  });
-});
-
-describe('[#35402] notify', () => {
-  it('tells the new owner once, naming the record, only when asked', async () => {
-    const messaging = { emit: vi.fn(async () => SENT) };
-    const quiet = await changeRecordOwner(fakeEngine(), 'lead', 'l1', { ownerId: 'u_next' }, CALLER, { messaging });
-    expect(quiet.notified).toBe(false);
-    expect(messaging.emit).not.toHaveBeenCalled();
-
-    const told = await changeRecordOwner(fakeEngine(), 'lead', 'l1', { ownerId: 'u_next' }, CALLER, { notify: true, messaging });
-    expect(told.notified).toBe(true);
-    expect(messaging.emit).toHaveBeenCalledTimes(1);
-    expect(messaging.emit).toHaveBeenCalledWith(expect.objectContaining({
-      topic: CHANGE_OWNER_NOTIFICATION_TOPIC,
-      audience: ['u_next'],
-      source: { object: 'lead', id: 'l1' },
-      actorId: 'u_manager',
-      organizationId: 'org_1',
-    }));
-    // The title rides as catalog keys, rendered in the new owner's language at
-    // delivery; the English literal is the same sentence, filled.
-    const sent = (messaging.emit.mock.calls[0] as any[])[0];
-    expect(sent.keyedText).toEqual({
-      titleKey: 'messages.recordOwnerChangedTitle',
-      params: { object: { key: 'objects.lead.label', fallback: 'Lead' } },
-    });
-    expect(sent.payload.title).toBe('You are now the owner of this Lead record');
-  });
-
-  it('the bulk form sends one notification for the rows that moved, none when nothing moved', async () => {
-    const messaging = { emit: vi.fn(async () => SENT) };
-    const engine = fakeEngine({ refuse: (id) => (id === 'l2' ? transferDenied() : undefined) });
-    const report = await changeRecordsOwner(engine, 'lead', ['l1', 'l2', 'l3'], { ownerId: 'u_next' }, CALLER, { notify: true, messaging });
-    expect(report.notified).toBe(true);
-    expect(messaging.emit).toHaveBeenCalledTimes(1);
-    const sent = (messaging.emit.mock.calls[0] as any[])[0];
-    expect(sent.payload.recordIds).toEqual(['l1', 'l3']);
-    expect(sent.keyedText).toEqual({
-      titleKey: 'messages.recordsOwnerChangedTitle',
-      params: { object: { key: 'objects.lead.label', fallback: 'Lead' }, count: '2' },
-    });
-    expect(sent.payload.title).toBe('You are now the owner of 2 Lead records');
-
-    const none = await changeRecordsOwner(fakeEngine({ refuse: () => transferDenied() }), 'lead', ['l1'], { ownerId: 'u_next' }, CALLER, { notify: true, messaging });
-    expect(none.notified).toBe(false);
-    expect(messaging.emit).toHaveBeenCalledTimes(1);
-  });
-
-  it('a caller taking a record themselves, a missing service and a failing one all answer notified: false, and the change stands', async () => {
-    const self = await changeRecordOwner(fakeEngine(), 'lead', 'l1', { ownerId: 'u_manager' }, CALLER, { notify: true, messaging: { emit: vi.fn(async () => SENT) } });
-    expect(self.notified).toBe(false);
-    const absent = await changeRecordOwner(fakeEngine(), 'lead', 'l1', { ownerId: 'u_next' }, CALLER, { notify: true });
-    expect(absent.notified).toBe(false);
-    const engine = fakeEngine();
-    const failing = await changeRecordOwner(engine, 'lead', 'l1', { ownerId: 'u_next' }, CALLER, {
-      notify: true,
-      messaging: { emit: vi.fn(async () => { throw new Error('outbox down'); }) },
-    });
-    expect(failing.notified).toBe(false);
-    expect(engine.tables.lead[0]!.owner_id).toBe('u_next');
   });
 });
 
@@ -389,5 +334,66 @@ describe('notified is read off the emit answer', () => {
       const result = await changeRecordOwner(fakeEngine(), 'lead', 'l1', { ownerId: 'u_next' }, CALLER, { notify: true, messaging });
       expect(result.notified, JSON.stringify(counts)).toBe(true);
     }
+  });
+});
+
+describe('[#35402] notify', () => {
+  it('tells the new owner once, naming the record, only when asked', async () => {
+    const messaging = { emit: vi.fn(async () => SENT) };
+    const quiet = await changeRecordOwner(fakeEngine(), 'lead', 'l1', { ownerId: 'u_next' }, CALLER, { messaging });
+    expect(quiet.notified).toBe(false);
+    expect(messaging.emit).not.toHaveBeenCalled();
+
+    const told = await changeRecordOwner(fakeEngine(), 'lead', 'l1', { ownerId: 'u_next' }, CALLER, { notify: true, messaging });
+    expect(told.notified).toBe(true);
+    expect(messaging.emit).toHaveBeenCalledTimes(1);
+    expect(messaging.emit).toHaveBeenCalledWith(expect.objectContaining({
+      topic: CHANGE_OWNER_NOTIFICATION_TOPIC,
+      audience: ['u_next'],
+      source: { object: 'lead', id: 'l1' },
+      actorId: 'u_manager',
+      organizationId: 'org_1',
+    }));
+    // The title rides as catalog keys, rendered in the new owner's language at
+    // delivery; the English literal is the same sentence, filled.
+    const sent = (messaging.emit.mock.calls[0] as any[])[0];
+    expect(sent.keyedText).toEqual({
+      titleKey: 'messages.recordOwnerChangedTitle',
+      params: { object: { key: 'objects.lead.label', fallback: 'Lead' } },
+    });
+    expect(sent.payload.title).toBe('You are now the owner of this Lead record');
+  });
+
+  it('the bulk form sends one notification for the rows that moved, none when nothing moved', async () => {
+    const messaging = { emit: vi.fn(async () => SENT) };
+    const engine = fakeEngine({ refuse: (id) => (id === 'l2' ? transferDenied() : undefined) });
+    const report = await changeRecordsOwner(engine, 'lead', ['l1', 'l2', 'l3'], { ownerId: 'u_next' }, CALLER, { notify: true, messaging });
+    expect(report.notified).toBe(true);
+    expect(messaging.emit).toHaveBeenCalledTimes(1);
+    const sent = (messaging.emit.mock.calls[0] as any[])[0];
+    expect(sent.payload.recordIds).toEqual(['l1', 'l3']);
+    expect(sent.keyedText).toEqual({
+      titleKey: 'messages.recordsOwnerChangedTitle',
+      params: { object: { key: 'objects.lead.label', fallback: 'Lead' }, count: '2' },
+    });
+    expect(sent.payload.title).toBe('You are now the owner of 2 Lead records');
+
+    const none = await changeRecordsOwner(fakeEngine({ refuse: () => transferDenied() }), 'lead', ['l1'], { ownerId: 'u_next' }, CALLER, { notify: true, messaging });
+    expect(none.notified).toBe(false);
+    expect(messaging.emit).toHaveBeenCalledTimes(1);
+  });
+
+  it('a caller taking a record themselves, a missing service and a failing one all answer notified: false, and the change stands', async () => {
+    const self = await changeRecordOwner(fakeEngine(), 'lead', 'l1', { ownerId: 'u_manager' }, CALLER, { notify: true, messaging: { emit: vi.fn(async () => SENT) } });
+    expect(self.notified).toBe(false);
+    const absent = await changeRecordOwner(fakeEngine(), 'lead', 'l1', { ownerId: 'u_next' }, CALLER, { notify: true });
+    expect(absent.notified).toBe(false);
+    const engine = fakeEngine();
+    const failing = await changeRecordOwner(engine, 'lead', 'l1', { ownerId: 'u_next' }, CALLER, {
+      notify: true,
+      messaging: { emit: vi.fn(async () => { throw new Error('outbox down'); }) },
+    });
+    expect(failing.notified).toBe(false);
+    expect(engine.tables.lead[0]!.owner_id).toBe('u_next');
   });
 });
