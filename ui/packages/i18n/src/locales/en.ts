@@ -2072,6 +2072,7 @@ const en = {
     // name and what it says for a field never changed.
     fieldHistory: 'Change history',
     fieldHistoryNone: 'No changes recorded',
+    fieldHistoryNoneRecent: 'No changes in the recent activity',
     // Replies
     replyCount: '{{count}} reply',
     replyCount_one: '{{count}} reply',

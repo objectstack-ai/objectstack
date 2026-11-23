@@ -1709,6 +1709,7 @@ const ar = {
     fieldChangeCollapse: "عرض أقل",
     fieldHistory: "سجل التغييرات",
     fieldHistoryNone: "لا توجد تغييرات مسجلة",
+    fieldHistoryNoneRecent: "لا توجد تغييرات في النشاط الأخير",
     replyCount: "{{count}} رد",
     replyCount_zero: "{{count}} رد",
     replyCount_one: "{{count}} رد",

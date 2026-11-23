@@ -1093,8 +1093,9 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
             </TooltipProvider>
           )}
           {/* objectstack#36290 — the field's change history, opened in place,
-              for a field of the object the reader may read. */}
-          {historyRecord && objectDefField && fieldHistoryOffered(perms, objectName, field.name) && (
+              for a field of the object whose changes are recorded with their
+              values and that the reader may read. */}
+          {historyRecord && objectDefField && fieldHistoryOffered(perms, objectName, field.name, objectSchema) && (
             <FieldHistoryButton
               dataSource={historyRecord.dataSource}
               objectName={historyRecord.objectName}

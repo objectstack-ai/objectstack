@@ -173,6 +173,7 @@ export {
   useFieldHistoryOffered,
   FIELD_HISTORY_PAGE_SIZE,
   FIELD_HISTORY_SCAN_BATCH,
+  FIELD_HISTORY_SCAN_BATCHES_PER_LOAD,
 } from './FieldHistory';
 export { SubscriptionToggle } from './SubscriptionToggle';
 export { ReactionPicker } from './ReactionPicker';

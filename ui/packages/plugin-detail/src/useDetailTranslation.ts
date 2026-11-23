@@ -288,6 +288,7 @@ export const DETAIL_DEFAULT_TRANSLATIONS: Record<string, string> = {
   // what it says for a field never changed.
   'detail.fieldHistory': 'Change history',
   'detail.fieldHistoryNone': 'No changes recorded',
+  'detail.fieldHistoryNoneRecent': 'No changes in the recent activity',
   // …and the punctuation that joins its field list: the shared list key the
   // form's field lists already use, not a second spelling of it.
   'validation.formInvalidJoiner': ', ',

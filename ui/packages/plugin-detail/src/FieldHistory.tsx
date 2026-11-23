@@ -19,14 +19,22 @@
  * `activity-field-redaction.ts`): a change of a field the reader may not read
  * is never sent. So the card reads what it is served and adds nothing, and
  * the entry points are not offered at all on a field the reader may not read
- * ({@link useFieldHistoryOffered}). The compliance ledger (`sys_audit_log`) is
- * not read: it stays the administrators'.
+ * ({@link useFieldHistoryOffered}). Nor on a field whose old → new values the
+ * writer never records (`resolveFieldHistory` from `@objectstack/spec/data`,
+ * the predicate plugin-audit's writer keeps values by): there the card could
+ * only say 「No changes recorded」 of a field that was changed. The compliance
+ * ledger (`sys_audit_log`) is not read: it stays the administrators'.
  *
  * The rows are read by record, never by field: a query naming the change
  * columns (`changed_fields`, `metadata`) is refused for a reader withheld any
  * field of the object (plugin-audit `parent-field-query-guard.ts`), so the
  * card pages the record's rows newest first and keeps those that changed the
- * field, until it has the page it shows or the rows run out.
+ * field. One open, and each "Load more", reads at most
+ * {@link FIELD_HISTORY_SCAN_BATCHES_PER_LOAD} batches of
+ * {@link FIELD_HISTORY_SCAN_BATCH} rows: it stops sooner when it has the page it
+ * shows or the rows run out, and otherwise stops there and offers "Load more"
+ * to read on, so a rarely-changed field on a busy record costs a bounded
+ * number of reads per click, never one read per fifty rows of the record.
  */
 
 import * as React from 'react';
@@ -45,6 +53,7 @@ import { History, Loader2 } from 'lucide-react';
 import { useDisplayLocale, useSafeTranslate } from '@object-ui/i18n';
 import { usePermissions } from '@object-ui/permissions';
 import type { DataSource } from '@object-ui/types';
+import { resolveFieldHistory } from '@objectstack/spec/data';
 import { FieldChangeItem } from './FieldChangeItem';
 import { useFieldChangeWording } from './fieldChangeText';
 import {
@@ -64,6 +73,12 @@ export const FIELD_HISTORY_PAGE_SIZE = 10;
 
 /** How many activity rows of the record one read asks for while looking for the field's changes. */
 export const FIELD_HISTORY_SCAN_BATCH = 50;
+
+/**
+ * How many batches one user action reads at most — the open, or one "Load
+ * more" — before it stops and offers "Load more" to read on.
+ */
+export const FIELD_HISTORY_SCAN_BATCHES_PER_LOAD = 4;
 
 /** One change of the field, as the card draws it. */
 export interface FieldHistoryEntry {
@@ -90,12 +105,18 @@ export interface FieldHistoryState {
   creation: FieldHistoryCreation | null;
   /** The record's rows have all been read. */
   exhausted: boolean;
+  /**
+   * This action's batches are spent with rows left unread: the scan has
+   * stopped and waits for "Load more". With no change found yet, the card says
+   * the recent activity holds none rather than that the field was never changed.
+   */
+  paused: boolean;
   loading: boolean;
   /** The read was refused (401 / 403): the reader may not see this record's activity. */
   denied: boolean;
   /** The read failed otherwise. */
   failed: boolean;
-  /** Whether "Load more" is offered: a found change not shown yet, or rows not read yet. */
+  /** Whether "Load more" is offered: a found change not shown yet, or the scan paused with rows not read yet. */
   hasMore: boolean;
   loadMore: () => void;
 }
@@ -128,6 +149,8 @@ export function useFieldHistory({ dataSource, objectName, recordId, field }: Use
   const [entries, setEntries] = React.useState<FieldHistoryEntry[]>([]);
   const [creation, setCreation] = React.useState<FieldHistoryCreation | null>(null);
   const [scanned, setScanned] = React.useState(0);
+  // Batches this action may still read: the open, or the latest "Load more".
+  const [budget, setBudget] = React.useState(FIELD_HISTORY_SCAN_BATCHES_PER_LOAD);
   const [exhausted, setExhausted] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
   const [denied, setDenied] = React.useState(false);
@@ -142,15 +165,18 @@ export function useFieldHistory({ dataSource, objectName, recordId, field }: Use
     setEntries([]);
     setCreation(null);
     setScanned(0);
+    setBudget(FIELD_HISTORY_SCAN_BATCHES_PER_LOAD);
     setExhausted(false);
     setDenied(false);
     setFailed(false);
   }, [dataSource, objectName, id, field]);
 
   // Read the next batch of the record's rows while the card wants more changes
-  // than it has found and rows remain. Each answer moves `scanned`, which runs
-  // this again until one of the two stops it.
-  const needsRead = canRead && !exhausted && !denied && !failed && entries.length < wanted;
+  // than it has found, rows remain, and this action has batches left. Each
+  // answer moves `scanned` and spends one batch, which runs this again until
+  // one of the three stops it.
+  const wantsMore = canRead && !exhausted && !denied && !failed && entries.length < wanted;
+  const needsRead = wantsMore && budget > 0;
   React.useEffect(() => {
     if (!needsRead) return undefined;
     let cancelled = false;
@@ -182,9 +208,17 @@ export function useFieldHistory({ dataSource, objectName, recordId, field }: Use
           const change = activityFieldChangesOf(row)?.find((c) => c.field === field);
           if (change) found.push({ id: String(row.id ?? `${scanned + index}`), actor, at, change });
         });
-        if (found.length > 0) setEntries((prev) => [...prev, ...found]);
+        // A row written while the card pages shifts `$skip` by one, so the next
+        // batch can repeat the last row read: keep each change once.
+        if (found.length > 0) {
+          setEntries((prev) => {
+            const seen = new Set(prev.map((e) => e.id));
+            return [...prev, ...found.filter((e) => !seen.has(e.id))];
+          });
+        }
         if (created) setCreation(created);
         setScanned(scanned + batch.length);
+        setBudget((b) => b - 1);
         setExhausted(rows.length <= FIELD_HISTORY_SCAN_BATCH);
       })
       .catch((err: unknown) => {
@@ -200,17 +234,23 @@ export function useFieldHistory({ dataSource, objectName, recordId, field }: Use
     };
   }, [needsRead, dataSource, objectName, id, field, scanned, systemActorLabel, impersonatedActorTemplate, unknownUserLabel]);
 
-  const loadMore = React.useCallback(() => setWanted((n) => n + FIELD_HISTORY_PAGE_SIZE), []);
+  // One more page to show, and a fresh budget of batches to find it with.
+  const loadMore = React.useCallback(() => {
+    setWanted((n) => n + FIELD_HISTORY_PAGE_SIZE);
+    setBudget(FIELD_HISTORY_SCAN_BATCHES_PER_LOAD);
+  }, []);
   const shown = Math.min(entries.length, wanted);
+  const paused = wantsMore && budget <= 0;
   return {
     entries,
     shown,
     creation,
     exhausted,
+    paused,
     loading: loading || needsRead,
     denied,
     failed,
-    hasMore: !denied && !failed && (entries.length > wanted || (!exhausted && entries.length >= wanted)),
+    hasMore: !denied && !failed && (entries.length > wanted || (!exhausted && entries.length >= wanted) || paused),
     loadMore,
   };
 }
@@ -218,14 +258,32 @@ export function useFieldHistory({ dataSource, objectName, recordId, field }: Use
 /**
  * Whether a field offers its change history to this reader: a field of the
  * object, not one of the platform's own record columns (`id`, `created_at`, …,
- * which no edit changes), and one the reader may read. Read permission is the
- * one `usePermissions().checkField(object, field, 'read')` answers, the gate
- * the record page and the list already draw the field by; with no permission
- * provider mounted there is no answer to narrow by and the server's narrowing
- * of the served changes is the floor.
+ * which no edit changes), one whose changes the writer records with their
+ * values, and one the reader may read.
+ *
+ * - Recorded: `resolveFieldHistory(field, object)` from `@objectstack/spec/data`,
+ *   the one predicate plugin-audit's writer keeps old → new by. It is false for
+ *   `fieldHistory: false` on the field, `enable.fieldHistory: false` on the
+ *   object, a credential field, and a type whose values are off by default
+ *   (image, file, JSON, …) unless the field opts in. Asked of the object schema
+ *   the caller passes; a caller with no schema in hand is not narrowed by it.
+ * - Readable: the answer `usePermissions().checkField(object, field, 'read')`
+ *   gives, the gate the record page and the list already draw the field by;
+ *   with no permission provider mounted there is no answer to narrow by and
+ *   the server's narrowing of the served changes is the floor.
  */
-export function useFieldHistoryOffered(objectName: string | null | undefined, field: string | null | undefined): boolean {
-  return fieldHistoryOffered(usePermissions(), objectName, field);
+export function useFieldHistoryOffered(
+  objectName: string | null | undefined,
+  field: string | null | undefined,
+  objectSchema?: unknown,
+): boolean {
+  return fieldHistoryOffered(usePermissions(), objectName, field, objectSchema);
+}
+
+interface FieldHistorySchema {
+  managedBy?: unknown;
+  enable?: { fieldHistory?: unknown } | null;
+  fields?: Record<string, { type?: unknown; fieldHistory?: unknown; trackHistory?: unknown } | undefined> | null;
 }
 
 /** {@link useFieldHistoryOffered}'s answer for a caller that already holds the permissions (one call per field of a list). */
@@ -233,9 +291,15 @@ export function fieldHistoryOffered(
   perms: Pick<ReturnType<typeof usePermissions>, 'isLoaded' | 'checkField'> | null | undefined,
   objectName: string | null | undefined,
   field: string | null | undefined,
+  objectSchema?: unknown,
 ): boolean {
   if (!objectName || !field) return false;
   if (NON_EDITABLE_SYSTEM_FIELDS.has(field)) return false;
+  if (objectSchema && typeof objectSchema === 'object') {
+    const schema = objectSchema as FieldHistorySchema;
+    const def = schema.fields && Object.prototype.hasOwnProperty.call(schema.fields, field) ? schema.fields[field] : undefined;
+    if (!resolveFieldHistory(def, schema)) return false;
+  }
   if (perms?.isLoaded && !perms.checkField(objectName, field, 'read')) return false;
   return true;
 }
@@ -281,6 +345,9 @@ export const FieldHistoryCard: React.FC<FieldHistoryCardProps> = ({
   const visible = history.entries.slice(0, history.shown);
   const settled = !history.loading || visible.length > 0;
   const none = settled && !history.loading && visible.length === 0 && history.exhausted;
+  // The scan stopped at this action's batches with nothing found: the recent
+  // activity holds no change of the field, which is not "never changed".
+  const noneRecent = settled && !history.loading && visible.length === 0 && history.paused;
 
   return (
     <div className={cn('flex flex-col gap-2 text-sm', className)} data-field-history={field}>
@@ -307,6 +374,10 @@ export const FieldHistoryCard: React.FC<FieldHistoryCardProps> = ({
             </p>
           )}
         </div>
+      ) : noneRecent ? (
+        <p className="text-xs text-muted-foreground" data-field-history-none-recent="">
+          {t('detail.fieldHistoryNoneRecent')}
+        </p>
       ) : (
         <ol className="flex max-h-80 flex-col gap-2 overflow-y-auto" data-field-history-entries="">
           {visible.map((entry) => (

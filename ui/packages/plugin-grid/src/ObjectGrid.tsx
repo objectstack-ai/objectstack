@@ -3622,16 +3622,16 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     }
     const recordId = rowRecordId(row);
     // objectstack#36290 — the change history of the field whose cell the menu
-    // opened on: a field the object declares, that the reader may read, on a
-    // stored record. Offered on any table that reads its rows from a data
-    // source, row actions or none.
+    // opened on: a field the object declares, whose changes are recorded with
+    // their values, that the reader may read, on a stored record. Offered on
+    // any table that reads its rows from a data source, row actions or none.
     const historyField =
       context.column
       && typeof dataSource?.find === 'function'
       && schema.objectName
       && recordId != null && recordId !== ''
       && Object.prototype.hasOwnProperty.call(objectSchema?.fields ?? {}, context.column)
-      && fieldHistoryOffered(perms, schema.objectName, context.column)
+      && fieldHistoryOffered(perms, schema.objectName, context.column, objectSchema)
         ? context.column
         : null;
     const onFieldHistory = historyField

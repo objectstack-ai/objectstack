@@ -1528,6 +1528,7 @@ const de = {
     fieldChangeCollapse: "Weniger anzeigen",
     fieldHistory: "Änderungsverlauf",
     fieldHistoryNone: "Keine Änderungen erfasst",
+    fieldHistoryNoneRecent: "Keine Änderungen in den letzten Aktivitäten",
     replyCount: "{{count}} Antwort",
     replyCount_one: "{{count}} Antwort",
     replyCount_other: "{{count}} Antworten",

@@ -18,6 +18,10 @@
  * 4. A refused read says so.
  * 5. The record page's field offers it only for a field of the object the
  *    reader may read: a field the reader may not read has no entry.
+ * 6. One open, and each "Load more", reads a bounded number of batches; a
+ *    rarely-changed field on a busy record stops there and offers "Load more".
+ * 7. A field whose old → new values the writer never records (history off on
+ *    the field or the object, a default-off type, a credential) has no entry.
  */
 
 import * as React from 'react';
@@ -39,7 +43,12 @@ vi.mock('@object-ui/permissions', async (importOriginal) => {
 });
 
 import { RecordContextProvider } from '@object-ui/react';
-import { FieldHistoryCard, FIELD_HISTORY_PAGE_SIZE, FIELD_HISTORY_SCAN_BATCH } from '../FieldHistory';
+import {
+  FieldHistoryCard,
+  FIELD_HISTORY_PAGE_SIZE,
+  FIELD_HISTORY_SCAN_BATCH,
+  FIELD_HISTORY_SCAN_BATCHES_PER_LOAD,
+} from '../FieldHistory';
 import { DetailSection } from '../DetailSection';
 
 afterEach(() => {
@@ -178,6 +187,37 @@ describe('FieldHistoryCard — one field\'s changes (objectstack#36290)', () => 
     expect((source.find.mock.calls[1] as [string, Record<string, unknown>])[1].$skip).toBe(FIELD_HISTORY_SCAN_BATCH);
   });
 
+  it(`one open reads at most ${FIELD_HISTORY_SCAN_BATCHES_PER_LOAD} batches, then "Load more" reads on`, async () => {
+    const capped = FIELD_HISTORY_SCAN_BATCHES_PER_LOAD * FIELD_HISTORY_SCAN_BATCH;
+    const others = Array.from({ length: capped + 10 }, (_, i) =>
+      updated(`p${i}`, new Date(Date.UTC(2026, 10, 22, 0, 0, 0) - i * 60_000).toISOString(), 'Ada', [
+        { field: 'phone', from: { text: `${i + 1}` }, to: { text: `${i}` } },
+      ]),
+    );
+    const source = pagingSource([
+      ...others,
+      updated('n1', '2026-10-01T10:00:00.000Z', 'Grace', [{ field: 'notes', from: { text: 'Before' }, to: { text: 'After' } }]),
+      created('2026-09-01T10:00:00.000Z', 'Grace'),
+    ]);
+    const { container } = mountCard(source);
+    // The open stops at its batches: the recent activity holds no change of
+    // the field, which the card says, and it does not say "never changed".
+    await waitFor(() => expect(container.querySelector('[data-field-history-none-recent]')).not.toBeNull());
+    expect(container.querySelector('[data-field-history-none-recent]')).toHaveTextContent('No changes in the recent activity');
+    expect(source.find).toHaveBeenCalledTimes(FIELD_HISTORY_SCAN_BATCHES_PER_LOAD);
+    expect(container.querySelector('[data-field-history-none]')).toBeNull();
+    // Nothing more is read without a click.
+    await new Promise((r) => setTimeout(r, 20));
+    expect(source.find).toHaveBeenCalledTimes(FIELD_HISTORY_SCAN_BATCHES_PER_LOAD);
+    fireEvent.click(container.querySelector('[data-field-history-more]') as HTMLElement);
+    await waitFor(() => expect(container.querySelectorAll('[data-field-history-entry]')).toHaveLength(1));
+    expect(entriesOf(container)).toEqual([{ actor: 'Grace', old: 'Before', new: 'After' }]);
+    expect(source.find).toHaveBeenCalledTimes(FIELD_HISTORY_SCAN_BATCHES_PER_LOAD + 1);
+    expect((source.find.mock.calls[FIELD_HISTORY_SCAN_BATCHES_PER_LOAD] as [string, Record<string, unknown>])[1].$skip).toBe(capped);
+    expect(container.querySelector('[data-field-history-none-recent]')).toBeNull();
+    expect(container.querySelector('[data-field-history-more]')).toBeNull();
+  });
+
   it('a field never changed: 「No changes recorded」 and who created the record, when', async () => {
     const source = pagingSource([
       updated('u1', '2026-11-20T10:00:00.000Z', 'Ada', [{ field: 'phone', from: { text: '0' }, to: { text: '1' } }]),
@@ -200,19 +240,26 @@ describe('FieldHistoryCard — one field\'s changes (objectstack#36290)', () => 
 });
 
 describe('the record page field\'s 「Change history」 entry (objectstack#36290)', () => {
-  const mountSection = (source: ReturnType<typeof pagingSource>) =>
+  const SECTION_FIELDS = [{ name: 'notes', label: 'Customer notes' }, { name: 'phone', label: 'Phone' }, { name: 'created_at', label: 'Created' }];
+  const SECTION_DATA = { id: 'rec-1', notes: 'Third', phone: '2', created_at: '2026-11-19T10:00:00.000Z' };
+  const mountSection = (
+    source: ReturnType<typeof pagingSource>,
+    schema: Record<string, unknown> = SCHEMA,
+    fields: Array<{ name: string; label: string }> = SECTION_FIELDS,
+    data: Record<string, unknown> = SECTION_DATA,
+  ) =>
     render(
       <RecordContextProvider
         objectName={OBJECT}
         recordId="rec-1"
-        data={{ id: 'rec-1', notes: 'Third', phone: '2' }}
-        objectSchema={SCHEMA as any}
+        data={data}
+        objectSchema={schema as any}
         dataSource={source as any}
       >
         <DetailSection
-          section={{ title: 'Details', fields: [{ name: 'notes', label: 'Customer notes' }, { name: 'phone', label: 'Phone' }, { name: 'created_at', label: 'Created' }] } as any}
-          data={{ id: 'rec-1', notes: 'Third', phone: '2', created_at: '2026-11-19T10:00:00.000Z' }}
-          objectSchema={SCHEMA}
+          section={{ title: 'Details', fields } as any}
+          data={data}
+          objectSchema={schema}
           objectName={OBJECT}
           dataSource={source}
         />
@@ -242,6 +289,37 @@ describe('the record page field\'s 「Change history」 entry (objectstack#36290
     permissions.denied.add('notes');
     const { container } = mountSection(pagingSource([]));
     expect(triggers(container)).toEqual(['phone']);
+  });
+
+  it('a field whose values are not recorded has no entry (control: a default-off type that opts in keeps it)', () => {
+    const schema = {
+      name: OBJECT,
+      fields: {
+        notes: { type: 'textarea', label: 'Customer notes' },
+        quiet: { type: 'text', label: 'Quiet', fieldHistory: false },
+        spec: { type: 'json', label: 'Spec' },
+        spec_on: { type: 'json', label: 'Spec (on)', fieldHistory: true },
+        secret: { type: 'password', label: 'Secret' },
+      },
+    };
+    const fields = [
+      { name: 'notes', label: 'Customer notes' },
+      { name: 'quiet', label: 'Quiet' },
+      { name: 'spec', label: 'Spec' },
+      { name: 'spec_on', label: 'Spec (on)' },
+      { name: 'secret', label: 'Secret' },
+    ];
+    const data = { id: 'rec-1', notes: 'Third', quiet: 'q', spec: '{"a":1}', spec_on: '{"b":2}', secret: '••••' };
+    const { container } = mountSection(pagingSource([]), schema, fields, data);
+    expect(triggers(container)).toEqual(['notes', 'spec_on']);
+  });
+
+  it('an object with field history off offers none (control: the same object with it on)', () => {
+    const on = mountSection(pagingSource([]));
+    expect(triggers(on.container)).toEqual(['notes', 'phone']);
+    cleanup();
+    const { container } = mountSection(pagingSource([]), { ...SCHEMA, enable: { fieldHistory: false } });
+    expect(triggers(container)).toEqual([]);
   });
 
   it('a section not drawing the page\'s record offers none', () => {

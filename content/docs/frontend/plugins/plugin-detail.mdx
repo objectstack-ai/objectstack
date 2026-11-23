@@ -245,10 +245,20 @@ The card reads the record's activity rows (`sys_activity`), the rows the
 activity stream draws, and keeps those that changed the field. The server
 serves each row's changes narrowed to the reader, so a value the reader may not
 read never reaches the browser, and a field the reader may not read
-(`checkField(object, field, 'read')`) offers no history at all. The platform's
-own record columns (`id`, `created_at`, …) offer none. The rows are read by
-record, fifty at a time: a query naming a change column is refused for a reader
-withheld any field of the object, so the field is never part of the query.
+(`checkField(object, field, 'read')`) offers no history at all. Nor does a
+field whose old → new values are not recorded (`resolveFieldHistory` from
+`@objectstack/spec/data`: `fieldHistory: false` on the field,
+`enable.fieldHistory: false` on the object, a credential field, or a media or
+JSON-like type that does not opt in with `fieldHistory: true`), and nor do the
+platform's own record columns (`id`, `created_at`, …).
+
+The rows are read by record, fifty at a time: a query naming a change column
+is refused for a reader withheld any field of the object, so the field is never
+part of the query. Opening the card reads at most four batches
+(`FIELD_HISTORY_SCAN_BATCHES_PER_LOAD`), and each **Load more** at most four
+more. When they hold no change of the field and older rows remain, the card
+says **No changes in the recent activity** and offers **Load more** to read on;
+it says **No changes recorded** only once every row has been read.
 
 ## The record's comment panel
 

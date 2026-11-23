@@ -1528,6 +1528,7 @@ const ko = {
     fieldChangeCollapse: "접기",
     fieldHistory: "변경 기록",
     fieldHistoryNone: "변경 기록이 없습니다",
+    fieldHistoryNoneRecent: "최근 활동에 변경 내역이 없습니다",
     replyCount: "답글 {{count}}개",
     replyCount_one: "답글 {{count}}개",
     replyCount_other: "답글 {{count}}개",

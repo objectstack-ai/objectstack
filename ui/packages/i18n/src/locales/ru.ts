@@ -1724,6 +1724,7 @@ const ru = {
     fieldChangeCollapse: "Свернуть",
     fieldHistory: "История изменений",
     fieldHistoryNone: "Изменений не зафиксировано",
+    fieldHistoryNoneRecent: "Нет изменений в недавней активности",
     replyCount: "{{count}} ответ",
     replyCount_one: "{{count}} ответ",
     replyCount_few: "{{count}} ответа",

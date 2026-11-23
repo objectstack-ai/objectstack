@@ -1573,6 +1573,7 @@ const es = {
     fieldChangeCollapse: "Ver menos",
     fieldHistory: "Historial de cambios",
     fieldHistoryNone: "No hay cambios registrados",
+    fieldHistoryNoneRecent: "No hay cambios en la actividad reciente",
     replyCount: "{{count}} respuesta",
     replyCount_one: "{{count}} respuesta",
     replyCount_many: "{{count}} de respuestas",

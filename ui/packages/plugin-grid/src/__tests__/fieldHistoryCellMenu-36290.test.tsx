@@ -17,6 +17,8 @@
  * 2. A field the reader may not read is not drawn as a column, and a cell of a
  *    column the object does not declare offers no history.
  * 3. A data source that cannot read activity (no `find`) offers none.
+ * 4. A field whose old → new values the writer never records
+ *    (`fieldHistory: false`) offers none.
  */
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
@@ -52,8 +54,8 @@ afterEach(() => {
 
 const OBJECT = 'account';
 const ROWS = [
-  { id: 'a1', name: 'Acme', status: 'draft', score: 3, derived: 'x' },
-  { id: 'a2', name: 'Globex', status: 'active', score: 5, derived: 'y' },
+  { id: 'a1', name: 'Acme', status: 'draft', score: 3, derived: 'x', quiet: 'q1' },
+  { id: 'a2', name: 'Globex', status: 'active', score: 5, derived: 'y', quiet: 'q2' },
 ];
 
 const activityRow = (id: string, field: string, from: string, to: string) => ({
@@ -82,6 +84,8 @@ function renderGrid(opts: { withFind?: boolean } = {}) {
         name: { type: 'text', label: 'Name' },
         status: { type: 'text', label: 'Status' },
         score: { type: 'number', label: 'Score' },
+        // History off on the field: the writer records no values for it.
+        quiet: { type: 'text', label: 'Quiet', fieldHistory: false },
       },
     }),
     ...(opts.withFind === false ? {} : { find }),
@@ -93,6 +97,7 @@ function renderGrid(opts: { withFind?: boolean } = {}) {
       { field: 'name', label: 'Name' },
       { field: 'status', label: 'Status' },
       { field: 'score', label: 'Score' },
+      { field: 'quiet', label: 'Quiet' },
       // A host-joined column the object does not declare.
       { field: 'derived', label: 'Derived' },
     ],
@@ -156,6 +161,23 @@ describe('a list cell\'s 「Change history」 (objectstack#36290)', () => {
     await settle();
     act(() => { rightClick(cellOf('Acme', 'x')); });
     expect(screen.queryByTestId('row-context-field-history')).toBeNull();
+  });
+
+  it('a field whose values are not recorded offers none (control: a recorded field\'s cell does)', async () => {
+    renderGrid();
+    await settle();
+    act(() => { rightClick(cellOf('Acme', 'q1')); });
+    // This table offers no row action of its own, so with no history to offer
+    // the cell keeps the browser's menu: no row menu opens at all.
+    await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
+    expect(screen.queryByTestId('row-context-menu')).toBeNull();
+    expect(screen.queryByTestId('row-context-field-history')).toBeNull();
+    cleanup();
+    renderGrid();
+    await settle();
+    act(() => { rightClick(cellOf('Acme', '3')); });
+    const menu = await screen.findByTestId('row-context-menu');
+    expect(within(menu).getByTestId('row-context-field-history')).toBeInTheDocument();
   });
 
   it('a data source that cannot read activity offers none', async () => {

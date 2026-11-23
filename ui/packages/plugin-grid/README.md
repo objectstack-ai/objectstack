@@ -961,7 +961,9 @@ no single-record read (objectstack#33317).
 
 Right-clicking a cell of a field the object declares adds **Change history**
 to the row's context menu, when the grid's data source can read activity
-(`find`) and the reader may read the field. Choosing it opens
+(`find`), the field's changes are recorded with their values
+(`resolveFieldHistory` from `@objectstack/spec/data`) and the reader may read
+the field. Choosing it opens
 `@object-ui/plugin-detail`'s `FieldHistoryPopover` at that point: that
 record's changes of that field, newest first, ten at a time, or **No changes
 recorded** with who created the record. `data-table` names the cell's column to

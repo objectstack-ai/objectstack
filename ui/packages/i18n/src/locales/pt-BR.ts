@@ -1577,6 +1577,7 @@ const pt = {
     fieldChangeCollapse: "Ver menos",
     fieldHistory: "Histórico de alterações",
     fieldHistoryNone: "Nenhuma alteração registrada",
+    fieldHistoryNoneRecent: "Nenhuma alteração na atividade recente",
     replyCount: "{{count}} resposta",
     replyCount_one: "{{count}} resposta",
     replyCount_many: "{{count}} de respostas",
