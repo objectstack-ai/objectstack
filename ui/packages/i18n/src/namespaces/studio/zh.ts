@@ -1363,6 +1363,12 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.inspector.report.namePlaceholder': '例如：pipeline_by_stage',
   'engine.inspector.report.label': '显示名',
   'engine.inspector.report.labelPlaceholder': '例如：按阶段统计的销售管道',
+  // objectstack#36481 — the note under the name / title box when readers in the
+  // session language are served a translation instead of the saved text.
+  'engine.inspector.servedLabel.kept':
+    '使用该语言的读者看到的是「{served}」：这个名称有一条译文，排在这里保存的文字之前。要改读者看到的文字，请到 Studio ›「全部元数据」›「翻译」里修改这条译文。',
+  'engine.inspector.servedLabel.ifKept':
+    '使用该语言的读者现在看到的是译文「{served}」。如果这条译文存放在本环境自己的翻译或定制包的翻译里，保存后读者仍会看到它。要改它，请到 Studio ›「全部元数据」›「翻译」里修改这条译文。',
   'engine.inspector.report.type': '报表类型',
   'engine.inspector.report.type.tabular': '表格',
   'engine.inspector.report.type.summary': '汇总',

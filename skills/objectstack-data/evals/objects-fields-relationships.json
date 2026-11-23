@@ -45,13 +45,14 @@
     {
       "id": 3,
       "prompt": "On `employee`: email must be unique within each organization, `status` may only move draft → active → terminated, and a `contract_end` earlier than `contract_start` must be rejected.",
-      "expected_output": "Uniqueness is an index, not a validation type: `indexes: [{ fields: ['email'], unique: 'organization' }]` (the scope is stated; `type` / `partial` are retired). The lifecycle is one `state_machine` validation with `field: 'status'`, `transitions: { draft: ['active'], active: ['terminated'], terminated: [] }` and a `message`. The date rule is a `script` validation (inverted: fails when the expression is true) or `cross_field`, written as bare CEL over `record.` with explicit `!= null` guards.",
+      "expected_output": "Uniqueness is an index, not a validation type: `indexes: [{ fields: ['email'], unique: 'organization' }]` (the scope is stated; `type` / `partial` are retired). The lifecycle is one `state_machine` validation with `field: 'status'`, `transitions: { draft: ['active'], active: ['terminated'], terminated: [] }`, `initialStates: ['draft']` and a `message` — `transitions` governs only UPDATE, so publish refuses a machine that runs on insert without it (`state-machine-no-initial-states`). The date rule is a `script` validation (inverted: fails when the expression is true) or `cross_field`, written as bare CEL over `record.` with explicit `!= null` guards.",
       "files": [],
       "assertions": {
         "must_contain": [
           "unique: 'organization'",
           "state_machine",
           "transitions",
+          "initialStates",
           "record.",
           "!= null"
         ],
