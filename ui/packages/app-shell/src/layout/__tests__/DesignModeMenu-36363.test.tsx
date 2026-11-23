@@ -767,13 +767,13 @@ describe('the design-mode menu in the sidebar order (objectstack#36591)', () => 
     servedNav.current = ORDERED();
     start();
     await flush();
-    await act_on('customers', 'Add an item after');
+    await act_on('contacts', 'Add an item after');
     const picker = await screen.findByTestId('design-menu-picker');
     fireEvent.click(within(picker).getByRole('button', { name: 'Objects' }));
     await flush();
     fireEvent.click(within(picker).getByRole('button', { name: 'Cases' }));
     await flush();
-    const trigger = within(entry('opps')).getByTestId('design-menu-actions');
+    const trigger = within(entry('customers')).getByTestId('design-menu-actions');
     fireEvent.pointerDown(trigger, { button: 0, pointerType: 'mouse' });
     await flush();
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Move to group' }));
@@ -781,7 +781,7 @@ describe('the design-mode menu in the sidebar order (objectstack#36591)', () => 
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Reports' }));
     await flush();
     const shown = editorOrder();
-    expect(shown).toEqual(['Customers', 'Cases', 'Contacts', 'Reports', 'Follow-ups', 'Pipeline', 'Opportunities']);
+    expect(shown).toEqual(['Contacts', 'Cases', 'Opportunities', 'Reports', 'Follow-ups', 'Pipeline', 'Customers']);
     const saved = await save();
     cleanup();
     expect(sidebarOrder(saved)).toEqual(shown);
