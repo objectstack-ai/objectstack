@@ -148,7 +148,7 @@ function arrangeDbOrphans(): void {
     objects: ['os_line'], notRead: [], scanned: 1,
     orphans: [{ object: 'os_line', recordId: 'li_1', fields: [{ field: 'order', master: 'os_order', missingMasterId: 'o_gone' }], cascade: [] }],
     withheld: [], otherDangling: [], undetermined: 0, unreadableObjects: [], truncatedObjects: [], unscannedObjects: [],
-    aborted: false, complete: true, counts: { orphans: 1, deeperDetails: 0, withheld: 0, otherDangling: 0 },
+    aborted: false, complete: true, notes: [], counts: { orphans: 1, deeperDetails: 0, withheld: 0, otherDangling: 0 },
   };
   seams.planOrphanDetailSweep.mockResolvedValue(plan);
   const engine = {
