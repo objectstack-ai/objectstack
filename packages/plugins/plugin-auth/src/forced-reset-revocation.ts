@@ -225,7 +225,8 @@ export function registrationStoreOf(
   };
 }
 
-function isLiveSession(row: Record<string, any>, now: number): boolean {
+/** Whether a `sys_session` row still admits: not tombstoned, not expired. */
+export function isLiveSession(row: Record<string, any>, now: number): boolean {
   if (row.revoked_at) return false;
   if (row.expires_at && new Date(row.expires_at).getTime() <= now) return false;
   return true;

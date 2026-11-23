@@ -469,6 +469,18 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Alterar proprietário",
         helpText: "A ação Alterar proprietário, individual e em massa: ativada, é oferecida; desativada, fica oculta. Não definida: ativada, exceto desativada em um objeto de detalhe controlled_by_parent. Oferecida apenas em um objeto cujos registros têm um proprietário reatribuível (ownership user ou não definido, sem managedBy, não é um objeto sys_, owner_id não é somente leitura e, em um objeto externo, está declarado ou mapeado); ativá-la em qualquer outro objeto é recusado. Controla apenas a ação, não uma edição simples de owner_id. Um objeto {enabled, visibleWhen, disabledWhen} armazenado é editado chave por chave; escreva um no código-fonte para condicionar a ação a cada registro."
       },
+      actionLayout: {
+        label: "Disposição das ações",
+        helpText: "A ordem das ações deste objeto e quais são botões, por escopo: pinned (no máximo 3 botões, em ordem) e more (a ordem do menu Mais; uma ação não nomeada em nenhum dos dois segue na sua ordem padrão). Sem definir: cada superfície escolhe seus botões pela ordem das ações, como antes."
+      },
+      "actionLayout.list": {
+        label: "Lista",
+        helpText: "A barra de ferramentas da página de lista, como {\"pinned\": [...], \"more\": [...]}: nomes de ações colocadas na barra da lista; $import / $export apenas em pinned. No máximo 3 fixadas. Sem fixar, a página ainda mostra seu próprio menu Importar / Exportar. O os validate recusa um nome que não é uma ação deste objeto ou que não está na barra da lista; esse nome não desenha nada."
+      },
+      "actionLayout.record": {
+        label: "Registro",
+        helpText: "O cabeçalho do registro (página do registro, pré-visualização lateral, barra inferior do celular), como {\"pinned\": [...], \"more\": [...]}: nomes de ações colocadas no cabeçalho do registro ou no seu menu Mais. No máximo 3 fixadas. O os validate recusa um nome que não é uma ação deste objeto ou que não está na página do registro; esse nome não desenha nada."
+      },
       editMode: {
         label: "Modo de edição",
         helpText: "Intenção de interação de edição para os registros deste objeto. Ausente, o renderizador escolhe seu próprio padrão. Intenção entre renderizadores, não estilo."

@@ -20,6 +20,7 @@ const PARTNER = 'com.acme.partner';
 
 const GROUPS = [{ key: 'basic', label: 'Basics', fields: ['name', 'region__c'] }];
 const TABS = ['crm_contact', { list: 'crm_task', hidden: true }];
+const LAYOUT = { record: { pinned: ['convert_lead'], more: ['log_call'] } };
 
 describe('judgeExtensionArrangement — the rule', () => {
     it('a plain package writing `fieldGroups` is refused once, at the key, prescribing `place`', () => {
@@ -53,8 +54,27 @@ describe('judgeExtensionArrangement — the rule', () => {
     it('CONTROL: the same body in the base\'s paired `.custom` package is admitted', () => {
         expect(judgeExtensionArrangement({
             packageId: PAIR,
-            objectExtensions: [{ extend: 'crm_lead', fieldGroups: GROUPS, relatedLists: TABS }],
+            objectExtensions: [{ extend: 'crm_lead', fieldGroups: GROUPS, relatedLists: TABS, actionLayout: LAYOUT }],
         })).toEqual([]);
+    });
+
+    it('[#36366] `actionLayout` is refused the same way, prescribing the action\'s own `locations` and `order`', () => {
+        const refusals = judgeExtensionArrangement({
+            packageId: PARTNER,
+            objectExtensions: [{ extend: 'crm_lead', actionLayout: LAYOUT }],
+        });
+        expect(refusals).toHaveLength(1);
+        expect(refusals[0]).toMatchObject({
+            path: 'objectExtensions[0].actionLayout', object: 'crm_lead', key: 'actionLayout', packageId: PARTNER,
+        });
+        expect(refusals[0]!.message).toContain('`.custom`');
+        expect(refusals[0]!.message).toContain('`locations` and `order`');
+        expect(refusals[0]!.message.length).toBeLessThanOrEqual(500);
+        const err = extensionArrangementRefusalError(refusals);
+        expect(err.code).toBe('VALIDATION_ERROR');
+        expect(err.status).toBe(400);
+        // An empty arrangement is an arrangement written: refused too.
+        expect(judgeExtensionArrangement({ packageId: PARTNER, objectExtensions: [{ extend: 'crm_lead', actionLayout: {} }] })).toHaveLength(1);
     });
 
     it('CONTROL: a plain package that writes neither key, and places with `place`, is admitted', () => {
@@ -103,8 +123,16 @@ describe('objectExtensionItemRefusal — the save, publish and restore gate asks
         expect(err?.issues?.map((i) => i.path)).toEqual(['relatedLists']);
     });
 
+    it('[#36366] …and with `actionLayout`, located at that key', () => {
+        const err = ask(PARTNER, item({ actionLayout: LAYOUT }));
+        expect(err?.code).toBe('VALIDATION_ERROR');
+        expect(err?.status).toBe(400);
+        expect(err?.issues?.map((i) => i.path)).toEqual(['actionLayout']);
+        expect(err?.message).toContain('`locations` and `order`');
+    });
+
     it('CONTROL: the same item written into the paired `.custom` package is admitted', () => {
-        expect(ask(PAIR, item({ fields: { region__c: { type: 'text' } }, fieldGroups: GROUPS, relatedLists: TABS }))).toBeUndefined();
+        expect(ask(PAIR, item({ fields: { region__c: { type: 'text' } }, fieldGroups: GROUPS, relatedLists: TABS, actionLayout: LAYOUT }))).toBeUndefined();
     });
 
     it('CONTROL: the plain package\'s item without the keys is admitted', () => {

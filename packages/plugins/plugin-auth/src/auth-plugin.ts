@@ -95,7 +95,8 @@ import { registerMfaRequiredEnrollmentPredicate } from './mfa-required-enrollmen
 import { registerPersonalViewHooks } from './personal-view-hooks.js';
 import { registerUserPreferenceHooks } from './user-preference-hooks.js';
 import { registerServiceAccountRowGuard } from './service-account-identity.js';
-import { personalViewCallerResolver, registerPersonalViewRoutes, PERSONAL_VIEW_REMOVE_ROUTE, type PersonalViewEngine } from './personal-view-routes.js';
+import { personalViewCallerResolver, registerPersonalViewRoutes, PERSONAL_VIEW_REMOVE_ROUTE, type PersonalViewEngine, type PersonalViewRoutesDeps } from './personal-view-routes.js';
+import { createPersonalViewDoorsService } from './personal-view-door-member.js';
 import { registerMembershipEndedSessionTrigger } from './membership-ended-session.js';
 import {
   IDP_GROUP_MAPPING_MATCH_PACKAGE_ID,
@@ -129,6 +130,7 @@ import { authIdentityManifest } from './manifest.js';
 import { scheduleLegacySsoSecretMigration } from './sso-client-secret.js';
 import { reportSsoProvidersWithNonBareDomainEntries } from './sso-stored-domain-entries.js';
 import { reportSsoProviderAccessSweep } from './sso-provider-lifecycle.js';
+import { retireDevSeedCredentials, type DevSeedRetirementEngine } from './dev-seed-credential-retirement.js';
 import {
   directSignInNetworkRefusal,
   isDirectSignInDoorNavigation,
@@ -1076,6 +1078,16 @@ export class AuthPlugin implements Plugin {
     ctx.registerService('tenancy', tenancy);
     this.tenancy = tenancy;
 
+    // [#36506] The personal-view delete door for a kernel with no
+    // `http.server` (a hosted tenant kernel runs `registerRoutes: false` and
+    // owns no socket): the runtime dispatcher's `/personal-views` domain
+    // forwards the request to this slot's `handlePersonalViewDoor`, which runs
+    // the registrar `mountPersonalViewDoor` runs, over the same deps, on a
+    // private table that never listens. Registered unconditionally, so the
+    // door answers wherever the plugin is composed; the self-hosted mount below
+    // is unchanged and nothing is mounted twice.
+    ctx.registerService('personal-views', createPersonalViewDoorsService(() => this.personalViewDoorDeps()));
+
     // The stack's `demoStaff` — decided here, from configuration alone, so the
     // application's seed (which starts before `kernel:ready`) can wait for the
     // accounts it names. See `DemoStaffingService`.
@@ -1809,6 +1821,23 @@ export class AuthPlugin implements Plugin {
         }
         await reportIfNoSignInMethodAtBoot(this.signInMethodFloorDeps(ctx, this.authManager), ctx.logger);
       }
+    });
+
+    // Outside development mode: retire what the development seed issued to
+    // every stamped account still on its seed password, on `kernel:ready`, so
+    // it has settled before `kernel:listening` opens the socket. Registered
+    // independently of `registerRoutes`: a retired session or key must not act
+    // through any door. A retirement that does not complete THROWS and fails
+    // the boot (`dev-seed-credential-retirement.ts`).
+    ctx.hook('kernel:ready', async () => {
+      let ql: DevSeedRetirementEngine | undefined;
+      try { ql = ctx.getService<DevSeedRetirementEngine>('objectql'); } catch { ql = undefined; }
+      const authManager = this.authManager;
+      await retireDevSeedCredentials({
+        engine: ql,
+        authContext: async () => (authManager ? await authManager.getAuthContext() : undefined),
+        logger: ctx.logger,
+      });
     });
 
     // Dev-only: provision a known, loginable platform admin on an empty DB.
@@ -3839,15 +3868,25 @@ export class AuthPlugin implements Plugin {
       );
       return;
     }
-    registerPersonalViewRoutes(httpServer, {
+    registerPersonalViewRoutes(httpServer, this.personalViewDoorDeps());
+    ctx.logger.info(`Personal view delete door mounted at DELETE ${PERSONAL_VIEW_REMOVE_ROUTE}`);
+  }
+
+  /**
+   * What the personal view door is composed over, on both of its faces: the
+   * self-hosted mount ({@link mountPersonalViewDoor}) and the `personal-views`
+   * slot's member (#36506). The engine, the auth service and the tenancy
+   * posture are read per request.
+   */
+  private personalViewDoorDeps(): PersonalViewRoutesDeps {
+    return {
       getEngine: () => this.authManager?.getDataEngine() as unknown as PersonalViewEngine | undefined,
       resolveCaller: personalViewCallerResolver({
         getEngine: () => this.authManager?.getDataEngine(),
         getAuth: () => (this.authManager ?? undefined) as unknown as RequestAuthService | undefined,
         tenancy: () => this.tenancy ?? undefined,
       }),
-    });
-    ctx.logger.info(`Personal view delete door mounted at DELETE ${PERSONAL_VIEW_REMOVE_ROUTE}`);
+    };
   }
 
   /**

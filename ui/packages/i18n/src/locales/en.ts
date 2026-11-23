@@ -2068,6 +2068,11 @@ const en = {
     fieldChangeEmpty: 'Empty',
     fieldChangeExpand: 'Show all',
     fieldChangeCollapse: 'Show less',
+    // objectstack#36290 — one field's change-history card: its entry point's
+    // name and what it says for a field never changed.
+    fieldHistory: 'Change history',
+    fieldHistoryNone: 'No changes recorded',
+    fieldHistoryNoneRecent: 'No changes in the recent activity',
     // Replies
     replyCount: '{{count}} reply',
     replyCount_one: '{{count}} reply',
@@ -4367,6 +4372,23 @@ const en = {
       newItemPendingDraft: 'A draft with this name is already pending. Try again.',
       newItemLeft: 'The new dashboard "{{name}}" could not be removed again; remove it in Studio.',
       newReportLeft: 'The new report "{{name}}" could not be removed again; remove it in Studio.',
+    },
+    pins: {
+      button: 'Header buttons',
+      pinned: 'Pinned to header',
+      other: 'Other',
+      nonePinned: 'No button is pinned: every action is in More.',
+      noneOther: 'Every action is pinned.',
+      pin: 'Pin {{name}} to the header',
+      unpin: 'Move {{name}} to More',
+      drag: 'Drag {{name}} to reorder',
+      full: 'At most {{cap}} buttons are pinned to the header. Unpin one first.',
+      notListed: 'This object\'s package is not listed, so its header buttons cannot be saved.',
+      pendingDraft: 'This object has unpublished changes in Studio. Publish or discard them there, then save again.',
+      pairNotWritable: 'This app\'s customization package cannot be written, so its header buttons cannot be saved.',
+      unknown: '"{{name}}" is no longer an action of this object. Unpin it, then save again.',
+      notPlaced: '"{{name}}" is no longer offered on this page. Unpin it, then save again.',
+      stale: 'No longer offered here, left out when you save: {{names}}',
     },
     recordTabs: {
       entry: 'Configure tabs',
