@@ -32,6 +32,12 @@
  *    still 403, because the door grants nothing (`member_default` is bound to
  *    the `everyone` anchor and carries no delete bit, ADR-0090 D5).
  *
+ *  - `[hosted]` the same door on the hosted shape (#36506): the runtime
+ *    dispatcher alone, the way a hosted tenant kernel with no `http.server` is
+ *    reached, answers through its `/personal-views` domain and the plugin's
+ *    `personal-views` member: the owner removes their own view, another member
+ *    gets the same unknown-id 404, anonymous the same 401.
+ *
  *  - `[platform-admin]` the recorded boundary: `admin_full_access`'s bare
  *    wildcard reads, edits and deletes a member's view through the generic
  *    data door, as it does on `sys_user_preference` (the admin rescue path);
@@ -45,6 +51,7 @@ import { type VerifyStack } from '@objectstack/verify';
 import { bootShowcase } from './showcase-boot.js';
 import { showcaseAppDefaultSecurity } from './showcase-security.js';
 import { catalogPermissionSet } from './catalog-permission-set.js';
+import { hostedDispatcherDoor, type HostedDoorCall } from './hosted-dispatcher.testkit.js';
 
 const OBJ = 'sys_personal_view';
 const TARGET = 'showcase_project';
@@ -316,6 +323,41 @@ describe('sys_personal_view over REST: a reader\'s own named list views (ruling 
       const r = await stack.apiAs(aliceTok, 'DELETE', `/data/${OBJ}/${row.id}`);
       expect(r.status, await r.clone().text()).toBe(403);
       expect(errorCodeOf(await r.json())).toBe('PERMISSION_DENIED');
+      expect(await stillThere(row.id)).toBeTruthy();
+    });
+  });
+
+  describe('[hosted] the same door on the dispatcher alone: a hosted tenant kernel with no http.server (#36506)', () => {
+    let hosted: HostedDoorCall;
+    const door = (id: string) => `/personal-views/${id}`;
+    const stillThere = async (id: string) => ql.findOne(OBJ, { where: { id }, context: SYS });
+
+    beforeAll(() => {
+      hosted = hostedDispatcherDoor(stack);
+    });
+
+    it('[hosted] the owner removes their own view: 200 { id, deleted: true }, and the row is gone — not a route miss', async () => {
+      const row = await save(aliceTok, aliceId, 'Alice: removed on the hosted door');
+      const r = await hosted(aliceTok, 'DELETE', door(row.id));
+      expect(r.status, await r.clone().text()).toBe(200);
+      const body: any = await r.json();
+      expect(body?.data ?? body).toEqual({ id: row.id, deleted: true });
+      expect(await stillThere(row.id)).toBeFalsy();
+    });
+
+    it('[hosted] another member: the same 404 RECORD_NOT_FOUND as the self-hosted door, and the row stays', async () => {
+      const row = await save(aliceTok, aliceId, 'Alice: not Bob\'s to remove on the hosted door');
+      const r = await hosted(bobTok, 'DELETE', door(row.id));
+      expect(r.status, await r.clone().text()).toBe(404);
+      expect(errorCodeOf(await r.json())).toBe('RECORD_NOT_FOUND');
+      expect(await stillThere(row.id)).toBeTruthy();
+    });
+
+    it('[hosted] anonymous: 401 UNAUTHENTICATED, and the row stays', async () => {
+      const row = await save(aliceTok, aliceId, 'Alice: not anonymous\'s to remove on the hosted door');
+      const r = await hosted(undefined, 'DELETE', door(row.id));
+      expect(r.status, await r.clone().text()).toBe(401);
+      expect(errorCodeOf(await r.json())).toBe('UNAUTHENTICATED');
       expect(await stillThere(row.id)).toBeTruthy();
     });
   });

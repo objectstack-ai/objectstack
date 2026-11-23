@@ -61,6 +61,7 @@ import { useSafeFieldLabel } from '@object-ui/react';
 import { NON_EDITABLE_SYSTEM_FIELDS } from './systemFields';
 import { InlineFieldInput } from './InlineFieldInput';
 import { FieldInPlaceEditor, isToggleFieldType, type FieldInPlaceWriter } from './FieldInPlaceEditor';
+import { FieldHistoryButton, fieldHistoryOffered } from './FieldHistory';
 import { headerColorClass } from './headerColor';
 import { DetailsColumnCapContext, framelessSectionColumns, useDefaultRecordPage } from './defaultRecordPage';
 import { hasCellValue } from './emptiness';
@@ -343,6 +344,16 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
   React.useEffect(() => {
     if (isEditing) setFieldsInPlace([]);
   }, [isEditing]);
+  /**
+   * objectstack#36290 — the record a field's change history is read for: the
+   * page's own record, as `inPlaceWriter` reads it, so a section drawing
+   * another record (or none) offers no history button.
+   */
+  const historyRecord =
+    recordCtx?.dataSource && recordCtx.recordId != null && recordCtx.recordId !== ''
+      && objectName && recordCtx.objectName === objectName
+      ? { dataSource: recordCtx.dataSource, objectName, recordId: recordCtx.recordId }
+      : null;
   const closeInPlace = React.useCallback((name: string) => {
     setFieldsInPlace((open) => open.filter((n) => n !== name));
   }, []);
@@ -1080,6 +1091,19 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
                 </TooltipContent>
               </Tooltip>
             </TooltipProvider>
+          )}
+          {/* objectstack#36290 — the field's change history, opened in place,
+              for a field of the object whose changes are recorded with their
+              values and that the reader may read. */}
+          {historyRecord && objectDefField && fieldHistoryOffered(perms, objectName, field.name, objectSchema) && (
+            <FieldHistoryButton
+              dataSource={historyRecord.dataSource}
+              objectName={historyRecord.objectName}
+              recordId={historyRecord.recordId}
+              field={field.name}
+              objectSchema={objectSchema}
+              className={frameless ? 'pointer-coarse:hidden' : undefined}
+            />
           )}
           {/* On the field face an editable value is copied from the same
               hover / focus button a read-only one is: its click is the

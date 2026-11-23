@@ -473,6 +473,18 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
         label: "變更負責人",
         helpText: "變更負責人操作（單筆與批次）：開啟即提供，關閉即隱藏。未設定時開啟，但 controlled_by_parent 明細物件預設關閉。僅在記錄有可重新指派負責人的物件上提供（ownership 為 user 或未設定、無 managedBy、不是 sys_ 物件、owner_id 未設為唯讀，外部物件上 owner_id 已宣告或已對應）；在其他物件上開啟會被拒絕。它只控制該操作，不影響直接編輯 owner_id。已儲存的 {enabled, visibleWhen, disabledWhen} 物件逐鍵編輯；在原始碼中寫一個即可按每筆記錄控制該操作。"
       },
+      actionLayout: {
+        label: "動作佈局",
+        helpText: "本物件動作的順序及哪些顯示為按鈕，按作用域分：pinned（最多 3 個按鈕，按順序）和 more（「更多」選單的順序；兩者都沒寫的動作按預設順序排在後面）。未設定時，各處仍按動作的排序選按鈕。"
+      },
+      "actionLayout.list": {
+        label: "列表",
+        helpText: "列表頁工具列，寫作 {\"pinned\": [...], \"more\": [...]}：放在列表工具列上的動作名稱；$import / $export 只能放在 pinned。最多固定 3 個。未固定時，頁面仍顯示自己的匯入 / 匯出選單。os validate 會拒絕不是本物件動作、或未放在列表工具列上的名稱；這樣的名稱什麼也不顯示。"
+      },
+      "actionLayout.record": {
+        label: "記錄",
+        helpText: "記錄頁頭（記錄頁、側邊預覽、手機底欄），寫作 {\"pinned\": [...], \"more\": [...]}：放在記錄頁頭或其「更多」選單中的動作名稱。最多固定 3 個。os validate 會拒絕不是本物件動作、或未放在記錄頁上的名稱；這樣的名稱什麼也不顯示。"
+      },
       editMode: {
         label: "編輯方式",
         helpText: "該物件記錄的編輯互動意圖。留空則由呈現端自行選擇預設方式。這是跨呈現端的意圖宣告，不是樣式。"

@@ -11,8 +11,7 @@
  * which this kernel does not have, and the catch-all's `dispatch()` had no
  * domain for them. The first pin here asserts no door answers a route miss
  * any more, door by door. (The card's hosted reading spelled the miss
- * `ENDPOINT_NOT_FOUND`, the transport's own; this tree does not explain that
- * spelling, so the pin refuses both.)
+ * `ENDPOINT_NOT_FOUND`, the transport's own: item 4 below explains it.)
  *
  * What this pins:
  *  1. on the hosted shape, a member removes their own reaction, resolves and
@@ -22,20 +21,28 @@
  *     anonymous refusal and a refused body — because the member runs the very
  *     registration the self-hosted mount runs;
  *  3. a hosted kernel without plugin-audit answers a typed
- *     `501 NOT_IMPLEMENTED`, never a route miss.
+ *     `501 NOT_IMPLEMENTED`, never a route miss;
+ *  4. on the `objectstack serve` / `objectstack dev` host shape (HonoServerPlugin
+ *     + DispatcherPlugin on the host, a kernel-resolver, NO catch-all) the same
+ *     member answers, with the same bytes, through DispatcherPlugin's fallback.
+ *     Without that fallback arm this shape answered the transport's own
+ *     `{"success":false,"error":{"code":"ENDPOINT_NOT_FOUND","message":"Not found"}}`,
+ *     byte for byte the card's hosted reading (cloud's local rig runs
+ *     `apps/objectos` under `objectstack dev`).
  *
  * The domain's own claim, gates and faults are pinned on the real dispatcher
  * in `packages/runtime/src/domains/comments.test.ts`.
  */
 
 import { describe, it, expect, afterEach } from 'vitest';
-import { ObjectKernel } from '@objectstack/core';
+import { ObjectKernel, LiteKernel } from '@objectstack/core';
 import type { Plugin, PluginContext } from '@objectstack/core';
 import { ObjectQLPlugin, type ObjectQL } from '@objectstack/objectql';
 import { HonoServerPlugin } from '@objectstack/plugin-hono-server';
 import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 import { AuditPlugin } from '@objectstack/plugin-audit';
 import { createHonoApp } from '@objectstack/hono';
+import { createDispatcherPlugin } from '@objectstack/runtime';
 import type { IHttpServer } from '@objectstack/spec/contracts';
 import { installDefaultOrganization, DEFAULT_ORGANIZATION_ID } from './default-organization.testkit.js';
 
@@ -281,6 +288,100 @@ describe('[#36469] a hosted kernel without plugin-audit answers a typed 501, nev
             expect(res.status, `${init.method} ${path}`).toBe(501);
             expect(body.error.code).toBe('NOT_IMPLEMENTED');
             expect(body.error.message).toContain('@objectstack/plugin-audit');
+        }
+    });
+});
+
+/**
+ * [#36469] The `objectstack serve` / `objectstack dev` host shape: the HOST
+ * kernel has `HonoServerPlugin` and `DispatcherPlugin` but NO `createHonoApp`
+ * catch-all, and a `kernel-resolver` places each request on a per-environment
+ * kernel that runs the real AuditPlugin with no `http.server` (cloud's local
+ * rig runs this way, `apps/objectos` under `objectstack dev`). Before
+ * `DispatcherPlugin`'s fallback handed the door shapes on, every request below
+ * answered the transport's own `404 ENDPOINT_NOT_FOUND`: the card's literal
+ * hosted reading.
+ */
+async function serveShapedHost() {
+    const tenant = await hostedDoor();
+    // A host kernel with no data engine of its own, as the runtime's
+    // multi-tenant fallback tests compose one: the doors' data is the tenant's.
+    const host = new LiteKernel({ logger: { level: 'silent' } } as any);
+    liveKernels.push(host as unknown as ObjectKernel);
+    await host.use(new HonoServerPlugin({ port: 0, cors: false }));
+    await host.use(new TestAuth());
+    await host.use({
+        name: 'test.comment-doors-kernel-resolver',
+        version: '1.0.0',
+        type: 'standard',
+        init: async (ctx: PluginContext) => {
+            ctx.registerService('kernel-resolver', {
+                resolveKernel: async (context: any) => {
+                    const headers = context?.request?.headers;
+                    const envId = typeof headers?.get === 'function' ? headers.get(ENVIRONMENT) : headers?.[ENVIRONMENT];
+                    if (envId !== TENANT_ENV) return undefined;
+                    context.environmentId = TENANT_ENV;
+                    return tenant.kernel;
+                },
+            });
+        },
+    } as Plugin);
+    await host.use(createDispatcherPlugin({ prefix: PREFIX, securityHeaders: false }) as any);
+    await host.bootstrap();
+    const base = `http://127.0.0.1:${host.getService<IHttpServer>('http.server').getPort!()}`;
+    const send = (path: string, init: RequestInit = {}) =>
+        fetch(`${base}${path}`, { ...init, headers: { ...(init.headers as Record<string, string>), [ENVIRONMENT]: TENANT_ENV } });
+    return { ...tenant, send };
+}
+
+const ENVIRONMENT = 'x-environment-id';
+const TENANT_ENV = 'env_tenant';
+
+describe('[#36469] the comment doors answer on an `objectstack serve`-shaped multi-tenant host (no catch-all)', () => {
+    it('a member removes their own reaction: 200, and the row is gone on the tenant', async () => {
+        const door = await serveShapedHost();
+        const { reactionId } = await door.seed();
+
+        const res = await door.send(`${PREFIX}/comments/reactions/${reactionId}`, as(ALICE, { method: 'DELETE' }));
+
+        expect(await res.clone().text()).not.toContain('ENDPOINT_NOT_FOUND');
+        expect(res.status, await res.clone().text()).toBe(200);
+        expect(await res.json()).toEqual({ success: true, data: { id: reactionId, deleted: true } });
+        expect(await door.stored(REACTION, reactionId)).toBeNull();
+    });
+
+    it('a member resolves and reopens a thread, then removes their own comment', async () => {
+        const door = await serveShapedHost();
+        const { commentId, reactionId } = await door.seed();
+        const resolution = `${PREFIX}/comments/${commentId}/resolution`;
+
+        const resolved = await door.send(resolution, as(ALICE, { method: 'PUT', body: JSON.stringify({ resolved: true }) }));
+        expect(resolved.status, await resolved.clone().text()).toBe(200);
+        expect((await door.stored(COMMENT, commentId) as any)?.is_resolved).toBeTruthy();
+
+        const reopened = await door.send(resolution, as(ALICE, { method: 'PUT', body: JSON.stringify({ resolved: false }) }));
+        expect(reopened.status, await reopened.clone().text()).toBe(200);
+        expect((await door.stored(COMMENT, commentId) as any)?.is_resolved).toBeFalsy();
+
+        await door.send(`${PREFIX}/comments/reactions/${reactionId}`, as(ALICE, { method: 'DELETE' }));
+        const removed = await door.send(`${PREFIX}/comments/${commentId}`, as(ALICE, { method: 'DELETE' }));
+        expect(removed.status, await removed.clone().text()).toBe(200);
+        expect(await door.stored(COMMENT, commentId)).toBeNull();
+    });
+
+    it('the anonymous refusal and the refused body are byte-identical to the self-hosted mount', async () => {
+        const host = await serveShapedHost();
+        const selfHosted = await selfHostedDoor();
+        const cases: Array<[label: string, path: string, init: RequestInit]> = [
+            ['anonymous unreact', `${PREFIX}/comments/reactions/rx_missing`, as(undefined, { method: 'DELETE' })],
+            ['a body that is not JSON', `${PREFIX}/comments/c_missing/resolution`, as(ALICE, { method: 'PUT', body: '{resolved:' })],
+            ['a body that is not exactly { resolved }', `${PREFIX}/comments/c_missing/resolution`, as(ALICE, { method: 'PUT', body: '{"resolved":"yes"}' })],
+        ];
+        for (const [label, path, init] of cases) {
+            const viaHost = await snapshot(await host.send(path, init));
+            const viaMount = await snapshot(await selfHosted.send(path, init));
+            expect(viaHost.status, label).not.toBe(404);
+            expect(viaHost, label).toEqual(viaMount);
         }
     });
 });

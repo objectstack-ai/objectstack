@@ -473,6 +473,18 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Inhaber ändern",
         helpText: "Die Aktion „Inhaber ändern“, einzeln und als Massenaktion: ein bietet sie an, aus blendet sie aus. Nicht gesetzt: ein, außer aus auf einem controlled_by_parent-Detailobjekt. Nur auf einem Objekt angeboten, dessen Datensätze einen neu zuweisbaren Inhaber haben (ownership user oder nicht gesetzt, kein managedBy, kein sys_-Objekt, owner_id nicht schreibgeschützt und auf einem externen Objekt deklariert oder zugeordnet); das Einschalten auf jedem anderen Objekt wird abgelehnt. Es steuert nur die Aktion, nicht eine einfache Bearbeitung von owner_id. Ein gespeichertes Objekt {enabled, visibleWhen, disabledWhen} wird Schlüssel für Schlüssel bearbeitet; schreiben Sie eines im Quelltext, um die Aktion von jedem Datensatz abhängig zu machen."
       },
+      actionLayout: {
+        label: "Aktionsanordnung",
+        helpText: "Die Reihenfolge der Aktionen dieses Objekts und welche davon Schaltflächen sind, je Bereich: pinned (höchstens 3 Schaltflächen, in Reihenfolge) und more (die Reihenfolge des Menüs „Mehr“; eine in keinem von beiden genannte Aktion folgt in ihrer Standardreihenfolge). Nicht gesetzt: Jede Oberfläche wählt ihre Schaltflächen wie bisher nach der Reihenfolge der Aktionen."
+      },
+      "actionLayout.list": {
+        label: "Liste",
+        helpText: "Die Symbolleiste der Listenseite, als {\"pinned\": [...], \"more\": [...]}: Namen von Aktionen in der Listen-Symbolleiste; $import / $export nur in pinned. Höchstens 3 angeheftet. Nicht angeheftet zeigt die Seite weiterhin ihr eigenes Import-/Export-Menü. os validate lehnt einen Namen ab, der keine Aktion dieses Objekts ist oder nicht in der Listen-Symbolleiste platziert ist; ein solcher Name zeichnet nichts."
+      },
+      "actionLayout.record": {
+        label: "Datensatz",
+        helpText: "Die Datensatzkopfzeile (Datensatzseite, Seitenvorschau, Leiste unten auf dem Telefon), als {\"pinned\": [...], \"more\": [...]}: Namen von Aktionen in der Datensatzkopfzeile oder ihrem Menü „Mehr“. Höchstens 3 angeheftet. os validate lehnt einen Namen ab, der keine Aktion dieses Objekts ist oder nicht auf der Datensatzseite platziert ist; ein solcher Name zeichnet nichts."
+      },
       editMode: {
         label: "Bearbeitungsmodus",
         helpText: "Absicht der Bearbeitungsinteraktion für Datensätze dieses Objekts. Fehlt sie, wählt der Renderer seinen eigenen Standard. Rendererübergreifende Absicht, keine Gestaltung."

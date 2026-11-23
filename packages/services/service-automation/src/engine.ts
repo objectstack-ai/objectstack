@@ -5987,6 +5987,7 @@ export class AutomationEngine implements IAutomationService {
             seedRunVariables: (...a) => this.seedRunVariables(...a),
             evaluateCondition: (...a) => this.evaluateCondition(...a),
             flowSlotName: (...a) => this.flowSlotName(...a),
+            subflowTargets: (...a) => this.subflowTargets(...a),
         };
         return listRecordUpdateStarts.call(host, input);
     }

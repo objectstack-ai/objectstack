@@ -1685,7 +1685,10 @@ export const FieldSchema = lazySchema(() => {
     // CASE-SENSITIVELY on the authored spelling, so a row per spelling is the
     // only way this channel can cover a family, and `not_null` was the spelling
     // it would have missed.
-    tracked: '`tracked` is not a field key — per-field timeline tracking is `trackHistory: true` (ADR-0052 §5b).',
+    tracked:
+      '`tracked` is not a field key — a field\'s old → new values show on the record activity timeline '
+      + 'by default. Write `fieldHistory: false` to turn them off for this field (`true` opts a media or '
+      + 'structured-JSON field in), or `enable.fieldHistory: false` on the object to turn them off for every field.',
     // [ADR-0158 L3] The natural spellings of a quantity's unit on the field
     // itself, answered in prose because the targets are NESTED keys of
     // `unitConfig` — the form the `currency` answer above takes. None of them

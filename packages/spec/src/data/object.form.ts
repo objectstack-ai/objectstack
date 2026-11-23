@@ -763,6 +763,18 @@ export const objectForm = defineForm({
             { field: 'transfer', label: 'Change Owner', widget: 'json', helpText: 'The Change Owner action, single and bulk: on offers it, off hides it. Unset: on, except off on a controlled_by_parent detail. Offered only on an object whose records have a reassignable owner (ownership user or unset, no managedBy, not a sys_ object, owner_id not readonly and, on an external object, declared or mapped); turning it on anywhere else is refused. It gates the action only, not a plain edit of owner_id. A stored {enabled, visibleWhen, disabledWhen} object is edited key by key; write one in source to gate the action on each record.' },
           ],
         },
+        // [#36366] The action layout per scope. Each arm is an object of two
+        // name lists (`pinned`, `more`), edited as JSON; the design mode edits
+        // it on the page.
+        {
+          field: 'actionLayout',
+          type: 'composite',
+          helpText: 'The order of this object\'s actions and which are buttons, per scope: pinned (at most 3 buttons, in order) and more (the More menu\'s order; an action named in neither follows in its default order). Unset: each surface picks its buttons by the actions\' order, as before.',
+          fields: [
+            { field: 'list', label: 'List', widget: 'json', helpText: 'The list page toolbar, as {"pinned": [...], "more": [...]}: action names placed on the list toolbar; $import / $export only in pinned. At most 3 pinned. Not pinned, the page still draws its own Import / Export menu. os validate refuses a name that is no action of this object or is not placed on the list toolbar; such a name draws nothing.' },
+            { field: 'record', label: 'Record', widget: 'json', helpText: 'The record header (record page, side preview, phone bar), as {"pinned": [...], "more": [...]}: action names placed in the record header or its More menu. At most 3 pinned. os validate refuses a name that is no action of this object or is not placed on the record page; such a name draws nothing.' },
+          ],
+        },
         { field: 'editMode', type: 'select', helpText: "Edit-interaction intent for records of this object. Absent, the renderer picks its own default. Cross-renderer intent, not styling.", options: [
           { label: 'Modal — edit form as a dialog over the current view', value: 'modal' },
           { label: 'Page — navigate to a dedicated full-page edit route', value: 'page' },

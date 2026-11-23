@@ -474,7 +474,10 @@ describe('objectui#3876 — de pack closes „ with “ and not with a straight 
     // 129 once objectstack-ai/objectstack#36364's report half added
     // `designMode.menu.newReportLeft`, the same sentence for a new report
     // („{{name}}“) — one interpolated span.
-    expect(okSpans, 'correctly paired spans').toBe(129);
+    // 133 once objectstack-ai/objectstack#36366 added `designMode.pins`: the
+    // header-buttons panel naming the 「More」 menu („Mehr“, twice) and the
+    // arranged action a save refuses („{{name}}“, twice), four spans.
+    expect(okSpans, 'correctly paired spans').toBe(133);
   });
 
   it('keeps the count identity that replaces the card’s count(„) === count(“)', () => {
@@ -607,7 +610,9 @@ describe('objectui#3876 — de pack closes „ with “ and not with a straight 
     // `designMode.menu.newItemLeft`, one more matched pair.
     // 129 / 129 / 0 after its report half added `designMode.menu.newReportLeft`,
     // one more matched pair.
-    expect({ open, close, rdq }).toEqual({ open: 129, close: 129, rdq: 0 });
+    // 133 / 133 / 0 after objectstack-ai/objectstack#36366 added
+    // `designMode.pins`, four more matched pairs.
+    expect({ open, close, rdq }).toEqual({ open: 133, close: 133, rdq: 0 });
     // The durable shape: every „ closed by a “, every surplus “ an English
     // opener answered by a ”. Survived translating the two English values.
     expect(close).toBe(open + rdq);

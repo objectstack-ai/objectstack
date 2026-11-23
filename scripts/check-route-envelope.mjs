@@ -1099,6 +1099,9 @@ const DISPATCHER_DOMAINS = {
   // refusal it makes itself — the two 501s, the sanitised 500s — goes through
   // `deps.error`.
   'approvals.ts': { handBuilt: 0 },
+  // [#36506] The `/attachments` bridge: two lines naming what
+  // `own-door-bridge.ts` forwards; it builds no answer of its own.
+  'attachments.ts': { handBuilt: 0 },
   // [ADR-0150 D5] Kind 1: the `405` for a shape the domain serves under
   // another verb must carry an `Allow:` header (`deps.error` takes none), as
   // `/actions`' does; its body is `buildApiError`'s declared envelope.
@@ -1142,11 +1145,19 @@ const DISPATCHER_DOMAINS = {
   // its one answer, `newSimilarTargetRefusalAnswer`, goes through `deps.error`.
   'new-similar-target.ts': { handBuilt: 0 },
   'notifications.ts': { handBuilt: 0 },
+  // [#36506] Not a domain: the shared bridge `/personal-views` and
+  // `/attachments` call. The member's own JSON `Response` is handed back as
+  // `result`, and every answer the bridge makes itself — the ordinary miss,
+  // the two 501s, the sanitised 500s — goes through `deps.routeNotFound` /
+  // `deps.error`.
+  'own-door-bridge.ts': { handBuilt: 0 },
   'packages.ts': { handBuilt: 0 },
   // The `/security` domain's permission-set clone door (ADR-0126 §7.1), beside
   // the activation door. Every answer goes through `deps.success` /
   // `deps.error` / `deps.errorFromThrown`.
   'permission-set-clone.ts': { handBuilt: 0 },
+  // [#36506] The `/personal-views` bridge, as `attachments.ts`.
+  'personal-views.ts': { handBuilt: 0 },
   'security.ts': { handBuilt: 0 },
   // No `storage.ts` — the `/storage` domain was retired in #4087 (it called
   // the storage contract with the wrong arity and read a Buffer as a
