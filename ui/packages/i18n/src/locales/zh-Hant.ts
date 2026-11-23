@@ -4618,15 +4618,15 @@ const zhHant = {
   },
   // objectstack#36741 — the full-page inbox the bell opens from 768 px up.
   inboxPage: {
-    backToList: '返回清單',
+    backToList: '返回列表',
     openFullRecord: '開啟完整記錄',
     occurrences: '每一次推送',
-    moreApprovals: '其餘的到審批中心查看',
+    moreApprovals: '其餘的到審批中心檢視',
     goApprove: '去審批 ›',
     loadEarlier: '載入更早的通知',
     loadEarlierFailed: '載入失敗，點此重試',
     pickApproval: '選一條審批，在這裡處理。',
-    pickItem: '選一條，在這裡查看。',
+    pickItem: '選一條，在這裡檢視。',
     openRequest: '開啟審批單',
     nextHint: '處理後自動跳到下一條 · J / K 上下切換',
     openLink: '開啟',

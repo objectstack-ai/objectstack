@@ -442,15 +442,19 @@ export function InboxPage({ dataSource, objects }: InboxPageProps) {
     if (!g) return <InboxDetailEmpty>{t('inboxPage.pickItem', { defaultValue: 'Pick an item to see it here.' })}</InboxDetailEmpty>;
     const lead = g.items[0];
     const subject = notificationSubject(lead.action_url);
-    const target = resolveNotificationTarget(
-      lead.action_url,
+    const recordHost =
       subject?.kind === 'record'
         ? (objectHostAppSegment(apps as readonly ObjectHostApp[] | undefined, subject.objectName, appName) ?? appSegment)
-        : appSegment,
-    );
-    const openFull = target
-      ? () => (target.kind === 'external' ? window.open(target.url, '_blank', 'noopener,noreferrer') : leaveTo(target.path))
-      : undefined;
+        : appSegment;
+    const target = resolveNotificationTarget(lead.action_url, recordHost);
+    // A record opens at its canonical address, whichever form the link took
+    // (`/OBJECT/ID` would only bounce through the shorthand redirect).
+    const openFull =
+      subject?.kind === 'record'
+        ? () => leaveTo(`/apps/${recordHost}/${subject.objectName}/record/${encodeURIComponent(subject.recordId)}`)
+        : target
+          ? () => (target.kind === 'external' ? window.open(target.url, '_blank', 'noopener,noreferrer') : leaveTo(target.path))
+          : undefined;
     return (
       <>
         <InboxDetailHeader
