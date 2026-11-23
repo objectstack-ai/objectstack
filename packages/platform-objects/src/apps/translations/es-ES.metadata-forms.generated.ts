@@ -873,6 +873,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Oculto",
         helpText: "Oculta el campo en las vistas UI predeterminadas"
       },
+      showOnCreate: {
+        label: "Mostrar al crear",
+        helpText: "Pedir este campo al crear un registro. Desactivado: el diálogo de creación, la creación a página completa y una creación abierta por una acción lo omiten; la edición, la página del registro y las listas lo siguen mostrando. Un campo obligatorio siempre se pide, así que no se puede desactivar."
+      },
       searchable: {
         label: "Buscable",
         helpText: "Incluye en los resultados de búsqueda global"

@@ -873,6 +873,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "非表示",
         helpText: "既定 UI ビューからフィールドを非表示"
       },
+      showOnCreate: {
+        label: "作成時に表示",
+        helpText: "レコード作成時にこのフィールドを入力させます。オフにすると、作成ダイアログ、全画面の作成、アクションから開く作成には表示されません。編集、レコードページ、リストには引き続き表示されます。必須フィールドは作成時に必ず入力するため、オフにできません。"
+      },
       searchable: {
         label: "検索可能",
         helpText: "グローバル検索結果に含める"

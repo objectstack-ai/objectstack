@@ -873,6 +873,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "隐藏",
         helpText: "在默认界面视图中隐藏"
       },
+      showOnCreate: {
+        label: "新建时显示",
+        helpText: "新建记录时是否填写此字段。关闭后，新建弹窗、整页新建和动作打开的新建都不显示它；编辑、记录页和列表仍然显示。必填字段新建时总要填写，不能关闭。"
+      },
       searchable: {
         label: "可搜索",
         helpText: "纳入全局搜索结果"

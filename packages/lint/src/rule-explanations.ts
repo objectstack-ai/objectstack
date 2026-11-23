@@ -5097,6 +5097,27 @@ const FORM_SECTION_GROUP_UNKNOWN_EXPLANATION: RuleExplanation = {
   ],
 };
 
+const FORM_VIEW_INTERNAL_NOT_LOADED_EXPLANATION: RuleExplanation = {
+  rule: 'form-view-internal-not-loaded',
+  covers: 'why an internal create or edit form no longer loads',
+  paragraphs: [
+    'The Console\'s record create and edit surfaces — the create dialog, the full-page create, a create ' +
+      'or edit an action opens, and the edit dialog — lay a record out by its object\'s field groups ' +
+      '(`fieldGroups`) and follow the rules declared on its fields: `required`, `requiredWhen`, ' +
+      '`visibleWhen`, `readonlyWhen`, and `showOnCreate` for a field a create should not ask for. They no ' +
+      'longer load an object\'s internal form view, so its sections, tabs, wizard steps, subforms, ' +
+      '`modalSize`, `buttons`, `layout` and `defaults` steer nothing.',
+    'The forms reported are the ones those surfaces used to load: a view container\'s default `form`, ' +
+      'its `formViews.default` and `formViews.create`, and a stored form view item that is the default ' +
+      '(`isDefault`) or is named `<object>.create`. A form shared publicly (`sharing.enabled: true`) keeps ' +
+      'loading at its own link and is never reported; neither is a form view under any other name, which ' +
+      'an action of type `form` opens by that name.',
+    'The rule is a warning: the declared form still parses, installs and runs, and changes nothing. To ' +
+      'clear it, move the sections into the object\'s field groups, put each required and show/hide rule ' +
+      'on its field (a create-time default goes on the field\'s `defaultValue`), and delete the form.',
+  ],
+};
+
 // ── Flow template paths (`validate-flow-template-paths.ts`) ───────────────────
 
 const FLOW_TEMPLATE_FIELD_UNPROVISIONED_EXPLANATION: RuleExplanation = {
@@ -6735,6 +6756,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [PAGE_FIELD_UNPROVISIONED_EXPLANATION.rule]: PAGE_FIELD_UNPROVISIONED_EXPLANATION,
   [PAGE_SECTION_GROUP_UNKNOWN_EXPLANATION.rule]: PAGE_SECTION_GROUP_UNKNOWN_EXPLANATION,
   [FORM_SECTION_GROUP_UNKNOWN_EXPLANATION.rule]: FORM_SECTION_GROUP_UNKNOWN_EXPLANATION,
+  [FORM_VIEW_INTERNAL_NOT_LOADED_EXPLANATION.rule]: FORM_VIEW_INTERNAL_NOT_LOADED_EXPLANATION,
   [FLOW_TEMPLATE_FIELD_UNPROVISIONED_EXPLANATION.rule]: FLOW_TEMPLATE_FIELD_UNPROVISIONED_EXPLANATION,
   [FLOW_TEMPLATE_LOOKUP_TRAVERSAL_EXPLANATION.rule]: FLOW_TEMPLATE_LOOKUP_TRAVERSAL_EXPLANATION,
   [FLOW_DOUBLE_BRACE_INTERPOLATION_EXPLANATION.rule]: FLOW_DOUBLE_BRACE_INTERPOLATION_EXPLANATION,

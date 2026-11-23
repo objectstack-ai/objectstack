@@ -117,6 +117,7 @@ import {
   offNavViewHeading,
   offNavViewLabel,
   offNavViewReachedByEntry,
+  offNavViewIsInternalForm,
   type OffNavType,
 } from './InterfacesNavRail.js';
 import {
@@ -447,14 +448,6 @@ import { StudioGridAddFieldButton, StudioGridAddFieldProvider, type StudioGridAd
 import { useDraftAutoSave, type DraftSend } from './useDraftAutoSave.js';
 import { FLOW_PRESETS, flowPresetTrigger, type FlowPreset } from './flowPresets.js';
 import { FormToolbar, ObjectFormDesigner } from './ObjectFormDesigner.js';
-import { formLayoutChoiceOf, useFormViewDraft } from './useFormViewDraft.js';
-import { formViewBodyOf, formViewSectionsOf } from './formViewSections.js';
-import {
-  resolveFormViewLayout,
-  type FormViewDefinition,
-  type ObjectDefinitionForFormView,
-  type RecordFormFlow,
-} from '../../utils/recordFormNavigation.js';
 import { isStudioHiddenSystemField } from './studioHiddenSystemField.js';
 import { ObjectGroupInspector } from './ObjectGroupInspector.js';
 import { ObjectValidationsPanel } from './ObjectValidationsPanel.js';
@@ -5136,13 +5129,16 @@ export function InterfacesPillar({
   // objectstack#30046 — under 视图: a list view an entry's header dropdown
   // reaches is not listed again (Scope 7); a form view reads a readable name,
   // and the heading says what the group holds (Scope 8).
+  // objectstack-ai/objectstack#36425 — an internal form view is not listed
+  // (the console no longer loads one); a public form is.
   const offNavSections = OFF_NAV_TYPES.map((type) => {
     const items = listOnlyCustomized
       ? markedOf(type)
       : itemsRead
         ? (packageItems?.byType[type] ?? []).filter(
             (item) =>
-              !navOpened.has(itemKeyOf(type, item.name)) && !(type === 'view' && offNavViewReachedByEntry(item, navOpened)),
+              !navOpened.has(itemKeyOf(type, item.name))
+              && !(type === 'view' && (offNavViewReachedByEntry(item, navOpened) || offNavViewIsInternalForm(item))),
           )
         : [];
     if (type !== 'view') return { type, items };
@@ -6539,70 +6535,18 @@ export function DataPillar({
     [formFieldsExtKey ?? formFieldsComputed],
   );
 
-  // objectstack#30057 — the form view the app's New and Edit dialogs open for
-  // this object, asked of the app's own resolver over the shell's merged
-  // objects (`formLayoutChoiceOf` → `selectRecordFormView`). With one, the
-  // Form tab lays out THAT view's sections and saves them to its draft (on a
-  // read-only base, as a declared override in its pair, ADR-0146 D2); with
-  // none, the object's field groups, as before. Where New and Edit open
-  // different form views, the author picks which one is shown.
-  const shellMetadata = useMetadata();
-  const [formFlow, setFormFlow] = React.useState<RecordFormFlow>('create');
-  const servedFormObject = current
-    ? (findByName(shellMetadata.objects, current.name) as ObjectDefinitionForFormView | undefined)
-    : undefined;
-  const formChoice = formLayoutChoiceOf(servedFormObject, formFlow);
-  const formViewCustomization = extendsBase ? customization : null;
-  const formViewId = formChoice.viewId;
-  const formView = useFormViewDraft({
-    client,
-    packageId,
-    viewId: formViewId,
-    publishNonce,
-    customization: formViewCustomization,
-    locale,
-    onDraftSaved: () => onDraftSaved?.({ type: 'view', name: formViewId }),
-  });
-  // A read-only package edits a form view only where its pair takes the override.
-  const formViewReadOnly = !formViewId || (readOnly && (formViewCustomization === null || formViewCustomization.walled));
-  const { flush: flushFormView } = useDraftAutoSave({
-    target: formView.targetKey,
-    loadedFor: formView.loadedFor,
-    dirty: formView.dirty,
-    blocked: !formView.row || formView.saving || formViewReadOnly,
-    snapshot: formView.row,
-    save: formView.save,
-  });
-  const formViewDirty = formView.dirty;
-  // Until the buffer loads, the served view's sections, read-only.
-  const formViewLayout = formChoice.view
-    ? formView.sections && !formViewReadOnly
-      ? { sections: formView.sections, onSectionsChange: formView.setSections }
-      : { sections: formView.sections ?? formViewSectionsOf(formChoice.view as Record<string, unknown>), onSectionsChange: () => {} }
-    : null;
-
   // objectui#12515 — what the Form tab's Preview renders. The draft differs
   // from the published definition when there is no published one, a pending
   // draft, or an unsaved edit; then Preview shows the draft unless the author
   // picked Published (offered only when a published version exists).
-  // objectstack#30057 — the form view's draft counts too.
   const draftDiffers =
     !hasBaseline ||
     hasDraft ||
     dirty ||
-    (extOpen !== null && (extHasDraft || extDirty)) ||
-    (formChoice.view !== null && (formView.hasDraft || formViewDirty));
+    (extOpen !== null && (extHasDraft || extDirty));
   const previewShowsDraft = !hasBaseline || (draftDiffers && previewSource === 'draft');
   const previewDraft = previewShowsDraft ? shownDraft : null;
   const previewObjectName = current?.name ?? '';
-  // objectstack#30057 — Preview lays the form out as the dialog it previews
-  // does: the chosen form view's sections (its draft beside a draft preview),
-  // through the dialog's own resolver.
-  const previewFormView =
-    formChoice.view && previewShowsDraft && formView.row ? formViewBodyOf(formView.row) : formChoice.view;
-  const previewFormLayout = resolveFormViewLayout(
-    previewFormView ? { name: previewObjectName, form: previewFormView as FormViewDefinition } : null,
-  );
   const previewDataSource = React.useMemo(
     () =>
       formPreviewSource(
@@ -7037,39 +6981,15 @@ export function DataPillar({
   );
   // objectstack#36511 — opening another object replaces the buffer the open
   // object's unsaved edits live in, so the author is asked first, as every
-  // departure asks (objectstack#26705). The form view's buffer still saves
-  // itself: its pending edit is sent first and the switch waits for it to
-  // land (objectstack#27511); one it cannot send is the author's to drop.
-  const [switchTo, setSwitchTo] = React.useState<Surface | null>(null);
+  // departure asks (objectstack#26705); nothing is sent by the switch.
   const openObject = React.useCallback(
     (next: Surface): boolean => {
-      if (next.name === current?.name) {
-        setSwitchTo(null);
-        setCurrent(next);
-        return true;
-      }
-      const dropsEdits = dirty || extDirty;
-      if (formView.saving || (formViewDirty && flushFormView())) {
-        if (!confirmDropUnsavedWork(dropsEdits, locale)) return false;
-        setSwitchTo(next);
-        return true;
-      }
-      if (!confirmDropUnsavedWork(dropsEdits || formViewDirty, locale)) return false;
-      setSwitchTo(null);
+      if (next.name !== current?.name && !confirmDropUnsavedWork(dirty || extDirty, locale)) return false;
       setCurrent(next);
       return true;
     },
-    [current, dirty, extDirty, formViewDirty, formView.saving, flushFormView, locale],
+    [current, dirty, extDirty, locale],
   );
-  React.useEffect(() => {
-    if (!switchTo || saving || formView.saving) return;
-    if (formViewDirty && flushFormView()) return;
-    setSwitchTo(null);
-    // Still dirty: the form view's save was refused (on screen). The author
-    // stays; the next switch asks.
-    if (formViewDirty) return;
-    setCurrent(switchTo);
-  }, [switchTo, saving, formViewDirty, formView.saving, flushFormView]);
   // The live request's apply (see `requestedSurface` above). objectstack#26845
   // — another object's load replaces the buffer a held edit lives in, so it
   // goes through the rail's own switch (`openObject`): an unsent edit is sent
@@ -7324,51 +7244,18 @@ export function DataPillar({
       </button>
     </div>
   );
-  // objectstack#30057 — which layout the tab shows, and, where New and Edit
-  // open different form views, the pick between them. A pending edit of the
-  // shown view is sent before the other one loads, or the author is asked.
-  const switchFormFlow = (next: RecordFormFlow) => {
-    if (next === formFlow) return;
-    if (formViewDirty && !flushFormView() && !confirmDropUnsavedWork(true, locale)) return;
-    setFormFlow(next);
-  };
+  // objectstack-ai/objectstack#36425 — the create and edit dialogs lay out by
+  // the object's field groups, never by an internal form view, so the Form tab
+  // always edits the field groups and says so.
   const formLayoutSource = current ? (
     <div className="inline-flex items-center gap-2" data-testid="form-layout-source">
-      {formChoice.flowsDiffer && (
-        <div
-          role="group"
-          aria-label={t('engine.studio.data.form.flowLabel', locale)}
-          data-testid="form-layout-flow"
-          className="inline-flex items-center gap-0.5 rounded-md bg-muted p-0.5"
-        >
-          {(['create', 'edit'] as const).map((flow) => (
-            <button
-              key={flow}
-              type="button"
-              onClick={() => switchFormFlow(flow)}
-              aria-pressed={formFlow === flow}
-              className={formModeItem(formFlow === flow)}
-            >
-              {t(flow === 'create' ? 'engine.studio.data.form.flowCreate' : 'engine.studio.data.form.flowEdit', locale)}
-            </button>
-          ))}
-        </div>
-      )}
       <span
         data-testid="form-layout-source-chip"
-        data-source={formChoice.view ? 'form-view' : 'field-groups'}
-        data-view={formViewId || undefined}
-        title={t(
-          formChoice.view
-            ? 'engine.studio.data.form.layoutSource.formViewTitle'
-            : 'engine.studio.data.form.layoutSource.fieldGroupsTitle',
-          locale,
-        )}
+        data-source="field-groups"
+        title={t('engine.studio.data.form.layoutSource.fieldGroupsTitle', locale)}
         className="inline-flex h-6 items-center rounded bg-muted px-2 text-[11px] text-muted-foreground"
       >
-        {formChoice.view
-          ? tFormat('engine.studio.data.form.layoutSource.formView', locale, { name: formViewId || current.name })
-          : t('engine.studio.data.form.layoutSource.fieldGroups', locale)}
+        {t('engine.studio.data.form.layoutSource.fieldGroups', locale)}
       </span>
     </div>
   ) : null;
@@ -7504,7 +7391,6 @@ export function DataPillar({
         </AlertDialogContent>
       </AlertDialog>
       {extConflictDialog}
-      {formView.conflictDialog}
       <div className="relative flex min-h-0 flex-1">
         {isMobile && railOpen && (
           <div
@@ -7997,15 +7883,6 @@ export function DataPillar({
                   to trail it is each item's title. */}
               {formMode === 'layout' ? (
                 <>
-                {formChoice.view && formView.failure && (
-                  <div
-                    role="alert"
-                    data-testid="form-view-failure"
-                    className="shrink-0 border-b bg-destructive/5 px-6 py-2 text-xs text-destructive"
-                  >
-                    {plainRefusal(formView.failure.error).message}
-                  </div>
-                )}
                 <ObjectFormDesigner
                   draft={shownDraft}
                   objectName={current.name}
@@ -8018,11 +7895,10 @@ export function DataPillar({
                   // objectstack#30057 — on a base object a new field goes into
                   // the pair's extension, from the toolbar beside the mode control.
                   onAddField={canAddFields && !extendsBase ? addField : undefined}
-                  readOnly={formViewLayout ? formViewReadOnly || !formView.sections : readOnly}
+                  readOnly={readOnly}
                   modeControl={formToolbarLeading}
                   contributedFields={contributedFields}
                   draftMarkedFields={agentMarkedFields}
-                  formView={formViewLayout}
                 />
                 </>
               ) : (
@@ -8124,9 +8000,6 @@ export function DataPillar({
                           type: 'object-form',
                           objectName: current.name,
                           mode: 'create',
-                          // objectstack#30057 — the chosen form view's layout, as the dialog lays it out.
-                          ...(previewFormLayout.sections ? { sections: previewFormLayout.sections } : {}),
-                          ...(previewFormLayout.contentLayout === 'tabbed' ? { formType: 'tabbed' } : {}),
                           // Memoized above at the top of the component: this array's
                           // IDENTITY is a dependency of ObjectForm's field-generation
                           // effect, so rebuilding it inline here re-ran that effect on
