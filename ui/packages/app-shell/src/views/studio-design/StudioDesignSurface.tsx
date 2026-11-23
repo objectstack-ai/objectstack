@@ -6687,7 +6687,7 @@ export function DataPillar({
               tFormat('engine.studio.data.appMenu.failed', locale, {
                 object: label,
                 app: navItemLabelText(join.app.label, locale) || join.app.name,
-                reason: plainRefusal(join.error),
+                reason: plainRefusal(join.error).message,
               }),
             );
           }

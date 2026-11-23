@@ -33,7 +33,7 @@ const PKG = 'com.example.visits';
 const APP = { name: 'visits', label: 'Visits', _packageId: PKG };
 
 function stubLayers(status: number, body: unknown) {
-  const fetchMock = vi.fn(async () => new Response(JSON.stringify(body), { status }));
+  const fetchMock = vi.fn(async (_input: unknown) => new Response(JSON.stringify(body), { status }));
   vi.stubGlobal('fetch', fetchMock);
   return fetchMock;
 }

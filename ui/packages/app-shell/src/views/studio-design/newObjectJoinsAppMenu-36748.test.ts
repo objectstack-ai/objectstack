@@ -28,7 +28,7 @@ const TEXTS: AppMenuSaveTexts = {
 function fixture({
   apps = [{ name: 'visits', label: 'Visits' }] as Array<Record<string, unknown>>,
   stored = [] as unknown[],
-  save = vi.fn(async () => ({})),
+  save = vi.fn(async (..._args: unknown[]): Promise<unknown> => ({})),
 } = {}) {
   const calls: string[] = [];
   const client = {

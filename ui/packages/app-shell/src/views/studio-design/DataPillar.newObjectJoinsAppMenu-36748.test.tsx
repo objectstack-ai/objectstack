@@ -38,7 +38,7 @@ const mockClient = {
       : { effective: null, code: null },
   ),
   getDraft: vi.fn(async () => null),
-  save: vi.fn(async (type: string, name: string, body: Record<string, unknown>, options: Record<string, unknown>) => {
+  save: vi.fn(async (type: string, _name: string, body: Record<string, unknown>, options: Record<string, unknown>) => {
     srv.calls.push(`save ${type} ${options.mode}`);
     if (type === 'app') {
       srv.appBodies.push(body);
@@ -133,7 +133,9 @@ describe('新建对象 joins the package’s one app menu (objectstack#36748)', 
     srv.apps = [{ name: 'visits', label: 'Visits' }];
     srv.appSave = () => Promise.reject(Object.assign(new Error('conflict'), { status: 409, code: 'METADATA_CONFLICT' }));
     await createObject('Visit');
-    await waitFor(() => expect(toast.warning).toHaveBeenCalledWith(expect.stringMatching(/“Visit” was created, but .*“Visits”/)));
+    await waitFor(() => expect(toast.warning).toHaveBeenCalledWith(
+        expect.stringMatching(/^“Visit” was created, but it could not be added to the menu of “Visits”: The app has unpublished changes in Studio\. /),
+      ));
     expect(srv.calls).toEqual(['save object draft', 'publish object', 'save app draft']);
     // The object is open on the rail all the same.
     expect(await screen.findByTestId('form-toolbar')).toBeInTheDocument();
