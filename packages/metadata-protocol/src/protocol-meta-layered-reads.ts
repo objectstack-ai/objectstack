@@ -498,6 +498,41 @@ export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockL
         host.throwMetadataServiceUnavailable(codeDegraded.errors);
     }
 
+    // ── [#36601] The published layer's version, only when the caller asked ──
+    //
+    // The keyed token of the stored ACTIVE row at this read's address
+    // (`?package=`, the bundle member): the row a per-item publish at the same
+    // address replaces, and the token that publish takes as `If-Match`
+    // (`PublishMetaItemRequestSchema.parentVersion`). The one producer the
+    // plain read's `version` and a save receipt's `version` use
+    // ({@link readVersionToken}), so the three agree byte for byte. `null`
+    // when no active row is stored there (code or a package artifact alone).
+    // Asked for by the doors; in-process readers of this method pay no read.
+    //
+    // [#36601, contract review S1] Read BEFORE the overlay body, never after:
+    // the two are separate reads, and a publish landing between them must
+    // not pair the OLD body with the NEW token (a Save built on that buffer
+    // would pass its pin and overwrite the publish without a word). Read
+    // first, a publish in between pairs an old token with the new body,
+    // and the Save's publish is refused `409`, the safe direction.
+    let overlayVersion: string | null | undefined;
+    if (opts.withVersion === true) {
+        try {
+            overlayVersion = await host.readVersionToken({
+                type: request.type,
+                name: request.name,
+                ...(request.packageId ? { packageId: request.packageId } : {}),
+                ...memberOption(member),
+            }, 'active');
+        } catch (error) {
+            // [#5707] The overlay read's rule: an unprovisioned store holds
+            // no active row (`null` is then the truth); any other failure is
+            // a read that did not happen, never "no row".
+            host.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
+            overlayVersion = null;
+        }
+    }
+
     // ── overlay layer: the environment's sys_metadata row (ADR-0131 D6) ──
     let overlay: unknown | null = null;
     let overlayScope: 'env' | null = null;
@@ -940,34 +975,6 @@ export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockL
     // [#29814] …and the draft layer, by the same reasoning: redaction
     // subtracts a credential and nothing else.
     const servedDraft = draft === undefined ? undefined : redactMetadataItem(request.type, draft);
-
-    // ── [#36601] The published layer's version, only when the caller asked ──
-    //
-    // The keyed token of the stored ACTIVE row at this read's address
-    // (`?package=`, the bundle member): the row a per-item publish at the same
-    // address replaces, and the token that publish takes as `If-Match`
-    // (`PublishMetaItemRequestSchema.parentVersion`). The one producer the
-    // plain read's `version` and a save receipt's `version` use
-    // ({@link readVersionToken}), so the three agree byte for byte. `null`
-    // when no active row is stored there (code or a package artifact alone).
-    // Asked for by the doors; in-process readers of this method pay no read.
-    let overlayVersion: string | null | undefined;
-    if (opts.withVersion === true) {
-        try {
-            overlayVersion = await host.readVersionToken({
-                type: request.type,
-                name: request.name,
-                ...(request.packageId ? { packageId: request.packageId } : {}),
-                ...memberOption(member),
-            }, 'active');
-        } catch (error) {
-            // [#5707] The overlay read's rule: an unprovisioned store holds
-            // no active row (`null` is then the truth); any other failure is
-            // a read that did not happen, never "no row".
-            host.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
-            overlayVersion = null;
-        }
-    }
 
     return {
         type: request.type,

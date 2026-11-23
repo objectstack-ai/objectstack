@@ -373,6 +373,9 @@ export class DraftVersionGuard {
         const conflict: DraftConflict = { type, name, layer: 'published' };
         const choice = await this.deps.ask(conflict);
         if (choice === 'reload') {
+          // A `beforeReload` that throws (its draft could not be taken back)
+          // stops the reload here: nothing is re-read and the pins stay, so
+          // the next Save is asked about again (contract review S2).
           await beforeReload?.();
           this.held.clear();
           this.published.clear();

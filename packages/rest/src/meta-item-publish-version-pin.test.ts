@@ -139,7 +139,7 @@ async function boot() {
         return (rows ?? []).map((r: any) => JSON.parse(String(r.metadata)).label as string);
     };
 
-    return { layers, read, save, publish, studioSave, stored };
+    return { protocol, layers, read, save, publish, studioSave, stored };
 }
 
 const ok = (res: any) => {
@@ -219,6 +219,39 @@ describe('[#36601] two Studio Saves over one published item', () => {
         expect(MetadataConflictErrorSchema.parse(again).currentVersion).toBe(first.version);
         expect(await h.stored('active')).toEqual(['first']);
         expect(await h.stored('draft')).toEqual(['second']);
+    }, 60_000);
+
+    it('a publish landing inside the `/layers` read never pairs the old body with the new token (contract review S1)', async () => {
+        const h = await boot();
+        ok(await h.save(view('live')));
+        // Another editor's Save lands right AFTER this read has taken the
+        // overlay body, and before it answers. Read after the body, the token
+        // would be the new row's: a buffer of the old body pinned to the
+        // current version, whose Save then overwrites without a prompt.
+        const proto: any = h.protocol;
+        const original = proto.findServedOverlayRow.bind(proto);
+        let landed = false;
+        proto.findServedOverlayRow = async (...args: unknown[]) => {
+            const served = await original(...args);
+            if (!landed) {
+                landed = true;
+                ok(await h.studioSave('by the other editor'));
+            }
+            return served;
+        };
+        const lay = ok(await h.layers());
+        proto.findServedOverlayRow = original;
+        expect(landed).toBe(true);
+        expect(lay.overlay.label).toBe('live');
+
+        // The token is the body's own row's (or older), never the newer one:
+        // the Save built on this read is refused and asked about.
+        const current = ok(await h.layers()).overlayVersion;
+        expect(lay.overlayVersion).toMatch(KEYED);
+        expect(lay.overlayVersion).not.toBe(current);
+        const refused = refusedConflict(await h.studioSave('built on the old body', { 'if-match': lay.overlayVersion }));
+        expect(refused.currentVersion).toBe(current);
+        expect(await h.stored('active')).toEqual(['by the other editor']);
     }, 60_000);
 
     it('a token that names no current version (a raw guess) is refused 409 and promotes nothing', async () => {

@@ -73,6 +73,8 @@ const server = vi.hoisted(() => ({
   activeVersions: new Map<string, string>(),
   servesPublishedVersion: false,
   publishes: [] as Array<{ name: string; ifMatch: string | undefined; ifNoneMatch: string | undefined }>,
+  // objectstack#36601 (contract review S2) — the draft discard fails.
+  resetFails: false,
 }));
 
 /**
@@ -161,6 +163,7 @@ const mockClient = vi.hoisted(() => {
     }),
     // The draft discard a refused Save sends (`?state=draft`).
     reset: vi.fn(async (type: string, name: string, options?: { state?: string }) => {
+      if (server.resetFails) throw new Error('reset unavailable');
       if (options?.state === 'draft') server.drafts.delete(k(type, name));
       return {};
     }),
@@ -227,6 +230,7 @@ beforeEach(() => {
   server.activeVersions.clear();
   server.servesPublishedVersion = false;
   server.publishes.length = 0;
+  server.resetFails = false;
   for (const fn of Object.values(mockClient)) (fn as unknown as { mockClear: () => void }).mockClear();
   server.active.set(`object/${OBJECT.name}`, JSON.parse(JSON.stringify(OBJECT)));
 });
@@ -478,6 +482,28 @@ describe('Data pillar — two Saves over one published object are not last-write
     await addFieldAndSave(b, addFieldFromGrid, SECOND);
     expect(server.publishes[server.publishes.length - 1]!.ifMatch).toBe(aLive);
     expect(liveFields()).toEqual(['title', 'status', 'new_field', 'second_field']);
+  });
+
+  it('"reload" whose draft cannot be taken back does not reload: the losing draft is never installed, and the next Save is asked again (contract review S2)', async () => {
+    const { b } = await racePublished();
+    server.resetFails = true;
+    fireEvent.click(screen.getByTestId('draft-conflict-reload'));
+    await waitFor(() => expect(screen.queryByTestId('draft-conflict-dialog')).toBeNull(), { timeout: 8000 });
+    // Refused, not reloaded: B's buffer stays on the page, unsaved, and the
+    // draft that lost is still pending (listed under Changes), never re-read.
+    expect(await within(b).findByText(/^Not published:/, undefined, { timeout: 8000 })).toBeInTheDocument();
+    expect(within(b).getByTestId('studio-save')).toBeInTheDocument();
+    expect(server.drafts.size).toBe(1);
+    expect(liveFields()).toEqual(['title', 'status', 'new_field']);
+
+    // The published pin is the one the conflict was raised on: B's next Save
+    // is refused and asked about again, never published over A.
+    server.resetFails = false;
+    const publishesBefore = server.publishes.length;
+    await saveIn(b);
+    await screen.findByTestId('draft-conflict-dialog', undefined, { timeout: 8000 });
+    expect(server.publishes.slice(publishesBefore).map((p) => p.ifMatch)).toEqual([LIVE]);
+    expect(liveFields()).toEqual(['title', 'status', 'new_field']);
   });
 
   it('"overwrite" asks again, then re-publishes pinned to the refusal\'s currentVersion and B\'s copy goes live', async () => {

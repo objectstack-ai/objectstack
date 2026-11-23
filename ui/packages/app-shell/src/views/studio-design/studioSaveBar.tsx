@@ -314,11 +314,22 @@ export async function publishSavedItem(
       console.error('[studio] a refused publish left the saved draft pending:', discardError);
     }
   };
+  // objectstack#36601 (contract review S2) — the reload's discard is NOT
+  // best-effort: a draft that could not be taken back would be re-read as the
+  // buffer and pinned to the fresh published version, so the next Save would
+  // publish the losing copy without a prompt. Its failure throws instead: the
+  // guard does not reload, keeps the published pin the conflict was raised
+  // on, and the Save reads as refused, edits on the page.
+  const discardBeforeReload = async (): Promise<void> => {
+    if (hadDraft) return;
+    await client.reset(item.type, item.name, { state: 'draft', ...scope });
+    draftDiscarded = true;
+  };
   try {
     if (pinned) {
       // A reload takes the saved draft back BEFORE the buffer is re-read, so
       // the re-read installs the live row, never the draft that lost.
-      const outcome = await pinned(client, item.type, item.name, scope, discardSavedDraft);
+      const outcome = await pinned(client, item.type, item.name, scope, discardBeforeReload);
       if (outcome === 'reloaded') {
         emitMetadataRefresh();
         return { ok: false, reloaded: true, draftDiscarded };
