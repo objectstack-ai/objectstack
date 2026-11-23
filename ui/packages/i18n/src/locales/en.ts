@@ -2195,6 +2195,7 @@ const en = {
       settings: 'Report settings',
       pendingDraft: 'This report has unpublished changes. Publish or discard them above, then save.',
       nameTaken: 'Every name made from this one is already taken. Give the report another name, then save.',
+      addsToMenu: 'Saving creates this report and adds it to the menu where you placed it, with your other design changes.',
       adminOnlyTitle: 'Only workspace admins can build reports',
       adminOnly: 'A report is shared with everyone in the workspace, so an admin builds it.',
       type: {
@@ -4354,11 +4355,13 @@ const en = {
       notWritable: 'This app\'s customization package cannot be written, so its menu cannot be saved.',
       newDashboard: 'New dashboard…',
       newDashboardTitle: 'New dashboard',
+      newReport: 'New report…',
       newItemSavesAll: 'Creating it saves your other design changes too, then opens it for editing.',
       create: 'Create',
       creating: 'Creating…',
       newItemPendingDraft: 'A draft with this name is already pending. Try again.',
       newItemLeft: 'The new dashboard "{{name}}" could not be removed again; remove it in Studio.',
+      newReportLeft: 'The new report "{{name}}" could not be removed again; remove it in Studio.',
     },
     recordTabs: {
       entry: 'Configure tabs',

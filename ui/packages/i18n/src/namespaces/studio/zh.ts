@@ -2480,17 +2480,17 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.access.title': '权限矩阵',
   'engine.studio.access.subtitle': '对象权限 · 字段级读写',
   'engine.studio.access.bannerTitle':
-    '这里只列出本应用的对象，保存时只改本应用的授权，其他应用给出的授权保持不变。改动先保存为草稿，点击顶栏「发布」后随应用一起生效（与数据、界面一致）。',
-  'engine.studio.access.banner': '本应用对象 · 发布后生效',
+    '这里只列出本应用的对象，保存时只改本应用的授权，其他应用给出的授权保持不变。改动在点击顶栏「保存」后立即生效（与数据、界面一致）。',
+  'engine.studio.access.banner': '本应用对象 · 保存后生效',
   // objectstack#29674 — the note on an open set the base's pair adds: its matrix lists the base's objects too.
-  'engine.studio.access.bannerPair': '本应用及 {package} 对象 · 发布后生效',
+  'engine.studio.access.bannerPair': '本应用及 {package} 对象 · 保存后生效',
   // objectstack#35018 — the open set's origin in the builder's words (the Studio title note).
   'engine.studio.access.origin.app': '随应用提供',
   // objectstack#35018 — the word before the open item's label on the copilot's 「正在看」 line.
   'engine.studio.copilot.subject.access': '权限',
   'engine.studio.copilot.subject.flow': '流程',
   'engine.studio.access.bannerTitlePair':
-    '这个权限集属于 {package} 的定制，所以除本应用的对象外也列出 {package} 的对象；保存时只改这部分授权，其他应用给出的授权保持不变。改动先保存为草稿，点击顶栏「发布」后生效。',
+    '这个权限集属于 {package} 的定制，所以除本应用的对象外也列出 {package} 的对象；保存时只改这部分授权，其他应用给出的授权保持不变。改动在点击顶栏「保存」后立即生效。',
   'engine.studio.access.bannerTitleReadOnly':
     '这里只列出本应用的对象。这个应用是只读的：可以查看它的权限集，但不能修改。',
   // ADR-0090 D5/D9 — 待确认的受众绑定建议(isDefault 权限集,管理员确认后生效,服务端绝不自动绑定)
@@ -2988,6 +2988,14 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.save.confirmIrreversible': '保存后以下改动立即生效，之后无法用「取消」撤回：\n{changes}\n\n仍要保存吗？',
   'engine.studio.save.confirmRemoveField': '• 删除字段「{field}」：所有记录上这个字段的值都会被删除。',
   'engine.studio.save.confirmRetypeField': '• 把字段「{field}」从{from}改成{to}：已存的值可能被转换或清空。',
+  // objectstack#36511 第 6 项 — 见英文条目。
+  'engine.studio.aiDraft.notice': '这一项有 AI 未发布的改动，保存会一并生效',
+  'engine.studio.aiDraft.discard': '放弃 AI 的改动',
+  'engine.studio.aiDraft.discardTitle': '丢弃这一项未发布的草稿，回到已生效的版本',
+  'engine.studio.aiDraft.discardConfirmUnsaved': '放弃 AI 的改动会一并丢掉本页还没保存的改动。仍要放弃吗？',
+  'engine.studio.aiDraft.discardFailed': '没有放弃 AI 的改动：{reason}',
+  // objectstack#36511 — 见英文条目。
+  'engine.studio.createLive': '创建',
   'engine.studio.held.lineExplicit': '还不能保存：{clause}。改动已保留在此处，补全后再点保存。',
   'engine.studio.loading': '加载中…',
   'engine.studio.loadFailed': '加载失败',
@@ -3468,14 +3476,11 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.owd.title': '谁能看到哪些记录',
   'engine.studio.owd.subtitle': '本包每个对象的记录可见范围',
   'engine.studio.owd.description':
-    '本包每个对象「谁能看到哪些记录」的设置 —— 在一屏里核对并批量修改。改动按对象保存为草稿，随包发布生效，与对象「设置」页一致。',
+    '本包每个对象「谁能看到哪些记录」的设置 —— 在一屏里核对并批量修改。点「保存」后改动立即生效，与对象「设置」页一致。',
   'engine.studio.owd.colObject': '对象',
   'engine.studio.owd.colInternal': '谁能看到哪些记录',
   'engine.studio.owd.none': '本包未声明任何对象。',
   'engine.studio.owd.loadFailed': '加载本包对象失败。',
-  'engine.studio.owd.save': '保存 {count} 处改动',
-  'engine.studio.owd.saveNone': '无改动',
-  'engine.studio.owd.saved': '已保存 {count} 个对象草稿。',
   'engine.studio.owd.unsaved': '未保存',
   'engine.studio.owd.byParent': '跟随所属的{master}',
   'engine.studio.owd.cbpPrereqTitle': '将该关系设为必填？',

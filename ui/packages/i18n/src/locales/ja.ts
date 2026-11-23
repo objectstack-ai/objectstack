@@ -3615,11 +3615,13 @@ const ja = {
       notWritable: 'このアプリのカスタマイズパッケージに書き込めないため、メニューを保存できません。',
       newDashboard: '新しいダッシュボード…',
       newDashboardTitle: '新しいダッシュボード',
+      newReport: '新規レポート…',
       newItemSavesAll: '作成すると、デザインモードの他の変更も保存され、編集用に開きます。',
       create: '作成',
       creating: '作成中…',
       newItemPendingDraft: 'この名前の未公開の下書きがすでにあります。もう一度お試しください。',
       newItemLeft: '新しいダッシュボード「{{name}}」を削除できませんでした。Studio で削除してください。',
+      newReportLeft: '新しいレポート「{{name}}」を削除できませんでした。Studio で削除してください。',
     },
     recordTabs: {
       entry: 'タブを設定',
@@ -4069,6 +4071,7 @@ const ja = {
       settings: "レポート設定",
       pendingDraft: "このレポートには未公開の変更があります。上で公開または破棄してから保存してください。",
       nameTaken: "この名前から作れる識別子はすべて使用済みです。レポートに別の名前を付けてから保存してください。",
+      addsToMenu: "保存するとこのレポートが作成され、選んだ位置のメニューに追加されます。デザインのほかの変更も一緒に保存されます。",
       adminOnlyTitle: "レポートを作成できるのはワークスペース管理者のみです",
       adminOnly: "レポートはワークスペースの全員に共有されるため、管理者が作成します。",
       type: {

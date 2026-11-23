@@ -3613,11 +3613,13 @@ const ko = {
       notWritable: '이 앱의 사용자 지정 패키지에 쓸 수 없어 메뉴를 저장할 수 없습니다.',
       newDashboard: '새 대시보드…',
       newDashboardTitle: '새 대시보드',
+      newReport: '새 보고서…',
       newItemSavesAll: '만들면 디자인 모드의 다른 변경 사항도 함께 저장되고 편집할 수 있게 열립니다.',
       create: '만들기',
       creating: '만드는 중…',
       newItemPendingDraft: '이 이름으로 게시되지 않은 초안이 이미 있습니다. 다시 시도하세요.',
       newItemLeft: '새 대시보드 "{{name}}"을(를) 삭제하지 못했습니다. Studio에서 삭제하세요.',
+      newReportLeft: '새 보고서 "{{name}}"을(를) 삭제하지 못했습니다. Studio에서 삭제하세요.',
     },
     recordTabs: {
       entry: '탭 구성',
@@ -4066,6 +4068,7 @@ const ko = {
       settings: "보고서 설정",
       pendingDraft: "이 보고서에 게시되지 않은 변경 사항이 있습니다. 위에서 게시하거나 버린 후 저장하세요.",
       nameTaken: "이 이름으로 만들 수 있는 식별자가 모두 사용 중입니다. 보고서 이름을 바꾼 뒤 저장하세요.",
+      addsToMenu: "저장하면 이 보고서가 만들어지고 지정한 메뉴 위치에 추가되며, 다른 디자인 변경도 함께 저장됩니다.",
       adminOnlyTitle: "워크스페이스 관리자만 보고서를 만들 수 있습니다",
       adminOnly: "보고서는 워크스페이스의 모든 사람에게 공유되므로 관리자가 만듭니다.",
       type: {

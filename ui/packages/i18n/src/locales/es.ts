@@ -3695,11 +3695,13 @@ const es = {
       notWritable: 'El paquete de personalización de esta aplicación no se puede escribir, así que su menú no se puede guardar.',
       newDashboard: 'Nuevo panel…',
       newDashboardTitle: 'Nuevo panel',
+      newReport: 'Nuevo informe…',
       newItemSavesAll: 'Al crearlo también se guardan tus otros cambios de diseño y luego se abre para editarlo.',
       create: 'Crear',
       creating: 'Creando…',
       newItemPendingDraft: 'Ya hay un borrador pendiente con este nombre. Inténtalo de nuevo.',
       newItemLeft: 'No se pudo eliminar el nuevo panel "{{name}}"; elimínalo en Studio.',
+      newReportLeft: 'No se pudo eliminar el nuevo informe "{{name}}"; elimínalo en Studio.',
     },
     recordTabs: {
       entry: 'Configurar pestañas',
@@ -4157,6 +4159,7 @@ const es = {
       settings: "Configuración del informe",
       pendingDraft: "Este informe tiene cambios sin publicar. Publícalos o descártalos arriba y luego guarda.",
       nameTaken: "Todos los identificadores derivados de este nombre ya están en uso. Ponle otro nombre al informe y guarda.",
+      addsToMenu: "Al guardar se crea este informe y se añade al menú en el lugar que elegiste, junto con tus otros cambios de diseño.",
       adminOnlyTitle: "Solo los administradores del espacio de trabajo pueden crear informes",
       adminOnly: "Un informe se comparte con todo el espacio de trabajo, así que lo crea un administrador.",
       type: {

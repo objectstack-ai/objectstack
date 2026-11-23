@@ -1835,6 +1835,7 @@ const zh = {
       settings: '报表设置',
       pendingDraft: '这张报表有一份还没发布的修改。先在上方发布或丢弃它，再保存。',
       nameTaken: '由这个名称生成的标识都已被占用。请给报表换个名称再保存。',
+      addsToMenu: '保存后会建好这张报表，放进菜单里你占好的位置，并一并保存设计模式里的其他改动。',
       adminOnlyTitle: '只有系统管理员能搭建报表',
       adminOnly: '报表对工作区里所有人生效，所以由系统管理员搭建。',
       type: {
@@ -3750,11 +3751,13 @@ const zh = {
       notWritable: '这个应用的定制包不可写，菜单无法保存。',
       newDashboard: '新建仪表盘…',
       newDashboardTitle: '新建仪表盘',
+      newReport: '新建报表…',
       newItemSavesAll: '创建时会一并保存设计模式里的其他改动，然后打开它进行编辑。',
       create: '创建',
       creating: '正在创建…',
       newItemPendingDraft: '这个名称下已有一份未发布的草稿，请再试一次。',
       newItemLeft: '新建的仪表盘「{{name}}」没能删除，请在 Studio 里删除它。',
+      newReportLeft: '新建的报表「{{name}}」没能删除，请在 Studio 里删除它。',
     },
     recordTabs: {
       entry: '配置页签',
