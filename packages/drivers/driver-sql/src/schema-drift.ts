@@ -1344,7 +1344,12 @@ export function diffManagedTable(args: {
     // explicit physical constraint — NOT against `required`, which is the
     // write-time contract and implies nothing about the column) ──────────
     const expectNullable = field.storage?.notNull !== true;
+    // [#36596] Whether a `relax_not_null` is proposed for this column: the
+    // literal-DEFAULT arm below drops a NOT NULL column's stale default only
+    // alongside it, never alone.
+    let relaxProposed = false;
     if (expectNullable && !col.nullable && field.storage?.notNull === false && fieldName !== ceremonyOwnedNullability) {
+      relaxProposed = true;
       // [#32590] The author DECLARED the column nullable — `storage: { notNull:
       // false }`, written out, not merely absent. The column constraint is the
       // declaration's to own (ADR-0113 D2), and this is the "deliberately
@@ -1385,6 +1390,7 @@ export function diffManagedTable(args: {
           `package applies it ("os package install"); or relax it deliberately via "os migrate apply".`,
       });
     } else if (expectNullable && !col.nullable && field.required !== true && fieldName !== ceremonyOwnedNullability) {
+      relaxProposed = true;
       // Column STRICTER than its declaration — and the field is not even
       // write-gated, so an omitting write reaches the DB and dies as a raw
       // driver error instead of a clean validation 400. That surprise is
@@ -1491,7 +1497,7 @@ export function diffManagedTable(args: {
       const physical = physicalDefaultLiteral(col.defaultValue);
       const multiValue = isMultiValueField({ type: String(field.type ?? ''), multiple: field.multiple === true });
       if (physical.kind === 'literal' && !multiValue) {
-        if (dv === undefined || dv === null) {
+        if ((dv === undefined || dv === null) && col.nullable) {
           out.push({
             kind: 'default_mismatch',
             remoteName: table,
@@ -1507,6 +1513,43 @@ export function diffManagedTable(args: {
               `declares no default — every insert that omits the field stores that value here, where a new ` +
               `database stores nothing. Dropping the default is non-destructive and rewrites no stored row. ` +
               SAFE_COLUMN_REMEDY,
+          });
+        } else if (dv === undefined || dv === null) {
+          // [#36596] A NOT NULL column. Dropping its only DEFAULT alone would
+          // turn every insert that omits the field from "stores the old value"
+          // into "refused by the database" — so the drop never travels alone.
+          // Where the declaration does not hold the column NOT NULL (the relax
+          // above is proposed: `storage.notNull: false` in words, or no storage
+          // declaration on a field that is not `required`), the drop travels
+          // WITH that relax at the relax's own category, `needs_confirm`, and
+          // is applied by the same deliberate acts (publish / package install
+          // for the declared-`false` case, #33724; `os migrate apply`), after
+          // which an omitting insert stores NULL. Anywhere else (`storage:
+          // { notNull: true }`, a `required` field, the ceremony-owned tenant
+          // column) the column is left alone: the entry is `destructive`, so no
+          // automatic path applies it, and it is reported (warned at boot, listed
+          // by "os migrate plan") rather than silently ignored.
+          const pairs = relaxProposed;
+          out.push({
+            kind: 'default_mismatch',
+            remoteName: table,
+            table,
+            column: fieldName,
+            expected: '(no column default)',
+            actual: `DEFAULT ${quoteDefaultForMessage(physical.text)}`,
+            severity: 'warning',
+            category: pairs ? 'needs_confirm' : 'destructive',
+            op: { type: 'drop_column_default', table, column: fieldName },
+            message: pairs
+              ? `${table}.${fieldName}: the NOT NULL column carries DEFAULT ${quoteDefaultForMessage(physical.text)}, but the ` +
+                `field declares no default and does not hold the column NOT NULL. Dropping the default goes with ` +
+                `relaxing the column (reported alongside), so an insert that omits the field stores NULL, as on a new ` +
+                `database; neither statement rewrites a stored row. Apply both together: publish the object, install ` +
+                `the package that declares it, or run "os migrate apply".`
+              : `${table}.${fieldName}: the NOT NULL column carries DEFAULT ${quoteDefaultForMessage(physical.text)}, but the ` +
+                `field declares no default. Left as it is: the column stays NOT NULL, so dropping its default would ` +
+                `make the database refuse every insert that omits the field. Declare the default again, or relax the ` +
+                `column (\`storage: { notNull: false }\`) and the default is dropped with it.`,
           });
         } else if ((typeof dv === 'string' || typeof dv === 'number' || typeof dv === 'boolean') && !isRuntimeDefaultValue(dv)) {
           if (physicalLiteralMatches(physical.text, dv, field.type) === false) {
