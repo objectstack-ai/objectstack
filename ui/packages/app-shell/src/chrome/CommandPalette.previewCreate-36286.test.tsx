@@ -22,6 +22,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, fireEvent, waitFor, cleanup, screen, act, within } from '@testing-library/react';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import { InlineEditProvider, MetadataCtx, useInlineEdit } from '@object-ui/react';
+import { MetadataClient } from '@object-ui/data-objectstack';
 
 vi.mock('@object-ui/auth', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -52,15 +53,19 @@ vi.mock('@object-ui/permissions', async (importOriginal) => ({
 
 // The switcher's create card reads the dataset catalog (a chart view's
 // source): answered empty here, with no network.
-vi.mock('../views/metadata-admin/useMetadata', async (importOriginal) => {
-  const { MetadataClient } = await import('@object-ui/data-objectstack');
-  const client = new MetadataClient({
-    baseUrl: 'http://localhost',
-    fetch: (async () => new Response('[]', { status: 200, headers: { 'content-type': 'application/json' } })) as unknown as typeof fetch,
-  });
-  return { ...(await importOriginal<Record<string, unknown>>()), useMetadataClient: () => client };
-});
+let metadataClient: MetadataClient | undefined;
+vi.mock('../views/metadata-admin/useMetadata', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  useMetadataClient: () =>
+    (metadataClient ??= new MetadataClient({
+      baseUrl: 'http://localhost',
+      fetch: (async () => new Response('[]', { status: 200, headers: { 'content-type': 'application/json' } })) as unknown as typeof fetch,
+    })),
+}));
 
+// The view switcher's module reaches the draft-publish lint, which the source
+// loads lazily: pay that load at import, not inside a test's window.
+import '@objectstack/lint';
 // The preview's key fields draw through `lazy()`: load the detail entry at
 // module scope, so its cost is paid at import (ui/AGENTS.md, lazy boundaries).
 import '@object-ui/plugin-detail';
