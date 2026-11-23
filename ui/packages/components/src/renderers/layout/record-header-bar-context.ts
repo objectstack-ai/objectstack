@@ -101,6 +101,14 @@ export interface RecordHeaderState {
    * declaration, unchanged.
    */
   title?: RecordHeaderTitle;
+  /**
+   * The record scope arrangement the header draws (objectstack#36366), where
+   * the host holds it ahead of the object as served: the design mode's staged
+   * one. A header that places the object's actions itself (`placedActions:
+   * true`) reads it over the object's `actionLayout.record`. Absent: the
+   * object's own.
+   */
+  actionLayout?: { readonly pinned: readonly string[]; readonly more?: readonly string[] };
 }
 
 /**

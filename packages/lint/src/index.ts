@@ -720,6 +720,12 @@ export type { ActionNameRefFinding, ActionNameRefSeverity } from './validate-act
 
 export { validateActionLocations, ACTION_NO_PLACEMENT } from './validate-action-locations.js';
 export type { ActionLocationsFinding, ActionLocationsSeverity } from './validate-action-locations.js';
+export {
+  validateObjectActionLayout,
+  OBJECT_ACTION_LAYOUT_UNKNOWN,
+  OBJECT_ACTION_LAYOUT_NOT_PLACED,
+} from './validate-object-action-layout.js';
+export type { ObjectActionLayoutFinding } from './validate-object-action-layout.js';
 export { validateActionObjectBinding, ACTION_NO_OBJECT_BINDING } from './validate-action-object-binding.js';
 export type { ActionObjectBindingFinding } from './validate-action-object-binding.js';
 export { validateFlowNodeExecutors, FLOW_NODE_TYPE_NO_EXECUTOR } from './validate-flow-node-executors.js';

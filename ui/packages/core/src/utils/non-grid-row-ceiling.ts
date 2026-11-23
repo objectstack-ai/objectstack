@@ -135,6 +135,13 @@ export const NON_GRID_ROW_CEILING = 2000;
  * value. Past it (10,500 rows) the probe row cuts at 10,000 and
  * `NonGridRowCeilingNote` shows, as below the shared ceiling.
  *
+ * ⛔ A STOP CONDITION, NOT A REQUEST SIZE. The gantt reaches this ceiling in
+ * steps no larger than the shared ceiling's one read (`fetchGanttRows`,
+ * `@object-ui/plugin-gantt`). Sent as one `$top` of 10,001 it was refused
+ * outright by any host whose maximum page size is smaller
+ * (`OS_DATA_MAX_PAGE_SIZE`; the hosted plane sets 5,000), on an empty object
+ * as on a full one, and the refusal drew in place of the chart.
+ *
  * ⚠️ As with the table above: SHARED-BOX seconds and a reading taken once,
  * when objectstack#32421 landed; nothing re-derives it. The DOM counts are
  * the environment-independent half.
@@ -173,8 +180,11 @@ export type NonGridRowCeiling = typeof NON_GRID_ROW_CEILING | typeof GANTT_ROW_C
  * A fresh object per call, so a caller that mutates the query it built cannot
  * change what the next caller sends.
  *
- * `ceiling` defaults to the shared {@link NON_GRID_ROW_CEILING}; only the
- * gantt passes {@link GANTT_ROW_CEILING}. A caller passes the SAME ceiling to
+ * `ceiling` defaults to the shared {@link NON_GRID_ROW_CEILING}, and every
+ * view that spreads this query passes no other: ⛔ it is ONE read, and
+ * {@link GANTT_ROW_CEILING} plus its probe row (10,001) is over the maximum
+ * page size a host may set, so the gantt walks to its ceiling in steps instead
+ * (see that constant). A caller passes the SAME ceiling to
  * {@link applyNonGridRowCeiling}, or the probe row is sliced at the wrong
  * place.
  */

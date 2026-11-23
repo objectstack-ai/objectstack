@@ -20,6 +20,15 @@
  *   the `record` favorite `recordFavoriteItem` builds, named by the title the
  *   record was last visited under.
  *
+ * - On an object's list, 「Add view」: what the view switcher's own 「Add
+ *   view」 runs (its create card, or the admin's Create View dialog), listed
+ *   while the switcher offers it.
+ * - On a record page, 「Edit」: the header's own Edit, listed while the header
+ *   draws it, and off while the header's button is off.
+ *
+ * Those two are published by the page beside its own control
+ * (`paletteCommands.ts`), never recomputed here.
+ *
  * The page is read off the address, matched against the route table the
  * console's own route reads are matched against (`APP_ROUTE_METADATA_READS`),
  * so a static route that shadows `:objectName` (`search`, `reports`) is not a
@@ -29,7 +38,7 @@
 
 import { matchPath, matchRoutes } from 'react-router-dom';
 import { CommandGroup, CommandItem } from '@object-ui/components';
-import { Star, StarOff } from 'lucide-react';
+import { Pencil, Plus, Star, StarOff } from 'lucide-react';
 import { useObjectLabel, useObjectTranslation } from '@object-ui/i18n';
 import { APP_ROUTE_METADATA_READS } from '../console/appRouteMetadataReads.js';
 import { objectViewRouteObject } from '../console/appObjectScope.js';
@@ -39,7 +48,8 @@ import { useRecentItems } from '../context/RecentItemsProvider.js';
 import { useRecentItemLabel } from '../hooks/useRecentItemLabel.js';
 import { useObjectListFavorite } from '../layout/SidebarItemMenu.js';
 import { servedObjectPluralLabel } from '../hooks/servedObjectLabel.js';
-import { FAVORITE_ADD_KIND, FAVORITE_REMOVE_KIND } from './PaletteEnterHint.js';
+import { ADD_VIEW_KIND, EDIT_RECORD_KIND, FAVORITE_ADD_KIND, FAVORITE_REMOVE_KIND } from './PaletteEnterHint.js';
+import { usePageCommands, type PageCommandId } from './paletteCommands.js';
 
 /** The page behind the palette, when it is one the group offers entries for. */
 export type PaletteCurrentPage =
@@ -120,23 +130,59 @@ export function PaletteCurrentPageGroup({
     const item = recordFavoriteItem(page.appSegment, page.objectName, page.recordId, visit ? recentLabel(visit) : undefined);
     favorite = { isFavorite: isFavorite(item.id), toggle: () => toggleFavorite(item) };
   }
-  if (!favorite) return null;
+  const pageFavorite = favorite;
+  // The page's own command for this kind of page, as the page publishes it.
+  const commandId: PageCommandId = page.kind === 'list' ? 'add-view' : 'edit-record';
+  const command = usePageCommands().find((published) => published.id === commandId);
+  if (!pageFavorite && !command) return null;
 
-  const { isFavorite: starred, toggle } = favorite;
   return (
     <CommandGroup heading={t('console.commandPalette.currentPage', { defaultValue: 'Current page' })}>
-      <CommandItem
-        data-testid="palette-current-page-favorite"
-        value={`${starred ? FAVORITE_REMOVE_KIND : FAVORITE_ADD_KIND} current page ${page.kind} ${page.objectName}`}
-        onSelect={() => run(toggle)}
-      >
-        {starred ? <StarOff className="mr-2 h-4 w-4" /> : <Star className="mr-2 h-4 w-4" />}
-        <span className="truncate">
-          {starred
-            ? t('common.removeFromFavorites', { defaultValue: 'Remove from favorites' })
-            : t('common.addToFavorites', { defaultValue: 'Add to favorites' })}
-        </span>
-      </CommandItem>
+      {pageFavorite && (
+        <CommandItem
+          data-testid="palette-current-page-favorite"
+          value={`${pageFavorite.isFavorite ? FAVORITE_REMOVE_KIND : FAVORITE_ADD_KIND} current page ${page.kind} ${page.objectName}`}
+          onSelect={() => run(pageFavorite.toggle)}
+        >
+          {pageFavorite.isFavorite ? <StarOff className="mr-2 h-4 w-4" /> : <Star className="mr-2 h-4 w-4" />}
+          <span className="truncate">
+            {pageFavorite.isFavorite
+              ? t('common.removeFromFavorites', { defaultValue: 'Remove from favorites' })
+              : t('common.addToFavorites', { defaultValue: 'Add to favorites' })}
+          </span>
+        </CommandItem>
+      )}
+      {command?.id === 'add-view' && (
+        <CommandItem
+          data-testid="palette-current-page-add-view"
+          value={`${ADD_VIEW_KIND} current page ${page.objectName}`}
+          disabled={command.disabled}
+          onSelect={() => run(command.run)}
+        >
+          <Plus className="mr-2 h-4 w-4" />
+          {/* The switcher's own words for it. */}
+          <span className="truncate">{t('view.switcher.addView', { defaultValue: 'Add view' })}</span>
+        </CommandItem>
+      )}
+      {command?.id === 'edit-record' && (
+        <CommandItem
+          data-testid="palette-current-page-edit"
+          value={`${EDIT_RECORD_KIND} current page ${page.objectName}`}
+          disabled={command.disabled}
+          onSelect={() => run(command.run)}
+        >
+          <Pencil className="mr-2 h-4 w-4" />
+          <span className="flex min-w-0 flex-col">
+            {/* The header button's own words for it. */}
+            <span className="truncate">{t('detail.edit', { defaultValue: 'Edit' })}</span>
+            {command.disabled && command.disabledReason && (
+              <span className="truncate text-xs text-muted-foreground" data-testid="palette-current-page-edit-reason">
+                {command.disabledReason}
+              </span>
+            )}
+          </span>
+        </CommandItem>
+      )}
     </CommandGroup>
   );
 }

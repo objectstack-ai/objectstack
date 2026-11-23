@@ -92,7 +92,7 @@ import { useSafeFieldLabel, useRecordContext, useRecordPagePreferences, type Rel
 import { usePermissions } from '@object-ui/permissions';
 import { useObjectLabel, useDisplayLocale, useLocalization, resolveFieldCurrency, recordCurrencyField, recordCurrencyPath, withFollowedParent } from '@object-ui/i18n';
 import { useDetailTranslation } from './useDetailTranslation';
-import { isMaskedDetailFieldType } from './fieldEnrichment';
+import { isComputedFieldType, isMaskedDetailFieldType } from './fieldEnrichment';
 import {
   COMPACT_RELATED_ROWS,
   RELATED_CARD_DROP_LINE,
@@ -1066,6 +1066,10 @@ interface RelationFieldDef {
   multiple?: unknown;
   hidden?: unknown;
   readonly?: unknown;
+  defaultValue?: unknown;
+  options?: unknown;
+  dependsOn?: unknown;
+  lookupFilters?: unknown;
 }
 
 function relationFieldEntries(fields: unknown): Array<[string, RelationFieldDef]> {
@@ -1093,6 +1097,22 @@ function relationFieldEntries(fields: unknown): Array<[string, RelationFieldDef]
  *  - `master_detail` with no catalog (none, or more than one required
  *    lookup): `undefined`, and 「+ 添加」 creates a new row directly.
  *
+ * A required lookup is a catalog only when both halves of "a pick is a whole
+ * row" hold (objectstack#36659 — a contract's required primary contact was
+ * read as its catalog, so the account's 合同 tab listed every account's
+ * contacts and a pick would have created a contract from a contact):
+ *
+ *  - its candidates are the same for every row: no `dependsOn` and no
+ *    `lookupFilters` entry reading `$record`. A lookup scoped by the row (the
+ *    contact `dependsOn` the contract's account) is a party of that row, and
+ *    the picker, which lists the catalog for the list, cannot apply the scope;
+ *  - the pick leaves nothing for a person to write: every OTHER required
+ *    field of the child has a default the insert applies (`defaultValue`, or
+ *    a select option marked `default`), is `readonly`, or is computed.
+ *    `required` is the writer's contract, so a child that still needs a
+ *    start date or an amount is a record someone fills in on its form, not a
+ *    line a pick completes.
+ *
  * `undefined` too for any other field type and for a multi-valued
  * relationship, whose membership a pick cannot write.
  */
@@ -1117,7 +1137,40 @@ export function derivedAddOf(
     && typeof def.reference === 'string' && def.reference !== '');
   if (catalogs.length !== 1) return undefined;
   const [catalogField, catalogDef] = catalogs[0];
+  if (scopedByRow(catalogDef)) return undefined;
+  const leftToWrite = entries.some(([name, def]) =>
+    name !== referenceField
+    && name !== catalogField
+    && def.required === true
+    && !insertDefaults(def)
+    && def.readonly !== true
+    && !isComputedFieldType(undefined, def.type));
+  if (leftToWrite) return undefined;
   return { picker: { object: catalogDef.reference as string }, linkField: catalogField };
+}
+
+/**
+ * Does the insert fill this field when a create omits it — the engine's
+ * `applyFieldDefaults`: a non-null `defaultValue`, else a select option marked
+ * `default: true`?
+ */
+function insertDefaults(def: RelationFieldDef): boolean {
+  if (def.defaultValue != null) return true;
+  return Array.isArray(def.options) && def.options.some((o) => (o as { default?: unknown } | null)?.default === true);
+}
+
+/**
+ * Does this lookup's candidate set depend on the row it is written on — a
+ * `dependsOn` entry, or a `lookupFilters` comparand `{ $record }`? Such a
+ * lookup is no catalog (`derivedAddOf`).
+ */
+function scopedByRow(def: RelationFieldDef): boolean {
+  if (Array.isArray(def.dependsOn) && def.dependsOn.length > 0) return true;
+  if (!Array.isArray(def.lookupFilters)) return false;
+  return def.lookupFilters.some((entry) => {
+    const value = (entry as { value?: unknown } | null)?.value;
+    return !!value && typeof value === 'object' && '$record' in (value as object);
+  });
 }
 
 /** One group of a stateful child list (`statusGroupsOf`). */
