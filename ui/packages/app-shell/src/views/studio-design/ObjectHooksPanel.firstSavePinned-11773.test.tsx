@@ -89,7 +89,7 @@ beforeEach(() => {
   door.ledgerFails = false;
   door.sent.length = 0;
   door.seq = 0;
-  for (const fn of [mockClient.list, mockClient.listDrafts, mockClient.getDraft, mockClient.save]) fn.mockClear();
+  for (const fn of [mockClient.list, mockClient.listDrafts, mockClient.getDraft, mockClient.save, mockClient.publish]) fn.mockClear();
   __setCelFormulaLoader(() =>
     Promise.resolve({
       validateExpression: () => ({ ok: true, errors: [], warnings: [] }),
