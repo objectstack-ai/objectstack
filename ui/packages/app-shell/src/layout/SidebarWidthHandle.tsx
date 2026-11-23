@@ -44,6 +44,25 @@ export function SidebarWidthHandle({ width, onPreview, onCommit }: SidebarWidthH
     if (commit && start && start.last !== start.width) onCommit(start.last);
   };
 
+  // The handle can go away mid-drag: ⌘/Ctrl+B folds the sidebar, or the window
+  // narrows past 768 px, while the edge is still held. The drag then ends as a
+  // cancel: the page is selectable again and the sidebar goes back to the
+  // width it had when the drag began, the way a pointer-cancel ends it.
+  const previewRef = React.useRef(onPreview);
+  React.useEffect(() => {
+    previewRef.current = onPreview;
+  });
+  React.useEffect(
+    () => () => {
+      if (!drag.current) return;
+      drag.current = null;
+      document.body.style.removeProperty('cursor');
+      document.body.style.removeProperty('user-select');
+      previewRef.current(null);
+    },
+    [],
+  );
+
   return (
     <div
       role="separator"

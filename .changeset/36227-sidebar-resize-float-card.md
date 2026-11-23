@@ -5,7 +5,7 @@
 
 feat(console): the left sidebar resizes by its right edge, the collapsed sidebar floats as a card, and a menu opened from the float no longer leaves it folded with the menu cut off
 
-Clause-②: yes (widening) — a new `@object-ui/i18n` key (`sidebar.resize`) in all 11 locales and new exports from the app shell's sidebar module (the width range, its kept preference and the float's classes); no spec, schema or server change
+Clause-②: yes (widening) — one new `@object-ui/i18n` key (`sidebar.resize`) in all 11 locales; no spec, schema, server or published export change
 Metadata-protocol: none
 
 - **Resize** (`@object-ui/app-shell`): from 768 px up, the docked sidebar's right edge drags it between 200 and 350 px; a double-click comes back to 256; ← → move it 16 px, Home and End to either end. The width is kept in this browser (`console.sidebar.width`) and the menu floating over a collapsed sidebar takes it too. A phone's drawer keeps its own width.

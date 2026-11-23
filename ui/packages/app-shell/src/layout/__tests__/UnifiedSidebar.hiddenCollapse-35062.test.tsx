@@ -839,6 +839,41 @@ describe('the docked sidebar’s right edge resizes it, and the float takes the 
     expect(tokens(panel())).not.toContain('left-0');
   });
 
+  it('the edge going away mid-drag ends the drag as a cancel: the page is selectable again and the width goes back (⌘B, then a narrow window)', () => {
+    const body = document.body.style;
+    writeWorkspacePreference(CONSOLE_SIDEBAR_WIDTH_PREFERENCE, 'user', 300);
+    renderShell(1440);
+
+    // ⌘B folds the sidebar while the edge is held.
+    fireEvent.pointerDown(resizeHandle()!, { button: 0, clientX: 300, pointerId: 1 });
+    fireEvent.pointerMove(resizeHandle()!, { clientX: 340, pointerId: 1 });
+    expect(frameWidth()).toBe('340px');
+    expect(body.getPropertyValue('user-select')).toBe('none');
+    commandB();
+    expectHidden();
+    expect(resizeHandle()).toBeNull();
+    expect(body.getPropertyValue('user-select'), 'the page is selectable again').toBe('');
+    expect(body.getPropertyValue('cursor')).toBe('');
+    expect(frameWidth(), 'back to the width it had').toBe('300px');
+    expect(tokens(frame())).not.toContain(SIDEBAR_RESIZING_FRAME);
+    expect(keptWidth()).toBe(300);
+
+    // The window narrows past 768 px while the edge is held.
+    commandB();
+    expectDocked();
+    fireEvent.pointerDown(resizeHandle()!, { button: 0, clientX: 300, pointerId: 2 });
+    fireEvent.pointerMove(resizeHandle()!, { clientX: 220, pointerId: 2 });
+    expect(body.getPropertyValue('user-select')).toBe('none');
+    resizeTo(700);
+    expect(resizeHandle()).toBeNull();
+    expect(body.getPropertyValue('user-select')).toBe('');
+    expect(body.getPropertyValue('cursor')).toBe('');
+    expect(keptWidth()).toBe(300);
+    resizeTo(1440);
+    expect(frameWidth(), 'nothing of the drag is left behind').toBe('300px');
+    expect(tokens(frame())).not.toContain(SIDEBAR_RESIZING_FRAME);
+  });
+
   it('on a phone the drawer keeps its own width and draws no edge', () => {
     writeWorkspacePreference(CONSOLE_SIDEBAR_WIDTH_PREFERENCE, 'user', 300);
     renderShell(700);
