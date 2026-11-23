@@ -103,6 +103,7 @@ describe('PreferenceResolver.filter reads every page of the preference rows', ()
 
         expect(out).toEqual([{ recipient: 'u1', channels: ['inbox'] }]);
         expect(log.warns).toEqual([]);
+        const topicReads = data.queries.filter((q) => JSON.stringify(q.where).includes('task.assigned'));
         // The premise of the pin: the first page alone does not hold the mute.
         const first = await data.engine.find('sys_notification_preference', {
             where: { organization_id: 'org_a', topic: 'task.assigned' }, orderBy: [{ field: 'id', order: 'asc' }], limit: 2,
@@ -110,7 +111,6 @@ describe('PreferenceResolver.filter reads every page of the preference rows', ()
         expect(first.map((row: Row) => row.id)).not.toContain('p09');
         // Page by page, seeking past the last id: 2 + 2 + 2 rows, then the
         // short (empty) page ends the walk; the `*` topic is one empty page.
-        const topicReads = data.queries.filter((q) => JSON.stringify(q.where).includes('task.assigned'));
         expect(topicReads.map((q) => q.limit)).toEqual([2, 2, 2, 2]);
         expect(topicReads[1].where).toEqual({ $and: [{ organization_id: 'org_a', topic: 'task.assigned' }, { id: { $gt: 'p02' } }] });
         expect(data.queries.every((q) => JSON.stringify(q.orderBy) === JSON.stringify([{ field: 'id', order: 'asc' }]))).toBe(true);

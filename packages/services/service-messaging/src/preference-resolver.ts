@@ -269,10 +269,11 @@ export class PreferenceResolver {
      * recipients, not by the organization.
      *
      * Equality on `topic` plus the seek on `id`: no IN, so no driver needs it.
-     * A walk that cannot advance (a reader that did not apply the seek, a row
-     * with no `id`) REJECTS instead of answering with what it read, because a
-     * partial set delivers as though the missing rows did not exist. The
-     * rejection reaches {@link filter}'s fail-open path like any failed read.
+     * A walk that cannot advance past a full page (a reader that did not
+     * apply the seek, a row with no `id`) REJECTS instead of answering with
+     * what it read, because a partial set delivers as though the missing rows
+     * did not exist. The rejection reaches {@link filter}'s fail-open path
+     * like any failed read.
      */
     private async loadRows(
         data: IDataEngine,
@@ -293,12 +294,17 @@ export class PreferenceResolver {
                 { where: { ...base, topic }, pageSize: this.pageSize },
             );
             const kept: Record<string, unknown>[] = [];
+            let lastPage = 0;
             for await (const page of walk.pages()) {
+                lastPage = page.length;
                 for (const row of page) {
                     if (isGlobalDefaultUser(row.user_id) || users.has(String(row.user_id))) kept.push(row);
                 }
             }
-            if (walk.truncated) {
+            // A SHORT last page is the whole rest of the topic, so the walk read
+            // everything even when it could not take a cursor from that page.
+            // Only a FULL page it could not move past leaves rows unread.
+            if (walk.truncated && lastPage >= this.pageSize) {
                 throw new Error(
                     `${this.objectName} rows for topic '${topic}' could not be read to the end: a page did not move past ` +
                         `the last id after ${walk.scanned} row(s); refusing to filter on a partial set.`,
