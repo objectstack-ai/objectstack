@@ -3571,9 +3571,9 @@ type FieldHistoryChoice = 'default' | 'on' | 'off';
  *    resolves to for the row in front of it. A field row (one carrying a
  *    `type`) asks `resolveFieldHistory` from `@objectstack/spec/data`, the
  *    same predicate the activity writer keeps or drops values with, so the
- *    label cannot drift from the writer: off for a media, JSON or credential
- *    type unless `trackHistory: true`. The object's `enable` block resolves to
- *    on. The row cannot see the object's own `enable.fieldHistory` (a field
+ *    label cannot drift from the writer: off for a media or JSON type unless
+ *    `trackHistory: true`, and off for a credential type whatever its flags
+ *    say. The object's `enable` block resolves to on. The row cannot see the object's own `enable.fieldHistory` (a field
  *    form, a repeater row); the help text says the object's off wins.
  *  - On / Off — write `true` / `false`.
  *
