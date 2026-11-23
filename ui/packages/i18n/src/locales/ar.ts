@@ -1965,6 +1965,10 @@ const ar = {
     widgetForbiddenTitle: "لا تملك صلاحية الوصول",
     widgetForbiddenMessage: "ليست لديك صلاحية لعرض البيانات الخاصة بهذه الأداة.",
     allWidgetsForbiddenMessage: "ليست لديك صلاحية لعرض البيانات الخاصة بلوحة التحكم هذه.",
+    noCards: {
+      title: 'لا توجد بطاقات بعد',
+      message: 'لا تحتوي لوحة المعلومات هذه على بطاقات بعد.',
+    },
     details: "التفاصيل",
     openInList: "فتح في القائمة",
     inPageEdit: {

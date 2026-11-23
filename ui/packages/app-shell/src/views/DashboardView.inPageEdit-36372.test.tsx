@@ -378,3 +378,23 @@ describe('DashboardView arrival from the design mode (objectstack#36364)', () =>
     expect(client.value.layered).not.toHaveBeenCalled();
   });
 });
+
+describe('DashboardView with no cards yet (objectstack#36364)', () => {
+  it('a dashboard with no cards says so instead of drawing a blank page; one with cards does not', async () => {
+    mount({ name: 'ops_board', label: 'Payment analysis', _packageId: 'crm', widgets: [] });
+    expect(await screen.findByTestId('dashboard-no-cards')).toHaveTextContent('No cards yetThis dashboard has no cards yet.');
+    cleanup();
+    mount();
+    await screen.findAllByText('Total (served)');
+    expect(screen.queryByTestId('dashboard-no-cards')).not.toBeInTheDocument();
+  });
+
+  it('the edit state draws no such notice: the editor is the place to add cards', async () => {
+    route.state = { designModeNewDashboard: 'ops_board' };
+    route.navigate = vi.fn();
+    client.value = makeClient({ layered: vi.fn(async () => ({ code: null, overlay: null, effective: { name: 'ops_board', label: 'P', widgets: [] } })) });
+    mount({ name: 'ops_board', label: 'Payment analysis', _packageId: 'crm', widgets: [] });
+    await screen.findByTestId('dashboard-editing-badge');
+    expect(screen.queryByTestId('dashboard-no-cards')).not.toBeInTheDocument();
+  });
+});

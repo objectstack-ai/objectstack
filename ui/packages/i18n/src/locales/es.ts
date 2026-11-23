@@ -1793,6 +1793,10 @@ const es = {
     widgetForbiddenTitle: "Sin acceso",
     widgetForbiddenMessage: "No tienes permiso para ver los datos de este widget.",
     allWidgetsForbiddenMessage: "No tienes permiso para ver los datos de este panel.",
+    noCards: {
+      title: 'Aún no hay tarjetas',
+      message: 'Este panel aún no tiene tarjetas.',
+    },
     details: "Detalles",
     openInList: "Abrir en la lista",
     inPageEdit: {

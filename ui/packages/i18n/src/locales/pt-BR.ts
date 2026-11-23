@@ -1788,6 +1788,10 @@ const pt = {
     widgetForbiddenTitle: "Sem acesso",
     widgetForbiddenMessage: "Você não tem permissão para ver os dados deste widget.",
     allWidgetsForbiddenMessage: "Você não tem permissão para ver os dados deste painel.",
+    noCards: {
+      title: 'Ainda não há cartões',
+      message: 'Este painel ainda não tem cartões.',
+    },
     details: "Detalhes",
     openInList: "Abrir na lista",
     inPageEdit: {

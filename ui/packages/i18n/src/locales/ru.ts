@@ -1853,6 +1853,10 @@ const ru = {
     widgetForbiddenTitle: "Нет доступа",
     widgetForbiddenMessage: "У вас нет прав на просмотр данных этого виджета.",
     allWidgetsForbiddenMessage: "У вас нет прав на просмотр данных этой панели.",
+    noCards: {
+      title: 'Карточек пока нет',
+      message: 'На этой панели пока нет карточек.',
+    },
     details: "Подробности",
     openInList: "Открыть в списке",
     inPageEdit: {

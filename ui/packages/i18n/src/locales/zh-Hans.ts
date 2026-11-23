@@ -1805,6 +1805,10 @@ const zh = {
     widgetForbiddenTitle: '无权访问',
     widgetForbiddenMessage: '你没有查看该组件数据的权限。',
     allWidgetsForbiddenMessage: '你没有查看该仪表盘数据的权限。',
+    noCards: {
+      title: '还没有卡片',
+      message: '这个仪表盘还没有卡片。',
+    },
     details: '明细',
     openInList: '在列表中打开',
     config: {

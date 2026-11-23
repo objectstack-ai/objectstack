@@ -1733,6 +1733,10 @@ const de = {
     widgetForbiddenTitle: "Kein Zugriff",
     widgetForbiddenMessage: "Sie haben keine Berechtigung, die Daten dieses Widgets anzuzeigen.",
     allWidgetsForbiddenMessage: "Sie haben keine Berechtigung, die Daten dieses Dashboards anzuzeigen.",
+    noCards: {
+      title: 'Noch keine Karten',
+      message: 'Dieses Dashboard hat noch keine Karten.',
+    },
     details: "Details",
     openInList: "In Liste öffnen",
     inPageEdit: {

@@ -519,6 +519,18 @@ export function DashboardView({ dataSource }: { dataSource?: any }) {
                     }
                   : {})}
               />
+              {/* objectstack#36364 — a dashboard with no cards yet (one just
+                  created in the design mode, say) says so, rather than
+                  drawing a blank page. */}
+              {!editing && Array.isArray((dashboard as { widgets?: unknown }).widgets) && (dashboard as { widgets: unknown[] }).widgets.length === 0 && (
+                <Empty data-testid="dashboard-no-cards">
+                  <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-muted">
+                    <LayoutDashboard className="h-6 w-6 text-muted-foreground" aria-hidden="true" />
+                  </div>
+                  <EmptyTitle>{tt('dashboard.noCards.title', 'No cards yet')}</EmptyTitle>
+                  <EmptyDescription>{tt('dashboard.noCards.message', 'This dashboard has no cards yet.')}</EmptyDescription>
+                </Empty>
+              )}
             </DrillNavigationProvider>
          </div>
 

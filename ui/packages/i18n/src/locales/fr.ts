@@ -1789,6 +1789,10 @@ const fr = {
     widgetForbiddenTitle: "Accès refusé",
     widgetForbiddenMessage: "Vous n’avez pas l’autorisation de voir les données de ce widget.",
     allWidgetsForbiddenMessage: "Vous n’avez pas l’autorisation de voir les données de ce tableau de bord.",
+    noCards: {
+      title: 'Pas encore de cartes',
+      message: 'Ce tableau de bord n’a pas encore de cartes.',
+    },
     details: "Détails",
     openInList: "Ouvrir dans la liste",
     inPageEdit: {

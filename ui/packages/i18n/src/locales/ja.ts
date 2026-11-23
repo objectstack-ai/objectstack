@@ -1733,6 +1733,10 @@ const ja = {
     widgetForbiddenTitle: "アクセス権がありません",
     widgetForbiddenMessage: "このウィジェットのデータを表示する権限がありません。",
     allWidgetsForbiddenMessage: "このダッシュボードのデータを表示する権限がありません。",
+    noCards: {
+      title: 'カードはまだありません',
+      message: 'このダッシュボードにはまだカードがありません。',
+    },
     details: "詳細",
     openInList: "リストで開く",
     inPageEdit: {

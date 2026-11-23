@@ -1805,6 +1805,10 @@ const zhHant = {
     widgetForbiddenTitle: '無權訪問',
     widgetForbiddenMessage: '你沒有檢視該元件資料的權限。',
     allWidgetsForbiddenMessage: '你沒有檢視該儀表盤資料的權限。',
+    noCards: {
+      title: '還沒有卡片',
+      message: '這個儀表盤還沒有卡片。',
+    },
     details: '明細',
     openInList: '在列表中開啟',
     config: {
