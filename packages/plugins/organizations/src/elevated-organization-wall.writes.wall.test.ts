@@ -6,11 +6,9 @@
  * one the wall may deny (`elevated-organization-wall.wall.test.ts` holds the
  * read and denial matrix):
  *
- * - a write that names an organization names one the caller's wall admits,
- *   and an update never empties the organization of a row: a member of one
- *   organization's action body can neither land a new row in another
- *   organization nor move a row there (ADR-0095 D1; the plain door's answer
- *   is `403 PERMISSION_DENIED`);
+ * - a write whose own data names an organization the caller's wall does not
+ *   admit, and an update whose own data empties a row's organization, are
+ *   refused `403 PERMISSION_DENIED`;
  * - the row a by-id write names is judged where the write runs: inside the
  *   body's own transaction, a row the transaction wrote is the caller's to
  *   write again, as at the plain door.
@@ -161,7 +159,7 @@ describe('an app-authored elevation’s writes are judged by its caller’s orga
   });
 
   describe('a member with an active organization', () => {
-    it('an action body handler cannot land a new row in another organization', async () => {
+    it('an action body handler’s insert that names another organization is refused', async () => {
       await reseed();
       const r = await run(alice, 'eoww_land', { name: 'LAND-B', org: orgB });
       expect(r.status, JSON.stringify(r.body)).toBe(403);
@@ -169,7 +167,7 @@ describe('an app-authored elevation’s writes are judged by its caller’s orga
       expect(await rowNamed('LAND-B')).toBeUndefined();
     });
 
-    it('a declared action body cannot land a new row in another organization', async () => {
+    it('a declared action body’s insert that names another organization is refused', async () => {
       await reseed();
       const r = await run(alice, 'eoww_body_land', { name: 'BODY-LAND-B', org: orgB });
       expect(r.status, JSON.stringify(r.body)).toBe(403);
@@ -177,7 +175,7 @@ describe('an app-authored elevation’s writes are judged by its caller’s orga
       expect(await rowNamed('BODY-LAND-B')).toBeUndefined();
     });
 
-    it('an action body handler cannot move its organization’s row into another organization', async () => {
+    it('an action body handler’s update that names another organization is refused', async () => {
       await reseed();
       const a1 = await rowNamed('A1');
       const r = await run(alice, 'eoww_move', { target: a1!.id, org: orgB });
@@ -186,7 +184,7 @@ describe('an app-authored elevation’s writes are judged by its caller’s orga
       expect((await rowNamed('A1'))!.organization_id).toBe(orgA);
     });
 
-    it('a declared action body cannot move its organization’s row into another organization', async () => {
+    it('a declared action body’s update that names another organization is refused', async () => {
       await reseed();
       const a1 = await rowNamed('A1');
       const r = await run(alice, 'eoww_body_move', { target: a1!.id, org: orgB });
@@ -195,7 +193,7 @@ describe('an app-authored elevation’s writes are judged by its caller’s orga
       expect((await rowNamed('A1'))!.organization_id).toBe(orgA);
     });
 
-    it('an action body handler cannot leave its organization’s row in no organization', async () => {
+    it('an action body handler’s update that empties the organization is refused', async () => {
       await reseed();
       const a1 = await rowNamed('A1');
       const r = await run(alice, 'eoww_move', { target: a1!.id, org: null });

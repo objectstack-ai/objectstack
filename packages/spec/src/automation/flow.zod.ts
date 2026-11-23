@@ -1295,8 +1295,7 @@ export const FlowSchema = lazySchema(() => strictObject(
         'would change the ledger row; an insert is not judged by this rule. ' +
         "Nor does it lift the organization wall: a system run for a user has its reads and writes judged by that " +
         "user's organization wall. A write whose own data names an organization outside it, or empties a record's " +
-        'organization, is refused with PERMISSION_DENIED, and a by-id write of a record outside it answers as a ' +
-        'record that is not there. Where the wall denies the user (no active organization under isolated, no ' +
+        'organization, is refused with PERMISSION_DENIED. Where the wall denies the user (no active organization under isolated, no ' +
         "membership under group), its reads of an organization's records return none, its deletes remove none, and " +
         'its other writes are refused with PERMISSION_DENIED. A run that began for no caller is not judged by it, ' +
         'after an approval decision too. ' +

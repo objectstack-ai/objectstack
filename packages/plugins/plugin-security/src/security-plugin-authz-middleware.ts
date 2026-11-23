@@ -731,10 +731,9 @@ export function registerAuthzMiddleware(
     // nothing (the read rule), and every other write there is refused naming
     // the missing organization; a write that names or empties the organization
     // is judged for every caller. The wall is the caller's own Layer 0, over
-    // the caller's own context, so its exemptions are the plain door's. Where
-    // the engine's projection of the same verdict already is that wall, the
-    // operation passes on to the bypass unasked; an elevation with no caller,
-    // and every platform system context, pass on unchanged. See
+    // the caller's own context, so its exemptions are the plain door's. An
+    // elevation with no caller, and every platform system context, pass on
+    // unchanged. See
     // `app-automation-organization-wall.ts`.
     await applyAppAutomationOrganizationWall(opCtx, {
       isFederated: (object) => isFederatedObject(typeof ql?.getSchema === 'function' ? ql.getSchema(object) : undefined),

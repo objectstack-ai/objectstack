@@ -1495,7 +1495,7 @@ const actionObject = () => strictObject({
   body: HookBodySchema.optional().describe(
     'Action body — expression (L1) or sandboxed JS (L2). Only used when type is `script`. '
       + "An action body runs as system, and its update, transfer, delete, purge or restore of an object declared managedBy: 'append-only' is refused with PERMISSION_DENIED; an insert is not judged by this rule. "
-      + "Its system elevation does not lift the organization wall: the body has its reads and writes judged by the invoking user's organization wall. A write whose own data names an organization outside it, or empties a record's organization, is refused with PERMISSION_DENIED, and a by-id write of a record outside it answers as a record that is not there. Where the wall denies the user (no active organization under isolated, no membership under group), its reads of an organization's records return none, its deletes remove none, and its other writes are refused with PERMISSION_DENIED.",
+      + "Its system elevation does not lift the organization wall: the body has its reads and writes judged by the invoking user's organization wall. A write whose own data names an organization outside it, or empties a record's organization, is refused with PERMISSION_DENIED. Where the wall denies the user (no active organization under isolated, no membership under group), its reads of an organization's records return none, its deletes remove none, and its other writes are refused with PERMISSION_DENIED.",
   ),
 
   /**

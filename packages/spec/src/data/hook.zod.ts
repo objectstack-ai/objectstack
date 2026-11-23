@@ -899,8 +899,8 @@ export const HookSchema = lazySchema(() => strictObject(
         "declared managedBy: 'append-only' is refused with PERMISSION_DENIED; an insert is not judged by this rule. " +
         "Nor does it lift the organization wall: a system hook has its reads and writes judged by the organization " +
         "wall of the user whose write fired it. A write whose own data names an organization outside it, or empties " +
-        "a record's organization, is refused with PERMISSION_DENIED, and a by-id write of a record outside it answers " +
-        'as a record that is not there. Where the wall denies the user (no active organization under isolated, no ' +
+        "a record's organization, is refused with PERMISSION_DENIED. " +
+        'Where the wall denies the user (no active organization under isolated, no ' +
         "membership under group), its reads of an organization's records return none, its deletes remove none, and " +
         'its other writes are refused with PERMISSION_DENIED. A hook under a write of a flow run that began for no ' +
         'caller is not judged by it. ' +

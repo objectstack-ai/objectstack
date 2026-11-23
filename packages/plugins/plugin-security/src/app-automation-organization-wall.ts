@@ -25,8 +25,8 @@
  * caller's own permission sets, so its exemptions are the plain door's: an
  * object outside tenancy, an object with no organization column, a platform
  * operator crossing the wall on an object whose posture permits it, and the
- * verified platform owner's read are answered as that door answers them. The
- * verdict judges the operation:
+ * verified platform owner's read are answered as that door answers them.
+ * Where this module applies the verdict to an operation:
  *
  * - a read takes the wall's filter on its predicate (the deny sentinel, the
  *   active organization, or the `group` membership set), and the verdict is
@@ -147,13 +147,11 @@ function carriesActiveOrganization(context: Record<string, unknown>): boolean {
 }
 
 /**
- * Can the engine's own projection fall short of the caller's wall for this
- * context? True when the context carries no active organization, no
- * membership set, or an empty one (the states the wall can deny, or where the
- * engine cannot see the caller's union), and for a platform operator (whose
- * crossing the engine does not grant). Every other caller is scoped by the
- * engine's projection of the same verdict, so the common elevation pays no
- * resolution here.
+ * Does this context call for the wall's own verdict? True when it carries no
+ * active organization, no membership set, or an empty one (the states the
+ * wall can deny, or where the caller's union is not carried), and for a
+ * platform operator (whose crossing is the wall's to decide). Every other
+ * caller is judged by the engine's projection of the same verdict.
  */
 export function callerMayLackOrganization(callerContext: Record<string, unknown>): boolean {
   if (!carriesActiveOrganization(callerContext)) return true;
@@ -357,15 +355,12 @@ export async function applyAppAutomationOrganizationWall(
   const verb = rlsOperationForVerb(operation);
   const isWrite = WRITE_CLASS.has(verb);
   const rows = isWrite && verb !== REMOVAL ? payloadRows(opCtx.data) : [];
-  // [ADR-0095 D1] A write whose payload names an organization, or an update
-  // that empties the column, is judged for EVERY caller, as the plain door
-  // judges it: the engine keeps an elevated payload's organization as sent,
-  // so no projection of the wall reaches it. The common elevation, which
-  // names none, pays nothing for this.
+  // [ADR-0095 D1] A write whose own data names an organization, or an update
+  // whose own data empties the column, is judged for EVERY caller.
   const touchesOrganization = rows.some((row) => namesOrganization(row) || (verb === 'update' && emptiesOrganization(row)));
-  // Always asked: a federated object (the engine projects no driver scope
-  // there), a decided segment (its own facts are the decider's), and a write
-  // that names or empties the organization.
+  // Judged by the wall's own verdict: a federated object, a decided segment
+  // (judged by its run's caller), and a write whose own data names or empties
+  // the organization.
   const alwaysAsked = deps.isFederated(object) || caller.decided === true || touchesOrganization;
   if (!alwaysAsked && !callerMayLackOrganization(caller.callerContext)) return;
 

@@ -22,7 +22,7 @@ The rule: elevation lifts a caller's business rules, never the organization wall
 - TO: the caller's own organization wall decides it:
   - with no active organization under `isolated`, an empty membership set under `group`, or no membership at all under `single`: its reads of a tenant-scoped object resolve to nothing (zero rows, no error); its delete and purge are answered by that read rule (a predicate delete matches nothing, a by-id delete answers `404 RECORD_NOT_FOUND`); and its other writes (insert, update, transfer, and the recycle bin's restore) are refused with `403 PERMISSION_DENIED`, naming the missing active organization or membership;
   - under `group`, a member reads and writes the union of the organizations they hold a membership in, with or without an active organization;
-  - its reads and predicate writes take the caller's wall on their predicate, and a by-id write of a row outside it answers `404 RECORD_NOT_FOUND`, as a row that is not there; a federated object included;
+  - on a federated object it reads only rows of the caller's organization scope, and a by-id write of a row outside it answers `404 RECORD_NOT_FOUND`, as a row that is not there;
   - an insert with no active organization on a walled tenant object is refused with `403 PERMISSION_DENIED`;
   - for every caller, an active organization included: a write whose own data names an organization outside the caller's wall, and an update whose own data empties a row's organization, are refused with `403 PERMISSION_DENIED`;
   - the check of the row a by-id write names is read inside the transaction the write carries, so a row the body's own transaction wrote is the caller's to write again in it;

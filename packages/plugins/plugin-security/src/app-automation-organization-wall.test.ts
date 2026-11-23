@@ -131,7 +131,7 @@ describe('an app-authored elevation is judged by its caller’s organization wal
         }
       });
 
-      it('control: a caller with an active organization and its membership set is not asked anything', async () => {
+      it('control: a caller with an active organization and its membership set reads under the engine’s scope of its own wall', async () => {
         const deps = depsFor(ORG_A);
         const opCtx: any = { object: 'task', operation: 'find', context: context({ tenantId: 'org_a' }), ast: { object: 'task', where: { a: 1 } } };
         await applyAppAutomationOrganizationWall(opCtx, deps);
@@ -258,7 +258,7 @@ describe('an app-authored elevation is judged by its caller’s organization wal
       expect(deps.completeCaller).not.toHaveBeenCalled();
     });
 
-    it('may-lack: no active organization, an absent or empty membership set, and a platform operator are all asked', () => {
+    it('may-lack: no active organization, an absent or empty membership set, and a platform operator are judged by the wall’s own verdict', () => {
       expect(callerMayLackOrganization({ accessible_org_ids: ['org_a'] })).toBe(true);
       expect(callerMayLackOrganization({ tenantId: 'org_a' })).toBe(true);
       expect(callerMayLackOrganization({ tenantId: 'org_a', accessible_org_ids: [] })).toBe(true);
@@ -419,7 +419,7 @@ describe('an app-authored elevation is judged by its caller’s organization wal
       expect(deps.callerLayer0).not.toHaveBeenCalled();
     });
 
-    it('a decided segment is always asked, though the caller’s own facts would leave it to the engine', async () => {
+    it('a decided segment is judged by the wall of the run’s caller', async () => {
       const decided = markRunCaller(
         systemFlow({ userId: 'u_decider', tenantId: 'org_a', accessible_org_ids: ['org_c'], posture: 'MEMBER' }),
         'u_alice',
