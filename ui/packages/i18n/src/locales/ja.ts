@@ -3576,8 +3576,8 @@ const ja = {
     resize: 'サイドバーの幅を調整',
   },
   designMode: {
-    title: 'デザインモード',
-    leaveUnsaved: 'デザインモードを終了しますか？保存されていない変更は失われます。',
+    title: 'レイアウトをデザイン',
+    leaveUnsaved: 'レイアウトのデザインを終了しますか？保存されていない変更は失われます。',
     saveFailed: '一部の変更が保存されませんでした：{{reason}}',
     menu: {
       title: 'メニュー',
@@ -3620,7 +3620,7 @@ const ja = {
       newDashboard: '新しいダッシュボード…',
       newDashboardTitle: '新しいダッシュボード',
       newReport: '新規レポート…',
-      newItemSavesAll: '作成すると、デザインモードの他の変更も保存され、編集用に開きます。',
+      newItemSavesAll: '作成すると、レイアウトのデザインでの他の変更も保存され、編集用に開きます。',
       create: '作成',
       creating: '作成中…',
       newItemPendingDraft: 'この名前の未公開の下書きがすでにあります。もう一度お試しください。',
@@ -3689,8 +3689,10 @@ const ja = {
     },
     aiAssistant: "AI アシスタント",
     designInStudio: "Studio でデザイン",
+    designLayout: "レイアウトをデザイン",
     editApp: "アプリを編集",
     openAppInStudio: "Studio で {{app}} を表示",
+    viewInStudio: "Studio で表示",
   },
   home: {
     build: {
@@ -3920,7 +3922,7 @@ const ja = {
     appOpensFromMenuDescription: "このアプリには専用のページがありません。メニューの項目を選んで、リンクを開くか操作を実行してください。",
     // objectstack#36748 — an app whose stored menu is empty, for a caller who can fill it.
     appMenuEmpty: "{{app}} のメニューはまだ空です",
-    appMenuEmptyDescription: "Studio でこのアプリのオブジェクトを作成すると、メニューに自動で追加されます。デザインモードで追加することもできます。",
+    appMenuEmptyDescription: "Studio でこのアプリのオブジェクトを作成すると、メニューに自動で追加されます。「レイアウトをデザイン」で追加することもできます。",
     openInStudio: "Studio で開く",
     openSetup: "設定を開く",
     createFirstApp: "最初のアプリを作成",
