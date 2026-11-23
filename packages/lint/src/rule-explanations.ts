@@ -4825,6 +4825,20 @@ const RELATED_LIST_ATTACHMENTS_OFF_EXPLANATION: RuleExplanation = {
   ],
 };
 
+const RELATED_LIST_STREAM_OFF_EXPLANATION: RuleExplanation = {
+  rule: 'related-list-stream-off',
+  covers: "'sys_activity' in relatedLists with every stream source off",
+  paragraphs: [
+    "`'sys_activity'` in `relatedLists` places the record page's activity stream tab. The stream merges three " +
+      'sources, each switched by the object: the discussion (`enable.feeds`), activities (`enable.activities`) ' +
+      'and field changes (`enable.trackHistory`). When `feeds` and `activities` are both `false` and ' +
+      '`trackHistory` is not `true`, the stream has nothing to show and the default record page draws no tab, ' +
+      'so the entry places nothing.',
+    'A warning, not an error: the entry is not wrong in itself and becomes live the moment any source is ' +
+      "turned back on. Turn a source on to show the stream, or remove `'sys_activity'`.",
+  ],
+};
+
 const RELATED_LIST_STREAM_PART_EXPLANATION: RuleExplanation = {
   rule: 'related-list-stream-part',
   covers: 'a relatedLists entry naming a part of the activity stream',
@@ -6882,6 +6896,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [RELATED_LIST_GROUP_NOT_BODY_EXPLANATION.rule]: RELATED_LIST_GROUP_NOT_BODY_EXPLANATION,
   [RELATED_LIST_COLUMN_UNKNOWN_EXPLANATION.rule]: RELATED_LIST_COLUMN_UNKNOWN_EXPLANATION,
   [RELATED_LIST_ATTACHMENTS_OFF_EXPLANATION.rule]: RELATED_LIST_ATTACHMENTS_OFF_EXPLANATION,
+  [RELATED_LIST_STREAM_OFF_EXPLANATION.rule]: RELATED_LIST_STREAM_OFF_EXPLANATION,
   [RELATED_LIST_STREAM_PART_EXPLANATION.rule]: RELATED_LIST_STREAM_PART_EXPLANATION,
   [EXTENSION_PLACEMENT_NOT_APPLIED_EXPLANATION.rule]: EXTENSION_PLACEMENT_NOT_APPLIED_EXPLANATION,
   [EXTENSION_PLACEMENT_ANCHOR_MISSING_EXPLANATION.rule]: EXTENSION_PLACEMENT_ANCHOR_MISSING_EXPLANATION,
