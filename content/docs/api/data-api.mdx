@@ -471,6 +471,10 @@ Offered only on an object the platform gives a reassignable owner and whose
 included. The switch gates this action only: a plain `owner_id` update (an
 import, a hook, a `PATCH`) still needs the transfer grant and nothing else.
 
+An object whose owning package is disabled is refused first, before its switch
+is read, with the data door's own `404 OBJECT_PACKAGE_DISABLED`: nothing is
+written and nobody is notified. Re-enable the package to change owners again.
+
 **Body**: exactly one target, and an optional notification.
 
 ```json
@@ -503,8 +507,10 @@ A queue move answers `"ownerId": null, "queue": "support_triage"`.
 The same for a list of records: one by-id update per record, each under the
 same rules as the single route. Takes up to **500** ids; an empty list, a list
 over 500 and a list naming an id twice are refused `400` before anything is
-written. An object that does not offer Change Owner is refused as a whole,
-`403 CHANGE_OWNER_DISABLED`, before any record is read.
+written. An object of a disabled package is refused as a whole,
+`404 OBJECT_PACKAGE_DISABLED`, and an object that does not offer Change Owner
+`403 CHANGE_OWNER_DISABLED`, both before any record is read, written or
+notified.
 
 **Body**: `{ "ids": ["lead_1", "lead_2"], "ownerId": "usr_123", "notify": true }`
 (or `queue` in place of `ownerId`).

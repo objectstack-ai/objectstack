@@ -4,10 +4,18 @@
 '@objectstack/spec': patch
 ---
 
-fix(core): Change Owner refuses an object of a disabled package `404 OBJECT_PACKAGE_DISABLED`
+fix(core)!: Change Owner refuses an object of a disabled package with the data door's `404 OBJECT_PACKAGE_DISABLED`
 
-Clause-②: no
+Clause-②: yes (narrowing) — `@objectstack/core` gains the root export `objectPackageDisabledError`, and both Change Owner doors newly answer `404 OBJECT_PACKAGE_DISABLED` for an object of a disabled package, which they answered `200` before
 Metadata-protocol: none
+Skills-docs: none — no page under `skills/` teaches Change Owner; the refusal carries the data door's own sentence, which names the fix
+
+<!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no stored row, registry key or authored value changes. What moves is the answer the two Change Owner doors give for an object whose owning package is disabled, an answer that returns to what it was the moment the package is re-enabled; there is nothing for a migration to rewrite and no tombstone. -->
+
+**BREAKING** for a caller that changes owners on a disabled package's object.
+
+- FROM: `POST /api/v1/data/:object/:id/change-owner` and `POST /api/v1/data/:object/change-owner` answered `200` for an object of a disabled package: the owner changed and, when asked, the notification was sent.
+- TO: both doors answer `404 OBJECT_PACKAGE_DISABLED`, naming the object, in the data door's words; nothing is written or sent. The fix for a caller: re-enable the package.
 
 `POST /api/v1/data/:object/:id/change-owner` and `POST /api/v1/data/:object/change-owner` changed owners, and sent owner-change notifications, on records of an object whose owning package was disabled, although every `/data` write refuses such an object. `changeRecordOwner` and `changeRecordsOwner` now ask the engine registry's `isObjectPackageDisabled` before the object's Change Owner switch is read, and refuse the whole call with the data door's own envelope (`code: 'OBJECT_PACKAGE_DISABLED'`, `status: 404`, the object name on `object`) before any user lookup, write or notification. Re-enabling the package restores the action; nothing is cached.
 
