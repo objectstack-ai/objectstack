@@ -258,13 +258,15 @@ const NO_OBJECTS: ObjectCatalogEntry[] = [];
  * `header` drops them and separates the items with dots, at the header's meta
  * size. Each item keeps its `Label:` caption and its value as sibling spans.
  *
- * objectui#13135 — the header lays its items out as a one-row grid whose
- * columns may shrink to nothing (`minmax(0, max-content)`), so the row's own
- * minimum width is near zero and it fits the meta slot instead of overflowing
- * it. Each item then truncates with an ellipsis, and a cut item names its
- * whole `Label: value` on hover. The row never wraps, so the header keeps its
- * height. (A flex row cannot do it: its minimum width is the sum of its
- * items' text, so the slot clipped it mid-word with no ellipsis.)
+ * objectstack#36745 — the header row gives way item by item, never all at
+ * once. Every item keeps its whole text; when the row cannot hold them all,
+ * they drop from the end (On error, then version, then Run as), and the row's
+ * hover text names each dropped item's whole `Label: value`. Trigger and
+ * Status are the floor: when the row cannot hold those two whole, every item
+ * hides and the slot shows nothing. The row never wraps, so the header keeps
+ * its height. (It replaces objectui#13135's shrinking grid, whose columns all
+ * gave way together: with the property panel open every item read as one
+ * character.) See {@link FlowMetaHeaderRow}.
  */
 export function FlowMetaPills({
   draft,
@@ -286,66 +288,139 @@ export function FlowMetaPills({
   const header = variant === 'header';
   const catalog = useObjectCatalog();
   const trigger = flowTriggerLabel(draft, nodes, catalog.status === 'loaded' ? catalog.data : NO_OBJECTS, locale);
-  const items: React.ReactNode[] = [
+  // `whole` is the item's whole text, which the header row's hover text names
+  // when the item has given way (objectstack#36745).
+  const items: Array<{ key: string; whole: string; node: React.ReactNode }> = [];
+  const add = (key: string, whole: string, node: React.ReactElement) => items.push({ key, whole, node });
+  const triggerLabel = tr('engine.flowPreview.pill.trigger', locale);
+  const statusLabel = tr('engine.flowPreview.pill.status', locale);
+  const runAsLabel = tr('engine.flowPreview.pill.runAs', locale);
+  const runAsValue = translateFlowMeta('runAs', runAs, locale);
+  add(
+    'trigger',
+    `${triggerLabel}: ${trigger.value}`,
     <Pill
       key="trigger"
       icon={header ? undefined : Zap}
-      label={tr('engine.flowPreview.pill.trigger', locale)}
+      label={triggerLabel}
       value={trigger.value}
       title={trigger.title}
       compact={header}
     />,
+  );
+  add(
+    'status',
+    `${statusLabel}: ${runView.label}`,
     <Pill
       key="status"
       icon={header ? undefined : CircleDot}
-      label={tr('engine.flowPreview.pill.status', locale)}
+      label={statusLabel}
       value={runView.label}
       tone={runView.tone}
       title={runView.title}
       compact={header}
     />,
-    <Pill
-      key="runAs"
-      icon={header ? undefined : Settings2}
-      label={tr('engine.flowPreview.pill.runAs', locale)}
-      value={translateFlowMeta('runAs', runAs, locale)}
-      compact={header}
-    />,
-  ];
+  );
+  add(
+    'runAs',
+    `${runAsLabel}: ${runAsValue}`,
+    <Pill key="runAs" icon={header ? undefined : Settings2} label={runAsLabel} value={runAsValue} compact={header} />,
+  );
   if (version) {
-    items.push(
-      header ? (
-        <span key="version" className="truncate">
-          v{version}
-        </span>
-      ) : (
-        <Pill key="version" label="v" value={version} />
-      ),
+    add(
+      'version',
+      `v${version}`,
+      header ? <span key="version">v{version}</span> : <Pill key="version" label="v" value={version} />,
     );
   }
   if (onError) {
-    items.push(
+    const onErrorLabel = tr('engine.flowPreview.pill.onError', locale);
+    const onErrorValue = translateFlowMeta('onError', onError, locale);
+    add(
+      'onError',
+      `${onErrorLabel}: ${onErrorValue}`,
       <Pill
         key="onError"
         icon={header ? undefined : GitBranch}
-        label={tr('engine.flowPreview.pill.onError', locale)}
-        value={translateFlowMeta('onError', onError, locale)}
+        label={onErrorLabel}
+        value={onErrorValue}
         compact={header}
       />,
     );
   }
-  if (!header) return <>{items}</>;
+  if (!header) return <>{items.map((item) => item.node)}</>;
+  return <FlowMetaHeaderRow items={items} />;
+}
+
+/**
+ * objectstack#36745 — how many of the header's meta items the row shows, from
+ * the front: as many whole items as fit `available`, each item's `widths`
+ * entry being its whole width with its leading separator. Fewer than `floor`
+ * (Trigger and Status) ⇒ 0: the row shows nothing rather than half of the
+ * two items it always leads with. A half-pixel of slack absorbs the
+ * fractional widths a browser reports.
+ */
+export function fitFlowMetaItems(widths: readonly number[], available: number, floor = 2): number {
+  let used = 0;
+  let shown = 0;
+  for (const width of widths) {
+    if (used + width > available + 0.5) break;
+    used += width;
+    shown += 1;
+  }
+  return shown < Math.min(floor, widths.length) ? 0 : shown;
+}
+
+/**
+ * objectstack#36745 — the header's meta row. Every item is laid out whole, in
+ * order, each after its `·` separator; the row takes the meta slot's width and
+ * clips. After each render and on every resize it measures each item's own
+ * width and the row's, keeps the first {@link fitFlowMetaItems} items, and
+ * makes the rest invisible (still laid out, so still measured: an item that
+ * fits again comes back when the row widens). The row's hover text names each
+ * hidden item's whole text, one per line; with nothing hidden it has none.
+ */
+function FlowMetaHeaderRow({ items }: { items: ReadonlyArray<{ key: string; whole: string; node: React.ReactNode }> }) {
+  const rowRef = React.useRef<HTMLSpanElement | null>(null);
+  const [shown, setShown] = React.useState(items.length);
+  const fit = React.useCallback(() => {
+    const row = rowRef.current;
+    if (!row) return;
+    const widths = Array.from(row.children, (el) => el.getBoundingClientRect().width);
+    setShown(fitFlowMetaItems(widths, row.getBoundingClientRect().width));
+  }, []);
+  // Every render: an item's text can change without the row resizing.
+  React.useLayoutEffect(fit);
+  React.useEffect(() => {
+    const row = rowRef.current;
+    if (!row || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(fit);
+    observer.observe(row);
+    return () => observer.disconnect();
+  }, [fit]);
+  const dropped = items.slice(shown).map((item) => item.whole);
   return (
-    <span className="inline-grid min-w-0 max-w-full auto-cols-[minmax(0,max-content)] grid-flow-col items-center gap-x-1.5">
+    <span
+      ref={rowRef}
+      data-testid="flow-meta-row"
+      data-shown={shown}
+      title={dropped.length ? dropped.join('\n') : undefined}
+      className="flex min-w-0 flex-1 items-center overflow-hidden whitespace-nowrap"
+    >
       {items.map((item, i) => (
-        <React.Fragment key={i}>
+        <span
+          key={item.key}
+          data-meta-item={item.key}
+          aria-hidden={i < shown ? undefined : true}
+          className={`inline-flex shrink-0 items-center gap-x-1.5${i > 0 ? ' pl-1.5' : ''}${i < shown ? '' : ' invisible'}`}
+        >
           {i > 0 && (
             <span aria-hidden className="text-muted-foreground/50">
               ·
             </span>
           )}
-          {item}
-        </React.Fragment>
+          {item.node}
+        </span>
       ))}
     </span>
   );
@@ -812,11 +887,6 @@ function Pill({
   /** The item header's meta (objectui#12454): the value at the caption's weight, plain text muted. */
   compact?: boolean;
 }) {
-  const ref = React.useRef<HTMLSpanElement | null>(null);
-  const cut = useCutText(ref, compact);
-  // objectui#13135 — a cut header item says its whole text first, then the
-  // hover text it already had (the run status's reason, the object's name).
-  const hover = cut ? [`${label}: ${value}`, title].filter(Boolean).join('\n') : title;
   const cls =
     tone === 'green'
       ? 'text-emerald-700 dark:text-emerald-400'
@@ -826,34 +896,11 @@ function Pill({
           ? 'text-muted-foreground'
           : 'text-foreground';
   return (
-    <span ref={ref} className={compact ? 'min-w-0 truncate' : 'inline-flex items-center gap-1'} title={hover}>
+    <span className={compact ? 'whitespace-nowrap' : 'inline-flex items-center gap-1'} title={title}>
       {Icon && <Icon className="h-3 w-3 text-muted-foreground" />}
       <span className="text-muted-foreground">{label}:</span>
       <span className={compact ? `ml-1 ${cls}` : `font-medium ${cls}`}>{value}</span>
     </span>
   );
-}
-
-/**
- * objectui#13135 — whether the element's text is cut (wider than its box),
- * measured on every render and on resize, as the Studio header's title
- * measures its own (objectui#12897). `false` while `enabled` is off.
- */
-function useCutText(ref: React.RefObject<HTMLElement | null>, enabled: boolean): boolean {
-  const [cut, setCut] = React.useState(false);
-  const measure = React.useCallback(() => {
-    const el = ref.current;
-    setCut(enabled && !!el && el.scrollWidth > el.clientWidth + 0.5);
-  }, [ref, enabled]);
-  // Every render: the text can change without the box resizing.
-  React.useLayoutEffect(measure);
-  React.useEffect(() => {
-    const el = ref.current;
-    if (!enabled || !el || typeof ResizeObserver === 'undefined') return;
-    const observer = new ResizeObserver(measure);
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [ref, enabled, measure]);
-  return cut;
 }
 
