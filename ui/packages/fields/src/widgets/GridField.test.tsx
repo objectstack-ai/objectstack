@@ -1575,4 +1575,43 @@ describe('GridField — the lazy face the package exports (objectstack#36102)', 
     const cell = screen.getByTestId('line-items').querySelector('input[aria-label="Description"]') as HTMLInputElement;
     expect(cell.value).toBe('Widget');
   });
+
+  // objectstack#36451 — a host that renders the face without preloading, whose
+  // first request for the body fails once (a network blip, a deploy that
+  // swapped chunk names), must not keep that failure for the whole session.
+  it('a mount after a failed load of the body renders the grid once the body is reachable, with no reload', async () => {
+    class Boundary extends React.Component<{ children: React.ReactNode }, { failed: boolean }> {
+      state = { failed: false };
+      static getDerivedStateFromError() {
+        return { failed: true };
+      }
+      render() {
+        return this.state.failed ? <div data-testid="grid-load-failed" /> : this.props.children;
+      }
+    }
+    vi.resetModules();
+    let failNextLoad = true;
+    vi.doMock('./grid-field/GridFieldWidget', async (importOriginal) => {
+      if (failNextLoad) {
+        failNextLoad = false;
+        throw new Error('Failed to fetch dynamically imported module: fields-grid');
+      }
+      return importOriginal();
+    });
+    const quiet = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const face = await import('./GridField');
+      const first = render(<Boundary><face.GridField value={lines} onChange={() => {}} field={field} /></Boundary>);
+      await screen.findByTestId('grid-load-failed');
+      first.unmount();
+
+      render(<Boundary><face.GridField value={lines} onChange={() => {}} field={field} /></Boundary>);
+      const cell = (await screen.findByTestId('line-items')).querySelector('input[aria-label="Description"]') as HTMLInputElement;
+      expect(cell.value).toBe('Widget');
+      expect(screen.queryByTestId('grid-load-failed')).toBeNull();
+    } finally {
+      quiet.mockRestore();
+      vi.doUnmock('./grid-field/GridFieldWidget');
+    }
+  });
 });
