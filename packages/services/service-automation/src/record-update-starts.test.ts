@@ -195,6 +195,12 @@ describe('AutomationEngine.listRecordUpdateStarts — approval reached through a
         expect(startsApproval()).toBe(false);
     });
 
+    it('does not follow a call to a disabled flow: its run is refused, so it starts no approval', () => {
+        engine.registerFlow('signoff', { ...calledFlow('signoff', { approval: true }), status: 'obsolete' } as any);
+        engine.registerFlow('closure', closureCalling('signoff'));
+        expect(startsApproval()).toBe(false);
+    });
+
     it('does not follow a call to a flow the engine does not hold', () => {
         engine.registerFlow('closure', closureCalling('never_registered'));
         expect(startsApproval()).toBe(false);
