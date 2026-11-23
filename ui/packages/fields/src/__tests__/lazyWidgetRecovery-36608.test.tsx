@@ -68,6 +68,8 @@ describe('recoverableLazy', () => {
 
     render(tree(Widget));
     expect(screen.getByTestId('widget-loaded')).toBeTruthy();
+    // `load()` hands over the widget itself, through the same request.
+    expect(await Widget.load()).toBe(Loaded);
     expect(loader).toHaveBeenCalledTimes(1);
   });
 

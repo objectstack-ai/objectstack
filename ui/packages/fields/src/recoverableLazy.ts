@@ -13,6 +13,17 @@ import React from 'react';
 /** What `React.lazy` takes: a dynamic import of a module whose `default` is the component. */
 export type LazyWidgetLoader<C extends React.ComponentType<any>> = () => Promise<{ default: C }>;
 
+/**
+ * The component {@link recoverableLazy} returns. `load()` resolves to the
+ * loaded widget itself, through the same shared request a mount makes (and,
+ * like a mount, asks again after a failure). It is the seam a caller that
+ * needs the widget's own function, not an element of it, reads instead of
+ * `React.lazy`'s private fields; hosts render the component and never need it.
+ */
+export type RecoverableLazyComponent<C extends React.ComponentType<any>> = React.ComponentType<
+  React.ComponentProps<C>
+> & { load(): Promise<C> };
+
 /** One request for the chunk, shared by every mount that asks while it stands. */
 interface LoadAttempt {
   readonly Lazy: React.ComponentType<any>;
@@ -49,14 +60,24 @@ interface LoadAttempt {
  */
 export function recoverableLazy<C extends React.ComponentType<any>>(
   loader: LazyWidgetLoader<C>,
-): React.ComponentType<React.ComponentProps<C>> {
+): RecoverableLazyComponent<C> {
   let current: LoadAttempt | undefined;
+  // The import in flight, shared by every attempt and by `load()`; forgotten
+  // on failure, so whoever asks next imports again.
+  let inflight: Promise<{ default: C }> | undefined;
+  const importOnce = (): Promise<{ default: C }> => {
+    inflight ??= loader().catch((error: unknown) => {
+      inflight = undefined;
+      throw error;
+    });
+    return inflight;
+  };
 
   const currentAttempt = (): LoadAttempt => {
     if (!current || current.retired) {
       const attempt: { Lazy?: React.ComponentType<any>; retired: boolean } = { retired: false };
       attempt.Lazy = React.lazy<React.ComponentType<any>>(() =>
-        loader().then(
+        importOnce().then(
           (loaded) => loaded,
           (error: unknown) => ({ default: failedLoad(attempt as LoadAttempt, error) }),
         ),
@@ -72,7 +93,9 @@ export function recoverableLazy<C extends React.ComponentType<any>>(
     const [attempt] = React.useState(currentAttempt);
     return React.createElement(attempt.Lazy, props);
   }
-  return RecoverableLazy;
+  return Object.assign(RecoverableLazy, {
+    load: (): Promise<C> => importOnce().then((loaded) => loaded.default),
+  });
 }
 
 /**
