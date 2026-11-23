@@ -143,6 +143,7 @@ import {
   type MetadataSelection,
 } from './preview-registry.js';
 import { readFields } from './previews/object-fields-io.js';
+import { declaredFieldOptions } from './previews/useObjectFields.js';
 import { useRegisterAssistantEditor, type AssistantEditorContext } from '../../assistant/assistantBus.js';
 import { useRegisteredMetadataInspector } from './inspector-registry.js';
 import { useRegisteredMetadataDefaultInspector } from './default-inspector-registry.js';
@@ -535,17 +536,24 @@ type ObjectCatalog = {
  * The field and action catalogs of one served object document, as the
  * pickers read them. A field's declared `multiple: true` rides along: the
  * `filter-builder` widget reads it to offer a list-valued column membership
- * and the empty checks only (`operatorsForField`).
+ * and the empty checks only (`operatorsForField`). Its declared `options` ride
+ * along too, read by `declaredFieldOptions`: the widget's builder draws a
+ * picklist column's value as a picker over them and stores the option's
+ * `value`, so a picklist filter holds a value the column can match.
  *
  * @internal exported for tests
  */
 export function objectCatalogOf(obj: { fields?: Record<string, any> | Array<any> } | null | undefined): ObjectCatalog {
-  const fieldOf = (name: unknown, f: any): ObjectFieldOption => ({
-    name: name as string,
-    label: f?.label,
-    type: f?.type,
-    ...(f?.multiple === true ? { multiple: true } : {}),
-  });
+  const fieldOf = (name: unknown, f: any): ObjectFieldOption => {
+    const options = f && typeof f === 'object' ? declaredFieldOptions(f) : undefined;
+    return {
+      name: name as string,
+      label: f?.label,
+      type: f?.type,
+      ...(f?.multiple === true ? { multiple: true } : {}),
+      ...(options ? { options } : {}),
+    };
+  };
   const raw = obj?.fields;
   const list = Array.isArray(raw)
     ? raw.map((f: any) => fieldOf(f?.name, f))
