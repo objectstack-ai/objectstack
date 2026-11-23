@@ -9,6 +9,13 @@
  * the viewers who may build, 「Add app」 at the foot (build with AI or in
  * Studio, start from a template, the marketplace).
  *
+ * objectstack#36485 — and the door into the design mode (`designMode.tsx`,
+ * objectstack#36362): 「Edit app」 under the list, in one group with
+ * 「Add app」, for the viewers the page header's 「Edit app」 was drawn for
+ * (the header draws none any more). The sidebar's head is drawn from 768 px
+ * up only, docked or floated over the content while the sidebar is
+ * collapsed, so a phone gets no way in, as before.
+ *
  * The list is `useLauncherApps`', the list Home's tiles and the phone's app
  * sheet draw, so every place offers the same apps. The phone keeps
  * `AppSwitcher`'s bottom sheet in its own top bar.
@@ -28,9 +35,9 @@ import {
   DropdownMenuTrigger,
   Input,
 } from '@object-ui/components';
-import { Check, ChevronDown, Hammer, LayoutGrid, Plus, Store } from 'lucide-react';
+import { Blocks, Check, ChevronDown, Hammer, LayoutGrid, Plus, Store } from 'lucide-react';
 import { useObjectTranslation } from '@object-ui/i18n';
-import { useWorkspaceAdminStatus } from '@object-ui/auth';
+import { useAuth, useWorkspaceAdminStatus } from '@object-ui/auth';
 import { useMetadata } from '../providers/MetadataProvider.js';
 import { matchAppBySegment } from '../utils/index.js';
 import { appAddressSegment } from '../utils/appRoute.js';
@@ -41,6 +48,9 @@ import { useAiSurfaceEnabled } from '../hooks/useAiSurface.js';
 import { isAiStudioEnabled, isMarketplaceEnabled } from '../runtime-config.js';
 import { STUDIO_NEW_PACKAGE_PATH } from '../views/studio-design/studioNewPackage.js';
 import { AppMark } from './AppMark.js';
+import { useAppStudioEntry } from './ShellPageActions.js';
+import { useDesignMode } from './designMode.js';
+import { postureHasOrgWall, useTenancyPosture } from '../hooks/useTenancyPosture.js';
 
 /** The app count above which the menu draws a search field over the list. */
 export const APP_MENU_SEARCH_FROM = 8;
@@ -93,13 +103,48 @@ function useAddAppEntries(): AddAppEntry[] {
   return entries;
 }
 
-/** The menu's foot: 「Add app」 and its choices. */
+/**
+ * What 「Edit app」 does for this viewer, or `null` where it is not drawn: it
+ * turns the shell's design mode on for the app on screen, in place.
+ *
+ * Drawn on the page header's button's condition, unchanged: a workspace admin
+ * holding `manage_metadata`, on an app whose package Studio lists
+ * (`useAppStudioEntry`'s gate, `useStudioEntryGate`), so the console's own
+ * apps get none. A read-only (installed) package's app gets it too
+ * (objectstack#36363: its changes are saved as this environment's
+ * customization), except where the customization door is walled off for this
+ * caller. Not drawn where no shell holds the mode, nor while the mode is on.
+ */
+function useEnterDesignMode(activeAppName: string): (() => void) | null {
+  const { entry } = useAppStudioEntry(true, activeAppName);
+  const designMode = useDesignMode();
+  const posture = useTenancyPosture();
+  const { user } = useAuth();
+  const customizable = !postureHasOrgWall(posture) || user?.isPlatformAdmin === true;
+  if (!entry || !designMode || designMode.active) return null;
+  if (entry.posture === 'view' && !customizable) return null;
+  return designMode.enter;
+}
+
+/** 「Edit app」: the door into the design mode. */
+function EditAppItem({ onEnter }: { onEnter: () => void }) {
+  const { t } = useObjectTranslation();
+  return (
+    <DropdownMenuItem onSelect={onEnter} className="flex items-center gap-2.5 py-2" data-testid="sidebar-app-menu-edit-app">
+      <span className="flex size-[22px] shrink-0 items-center justify-center text-muted-foreground" aria-hidden>
+        <Blocks className="size-4" />
+      </span>
+      <span className="flex-1 truncate">{t('topbar.editApp', { defaultValue: 'Edit app' })}</span>
+    </DropdownMenuItem>
+  );
+}
+
+/** 「Add app」 and its choices. */
 function AddAppSubmenu() {
   const { t } = useObjectTranslation();
   const entries = useAddAppEntries();
   return (
     <>
-      <DropdownMenuSeparator />
       <DropdownMenuSub>
         <DropdownMenuSubTrigger className="flex items-center gap-2.5 py-2" data-testid="sidebar-app-menu-add">
           <span className="flex size-[22px] shrink-0 items-center justify-center text-muted-foreground" aria-hidden>
@@ -135,6 +180,7 @@ export function SidebarAppMenu({ activeAppName, onAppChange }: SidebarAppMenuPro
   const apps = metadataApps || [];
   const { apps: launcherApps } = useLauncherApps(apps);
   const mayAddApp = useMayAddApp();
+  const enterDesignMode = useEnterDesignMode(activeAppName);
   const [query, setQuery] = React.useState('');
 
   // The route may name an app the launcher does not offer (a direct URL to an
@@ -203,6 +249,8 @@ export function SidebarAppMenu({ activeAppName, onAppChange }: SidebarAppMenuPro
             </div>
           )}
         </div>
+        {(enterDesignMode || mayAddApp) && <DropdownMenuSeparator />}
+        {enterDesignMode && <EditAppItem onEnter={enterDesignMode} />}
         {mayAddApp && <AddAppSubmenu />}
       </DropdownMenuContent>
     </DropdownMenu>

@@ -10,11 +10,18 @@
  * Real subjects: `SidebarAppMenu`, `AppMark`, the real launcher list. The
  * dropdown primitives pass through so the menu content renders without
  * radix's open/close machinery (`AppSwitcher.homeMenu-12605`'s idiom).
+ *
+ * objectstack#36485 — the menu is also the door into the design mode:
+ * 「Edit app」 under the list, in one group with 「Add app」, on the page
+ * header button's former gate (a workspace admin holding `manage_metadata`,
+ * an app whose package Studio lists, a read-only one included), not while the
+ * mode is on. Real subjects added: `useAppStudioEntry`'s gate over a stubbed
+ * package list, and the shell's real design-mode controller.
  */
 
 import '@testing-library/jest-dom/vitest';
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import type { ReactNode } from 'react';
 
@@ -55,10 +62,17 @@ vi.mock('../../providers/MetadataProvider', () => ({
 }));
 
 let admin = false;
-vi.mock('@object-ui/auth', async (importOriginal) => ({
-  ...(await importOriginal<Record<string, unknown>>()),
-  useWorkspaceAdminStatus: () => ({ isAdmin: admin, isResolved: true }),
-}));
+/** What the session's auth answers beyond the real hook: the deployment's posture, the platform operator flag. */
+let authOverride: Record<string, unknown> = {};
+vi.mock('@object-ui/auth', async (importOriginal) => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- the real module, spread whole
+  const actual = await importOriginal<Record<string, any>>();
+  return {
+    ...actual,
+    useWorkspaceAdminStatus: () => ({ isAdmin: admin, isResolved: true }),
+    useAuth: () => ({ ...actual.useAuth(), ...authOverride }),
+  };
+});
 let canAuthor = true;
 vi.mock('../../hooks/useCanAuthorMetadata', () => ({
   useCanAuthorMetadata: () => canAuthor,
@@ -73,6 +87,7 @@ vi.mock('../../runtime-config', async (importOriginal) => ({
 }));
 
 import { SidebarAppMenu, APP_MENU_SEARCH_FROM } from '../SidebarAppMenu';
+import { DesignModeProvider, useDesignModeController } from '../designMode';
 
 const CRM = { name: 'crm', label: 'CRM', icon: 'flame', _packageId: 'com.acme.crm' };
 const SERVICE = { name: 'service', label: 'Service', icon: 'headset' };
@@ -94,6 +109,8 @@ afterEach(() => {
   apps = [];
   admin = false;
   canAuthor = true;
+  authOverride = {};
+  vi.unstubAllGlobals();
 });
 
 describe('the sidebar app menu only switches apps (objectstack#36112)', () => {
@@ -165,5 +182,120 @@ describe('the sidebar app menu only switches apps (objectstack#36112)', () => {
     canAuthor = false;
     renderMenu('crm');
     expect(menu().queryByTestId('sidebar-app-menu-add')).toBeNull();
+  });
+});
+
+describe('「Edit app」 in the app menu enters the design mode (objectstack#36485)', () => {
+  let writable = true;
+
+  /** The shell's hold on the mode, as `ConsoleLayout` keeps it, and whether it is on. */
+  function Shell({ children }: { children: ReactNode }) {
+    const mode = useDesignModeController({ appName: 'crm', appBasePath: '/apps/crm', enabled: true });
+    return (
+      <DesignModeProvider value={mode}>
+        <output data-testid="mode">{mode.active ? 'on' : 'off'}</output>
+        {children}
+      </DesignModeProvider>
+    );
+  }
+
+  async function mountMenu({ held = true, route = '/apps/crm/crm_lead', active = 'crm' } = {}) {
+    const menuNode = <SidebarAppMenu activeAppName={active} onAppChange={vi.fn()} />;
+    render(<MemoryRouter initialEntries={[route]}>{held ? <Shell>{menuNode}</Shell> : menuNode}</MemoryRouter>);
+    // The package list's verdict settled, so an absent item is a reading.
+    await act(() => new Promise<void>((resolve) => setTimeout(resolve, 0)));
+    await act(() => new Promise<void>((resolve) => setTimeout(resolve, 0)));
+  }
+
+  const editApp = () => menu().queryByTestId('sidebar-app-menu-edit-app');
+
+  beforeEach(() => {
+    writable = true;
+    apps = [CRM, SERVICE, SETUP];
+    admin = true;
+    canAuthor = true;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: unknown) => ({
+        ok: true,
+        status: 200,
+        json: async () =>
+          String(url).endsWith('/api/v1/packages')
+            ? { data: { packages: [{ manifest: { id: 'com.acme.crm', name: 'CRM' }, writable }] } }
+            : { data: [] },
+      })),
+    );
+  });
+
+  it('a workspace admin who may author sees it under the list, in one group with 「Add app」', async () => {
+    await mountMenu();
+    const item = editApp();
+    expect(item).not.toBeNull();
+    expect(item).toHaveTextContent('Edit app');
+    expect(item!.querySelector('svg.lucide-blocks')).not.toBeNull();
+    const lastRow = menu().getByTestId('sidebar-app-menu-row-setup');
+    const add = menu().getByTestId('sidebar-app-menu-add');
+    const rule = item!.previousElementSibling;
+    expect(rule?.tagName).toBe('HR');
+    expect(lastRow.compareDocumentPosition(rule!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(item!.compareDocumentPosition(add) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // One group: the rule above it is the menu's only one, none between it and 「Add app」.
+    expect(screen.getByTestId('sidebar-app-menu').querySelectorAll('hr')).toHaveLength(1);
+  });
+
+  it('choosing it turns the mode on in place; while it is on the menu offers it no more', async () => {
+    await mountMenu();
+    expect(screen.getByTestId('mode')).toHaveTextContent('off');
+    await act(async () => fireEvent.click(editApp()!));
+    expect(screen.getByTestId('mode')).toHaveTextContent('on');
+    expect(editApp()).toBeNull();
+    // The rest of the menu is unchanged.
+    expect(menu().getByTestId('sidebar-app-menu-add')).toBeInTheDocument();
+    expect(menu().getByTestId('sidebar-app-menu-row-crm')).toBeInTheDocument();
+  });
+
+  it('an installed (read-only) package\'s app has it too, and it enters the same mode (objectstack#36363)', async () => {
+    writable = false;
+    await mountMenu();
+    await act(async () => fireEvent.click(editApp()!));
+    expect(screen.getByTestId('mode')).toHaveTextContent('on');
+  });
+
+  it('where the customization door is walled off for this caller, a read-only package\'s app gets none; a writable one keeps it', async () => {
+    authOverride = { getAuthConfig: async () => ({ features: { tenancyPosture: 'isolated' } }), user: { isPlatformAdmin: false } };
+    writable = false;
+    await mountMenu();
+    expect(editApp()).toBeNull();
+    cleanup();
+    writable = true;
+    vi.stubGlobal('fetch', vi.fn(async (url: unknown) => ({
+      ok: true,
+      status: 200,
+      json: async () =>
+        String(url).endsWith('/api/v1/packages')
+          ? { data: { packages: [{ manifest: { id: 'com.acme.crm', name: 'CRM' }, writable: true }] } }
+          : { data: [] },
+    })));
+    await mountMenu();
+    expect(editApp()).not.toBeNull();
+  });
+
+  it('control: a member, and an admin who may not author, get none', async () => {
+    admin = false;
+    await mountMenu();
+    expect(editApp()).toBeNull();
+    cleanup();
+    admin = true;
+    canAuthor = false;
+    await mountMenu();
+    expect(editApp()).toBeNull();
+  });
+
+  it('control: none on an app whose package Studio does not list (the console\'s own Setup), nor where no shell holds the mode', async () => {
+    await mountMenu({ active: 'setup', route: '/apps/setup/system' });
+    expect(editApp()).toBeNull();
+    cleanup();
+    await mountMenu({ held: false });
+    expect(editApp()).toBeNull();
   });
 });
