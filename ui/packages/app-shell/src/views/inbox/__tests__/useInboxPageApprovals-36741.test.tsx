@@ -18,8 +18,14 @@ const feeds = vi.hoisted(() => ({
   refresh: vi.fn(),
 }));
 
-vi.mock('@object-ui/auth', () => ({ useAuth: () => ({ user: { id: 'u1', email: 'u1@example.com' } }) }));
-vi.mock('@object-ui/react', () => ({ useDataInvalidation: () => bus.nonce }));
+vi.mock('@object-ui/auth', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  useAuth: () => ({ user: { id: 'u1', email: 'u1@example.com' } }),
+}));
+vi.mock('@object-ui/react', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  useDataInvalidation: () => bus.nonce,
+}));
 vi.mock('../../../hooks/sharedUserFeeds.js', () => ({
   approverIdentities: () => ['u1'],
   fetchPendingApprovalPage: (...args: unknown[]) => feeds.fetchPage(...args),
