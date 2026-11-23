@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { IDataEngine } from '@objectstack/spec/contracts';
+import { keysetWalk } from '@objectstack/types';
 import { FAN_OUT_SYSTEM_CONTEXT } from './fan-out-system-context.js';
 
 /** The object the preference matrix lives in. */
@@ -24,7 +25,15 @@ export interface PreferenceResolverOptions {
     mandatoryTopics?: readonly string[];
     /** Object name override (default {@link PREFERENCE_OBJECT}). */
     objectName?: string;
+    /** Rows per page of a {@link PreferenceResolver.filter} read (default {@link PREFERENCE_PAGE_SIZE}; tests shrink it). */
+    pageSize?: number;
 }
+
+/**
+ * Rows per page of the preference reads {@link PreferenceResolver.filter}
+ * makes. A page size, never a cap: each read walks every page to the end.
+ */
+export const PREFERENCE_PAGE_SIZE = 1000;
 
 export interface PreferenceContext {
     topic: string;
@@ -164,10 +173,15 @@ function isGlobalDefaultUser(userId: unknown): boolean {
 export class PreferenceResolver {
     private readonly objectName: string;
     private readonly mandatory: readonly string[];
+    private readonly pageSize: number;
 
     constructor(private readonly opts: PreferenceResolverOptions) {
         this.objectName = opts.objectName ?? PREFERENCE_OBJECT;
         this.mandatory = opts.mandatoryTopics ?? [];
+        const pageSize = opts.pageSize;
+        this.pageSize = Number.isInteger(pageSize) && (pageSize as number) > 0
+            ? (pageSize as number)
+            : PREFERENCE_PAGE_SIZE;
     }
 
     /** Whether a topic bypasses preferences (exact or `prefix.` match). */
@@ -193,9 +207,10 @@ export class PreferenceResolver {
         const data = this.opts.getData();
         if (!data) return all(); // fail-open
 
+        const users = new Set(recipients);
         let rows: Record<string, unknown>[];
         try {
-            rows = await this.loadRows(data, ctx);
+            rows = await this.loadRows(data, ctx, users);
         } catch (err) {
             this.opts.logger.warn(
                 `[preferences] lookup for topic '${ctx.topic}' failed (${msg(err)}); delivering all (fail-open)`,
@@ -203,7 +218,7 @@ export class PreferenceResolver {
             return all();
         }
 
-        const index = indexRows(rows, new Set(recipients));
+        const index = indexRows(rows, users);
 
         const nowMs = ctx.now ?? Date.now();
         const critical = ctx.severity === 'critical';
@@ -239,19 +254,60 @@ export class PreferenceResolver {
         return targets;
     }
 
-    /** Load the candidate rows (topic-specific + wildcard-topic), org-scoped. */
-    private async loadRows(data: IDataEngine, ctx: PreferenceContext): Promise<Record<string, unknown>[]> {
-        // Two equality queries (topic and the '*' wildcard) avoid relying on
-        // driver-specific IN support; user filtering is done in memory.
+    /**
+     * The rows that can decide this delivery, org-scoped: the recipients' own
+     * and the organization's default (the empty `user_id`), for the event's
+     * topic and for the `*` topic.
+     *
+     * Each topic is read to the END, one page of {@link PREFERENCE_PAGE_SIZE}
+     * rows at a time, seeking past the last `id` (`keysetWalk`), so the pages
+     * partition the rows and none is left unread however many the
+     * organization holds: a recipient's own opt-out, digest or quiet hours
+     * always reaches the index. A single capped read with no order dropped an
+     * undefined subset once a topic held more rows than the cap. Rows of
+     * anyone else are dropped page by page, so what is kept is bounded by the
+     * recipients, not by the organization.
+     *
+     * Equality on `topic` plus the seek on `id`: no IN, so no driver needs it.
+     * A walk that cannot advance (a reader that did not apply the seek, a row
+     * with no `id`) REJECTS instead of answering with what it read, because a
+     * partial set delivers as though the missing rows did not exist. The
+     * rejection reaches {@link filter}'s fail-open path like any failed read.
+     */
+    private async loadRows(
+        data: IDataEngine,
+        ctx: PreferenceContext,
+        users: ReadonlySet<string>,
+    ): Promise<Record<string, unknown>[]> {
         const base: Record<string, unknown> = {};
         if (ctx.organizationId) base.organization_id = ctx.organizationId;
-        // The explicit system opt-in — see FAN_OUT_SYSTEM_CONTEXT: the rows are
-        // the recipients' preferences, read on their behalf, not the emitter's.
-        const [specific, wildcard] = await Promise.all([
-            data.find(this.objectName, { where: { ...base, topic: ctx.topic }, limit: 10000 }, { context: FAN_OUT_SYSTEM_CONTEXT }),
-            data.find(this.objectName, { where: { ...base, topic: WILDCARD }, limit: 10000 }, { context: FAN_OUT_SYSTEM_CONTEXT }),
-        ]);
-        return [...(specific ?? []), ...(wildcard ?? [])];
+        const read = async (topic: string): Promise<Record<string, unknown>[]> => {
+            const walk = keysetWalk<Record<string, unknown>>(
+                // The explicit system opt-in — see FAN_OUT_SYSTEM_CONTEXT: the rows are
+                // the recipients' preferences, read on their behalf, not the emitter's.
+                async (q) => ((await data.find(
+                    this.objectName,
+                    { ...(q.where !== undefined ? { where: q.where as Record<string, unknown> } : {}), orderBy: q.orderBy, limit: q.limit },
+                    { context: FAN_OUT_SYSTEM_CONTEXT },
+                )) ?? []) as Record<string, unknown>[],
+                { where: { ...base, topic }, pageSize: this.pageSize },
+            );
+            const kept: Record<string, unknown>[] = [];
+            for await (const page of walk.pages()) {
+                for (const row of page) {
+                    if (isGlobalDefaultUser(row.user_id) || users.has(String(row.user_id))) kept.push(row);
+                }
+            }
+            if (walk.truncated) {
+                throw new Error(
+                    `${this.objectName} rows for topic '${topic}' could not be read to the end: a page did not move past ` +
+                        `the last id after ${walk.scanned} row(s); refusing to filter on a partial set.`,
+                );
+            }
+            return kept;
+        };
+        const [specific, wildcard] = await Promise.all([read(ctx.topic), read(WILDCARD)]);
+        return [...specific, ...wildcard];
     }
 
     /**
