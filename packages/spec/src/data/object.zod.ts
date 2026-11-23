@@ -33,7 +33,7 @@ import { RECORD_PAGE_BUILTIN_TABS, relatedListEntryHidden, relatedListEntryName,
 import { refuseStageFieldWithoutKinds } from './stage-field-kinds';
 // [#32763] The `icon` leaf, shared with the AI blueprint object.
 import { OBJECT_COLOR_SCHEMA, OBJECT_ICON_SCHEMA } from './object-icon';
-// [#36366] The header buttons per page type, shared with the object extension.
+// [#36366] The action arrangement per scope (pinned, more), shared with the object extension.
 import { OBJECT_ACTION_LAYOUT_SCHEMA } from './object-action-layout';
 // The masked-on-read declaration (#20141); `warnGenericPasswordFields` reads its
 // `password` exemption rather than restating it. No runtime cycle: that module's

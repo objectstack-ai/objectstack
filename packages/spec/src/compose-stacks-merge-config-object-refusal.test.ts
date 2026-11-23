@@ -78,7 +78,7 @@ const shared = (out: ObjectStackDefinition) =>
  * `'merge'` by the unedited composer, which is the ARRIVAL leg below in production.
  */
 const CONFIG_OBJECT_KEYS_IN_SHAPE_ORDER = [
-  // [#36366] `actionLayout` — the page headers' pinned buttons, per page type.
+  // [#36366] `actionLayout` — the object's action arrangement per scope (pinned, more).
   'actionLayout',
   'userActions',
   'external',
