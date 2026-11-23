@@ -25,7 +25,7 @@
 // dispatcher domain files.
 //
 // The population comes from `packages/rest/src/rest-route-ledger.ts` (20
-// families) and `packages/runtime/src/route-ledger.ts` (24
+// families) and `packages/runtime/src/route-ledger.ts` (26
 // domains) because those two are enumerated from a RUNNING server and guarded
 // in both directions by their own conformance tests — so a new family or
 // domain cannot be silently absent from them, and therefore cannot be silently
@@ -76,11 +76,11 @@
 // The ledgers supply the POPULATION; the classification stays a reviewed row
 // here.
 //
-// Of the 42 ledger keys, 18 are classified by rows below (re-derived when the
+// Of the 44 ledger keys, 20 are classified by rows below (re-derived when the
 // `/ui` and `/data` domains arrived classified under ADR-0138 D2's second
 // slice, after the `forms` family and the `/notifications`, `/keys` and
-// `/share-links` domains did under its first, the `/comments` domain did,
-// #36469, the `/webhooks/redeliver` domain did, #22755, `/approvals/act` did, #22576, and `/i18n` left the baseline,
+// `/share-links` domains did under its first, the `/personal-views` and
+// `/attachments` domains did, #36506, the `/comments` domain did, #36469, the `/webhooks/redeliver` domain did, #22755, `/approvals/act` did, #22576, and `/i18n` left the baseline,
 // #22432); the other 24 are enumerated one by one,
 // dated, and pinned SHRINK-ONLY in `authz-ledger-population.baseline.ts`,
 // whose MAX note dates every step down from the 34 of 40 it held on the
@@ -438,6 +438,22 @@ export const AUTHZ_CONFORMANCE: AuthzPrimitive[] = [
     enforcement: 'core/security/own-row-delete-routes.ts (the unreact and own-comment delete doors) and plugin-audit/comment-routes.ts (the resolution door) — the caller resolved from the request\'s own credentials (ownRowDeleteCallerResolver: no signed-in user 401, a held sign-in 403), the row read AS THE CALLER (object grant, organization wall, comment read gate; unreadable = unknown 404), the owner column checked (403 PERMISSION_DENIED) or the posting gate asked (canWriteObject insert on sys_comment), then a system write attributed to the caller; reached through ICommentDoorsService.handleCommentDoor by runtime/domains/comments.ts, which claims exactly the three method and path shapes, forwards the transport\'s request UNREAD, resolves the slot per request and adds no credential of its own (an absent slot or member is a typed 501, never a route miss). The two dispatcher preamble gates apply with NO exemption: core/security/auth-gate.ts ALLOW_ROUTES does not list the paths and runtime/http-dispatcher.ts enforceProjectMembership does not skip them. The member runs the very registration the self-hosted mount runs (plugin-audit comment-doors-member.ts over registerCommentDoors in audit-plugin.ts)',
     covers: ['dispatcher-domain:route-ledger.ts:/comments'],
     note: 'The DISPATCHER domain only: on a self-hosted kernel the same paths are served from plugin-audit\'s mount on the kernel\'s http.server and never reach the dispatcher. Unit- and wire-proven, not dogfood-proven: runtime domains/comments.test.ts pins the domain on the real HttpDispatcher (the three shapes forwarded unread, every other method and path the ordinary miss, 501 for an absent slot or member, the slot read per request, the environment-scoped spelling forwarded at the wire path, a signed-in non-member and a gated session stopped before the member); http-conformance hono-comment-doors.conformance.test.ts drives the real AuditPlugin through createHonoApp on a kernel with no http.server (unreact, resolve and reopen, own-comment delete land in the store) and answers the anonymous refusal and refused bodies with the same bytes as the self-hosted mount; plugin-security comment-doors.integration.test.ts and comment-reaction-unreact-door.integration.test.ts hold the doors\' grants on the real stack.' },
+
+  // #36506 — the `/personal-views` and `/attachments` dispatcher domains (ruling
+  // A on #22438, applied to the personal-view delete door and the attachment
+  // removal and rename doors), through the shared bridge `own-door-bridge.ts`.
+  // As `comment-doors-session`, the credential IS the session: each member
+  // resolves the caller from the request's own credentials, and the
+  // dispatcher's two preamble gates apply unexempted.
+  // ⛔ Ids stay in this comment, out of the row's strings.
+  //
+  // Not HIGH_RISK, for the reason `comment-doors-session` gives: each door
+  // writes one row after reading it AS THE CALLER, so it is no sibling read
+  // path around a data gate.
+  { id: 'own-row-doors-session', summary: 'Own-row doors (`DELETE /personal-views/:id`, `DELETE /attachments/:id`, `PATCH /attachments/:id`) — a signed-in member removes a personal view they saved, and removes or renames an attachment they uploaded; a row the caller cannot read answers as unknown, another member\'s row is refused 403, and an anonymous caller is refused 401 by the door itself, exactly as the self-hosted mount refuses it', state: 'enforced',
+    enforcement: 'core/security/own-row-delete-routes.ts (the personal-view and attachment removal doors) and service-storage/attachment-removal-routes.ts (the rename door) — the caller resolved from the request\'s own credentials (ownRowDeleteCallerResolver: no signed-in user 401, a held sign-in 403), the row read AS THE CALLER (object grant, organization wall, the owner-only scope of sys_personal_view, the attachment read-visibility gate; unreadable = unknown 404), the owner column checked (403 PERMISSION_DENIED) or the update gate asked, then a system write attributed to the caller; reached through IPersonalViewDoorsService.handlePersonalViewDoor and IAttachmentDoorsService.handleAttachmentDoor by runtime/domains/own-door-bridge.ts (personal-views.ts, attachments.ts), which claims exactly the door shapes, forwards the transport\'s request UNREAD, reads the REQUEST kernel\'s slot per request and adds no credential of its own (an absent slot or member is a typed 501, never a route miss). The two dispatcher preamble gates apply with NO exemption: core/security/auth-gate.ts ALLOW_ROUTES does not list the paths and runtime/http-dispatcher.ts enforceProjectMembership does not skip them. Each member runs the very registration its self-hosted mount runs (plugin-auth personal-view-door-member.ts, service-storage attachment-door-member.ts, over plugin-hono-server createDoorTableMember)',
+    covers: ['dispatcher-domain:route-ledger.ts:/personal-views', 'dispatcher-domain:route-ledger.ts:/attachments'],
+    note: 'The DISPATCHER domains only: on a self-hosted kernel the same paths are served from the plugins\' mounts on the kernel\'s http.server and never reach the dispatcher. Unit-, wire- and dogfood-proven: runtime domains/own-door-bridge.test.ts pins both domains on the real HttpDispatcher (the door shapes forwarded unread, every other method and path the ordinary miss, 501 for an absent slot or member, the slot read per request and only from the request kernel, the environment-scoped spelling forwarded at the wire path, a signed-in non-member and a gated session stopped before the member); personal-view-row-scope.dogfood.test.ts and member-attachment-baseline.dogfood.test.ts drive each door through a dispatcher alone over the real showcase and attachments stacks (`[hosted]`: the owner\'s removal and rename land, another member is refused as on the self-hosted door, anonymous is 401).' },
 
   // ── ADR-0138 D2 — THE CLOSED LIST OF DOORS (card E2) ─────────────────────
   //

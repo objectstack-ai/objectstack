@@ -141,7 +141,7 @@ export function objectExtensionContribution(ext: any): {
   definition: {
     name: string; fields: unknown; fieldPatches: unknown; label: unknown; pluralLabel: unknown;
     description: unknown; validations: unknown; indexes: unknown; place: unknown;
-    fieldGroups: unknown; relatedLists: unknown;
+    fieldGroups: unknown; relatedLists: unknown; actionLayout: unknown;
   };
   priority: number;
 } {
@@ -169,6 +169,9 @@ export function objectExtensionContribution(ext: any): {
       // package's and names it.
       fieldGroups: ext.fieldGroups,
       relatedLists: ext.relatedLists,
+      // [objectstack#36366] …and the arrangement of its actions, the
+      // same rule's third key, applied there arm by arm.
+      actionLayout: ext.actionLayout,
     },
     priority: ext.priority ?? 200,
   };

@@ -957,6 +957,18 @@ schema key: list metadata cannot set it. The console passes `false` for a view
 authored `navigation: { mode: 'none' }` and for an object whose data API serves
 no single-record read (objectstack#33317).
 
+### A cell's change history
+
+Right-clicking a cell of a field the object declares adds **Change history**
+to the row's context menu, when the grid's data source can read activity
+(`find`), the field's changes are recorded with their values
+(`resolveFieldHistory` from `@objectstack/spec/data`) and the reader may read
+the field. Choosing it opens
+`@object-ui/plugin-detail`'s `FieldHistoryPopover` at that point: that
+record's changes of that field, newest first, ten at a time, or **No changes
+recorded** with who created the record. `data-table` names the cell's column to
+the host's `renderRowContextMenu` as `context.column`.
+
 ### Inline Editing
 
 Enable inline cell editing for quick updates:

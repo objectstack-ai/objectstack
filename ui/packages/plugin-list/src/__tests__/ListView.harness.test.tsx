@@ -1478,6 +1478,84 @@ describe('ListView.onRowsChange-26679', () => {
   });
 });
 
+// ── ListView.onFindParamsChange-36554 ───────────────────────────────────────────
+
+/**
+ * objectstack-ai/objectstack#36554 — `ListView` reports the query behind the
+ * rows it shows (`onFindParamsChange`): the exact params of the read that
+ * drew them, so a host can re-issue it past the page drawn (the dashboard
+ * drill reads its whole result's ids with it). Answered where `onRowsChange`
+ * answers with rows; a kind with no row sequence (a calendar) answers `null`.
+ */
+describe('ListView.onFindParamsChange-36554', () => {
+  restoreAfterBlock();
+
+  const OBJECT = 'crm_lead';
+  const objectDef = {
+    name: OBJECT,
+    label: 'Lead',
+    fields: {
+      id: { name: 'id', type: 'text' },
+      name: { name: 'name', type: 'text', label: 'Name' },
+      status: {
+        name: 'status', type: 'select', label: 'Status',
+        options: [{ value: 'new', label: 'New' }, { value: 'won', label: 'Won' }],
+      },
+      created_at: { name: 'created_at', type: 'datetime', label: 'Created' },
+    },
+  };
+  const ROWS = [
+    { id: 'l_3', name: 'Mira Costa', status: 'new' },
+    { id: 'l_1', name: 'Kai Watanabe', status: 'won' },
+  ];
+
+  function mount(schemaExtra: Record<string, unknown>) {
+    const dataSource = {
+      find: vi.fn(async () => ({ data: ROWS, total: 12 })),
+      findOne: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+      delete: vi.fn(),
+      getObjectSchema: vi.fn(async (name: string) => (name === OBJECT ? objectDef : null)),
+    } as any;
+    const onFindParamsChange = vi.fn();
+    render(
+      <SchemaRendererProvider dataSource={dataSource}>
+        <ListView
+          schema={{ type: 'list-view', objectName: OBJECT, columns: ['name', 'status'], ...schemaExtra } as any}
+          dataSource={dataSource}
+          onFindParamsChange={onFindParamsChange}
+        />
+      </SchemaRendererProvider>,
+    );
+    return { dataSource, onFindParamsChange };
+  }
+
+  afterEach(() => cleanup());
+
+  it('a paged grid reports the params of the read that drew its rows', async () => {
+    const { dataSource, onFindParamsChange } = mount({
+      viewType: 'grid',
+      filter: [['status', '=', 'new']],
+      sort: [{ field: 'name', order: 'asc' }],
+    });
+    await waitFor(() => expect(dataSource.find).toHaveBeenCalled());
+    await waitFor(() => expect(onFindParamsChange.mock.calls.at(-1)?.[0]).toBeTruthy());
+    expect(onFindParamsChange.mock.calls.at(-1)?.[0]).toEqual(dataSource.find.mock.calls.at(-1)?.[1]);
+    expect(JSON.stringify(onFindParamsChange.mock.calls.at(-1)?.[0].$filter)).toContain('new');
+  });
+
+  it('control: a calendar has no row sequence and reports no query', async () => {
+    const { dataSource, onFindParamsChange } = mount({
+      viewType: 'calendar',
+      options: { calendar: { startDateField: 'created_at' } },
+    });
+    await waitFor(() => expect(dataSource.find).toHaveBeenCalled());
+    await waitFor(() => expect(onFindParamsChange).toHaveBeenCalled());
+    expect(onFindParamsChange.mock.calls.every(([params]) => params === null)).toBe(true);
+  });
+});
+
 // ── ListView.printButtonSemantics ────────────────────────────────────────────
 
 /**

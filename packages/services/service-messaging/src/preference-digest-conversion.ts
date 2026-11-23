@@ -36,9 +36,23 @@
  *  - No ledger on the kernel, or a ledger that cannot be read: the pass does
  *    NOT run, because it could not be recorded and would repeat.
  *
+ * ## Only the rows that held `none` before the claim
+ *
+ * The pass reads the ids of every row holding `none` FIRST, in pages by id,
+ * then claims the ledger row, then rewrites exactly that snapshot — it never
+ * reads the filter again. The deployment is serving while the boot hook
+ * runs, so a `none` written during the pass (a member's own pick, a new row,
+ * a node still on the earlier release in a rolling deploy) is a real choice
+ * and is not part of the snapshot.
+ *
  * Every organization's rows: the read is the platform's own, not a tenant's.
  * Each rewrite is addressed by id AND the stored `none`, under the row's own
  * organization, so a value written since the read is left alone.
+ *
+ * A claim that fails rewrites nothing, and the next boot takes a new
+ * snapshot: a `none` written between those two boots is converted with the
+ * rest. Nothing can record the earlier snapshot when the ledger itself cannot
+ * be written, so that failure is logged as an error naming the fix.
  */
 
 import type { IDataEngine } from '@objectstack/spec/contracts';
@@ -58,8 +72,8 @@ const LEGACY_UNSET_DIGEST = 'none';
 /** The table this conversion rewrites; the type ties it to `PREFERENCE_OBJECT`. */
 const OBJECT: typeof PREFERENCE_OBJECT = 'sys_notification_preference';
 
-/** How many rows one read takes — the same ceiling `PreferenceResolver.loadRows` reads with. */
-const PASS_LIMIT = 10000;
+/** How many rows one page of the snapshot read takes. */
+const PAGE_SIZE = 10000;
 
 const SYSTEM_CONTEXT = { isSystem: true } as const;
 
@@ -74,15 +88,28 @@ type ConversionEngine = Pick<IDataEngine, 'find' | 'findOne' | 'insert' | 'updat
     getObject?(name: string): unknown;
 };
 
+export interface PreferenceDigestConversionOptions {
+    /** Rows per page of the snapshot read; defaults to 10000. */
+    pageSize?: number;
+}
+
+/** One row of the snapshot: what its rewrite is addressed by. */
+interface LegacyRow {
+    id: string;
+    organizationId: string | undefined;
+}
+
 export interface PreferenceDigestConversionResult {
     /**
-     * - `converted` — the ledger row was claimed and every legacy `none` found
-     *   was attempted (`failed` lists the ones left as stored);
+     * - `converted` — the ledger row was claimed and every row of the snapshot
+     *   taken before the claim was attempted (`failed` lists the ones left as
+     *   stored);
      * - `already-run` — the ledger records an earlier pass; nothing was read;
      * - `ledger-unavailable` — no `sys_migration` on this kernel; nothing ran;
      * - `ledger-unreadable` — the ledger read failed; nothing ran;
-     * - `read-failed` — the preference rows could not be read; nothing was
-     *   claimed or rewritten, and the next boot tries again;
+     * - `read-failed` — the preference rows could not be read (any page of
+     *   the snapshot); nothing was claimed or rewritten, and the next boot
+     *   tries again;
      * - `claim-failed` — the ledger row could not be written; nothing was
      *   rewritten;
      * - `no-engine` — no data engine that reads and writes rows.
@@ -114,13 +141,15 @@ export function buildDigestConversionRecord(details: Record<string, unknown>, no
 }
 
 /**
- * Rewrite every legacy stored `digest = 'none'` to empty, across every
- * organization, unless this deployment's ledger already records the pass.
- * Never throws: it runs in a boot hook, which it must not break.
+ * Rewrite every stored `digest = 'none'` that existed before the ledger claim
+ * to empty, across every organization, unless this deployment's ledger
+ * already records the pass. Never throws: it runs in a boot hook, which it
+ * must not break.
  */
 export async function convertLegacyNoneDigestsOnce(
     engine: IDataEngine | undefined,
     logger?: PreferenceDigestConversionLogger,
+    options: PreferenceDigestConversionOptions = {},
 ): Promise<PreferenceDigestConversionResult> {
     const result = (status: PreferenceDigestConversionResult['status'], converted = 0, failed: string[] = []): PreferenceDigestConversionResult =>
         ({ status, converted, failed });
@@ -151,23 +180,39 @@ export async function convertLegacyNoneDigestsOnce(
         return result('ledger-unreadable');
     }
 
-    const readLegacy = async (): Promise<Array<Record<string, unknown>>> => {
-        try {
-            return ((await e.find(
-                OBJECT,
-                { where: { digest: LEGACY_UNSET_DIGEST }, fields: ['id', 'organization_id'], limit: PASS_LIMIT },
-                { context: SYSTEM_CONTEXT },
-            )) ?? []) as Array<Record<string, unknown>>;
-        } catch (err) {
-            // No table yet holds no legacy row: a fresh database.
-            if (isMissingTableError(err, OBJECT)) return [];
-            throw err;
+    // The snapshot: every row holding `none` now, read in pages in id order
+    // until a page comes back short. Taken before the claim, and the only
+    // rows the pass rewrites.
+    const size = Math.max(1, Math.floor(options.pageSize ?? PAGE_SIZE));
+    const readSnapshot = async (): Promise<LegacyRow[]> => {
+        const snapshot: LegacyRow[] = [];
+        for (let after: string | undefined; ;) {
+            let page: Array<Record<string, unknown>>;
+            try {
+                page = ((await e.find(
+                    OBJECT,
+                    {
+                        where: { digest: LEGACY_UNSET_DIGEST, ...(after === undefined ? {} : { id: { $gt: after } }) },
+                        fields: ['id', 'organization_id'],
+                        orderBy: [{ field: 'id', order: 'asc' }],
+                        limit: size,
+                    },
+                    { context: SYSTEM_CONTEXT },
+                )) ?? []) as Array<Record<string, unknown>>;
+            } catch (err) {
+                // No table yet holds no legacy row: a fresh database.
+                if (after === undefined && isMissingTableError(err, OBJECT)) return [];
+                throw err;
+            }
+            for (const row of page) snapshot.push({ id: String(row.id), organizationId: textOrUndefined(row.organization_id) });
+            if (page.length < size) return snapshot;
+            after = String(page[page.length - 1]!.id);
         }
     };
 
-    let rows: Array<Record<string, unknown>>;
+    let rows: LegacyRow[];
     try {
-        rows = await readLegacy();
+        rows = await readSnapshot();
     } catch (err) {
         logger?.error(
             `[messaging] the one-time ${OBJECT} digest conversion could not read the rows it converts, so it did not ` +
@@ -207,49 +252,29 @@ export async function convertLegacyNoneDigestsOnce(
 
     let converted = 0;
     const failed: string[] = [];
-    const seen = new Set<string>();
-    // Pass until a read returns no row this run has not already handled. A row
-    // left as stored still matches the filter, so `seen` is what ends the loop.
-    for (;;) {
-        const fresh = rows.filter((row) => !seen.has(String(row.id)));
-        if (fresh.length === 0) break;
-        for (const row of fresh) {
-            const id = String(row.id);
-            seen.add(id);
-            try {
-                // A migration is an entry point, so it states the system
-                // context itself, with the row's own organization threaded.
-                // Compare-and-set: the predicate path honours both keys, so a
-                // digest written since the read is left alone (0 matched).
-                const matched = await e.update(
-                    OBJECT,
-                    { digest: null },
-                    { where: { id, digest: LEGACY_UNSET_DIGEST }, multi: true, context: { ...SYSTEM_CONTEXT, tenantId: textOrUndefined(row.organization_id) } },
-                );
-                if (matched !== 0) converted += 1;
-            } catch (err) {
-                failed.push(id);
-                logger?.error(
-                    `[messaging] the one-time ${OBJECT} digest conversion could not rewrite row ${id} (${messageOf(err)}): ` +
-                        "it still holds the old default digest 'none', which now reads as that person's own choice of no " +
-                        "digest. Fix: open the row in Setup, Notification Preferences, and clear its Digest.",
-                    undefined,
-                    { object: OBJECT, id },
-                );
-            }
-        }
+    // The snapshot only: a row that came to hold `none` after it was taken is
+    // a choice made under this release, and is never read here.
+    for (const { id, organizationId } of rows) {
         try {
-            rows = await readLegacy();
-        } catch (err) {
-            logger?.error(
-                `[messaging] the one-time ${OBJECT} digest conversion stopped after ${converted} row(s): re-reading the ` +
-                    `rows failed (${messageOf(err)}). It is recorded as run and will not run again, so any row still ` +
-                    "holding digest 'none' reads as that person's own choice of no digest. Fix: clear Digest on those " +
-                    'rows in Setup, Notification Preferences.',
-                undefined,
-                { object: OBJECT, error: messageOf(err) },
+            // A migration is an entry point, so it states the system
+            // context itself, with the row's own organization threaded.
+            // Compare-and-set: the predicate path honours both keys, so a
+            // digest written since the read is left alone (0 matched).
+            const matched = await e.update(
+                OBJECT,
+                { digest: null },
+                { where: { id, digest: LEGACY_UNSET_DIGEST }, multi: true, context: { ...SYSTEM_CONTEXT, tenantId: organizationId } },
             );
-            break;
+            if (matched !== 0) converted += 1;
+        } catch (err) {
+            failed.push(id);
+            logger?.error(
+                `[messaging] the one-time ${OBJECT} digest conversion could not rewrite row ${id} (${messageOf(err)}): ` +
+                    "it still holds the old default digest 'none', which now reads as that person's own choice of no " +
+                    "digest. Fix: open the row in Setup, Notification Preferences, and clear its Digest.",
+                undefined,
+                { object: OBJECT, id },
+            );
         }
     }
 

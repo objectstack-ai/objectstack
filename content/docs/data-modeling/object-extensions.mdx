@@ -71,6 +71,7 @@ check that spelling first.
 | `description` | Same as `label`. |
 | `place` | **Applied once, after every extension's fields are merged.** Says where the fields, groups and child lists this extension brings go on the target — [below](#placing-what-you-bring). |
 | `fieldGroups`, `relatedLists` | **Only in a base's paired `.custom` package. Each replaces, whole.** The complete field arrangement and the complete tab list of the target, applied last — [below](#arranging-the-whole-record-page). In any other package they are refused, and `place` is the key to use. |
+| `actionLayout` | **Only in a base's paired `.custom` package. Applied arm by arm, last.** Each `list` or `record` arm it writes (`{ pinned, more }`) replaces the arm the target serves for that scope whole; an arm it leaves out stays. In any other package it is refused, and an action the package brings is placed by its own `locations` and `order`. See [choosing the header's buttons](/docs/ui/actions#choose-the-headers-buttons). |
 | `priority` | Not merged — it *orders* the merge. `0`–`999`, default `200`. |
 
 Added fields are ordinary fields, so everything on the
@@ -276,7 +277,8 @@ D10). The object is extended, never replaced:
 - **An object takes no `overrides` declaration.** Declaring one on an object is refused,
   naming the extension as the route.
 - **The pair may arrange the whole record page.** Its extension, and no other package's,
-  writes `fieldGroups` and `relatedLists` — [below](#arranging-the-whole-record-page).
+  writes `fieldGroups` and `relatedLists` — [below](#arranging-the-whole-record-page) —
+  and `actionLayout`, the order of the object's actions and which are header buttons.
 
 {/* os:check */}
 ```typescript

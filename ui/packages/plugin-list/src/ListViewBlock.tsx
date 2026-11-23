@@ -341,6 +341,17 @@ const ListViewBlock = elementDataSourceBlock(React.forwardRef<ListViewHandle, Li
   // outside one (objectstack#26613): the tab's badge says how many records the
   // list holds, the number its own query answered.
   const reportTabCount = usePageTabCountReporter();
+  // The count goes to the host too (objectstack#36554): a host that mounts
+  // this block with its own `onTotalChange` (the dashboard drill, whose record
+  // page says 「N of M」 over the drill's whole result) hears it as well as the
+  // tab's badge. Both are read when a load settles, so neither shadows the other.
+  const hostTotalChange = props.onTotalChange;
+  const onTotalChange = hostTotalChange && reportTabCount
+    ? (total: number) => {
+      hostTotalChange(total);
+      reportTabCount(total);
+    }
+    : hostTotalChange ?? reportTabCount;
 
   // A list that names its records in neither place has nothing to fetch, and
   // drew the "Nothing here yet" empty state, which reads as an empty query
@@ -411,7 +422,7 @@ const ListViewBlock = elementDataSourceBlock(React.forwardRef<ListViewHandle, Li
               dataSource={adapter}
               compact={compact}
               capped={capped}
-              onTotalChange={reportTabCount}
+              onTotalChange={onTotalChange}
               onAddRecord={add.onAddRecord}
             />
           </CompactListDestinationContext.Provider>

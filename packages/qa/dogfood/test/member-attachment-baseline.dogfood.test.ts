@@ -50,6 +50,7 @@ import { SecurityPlugin, securityDefaultPermissionSets } from '@objectstack/plug
 import { PermissionSetSchema } from '@objectstack/spec/security';
 import { SysAttachment } from '@objectstack/platform-objects/audit';
 import { attachmentsFixtureStack } from './fixtures/attachments-fixture.js';
+import { hostedDispatcherDoor } from './hosted-dispatcher.testkit.js';
 
 const SYS = { isSystem: true } as const;
 const MEMBER_EMAIL = 'att-baseline-member@verify.test';
@@ -422,6 +423,28 @@ describe('a member attaches to the records they edit and sees the files of the r
       expect(await removeAs(otherTok, id)).toMatchObject({ status: 403, code: 'PERMISSION_DENIED' });
       expect(await dataDeleteAs(otherTok, id)).toMatchObject({ status: 403, code: 'PERMISSION_DENIED' });
       expect(await row(id)).toMatchObject({ id, uploaded_by: memberId });
+    });
+
+    // [#36506] The same two doors on the hosted shape: the runtime dispatcher
+    // alone, the way a hosted tenant kernel with no `http.server` is reached,
+    // answers through its `/attachments` domain and the `file-attachments`
+    // service's member. Before that domain, both answered `404 ROUTE_NOT_FOUND`.
+    it('[hosted] on the dispatcher alone the uploader renames, then removes, their own attachment — and another member is refused the same 403', async () => {
+      const hosted = hostedDispatcherDoor(stack);
+      const id = await memberAttachment();
+
+      expect(await answerOf(await hosted(otherTok, 'DELETE', `/attachments/${id}`))).toMatchObject({ status: 403, code: 'PERMISSION_DENIED' });
+      expect(await answerOf(await hosted(undefined, 'PATCH', `/attachments/${id}`, { file_name: 'anon.txt' }))).toMatchObject({ status: 401, code: 'UNAUTHENTICATED' });
+
+      const renamed = await answerOf(await hosted(memberTok, 'PATCH', `/attachments/${id}`, { file_name: '  renamed-on-hosted.txt ' }));
+      expect(renamed.status, JSON.stringify(renamed.body)).toBe(200);
+      expect(renamed.body).toEqual({ success: true, data: { id, file_name: 'renamed-on-hosted.txt' } });
+      expect(await row(id)).toMatchObject({ id, file_name: 'renamed-on-hosted.txt' });
+
+      const removed = await answerOf(await hosted(memberTok, 'DELETE', `/attachments/${id}`));
+      expect(removed.status, JSON.stringify(removed.body)).toBe(200);
+      expect(removed.body).toEqual({ success: true, data: { id, deleted: true } });
+      expect(await row(id)).toBeNull();
     });
 
     it('an administrator still deletes any attachment through the data door; the door grants them nothing more', async () => {
