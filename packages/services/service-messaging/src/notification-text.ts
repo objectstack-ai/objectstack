@@ -27,10 +27,10 @@
  *  - `params` fills the entries' `{{name}}` holes. A value is used as given,
  *    or, spelled `{ key, fallback }`, is itself the recipient-language text of
  *    the catalog entry `key`, else `fallback`; or, spelled
- *    `{ objectLabel, fallback }`, is the label of the object named
- *    `objectLabel` in the recipient's language, else `fallback`.
+ *    `{ object, fallback }`, is the label of the object whose API name is
+ *    `object`, in the recipient's language, else `fallback`.
  *  - [#35384] An object's label is METADATA, not a catalog sentence, so the
- *    `{ objectLabel }` param is resolved as `GET /meta/object/:name` serves it:
+ *    `{ object }` param is resolved as `GET /meta/object/:name` serves it:
  *    by `translateObject` (`@objectstack/spec/system`) over the object's
  *    served definition and its packaged base, with the metadata route's
  *    `ResolveOptions` (the recipient's negotiated locale, the DECLARED
@@ -98,15 +98,16 @@ export type NotificationTextParam =
     | NotificationObjectLabelParam;
 
 /**
- * [#35384] A `{{name}}` value that is the label of the object `objectLabel`
- * names (its API name, `crm_deal`), in the recipient's language, as
+ * [#35384] A `{{name}}` value that is the label of the object whose API name
+ * `object` holds (`crm_deal`), in the recipient's language, as
  * `GET /meta/object/:name` serves it: `translateObject` over the object's
  * served definition and packaged base, with the metadata route's resolve
  * options. `fallback` is the text when nothing resolves (no `i18n` service
  * that can hand its translations over, no data engine that knows the object).
  */
 export interface NotificationObjectLabelParam {
-    readonly objectLabel: string;
+    /** The object's API name (`ObjectSchema.name`), never its label: the param names the object, the render picks its label. */
+    readonly object: string;
     readonly fallback: string;
 }
 
@@ -158,7 +159,7 @@ const PARAM_NAME_SHAPE = /^\w+$/;
 
 const TEXT_MEMBERS: ReadonlySet<string> = new Set(['titleKey', 'bodyKey', 'params']);
 const KEYED_PARAM_MEMBERS: ReadonlySet<string> = new Set(['key', 'fallback']);
-const OBJECT_LABEL_PARAM_MEMBERS: ReadonlySet<string> = new Set(['objectLabel', 'fallback']);
+const OBJECT_LABEL_PARAM_MEMBERS: ReadonlySet<string> = new Set(['object', 'fallback']);
 
 /**
  * An object's API name: one segment of {@link CATALOG_KEY_SHAPE}, so every
@@ -194,15 +195,15 @@ function problemOf(value: unknown): string | undefined {
     for (const [name, param] of Object.entries(params)) {
         if (!PARAM_NAME_SHAPE.test(name)) return `.params has a name '${name}' no {{hole}} can spell`;
         if (typeof param === 'string') continue;
-        if (!isPlainObject(param)) return `.params.${name} must be a string, { key, fallback } or { objectLabel, fallback }`;
-        if ('objectLabel' in param) {
+        if (!isPlainObject(param)) return `.params.${name} must be a string, { key, fallback } or { object, fallback }`;
+        if ('object' in param) {
             for (const member of Object.keys(param)) {
                 if (!OBJECT_LABEL_PARAM_MEMBERS.has(member)) {
-                    return `.params.${name} has an undeclared member '${member}' (declared: objectLabel, fallback)`;
+                    return `.params.${name} has an undeclared member '${member}' (declared: object, fallback)`;
                 }
             }
-            if (typeof param.objectLabel !== 'string' || !OBJECT_NAME_SHAPE.test(param.objectLabel)) {
-                return `.params.${name}.objectLabel must be an object's API name such as 'crm_deal' (got ${JSON.stringify(param.objectLabel)})`;
+            if (typeof param.object !== 'string' || !OBJECT_NAME_SHAPE.test(param.object)) {
+                return `.params.${name}.object must be an object's API name such as 'crm_deal' (got ${JSON.stringify(param.object)})`;
             }
             if (typeof param.fallback !== 'string') return `.params.${name}.fallback must be a string`;
             continue;
@@ -375,9 +376,9 @@ export class NotificationTextRenderer {
         for (const [name, param] of Object.entries(keys.params ?? {})) {
             if (typeof param === 'string') {
                 params[name] = param;
-            } else if ('objectLabel' in param) {
+            } else if ('object' in param) {
                 translation ??= { value: metaLabelTranslation(i18n, locale) };
-                params[name] = this.objectLabel(translation.value, param.objectLabel) ?? param.fallback;
+                params[name] = this.objectLabel(translation.value, param.object) ?? param.fallback;
             } else {
                 params[name] = lookup(i18n, param.key, locale) ?? param.fallback;
             }

@@ -725,7 +725,7 @@ describe("#32240 — an inbox row reads in the READER's language", () => {
 });
 
 /**
- * [#35384] The typed object-label param, `{ objectLabel, fallback }`: an
+ * [#35384] The typed object-label param, `{ object, fallback }`: an
  * object's label is METADATA, so it is resolved as `GET /meta/object/:name`
  * serves it — `translateObject` over the object's served definition and its
  * packaged base, with the metadata route's resolve options (the recipient's
@@ -751,7 +751,7 @@ describe('#35384 — an object label param reads as /meta serves the object', ()
     const TYPED: NotificationTextKeys = {
         titleKey: 'messages.dealTitle',
         bodyKey: 'messages.dealBody',
-        params: { object: { objectLabel: 'crm_deal', fallback: 'Opportunity' }, record: 'D_1' },
+        params: { object: { object: 'crm_deal', fallback: 'Opportunity' }, record: 'D_1' },
     };
     const LEGACY: NotificationTextKeys = {
         ...TYPED,
@@ -866,11 +866,11 @@ describe('#35384 — an object label param reads as /meta serves the object', ()
         const ql = await bootDeal();
         const { messaging } = compose(ql, { i18n: sourceLocaleI18n() });
         const bad: unknown[] = [
-            { objectLabel: 'crm_deal' },                                   // no fallback
-            { objectLabel: 'crm deal', fallback: 'Deal' },                 // not an object's API name
-            { objectLabel: 'objects.crm_deal.label', fallback: 'Deal' },   // a catalog key is not a name
-            { objectLabel: 'crm_deal', fallback: 'Deal', key: 'objects.crm_deal.label' }, // both shapes at once
-            { objectLabel: 7, fallback: 'Deal' },
+            { object: 'crm_deal' },                                        // no fallback
+            { object: 'crm deal', fallback: 'Deal' },                      // not an object's API name
+            { object: 'objects.crm_deal.label', fallback: 'Deal' },        // a catalog key is not a name
+            { object: 'crm_deal', fallback: 'Deal', key: 'objects.crm_deal.label' }, // both shapes at once
+            { object: 7, fallback: 'Deal' },
         ];
         for (const object of bad) {
             const keyedText = { ...TYPED, params: { object, record: 'D_1' } };

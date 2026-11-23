@@ -32,7 +32,7 @@
  * (`ApprovalService.notify` resolves it per recipient); the #23556 / #23594
  * ruling B form, label and id for every reader, stands only on the
  * reader-less action-link pages. [#35384] The label rides as the messaging
- * service's typed object-label param, `{ objectLabel: <object>, fallback }`,
+ * service's typed object-label param, `{ object: <object API name>, fallback }`,
  * which it resolves per recipient as `GET /meta/object/:name` serves the
  * object (`translateObject` with the metadata route's resolve options and the
  * packaged base), the way the reader-language labels (`reader-locale-labels.ts`)
@@ -55,7 +55,8 @@ export type ApprovalTextParam =
 
 /** [#35384] The structural mirror of the messaging service's `NotificationObjectLabelParam`. */
 export interface ApprovalObjectLabelParam {
-  readonly objectLabel: string;
+  /** The object's API name, never its label. */
+  readonly object: string;
   readonly fallback: string;
 }
 
@@ -105,7 +106,7 @@ export function subjectParams(
   record: string,
 ): ApprovalSubjectParams {
   return {
-    object: { objectLabel: objectName, fallback: objectLabel ?? objectName },
+    object: { object: objectName, fallback: objectLabel ?? objectName },
     record,
   };
 }

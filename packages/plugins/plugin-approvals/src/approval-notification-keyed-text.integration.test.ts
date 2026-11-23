@@ -365,7 +365,7 @@ describe('#24978 — end to end: a real messaging service renders each approver\
 /**
  * [#35384] The object an approval notification names is labelled as
  * `GET /meta/object/:name` serves it: the subject param is the messaging
- * service's typed object-label param (`{ objectLabel, fallback }`), resolved
+ * service's typed object-label param (`{ object, fallback }`), resolved
  * per recipient by `translateObject` with the metadata route's resolve options
  * and the object's packaged base, never through `t()`.
  *
