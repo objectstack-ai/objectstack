@@ -3310,6 +3310,8 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.rules.transitions': '允许的状态流转（从 → 下一状态）',
   'engine.studio.rules.transitionFrom': '起始状态',
   'engine.studio.rules.transitionTo': '下一状态（逗号分隔）',
+  'engine.studio.rules.transitionClearable': '可清空',
+  'engine.studio.rules.transitionClearableHint': '记录处于此状态时，允许用户清空该字段',
   'engine.studio.rules.addTransition': '新增流转',
   'engine.studio.rules.jsonSchema': 'JSON Schema',
   'engine.studio.rules.invalidJson': 'JSON 格式无效',

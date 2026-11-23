@@ -3748,6 +3748,8 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.rules.transitions': 'Allowed transitions (from → next states)',
   'engine.studio.rules.transitionFrom': 'From state',
   'engine.studio.rules.transitionTo': 'Next states (comma-separated)',
+  'engine.studio.rules.transitionClearable': 'May be cleared',
+  'engine.studio.rules.transitionClearableHint': 'Lets a user clear the field while the record is in this state',
   'engine.studio.rules.addTransition': 'Add transition',
   'engine.studio.rules.jsonSchema': 'JSON Schema',
   'engine.studio.rules.invalidJson': 'Invalid JSON',
