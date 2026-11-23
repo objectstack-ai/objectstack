@@ -32,7 +32,7 @@
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, cleanup, screen, fireEvent, waitFor, within, act } from '@testing-library/react';
-import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom';
+import { MemoryRouter, Routes, Route, useLocation, useNavigate } from 'react-router-dom';
 import { createI18n, I18nProvider } from '@object-ui/i18n';
 import { MePermissionsProvider, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 
@@ -547,5 +547,98 @@ describe('objectstack#36408 — the data page keeps its list\'s search, sort, gr
     expect(lastQuery().$orderby ?? []).toEqual([]);
     // No sort is this page's own: the list offers no 「Reset to default」 for the address's.
     expect(screen.queryByTestId('sort-reset-default')).toBeNull();
+  });
+});
+
+describe('objectstack#36577 — moving straight from one object\'s data page to another\'s opens the new address\'s list', () => {
+  const CONTACT = 'demo_contact';
+  const CONTACT_PATH = `/apps/sales/${CONTACT}/data`;
+  const TWO_OBJECTS = [
+    OBJECTS[0],
+    {
+      name: CONTACT,
+      label: 'Contact',
+      pluralLabel: 'Contacts',
+      fields: {
+        name: { type: 'text', label: 'Name' },
+        city: { type: 'text', label: 'City' },
+        stage: { type: 'select', label: 'Stage', options: [{ value: 'won', label: 'Won' }, { value: 'lost', label: 'Lost' }] },
+      },
+    },
+  ];
+  /** The list queries with the object each asked, newest last; the count probe (`$top: 0`) is left out. */
+  let queries: Array<{ object: string; params: Record<string, any> }> = [];
+  const lastQueryOf = (object: string) => [...queries].reverse().find((q) => q.object === object)?.params;
+  const addressParams = () => new URLSearchParams(search() ?? '');
+
+  function permissions(): MePermissionsAuthenticatedResponse {
+    const base = answer();
+    return { ...base, objects: { ...base.objects, [CONTACT]: base.objects[OBJECT_NAME] } } as MePermissionsAuthenticatedResponse;
+  }
+
+  /** In-app navigation, as a link or the history does it: no reload. */
+  function GoTo({ to }: { to: string }) {
+    const navigate = useNavigate();
+    return <button type="button" data-testid="go-to" onClick={() => navigate(to)}>go</button>;
+  }
+
+  async function mountThenSwitch(fromSearch: string, toSearch: string) {
+    queries = [];
+    const dataSource = {
+      find: vi.fn(async (object: string, params: Record<string, any>) => {
+        if (params?.$top !== 0) queries.push({ object, params });
+        return { data: ROWS, total: MATCHED };
+      }),
+      findOne: vi.fn(async () => null),
+      create: vi.fn(async () => ({})),
+      update: vi.fn(async () => ({})),
+      delete: vi.fn(async () => ({})),
+      getObjectSchema: vi.fn(async (name: string) => TWO_OBJECTS.find((o) => o.name === name) ?? null),
+    } as never;
+    window.history.replaceState(null, '', DATA_PATH);
+    render(
+      <MePermissionsProvider initialPermissions={permissions()}>
+        <I18nProvider instance={createI18n({ defaultLanguage: 'en', detectBrowserLanguage: false })}>
+          <ExpressionProvider user={{ id: 'u1', name: 'Ada', profile: 'admin' }}>
+            <MemoryRouter initialEntries={[`${DATA_PATH}${fromSearch}`]}>
+              <Routes>
+                <Route path="/apps/:appName/:objectName/data" element={<ObjectDataPage dataSource={dataSource} objects={TWO_OBJECTS} />} />
+              </Routes>
+              <LocationProbe />
+              <GoTo to={`${CONTACT_PATH}${toSearch}`} />
+            </MemoryRouter>
+          </ExpressionProvider>
+        </I18nProvider>
+      </MePermissionsProvider>,
+    );
+    await screen.findByText('Globex', undefined, { timeout: 5000 });
+    await settle();
+    fireEvent.click(screen.getByTestId('go-to'));
+    await waitFor(() => expect(lastQueryOf(CONTACT)).toBeDefined(), { timeout: 5000 });
+    await screen.findByText('Globex', undefined, { timeout: 5000 });
+    await settle();
+  }
+
+  it('a search and a chip on the new address: the new object\'s list searches and filters by them, not by the old one\'s', async () => {
+    await mountThenSwitch('?uf__search=Acm', '?uf__search=Glo&uf_stage=won');
+    expect(pathname()).toBe(CONTACT_PATH);
+    const q = lastQueryOf(CONTACT)!;
+    expect(q.$search).toBe('Glo');
+    expect(JSON.stringify(q.$filter ?? null)).toContain('stage');
+    expect(JSON.stringify(q.$filter ?? null)).toContain('won');
+    expect(screen.getByTestId('search-active-keyword').textContent).toBe('Glo');
+    // The address and the list say the same thing.
+    expect(addressParams().get('uf__search')).toBe('Glo');
+    expect(addressParams().get('uf_stage')).toBe('won');
+  });
+
+  it('a new address with no list state: the new object\'s list carries none of the old one\'s, and none is written', async () => {
+    await mountThenSwitch('?uf__search=Acm', '');
+    expect(pathname()).toBe(CONTACT_PATH);
+    for (const { params } of queries.filter((entry) => entry.object === CONTACT)) {
+      expect(params.$search).toBeUndefined();
+    }
+    expect(screen.queryByTestId('search-active-keyword')).toBeNull();
+    expect(addressParams().has('uf__search')).toBe(false);
   });
 });
