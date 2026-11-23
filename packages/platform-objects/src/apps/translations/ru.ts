@@ -110,6 +110,7 @@ export const ru: TranslationData = {
         nav_settings_knowledge: { label: 'Знания' },
         nav_settings_lifecycle: { label: 'Жизненный цикл данных' },
         nav_recycle_bin: { label: 'Корзина' },
+        nav_public_forms: { label: 'Публичные формы' },
         nav_notification_preferences: { label: 'Настройки уведомлений' },
         nav_notification_templates: { label: 'Шаблоны уведомлений' },
 
