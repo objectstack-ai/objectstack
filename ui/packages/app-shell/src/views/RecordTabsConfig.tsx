@@ -5,10 +5,13 @@
  * objectstack#36359): an administrator arranges the record page's tabs in
  * place, for everyone.
  *
- * - The entry is the first of the record's own entries in its 「…」, drawn for
- *   a workspace administrator who may author metadata, on the desktop full
- *   page of an object whose package the server lists writable (the gate of
- *   Studio's design entries, `useStudioDesignGate`). Not on a phone, not in a
+ * - The entry opens the record's 「…」 (it leads the menu, ahead of Refresh),
+ *   drawn for a workspace administrator who may author metadata, on the
+ *   desktop full page of an object whose package Studio lists: writable (an
+ *   object of a self-built app, the gate of Studio's design entries,
+ *   `useStudioDesignGate`), or read-only (an installed app's object, Studio's
+ *   view posture, `useStudioEntryGate`) where the customization door does not
+ *   wall this caller off (`useCustomizeDoorWalled`). Not on a phone, not in a
  *   drawer or pane, not on a page its author composed.
  * - Chosen, the page enters its edit state in place: a bar across the top of
  *   the page — 「Configure tabs」 at its left, 「Cancel」 and 「Save」 at its
@@ -20,7 +23,11 @@
  * - 「Cancel」 drops the draft and writes nothing. With a change held, leaving
  *   the page asks first (the shell's unsaved-edits seam).
  * - 「Save」 writes the object's `relatedLists` and publishes it
- *   (`saveRecordTabs`): the order everyone sees by default. A reader's own
+ *   (`saveRecordTabs`): the order everyone sees by default. On an installed
+ *   object it writes the `relatedLists` of the object extension of the base's
+ *   paired `.custom` package instead (`recordTabsInstalled.ts`), where every
+ *   tab can be moved, a related one hidden, and each is marked with where it
+ *   comes from (the original package, another package, this environment). A reader's own
  *   arrangement is a diff laid over that default (`relatedArrangement.ts`),
  *   and 「Restore default order」 returns them to it.
  * - The field area is not changed here: 「Adjust field groups」 opens the
@@ -51,9 +58,10 @@ import { CSS } from '@dnd-kit/utilities';
 import { Eye, EyeOff, GripVertical, Lock, Pencil, PanelsTopLeft } from 'lucide-react';
 import { Button, Input, cn } from '@object-ui/components';
 import { useObjectTranslation } from '@object-ui/i18n';
-import { isRecordPageBuiltinTab, relatedListEntryName } from '@objectstack/spec/data';
+import { isRecordPageBuiltinTab, readRelatedListsArrangement, relatedListEntryName } from '@objectstack/spec/data';
 import { registerUnsavedEdits } from '../chrome/unsavedEdits.js';
-import { useStudioDesignGate } from '../hooks/useStudioDesignGate.js';
+import { useStudioDesignGate, useStudioEntryGate } from '../hooks/useStudioDesignGate.js';
+import { useCustomizeDoorWalled } from './studio-design/StudioCustomizeControls.js';
 import { relatedListEntryNames, type DerivedRelatedList } from '../utils/deriveRelatedLists.js';
 import { studioPillarItemPath } from './studio-design/metadataArea.js';
 import { entryDetails } from './studio-design/relatedListVocabulary.js';
@@ -69,6 +77,13 @@ import {
   type RecordTabsEdit,
 } from './recordTabsConfig.js';
 import { consoleRecordTabsDoors, saveRecordTabs } from './recordTabsConfigSave.js';
+import {
+  initialInstalledTabsDraft,
+  previewInstalledTabsObject,
+  recordTabSource,
+  recordTabsPackageOf,
+  type RecordTabSource,
+} from './recordTabsInstalled.js';
 import type { RecordTabsIo } from './recordTabsConfigIo.js';
 
 type RecordTabsObjectDef = Record<string, unknown> & { name?: string };
@@ -81,9 +96,14 @@ export const RECORD_TABS_CONFIG_ACTION = 'sys_configure_tabs';
 
 /** The package an object is kept in, as served (`_packageId`), or `null`. */
 export function objectPackageId(objectDef: RecordTabsObjectDef | null | undefined): string | null {
-  const id = objectDef?._packageId;
-  return typeof id === 'string' && id && id !== 'sys_metadata' ? id : null;
+  return recordTabsPackageOf(objectDef);
 }
+
+/**
+ * Where a save lands, as the editor knows it: `own`, the object's writable
+ * package; `pair`, the paired `.custom` package of the installed base.
+ */
+export type RecordTabsMode = 'own' | 'pair';
 
 /** Where 「Adjust field groups」 goes: the object in Studio's Data pillar. */
 export function recordTabsStudioPath(objectDef: RecordTabsObjectDef | null | undefined): string | null {
@@ -94,6 +114,7 @@ export function recordTabsStudioPath(objectDef: RecordTabsObjectDef | null | und
 
 interface RecordTabsSession {
   readonly objectName: string;
+  readonly mode: RecordTabsMode;
   readonly initial: RecordTabsDraft;
   readonly draft: RecordTabsDraft;
 }
@@ -128,11 +149,15 @@ export function useRecordTabsConfig({ objectDef, objects, enabled, canRead, titl
   const objectName = typeof objectDef?.name === 'string' ? objectDef.name : '';
   const packageId = objectPackageId(objectDef);
   const studioPath = recordTabsStudioPath(objectDef);
-  const offered = useStudioDesignGate(enabled ? studioPath : null) !== null && !!packageId;
+  const own = useStudioDesignGate(enabled ? studioPath : null) !== null;
+  const entry = useStudioEntryGate(enabled && !own ? studioPath : null);
+  const walled = useCustomizeDoorWalled();
+  const mode: RecordTabsMode | null = !packageId ? null : own ? 'own' : entry?.posture === 'view' && !walled ? 'pair' : null;
+  const offered = mode !== null;
 
   const [held, setHeld] = React.useState<RecordTabsSession | null>(null);
   const [saving, setSaving] = React.useState(false);
-  const session = held && held.objectName === objectName && offered ? held : null;
+  const session = held && held.objectName === objectName && held.mode === mode ? held : null;
   const active = session !== null;
 
   const catalog = React.useMemo<RecordTabsCatalog | null>(
@@ -141,11 +166,14 @@ export function useRecordTabsConfig({ objectDef, objects, enabled, canRead, titl
   );
 
   const enter = React.useCallback(() => {
-    if (!objectDef || !objectName) return;
+    if (!objectDef || !objectName || !mode) return;
     const opened = recordTabsCatalog(objectDef, objects, { canRead });
-    const initial = initialRecordTabsDraft(objectDef, objects, opened, { canRead });
-    setHeld({ objectName, initial, draft: initial });
-  }, [objectDef, objectName, objects, canRead]);
+    const initial =
+      mode === 'pair'
+        ? initialInstalledTabsDraft(objectDef, objects, opened, { canRead })
+        : initialRecordTabsDraft(objectDef, objects, opened, { canRead });
+    setHeld({ objectName, mode, initial, draft: initial });
+  }, [objectDef, objectName, objects, canRead, mode]);
   const cancel = React.useCallback(() => setHeld(null), []);
   const edit = React.useCallback((change: RecordTabsEdit) => {
     setHeld((prev) => (prev ? { ...prev, draft: editRecordTabsDraft(prev.draft, change) } : prev));
@@ -170,7 +198,7 @@ export function useRecordTabsConfig({ objectDef, objects, enabled, canRead, titl
     setSaving(true);
     try {
       await saveRecordTabs(
-        { objectName, packageId, draft: session.draft, catalog },
+        { objectName, packageId, draft: session.draft, catalog, initial: session.initial },
         {
           notListed: t('designMode.recordTabs.notListed', {
             defaultValue: "This object's package is not listed, so its tabs cannot be saved.",
@@ -180,6 +208,9 @@ export function useRecordTabsConfig({ objectDef, objects, enabled, canRead, titl
           }),
           notWritable: t('designMode.recordTabs.notWritable', {
             defaultValue: "This object's package cannot be written, so its tabs cannot be saved here.",
+          }),
+          pairNotWritable: t('designMode.recordTabs.pairNotWritable', {
+            defaultValue: "This app's customization package cannot be written, so its tabs cannot be saved.",
           }),
         },
         consoleRecordTabsDoors(client),
@@ -198,9 +229,21 @@ export function useRecordTabsConfig({ objectDef, objects, enabled, canRead, titl
   }, [session, catalog, packageId, saving, objectName, client, t]);
 
   const previewObject = React.useMemo(
-    () => (session && catalog && objectDef ? previewRecordTabsObject(objectDef, session.draft, catalog) : undefined),
+    () =>
+      session && catalog && objectDef
+        ? session.mode === 'pair'
+          ? previewInstalledTabsObject(objectDef, session.draft, catalog)
+          : previewRecordTabsObject(objectDef, session.draft, catalog)
+        : undefined,
     [session, catalog, objectDef],
   );
+  const pairId = (objectDef && readRelatedListsArrangement(objectDef)?.packageId) ?? null;
+  const packageNames = io?.packageNames;
+  const sourceOf = React.useCallback(
+    (list: DerivedRelatedList): RecordTabSource | undefined => (objectDef ? recordTabSource(list, objectDef, objects) : undefined),
+    [objectDef, objects],
+  );
+  const packageName = React.useCallback((id: string) => packageNames?.get(id) ?? id, [packageNames]);
 
   const storedLists = io?.stored?.objectName === objectName ? io.stored.lists : null;
   const sourceLanguage = io?.sourceLanguage ?? false;
@@ -210,7 +253,13 @@ export function useRecordTabsConfig({ objectDef, objects, enabled, canRead, titl
       <RecordTabsConfigBar dirty={dirty} saving={saving} ready={!!client} onCancel={cancel} onSave={() => void save()} />
       {packageId && (
         <React.Suspense fallback={null}>
-          <RecordTabsConfigIo objectName={objectName} packageId={packageId} language={language} onIo={setIo} />
+          <RecordTabsConfigIo
+            objectName={objectName}
+            packageId={packageId}
+            pairId={session.mode === 'pair' ? pairId : null}
+            language={language}
+            onIo={setIo}
+          />
         </React.Suspense>
       )}
     </>
@@ -227,6 +276,7 @@ export function useRecordTabsConfig({ objectDef, objects, enabled, canRead, titl
         studioPath={studioPath}
         disabled={saving}
         onEdit={edit}
+        {...(session.mode === 'pair' ? { installed: { sourceOf, packageName } } : {})}
       />
     ) : null;
 
@@ -301,10 +351,12 @@ interface ChipProps {
   fixedReason?: string;
   rename?: { open: boolean; hint?: string; onRename: (label: string | undefined) => void };
   hide?: { label: string; onHide: () => void };
+  /** Where the tab comes from, on an installed object (card item 7). */
+  source?: { kind: RecordTabSource['kind']; text: string };
   disabled: boolean;
 }
 
-function TabChipBody({ label, fixedReason, rename, hide, disabled, handle }: ChipProps & { handle?: React.ReactNode }) {
+function TabChipBody({ label, fixedReason, rename, hide, source, disabled, handle }: ChipProps & { handle?: React.ReactNode }) {
   const { t } = useObjectTranslation();
   const [editing, setEditing] = React.useState(false);
   const [value, setValue] = React.useState(label);
@@ -338,6 +390,15 @@ function TabChipBody({ label, fixedReason, rename, hide, disabled, handle }: Chi
       ) : (
         <span className="truncate px-0.5" title={fixedReason}>
           {label}
+        </span>
+      )}
+      {source && !editing && (
+        <span
+          className="max-w-32 shrink-0 truncate rounded bg-muted px-1 text-[11px] leading-4 text-muted-foreground"
+          title={source.text}
+          data-record-tabs-source={source.kind}
+        >
+          {source.text}
         </span>
       )}
       {rename && !editing && (
@@ -413,6 +474,11 @@ function SortableTabChip(props: ChipProps & { sortable: boolean }) {
  * handle, a rename and a hide; then 附件 (hide only), 审批 and 动态 (fixed,
  * where the page draws them last); then the 「Hidden」 area, from which a tab
  * is shown again; and 「Adjust field groups」.
+ *
+ * On an installed object (`installed`), every tab is in the draft's order and
+ * moves: another package's list and the built-in tabs too; a related tab
+ * hides, a built-in one does not (the `.custom` list cannot hide it); each
+ * related tab carries where it comes from.
  */
 export function RecordTabsEditor({
   catalog,
@@ -424,6 +490,7 @@ export function RecordTabsEditor({
   studioPath,
   disabled = false,
   onEdit,
+  installed,
 }: {
   catalog: RecordTabsCatalog;
   draft: RecordTabsDraft;
@@ -436,6 +503,11 @@ export function RecordTabsEditor({
   studioPath: string | null;
   disabled?: boolean;
   onEdit: (edit: RecordTabsEdit) => void;
+  /** The object is an installed one: every tab arranges, each related tab with its source. */
+  installed?: {
+    sourceOf: (list: DerivedRelatedList) => RecordTabSource | undefined;
+    packageName: (packageId: string) => string;
+  };
 }) {
   const { t } = useObjectTranslation();
   const byId = React.useMemo(() => new Map(catalog.candidates.map((c) => [c.id, c] as const)), [catalog]);
@@ -443,7 +515,8 @@ export function RecordTabsEditor({
     const candidate = byId.get(id);
     return candidate ? titleOf(candidate.list) : id;
   };
-  const labelOf = (id: RecordTabId): string => draft.labels[id] ?? defaultLabel(id);
+  const labelOf = (id: RecordTabId): string =>
+    isRecordPageBuiltinTab(id) ? builtinLabel(id) : (draft.labels[id] ?? defaultLabel(id));
   const contributed = t('designMode.recordTabs.contributed', {
     defaultValue: 'Another package adds this tab. It is placed there.',
   });
@@ -453,6 +526,32 @@ export function RecordTabsEditor({
   const builtinFixed = t('designMode.recordTabs.builtinFixed', {
     defaultValue: 'The platform draws this tab last, under its own name.',
   });
+  const builtinMoves = t('designMode.recordTabs.builtinMoves', {
+    defaultValue: 'A built-in tab can be moved, not hidden or renamed.',
+  });
+  const builtinLabel = (name: string): string =>
+    name === 'sys_attachment'
+      ? t('detail.attachments', { defaultValue: 'Attachments' })
+      : name === 'sys_approval_request'
+        ? t('detail.approvalsPanelTitle', { defaultValue: 'Approvals' })
+        : t('detail.timeline', { defaultValue: 'Activity' });
+  const sourceTag = (list: DerivedRelatedList): ChipProps['source'] => {
+    const source = installed?.sourceOf(list);
+    if (!source) return undefined;
+    if (source.kind === 'base') {
+      return { kind: 'base', text: t('designMode.recordTabs.sourceBase', { defaultValue: 'Original package' }) };
+    }
+    if (source.kind === 'environment') {
+      return { kind: 'environment', text: t('designMode.recordTabs.sourceEnvironment', { defaultValue: 'This environment' }) };
+    }
+    return {
+      kind: 'package',
+      text: t('designMode.recordTabs.sourcePackage', {
+        defaultValue: 'From {{name}}',
+        name: installed?.packageName(source.packageId) ?? source.packageId,
+      }),
+    };
+  };
   /** Ruling (4): the name opens in the source language, where the shown name is the stored one. */
   const renameOpen = (id: RecordTabId): boolean => {
     if (!sourceLanguage || storedLists === null) return false;
@@ -482,8 +581,12 @@ export function RecordTabsEditor({
   const hiddenNames: Array<{ id: string; label: string; restore: () => void }> = draft.hidden
     .filter((id) => byId.has(id))
     .map((id) => ({ id, label: labelOf(id), restore: () => onEdit({ kind: 'restore', id }) }));
-  if (catalog.files && draft.attachmentsHidden) {
+  if (!installed && catalog.files && draft.attachmentsHidden) {
     hiddenNames.push({ id: 'sys_attachment', label: attachments, restore: () => onEdit({ kind: 'attachments', hidden: false }) });
+  }
+  // An installed object's attachments tab the base hides: naming it shows it.
+  if (installed && catalog.files && draft.hidden.includes('sys_attachment')) {
+    hiddenNames.push({ id: 'sys_attachment', label: attachments, restore: () => onEdit({ kind: 'restore', id: 'sys_attachment' }) });
   }
 
   return (
@@ -492,8 +595,20 @@ export function RecordTabsEditor({
         <SortableContext items={[...draft.order]} strategy={horizontalListSortingStrategy}>
           <ul className="flex min-w-0 flex-wrap items-center gap-2" aria-label={t('designMode.recordTabs.shown', { defaultValue: 'Tabs' })}>
             {draft.order.map((id) => {
+              if (isRecordPageBuiltinTab(id)) {
+                return (
+                  <SortableTabChip
+                    key={id}
+                    id={id}
+                    label={labelOf(id)}
+                    sortable
+                    disabled={disabled}
+                    fixedReason={builtinMoves}
+                  />
+                );
+              }
               const candidate = byId.get(id);
-              const fixed = candidate?.fromPackage !== undefined;
+              const fixed = !installed && candidate?.fromPackage !== undefined;
               const label = labelOf(id);
               return (
                 <SortableTabChip
@@ -513,18 +628,19 @@ export function RecordTabsEditor({
                         }
                   }
                   hide={fixed ? undefined : { label: hideLabel(label), onHide: () => onEdit({ kind: 'hide', id }) }}
+                  source={candidate && installed ? sourceTag(candidate.list) : undefined}
                 />
               );
             })}
             {/* Another package's lists: placed by that package, after this object's own (objectstack#35901). */}
             {catalog.candidates
-              .filter((candidate) => candidate.fromPackage !== undefined)
+              .filter((candidate) => !installed && candidate.fromPackage !== undefined)
               .map((candidate) => (
                 <li key={candidate.id} className={cn(CHIP, 'bg-muted/40 text-muted-foreground')} data-record-tabs-tab={candidate.id}>
                   <TabChipBody id={candidate.id} label={labelOf(candidate.id)} fixedReason={contributed} disabled={disabled} />
                 </li>
               ))}
-            {catalog.files && !draft.attachmentsHidden && (
+            {!installed && catalog.files && !draft.attachmentsHidden && (
               <li className={cn(CHIP, 'bg-background')} data-record-tabs-tab="sys_attachment">
                 <TabChipBody
                   id="sys_attachment"
@@ -535,7 +651,7 @@ export function RecordTabsEditor({
                 />
               </li>
             )}
-            {[t('detail.approvalsPanelTitle', { defaultValue: 'Approvals' }), t('detail.timeline', { defaultValue: 'Activity' })].map(
+            {(installed ? [] : [t('detail.approvalsPanelTitle', { defaultValue: 'Approvals' }), t('detail.timeline', { defaultValue: 'Activity' })]).map(
               (label, index) => (
                 <li
                   key={label}
