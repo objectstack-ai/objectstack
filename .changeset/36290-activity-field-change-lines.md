@@ -5,7 +5,7 @@
 
 feat(record-page): each changed field is its own line under an activity entry, `Label: old → new`
 
-Clause-②: yes (widening) — four new `detail.*` language-pack keys in every locale `@object-ui/i18n` ships (`fieldChangeLabel`, `fieldChangeEmpty`, `fieldChangeExpand`, `fieldChangeCollapse`), and four new optional props on the exported `FieldChangeItem` (`label`, `oldText` / `newText`, `emptyLabel`, `expandLabel` / `collapseLabel`); nothing is removed or renamed
+Clause-②: yes (widening) — four new `detail.*` language-pack keys in every locale `@object-ui/i18n` ships (`fieldChangeLabel`, `fieldChangeEmpty`, `fieldChangeExpand`, `fieldChangeCollapse`), and six new optional props on the exported `FieldChangeItem` (`label`, `oldText` / `newText`, `emptyLabel`, `expandLabel` / `collapseLabel`); nothing is removed or renamed
 Metadata-protocol: none
 
 The record page's activity named a saved change by its fields only (「更新了 客户备注」), or carried every value on one cut line. An activity entry now reads as the fields it changed, with one line per changed field under it: `Customer notes: Old words → New words`. A save that changed the phone and the email is one entry with two lines.
