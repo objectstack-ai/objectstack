@@ -153,13 +153,14 @@ describe('ObjectFieldInspector — display-patch mode explains every locked cont
     }
   });
 
-  it('the named locks of the card: API name, Type, Required, Track history, a rule editor, Move up/down and Remove', () => {
+  it('the named locks of the card: API name, Type, Required, Field change values, a rule editor, Move up/down and Remove', () => {
     const rail = mount('industry');
     const sentence = within(rail).getByTestId('field-base-patch-only');
     const named = [
       within(rail).getByTestId('field-apiname-input'),
       within(rail).getByRole('checkbox', { name: t('designer.field.required', LOCALE) }),
-      within(rail).getByRole('checkbox', { name: t('designer.field.trackHistory', LOCALE) }),
+      // objectstack#36290 — the Track history box became the Field change values choice.
+      within(rail).getByRole('combobox', { name: t('designer.field.fieldHistory', LOCALE) }),
       within(rail).getByLabelText(t('designer.field.visibleWhen', LOCALE)),
       // The header's pair and each option row's.
       ...within(rail).getAllByRole('button', { name: t('engine.inspector.reorder.up', LOCALE) }),

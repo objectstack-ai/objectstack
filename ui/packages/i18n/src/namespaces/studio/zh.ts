@@ -315,7 +315,8 @@ const STUDIO_ZH: Record<string, string> = {
   'designer.field.description': '描述',
   'designer.field.readonly': '只读',
   'designer.field.hidden': '隐藏',
-  'designer.field.trackHistory': '记录历史',
+  'designer.field.fieldHistory': '字段修改值',
+  'designer.field.fieldHistoryObjectOff': '该对象已对所有字段关闭修改值，所以无论这里怎么选，该字段的修改都只写出字段名。',
   'designer.field.showOnCreate': '新建时显示',
   'designer.field.showOnCreateRequired': '必填字段新建时总要填写，所以「新建时显示」保持开启。',
   'designer.field.placeholder': '占位符',
@@ -2229,7 +2230,10 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.settings.capabilitiesHint': '为本对象打开或关闭记录页上的功能;每个开关都会真正生效',
   'engine.studio.settings.capTrackHistory': '字段变更历史',
   'engine.studio.settings.capTrackHistoryDesc':
-    '显示记录的字段变更:在默认记录页上,它们并入记录唯一的时间线,归在「变更」筛选下。配合字段级历史跟踪可选择汇总哪些字段的差异;审计采集本身始终开启(合规要求)。',
+    '显示记录的字段变更:在默认记录页上,它们并入记录唯一的时间线,归在「变更」筛选下。变更是否显示旧值 → 新值由下方的「字段修改值」决定;审计采集本身始终开启(合规要求)。',
+  'engine.studio.settings.capFieldHistory': '字段修改值',
+  'engine.studio.settings.capFieldHistoryDesc':
+    '在记录的动态里显示每个被修改字段的旧值 → 新值。默认开启,单个字段可以自行关闭。关闭后,该对象所有字段的修改都只写出字段名。',
   'engine.studio.settings.capFiles': '附件',
   'engine.studio.settings.capFilesDesc':
     '记录页通用附件面板(上传/下载/删除)。关闭后服务端同时拒绝指向该对象的新附件。',

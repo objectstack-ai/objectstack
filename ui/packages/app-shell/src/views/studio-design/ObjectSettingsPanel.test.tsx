@@ -6,7 +6,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent, within } from '@testing-library/react';
+import { render, screen, fireEvent, within, cleanup } from '@testing-library/react';
 import React from 'react';
 import { t } from '../metadata-admin/i18n';
 import { ObjectSettingsPanel } from './ObjectSettingsPanel';
@@ -158,5 +158,44 @@ describe('ObjectSettingsPanel — capabilities (enable.*, framework#2707/#2727)'
     const onPatch = renderPanel(baseDraft);
     fireEvent.click(screen.getByTestId('cap-trackHistory'));
     expect(onPatch).toHaveBeenCalledWith({ enable: { trackHistory: true } });
+  });
+});
+
+/**
+ * objectstack-ai/objectstack#36290 (ruling 7076513167 point 1) — field change
+ * values show by default and an object can turn them off. `enable.fieldHistory`
+ * has no default: unset is on, so the switch writes `false` to turn values off
+ * and removes the key to turn them back on.
+ */
+describe('ObjectSettingsPanel — field change values (enable.fieldHistory, #36290)', () => {
+  const box = () => screen.getByTestId('cap-fieldHistory') as HTMLInputElement;
+
+  it('is on when the key is unset or true, off only on a literal false', () => {
+    renderPanel(baseDraft);
+    expect(box().checked).toBe(true);
+    cleanup();
+    renderPanel({ ...baseDraft, enable: { fieldHistory: true } });
+    expect(box().checked).toBe(true);
+    cleanup();
+    renderPanel({ ...baseDraft, enable: { fieldHistory: false } });
+    expect(box().checked).toBe(false);
+  });
+
+  it('turning it off writes enable.fieldHistory: false, preserving sibling keys', () => {
+    const onPatch = renderPanel({ ...baseDraft, enable: { trackHistory: true, files: true } });
+    fireEvent.click(box());
+    expect(onPatch.mock.calls).toEqual([[{ enable: { trackHistory: true, files: true, fieldHistory: false } }]]);
+  });
+
+  it('turning it back on removes the key rather than writing true, preserving sibling keys', () => {
+    const onPatch = renderPanel({ ...baseDraft, enable: { fieldHistory: false, feeds: false } });
+    fireEvent.click(box());
+    expect(onPatch.mock.calls).toEqual([[{ enable: { feeds: false } }]]);
+  });
+
+  it('is labelled by its title, separate from Field change history', () => {
+    renderPanel(baseDraft);
+    expect(screen.getByLabelText(t('engine.studio.settings.capFieldHistory', 'en-US'))).toBe(box());
+    expect(t('engine.studio.settings.capFieldHistory', 'en-US')).not.toBe(t('engine.studio.settings.capTrackHistory', 'en-US'));
   });
 });
