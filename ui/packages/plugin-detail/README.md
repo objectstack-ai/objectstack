@@ -1050,8 +1050,9 @@ export function RecordCommentsSwitch() {
 
 The "Reference Rail" is a right-hand column of summary cards for related
 collections, drawn by the `record:reference_rail` component. The synthesized
-default page never emits it: its right column already shows every related
-list as a compact panel (see *One record page, laid out by its width* above). The
+default page never emits it: each related list it places is a tab of its own
+on the record's tab row, with its count (see *One record page, laid out by its
+width* above). The
 `buildDefaultPageSchema` options that used to opt into the rail
 (`showReferenceRail`, `hideReferenceRail`, `hideRelatedTab`) and the `rightRail`
 slot were removed with the other surface hints ADR-0085 does not admit
