@@ -3655,6 +3655,7 @@ const es = {
       pendingDraft: 'Este objeto tiene cambios sin publicar en Studio. Publícalos o descártalos allí y vuelve a guardar.',
       unknown: '"{{name}}" ya no es una acción de este objeto. Desfíjala y vuelve a guardar.',
       notPlaced: '"{{name}}" ya no se ofrece en esta página. Desfíjala y vuelve a guardar.',
+      stale: 'Ya no se ofrece aquí; se omite al guardar: {{names}}',
     },
   },
   topbar: {

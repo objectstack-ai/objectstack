@@ -3651,6 +3651,7 @@ const fr = {
       pendingDraft: 'Cet objet a des modifications non publiées dans Studio. Publiez-les ou annulez-les là-bas, puis enregistrez à nouveau.',
       unknown: '« {{name}} » n’est plus une action de cet objet. Désépinglez-la, puis enregistrez à nouveau.',
       notPlaced: '« {{name}} » n’est plus proposée sur cette page. Désépinglez-la, puis enregistrez à nouveau.',
+      stale: 'N’est plus proposé ici, omis à l’enregistrement : {{names}}',
     },
   },
   topbar: {

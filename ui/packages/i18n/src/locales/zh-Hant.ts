@@ -3654,6 +3654,7 @@ const zhHant = {
       pendingDraft: '這個物件在 Studio 裡有未釋出的改動。請先在那裡釋出或丟棄，再儲存。',
       unknown: '「{{name}}」已不是這個物件的動作。請取消固定後再儲存。',
       notPlaced: '「{{name}}」已不在這個頁面上。請取消固定後再儲存。',
+      stale: '已不在這個頁面上，儲存時會去掉：{{names}}',
     },
   },
   topbar: {

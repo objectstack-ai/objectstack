@@ -3573,6 +3573,7 @@ const de = {
       pendingDraft: 'Dieses Objekt hat unveröffentlichte Änderungen in Studio. Veröffentlichen oder verwerfen Sie sie dort und speichern Sie dann erneut.',
       unknown: '„{{name}}“ ist keine Aktion dieses Objekts mehr. Lösen Sie sie und speichern Sie erneut.',
       notPlaced: '„{{name}}“ wird auf dieser Seite nicht mehr angeboten. Lösen Sie sie und speichern Sie erneut.',
+      stale: 'Hier nicht mehr angeboten, beim Speichern weggelassen: {{names}}',
     },
   },
   topbar: {

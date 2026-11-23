@@ -3654,6 +3654,7 @@ const zh = {
       pendingDraft: '这个对象在 Studio 里有未发布的改动。请先在那里发布或丢弃，再保存。',
       unknown: '「{{name}}」已不是这个对象的动作。请取消固定后再保存。',
       notPlaced: '「{{name}}」已不在这个页面上。请取消固定后再保存。',
+      stale: '已不在这个页面上，保存时会去掉：{{names}}',
     },
   },
   topbar: {

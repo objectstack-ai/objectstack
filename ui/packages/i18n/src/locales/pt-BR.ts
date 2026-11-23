@@ -3650,6 +3650,7 @@ const pt = {
       pendingDraft: 'Este objeto tem alterações não publicadas no Studio. Publique ou descarte-as lá e salve novamente.',
       unknown: '"{{name}}" não é mais uma ação deste objeto. Desafixe-a e salve novamente.',
       notPlaced: '"{{name}}" não é mais oferecida nesta página. Desafixe-a e salve novamente.',
+      stale: 'Não é mais oferecido aqui; fica de fora ao salvar: {{names}}',
     },
   },
   topbar: {

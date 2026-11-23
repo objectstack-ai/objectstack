@@ -4254,6 +4254,7 @@ const en = {
       pendingDraft: 'This object has unpublished changes in Studio. Publish or discard them there, then save again.',
       unknown: '"{{name}}" is no longer an action of this object. Unpin it, then save again.',
       notPlaced: '"{{name}}" is no longer offered on this page. Unpin it, then save again.',
+      stale: 'No longer offered here, left out when you save: {{names}}',
     },
   },
   topbar: {
