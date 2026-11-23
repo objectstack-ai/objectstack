@@ -7,8 +7,12 @@ import ExcelJS from 'exceljs';
 import {
   parseDelimited, parseCSV, parseExcelArrayBuffer, parseClipboardTable,
   inferColumnType, isTypeCompatible, ImportParseError, parseSpreadsheetFile,
-  suggestColumnMappings, scoreToConfidence, type MappableField,
+  suggestColumnMappings, scoreToConfidence, type MappableField, decodeSpreadsheetText,
 } from './importParsers';
+import {
+  parseDelimited as fieldsParseDelimited,
+  decodeSpreadsheetText as fieldsDecodeSpreadsheetText,
+} from '@object-ui/fields';
 
 describe('parseDelimited', () => {
   it('parses CSV with quotes, escaped quotes and embedded commas/newlines', () => {
@@ -263,10 +267,8 @@ describe('suggestColumnMappings', () => {
 });
 
 describe('the delimited-text reader is one copy, in @object-ui/fields (objectstack#36442)', () => {
-  it('the wizard reads with the very functions the file preview reads with', async () => {
-    const wizard = await import('./importParsers');
-    const fields = await import('@object-ui/fields');
-    expect(wizard.parseDelimited).toBe(fields.parseDelimited);
-    expect(wizard.decodeSpreadsheetText).toBe(fields.decodeSpreadsheetText);
+  it('the wizard reads with the very functions the file preview reads with', () => {
+    expect(parseDelimited).toBe(fieldsParseDelimited);
+    expect(decodeSpreadsheetText).toBe(fieldsDecodeSpreadsheetText);
   });
 });
