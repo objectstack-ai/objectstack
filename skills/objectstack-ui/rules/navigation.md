@@ -179,13 +179,14 @@ at runtime from the client viewport, because an author
 - **Column count.** Not authored. The form grid follows its **real rendered width**
   via container queries — the same form is 1 column in a narrow drawer and up to 4
   on a wide page. Author *grouping* with `fieldGroups`.
-- **`sections` are the escape hatch — reach for them last.** The ladder, in
-  order: (1) **derive** — declare `fieldGroups` and author no
-  `sections` at all; (2) **reference** — when one surface needs a local
-  arrangement, a section may name a declared group, `{ group: 'contact_info' }`,
+- **`sections` are the escape hatch — reach for them last.** New and Edit
+  never read them ([Form Views](./list-views.md#form-views)): they arrange a
+  named or public form and a page's `record:details` or form block. The ladder:
+  (1) **derive** — declare `fieldGroups` and author no `sections`;
+  (2) **reference** — a section may name a declared group, `{ group: 'contact_info' }`,
   and inherits its members, label and presentation (restating a key the group
-  declares is refused at parse); (3) **enumerate** — `{ label, fields: [...] }`
-  only for a named-customer requirement a group reference genuinely cannot
-  express (a cross-group entry combination, a wizard/pane structure), with that
-  reason in a comment beside it. A hand-enumerated section re-copies membership
-  the object already owns and goes stale on the next field added.
+  declares is refused); (3) **enumerate** — `{ label, fields: [...] }`
+  only for a named-customer requirement a group reference cannot
+  express (a cross-group combination, a wizard's steps), with the
+  reason in a comment. An enumerated section copies membership
+  the object owns and goes stale on the next field added.
