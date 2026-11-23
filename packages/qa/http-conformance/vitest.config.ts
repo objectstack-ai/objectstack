@@ -72,6 +72,21 @@ export default defineConfig({
         find: /^@objectstack\/service-storage$/,
         replacement: path.resolve(__dirname, '../../services/service-storage/src/index.ts'),
       },
+      // The same file composes the platform objects, plugin-security and
+      // plugin-sharing around the doors: the identity, grant and sharing
+      // rules the doors read as the caller, so they are this checkout's too.
+      {
+        find: /^@objectstack\/platform-objects\/plugin$/,
+        replacement: path.resolve(__dirname, '../../platform-objects/src/plugin.ts'),
+      },
+      {
+        find: /^@objectstack\/plugin-security$/,
+        replacement: path.resolve(__dirname, '../../plugins/plugin-security/src/index.ts'),
+      },
+      {
+        find: /^@objectstack\/plugin-sharing$/,
+        replacement: path.resolve(__dirname, '../../plugins/plugin-sharing/src/index.ts'),
+      },
       // `hono-mcp-stateless-verbs.conformance.test.ts` serves `/api/v1/mcp`
       // from the REAL `MCPServerRuntime` on both doors, so its verdict on which
       // verbs the transport answers is about this checkout's mcp source.
