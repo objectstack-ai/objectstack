@@ -1331,6 +1331,16 @@ const en = {
     inlineEditLabel: 'Edit records inline (click a cell to edit)',
     // The list's Options menu.
     optionsMenu: {
+      // objectstack#36370 — a board's own settings.
+      kanbanLaneField: "Columns by",
+      kanbanLanes: "Visible columns",
+      kanbanCardFields: "Card fields",
+      kanbanAddCardField: "Add field",
+      kanbanShowFieldLabels: "Show field names",
+      kanbanHideEmptyFields: "Hide empty fields",
+      kanbanSummary: "Column summary",
+      kanbanHiddenLanes: "Hidden columns",
+      kanbanHiddenLanesHint: "Cards of a hidden column show under Uncategorized.",
       viewName: 'View name',
       fields: 'Fields',
       fieldsShown: '{{count}} shown',
@@ -1374,6 +1384,19 @@ const en = {
     },
   },
   kanban: {
+    // objectstack#36370 — the lane header's 「+」 and 「⋯」 menu, and an empty lane's create row.
+    laneMenu: {
+      actions: "{{column}} column actions",
+      collapse: "Collapse column",
+      expand: "Expand column",
+      hide: "Hide column",
+      hideHint: "Its cards move to Uncategorized",
+      createIn: "New record in {{column}}",
+      create: "New",
+    },
+    laneStatistic: {
+      loadedOnly: "loaded cards",
+    },
     addCard: 'Add card',
     addColumn: 'Add column',
     moveCard: 'Move card',
@@ -2038,6 +2061,13 @@ const en = {
     foldedMoreFields_other: '{{count}} more',
     expandFolded: 'Show each update',
     collapseFolded: 'Hide updates',
+    // objectstack#36290 — one line per changed field under an activity entry:
+    // the field's label before its values, the word for an empty side, and
+    // the control that shows a long value in full and clamps it again.
+    fieldChangeLabel: '{{field}}:',
+    fieldChangeEmpty: 'Empty',
+    fieldChangeExpand: 'Show all',
+    fieldChangeCollapse: 'Show less',
     // Replies
     replyCount: '{{count}} reply',
     replyCount_one: '{{count}} reply',
@@ -3423,6 +3453,7 @@ const en = {
       },
       linkFilterRefused: 'This link’s filter was not applied. It names a field you can’t filter on here, so the list shows the view without it.',
       personalizedParts: {
+        kanban: "Board settings",
         filters: 'Filters',
         search: 'Search',
         sort: 'Sort',
@@ -4257,6 +4288,27 @@ const en = {
       pendingDraft: 'This app has unpublished changes in Studio. Publish or discard them there, then save again.',
       noVersion: 'This app\'s package states no version, so its menu cannot be customized.',
       notWritable: 'This app\'s customization package cannot be written, so its menu cannot be saved.',
+    },
+    recordTabs: {
+      entry: 'Configure tabs',
+      title: 'Configure tabs',
+      leaveUnsaved: 'Leave without saving? Your tab changes will be lost.',
+      saveFailed: 'The tabs were not saved: {{reason}}',
+      notListed: 'This object\'s package is not listed, so its tabs cannot be saved.',
+      pendingDraft: 'This object has unpublished changes in Studio. Publish or discard them there, then save again.',
+      notWritable: 'This object\'s package cannot be written, so its tabs cannot be saved here.',
+      name: 'Tab name',
+      rename: 'Rename {{name}}',
+      drag: 'Move {{name}}',
+      hide: 'Hide {{name}}',
+      show: 'Show {{name}}',
+      shown: 'Tabs',
+      hidden: 'Hidden',
+      noneHidden: 'None',
+      contributed: 'Another package adds this tab. It is placed there.',
+      renameSourceOnly: 'Tab names are changed in the app\'s source language',
+      builtinFixed: 'The platform draws this tab last, under its own name.',
+      adjustFieldGroups: 'Adjust field groups',
     },
   },
   topbar: {

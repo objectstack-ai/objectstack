@@ -297,7 +297,7 @@ const STUDIO_ZH: Record<string, string> = {
   'designer.field.section.developer': '开发者信息',
   'designer.field.section.developerHint': '内部名在接口与公式里引用，日常改字段用不到。',
   'designer.field.removeConfirmTitle': '删除字段“{label}”？',
-  'designer.field.removeConfirmBody': '字段会从这个对象的草稿中移除，发布后生效。',
+  'designer.field.removeConfirmBody': '改动保存并生效后，这个字段会从对象中移除。',
   'designer.field.section.advanced': '高级',
   'designer.field.section.options': '{type} 选项',
   'designer.field.section.computed': '计算值',
@@ -1363,6 +1363,12 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.inspector.report.namePlaceholder': '例如：pipeline_by_stage',
   'engine.inspector.report.label': '显示名',
   'engine.inspector.report.labelPlaceholder': '例如：按阶段统计的销售管道',
+  // objectstack#36481 — the note under the name / title box when readers in the
+  // session language are served a translation instead of the saved text.
+  'engine.inspector.servedLabel.kept':
+    '使用该语言的读者看到的是「{served}」：这个名称有一条译文，排在这里保存的文字之前。要改读者看到的文字，请到 Studio ›「全部元数据」›「翻译」里修改这条译文。',
+  'engine.inspector.servedLabel.ifKept':
+    '使用该语言的读者现在看到的是译文「{served}」。如果这条译文存放在本环境自己的翻译或定制包的翻译里，保存后读者仍会看到它。要改它，请到 Studio ›「全部元数据」›「翻译」里修改这条译文。',
   'engine.inspector.report.type': '报表类型',
   'engine.inspector.report.type.tabular': '表格',
   'engine.inspector.report.type.summary': '汇总',
@@ -1683,6 +1689,9 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.form.hideValue': '隐藏值',
   'engine.form.revealValue': '显示值',
   'engine.form.clear': '清除',
+  'engine.form.fieldHistoryDefault': '默认（{state}）',
+  'engine.form.fieldHistoryOn': '开',
+  'engine.form.fieldHistoryOff': '关',
   'engine.form.anOption': '一个选项',
   'engine.form.selectDepToConfigure': '请先选择{dep}，然后再配置。',
   'engine.form.noConfigNeeded': '“{value}”无需额外配置。',
@@ -2200,6 +2209,22 @@ const STUDIO_ZH: Record<string, string> = {
     '组织内每个用户都能查看和编辑所有记录。',
   'engine.studio.settings.sharingDescControlledByParent':
     '谁能看到这条记录,跟随它所属的主记录(经主从关系)。',
+  'engine.studio.settings.cbpRefusalSeveralRequiredMasters':
+    '该对象设为「跟随所属的主记录」,但 {fields} 都是必填的主从关系字段,无法确定由哪条主记录决定谁能看到记录,因此无法保存。请只在决定访问权限的那个主对象上保留主从关系,其余改为查找关系字段。',
+  'engine.studio.settings.cbpRefusalSeveralMasters':
+    '该对象设为「跟随所属的主记录」,但 {fields} 都是主从关系字段且都不是必填,没有一个能作为决定谁能看到记录的主记录,因此无法保存。请只在决定访问权限的那个主对象上保留主从关系,其余改为查找关系字段。',
+  'engine.studio.settings.cbpRefusalMasterNotRequired':
+    '该对象设为「跟随所属的主记录」,但主从关系字段 {field} 没有说明每条记录是否必须有主记录,因此无法保存。请把 {field} 设为必填(每条记录都有主记录)或非必填(记录可以没有主记录)。',
+  'engine.studio.settings.cbpRefusalRequiredLookupOnly':
+    '该对象设为「跟随所属的主记录」,但它没有主从关系字段,只有必填的查找关系字段 {fields};查找关系不会把主记录的访问权限传下来,因此无法保存。请把该字段改为主从关系(删除主记录时会一并删除这些记录);如果这些记录应在主记录删除后保留,请改选其他共享方式。',
+  'engine.studio.settings.cbpRefusalRequiredLookupsOnly':
+    '该对象设为「跟随所属的主记录」,但它没有主从关系字段,只有必填的查找关系字段 {fields};查找关系不会把主记录的访问权限传下来,因此无法保存。请把指向主对象的那个字段改为主从关系(删除主记录时会一并删除这些记录);如果这些记录应在主记录删除后保留,请改选其他共享方式。',
+  'engine.studio.settings.cbpRefusalNoMaster':
+    '该对象设为「跟随所属的主记录」,但它没有可跟随的主从关系字段,因此无法保存。请添加一个指向主对象的主从关系字段;如果这些记录各自独立,请改选其他共享方式。',
+  'engine.studio.settings.cbpRefusalMasterNotWritable':
+    '该对象经 {field} 跟随所属的主记录,但该字段是只读或系统字段,用户保存记录时无法填写它,因此无法保存。请让 {field} 可编辑;如果这些记录应在主记录删除后保留,请改选其他共享方式。',
+  'engine.studio.settings.cbpRefusalField': '「{name}」',
+  'engine.studio.settings.cbpRefusalFieldSeparator': '、',
   'engine.studio.settings.capabilities': '功能开关',
   'engine.studio.settings.capabilitiesHint': '为本对象打开或关闭记录页上的功能;每个开关都会真正生效',
   'engine.studio.settings.capTrackHistory': '字段变更历史',
@@ -2948,6 +2973,22 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.pkg.manageRefreshFailed':
     '软件包 {id} 在该操作后未能刷新 —— 已关闭面板，以免把操作前的记录当作最新呈现。{error}',
   'engine.studio.publish': '发布',
+  'engine.studio.save.save': '保存',
+  'engine.studio.save.saving': '保存中…',
+  'engine.studio.save.cancel': '取消',
+  'engine.studio.save.title': '保存本页的改动，保存后立即生效。',
+  'engine.studio.save.cancelTitle': '丢掉本页还没保存的改动',
+  'engine.studio.save.done': '已保存并生效：{items}',
+  'engine.studio.save.refused': '未保存：{items}',
+  'engine.studio.save.refusedLine': '{item}：{reason}',
+  'engine.studio.save.savedLine': '已保存并生效：{items}',
+  'engine.studio.save.itemSeparator': '、',
+  'engine.studio.save.held': '未保存：{clause}。改动仍保留在页面上。',
+  'engine.studio.save.publishFirst': '发布前请先保存或取消本页的改动。',
+  'engine.studio.save.confirmIrreversible': '保存后以下改动立即生效，之后无法用「取消」撤回：\n{changes}\n\n仍要保存吗？',
+  'engine.studio.save.confirmRemoveField': '• 删除字段「{field}」：所有记录上这个字段的值都会被删除。',
+  'engine.studio.save.confirmRetypeField': '• 把字段「{field}」从{from}改成{to}：已存的值可能被转换或清空。',
+  'engine.studio.held.lineExplicit': '还不能保存：{clause}。改动已保留在此处，补全后再点保存。',
   'engine.studio.loading': '加载中…',
   'engine.studio.loadFailed': '加载失败',
   'engine.studio.refusal.choiceWithoutOptions':

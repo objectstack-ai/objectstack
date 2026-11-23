@@ -23,7 +23,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 // Module scope as well as in the `vi.mock` factory below: the cold transform is paid
 // during collection, which no test or hook timeout clocks (AGENTS.md, flaky-test discipline).
 import '@object-ui/components';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { MetadataClient } from '@object-ui/data-objectstack';
 
@@ -71,6 +71,8 @@ function doorRefusal(body: Row): string[] {
 const puts: Array<{ body: Row; status: number }> = [];
 
 const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+  // objectstack#36511 — the Save's own publish of the item, and a refused one's discard.
+  if (init?.method === 'POST' || init?.method === 'DELETE') return new Response('{"success":true}', { status: 200 });
   if (init?.method === 'PUT') {
     const body = JSON.parse(String(init.body)) as Row;
     const refused = doorRefusal(body);
@@ -142,7 +144,10 @@ vi.mock('@object-ui/plugin-view', async (importOriginal) => {
 
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), dismiss: vi.fn() } }));
 
+// The source reaches a dynamic import of it: its first load is paid at collection (`check:test-source-alias`).
+import '@objectstack/lint';
 import { DataPillar } from './StudioDesignSurface';
+import { StudioSaveHarness, pressStudioSave } from './__tests__/studioSaveHarness';
 import { addFieldFromGrid } from './__tests__/dataPillarAddField';
 import { createEmptyDataSource } from './__tests__/emptyDataSource';
 
@@ -161,20 +166,13 @@ afterEach(() => {
 
 function renderData() {
   render(
-    <MemoryRouter initialEntries={[`/studio/${PKG}/data`]}>
+    <StudioSaveHarness><MemoryRouter initialEntries={[`/studio/${PKG}/data`]}>
       <DataPillar packageId={PKG} />
-    </MemoryRouter>,
+    </MemoryRouter></StudioSaveHarness>,
   );
 }
 
 const fieldCountShown = () => screen.getByText(/^\d+ fields$/).textContent;
-
-/** Past the autosave's 1.5 s debounce. */
-async function outlastDebounce(): Promise<void> {
-  await act(async () => {
-    await new Promise((r) => setTimeout(r, 2300));
-  });
-}
 
 /** What every PUT the page sent carried for `tier` and `status`. */
 function sentFields(): Array<{ tier: unknown; status: unknown; status_code: number }> {
@@ -187,11 +185,11 @@ function sentFields(): Array<{ tier: unknown; status: unknown; status_code: numb
 const SERVED_STATUS = JSON.stringify((SERVED.fields as Record<string, Row>).status);
 
 describe('Studio data page — a picklist-bound field is saved without its served options (objectui#10202)', () => {
-  it('the draft autosave (an added field) sends no bound field with `options`, and the inline select byte-identical', async () => {
+  it('the Save (an added field) sends no bound field with `options`, and the inline select byte-identical', async () => {
     renderData();
     await waitFor(() => expect(fieldCountShown()).toBe('3 fields'), { timeout: 8000 });
     await addFieldFromGrid();
-    await outlastDebounce();
+    await pressStudioSave();
     await waitFor(() => expect(puts.length).toBeGreaterThan(0), { timeout: 4000 });
 
     for (const sent of sentFields()) {
@@ -205,6 +203,7 @@ describe('Studio data page — a picklist-bound field is saved without its serve
     renderData();
     await waitFor(() => expect(fieldCountShown()).toBe('3 fields'), { timeout: 8000 });
     fireEvent.click(await screen.findByRole('button', { name: 'Reverse columns' }, { timeout: 8000 }));
+    await pressStudioSave();
     await waitFor(() => expect(puts.length).toBeGreaterThan(0), { timeout: 4000 });
 
     const first = puts[0];

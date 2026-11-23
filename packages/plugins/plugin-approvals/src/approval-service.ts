@@ -10937,6 +10937,10 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
    * a reader: the list ({@link listRequests}: the inbox and the record's
    * approval panel), and the get and a decision's echo ({@link loadRequest}),
    * whose step progress ({@link attachFlowSteps}) names its steps the same way.
+   *
+   * [#35384] The engine is where an object's label is served from: its served
+   * definition and its packaged base, so a renamed object is named by its
+   * rename, as `/meta` names it.
    */
   private readerLabels(context: ExecutionContext): ReaderLabels | undefined {
     let service: ReaderLabelI18n | undefined;
@@ -10946,7 +10950,7 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
       // The i18n service is optional and late-bound: the stored labels stand.
       return undefined;
     }
-    return readerLabelsFor(service, context?.locale);
+    return readerLabelsFor(service, context?.locale, this.engine);
   }
 
   async countRequests(

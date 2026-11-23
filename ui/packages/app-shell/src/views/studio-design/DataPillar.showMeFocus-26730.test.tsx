@@ -17,7 +17,7 @@
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, fireEvent, cleanup, act, waitFor, within } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { MetadataClient } from '@object-ui/data-objectstack';
 
@@ -45,6 +45,8 @@ function serverIssues(body: Record<string, unknown>): Array<{ path: string; mess
 }
 
 const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+  // objectstack#36511 — the Save's own publish of the item, and a refused one's discard.
+  if (init?.method === 'POST' || init?.method === 'DELETE') return new Response('{"success":true}', { status: 200 });
   if (init?.method === 'PUT') {
     const body = JSON.parse(String(init.body)) as Record<string, unknown>;
     puts.push(body);
@@ -110,7 +112,10 @@ vi.mock('@object-ui/react', async (importOriginal) => {
   return { ...mod, useAdapter: () => dataSource };
 });
 
+// The source reaches a dynamic import of it: its first load is paid at collection (`check:test-source-alias`).
+import '@objectstack/lint';
 import { DataPillar } from './StudioDesignSurface';
+import { StudioSaveHarness, pressStudioSave } from './__tests__/studioSaveHarness';
 import { addFieldFromFormToolbar } from './__tests__/dataPillarAddField';
 import { createEmptyDataSource } from './__tests__/emptyDataSource';
 import { registerBuiltinInspectors } from '../metadata-admin/inspectors';
@@ -128,19 +133,12 @@ afterEach(() => {
 
 const L = (key: string) => t(key, 'en');
 
-/** Past the autosave's 1.5 s debounce. */
-async function outlastDebounce(): Promise<void> {
-  await act(async () => {
-    await new Promise((r) => setTimeout(r, 2300));
-  });
-}
-
 async function mountOnView(def: Record<string, unknown>, tabKey: string): Promise<void> {
   objectDef = def;
   render(
-    <MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
+    <StudioSaveHarness><MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
       <DataPillar packageId="com.example.showcase" />
-    </MemoryRouter>,
+    </MemoryRouter></StudioSaveHarness>,
   );
   // The first match is the flat tab (the passthrough menu draws a second).
   fireEvent.click((await screen.findAllByRole('button', { name: L(tabKey) }))[0]);
@@ -169,7 +167,7 @@ describe('Studio data page — "Show me" puts the focus on the input the refusal
     };
     await mountOnView(TASK, 'engine.studio.data.tab.form');
     await addFieldFromFormToolbar(undefined, { label: 'Due note' });
-    await outlastDebounce();
+    await pressStudioSave();
     const strip = await screen.findByTestId('studio-refusal', undefined, { timeout: 4000 });
     expect(within(strip).getByTestId('studio-refusal-message')).toHaveTextContent(
       tFormat('engine.studio.refusal.field', 'en', { field: 'Due note' }),
@@ -197,7 +195,7 @@ describe('Studio data page — "Show me" puts the focus on the input the refusal
     // Any edit: the label of the first action, which the list selects.
     const labelInput = (await screen.findByText(L('engine.inspector.action.label'), { selector: 'label' })).parentElement!.querySelector('input')!;
     fireEvent.change(labelInput, { target: { value: 'Archive now' } });
-    await outlastDebounce();
+    await pressStudioSave();
     expect(puts).toHaveLength(1);
     await screen.findByTestId('studio-refusal');
 

@@ -24,11 +24,15 @@
  *   objects.<object>._actions.<action_name>.params.<param_name>.placeholder
  *   objects.<object>._actions.<action_name>.params.<param_name>.options.<value>
  *   objects.<object>._tabs.<tab_name>.label
+ *   objects.<object>._relatedLists.<list>.label
  *   objects.<object>._sections.<section_name>.label
  *   objects.<object>._sections.<section_name>.description
  *   objects.<object>._sections.<section_name>.fields.<field>.label
  *   objects.<object>._sections.<section_name>.fields.<field>.placeholder
  *   objects.<object>._sections.<section_name>.fields.<field>.helpText
+ *
+ * `<list>` is the literal `list` of an object-form `relatedLists` entry on that
+ * object (`object.field` is one key), see `translateObject`.
  *
  * `<section_name>` is a form section's own `name` — the served form view's
  * `config.sections[]`, see {@link translateView}. A section authored without a
@@ -5288,6 +5292,90 @@ function translateObjectValidations(
 }
 
 /**
+ * `objects.<object>._relatedLists.<list>.label` along the locale chain, the
+ * `list` indexed directly (a dotted `object.field` is one key, never split);
+ * `undefined` when no locale of the chain carries a non-empty entry.
+ */
+function lookupRelatedListLabel(
+  bundle: TranslationBundle | undefined,
+  objectName: string,
+  list: string,
+  opts?: ResolveOptions,
+): string | undefined {
+  if (!bundle) return undefined;
+  for (const code of localeChain(opts)) {
+    const candidate = pickData(bundle, code)?.objects?.[objectName]?._relatedLists?.[list]?.label;
+    if (typeof candidate === 'string' && candidate.length > 0) return candidate;
+  }
+  return undefined;
+}
+
+/**
+ * Overlay `objects.<object>._relatedLists.<list>.label` onto the `label` of
+ * each object-form entry of an object document's `relatedLists` — the record
+ * page's tab title and table heading for that list — returning the SAME array
+ * reference when nothing matched, so {@link translateObject} can leave
+ * `relatedLists` off its copy.
+ *
+ * ## The entry's own label, and nothing in its place
+ *
+ * Only an entry that AUTHORS a non-empty `label` is translated. A bare-string
+ * entry, a built-in tab and an object entry with no `label` keep exactly what
+ * they serve without a bundle: the console then titles the list from the child
+ * FK's `relatedListTitle` (translated on the child, see {@link translateObject})
+ * or the child object's plural label. A bundle translates an attribute and
+ * never swaps another in, the rule the field-level `inlineTitle` and
+ * `relatedListTitle` overlays follow.
+ *
+ * The address is keyed by the PARENT (the object that declares the entry) and
+ * the entry's literal `list` value, `object.field` included as one key. Each
+ * locale of the chain is asked in order, as `_tabs` is.
+ *
+ * ## The catalog loses to an explicit override — ADR-0029 D9.2a
+ *
+ * The catalog translates the PACKAGED entry, so the label is judged by
+ * {@link valueOverridesPackagedBase} (⛔ never a second comparison) against the
+ * entry naming the same `list` in {@link TranslateDocumentOptions.packagedBase}'s
+ * `relatedLists`. An entry the base does not carry was authored after the fact
+ * and its label counts as diverged; no base supplied means nothing is inferred
+ * and the catalog applies — {@link translateObjectListViews}' edges, unchanged.
+ */
+function translateObjectRelatedLists(
+  relatedLists: unknown,
+  catalogs: LabelCatalogs,
+  objectName: string,
+  opts: TranslateDocumentOptions | undefined,
+): unknown {
+  if (!Array.isArray(relatedLists) || !catalogs.unchanged) return relatedLists;
+  const base = asRecord(opts?.packagedBase);
+  // The base's own object-form entries — `[]` when the base is known but
+  // declares none, so every labelled entry on the served document then counts
+  // as authored.
+  const packagedEntries = base === undefined
+    ? undefined
+    : (Array.isArray(base.relatedLists) ? base.relatedLists : []).map(asRecord);
+  let changed = false;
+  const next = relatedLists.map((raw) => {
+    const entry = asRecord(raw);
+    if (entry === undefined) return raw;
+    const list = entry.list;
+    if (typeof list !== 'string' || list.length === 0) return raw;
+    if (typeof entry.label !== 'string' || entry.label.length === 0) return raw;
+    const packagedEntry = packagedEntries === undefined
+      ? undefined
+      : packagedEntries.find((candidate) => candidate?.list === list) ?? {};
+    const translated = lookupRelatedListLabel(
+      catalogFor(catalogs, valueOverridesPackagedBase(packagedEntry, 'label', entry.label)),
+      objectName, list, opts,
+    );
+    if (translated === undefined || translated === entry.label) return raw;
+    changed = true;
+    return { ...entry, label: translated };
+  });
+  return changed ? next : relatedLists;
+}
+
+/**
  * The packaged object's validation rules by `name`, each `conditional` branch
  * under its own name to {@link MAX_VALIDATION_DEPTH}, for
  * {@link translateObjectValidations}' divergence test — empty when no base is
@@ -5452,6 +5540,14 @@ function packagedRulesByName(packagedBase: unknown): Map<string, Record<string, 
  * related list (side card or full-width table) from the served child field.
  * An authored title with no entry keeps its text; the child's label is never
  * swapped in for it.
+ *
+ * ## A `relatedLists` entry's `label` — the title the parent declares
+ *
+ * `objects.<object>._relatedLists.<list>.label` overlays the `label` of the
+ * object-form `relatedLists` entry naming `<list>` on THIS object, the parent:
+ * that label wins over the child FK's `relatedListTitle` on the record page,
+ * and the console reads it off the served parent. Only an authored label is
+ * translated — see {@link translateObjectRelatedLists}.
  */
 export function translateObject<T extends ObjectLike>(
   doc: T,
@@ -5616,6 +5712,8 @@ export function translateObject<T extends ObjectLike>(
   const listViews = translateObjectListViews(doc.listViews, catalogs, objectName, opts);
   const authoredValidations = (doc as { validations?: unknown }).validations;
   const validations = translateObjectValidations(authoredValidations, bundle, objectName, opts);
+  const authoredRelatedLists = (doc as { relatedLists?: unknown }).relatedLists;
+  const relatedLists = translateObjectRelatedLists(authoredRelatedLists, catalogs, objectName, opts);
 
   return {
     ...doc,
@@ -5626,6 +5724,7 @@ export function translateObject<T extends ObjectLike>(
     ...(actions !== undefined ? { actions } : {}),
     ...(listViews !== doc.listViews ? { listViews } : {}),
     ...(validations !== authoredValidations ? { validations } : {}),
+    ...(relatedLists !== authoredRelatedLists ? { relatedLists } : {}),
   };
 }
 

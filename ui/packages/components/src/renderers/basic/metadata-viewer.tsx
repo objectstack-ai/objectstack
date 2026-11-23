@@ -397,22 +397,22 @@ function StateMachineView({ object, name }: ViewerProps) {
  * What the embed names a step by, in the reader's language where the package
  * translates it.
  *
- * Every step by its label's one key (`approvals` / untitled `screens` /
- * `nodes`, `useFlowLabelTranslations`), else the authored label. A screen that
- * authors its own `config.title` is named by that heading — the words its
- * reader meets at run time, translated under `screens.<node_id>.title` —
- * unless the heading holds a `{{ }}` hole a drawing cannot fill; it then keeps
- * its authored label, which has no key.
+ * A screen that authors its own `config.title` is named by that heading — the
+ * words its reader meets at run time, translated under
+ * `screens.<node_id>.title` — unless the heading holds a `{{ }}` hole a
+ * drawing cannot fill. Every other step, and such a screen, by its label's one
+ * key (`approvals` / untitled `screens` / `nodes`, `useFlowLabelTranslations`),
+ * else the authored label.
  */
 function flowStepName(node: any, translated: FlowLabelTranslations | undefined): string | undefined {
   if (!node) return undefined;
-  const own = translated?.stepLabel(node);
-  if (own) return own;
   const title = node.type === 'screen' ? node.config?.title : undefined;
   if (typeof title === 'string' && title) {
     const heading = translated?.screenTitle(node) ?? title;
     if (!heading.includes('{{')) return heading;
   }
+  const own = translated?.stepLabel(node);
+  if (own) return own;
   return typeof node.label === 'string' && node.label ? node.label : node.id;
 }
 

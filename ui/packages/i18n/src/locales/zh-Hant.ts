@@ -1056,6 +1056,16 @@ const zhHant = {
     inlineEditLabel: '行內編輯記錄(點選單元格進行編輯)',
     // The list's Options menu.
     optionsMenu: {
+      // objectstack#36370 — a board's own settings.
+      kanbanLaneField: "分列欄位",
+      kanbanLanes: "顯示哪幾列",
+      kanbanCardFields: "卡片上顯示的欄位",
+      kanbanAddCardField: "新增欄位",
+      kanbanShowFieldLabels: "顯示欄位名",
+      kanbanHideEmptyFields: "隱藏空欄位",
+      kanbanSummary: "列底統計",
+      kanbanHiddenLanes: "隱藏的列",
+      kanbanHiddenLanesHint: "隱藏的列裡的卡片會顯示在「未分類」。",
       viewName: '檢視名稱',
       fields: '欄位',
       fieldsShown: '已顯示 {{count}} 個',
@@ -1099,6 +1109,19 @@ const zhHant = {
     },
   },
   kanban: {
+    // objectstack#36370 — the lane header's 「+」 and 「⋯」 menu, and an empty lane's create row.
+    laneMenu: {
+      actions: "{{column}} 列的操作",
+      collapse: "摺疊這一列",
+      expand: "展開這一列",
+      hide: "隱藏這一列",
+      hideHint: "這一列的卡片會移到「未分類」",
+      createIn: "在「{{column}}」新建",
+      create: "新建",
+    },
+    laneStatistic: {
+      loadedOnly: "僅已載入的卡片",
+    },
     addCard: '新增卡片',
     addColumn: '新增列',
     moveCard: '移動卡片',
@@ -1728,6 +1751,10 @@ const zhHant = {
     foldedMoreFields_other: '其他 {{count}} 項',
     expandFolded: '展開每次更新',
     collapseFolded: '收起更新',
+    fieldChangeLabel: '{{field}}：',
+    fieldChangeEmpty: '空',
+    fieldChangeExpand: '展開',
+    fieldChangeCollapse: '收起',
     // Replies
     replyCount: '{{count}} 條回覆',
     replyCount_one: '{{count}} 條回覆',
@@ -2906,6 +2933,7 @@ const zhHant = {
       },
       linkFilterRefused: '此連結的篩選條件未應用：其中包含你在此處無法篩選的欄位，因此列表按檢視本身顯示。',
       personalizedParts: {
+        kanban: "看板設定",
         filters: '篩選',
         search: '搜尋',
         sort: '排序',
@@ -3657,6 +3685,27 @@ const zhHant = {
       pendingDraft: '這個應用在 Studio 裡有未釋出的改動。請先在那裡釋出或丟棄，再儲存。',
       noVersion: '這個應用所在的包沒有宣告版本，選單無法定製。',
       notWritable: '這個應用的定製包不可寫，選單無法儲存。',
+    },
+    recordTabs: {
+      entry: '配置頁籤',
+      title: '配置頁籤',
+      leaveUnsaved: '尚未儲存，確定離開？對頁籤的改動將丟失。',
+      saveFailed: '頁籤未儲存：{{reason}}',
+      notListed: '此物件所在的軟體包不在列表中，無法儲存頁籤。',
+      pendingDraft: '此物件在 Studio 中有未釋出的改動。請先在那裡釋出或丟棄，再儲存。',
+      notWritable: '此物件所在的軟體包不可寫，無法在這裡儲存頁籤。',
+      name: '頁簽名稱',
+      rename: '重新命名{{name}}',
+      drag: '移動{{name}}',
+      hide: '隱藏{{name}}',
+      show: '顯示{{name}}',
+      shown: '頁籤',
+      hidden: '已隱藏',
+      noneHidden: '無',
+      contributed: '此頁籤由另一個軟體包新增，在那裡擺放。',
+      renameSourceOnly: '頁簽名稱只能在應用的源語言下修改',
+      builtinFixed: '此頁籤由平台繪製，固定在最後，名稱不可改。',
+      adjustFieldGroups: '調整欄位分組',
     },
   },
   topbar: {

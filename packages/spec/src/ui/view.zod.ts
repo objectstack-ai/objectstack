@@ -2371,6 +2371,42 @@ export const EmptyStateSchema = lazySchema(() => strictObject({
 }));
 
 /**
+ * objectstack#36370 — a board lane's foot statistic (`kanban.summary`).
+ *
+ * Its own closed set, not the list footer's `ColumnSummaryConfigSchema`: the
+ * board computes these in the browser, so the set is exactly what a reader
+ * computes. `count` counts the lane's records (the lane's own count, the one
+ * its header shows); `sum` totals a number field (`field` required) over the
+ * cards the lane has LOADED, not over every record of the lane, and says so
+ * at the foot when the lane holds more than it drew; `none` shows nothing,
+ * also over `summarizeField`. A sum over the whole lane, and an average, a
+ * minimum or a maximum, wait for a lane aggregate the query answers
+ * (objectstack#36520): over a lane that has loaded only part of its cards none
+ * of them is even a bound.
+ */
+export const KanbanLaneSummarySchema = lazySchema(() => z.discriminatedUnion('type', [
+  strictObject({
+    surface: 'this `none` lane statistic',
+    history: VIEW_HISTORY,
+  }, {
+    type: z.literal('none'),
+  }),
+  strictObject({
+    surface: 'this `count` lane statistic',
+    history: VIEW_HISTORY,
+  }, {
+    type: z.literal('count'),
+  }),
+  strictObject({
+    surface: 'this `sum` lane statistic',
+    history: VIEW_HISTORY,
+  }, {
+    type: z.literal('sum'),
+    field: z.string().min(1).describe('The number field the lane totals over its loaded cards (e.g. amount)'),
+  }),
+]).describe('Lane foot statistic: none, the count of the lane\'s records, or the sum of a number field over the lane\'s loaded cards'));
+
+/**
  * Kanban Settings
  */
 export const KanbanConfigSchema = lazySchema(() => strictObject({
@@ -2433,6 +2469,41 @@ export const KanbanConfigSchema = lazySchema(() => strictObject({
       + 'the view. List each value once.',
     ),
   summarizeField: z.string().optional().describe('Field to sum at top of column (e.g. amount)'),
+  /**
+   * objectstack#36370 — the statistic each lane shows at its foot
+   * ({@link KanbanLaneSummarySchema}): `{ type: 'count' }` counts the lane's
+   * records; `{ type: 'sum', field }` totals a number field over the cards
+   * the lane has loaded (not the lane's every record: objectstack#36520);
+   * `{ type: 'none' }` shows nothing, also over a `summarizeField`. Without
+   * it a lane shows the sum of `summarizeField` where that is set, as before
+   * this key, and nothing otherwise.
+   *
+   * ⛔ No spec-side default: absence keeps a board stored before this key
+   * exactly as it was.
+   */
+  summary: KanbanLaneSummarySchema.optional().describe(
+    'The statistic each lane shows at its foot. `{ type: \'count\' }` counts the lane records; '
+    + '`{ type: \'sum\', field: \'amount\' }` totals a number field over the cards the lane has loaded, '
+    + 'not every record of the lane (the foot says so when the lane holds more); `{ type: \'none\' }` shows nothing. '
+    + 'Takes precedence over summarizeField. Omit to keep summarizeField\'s sum, or no statistic without it.',
+  ),
+  /**
+   * objectstack#36370 — whether a card names each field beside its value.
+   * Absent means `true`, the card as boards drew it before this key; `false`
+   * leaves the values alone.
+   */
+  showFieldLabels: z.boolean().optional().describe(
+    'Whether each card names its fields beside their values. Omit for true (names shown); false shows the values alone.',
+  ),
+  /**
+   * objectstack#36370 — whether a card leaves out a field that holds nothing.
+   * Absent means `true`, the card as boards drew it before this key; `false`
+   * keeps the field's row with an empty value, so every card of the lane
+   * lines up.
+   */
+  hideEmptyFields: z.boolean().optional().describe(
+    'Whether a card leaves out a field that holds no value. Omit for true (left out); false keeps the field with an empty value.',
+  ),
   /**
    * [#16894] The one item-titled view config of the family that omitted this
    * key. `GalleryConfigSchema`, `TimelineConfigSchema`, `CalendarConfigSchema`,
@@ -8333,6 +8404,8 @@ export type CalendarConfig = z.input<typeof CalendarConfigSchema>;
 export type GanttConfig = z.input<typeof GanttConfigSchema>;
 export type GanttQuickFilter = z.input<typeof GanttQuickFilterSchema>;
 export type KanbanConfig = z.input<typeof KanbanConfigSchema>;
+export type KanbanLaneSummary = z.input<typeof KanbanLaneSummarySchema>;
+export type KanbanLaneSummaryParsed = z.infer<typeof KanbanLaneSummarySchema>;
 export type ListMapConfig = z.input<typeof ListMapConfigSchema>;
 export type NavigationMode = z.input<typeof NavigationModeSchema>;
 export type TreeConfig = z.input<typeof TreeConfigSchema>;
