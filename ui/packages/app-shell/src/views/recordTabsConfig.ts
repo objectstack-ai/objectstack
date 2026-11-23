@@ -89,7 +89,7 @@ export interface RecordTabsDraft {
   readonly labels: Readonly<Record<RecordTabId, string>>;
 }
 
-type ObjectLike = Record<string, unknown> & { name?: string };
+type RecordTabsObjectDef = Record<string, unknown> & { name?: string };
 
 /** The id of a derived list. */
 export function recordTabId(list: Pick<DerivedRelatedList, 'childObject' | 'referenceField'>): RecordTabId {
@@ -108,8 +108,8 @@ function canBeTab(list: DerivedRelatedList): boolean {
  * order; `canRead` drops what the reader may not read, as the page does.
  */
 export function recordTabsCatalog(
-  objectDef: ObjectLike,
-  objects: readonly ObjectLike[],
+  objectDef: RecordTabsObjectDef,
+  objects: readonly RecordTabsObjectDef[],
   options: { canRead?: (objectName: string) => boolean } = {},
 ): RecordTabsCatalog {
   // The object with no declared list: every list that could be a tab is
@@ -143,8 +143,8 @@ function namingEntry(entries: readonly unknown[], list: DerivedRelatedList): unk
  * hidden; a tab's name is the `label` of the entry naming it.
  */
 export function initialRecordTabsDraft(
-  objectDef: ObjectLike,
-  objects: readonly ObjectLike[],
+  objectDef: RecordTabsObjectDef,
+  objects: readonly RecordTabsObjectDef[],
   catalog: RecordTabsCatalog,
   options: { canRead?: (objectName: string) => boolean } = {},
 ): RecordTabsDraft {
@@ -335,7 +335,7 @@ export function recordTabsEntries(
  * with the draft's `relatedLists` written over its served one, and no
  * environment arrangement (an object of a writable package has none).
  */
-export function previewRecordTabsObject<T extends ObjectLike>(
+export function previewRecordTabsObject<T extends RecordTabsObjectDef>(
   objectDef: T,
   draft: RecordTabsDraft,
   catalog: RecordTabsCatalog,

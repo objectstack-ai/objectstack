@@ -71,7 +71,7 @@ import {
 import { consoleRecordTabsDoors, saveRecordTabs } from './recordTabsConfigSave.js';
 import type { RecordTabsIo } from './recordTabsConfigIo.js';
 
-type ObjectLike = Record<string, unknown> & { name?: string };
+type RecordTabsObjectDef = Record<string, unknown> & { name?: string };
 
 /** The metadata client, the stored list and the default language: loaded with the edit state (`recordTabsConfigIo.tsx`). */
 const RecordTabsConfigIo = React.lazy(() => import('./recordTabsConfigIo.js'));
@@ -79,44 +79,28 @@ const RecordTabsConfigIo = React.lazy(() => import('./recordTabsConfigIo.js'));
 /** The record's 「…」 entry's name: the host action it is drawn as. */
 export const RECORD_TABS_CONFIG_ACTION = 'sys_configure_tabs';
 
-/**
- * Closes the 「…」 menu the entry was chosen from. The record header's menu
- * keeps itself open on a choice (`action:menu` prevents Radix's close on
- * select: an action that opens a dialog or reloads the page takes the menu
- * away itself), and the edit state changes the page in place, so the menu
- * would stay open over the editor. The Escape the menu's own dismiss layer
- * listens for, sent from the focused item; nothing else on the record page
- * acts on it (measured in the booted console).
- */
-export function dismissFocusedMenu(): void {
-  if (typeof document === 'undefined') return;
-  const from = document.activeElement;
-  if (!from?.closest('[role="menu"]')) return;
-  from.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
-}
-
 /** The package an object is kept in, as served (`_packageId`), or `null`. */
-export function objectPackageId(objectDef: ObjectLike | null | undefined): string | null {
+export function objectPackageId(objectDef: RecordTabsObjectDef | null | undefined): string | null {
   const id = objectDef?._packageId;
   return typeof id === 'string' && id && id !== 'sys_metadata' ? id : null;
 }
 
 /** Where 「Adjust field groups」 goes: the object in Studio's Data pillar. */
-export function recordTabsStudioPath(objectDef: ObjectLike | null | undefined): string | null {
+export function recordTabsStudioPath(objectDef: RecordTabsObjectDef | null | undefined): string | null {
   const packageId = objectPackageId(objectDef);
   const name = objectDef?.name;
   return packageId && typeof name === 'string' && name ? studioPillarItemPath(packageId, 'data', { type: 'object', name }) : null;
 }
 
-interface Session {
+interface RecordTabsSession {
   readonly objectName: string;
   readonly initial: RecordTabsDraft;
   readonly draft: RecordTabsDraft;
 }
 
 export interface RecordTabsConfigInput {
-  readonly objectDef: ObjectLike | null | undefined;
-  readonly objects: readonly ObjectLike[];
+  readonly objectDef: RecordTabsObjectDef | null | undefined;
+  readonly objects: readonly RecordTabsObjectDef[];
   /** The page may offer the entry at all: a desktop full page drawing the synthesized record page. */
   readonly enabled: boolean;
   readonly canRead?: (objectName: string) => boolean;
@@ -131,7 +115,7 @@ export interface RecordTabsConfig {
   readonly active: boolean;
   readonly enter: () => void;
   /** The object the page draws while the edit state is on, else `undefined`. */
-  readonly previewObject: ObjectLike | undefined;
+  readonly previewObject: RecordTabsObjectDef | undefined;
   /** The bar, while the edit state is on. */
   readonly bar: React.ReactNode;
   /** The editor that takes the tab row's place, while the edit state is on. */
@@ -146,7 +130,7 @@ export function useRecordTabsConfig({ objectDef, objects, enabled, canRead, titl
   const studioPath = recordTabsStudioPath(objectDef);
   const offered = useStudioDesignGate(enabled ? studioPath : null) !== null && !!packageId;
 
-  const [held, setHeld] = React.useState<Session | null>(null);
+  const [held, setHeld] = React.useState<RecordTabsSession | null>(null);
   const [saving, setSaving] = React.useState(false);
   const session = held && held.objectName === objectName && offered ? held : null;
   const active = session !== null;

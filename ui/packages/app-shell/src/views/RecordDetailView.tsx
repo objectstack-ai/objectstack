@@ -31,7 +31,7 @@ import { SkeletonDetail } from '../skeletons/index.js';
 import { ManagedByBadge, useManagedByNote } from '../components/ManagedByBadge.js';
 import { isSetupAppSegment } from '../console/setupApp.js';
 import { authoredBodyTableIds, deriveRelatedLists } from '../utils/deriveRelatedLists.js';
-import { RECORD_TABS_CONFIG_ACTION, dismissFocusedMenu, useRecordTabsConfig } from './RecordTabsConfig.js';
+import { RECORD_TABS_CONFIG_ACTION, useRecordTabsConfig } from './RecordTabsConfig.js';
 import { pruneUnregisteredRecordPageObjects, recordPageChildObjects } from './recordPageChildObjects.js';
 import { stripDiscussionNodes, hasExplicitAttachments, hasExplicitApprovals } from '../utils/pageSchemaIntrospect.js';
 import { ActionConfirmDialog, type ConfirmDialogState } from './ActionConfirmDialog.js';
@@ -5344,10 +5344,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         variant: 'outline',
         order: 101,
         component: 'action:menu',
-        onClick: () => {
-          dismissFocusedMenu();
-          tabsConfig.enter();
-        },
+        onClick: () => tabsConfig.enter(),
       } as any);
     }
     // The record's favorites control is the star beside the record's name
@@ -6060,8 +6057,15 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
             'absolute right-2 sm:right-4 z-50 flex items-center gap-2',
             // Under a phone's one 44 px bar row; in a pane, over the page's
             // top-right corner, level with its first row (objectstack#35745).
-            // Under the tab configuration's 48 px bar while it is drawn.
-            pageBar ? 'top-12' : tabsConfig.bar ? 'top-14 sm:top-16' : headerBarForRecord ? 'top-3' : 'top-2 sm:top-4',
+            // While the tab configuration's bar is drawn: its 48 px (3rem)
+            // plus the page's own top-2 / sm:top-4 gap under it.
+            pageBar
+              ? 'top-12'
+              : tabsConfig.bar
+                ? 'top-[calc(3rem+0.5rem)] sm:top-[calc(3rem+1rem)]'
+                : headerBarForRecord
+                  ? 'top-3'
+                  : 'top-2 sm:top-4',
           )}
         >
           {sharedChrome}

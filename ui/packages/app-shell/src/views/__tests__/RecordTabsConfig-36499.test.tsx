@@ -79,7 +79,7 @@ vi.mock('../studio-design/packages-io', async (importOriginal) => ({
   fetchListedPackageManifests: async () => new Map([['app.crm', { id: 'app.crm', name: 'CRM', writable: true, manifest: {} }]]),
 }));
 
-import { dismissFocusedMenu, useRecordTabsConfig } from '../RecordTabsConfig';
+import { useRecordTabsConfig } from '../RecordTabsConfig';
 import { __resetDefaultLocale } from '../../layout/designModeMenuSave';
 import { confirmUnsavedLeave } from '../../chrome/unsavedEdits';
 
@@ -179,27 +179,6 @@ describe('「Configure tabs」 (objectstack#36499)', () => {
     const ticket = editor.querySelector('[data-record-tabs-tab="ext_ticket.account"]') as HTMLElement;
     expect(within(ticket).queryAllByRole('button')).toEqual([]);
     expect(ticket.querySelector('[data-record-tabs-fixed]')).not.toBeNull();
-  });
-
-  it('choosing the entry closes the menu it was chosen from (an Escape from the focused item), and nothing else', () => {
-    const keys: string[] = [];
-    const listen = (e: KeyboardEvent) => keys.push(e.key);
-    document.addEventListener('keydown', listen);
-    render(
-      <>
-        <div role="menu">
-          <button type="button">entry</button>
-        </div>
-        <button type="button">outside</button>
-      </>,
-    );
-    screen.getByText('outside').focus();
-    dismissFocusedMenu();
-    expect(keys).toEqual([]);
-    screen.getByText('entry').focus();
-    dismissFocusedMenu();
-    expect(keys).toEqual(['Escape']);
-    document.removeEventListener('keydown', listen);
   });
 
   it('hide → the Hidden area → restore; Cancel writes nothing', async () => {

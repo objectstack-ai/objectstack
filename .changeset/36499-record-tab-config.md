@@ -2,6 +2,7 @@
 '@object-ui/app-shell': patch
 '@object-ui/plugin-detail': patch
 '@object-ui/i18n': patch
+'@object-ui/components': patch
 ---
 
 feat(console): an administrator configures the record page's tabs in place, from the record's 「…」
@@ -16,3 +17,5 @@ In the edit state the related tabs are dragged to a new order, hidden into a 「
 「Save」 writes the object's `relatedLists` over the object as stored (never as served), as a draft with the first-write pin, and publishes it, so everyone sees the new default order, names and hidden tabs. An object's own `relatedLists` hides a tab by leaving it out; an entry the editor does not arrange (a 审批 / 动态 name, a list it does not offer) is kept. A reader's own dragged order still lays over the new default, and 「Restore default order」 returns them to it. A tab is renamed only in the app's source language, where its shown name is its stored one, the design-mode menu's rule.
 
 New language-pack keys under `designMode.recordTabs` in all eleven console locales. `RecordPageColumns` takes an optional `tabRowEditor`, drawn in the tab row's place. Objects of installed (read-only) packages are not offered the entry yet.
+
+`page:header`: a `⋯` entry that finished on the click (it returned no pending promise) now closes the menu, as Refresh does; an entry still running keeps the menu open with its row busy until it settles, as before.
