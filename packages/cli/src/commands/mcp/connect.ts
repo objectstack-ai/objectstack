@@ -156,25 +156,14 @@ export function resolveClientExecutable(
   return { kind: 'missing' };
 }
 
-/** A `spawnSync`-shaped answer for a client that was never started. */
-function notStarted(error: NodeJS.ErrnoException): SpawnSyncReturns<Buffer> {
-  return { pid: 0, output: [], stdout: Buffer.alloc(0), stderr: Buffer.alloc(0), status: null, signal: null, error };
-}
-
 /**
- * Runs a client's own CLI, without a shell on every platform. A seam, so a
- * test can stand in for `claude`.
+ * Runs a client's own CLI from an argv array, without a shell on every
+ * platform. `command` is {@link resolveClientExecutable}'s `found` path. A
+ * seam, so a test can stand in for `claude`.
  */
 export const mcpClientRunner = {
   run(command: string, args: string[]): SpawnSyncReturns<Buffer> {
-    const resolved = resolveClientExecutable(command);
-    if (resolved.kind === 'missing') {
-      return notStarted(Object.assign(new Error(`${command} was not found on PATH`), { code: 'ENOENT' }));
-    }
-    if (resolved.kind === 'batch-shim') {
-      return notStarted(Object.assign(new Error(resolved.path), { code: 'EBATCHSHIM' }));
-    }
-    return spawnSync(resolved.path, args, { stdio: 'inherit', shell: false });
+    return spawnSync(command, args, { stdio: 'inherit', shell: false });
   },
 };
 
@@ -307,17 +296,26 @@ export default class McpConnect extends Command {
       if (!flags.print) {
         console.log('');
         printStep(`Registering ${name} with Claude Code...`);
-        const ran = mcpClientRunner.run('claude', claudeMcpAddArgs(name, mcpUrl));
-        if (ran.error) {
-          const code = (ran.error as NodeJS.ErrnoException).code;
+        const notFound = 'Claude Code\'s `claude` command was not found on your PATH. Install Claude Code, then run the Connect line above '
+          + '(or `os mcp connect` again). For another client, add the Endpoint above as a remote HTTP MCP server in its settings.';
+        const client = resolveClientExecutable('claude');
+        if (client.kind !== 'found') {
           printError(
-            code === 'ENOENT'
-              ? 'Claude Code\'s `claude` command was not found on your PATH. Install Claude Code, then run the Connect line above '
-                + '(or `os mcp connect` again). For another client, add the Endpoint above as a remote HTTP MCP server in its settings.'
-              : code === 'EBATCHSHIM'
-                ? `The \`claude\` on your PATH is a batch-file shim (${ran.error.message}), `
-                  + 'which this command does not run because it starts commands without a shell. Run the Connect line above yourself.'
-                : `\`claude\` could not be started: ${ran.error.message}. Run the Connect line above yourself.`,
+            client.kind === 'missing'
+              ? notFound
+              : `The \`claude\` on your PATH is a batch-file shim (${client.path}), which this command does not run: `
+                + 'it starts programs without a shell. Run the Connect line above yourself.',
+          );
+          this.exit(1);
+          return;
+        }
+        const ran = mcpClientRunner.run(client.path, claudeMcpAddArgs(name, mcpUrl));
+        if (ran.error) {
+          const missing = (ran.error as NodeJS.ErrnoException).code === 'ENOENT';
+          printError(
+            missing
+              ? notFound
+              : `\`claude\` could not be started: ${ran.error.message}. Run the Connect line above yourself.`,
           );
           this.exit(1);
           return;

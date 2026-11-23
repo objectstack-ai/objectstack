@@ -144,14 +144,16 @@ describe.each(Object.entries(FLOWS))('%s: the sign-in page opens from an argv ar
 describe('os mcp connect starts the client from an argv array, without a shell', () => {
   const ARGS = ['mcp', 'add', '--transport', 'http', 'acme', 'https://acme.example.test/api/v1/mcp'];
 
-  it('win32: runs the `claude.exe` found on PATH by its absolute path, with no shell', () => {
+  it('win32: resolves the `claude.exe` on PATH to its absolute path and runs that, with no shell', () => {
     onPlatform('win32');
     vi.stubEnv('PATH', 'relative\\bin;C:\\Users\\me\\.local\\bin;C:\\npm');
     fsMock.files.add('C:\\Users\\me\\.local\\bin\\claude.exe');
     fsMock.files.add('C:\\npm\\claude.cmd');
     cp.spawnSync.mockReturnValue({ status: 0 });
 
-    mcpClientRunner.run('claude', ARGS);
+    const client = resolveClientExecutable('claude');
+    expect(client).toEqual({ kind: 'found', path: 'C:\\Users\\me\\.local\\bin\\claude.exe' });
+    mcpClientRunner.run(client.kind === 'found' ? client.path : '', ARGS);
 
     expect(cp.spawnSync).toHaveBeenCalledTimes(1);
     const [command, args, options] = cp.spawnSync.mock.calls[0] as [string, string[], { shell?: unknown }];
@@ -160,33 +162,29 @@ describe('os mcp connect starts the client from an argv array, without a shell',
     expect(options.shell).toBe(false);
   });
 
-  it('win32: a batch-file shim alone is not run, and the answer says why', () => {
+  it('win32: a batch-file shim is answered as one, so the command does not run it', () => {
     onPlatform('win32');
     vi.stubEnv('PATH', 'C:\\npm');
     fsMock.files.add('C:\\npm\\claude.cmd');
 
-    const ran = mcpClientRunner.run('claude', ARGS);
-
-    expect(cp.spawnSync).not.toHaveBeenCalled();
-    expect((ran.error as NodeJS.ErrnoException).code).toBe('EBATCHSHIM');
-    expect(ran.error?.message).toBe('C:\\npm\\claude.cmd');
+    expect(resolveClientExecutable('claude')).toEqual({ kind: 'batch-shim', path: 'C:\\npm\\claude.cmd' });
   });
 
-  it('win32: nothing on PATH is ENOENT, and the current directory is not searched', () => {
+  it('win32: the current directory and relative PATH entries are not searched', () => {
     onPlatform('win32');
     vi.stubEnv('PATH', '.;bin');
     fsMock.files.add('.\\claude.exe');
+    fsMock.files.add('bin\\claude.exe');
 
-    const ran = mcpClientRunner.run('claude', ARGS);
-
-    expect(cp.spawnSync).not.toHaveBeenCalled();
-    expect((ran.error as NodeJS.ErrnoException).code).toBe('ENOENT');
+    expect(resolveClientExecutable('claude')).toEqual({ kind: 'missing' });
   });
 
   it.each(['darwin', 'linux'] as const)('%s: runs `claude` by name, with no shell', (platform) => {
     onPlatform(platform);
     cp.spawnSync.mockReturnValue({ status: 0 });
 
+    const client = resolveClientExecutable('claude');
+    expect(client).toEqual({ kind: 'found', path: 'claude' });
     mcpClientRunner.run('claude', ARGS);
 
     const [command, args, options] = cp.spawnSync.mock.calls[0] as [string, string[], { shell?: unknown }];
