@@ -4152,6 +4152,7 @@ const fr = {
     dateRange: {
       from: "Du",
       to: "Au",
+      comparePrevious: "Comparer avec la période précédente",
       datasetUnreadable: "La période de ce rapport ne nomme aucune dimension, et le jeu de données « {{dataset}} » n’a pas pu être lu pour trouver sa dimension de date ({{reason}}).",
       noSingleDateDimension: "La période de ce rapport ne nomme aucune dimension, et le jeu de données « {{dataset}} » déclare {{total}} dimensions de date ({{found}}) alors qu’il en faut exactement une. Nommez la dimension de date dans dateRange.dimension du rapport.",
     },

@@ -1809,6 +1809,7 @@ const zhHant = {
     dateRange: {
       from: '開始',
       to: '結束',
+      comparePrevious: '和上一期對比',
       datasetUnreadable: '該報表的時間範圍未指定維度，且無法讀取資料集“{{dataset}}”以確定其日期維度（{{reason}}）。',
       noSingleDateDimension: '該報表的時間範圍未指定維度，而資料集“{{dataset}}”聲明瞭 {{total}} 個日期維度（{{found}}），這裡需要恰好一個。請在報表的 dateRange.dimension 中指定日期維度。',
     },

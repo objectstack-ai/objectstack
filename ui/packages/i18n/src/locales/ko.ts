@@ -4065,6 +4065,7 @@ const ko = {
     dateRange: {
       from: "시작",
       to: "종료",
+      comparePrevious: "이전 기간과 비교",
       datasetUnreadable: "이 보고서의 기간에 차원이 지정되지 않았으며, 날짜 차원을 찾기 위해 “{{dataset}}” 데이터셋을 읽을 수 없습니다({{reason}}).",
       noSingleDateDimension: "이 보고서의 기간에 차원이 지정되지 않았으며, “{{dataset}}” 데이터셋은 날짜 차원을 {{total}}개 선언합니다({{found}}). 정확히 하나여야 합니다. 보고서의 dateRange.dimension에 날짜 차원을 지정하세요.",
     },

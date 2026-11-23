@@ -4068,6 +4068,7 @@ const ja = {
     dateRange: {
       from: "開始",
       to: "終了",
+      comparePrevious: "前期と比較",
       datasetUnreadable: "このレポートの期間はディメンションを指定しておらず、データセット「{{dataset}}」を読み込んで日付ディメンションを特定できませんでした（{{reason}}）。",
       noSingleDateDimension: "このレポートの期間はディメンションを指定しておらず、データセット「{{dataset}}」は日付ディメンションを {{total}} 個宣言しています（{{found}}）。ちょうど 1 個である必要があります。レポートの dateRange.dimension で日付ディメンションを指定してください。",
     },
