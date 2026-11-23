@@ -40,15 +40,15 @@ import { useObjectTranslation } from '@object-ui/i18n';
 import { useAuth, useWorkspaceAdminStatus } from '@object-ui/auth';
 import { useMetadata } from '../providers/MetadataProvider.js';
 import { matchAppBySegment } from '../utils/index.js';
-import { appAddressSegment } from '../utils/appRoute.js';
+import { appAddressSegment, appStudioDesignPath } from '../utils/appRoute.js';
 import { useServedAppLabel } from '../hooks/useServedAppLabel.js';
 import { useLauncherApps } from '../hooks/useLauncherApps.js';
 import { useCanAuthorMetadata } from '../hooks/useCanAuthorMetadata.js';
+import { useStudioEntryGate } from '../hooks/useStudioDesignGate.js';
 import { useAiSurfaceEnabled } from '../hooks/useAiSurface.js';
 import { isAiStudioEnabled, isMarketplaceEnabled } from '../runtime-config.js';
 import { STUDIO_NEW_PACKAGE_PATH } from '../views/studio-design/studioNewPackage.js';
 import { AppMark } from './AppMark.js';
-import { useAppStudioEntry } from './ShellPageActions.js';
 import { useDesignMode } from './designMode.js';
 import { postureHasOrgWall, useTenancyPosture } from '../hooks/useTenancyPosture.js';
 
@@ -109,14 +109,15 @@ function useAddAppEntries(): AddAppEntry[] {
  *
  * Drawn on the page header's button's condition, unchanged: a workspace admin
  * holding `manage_metadata`, on an app whose package Studio lists
- * (`useAppStudioEntry`'s gate, `useStudioEntryGate`), so the console's own
- * apps get none. A read-only (installed) package's app gets it too
+ * (`useStudioEntryGate`, the gate `useAppStudioEntry` reads; it judges the
+ * package the path names, so the app's own Studio path is read), so the
+ * console's own apps get none. A read-only (installed) package's app gets it too
  * (objectstack#36363: its changes are saved as this environment's
  * customization), except where the customization door is walled off for this
  * caller. Not drawn where no shell holds the mode, nor while the mode is on.
  */
-function useEnterDesignMode(activeAppName: string): (() => void) | null {
-  const { entry } = useAppStudioEntry(true, activeAppName);
+function useEnterDesignMode(apps: any[], activeAppName: string): (() => void) | null {
+  const entry = useStudioEntryGate(appStudioDesignPath(matchAppBySegment(apps, activeAppName), true));
   const designMode = useDesignMode();
   const posture = useTenancyPosture();
   const { user } = useAuth();
@@ -180,7 +181,7 @@ export function SidebarAppMenu({ activeAppName, onAppChange }: SidebarAppMenuPro
   const apps = metadataApps || [];
   const { apps: launcherApps } = useLauncherApps(apps);
   const mayAddApp = useMayAddApp();
-  const enterDesignMode = useEnterDesignMode(activeAppName);
+  const enterDesignMode = useEnterDesignMode(apps, activeAppName);
   const [query, setQuery] = React.useState('');
 
   // The route may name an app the launcher does not offer (a direct URL to an

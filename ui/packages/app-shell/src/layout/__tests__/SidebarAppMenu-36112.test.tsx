@@ -104,6 +104,29 @@ function renderMenu(active = 'crm', onAppChange = vi.fn()) {
 
 const menu = () => within(screen.getByTestId('sidebar-app-menu'));
 
+/** Whether the stubbed package list serves CRM's package writable. */
+let writable = true;
+
+/** The package list (`GET /api/v1/packages`), read for a viewer who may author: CRM's package, writable or not. */
+function stubPackageList() {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (url: unknown) => ({
+      ok: true,
+      status: 200,
+      json: async () =>
+        String(url).endsWith('/api/v1/packages')
+          ? { data: { packages: [{ manifest: { id: 'com.acme.crm', name: 'CRM' }, writable }] } }
+          : { data: [] },
+    })),
+  );
+}
+
+beforeEach(() => {
+  writable = true;
+  stubPackageList();
+});
+
 afterEach(() => {
   cleanup();
   apps = [];
@@ -186,8 +209,6 @@ describe('the sidebar app menu only switches apps (objectstack#36112)', () => {
 });
 
 describe('「Edit app」 in the app menu enters the design mode (objectstack#36485)', () => {
-  let writable = true;
-
   /** The shell's hold on the mode, as `ConsoleLayout` keeps it, and whether it is on. */
   function Shell({ children }: { children: ReactNode }) {
     const mode = useDesignModeController({ appName: 'crm', appBasePath: '/apps/crm', enabled: true });
@@ -210,21 +231,8 @@ describe('「Edit app」 in the app menu enters the design mode (objectstack#364
   const editApp = () => menu().queryByTestId('sidebar-app-menu-edit-app');
 
   beforeEach(() => {
-    writable = true;
     apps = [CRM, SERVICE, SETUP];
     admin = true;
-    canAuthor = true;
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (url: unknown) => ({
-        ok: true,
-        status: 200,
-        json: async () =>
-          String(url).endsWith('/api/v1/packages')
-            ? { data: { packages: [{ manifest: { id: 'com.acme.crm', name: 'CRM' }, writable }] } }
-            : { data: [] },
-      })),
-    );
   });
 
   it('a workspace admin who may author sees it under the list, in one group with 「Add app」', async () => {
@@ -268,14 +276,8 @@ describe('「Edit app」 in the app menu enters the design mode (objectstack#364
     expect(editApp()).toBeNull();
     cleanup();
     writable = true;
-    vi.stubGlobal('fetch', vi.fn(async (url: unknown) => ({
-      ok: true,
-      status: 200,
-      json: async () =>
-        String(url).endsWith('/api/v1/packages')
-          ? { data: { packages: [{ manifest: { id: 'com.acme.crm', name: 'CRM' }, writable: true }] } }
-          : { data: [] },
-    })));
+    // A fresh transport, so the list is read again rather than answered from the session's hold.
+    stubPackageList();
     await mountMenu();
     expect(editApp()).not.toBeNull();
   });
