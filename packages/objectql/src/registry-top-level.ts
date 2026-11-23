@@ -456,6 +456,24 @@ function foldScalarOverridesPackagedBase(owner: unknown, key: ObjectFoldScalarKe
 }
 
 /**
+ * [#36366] An `object_extension`'s `actionLayout` folded onto `merged`, the
+ * fourth of the {@link OBJECT_FOLD_SCALAR_KEYS}, arm by arm: an arm the
+ * extension sets (`{ pinned, more }`) replaces the running arm whole, an arm
+ * it leaves out stays as folded, and a base the tenant arranged keeps its own
+ * (`yields`, ADR-0029 D9.2a). It lives here, not in `mergeObjectDefinitions`
+ * (`registry.ts`), because that file is a facade at its line ceiling.
+ */
+function foldExtensionActionLayout(
+  merged: ServiceObject,
+  extension: ObjectExtensionBody,
+  yields: (key: ObjectFoldScalarKey) => boolean,
+): void {
+  if (extension.actionLayout !== undefined && !yields('actionLayout')) {
+    merged.actionLayout = { ...merged.actionLayout, ...extension.actionLayout };
+  }
+}
+
+/**
  * [ADR-0146 D10, second rule] An object extension's per-field display patches:
  * the slot `ObjectExtensionSchema.fieldPatches` declares, carried onto the
  * extension def by the manifest loop (`engine.ts`) and applied by
@@ -2282,7 +2300,7 @@ export {
   QUEUE_FIELD, RunRegisteredObject, SECURITY_CATALOG_NAME_RULE, ServedObjectLayer, TenantRuleSettings,
   WithheldExtensions, admittedFieldPatches, applyFieldPatches, bareNameConflictLine, bareNameReasonFor, bundleBaseKey,
   carriesTenantScopeColumn, changedPackagedRuleKeys, coldBootConflictMessage, collectBundle, declaredOwnedObjectNames,
-  declaresTenantIndex, displayKeyOverridesPackagedBase, entriesOfMember, fieldNamesOf, fieldPatchYieldKey, foldScalarOverridesPackagedBase,
+  declaresTenantIndex, displayKeyOverridesPackagedBase, entriesOfMember, fieldNamesOf, fieldPatchYieldKey, foldExtensionActionLayout, foldScalarOverridesPackagedBase,
   indexKeysOf, isLeftOutExtension, isPackagelessActionSlotKey, isPlainRecord, isStoredActionRow, leavesExtensionsOut,
   mergeValidationsByName, optionByValue, overlaySlotEntriesOf, overlaySlotKey, ownFieldNamesOf, ownFieldsTarget,
   packageBodySlot, packagedAddedFields, packagelessActionOwnerKey, packagelessActionSlotEntriesOf,

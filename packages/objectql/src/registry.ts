@@ -136,7 +136,7 @@ import {
   bareNameColdBootWarning, bareNameConflictLine, bareNameReasonFor, bundleBaseKey, carriesTenantScopeColumn,
   coldBootConflictMessage, collectBundle, declaresTenantIndex, mergeValidationsByName, overlaySlotEntriesOf,
   overlaySlotKey, packageBodySlot, parseOverlaySlotKey, parsePackageAction, picklistReferrerOf, sameActionDeclaration,
-  sameHolder, storesObjectLessPackagelessRow, withArrivingMembers, withDiscriminator,
+  foldExtensionActionLayout, sameHolder, storesObjectLessPackagelessRow, withArrivingMembers, withDiscriminator,
 } from './registry-top-level.js';
 import type {
   ArtifactInstallScope, BareNameConflict, BoundActionCollision, BundleArrival, BundleEntry, CoOwnershipSource,
@@ -204,12 +204,10 @@ export {
  *     [ADR-0029 D9.2a, 2026-10-30 note]): rules of different names add, and a
  *     rule of a name already folded replaces it — with `tenantRules`, carrying
  *     the tenant's `message` and `active`, never the tenant's condition.
- *   - The {@link OBJECT_FOLD_SCALAR_KEYS} (`label`, `pluralLabel`,
- *     `description`, and [#36366] `actionLayout` arm by arm) are overridden
- *     last-writer-wins, subject to the
- *     `tenantAuthored` yield rule below. [#30391] A `label` that renames the
- *     object without a `pluralLabel` beside it also takes the running
- *     `pluralLabel` off: the plural named the old label.
+ *   - The {@link OBJECT_FOLD_SCALAR_KEYS} (`label`, `pluralLabel`, `description`, and [#36366]
+ *     `actionLayout` arm by arm) are overridden last-writer-wins, subject to the `tenantAuthored`
+ *     yield rule below. [#30391] A `label` that renames the object without a `pluralLabel` beside
+ *     it also takes the running `pluralLabel` off: the plural named the old label.
  *   - `fieldPatches` [ADR-0146 D10, second rule] is APPLIED, never carried:
  *     after the merges above, each patch writes its `BASE_FIELD_DISPLAY_WHITELIST`
  *     keys onto the named field and its option labels onto the options whose
@@ -310,12 +308,7 @@ function mergeObjectDefinitions(
   if (extension.description !== undefined && !yields('description')) {
     merged.description = extension.description;
   }
-  // [#36366] The action layout per scope, a fold scalar like the three above,
-  // arm by arm: an arm the extension sets (`{ pinned, more }`) replaces the
-  // running arm whole, an arm it leaves out stays as folded.
-  if (extension.actionLayout !== undefined && !yields('actionLayout')) {
-    merged.actionLayout = { ...merged.actionLayout, ...extension.actionLayout };
-  }
+  foldExtensionActionLayout(merged, extension, yields); // [#36366] the fourth fold scalar, arm by arm
 
   // [ADR-0146 D10, second rule] The extension's display patches of the
   // owner's own fields (`ownFields`) — never of a field an extension adds,
