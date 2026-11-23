@@ -184,6 +184,8 @@ describe('owd-sharing — cbpMasterRefusal reports the installed spec\'s refusal
     ],
     ['a required lookup only', { account: { type: 'lookup', reference: 'crm_account', required: true } }],
     ['no relationship field', { subject: { type: 'text', label: 'Subject' } }],
+    ['a required master marked readonly', { account: { type: 'master_detail', reference: 'crm_account', required: true, readonly: true } }],
+    ['an optional master marked system', { account: { type: 'master_detail', reference: 'crm_account', required: false, system: true } }],
   ];
 
   it.each(CASES)('%s: the same verdict and the same text as the spec', (_label, fields) => {
@@ -239,6 +241,21 @@ describe('owd-sharing — cbpMasterRefusal reads the spec\'s code and shape off 
     });
     expect(r?.shape).toBe('required-lookup-only');
     expect(names(r)).toEqual(['account']);
+  });
+
+  it('a master marked readonly or system: shape master-not-writable, naming the master', () => {
+    for (const flag of ['readonly', 'system'] as const) {
+      const r = cbpMasterRefusal('crm_case', {
+        account: { type: 'master_detail', reference: 'crm_account', required: true, [flag]: true },
+        owner: { type: 'lookup', reference: 'sys_user', [flag]: true },
+      });
+      expect(r?.shape, flag).toBe('master-not-writable');
+      expect(names(r), flag).toEqual(['account']);
+    }
+    // `false` is no refusal: the flag is carried as written, not as present.
+    expect(cbpMasterRefusal('crm_case', {
+      account: { type: 'master_detail', reference: 'crm_account', required: true, readonly: false, system: false },
+    })).toBeUndefined();
   });
 
   it('no relationship field: shape no-master, naming nothing', () => {

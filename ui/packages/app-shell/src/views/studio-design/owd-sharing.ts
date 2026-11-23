@@ -113,6 +113,15 @@ export function requireCbpMasterDetails(fields: unknown): unknown {
   });
 }
 
+/**
+ * The writability flags the spec judges on the one master (its module-private
+ * `UNWRITABLE_MASTER_FLAGS`, `data/controlled-by-parent-master.ts`): a master
+ * marked `readonly: true` or `system: true` is refused with the shape
+ * `master-not-writable`. The probe carries them on a `master_detail` field, as
+ * booleans exactly as written, so the tab shows that refusal too.
+ */
+const CBP_UNWRITABLE_MASTER_FLAGS = ['readonly', 'system'] as const;
+
 /** The two places `ObjectSchema` reports a `controlled_by_parent` master refusal. */
 const CBP_REFUSAL_PATHS: ReadonlySet<string> = new Set(['sharingModel', 'fields']);
 
@@ -195,12 +204,14 @@ function refusalFields(
  * the spec's exported `controlledByParentMasterRefusal` directly, so the code
  * it reads is the one the door stamps. It parses a PROBE: the object's name,
  * `sharingModel: 'controlled_by_parent'`, and its relationship fields reduced
- * to `type`, `reference` and a boolean `required`. The probe is needed because
- * a whole draft can carry an issue elsewhere (an unknown key, a malformed
- * field) that stops `ObjectSchema` before the master check runs, and the panel
- * would then read a refused object as accepted. Of the probe's issues it keeps
- * the custom ones at `sharingModel` (zero masters) and at `fields` (two or
- * more), the two paths the spec reports this refusal at.
+ * to `type`, `reference` and a boolean `required` — plus, on a `master_detail`,
+ * the boolean writability flags ({@link CBP_UNWRITABLE_MASTER_FLAGS}). The
+ * probe is needed because a whole draft can carry an issue elsewhere (an
+ * unknown key, a malformed field) that stops `ObjectSchema` before the master
+ * check runs, and the panel would then read a refused object as accepted. Of
+ * the probe's issues it keeps the custom ones at `sharingModel` (zero masters)
+ * and at `fields` (two or more, or an unwritable master), the two paths the
+ * spec reports this refusal at.
  */
 export function cbpMasterRefusal(objectName: unknown, fields: unknown): CbpMasterRefusal | undefined {
   const entries = readFields(fields).entries;
@@ -211,6 +222,11 @@ export function cbpMasterRefusal(objectName: unknown, fields: unknown): CbpMaste
     const def: Record<string, unknown> = { type };
     if (typeof e.def.reference === 'string' && e.def.reference) def.reference = e.def.reference;
     if (typeof e.def.required === 'boolean') def.required = e.def.required;
+    if (type === MASTER_DETAIL) {
+      for (const flag of CBP_UNWRITABLE_MASTER_FLAGS) {
+        if (typeof e.def[flag] === 'boolean') def[flag] = e.def[flag];
+      }
+    }
     probeFields[e.name] = def;
   }
   const result = ObjectSchema.safeParse({

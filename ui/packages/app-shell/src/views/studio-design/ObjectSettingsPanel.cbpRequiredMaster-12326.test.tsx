@@ -177,6 +177,20 @@ describe('ObjectSettingsPanel — the controlled_by_parent refusal speaks the au
       { fields: '「Account」' },
     ],
     ['no relationship field', { subject: { type: 'text' } }, 'engine.studio.settings.cbpRefusalNoMaster', {}, {}],
+    [
+      'a required master marked readonly',
+      { account: { type: 'master_detail', label: 'Account', reference: 'crm_account', required: true, readonly: true } },
+      'engine.studio.settings.cbpRefusalMasterNotWritable',
+      { field: '“Account”' },
+      { field: '「Account」' },
+    ],
+    [
+      'a required master marked system',
+      { account: { type: 'master_detail', reference: 'crm_account', required: true, system: true } },
+      'engine.studio.settings.cbpRefusalMasterNotWritable',
+      { field: '“account”' },
+      { field: '「account」' },
+    ],
   ];
 
   it.each(CASES)('%s: the wording its shape selects, in en and zh, naming the fields', (_label, fields, key, enVars, zhVars) => {
