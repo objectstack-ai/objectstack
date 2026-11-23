@@ -114,9 +114,9 @@ for (const topic of readdirSync(COMMANDS_DIR, { withFileTypes: true }).sort((a, 
     const file = join(COMMANDS_DIR, topic.name, name);
     const src = readFileSync(file, 'utf8');
     if (!/\bdelete:\s*Flags\.boolean/.test(src) || !/\byes:\s*Flags\.boolean/.test(src)) continue;
-    const mod = (await import(file)) as { default?: Runnable };
-    const cls = mod.default;
-    if (typeof cls !== 'function') continue;
+    const mod = (await import(file)) as { default?: unknown };
+    if (typeof mod.default !== 'function') continue;
+    const cls = mod.default as unknown as Runnable;
     if (cls.flags?.delete?.type === 'boolean' && cls.flags?.yes?.type === 'boolean') {
       const id = `${topic.name} ${basename(name, '.ts')}`;
       POPULATION.push(id);
