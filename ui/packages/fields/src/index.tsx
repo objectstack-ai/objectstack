@@ -36,7 +36,7 @@ import { deriveHexBadgePalette } from './hexBadgePalette.js';
 import { formatNumberFieldValue, formatCurrency, formatPercentPoints, percentCellScale } from './widgets/number-format.js';
 import { useFieldTranslation } from './widgets/useFieldTranslation.js';
 import { useBooleanValueLabel } from './widgets/booleanValueLabel.js';
-import { loadGridFieldWidget } from './widgets/GridField.js';
+import { GridField } from './widgets/GridField.js';
 import { RecordHoverCard, type RecordHoverCardObjectDef } from './RecordHoverCard.js';
 
 // Module-level cache so multiple renderers fetching the same lookup ID
@@ -4832,9 +4832,11 @@ const fieldWidgetMap = {
   // Complex data types
   'object': () => import('./widgets/ObjectField.js').then(m => ({ default: m.ObjectField })),
   'vector': () => import('./widgets/VectorField.js').then(m => ({ default: m.VectorField })),
-  // The grid's body, through its public face's one loader so a lazy `GridField`
-  // mounted after this resolved renders without a boundary (objectstack#36102).
-  'grid': () => loadGridFieldWidget().then(m => ({ default: m.GridFieldWidget })),
+  // The grid's public face, already in this chunk, not its body: the face loads
+  // the body through its one loader (objectstack#36102) and asks again after a
+  // failed load, where a `React.lazy` wrapped around the body here would keep
+  // the failure until the page is reloaded (objectstack#36451).
+  'grid': () => Promise.resolve({ default: GridField }),
   
   // Additional field types from @objectstack/spec
   'color': () => import('./widgets/ColorField.js').then(m => ({ default: m.ColorField })),
