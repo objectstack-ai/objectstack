@@ -1,0 +1,35 @@
+{
+  "number": 36744,
+  "kind": "issue",
+  "title": "Studio 权限矩阵：1000–1304 px 之间批量操作列压住「写入范围」，平铺表格只在放得下时显示",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-23T15:29:49Z",
+  "updated_at": "2026-11-23T16:51:59Z",
+  "closed_at": "2026-11-23T16:48:48Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36744",
+  "body": "repo:objectstack#1 · os-warren · session_01JQwxbZeHNsF3RWcWpj7rGj\n\n① product defect · Source: maintainer (Warren), 2026-11-23, UI review thread.\n- 14:23Z 「还有哪些元数据可能会有问题？同时全面的测试 studio的各项功能」\n- 15:09Z 「用fable 评审一下 studio的问题，提出修改方案」\n- 15:23Z, decision card 「Studio 评审的 9 张卡，按 fable 方案立卡吗？」 → **「9 张全立」**\n\nEvidence:\n- Fable code review on main 9e0c0c23: project file `ui-review-2026-11-23/fable-studio-review.md`.\n- Browser screenshots: `ui-review-2026-11-23/round2/`.\n- Round-2 report: https://claude.ai/artifact/X5ukNAgphAq5vDpDAT6SAD\n\nPaths are relative to `ui/packages/app-shell/src/views/` unless they start with `ui/` or `packages/`. `SDS` = `studio-design/StudioDesignSurface.tsx`. `zh` = `ui/packages/i18n/src/namespaces/studio/zh.ts`. Line numbers are on 9e0c0c23.\n\n## What (review r06, confirmed)\nIn the permission matrix, the right-pinned bulk column (`w-56`, `PermissionMatrixEditor.tsx:2839–2840, 3264`) covers the last column, 「写入范围」. The cause is two numbers that disagree:\n- The flat form is drawn from a 1000 px pane (`metadata-admin/permissionMatrixFold.ts:29, 35–47`).\n- Its table floor is 1304 px (`permissionMatrixFold.ts:44`).\n\nBetween 1000 and 1304 px the table overflows. At a 1440 px window the pane is 1200 px, inside that band. The column is reachable by scrolling sideways, but nothing shows that the pane scrolls.\n\n## Expected\nUse one number: draw the flat form only where it fits. Raise the fold width to the flat floor, and have `PermissionMatrixEditor.fold-35061.test.tsx` pin the two as equal.\n\nThe review offers an alternative, which is a design choice: lower the floor to what the Studio table needs (about 1040 px plus the object column) by using the folded form's 「Bulk」 menu in the flat form too. The thread proposes it to the seat only if the folded form at 1440 px looks wrong in the browser.\n\n## Acceptance\n- A test pins the fold width as equal to the flat table floor.\n- Browser screenshots at 1440 and 1920 px: no column is covered.\n\nGrading: `area:ux` · Bug · Cosmetic · administrators, often ⇒ p2. Effort S. Evidence: read (review r06) + measured (`round2/` r06).\n\nDedupe: no open card names `permissionMatrixFold` or the covered column."
+}

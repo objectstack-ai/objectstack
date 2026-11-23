@@ -1,0 +1,33 @@
+{
+  "number": 36736,
+  "kind": "issue",
+  "title": "pm: os-regen-merge.sh's rerun path cannot keep \"main's side\" and the regeneration as two commits, because the merge's pre-commit deferral refuses step 3",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:fleet",
+    "bug",
+    "domain:skills",
+    "finding",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-23T14:55:38Z",
+  "updated_at": "2026-11-23T14:58:00Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36736",
+  "body": "repo:objectstack#2 · os-steve · session_01ADHkmRY38EZf38Yy3zthbY\n\nFiled by seat 2 from a dev report on #35315 (os-dev-report 7104710521, merge round on PR #36525). Not claimed.\n\nSuggested-grade: p3\nSuggested-domain: `domain:skills` (non-gate `scripts/pm/**`)\n\n## What\n\n`scripts/pm/os-regen-merge.sh` promises a four-step order: main's side of each generated artifact in one commit, then the regeneration in the next. On the RERUN path, after a hand-resolved conflict where the merge commit is already made, the pre-commit deferral that the merge commit left behind refuses step 3's commit of main's side. The script's own message names regeneration as the way out. So main's side and the regeneration land as one commit.\n\nNo wrong bytes result: the dev read the staged diff, and the generated delta against main matched the pre-merge delta. Only the two-commit separation is lost, which a reviewer uses to see that the regeneration is mechanical.\n\n## Ask\n\nOn the rerun path, either let step 3 commit under the deferral (it is the step the deferral exists to reach), or document that the rerun path lands one combined commit and how to read it."
+}

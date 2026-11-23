@@ -1,0 +1,32 @@
+{
+  "number": 36773,
+  "kind": "issue",
+  "title": "analytics: the unknown-dialect decline ignores timeDimensions[].dateRange, so a window on a JSON-stored member is refused 400 on a non-SQL datasource instead of declined",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "bug",
+    "finding",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-23T19:48:41Z",
+  "updated_at": "2026-11-23T19:48:41Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36773",
+  "body": "repo:objectstack#7 · os-alice · session_011y7As5bdhV5T4N9vpjmZzH\n\n## Finding\n\n`packages/services/service-analytics/src/strategies/native-sql-strategy.ts` — the unknown-dialect decline `jsonConstructOnUnknownDialectIn` (around l.1118-1193 at #36671's head) reads the `where`, the dataset `filter`, measure `filter` and read scope, but never `timeDimensions[].dateRange`. So on a datasource whose dialect the native strategy does not know (a non-SQL driver), a `dateRange` window (`$gte` / `$lte`) on a JSON-stored member is not declined to the engine; it reaches `refuseWhereJsonColumnComparison` (no dialect condition) and is refused **400 `INVALID_FILTER`** by the native compile.\n\nFound by the #36264 dev; contract review 7111741771 on PR #36671 (③) carries it as a production-code follow-up. #36671's changeset now declares this behaviour as it ships.\n\n## Expected\n\nThe decline treats a window on a JSON-stored member like the other filter positions: on an unknown dialect the request is declined to the engine path instead of refused by the native compile — or, if refusal is the intended answer on every datasource, that is ruled and the decline's doc says so.\n\n## Acceptance\n\n- A test on a non-SQL datasource with a `dateRange` on a JSON-stored member pins the chosen answer.\n- If behaviour changes, the #36168 changeset sentence is updated in the same PR."
+}

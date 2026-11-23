@@ -1,0 +1,32 @@
+{
+  "number": 36758,
+  "kind": "issue",
+  "title": "应用菜单：「编辑应用」实际进的是设计模式（只改布局），拆成「设计布局」和「编辑应用」（进 Studio）两行",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-23T16:01:06Z",
+  "updated_at": "2026-11-23T16:34:59Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36758",
+  "body": "repo:objectstack#1 · os-warren · session_01JQwxbZeHNsF3RWcWpj7rGj\n\n① product defect · Source: maintainer (Warren), 2026-11-23, UI review thread.\n- 15:47Z: 「左上角应用下拉中的编辑应用实际进的是编辑布局，原来的 studio 才是编辑应用。」\n- 15:48Z: 「评估应该如何设计入口」\n- 15:59Z, ruling on the decision card 「应用下拉里的编辑入口怎么设计？」 → **「编辑布局+编辑应用两行」**. The option reads: 「编辑布局」 enters design mode (its bar is renamed too); 「编辑应用」 opens this app in Studio; an installed app reads 「在 Studio 中查看」.\n- 15:59:32Z, wording: 「设计布局 编辑应用」. The layout door and the bar are named **「设计布局」**, not 「编辑布局」.\n\n**What happens (measured on main 9e0c0c23, showcase app, admin, desktop browser).**\n- The sidebar app menu lists 功能展示 / 客户回访 / 系统设置 / 编辑应用 / 添加应用. 「编辑应用」 enters design mode, which edits only the menu, header pins and page arrangement.\n- No desktop surface links to the current app's Studio: not the list, the dashboard, the record page or the user menu. The home page's 「在 Studio 中新建」 is the only Studio door, and it creates a new package.\n- The row that would do this already exists: `AppSwitcher.tsx` around lines 290–313 draws 「在 Studio 中编辑 {app}」 / 「在 Studio 中查看 {app}」 from `designInStudioPath` and `studioPosture`. But `AppSwitcher` is mounted only in `AppHeader`, which the desktop layout does not draw outside phone, docs and design mode (`ConsoleLayout.tsx` around line 296).\n\n**Change (the ruled option).**\n1. **Sidebar app menu, two rows** (`ui/packages/app-shell/src/layout/SidebarAppMenu.tsx`, `EditAppItem` around lines 130–140, gate `useEnterDesignMode` around line 119):\n   - 「设计布局」 enters design mode. Rename the label key `topbar.editApp` (zh 「编辑应用」) to a layout wording in every locale.\n   - 「编辑应用」 opens this app's package in Studio. It reuses `AppSwitcher`'s target and posture: the same `designInStudioPath` / `useAppStudioEntry` derivation, so the two cannot disagree. Where the posture is `view` (an installed app), the row reads 「在 Studio 中查看」.\n   - Each row keeps its own existing gate. Do not add a new gate.\n2. **The design-mode bar's title** `designMode.title` (zh 「设计模式」, `DesignModeBar.tsx:17`) becomes the same 「设计布局」, so the door and the bar use one word. Also update the related strings that name the mode, such as `designMode.leaveUnsaved` 「离开设计模式？…」.\n3. **Out of scope.** Dashboard and report editing stay in their page headers (#36692). Folding record tabs into this mode is #36737.\n\n**Expected.** An admin's app menu shows 「设计布局」 and 「编辑应用」 (or 「在 Studio 中查看」 for an installed app). Each one opens what its name says.\n\n**Acceptance.**\n- Tests pin the following:\n  - both rows and their targets;\n  - the installed-app posture label;\n  - the renamed bar title.\n- Browser screenshot of the showcase app's menu (installed: 「在 Studio 中查看」) and of a self-built app's menu (「编辑应用」 → `/studio/<package>`).\n\n**Skills/docs.** Update docs and skills that say 「编辑应用」 or \"Edit app\" for design mode, or 「设计模式」 as the door's name. Search `content/docs` and `skills/`.\n\n**Order.** This touches `SidebarAppMenu.tsx` and the design-mode strings, as do #36692 and #36737. The three are dispatched serially, never in parallel, in the order the maintainer releases them. All three are p2 and held under the maintainer's 2026-11-23 15:36Z freeze. Part of the design-mode epic #36359.\n\nGrading (proposed): `area:ux` · Bug · the core admin door is misnamed, and Studio is unreachable from a running app on desktop, hit by every admin who customizes an app ⇒ p2. The seat grades by its own table. Evidence: measured (browser, menu items and absence of a Studio link) + read (code on main 9e0c0c23).\n\nDedupe: check for an open card on 「编辑应用」 / SidebarAppMenu / AppSwitcher's Studio row before filing."
+}

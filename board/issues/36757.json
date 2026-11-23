@@ -1,0 +1,37 @@
+{
+  "number": 36757,
+  "kind": "pull_request",
+  "title": "feat(pm): put the topic-and-area board builder in the repo",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/l",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-23T15:56:48Z",
+  "updated_at": "2026-11-23T16:48:49Z",
+  "closed_at": "2026-11-23T16:48:46Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-23T16:48:46Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36757",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-warren\"} -->\n_Requested by **Warren** · [project thread](https://claude.ai/code/project/chan_01U5RdnAAmkSQmZbqh6FtqZ8?thread=cmsg_01U5RdnAAmkSQmZbqh6FtqZ8JpuMUc83TvQP7B2uT2pUz5)_\n\nPart of #36740 — this PR lands card items 1–3 (the script, the page template, the runbook). Item 4, the one skill line in the triage lane file, is governed text, so it follows as its own PR carrying the closing keyword once this one merges; keeping it out keeps this diff out of Tier H.\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户无感：专题看板的生成脚本、页面模板和刷新手册从分诊会话的临时目录搬进仓库。\n- 属于车队工具：分诊换人或换号后，新座位照手册就能继续每 3 小时刷新看板。\n- 只读 GitHub、不写任何东西；出错最多是看板某次数字不对，下次刷新即恢复，可直接撤回。\n- 无\n\n## What changes\n\n- `scripts/pm/topic-board.mjs` (new): a Node port of the reference `build.py` from the card. `--repo=objectstack|cloud --out=DIR` writes `epics{,_cloud}.json` and `areas{,_cloud}.json`; `--self-test` runs offline. Read-only: every read goes through `gh-pages.mjs` (`gh api`, the shared `scripts/pm` read path); a failed read exits 3 and writes nothing. The retired `lanes` output (and the seat roster that fed it) is not ported.\n- `scripts/pm/topic-board/page.html` (new): the card's page template, as attached on the card, unchanged (no path needed fixing).\n- `scripts/pm/topic-board/README.md` (new): the 3-hourly runbook — build both repos, upload the four JSON files one per call, repoint the four dataset docs with `if_version`, delete superseded blobs; artifact ownership across accounts; reading a stale row; no artifact URL in the repo.\n- `package.json`: the self-test is chained onto the existing `check:pm-board-snapshot` script, so CI runs it with no workflow edit.\n\n## Why\n\nThe board builder lived only in triage#1's session scratchpad and dies with it; the maintainer ordered it into the repo so any triage seat, on any account, can keep refreshing the board.\n\n## Tests\n\n`node scripts/pm/topic-board.mjs --self-test` — 38 cases, all pass, offline. It pins: topic detection (`pm:epic`, `[Epic …]`, `[专题 …]`, `专题：`, `tracking` with open subs; a closed-out tracking card and a `pm:seat` card are not topics); parent choice (direct holder beats a larger containing topic; a cycle keeps one link); rollup (a parent's numbers include its descendant topics' cards, topic cards never count as members, closed sub-issues count in total/closed); prose-linked \"unlinked\" members (`#2000` and `#200号` do not match `#200`); topic cards left out of the area table with `topic_skipped`; the 「（未定 area）」 row; the read path (pull requests dropped, request count, a failed sub-issues read fails the whole read).\n\nA one-off mutation (direct-holder rule replaced by \"any containing topic\") turned three cases red, then was restored before the commit (the original line read back).\n\n## Acceptance notes\n\n- Pacing is at or below the reference's: one paginated open-issues list, one sub-issues read per topic, and one per sub-issue whose `sub_issues_summary.total` is above zero (or absent). The reference read every sub-issue's sub-issues unconditionally; the members found are the same.\n- Area rows: every area of the repo's list gets a row in list order, zero or not, so the page shows every area group; others follow by open count, then 「（未定 area）」. The reference emitted only areas with cards, sorted by count; the page sorts groups by its own order, so only zero groups are new. `topic` is 0 by construction (as in the reference) and kept for the page's shape.\n- Faithful to the reference, kept as is: a card detected as a topic by title alone (no `pm:epic` / `tracking` label) is not in the area table's skip list, so it counts there when it sits in no other topic.\n- Live-count check (done-when 1) is not measured here: this container's `gh` is limited to search. NOT MEASURED: live read, reason: no non-search `gh api` in this container. It is the triage seat's reading, on its next refresh, from a checkout of this branch:\n\n  ```sh\n  node scripts/pm/topic-board.mjs --repo=objectstack --out=DIR\n  node scripts/pm/topic-board.mjs --repo=cloud --out=DIR\n  ```\n\n  Then compare `DIR/epics.json`, `DIR/areas.json`, `DIR/epics_cloud.json` and `DIR/areas_cloud.json` with the datasets of triage#1's last published refresh: per topic `open`/`total`/`closed`/`unlinked`, per area `open`/`p1`, and `topic_skipped`. They should match within the cards that changed between the two builds; the only expected structural difference is the new zero rows for areas with no open cards. The stdout summary line also prints the GET request count of each run.\n\n## Verification\n\nRead first: `buildBoard` in `scripts/pm/topic-board.mjs` (the parent choice and the cycle guard), then `readBoard` (the read count and failure path).\n\nTwo-minute check: `node scripts/pm/topic-board.mjs --self-test` → `topic-board self-test: all passed`.\n\nThe page was rendered in Chromium from the script's own output on a fixture (stub `dash`/`d3`): no page errors, both tabs draw the area groups, the topic tree (child under parent) and the 「专题以外」 rows.\n\n<details><summary>Local gates at b85141cb (dispatch-gates --commands: 42 families)</summary>\n\n`node scripts/pm/dispatch-gates.mjs --ran` → `42 derived famil(ies) accounted for — 38 run, 4 NOT-MEASURED`. All 38 run exit 0, including `pnpm check:pm-board-snapshot` (now carrying this self-test), `node scripts/check-self-test-wired.mjs` and `pnpm check:pm-dispatch-gates` (fast tier 459 s, exit 0).\n\nNOT MEASURED (exit 3, PREREQUISITE NOT MET — they read built `dist/`, and this diff touches no package): `check:dts-closure`, `check:dual-build-cjs-loads`, `check:lean-entry-closure`, `check:sourcemap-no-sources-content`. CI builds and runs them.\n\n</details>\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01JQwxba6Siz8egCv4AAnqtU\n\n<!-- signed: repo:objectstack#1 · os-warren · session_01JQwxba6Siz8egCv4AAnqtU -->\n"
+}

@@ -1,0 +1,38 @@
+{
+  "number": 36763,
+  "kind": "pull_request",
+  "title": "fix(app-shell): the console builds on macOS again — helper modules no longer differ from their component only by case, and CI refuses such pairs",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-23T16:10:17Z",
+  "updated_at": "2026-11-23T16:56:54Z",
+  "closed_at": "2026-11-23T16:56:52Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-23T16:56:52Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36763",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-warren\"} -->\n_Requested by **Warren** · [project thread](https://claude.ai/code/project/chan_01U5RdnAAmkSQmZbqh6FtqZ8?thread=cmsg_01U5RdnAAmkSQmZbqh6FtqZ8E7nn7vpAyMKtKMup2XHy9u)_\nPart of #36753 — this PR carries items 1–3 of the card (rename, check, whole-repo scan). Item 4, the one authoring-rule line in `ui/AGENTS.md`, is a governed (Tier H) file and follows in a second PR after this one merges; that PR closes the card.\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户能看到什么变化：在 Mac 上，控制台重新能打包、本机环境重新能起来；功能和页面没有任何变化，Linux 上用户无感。\n- 为什么做：属于「运行界面的设计模式」专题。设计模式的页头按钮和记录页签配置各有一个组件文件和一个辅助文件，名字只差首字母大小写，Mac 不分大小写，打包时拿错了文件；上一次同类问题只改了名，没加检查，所以又出现了。\n- 出错会怎样：本次只改两个辅助文件的名字和引用，外加一道新检查；若新检查误拦，提交会在持续集成里报红，撤回这一个合并即恢复原样。\n- 要你做什么：无。\n\n## What changes\n\n**Renames (item 1).** In `ui/packages/app-shell/src`, the lower-case helper of each pair takes a `Model` suffix, the shape `designModeMenuModel.ts` took for the same class of defect:\n\n| Before | After | Component it collided with |\n|---|---|---|\n| `layout/designModeHeaderPins.ts` | `layout/designModeHeaderPinsModel.ts` | `layout/DesignModeHeaderPins.tsx` |\n| `layout/__tests__/designModeHeaderPins-36366.test.ts` | `layout/__tests__/designModeHeaderPinsModel-36366.test.ts` | `layout/__tests__/DesignModeHeaderPins-36366.test.tsx` |\n| `views/recordTabsConfig.ts` | `views/recordTabsConfigModel.ts` | `views/RecordTabsConfig.tsx` |\n| `views/__tests__/recordTabsConfig-36499.test.ts` | `views/__tests__/recordTabsConfigModel-36499.test.ts` | `views/__tests__/RecordTabsConfig-36499.test.tsx` |\n\nThirteen importers (five product modules that import the pins helper, three that import the tabs helper, the two renamed tests and three sibling tests) now name the new modules; each is a one-line specifier change. File contents are otherwise byte-identical (`git mv`, similarity 100%). No behaviour change.\n\n**The check (item 2).** New `scripts/check-case-colliding-paths.mjs` reads the whole index (`git ls-files -z`) and refuses two entries in ONE directory whose names, with the LAST extension dropped, differ only by letter case. Comparing whole file names would miss this class: `DesignModeHeaderPins.tsx` and `designModeHeaderPins.ts` have different extensions; what collides is the module specifier. It also catches plain case-only names (`README.md` + `readme.md`) and directory entries (`Foo/` beside `foo.ts`, `Docs/` + `docs/`). It does not flag `index.ts` + `index.css` (identical stem) or `Foo.tsx` + `Foo.test.tsx` (stems differ). No skip list. The self-test follows AGENTS.md § Writing a `--self-test` (5 pinned batteries with per-battery floors, roster-size floor, verdict handshake) and runs real `scan()` over throwaway git indexes built with `update-index --cacheinfo`, so it holds both spellings on any host file system.\n\n**Where it runs.** Chained into the existing root script `check:gitlink-declared` (the other whole-index shape gate), which `lint.yml`'s unconditional step \"Staged gitlinks are declared in .gitmodules\" already runs on every PR on Linux: `... && node scripts/check-case-colliding-paths.mjs --self-test && node scripts/check-case-colliding-paths.mjs`. Precedent for one script key running two checkers: `check:workflow-status-functions`. `lint.yml` is untouched, so this PR has no governed path.\n\n**Whole-repo scan (item 3).** On `origin/main` at `0e83fe03` the check finds exactly the four groups above and nothing else (27,476 tracked paths, 1,169 directories; no directory collisions). On this branch: 0 groups.\n\n## Tests\n\n<details><summary>Check: red on main, green here, red on a planted pair, self-test, ablation</summary>\n\n- `origin/main` `0e83fe03` (detached worktree), `node scripts/check-case-colliding-paths.mjs` → exit 1, 4 groups, exactly the table above.\n- This branch, `pnpm check:gitlink-declared` → exit 0:\n  `✓ check-gitlink-declared --self-test: 36 assertions …` / `check-gitlink-declared: OK …` / `✓ check-case-colliding-paths --self-test: 29 assertions (pure batteries + throwaway git repos, real scan() path)` / `check-case-colliding-paths: OK (27476 tracked path(s) in 1169 director(ies); 0 case-colliding group(s)).`\n- Card acceptance 3 (planted `Foo.tsx` + `foo.ts`, staged, Linux) → exit 1: `ui/packages/app-shell/src/zz/Foo.tsx` and `ui/packages/app-shell/src/zz/foo.ts` named as one group; then unstaged and removed.\n- One-time ablation (not kept): the fold `stem.toLowerCase()` replaced by `stem` (anchor grep count 1 after the write) → `--self-test` exit 1, 10 failures, first `Foo.tsx + foo.ts: expected 1 collision, got 0`; restored from a byte copy, `git diff` clean.\n\n</details>\n\n<details><summary>Renamed modules: unit and DOM tests</summary>\n\n`@objectstack/spec`, `formula`, `lint`, `sdui-parser`, `client` built first, then from `ui/`:\n`pnpm exec vitest run --maxWorkers=2` over the 8 test files that import the two pairs (`designModeHeaderPinsModel-36366`, `designModeHeaderPinsSave-36366`, `DesignModeHeaderPins-36366`, `recordTabsConfigModel-36499`, `recordTabsConfigSave-36499`, `recordTabsInstalled-36499`, `RecordTabsConfig-36499`, `RecordTabsConfigInstalled-36499`) at `62367fb2` → `Test Files 8 passed (8)`, `Tests 66 passed (66)`.\n\n</details>\n\n## Acceptance notes\n\n- Card acceptance 1–2 (macOS console build, three pages on a Mac bundle) need a Mac; NOT MEASURED here. The coordinator's own Mac reading in the card body (four importers pointed at the exact `.tsx` → bundle green, pages work) is the same resolution this rename makes permanent.\n- `@object-ui/app-shell` `type-check` NOT MEASURED locally (it needs every `@object-ui/*` dependency built; the 2,079 errors in an unbuilt container are all unresolved workspace packages, and none is a relative-specifier error). CI's `Type Check UI` is the reading.\n- The check is a new gate. The card's item 2 asks for it; the same item was on the earlier card for this class, filed on the maintainer's 「立卡」.\n\n## Verification\n\nTwo minutes: `git mv` any `.tsx` component's helper back to a case-only name (or `touch a/Foo.tsx a/foo.ts && git add a`) and run `pnpm check:gitlink-declared` — it exits 1 naming the pair.\n\nFiles to read first: `scripts/check-case-colliding-paths.mjs` (`stemOf`, `directoryEntries`, `findCollisions` — the rule), `package.json` line 36 (the wiring).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01JQwxbXnuzDBbW3qeZ7Kfkc)_\n"
+}

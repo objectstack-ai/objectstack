@@ -1,0 +1,36 @@
+{
+  "number": 36728,
+  "kind": "pull_request",
+  "title": "fix(fields): a multi-record lookup column in the line-item grid reads its records, not \"undefined\", read-only and in list mode",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-23T14:23:21Z",
+  "updated_at": "2026-11-23T15:11:02Z",
+  "closed_at": "2026-11-23T15:11:00Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-23T15:11:00Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36728",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-warren\"} -->\n_Requested by **Warren** · [project thread](https://claude.ai/code/project/chan_01U5RdnAAmkSQmZbqh6FtqZ8?thread=cmsg_01U5RdnAAmkSQmZbqh6FtqZ852pUyi6G1KDP9T8JogHTeb)_\n\nFixes #36618\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户在只读的记录页、打印页或卡片式明细里查看明细行时，\"可选多条关联记录\"的那一列不再显示 undefined，而是逐个显示所关联记录的名称；单选的关联列外观不变。\n- 属于体验专题的界面缺陷修复，替查看订单、报价这类带明细行单据的人解决看不懂的问题。\n- 出错的话只是这一列显示不对，不影响保存的数据，可直接撤回。\n- 无。\n\n## What changes\n\nThe line-item grid renders a read-only `LookupField` at two sites: the read-only table (`readonly` grid: read-only record page, print page) and the list form-factor cell (`displayMode=\"list\"`). Both built the lookup's `field` without the column's `multiple`, while the editable cell passes `multiple: c.multiple`. Without it, `LookupField` resolves the stored id list as ONE id (`selectedOptions = [resolveSelectedOption(value)]`) and its single-value read-only face prints that option's missing label, which renders as \"undefined\".\n\n- `ui/packages/fields/src/widgets/grid-field/GridFieldWidget.tsx`: both read-only sites now pass `multiple: c.multiple`, read from the column definition (as the card asks), never inferred from the value's shape. The read-only face then draws one badge per related record.\n- Changeset: `@object-ui/fields` patch.\n\nNo new prop, key or export. Single-record lookup columns are unchanged.\n\n## Tests\n\nNew `ui/packages/fields/src/widgets/GridField.multiLookupReadonly-36618.test.tsx`, one case per site plus a control per site:\n\n- read-only table: a cell holding `['p1', 'p2']` draws `Widget` and `Gadget`, and the grid's text has no `undefined`;\n- list mode: the same;\n- control, each site: a single-record lookup column still draws its one name.\n\nReverse verification (fix committed first; each site reverted on its own with an anchored replacement whose hit count was checked, test run, then `git checkout HEAD --` and `git diff HEAD` empty):\n\n| Site reverted | Result |\n|---|---|\n| read-only table | `× read-only: a cell holding two product ids draws both product names`; 3 others pass |\n| list mode | `× list: a cell holding two product ids draws both product names`; 3 others pass |\n\nSo each multi-value case pins its own site, and the controls pass both ways.\n\n<details><summary>Package runs at 418f177d (merged with main e343ab7c; the merge touched nothing under ui/packages/fields)</summary>\n\n```\npnpm exec vitest run --root ../.. --maxWorkers=2 packages/fields/src/widgets/GridField\n Test Files  21 passed (21)\n      Tests  272 passed (272)\nos-verify-lock: VERDICT command-exit 0\n\npnpm --filter @object-ui/fields type-check   (tsc --noEmit && tsc -p tsconfig.test.json)\nexit 0\n```\n\nThe dependency closure was built first (`pnpm --filter '@object-ui/fields^...' build`, VERDICT command-exit 0).\n</details>\n\n<details><summary>Derived gate families (dispatch-gates --commands, 38 families, run on the same diff at 974437a3 before the merge with main)</summary>\n\nAll 38 exited 0. `dispatch-gates --ran`: 38 derived, 38 run, 0 NOT-MEASURED, 0 UNRUN. Every family CI runs is read from this PR's check-runs, not re-run locally.\n</details>\n\n## Acceptance notes\n\n- Not measured in a browser: the showcase app has no line-item grid with a multi-record lookup column to open. The jsdom pins render the real `LookupField` against a data source and read the drawn names.\n- An empty stored list (`[]`) still reaches the lookup branch in both sites (the guard checks `null` and `''` only); with `multiple` passed it draws the lookup's read-only empty face, not the grid's muted em dash. Not pinned here, and what it drew before was not measured. Left as is: the card asks only for `multiple`.\n\n## Verification\n\nRead first:\n1. `ui/packages/fields/src/widgets/grid-field/GridFieldWidget.tsx`, the two read-only `LookupField` sites (the only code change).\n2. The new test file.\n\nTwo-minute check: `pnpm --dir ui exec vitest run packages/fields/src/widgets/GridField.multiLookupReadonly-36618.test.tsx` shows 4 passing; revert either `multiple: c.multiple` and its site's multi-value case fails.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01JQwxbYEoTneL1bdkVJrq2S)_\n"
+}

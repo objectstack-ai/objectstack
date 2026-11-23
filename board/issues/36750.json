@@ -1,0 +1,32 @@
+{
+  "number": 36750,
+  "kind": "issue",
+  "title": "Studio 列表视图：对象没有默认视图时不要去读 <object>.default 的分层（每个新对象都报一次 404）",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-23T15:34:42Z",
+  "updated_at": "2026-11-23T15:44:51Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36750",
+  "body": "repo:objectstack#1 · os-warren · session_01JQwxbZeHNsF3RWcWpj7rGj\n\n① product defect · Source: maintainer (Warren), 2026-11-23, UI review thread.\n- 14:23Z 「还有哪些元数据可能会有问题？同时全面的测试 studio的各项功能」\n- 15:09Z 「用fable 评审一下 studio的问题，提出修改方案」\n- 15:23Z, decision card 「Studio 评审的 9 张卡，按 fable 方案立卡吗？」 → **「9 张全立」**\n\nEvidence:\n- Fable code review on main 9e0c0c23: project file `ui-review-2026-11-23/fable-studio-review.md`.\n- Browser screenshots: `ui-review-2026-11-23/round2/`.\n- Round-2 report: https://claude.ai/artifact/X5ukNAgphAq5vDpDAT6SAD\n\nPaths are relative to `ui/packages/app-shell/src/views/` unless they start with `ui/` or `packages/`. `SDS` = `studio-design/StudioDesignSurface.tsx`. `zh` = `ui/packages/i18n/src/namespaces/studio/zh.ts`. Line numbers are on 9e0c0c23.\n\n## What (review §B, the 404; confirmed from code)\n- With no view flagged as default, the list-view buffer falls back to the made-up id `<object>.default` (`studio-design/ObjectListViewInspector.tsx:186–187`). Having no draft, it reads that id's published layer (`ObjectListViewInspector.tsx:718–724`).\n- No such view exists, so the server answers 404 on `/meta/view/<object>.default/layers`.\n- The client turns that into an empty result (`ui/packages/data-objectstack/src/metadata-client.ts:1772–1774`). Nothing breaks, but the browser logs the failed request.\n- The guard that used to skip this read covers draft-only objects (objectui#12508). Since #36511, a new object is published at once, so the guard no longer applies.\n\n## Expected\nSkip the layered read when the id is the fallback, that is, when the object's merged `listViews` holds no view under it. The buffer already knows this (`ObjectListViewInspector.tsx:556–558`). Check the other callers of the layered read for the same fallback.\n\n## Acceptance\nA test pins that no layered read is sent for the fallback id.\n\nGrading: `area:ux` · Bug · no effect on what the user sees · developers only ⇒ p3. It is batched with the area's close-out, not queued ahead of p2. Effort S. Evidence: read (review §B).\n\nDedupe: none open on this request."
+}

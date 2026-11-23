@@ -1,0 +1,32 @@
+{
+  "number": 36739,
+  "kind": "issue",
+  "title": "初始设置清单：组织基本信息合成一张表单、其余改可选、侧栏底部「开始使用 n/m」小条（#36732 后续）",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "enhancement",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-23T15:23:05Z",
+  "updated_at": "2026-11-23T15:44:21Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36739",
+  "body": "repo:objectstack#1 · os-warren · session_01JQwxbZeHNsF3RWcWpj7rGj\n\nChild of epic #36107, split from #36732 item 5. Maintainer's ruling 2026-11-23 15:21Z, decision card 「合并表单+侧栏小条」. It replaces the 15:07Z pick 「系统设置第一页」 for the checklist's entry point. The full list still stays on the Setup first page.\n\n## 维护者原话\n- 15:15Z 「首页初始设置是否建议做成向导。」 (with an Attio sidebar 「Getting started 2/6」 screenshot)\n- 15:15Z 「而且目前初始设置的细节也不好用，很多设置可以合并一个表单，你具体评估一下。」\n- Option chosen at 15:21Z: 「基本信息合成一张表单一次保存；其余改可选；侧栏底部「开始使用 2/6」小条，系统设置第一页留完整清单。」\n\n## Split with #36732\n- **#36732 (PR #36738) ships:** the existing checklist at the top of the 系统设置 app's first page, for admins, and in the no-apps empty state. Admins therefore keep a place to see it the moment `/home` is retired.\n- **This card ships:** everything below. It runs serially after #36738 merges, because the files are the same.\n\n## State (main e343ab7c, read from `ui/apps/console/src/pages/settings/FirstRunChecklist.tsx` and `firstRunChecklistLogic.ts`; not browser-measured)\n- The platform has 8 rows:\n  1. Org name, which goes to Setup › Organization.\n  2. Language and country.\n  3. Time zone.\n  4. Default currency.\n  5. Mail sending, which is optional (`OPTIONAL_ROWS` holds only mail).\n  6. Invite colleagues.\n  7. Built-in AI.\n  8. Connect an external AI assistant.\n- Rows 2, 3 and 4 each have their own 「设置/确认」, yet all three save the same `PUT /api/settings/localization`, prefilled from the browser.\n- The hosted profile adds 9 「放进第一个应用」 and 10 「添加第一条记录」 (optional).\n- Every row except mail and first record is required. A customer who does not use AI, or a lone admin trying the product, can never finish.\n- Self-hosted first admin creation (`ui/apps/console/src/pages/auth/SetupPage.tsx`) already takes the org name and writes the browser time zone to the org.\n\n## Expected\n1. **One 「组织基本信息」 form.**\n   - It holds org name, language, country, time zone and currency, all prefilled from the browser, saved with one 「保存」.\n   - It counts as one checklist row.\n   - If the org name uses another endpoint, the same save writes it too.\n   - The thread proposes whether self-hosted `SetupPage` can take this form at first-admin creation, so the row starts done.\n2. **The only required rows** are 组织基本信息, plus 「放进第一个应用」 on hosted. Invite colleagues, mail sending, built-in AI and external AI become optional. Each still ticks itself from the real settings, by the same rules as today.\n3. **A sidebar pill**, after Attio's 「Getting started 2/6」:\n   - Only admins see it, in every app, at the sidebar bottom.\n   - It reads 「开始使用 已完成/总数」 and opens the checklist in place.\n   - It disappears once the required rows are done.\n   - The thread proposes whether to keep today's 「本机隐藏」 (hide on this device).\n4. The **Setup first page** keeps the full list, including done rows.\n5. The **no-apps empty state** still shows the list.\n6. **Phone:** there is no resident sidebar. The thread proposes where the pill goes; the phone otherwise stays unchanged.\n\n## Not done\n- A step-by-step first-login wizard. The maintainer declined it on the card.\n\n## Acceptance\n- A new environment's admin sees 「开始使用 0/N」 at the sidebar bottom in any app, and clicking it opens the list. A plain member sees nothing.\n- 组织基本信息 is one form. One save ticks the row and writes all five values.\n- Without configuring AI or inviting anyone, the required rows can be completed, and the pill then disappears.\n- The Setup first page shows the full list.\n- Tests pin the required/optional split, the one-save form, and the pill's admin-only visibility and disappearance.\n- Browser screenshots at desktop and phone widths.\n\nGrading (proposed): `area:ux` · Feature · epic child at the epic's grade ⇒ p2. Evidence: read (the ruling, the checklist code above).\n\nDedupe: no open card names `FirstRunChecklist` or the setup checklist; #36732 holds only its placement."
+}

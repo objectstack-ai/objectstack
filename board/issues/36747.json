@@ -1,0 +1,32 @@
+{
+  "number": 36747,
+  "kind": "issue",
+  "title": "Studio 关联字段和汇总字段的目标只能选对象，不再接受随手输入的文字",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:build",
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-23T15:31:55Z",
+  "updated_at": "2026-11-23T15:44:41Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36747",
+  "body": "repo:objectstack#1 · os-warren · session_01JQwxbZeHNsF3RWcWpj7rGj\n\n① product defect · Source: maintainer (Warren), 2026-11-23, UI review thread.\n- 14:23Z 「还有哪些元数据可能会有问题？同时全面的测试 studio的各项功能」\n- 15:09Z 「用fable 评审一下 studio的问题，提出修改方案」\n- 15:23Z, decision card 「Studio 评审的 9 张卡，按 fable 方案立卡吗？」 → **「9 张全立」**\n\nEvidence:\n- Fable code review on main 9e0c0c23: project file `ui-review-2026-11-23/fable-studio-review.md`.\n- Browser screenshots: `ui-review-2026-11-23/round2/`.\n- Round-2 report: https://claude.ai/artifact/X5ukNAgphAq5vDpDAT6SAD\n\nPaths are relative to `ui/packages/app-shell/src/views/` unless they start with `ui/` or `packages/`. `SDS` = `studio-design/StudioDesignSurface.tsx`. `zh` = `ui/packages/i18n/src/namespaces/studio/zh.ts`. Line numbers are on 9e0c0c23.\n\n## What (review r08, root cause 4)\nThe Lookup door accepts any typed text as its target object, because `objectsOnly` is off (`metadata-admin/inspectors/ObjectFieldInspector.tsx:1769–1777`). No expression is legal there (`metadata-admin/inspectors/ObjectPicker.tsx:274–280`), so a typo saves a Lookup to an object that does not exist. The summary (roll-up) target door has the same gap.\n\n## Expected\nPass `objectsOnly` on the Lookup and summary target doors.\n\n**Premise to verify first.** The picker's catalog must list an object that exists only as an AI draft. Otherwise a Lookup to it could not be set. If it does not, report a fork to the seat; do not quietly allow free text.\n\n## Acceptance\n- A test pins that the Lookup and summary target pickers refuse free text and accept a listed object.\n- A test covers a draft-only object as a target, per the premise.\n\nGrading: `area:ux` · Bug · Impeded · builders, often ⇒ p2. Effort S. Evidence: read (review r08).\n\nDedupe: no open card names `objectsOnly`."
+}

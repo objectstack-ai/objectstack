@@ -1,0 +1,36 @@
+{
+  "number": 36760,
+  "kind": "pull_request",
+  "title": "docs: add a repository security policy (SECURITY.md)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-23T16:04:40Z",
+  "updated_at": "2026-11-23T17:07:24Z",
+  "closed_at": "2026-11-23T17:07:22Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-23T17:07:22Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36760",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-warren\"} -->\n_Requested by **Warren** · [project thread](https://claude.ai/code/project/chan_01U5RdnAAmkSQmZbqh6FtqZ8?thread=cmsg_01U5RdnAAmkSQmZbqh6FtqZ8AB5AVNK6zxdTzUK1owwiGP)_\n\nFixes #36751\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户能看到什么变化：在仓库「Security」页，原来的「未检测到安全政策」变成一份安全政策，告诉外部研究者通过私密渠道报告漏洞、哪些版本修安全问题、多久回复。\n- 为什么做：仓库公开并发布 npm 包，研究者找到漏洞时没有任何地方指向私密报告，可能直接提公开 issue，等于提前公开漏洞。\n- 出错会怎样：只是一份文档，不改任何代码、不发版；写得不对直接改或撤回这次合并即可。\n- 要你做什么：拍板两项承诺（只修最新大版本；3 个工作日确认、10 个工作日定性、按严重程度的修复时限），以及文档站已公开的「邮箱报告、1 个工作日回复」是否要统一，见下方 Maintainer's call。\n\n## What changes\n\nAdds `SECURITY.md` at the repository root (one new file, 71 lines, nothing else). GitHub renders it on the Security → Policy tab. It says:\n\n1. **How to report** — through private vulnerability reporting (the repository's `/security/advisories/new` form), never a public issue, discussion or pull request; what a report should include (package and version, reproduction, impact, preconditions).\n2. **Supported versions** — the latest major line gets security fixes, older majors do not. The line is named by a rule (\"every release whose major version equals the newest release on npm\"), not by a number, so the file does not go stale at the next major.\n3. **Response targets** — acknowledgement within 3 business days, triage verdict within 10, and a fix target by severity (critical 14 days, high 30, medium 90, low in a regular release), all stated as targets, not guarantees.\n4. **Disclosure** — the fix ships in a normal release, then the advisory is published with affected and patched versions; a CVE is requested for high and critical; the reporter is credited with permission.\n5. **Scope** — the source and npm packages of this repository; a finding in a hosted ObjectStack service is reported the same way and labelled as such.\n\nNo real vulnerability or advisory is named anywhere in the file.\n\n## Maintainer's call\n\nTwo policy choices are written as the card proposed and are yours to confirm or change in review:\n\n- **Supported versions:** latest major line only (`18.x` at the time of writing — every published `@objectstack/*` package is 18.6.0, one fixed version group).\n- **Response and fix targets:** 3 / 10 business days, and 14 / 30 / 90 days / next regular release by severity. The card proposed \"a fix target by severity\" without numbers; the four numbers are this PR's proposal.\n\nOne inconsistency this PR surfaces but does not settle (it lives in another repository): the docs site already publishes a different channel and promise. `docs.objectos.ai` `content/docs/reference/security.mdx` (\"Vulnerability disclosure\") and `content/docs/resources/support.mdx` tell reporters to email a security mailbox and promise a reply within **1 business day**; the cloud enterprise security questionnaire quotes the same. This file follows the card and the dispatch order (private vulnerability reporting only, 3 business days). Options: (a) keep this file as is and align the docs site to it in a docs-repo card; (b) also list the mailbox here as a second channel and/or change the acknowledgement target to 1 business day. Recommendation: (a), one channel, because a mailbox report cannot become a draft advisory without being copied by hand.\n\n## Why\n\nThe repository is public and ships npm packages, and private vulnerability reporting is already enabled (`GET /repos/objectstack-ai/objectstack/private-vulnerability-reporting` → `{\"enabled\": true}`, read 2026-11-23), but the Security tab says \"No security policy detected\" and nothing points a reporter at the private form.\n\n## Tests\n\nNone: a Markdown document only, no code path and no tested behaviour. Premise re-read on base `0e83fe03` before writing: no `SECURITY.md` at the root, in `.github/` or in `docs/`; all 76 non-private package manifests read 18.x.\n\n## Acceptance notes\n\n- Publishes nothing: the file is at the repository root, outside every package's `files[]`, so this PR carries `skip-changeset`.\n- The organization has no default `SECURITY.md` either (per the card's reading); this PR covers this repository only, as the card asks.\n\n## Verification\n\nLocal gates, derived by `node scripts/pm/dispatch-gates.mjs --commands` for this change set (9 whole-tree families; this path matches no family). Results at head `9e281909`:\n\n<details><summary>9 of 9 derived families run locally, all exit 0 (head 9e281909)</summary>\n\n| Command | Exit |\n| --- | --- |\n| `node scripts/check-closing-keyword-parity.mjs` | 0 |\n| `node scripts/check-closing-keyword-parity.mjs --self-test` | 0 |\n| `node scripts/check-comment-mask-corpus.mjs` | 0 |\n| `pnpm check:adr-anchors` | 0 |\n| `pnpm check:driver-memory-census` | 0 |\n| `pnpm check:gitlink-declared` | 0 |\n| `pnpm check:nul-bytes` | 0 |\n| `pnpm check:refd-timer-probe` | 0 |\n| `pnpm check:watch-hint-literal` | 0 |\n\n`dispatch-gates --ran`: 9 derived families accounted for, 0 NOT MEASURED. `pnpm install --frozen-lockfile --ignore-scripts` ran first (two gates import `yaml`). Every other family CI runs is cited from the PR's check runs at L1.\n\n</details>\n\nTwo-minute check: open the branch's `SECURITY.md` on GitHub, or after merge the repository's Security → Policy tab; expected: the policy renders with the \"Report a vulnerability\" link opening the private advisory form.\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (not touched)\n- [x] 2. Every name I added uses the casing for its kind. (no names)\n- [x] 3. No formatter ran; `pnpm lint` passes. (no lintable source; CI runs it)\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset — this one publishes nothing (`skip-changeset`).\n- [x] 6. `packages/spec` touched: no.\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English (the 维护者速读 section is the required Chinese summary).\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01JQwxbYUu3CBCpJ7gqXVrw2)_\n"
+}

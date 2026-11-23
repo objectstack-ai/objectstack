@@ -1,0 +1,34 @@
+{
+  "number": 36753,
+  "kind": "issue",
+  "title": "在 Mac 上界面打包失败、本机环境起不来：又有两对只差大小写的文件名（DesignModeHeaderPins、RecordTabsConfig）；#36589 只改了名，没有加检查",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:build",
+    "bug",
+    "domain:ui",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-23T15:42:41Z",
+  "updated_at": "2026-11-23T17:06:29Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36753",
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#36359（运行界面的设计模式专题）。⛔ 不是认领。优先级 p1（协调席定的，维护者未指定：在 Mac 上控制台打不出包，本机环境起不来）。维护者 2026-11-23 对同一类缺陷的上一张卡说「立卡通知 2号」，本卡是它的复发，同样通知席位 `repo:objectstack#2`。\n\n## 维护者说过的（2026-11-23）\n\n- 「更新最新的代码，重启本地环境」。协调席更新后环境没起来，查到本卡的问题。\n- 上一张同类卡 objectstack-ai/objectstack#36589 立卡时：「立卡」「立卡通知 2号」。\n\n## 现状（主干 `0de93df79e`，macOS，本机构建）\n\n- objectstack-ai/objectstack#36589 由 PR #36604（`42b4060bed`，2026-11-23 02:38）关闭。那次提交只做了一件事：把 `designModeMenu.ts` 改名为 `designModeMenuModel.ts`。卡上「要做的」第 2 条（加一道检查拦住只差大小写的文件名）和第 3 条（全仓库扫描）没有做。\n- 之后合并进来的代码里又出现了两对，都在 `ui/packages/app-shell/src/` 下：\n\n| 一对文件 | 来自 | 被错误解析的引用 |\n|---|---|---|\n| `layout/DesignModeHeaderPins.tsx`、`layout/designModeHeaderPins.ts` | objectstack-ai/objectstack#36366（PR #36629，`70d07fd612`，11-23 13:17） | `views/RecordDetailView.tsx:78`、`views/objectViewPageHeader.tsx:44`、`layout/DesignModeHeaderPinsPanel.tsx:50` |\n| `views/RecordTabsConfig.tsx`、`views/recordTabsConfig.ts` | objectstack-ai/objectstack#36499 | `views/RecordDetailView.tsx:34` |\n\n- 在 macOS（文件系统不区分大小写）上，`import … from './DesignModeHeaderPins.js'` 先试 `.ts`，命中了小写开头的那个辅助文件。后果比上次重：\n  - `@object-ui/app-shell` 的类型构建失败（TS1149、TS2305 等）。\n  - **控制台打包直接失败**：`[MISSING_EXPORT] \"DesignModeHeaderPins\" is not exported by \"…/layout/DesignModeHeaderPins.ts\"`、`\"useRecordTabsConfig\" is not exported by \"…/views/RecordTabsConfig.ts\"`，共 6 个错误。没有产物，本机环境起不来。\n- Linux 区分大小写，持续集成全绿；线上构建协调席没有验证。\n- 协调席在本机把这四处引用临时改成带 `.tsx` 的准确文件名后，打包通过，环境起来，设计模式和记录页都能用（改动没有提交）。\n- 用下面这条命令扫了 `ui/packages/app-shell/src`（不含测试目录），目前只有这两对：去掉扩展名后转小写，统计重复。其他包没有扫。\n\n## 要做的\n\n1. 把这两对文件改名，让同一目录下不再有去掉扩展名后只差大小写的文件；同步改引用和对应的测试文件名。\n2. **加检查**（#36589 欠的）：在持续集成里（Linux 上也能跑）拦住「同一目录下、去掉扩展名后只差大小写」的文件对。注意这类冲突的两个文件扩展名不同（`.tsx` 和 `.ts`），只比较完整文件名的检查拦不住。\n3. 用这道检查把整个仓库扫一遍，有别的一并处理，在 PR 里列出。\n4. 在 `ui/AGENTS.md`（或对应的编写规则）里加一句：组件文件和它的辅助文件不能只靠首字母大小写区分。\n\n## 不做的\n\n- 不改这些文件的功能。\n\n## 验收\n\n- 在 macOS 上从干净的检出跑控制台打包：成功，没有 MISSING_EXPORT、没有 TS1149。\n- 在 macOS 上打包的控制台里：记录页能打开；从应用名菜单点「编辑应用」能进设计模式；记录「…」里的「配置页签」能打开。\n- 故意加一对 `Foo.tsx` 和 `foo.ts`：新加的检查在 Linux 上报错。\n- PR 正文列出改名的文件、全仓库扫描的结果，以及检查放在哪里。\n\n## 协调席自己加的\n\n- 「要做的」第 4 条（写进编写规则）。\n- 验收第二条里的三个页面。\n- 「#36589 没做第 2、3 条」是协调席看那次提交改动的文件列表得出的（只有改名和一个变更说明文件），没有逐个查别的提交里是否另加了检查。"
+}

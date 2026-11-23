@@ -1,0 +1,36 @@
+{
+  "number": 36762,
+  "kind": "pull_request",
+  "title": "ci(codeql): scan with security-extended and skip test paths",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "ci/cd",
+    "documentation",
+    "pm:awaiting-merge",
+    "protocol:system",
+    "size/s",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-23T16:08:32Z",
+  "updated_at": "2026-11-23T17:04:59Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36762",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-warren\"} -->\n_Requested by **Warren** · [project thread](https://claude.ai/code/project/chan_01U5RdnAAmkSQmZbqh6FtqZ8?thread=cmsg_01U5RdnAAmkSQmZbqh6FtqZ8JPNQ4YY52Smoyx1jKHDSDS)_\n\nFixes #36752\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户无感：代码扫描页以后只列安全类告警，「未使用的变量」这类代码质量提示和测试文件里的告警不再出现，产品代码照样全部扫描。\n- 属于车队基础设施，替你把 929 条告警缩成能逐条处理的清单；测试里几个看着像真密钥的假字符串也改成了一眼能看出是假的。\n- 只改扫描配置和测试里的假字符串，不碰产品代码；出问题直接撤回即可，扫描恢复原样。\n- 这个 PR 改了受管的工作流文件，需要你批准或亲手合并。\n\n## What changes\n\n- **Query suite.** `.github/workflows/codeql.yml` no longer passes `queries: security-and-quality`; it points `config-file` at the new `.github/codeql/codeql-config.yml`, which runs `security-extended`. `security-and-quality` is `security-extended` plus the code-quality queries, so every security query that ran before still runs; only the quality queries leave the code-scanning tab (lint owns them).\n- **Paths.** The config's `paths-ignore` lists test paths only: test file names (`*.test.*`, `*.spec.*`), test directories (`__tests__`, `test`, `tests`, `e2e`), fixtures and mocks (`fixtures`, `__fixtures__`, `__mocks__`) and the never-published `ui/packages/test-support`. `scripts/**` stays scanned (the fleet scripts read untrusted text). No pattern names a `spec` directory, so `packages/spec` stays scanned.\n- **Dismissal rule.** Written in the config file's header, next to the paths it governs: an alert is fixed or dismissed with one of GitHub's three reasons plus a one-line comment saying why; an empty-comment dismissal is reopened; a path that is all test code goes into `paths-ignore` instead; a product-code security alert is the security seat's, never discussed in public.\n- **Fixture key-shaped strings.** Five test and doc files carried `sk_live_`-prefixed strings or a PEM block whose body looked real. Each now carries a `FAKE` marker (the PEM body reads `FAKE-KEY-BODY-NOT-A-REAL-KEY`). Strings that already said fake, example, demo or do-not-log, and the strings a redaction test plants on purpose to match real token shapes, are unchanged.\n- No changeset: nothing here ships in a package (workflow, CI config, test files, a docs page). `skip-changeset`.\n\n## Tests\n\n- Before the change, every key-shaped literal in the tree (81 lines: `sk_live_`/`sk_test_`/`rk_live_`/`pk_live_`, `AKIA…`, `ghp_`, `github_pat_`, `xox?-`, `sk-ant-`, PEM headers, `osk_test_`) went through GitHub's own secret scanner (`run_secret_scanning`): 0 secrets detected. So push protection would not have blocked on any of them; the edits remove the remaining look-alikes.\n- The touched test files, run under the verify lock (the runs were taken at `31e3d02b`; `f501d0fd` only restores a sixth file to `main`):\n\n<details><summary>Test runs</summary>\n\n```\npackages/spec  src/system/push-config.test.ts                      Test Files 1 passed (1)  Tests 38 passed (38)\npackages/objectql  src/external-driver-floor.test.ts               Test Files 1 passed (1)  Tests 78 passed (78)\nui  packages/plugin-detail/src/__tests__/DetailSection.masked{CopyRefusal-8440,TypeAuthority-8686}.test.tsx\n                                                                   Test Files 2 passed (2)  Tests 24 passed (24)\nos-verify-lock: VERDICT command-exit 0 (each run)\n```\n</details>\n\n- What the ignore list matches, read on `0e83fe03` + this branch (`git ls-files`, JS/TS/HTML/Vue extensions, the patterns translated to anchored regexes): 23,729 files, 15,586 ignored, 8,143 scanned. Every ignored file carries a test marker in its name or directory; 0 of 318 files under `scripts/` and 0 non-test files under `packages/spec/` are ignored.\n\n- Gates. Local subset: the 129 commands `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack --commands` derives for this diff, each under a 300 s timeout, started on `31e3d02b` and finished on `f501d0fd` (the two differ only by one test file restored to `main`). 122 exit 0. Not a verdict on this diff, all NOT MEASURED locally and read from CI: four PREREQUISITE NOT MET exits (a gate reading built output this checkout did not build, or a positive-control commit outside the shallow history), one `ui` scripts suite whose only red is its import-every-module test with the `ui` workspace unbuilt, two 300 s timeouts (`check:query-options-erasure`, `check:type-check-debt`), and `check:pm-dispatch-gates` skipped as longer than the foreground limit. Every family CI runs is read from this PR's check-runs: at `f501d0fd`, 60 success, 10 expected skip, 0 unexpected skip, 0 failed, 0 pending (`node scripts/pm/pr-state.mjs --pr 36762`), mergeable_state clean.\n\n## Acceptance notes\n\n- The new config was NOT MEASURED by a CodeQL run: the workflow runs on its daily schedule and on `workflow_dispatch` only, never on a pull request, and no CodeQL CLI is installed here. First reading: the next run on `main` after merge, or a `workflow_dispatch` of `CodeQL Security Analysis` on `main`.\n- The card's done-when reads the open count before and after, by rule. Those counts are read on the code-scanning tab after that first run, not here; this PR names no alert, rule instance or alert path.\n- A runtime test's `sk_live_secret` placeholder was edited on the first head and restored on `f501d0fd`: an edit to that test file asks the test-source alias gate for an unrelated module-top import (its own message, red on `31e3d02b`), and the string already reads as a placeholder.\n- Two key-shaped placeholders were left as they are, because changing them would touch a published package for a comment: an `@example` header value ending in `abc123...` in the spec package's identity protocol docblock, and a bare `sk_live_...` in a docs page. Neither is a full key shape.\n\n## Verification\n\nTwo minutes: after merge, run `CodeQL Security Analysis` from the Actions tab on `main`. Expected: the `Initialize CodeQL` step logs that it loaded `./.github/codeql/codeql-config.yml` with the `security-extended` suite, and the code-scanning tab's open count falls by the quality-rule and test-path alerts while the product-code security alerts stay open.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01JQwxbY2cjip3kVYQMRdXmo)_\n\n<!-- signed: repo:objectstack#1 · os-warren · session_01JQwxbY2cjip3kVYQMRdXmo -->\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 36742,
+  "kind": "issue",
+  "title": "Studio 新建流程后页头显示「未发布草稿」：创建后要重读引擎状态，提示说明流程已停用",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-23T15:29:01Z",
+  "updated_at": "2026-11-23T16:52:34Z",
+  "closed_at": "2026-11-23T16:48:48Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36742",
+  "body": "repo:objectstack#1 · os-warren · session_01JQwxbZeHNsF3RWcWpj7rGj\n\n① product defect · Source: maintainer (Warren), 2026-11-23, UI review thread.\n- 14:23Z 「还有哪些元数据可能会有问题？同时全面的测试 studio的各项功能」\n- 15:09Z 「用fable 评审一下 studio的问题，提出修改方案」\n- 15:23Z, decision card 「Studio 评审的 9 张卡，按 fable 方案立卡吗？」 → **「9 张全立」**\n\nEvidence:\n- Fable code review on main 9e0c0c23: project file `ui-review-2026-11-23/fable-studio-review.md`.\n- Browser screenshots: `ui-review-2026-11-23/round2/`.\n- Round-2 report: https://claude.ai/artifact/X5ukNAgphAq5vDpDAT6SAD\n\nPaths are relative to `ui/packages/app-shell/src/views/` unless they start with `ui/` or `packages/`. `SDS` = `studio-design/StudioDesignSurface.tsx`. `zh` = `ui/packages/i18n/src/namespaces/studio/zh.ts`. Line numbers are on 9e0c0c23.\n\n## What (review r05, confirmed)\nAfter an author creates a flow in Studio, the header reads 「未发布草稿」, although the new flow is published. The create path never re-reads the engine status. `doCreateFlow` (`SDS:8808–8882`) does not bump `statusNonce` (compare `SDS:9054`), so the header reads \"no engine row\" as an unpublished draft. The create toast reuses `engine.studio.save.done`. It does not say that the new flow is switched off until enabled.\n\n## Expected\n- Bump `statusNonce` after the create's publish, so the header says 「已停用」 right after creation.\n- Give the create its own toast, for example 「已创建：{name}（已停用，启用后才会运行）」, in `zh` and every locale table.\n- Also fix two texts the review found wrong whatever the save model is:\n  - the Data empty state at `zh:2354`;\n  - the comment at `SDS:1747–1749`.\n\n## Acceptance\n- A test pins that the header reads the engine status after create, so a new flow shows 「已停用」 and not 「未发布草稿」.\n- A test pins the create toast key and its text.\n- A browser screenshot shows the header and toast after creating a flow in Studio.\n\nGrading: `area:ux` · Bug · Cosmetic · builders, often ⇒ p2 (UX rule). Effort S. Evidence: read (review r05) + measured (`round2/` r05).\n\nDedupe: no open card names `statusNonce` or the new-flow header."
+}

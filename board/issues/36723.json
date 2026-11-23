@@ -2,26 +2,35 @@
   "number": 36723,
   "kind": "pull_request",
   "title": "docs(spec,objectql): SharedRecordIds and fixed-read leaf seam docblocks describe the share arm after the switch",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
     "type": "Bot"
   },
-  "labels": [],
+  "labels": [
+    "documentation",
+    "protocol:data",
+    "size/s",
+    "tooling"
+  ],
   "assignees": [
     "os-alice"
   ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-23T14:19:09Z",
-  "updated_at": "2026-11-23T14:19:12Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
-  "comments": 0,
+  "updated_at": "2026-11-23T15:28:49Z",
+  "closed_at": "2026-11-23T15:28:47Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-23T15:28:47Z",
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/36723",
   "body": "Fixes #36121\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n- 用户能看到什么变化：用户无感；只改了两处源码注释，让它们和第 6 步切换后的实际行为一致。\n- 为什么做：属于「共享授权不再有 5000 条上限」那个系列的收尾，旧注释仍说名单最多 5000 条、仍说还没有生产者。\n- 出错会怎样：只是注释，不改任何代码或行为；写错了也只是误导读注释的人，随时可撤回。\n- 要你做的：无。\n\n## What changes\n\nComment-only, in two files. Each sentence below was false on `origin/main` (3aa008d436) after the ADR-0155 step-6 switch (plugin-sharing's `buildReadFilter` / `buildWriteFilter` now push `SharedRecordIds.read` / `.write` at `sharing-service.ts:828` and `:948`; `share-arm-boot.ts` holds the class-2 boot check; `shareGrantsInertReason` calls `driverEvaluatesFixedReadLeaf` at `sharing-service.ts:1763`).\n\n`packages/spec/src/data/shared-record-ids.ts`\n\n| line | before | after |\n|---|---|---|\n| 9 | It sits where today's list of granted ids sits | It sits where the share arm's list of granted ids sat before the producer's switch (ADR-0155 plan step 6) |\n| 21-23 | The list the share arm binds today holds at most 5,000 members of G; the leaf is G at every count. | The list the share arm bound before the switch is retired; the share arm now carries this leaf, which is G at every count. |\n| 72 | where today's `recipient_id` comes from | where the retired list's `recipient_id` came from |\n| 102-104 | No caller of the comparand-shape door admits it until the engine's card (ADR-0155 plan step 2), and nothing writes it until that producer's switch (plan step 6). | The engine's callers of the comparand-shape door admit it (ADR-0155 plan step 2), and that producer writes it from its switch on (plan step 6). |\n\n`packages/objectql/src/fixed-read-leaf-seam.ts`\n\n| line | before | after |\n|---|---|---|\n| 57-59 | the class-② boot check and R2's share-arm answer land with the producer (ADR-0155 plan step 6), and until then nothing on main writes the leaf. | the class-② boot check and R2's share-arm answer live with the producer, plugin-sharing (ADR-0155 plan step 6), which is the one writer of the leaf. |\n| 85-86 | the seam's consult now, and the producer's up-front answer (R2) when it lands (ADR-0155 plan step 6) | the seam's consult, and the producer's up-front answer (R2, ADR-0155 plan step 6) |\n| 121 | which today's read of the table runs and the subquery would read around | which the retired list's read of the table ran and the subquery would read around |\n\nKept, because still true at main: seam line 5, \"`SharedRecordIds` today, ADR-0147's leaf on the card that adds it\" (`FIXED_READ_LEAF_NAMES` is still `['SharedRecordIds']`), and \"with no cap and no ordering\" (ADR-0155 ① ruled A, restated unchanged). The corrected prose describes the 5,000 cap only as retired, never as live.\n\nThe card's `git grep -n \"5,000\\|5000\" -- packages/spec/src/data packages/objectql/src` hits one grant-list line (shared-record-ids.ts:22, fixed here). The other hits are unrelated: autonumber seed page size (`engine-top-level.ts`, `engine-defaults-and-autonumbers.ts`), `MIN_MAX_EXCLUDED_ID_BUDGET`, timeouts and test fixtures. Left alone.\n\nTwo patch changesets, one per touched published package (`@objectstack/spec`, `@objectstack/objectql`), because the docblocks ship in the published bytes.\n\n## Tests\n\nNo behaviour changes, so there is no new test and no ablation.\n\n## Acceptance notes\n\n- `packages/plugins/plugin-sharing/src/share-arm-boot.ts:10` still says \"today's grant read\" about the retired list read. It is outside this card's file surface (not under the card's grep roots), so it is left for a later pass.\n\n## Verification\n\nTwo-minute check: `git diff origin/main -- packages/spec/src/data/shared-record-ids.ts packages/objectql/src/fixed-read-leaf-seam.ts` shows only lines inside block comments, and `grep -n \"today\\|until\" packages/spec/src/data/shared-record-ids.ts` no longer finds the list or the producer described as live.\n\nFiles to read first: `packages/spec/src/data/shared-record-ids.ts` (the 5,000 sentence, lines 21-23).\n\n<details><summary>Local gates at d42859d056</summary>\n\n- Build: `pnpm --filter '@objectstack/objectql^...' --filter @objectstack/objectql build` under os-verify-lock: VERDICT command-exit 0.\n- `pnpm --filter @objectstack/spec typecheck` and `pnpm --filter @objectstack/objectql typecheck`: both passed (the lock command's later vitest leg named a wrong path; rerun below).\n- `vitest run src/data/shared-record-ids.test.ts` (spec): Test Files 1 passed, Tests 32 passed. `vitest run src/engine-fixed-read-leaf-seam.test.ts` (objectql): Test Files 1 passed, Tests 70 passed.\n- `dispatch-gates --commands`: 81 families derived; 79 exit 0, 2 exit 3 (NOT MEASURED): `check-plugin-teardown-shape.mjs --self-test` (shallow clone cannot reach its pinned control commit) and `check:dual-build-cjs-loads` (needs a full workspace build). Both run in CI.\n- `--ran` reconciliation: 81 derived, 79 run, 2 NOT-MEASURED, 0 UNRUN.\n- Spec dist gates rerun after the build: check:api-surface, check:exported-any, check:docs, check:authorable-surface all exit 0. `check-nul-bytes`: exit 0.\n- `test:repo` not run locally (no repo-project test touched); CI Test Core covers it.\n\n</details>\n\n---\n\n_Generated by [Claude Code](https://claude.ai/code/session_011y7As6FyXmJyGyHNKXUkV7)_\n"

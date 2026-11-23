@@ -1,0 +1,35 @@
+{
+  "number": 36746,
+  "kind": "issue",
+  "title": "Studio 作者面板上的开发者用语和机器名：关联字段提示、校验提示标题、通知节点说明、设置键名（一张合并卡）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-23T15:30:47Z",
+  "updated_at": "2026-11-23T16:50:18Z",
+  "closed_at": "2026-11-23T16:48:48Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36746",
+  "body": "repo:objectstack#1 · os-warren · session_01JQwxbZeHNsF3RWcWpj7rGj\n\n① product defect · Source: maintainer (Warren), 2026-11-23, UI review thread.\n- 14:23Z 「还有哪些元数据可能会有问题？同时全面的测试 studio的各项功能」\n- 15:09Z 「用fable 评审一下 studio的问题，提出修改方案」\n- 15:23Z, decision card 「Studio 评审的 9 张卡，按 fable 方案立卡吗？」 → **「9 张全立」**\n\nEvidence:\n- Fable code review on main 9e0c0c23: project file `ui-review-2026-11-23/fable-studio-review.md`.\n- Browser screenshots: `ui-review-2026-11-23/round2/`.\n- Round-2 report: https://claude.ai/artifact/X5ukNAgphAq5vDpDAT6SAD\n\nPaths are relative to `ui/packages/app-shell/src/views/` unless they start with `ui/` or `packages/`. `SDS` = `studio-design/StudioDesignSurface.tsx`. `zh` = `ui/packages/i18n/src/namespaces/studio/zh.ts`. Line numbers are on 9e0c0c23.\n\nOne family card: developer wording and machine names on Studio author panels. The zh `label` wording card filed beside this one is also copy, and the two may share one PR.\n\n## What and expected, by location\n\n**r08: Lookup 「关联对象」 placeholder and hints.**\n- `metadata-admin/inspectors/ObjectFieldInspector.tsx:1774`: the placeholder is `object_name` (`zh:361`), in monospace with no chevron, so it looks like a text box. The list does open on focus (`ObjectPicker.tsx:514–519`). Change it to a human placeholder, 「选择对象…」, and add a chevron.\n- `ObjectFieldInspector.tsx:2933` passes `reference`, the API name, into 「所有 {ref} 记录均可选」, and falls back to the hard-coded English `'related'`. Resolve `{ref}` to the object's label from the catalog the picker already reads.\n- Before a target is set, the related-list help falls back to 「父对象」 (`ObjectFieldInspector.tsx:3213`, `zh:396`), which gives 「在 父对象 记录页上」. Do not render the two hints until a target is set; `designer.field.lookup.setTargetFirst` exists at `zh:367`.\n\n**r09: the lint toast head.**\n- `ui/packages/app-shell/src/providers/saveAdvisoryToast.ts:107–111` prefixes every finding with `[rule] where`. `where` is the developer locator in English (`packages/lint/src/validate-security-posture.ts:1614`), even when the producer sent a sentence written for the author.\n- When `userMessage` is present, show the sentence alone. Keep `[rule] where` only on the developer face.\n- Out of scope: naming objects and permission sets by label inside the sentence. That needs producer-side label lookup, a new capability (review F3), which waits on the maintainer's pick. See also #32654.\n\n**r10: the Notify node inspector.**\n- The zh overlay at `metadata-admin/i18n.ts:576–590` carries developer text: 「通知标题(别名:subject)」, 「通知正文(别名:body)」, 「事件主题(默认 \"notify\")」, 「引发该事件的用户 id」, 「通知所关联记录的对象名」, 「info | warning | critical」.\n- The English base still says \"Event topic (default: \"notify\")\" (`metadata-admin/inspectors/flow-node-config.ts:1284`).\n- Rewrite the rows in the author's words, in the English base and every locale overlay. Topic, Triggering user and Payload may go behind the existing 「Advanced」 fold, in this card.\n\n**r11: setting keys on the object 「设置」 panel.** This was ruled by the maintainer at 15:23Z: the key stays off the panel at rest and shows on hover.\n- `SettingKey` draws the metadata key as a chip beside every title (`studio-design/ObjectSettingsPanel.tsx:152–169, 171–183`, nine uses).\n- Move the key into the title's hover text, after the pickers' `nameOnHover` precedent (`ObjectPicker.tsx:281–286`).\n- This supersedes the \"key as a small chip beside the title\" choice from #36512 (closed). Update that file's comment to cite this card.\n\n## Acceptance\n- One test per location pins the new text or behaviour:\n  - the Lookup placeholder and label-resolved hint, with no hint before a target is set;\n  - the toast without `[rule] where` when `userMessage` is present;\n  - the Notify rows in en and zh;\n  - the setting key in hover text and not on the panel.\n- Browser screenshots of each panel in zh.\n\nGrading: `area:ux` · Bug · Cosmetic · builders and administrators, often ⇒ p2. Effort M. Evidence: read (review r08–r11) + measured (`round2/` r08–r11).\n\nDedupe: no open card names `SettingKey`, `saveAdvisoryToast`'s head, or the Notify inspector's zh rows. #32654 is the producer-side tracking card for user-facing text, and this card does not touch producers."
+}

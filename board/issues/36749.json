@@ -1,0 +1,35 @@
+{
+  "number": 36749,
+  "kind": "issue",
+  "title": "Studio 中文界面里 label 统一叫「显示名」（新建字段提示说「标签」，输入框说「显示名」）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-23T15:33:49Z",
+  "updated_at": "2026-11-23T16:51:16Z",
+  "closed_at": "2026-11-23T16:48:50Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36749",
+  "body": "repo:objectstack#1 · os-warren · session_01JQwxbZeHNsF3RWcWpj7rGj\n\n① product defect · Source: maintainer (Warren), 2026-11-23, UI review thread.\n- 14:23Z 「还有哪些元数据可能会有问题？同时全面的测试 studio的各项功能」\n- 15:09Z 「用fable 评审一下 studio的问题，提出修改方案」\n- 15:23Z, decision card 「Studio 评审的 9 张卡，按 fable 方案立卡吗？」 → **「9 张全立」**\n\nEvidence:\n- Fable code review on main 9e0c0c23: project file `ui-review-2026-11-23/fable-studio-review.md`.\n- Browser screenshots: `ui-review-2026-11-23/round2/`.\n- Round-2 report: https://claude.ai/artifact/X5ukNAgphAq5vDpDAT6SAD\n\nPaths are relative to `ui/packages/app-shell/src/views/` unless they start with `ui/` or `packages/`. `SDS` = `studio-design/StudioDesignSurface.tsx`. `zh` = `ui/packages/i18n/src/namespaces/studio/zh.ts`. Line numbers are on 9e0c0c23.\n\n## What (review: add-field hint)\n- The add-field input is labelled 「显示名」 (`designer.field.label`, `studio-design/AddFieldPopover.tsx:184`, `zh:305`).\n- Its hints say 「标签」: `engine.studio.data.addFieldNeedsLabel` = 「请先填写标签。」 and `addFieldApiNameNotDerived` = 「标签里没有…」 (`AddFieldPopover.tsx:159`, `zh:2364–2365`).\n- zh uses three words for `label`: 「显示名」 in 29 strings, 「显示名称」 in 8, and 「标签」 in at least these author-facing rows: `zh:69, 70, 609, 2269, 2408, 3301, 3342, 3566, 3630`. The rows at `zh:762–908` are block item labels and may be right as they are; check each one.\n\n## Expected\nOne word, 「显示名」, for `label` across the rows above. Copy only.\n\n## Acceptance\n- A test, or the i18n gate, pins that the add-field hints say 「显示名」.\n- The PR lists every row changed and every row deliberately left as is.\n\nGrading: `area:ux` · Bug · Cosmetic · builders, often ⇒ p2. Effort S. This card and #36746 (developer wording) are both copy and may share one PR. Evidence: read (review).\n\nDedupe: no open card on the zh word for `label`."
+}

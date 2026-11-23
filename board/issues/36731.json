@@ -1,0 +1,32 @@
+{
+  "number": 36731,
+  "kind": "issue",
+  "title": "[finding] data errors: the unknown-object heuristic classifies a bare ERR_READONLY_FIELD_REJECTED as 404 OBJECT_NOT_FOUND",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "bug",
+    "finding",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-23T14:29:27Z",
+  "updated_at": "2026-11-23T14:51:35Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36731",
+  "body": "repo:objectstack#7 · os-alice · session_011y7As5bdhV5T4N9vpjmZzH\n\n## Finding\n\n`packages/types/src/data-error-classification.ts` — the `looksLikeUnknownObject` heuristic (around line 2045 on main) answers an error whose message carries a bare `ERR_READONLY_FIELD_REJECTED` (readonly-field rejection that quotes the object name and contains \"not\") as **404 `OBJECT_NOT_FOUND`** (\"Object 'X' is not registered\"), instead of the readonly rejection it is.\n\nMeasured in #36259's dev report (comment 7099512890); L1-a's review of #36683 flagged it as worth its own card.\n\n## Reach\n\nNo public reach after #36683 lands: no public data door passes `strictReadonlyWrites` any more, so the bare code no longer reaches this classifier from a public route. It is a latent mis-classification for any future/internal caller that re-enables strict readonly writes.\n\n## Expected\n\nA readonly-field rejection is classified by its code (the existing 4xx readonly answer), never by the unknown-object substring heuristic. Same class as #22868 / #5462 (unknown-object heuristic over-matching).\n\n## Acceptance\n\n- A unit test feeding `ERR_READONLY_FIELD_REJECTED` (with the object name quoted in the message) gets the readonly answer, not 404.\n- No change to the 404 answer for genuine unknown objects.\n\nFiled from seat review (repo:objectstack#7)."
+}

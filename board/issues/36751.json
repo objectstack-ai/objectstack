@@ -1,0 +1,34 @@
+{
+  "number": 36751,
+  "kind": "issue",
+  "title": "Repository security policy: add SECURITY.md so the Security tab tells reporters to use private vulnerability reporting, which versions get fixes, and how fast",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:fleet",
+    "domain:docs",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-23T15:39:25Z",
+  "updated_at": "2026-11-23T17:29:10Z",
+  "closed_at": "2026-11-23T17:07:24Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36751",
+  "body": "director#1 · hotlong · session_f4c42f815d5e47b39de5e9fb0d6d7864\n\nFiling gate: ③ a task the maintainer dispatched · Source: maintainer — in the director session on 2026-11-23, after an evaluation of https://github.com/objectstack-ai/objectstack/security, the maintainer answered 「File the cards」 and then 「Go ahead」 on the plan that named this card.\n\nReader: the `domain:docs` seat (a root-level repository document). The policy choices marked below go to the maintainer in the PR, not to the seat.\n\nDedupe: `repo:objectstack-ai/objectstack is:issue \"SECURITY.md\" in:title` → 6, all closed and all about `skills/objectstack-data/rules/security.md`, a different file. `\"security policy\" in:title` → 9, all about record-level policies in `plugin-security`. None asks for a repository security policy. Neither this repository nor the organization's `.github` repository has a `SECURITY.md` (read 2026-11-23: `contents/SECURITY.md`, `.github/SECURITY.md` and `docs/SECURITY.md` all 404, and so is the org default).\n\nGrade: p2 · area:devpath · Task · the repository is public and ships npm packages: a researcher who finds a hole meets \"No security policy detected\" and may file it as a public issue.\n\n## 维护者速读\n\n- 要做的：在仓库根目录加 `SECURITY.md`。安全页的「Policy」一栏从「未检测到安全政策」变成一份说明。\n- 为什么：仓库公开、发 npm 包。外部研究者找到漏洞时不知道该私下报，可能直接提公开 issue，等于把漏洞公开。私密漏洞报告已经开了，但页面上没有任何地方指过去。\n- 需要你定：支持哪些版本修安全问题，多久回复、多久修复。下面是建议值，在 PR 里拍板。\n- 风险：只是一份文档，不改代码。\n\n## What the policy says\n\n1. **How to report:** through GitHub private vulnerability reporting (`/security/advisories/new`, already enabled on this repository), never a public issue, discussion or PR. Say what to include: affected package and version, steps, impact.\n2. **Supported versions (maintainer's call):** proposed \"the latest major line (`18.x` today) gets security fixes; older majors do not\". Say how the line is named so the file does not go stale at the next major.\n3. **Response targets (maintainer's call):** proposed acknowledgement within 3 business days, triage verdict within 10, and a fix target by severity.\n4. **Disclosure:** fixes ship in a normal release; the advisory is published with patched versions after the release, and a CVE is requested for high and critical ones.\n5. **Scope:** the packages in this repository; the hosted service has its own channel, if any. Link to it rather than inventing one.\n\n## Done when\n\n`SECURITY.md` is on `main`, and the repository's Security → Policy tab renders it."
+}

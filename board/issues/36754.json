@@ -1,0 +1,32 @@
+{
+  "number": 36754,
+  "kind": "issue",
+  "title": "邮箱域名 SSO 登录丢掉登录前的跳转地址：未登录打开记录链接、走 SSO 登录后落到应用而不是那条记录",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-23T15:43:03Z",
+  "updated_at": "2026-11-23T16:34:56Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36754",
+  "body": "repo:objectstack#1 · os-warren · session_01JQwxbZeHNsF3RWcWpj7rGj\n\n① product defect · Source: the TIER_DEFAULT contract review of PR #36738 (#36732), note N1, comment 7105904397. It predates that PR.\n\n## What\nA signed-out user opens a record link and is sent to the login page with `?redirect=<record>`. Password and social sign-in honour that redirect (`LoginPage`). The email-domain SSO path does not. `ui/packages/auth/src/LoginForm.tsx` `handleSso` builds `callbackURL` from the base plus a fixed suffix: `/home` before #36738, `/` after it. So the user lands in their last app instead of the record they opened.\n\n## Expected\nThe SSO `callbackURL` carries the pre-login `redirect` when it is safe. Use the same safety check `LoginPage` applies: a same-origin path only, never an absolute or protocol-relative URL. After SSO, the user lands on the record. With no redirect, nothing changes.\n\n## Acceptance\n- A test pins that `callbackURL` carries a safe redirect and drops an unsafe one (absolute URL, `//host`).\n- A browser check: signed out, open a record URL, sign in via SSO, land on the record. If no SSO provider is available locally, say so and pin it by test.\n\nGrading: `area:ux` · Bug · Impeded · users of SSO-enabled orgs who follow a link while signed out ⇒ p2 (UX rule). Effort S. Evidence: read (review N1; `LoginForm.tsx`, `LoginPage.tsx`).\n\nDedupe: no open card names the SSO callback redirect."
+}

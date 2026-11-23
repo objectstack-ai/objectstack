@@ -1,0 +1,33 @@
+{
+  "number": 36765,
+  "kind": "pull_request",
+  "title": "docs(pm): name the 3-hourly topic-board rebuild as a triage duty",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "pm:awaiting-merge",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-23T17:02:56Z",
+  "updated_at": "2026-11-23T17:26:37Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36765",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-warren\"} -->\n_Requested by **Warren** · [project thread](https://claude.ai/code/project/chan_01U5RdnAAmkSQmZbqh6FtqZ8?thread=cmsg_01U5RdnAAmkSQmZbqh6FtqZ8JpuMUc83TvQP7B2uT2pUz5)_\n\nFixes #36740 — card item 4, the skill pointer. Items 1–3 (the script, the page template, the runbook) landed in #36757.\n\nClause-②: no\nMetadata-protocol: none\nRule-change: yes\nRuling-ref: ruling record 7107018094 on #36740 — the maintainer, in the triage session, 2026-11-23: 「看板代码要放进仓库，立卡派发」; and on the seat's decision card, 2026-11-23 15:34Z: 「接，按普通顺序派」. Neither quote names this skill line; the link between the quotes and the card's item 4 (this line) is the seat's reading of card #36740, so the line itself waits for the maintainer's approval of this PR.\n\n## 维护者速读\n\n- 用户无感：分诊座位的职责说明里加一行，写明每 3 小时照手册刷新专题看板。\n- 属于车队工具：上一步已把看板脚本放进仓库，这一行让以后任何分诊座位都知道这是它的固定任务。\n- 只改一行说明文字，不碰产品；写错了直接撤回这一行即可。\n- 这是技能文本，需要 os-zhuang 批准后才能合并。\n\n## What changes\n\n- `.claude/skills/pm-dispatch/references/lanes/triage.md`: one new line naming the board duty — every 3 h, on the UTC hours 0, 3, …, 21, rebuild both repos' data and refresh the board following `scripts/pm/topic-board/README.md`. Placed with the other per-round duties, after the dropped-seat line.\n- `scripts/pm/check-skill-line-ratchet.mjs`: the `lanes/triage.md` ceiling rises 2526 → 2637, **+111 bytes**, the measured size of that one line. The file sat exactly at its ceiling, so the line cannot be paid by headroom. The raise cites ruling record **7107018094** (comment on #36740), in the PR body here and in the row's comment, as the ratchet discipline requires.\n\n## Why\n\nThe card's item 4: the runbook landed in #36757, and the triage lane file is what a new triage seat reads first, so the duty has to be named there or a seat on another account would not know the board exists.\n\n## Verification\n\nRead first: the one added line in `lanes/triage.md`, then the CEILINGS row for it.\n\nTwo-minute check: `pnpm check:pm-skill-ratchet` → the `lanes/triage.md` line reads 2637 bytes, ceiling 2637.\n\n<details><summary>Local gates at 4e64d5c4 (dispatch-gates --commands: 40 families)</summary>\n\n`node scripts/pm/dispatch-gates.mjs --ran` → 40 accounted: 39 run, all exit 0 — including `pnpm check:pm-skill-ratchet`, `pnpm check:pm-skill-id-lint`, `pnpm check:skill-frame-sync`, `pnpm check:pm-governed-merges`, `pnpm check:pm-record-recognisers` and `pnpm check:pm-dispatch-gates` (fast tier 431 s, exit 0). 1 NOT MEASURED, exit 3 PREREQUISITE NOT MET: `check:doc-formula-expressions` (needs a built `@objectstack/formula`; this diff touches no package). CI builds and runs it.\n\n</details>\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01JQwxba6Siz8egCv4AAnqtU\n\n<!-- signed: repo:objectstack#1 · os-warren · session_01JQwxba6Siz8egCv4AAnqtU -->\n"
+}
