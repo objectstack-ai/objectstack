@@ -433,7 +433,10 @@ export default function DesignModeMenu({ app, basePath, resolveTargetLabel, reso
   const [buildingReport, setBuildingReport] = React.useState(false);
   const saveNewReport = async (name: string, label: string, body: Record<string, unknown>): Promise<boolean> => {
     if (!addAt) return false;
-    const entry = entryFor('report', name, newEntryId([...menu, ...(storedMenu ?? [])]));
+    // A report entry with no label shows its machine name (only an object,
+    // view or dashboard entry inherits its target's label), so the entry
+    // carries the name the reader gave the report.
+    const entry = { ...entryFor('report', name, newEntryId([...menu, ...(storedMenu ?? [])])), label };
     const itemTexts = {
       ...texts,
       itemPendingDraft: t('designMode.menu.newItemPendingDraft', {

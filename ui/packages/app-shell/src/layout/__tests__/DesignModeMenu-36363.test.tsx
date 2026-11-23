@@ -859,7 +859,9 @@ describe('a new report from 「Add menu item」 (objectstack#36364, report half)
     expect(written[0][4]).toEqual({ mode: 'draft', ifNoneMatch: '*', packageId: 'com.acme.crm' });
     const navigation = (written[2][3] as { navigation: Array<{ id: string; children?: unknown[] }> }).navigation;
     expect(navigation[1].children!.map((c) => (c as { id: string }).id)).toEqual(['accounts', 'leads']);
-    expect(navigation[2].children).toEqual([{ id: 'nav_item_1', type: 'report', reportName: 'payment_analysis' }]);
+    expect(navigation[2].children).toEqual([
+      { id: 'nav_item_1', type: 'report', reportName: 'payment_analysis', label: 'Payment analysis' },
+    ]);
     expect(screen.queryByTestId('design-mode-bar')).toBeNull();
     expect(newReportSlotFor('/apps/crm/reports/new')).toBeNull();
   });
