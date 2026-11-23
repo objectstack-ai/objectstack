@@ -1,0 +1,36 @@
+{
+  "number": 36668,
+  "kind": "pull_request",
+  "title": "test(cli): drive os migrate list-preferences in the --json stdout-purity family",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/xs",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [
+    "os-alice"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-23T10:45:41Z",
+  "updated_at": "2026-11-23T11:38:10Z",
+  "closed_at": "2026-11-23T11:38:07Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-23T11:38:07Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36668",
+  "body": "Fixes #36639\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户无感：只改了 CLI 的夜间测试清单，命令本身的行为没有变化。\n- 为什么做：夜间测试「命令输出 JSON 时标准输出必须是纯 JSON」变红了，因为新加的偏好清理迁移命令没被列进受测名单。\n- 出错会怎样：最坏是夜间测试继续报红，不影响任何发布内容；可直接撤回本次合并。\n- 无。\n\n## What changes\n\n`packages/cli/test/json-stdout-purity.e2e.test.ts` discovers its family from the source tree (every command that boots `bootSchemaStack`, directly or through a booting `src/utils` module, and declares a `json: Flags.boolean(` flag) and reconciles it against its `FAMILY` map. `os migrate list-preferences` (`packages/cli/src/commands/migrate/list-preferences.ts`) boots `bootSchemaStack` with `jsonOutput: json` and declares `--json`, so it joined the discovered set without being listed, and the reconciliation went red on the nightly tier (the only tier that collects this file).\n\nThe fix lists the member and DRIVES it — the discovery and the test are untouched (the card's ruling: never rename, skip or delete the failing test). The bare form is driven: a read-only dry run (`deferSchemaDdl` + `readOnlyProbe`) whose empty report is emitted compact before the `finally` shutdown, so the shutdown's diagnostics follow the document and must stay off stdout. The command itself already keeps stdout pure: all three per-member assertions pass on the new member, so no `src/` change is owed.\n\nMechanism hypothesis from the dispatch: confirmed. Measured on `origin/main` 3cf6a44be by replaying the test's own discovery: discovered minus listed = exactly `migrate list-preferences`; listed minus discovered = nothing. (The nightly log at 9e2a4acb read 36 vs 35; at 3cf6a44be the two sets are 38 vs 37 — another member was listed in between; the one-name difference is the same.)\n\n## Tests\n\n<details><summary>nightly tier, the failing file — 116/116 on ece0fbce</summary>\n\n`OS_TEST_TIERS=nightly pnpm --filter @objectstack/cli exec vitest run --maxWorkers=2 test/json-stdout-purity.e2e.test.ts` (under `os-verify-lock.sh`):\n\n```\n Test Files  1 passed (1)\n      Tests  116 passed (116)\nos-verify-lock: VERDICT command-exit 0\n```\n\n116 = 2 family-reconciliation tests + 38 members x 3 (one JSON document on stdout by bare `JSON.parse`; no kernel-logger record on stdout; every boot diagnostic on stderr).\n</details>\n\n<details><summary>typecheck</summary>\n\n`pnpm --filter @objectstack/cli typecheck` (tsc --noEmit plus check:test-typecheck): VERDICT command-exit 0; check:test-typecheck OK, debt ledger held.\n</details>\n\n## Acceptance notes\n\n- No changeset: the diff is one test file; `@objectstack/cli` ships `dist`, `README.md`, `CHANGELOG.md` only, so nothing published moves (`skip-changeset`).\n- The `migrate stored-references` comment in `FAMILY` still says the discovery does not reach that command; on 3cf6a44be the discovery does reach it (the reconciliation is green with it listed). Stale comment only, left as is — out of this card's scope.\n- No ablation: no tested behaviour changed; the red side is the card's own nightly log, and the replayed discovery on the base shows the same one-name difference.\n\n## Verification\n\nRead first: `packages/cli/test/json-stdout-purity.e2e.test.ts`, the new `'migrate list-preferences': []` entry and its comment.\n\nTwo-minute check: `OS_TEST_TIERS=nightly pnpm --filter @objectstack/cli exec vitest run test/json-stdout-purity.e2e.test.ts` — expect `Tests 116 passed (116)`, including three `os migrate list-preferences --json` cases.\n\n<details><summary>local gates (derived by dispatch-gates --commands, reconciled by --ran: 50 derived, 50 run)</summary>\n\n49 of 50 exit 0. `node scripts/check-plugin-teardown-shape.mjs --self-test` exit 3: PREREQUISITE NOT MET on this shallow clone (its positive control is pinned to a commit the clone cannot reach) — NOT MEASURED locally, checker-health only; CI runs it. `pnpm check:dual-build-cjs-loads` exited 3 on the first pass in the sequential sweep (that output was overwritten before it was read) and exit 0 on an immediate standalone rerun (self-test 94 cases, 124 entry points load). Every family CI runs is read from this PR's check-runs.\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_011y7As5bdhV5T4N9vpjmZzH)_\n"
+}

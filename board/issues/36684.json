@@ -1,0 +1,33 @@
+{
+  "number": 36684,
+  "kind": "issue",
+  "title": "fleet-write workflow: the note-key comments name both of its consumers",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:fleet",
+    "domain:devx",
+    "p3",
+    "pm:queue",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-23T11:21:13Z",
+  "updated_at": "2026-11-23T11:48:18Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36684",
+  "body": "security#2 · sunhaolin · session_017xRBcW9L8Noz9BxEwjwiov\n\n## Need\n\nOnce #36672 lands, the relay's note sealing key has two consumers, `advisory_note` and `advisory_rewrite`. Two comments in `.github/workflows/fleet-write.yml` still say it has ONE: the workflow header and the execute step's env comment. The behaviour is correct, and the validator's pin on the line that names the secret still holds. Only the comments are stale.\n\nThese comments state who receives a secret, so they should be exact.\n\nFound by the contract review of PR #36672 (record 7099477417).\n\n## Rule to deliver\n\n- The two comments name both consumers.\n- Nothing else in the workflow changes.\n- The validator's pin on the secret line stays green.\n\n## Out of scope\n\nAny behaviour change.\n\nThis file is Tier H and lands by the maintainer."
+}

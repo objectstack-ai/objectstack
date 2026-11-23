@@ -1,0 +1,39 @@
+{
+  "number": 36666,
+  "kind": "pull_request",
+  "title": "fix(spec): a ctx.text key is literal at save only when its closing quote ends the argument",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "protocol:data",
+    "protocol:ui",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-alice"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-23T10:43:08Z",
+  "updated_at": "2026-11-23T12:06:55Z",
+  "closed_at": "2026-11-23T12:06:53Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-23T12:06:53Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36666",
+  "body": "Fixes #35698\nrepo:objectstack#7 · os-alice · session_011y7As8yeqbR9TKANdPKRxt\n\nClause-②: no\nMetadata-protocol: none\n\nClause-② citation, the published docblock of `hookTextKeysAskedIn` (`packages/spec/src/data/hook-refusal-codes.ts`) on `origin/main` 9348f02b: \"A key that arrives any other way (a variable, a computed value) is left to the run-time refusal.\" A key built from a literal (`'k' + suffix`, `'k'.concat(suffix)`) is a computed value, so its save refusal was a false refusal; this PR removes only that. Every literal ask refused before is still refused, in the same words (the lit pins below).\n\n## 维护者速读\n- 搭建者在钩子或动作代码里用拼接方式拼出文本键时,保存不再被误拒;直接写死的文本键照旧在保存时检查,用户无其它感知变化。\n- 属于钩子与动作「按组织语言写入记录的文本」这条线,替写拼接键的搭建者解决保存被误拒的问题。\n- 出错的话,拼接出的键若没有声明,会在运行时才报错并点名该键(本来就有的运行时拒绝);改动可以直接撤回。\n- 无\n\n## What changes\n- `TEXT_CALL`, the one reader both save doors use (`HookSchema` and `ActionSchema`, through `hookTextKeysAskedIn`), now ends with the lookahead `(?=\\s*[,)])` after the closing quote: a key is literal only when its closing quote ends the argument, `,` or `)` following after optional whitespace (a comment there is blanked to whitespace by the existing masking first).\n- Anything else after the quote (`+`, a member access) leaves the argument to the run-time refusal, which already names the key (`undeclaredHookTextAtRun` / `undeclaredActionTextAtRun`).\n- A template literal with a `${}` hole needed no change: measured on `origin/main`, the masking already blanks it (its contents are not a snake_case key), so it was never read as literal. Pinned anyway.\n- Docblocks of `TEXT_CALL`, `hookTextKeysAskedIn` and the hook-texts section header say what \"literal\" means now. No export, schema shape, `.describe()` or error sentence changed.\n- `patch` changeset for `@objectstack/spec`.\n\n## Tests\nNew top-level `describe` in each existing harness file (`packages/spec/src/data/hook-texts.test.ts`, `packages/spec/src/ui/action-texts.test.ts`):\n- **lit** (hooks 7 shapes, actions 6): a lone argument, a first argument, whitespace before the comma, a line break before the close, a comment before the close (hook), a backtick with no hole, the optional call. Each is still refused at `body.source` with the unchanged sentence.\n- **dark** (hooks 7 shapes plus an inline handler, actions 5): `'k' + suffix`, the same on the next line (hook), in the optional call, a backtick concatenation, `'k'.concat(suffix)`, a template hole (plus the optional call, hook). Each passes the save.\n- **CONTROL** (hook): a literal ask beside a computed one in the same body is still refused, exactly once.\n\n<details><summary>Before the fix (origin/main reader, new pins), after, and ablation</summary>\n\n- Before (pins on the unfixed reader): `Tests  10 failed | 68 passed (78)`, the 10 being every dark `+` / member-access case on both doors; the 4 template-hole dark cases and every lit case were already green.\n- After, at dc8f1abe: the two harness files plus `hook.test.ts` and `action-refusals.test.ts`: `Test Files  4 passed (4)`, `Tests  207 passed (207)`.\n- Ablation (committed fix, lookahead removed through `scripts/ablation-replace.mjs`; tests import `src` relatively, so no dist leg): `anchor 1 -> 0, blob c25b9072dccd -> 8bd13ccf2097` → `Tests  10 failed | 68 passed (78)`, direction red as predicted; restore `blob == HEAD (c25b9072dccd) and git diff HEAD is empty`.\n- `pnpm --filter @objectstack/spec test` at dc8f1abe: `Test Files  879 passed | 1 skipped (880)`, `Tests  28083 passed | 1 skipped | 1 todo (28085)`, lock `VERDICT command-exit 0`.\n- `pnpm --filter @objectstack/spec typecheck` at dc8f1abe: `VERDICT command-exit 0` (test layer: debt ledger held).\n</details>\n\n## Acceptance notes\n- Declared narrowing of the local gate set: another build-heavy dev run shared this container, so per dispatch no spec build was run. 18 derived families ran locally, all exit 0 (changeset gates, comment-mask adoption and corpus, issue citations, affected docs, drift comment, nul bytes, doc authoring, spec docblock symbol anchors, spec parsed alias, keyed text bounds, cross-package test inputs, test source alias, adr anchors, closed ceremony text, watch hint literal). The `dist`-reading spec families (`check:api-surface`, `check:docs`, `check:authorable-surface`, …) and the remaining 67 are CI's. No export, schema or `.describe()` changed, so none of them should move.\n- Sibling readers, same shape, not changed here: the refusal code and reason readers in the same file (`code: 'X'`, `e.code = 'X'`, `reason: 'x'`, `e.reason = 'x'`) also stop at the closing quote. Measured at the hook save door: a body throwing `{ code: 'OVER' + suffix }` with `refusals` declaring `OVER_LIMIT` is refused at `body.source` as code `'OVER'`, against the `hookRefusalCodesThrownIn` docblock (\"a computed value — is left to the run-time refusal\"). Their terminator set differs from a call argument's (`,` `}` for a property, `;` / line end for an assignment), so it is not this PR's mechanical shape; reported to the seat for one family card.\n\n## Verification\nRead first (by risk):\n1. `packages/spec/src/data/hook-refusal-codes.ts`: the `TEXT_CALL` hunk, the one behavioural line.\n2. `packages/spec/src/data/hook-texts.test.ts`: the new lit/dark describe.\n3. `packages/spec/src/ui/action-texts.test.ts`: the action twin.\n\nTwo-minute check: `pnpm --filter @objectstack/spec exec vitest run src/data/hook-texts.test.ts src/ui/action-texts.test.ts` shows every lit and dark case passing; delete `(?=\\s*[,)])` from `TEXT_CALL` and the same command shows 10 dark cases failing.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_011y7As8yeqbR9TKANdPKRxt)_\n"
+}

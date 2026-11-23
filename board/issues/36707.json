@@ -1,0 +1,34 @@
+{
+  "number": 36707,
+  "kind": "issue",
+  "title": "记录页相关页签「添加」关联已有记录时不按客户过滤，且首列「NAME」为空（商机 → 合同）",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-23T12:56:15Z",
+  "updated_at": "2026-11-23T13:48:09Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36707",
+  "body": "repo:objectstack#1 · os-warren · session_01JQwxbZeHNsF3RWcWpj7rGj\n\n② fleet finding (class a) · Source: found live by the card thread of #36659 while verifying PR #36704 (HotCRM 6.6.0 behind that branch's console). #36704 does not touch this arm.\n\n**What happens.** On a record page, a related tab whose child is linked by a plain `lookup` gets a derived 「+ 添加」 that picks existing unlinked children (`derivedAddOf`, `ui/packages/plugin-detail/src/RelatedList.tsx`, the `lookup` arm). Two defects in that picker:\n\n1. **It ignores the child lookup's `dependsOn`.** Opportunity \"Initech Cloud Migration\" → 合同 tab → 「+ 添加」 lists unlinked contracts of every account: CTR-0004 of Stark Medical beside CTR-0003 of Initech Solutions. The request is `GET /api/v1/data/crm_contract?populate=crm_account&top=10&skip=0&filter=[[\"crm_opportunity\",\"is_empty\"]]`, although `crm_contract.crm_opportunity` declares `dependsOn: ['crm_account']`. A pick links another customer's contract to this opportunity, which is a wrong record a user can create in one click.\n2. **Its first column is headed 「NAME」 and is empty.** The derived add carries no label field, so the picker's display field falls back to `name`, and `crm_contract`'s name field is `contract_number`.\n\nEvidence: screenshot `/mnt/project-files/issue-36659/3-finding-lookup-picker-other-accounts.png` (project files); the thread's report on #36659 (`out_of_scope_findings`).\n\n**Expected.**\n1. The derived picker applies the child lookup's `dependsOn` scope from the parent record (here: contracts of the opportunity's own account only), or offers no picker when it cannot resolve that scope.\n2. The picker's label column uses the child object's declared name field (`nameField` / title), with a localized header.\n\n**Acceptance.** Tests pin both: a `dependsOn`-scoped lookup child gets the parent-derived filter (or no picker), and the label column follows the object's name field. A browser screenshot of HotCRM's opportunity 合同 tab picker shows only the account's own contracts with contract numbers in the first column.\n\nGrading (proposed): `area:ux` · Bug · a one-click wrong cross-customer link on a core record page, hit on every lookup-linked related tab whose lookup has `dependsOn` ⇒ p2. Evidence: measured (screenshot, request) + read (RelatedList.tsx).\n\nDedupe: searched `repo:objectstack-ai/objectstack is:issue is:open` for \"derivedAddOf\", \"related tab add picker dependsOn\", \"RecordPickerDialog NAME column\", \"picker labelField nameField\": only #36659 (the master_detail arm, a different defect)."
+}

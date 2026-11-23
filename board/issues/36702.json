@@ -1,0 +1,33 @@
+{
+  "number": 36702,
+  "kind": "issue",
+  "title": "messaging: the QUIET_HOURS_OFF sentinel is spelled separately in the server resolver and the UI, with no pin tying the two",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:workflow",
+    "domain:server",
+    "finding",
+    "pm:queue",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-23T12:46:17Z",
+  "updated_at": "2026-11-23T12:46:56Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36702",
+  "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nFiling gate ① · Source: fleet · split off #36369 at ACCEPT 7101525096 on PR #36694, on seat 3's filing request (#32588 comment 7101547116). Origin: contract review 7076382062 on PR #36326. Parent topic #36240.\n\n## What happens\n\nThe \"quiet hours switched off\" sentinel is written out twice:\n\n- `packages/services/service-messaging/src/preference-resolver.ts` (server);\n- the UI's `myPreferences.ts` (console).\n\nNothing fails if one spelling drifts. If they ever differ, a member who switches quiet hours off in the console would be read by the server as having a quiet-hours value, or the reverse, and nothing would surface the mismatch.\n\n## Done when\n\n- The sentinel has one source, shared by both, or a pin test fails when the two spellings differ.\n- No behaviour change today.\n\nTriage: lands in `area:workflow` · `domain:server` · `priority:p3` · Task · `pm:queue`; rationale: a latent drift between two copies of one constant. It has no effect today, so p3, but it is kept rather than closed because a future drift would silently change who receives notifications during quiet hours."
+}

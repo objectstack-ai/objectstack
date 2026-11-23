@@ -1,0 +1,35 @@
+{
+  "number": 36656,
+  "kind": "pull_request",
+  "title": "fix(plugin-form): the print row-cap test loads the line grid's body before its first render (#36640)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-23T09:26:26Z",
+  "updated_at": "2026-11-23T10:12:44Z",
+  "closed_at": "2026-11-23T10:12:41Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-23T10:12:41Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36656",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-warren\"} -->\n_Requested by **Warren** · [project thread](https://claude.ai/code/project/chan_01U5RdnAAmkSQmZbqh6FtqZ8?thread=cmsg_01U5RdnAAmkSQmZbqh6FtqZ8PC4syDJ8bPonzN7bL9mdeU)_\n\nFixes #36640\n\nAlso the cause of #36649 (main's 4-hourly full run red at `e9fa6b5d06`); that card closes when the next full run is green.\n\n## What changes\n\n`ui/packages/plugin-form/src/__tests__/lineItemsPrintRowCap-11958.test.tsx` loads the line grid's body at module scope (`await preloadGridField()`), before any test renders. No assertion is changed, removed, relaxed or retried; no timeout is touched; the file is not moved into `heavyDomTests`. Test-only: no product code moves, so no changeset (needs `skip-changeset`).\n\n## Why\n\nRoot cause, read from both failure logs and confirmed with a probe:\n\n- Both reds fail at **line 100** (`expected +0 to be 2`), the single row count read right after `waitFor` sees the row-ceiling note: the merge-queue run on PR #36461 (reading 7092248222) and main's 4-hourly run 45135779472, job 137562669352 (`Test UI (3/16)`, `lineItemsPrintRowCap-11958.test.tsx:100:58`). Lines 112 and 118 never failed.\n- The note and the rows commit together (`setRowCap` and `setRows` are set in the same load callback in `LineItemsPanel.tsx`), but the grid's body is split out and loads on first use (objectstack#36102, `ui/packages/fields/src/widgets/GridField.ts`). `LineItemsPanel` starts that load at mount with `preloadGridField()` but does not wait for it, so a grid mounted before the load settles draws its loading face (`data-testid=\"grid-field-loading\"`, no table) while the note is already in the DOM.\n- Probe at line 100 on unmodified `main` (`3cf6a44b`): `loadingFace=true tbody=false`. The count of 0 is the loading face, not a missing or extra row.\n\nThis is the case `ui/AGENTS.md` § 测试纪律 names: an assertion that lands behind a dynamic `import()` loads that module at module scope, where the cost is outside every test window. Three sibling tests in this package already do exactly this (`ModalForm.untypedRepeater.test.tsx`, `masterDetailSectionMembers-8071.test.tsx`, `deriveMasterDetail.declaredSpelling.test.tsx`).\n\nProduct side, considered and not changed: in the browser the note can sit under the grid's loading face only until the chunk that `preloadGridField()` already requested arrives, and printing is a user-triggered `window.print()`, so no printed page carries the note without its rows. The row cap and the note are unchanged.\n\n## Verification\n\nAll counts on `objectstack-ai/objectstack`, the 6-test file run alone with `npx vitest run --maxWorkers=2 packages/plugin-form/src/__tests__/lineItemsPrintRowCap-11958.test.tsx` from `ui/`, 20 runs each, under load (one busy loop per core on a 4-core container, so the file runs against 4 CPU stressors):\n\n| Tree | Red runs | Failing test |\n|---|---|---|\n| before: `main` `3cf6a44b` | **20 / 20** | `draws the cap’s rows…`, line 100, `expected +0 to be 2` |\n| after: this branch `0c621d36` | **0 / 20** | none; every run `Tests 6 passed (6)` |\n\nRun cold, as each fresh vitest run is, the load always loses the race; in CI's full run it loses only when the chunk's transform is slow, which is why the queue and the 4-hourly run saw it intermittently.\n\nAlso on `0c621d36`: the whole `plugin-form` package under `--maxWorkers=2`, 245 files / 2766 tests passed, 1 skipped (pre-existing); `eslint` on the changed file clean.\n\nClause-②: no\nMetadata-protocol: none\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (not touched)\n- [x] 2. Every name I added uses the casing for its kind. (no names added)\n- [x] 3. No formatter ran; `pnpm lint` passes. (eslint on the changed file)\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset. (test-only, publishes nothing)\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (not touched)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

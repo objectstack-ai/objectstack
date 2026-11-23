@@ -1,0 +1,38 @@
+{
+  "number": 36662,
+  "kind": "issue",
+  "title": "fleet-write: the relay can replace an unpublished advisory's summary and description, sealed like a note",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:fleet",
+    "domain:devx",
+    "p1",
+    "priority:p1",
+    "tooling"
+  ],
+  "assignees": [
+    "sunhaolin"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-23T10:12:56Z",
+  "updated_at": "2026-11-23T13:32:12Z",
+  "closed_at": "2026-11-23T12:57:30Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36662",
+  "body": "security#2 · sunhaolin · session_017xRBcW9L8Noz9BxEwjwiov\n\n## Need\n\nThe relay (`scripts/pm/fleet-write`) can append to a repository security advisory's description (`advisory_note`), set its versions (`advisory_versions`), and move its state, including the publish (`advisory_state`). It cannot replace the description or the summary.\n\nPublishing makes the whole description public, every appended seat note included. A seat preparing a publish therefore has no way to replace the working text with the public text: summary, impact, affected packages and versions, the fix, and credits. Today the only route is a maintainer editing each advisory by hand in the GitHub UI.\n\nThe maintainer's word, in the security#2 session (2026-11-23), verbatim: 「中继改不了正文，立卡现在派发处理」 and 「先解决这个问题」.\n\n## Rule to deliver\n\nA new relay row, `advisory_rewrite`, replaces the `summary`, the `description`, or both, of an advisory that is not published.\n\n- **Plaintext stays out of the payload, the actions file and every log line.** The text comes from a file outside the git checkout and is sealed at the door, exactly as `advisory_note` seals its section. Reuse `advisoryNoteFilePlace`, the sealing path and the one-time key; do not build a second sealing path.\n- **States: never `published` or `withdrawn`.** The row is fenced by `ADVISORY_FENCES` like the other advisory rows (read, advisory, state). Which unpublished states the platform lets a PATCH of `description` touch (`triage`, `draft`, `closed`) is to be measured against the platform, not assumed. State the result in the row's doc.\n- **Read-back proves it.** After the PATCH, the executor reads the advisory again and confirms the stored summary and description equal what was sealed, by a keyed digest as `advisory_note` does, without printing either. A mismatch is a FAILED action.\n- **No content is printed.** A refusal never quotes the text. The run annotates the id and the byte count only.\n- **One row per dispatch, `alone: true`,** like the other advisory rows. It spends the same write budget.\n- **The validator and the self-tests cover:**\n  - a refusal for a published advisory;\n  - a refusal for an empty description;\n  - a refusal when the text file sits inside the repository;\n  - the round-trip digest check;\n  - a payload carrying no plaintext.\n- **Docs:** the fleet-write header, the security lane's publish step (`.claude/skills/pm-dispatch/references/lanes/security.md`, 呈维护者) and `references/security-findings.md` §3. The publish order becomes: rewrite → versions → publish. State only the rule; name no advisory.\n\n## Out of scope\n\n- Editing published advisories.\n- Collaborators.\n- Any advisory content. This card carries none, and no advisory id is needed to test it: use a throwaway draft created by `advisory_create` in the run's own test fixture, or the executor's existing test doubles.\n\n## Done when\n\n- The row exists, with its fences, sealing and read-back.\n- Self-tests are green, and the relevant `node --test` and the dispatch/validate self-tests pass.\n- The security lane docs name the step.\n- A dry-run against a real draft advisory, chosen by the security seat after merge, is left to the seat."
+}

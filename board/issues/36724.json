@@ -1,0 +1,28 @@
+{
+  "number": 36724,
+  "kind": "pull_request",
+  "title": "docs(plugin-auth): boot reachability report and self-hosting page state the admission order the audience gate reads",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "os-alice"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-23T14:19:17Z",
+  "updated_at": "2026-11-23T14:19:20Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36724",
+  "body": "Fixes #36355\nrepo:objectstack#7 · os-alice · session_011y7As6FyXmJyGyHNKXUkV7\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户能看到什么变化:自托管运维者在启动日志里那条「无人能登录」报错,以及自托管部署文档,对邀请恢复路径的描述更准确;行为不变。\n- 为什么做:上一轮受众策略调整后,文案仍说「邀请先于策略判断」,与代码实际顺序不符,属于其后续文字修正。\n- 出错会怎样:只是文字,最坏是说法仍不够精确;可直接撤回,不影响任何准入结果。\n- 要你做什么:无\n\n## What changes\n\nProse only, no logic, no condition, no test change.\n\n- `packages/plugins/plugin-auth/src/boot-sign-in-reachability.ts` (N1): the module docblock no longer says `decideAudienceAdmission` short-circuits on `hasPendingInvitation` before the posture switch. It now states the order the function has at main: the posture's own rule is read first (`isAdmittedByPostureRule`: `open`, and an on-allowlist `email_domain` address), then the invitation branch (which admits under `invite_only` and for an off-allowlist address). The `no_sign_in_account_at_boot` message gets the same correction: the verdict-level claim \"that ONE creation is admitted under EVERY audience posture\" is kept (its pin stays green), and the mechanism now says which branch admits it under which posture. The line-62 rider rule is untouched: the no-mail-transport rider stays scoped to `invite_only`, and nothing states the verification forcing for every non-`invite_only` posture.\n- `content/docs/deployment/self-hosting.mdx` (N3): \"Under `open` every address is admitted by the posture, invitation or not\" gains the half-clause the #36312 changeset states: except a social-provider sign-in whose address the provider did not verify while email verification is in force, refused `403 SELF_REGISTRATION_CLOSED` (`admissionRestsOnAddress` reads `open` as resting on the address exactly while `resolveEmailVerificationRequirement('open', …)` is true).\n- Same page, the recovery paragraph's \"The invitation carve-out admits that one creation under every posture\" carried the same imprecision as N1; the module docblock says that page and the message \"must keep agreeing\", so it is reworded the same way in this PR (same file, inside the claimed surface).\n- `.changeset/36355-auth-boot-reachability-admission-order.md`: `patch` for `@objectstack/plugin-auth`. The message string ships in `dist` (`files: [\"dist\", \"README.md\", \"CHANGELOG.md\"]`).\n\n## Tests\n\nNo test changes. No test pins the reworded sentence verbatim: the \"under EVERY audience posture\" text appears only in a `describe`/`it` title, and the pins under it assert the admission verdict for every posture, which this PR does not move. Every `toContain` pin on the message still holds.\n\nRead first: `boot-sign-in-reachability.ts` message hunk (around the \"That ONE creation\" line), the risk being a `toContain` pin that spans a reworded line; then the docblock bullet; then the doc paragraph.\n\n## Acceptance notes\n\n- Verdict-level claims are unchanged in both files; only the mechanism sentences move.\n- `check:skill-examples`, `check:dual-build-cjs-loads` exited 3 locally (PREREQUISITE NOT MET: they read built output of packages outside this diff's closure) and `check-plugin-teardown-shape --self-test` exited 3 on a shallow checkout. NOT MEASURED locally; CI runs them on a full build.\n\n## Verification\n\nTwo-minute check: `pnpm --filter @objectstack/plugin-auth exec vitest run src/boot-sign-in-reachability.test.ts` — expect 51 passed.\n\n<details><summary>Local readings at d1105b670d</summary>\n\n- `pnpm --filter @objectstack/plugin-auth exec vitest run --maxWorkers=2 src/boot-sign-in-reachability.test.ts`: Test Files 1 passed (1), Tests 51 passed (51).\n- Under the verify lock, `pnpm --filter @objectstack/plugin-auth build && … typecheck && … test`: VERDICT command-exit 0; Test Files 293 passed (293), Tests 6265 passed, 10 skipped (6275).\n- `dispatch-gates --commands` derived 91 families; all run, 88 exit 0, 3 exit 3 (NOT MEASURED, above); `--ran` reconciliation: 91 accounted, 88 run, 3 NOT-MEASURED.\n- `check-nul-bytes`: OK. `overlap-check`: VERDICT clean exit 0 (main, #36311, #35129 merge cleanly).\n\n</details>\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_011y7As6FyXmJyGyHNKXUkV7\n"
+}

@@ -1,0 +1,37 @@
+{
+  "number": 36651,
+  "kind": "pull_request",
+  "title": "fix(studio): an edit typed as a Save ends survives the Save's re-read of the object",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-23T08:45:22Z",
+  "updated_at": "2026-11-23T10:13:06Z",
+  "closed_at": "2026-11-23T10:13:04Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-23T10:13:04Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36651",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-warren\"} -->\n_Requested by **Warren** · [project thread](https://claude.ai/code/project/chan_01U5RdnAAmkSQmZbqh6FtqZ8?thread=cmsg_01U5RdnAAmkSQmZbqh6FtqZ82MfFjFxvJRAyoku6XCvWt4)_\n\nFixes #36648\nFixes #36653\n\n## What changes\n\n- `StudioDesignSurface.tsx`, the Data pillar's object load: a re-read on the live-metadata pulse alone (`refreshOnly`) no longer clears the dirty flag, the kept CEL verdicts and the served verdict as its effect starts. It drops them when it installs, after the existing in-flight check (`refreshOnly && objBuffersHeldRef.current` ⇒ keep the buffer). A full load (another object, a publish, a reload) resets at the start as before.\n- New `DataPillar.pulseAfterSave-36648.test.tsx` (2 cases): types into the window deterministically (the hook wrapped to report its release; the keystroke runs in the microtask after it) and pins that the edit stays, that a valid one is sent by the next Save, and that an unparsable one is held. Both cases fail on `main` (`expected '' to be …`: the edit is gone) and pass here.\n- `DataPillar.panelGate.test.tsx` and `panelHold-27629` are untouched: nothing skipped, retried, narrowed or slowed.\n\n## Why — root cause (product, pre-existing; not #36636)\n\nThe red in run 45133910959 is the **second** Save of the first case (`panelGate.test.tsx:166`): `findByTestId('studio-save')` ran its full 4 s and the button never came back after the case typed `record.status ==`. The button is drawn only while the page holds an edit, so the edit was gone.\n\nA Save's publish sends the live-metadata pulse. The pillar holds it while the buffer has work (`useMetadataRefreshNonce(objBuffersHeld)`) and releases it in an effect the moment the Save ends; the next render's load effect re-reads the object. That effect called `setDirty(false)` (and cleared the verdicts) **as it started**, before the in-flight check. A keystroke landing between the release and that effect therefore lost its dirty flag; the read, finding nothing held, installed the server's body over it; the edit and the Save button went with it. The window is one scheduler gap, which a loaded merge-queue runner can open between the case's Save and its next keystroke. For an author it is a keystroke right after pressing Save that silently disappears.\n\nNot #36636: `StudioDesignSurface.tsx` and `useMetadataRefreshNonce.ts` are byte-identical between #36636's parent `99ece3c4` and `main`; the window predates it. #36636 changed only when Save reads `held`, before any write.\n\n## Verification\n\nLoaded box: 4-core container, 4 busy-loop CPU stressors, `vitest run --maxWorkers=2`, 20 consecutive runs.\n\n| tree | files | runs | red |\n|:--|:--|:--|:--|\n| #36636's parent `99ece3c4` | panelGate | 20 | 2: both `expected \"vi.fn()\" to not be called` (:167, :175), the #36619 verdict race #36636 fixed |\n| `main` `e9fa6b5d` | panelGate | 20 | 0 (the :166 timeout did not recur in 20; the deterministic case above reproduces it) |\n| this head `6e21473c` | panelGate + panelHold-27629 + pulseAfterSave-36648 | 20 | 0: 20 of 20 green in a row, all 10 cases each run |\n\nAlso green locally: every studio-design test file that saves through the top bar, reads the pulse, or is a `DataPillar.*` suite (50 files, 259 tests).\n\n## Also: the unit-project red that blocked this PR (#36653)\n\n`Test UI (7/16)` went red on `romanizeHan.test.ts:24` (`expected ' weixiu  zhongxin ' to be '维修中心'`), a file the fix above does not touch. Cause: test order, not product. The `unit` project runs files with `isolate: false`; `layout/__tests__/designModeMenuCreate-36364.test.ts` (landed 08:11Z with #36606) calls `loadHanRomanizer()` in its `beforeAll`, so when it ran earlier in the same worker the shared `romanizeHan` module was already loaded and the \"before the dictionary has loaded\" cases read romanized text.\n\n- Reproduction: `vitest run --project unit --maxWorkers=1 designModeMenuCreate-36364.test.ts romanizeHan.test.ts` fails at `:24` with CI's exact message on `main` `3cf6a44b`.\n- Fix (separate commit, test only, no product code, no changeset): the before-load describe reads its own instance (`vi.resetModules()` + dynamic `import('./romanizeHan')`) and still pins \"unchanged and pending until loaded\"; a new case pins that the same instance stops being pending once it loads. Nothing skipped, retried or narrowed.\n- Counts: neighbour first, `--maxWorkers=1`, 4 busy-loop CPU stressors on a 4-core box, 20 consecutive runs: 20 of 20 green (red before). Alone: green.\n\nClause-②: no\nMetadata-protocol: none\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic.\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (not touched)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01JQwxbXCSJnUMMhWxyBmuqA\n\n<!-- signed: repo:objectstack#1 · os-warren · session_01JQwxbXCSJnUMMhWxyBmuqA -->\n"
+}

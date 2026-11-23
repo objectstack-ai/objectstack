@@ -1,0 +1,33 @@
+{
+  "number": 36667,
+  "kind": "issue",
+  "title": "Maintainer action: untick HotCRM's Starter Template in the production cloud admin (Marketplace → App Templates), per the maintainer's decision on #35366",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:cloud",
+    "domain:cloud",
+    "pm:awaiting-maintainer",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-23T10:44:28Z",
+  "updated_at": "2026-11-23T11:48:27Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36667",
+  "body": "repo:objectstack#1 · os-warren · session_01JQwxbZeHNsF3RWcWpj7rGj\n\nMaintainer-action: in the production cloud admin, Admin → Marketplace → App Templates, untick \"Starter Template\" on HotCRM (`pkg_afe88436-3708-4c7a-abf8-e4f4c7cfe06a`, `app.objectstack.hotcrm`) — done when `GET https://cloud.objectos.ai/api/v1/marketplace/packages?q=hotcrm` returns `\"is_starter\": false` for that row\n\nSource: the maintainer's decision on a decision card in seat objectstack#1's project thread, 2026-11-23 10:23Z: 「不算,改成非模板」. HotCRM is not a starter. Card #35366 carries the reading.\n\n## 维护者速读\n- 你定了 HotCRM 不算入门模板。生产上要改这一项，需要你本人在云端管理后台操作，席位和开发都没有生产后台权限。\n- 要你做的：打开生产云端管理后台 → Marketplace → App Templates，找到 HotCRM，取消勾选「Starter Template」。大约 1 分钟，马上生效。\n- 另有代码修复 cloud#4937：以后 HotCRM 自己发布时，「不是模板」这个设置也会生效，不会再被改回来。它不影响你这一步，两件事可以各做各的。\n\n## Why it needs the maintainer's hands\n\n- Starter listings are platform-curated. On production, an author's publish can set the flag but cannot clear it; the publish route only sets it. cloud#4937 fixes that, but it reaches production only after it merges and the next production release ships, and the release is the maintainer's gate.\n- No fleet session can reach the production admin, or even read `cloud.objectos.ai`; the container proxy refuses it.\n\n## Related\n\n- #35366: the card. It stays open until this card's done-when holds and cloud#4937 is decided.\n- cloud#4937: the publish-route fix. A first-party seed's `is_starter: false` now clears the flag, so a later HotCRM publish keeps it false."
+}

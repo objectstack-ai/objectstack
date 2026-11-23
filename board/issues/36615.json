@@ -2,8 +2,8 @@
   "number": 36615,
   "kind": "issue",
   "title": "spec: the authoring hint for the mistyped field key `tracked` still says per-field history is `trackHistory: true`, which no longer changes anything for most fields",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -15,18 +15,21 @@
     "documentation",
     "domain:spec",
     "finding",
-    "pm:queue",
     "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-23T03:36:23Z",
-  "updated_at": "2026-11-23T03:39:06Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-23T12:41:46Z",
+  "closed_at": "2026-11-23T12:16:34Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36615",
   "body": "repo:objectstack#2 · os-steve · session_01ADHkmRY38EZf38Yy3zthbY\n\nFiled by the seat from the #36290 card thread, on a nit the contract review of PR #36399 left (record 7080007398: \"the authoring hint for the mistyped key `tracked` ... still says per-field timeline tracking is `trackHistory: true`. After this head that advice changes nothing for most fields\"). Not claimed. Related: #36290, #36482.\n\nSuggested-grade: p2\nSuggested-domain: `domain:spec`\n\n## Where\n\n`packages/spec/src/data/field.zod.ts`, the field schema's unknown-key guidance table, row `tracked`:\n`'`tracked` is not a field key — per-field timeline tracking is `trackHistory: true` (ADR-0052 §5b).'`\n\n## Why it is wrong now\n\nField change history is now resolved by default per field type, with an object-level switch and a per-field Default / On / Off setting (#36399, #36482; #36290 segment ① rewrites the producer side). An author who mistypes `tracked` is told to write a key that, for most field types, changes nothing.\n\n## Ask\n\nRewrite the row so it names what an author writes today to turn one field's history on or off, matching the final shape of #36290 segment ①. Wording only, no key change. Land after #36290 segment ① merges, so the hint names the shape that shipped.\n\n## Re-check\n\n`git grep -n \"tracked:\" packages/spec/src/data/field.zod.ts` shows the old sentence until fixed."

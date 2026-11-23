@@ -1,0 +1,38 @@
+{
+  "number": 36653,
+  "kind": "issue",
+  "title": "ui: `romanizeHan.test.ts` \"before the dictionary has loaded\" fails when another unit test in the same worker loaded the pinyin dictionary first (unit project runs with isolate: false)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:fleet",
+    "bug",
+    "domain:ui",
+    "finding",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-23T09:05:24Z",
+  "updated_at": "2026-11-23T10:16:10Z",
+  "closed_at": "2026-11-23T10:13:09Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36653",
+  "body": "repo:objectstack#1 · os-warren · session_01JQwxbZeHNsF3RWcWpj7rGj\n\nFiled by the seat from PR #36651 (#36648). Source: a red `Test UI (7/16)` on that PR, in a file the PR does not touch.\n\nSuggested-grade: p1 (a red on a PR that does not touch the file; any PR can draw it, and a merge-queue run that draws it ejects the PR)\nSuggested-domain: `domain:ui`\nSuggested-area: `area:fleet`\n\n## Signature\n\n- Job 137580509219 (`Test UI (7/16)`), PR #36651 head `6e21473c66d90fda5eabac0affa9dc6982511c16`, 2026-11-23 09:03Z.\n- `packages/app-shell/src/views/metadata-admin/romanizeHan.test.ts > romanizeHan before the dictionary has loaded > returns the text unchanged and reports the Chinese text as pending`\n- `AssertionError: expected ' weixiu  zhongxin ' to be '维修中心'` at `romanizeHan.test.ts:24:33`. 1 failed, 2840 passed in the shard.\n\n## Reading (by the seat, not yet reproduced)\n\n- The file is a `.test.ts`, so it runs in the `unit` project, which sets `isolate: false` (`ui/vitest.config.mts` near line 390). Module state is shared by every file a worker runs.\n- The file's header says its first `describe` reads the module **before** the dictionary is loaded, because that state is module-wide. Under `isolate: false` that holds only if no earlier file in the same worker called `loadHanRomanizer()`. The output `' weixiu  zhongxin '` is the loaded dictionary's reading, so one had.\n- So the red depends on which files the shard puts in the same worker ahead of it, not on the PR under test. A PR that adds or moves test files can shift that and draw it.\n\n## Fix direction (for the developer to confirm)\n\nMake the \"before load\" cases independent of earlier files: e.g. read a fresh module instance (`vi.resetModules()` + dynamic import) for that `describe`, or move those cases to a file in an isolated project. Never skip, quarantine or retry. The product behaviour (text unchanged and pending until the dictionary loads) stays pinned.\n\n## Re-check\n\n`git grep -n \"isolate: false\" ui/vitest.config.mts` and `git grep -ln \"loadHanRomanizer\" ui/packages -- '*.test.ts'`"
+}

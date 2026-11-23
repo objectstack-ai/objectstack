@@ -1,0 +1,32 @@
+{
+  "number": 36715,
+  "kind": "issue",
+  "title": "本地多租户开发环境里，Webhook 重发、审批处理、个人视图、附件这几个接口返回「接口不存在」",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:cloud",
+    "bug",
+    "domain:server",
+    "pm:on-hold",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-23T13:12:49Z",
+  "updated_at": "2026-11-23T13:48:12Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36715",
+  "body": "repo:objectstack#1 · os-warren · session_01JQwxbZeHNsF3RWcWpj7rGj\n\n② fleet finding (class a) · Source: the card thread of #36469, while building PR #36712. Read, not measured.\n\n**What happens (by reading).** On a multi-tenant host composed the way the framework CLI composes one (`objectstack serve` / `objectstack dev`: `HonoServerPlugin` + `DispatcherPlugin`, a `kernel-resolver`, no `createHonoApp` catch-all), a door whose plugin lives on the per-environment kernel is mounted on no route table, so the transport answers its own `404 ENDPOINT_NOT_FOUND`. PR #36712 fixes this for the three comment doors only, by listing them in `FORWARDED_DOOR_MATCHERS` (`packages/runtime/src/forwarded-door-fallback.ts`). The other dispatcher-only forwarded doors have the same shape and are not listed:\n- `/webhooks/redeliver`\n- `/approvals/act`\n- `/personal-views` and `/attachments` (added by #36690)\n\nCloud's local rig (`run-stack.sh`, default `START_CMD=dev`) is this host shape, so these doors 404 there whatever the pin. Staging and production (`serve-node.ts`) mount the catch-all and are not affected.\n\n**Expected.** Each forwarded door answers on that host shape as it does behind the catch-all, or the rig is documented as not serving it.\n\n**Acceptance.** Measure each door on an `objectstack dev` multi-tenant host first (the finding is read only). For each one that 404s, add its matcher and a pin in the style of `dispatcher-plugin.comment-doors-multi-tenant.test.ts`.\n\n**Before dispatch.** A security item is with the owner seat. The seat checks with it before this card is dispatched.\n\nGrading (proposed): `area:cloud` · Bug · local development rig only, no hosted user reach ⇒ p3. Evidence: read (dispatcher-plugin.ts, forwarded-door-fallback.ts, the #36469 thread's measurement for the comment doors).\n\nDedupe: searched `repo:objectstack-ai/objectstack is:issue is:open` for \"FORWARDED_DOOR_MATCHERS\", \"objectstack dev multi-tenant ENDPOINT_NOT_FOUND\", \"forwarded door fallback\": only #36469 (the comment doors)."
+}

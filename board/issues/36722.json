@@ -1,0 +1,32 @@
+{
+  "number": 36722,
+  "kind": "issue",
+  "title": "报表图表加「显示数量为 0 的分组」开关（#36645 第 2 项拆出）",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:build",
+    "domain:ui",
+    "enhancement",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-23T14:18:04Z",
+  "updated_at": "2026-11-23T14:18:04Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36722",
+  "body": "repo:objectstack#1 · os-warren · session_01JQwxbZeHNsF3RWcWpj7rGj\n\nSplit out of #36645 (item 2) · Source: #36374 spec item 3 · Maintainer's pick: decision card 2026-11-23 14:16Z, 「做,作为单独的功能卡」.\n\n**What.** A report chart grouped by a field shows only the groups that have records. A sales manager charting deals by stage does not see the stages with no deals, so an empty stage looks like it does not exist rather than reading as zero. The report spec has no key to ask for those groups, so neither the renderer nor the report builder can offer it.\n\n**Expected.**\n- A new optional report chart setting asks for groups with a count of 0 to be shown. It defaults to off, so every existing report renders exactly as today.\n- The report renderer honours it. For a picklist or other field with a known set of values, every value appears, and the empty ones show 0. For a date grouping, every bucket in the report's range appears.\n- The report builder (#36374) offers a switch for it in the chart settings.\n\n**Pointers.** `service-analytics` already exports `fillEmptyGroups(rows, columnAggregates)`. Check whether it is the right engine hook before writing a second zero-fill. Its CHANGELOG notes a past defect where shifted bucket keys were filled with a confident `0`, so a date range needs a test.\n\n**Acceptance.**\n- A spec test shows the key is optional and defaults off.\n- A renderer or analytics test covers a picklist grouping with an empty value and a date grouping with an empty bucket.\n- A builder test shows the switch round-trips through save.\n- The PR carries `Clause-②: yes (widening)` and its spec-baseline updates, and gets a contract-tier review before the queue.\n\n**Order.** After #36705 merges, because it touches the same builder files.\n\nGrading (proposed): `area:build` · Feature · a new authorable key asked for by the maintainer, no data harm without it ⇒ p2. Evidence: read (#36645, #36374 item 3, the decision card).\n\nDedupe: #36645 names this item and stops short of it; no other card carries it."
+}

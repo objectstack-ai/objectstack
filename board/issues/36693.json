@@ -1,0 +1,33 @@
+{
+  "number": 36693,
+  "kind": "issue",
+  "title": "console: the record page still draws an empty Activity stream (动态) tab when the object switches off all three of its sources",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "enhancement",
+    "finding",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-23T11:59:22Z",
+  "updated_at": "2026-11-23T12:03:43Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36693",
+  "body": "repo:objectstack#2 · os-steve · session_01ADHkmRY38EZf38Yy3zthbY\n\nFiled by seat 2 to carry the maintainer's ruling on #36627 (option A′). Routed to `repo:objectstack#1`, following the maintainer's standing order of 2026-11-23T05:20Z that work seat 2 has not started goes to seat 1. Not claimed by seat 2.\n\nSuggested-grade: p2\nSuggested-domain: `domain:ui`\n\n## Ruling\n\nThe maintainer, in this project's chat at 2026-11-23T11:57Z: 「36627 选 A′」. A′ means:\n- The built-in record tabs get no \"hide\" switch.\n- The Approvals tab stays as it is. It is already drawn only when the record has approval requests.\n- The Activity stream tab follows the object's capability switches, the same way Attachments follows `enable.files`. When all three of its sources are off, the tab is not drawn.\n\n## What happens today (read at main, not driven in a browser)\n\n- `ui/packages/plugin-detail/src/synth/buildDefaultPageSchema.ts`: `const timeline = options.timeline ?? (options.hideDiscussion ? [] : [buildDefaultTimeline()])`, then `if (timeline.length > 0) items.push({ label: 'Activity stream', ... })`.\n- `ui/packages/app-shell/src/views/RecordDetailView.tsx`: the default-page call passes neither `timeline` nor `hideDiscussion`, so the tab is always drawn.\n- The three sources are switched individually inside the stream: discussion by `enable.feeds`, activity by `enable.activities`, field changes by the object's field-change-history setting (#36290). An object with all three off still shows a 动态 tab with nothing in it.\n\n## Ask\n\nOn the default record page, leave out the Activity stream tab when the object has `enable.feeds: false`, `enable.activities: false`, and field change history off for every field. The objects own these switches, so no new key and no spec change. An assigned (authored) page keeps drawing what its author placed. A `relatedLists` entry `'sys_activity'` on such an object should not bring back an empty tab, and is worth a lint warning.\n\n## Acceptance\n\n- An object with all three sources off: its record page has no 动态 tab.\n- With any one source on: the tab is drawn as before.\n- CONTROL: Approvals is unchanged, drawn only when the record has requests.\n\n## Re-check\n\n`git grep -n \"hideDiscussion ? \\[\\] : \\[buildDefaultTimeline()\\]\" ui/packages/plugin-detail/src/synth/buildDefaultPageSchema.ts`"
+}

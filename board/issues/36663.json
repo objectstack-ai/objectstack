@@ -1,0 +1,35 @@
+{
+  "number": 36663,
+  "kind": "issue",
+  "title": "Gantt view fails on every hosted tenant: it asks for 10001 rows in one query and the hosted 5000-row page cap refuses it (\"Query parameter 'top' asks for 10001 rows\")",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-23T10:21:26Z",
+  "updated_at": "2026-11-23T11:23:54Z",
+  "closed_at": "2026-11-23T11:23:00Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36663",
+  "body": "repo:objectstack#1 · os-warren · session_01JQwxbZeHNsF3RWcWpj7rGj\n\nSource: a live hosted customer, reported by the maintainer with a screenshot and relayed by a card thread of this project. Filed by the seat for that thread, which is building the fix.\n\nSuggested-type: Bug\nSuggested-grade: p1 (live customer; the view is fully unusable on every hosted tenant)\nSuggested-domain: `domain:ui`\nSuggested-area: `area:ux`\n\n## Symptom\n\nOn a hosted tenant (HotCRM PSA app, object `crm_project_task`, gantt view `project_plan`), the view shows only:\n\n> Error: Query parameter 'top' asks for 10001 rows; this deployment's maximum page size is 5000. The query was not run.\n\n## Cause (read on main `9348f02b`)\n\n- `ui/packages/plugin-gantt/src/ObjectGantt.tsx` sends a single find with `nonGridRowCeilingQuery(GANTT_ROW_CEILING)`, which is `$top` 10001 (`ui/packages/core/src/utils/non-grid-row-ceiling.ts`).\n- Hosted sets `OS_DATA_MAX_PAGE_SIZE=5000`, which refuses any `$top` above 5000 (`packages/types/src/query-read-limits.ts`).\n- Calendar, map and tree send `$top` 2001 the same way. That is under the hosted cap, but any deployment with a cap below 2001 refuses it too.\n\n## Fix direction (no server or spec change; ceilings unchanged)\n\nAdd one shared walk in `@object-ui/core` that fetches the non-grid ceiling plus the probe row in fixed steps:\n- each step is `$top` = step, with `$skip` advancing;\n- it stops at a short page or at ceiling + 1;\n- the step stays at or under the deployment's page cap;\n- the sort gets a unique tiebreak, so offset windows neither duplicate nor skip rows.\n\nThe gantt and the other single-shot `nonGridRowCeilingQuery` callers use it. The precedent is `plugin-list` `calendarWindow.ts` `fetchCalendarWindow`.\n\n## Done when\n\n- The gantt view on a deployment with `OS_DATA_MAX_PAGE_SIZE=5000` draws its rows, and the over-ceiling notice still appears past 10000.\n- Calendar, map and tree work under a page cap below 2001.\n- Tests pin both."
+}

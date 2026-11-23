@@ -1,0 +1,33 @@
+{
+  "number": 36671,
+  "kind": "pull_request",
+  "title": "fix(service-analytics): declare the multi-value filter refusal on /analytics/query and the native arm of /analytics/sql",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-alice"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-23T10:52:11Z",
+  "updated_at": "2026-11-23T14:17:42Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36671",
+  "body": "Fixes #36264\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n- 用户无感:只改即将发布的升级说明,让调用通用分析查询和 SQL 预览接口的集成方在升级前看到这项拒收。\n- 属于分析报表的数据正确性收口,替调用分析接口的集成方补上漏写的破坏性变更说明。\n- 出错只会让发布说明的措辞不准,不改任何运行行为;可直接撤回。\n- 无\n\n## What changes\n- `.changeset/36168-dataset-json-column-refusal.md` (unreleased, consumed by the open Version Packages PR): the summary line, the `Clause-②: no (narrowing)` reason and the BREAKING paragraph now name `POST /api/v1/analytics/query`, the native-SQL arm of `POST /api/v1/analytics/sql`, and the `timeDimensions[].dateRange` window (a `$gte` / `$lte` pair) beside the dataset door. The ADR-0087 marker's prose names the same doors. No production code changes.\n- **DELIBERATE CORRECTION** (`check-empty-changeset` stays red by design): the pending note `.changeset/36168-dataset-json-column-refusal.md` was false by omission — it declared the refusal for the dataset door only, while `query()` and `generateSql()` share the same strategy context (`callCtx`, carrying `declaredValueShape`) and so refuse the same filter. Corrected sentences:\n  - summary: \"the dataset query door, `POST /api/v1/analytics/query` and the native arm of `POST /api/v1/analytics/sql` refuse `=`, `$in` and every other scalar comparison or text operator on a multi-value or JSON field with the data door's `400 INVALID_FILTER`, instead of answering a wrong count\"\n  - `Clause-②: no (narrowing) — the dataset query door, `POST /api/v1/analytics/query` and the native SQL arm of `POST /api/v1/analytics/sql` refuse a scalar comparison on a multi-value or JSON field, in a `where` or a `timeDimensions[].dateRange` window, that they answered `200``\n  - BREAKING: \"... and for a client of `POST /api/v1/analytics/query` or of `POST /api/v1/analytics/sql` answered by the native SQL strategy whose `where` applies — or whose `timeDimensions[].dateRange` window (a `$gte` / `$lte` pair) applies — an operator of `JSON_COLUMN_INCOMPATIBLE_OPERATORS` ...\"\n- One new top-level `describe` in the existing harness `packages/services/service-analytics/src/__tests__/dataset-json-column-refusal-36168.test.ts`: `AnalyticsService.query` and `.generateSql` on the `postgres` dialect, `{ tags: { $in: ['a'] } }` on a `select` declared `multiple: true` → `INVALID_FILTER` / 400; control `$contains` resolves; and `query` with a `dateRange` on a `tags` time member → `INVALID_FILTER` / 400.\n\n## Tests\n- Read first: (1) the BREAKING paragraph of the changeset, it is the text that ships; (2) the new `describe` block at the end of the test file.\n- Two-minute check: `pnpm --filter @objectstack/service-analytics exec vitest run --maxWorkers=2 src/__tests__/dataset-json-column-refusal-36168.test.ts -t 36264` — expect 3 passed.\n\n<details><summary>Package suite and typecheck at d164ccf63</summary>\n\n```\n> tsc --noEmit            (exit 0)\n Test Files  224 passed (224)\n      Tests  5733 passed | 345 skipped (6078)\nos-verify-lock: VERDICT command-exit 0\n```\n</details>\n\n<details><summary>Ablation (one-off, not kept)</summary>\n\nMutation via `scripts/ablation-replace.mjs` on `analytics-service.ts`, in `query()` only: `const ctx = await this.callCtx(...)` became `const ctx = { ...(await this.callCtx(...)), declaredValueShape: undefined }` (anchor x1 -> x0, blob bf7a2df1c981 -> edaab3fae524). Result: `query: $in ...` and `query: ... dateRange ...` red, `generateSql: $in ...` green (its context untouched) — 2 failed | 1 passed. Restored: blob == HEAD (bf7a2df1c981), `git diff HEAD` empty. The test imports `../analytics-service.js` from `src/`, so no `dist/` rebuild was involved.\n</details>\n\n## Acceptance notes\n- The dateRange position was measured, not assumed: on a member whose declared shape is JSON-stored (`tags`), `query()` answers `Operator \"$gte\" on field \"seen\" WAS NOT APPLIED ...` (400 INVALID_FILTER). A `datetime` declared `multiple: true` is not JSON-stored (`isMultiValueField` does not count `datetime` as multi-capable) and is answered 200, so the changeset says \"on a multi-value or JSON field\" only.\n- Placement: the pin lives as a new top-level `describe` in the existing #36168 harness file rather than a new file, per the AGENTS.md test-placement rule (a new pin for a component that already has a shared harness file goes in that file).\n- `node scripts/pm/overlap-check.mjs` exits 1 against the Version Packages PR, which shares the changeset file; expected, that PR regenerates from the changeset and is not touched here.\n\n## Verification\n- Local gate subset from `node scripts/pm/dispatch-gates.mjs --commands` at d164ccf63: 63 derived, 61 run exit 0 except `check-empty-changeset --base origin/main` exit 1 (the DELIBERATE CORRECTION above, red by design); 2 NOT MEASURED (exit 3, prerequisite not met): `check-plugin-teardown-shape --self-test` (shallow clone cannot reach its pinned positive control; same on main 3cf6a44be) and `check:dual-build-cjs-loads` (needs a full `pnpm build`) — CI runs both. `dispatch-gates --ran`: 63 accounted, 0 UNRUN.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_011y7As6FyXmJyGyHNKXUkV7)_\n"
+}

@@ -2,8 +2,8 @@
   "number": 36640,
   "kind": "issue",
   "title": "ui: plugin-form test `lineItemsPrintRowCap-11958` failed once in the merge queue with \"expected +0 to be 2\" on a PR that does not touch plugin-form",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -15,18 +15,23 @@
     "bug",
     "domain:ui",
     "finding",
-    "pm:queue",
     "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-warren"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-23T05:59:06Z",
-  "updated_at": "2026-11-23T06:01:08Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-23T10:14:37Z",
+  "closed_at": "2026-11-23T10:12:43Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36640",
   "body": "repo:objectstack#2 · os-steve · session_01ADHkmRY38EZf38Yy3zthbY\n\nFiled by the seat from the #36256 card thread. PR #36461 was removed from the merge queue at 05:17Z; one of its two red queue runs failed in a package the PR does not touch. Not claimed: seat 2 is winding down and takes no new cards.\n\nSuggested-grade: p2\nSuggested-domain: `domain:ui`\n\n## Where\n\n`ui/packages/plugin-form/src/__tests__/lineItemsPrintRowCap-11958.test.tsx`. Assertion: `expected +0 to be 2` (`LIMIT` is 2 in this file). The row-count checks are line 100 (read once, right after `waitFor` sees the cut-off note) and lines 112 and 118 (inside `waitFor`).\n\n## Reading\n\n- Merge-queue run reading 7092248222, on the merge group of PR #36461 (it changes nothing under `ui/packages/plugin-form`).\n- One hit in the last 24 hours (as read by the #36256 thread). No existing card names this test.\n\n## Likely cause (not verified)\n\nLine 100 counts `tbody tr` once, right after the note is in the DOM. If the note renders before the rows, the count is 0. If so, waiting for the rows the same way lines 112 and 118 do fixes it. A `waitFor` timeout on 112 or 118 under load would print the same message, so read the job log first to see which line failed.\n\n## Re-check\n\n`git grep -n \"querySelectorAll('tbody tr').length).toBe(LIMIT)\" ui/packages/plugin-form/src/__tests__/lineItemsPrintRowCap-11958.test.tsx`"

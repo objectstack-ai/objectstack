@@ -1,7 +1,7 @@
 {
   "number": 32573,
   "kind": "issue",
-  "title": "[PM seat] repo:cloud · seat 5 — 🟢 hotlong",
+  "title": "[PM seat] repo:cloud · seat 5 — ⏳ vacant",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -19,12 +19,12 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T05:56:52Z",
-  "updated_at": "2026-11-19T07:50:15Z",
+  "updated_at": "2026-11-23T12:13:23Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
   "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32573",
-  "body": "repo:cloud#5 · hotlong · session_01Q4EjjPP1zuWBNq3nBXVei9\n\n**本贴是 `repo:cloud` 车道座位 5 的权威登记。** 座位贴协议见 `.claude/skills/pm-dispatch/references/seat-post-protocol.md`;只有在任座位 PM 编辑正文。\n\n## 当前 PM\n\n**🟢 `hotlong`** · session `session_01Q4EjjPP1zuWBNq3nBXVei9` · seat `repo:cloud#5` · seated at this post's creation (the platform's timestamp).\n\n- **Why a fifth seat:** the maintainer summoned `/pm-dispatch cloud` in this session. Seats 1–3 are held by `os-warren` (#6026, #24145, #30278) and seat 4 by `os-bob` (#32003), so this is the lane's highest seat number plus one.\n- **Maintainer ruling — the approval account sits this seat (verbatim, 2026-11-12, in session):** the seat asked whether `hotlong`, an account listed in `GOVERNED_APPROVERS`, may sit a seat against the SKILL.md invariant 「批准账号永不跑席位或作其关联用户」; the maintainer chose 「破例：用 hotlong 坐 seat 5」. Consequence recorded with the ruling: a governed (Tier H) PR this seat accepts is not approved by `hotlong`; its approval request goes to the other approver.\n- **Scope — p1 only (the maintainer, verbatim: 「只做p 1」, and on re-seating 2026-11-19: 「入座，开信箱，暂时还是只派 p1」):** this seat claims only unassigned `pm:queue` cards labelled `priority:p1`, never a card claimed or routed to seats 1–4. (Superseded: 「只派发 p1 p2 卡」.) First-touch triage and the release board stay with seats 1–3.\n- **Form:** a kept seat in a session the maintainer drives, with cloud-lane triage duties, on the maintainer's order (2026-11-15): 「本座位保留。后续做 cloud 车道的分诊。定时 45 分钟。」 `Patrol:` an hourly self-bound check-in into this session (the scheduler's floor is one hour, so the maintainer's 45 minutes runs hourly), `trig_0125m96nD4E4xKTYr2jmLjyZ`. `Mailbox:` objectstack-ai/objectstack#35365 (opened and subscribed 2026-11-19T06:25Z).\n- **Deploys — only on the owner's word (verbatim, 2026-11-19, in session: 「什么时候部署你应该等我的指令。」):** this seat never deploys staging or production on its own; when a round's PRs have merged it tells the owner and waits.\n- **Batch:** 3 (the skill default). Write pace: the fleet default.\n\n## 继承台账\n\nNone inherited.\n\n## 热文件串行队\n\nNone declared yet.\n\n## 说明\n\n- Same lane rules as seats 1–4 (`references/lanes/cloud.md`); claim timestamps arbitrate any race with seat 4.\n\n\n"
+  "body": "repo:cloud#5 · hotlong · session_01Q4EjjPP1zuWBNq3nBXVei9\n\n**本贴是 `repo:cloud` 车道座位 5 的权威登记。** 座位贴协议见 `.claude/skills/pm-dispatch/references/seat-post-protocol.md`;只有在任座位 PM 编辑正文。\n\n## 当前 PM\n\n**⏳ vacant** · the last holder was `hotlong`, session `session_01Q4EjjPP1zuWBNq3nBXVei9`. The seat clocked out 2026-11-23T12:11Z on the account owner's word, verbatim, in that session: 「你可以下班了，不用巡查」. ⛔ This is not an inheritance ruling.\n\n- **Handover check:** `check-handover.mjs` exits 0 on objectstack-ai/cloud and objectstack-ai/objectstack. objectstack#35455 was released to `pm:queue` (comment 7100568585), with the next step written on it.\n- **In flight:** none. No dev is running and no pull of this seat is open.\n- **Patrol:** `trig_0125m96nD4E4xKTYr2jmLjyZ` is disabled. It is bound to this session, so it is kept, not deleted.\n- **Mailbox:** objectstack-ai/objectstack#35365 closes with this note.\n- **Left with the owner:** maintainer index card cloud#4922 holds every row that waits on the owner. Chief among them is the staging/production acceptance in cloud#4879 item 2. Production was deployed 2026-11-22 at cloud `ab435864` / objectstack `7ae5e0742d45`.\n- **Platform cards this seat filed that cloud waits on:** objectstack#36497 (console double read, which turns cloud's `console-boots` budget flaky) and objectstack#36198 (restriction-profile twin; cloud#4925 drops the ledger row after the unmount).\n- **Lane:** `repo:cloud#1` (`os-warren`) is back online and holds cloud#4931. It takes p1 only.\n\n## 继承台账\n\nNone inherited.\n\n## 热文件串行队\n\nNone.\n"
 }

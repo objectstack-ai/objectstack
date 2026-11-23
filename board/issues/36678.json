@@ -1,0 +1,35 @@
+{
+  "number": 36678,
+  "kind": "issue",
+  "title": "Edit form: a currency field's symbol overlaps the first digit when the symbol is wider than \"$\" (zh-CN USD shows `US$` over the amount)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "bug",
+    "domain:ui",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-23T11:04:15Z",
+  "updated_at": "2026-11-23T12:42:16Z",
+  "closed_at": "2026-11-23T12:16:32Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36678",
+  "body": "repo:objectstack#1 · os-warren · session_01JQwxbZeHNsF3RWcWpj7rGj\n\n① product defect · Source: maintainer — Warren, 2026-11-23 11:00Z in the UI review thread: 「01 立卡派发」 (item 01 of the browser review of latest main, https://claude.ai/artifact/Nh8ZCYjSKEG8SLZJCsBK8b)\n\n**What happens.** In the record edit form (dialog and full page), a currency field draws its symbol as an absolutely positioned adornment and reserves a fixed `pl-8` (2rem) of left padding for it. Any symbol wider than about two characters overlaps the typed amount. In the zh-CN console, USD renders as `US$`, so a budget of `150000` reads as `US$50000` — the `$` sits on top of the leading `1`.\n\n**Reproduction (measured on main 9348f02b, showcase app, zh-CN browser locale).**\n1. Sign in as admin, open Projects → Website Relaunch → Edit.\n2. Look at Budget (`150000`) and Spent (`60000`): the leading digit is hidden under `US$`.\nScreenshot: project files `ui-review-2026-11-23/01-金额前缀压住数字.png`.\n\n**Reach.** The symbol comes from `Intl` (`currencySymbol(currency, locale)`), so the width varies by currency × locale. Measured with `Intl.NumberFormat(...).formatToParts`: zh-CN USD `US$`, zh-CN HKD `HK$`, zh-CN JPY `JP¥`, en-US CAD `CA$`, en-US CHF `CHF` all exceed the reserved 2rem; en-US USD `$`, zh-CN CNY `¥`, de-DE EUR `€` fit. Every user editing such an amount sees the wrong-looking number every time.\n\n**Where (read).** `ui/packages/fields/src/widgets/CurrencyField.tsx` — the adornment `<span className=\"absolute left-3 …\">{symbol}</span>` (around line 233) and the input's fixed `symbol ? 'pl-8' : ''` (around line 258). The grid cell editor `ui/packages/fields/src/widgets/grid-field/GridFieldWidget.tsx` uses a fixed `pl-6` for its adornment (around line 1607) and should be checked for the same overlap.\n\n**Expected.** The amount is never covered: the input's left inset follows the rendered symbol width (or the symbol sits outside the input as a leading addon), for any currency × locale.\n\n**Acceptance.** A test pins a wide symbol (`US$` under zh-CN, `CHF` under en-US) and asserts the input reserves at least the symbol's width; browser screenshot of the showcase edit form in zh-CN with the full amount visible.\n\nGrading (proposed): `area:data` · Bug · UX rule — a core feature (\"every field type renders, accepts input\") hit by every user who edits a wide-symbol currency, every time ⇒ p1 · evidence: measured (screenshot) + read (CurrencyField.tsx).\n\nDedupe: searched `repo:objectstack-ai/objectstack is:issue` for \"currency symbol overlap\", \"currency adornment\", \"currency prefix input\", \"CurrencyField symbol\" — no open card on this mechanism (all hits closed and about multi-currency resolution, not the adornment width)."
+}

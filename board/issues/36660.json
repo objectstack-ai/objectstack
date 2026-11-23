@@ -1,0 +1,31 @@
+{
+  "number": 36660,
+  "kind": "issue",
+  "title": "Studio: a person's Save on a permission set, hook, added action or OWD row publishes a pending AI draft of that item with no notice (the AI notice and its discard exist only on objects and flows)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:build",
+    "domain:ui",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-23T10:03:27Z",
+  "updated_at": "2026-11-23T10:48:18Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36660",
+  "body": "repo:objectstack#1 · os-warren · session_01JQwxbZeHNsF3RWcWpj7rGj\n\nSource: fleet-filed by this seat after PR #36652 (#36511, PR 3 of 3) merged. Raised by the contract review on that PR (records 7096256689 and 7096452455, both as a note) and by the #36511 card thread. Not a regression: #36652 shipped item 6 for objects and flows only, as its body says.\n\nSuggested-type: Feature (it extends an existing notice to more editors; the maintainer's pick list decides whether and when)\nSuggested-grade: p2\nSuggested-domain: `domain:ui`\nSuggested-area: `area:build`\n\n## What happens today (main after #36652)\n\n- Since epic #36510 (「人改一项、点保存、立刻生效。草稿加整包发布只留给 AI」), a person's Save in Studio writes the item and publishes it at once.\n- On an **object** or a **flow** with the AI's unpublished draft, the page opens on the AI's version and shows 「这一项有 AI 未发布的改动，保存会一并生效」 with 「放弃 AI 的改动」 (`StudioDesignSurface.tsx`, `StudioAiDraftNotice.tsx`).\n- On a **permission set**, a **hook**, an installed app's **added action**, or an **OWD row**, there is no such line. If the AI left a draft of that item, the person's Save publishes it together with their own edit, and nothing on the page says so.\n\n## Why it matters\n\nThe person believes they are publishing their one change. On a permission set, the AI's part can be a grant change. On a hook, it can be server-side behaviour. Both then go live under the person's Save.\n\n## Ask (for the maintainer's pick)\n\nShow the same notice and per-item discard on these editors, using the same rules as objects and flows:\n- the line only for an AI-written draft (`by` is copilot or mcp), never for a person's own draft;\n- the discard asks first when the page has unsaved edits;\n- the discard drops that one item's draft at its package (`DELETE /meta/:type/:name?state=draft&package=`), never the package batch.\n\n## Not in scope\n\n- The per-item discard on a never-published AI item removes the item, while its title says \"go back to the live version\". That is a wording note for the same follow-up, if picked."
+}

@@ -1,0 +1,32 @@
+{
+  "number": 36716,
+  "kind": "issue",
+  "title": "报表编辑器保存应用包里自带的报表时返回 403，没有写到 .custom 覆盖包",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:build",
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-23T13:23:39Z",
+  "updated_at": "2026-11-23T13:48:15Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36716",
+  "body": "repo:objectstack#1 · os-warren · session_01JQwxbZeHNsF3RWcWpj7rGj\n\n② fleet finding (class a) · Source: found live by the card thread of #36645 while verifying PR #36705 (showcase, zh-CN, admin). Not caused by that PR: the control run without any filter change gives the same answer.\n\n**What happens.** Open a report that ships in an app package (showcase 「按状态统计工时（图表）」) in the console report builder, change anything (for example the chart type), and Save. The metadata write door answers 403 and nothing is saved. Saving a NEW report succeeds.\n\nEvidence: frame `6-preexisting-shipped-report-save-refused.png` in project files `issue-36645/`.\n\n**Expected.** ADR-0146 D11: an edit to a package-shipped item is written into the app's `.custom` overlay package (the save carries `?package=`), so an admin can adjust a shipped report the same way other shipped metadata is customized. Or, if a shipped report is meant to be read-only, the builder says so before the admin edits instead of failing at Save.\n\n**Acceptance.** A pin that saving a package-shipped report from the builder writes the `.custom` overlay (or the builder shows the read-only state up front); a browser check on the showcase report above.\n\nGrading (proposed): `area:build` · Bug · an admin's edit to any shipped report is lost at Save with a bare refusal ⇒ p2. Evidence: measured (screenshot, control run) + read (ADR-0146 D11).\n\nDedupe: searched `repo:objectstack-ai/objectstack is:issue is:open` for \"report builder save 403 package\", \"report save custom overlay package\", \"ReportView save shipped report 403\": no open card on this path."
+}

@@ -1,0 +1,37 @@
+{
+  "number": 36665,
+  "kind": "pull_request",
+  "title": "fix(gantt): a gantt opens on a host with a maximum page size — walk to the row ceiling in steps instead of one 10,001-row read",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-23T10:33:48Z",
+  "updated_at": "2026-11-23T11:23:00Z",
+  "closed_at": "2026-11-23T11:22:58Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-23T11:22:58Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36665",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-warren\"} -->\n_Requested by **Warren** · [project thread](https://claude.ai/code/project/chan_01U5RdnAAmkSQmZbqh6FtqZ8?thread=cmsg_01U5RdnAAmkSQmZbqh6FtqZ8B1qFgH3ztNJnUAjp2JLA6H)_\n\nFixes #36663\nClause-②: no\nMetadata-protocol: none\n\n## What changes\n\n- `ui/packages/plugin-gantt/src/ganttRowWalk.ts` (new, not exported from the package index): `fetchGanttRows` reads the gantt's filtered result set up to `GANTT_ROW_CEILING` + the probe row in steps of `GANTT_FETCH_STEP` = `nonGridRowCeilingQuery().$top` (2,001), the one read the calendar, map, tree and timesheet already send. The first read is the authored query with `$top` = the step; when it settles the set (short, or an adapter that ignored `$top`) it is returned as is, envelope included, so a set that fits is still one read with the authored `$orderby` untouched. A FULL first read means more rows exist: the set is then walked from the top under a unique order, the authored `$orderby` with `id` appended as the tie-breaker in the last key's direction (`withIdTieBreak`; `asc` when nothing was authored), and rows are kept once by `id`/`_id`. `$skip` moves by the rows that came back; the walk stops at the first short answer or one row past the ceiling and answers `{ data, total? }`. It stops asking once a newer reload owns the screen.\n- `ObjectGantt`'s reload calls it in place of the single `find` with `...nonGridRowCeilingQuery(GANTT_ROW_CEILING)`. Everything else in the query (`$filter`, `$orderby`, `$expand`, `$search`) and the cut (`applyNonGridRowCeiling(result, GANTT_ROW_CEILING)`, `NonGridRowCeilingNote`) are unchanged.\n- `@object-ui/core` `non-grid-row-ceiling.ts`: docblocks only. `GANTT_ROW_CEILING` now says it is a stop condition, not a request size; `nonGridRowCeilingQuery` no longer says the gantt passes its ceiling to it.\n- Tests: the harness adapter honours `$skip`, and can refuse a `$top` over a maximum page size the way the server does. New block \"a host with a maximum page size of 5,000\": an empty object draws (one read, no refusal), 6,234 rows all draw with every `$top` at or under 5,000, and past 10,000 the ceiling and its note still show. Existing `$top` pins move from 10,001 to the step; the truncation case now pins the walk (`$top` sums to 10,001, each `$skip` is the rows before it, each carries `$orderby: { id: 'asc' }`). New `ganttRowWalk.test.ts` (7 cases): one read answered as is with the authored order, no read over the step, the tie-break order, a row kept once when an unstable adapter repeats it across a step boundary, and the stop once a newer reload owns the screen.\n\n## Why\n\nLive hosted customer (HotCRM PSA `crm_project_task`, gantt view `project_plan`): the view shows only \"Query parameter 'top' asks for 10001 rows; this deployment's maximum page size is 5000. The query was not run.\" The hosted plane sets `OS_DATA_MAX_PAGE_SIZE=5000`, and `planQueryReadWindow` refuses any `limit` over it before the driver runs, so the refusal depends on the `$top` asked for, not on the rows held: the maintainer confirmed that tenant's plan has no tasks at all. Every hosted gantt was unusable.\n\nDeviation from the card's fix direction, stated: the card proposed one shared walk in `@object-ui/core` used by every non-grid view. Only the gantt asks one read for more than the others: calendar, map, tree and timesheet send 2,001, which the hosted cap accepts. So the walk is private to `plugin-gantt` and steps at that same 2,001. No new public export (Clause-② no), and the other four views are untouched. A deployment whose cap is below 2,001 still refuses all five views alike; that is a separate question for a follow-up, not this fix.\n\nPaging order: the platform's drivers already append the `id` tie-breaker to a paged read (`driver-query-in-memory.ts` \"Sort and paging\"), but an adapter that does not would let offset steps over tied sort keys (a stage, a date) repeat one row and skip another, the finding raised on the sibling PR #36658. So the multi-step walk sends the unique order itself and dedupes by `id`. The first full read is re-read under that order rather than reused, which costs one extra read only for sets over 2,001 rows; it keeps every single-read case, and every existing `$orderby` pin, exactly as authored.\n\n## Verification\n\n- `npx vitest run packages/plugin-gantt/ packages/core/src/utils` (under `ui/`): 220 files passed, 1 skipped; 3,018 tests passed, 114 skipped (at 14353fe2). After the tie-break change, `packages/plugin-gantt/`: 97 files passed, 1 skipped; 809 tests passed, 114 skipped.\n- Reverse check: with the first step set back to 10,001, all three \"maximum page size of 5,000\" cases fail (the refusal is drawn instead of the chart); restored, they pass. With the dedupe removed, \"keeps a row once when tied keys move it across a step boundary\" fails; restored, it passes.\n- `pnpm type-check` in `ui/packages/plugin-gantt`: clean. `eslint` on the touched files: 0 errors (existing warnings only).\n- Delivery: the reporting tenant is hosted, so the fix reaches it only after a framework release and the cloud repo's framework pin moves and deploys.\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic.\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (not touched)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01JQwxbaTVGEEt267uyT6ufm\n\n<!-- signed: repo:objectstack#1 · os-warren · session_01JQwxbaTVGEEt267uyT6ufm -->\n"
+}

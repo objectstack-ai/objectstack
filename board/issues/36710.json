@@ -1,0 +1,33 @@
+{
+  "number": 36710,
+  "kind": "issue",
+  "title": "approvals: no wire-door conformance case and no checklist clause for the reason-required reject on the email action link",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:workflow",
+    "domain:server",
+    "finding",
+    "pm:queue",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-23T13:00:02Z",
+  "updated_at": "2026-11-23T13:00:43Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36710",
+  "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nFiling gate ① · Source: fleet · contract review 7101851923 on PR #36695 (#35722), nit N4, filed on seat 3's request (#32588 comment 7101877978). Parent topic #36243.\n\n## What is missing\n\n- No case in `packages/qa/http-conformance` drives the `400` confirm page (`reason_required`) through dispatcher + hono.\n- `docs/qa/platform-checklist/areas/approvals.json` has no clause for the reject reason on the link. Its redemption step still reads \"comment 'Via action link'\" without saying that this is approve-only.\n\n## Done when\n\n- A conformance case posts a reject with no or blank `comment` and expects the `400` confirm page; a reject with a reason redeems.\n- The checklist gains a clause for the link reject reason, and the redemption step says approve-only.\n\nTriage: lands in `area:workflow` · `domain:server` · `priority:p3` · Task · `pm:queue`; rationale: a coverage gap on behaviour that works today (unit-tested in #36695), so p3. It is kept because the wire door is where a regression would first be seen."
+}

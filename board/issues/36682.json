@@ -1,0 +1,37 @@
+{
+  "number": 36682,
+  "kind": "pull_request",
+  "title": "fix(automation): the stage-change approval mark follows the flows a run calls",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-23T11:17:54Z",
+  "updated_at": "2026-11-23T12:42:56Z",
+  "closed_at": "2026-11-23T12:42:54Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-23T12:42:54Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36682",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-support-ai\"} -->\n_Requested by **Yibo Wang** · [project thread](https://claude.ai/code/project/chan_01BVUyyPie8gHwoPM18iABwB?thread=cmsg_01BVUyyPie8gHwoPM18iABwBEaJzgBWzjWCNjBjkVoeRto)_\n\nFixes #36322\n\nrepo:objectstack#3 · os-support-ai · session_01WGufzi4PechTRCTBrfxV8W\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户能看到什么变化：成员把记录改到会触发审批的阶段时，若审批藏在被调用的子流程里，确认框里该流程现在也会标出「会发起审批」，之前漏标。\n- 为什么做：属于「审批收尾」专题，补上改阶段确认框清单里审批标记的漏网情况。\n- 出错会怎样：最坏是某个流程的审批标记多标或漏标，只影响确认框里的提示，不影响保存和流程本身，可直接撤回。\n- 要你做什么：无。\n\n## What changes\n\n- `listRecordUpdateStarts` (`POST /api/v1/automation/_record-starts`) set `startsApproval` only when the listed flow itself held an approval node. `showcase_project_closure` (examples/app-showcase) reaches its approval through a `subflow` node calling `showcase_closure_signoff`, so it was listed without the mark although the change starts an approval.\n- The mark now follows the flows a run calls: `flowReachesApproval` (module-private in `record-update-starts.ts`) walks from the listed flow through the engine's own reading of call targets, `AutomationEngine.subflowTargets` (`subflow` and `map` nodes at every region depth, a shared flow name resolved to the slot the caller's run dispatches to), and asks each flow reached the one existing approval test, `flowStartsApproval`. No second approval rule.\n- A call to a flow the engine does not hold, or holds disabled, is not followed (the run of such a child is refused, so no approval starts). Each flow is visited once, so a self-calling flow or a cycle of flows ends.\n- `engine.ts`: one line, the record-update-starts host literal now passes `subflowTargets` (the existing private method). This is outside the claim's file surface (`record-update-starts.ts` and its tests); see Acceptance notes.\n- Ruling 7073655354 on #35928 (\"A flow that contains an approval node is marked as starting an approval (ADR-0019: an approval is a node inside a flow).\") is implemented, not changed: the answer stays one boolean per listed flow, no subflow name or node is served, and the ruling's basis records that the platform has no per-flow view permission, so no flow the caller may not see is revealed.\n\n## Tests\n\nNew top-level `describe` in `record-update-starts.test.ts` (the module's existing harness file):\n\n- marks a flow whose subflow holds the approval node;\n- marks a flow whose approval sits two calls down;\n- does not mark a flow whose subflow holds no approval (CONTROL);\n- ends on a flow that calls itself, and on a cycle of flows, without marking either;\n- does not follow a call to a disabled flow;\n- does not follow a call to a flow the engine does not hold.\n\n<details><summary>Run readings (head 1966dced)</summary>\n\n- `pnpm --filter @objectstack/service-automation exec vitest run --maxWorkers=2 src/record-update-starts.test.ts`: Test Files 1 passed (1), Tests 14 passed (14).\n- `pnpm --filter @objectstack/service-automation test`: Test Files 293 passed (293), Tests 4264 passed (4264); lock VERDICT command-exit 0.\n- `pnpm --filter @objectstack/service-automation typecheck`: VERDICT command-exit 0; `tsc --listFiles` includes `record-update-starts.test.ts`.\n- Ablation 1 (via `scripts/ablation-replace.mjs`, tests import `src/`, no build involved): the subflow follow replaced by an empty target list, anchor 1 to 0, blob 26f2db07 to 6aa7aeef; 2 failed (both \"marks\" pins), 12 passed; restored, blob equals HEAD, `git diff HEAD` empty.\n- Ablation 2: the enabled check on a call target replaced by `true`, anchor 1 to 0, blob 26f2db07 to 180d531d; 1 failed (the disabled-flow pin), 13 passed; restored, blob equals HEAD.\n- The cycle guard was not ablated: without it the walk is a synchronous infinite loop that vitest cannot time out.\n\n</details>\n\n## Acceptance notes\n\n- File surface: the claim names `record-update-starts.ts` and its tests. The host the module reads is built in `engine.ts` (`listRecordUpdateStarts`), and the call-target reading that resolves a shared flow name to its slot is a private engine method, so the one-line host addition is the only way to follow subflows without a second resolver. Declared here for the seat; no other `engine.ts` line moves.\n- Depth: the walk visits each distinct flow once and does not mirror the subflow node's runtime nesting cap (16). An approval only reachable past 16 distinct nested flows would be marked although a run refuses there; not covered.\n\n## Verification\n\nTwo-minute check: `pnpm --filter @objectstack/service-automation exec vitest run --maxWorkers=2 src/record-update-starts.test.ts` shows 14 passed, including the six pins under \"approval reached through a subflow (#36322)\".\n\nRead first: `packages/services/service-automation/src/record-update-starts.ts` (`flowReachesApproval`, the walk and its two not-followed cases), then the one-line host addition in `engine.ts`.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01WGufzi4PechTRCTBrfxV8W\n\n<!-- signed: repo:objectstack#3 · os-support-ai · session_01WGufzi4PechTRCTBrfxV8W -->\n"
+}

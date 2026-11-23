@@ -2,8 +2,8 @@
   "number": 36374,
   "kind": "issue",
   "title": "报表搭建页：右边五项（报表类型、数据来源、指标、分组、图表），选完数据来源立刻出图，缺什么就在图的位置提示",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:ux",
     "domain:ui",
     "enhancement",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -23,9 +22,13 @@
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-22T08:17:21Z",
-  "updated_at": "2026-11-23T07:17:55Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-23T08:41:10Z",
+  "closed_at": "2026-11-23T08:40:23Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 8,
   "locked": false,

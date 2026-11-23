@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "repo": "objectstack-ai/objectstack",
-  "generated_at": "2026-11-23T08:26:18.496Z",
+  "generated_at": "2026-11-23T14:20:49.415Z",
   "walk_phase": "incremental",
   "walk": {
     "open_set": {
@@ -11,8 +11,8 @@
     },
     "delta": {
       "complete": true,
-      "cursor": "2026-11-23T08:10:43.450Z",
-      "since": "2026-11-22T20:01:44.254Z",
+      "cursor": "2026-11-23T14:04:36.718Z",
+      "since": "2026-11-23T08:10:43.450Z",
       "slice": 300
     },
     "history": {
@@ -20,28 +20,28 @@
       "cursor": "2026-09-23T20:24:00Z"
     }
   },
-  "since": "2026-11-22T20:01:44.254Z",
-  "since_reason": "incremental from the previous run's next_since (2026-11-22T20:01:44.254Z)",
-  "next_since": "2026-11-23T08:10:43.450Z",
+  "since": "2026-11-23T08:10:43.450Z",
+  "since_reason": "incremental from the previous run's next_since (2026-11-23T08:10:43.450Z)",
+  "next_since": "2026-11-23T14:04:36.718Z",
   "resume": null,
   "counts": {
-    "issues_open": 542,
-    "issues_closed": 16211,
+    "issues_open": 527,
+    "issues_closed": 16258,
     "issues_transferred": 11,
-    "pulls_open": 35,
-    "pulls_closed": 17735,
-    "records": 34534
+    "pulls_open": 46,
+    "pulls_closed": 17771,
+    "records": 34613
   },
   "board": {
-    "open_issues_count": 510,
-    "open_pull_requests": 30,
-    "read_at": "2026-11-23T08:26:09.395Z"
+    "open_issues_count": 506,
+    "open_pull_requests": 41,
+    "read_at": "2026-11-23T14:20:48.447Z"
   },
   "count_check": {
     "verdict": "ok",
     "reason": null,
-    "expected": 480,
-    "archived": 542,
+    "expected": 465,
+    "archived": 527,
     "shortfall": 0,
     "surplus": 0,
     "gone_ledger": 62,
@@ -52,10 +52,10 @@
     "pending_since": null,
     "reason": null
   },
-  "requests": 416,
+  "requests": 334,
   "run": {
-    "numbers_read": 212,
-    "files_written": 397,
+    "numbers_read": 178,
+    "files_written": 340,
     "walk_complete": true,
     "open_set_completed_here": false,
     "delta_ran": false,
@@ -65,15 +65,28 @@
     "reconcile": {
       "first": {
         "verdict": "ok",
-        "expected": 480,
-        "archived": 542,
+        "expected": 465,
+        "archived": 526,
         "shortfall": 0,
         "surplus": 0
       },
-      "listed": 510,
-      "candidates": 5,
+      "listed": 506,
+      "candidates": 8,
       "left": 0,
-      "reread": [],
+      "reread": [
+        {
+          "number": 36375,
+          "state": "closed"
+        },
+        {
+          "number": 36726,
+          "state": "open"
+        },
+        {
+          "number": 36727,
+          "state": "open"
+        }
+      ],
       "transferred": [],
       "destroyed": [
         {
@@ -100,7 +113,7 @@
       "unreadable": [],
       "blank_pages_reasked": 0,
       "reason": null,
-      "wrote": 0,
+      "wrote": 4,
       "cut_short": false
     }
   }

@@ -2,8 +2,8 @@
   "number": 36628,
   "kind": "issue",
   "title": "skills(objectstack-data): object colour guidance says 'avoid repeats in one app'; the platform now colours by business family",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,21 @@
   "labels": [
     "area:ai",
     "domain:skills",
-    "pm:queue",
     "priority:p1"
   ],
   "assignees": [],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-23T04:25:25Z",
-  "updated_at": "2026-11-23T04:46:29Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-23T13:37:44Z",
+  "closed_at": "2026-11-23T13:34:26Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36628",
   "body": "repo:objectstack#1 · os-warren · session_01JQwxbZeHNsF3RWcWpj7rGj\n\nFiling gate ① · Source: fleet · the follow-up named by #36592 (\"teach AI authors to pick a colour\", the maintainer's direct dispatch 「立卡派」), filed by seat repo:objectstack#1 after PR #36605 merged.\n\n## What\nPR #36605 gave the built-in and example objects a palette `color`, picked by **business family**. The maintainer approved the family table as written (2026-11-23, 03:54Z). Its rules:\n- one hue per family (people `blue`, security `purple`, approvals and work `orange`, messaging `pink`, integrations `teal`, reference data and finance `green`, audit and settings `amber`);\n- `red` left unused because it reads as an alarm;\n- objects nobody opens in the console keep no `color` and stay `gray`.\n\n`skills/objectstack-data/SKILL.md` (the `color` row of the object property table) tells AI authors instead: \"Give every object one; avoid repeats in one app\". That conflicts with the platform's own practice. With nine names, any app over nine objects must repeat a colour. The skill also gives no reason to pick one hue over another. `references/examples-objects.md`'s object example has an `icon` but no `color`.\n\n## Done when\n- The `color` guidance in `skills/objectstack-data` tells an author to group the app's objects into a few business families, give each family one palette name, reserve `red` for objects that really are alerts, and leave internal or never-opened objects without a colour. It cites the platform's own objects as the worked example. It does not name card ids.\n- The object example in `references/examples-objects.md` declares a `color`.\n- If an eval in `skills/objectstack-data/evals/` checks object authoring, its reference answer agrees with the new guidance.\n\nreach: every AI-authored object; the console draws the colour on nav, headers, related lists and search.\nBusiness reason: AI-built apps should look as organised as the platform's own Setup.\nReader: `skills/**` (Tier H; os-zhuang approves).\nDedupe: `object color skill`, `avoid repeats in one app`, `palette family` → none.\nGrade suggestion: p2. Triage decides."

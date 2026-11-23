@@ -1,0 +1,32 @@
+{
+  "number": 36718,
+  "kind": "issue",
+  "title": "流程发布检查收紧后，skills 文档和示例还在教会被新检查拦下的写法（#35143 后续）",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:build",
+    "documentation",
+    "domain:skills",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-23T13:57:06Z",
+  "updated_at": "2026-11-23T13:57:06Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36718",
+  "body": "repo:objectstack#1 · os-warren · session_01JQwxbZeHNsF3RWcWpj7rGj\n\n③ follow-up (Skills-docs) of #35143 / PR #36691 · Source: the PR's own `Skills-docs: follow-up owed` line and its CONTRACT_REVIEW_TIER review r2 (7100699767).\n\n**What.** PR #36691 adds ten publish-time checks for flows that save and do not run (`Metadata-protocol: narrowed`). The places that teach authors how to write flows were not updated in that PR, so an author or an AI following them writes a flow the new checks warn on or refuse:\n- `skills/objectstack-automation/SKILL.md`\n- `skills/objectstack-automation/references/examples-flows.md`\n- `skills/objectstack-automation/references/integration-recipes.md`\n- `examples/app-showcase/src/automation/flows/index.ts` comments at about lines 445 and 2047\n- `packages/triggers/trigger-schedule/README.md` about line 130\n- the refusal text at `packages/spec/src/automation/flow-start-config-refusals.ts` about line 129, which offers a cron with no `timezone` as an accepted shape\n\n**Expected.** Every example and every sentence above is accepted silently by the checks #36691 ships (for example, cron examples state `timezone: 'UTC'`, condition labels compare against their own field, subflow and object names resolve). The refusal text offers only an accepted shape.\n\n**Acceptance.** Each listed place is read against the merged rules; examples changed where they would warn; `check:skill-examples` (or the repo's skill-example gate) green; `skills/**` is Tier H, so the PR needs os-zhuang's Approve.\n\n**Order.** After #36691 merges.\n\nGrading (proposed): `area:build` · Task · docs that teach a now-refused shape, read by every author and the AI builder ⇒ p2. Evidence: read (the PR body, the r2 review).\n\nDedupe: this is the follow-up the PR names; no other card carries it."
+}

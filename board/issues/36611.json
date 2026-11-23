@@ -2,8 +2,8 @@
   "number": 36611,
   "kind": "issue",
   "title": "Skills follow-up of #36455: objectstack-data still points at the removed subforms section and does not teach showOnCreate; automation and the skills README still route single-object step forms to wizard",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -15,18 +15,21 @@
     "documentation",
     "domain:skills",
     "finding",
-    "pm:queue",
     "priority:p1"
   ],
   "assignees": [],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-23T02:44:35Z",
-  "updated_at": "2026-11-23T05:21:37Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-23T13:38:18Z",
+  "closed_at": "2026-11-23T13:34:28Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 5,
+  "comments": 9,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36611",
   "body": "repo:objectstack#2 · os-steve · session_01ADHkmRY38EZf38Yy3zthbY\n\nFiled by the seat from the #36455 dev (PR #36609, `skills/objectstack-ui`), outside that card's scope. Not claimed. Related: #36455, #36158 (in flight on the same objectstack-data file).\n\nSuggested-grade: p2\nSuggested-domain: `domain:skills`\n\n## Where\n\n1. `skills/objectstack-data/.../relationships.md` around line 278 still links to the subforms override section that was removed.\n2. The objectstack-data skill does not teach `showOnCreate` (the UI skill now does, after #36455).\n3. `skills/objectstack-automation/SKILL.md` around line 44 and `skills/README.md` around line 125 route \"a single-object step form\" to wizard. Today that holds only for a named form that an action opens.\n\n## Ask\n\nCorrect the three places so a metadata author is taught the current behaviour, with the evals that exercise it. Run the overlap check against #36158 before claiming (same objectstack-data file); land after it if both are open.\n\n## Re-check\n\n`git grep -n \"subforms\" skills/objectstack-data` and `git grep -n -i \"wizard\" skills/objectstack-automation/SKILL.md skills/README.md` show the stale lines until fixed."

@@ -1,0 +1,37 @@
+{
+  "number": 36681,
+  "kind": "pull_request",
+  "title": "feat(connector-slack): make ConnectorSlackPlugin's static bot token optional",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-23T11:14:25Z",
+  "updated_at": "2026-11-23T12:53:35Z",
+  "closed_at": "2026-11-23T12:53:33Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-23T12:53:33Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36681",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-support-ai\"} -->\n_Requested by **Yibo Wang** · [project thread](https://claude.ai/code/project/chan_01BVUyyPie8gHwoPM18iABwB?thread=cmsg_01BVUyyPie8gHwoPM18iABwB7rHCNuVSmroKh1hDHw61rk)_\n\nFixes #35791\n\nrepo:objectstack#3 · os-support-ai · session_01WGufzh5qSa4qh6mCPSykM6\n\nClaim: seat 3 comment 7099367389 on the card, naming branch claude/project-thread-oxj1ql.\n\nClause-②: yes (widening)\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户能看到什么变化：只用各组织自己 Slack 令牌发私信的部署，装 Slack 插件时不必再填一个占位的机器人令牌；不填时启动日志说一句「流程里的 Slack 连接器没注册」，填了则一切照旧。\n- 为什么做：Slack 私信渠道（替各组织用自己的令牌给成员发 Slack 私信）上线后留下的收尾，插件的令牌只给流程连接器用，私信用不到。\n- 出错会怎样：没填令牌的部署里，流程若引用 Slack 连接器，会和没装插件时一样执行失败；填了令牌的部署行为不变，可直接撤回本改动。\n- 要你做什么：无。\n\n## What changes\n\n- `ConnectorSlackPluginOptions` is now `Omit<SlackConnectorOptions, 'token'>` plus `token?: string`, and the constructor's options argument is optional.\n- `start()`: without a token (absent or empty string) the plugin logs one info line (`no static bot token — flow Slack connector not registered; the 'slack' client service serves caller-held tokens only`) and returns before touching the automation engine. With a token it registers the `slack` flow connector exactly as before.\n- `init()` is unchanged: the `slack` client service (`createSlackClientService`, already token-free since #35789) is registered in both compositions.\n- `SlackConnectorOptions.token` and `createSlackConnector` are unchanged: the connector itself still requires a token.\n\n## Tests\n\n`packages/connectors/connector-slack/src/connector-slack-plugin.test.ts`, new block \"composed without a static bot token\":\n\n- Kernel composition with `{ fetchImpl }` only: the automation engine is up (`connector_action` registered, positive control) and has no `slack` connector; the `slack` client service sends with the caller's token.\n- Kernel composition with `new ConnectorSlackPlugin()`: boots, no connector, client service present.\n- Harness context, token omitted and token `''`: exactly one info line, the registry's `registerConnector` never called, `destroy()` a no-op.\n- Same harness with a token: the connector is registered (control for the skip).\n\nThe existing token-ful tests (end-to-end flow post, client service, shutdown unregister) are unchanged and green, which pins the \"with a token, unchanged\" half.\n\n## Acceptance notes\n\n- Clause-② measured on the built declaration: `packages/connectors/connector-slack/dist/index.d.ts` exports `type ConnectorSlackPluginOptions` from the package entry (`exports[\".\"]`, `files: [\"dist\", …]`), now spelled `interface ConnectorSlackPluginOptions extends Omit<SlackConnectorOptions, 'token'> { token?: string; }` and `constructor(options?: ConnectorSlackPluginOptions)`. Published surface, widened only: every value accepted before is still accepted. Hence `yes (widening)`; it owes the seat's TIER_DEFAULT review of the declaration.\n- `Metadata-protocol: none`: a plugin constructor option, not stored metadata. Kind `none` ⇒ `patch`.\n- An empty-string token is read as absent, so a deployment wiring an unset environment value through as `\"\"` gets the skip and its log line rather than a connector that fails every call with `not_authed`.\n- No other in-repo composition passes a tokenless option today (runtime and service-messaging composition tests all pass a token), so no consumer changes.\n\n## Verification\n\nTwo-minute check: `pnpm --filter @objectstack/connector-slack exec vitest run src/connector-slack-plugin.test.ts`, expect 7 passed.\n\n<details><summary>Local runs (head 28847962)</summary>\n\n- `pnpm --filter '@objectstack/connector-slack^...' build` under the verify lock: `VERDICT command-exit 0`.\n- `pnpm --filter @objectstack/connector-slack test && … typecheck && … build`: `Test Files 3 passed (3)`, `Tests 16 passed (16)`, `VERDICT command-exit 0`. `tsc --listFiles` includes the 3 test files.\n- Ablation (source-imported test, no dist leg): `node scripts/ablation-replace.mjs` replaced `if (!token) {` with `if (false as boolean) {` (anchor 1 → 0, blob 67ae6dad → 0d7e87e8); `src/connector-slack-plugin.test.ts` went `Tests 4 failed | 3 passed (7)`, the four tokenless cases red; restored, blob == HEAD 67ae6dad, `git diff HEAD` empty.\n- Derived gate families (`dispatch-gates.mjs --commands`, 65): 64 run with exit 0, 1 NOT MEASURED: `pnpm check:dual-build-cjs-loads` exit 3 (PREREQUISITE NOT MET, 39 untouched packages without `dist/`; CI builds and runs it). `check-plugin-teardown-shape --self-test` first exited 3 on the shallow clone, re-run after fetching its pinned fixture: 48 cases pass. `dispatch-gates.mjs --ran`: \"65 derived famil(ies) accounted for — 64 run, 1 NOT-MEASURED\". Change set 132 lines, under the 3000-line human-merge threshold.\n\n</details>\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (not touched)\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes. (CI)\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (not touched)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01WGufzh5qSa4qh6mCPSykM6)_\n\n<!-- signed: repo:objectstack#3 · os-support-ai · session_01WGufzh5qSa4qh6mCPSykM6 -->\n"
+}

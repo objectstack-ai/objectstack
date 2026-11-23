@@ -1,0 +1,37 @@
+{
+  "number": 36657,
+  "kind": "pull_request",
+  "title": "feat(console): build a new report from the design mode's Add menu item",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-23T09:26:33Z",
+  "updated_at": "2026-11-23T10:12:43Z",
+  "closed_at": "2026-11-23T10:12:41Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-23T10:12:41Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36657",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-warren\"} -->\n_Requested by **Warren** · [project thread](https://claude.ai/code/project/chan_01U5RdnAAmkSQmZbqh6FtqZ8?thread=cmsg_01U5RdnAAmkSQmZbqh6FtqZ89Betg8QPoUPD5NhDenSfS2)_\nFixes #36364\nClause-②: yes (widening) — three new `@object-ui/i18n` keys (`designMode.menu.newReport`, `designMode.menu.newReportLeft`, `report.builder.addsToMenu`) in all 11 locales; no spec, schema or public export change\nMetadata-protocol: none\n\nrepo:objectstack#1 · os-warren · session_01JQwxbXq2Dxb31zZNmSqCtz\n\n## 维护者速读\n\n- 用户能看到什么变化：管理员在设计模式里「添加菜单项 → 报表」，第一行是「新建报表…」，点了会占好菜单位置并打开报表搭建页；选好数据来源和指标、保存后，新报表出现在占好的位置，设计模式里的其他改动一起保存。\n- 为什么做：设计模式专题卡的报表这一半，按席位定的方案：报表必须先有数据来源和指标，所以从搭建页新建，而不是只填名字。\n- 出错会怎样：菜单保存失败时，刚建的报表会被删掉，设计模式和搭建页都保持打开；中途关闭搭建页或离开它，什么都不写、占位消失；可以直接撤回本次合并。\n- 要你做什么：不用做什么。\n\n## What changes\n\nThe report half of #36364, on top of the report builder (#36644), per the seat's ruling (option A, comment 7090058961): a report needs `dataset` and `values`, so 「New report…」 opens the builder, and the report and its menu entry are written only when the builder saves.\n\n- **Picker** (`DesignModeMenu.tsx`): the Reports list starts with 「New report…」. It holds the place (the dashed row now reads 「New report…」), offers a slot, and navigates to the app's `reports/new`. Nothing is written.\n- **The slot** (`designModeReportSlot.ts`, new): the menu lives in the sidebar and the builder in the page, with no shared tree, so a module-level store holds one slot `{ path, save, cancel }`. It is keyed by the builder's address, not the app's name, because the console addresses an app by its route segment (the showcase app is `/apps/com.example.showcase`, its name `showcase_app`). This was found on the live run, and a page test pins it. The menu withdraws the slot when the place is dropped and when it unmounts (the design mode ended). Without a slot the builder is the plain new-report page, as before.\n- **The builder page** (`ReportNewPage.tsx`): when a slot waits on its address, it says 「Saving creates this report and adds it to the menu where you placed it, with your other design changes.」. Its Save hands `(name, label, body)` to the slot and writes nothing itself. A refused save keeps the builder open. Its Close cancels the place and goes back.\n- **The save** (`designModeMenuCreate.ts`): `NewMenuItem` gains a `report` arm carrying the builder's body. `saveAppMenuWithNewItem` runs the dashboard half's order unchanged: every menu-save check first, then the report saved and published in the menu's own package (`saveAndPublishInPackage`, the package-bound door `saveDashboardInPlace` now shares), then the menu written with the entry in the held place and every other staged edit (`saveWith`). On a refused menu the report is removed again.\n- **Leaving the builder another way** (a menu link, Back) drops the held place too, so no row waits for a builder that is gone.\n- **The entry's label**: a report entry with no `label` shows its machine name (only object, view and dashboard entries inherit their target's label, per the cloud#2021 ruling), so the new entry carries the report's label. The live run first showed `hui_kuan_fenxi` in the menu, and this fixes it.\n\n## Tests\n\n- `pnpm --dir ui exec vitest run packages/app-shell/src/layout packages/app-shell/src/views/ReportNewPage` at `f3021225`: `Test Files 157 passed (157)`, `Tests 1284 passed (1284)`. `DesignModeMenu-36363.test.tsx` was rerun at head `ecbe0f66` after the label change: `38 passed`. Earlier at `f7737e36`, `packages/i18n` gave `1978 passed`, with the de quote-pairing count raised 128 → 129 for `newReportLeft`'s „{{name}}“.\n- New pins:\n  - `designModeMenuCreate-36364.test.ts`: 4 report cases. They cover the body, the package write order (ensure → save/publish report → save/publish app), a refused menu resetting the report, and an unlisted package creating nothing.\n  - `DesignModeMenu-36363.test.tsx`: 5 report cases. They cover the picker row holding the place and writing nothing; the builder's Save writing the report, then the menu with the labelled entry and the other staged edit, then leaving the mode; a refused menu; the builder's Close; and leaving the builder.\n  - `ReportNewPage.menuSlot-36364.test.tsx`: 5 cases. They cover Save going through the slot; a refused save staying open; Close cancelling and going back; a route segment other than the app's name; and another app's slot not being used.\n- Ablations (one-shot, not kept): without the page change, the page file went 3 failed | 1 passed. Without the menu change, all 5 menu report cases were red.\n- `tsc --noEmit` (app-shell) exit 0. ESLint on the changed files: 0 errors. `check-i18n-call-site-keys` exit 0.\n\n## Screenshots\n\nTaken on the live showcase example (fresh backend, console dev server, zh-CN, deviceScaleFactor 2). They are stored with the seat's project files (`issue-36364/`):\n\n1. 「添加菜单项 → 报表」, with 「新建报表…」 first.\n2. The builder, with the held 「新建报表…」 row under 数据分析 and the 「adds to the menu」 line.\n3. The builder filled: Invoice Metrics, grouped by status, named 回款分析.\n4. After Save: the design mode is left, and 「回款分析」 sits in the held place, open.\n5. Cancel path: a second 「新建报表…」, closed from the builder. The page goes back, no held row is left, and the mode stays on.\n\nChecked through the API after the run:\n- `report/hui_kuan_fenxi` is stored in `com.example.showcase.custom`, the menu's package (the same item Studio lists), with `_diagnostics.valid: true`.\n- The app's menu holds `{ id: nav_item_1, type: report, reportName: hui_kuan_fenxi, label: 回款分析 }` under `grp_analytics`.\n- It is the only `hui_kuan*` report, so the cancelled build left nothing.\n\n## Overlap\n\n`overlap-check`: merges cleanly with main, #36655 and #36525. With #36629 it conflicts only in `de-quote-pairing-3876.test.ts`, because both PRs raise the same German quote count. Whichever lands second re-adds 1 to the count.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}
