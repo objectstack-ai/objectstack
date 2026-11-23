@@ -20,9 +20,10 @@
  * no create, no bulk action, no view switch, no saved view.
  *
  * The record's name opens its full page through the host
- * (`DrillNavigationContext.openRecord`, item 6), with the rows the list shows
- * as the page's ↑ ↓ set and the count it matched; no record panel is stacked
- * over the drill. A host with no record page (a page block's metric or pivot
+ * (`DrillNavigationContext.openRecord`, item 6), with the drill's whole
+ * result as the page's ↑ ↓ set and the count it matched (`drillRecordOrigin`,
+ * objectstack-ai/objectstack#36554: the rows past the page drawn are read by
+ * the list's own query); no record panel is stacked over the drill. A host with no record page (a page block's metric or pivot
  * mounts no navigation) opens the record in a dialog showing the fields the
  * list lists: the list reads only those (`$select`), so a field it did not
  * read is not drawn as empty.
@@ -39,6 +40,7 @@ import { FILTER_DATE_LIKE_TYPES } from '@object-ui/types';
 import { Loader2 } from 'lucide-react';
 import { RecordDetailDrawer } from './RecordDetailDrawer';
 import { drillListConditions } from './drillConditions';
+import { drillRecordOrigin } from './drillRecordSteps';
 
 /** The registry key of the standard list (`@object-ui/plugin-list`). */
 export const DRILL_LIST_COMPONENT = 'list-view';
@@ -116,7 +118,13 @@ export const DrillRecordList: React.FC<DrillRecordListProps> = ({
 
   const [added, setAdded] = React.useState<string[]>([]);
   const [summaries, setSummaries] = React.useState<Record<string, Summary>>({});
-  const shown = React.useRef<{ ids: string[]; total?: number }>({ ids: [] });
+  const shown = React.useRef<{
+    ids: string[];
+    total?: number;
+    findParams?: Readonly<Record<string, unknown>> | null;
+  }>({ ids: [] });
+  // One record page at a time: a second click while the step set is read is dropped.
+  const opening = React.useRef(false);
   const [opened, setOpened] = React.useState<Record<string, unknown> | null>(null);
 
   const baseColumns = React.useMemo(() => {
@@ -173,14 +181,22 @@ export const DrillRecordList: React.FC<DrillRecordListProps> = ({
         shown.current = { ...shown.current, ids: rows.map(rowId).filter((id): id is string => !!id) };
       }}
       onTotalChange={(total: number) => { shown.current = { ...shown.current, total }; }}
+      onFindParamsChange={(findParams: Readonly<Record<string, unknown>> | null) => {
+        shown.current = { ...shown.current, findParams };
+      }}
       rowOpensRecord
       onRowClick={(record: Record<string, unknown>) => {
         if (!openRecord) return setOpened(record);
         const id = rowId(record);
-        if (!id) return;
-        const { ids, total } = shown.current;
-        openRecord(objectName, id, { siblings: ids.includes(id) ? ids : [id], ...(total != null ? { total } : {}) });
-        onNavigate?.();
+        if (!id || opening.current) return;
+        opening.current = true;
+        const { ids, total, findParams } = shown.current;
+        void drillRecordOrigin({ dataSource, objectName, recordId: id, drawn: ids, total, findParams })
+          .then((origin) => {
+            openRecord(objectName, id, origin);
+            onNavigate?.();
+          })
+          .finally(() => { opening.current = false; });
       }}
     />
     {!openRecord && (
