@@ -3691,11 +3691,13 @@ const fr = {
       notWritable: 'Le package de personnalisation de cette application n’est pas modifiable : son menu ne peut pas être enregistré.',
       newDashboard: 'Nouveau tableau de bord…',
       newDashboardTitle: 'Nouveau tableau de bord',
+      newReport: 'Nouveau rapport…',
       newItemSavesAll: 'Le créer enregistre aussi vos autres modifications de design, puis l’ouvre en modification.',
       create: 'Créer',
       creating: 'Création…',
       newItemPendingDraft: 'Un brouillon portant ce nom est déjà en attente. Réessayez.',
       newItemLeft: 'Le nouveau tableau de bord « {{name}} » n’a pas pu être supprimé ; supprimez-le dans Studio.',
+      newReportLeft: 'Le nouveau rapport « {{name}} » n\'a pas pu être retiré ; retirez-le dans Studio.',
     },
     recordTabs: {
       entry: 'Configurer les onglets',
@@ -4153,6 +4155,7 @@ const fr = {
       settings: "Paramètres du rapport",
       pendingDraft: "Ce rapport a des modifications non publiées. Publiez-les ou supprimez-les ci-dessus, puis enregistrez.",
       nameTaken: "Tous les identifiants dérivés de ce nom sont déjà pris. Donnez un autre nom au rapport, puis enregistrez.",
+      addsToMenu: "L'enregistrement crée ce rapport et l'ajoute au menu à l'emplacement choisi, avec vos autres modifications de conception.",
       adminOnlyTitle: "Seuls les administrateurs de l’espace de travail peuvent créer des rapports",
       adminOnly: "Un rapport est partagé avec tout l’espace de travail ; c’est donc un administrateur qui le crée.",
       type: {

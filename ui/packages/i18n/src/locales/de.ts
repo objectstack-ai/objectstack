@@ -3613,11 +3613,13 @@ const de = {
       notWritable: 'Das Anpassungspaket dieser App ist nicht beschreibbar, daher kann ihr Menü nicht gespeichert werden.',
       newDashboard: 'Neues Dashboard…',
       newDashboardTitle: 'Neues Dashboard',
+      newReport: 'Neuer Bericht…',
       newItemSavesAll: 'Beim Erstellen werden auch Ihre anderen Designänderungen gespeichert; danach wird es zum Bearbeiten geöffnet.',
       create: 'Erstellen',
       creating: 'Wird erstellt…',
       newItemPendingDraft: 'Unter diesem Namen liegt bereits ein unveröffentlichter Entwurf. Versuchen Sie es erneut.',
       newItemLeft: 'Das neue Dashboard „{{name}}“ konnte nicht wieder entfernt werden; entfernen Sie es in Studio.',
+      newReportLeft: 'Der neue Bericht „{{name}}“ konnte nicht wieder entfernt werden; entfernen Sie ihn in Studio.',
     },
     recordTabs: {
       entry: 'Tabs konfigurieren',
@@ -4067,6 +4069,7 @@ const de = {
       settings: "Berichtseinstellungen",
       pendingDraft: "Dieser Bericht hat unveröffentlichte Änderungen. Veröffentlichen oder verwerfen Sie sie oben und speichern Sie dann.",
       nameTaken: "Alle aus diesem Namen gebildeten Kennungen sind bereits vergeben. Geben Sie dem Bericht einen anderen Namen und speichern Sie dann erneut.",
+      addsToMenu: "Beim Speichern wird dieser Bericht erstellt und an der gewählten Stelle ins Menü aufgenommen, zusammen mit Ihren anderen Designänderungen.",
       adminOnlyTitle: "Nur Workspace-Administratoren können Berichte erstellen",
       adminOnly: "Ein Bericht gilt für alle im Workspace, daher erstellt ihn ein Administrator.",
       type: {

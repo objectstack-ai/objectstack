@@ -38,6 +38,10 @@
  * place, and the mode saves at once, every other staged change with it
  * (`saveAppMenuWithNewItem`); then the mode is left and the new dashboard
  * opens for editing (`dashboardEditArrival`). 「Cancel」 writes nothing.
+ * In 「Reports」 the first row is 「New report…」: a report needs a data source
+ * and a measure, so the place stays held and the report builder opens; its
+ * Save creates the report and saves the mode the same way
+ * (`designModeReportSlot`), and its Close drops the place, writing nothing.
  *
  * Every edit is staged with the mode (`useDesignModeChange`), under one key
  * for the app's menu: the mode's 「Save」 writes it (`saveAppMenu`), its
@@ -56,7 +60,7 @@
  */
 
 import * as React from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
   DndContext,
@@ -160,6 +164,7 @@ import {
 } from './designModeMenuSave.js';
 import { freeItemName, isNewMenuItemKind, saveAppMenuWithNewItem, type NewMenuItemKind } from './designModeMenuCreate.js';
 import { dashboardEditArrival } from './designModeArrival.js';
+import { offerNewReportSlot, withdrawNewReportSlot, type NewReportSlot } from './designModeReportSlot.js';
 
 /**
  * The group label's icon-mode hiding, as the sidebar's own labels declare it
@@ -417,6 +422,79 @@ export default function DesignModeMenu({ app, basePath, resolveTargetLabel, reso
     return true;
   };
 
+  // objectstack#36364 (report half) — 「New report…」: a report cannot be
+  // made from a name (the spec wants `dataset` and `values`), so the place
+  // stays held and the report builder opens at `reports/new`. The builder
+  // saves through the slot offered here (`designModeReportSlot`): the report
+  // is created in the menu's package and its entry saved in the held place
+  // with every other staged change, in one act; nothing is written before.
+  // The builder's Close drops the place. Resolves `false` when nothing was
+  // saved (the mode has said why); the builder stays open for another try.
+  const [buildingReport, setBuildingReport] = React.useState(false);
+  const saveNewReport = async (name: string, label: string, body: Record<string, unknown>): Promise<boolean> => {
+    if (!addAt) return false;
+    const entry = entryFor('report', name, newEntryId([...menu, ...(storedMenu ?? [])]));
+    const itemTexts = {
+      ...texts,
+      itemPendingDraft: t('designMode.menu.newItemPendingDraft', {
+        defaultValue: 'A draft with this name is already pending. Try again.',
+      }),
+      itemLeft: t('designMode.menu.newReportLeft', {
+        defaultValue: 'The new report "{{name}}" could not be removed again; remove it in Studio.',
+        name: label,
+      }),
+    };
+    const saved = await saveWith(insertEntry(menu, addAt.parentId, addAt.index, entry), (navigation) =>
+      saveAppMenuWithNewItem(
+        { appName, packageId, served, navigation, item: { kind: 'report', name, label, body } },
+        itemTexts,
+        consoleAppMenuDoors(client as never),
+      ),
+    );
+    if (!saved) return false;
+    setAddAt(null);
+    setBuildingReport(false);
+    return true;
+  };
+  const saveNewReportRef = React.useRef(saveNewReport);
+  React.useLayoutEffect(() => {
+    saveNewReportRef.current = saveNewReport;
+  });
+  React.useEffect(() => {
+    if (!buildingReport) return;
+    const slot: NewReportSlot = {
+      appName,
+      save: (name, label, body) => saveNewReportRef.current(name, label, body),
+      cancel: () => {
+        setBuildingReport(false);
+        setAddAt(null);
+      },
+    };
+    offerNewReportSlot(slot);
+    // Withdrawn when the place is no longer held, and when the menu unmounts
+    // (the design mode ended): the builder then saves on its own, off the menu.
+    return () => withdrawNewReportSlot(slot);
+  }, [buildingReport, appName]);
+  // Leaving the builder another way than its Save or Close (a menu link, the
+  // browser's Back) drops the place too, so no held row waits for a builder
+  // that is gone. Read once the builder has been reached.
+  const { pathname } = useLocation();
+  const newReportPath = `${basePath}/reports/new`;
+  const [reachedBuilder, setReachedBuilder] = React.useState(false);
+  const onBuilder = pathname === newReportPath || pathname.endsWith(newReportPath);
+  if (buildingReport && onBuilder && !reachedBuilder) setReachedBuilder(true);
+  if (!buildingReport && reachedBuilder) setReachedBuilder(false);
+  if (buildingReport && reachedBuilder && !onBuilder) {
+    setBuildingReport(false);
+    setReachedBuilder(false);
+    setAddAt(null);
+  }
+  const startNewReport = () => {
+    if (!addAt) return;
+    setBuildingReport(true);
+    navigate(newReportPath);
+  };
+
   const renderLeaf = (entry: MenuEntry, depth: number) => {
     const id = String(entry.id);
     const place = placeOf(menu, id);
@@ -456,7 +534,7 @@ export default function DesignModeMenu({ app, basePath, resolveTargetLabel, reso
   const renderEntries = (entries: Menu, parentId: string | null, depth: number): React.ReactNode[] => {
     const rows: React.ReactNode[] = [];
     entries.forEach((entry, index) => {
-      if (addAt && addAt.parentId === parentId && addAt.index === index) rows.push(<Placeholder key="placeholder" depth={depth} />);
+      if (addAt && addAt.parentId === parentId && addAt.index === index) rows.push(<Placeholder key="placeholder" depth={depth} buildingReport={buildingReport} />);
       if (isGroup(entry)) {
         const gid = String(entry.id);
         rows.push(
@@ -477,7 +555,7 @@ export default function DesignModeMenu({ app, basePath, resolveTargetLabel, reso
         rows.push(renderLeaf(entry, depth));
       }
     });
-    if (addAt && addAt.parentId === parentId && addAt.index >= entries.length) rows.push(<Placeholder key="placeholder" depth={depth} />);
+    if (addAt && addAt.parentId === parentId && addAt.index >= entries.length) rows.push(<Placeholder key="placeholder" depth={depth} buildingReport={buildingReport} />);
     rows.push(
       <AddRow
         key="add"
@@ -516,13 +594,14 @@ export default function DesignModeMenu({ app, basePath, resolveTargetLabel, reso
           </SortableContext>
         </DndContext>
       </SidebarGroupContent>
-      {addAt && (
+      {addAt && !buildingReport && (
         <MenuItemPicker
           packageId={packageId}
           inMenu={menuTargets(menu)}
           onClose={() => setAddAt(null)}
           onPick={(kind, name, link) => pick(entryFor(kind, name, newEntryId([...menu, ...(storedMenu ?? [])]), link))}
           onCreate={createItem}
+          onNewReport={startNewReport}
           language={language}
         />
       )}
@@ -612,12 +691,14 @@ function MenuLeaf({
   );
 }
 
-function Placeholder({ depth }: { depth: number }) {
+function Placeholder({ depth, buildingReport }: { depth: number; buildingReport?: boolean }) {
   const { t } = useObjectTranslation();
   return (
     <li className="list-none" style={indent(depth)} data-testid="design-menu-placeholder">
       <div className="mx-0.5 flex h-8 items-center rounded-md border border-dashed border-sidebar-border px-2 text-sm text-sidebar-foreground/60">
-        {t('designMode.menu.placeholder', { defaultValue: 'Choose a menu item…' })}
+        {buildingReport
+          ? t('designMode.menu.newReport', { defaultValue: 'New report…' })
+          : t('designMode.menu.placeholder', { defaultValue: 'Choose a menu item…' })}
       </div>
     </li>
   );
@@ -811,6 +892,7 @@ function MenuItemPicker({
   onClose,
   onPick,
   onCreate,
+  onNewReport,
   language,
 }: {
   packageId: string;
@@ -819,6 +901,8 @@ function MenuItemPicker({
   onPick: (kind: MenuTargetKind, name: string, link?: { label: string; url: string }) => void;
   /** Create a new `kind` named `label`; `taken` is every name of that kind the picker lists. */
   onCreate: (kind: NewMenuItemKind, label: string, taken: readonly string[]) => Promise<boolean>;
+  /** Build a new report for the held place, in the report builder. */
+  onNewReport: () => void;
   language: string;
 }) {
   const { t } = useObjectTranslation();
@@ -940,6 +1024,19 @@ function MenuItemPicker({
                 >
                   <Plus className="h-4 w-4 shrink-0" aria-hidden="true" />
                   <span className="flex-1 truncate">{newTexts[kind]}</span>
+                </button>
+              </li>
+            )}
+            {kind === 'report' && (
+              <li>
+                <button
+                  type="button"
+                  onClick={onNewReport}
+                  className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm font-medium text-primary hover:bg-accent"
+                  data-testid="design-menu-picker-new-report"
+                >
+                  <Plus className="h-4 w-4 shrink-0" aria-hidden="true" />
+                  <span className="flex-1 truncate">{t('designMode.menu.newReport', { defaultValue: 'New report…' })}</span>
                 </button>
               </li>
             )}
