@@ -430,6 +430,32 @@
  * finds it — as text, URI-encoded, hex or base64 — in no line, row, summary,
  * annotation, pace line or real process's output.
  *
+ * ## The rewrite — `advisory_rewrite`, opened through the note's door, replaced once and read back (`advisoryRewriteAction`)
+ *
+ * The note's path, step for step, on the note's key and envelope (`ops.mjs`,
+ * "The one row that REPLACES an advisory's text"): the key judged first; the
+ * advisory's GET and `ADVISORY_REWRITE_FENCES` — the note's fences with
+ * `ADVISORY_REWRITE_STATES` (`triage`, `draft`, `closed`; never published or
+ * withdrawn) and a summary that is text or null; the open under the
+ * REWRITE's associated data (a note's seal is `ADVISORY_NOTE_OPEN_FAILED`
+ * here); the text judged again (`advisoryRewriteFailure`), then every line of
+ * each field masked; a SECOND fenced GET immediately before the write,
+ * refused if its state left the fence or the summary or the description
+ * changed since the first. Then ONE PATCH of exactly the fields sealed and
+ * the read-back (`advisoryRewriteReadBack`): the PATCH's answer, then a GET
+ * after it, each holding every field sent byte for byte and the field not
+ * sent as read. A PATCH that threw is UNCONFIRMED and a read-back that fails
+ * is FAILED, each saying `ADVISORY_REWRITE_NOT_RESENT`. Its ONE notice is the
+ * note's spelling, op `advisory_rewrite`: the sealed text's byte count and
+ * the keyed digest of the text the GET after the PATCH STORES
+ * (`advisoryRewriteStoredDigest`). Residual window, the note's: a write or a
+ * state move landing between the second GET and the PATCH is not seen before
+ * the write (about one round trip); the read-back judges the text, not the
+ * state, so a publish inside that window lands the row and prints the state
+ * it read. ⛔ It prints what the note prints — the call, the status, the id,
+ * the state, byte counts and that digest — and never a byte of the summary
+ * or the description, old or new.
+ *
  * ## The assignees and labels legs — `pr_create` with `assignees` / `labels`, the requests that read an earlier answer
  *
  * The op table spells each leg's path with a placeholder and `fromAnswer:
@@ -2870,7 +2896,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   "advisory_read: ONE GET after the sender gate and nothing written; the read, advisory and sender fences judged on that answer — target-write by the maintainer's ruling, a sender off the advisory's collaborators sealed for, one without write refused before the GET, any other gate closed — then the answer sealed to the seat's key and emitted as notice parts the reader parses back, opening byte for byte for that key and read alone; a failed or unsealed seal and an over-cap answer FAILED with nothing emitted; ⛔ the marker in the summary, description and vulnerabilities, and the advisory's id, reach no log line, row, step summary or annotation, and the sealed answer alone carries no marker": 18,
   "advisory_list: the row's gate before any request, then one walk per listed state on the platform's own cursor, nothing written; a short page or a full one with no next link ends a walk; a refused, unreached or off-shape page, a next link off this API's collection, a repeated advisory, the page cap and the channel's cap each FAILED with nothing emitted; each advisory projected to five fields, the JSON padded and sealed to the seat's key as exactly ten notice parts the reader parses back and opens; ⛔ the marker, every listed id, the cursor and the count reach no log line, row, step summary or annotation, and the row reads the same whatever the count": 27,
   "advisory_note: the relay's key judged against the committed half before any request; the advisory's GET and its fences, the open, the section judged again and the mask (sparing the note's own notice), a second GET immediately before ONE PATCH of { description } — the text read, byte for byte, the separator and the section — then that PATCH's answer and a GET after it read back byte for byte; a key, fence, open, section, race, cap, refusal or read-back failure each FAILED with no write or no second one, and no byte of the note, the description or the key on any line, row, summary, annotation, pace line or real process's output": 25,
-  "advisory_rewrite: the note's key judged first; the advisory's GET and the rewrite's fences — a published or withdrawn advisory refused, triage, draft and closed landing; the open under the rewrite's own associated data, so a note's seal never opens as one; the text judged again and masked; a second GET immediately before ONE PATCH of exactly the fields sealed, byte for byte; the read-back of each field sent and of the one not sent; ONE notice whose keyed digest is of the text the advisory stores, read back by the seat's parser; and no byte of the new text or the old on any line, row, summary, annotation or pace line": 15,
+  "advisory_rewrite: the note's key judged first; the advisory's GET and the rewrite's fences — a published or withdrawn advisory refused, triage, draft and closed landing; the open under the rewrite's own associated data, so a note's seal never opens as one; the text judged again and masked; a second GET immediately before ONE PATCH of exactly the fields sealed, byte for byte; the read-back of each field sent and of the one not sent; ONE notice whose keyed digest is of the text the advisory stores, read back by the seat's parser; and no byte of the new text or the old on any line, row, summary, annotation or pace line":16,
 });
 // Raised 17 → 18 with the governed-review follow-up battery, 18 → 19 with the run_rerun_failed battery, 19 → 20 with the
 // hierarchy link battery, 20 → 21 with the advisory rows' battery, 21 → 22 with advisory_read's, 22 → 23 with the mailbox
@@ -5129,7 +5155,12 @@ export async function selfTest() {
       t('…the empty description named as such', judged[0].rows[0].result.endsWith('the description is empty'), true);
       // ⛔ The concurrency read.
       const raced = await rewriteRun([rewrite()], { ...lands(), [A_GET]: [advisory(), advisory({ summary: `${WORKING} — edited between the reads` })] });
-      t('⛔ the second read: a summary changed since the first is FAILED with TWO GETs and ZERO writes, named by its byte counts', [...failed(raced), raced.seen.map((s) => s.call), raced.rows[0]?.result?.includes("summary changed between the relay's two reads")], [EXIT_ACTION_FAILED, 1, 'not sent', 0, 0, [PERM, A_GET, A_GET], true]);
+      const racedText = await rewriteRun([rewrite()], { ...lands(), [A_GET]: [advisory(), advisory({ description: `${WORKING}\nmore — edited between the reads` })] });
+      t("⛔ the second read: a summary changed since the first, and a description changed since the first, are each FAILED with TWO GETs and ZERO writes, named by the field and its byte counts", [raced, racedText].map((r) => [...failed(r), r.seen.map((s) => s.call)]).concat([[raced.rows[0]?.result?.includes("summary changed between the relay's two reads"), racedText.rows[0]?.result?.includes("description changed between the relay's two reads")]]), [[EXIT_ACTION_FAILED, 1, 'not sent', 0, 0, [PERM, A_GET, A_GET]], [EXIT_ACTION_FAILED, 1, 'not sent', 0, 0, [PERM, A_GET, A_GET]], [true, true]]);
+      // ⛔ The fence on the second read: the guard that makes "never published" true at the moment of the write.
+      const moved = [];
+      for (const state of ['published', 'withdrawn']) moved.push(await rewriteRun([rewrite()], { ...lands(), [A_GET]: [advisory(), advisory({ state })] }));
+      t("⛔ the second read, immediately before the PATCH, is fenced as the first: an advisory read as draft that reads published, or withdrawn, on the second GET is FAILED with TWO GETs and ZERO writes, naming the state fence on that read", moved.map((r) => [...failed(r), r.seen.map((s) => s.call), r.rows[0]?.result?.includes('(its second read, just before the write)') && r.rows[0]?.result?.includes('fence `state`')]), moved.map(() => [EXIT_ACTION_FAILED, 1, 'not sent', 0, 0, [PERM, A_GET, A_GET], true]));
       // ⛔ The read-back.
       const notStored = await rewriteRun([rewrite()], { ...lands(), [A_PATCH]: stored({ summary: SUMMARY, description: `${DESCRIPTION} ` }) });
       const overtaken = await rewriteRun([rewrite(ALONE)], { ...lands({ summary: WORKING, description: DESCRIPTION }), [A_GET]: [advisory(), advisory(), stored({ summary: `${WORKING}x`, description: DESCRIPTION })] });

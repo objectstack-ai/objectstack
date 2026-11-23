@@ -1807,7 +1807,7 @@ export function armAdvisoryNotes(actions, { requestId, relayPublicKey = ADVISORY
     if (a === null || typeof a !== 'object' || Array.isArray(a) || !ADVISORY_NOTE_OPS.includes(a.op)) return a;
     const said = (why) => `fleet-write/dispatch: REFUSED — actions[${i}] (${a.op}): ${why}`;
     if (Object.hasOwn(a, 'sealed_note')) {
-      refused.push(said(`sealed_note is set in the actions file: a note is sealed by this door, from the file ${ADVISORY_NOTE_FILE_KEY} names, so a seal made elsewhere is refused, not sent. Drop it and name the file.`));
+      refused.push(said(`sealed_note is set in the actions file: ${a.op === 'advisory_rewrite' ? `a rewrite is sealed by this door, from the files ${Object.values(ADVISORY_REWRITE_FILE_KEYS).join(' and/or ')} name` : `a note is sealed by this door, from the file ${ADVISORY_NOTE_FILE_KEY} names`}, so a seal made elsewhere is refused, not sent. Drop it and name the file.`));
       return a;
     }
     // ⛔ The plaintext never lives in a repository's files: a file that resolves inside any git work tree, or one git
@@ -1916,7 +1916,8 @@ export function confirmRunAdvisoryNotes(payload, parsed, notes = new Map()) {
     else if (distinct.length === 0) out.push({ ...row, why: 'no notice on the run names it' });
     else if (distinct.length > 1) out.push({ ...row, why: 'two different notices on the run name it' });
     else if (distinct[0].noteBytes !== sealed.bytes || distinct[0].noteDigest !== sealed.digest) {
-      out.push({ ...row, why: `the run's notice names a ${distinct[0].noteBytes}-byte section whose keyed digest is not this process's — what the executor read back is not the section sealed here` });
+      const what = a.op === 'advisory_rewrite' ? 'rewrite' : 'section';
+      out.push({ ...row, why: `the run's notice names a ${distinct[0].noteBytes}-byte ${what} whose keyed digest is not this process's — what the executor read back is not the ${what} sealed here` });
     } else out.push({ ...row, state: 'confirmed', bytes: sealed.bytes });
   }
   return out;

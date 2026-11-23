@@ -1056,13 +1056,17 @@
  *   2. the advisory's GET, judged by `ADVISORY_REWRITE_FENCES`: `ADVISORY_NOTE_FENCES` with `from`
  *      `ADVISORY_REWRITE_STATES` — `triage`, `draft` or `closed`, `published` and `withdrawn` refused — and a summary
  *      that is text or none;
- *   3. the open, under the rewrite's associated data, then `::add-mask::` for every line of each field;
- *   4. the text judged again (`advisoryRewriteFailure`);
+ *   3. the open, under the rewrite's associated data;
+ *   4. the text judged again (`advisoryRewriteFailure`), then `::add-mask::` for every line of each field;
  *   5. the CONCURRENCY read: a second GET immediately before the PATCH, refused unless it passes the fences and its
  *      summary and description are exactly the first's;
  *   6. ONE PATCH of the fields sealed;
  *   7. the READ-BACK (`advisoryRewriteReadBack`): the PATCH's answer, then a GET after it, each holding exactly the
  *      fields sent and the other one as read — a mismatch FAILED, carrying `ADVISORY_REWRITE_NOT_RESENT`.
+ *
+ * The residual window is the note's: a write or a state move landing between step 5's read and the PATCH is not
+ * seen before the write (about one round trip). The read-back judges the text, not the state, so a publish inside
+ * that window lands the row and prints the state it read; a text write after the PATCH fails the read-back.
  *
  * Which states the platform takes the PATCH in is the platform's REST description's answer (read 2026-11-23, operation
  * `security-advisories/update-repository-advisory`): none is excluded for `summary` or `description` (`maxLength`
@@ -2845,7 +2849,7 @@ export const ADVISORY_NOTE_PRIVATE_KEY_SHAPE = /^MC4CAQAwBQYDK2VuBCIEI[A-P][A-Za
 export function advisoryNoteKeyFailure(text, relayPublicKey = ADVISORY_NOTE_RELAY_PUBLIC_KEY) {
   if (relayPublicKey === null) return `the relay's note key is not committed — ADVISORY_NOTE_RELAY_PUBLIC_KEY is null; the maintainer makes the pair, sets the repository secret ${ADVISORY_NOTE_KEY_SECRET} and commits its public half`;
   if (advisoryReadKeyFailure(relayPublicKey) !== null) return 'the committed ADVISORY_NOTE_RELAY_PUBLIC_KEY is not an X25519 public key in its one spelling';
-  if (typeof text !== 'string' || text === '') return `the execute step carries no ${ADVISORY_NOTE_KEY_ENV} — the repository secret ${ADVISORY_NOTE_KEY_SECRET} is unset, or the stroke was not marked a note's`;
+  if (typeof text !== 'string' || text === '') return `the execute step carries no ${ADVISORY_NOTE_KEY_ENV} — the repository secret ${ADVISORY_NOTE_KEY_SECRET} is unset, or the stroke was not marked as sealed to the relay's note key (a note's or a rewrite's)`;
   if (!ADVISORY_NOTE_PRIVATE_KEY_SHAPE.test(text)) return `${ADVISORY_NOTE_KEY_ENV} is not an X25519 private key in base64 PKCS#8 DER, its one spelling`;
   let key;
   try {
