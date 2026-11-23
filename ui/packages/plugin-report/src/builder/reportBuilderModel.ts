@@ -151,7 +151,12 @@ export function isDateDimension(members: ReportBuilderMembers | undefined, name:
  * report no longer selects. Authored chart chrome (`showDataLabels`,
  * `annotations`, `title`, …) is kept.
  */
-function reconcile(report: ReportDraft, members: ReportBuilderMembers | undefined, chartType: string): ReportDraft {
+function reconcile(
+  report: ReportDraft,
+  members: ReportBuilderMembers | undefined,
+  chartType: string,
+  prevRows: readonly string[] = names(report.rows),
+): ReportDraft {
   const out: ReportDraft = { ...report };
   const measure = names(out.values)[0] ?? '';
   const { first, second } = selectedGrouping(out);
@@ -177,7 +182,7 @@ function reconcile(report: ReportDraft, members: ReportBuilderMembers | undefine
   if (!declared && dateRow) {
     out.dateRange = { dimension: dateRow, defaultRange: REPORT_BUILDER_DEFAULT_RANGE };
   } else if (declared && typeof declared.dimension === 'string' && !rows.includes(declared.dimension)) {
-    const wasGrouped = names(report.rows).includes(declared.dimension);
+    const wasGrouped = prevRows.includes(declared.dimension);
     if (wasGrouped) {
       if (dateRow) out.dateRange = { ...declared, dimension: dateRow };
       else delete out.dateRange;
@@ -260,7 +265,7 @@ export function pickGrouping(
   let chartType = selectedChartType(report);
   if (rows.length > 0 && chartType === 'metric') chartType = 'bar';
   if (rows.length === 0 && NEEDS_GROUPING.has(chartType)) chartType = 'metric';
-  return reconcile(out, members, chartType);
+  return reconcile(out, members, chartType, names(report.rows));
 }
 
 /** Draw the report as `chartType`. */

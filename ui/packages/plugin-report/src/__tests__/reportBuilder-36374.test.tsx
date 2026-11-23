@@ -52,13 +52,13 @@ const EXISTING: ReportDraft = {
 
 /** Every report the builder writes must be one the spec accepts. */
 function expectSpecValid(report: ReportDraft) {
-  const parsed = ReportSchema.safeParse({ label: 'R', name: 'r', ...report });
+  const parsed = ReportSchema.safeParse({ label: 'R', name: 'new_report', ...report });
   if (!parsed.success) throw new Error(JSON.stringify(parsed.error.issues, null, 2));
 }
 
 describe('report builder model (objectstack#36374)', () => {
   it('picking a data source starts on its count measure, no grouping, a single number', () => {
-    const next = pickDataset({ name: 'r', label: 'R', type: 'summary' }, 'pipeline', MEMBERS);
+    const next = pickDataset({ name: 'new_report', label: 'R', type: 'summary' }, 'pipeline', MEMBERS);
     expect(next.dataset).toBe('pipeline');
     expect(next.values).toEqual(['deal_count']);
     expect(next.rows).toBeUndefined();
@@ -85,7 +85,7 @@ describe('report builder model (objectstack#36374)', () => {
   });
 
   it('grouping a single number turns it into bars; clearing the grouping of bars turns them back', () => {
-    const number = pickDataset({ name: 'r', label: 'R' }, 'pipeline', MEMBERS);
+    const number = pickDataset({ name: 'new_report', label: 'R' }, 'pipeline', MEMBERS);
     const grouped = pickGrouping(number, 'owner', '', MEMBERS);
     expect(grouped.rows).toEqual(['owner']);
     expect(grouped.chart).toMatchObject({ type: 'bar', xAxis: 'owner', yAxis: 'deal_count' });

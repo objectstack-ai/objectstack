@@ -184,7 +184,8 @@ describe('the report editor\'s Save says a refused save (objectui#11583, ReportV
     const [, options] = vi.mocked(toast.error).mock.calls[0] as [unknown, { description?: unknown } | undefined];
     expect(String(options?.description)).toContain('Saving reports requires the Manage Metadata permission');
     const [type, name, body, opts] = client.value.save.mock.calls[0];
-    expect([type, name, opts]).toEqual(['report', 'revenue_by_month', { mode: 'draft' }]);
+    // objectstack#36374 — Save stages the body and publishes it in the same press.
+    expect([type, name, opts]).toEqual(['report', 'revenue_by_month', { mode: 'draft', ifNoneMatch: '*' }]);
     expect(body).toMatchObject({ label: 'Revenue EDITED' });
     expect(refresh).not.toHaveBeenCalled();
     // The patch round: the editor stays open with the edit intact, and Save
@@ -201,6 +202,7 @@ describe('the report editor\'s Save says a refused save (objectui#11583, ReportV
       getDraft: vi.fn(async () => null),
       layered: storedLayers(),
       save: vi.fn(async () => ({})),
+      publish: vi.fn(async () => ({})),
     };
     mountReport();
     await editThriceAndSave();

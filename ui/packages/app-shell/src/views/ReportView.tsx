@@ -8,6 +8,9 @@ import { Empty, EmptyTitle, EmptyDescription } from '@object-ui/components';
 // the served-text boxes need the console's metadata client).
 import { ReportBuilderHost } from './ReportBuilderHost.js';
 import { RuntimeDraftBar } from './RuntimeDraftBar.js';
+// A joined report, and a pre-dataset one, keep the spec-driven report
+// inspector: the builder draws one dataset (see `opensInBuilder`).
+import { ReportConfigPanel } from './ReportConfigPanel.js';
 import { readReportBuilderArrival, withoutReportBuilderArrival } from './reportBuilderArrival.js';
 import { Pencil, BarChart3, Loader2 } from 'lucide-react';
 import { PageHeader } from '../layout/PageHeader.js';
@@ -30,7 +33,11 @@ import { DrillDownDrawer } from '@object-ui/plugin-dashboard';
 import { DrillNavigationProvider } from '@object-ui/react';
 import { useRecordListDrillNavigation } from './useOpenRecordList.js';
 import { metadataText } from '../hooks/useNavTargetLabel.js';
-import { servedReportTextOf, type ServedReportText } from './studio-design/servedReportText.js';
+import {
+  ServedReportTextContext,
+  servedReportTextOf,
+  type ServedReportText,
+} from './studio-design/servedReportText.js';
 
 /**
  * The report keys whose text the server translates where it serves the report
@@ -61,6 +68,31 @@ export function previewWithServedText(
   return out;
 }
 
+/**
+ * objectstack#36374 — whether a report is edited in the report builder. The
+ * builder draws ONE dataset-bound report (or a new one); a `joined` report
+ * (several datasets, one per block) and a pre-dataset report (`objectName`,
+ * `dataSource` or inline `data`) keep the report inspector panel, which edits
+ * every shape the spec allows.
+ */
+export function opensInBuilder(report: Record<string, unknown> | null | undefined): boolean {
+  if (!report) return false;
+  if (report.type === 'joined') return false;
+  return report.objectName === undefined && report.dataSource === undefined && report.data === undefined;
+}
+
+// Fallback fields when no schema is available
+const FALLBACK_FIELDS = [
+  { value: 'month', label: 'Month', type: 'text' },
+  { value: 'revenue', label: 'Revenue', type: 'number' },
+  { value: 'count', label: 'Count', type: 'number' },
+  { value: 'region', label: 'Region', type: 'text' },
+  { value: 'product', label: 'Product', type: 'text' },
+  { value: 'source', label: 'Lead Source', type: 'text' },
+  { value: 'stage', label: 'Stage', type: 'text' },
+  { value: 'amount', label: 'Amount', type: 'number' },
+];
+
 export function ReportView({ dataSource }: { dataSource?: DataSource }) {
   const { t, language } = useObjectTranslation();
   const { reportName } = useParams<{ reportName: string }>();
@@ -71,8 +103,13 @@ export function ReportView({ dataSource }: { dataSource?: DataSource }) {
   // Editing a report mutates the SHARED definition, so it is an admin-only
   // quick-edit affordance (mirrors ObjectView's view-config gate).
   const { isAdmin } = useWorkspaceAdminStatus();
-  // objectstack#36374 — the report builder replaces the page while it is open.
-  const [builderOpen, setBuilderOpen] = useState(false);
+  // objectstack#36374 — which editor is open: the report builder (it
+  // replaces the page), or the inspector panel beside the report.
+  const [editor, setEditor] = useState<'builder' | 'panel' | null>(null);
+  const builderOpen = editor === 'builder';
+  const configPanelOpen = editor === 'panel';
+  // Version counter — incremented on save to refresh the stable config reference
+  const [configVersion, setConfigVersion] = useState(0);
   
   // Find report definition from API-driven metadata
   const { reports, objects, loading, refresh } = useMetadata();
@@ -92,6 +129,28 @@ export function ReportView({ dataSource }: { dataSource?: DataSource }) {
   // with an "Open in list →" escape hatch to the full object list page.
   const drillNavigation = useRecordListDrillNavigation();
   const [drill, setDrill] = useState<{ object: string; filter: Record<string, unknown>; title: string } | null>(null);
+
+  const getFieldsForObject = useCallback(
+    (objName: string | undefined) => {
+      if (!objName || !objects?.length) return undefined;
+      const objDef = objects.find((o: any) => o.name === objName);
+      if (!objDef?.fields) return undefined;
+      const fields = objDef.fields;
+      if (Array.isArray(fields)) {
+        return fields.map((f: any) =>
+          typeof f === 'string'
+            ? { value: f, label: f, type: 'text' }
+            : { value: f.name, label: f.label || f.name, type: f.type || 'text' },
+        );
+      }
+      return Object.entries(fields).map(([name, def]: [string, any]) => ({
+        value: name,
+        label: def.label || name,
+        type: def.type || 'text',
+      }));
+    },
+    [objects],
+  );
 
   // ADR-0021 D2 drill-down: open the dataset's object list scoped by
   // `?filter[<field>]=<value>` (the same equality-filter contract the
@@ -180,6 +239,14 @@ export function ReportView({ dataSource }: { dataSource?: DataSource }) {
     },
     [metadataClient, objects, reportData, editSchema, language],
   );
+
+  // Derive available fields from object schema for filter/sort editors
+  // Uses live editSchema when available to respond to objectName changes
+  const availableFields = useMemo(() => {
+    const liveReport = editSchema || reportData;
+    const objName = liveReport?.objectName || liveReport?.dataSource?.object;
+    return getFieldsForObject(objName) ?? FALLBACK_FIELDS;
+  }, [editSchema, reportData, getFieldsForObject]);
 
   // ---- Save helper --------------------------------------------------------
   // objectstack#36374 — Save writes the report and publishes it in the same
@@ -292,12 +359,60 @@ export function ReportView({ dataSource }: { dataSource?: DataSource }) {
     }
     setAuthoredAtOpen(body);
     setServedText(servedReportTextOf(published, reportData));
-    setBuilderOpen(true);
+    if (opensInBuilder(body)) {
+      setEditor('builder');
+      return;
+    }
+    savedSinceOpenRef.current = false;
+    setEditSchema(body);
+    setEditor('panel');
+    setConfigVersion((v) => v + 1);
   }, [metadataClient, reportName, reportData, metadataLocale]);
 
   const handleCloseBuilder = useCallback(() => {
-    setBuilderOpen(false);
+    setEditor(null);
   }, []);
+
+  // The inspector panel's buffer drives the page's preview while it is open.
+  // A landed save keeps it as the preview until the metadata refresh it
+  // triggers replaces it; a close with no landed save puts the served report
+  // back (the buffer is the untranslated source, no display copy here).
+  const savedSinceOpenRef = useRef(false);
+  const handleCloseConfigPanel = useCallback(() => {
+    setEditor(null);
+    if (!savedSinceOpenRef.current) setEditSchema(null);
+  }, []);
+
+  // Stabilize config reference: only recompute after explicit actions (panel
+  // open, save). configVersion is incremented on those actions.
+  // This prevents useConfigDraft from resetting the draft on every live field
+  // change (same pattern as DashboardView's dashboardConfig).
+  const reportConfig = useMemo(
+    () => editSchema || reportData,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [configVersion],
+  );
+
+  const handleReportConfigSave = useCallback(
+    async (config: Record<string, any>): Promise<boolean> => {
+      setEditSchema(config);
+      const saved = await saveSchema(config);
+      if (saved) savedSinceOpenRef.current = true;
+      // Re-seat the panel's config only on a save that landed: a refused one
+      // keeps the open panel's draft, edit included, for a retry
+      // (objectui#11583).
+      if (saved) setConfigVersion((v) => v + 1);
+      return saved;
+    },
+    [saveSchema],
+  );
+
+  const handleReportFieldChange = useCallback(
+    (field: string, value: any) => {
+      setEditSchema((prev: any) => ({ ...prev, [field]: value }));
+    },
+    [],
+  );
 
   const handleBuilderSave = useCallback(
     async (schema: Record<string, any>): Promise<boolean> => {
@@ -306,7 +421,7 @@ export function ReportView({ dataSource }: { dataSource?: DataSource }) {
       // (objectui#11583).
       if (saved) {
         setEditSchema(schema);
-        setBuilderOpen(false);
+        setEditor(null);
       }
       return saved;
     },
@@ -332,10 +447,10 @@ export function ReportView({ dataSource }: { dataSource?: DataSource }) {
     setReportData(initialReport);
   }, [initialReport]);
 
-  // When metadata refreshes, discard the saved picture once the builder is
+  // When metadata refreshes, discard the saved picture once the editor is
   // closed: the served report now carries the save.
   useEffect(() => {
-    if (!builderOpen) {
+    if (!editor) {
       setEditSchema(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -579,6 +694,24 @@ export function ReportView({ dataSource }: { dataSource?: DataSource }) {
                  </Suspense>
              </div>
          </div>
+
+         {/* Right-side config panel for a joined or pre-dataset report — the
+             studio's spec-driven report inspector, hosted locally in
+             app-shell (see ReportConfigPanel). */}
+         <ServedReportTextContext.Provider value={servedText}>
+         <ReportConfigPanel
+           open={configPanelOpen && isAdmin}
+           onClose={handleCloseConfigPanel}
+           config={reportConfig}
+           onSave={handleReportConfigSave}
+           onFieldChange={handleReportFieldChange}
+           availableFields={availableFields}
+           getFieldsForObject={getFieldsForObject}
+           name={reportName}
+           metadataClient={metadataClient}
+           onAfterChange={() => refresh().catch(() => {})}
+         />
+         </ServedReportTextContext.Provider>
 
          <MetadataPanel
             open={showDebug}
