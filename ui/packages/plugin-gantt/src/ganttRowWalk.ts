@@ -36,18 +36,24 @@ export const GANTT_FETCH_STEP: number = nonGridRowCeilingQuery().$top;
  * Read the gantt's filtered result set up to {@link GANTT_ROW_CEILING} plus
  * the probe row, in steps of at most {@link GANTT_FETCH_STEP} rows.
  *
- * `$top` is the step (or the rows still wanted, at the end), `$skip` moves by
- * the rows that came back, and the walk stops at the first short answer or one
- * row past the ceiling, so `applyNonGridRowCeiling(result, GANTT_ROW_CEILING)`
- * still reads truncation from the rows in hand. A platform read that carries
- * `limit` or `offset` is a partition of the result set (the drivers append the
- * `id` tie-breaker), so the steps neither repeat nor skip a row.
+ * The first read is the query as authored, `$top` the step. When it answers
+ * short (the whole set fits one step, the common case) or longer than the step
+ * (an adapter that ignores `$top`, which the ceiling then slices), it settles
+ * the set and is returned AS IS, envelope and all: one read, exactly as before.
  *
- * A first answer that already settles it is returned AS IS, envelope and all:
- * a short one (the whole set fits one step, the common case) or one longer than
- * the step (an adapter that ignores `$top`, which the ceiling then slices).
- * Only a walk of several steps is re-wrapped, as `{ data, total? }`, with the
- * newest `total` an answer reported.
+ * Only a FULL first answer means more rows exist, and then the set is walked
+ * from the top under a UNIQUE order: the authored `$orderby` with `id` appended
+ * as the tie-breaker, in the last key's direction (`asc` when there is none).
+ * Offset steps over an order with ties may repeat one row and skip another on
+ * an adapter that does not break ties itself (the platform's drivers append the
+ * same `id` key to a paged read, so there it changes nothing). The first read
+ * is not reused, because it was not taken under that order. Rows are kept once
+ * by `id` (`_id`); a row with neither is kept as it comes. `$top` is the step
+ * (or the rows still wanted, at the end), `$skip` moves by the rows that came
+ * back, and the walk stops at the first short answer or one row past the
+ * ceiling, so `applyNonGridRowCeiling(result, GANTT_ROW_CEILING)` still reads
+ * truncation from the rows in hand. The walk's answer is `{ data, total? }`,
+ * with the newest `total` a read reported.
  *
  * `isCurrent` is asked after every answer: when a newer reload owns the screen
  * the walk stops asking, and its caller discards what it has.
@@ -60,20 +66,50 @@ export async function fetchGanttRows(
   const wanted = GANTT_ROW_CEILING + 1;
   const firstTop = Math.min(GANTT_FETCH_STEP, wanted);
   const first = await find({ ...params, $top: firstTop });
-  const firstRows = extractRecords(first);
-  if (firstRows.length !== firstTop || !isCurrent()) return first;
+  if (extractRecords(first).length !== firstTop || !isCurrent()) return first;
 
-  const data: unknown[] = [...firstRows];
+  const ordered = { ...params, $orderby: withIdTieBreak(params.$orderby) };
+  const data: unknown[] = [];
+  const seen = new Set<string>();
+  let read = 0;
   let total = reportedTotal(first);
   while (data.length < wanted) {
     const top = Math.min(GANTT_FETCH_STEP, wanted - data.length);
-    const result = await find({ ...params, $top: top, $skip: data.length });
+    const result = await find({ ...ordered, $top: top, ...(read > 0 ? { $skip: read } : {}) });
     const rows = extractRecords(result);
     total = reportedTotal(result) ?? total;
-    data.push(...rows);
+    read += rows.length;
+    for (const row of rows) {
+      const id = rowId(row);
+      if (id !== undefined) {
+        if (seen.has(id)) continue;
+        seen.add(id);
+      }
+      data.push(row);
+    }
     if (rows.length < top || !isCurrent()) break;
   }
   return total !== undefined ? { data, total } : { data };
+}
+
+/**
+ * `$orderby` with `id` appended as the last key, in the last authored key's
+ * direction (`asc` when nothing was authored). An order that already names
+ * `id` is returned unchanged.
+ */
+export function withIdTieBreak(orderby: unknown): Record<string, 'asc' | 'desc'> {
+  const keys = orderby && typeof orderby === 'object' && !Array.isArray(orderby)
+    ? (orderby as Record<string, 'asc' | 'desc'>)
+    : {};
+  if ('id' in keys) return { ...keys };
+  const directions = Object.values(keys);
+  return { ...keys, id: directions.length > 0 ? directions[directions.length - 1] : 'asc' };
+}
+
+function rowId(row: unknown): string | undefined {
+  if (!row || typeof row !== 'object') return undefined;
+  const id = (row as { id?: unknown; _id?: unknown }).id ?? (row as { _id?: unknown })._id;
+  return id === undefined || id === null ? undefined : String(id);
 }
 
 function reportedTotal(result: unknown): number | undefined {

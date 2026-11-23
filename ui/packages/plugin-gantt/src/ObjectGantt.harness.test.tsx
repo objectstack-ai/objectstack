@@ -386,17 +386,21 @@ describe('ObjectGantt.rowCeiling-7210', () => {
         ),
       );
 
-      // The walk read one probe row past the ceiling — that is what makes the
-      // cut a fact about the rows in hand rather than a guess — and asked no
-      // single read for more than one step (objectstack: a hosted maximum page
-      // size refuses a `$top` of 10,001).
+      // The first read came back full, so the set was walked from the top
+      // under a unique order. The walk read one probe row past the ceiling —
+      // that is what makes the cut a fact about the rows in hand rather than a
+      // guess — and asked no single read for more than one step (a hosted
+      // maximum page size refuses a `$top` of 10,001).
       const wanted = nonGridRowCeilingQuery(GANTT_ROW_CEILING).$top;
-      const tops = calls.map((params) => params.$top);
+      expect(calls[0].$top).toBe(GANTT_FETCH_STEP);
+      const walk = calls.slice(1);
+      const tops = walk.map((params) => params.$top);
       expect(tops.reduce((sum, top) => sum + top, 0)).toBe(wanted);
       for (const top of tops) expect(top).toBeLessThanOrEqual(GANTT_FETCH_STEP);
-      expect(calls.map((params) => params.$skip ?? 0)).toEqual(
+      expect(walk.map((params) => params.$skip ?? 0)).toEqual(
         tops.map((_, i) => tops.slice(0, i).reduce((sum, top) => sum + top, 0)),
       );
+      for (const params of walk) expect(params.$orderby).toEqual({ id: 'asc' });
 
       // ⭐ The half the ruling cares about: the truncation is NOT silent.
       const note = await screen.findByRole('note');
