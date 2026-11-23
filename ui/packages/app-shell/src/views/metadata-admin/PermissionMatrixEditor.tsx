@@ -626,8 +626,10 @@ export interface PermissionMatrixEditPageProps {
    * name, Package chip, granted / override counts, History and a more menu
    * holding the name / label editor) instead of the PageShell breadcrumb,
    * badge row and collapsible set header, and splits its sections into five
-   * tabs, all kept mounted. Presentation only: every write, gate and autosave
-   * is the routed page's. Omitted (Setup's permission page): unchanged.
+   * tabs, all kept mounted. With a package, it also selects the save path:
+   * the grants are held until the Studio top bar's Save, which writes the
+   * draft and publishes that one set (objectstack#36511), instead of the
+   * routed page's autosave. Omitted (Setup's permission page): unchanged.
    */
   studio?: PermissionStudioChrome;
   /**
@@ -1660,8 +1662,10 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
         toSave = mergePermissionSlice(base, payload, scope);
       }
       // ADR-0086 P2 (D6/D7). Package door → the set is metadata: write a DRAFT
-      // (stamped with `packageId`) that the package's atomic Publish promotes,
-      // exactly like the Data/Interfaces pillars — NOT a live record write.
+      // (stamped with `packageId`), exactly like the Data/Interfaces pillars —
+      // NOT a live record write. Under the Studio's Save the set's own publish
+      // follows it at once (objectstack#36511); otherwise the package's Publish
+      // promotes it.
       // Environment door (no packageId) stays live (config).
       // objectui#11773 — the guard pins the package door's DRAFT save; the
       // environment door's live write passes through it unpinned, as before.

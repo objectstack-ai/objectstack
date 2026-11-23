@@ -405,6 +405,15 @@ export function PackageOwdOverviewPanel({
     setPrereq(null);
     const refused: Array<{ name: string; label: string; reason: string; edit: OwdEdit }> = [];
     let saved = 0;
+    const savedNames = new Set<string>();
+    // Read the rows back from the server, then put back the edits of the rows
+    // this pass did not save.
+    const reloadKeeping = async (unsaved: ReadonlyArray<{ row: { name: string }; edit: OwdEdit }>) => {
+      await load();
+      if (unsaved.length > 0) {
+        setEdits((prev) => ({ ...prev, ...Object.fromEntries(unsaved.map((u) => [u.row.name, u.edit])) }));
+      }
+    };
     try {
       // Each changed row lands as that object's package-scoped DRAFT: read the
       // fresh body (below), apply just `sharingModel` (unset → drop the key),
@@ -456,6 +465,11 @@ export function PackageOwdOverviewPanel({
           // Save stops here with every edit still on the page.
           if (!force && relations.length > 0 && (e as { status?: number })?.status === 409 && errorCodeIs(e, 'DESTRUCTIVE_CHANGE')) {
             const issues = (e as { issues?: unknown }).issues;
+            // Rows this pass already published are live: the page reads them
+            // back before it asks, so it never shows a live row as unsaved, and
+            // Cancel never puts back a value the server no longer holds. Every
+            // row not yet saved keeps its edit for the confirm's second pass.
+            if (saved > 0) await reloadKeeping(changed.filter((c) => !savedNames.has(c.row.name)));
             setPrereq({
               object: s.row.label,
               relations,
@@ -476,16 +490,12 @@ export function PackageOwdOverviewPanel({
           continue;
         }
         saved += 1;
+        savedNames.add(s.row.name);
       }
       // A Save leaves no draft: the publish told the ledger behind Changes.
-      if (saved > 0) {
-        await load();
-        // The reload puts every dial back at what the server holds: a refused
-        // row's edit stays on the page, unsaved.
-        if (refused.length > 0) {
-          setEdits((prev) => ({ ...prev, ...Object.fromEntries(refused.map((r) => [r.name, r.edit])) }));
-        }
-      }
+      // The reload puts every dial back at what the server holds: a refused
+      // row's edit stays on the page, unsaved.
+      if (saved > 0) await reloadKeeping(changed.filter((c) => !savedNames.has(c.row.name)));
       if (refused.length === 0) return { kind: 'saved' };
       const reason = refused
         .map((r) => tFormat('engine.studio.save.refusedLine', locale, { item: r.label, reason: r.reason }))

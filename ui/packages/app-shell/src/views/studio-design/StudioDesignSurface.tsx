@@ -11379,7 +11379,9 @@ export function AccessPillar({
         labelPlaceholder={t('engine.studio.access.labelPlaceholder', locale)}
         idFieldLabel={t('engine.studio.access.idLabel', locale)}
         idPlaceholder={t('engine.studio.access.idPlaceholder', locale)}
-        // objectui#11787 — one label on every Studio create dialog: each writes a draft.
+        // objectstack#36511 — a permission set is created live (written, then
+        // published at its package), so its dialog says Create; a create that
+        // still writes a draft says Save as draft (objectui#11787).
         submitLabel={t('engine.studio.createLive', locale)}
         submittingLabel={t('engine.studio.creating', locale)}
         busy={busy}
