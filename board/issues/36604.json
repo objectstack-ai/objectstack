@@ -1,0 +1,37 @@
+{
+  "number": 36604,
+  "kind": "pull_request",
+  "title": "fix(app-shell): rename designModeMenu.ts so no layout file differs from DesignModeMenu.tsx only in case",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-23T02:16:33Z",
+  "updated_at": "2026-11-23T03:07:21Z",
+  "closed_at": "2026-11-23T03:07:19Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-23T03:07:19Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36604",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi92ncfFpPUpTD8314otX5oaG)_\nFixes #36589\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 在 Mac 上自己构建的开发者：以前应用壳构建报错、点「编辑应用」整页白屏，改后构建通过、能进入设计模式；线上构建本来不受影响，用户无感。\n- 属于运行界面设计模式专题，修的是设计模式菜单合并时带进来的文件名冲突。\n- 只是把一个辅助文件改了名、改了引用，不改任何功能；出错会是构建或测试直接失败，可以直接撤回。\n- 无。\n\n## What changes\n\n`ui/packages/app-shell/src/layout/` held the design-mode menu component `DesignModeMenu.tsx` beside its pure tree helpers `designModeMenu.ts`. On a case-insensitive file system (the macOS default) the sidebar's lazy `import('./DesignModeMenu.js')` tries `.ts` first and lands on the helper module (no default export): TS1149 in the app-shell build, and a white page when 「Edit app」 opens design mode.\n\nRenamed with `git mv` (history kept, similarity 100%):\n\n| Before | After |\n|:---|:---|\n| `layout/designModeMenu.ts` | `layout/designModeMenuModel.ts` |\n| `layout/__tests__/designModeMenu-36363.test.ts` | `layout/__tests__/designModeMenuModel-36363.test.ts` |\n\nImporters updated (one line each): `DesignModeMenu.tsx`, `designModeMenuSave.ts`, `__tests__/designModeMenuModel-36363.test.ts`, `__tests__/designModeMenuSave-36363.test.ts`. No other tracked file names the old module. No behaviour change. Changeset: `.changeset/36589-design-menu-casing.md` (`@object-ui/app-shell` patch).\n\n### Repository scan: entries in one directory that differ only in letter case\n\nOver `git ls-files` (every tracked path, 27245 files), per directory, three comparisons, all case-insensitive:\n\n- **A**: full entry names (files and directories);\n- **B**: module names, the file name minus its last extension (`./X.js` resolves to `x.ts` or `X.tsx`, so `foo.ts` / `Foo.tsx` is a pair);\n- **C**: a file's module name against a sibling directory name.\n\n| Tree | A | B | C |\n|:---|:---|:---|:---|\n| `origin/main` c0eecb1f80 | 0 | 2: `layout/` `DesignModeMenu.tsx` / `designModeMenu.ts`; `layout/__tests__/` `DesignModeMenu-36363.test.tsx` / `designModeMenu-36363.test.ts` | 0 |\n| this branch d097435bd1 | 0 | 0 | 0 |\n\nNothing outside `ui/packages/app-shell/src/layout/` was found, so nothing else is renamed. The scan was a one-off script, not a committed gate (see Acceptance notes).\n\n## Tests\n\n- `pnpm --filter @object-ui/app-shell run type-check` (both programs, `tsconfig.json` and `tsconfig.test.json`) and `pnpm --filter @object-ui/app-shell run build` (tsc + `check-dist-completeness`): pass, after building the dependency closure (`turbo run build --filter='@object-ui/app-shell^...'`, 68/68). `dist/layout/` now holds `DesignModeMenu.js` and `designModeMenuModel.js`, no `designModeMenu.js`.\n- The three 36363 suites that import the renamed module or the component, unchanged apart from the import line: `Test Files 3 passed (3)`, `Tests 62 passed (62)`.\n- Derived gate families at head `d097435bd1` (`dispatch-gates.mjs --commands`, 38 commands): each run with stdin closed, 38 × exit 0; `dispatch-gates.mjs --ran` reads `38 derived, 38 run, 0 NOT-MEASURED, 0 UNRUN`.\n\n<details><summary>Gate notes</summary>\n\n- `pnpm --dir ui exec vitest run scripts/`: the first run was killed by the container's memory cgroup (an OOM-kill of the vitest node process at about 10.8 GB RSS on a shared box), so it is not a test verdict. It was re-run with `--maxWorkers=2` and a 4 GB heap: `Test Files 172 passed | 2 skipped (174)`, `Tests 5127 passed | 2 skipped (5129)`.\n- `scripts/pm/overlap-check.mjs`: `VERDICT clean exit 0` (against `origin/main` c0eecb1f80; no open PR shares a file).\n- The whole app-shell suite was not run locally. Only the three suites that import the renamed files were run; `Test UI` in CI runs the rest.\n\n</details>\n\n## Acceptance notes\n\n- **macOS: NOT MEASURED.** This container is Linux on a case-sensitive file system. Substitute reading: TypeScript's own `resolveModuleName` (bundler resolution, the package's setting) run from `UnifiedSidebar.tsx` against each tree with a host whose `fileExists` answers case-insensitively, as the macOS default volume does:\n  - `origin/main`: `./DesignModeMenu.js` resolves to `layout/DesignModeMenu.ts`, which opens `layout/designModeMenu.ts` on disk. This reproduces the card's TS1149 file name, so it is the positive control.\n  - this branch: `./DesignModeMenu.js` resolves to `layout/DesignModeMenu.tsx` (the component). The new `./designModeMenuModel.js` resolves to the helper module.\n  - With scan B at 0 for the whole tree, no relative import anywhere can reach a different file by case alone. The 「Edit app」 white screen is a consequence of the same resolution and was not re-run here either.\n- **The guard the card asks for is not added.** The card's item 2 is the coordinator's own addition, so the claim allows only strengthening a gate that already reads file names. None exists. Searched: the root `check:*` scripts and `scripts/`, `ui/scripts/check-*.mjs`, `ui/eslint-rules/`, and both ESLint configs. Gates that walk the tracked tree read file *contents* (`check:nul-bytes`, `ui/scripts/check-control-bytes.mjs`). Gates that touch names do so for another question: import reachability (`check-unreferenced-sources`), `vi.mock` specifiers (`check-vi-mock-specifiers`), product words (the product-neutral-renderer ratchet). A case-collision rule in any of them would be a new gate under an old name. TypeScript's `forceConsistentCasingInFileNames` is what reported TS1149 on macOS, but it can only fire on a case-insensitive host, so it never fires in CI. The gap stays open for the seat to decide on: no gate keeps a case-only pair out on Linux.\n\n## Verification\n\n- **Read first:** `ui/packages/app-shell/src/layout/DesignModeMenu.tsx` (the import block ending `from './designModeMenuModel.js'`), `ui/packages/app-shell/src/layout/designModeMenuSave.ts` (`rebaseMenuEdits` import).\n- **Two-minute check:** `git ls-files ui/packages/app-shell/src/layout | grep -i 'designmodemenu\\.'`. Expect `DesignModeMenu.tsx` only, with no second entry spelled the same apart from case.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01ADHkmRB34k9WUWeGpRnVNm\n\n<!-- signed: repo:objectstack#2 · os-steve · session_01ADHkmRB34k9WUWeGpRnVNm -->\n"
+}

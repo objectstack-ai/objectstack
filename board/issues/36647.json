@@ -1,0 +1,31 @@
+{
+  "number": 36647,
+  "kind": "issue",
+  "title": "Artifact boot silently drops an app's code plugins: runtimeModule carries only `functions`, so `plugins: [new XPlugin()]` never mounts (and its dependencies are not shipped)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-bob",
+    "id": 353326562,
+    "type": "User"
+  },
+  "labels": [
+    "area:package",
+    "bug",
+    "domain:cli",
+    "domain:server"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-23T08:01:56Z",
+  "updated_at": "2026-11-23T08:03:12Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36647",
+  "body": "Filing gate ①: a reproducible defect and a contract violation (declared ≠ delivered).\nSource: evaluation of the BrightRule app (`objectstack-ai/brightrule`, branch `feature/policy-inquiry`) on ObjectOS EE `ghcr.io/objectstack-ai/objectos-ee:18.6.0`, local stack (PostgreSQL 16 + pgvector), 2026-11-23.\nDedupe: `org:objectstack-ai runtimeModule plugins` and `org:objectstack-ai artifact plugins dropped` returned nothing on this.\n\n## What happens\n\nAn app whose `objectstack.config.ts` lists code plugins builds fine and reports them, but none of them mount when the app is booted from its artifact. Nothing says so.\n\nBrightRule's config:\n\n```ts\nplugins: [\n  new ConnectorRestPlugin(), new ConnectorOpenApiPlugin(), new ConnectorMcpPlugin(),\n  new KnowledgeServicePlugin({ sources: [policyClauseKnowledgeSource()] }), // @objectstack/service-knowledge\n  new KnowledgeVectorPlugin(),   // app code: OpenAI-compatible embedder + pgvector store (uses `pg`)\n  new PolicyQaPlugin(),          // app code: indexes clauses at kernel:ready\n],\n```\n\n1. `os build` (18.6.0) prints `Runtime: 6 plugins` and writes `dist/objectstack.json` plus `dist/objectstack-runtime.<hash>.mjs`.\n2. The runtime module exports only `functions` and `meta` (the hook handlers). The `plugins` array in `objectstack.json` holds plain descriptors (`{ name, version, dependencies, options }`), not anything that can be started.\n3. Boot EE 18.6.0 with `OS_COMPOSED_ARTIFACT_URL=file:///…/dist/objectstack.json`. The plugin table shows 57 plugins and none of the six: no `com.objectstack.service.knowledge`, no app plugins, no connectors. No warning at build or at boot.\n4. Consequence for this app: the knowledge service, the vector adapter and the clause index never exist. Everything that depends on them fails later and elsewhere (empty retrieval, hooks finding no service).\n\n## Why (origin/main e9fa6b5d06)\n\n- `packages/runtime/src/load-artifact-bundle.ts:199` `mergeRuntimeModule` imports the runtime module and reads `mod.functions ?? mod.default?.functions` only (L205). Plugins are never read from it.\n- `packages/cli/src/utils/build-runtime.ts:233` bundles with `packages: 'external'`. Even if plugins were exported, their imports stay bare. In the EE 18.6.0 image `@objectstack/service-knowledge`, `@objectstack/embedder-openai` and `pg` do not resolve (`require.resolve` from `/repo/cloud/apps/objectos-ee` fails for all three), so a deployed artifact has no way to load them.\n\n## The contract it breaks\n\n- cloud `apps/objectos-ee/deploy/artifact-pinned-boot.md`, \"What this mode does and does not mount\": \"The app's own plugins, flows and triggers come from the artifact\".\n- The build summary's `Runtime: 6 plugins` tells the author the plugins are in the build.\n\n## Expected\n\nOne of these, decided by the maintainer:\n\n- **Carry them.** The artifact ships the app's code plugins in a form the runtime can start (exported from the runtime module), together with their dependencies (bundled, or installed beside the artifact), and the loader mounts them.\n- **Refuse them.** If code plugins are not supported on the artifact path, `os build` (or the boot) fails or warns loudly, naming each plugin that will not mount and saying what to do instead. Today the drop is silent.\n\n## Workaround used to finish the evaluation\n\nA derived image on top of `objectos-ee:18.6.0`: the app's production dependencies installed under `/srv/brightrule/node_modules`, and an entry `objectstack.config.ts` that imports the stock EE config unchanged and appends the app's plugins. With it the plugins mount (60 plugins) and the pgvector index is built. Every customer with a plugin-bearing app would have to maintain such an image per EE release.\n\nRelated (filed together):\n- objectstack-ai/cloud#4935 — `ask` never loads a package's `surface: 'ask'` skill\n- objectstack-ai/cloud#4933 — `search_knowledge` is never registered\n- objectstack-ai/cloud#4934 — `query_data` fails on DeepSeek (`json_schema` response format)"
+}

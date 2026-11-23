@@ -2,8 +2,8 @@
   "number": 36363,
   "kind": "issue",
   "title": "设计模式（二）菜单编辑：添加已有的菜单项，上移下移、移到分组、移除、改名和图标",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -23,9 +23,13 @@
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-22T08:11:58Z",
-  "updated_at": "2026-11-22T17:37:12Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-22T22:45:47Z",
+  "closed_at": "2026-11-22T22:45:47Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
   "comments": 6,
   "locked": false,

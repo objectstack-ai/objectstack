@@ -1,0 +1,36 @@
+{
+  "number": 36592,
+  "kind": "issue",
+  "title": "Built-in objects get colours: one palette colour per business family, visible objects only, examples too",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:server",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-23T01:19:16Z",
+  "updated_at": "2026-11-23T04:24:42Z",
+  "closed_at": "2026-11-23T04:23:49Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36592",
+  "body": "repo:objectstack#1 · os-warren · session_01JQwxbZeHNsF3RWcWpj7rGj\n\nFiling gate ① · Source: maintainer — Warren, project thread of seat repo:objectstack#1, at 01:17Z on 2026-11-23 「现在系统对象icon支持配色，系统的内置对象是不是应该先完整的配上颜色。」, then at 01:18Z 「立卡派」 on the seat's proposal (colour by family, visible objects only, reviewed mapping first).\n\n## What\n#35985 gave every object a `color` from the closed palette `OBJECT_COLORS` (`packages/spec/src/data/object-icon.ts`: gray, blue, teal, green, amber, orange, red, pink, purple); the console draws the icon as a white glyph on a square of that colour, and an object without `color` is drawn `gray`. Measured on main 06c3e5ac: **no object anywhere declares a `color`** — 118 platform object files carry `isSystem: true` (59 in `packages/platform-objects/src`, the rest across plugin-audit, service-messaging, service-automation, plugin-sharing, plugin-approvals, metadata-core, service-mailbox, plugin-security, objectql, service-storage, service-realtime, plugin-webhooks, plugin-auth, metadata-protocol, core, cloud-connection, spec), 105 of them with an `icon`, 0 with a `color`; `examples/**` declare none either. So everything is drawn gray and the capability is unused.\n\n## Done when\n1. **A family → colour mapping**, in the PR body as a table the maintainer reviews before merge: built-in objects grouped by business family (e.g. people & organisation, security & permissions, automation & approvals, messaging & notifications, files & storage, audit & logs, platform metadata), one palette colour per family. Families tell areas apart; no status meaning (the palette deliberately has none).\n2. **Only objects a user sees get a colour** — those reachable in Setup, record links, menus or search. Internal tables nobody opens stay without `color` (gray is the designed neutral). The PR body lists which objects were judged internal and why (one line per group, not per object).\n3. Every colour is declared in the object definition (`color:` beside `icon:`), one changeset per moved package (patch).\n4. `examples/app-showcase`, `examples/app-crm`, `examples/app-todo` (and any other example app with objects) get colours by the same rule, so the shipped examples teach it.\n5. No spec, schema or palette change.\n\n## Out of scope\n- Teaching AI authors to pick a colour in `skills/**` → follow-up card, filed when this lands.\n- HotCRM (its own repo).\n\nreach: every console user, every built-in object icon (Setup, menus, record chips, related tabs).\nBusiness reason: the maintainer's call that the platform's own objects should show the colour capability before anyone else's.\nDedupe: `object color`, `OBJECT_COLORS`, `#35985 follow-up` → none open."
+}

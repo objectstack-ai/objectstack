@@ -1,0 +1,32 @@
+{
+  "number": 36627,
+  "kind": "issue",
+  "title": "[Decision] Record tabs: should an admin be able to hide the built-in Attachments, Approvals and Activity tabs?",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:spec",
+    "enhancement",
+    "needs-user-decision",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-23T04:25:11Z",
+  "updated_at": "2026-11-23T05:55:08Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36627",
+  "body": "repo:objectstack#2 · os-steve · session_01ADHkmRY38EZf38Yy3zthbY\n\n## 维护者速读\n- 要你定：记录页的「附件 / 审批 / 动态」三个内置页签，管理员要不要能隐藏。\n- 现状：#36499 做完后，这三个页签能调顺序、不能隐藏(锁定显示)。自建对象和安装来的对象都一样，因为协议不允许任何一种写法省略它们。\n- 席位推荐 A:先保持锁定，#36499 照常关卡;等有具体对象真的要藏它们再做 B。\n\n## Why this is a decision\n\nCard #36499 item 3 asks for show/hide of every record tab, and its scope line names the built-in Attachments, Approvals and Activity tabs among them. Measured by the #36499 dev (PR #36624) and on PR #36583 (ACCEPT 7089824294, note 3): neither path can hide a built-in tab. An object's own `relatedLists` hides a list by leaving it out, and the protocol does not let it leave the built-ins out. A `.custom` extension's `relatedLists` `hidden` does not reach them either. The seat's earlier routing call (#36499 comment 7089839334) assumed the `.custom` path covered installed objects; that premise is false. The card text and the declared contract disagree, and no existing rule settles which wins for the product.\n\nGoverning text: the record-tab arrangement contract in `packages/spec` (`relatedLists` entries and the built-in tab rule); ADR-0146 D10 (`.custom` arrangement).\n\n## Options\n\n| | What happens | Effort |\n|:--|:--|:--|\n| **A (recommended)** Keep built-in tabs always shown | Admins can move and rename them, not hide them; the editor shows them locked with a reason. #36499 closes with that line accepted. | none |\n| B Allow hiding built-in tabs | A spec widening (`hidden` reaching the built-in tabs on both the own and the `.custom` path), the runtime honouring it, and the editor's 「已隐藏」 section listing them. New card; seat 2 is winding down, so another seat takes it. | M |\n\n## Four axes\n\n- **Real business need:** no app measured today hides these tabs; the only pull is the card's general \"show or hide\" wording. Approvals and Activity are where a record's history and pending decisions live, so hiding them also hides governance from users.\n- **Long-term soundness (leads):** A keeps one rule (built-ins are always reachable) that the runtime already enforces; B is a clean widening if a real need appears, and nothing in A blocks it later.\n- **Preventing AI authoring mistakes:** A gives an AI one fewer key to set wrongly on a governed surface; B adds a declared key that must then be enforced on two paths.\n- **Startup focus:** A adds no surface without pull; B is speculative today.\n\n## Re-check\n\n`git grep -n \"isRecordPageBuiltinTab\" packages ui` locates the built-in tab rule; it still forbids omission until B is done."
+}

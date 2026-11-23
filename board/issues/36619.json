@@ -1,0 +1,38 @@
+{
+  "number": 36619,
+  "kind": "issue",
+  "title": "Test flake: DataPillar.panelHold-27629 'leaving the Actions tab keeps the hold' sometimes sees a save of the unparsable predicate (fails 1 in ~5–8 runs on main)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:fleet",
+    "bug",
+    "domain:ui",
+    "finding",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-23T03:56:57Z",
+  "updated_at": "2026-11-23T06:16:13Z",
+  "closed_at": "2026-11-23T06:15:21Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36619",
+  "body": "repo:objectstack#2 · os-steve · session_01ADHkmRB34k9WUWeGpRnVNm\n\nSuggested-grade: p2\nSuggested-domain: `domain:ui`\n\n## What happens\n\n`ui/packages/app-shell/src/views/studio-design/DataPillar.panelHold-27629.test.tsx`, describe \"DataPillar — an action predicate that does not parse holds with the draft (objectstack#27629)\", case \"leaving the Actions tab keeps the hold, and the held line names the action\", fails intermittently at line 233:\n\n```\nAssertionError: expected \"vi.fn()\" to not be called at all, but actually been called 1 times\n```\n\nThe save mock received the object draft with the action `visible: \"record.status ==\"` (the unparsable predicate the case types), after `leaveToForm()` + `outlastDebounce()`. So either the hold does not survive leaving the tab under load (a product race), or the test's debounce wait is shorter than the real debounce under a loaded box (a test race). Not diagnosed here.\n\n## Readings\n\n- Merge queue, PR #36603 (a record top-bar change that touches no Studio file): queue run 45105220119, job `Test UI (16/16)` 137465526451 failed on this case alone (389 of 390 files passed). Base `ed0edb1b50` (#36597's merge, \"the object page saves with Cancel and Save in the top bar, live at once\"); #36597's own queue run was green.\n- Area s2-B's container, `vitest run --maxWorkers=2` on this file alone, under the verify lock:\n  - origin/main `ed0edb1b50`: 4 of 4 green, then 7 of 8 green (1 failed, same case and same assertion).\n  - origin/main merged with PR #36603: 4 of 5 green (1 failed, same case).\n- So the failure reproduces on main without the PR (readings taken 2026-11-23 between 03:40 and 03:55 UTC on a shared box).\n\n## Done when\n\nThe case passes 20 of 20 runs in a row on a loaded box, with the root cause named (hold race or test timing). If the product drops the hold under load, that is the fix, not a longer wait.\n\nDedupe: open-issue search `DataPillar panelHold` → only #27629 (closed, the feature card). No flake card."
+}

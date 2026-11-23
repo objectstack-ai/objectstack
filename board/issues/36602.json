@@ -1,0 +1,36 @@
+{
+  "number": 36602,
+  "kind": "pull_request",
+  "title": "fix(fields): a tap on a lookup picker option's preview chip selects the option",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-23T02:08:39Z",
+  "updated_at": "2026-11-23T03:07:21Z",
+  "closed_at": "2026-11-23T03:07:19Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-23T03:07:19Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36602",
+  "body": "Fixes #36479\nClause-②: no\nMetadata-protocol: none\n\nrepo:objectstack#2 · os-steve · session_01ADHkmNmMEXS4EzeVz9RjvD\n\n## 维护者速读\n\n- 用户在关联字段的下拉选择里点选项下方预览中的记录标签（如「客户：Fabrikam」），以前会直接跳到那条记录、编辑被丢下；现在点选项任何位置都是选中该选项，手机和电脑一样。\n- 记录页字段区的体验修补，替在手机上编辑关联字段的用户解决「点错就跳走」的问题。\n- 出错时最坏是预览里的记录标签或邮箱、网址不再能点开（本来在选择框里也不该点开）；记录页、列表里的链接不受影响，改动可直接撤回。\n- 无。\n\n## What changes\n\nThe lookup quick-picker's option preview drew each extra column through the read cell. A reference column became a link to its record whenever the host answers `recordHref` (on a record page, the record chip), and that link's click handler stops propagation and calls the host's `openRecord`, so the option row's own click never fired. An `email` / `url` / `phone` / file column did the same with its own anchor (the email cell's anchor also stops propagation).\n\n`renderLookupColumnValue` is the one renderer both picker surfaces call (the dropdown preview and the browse-all dialog table). It now carries the picker rule the dialog applied on its own (objectui#11903, point 7): every candidate cell renders under a host with no record destination (`WithoutRecordLinks`), so a reference keeps its face (the chip included) without the anchor or hover card, and a self-linking type is drawn with the `text` face. The fix sits where the preview gets the read cell's link; no event is swallowed anywhere.\n\nDesktop answer the card asked for: yes, the same click navigated with a mouse too. The defect was the link's click handler, not the pointer type; the pin drives both `[TouchA]` and `[MouseLeft]`.\n\n## First read (by risk)\n\n1. `ui/packages/fields/src/widgets/lookupColumnDisplay.tsx`: the renderer branch of `renderLookupColumnValue` (face substitution + `WithoutRecordLinks`).\n2. `ui/packages/fields/src/widgets/LookupField.previewLinkFree-36479.test.tsx`: the pin.\n\n## Tests\n\n<details><summary>Premise reproduced on main (c0eecb1f8 code, pin only)</summary>\n\n```\n× [TouchA] on the chip selects the option and opens no record\n× [MouseLeft] on the chip selects the option and opens no record\n× draws the chip with no anchor, so the option is the one click target\n× draws a self-linking column with its text face, so a tap on it selects too\nAssertionError: expected \"vi.fn()\" to not be called at all, but actually been called 1 times   (openRecord)\nAssertionError: expected \"vi.fn()\" to be called 1 times, but got 0 times                      (onChange, email column)\nTests  4 failed (4)\n```\n</details>\n\n<details><summary>With the fix</summary>\n\n```\nLookupField.previewLinkFree-36479.test.tsx  Tests  4 passed (4)\nos-verify-lock: VERDICT command-exit 0\n```\n</details>\n\n<details><summary>Ablation (fix committed first; renderer branch reverted with scripts/ablation-replace.mjs)</summary>\n\n```\nablation-replace: ok mutation landed: anchor 1 -> 0, blob f2aef5ef1057 -> a27207a105b6\n× [TouchA] on the chip selects the option and opens no record\n× [MouseLeft] on the chip selects the option and opens no record\n× draws the chip with no anchor, so the option is the one click target\n× draws a self-linking column with its text face, so a tap on it selects too\nTests  4 failed (4)\nablation-replace: ok restored: blob == HEAD (f2aef5ef1057) and `git diff HEAD` is empty\n```\n`@object-ui/fields` resolves to `src/` through the ui vitest alias, so no dist rebuild was involved in either leg.\n</details>\n\n<details><summary>Package suite and type-check</summary>\n\nAt head 186d4b424:\n```\npnpm exec vitest run --root ../.. --maxWorkers=2 packages/fields/ && pnpm run type-check   (under os-verify-lock)\n Test Files  323 passed | 1 skipped (324)\n      Tests  4895 passed | 7 skipped (4902)\ntsc --noEmit && tsc -p tsconfig.test.json   (the test program includes src/**/*.test.tsx)\nos-verify-lock: VERDICT command-exit 0\n```\nOnly `@object-ui/fields` changes, and its public surface is byte-unchanged (no export added or removed), so no importer owes a run.\n</details>\n\n## Acceptance notes\n\n- `RecordPickerDialog.tsx` keeps its own `SELF_LINKING_CELL_TYPES` substitution and `WithoutRecordLinks` wrapper; with the rule now in the shared renderer they are redundant there (idempotent, no behaviour change). Removing them is outside this card's file surface and left in place.\n- The record page's chip face (`ReferenceChipContext`) still reaches the preview through the popover, so a reference in an option preview draws as an unlinked chip there and as plain text elsewhere. Unchanged here; noted only.\n\n## Verification\n\nTwo-minute check: `cd ui/packages/fields && pnpm exec vitest run --root ../.. packages/fields/src/widgets/LookupField.previewLinkFree-36479.test.tsx` shows 4 passed. In the Console (not driven in a browser by this PR; the component pin is the evidence): showcase Field Zoo record at 375 px, inline-edit the Master-Detail field, open the picker, tap the `Account: Fabrikam` chip in an option preview: expect the option to be selected and no record to open.\n\n<details><summary>Gate families derived for this diff (head 186d4b424)</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 38 families; all 38 ran locally and exited 0 (the vitest one under os-verify-lock). `--ran` reconciliation: `38 derived, 38 run, 0 NOT-MEASURED, 0 UNRUN` (a derived zero: every line carries its exit code). The type-check programs CI runs over the whole workspace (`Type Check UI` and the `lint.yml` type-check lanes) are CI's; the package's own `type-check` above is the local reading.\n</details>\n\n---\n\n_Generated by [Claude Code](https://claude.ai/code/session_01ADHkmNmMEXS4EzeVz9RjvD)_\n"
+}

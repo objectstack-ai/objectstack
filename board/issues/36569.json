@@ -1,0 +1,36 @@
+{
+  "number": 36569,
+  "kind": "pull_request",
+  "title": "fix(app-shell): the Studio canvas selection strip names a selected dashboard widget in the session's language",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-22T23:39:23Z",
+  "updated_at": "2026-11-23T00:35:37Z",
+  "closed_at": "2026-11-23T00:35:35Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-23T00:35:35Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36569",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9GNMYnbm5cgRkMqUGpXobrR)_\nFixes #36480\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 中文会话里在 Studio 仪表盘画布上选中一个卡片，画布上方那行字以前写「已选中：Pipeline by Stage」，现在写「已选中：阶段管道分布」，和右侧属性面板的标题一致。\n- 属于「Studio 面板说业务话、跟随当前语言」这一组修复，补上上一轮面板改造没覆盖到的画布状态行。\n- 出错时最多是那行字显示回英文原文或卡片编号，不影响保存和数据；直接撤回本次合并即可。\n- 无。\n\n## What changes\n\n`StudioDesignSurface` names a selected dashboard widget in the canvas status strip by the text the widget panel's Title box shows, instead of `selection.label` (the authored title `DashboardPreview` puts there). The text comes from the panel's own reading: `shownLabel` over the served widget titles the Interfaces pillar already pairs with the published layer (`servedWidgets`), in the language `useLabelLanguage` names. A new helper, `shownWidgetTitle` in `servedDashboardText.ts`, finds the widget in the draft by id (as `DashboardWidgetInspector` does) and returns that text. No second reading: if the draft holds no widget of that id or its title reads empty, the strip falls back to `selection.label || selection.id`, as before.\n\nThe card asks for a check of the other kinds the canvas can select:\n\n- **Report:** `ReportPreview` emits no selection, so the strip has nothing to name on a report leaf. Nothing to change.\n- **Page block:** `PageBlockCanvas` / `PagePreview` select `{ kind: 'block', label }` with the block's authored `label`/`title` (else id or type). `PageBlockInspector` uses the same `selection.label` as its title, so the strip and the panel already show the same text. The Studio has no served page text to pair with, so it is unchanged (see Acceptance notes).\n- **Navigation entry:** already reads `navInspectorHead.title`, the panel's own title.\n\nRead first (by risk):\n1. `StudioDesignSurface.tsx`, the `selectionLabel` expression above `canvasHint`: the only behaviour change.\n2. `servedDashboardText.ts` `shownWidgetTitle`: the widget lookup and the `shownLabel` call.\n3. The new test's stub canvas, which emits a selection the way `DashboardPreview.handleWidgetClick` does.\n\nTwo-minute check: `pnpm --dir ui exec vitest run packages/app-shell/src/views/studio-design/StudioDesignSurface.canvasStripServedLabel-36480.test.tsx`. Expect 4 passed. Live: in a zh-CN session, open HotCRM `sales_dashboard` in Studio Interfaces and click 阶段管道分布. The line above the canvas reads 「已选中：阶段管道分布 · Esc 取消选中」.\n\n## Tests\n\nNew `StudioDesignSurface.canvasStripServedLabel-36480.test.tsx` (4 cases). It uses the real `StudioDesignSurface` with its right slot and the real `DashboardWidgetInspector`, over the authored English layer and a zh-CN served dashboard in the metadata store:\n\n- zh: the strip names the widget 阶段管道分布, not `Pipeline by Stage`, and the Title box (`#widget-title`) reads the same text;\n- zh: a widget retitled in the draft is named by its draft title, as the Title box reads it;\n- en: the strip reads the English title;\n- the fixture parses against `DashboardSchema`.\n\nAblation (`scripts/ablation-replace.mjs`): the `shownWidgetTitle(...)` call in the strip replaced by `undefined` made the zh served-title case red (1 failed, 3 passed). Restored, blob equals HEAD and `git diff HEAD` is empty.\n\n## Acceptance notes\n\n- **Page blocks:** this change leaves them alone. Their strip and panel read the same authored block label. The Studio has no served page text (no page counterpart of `servedWidgetTextOf` / `servedReportTextOf`), so a translated page block title shows in its authored language in both places. Making both follow the session language needs a served page pairing, which is a separate change. It is not filed: no live reading was taken here.\n- The canvas's inline widget rename strip (`DashboardPreview`) still edits the authored title in the designer locale. That is the editor, not the status line, and this card does not change it.\n- No props, exports, catalogue keys or stored metadata change.\n\n## Verification\n\n<details><summary>Tests, at aef2a628 (origin/main d463c46f merged)</summary>\n\n- Locked `vitest run` of six files: the new file, `servedDashboardText.test.ts`, `InterfacesPillar.componentListServedTitles-12688.test.tsx`, `StudioDesignSurface.rightSlot-12725.test.tsx`, `DashboardWidgetInspector.test.tsx`, `StudioDesignSurface.selectionLeafScope.test.tsx`. Result: Test Files 6 passed (6), Tests 57 passed (57). This ran after the app-shell dependency closure was rebuilt (`pnpm --filter '@object-ui/app-shell^...' build`, lock VERDICT command-exit 0).\n- `pnpm --filter @object-ui/app-shell type-check` (both `tsc` projects, tests included): VERDICT command-exit 0. This ran at 542d9a19, before the merge, which touched no app-shell file.\n- `eslint` on the three touched ui files: 0 errors. The warnings are in `StudioDesignSurface.tsx` and none is on a changed line.\n\n</details>\n\n<details><summary>Gates</summary>\n\n- `dispatch-gates --commands --repo objectstack-ai/objectstack` at aef2a628 derived 38 families. All 38 were run with their exit codes recorded, and every one exited 0. `--ran` reports 38 derived, 38 run, 0 NOT-MEASURED, 0 UNRUN.\n- `overlap-check --branch=HEAD`: VERDICT clean exit 0 against origin/main. Before the merge it also ran clean against #36543, which shares `StudioDesignSurface.tsx`.\n- Changed lines: 331, under the 3000 threshold.\n\n</details>\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01ADHkmQD4KwKe5BckFpeiuB\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 36648,
+  "kind": "issue",
+  "title": "ui: Studio test `DataPillar.panelGate` \"refuses a rule guard that does not parse\" timed out in the merge queue with no `studio-save` button, on a PR that does not touch Studio",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:fleet",
+    "bug",
+    "domain:ui",
+    "finding",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-23T08:10:04Z",
+  "updated_at": "2026-11-23T08:12:16Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36648",
+  "body": "repo:objectstack#2 · os-steve · session_01ADHkmRY38EZf38Yy3zthbY\n\nFiled by the seat from the #36364 card thread. PR #36606 was removed from the merge queue at 08:08Z. Its one red test is in a Studio file the PR does not touch. Not claimed: seat 2 is winding down and takes no new cards.\n\nSuggested-grade: p2 (p1 if it repeats: it blocks the merge queue)\nSuggested-domain: `domain:ui`\n\n## Where\n\n`ui/packages/app-shell/src/views/studio-design/DataPillar.panelGate.test.tsx:156`, `it('refuses a rule guard that does not parse')`. After a 5027 ms timeout it cannot find `data-testid=\"studio-save\"`.\n\n## Reading\n\n- Merge-queue run 45133910959, job 137556364792 (`Test UI` shard 7/16): 1 failed, 444 passed. The merge group is PR #36606, which changes nothing under `studio-design`.\n- Same test family as the closed flake #36619 (`DataPillar.panelHold-27629`), but a different case.\n- Recent `studio-design` changes on main: #36636 (06:15Z; Save now waits for a transition-priority render before reading the hold, which is the #36619 fix), #36641 (06:50Z), #36597 (03:09Z).\n\n## Likely cause (not verified)\n\nThe Save button is drawn only while the page holds edits. #36636 changed when Save reads the CEL verdict. This case may now need longer than the 5 s wait under queue load, or the button may not appear at all on the parse-fault path. Read #36636's diff against this case before calling it load-only.\n\n## Re-check\n\nRun this file 20 times on a loaded box at main: `pnpm --filter @object-ui/app-shell vitest run src/views/studio-design/DataPillar.panelGate.test.tsx --repeat 20`, or the repo's equivalent."
+}

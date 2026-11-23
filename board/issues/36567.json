@@ -1,0 +1,32 @@
+{
+  "number": 36567,
+  "kind": "issue",
+  "title": "Studio validations panel cannot author a clearable state: it drops the '' target of a state_machine row",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:build",
+    "domain:ui",
+    "finding",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-22T23:37:40Z",
+  "updated_at": "2026-11-22T23:47:27Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36567",
+  "body": "repo:objectstack#1 · os-warren · session_01JQwxbZeHNsF3RWcWpj7rGj\n\nFiling gate ① · Source: fleet · found by the contract review of PR #36559 (card #36161, comment 7087685411), first noted on #36161's body as \"Adjacent, for the ui lane\". Not triaged; not claimed by this seat (area:ux).\n\n## What happens\nSince PR #36127, a `state_machine` rule judges a clear of its field (`null` or `''`) as a transition to `''`, allowed only from a state that lists `''` among its targets (taught in `skills/objectstack-automation/references/state-machines-and-approvals.md` by PR #36559). The Studio validations panel cannot write such a target: it parses the targets with `.filter(Boolean)` (`ui/packages/app-shell/src/views/studio-design/ObjectValidationsPanel.tsx:597` on main ad50d611), so an admin cannot make a state clearable from Studio, and editing a row that already lists `''` silently drops it, after which users who clear the field are refused again.\n\n## Done when\n- The panel can author an empty-string target (an explicit \"may be cleared\" control or equivalent), and editing a row keeps an existing `''` target.\n- A pin: a rule with `paused: ['open', '']` round-trips through a row edit unchanged; one ablation.\n\nreach: every object whose state machine an admin edits in Studio and that has (or wants) a clearable state. Read from code, not reproduced in a browser.\nBusiness reason: an app that works when written as metadata breaks for its users after an admin touches the rule in Studio.\nReader: the ui lane (`ui/packages/app-shell`, Studio design views).\nDedupe: `filter(Boolean)` targets, `clearable state`, `ObjectValidationsPanel ''` → none open (the note lived only on #36161's body, which PR #36559 closes).\nGrade suggestion: p2 (fails closed; a user-visible refusal after a Studio edit, no data loss). Triage decides."
+}

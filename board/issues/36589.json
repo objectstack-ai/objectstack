@@ -1,0 +1,37 @@
+{
+  "number": 36589,
+  "kind": "issue",
+  "title": "在 Mac 上构建后点「编辑应用」整页白屏、类型检查失败：DesignModeMenu.tsx 和 designModeMenu.ts 两个文件名只差大小写",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:build",
+    "bug",
+    "domain:ui",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-23T01:13:58Z",
+  "updated_at": "2026-11-23T03:08:04Z",
+  "closed_at": "2026-11-23T03:07:21Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36589",
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#36359（运行界面的设计模式专题）。⛔ 不是认领。优先级 p1（协调席定的，维护者未指定：在 Mac 上构建的人设计模式完全不可用，构建也报错）。维护者 2026-11-23：「立卡通知 2号」，本卡通知席位 `repo:objectstack#2`。\n\n## 维护者说过的（2026-11-23）\n\n- 「更新最新代码，验收新完成的开发」\n- 协调席汇报验收发现的两个缺陷后：「立卡」「立卡通知 2号」\n\n## 现状（主干 `84853fd18e`，macOS，本机构建）\n\n- objectstack-ai/objectstack#36363 的合并（PR #36437，提交 `ee651ce4c7`）在 `ui/packages/app-shell/src/layout/` 下加了两个文件：\n  - `DesignModeMenu.tsx`：设计模式里的菜单组件（默认导出）。\n  - `designModeMenu.ts`：辅助函数。\n- `UnifiedSidebar.tsx` 第 102 行：`React.lazy(() => import('./DesignModeMenu.js'))`。\n- macOS 默认的文件系统不区分大小写。解析 `./DesignModeMenu.js` 时先试 `.ts`，命中了 `designModeMenu.ts`（辅助函数，没有默认导出），而不是 `DesignModeMenu.tsx`。\n- 两个后果，协调席都实测到了：\n  1. **构建报错**：`@object-ui/app-shell` 的 build 失败，`designModeMenuSave.ts(54,44): error TS1149: File name '…/designModeMenu.ts' differs from already included file name '…/DesignModeMenu.ts' only in casing`，以及 `UnifiedSidebar.tsx(102,…)` 的 TS2322、TS1261。整个仓库 119 个构建任务里只有这一个失败。\n  2. **运行时白屏**：控制台用这份源码打包后，在任意页面点页头的「编辑应用」，整页变白，控制台报 `Uncaught TypeError: Cannot convert object to primitive value`（React 在报原始错误时自己又抛了一次）。\n- Linux 区分大小写，所以持续集成全绿，线上构建应该不受影响；协调席没有在线上验证。\n- 协调席在本机把第 102 行临时改成 `import('./DesignModeMenu.tsx')` 后重新打包，设计模式恢复正常（改动没有提交，已撤掉）。\n\n## 要做的\n\n1. 让这两个文件的名字不再只差大小写：把其中一个改名（比如辅助函数改成 `designModeMenuModel.ts`），同步改所有引用和对应的测试文件名（`__tests__/DesignModeMenu-36363.test.tsx` 和 `__tests__/designModeMenu-36363.test.ts` 也是同样的一对）。\n2. 加一道检查，拦住以后再出现「同一目录下只差大小写的文件名」：放进现有的 lint 或持续集成里，Linux 上也能拦。\n3. 全仓库扫一遍，看还有没有别的这样的文件对，有的话一并处理并在 PR 里列出。\n\n## 不做的\n\n- 不改设计模式的功能。\n\n## 验收\n\n- 在 macOS 上从干净的检出构建：`@object-ui/app-shell` 的 build 通过，没有 TS1149。\n- 在 macOS 上打包的控制台里点「编辑应用」：进入设计模式，不白屏。\n- 故意加一对只差大小写的文件名：新加的检查报错（在 Linux 上跑）。\n- PR 正文列出改名的文件和扫描结果。\n\n## 协调席自己加的\n\n- 「要做的」第 2、3 条（加检查、全仓库扫描）。\n- 改名的具体名字只是举例。\n- 线上（Linux 构建）是否正常，协调席没有验证。"
+}

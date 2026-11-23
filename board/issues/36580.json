@@ -1,0 +1,38 @@
+{
+  "number": 36580,
+  "kind": "pull_request",
+  "title": "feat(studio): the Field History setting offers Default, On and Off, and Default says what it resolves to",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "protocol:data",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-23T00:34:00Z",
+  "updated_at": "2026-11-23T02:49:39Z",
+  "closed_at": "2026-11-23T02:49:37Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-23T02:49:37Z",
+  "comments": 11,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36580",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9RrM5sKZCWCaM7kfFhKhSDe)_\n\nFixes #36482\n\nClause-②: yes (widening)\nMetadata-protocol: none\n\n## 维护者速读\n\n- 字段表单、对象表单的字段列表、对象「功能」里的「字段修改值」从开关改成三选一：默认 / 开 / 关。\n- 「默认」不写任何值（跟随平台），并直接写出它对这一行意味着什么：大多数类型显示「默认（开）」，媒体、JSON、凭据字段显示「默认（关）」。\n- 以前关掉后回不到「跟随默认」，现在选「默认」即删掉这个键；开、关照旧写 true / false。\n- 「默认是开还是关」与动态写入时的判断用同一个函数（新放进 spec），两边不会再各写一份类型清单而对不上；写入行为不变。\n- 若出错，可能表现为某个字段类型的「默认」标成开、实际写入时却不显示值（或相反），已有测试逐类型钉住。\n- 11 个语种的帮助文字同步改写，去掉了「开关显示为关」的说明。\n\n## What changes\n\n**Spec** (`packages/spec/src/data/field-history-default.ts`, new, exported from `@objectstack/spec/data`):\n- `resolveFieldHistory(field, object)`: whether a changed field's old → new values show on the activity timeline. Off when the object writes `enable.fieldHistory: false`, or the field writes `fieldHistory: false`, or the field is a credential (`isMaskedOnReadFieldType`, with the object's `managedBy`). On when the field writes `fieldHistory: true` or `trackHistory: true`. Otherwise on unless the type is in `FIELD_HISTORY_DEFAULT_OFF_TYPES`.\n- `FIELD_HISTORY_DEFAULT_OFF_TYPES`: the 14 types that were a private `Set` in the audit writer, unchanged, now frozen and typed `FieldType[]`.\n- Same home and same reason as `isMaskedOnReadFieldType` (#20141): two consumers ask the question, so it is declared once.\n- `field.form.ts` and `object.form.ts`: the three `fieldHistory` rows (field form, the `fields` repeater, the `enable` composite) name `widget: 'field-history'`; the repeater and composite rows drop `type: 'boolean'` so the widget is what renders. Help text rewritten: no \"though the switch shows off\"; the field rows say what Default means per type (fixes the L2 nit on #36399 that \"Unset means ON\" was too broad for media, JSON and credential fields).\n- Names per the seat's ruling (comment 7088708778): `resolveFieldHistory` (the resolved value of the authored key, as `resolveDisplayField` is for `displayField`), `FIELD_HISTORY_DEFAULT_OFF_TYPES`, input interfaces `FieldHistoryField` / `FieldHistoryObject`.\n- `api-surface/data.json` and `export-origins/data.json` regenerated: 4 added, 0 removed.\n\n**Writer** (`packages/plugins/plugin-audit/src/audit-writers.ts`): `changeValuesShownFor(objectDef)` now returns `(_key, field) => resolveFieldHistory(field, objectDef)`. The local `NO_LINE_VALUE_TYPES` set is gone. Equivalence: the old credential test was `collectMaskedReadFields(objectDef).has(key)`, which is `isMaskedOnReadFieldType(def.type, objectDef.managedBy)` over `objectDef.fields`; every caller passes `field = getObjectDef(object).fields[key]` (`getFieldDefs`), so the two read the same definition. The full plugin-audit suite passes unchanged.\n\n**Studio** (`ui/packages/app-shell/src/views/metadata-admin/widgets.tsx`): new registered widget `field-history`, labelling `control` (the host label names the Select trigger). Three options: `Default (On|Off)`, `On`, `Off`. Default calls `onChange(undefined)`, which removes the key. A field row (one carrying `type`) resolves Default through `resolveFieldHistory({ type, trackHistory }, undefined)`; the `enable` block resolves to on. A non-boolean stored value draws as Default, as the writer reads it. New i18n keys `engine.form.fieldHistoryDefault` / `fieldHistoryOn` / `fieldHistoryOff` in the studio namespace (en, zh).\n\n**Translations**: the three help texts in all 11 `*.metadata-forms.generated.ts` bundles, hand-translated (extract does not overwrite a present leaf).\n\n## Tests\n\n- `packages/spec/src/data/field-history-default.test.ts` (new, 12): each arm of the predicate, every no-line type, the better-auth password exemption, literal-boolean reads.\n- `ui/.../FieldHistoryWidget-36482.test.tsx` (new, 10): the three published rows name the widget; Default (On) / Default (Off) per type and with `trackHistory: true`; stored `true` / `false` draw On / Off; choosing Default after Off calls `onChange(undefined)`; On / Off write `true` / `false`; read-only disables it. Ablation: with the resolver replaced by `true`, \"names Default (Off) for a media, JSON or credential type\" fails; with Default writing `false`, \"a stored false goes back to unset\" fails.\n- Registry tables extended with a `field-history` row, as each one requires for a new key: `SchemaForm.widgetLabelling.test.tsx`, `SchemaForm.controlWidgetGridNaming-9889.test.tsx`, `__tests__/SchemaForm.controlWidgetFailureArmNaming-9931.test.tsx` (164/164).\n- Local runs: plugin-audit 109 files / 1815 tests; spec `src/data` 190 files / 6778 tests; platform-objects translations 26 files / 610 tests. Derived gates are in the seat's gates file; CI runs the full farm.\n\n## Acceptance notes\n\n- The field rows cannot see the object's own `enable.fieldHistory` (a field form, a repeater row has only the field), so Default names the field's own resolution; the help text says the object's off wins.\n- Accepted deviation (contract review 7088768550, N3): the widget passes no object to `resolveFieldHistory`, so two cases differ from the writer: an object with `enable.fieldHistory: false` (disclosed in the help text), and a `password` field on a `managedBy: 'better-auth'` object (label Default (Off), writer on). No better-auth object declares a `password`-typed field today, so the second is unreachable; passing the object needs row-to-document plumbing in `RecordField`, not owed by this card.\n- Contract review N1 and N2 fixed in `5df919cb`: module header wording; the field rows' help text now says a credential field never shows values (11 locales).\n- Contract review N4 (delta 7088846404) fixed in `e285ca09`: the widget docblock and the changeset no longer read as if Track History could turn a credential field on; a credential field's Default is Off always. Wording only, no code change.\n- Accepted deviation (contract review 7089359334, N5): one rewrapped comment line in the `FieldHistoryWidget` docblock is 121 characters. Comment formatting only; ESLint is green on `e285ca09`. Left for a later touch of the file rather than moving the head.\n- Out of scope, carried by #36290's remaining PRs: the Studio field designer and object field inspector (`FieldDesigner.tsx`, `ObjectFieldInspector.tsx`) and an `enable.fieldHistory` control in `ObjectSettingsPanel`. They do not render these spec form rows.\n- ADR-0052 §5b.1 amendment for the reversed default is already carried by #36086 (from #36399); this PR adds no ADR sentence.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01ADHkmPedgY4mKE12ad7oAo)_\n\n<!-- signed: repo:objectstack#2 · os-steve · session_01ADHkmPedgY4mKE12ad7oAo -->\n\n\n\n"
+}

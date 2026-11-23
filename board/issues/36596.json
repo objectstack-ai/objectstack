@@ -1,0 +1,37 @@
+{
+  "number": 36596,
+  "kind": "issue",
+  "title": "main red: on live MySQL, dropping a removed literal DEFAULT (#36245) leaves a NOT NULL column with no default, so unset inserts fail",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "bug",
+    "domain:server",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-23T01:45:12Z",
+  "updated_at": "2026-11-23T03:08:04Z",
+  "closed_at": "2026-11-23T03:07:21Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36596",
+  "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nFiling gate ① · Source: fleet · found by the triage patrol on main CI.\n\n## What happens\nMain's push CI has been red since 00:50Z on 2026-11-23. The four push runs since then failed (00:50, 01:06, 01:32 and 01:37; latest 45095572904 at `79d9c14355`). The failing job is **Temporal Conformance (live PG + MySQL)**, step \"Run driver-sql suite against both live servers\". 2 tests fail out of 7,006:\n\n```\nFAIL src/sql-driver-36245-stale-literal-default.test.ts > live cell budget (60000 ms) >\n  #36245 §2 — a literal DEFAULT follows the declaration across two boots (live mysql)\nError: insert into `os36245_pref` (`id`, `title`) values ('after', 'after') -\n  Field 'digest' doesn't have a default value\n```\n\nThe fix for #36245 (PR #36564) drops a physical column `DEFAULT` that the metadata no longer declares. On MySQL the column is still `NOT NULL`, so after the drop an insert that leaves the field unset is **refused**, instead of storing null. That breaks the new test, and on a real MySQL deployment it would break every unset write to such a field. #36245's own \"Read first\" line named the `NOT NULL` with-default case (#33724's in-place relax is the precedent).\n\n## Done when\n- When schema sync drops a literal default from a `NOT NULL` column that the metadata no longer requires, it also relaxes the column to nullable, as #33724 does. Alternatively it leaves such a column alone and says so. In either case an unset insert stores null on MySQL, Postgres and SQLite.\n- The live MySQL and PG legs of Temporal Conformance are green, and main is green.\n- ⛔ The test is not skipped, quarantined or narrowed to make main green.\n\nreach: main is red for every PR's base, and every MySQL deployment that upgrades past PR #36564 with a removed literal default on a `NOT NULL` column. Measured on main CI.\nBusiness reason: main is red, and a MySQL customer's writes would fail.\nReader: domain:server (driver-sql schema sync). Follow-up of #36245 (closed).\nGrade: p1. Main is blocked, and a common write fails on MySQL."
+}

@@ -1,0 +1,36 @@
+{
+  "number": 36559,
+  "kind": "pull_request",
+  "title": "docs(skills): objectstack-automation teaches that a clearable state lists '' among its targets",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-22T23:11:49Z",
+  "updated_at": "2026-11-23T00:52:01Z",
+  "closed_at": "2026-11-23T00:50:46Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-23T00:50:45Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36559",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-warren\"} -->\n_Requested by **Warren** · [project thread](https://claude.ai/code/project/chan_01U5RdnAAmkSQmZbqh6FtqZ8?thread=cmsg_01U5RdnAAmkSQmZbqh6FtqZ8Uwe38nh7MLTBwLqZZeHCsq)_\n\nFixes #36161\n\nClause-②: no\nMetadata-protocol: none\nRide-along: the `employee` lifecycle eval in `skills/objectstack-data/evals/objects-fields-relationships.json` now declares `initialStates` (declared by the seat; source: a finding in the thread of card 36534, the same state-machine teaching theme).\n\n## 维护者速读\n\n- 用户能看到什么变化:用 AI 搭应用的人,照自动化技能写状态机时,会被告知「想让某个状态可以清空,就要在它的去向里写上空值」;此前技能没提,照着写出来的应用会拒绝用户清空状态字段。\n- 为什么做:平台已经把「清空状态」当成一次状态流转来判定,技能文字落后于已上线的规则,这是补上那句教学。\n- 出错会怎样:只改教学文字,不改任何运行行为;写错了最多是 AI 少写或多写一个空值去向,撤回这个改动即可恢复原文。\n- 要你做什么:无。\n\n## What changes\n\n`skills/objectstack-automation/references/state-machines-and-approvals.md`, state-machine notes, one new entry:\n\n> **Clearing the field is a transition to `''`.** An update to `null` or `''` is judged from the stored state: a clearable state lists `''` in its targets, e.g. `paused: ['open', '']`; from any other listed state it is refused (`invalid_transition`, `constraint.to: ''`).\n\nQuoted from the merged code, not from the card. `checkStateMachine` in `packages/objectql/src/validation/rule-validator.ts` (main d463c46f) reads the stored state, maps an empty target (`undefined`, `null` or the empty string) to the key `''`, and answers `fallback('invalid_transition', { from: fromKey, to: toKey }, …)` when the stored state's list does not include it. Two points where the skill text is narrower than the card's sentence, both on purpose:\n\n- The card writes `to: ''`. In the code that pair is the refusal's `constraint` (`{ from, to: '' }`), so the skill says `constraint.to: ''`.\n- The card writes \"a clear from any other state is refused\". The code returns no error when the stored state is not a key of `transitions` (the existing \"unlisted from state is not guarded\" note), so the skill says \"any other listed state\".\n\nThe new entry is paid for by shortening the section intro and six neighbouring notes in the same file; each keeps its fact. The token ceiling row is untouched.\n\nRide-along, second commit: in `skills/objectstack-data/evals/objects-fields-relationships.json`, the `employee` lifecycle case's expected answer declared a `state_machine` with `transitions` only, which publish refuses for a machine that runs on insert (`state-machine-no-initial-states`). It now declares `initialStates: ['draft']` with the one-clause reason its sibling `order` case uses, and `must_contain` requires `initialStates`. The seeds eval in `hooks-security-seeds-datasources.json` that mentions `state_machine` only says seed rows skip that rule; it teaches no machine and is unchanged.\n\n## Tests\n\nNo code path changes, so there is no test to add or ablate. The one `os:check` block in the section is byte-identical.\n\n## Acceptance notes\n\n- Scope-out, the ui lane's: the card notes that the Studio validations panel parses targets with a filter that drops empty strings, so it cannot write `''` and loses an existing one on edit. Not touched here; no file under `ui/` is in this diff.\n- Commit trailer: the commit carries the model-free trailer pair AGENTS.md prescribes. The dispatch order asked for a trailer naming a model; AGENTS.md outranks it.\n- Changeset: `skills/` ships as `@objectstack/skills`, so this takes a `patch` changeset (`.changeset/36161-automation-skill-clearable-state.md`), not `skip-changeset`.\n\n## Verification\n\nReadings at head dd527b97 against main d463c46f.\n\n| Reading | Before | After |\n|:--|--:|--:|\n| The edited file, lines | 385 | 386 |\n| The edited file, bytes | 23726 | 23734 |\n| The edited file, tokens (ceiling 5936) | 5932 | 5934 |\n| All `SKILL.md` files, lines | 4951 | 4951 |\n| Ratcheted authored catalog, tokens | 197573 | 197575 |\n| The eval file (measured, not ratcheted), tokens | 7984 | 8032 |\n| Whole shipped bundle, tokens | 293321 | 293371 |\n\nNet `skills/**` lines: +2 (25 added, 23 removed): +1 in the reference, +1 in the eval file.\n\nRead first: the \"Notes\" list of the state-machine section in the diff — the new entry, then the six shortened notes beside it (check that none lost a fact).\n\nTwo-minute check: `node scripts/check-skills-token-ratchet.mjs` exits 0 and prints `state-machines-and-approvals.md is 5934 tokens (ceiling 5936; headroom 2)`; `git grep -n \"''\" -- skills/objectstack-automation/references/state-machines-and-approvals.md` shows the clearable-state entry.\n\n<details><summary>Local gate subset (derived by dispatch-gates, 49 families)</summary>\n\n44 exited 0 at dd527b97, among them `check-skills-token-ratchet` (scan and self-test), `check:skill-refs`, `check:skill-served-sections`, `check:skill-links`, `check:skill-identifier-liveness`, `check:skill-compatibility`, `check:skill-frame-sync`, `check:role-word`, `check:doc-authoring`, `check:nul-bytes`, `check:published-files`, `check-empty-changeset`, `check-changeset-no-major`, `check-adr-0087-registration`, `check-closing-keyword-parity`.\n\nNOT MEASURED locally, left to CI:\n\n- `check:dts-closure`, `check:dual-build-cjs-loads`, `check:lean-entry-closure`, `check:sourcemap-no-sources-content`, `check:doc-formula-expressions` — each exited 3, prerequisite not met: they read built `dist/` and this diff touches no package, so no build closure was made.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01JQwxbZeHNsF3RWcWpj7rGj)_\n\n<!-- signed: repo:objectstack#1 · os-warren · session_01JQwxbZeHNsF3RWcWpj7rGj -->\n"
+}

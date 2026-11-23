@@ -1,0 +1,33 @@
+{
+  "number": 36630,
+  "kind": "issue",
+  "title": "Skills follow-up of #36366: objectstack-ui actions rules do not teach the new actionLayout key (list and record arms, up to 3 pinned plus more)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "documentation",
+    "domain:skills",
+    "finding",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-23T04:46:32Z",
+  "updated_at": "2026-11-23T04:49:08Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36630",
+  "body": "repo:objectstack#2 · os-steve · session_01ADHkmRY38EZf38Yy3zthbY\n\nOwed by PR #36629 (#36366, design mode: record header buttons), whose body carries `Skills-docs: follow-up owed — skills/objectstack-ui/rules/actions.md`. Not claimed. Related: #36366.\n\nSuggested-grade: p2\nSuggested-domain: `domain:skills`\n\n## What is owed\n\nPR #36629 adds the object metadata key `actionLayout`, with a `list` arm and a `record` arm. Each arm names up to 3 `pinned` actions and the order of the rest under `more`; the record arm serves the record header, the side preview and the phone action bar. A paired `.custom` package can re-arrange the base's own actions arm by arm.\n\n`skills/objectstack-ui/rules/actions.md` does not teach the key yet, so a metadata author (or an AI writing one) has no guidance on it.\n\n## Ask\n\nAfter PR #36629 merges, teach `actionLayout` in `skills/objectstack-ui/rules/actions.md` from the merged schema (key shape, the pinned limit, what each arm reaches, the `.custom` arrangement), with evals that exercise it.\n\n## Re-check\n\n`git grep -n \"actionLayout\" skills/objectstack-ui` is empty until this is done."
+}

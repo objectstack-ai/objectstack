@@ -1,0 +1,37 @@
+{
+  "number": 36581,
+  "kind": "pull_request",
+  "title": "fix(plugin-security): a refusal negotiates the label locale, so en-US names the master as /meta does",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-23T00:34:47Z",
+  "updated_at": "2026-11-23T01:32:37Z",
+  "closed_at": "2026-11-23T01:32:35Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-23T01:32:35Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36581",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi91tYCagMT6JaQ6YA5YqnWwi)_\nFixes #36573\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户能看到什么变化:浏览器语言是地区写法(如美式英语)的用户,写入被主从权限拒绝时,提示里的主对象名称与元数据接口、引擎提示一致(英文名),不再显示默认语言(中文)的名称。\n- 为什么做:属于“同一对象在各处叫同一个名字”的本地化一致性工作,补上安全插件这一处读者。\n- 出错会怎样:最坏情况只是拒绝提示里的对象名换成另一语言的写法,不影响权限判定本身;可直接撤回。\n- 要你做什么:无。\n\n## What changes\n\n`denialLabels` in `packages/plugins/plugin-security/src/security-plugin-authz-middleware.ts` now negotiates the label locale against what `i18n.getLocales()` reports, with `resolveBundleLocale` (`@objectstack/spec/system`, the platform's one negotiation rule), before it calls `translateObject` — the same question objectql (`negotiatedMessageLocale`), plugin-approvals (`negotiatedReaderLocale`) and the metadata route ask. The tag passes through untouched when nothing matches.\n\nWhy `en-US` read `合同` before: the request tag reached `translateObject` raw. `en-US` is not the authored `sourceLocale` (`en`) by the resolver's case-insensitive equality, so the declared fallback chain (`zh-CN`) was consulted; the `en` pack holds no row for the master, so the lookup fell to the `zh-CN` row. Negotiated, the tag becomes `en`, which IS the authored language, so the authored label answers.\n\nThe fix sits in the one function both refusal paths call (the field-write refusal and the master-detail refusal), so neither caller carries its own copy. The sentence locale (`denialLocaleOf`, built-in catalog) is unchanged: the catalog already reads `en-US` as `en`, and the refusal sentence was already English; only the label inside it was wrong.\n\nNo shared exported helper exists: objectql's and plugin-approvals' wrappers are module-internal (not on either package index) and objectql is a devDependency of plugin-security only, so the precedent — a thin local call to `resolveBundleLocale` over the offered set — is followed rather than widening a package's public surface.\n\n## Tests\n\nNew top-level describe in `packages/plugins/plugin-security/src/denial-label-source-locale.test.ts` (the existing harness for this exact gate and deployment shape; AGENTS.md: a new pin for a component with a shared harness goes into that file as a top-level describe — the shared engine setup was hoisted to module scope so both describes reuse one engine). Deployment: `sourceLocale 'en'`, default+fallback `zh-CN`, an `en` pack with no row for the master. Real `ObjectQL` over a real `SqlDriver`, engine insert refused by the master-edit gate:\n\n- `en`, `en-US`, `fr-FR` → `userMessage` names `Contract`, `code` `PERMISSION_DENIED`, status 403;\n- `zh-CN` (control) → names `合同`, same envelope.\n\n<details><summary>Runs (head 2dc50ab54a)</summary>\n\n- `pnpm --filter @objectstack/plugin-security exec vitest run --maxWorkers=2 src/denial-label-source-locale.test.ts src/controlled-by-parent-master-edit-user-message.test.ts src/owner-queue-field-write-user-message.test.ts` → Test Files 3 passed (3), Tests 60 passed (60)\n- `pnpm --filter @objectstack/plugin-security typecheck && pnpm --filter @objectstack/plugin-security test` → typecheck OK (incl. check:test-typecheck), Test Files 287 passed (287), Tests 7242 passed / 45 skipped\n- Ablation (one-shot, via `scripts/ablation-replace.mjs`, anchor `locale: negotiated,` → raw `locale`, anchor x1 → x0, blob aaf76ff0 → f516a0b7; the test imports `./security-plugin.js` from src, no dist leg): 1 failed / 6 passed — exactly `en-US`: Expected \"…edit access to the Contract…\", Received \"…edit access to the 合同…\". Restored: blob == HEAD, `git diff HEAD` empty.\n\n</details>\n\n## Acceptance notes\n\n- Read first: `security-plugin-authz-middleware.ts` `denialLabels` (the negotiation hunk — risk: the offered set is now built from `getLocales()` entries that are non-empty strings, which is also what objectql's wrapper does); then the test file's new describe.\n- The field-write refusal reads through the same function; its en-US case is covered structurally (one call site of the negotiation), not by a separate pin.\n\n## Verification\n\nTwo-minute check: `pnpm --filter @objectstack/plugin-security exec vitest run src/denial-label-source-locale.test.ts` → 7 passed; the `en-US` case is the one that reads `合同` on `main`.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01ADHkmPTDM2MxHR8cvoMVUX\n<!-- signed: repo:objectstack#2 · os-steve · session_01ADHkmPTDM2MxHR8cvoMVUX -->\n"
+}

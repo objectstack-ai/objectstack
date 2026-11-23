@@ -1,0 +1,31 @@
+{
+  "number": 36645,
+  "kind": "issue",
+  "title": "report builder: the three pieces #36374 left out (+ 筛选 under the data source, show zero-count groups, compare with the previous period)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "pm:queue",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-23T07:19:44Z",
+  "updated_at": "2026-11-23T07:48:22Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36645",
+  "body": "repo:objectstack#1 · os-warren · session_01JQwxbZeHNsF3RWcWpj7rGj\n\nFiling gate ① · Source: fleet · the remainder of #36374 (epic #36255) after PR #36644, which builds the report builder page. The seat split these off at L1, and that PR's acceptance notes name them.\n\n## What is left\nThree of #36374's \"要做的\" lines are not in PR #36644:\n1. **「＋ 筛选」 under the data source** (item 3). The builder picks a dataset but cannot add a report filter.\n2. **「显示数量为 0 的分组」** (item 3, a chart switch). The report spec has no key for it today, so this is a spec widening: a new capability, a separate Feature that waits on the maintainer's pick list (scope-creep rule, 2026-11-18). Note: this item needs that decision before any build.\n3. **「和上一期对比」** (item 6, the time switch). It waits on the engine defect #35395.\n\n## Done when\n- 1: the builder adds and removes report filters on the bound dataset, the preview redraws at once, and Save keeps them.\n- 2: only after the maintainer picks it: a spec key, the renderer honours it, and the builder offers the switch.\n- 3: after #35395: the time switch offers 「和上一期对比」, and the chart draws both periods.\n\nreach: every admin building a report in the console.\nBusiness reason: these are the last pieces of the builder the maintainer approved on board 49, figure 3.\nReader: `domain:ui` (plugin-report builder; spec for item 2).\nBlocked-by: #35395 (item 3 only)\nDedupe: `report builder filter`, `show zero groups report`, `compare previous period report` → none open besides #35395.\nGrade suggestion: p2. Triage decides; item 2 goes on the maintainer's pick list."
+}

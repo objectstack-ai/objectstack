@@ -1,0 +1,37 @@
+{
+  "number": 36591,
+  "kind": "issue",
+  "title": "设计模式里「上移 / 下移」保存后应用里的菜单顺序不变：只调了数组先后，没改菜单项自带的排序号，而侧栏按排序号排",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-23T01:14:38Z",
+  "updated_at": "2026-11-23T07:03:16Z",
+  "closed_at": "2026-11-23T07:02:29Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36591",
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#36359（运行界面的设计模式专题）。⛔ 不是认领。优先级 p1（协调席定的，维护者未指定：已上线功能在 AI 搭建的应用上保存后没有效果，而且不报错）。维护者 2026-11-23：「立卡通知 2号」，本卡通知席位 `repo:objectstack#2`。\n\n## 维护者说过的（2026-11-23）\n\n- 「更新最新代码，验收新完成的开发」\n- 协调席汇报验收发现的两个缺陷后：「立卡」「立卡通知 2号」\n\n## 现状（主干 `84853fd18e`，本机环境浏览器实测，1440 宽，系统管理员，自建应用「CRM客户管理」）\n\n- 这个应用的菜单是四项：客户、联系人、销售商机、跟进记录。它是 AI 搭建的，每个菜单项带一个排序号：`[{objectName: nb57_customer, order: 0}, {nb57_contact, order: 1}, {nb57_opportunity, order: 2}, {nb57_follow_up, order: 3}]`。\n- 进入设计模式，对「联系人」点「…→ 上移」：设计模式里的顺序变成 联系人、客户、…。点「保存」。\n- 保存发了两个请求，都成功：`PUT /api/v1/meta/app/customer_crm?mode=draft&package=app.nb57`，然后 `POST /api/v1/meta/app/customer_crm/publish?package=app.nb57`。\n- 退出设计模式后，侧栏仍是 客户、联系人、…；整页刷新后也一样。没有任何报错。\n- 读回保存的应用定义：`[{nb57_contact, order: 1}, {nb57_customer, order: 0}, …]`。数组里联系人排到了前面，但排序号没动。\n- 所以：设计模式按数组位置显示，应用里的侧栏按排序号显示，两边对不上。再进设计模式看到的是 联系人、客户（和侧栏相反）。\n- HotCRM 的菜单项不带排序号（读 `src/sales/apps/crm.app.ts`，0 处），推测不受影响；协调席没有在 HotCRM 上保存过。\n- 协调席已把测试应用的菜单改回原样并核对。\n\n## 要做的\n\n1. 保存菜单时，让应用里的侧栏和设计模式显示同一个顺序。两种做法选一种并在 PR 里说明：\n   - 保存时按新的先后重写每一项的排序号；或者\n   - 保存时去掉排序号，统一按数组位置排。\n2. 设计模式里显示的顺序和侧栏用同一套排序规则，进模式之前和之后看到的顺序一致。\n3. 「移到分组」「在前面加一项」「在后面加一项」「添加菜单项」同样检查：新加或移动的项在带排序号的应用里落在正确的位置。\n4. 分组（带子项的菜单组）自身和组内各项的排序号同样处理。\n\n## 不做的\n\n- 不改菜单项操作菜单里的项目。\n\n## 验收\n\n- 自建应用「CRM客户管理」（菜单项带排序号）：把「联系人」上移并保存，退出后侧栏是 联系人、客户、…；刷新后还在；再进设计模式顺序相同。\n- 同一应用：「在后面加一项」加一个对象、把一项「移到分组」并保存，侧栏里位置和设计模式里相同。\n- HotCRM（菜单项不带排序号）：上移一项并保存，侧栏顺序变了。\n- 一个菜单里既有带排序号的项、又有不带的项的应用：保存一次后顺序和设计模式一致。\n- PR 正文写明选了哪种做法，以及为什么原来的测试没拦住（objectstack-ai/objectstack#36363 的验收第二条就是「上移并保存：顺序变了；刷新后还在」）。\n\n## 协调席自己加的\n\n- 「要做的」第 1 条的两种做法、第 3、4 条。\n- 验收里「混合」那一条。\n- 侧栏按排序号排是协调席从现象推断的（数据里只有排序号和数组位置两个线索），没有读到排序的那段代码。"
+}

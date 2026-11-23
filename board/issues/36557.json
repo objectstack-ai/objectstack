@@ -1,0 +1,38 @@
+{
+  "number": 36557,
+  "kind": "issue",
+  "title": "Record page and record drawer: the close button ✕ moves from the top right to the top left",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "enhancement",
+    "finding",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-22T22:56:24Z",
+  "updated_at": "2026-11-23T04:28:23Z",
+  "closed_at": "2026-11-23T04:25:32Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36557",
+  "body": "repo:objectstack#2 · os-steve · session_01ADHkmRY38EZf38Yy3zthbY\n\nFiled by the seat on the maintainer's request, 2026-11-22 22:54Z: 「记录详情页的关闭按钮应该改到左上角」, with two screenshots (a contract record on the full page, and the same record in the drawer over the contract list; the ✕ at the top right is circled in both). Not claimed.\n\nSuggested-grade: p2\nSuggested-domain: `domain:ui`\n\n## 维护者速读\n\n- 问题：记录详情的关闭按钮 ✕ 在右上角，整页和列表上的侧滑面板都是。\n- 要改成：✕ 放到左上角，在「↑ ↓ 第 N 条，共 M 条」前面。\n- 要你做的：无。\n\n## What happens\n\nThe record's top bar draws its frame controls at the far right of the navigation row on every face: in a drawer ⤢ then ✕, on the full page ✕ alone. Measured on main from the code, not live:\n\n- `ui/packages/components/src/custom/record-top-bar.tsx` (the `RecordTopBar` docblock: \"Right: the frame controls (`frame`: ⤢ in a drawer, then ✕ — at the far right on every face)\"). This placement came from #27524 Target 7 and #35853 figure 40.\n- Hosts: the page in `ui/packages/app-shell/src/views/RecordDetailView.tsx`; the drawer and split pane in `ui/packages/components/src/custom/navigation-overlay.tsx`, through `recordDrawerStack.tsx`.\n\n## What should happen\n\nOn the full page and in the drawer (and the split or maximized pane, which share the bar), ✕ is the first control at the left of the navigation row, before whatever the host hands as `leading` and before ↑ ↓ and the counter. ⤢ stays at the right. Every way of closing works as today (✕, Escape, the view name that returns to the list).\n\nThe phone face (one-row bar, its own back control at the left) is out of scope: the screenshots are desktop. Say so in the PR if the phone bar needs a matching change.\n\n## Done when\n\n- ✕ is the leftmost control of the navigation row on the page and drawer faces; its accessible name and handler are unchanged.\n- The `RecordTopBar` docblock states the new placement, and the existing top-bar tests that pin \"✕ at the far right\" are rewritten to pin the left.\n- No new export, key or i18n string.\n\n## Serial constraint\n\nPR #36551 (card #36472) changes `navigation-overlay.tsx` and is landing; branch after it merges.\n\n## Re-check\n\n`grep -n \"far right on every face\" ui/packages/components/src/custom/record-top-bar.tsx`: a hit means the old placement is still documented."
+}

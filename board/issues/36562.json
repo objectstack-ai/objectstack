@@ -1,0 +1,37 @@
+{
+  "number": 36562,
+  "kind": "pull_request",
+  "title": "docs(skills): objectstack-formula says an unlowerable SharingRule condition fails the build and the rule is skipped at runtime",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "security",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-22T23:22:14Z",
+  "updated_at": "2026-11-23T01:01:13Z",
+  "closed_at": "2026-11-23T00:49:28Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-23T00:49:28Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36562",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi91tYCagMT6JaQ6YA5YqnWwi)_\n\nFixes #36516\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户能看到什么变化:用公式技能包写共享规则的 AI 和开发者,以前被告知「条件算不出来会让写入失败」,现在读到的是真实情况:这样的共享规则在构建时就报错,运行时整条规则被跳过、不授予任何访问权,只留一行警告日志。\n- 为什么做:这是公式技能包教错失效方式的一处文字;权限规则教错,AI 会按错误的预期去设计和排查共享。\n- 出错会怎样:只改了技能包里的一句说明和两处重复文字,不改任何运行行为;如果新句子有误,读者会被教错,撤回这一个改动即可恢复原文。\n- 要你做什么:批准这一处受管技能包文字改动。\n\n## What changes\n\n`skills/objectstack-formula/SKILL.md`, section \"Surfaces that take an Expression\", the fault-open warning paragraph. The sentence used to say an unevaluable `Hook` / `SharingRule` `condition` or validation predicate aborts the write. It now reads:\n\n> an unevaluable `Hook` `condition` or validation predicate **aborts the write** (§5); a `SharingRule` `condition` that does not lower to a filter fails the build, and at runtime the rule is skipped and grants nothing (one WARN).\n\nOnly the `SharingRule` half changed. The `Hook` and validation-predicate halves say what they said before.\n\nWhat the code does, read at `main` d463c46f:\n\n- Build: `packages/lint/src/validate-sharing-rule-enforceability.ts:18-28` and its \"Why `error`\" section: a condition that does not lower is reported as an `error`.\n- Runtime: `packages/plugins/plugin-sharing/src/declared-sharing-rules.ts:154` compiles the condition with `compileCelToFilter` and no variables; `:217` turns a refusal into a `condition` skip; `:370-374` calls `warnOnce` and `continue`s, so the rule never enters the served set; `:336-348` logs one WARN per rule and cause. A sharing rule's condition is never evaluated on a write, so there is no write to abort.\n\nNo eval case is added: case 14 in `skills/objectstack-formula/evals/cel-predicates-formulas.json` already expects \"the rule would grant nothing\" for a condition that does not lower.\n\n### Token budget: paid by two cuts, ceiling not raised\n\nThe corrected sentence costs +127 bytes. Two restatements in the same file are cut to pay for it:\n\n| Cut | Bytes | Where the content still lives in the file |\n|:---|---:|:---|\n| The note under the translation table: `previous.x` fails the write on an insert unless guarded by `previous != null &&` | -105 | Section 5: the `previous` table's \"Insert events\" row (`previous` is `null`, the two guard spellings, a column read off it faults) and the \"An unevaluable condition ABORTS the operation\" paragraph (a column read off `previous` on an insert fails the write) |\n| \"Two more dialects ride the same envelope.\" at the head of \"Cron and template surfaces\" (the next sentence now starts \"Neither dialect is CEL\") | -34 | \"Core contract\": \"Every expression in metadata is the same envelope\" and the three-dialect table listing `cron` and `template` |\n\nReadings (the ratchet prices `ceil((bytes - 20) / 4)`; the 20 is the release-stamp line):\n\n| | Before (`main` d463c46f) | After (f768c921) |\n|:---|---:|---:|\n| `skills/objectstack-formula/SKILL.md` lines | 493 | 491 |\n| `skills/objectstack-formula/SKILL.md` bytes | 24048 | 24036 |\n| `skills/objectstack-formula/SKILL.md` tokens (ceiling 6008) | 6007 | 6004 |\n| All `skills/*/SKILL.md` lines | 4951 | 4949 |\n| All `skills/*/SKILL.md` bytes | 261175 | 261163 |\n| Ratcheted authored bundle tokens (ceiling sum 202541) | 197573 | 197570 |\n\n`scripts/check-skills-token-ratchet.mjs` is not edited; the formula row's ceiling stays 6008.\n\n## Tests\n\nText-only change to a published skill; no code, no test file. No ablation (no tested behaviour changed). All readings at f768c921.\n\n- `node scripts/check-skills-token-ratchet.mjs`: exit 0, \"skills/objectstack-formula/SKILL.md is 6004 tokens (ceiling 6008; headroom 4)\", \"60 authored bundle file(s) within their ceilings\".\n- `pnpm --filter @objectstack/spec run check:skill-docs`: exit 0, \"Skill docs in sync\".\n- `pnpm --filter @objectstack/lint run check:doc-formula-expressions` (after building the lint closure under the verify lock, VERDICT command-exit 0): \"26 record-scoped formula example(s) across 593 files / 1864 TS blocks judged clean\".\n\n## Acceptance notes\n\n- Gates: `node scripts/pm/dispatch-gates.mjs --commands` derived 49 families; `--ran` answers \"49 derived famil(ies) accounted for — 45 run, 4 NOT-MEASURED (4 DERIVED from a recorded exit 3)\". The four are `check:dts-closure`, `check:dual-build-cjs-loads`, `check:lean-entry-closure` and `check:sourcemap-no-sources-content`: each refuses without a full `pnpm build`, which this text-only diff does not owe locally. NOT MEASURED locally; CI reads them.\n- `node scripts/pm/overlap-check.mjs` at f768c921: \"VERDICT clean exit 0\" (one open PR shares the file and merges cleanly).\n- The first cut removes a reminder that sat next to the `ISCHANGED(x)` row. Its content is intact in section 5, which the cheat-sheet's \"Previous record\" row already points to.\n\n## Verification\n\n- Read first: `skills/objectstack-formula/SKILL.md` (the changed sentence near line 447, then the two cuts), then `.changeset/36516-formula-skill-sharing-rule-skip.md`.\n- Two-minute check: `node scripts/check-skills-token-ratchet.mjs` and read the `objectstack-formula/SKILL.md` line: 6004 tokens, ceiling 6008.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01ADHkmPTDM2MxHR8cvoMVUX\n"
+}

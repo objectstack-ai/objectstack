@@ -1,0 +1,35 @@
+{
+  "number": 36563,
+  "kind": "pull_request",
+  "title": "fix(app-showcase): label the invoice pre-tax roll-up Subtotal / 小计, not Total / 合计",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-22T23:23:36Z",
+  "updated_at": "2026-11-22T23:59:42Z",
+  "closed_at": "2026-11-22T23:59:41Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-22T23:59:40Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36563",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9XS45uS4YmpkyKDUwCT41Tq)_\n\nFixes #36314\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n- 用户能看到什么变化：示例应用里发票的记录页和编辑表单上，税前金额的标签从「Total / 合计」改为「Subtotal / 小计」，不再和旁边的「Total incl. Tax / 含税总额」看着像两个总额。\n- 为什么做：发票页面体验问题——替看发票的人分清哪个是税前、哪个是含税。\n- 出错会怎样：只动示例应用里一个字段的显示文字，最坏是标签措辞不合适，可直接撤回。\n- 要你做什么：无。\n\n## What changes\n\n- `examples/app-showcase/src/system/translations/index.ts`: `showcase_invoice.fields.total.label` reads `Subtotal` (en, was `Total`) and `小计` (zh-CN, was `合计`). The object metadata already labels the field `Subtotal` (`examples/app-showcase/src/data/objects/invoice.object.ts`), and the line-grid summary stack calls the same figure Subtotal; only the bundle disagreed.\n- The bundle ships exactly two locales, `en` and `zh-CN` — no other locale key exists anywhere under `examples/app-showcase` (grep for `ja-JP` / `es-ES`: zero hits), so \"every shipped language\" is these two.\n- The comment above `showcase_expense_report` that said 「合计 is showcase_invoice's `total`」 moves with the label: 合计 is now the report's own total, and the invoice's pre-tax `total` reads 小计 beside its 含税总额.\n- Not changed: the field name, any other field's label, the expense report's own 合计 (`total_amount`), the source metadata.\n- No test, QA checklist item or fixture pinned the old label: a grep over `examples/`, `packages/qa/`, `docs/qa/` and every `*.test.ts` for the old invoice label finds nothing to update (the `records-forms` checklist item already calls this field \"the Subtotal (`total`)\").\n\n**Read first** (risk order): the two label lines in `examples/app-showcase/src/system/translations/index.ts` (en block, zh-CN block); the rewritten comment above `showcase_expense_report` in the same file.\n\n**Two-minute check:** boot the showcase, open invoice INV-1010 — the record page and the edit form read `Subtotal €230.00` beside `Total incl. Tax €276.00`; switch to zh-CN and they read 小计 beside 含税总额.\n\n## Tests\n\nText-only change in a private example; no behaviour moved, so no new pin and no ablation. Run on the final head `60d6b511` (after merging `origin/main`):\n\n<details><summary>showcase typecheck + tests (under the shared verify lock)</summary>\n\n- `pnpm --filter @objectstack/example-showcase typecheck` — clean (tsc --noEmit, no output).\n- `pnpm --filter @objectstack/example-showcase test` — `Test Files 49 passed (49)`, `Tests 554 passed (554)`.\n- Lock verdict: `os-verify-lock: VERDICT command-exit 0` (closure build + typecheck + test in one locked run).\n\n</details>\n\n## Acceptance notes\n\n- No changeset, `skip-changeset`: the only path touched is `examples/app-showcase` (`@objectstack/example-showcase`, a private package) — nothing any released package ships moves.\n- Screenshot of INV-1010: NOT MEASURED. `pnpm dev` refuses to boot in this worktree until the whole workspace is built (its prerequisite check names 35 of 108 packages without a `dist/`, most under `ui/`); a full workspace build for a screenshot was outside this card's budget, and no full dogfood run was made for it.\n\n## Verification\n\n<details><summary>Derived gate families — 37/37 exit 0 on 60d6b511</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 37 commands for this diff; each was run on head `60d6b511` and every one exited 0. Reconciliation: `dispatch-gates --ran: 37 derived famil(ies) accounted for — 37 run, 0 NOT-MEASURED`. Families CI runs beyond that list (the required contexts, `test:repo`, dogfood shards) are CI's.\n\n`node scripts/pm/overlap-check.mjs --repo=objectstack-ai/objectstack --branch=HEAD`: `VERDICT clean exit 0` (merges cleanly onto origin/main, 0 open PR heads overlap).\n\n</details>\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01ADHkmNmMEXS4EzeVz9RjvD\n"
+}

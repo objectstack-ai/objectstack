@@ -1,0 +1,37 @@
+{
+  "number": 36578,
+  "kind": "pull_request",
+  "title": "fix(nightly): green the showcase live tiers — the currency picker reads in a form host, four specs read the product as merged",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-23T00:12:28Z",
+  "updated_at": "2026-11-23T01:06:42Z",
+  "closed_at": "2026-11-23T01:06:40Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-23T01:06:40Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36578",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-warren\"} -->\n_Requested by **Warren** · [project thread](https://claude.ai/code/project/chan_01U5RdnAAmkSQmZbqh6FtqZ8?thread=cmsg_01U5RdnAAmkSQmZbqh6FtqZ88Tcs1L1zT2fWqjj2xTzFXM)_\n\nFixes #36321\nClause-②: no\n\nrepo:objectstack#1 dispatch · os-warren · session_01JQwxbanvK21nJKgGjvE9XL\n\n## 维护者速读\n\n- 用户可见变化：新建发票时，本币发票在填过表头后选产品，单价会照常自动带出；之前一律留空并提示「还没选币种」，而表头明明显示着美元。其余改动只是夜间测试的写法，用户无感。\n- 为什么做：夜间浏览器测试在 main 上连红多日，卡片要求找出回归并修好，不许跳过或删测试。\n- 出错会怎样：只影响新建主从单据里币种选择框被表单读取的方式；不对可以直接撤回这一个合并。\n- 要你做什么：无。\n\n## What changes\n\nThe nightly `live` tier's two showcase files were red on main for four reasons. One is a product regression, three are specs that pinned a surface a merged pull request moved.\n\n**Product: the currency code picker is readable by a form host that reads the DOM** (`@object-ui/components`, `CurrencyCodePicker`).\nThe master-detail form reads its header's live values off the header's named elements (`scrapeHeaderRecord`) on each bubbling `input` / `change`. The picker's only element in the form is its trigger button, which carries the field's `name`, and a button's `value` was the empty string. Since #36351 (merged 2026-11-22 22:18Z) the line grid withholds a picked amount from a line whose currency it cannot tell, so on a New Invoice whose Currency shows \"USD — US Dollar\", picking Widget A left Unit Price empty with \"Unit Price was not filled: the picked amount is $29.99, but no currency is chosen here yet.\" The trigger now carries the selected code as its `value`, and a changed code bubbles one `change` event from the trigger, as a native select does (Radix Select's hidden select does the same). Opening on a code announces nothing.\n\n**Specs that read the product as merged** (no test renamed, skipped or deleted; every assertion still pins what it pinned):\n\n- `ui/e2e/live/phone-nav-drawer-back-29131.spec.ts`, desktop CONTROL: since #36297 a 1280 px window starts with the sidebar expanded, and the collapsed sidebar's own button stays in the DOM, off screen. `.first()` on the shared trigger selector clicked it and timed out \"element is outside of the viewport\". The two presses are now the collapse button, then the page header's expand button, each by its test id, with the visible state checked between.\n- `ui/e2e/live/inline-edit-polish-2572.spec.ts`: the shared inline-edit session it pins is entered by a double-click on the record page's sectioned face, titled \"Double-click to edit\". At 1280 px with the sidebar expanded that is the face drawn (measured); the \"Click to edit\" field-list face now edits one field in place with no session and no save bar (#36475), which is not what this file pins.\n- `examples/app-showcase/e2e/detail-shapes.spec.ts` (related-heavy): the meta footer is now a \"System information\" section that starts collapsed (#36147), so the case opens it before reading \"Created\"; and the summary rail is retired in every tier (#35890), so Contoso's contacts are read from the Contacts tab instead of the rail's card. The vacuous right-column count (no right column exists) is dropped with the rail.\n\nAlready repaired on main before this branch, so not touched: the `New` button's name (#36303) and the retired \"Keep sidebar open\" toggle in `detail-shapes` (#36297).\n\n## Tests\n\n- New `ui/packages/components/src/__tests__/currency-code-picker-form-read-36321.test.tsx` (3 cases): the named trigger's value is the code; with no code it is empty; a pick bubbles one `change` from the trigger, read after the new code is on it, and opening on a code announces nothing.\n- Ablation on the committed tree, each leg by `scripts/ablation-replace.mjs` and restored to the HEAD blob `a5fe02c11426` with `git diff HEAD` empty: the trigger's `value` removed gives `Tests 2 failed | 1 passed (3)`; the `dispatchEvent` removed gives `Tests 1 failed | 2 passed (3)`.\n\n## Acceptance notes\n\n- A line picked BEFORE any header edit on a New Invoice still withholds the price with the same note: the form's create feed opens on the caller's initial record, not on the schema defaults the header seeds, so the seeded home currency reaches the grid only with the first header event. Withholding is the safe direction (no cross-currency copy). Same family as the #36351 follow-ups on #36412.\n\n## Verification\n\n<details><summary>The two nightly files, whole, at b37d813a5</summary>\n\n`os-verify-lock.sh -c 'pnpm console:build && cd examples/app-showcase && OS_TEST_TIERS=nightly pnpm exec vitest run test/showcase-smoke.live.test.ts test/console-live-specs.live.test.ts'`: smoke `56 passed (2.7m)`, Console live specs `28 passed (2.0m)`, `Test Files 2 passed (2)`, `Tests 2 passed (2)`, VERDICT command-exit 0.\n\nControl at main d463c46f (same command): `Test Files 2 failed (2)`; Console live `3 of 28` failed (form-view-subforms, inline-edit-polish-2572, phone-nav CONTROL), smoke `1 of 56` failed (detail-shapes related-heavy).\n\n</details>\n\n<details><summary>Gates</summary>\n\nAll at b37d813a5.\n\n- `dispatch-gates --commands` derived 56 families; 53 lock-free ones run one by one, each exit 0. `dispatch-gates --ran` with every exit recorded: `56 derived, 56 run, 0 NOT-MEASURED, 0 UNRUN`.\n- Under `os-verify-lock` (one hold, parts sequenced, each part's own exit read): `pnpm --filter @object-ui/components run type-check` exit 0; `vitest run packages/components/` (from `ui/`) `Test Files 506 passed | 1 skipped (507)`, `Tests 4936 passed | 24 skipped (4960)`; `pnpm check:type-check-debt` exit 0; `vitest run scripts/` (from `ui/`) `Test Files 172 passed | 2 skipped (174)`, `Tests 5127 passed | 2 skipped (5129)`; `pnpm check:dual-build-cjs-loads` exit 0.\n- The acceptance note measured in the browser (backend + Console preview at the head): a New Invoice opens with the trigger `value=USD`; an Add line and a Widget A pick with no header edit leaves Unit Price `\"\"` with the note.\n- Declared to CI: `test:repo` and the full lint farm.\n\n</details>\n\n## Two-minute check\n\n`pnpm --dir ui exec vitest run packages/components/src/__tests__/currency-code-picker-form-read-36321.test.tsx`: 3 passed. In the Console, New Invoice, type a name, Add line, pick Widget A: Unit Price reads 29.99.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01JQwxbanvK21nJKgGjvE9XL)_\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01JQwxbanvK21nJKgGjvE9XL\n"
+}

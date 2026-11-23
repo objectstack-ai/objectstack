@@ -2,8 +2,8 @@
   "number": 36043,
   "kind": "issue",
   "title": "Form line-item table: people, multi-select, tags, check and rating columns get their own cell editors instead of a plain text box",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -23,9 +23,13 @@
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-21T10:35:08Z",
-  "updated_at": "2026-11-22T18:11:11Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-22T21:10:21Z",
+  "closed_at": "2026-11-22T21:10:21Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 3,
   "locked": false,

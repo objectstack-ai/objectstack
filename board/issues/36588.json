@@ -1,0 +1,36 @@
+{
+  "number": 36588,
+  "kind": "pull_request",
+  "title": "fix(plugin-list): a condition chip names an advanced-panel operator in the panel's words, never by its id",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-23T01:09:29Z",
+  "updated_at": "2026-11-23T02:01:47Z",
+  "closed_at": "2026-11-23T02:01:44Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-23T02:01:44Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36588",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9GPJ8pmbK219Pay95x25Uno)_\nFixes #36462\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 列表与仪表盘钻取弹窗里的筛选条件标签，原来在冒号后直接显示操作符的内部代号，现在显示与高级筛选面板下拉项一致的文字，如「金额：不为 null」「金额：大于 100」。\n- 属于列表筛选体验打磨，替在 CRM 仪表盘做钻取的业务用户解决看不懂条件的问题。\n- 只影响条件标签上的文字；万一措辞不合适，读者看到的是一个可读词而不是机器名，撤回这次合并即可恢复原样。\n- 无\n\n## What changes\n\n`quickOperatorLabel` (plugin-list's condition chip and quick-filter operator wording) returned the raw operator id for every operator outside its 13 quick-filter words. A drill dialog's base filter carries `['amount', 'is_not_null', true]`, so the chip read \"Deal Value: is_not_null\" (HotCRM: 「金额：is_not_null」, 「阶段：not_equals 失败」).\n\n- **The five operators the card names** (`not_equals`, `greater_than`, `less_than`, `is_null`, `is_not_null`) now read the advanced filter panel's own key for each operator, `filterBuilder.operators.ID` — the same key the panel's dropdown row draws. No new key: every one of the 11 packs already translates them, so no locale pack changes and a chip can never word an operator differently from the panel. The provider-less defaults table gains the seven rows verbatim from the en pack (as it already does for the dashboard range keys); `check:i18n-keys` holds them equal.\n- **Bounded in-place fix, same defect class:** `icontains` and `ends_with` are also operators only the advanced panel writes (its text operator list offers both) and showed their id the same way; they take the same one-line arm each. All four exemption conditions hold: same defect class, mechanical with the form pinned by the five above, same file surface the claim declares, same gate family.\n- **Unknown operator fallback:** any other spelling now reads `listConditions.filter.operator` (\"Condition\" / 「条件」), the quick filter's existing name for the operator control, already in all 11 packs. A view triple's comparison symbol (`=`, `!=`, `>`, `>=`, `<`, `<=`) still reads as written (\"Amount: >= 10\"), which existing pins hold.\n- `describeConditionValue`: a named operator with no value text is now the operator alone, never followed by a trailing space (\"Deal Value: Condition\", not \"Deal Value: Condition \" for a value-less unknown operator). `is_null` / `is_not_null` were already in `isValuelessOperator`'s set, so their chips carry no value: \"Deal Value: Is not null\".\n\n## Tests\n\nNew top-level `describe` in the shared harness `listConditions.test.tsx` (`ConditionChipRow — an operator only the advanced panel writes`): the chip text for each of the seven operators in en and zh-CN; the reader's own filter chip; every pack words each of the seven and never as the id; the unknown-operator fallback in en and zh-CN; a CONTROL that symbols still read as written. No existing test was changed.\n\n<details><summary>Runs at head 66eb08bc</summary>\n\n- `vitest run packages/plugin-list/src/conditions/` (lock VERDICT command-exit 0): Test Files 2 passed, Tests 74 passed.\n- Full package, `vitest run packages/plugin-list/` (lock VERDICT command-exit 0): Test Files 185 passed (185), Tests 2032 passed (2032).\n- `pnpm --filter @object-ui/plugin-list type-check` (`tsc --noEmit && tsc -p tsconfig.test.json`): lock VERDICT command-exit 0.\n- Ablation 1, `ablation-replace.mjs --delete` of the `is_not_null` arm: mutation landed (anchor 1 to 0), 3 failed / 3 passed of the new describe (\"Received: Deal Value: Condition\"); restored, blob == HEAD, `git diff HEAD` empty.\n- Ablation 2, fallback `default:` back to `return operator`: mutation landed, 1 failed (the fallback test) / 5 passed; restored, blob == HEAD.\n- `pnpm --dir ui check:i18n-keys`, `check:i18n-dead-keys`, `check:i18n-drift`: exit 0 each.\n\n</details>\n\n## Acceptance notes\n\n- **The card's example said \"Deal Value: is set\"; the chip reads \"Deal Value: Is not null\".** To do 1 says to reuse the advanced panel's own operator wording, and the panel's word for `is_not_null` is \"Is not null\" (「不为 null」). \"Is set\" is the panel's word for a different operator, `exists`, whose fold onto `is_not_null` the filter-builder header records as refused (objectui#9559 ruling B: two labels for one wire predicate). Rewording \"null\" for business readers would change the panel and the chip together, since they now share one key; that is a wording decision for the panel, not done here.\n- **Casing:** the panel's words are sentence-case (\"Greater than\"), the quick filter's own 13 are lower-case (\"is any of\"), so an en chip can read \"Deal Value: Greater than 100\" beside \"Stage: is any of\". Reusing the panel's keys was chosen over a new chip-cased key per operator in each of the 11 packs to keep one wording per operator and no locale pack edits; CJK packs are unaffected.\n- **Symbols from view triples** still read as written (\"Amount: >= 10\", where the quick filter says \"≥ 10\"). Observation only, unchanged and pinned by existing tests.\n- Lowered AST spellings that are not canonical ids (`nin`, `isnotnull`, `startswith`) reach the chip only from a hand-written view filter; they now read \"Condition\", readable but unspecific. Observation only.\n\n## Verification\n\nRead first: `conditionTranslations.ts` (the new arms and the `default:`), then `ListConditionControls.tsx` (`describeConditionValue`'s last return).\n\nTwo-minute check: `cd ui && npx vitest run packages/plugin-list/src/conditions/__tests__/listConditions.test.tsx -t \"advanced panel writes\"` shows 6 passing tests, among them the en chips \"Deal Value: Is not null\" and the zh-CN chips 「金额：不为 null」.\n\nSession: https://claude.ai/code/session_01ADHkmRGDrq6JSytBsNFabU\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 36636,
+  "kind": "pull_request",
+  "title": "fix(studio): Save waits for the CEL verdict to reach the page before it reads the hold",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-23T05:33:50Z",
+  "updated_at": "2026-11-23T06:15:21Z",
+  "closed_at": "2026-11-23T06:15:19Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-23T06:15:19Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36636",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-warren\"} -->\n_Requested by **Warren** · [project thread](https://claude.ai/code/project/chan_01U5RdnAAmkSQmZbqh6FtqZ8?thread=cmsg_01U5RdnAAmkSQmZbqh6FtqZ82MfFjFxvJRAyoku6XCvWt4)_\n\nFixes #36619\n\n## What changes\n\n`studioSaveBar.tsx`: the top bar's Save, after its existing wait past the lint debounce, now also awaits a render of its own at **transition** priority (`useRendersSettled`) before it reads the buffers' `held`. React commits that render only once no default-priority render is left, so the verdict's whole effect chain has reached the buffer's Save entry when Save reads it. No test file changes; the test is not skipped, retried, narrowed or slowed.\n\n## Why — root cause (product race, not test timing)\n\nBoth red cases fail on the **first** Save, before the tab is ever left: under load, all 4 red runs failed at `DataPillar.panelHold-27629.test.tsx:233` (`expect(save).not.toHaveBeenCalled()` right after typing `record.status ==` and pressing Save). Case (b)'s `studio-held-message` miss is the same race one step later: that Save already sent the broken text, the draft is clean, so no hold is left to name.\n\nThe Save read `held` a fixed 50 ms past `LINT_DEBOUNCE_MS` (`VERDICT_SETTLE_MS`). An action predicate's verdict reaches the object's Save entry through four effect-driven renders after the lint resolves: `CelPredicateField` → `ConditionBuilder` (`onBlockingIssuesChange` effect) → `ActionDefaultInspector` (effect) → `ObjectActionsPanel` (`onCelVerdictsChange` effect) → `DataPillar` (`held`, copied into the entry ref by a layout effect). On a busy main thread the lint timer and Save's timer come due in the same timer pass, so Save's continuation runs before any of those renders and reads the pre-edit verdict (`count: 0`, judged on `true`), then sends `visible: \"record.status ==\"`. That is the product sending a formula its check has not judged, the invariant the Save bar's header states; the rule-guard cases have a shorter chain and stayed green.\n\nOut of scope (Acceptance notes): the fix covers verdicts already reported when Save's timer fires. A lint still in flight then (a first-load dynamic import of the CEL engine on a slow network) is not awaited; closing that needs a pending-check signal from `metadata-admin/CelPredicateField.tsx`, outside this card's file surface. Not reproduced; recorded here only.\n\n## Verification\n\nLoaded box: 4-core container, 4 busy-loop CPU stressors, `vitest run --maxWorkers=2` on the file alone, consecutive runs.\n\n| | runs | red | where |\n|:--|:--|:--|:--|\n| before (`origin/main` 9e2a4acb) | 7 | 4 | all at :233, case (a) |\n| after (head ff094d24) | 20 | 0 | 20 of 20 green in a row, all 5 cases each run |\n\nEvery app-shell test file that saves through the top bar (27 files, 155 tests, the ones using `pressStudioSave` or `useStudioSaveCoordinator`): green locally.\n\nLocal `tsc --noEmit` on app-shell reports no error in the changed file beyond the container's unbuilt `@object-ui/*` module resolution, which every file shares; the type-check lanes are CI's.\n\nClause-②: no\nMetadata-protocol: none\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic.\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (not touched)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01JQwxbXCSJnUMMhWxyBmuqA\n\n<!-- signed: repo:objectstack#1 · os-warren · session_01JQwxbXCSJnUMMhWxyBmuqA -->\n"
+}

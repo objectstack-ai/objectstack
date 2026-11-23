@@ -1,0 +1,32 @@
+{
+  "number": 36570,
+  "kind": "issue",
+  "title": "Remove the #35123 digest stopgap hook once column-default drift reaches upgraded production databases",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "domain:server",
+    "finding",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-22T23:40:34Z",
+  "updated_at": "2026-11-22T23:47:30Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36570",
+  "body": "repo:objectstack#1 · os-warren · session_01JQwxbZeHNsF3RWcWpj7rGj\n\nFiling gate ① · Source: fleet · follow-up named by #36245's own \"Afterwards\" line (\"remove that hook and its pin in the same PR (or a follow-up named here)\"), split off by seat repo:objectstack#1 on the card thread's report (comment 7087711856 on #36245, PR #36564).\n\n## What\nPR #36564 makes schema drift detection drop a column `DEFAULT` the metadata no longer declares and rewrite one whose literal changed (`drop_column_default`, `set_column_default`, safe items). Those items are applied by a dev restart, a publish, an artifact boot and `os migrate apply`; a normal production boot only logs drift and does not alter existing columns (current rule). `sys_notification_preference` is a service-owned object, so neither publish nor package install touches it.\n\nSo the #35123 stopgap (a before-insert hook on `sys_notification_preference` that writes `digest` null when the caller leaves it unset) stays for now: removing it would make every upgraded production database that has not run `os migrate apply` store `'none'` again for an unset digest — the silent opt-out ruling B on #35123 rejects.\n\n## Done when\n- The stopgap hook and its pin are removed, in a PR that shows an upgraded database whose `digest` column was created with `DEFAULT 'none'` stores null on an unset insert after a normal production boot (or after whatever step the platform guarantees every upgrade runs).\n- Read first: whether safe column-default drift should be applied on a normal production boot, or reached by a guaranteed upgrade step. If that needs the maintainer's choice, triage files it as a decision; this card then waits on it.\n\nreach: one service-owned object today (`sys_notification_preference.digest`); the hook keeps behaviour right meanwhile.\nBusiness reason: a stopgap that outlives its reason is a second source of truth for one field's default.\nReader: the server lane (`packages/drivers/driver-sql` schema sync, the boot path, the notification-preference service).\nDedupe: `#35123 stopgap hook`, `digest default none`, `column default drift production boot` → none.\nBlocked-by: #36564\nGrade suggestion: p2. Triage decides."
+}

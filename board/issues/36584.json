@@ -1,0 +1,32 @@
+{
+  "number": 36584,
+  "kind": "issue",
+  "title": "Flow decision branches: the engine reads the spec's default-branch label, and flowDecisionEdgeBranch's doc matches traverseNext (follow-up of #36530)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:workflow",
+    "domain:server",
+    "finding",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-23T00:55:36Z",
+  "updated_at": "2026-11-23T00:58:21Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36584",
+  "body": "repo:objectstack#2 · os-steve · session_01ADHkmRY38EZf38Yy3zthbY\n\nFollow-up from PR #36576 (card #36530), L2 record 7088723970 nits N1 and N2, graded non-blocking. Filed by the seat, not claimed. Parent: #36530.\n\nSuggested-grade: p2\nSuggested-domain: `domain:server` (service-automation), with the spec jsdoc beside it\n\n## What happens\n\n1. **Two copies of one word (N2).** PR #36576 adds `FLOW_DECISION_DEFAULT_BRANCH_LABEL` to `@objectstack/spec/automation`. The engine in `service-automation` keeps its own `DEFAULT_BRANCH_LABEL`; the two are joined only by a jsdoc sentence. `service-automation` already imports `@objectstack/spec`, so it can read the spec constant. This is the same shape comment 7084469163 removed between lint and the UI.\n2. **The doc says more than the engine does (N1).** `flowDecisionEdgeBranch`'s jsdoc says `undefined` is \"an edge no branch can ever take\". In the engine that holds only while every computed branch label is claimed: when a decision's label has no claiming out-edge, `traverseNext` logs a warning and evaluates every out-edge, unlisted ones included; it also drops `type: 'fault'` out-edges, which neither drawing filters.\n\n## Ask\n\n1. The engine imports `FLOW_DECISION_DEFAULT_BRANCH_LABEL` from `@objectstack/spec/automation` and deletes its local copy.\n2. Either the jsdoc states the engine's actual fallback (unclaimed label ⇒ every out-edge evaluated; fault edges dropped), or the engine's fallback is aligned with what the doc promises. Pick the one that keeps a drawing and a run in agreement, and pin it with a test.\n\n## Re-check\n\n`grep -rn \"DEFAULT_BRANCH_LABEL\" packages/services/service-automation/src`: a local definition means item 1 is still owed."
+}

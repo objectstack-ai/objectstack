@@ -1,0 +1,37 @@
+{
+  "number": 36642,
+  "kind": "pull_request",
+  "title": "fix(kanban): lanes on a lookup or user field key by the foreign key and are titled by the record's name (#36430)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-23T06:33:26Z",
+  "updated_at": "2026-11-23T07:18:52Z",
+  "closed_at": "2026-11-23T07:18:51Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-23T07:18:50Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36642",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-warren\"} -->\n_Requested by **Warren** · [project thread](https://claude.ai/code/project/chan_01U5RdnAAmkSQmZbqh6FtqZ8?thread=cmsg_01U5RdnAAmkSQmZbqh6FtqZ8722AKp5es9SqH3bShhXVa1)_\n\nCard thread for #36430, dispatched by seat repo:objectstack#1 · session_01JQwxba2NAjVpDLao1M9SYN\n\nFixes #36430 (items 1–3; item 4 is open, see below)\n\n## 维护者速读\n\n- 看板按「负责人」这类查找 / 人员 / 主从 / 树形字段分列时，原来画出一堆标题为「[object Object]」的列、每列塞满全部卡片。现在每个被引用的记录一列，列名是它的名字（人名、客户名），卡片各归各列，没有值的卡片在「未分类」。\n- 把卡片拖到另一列，会把该字段改成那一列对应的记录（例如把负责人从 Alice 改成 Bob），卡片上的负责人名字也随之更新。\n- 第 4 项（在「视图设置 → 分列字段」里提供这些字段）还没做：它在列表视图的设置面板里，等维护者确认后补上，否则由席位另立卡。\n\n## What changes\n\n`ui/packages/plugin-kanban` only.\n\n1. **Lanes from a reference field** — `ObjectKanban#effectiveColumns`' data-derived branch built lanes from `String(record[groupBy])`. The board fetches with `$expand`, so a reference value is the referenced record and every lane was `\"[object Object]\"`. New `kanbanReferenceLanes.ts`: `lanesFromRecords` makes one lane per distinct key — the expanded record's `id` (`_id`), else the stored value — titled through core's `referencedRecordTitle` (the field's `displayField`, then the target object's `nameField`, then the shared ladder), else the key. When the lane field declares `reference`, the board reads that object's definition (`useSettledSchema`, cached) so its declared name field titles the lane. A record with no value names no lane (it was already bucketed to \"Uncategorized\"; before, a data-derived board also drew an empty lane titled `null`).\n2. **Bucketing on the foreign key** — `bucketCardsIntoColumns` keys a record by `laneKeyOf(value)`, so expanded references land in their lane, including declared `columns` keyed by foreign key. Lane paging already filters each lane's query on the lane id (the key), unchanged.\n3. **A drag writes the foreign key** — the PATCH already sends the lane id, which is now the key. The optimistic local row holds the target lane's expanded record (`laneValueOf`) instead of the bare key, so the card keeps naming its new owner; the failure rollback restores the expanded value it held.\n\n**Item 4 (lane-field picker) is not in this diff.** It lives in `ui/packages/plugin-list/src/ListView.tsx` (`laneFieldOptions` filter); the seat widened the surface, and the edit is waiting on the maintainer's go-ahead in the thread.\n\n## Why\n\nA board grouped by owner is a common grouping and was unusable (#36430, graded p1).\n\n## Verification\n\nHead `02acbeab`, tree `objectstack-ai/objectstack@02acbeab`:\n\n- New `ObjectKanban.referenceLanes-36430.test.tsx` (4 rows: owner lanes titled by name with the right cards; lookup lane titled by the target's `nameField`; a drop writes `{ owner_id: 'u2' }` and the card stays in Bob's lane; declared FK-keyed lanes take expanded values) and two rows in `index.bucket.test.ts`.\n- Ablation: with `ObjectKanban.tsx` and `index.tsx` restored from `origin/main` and the tests kept, 5 of the new rows fail (all 4 board rows and the FK bucketing row); with the fix, all pass.\n- `vitest run packages/plugin-kanban/` on `d8058107` (the later head only adds changeset lines): 84 files, 552 tests passed.\n- `overlap-check.mjs`: clean against `origin/main` `d7411fa3` and 0 open PR heads.\n- NOT MEASURED locally: `type-check` for plugin-kanban (the `@object-ui/*` dependency declarations are not built in this container; every error printed was a missing-module / implicit-any cascade, none on the new code's logic). `Type Check UI` in CI is the verdict.\n\nClause-②: no\nMetadata-protocol: none\n\n## Acceptance notes\n\n- **Item 4 and the swimlane sibling.** If the maintainer has not approved item 4 by the time CI is green, the seat (repo:objectstack#1) files two follow-up cards and lands this PR with `Fixes #36430` covering items 1–3:\n  - the lane-field picker offering single-valued lookup, user, master-detail and tree fields (`ListView.tsx` `laneFieldOptions`), item 4 of #36430;\n  - a swimlane (`swimlaneField`) on a reference field, which still stringifies the value in `KanbanImpl`'s swimlane bucketing (same defect class, the other axis).\n- A multi-valued reference used as the lane field still draws `[object Object],…` lanes; the picker change for item 4 leaves multi-valued references out.\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic.\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes (CI).\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: n/a.\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01JQwxba2NAjVpDLao1M9SYN"
+}

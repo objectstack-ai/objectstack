@@ -2,8 +2,8 @@
   "number": 36501,
   "kind": "issue",
   "title": "Studio 左上角改成「‹ 返回应用」加应用名；去掉首页图标、应用切换和右上角的「打开应用」（外壳专题第 12 项，设计板图 47）",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:ux",
     "domain:ui",
     "enhancement",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,9 +22,13 @@
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-22T15:03:18Z",
-  "updated_at": "2026-11-22T17:11:55Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-22T22:39:25Z",
+  "closed_at": "2026-11-22T22:37:43Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
   "comments": 5,
   "locked": false,

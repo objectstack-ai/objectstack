@@ -1,0 +1,36 @@
+{
+  "number": 36607,
+  "kind": "pull_request",
+  "title": "fix(fields): a failed first load of the line-item grid body recovers on the next mount",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-23T02:33:27Z",
+  "updated_at": "2026-11-23T03:19:09Z",
+  "closed_at": "2026-11-23T03:19:08Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-23T03:19:08Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36607",
+  "body": "Fixes #36451\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户能看到什么变化:控制台记录表单里的明细行表格,第一次加载失败一次后(网络抖动、发版换了文件名),之后再打开表单即可正常显示表格,不用刷新整页。\n- 为什么做:明细行表格按需加载的收尾问题,替所有碰到一次加载失败的表单用户解决「只能刷新页面」。\n- 出错会怎样:只影响明细行表格的加载方式,最坏是加载失败时照旧显示报错;可直接撤回。\n- 要你做什么:无。\n\n## What changes\n\n- `GridField` / `LineItemsField` (`ui/packages/fields/src/widgets/GridField.ts`) no longer render the body through a module-scope `React.lazy`. A lazy component keeps its first outcome for good, a rejection included, so after one failed load of the body every later mount rethrew that failure until the page was reloaded, although `loadGridFieldWidget` already forgot the failure. A mount that finds the body still loading now renders `GridFieldOnceLoaded`: it shows the existing loading placeholder, asks the one loader from an effect (so only a committed mount requests anything; a render React discards before commit cannot loop on a failing chunk), throws a failed load to the nearest error boundary, and the next mount asks again. A mount after the body has loaded still renders it directly in the same render; `preloadGridField()` is unchanged and never rejects.\n- The `grid` entry of the form-field loader map (`ui/packages/fields/src/index.tsx`) resolves to that face instead of a `React.lazy` around the body, so the registered `field:grid` widget and `getLazyFieldWidget('grid')` recover the same way. The face is already in the eager chunk (the entry exports it), so this adds no edge to the body.\n- Patch changeset for `@object-ui/fields`.\n\nRead first, by risk:\n\n1. `GridField.ts`, the `GridFieldOnceLoaded` function: the effect-driven load, the cleanup guard, the throw of a failed outcome.\n2. `index.tsx`, the `grid` entry of the loader map.\n3. `GridField.test.tsx`, the new `after one failed load of the body` describe inside the existing lazy-face block.\n\n## Tests\n\nTwo pins in the existing lazy-face block of `GridField.test.tsx`: the body module is mocked to fail its first load once and then load normally; the first mount must reach the error boundary and a later mount must render the grid, once for the `GridField` face and once for `getLazyFieldWidget('grid')`.\n\n<details><summary>Premise, measured on main's code (both pins red)</summary>\n\n`GridField.ts` and `index.tsx` replaced by their blobs at the branch point `e17c2ae1a` (hash-verified on disk), then the pins run:\n\n```\n× a later mount of GridField renders the grid once the body is reachable, with no reload\n× a later mount of the grid form-field widget renders the grid too\nTests  2 failed | 107 skipped (109)\n```\n\nBoth failures: the later mount shows the boundary fallback (`grid-load-failed`), never `line-items`. Restored with `git checkout HEAD`, `git diff HEAD` empty, HEAD blob hashes matched.\n\n</details>\n\n<details><summary>Ablation, one half at a time</summary>\n\n- Face reverted to main, `index.tsx` fixed: both pins red (the form-field entry reaches the reverted face).\n- `index.tsx` reverted to main, face fixed: only the form-field pin red (`1 failed | 1 passed`).\n\nEach leg restored and verified the same way.\n\n</details>\n\n<details><summary>Package run at head 66d9f58b1</summary>\n\n`pnpm --dir ui exec vitest run --maxWorkers=2 packages/fields/ && pnpm --filter @object-ui/fields run type-check` under the shared verify lock:\n\n```\nTest Files  322 passed | 1 skipped (323)\nTests  4893 passed | 7 skipped (4900)\nVERDICT command-exit 0\n```\n\n`pnpm --dir ui exec vitest run scripts/` (derived gate): 172 files passed, VERDICT command-exit 0. ESLint on the three changed files: 0 errors (warnings pre-existing).\n\n</details>\n\n<details><summary>Derived gates at head 66d9f58b1</summary>\n\n`dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 39 families; all 39 run, all exit 0, `--ran` reconciliation: 39 run, 0 NOT-MEASURED, 0 UNRUN. First pass: `check:query-options-erasure` and `check:type-check-debt` hit a 300 s harness timeout and `check:watch-hint-literal` exited 1 once (cause not established); each re-run to completion, exit 0.\n\n</details>\n\n## Acceptance notes\n\n- A form drawing a `grid` field now shows the grid's own loading placeholder (a dashed box of the header's height) while the body loads, where it showed the form's own suspense fallback before.\n- Boundary not measured here: the retry calls `import()` again for the same chunk URL. Whether a given browser re-fetches a module whose earlier dynamic import failed is engine behaviour; the pins run under vitest/jsdom only.\n- Card step 3, measured with a throwaway test (deleted, not committed): the same edge, a module-scope `React.lazy` keeping a failed first load until reload, holds for `FieldEditWidget`'s date picker (measured; its datetime picker and rich-text panel are the same construction), `richTextDisplay`'s markdown content (measured), `FilterConditionCell` (measured), the per-type lazy cache of `getLazyFieldWidget` and `registerField` for every other type (measured for `date`), and `ImageField`'s cropper dialog (same construction, not measured). None is changed here; they are listed for the seat.\n- No README or docs sentence is made false by this change.\n\n## Verification\n\nTwo-minute check: `pnpm --dir ui exec vitest run packages/fields/src/widgets/GridField.test.tsx -t \"after one failed load\"` from the repo root; expect `2 passed`.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01ADHkmNmMEXS4EzeVz9RjvD)_\n"
+}

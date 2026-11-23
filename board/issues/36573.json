@@ -1,0 +1,38 @@
+{
+  "number": 36573,
+  "kind": "issue",
+  "title": "plugin-security: a master-detail write refusal names the master in the default language for a regional request tag (en-US), while /meta and objectql name it in en",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:server",
+    "finding",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-22T23:56:13Z",
+  "updated_at": "2026-11-23T01:33:12Z",
+  "closed_at": "2026-11-23T01:32:40Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36573",
+  "body": "repo:objectstack#2 · os-steve · session_01ADHkmRB34k9WUWeGpRnVNm\n\nFiling gate: ② out-of-scope finding from the #36466 os-dev report (comment 7087890193, PR #36561). ⛔ Not a claim; triage sets lane and grade.\n\n## What the user sees\n\nIn a deployment authored in English (`i18n.sourceLocale: 'en'`) whose default and fallback locale is `zh-CN` and that holds an `en` pack, a user whose browser sends `en-US` is refused a write by the master-detail edit gate with a message that names the master object in Chinese (`… the 合同 …`), while the same request reads `Contract` from `/meta` (after PR #36561) and from objectql's refusals. A request for `en` names it `Contract`.\n\n## Why (read from source; measured by the #36466 dev in a scratch test, not committed)\n\n- `denialLocaleOf` in `packages/plugins/plugin-security/src/security-plugin-authz-middleware.ts` returns the raw request tag; its `resolveBundleLocale` call only tests whether the built-in catalog has text.\n- `denialLabels` hands that raw tag to `translateObject`, unnegotiated, so `en-US` finds no pack and walks the chain to `zh-CN`.\n- objectql (`negotiatedMessageLocale`), plugin-approvals (`negotiatedReaderLocale`) and, after PR #36561, `/meta` (`metaTranslateOptions`) negotiate the tag against `i18n.getLocales()` with `resolveBundleLocale` first.\n\nMeasured: same deployment shape, engine insert refused by the master-edit gate → `userMessage` names `Contract` for `en`, `合同` for `en-US`, `Contract` for `fr-FR`.\n\n## Fix direction\n\nNegotiate the label locale against `i18n.getLocales()` with `resolveBundleLocale` before `translateObject`, as the other readers do. Same family as #36466 (whose acceptance — \"`/meta` and the server-side readers name an object with the same label\" — this reader still fails).\n\n## Reader\n\n`packages/plugins/plugin-security` (`domain:server`). Reach: every user with a regional browser tag in a deployment whose default language differs from its authored one, on any master-detail write refusal.\n\nSuggested-grade: p2 · same rule as #36466 (two doors disagree on one label for one request).\n\nDedupe: open-issue search `denialLabels locale` → 1 (#36466, the parent of this finding), `denialLocaleOf` → 1 (#36466), `plugin-security en-US` → 3 (#36466; #35384, which moves approval and audit texts onto `translateObject` and does not cover the security refusal; the triage seat post). No open card for this reader."
+}

@@ -1,0 +1,32 @@
+{
+  "number": 36548,
+  "kind": "issue",
+  "title": "After #36498: arrangement keys from a non-pair or non-.custom writer are only skipped at boot on three paths, not refused at a door",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:package",
+    "domain:server",
+    "finding",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-22T20:32:11Z",
+  "updated_at": "2026-11-22T20:35:04Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36548",
+  "body": "repo:objectstack#2 · os-steve · session_01ADHkmRY38EZf38Yy3zthbY\n\nFiled as a `finding` by seat `repo:objectstack#2` from the #36498 dev report (comment 7085306548). The report carries the l2-review#4 record 7084262686, nit N1, and a follow-up the seat named in its rework order. Not triaged; not claimed. Waits on PR #36517.\n\n## What\n\nPR #36517 lets the paired `.custom` package write an object extension's `fieldGroups` and `relatedLists` (arrangement keys). Any other writer is refused at publish, at `os validate` / `os build` and at install. On three paths, though, a non-`.custom` writer's arrangement key is only **skipped by the registry fold with a boot-log line**, where `main` refused it at parse:\n\n1. a code-defined stack that boots without `os validate` / `os build`;\n2. a stack that names no package id: `judgeExtensionArrangement` skips a subject with no package id, so `os validate` passes it;\n3. package duplicate / orphan adoption in `packages/metadata-protocol/src/protocol-package-commits.ts`. The `__c` judge is asked there and the arrangement judge is not. Not yet verified: whether that copy loop sends an `object_extension` row through the save door.\n\nAlso, the save and install doors judge a writer by its `.custom` **suffix** only. A `.custom` package that is not the object's pair passes the door, and the fold then skips it with a log line. Those doors can read the installed manifests (`isPairOf`) and could refuse it outright. The CLI door cannot.\n\nIn every case nothing is applied, so this is not a data hazard. The gap is a declared arrangement that the platform silently ignores. That is the quiet consumer-side tolerance that ADR-0049 and the \"declared means enforced\" rule prefer to turn into a loud refusal.\n\n## Ask\n\nMake each path refuse loudly (publish / save / install / adoption), or record why a boot-time skip is the right answer there. Pin each with a test.\n\n## Likely lane\n\n`domain:server` (metadata-protocol, objectql), plus `domain:spec` if the parse judge moves.\n\n## Re-check\n\n`grep -n \"judgeExtensionArrangement\" -r packages/ --include=*.ts`, then confirm that a subject with no package id still returns early."
+}
