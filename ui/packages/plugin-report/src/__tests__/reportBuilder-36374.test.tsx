@@ -223,6 +223,14 @@ describe('report builder page (objectstack#36374)', () => {
     await waitFor(() => expect(dataSource.queryDataset).toHaveBeenCalled());
   });
 
+  it('picking the data source leaves the measure picker closed: its count measure is already there', async () => {
+    render(<Harness initial={{ name: '', label: '' }} members={MEMBERS} />);
+    fireEvent.click(await screen.findByTestId('report-builder-source-option-pipeline'));
+    await waitFor(() => expect(current().values).toEqual(['deal_count']));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(screen.queryByTestId('report-builder-measure-option-deal_count')).toBeNull();
+  });
+
   it('an existing report opens with its settings filled in and draws its chart', async () => {
     const dataSource = { queryDataset: vi.fn(async () => ({ rows: [{ stage: 'Won', total_amount: 10 }], fields: [] })) };
     render(<Harness initial={EXISTING} members={MEMBERS} dataSource={dataSource} />);

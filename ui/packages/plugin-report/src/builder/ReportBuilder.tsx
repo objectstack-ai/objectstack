@@ -159,7 +159,11 @@ export function ReportBuilder({
   const measure = selectedMeasure(report);
   const grouping = selectedGrouping(report);
   const chartType = selectedChartType(report);
-  const missing = missingPiece(report, membersLoading ? undefined : members);
+  const readyMembers = membersLoading ? undefined : members;
+  // Judged on the report as it stands once the dataset's default measure
+  // lands (the effect below), so a just-picked dataset never opens the
+  // measure picker for the one render before its count measure is filled.
+  const missing = missingPiece(readyMembers ? fillDefaults(report, readyMembers) : report, readyMembers);
 
   // The one open picker. A missing piece opens its section's picker by
   // itself, once per missing piece: closing it leaves it closed until the
