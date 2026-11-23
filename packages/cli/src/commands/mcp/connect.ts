@@ -14,6 +14,17 @@
  * deploy's wait uses for the environment's origin) plus {@link MCP_ENDPOINT_PATH}.
  * `--url` skips the control plane: a self-hosted server or a local `os dev`.
  *
+ * ## One parse for the address, on both paths
+ *
+ * The address the command registers and prints is held to one rule, whether
+ * it came from `--url` ({@link mcpUrlFromBase}) or from the control plane
+ * ({@link mcpUrlFromOrigin}): it parses with `new URL`, it is `http:` or
+ * `https:`, it is rebuilt from the parsed `origin`, its text holds no control
+ * character, and the rebuilt address holds only {@link LINE_SAFE_URL}'s
+ * characters, so the printed Connect line, which a user may paste into a
+ * shell, holds no shell syntax. Anything else is refused, with nothing
+ * registered and no Connect line printed.
+ *
  * ## Which name
  *
  * The environment's own (its slug, else its display name, else its id), made
@@ -61,12 +72,26 @@ export const MCP_CLIENTS = ['claude-code'] as const;
 /** A server name every client accepts: letters, digits, `-` and `_`. */
 const SERVER_NAME = /^[A-Za-z0-9_-]+$/;
 
+/**
+ * Every character a registered and printed MCP URL may hold: letters,
+ * digits, `-._~`, `:` and `/`, and `[`/`]` for an IPv6 literal host. No shell
+ * in common use (sh, cmd.exe, PowerShell) reads any of them as syntax.
+ */
+export const LINE_SAFE_URL = /^[A-Za-z0-9._~:/[\]-]+$/;
+
+/** A C0 control character or DEL, which the URL parser would silently drop or refuse. */
+const CONTROL_CHARACTER = /[\u0000-\u001f\u007f]/;
+
 /** `claude`'s arguments that register `url` as the remote HTTP MCP server `name`. */
 export function claudeMcpAddArgs(name: string, url: string): string[] {
   return ['mcp', 'add', '--transport', 'http', name, url];
 }
 
-/** The `claude mcp add` line, as `os dev`'s banner and this command print it. */
+/**
+ * The `claude mcp add` line, as `os dev`'s banner and this command print it.
+ * This command prints it only for a `name` matching {@link SERVER_NAME} and a
+ * `url` matching {@link LINE_SAFE_URL}, so the line needs no quoting.
+ */
 export function claudeMcpAddLine(name: string, url: string): string {
   return ['claude', ...claudeMcpAddArgs(name, url)].join(' ');
 }
@@ -91,6 +116,9 @@ export function environmentServerName(env: { id: string; slug?: string; displayN
  * ends in it is refused rather than doubled.
  */
 export function mcpUrlFromBase(raw: string): { ok: true; mcpUrl: string } | { ok: false; reason: string } {
+  if (CONTROL_CHARACTER.test(raw.trim())) {
+    return { ok: false, reason: '`--url` holds a control character. Pass the server\'s base URL, such as http://localhost:3000.' };
+  }
   let parsed: URL;
   try {
     parsed = new URL(raw.trim());
@@ -110,15 +138,67 @@ export function mcpUrlFromBase(raw: string): { ok: true; mcpUrl: string } | { ok
       reason: `\`--url\` takes the server's base URL; this command adds ${MCP_ENDPOINT_PATH} itself. Pass ${parsed.origin}${path.slice(0, -MCP_ENDPOINT_PATH.length)}.`,
     };
   }
-  return { ok: true, mcpUrl: `${parsed.origin}${path}${MCP_ENDPOINT_PATH}` };
+  const mcpUrl = `${parsed.origin}${path}${MCP_ENDPOINT_PATH}`;
+  if (!LINE_SAFE_URL.test(mcpUrl)) {
+    return {
+      ok: false,
+      reason: '`--url` may hold only letters, digits, `-`, `.`, `_`, `~`, `:`, `/` and an IPv6 host\'s brackets, '
+        + 'so the printed Connect line is safe to paste into a shell.',
+    };
+  }
+  return { ok: true, mcpUrl };
 }
+
+/**
+ * The control plane's environment origin (`readCloudEnvironment`'s `origin`)
+ * as the MCP URL, under the same rule as {@link mcpUrlFromBase}: it parses as
+ * an `http:` or `https:` URL that is an origin alone (no user, password, path,
+ * query or fragment), holds no control character, and the address rebuilt
+ * from the parsed `origin` holds only {@link LINE_SAFE_URL}'s characters.
+ * Anything else is refused; the refusal does not repeat the text it refused.
+ */
+export function mcpUrlFromOrigin(origin: string): { ok: true; mcpUrl: string } | { ok: false; reason: string } {
+  const refused = {
+    ok: false as const,
+    reason: 'is not an http or https host name in plain characters (letters, digits, `-`, `.`, and an optional port)',
+  };
+  if (CONTROL_CHARACTER.test(origin)) return refused;
+  let parsed: URL;
+  try {
+    parsed = new URL(origin);
+  } catch {
+    return refused;
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return refused;
+  if (parsed.username || parsed.password || parsed.pathname !== '/' || parsed.search || parsed.hash) return refused;
+  const mcpUrl = `${parsed.origin}${MCP_ENDPOINT_PATH}`;
+  return LINE_SAFE_URL.test(mcpUrl) ? { ok: true, mcpUrl } : refused;
+}
+
+/** A Windows path rooted at a drive letter: `C:\…` or `C:/…`. */
+const DRIVE_ROOTED = /^[A-Za-z]:[\\/]/;
+
+/**
+ * The file test {@link resolveClientExecutable} uses on Windows. A seam, so a
+ * test can stand in for a Windows `PATH` while the real lookup runs.
+ */
+export const clientFileProbe = {
+  isFile(candidate: string): boolean {
+    try {
+      return statSync(candidate, { throwIfNoEntry: false })?.isFile() === true;
+    } catch {
+      return false;
+    }
+  },
+};
 
 /**
  * Where a client's CLI is, so it can run without a shell.
  *
  * Off Windows the bare name is the answer: `spawnSync` walks `PATH` itself.
  * On Windows it is the file `cmd.exe` would have run for the name, minus the
- * current directory: the first `PATH` entry, of those that are absolute,
+ * current directory: the first `PATH` entry, of those rooted at a drive letter
+ * (`C:\…`; a relative entry and one rooted without a drive are skipped),
  * holding `NAME.com`, `NAME.exe`, `NAME.bat` or `NAME.cmd` (that order in
  * each entry). An `.exe` or `.com` is `found` by its absolute path. A
  * batch-file shim (`.cmd`/`.bat`, what an npm global install writes) runs
@@ -138,14 +218,8 @@ export function resolveClientExecutable(
   const dirs = (read('PATH') ?? '')
     .split(';')
     .map((dir) => dir.trim().replace(/^"(.*)"$/, '$1'))
-    .filter((dir) => dir && winPath.isAbsolute(dir));
-  const isFile = options.isFile ?? ((candidate: string): boolean => {
-    try {
-      return statSync(candidate, { throwIfNoEntry: false })?.isFile() === true;
-    } catch {
-      return false;
-    }
-  });
+    .filter((dir) => DRIVE_ROOTED.test(dir));
+  const isFile = options.isFile ?? ((candidate: string): boolean => clientFileProbe.isFile(candidate));
   for (const dir of dirs) {
     for (const ext of ['.com', '.exe', '.bat', '.cmd']) {
       const candidate = winPath.join(dir, `${name}${ext}`);
@@ -279,7 +353,13 @@ export default class McpConnect extends Command {
           this.exit(1);
           return;
         }
-        mcpUrl = `${env.origin}${MCP_ENDPOINT_PATH}`;
+        const derived = mcpUrlFromOrigin(env.origin);
+        if (!derived.ok) {
+          printError(`The address ${baseUrl} reports for ${where} ${derived.reason}. Nothing was registered.`);
+          this.exit(1);
+          return;
+        }
+        mcpUrl = derived.mcpUrl;
         name = flags.name ?? environmentServerName({ id: target.environmentId, slug: env.slug, displayName });
         printStep(
           target.source === 'only'
@@ -288,6 +368,12 @@ export default class McpConnect extends Command {
         );
       }
 
+      // Both paths already hold these; checked once more where the line is built.
+      if (!SERVER_NAME.test(name) || !LINE_SAFE_URL.test(mcpUrl)) {
+        printError('The server name or address holds characters the Connect line cannot carry. Nothing was registered.');
+        this.exit(1);
+        return;
+      }
       const line = claudeMcpAddLine(name, mcpUrl);
       console.log(`  Endpoint  ${mcpUrl}`);
       console.log(`  Name      ${name}`);
@@ -304,7 +390,8 @@ export default class McpConnect extends Command {
             client.kind === 'missing'
               ? notFound
               : `The \`claude\` on your PATH is a batch-file shim (${client.path}), which this command does not run: `
-                + 'it starts programs without a shell. Run the Connect line above yourself.',
+                + 'it starts programs without a shell. Run the Connect line above yourself, '
+                + "or install Claude Code's native Windows build and run `os mcp connect` again.",
           );
           this.exit(1);
           return;

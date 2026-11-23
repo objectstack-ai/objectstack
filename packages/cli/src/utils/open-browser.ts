@@ -6,10 +6,13 @@
  *
  * Two rules, both checked before anything is launched:
  *
- *   1. **Only an http or https address is opened.** The address is parsed
- *      with `new URL`; anything else (no scheme, `file:`, a custom protocol, a
- *      string that does not parse) is never handed to the operating system.
- *      The caller prints the address for the user to open themselves.
+ *   1. **Only an http or https address is opened, and only one written in
+ *      a conservative character set.** The address is parsed with `new URL`;
+ *      anything else (no scheme, `file:`, a custom protocol, a string that does
+ *      not parse) is never handed to the operating system, and neither is a
+ *      normalised `href` holding any character outside
+ *      {@link BROWSABLE_CHARACTERS}. The caller prints the address for the
+ *      user to open themselves.
  *   2. **The opener runs without a shell.** The program and its arguments go
  *      to `spawn` as an argv array with `shell: false`, so the address is one
  *      argument and nothing in it is ever read as shell syntax. The address
@@ -22,13 +25,15 @@
  *     absolute path under `%SystemRoot%\System32`. `start`, the usual
  *     spelling, is a `cmd.exe` builtin and cannot run without a shell;
  *     `FileProtocolHandler` hands the address to the shell-execute API, which
- *     opens it with the default browser for `http:`/`https:`. A normalised
- *     `href` holds no space or double quote (both are percent-encoded), so
- *     Node passes it to `rundll32` as one unquoted argument.
+ *     opens it with the default browser for `http:`/`https:`. The address
+ *     handed over holds no space and no double quote, because rule 1 refuses
+ *     every `href` that holds either, so Node passes it to `rundll32` as one
+ *     unquoted argument.
  *   - Everything else: `xdg-open URL`.
  *
- * Best-effort, as before: a missing opener (`xdg-open` not installed) is
- * swallowed, and the address the caller printed is the fallback.
+ * Best-effort, as before: an opener that fails after it was started (say,
+ * `xdg-open` not installed) is swallowed, and the address the caller printed
+ * is the fallback. "Opened" therefore means the opener was started.
  */
 
 import { spawn } from 'node:child_process';
@@ -41,8 +46,18 @@ export interface BrowserLaunch {
 }
 
 /**
- * The address as the normalised `href` of an `http:` or `https:` URL, or
- * `undefined` for anything else — which is then never launched.
+ * Every character an opened address may hold: the characters RFC 3986 lets a
+ * URI hold (letters, digits, `-._~`, the delimiters `:/?#[]@!$&'()*+,;=`, and
+ * `%` for percent-encoding). No space, no double quote, none of `<`, `>`, a
+ * backslash, `^`, a backtick, `{`, `|` or `}`, no control character and
+ * nothing outside ASCII.
+ */
+export const BROWSABLE_CHARACTERS = /^[A-Za-z0-9\-._~:/?#[\]@!$&'()*+,;=%]+$/;
+
+/**
+ * The address as the normalised `href` of an `http:` or `https:` URL written
+ * in {@link BROWSABLE_CHARACTERS}, or `undefined` for anything else — which is
+ * then never launched.
  */
 export function browsableUrl(raw: string): string | undefined {
   let parsed: URL;
@@ -52,7 +67,7 @@ export function browsableUrl(raw: string): string | undefined {
     return undefined;
   }
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return undefined;
-  return parsed.href;
+  return BROWSABLE_CHARACTERS.test(parsed.href) ? parsed.href : undefined;
 }
 
 /** The opener for `href` on `platform`; `href` must already be {@link browsableUrl}'s answer. */
@@ -84,25 +99,31 @@ export const browserLauncher = {
 };
 
 /**
- * Opens `raw` in the default browser when it is an http or https address.
- * Answers whether an opener was started, so the caller says "opened" only
- * when it was.
+ * What {@link openBrowser} did: started an opener, refused an address that is
+ * not one it opens, or failed to start the opener.
  */
-export function openBrowser(raw: string, platform: NodeJS.Platform = process.platform): boolean {
+export type BrowserOpenResult = 'opened' | 'not-browsable' | 'not-started';
+
+/**
+ * Opens `raw` in the default browser when {@link browsableUrl} accepts it.
+ * Answers what happened, so the caller says "opened" only when an opener was
+ * started, and gives the right reason when it was not.
+ */
+export function openBrowser(raw: string, platform: NodeJS.Platform = process.platform): BrowserOpenResult {
   const href = browsableUrl(raw);
-  if (href === undefined) return false;
+  if (href === undefined) return 'not-browsable';
   try {
     browserLauncher.launch(browserLaunch(href, platform));
   } catch {
-    return false;
+    return 'not-started';
   }
-  return true;
+  return 'opened';
 }
 
-/** What the device flow prints after {@link openBrowser}, for either answer. */
-export function browserOpenNotice(opened: boolean): string {
-  return opened
-    ? '  (Browser opened automatically. Press Ctrl+C to cancel.)'
-    : '  (Not opened in a browser: the sign-in address is not an http or https address. '
-      + 'Open it yourself only if you recognise it.)';
+/** What the device flow prints after {@link openBrowser}, for each answer. */
+export function browserOpenNotice(result: BrowserOpenResult): string {
+  if (result === 'opened') return '  (Browser opened automatically. Press Ctrl+C to cancel.)';
+  if (result === 'not-started') return '  (Could not start a browser. Open the sign-in address above yourself.)';
+  return '  (Not opened in a browser: the sign-in address is not an http or https address in plain URL characters. '
+    + 'Open it yourself only if you recognise it.)';
 }
