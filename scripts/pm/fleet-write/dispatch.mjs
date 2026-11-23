@@ -2695,14 +2695,16 @@ const SELF_TEST_BATTERIES = Object.freeze({
   "advisory_read at the seat: the key pair made in this process per read — its public half in the action, its private half a KeyObject never exported, written or printed, and a key from the file refused; no byte read-back, said where the read-back is decided; the run's notice parts read back exactly, reassembled 1..n once each and opened with that key byte for byte, end to end through the real executor; what does not open is UNVERIFIED (6) with nothing printed; the text reaches this process's stdout on --reveal alone, never stderr or --json": 17,
   "advisory_list at the seat: derived from the table into the sealed-read path, so its key pair is made here and a key from the file refused, with no byte read-back, said where the read-back is decided; the real executor's ten notice parts read back, reassembled and opened under the listing's own associated data — never a read's — byte for byte on the padded plaintext; what does not open is UNVERIFIED (6) with nothing printed; --reveal alone prints it, its pad trimmed for that op's display alone, never on stderr or --json": 9,
   "advisory_note at the seat: the note read from the file note_file names, composed under the seat's signature line and this door's own stamp, judged, then sealed HERE with a one-time digest key to the relay's committed half under the stroke's request id — the payload carrying the seal alone; a seal from the file, a file inside any git repository, and a missing, unreadable or unjudged one refused and a null committed half a prerequisite, all before anything is sent; the run's ONE notice confirmed against the byte count and keyed digest only this process holds, anything else UNVERIFIED, exit 6 — and no byte of the note on any line the seat prints": 22,
+  "advisory_rewrite at the seat: the summary and/or description read from the files summary_file and description_file name, each placed outside every git repository by the note's own check, spelled as one JSON object with no signature or stamp and judged — an empty description refused — then sealed HERE through the note's path with a one-time digest key under the rewrite's own associated data, the payload carrying the seal alone; the real executor's ONE notice confirmed against that digest, a mismatch UNVERIFIED, exit 6 — and no byte of either text on any line the seat prints": 12,
 });
 // Raised 21 → 22 with the run_rerun_failed seat battery, 22 → 23 with the signature battery, 23 → 24 with the
 // hierarchy link seat battery, 24 → 25 with the pull request body battery, 25 → 26 with the advisory rows' seat
 // battery, 26 → 27 with advisory_read's seat battery, 27 → 28 with the retired lane aliases battery, 29 → 30 with
 // advisory_list's seat battery, 30 → 31 with advisory_note's seat battery, 32 → 33 with the record tier's seat
-// battery: one battery, one row.
-const SELF_TEST_BATTERY_FLOOR = 33;
+// battery: one battery, one row; 33 → 34 with advisory_rewrite's seat battery.
+const SELF_TEST_BATTERY_FLOOR = 34;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
+const REWRITE_SEAT_BATTERY = "advisory_rewrite at the seat: the summary and/or description read from the files summary_file and description_file name, each placed outside every git repository by the note's own check, spelled as one JSON object with no signature or stamp and judged — an empty description refused — then sealed HERE through the note's path with a one-time digest key under the rewrite's own associated data, the payload carrying the seal alone; the real executor's ONE notice confirmed against that digest, a mismatch UNVERIFIED, exit 6 — and no byte of either text on any line the seat prints";
 
 const batteryCases = new Map();
 let openBattery = null;
@@ -4024,6 +4026,114 @@ export async function selfTest() {
       const body = own.slice(own.lastIndexOf('export async function main('));
       t('structural: main seals the notes after the reads\' keys and BEFORE the packer and the dry-run exit, under the request id the payload carries', [body.indexOf('armAdvisoryNotes(actions, { requestId') > body.indexOf('armAdvisoryReads(actions)'), body.indexOf('armAdvisoryNotes(actions, { requestId') < body.indexOf('packRequest({ repo: opts.repo, session, actions, requestId })'), body.indexOf('armAdvisoryNotes(') < body.indexOf('if (opts.dryRun)')], [true, true, true]);
     }
+
+    // ── advisory_rewrite at the seat ────────────────────────────────────────
+    battery(REWRITE_SEAT_BATTERY);
+    {
+      const REPO = 'objectstack-ai/objectstack';
+      // A made-up id: the fixture names no real advisory.
+      const GHSA = 'GHSA-abcd-2345-wxyz';
+      const MARKER = 'REWRITE MARKER: the public text, never in a seat line';
+      const { generateKeyPairSync, createHmac } = await import('node:crypto');
+      const { executeFleetWrite } = await import('./execute.mjs');
+      const { openAdvisoryNote, ADVISORY_NOTE_OPEN_FAILED } = await import('./ops.mjs');
+      const { mkdirSync } = await import('node:fs');
+      const k = generateKeyPairSync('x25519');
+      const RELAY = { privateKey: k.privateKey, text: k.privateKey.export({ format: 'der', type: 'pkcs8' }).toString('base64'), spki: k.publicKey.export({ format: 'der', type: 'spki' }).toString('base64') };
+      const SUMMARY = `${MARKER} — 漢字`;
+      const DESCRIPTION = `${MARKER}\n\n## Impact\nline two — 🎉, a quote " and a backslash \\`;
+      const TEXT = advisoryRewriteText({ summary: SUMMARY, description: DESCRIPTION });
+      const summaryFile = join(dir, 'advisory-rewrite-summary.md');
+      const descriptionFile = join(dir, 'advisory-rewrite-description.md');
+      writeFileSync(summaryFile, `  ${SUMMARY}  \n\n`, 'utf8');
+      writeFileSync(descriptionFile, `\n\n${DESCRIPTION}  \n\n`, 'utf8');
+      const REWRITE = { op: 'advisory_rewrite', ghsa_id: GHSA, summary_file: summaryFile, description_file: descriptionFile };
+      const digestKeys = [];
+      const keyed = () => {
+        const key = Buffer.alloc(32, 9 + digestKeys.length);
+        digestKeys.push(Buffer.from(key));
+        return key;
+      };
+      const arm = (actions, extra = {}) => armAdvisoryNotes(actions, { requestId: 'fw-test-1', relayPublicKey: RELAY.spki, digestKey: keyed, ...extra });
+      const quiet = (r) => !JSON.stringify([...r.refused, ...r.prerequisite]).includes('MARKER');
+      // The text.
+      t("⭐ the text: the summary's surrounding whitespace dropped, the description's leading blank lines and trailing whitespace dropped, spelled as one JSON object of the two in order — no signature line and no stamp, this is the public text — and the judge passes it", [advisoryRewriteCompose({ summary: `  ${SUMMARY}  \n`, description: `\n\n${DESCRIPTION}  \n` }), advisoryRewriteFailure(TEXT), ADVISORY_REWRITE_FILE_KEYS], [{ text: TEXT }, null, { summary: 'summary_file', description: 'description_file' }]);
+      const composeRefusals = [{ description: `${MARKER}\r\nCRLF` }, { description: ' \n\n ' }, { summary: `${MARKER}\nsecond line` }, { summary: '' }, {}].map((texts) => advisoryRewriteCompose(texts).refusal ?? null);
+      t('⛔ refused, naming what to fix and NEVER a byte of the text: a carriage return, an EMPTY description, a summary of two lines, an empty summary, and no field at all', [composeRefusals.map((r) => typeof r === 'string'), composeRefusals.some((r) => r?.includes('MARKER')), composeRefusals[1]], [[true, true, true, true, true], false, 'the description is empty']);
+      // The arm: the note's path.
+      const armed = arm([REWRITE]);
+      const sealedRewrite = armed.actions[0]?.sealed_note;
+      t("⭐ the arm: the rewrite leaves carrying ghsa_id and sealed_note alone — both file keys gone — and this process keeps the sealed text's byte count and keyed digest under action 1, as for a note", [armed.refused, armed.prerequisite, Object.keys(armed.actions[0]), [...armed.notes.entries()], ADVISORY_NOTE_OPS], [[], [], ['op', 'ghsa_id', 'sealed_note'], [[1, { bytes: Buffer.byteLength(TEXT, 'utf8'), digest: createHmac('sha256', digestKeys[0]).update(TEXT, 'utf8').digest('hex') }]], ['advisory_note', 'advisory_rewrite']]);
+      const opens = (sealed, op) => {
+        try {
+          return openAdvisoryNote({ sealed, privateKey: RELAY.privateKey, aad: advisorySealAad({ requestId: 'fw-test-1', action: 1, op, ghsaId: GHSA }) }).section;
+        } catch (e) {
+          return e.message === ADVISORY_NOTE_OPEN_FAILED ? 'refused' : `threw: ${e.message}`;
+        }
+      };
+      t("⭐ the seal opens with the relay's key under the REWRITE's associated data to the text BYTE FOR BYTE — and to nothing as a note", [opens(sealedRewrite, 'advisory_rewrite') === TEXT, opens(sealedRewrite, 'advisory_note')], [true, 'refused']);
+      const packed = packRequest({ repo: REPO, session: SESSION, actions: armed.actions, requestId: 'fw-test-1' });
+      const wire = JSON.stringify(packed.payload ?? {});
+      t('⭐ a payload carrying NO plaintext: it passes the shared validator and holds the seal and no byte of the summary or the description — not as text, not in the seal\'s decoded bytes — nor either file\'s path', [packed.ok, wire.includes('MARKER'), Buffer.from(sealedRewrite, 'base64url').includes(Buffer.from('REWRITE MARKER')), wire.includes(summaryFile) || wire.includes(descriptionFile)], [true, false, false, false]);
+      t('…a description alone seals the description alone', [opens(arm([{ op: 'advisory_rewrite', ghsa_id: GHSA, description_file: descriptionFile }]).actions[0].sealed_note, 'advisory_rewrite') === advisoryRewriteText({ description: DESCRIPTION })], [true]);
+      // ⛔ Refused before anything is sent.
+      writeFileSync(join(dir, 'advisory-rewrite-empty.md'), '\n  \n', 'utf8');
+      writeFileSync(join(dir, 'advisory-rewrite-two-lines.md'), `${MARKER}\nand a second line`, 'utf8');
+      const refusedArms = [
+        arm([{ op: 'advisory_rewrite', ghsa_id: GHSA }]),
+        arm([{ ...REWRITE, sealed_note: sealedRewrite }]),
+        arm([{ op: 'advisory_rewrite', ghsa_id: GHSA, note_file: descriptionFile }]),
+        arm([{ op: 'advisory_rewrite', ghsa_id: GHSA, description_file: join(dir, 'advisory-rewrite-empty.md') }]),
+        arm([{ op: 'advisory_rewrite', ghsa_id: GHSA, summary_file: join(dir, 'advisory-rewrite-two-lines.md') }]),
+        arm([{ op: 'advisory_rewrite', ghsa_id: GHSA, description_file: join(dir, 'no-such-rewrite.md') }]),
+      ];
+      t("⛔ REFUSED, nothing sealed: no file named, a seal already in the actions file, a note's file key, an EMPTY description, a summary of two lines and a file that does not exist — each naming its action, none echoing the text", [refusedArms.map((r) => [r.refused.length, r.notes.size, r.refused[0]?.startsWith('fleet-write/dispatch: REFUSED — actions[0] (advisory_rewrite): '), quiet(r)]), refusedArms[3].refused[0]?.endsWith('the description is empty')], [refusedArms.map(() => [1, 0, true, true]), true]);
+      const clone = join(dir, 'rewrite-clone');
+      mkdirSync(clone);
+      spawnSync('git', ['init', '-q', clone], { encoding: 'utf8' });
+      writeFileSync(join(clone, 'description.md'), DESCRIPTION, 'utf8');
+      const reads = [];
+      const spied = (path) => {
+        reads.push(path);
+        return readReal(path);
+      };
+      const placed = [{ description_file: SELF_PATH }, { description_file: join(clone, 'description.md') }, { summary_file: summaryFile, description_file: join(clone, 'description.md') }].map((files) => arm([{ op: 'advisory_rewrite', ghsa_id: GHSA, ...files }], { read: spied }));
+      t("⛔ a text file inside a git repository is REFUSED before it is read — this checkout, any other clone, and one of the two files inside while the other lies outside — the note's own placement check, nothing sealed, never echoing the text", [placed.map((r) => [r.refused.length, r.notes.size, r.refused[0]?.includes('resolves inside a git repository (its work tree or git dir, after symlinks)'), r.refused[0]?.includes("a rewrite's plaintext never lives in a repository's files"), quiet(r)]), reads.filter((p) => p !== summaryFile)], [placed.map(() => [1, 0, true, true, true]), []]);
+      // ⭐ End to end: the REAL executor replaces, its notice becomes the run's annotation, the seat confirms it.
+      const PERM_A = `GET /repos/${REPO}/collaborators/os-dev-a/permission`;
+      const ADV = `/repos/${REPO}/security-advisories/${GHSA}`;
+      const executed = async (payload, { store = (body, now) => ({ ...now, ...body }) } = {}) => {
+        const lines = [];
+        let held = { summary: 'the working summary', description: 'the working text' };
+        const r = await executeFleetWrite({ payload, sender: 'os-dev-a', token: TOKEN }, {
+          fetch: async (url, init) => {
+            const call = `${init?.method ?? 'GET'} ${new URL(url).pathname}`;
+            if (call === `PATCH ${ADV}`) held = store(JSON.parse(init.body), held);
+            const a = call === PERM_A ? { status: 200, json: { permission: 'write', role_name: 'write' } } : call === `GET ${ADV}` || call === `PATCH ${ADV}` ? { status: 200, json: { ghsa_id: GHSA, state: 'draft', ...held } } : { status: 404, json: { message: 'Not Found' } };
+            return { status: a.status, headers: new Headers({ 'x-ratelimit-remaining': '4999' }), json: async () => a.json };
+          },
+          pace: paceFor(join(dir, `pace-rewrite-exec-${paceCase++}.jsonl`)),
+          log: (l) => lines.push(l),
+          mask: () => {},
+          advisoryNoteKey: RELAY.text,
+          advisoryNote: { relayPublicKey: RELAY.spki },
+        });
+        const notes = lines.filter((l) => l.startsWith('::notice ')).map((l) => ({ path: '.github', annotation_level: 'notice', title: 'fleet-write advisory_rewrite', message: l.slice(l.indexOf('::', 2) + 2) }));
+        return { ...r, notes, held, lines };
+      };
+      const relayed = await executed(packed.payload);
+      const runOf = (notes, noted = armed.notes) => drive({ runs: () => [RUN('completed', 'success')], notes: () => notes }, { stroke: packed.payload, noted });
+      const ok = await runOf({ status: 200, json: [RUNNER_NOTICE, ...relayed.notes] });
+      t("⭐ END TO END, the round trip — the real executor replaced the summary and the description byte for byte, its ONE notice read off the run and confirmed against the digest this process sealed: ONE dispatch, success, exit 0", [relayed.exit, relayed.held, relayed.notes.length, ok.seen.filter((s) => s.call === DISPATCH).length, ok.state, exitForResult(ok), ok.notes], [0, { summary: SUMMARY, description: DESCRIPTION }, 1, 1, 'success', EXIT_OK, [{ action: 1, op: 'advisory_rewrite', state: 'confirmed', bytes: Buffer.byteLength(TEXT, 'utf8'), why: '' }]]);
+      t("…and the seat's line says the byte count and that the digest matched — never the text", [ok.logs.some((l) => l.includes(`confirms action 1 advisory_rewrite: the advisory's stored text is the ${Buffer.byteLength(TEXT, 'utf8')}-byte rewrite this process sealed, byte for byte`)), [...ok.logs, ...relayed.lines].some((l) => l.includes('MARKER'))], [true, false]);
+      const stranger = arm([REWRITE]);
+      const otherSeal = await executed(packRequest({ repo: REPO, session: SESSION, actions: stranger.actions, requestId: 'fw-test-1' }).payload);
+      const unconfirmed = [await runOf({ status: 200, json: otherSeal.notes }), await runOf({ status: 200, json: [RUNNER_NOTICE] })];
+      t("⛔ UNVERIFIED, exit 6, and NEVER re-sent: a notice whose keyed digest is another seal's (another digest key), and no notice", unconfirmed.map((r) => [r.state, exitForResult(r), r.notes?.[0]?.state, r.seen.filter((s) => s.call === DISPATCH).length, r.logs.some((l) => l.includes('never re-send it'))]), unconfirmed.map(() => ['unverified', EXIT_UNCONFIRMED, 'unverified', 1, true]));
+      const trimmed = await executed(packed.payload, { store: (body, now) => ({ ...now, ...body, description: `${body.description}.` }) });
+      t("⛔ …and a platform that stores another description is FAILED in the run — the read-back, before any notice — so the seat has nothing to confirm", [trimmed.exit, trimmed.notes.length, trimmed.rows[0]?.result?.includes('NOT STORED as sent')], [5, 0, true]);
+    }
+
 
     // ── the hierarchy link at the seat ──────────────────────────────────────
     battery("the hierarchy link at the seat: an epic's children pack as sub_issue_add actions carrying the parent and the child by number alone, beside other issue ops in ONE dispatch; a self-link, an id or a replace_parent is refused before anything is sent; neither row creates content, carries a body or names a workflow, so the stroke is paced at rule ①'s gap and nothing is read back here — a success run is the executor's confirmation; a run that failed at the relay's fence is exit 5 after ONE dispatch, never re-sent");
