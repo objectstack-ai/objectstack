@@ -131,7 +131,7 @@ const FAMILIES: Family[] = [
         prefix: '/attachments',
         doors: [
             ['DELETE', '/attachments/att_1'],
-            ['PATCH', '/attachments/att_1', { name: 'renamed.pdf' }],
+            ['PATCH', '/attachments/att_1', { file_name: 'renamed.pdf' }],
         ],
         misses: [
             ['GET', '/attachments/att_1'],
