@@ -3,8 +3,13 @@
 /**
  * ShellPageActions — the page's top-right button group (objectstack#36111,
  * phase 1 of the top-bar removal, objectstack#36107): from left to right the
- * comments slot, 「Edit app」, the AI assistant and help, at the same place on
- * every in-app page — a list, a record, a dashboard, a report, a custom page.
+ * comments slot, the AI assistant and help, at the same place on every in-app
+ * page — a list, a record, a dashboard, a report, a custom page.
+ *
+ * The group carries nothing that edits the app (objectstack#36485): the
+ * design mode is entered from the app-name menu's 「Edit app」
+ * (`SidebarAppMenu`), for an app built here and an installed one alike, and
+ * no 「Open {app} in Studio」 is drawn here.
  *
  * The SHELL decides whether it is drawn, not the page: `ConsoleLayout` mounts
  * `ShellPageActionsScope`, which hands the group to the headers through the
@@ -27,24 +32,18 @@
  * test that mounts a page bare) the group is never drawn, and on a phone
  * neither: the phone has its own bar.
  *
- * The parts are the top bar's own: 「Edit app」 reads the same gate as the top
- * bar's pencil (`useAppStudioEntry`), the AI button IS `AssistantTopBarButton`,
- * and the help menu IS `HelpMenu`. Where the shell holds the design mode
- * (`designMode.tsx`, objectstack#36362), 「Edit app」 turns it on instead of
- * opening Studio, and is not drawn while it is on; elsewhere it opens what the
- * pencil opens.
+ * The parts are the top bar's own: the AI button IS `AssistantTopBarButton`,
+ * and the help menu IS `HelpMenu`.
  */
 
 import * as React from 'react';
-import { Link, useLocation, useParams } from 'react-router-dom';
-import { Blocks, Eye } from 'lucide-react';
-import { Button, cn, useSidebar } from '@object-ui/components';
+import { useLocation, useParams } from 'react-router-dom';
+import { cn, useSidebar } from '@object-ui/components';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { useMetadata } from '../providers/MetadataProvider.js';
 import { useNavigationContext } from '../context/NavigationContext.js';
 import { matchAppBySegment, appStudioRoutePath } from '../utils/index.js';
 import { useStudioEntryGate, type StudioEntry } from '../hooks/useStudioDesignGate.js';
-import { useServedAppLabel } from '../hooks/useServedAppLabel.js';
 import { useAiSurfaceEnabled } from '../hooks/useAiSurface.js';
 import {
   ShellPageActionsSlotContext,
@@ -55,9 +54,6 @@ import {
 import { LocalizedSidebarTrigger } from './LocalizedSidebarTrigger.js';
 import { AssistantTopBarButton } from './AssistantTopBarButton.js';
 import { HelpMenu } from './HelpMenu.js';
-import { useDesignMode, type DesignModeValue } from './designMode.js';
-import { useAuth } from '@object-ui/auth';
-import { postureHasOrgWall, useTenancyPosture } from '../hooks/useTenancyPosture.js';
 
 /**
  * Counts the headers under a scope that place the expand button, so the
@@ -184,8 +180,9 @@ export function useShellPageActionsOn(): boolean {
  * page or report route its design surface (`appStudioRoutePath`). `null` when
  * this principal or this package gets no entry (`useStudioEntryGate`).
  *
- * The top bar's 「Edit app」 pencil and the group's 「Edit app」 both read it,
- * so the two cannot open different places.
+ * The top bar's 「Edit app」 pencil reads it, and the app-name menu's
+ * 「Edit app」 reads its gate (objectstack#36485), so the two cannot offer
+ * the app to different people.
  */
 export function useAppStudioEntry(enabled: boolean, activeAppName?: string): {
   currentApp: unknown;
@@ -205,87 +202,6 @@ export function useAppStudioEntry(enabled: boolean, activeAppName?: string): {
   return { currentApp, entry };
 }
 
-/**
- * 「Edit app」 in the group: its words beside an icon that is not the pencil
- * (the record's 「Edit」 carries the pencil), the words dropped below `lg` with
- * the tooltip keeping them. A read-only package's app gets the top bar's eye
- * and 「Open {app} in Studio」 (ADR-0146 D5) at the same place.
- *
- * objectstack#36362 — under a shell that holds the design mode, 「Edit app」
- * turns the mode on, in place, and opens no Studio. objectstack#36363 — so
- * does a read-only package's app, where the customization door takes this
- * caller: its changes are saved as this environment's customization.
- */
-function EditAppButton({
-  entry,
-  appText,
-  designMode,
-}: {
-  entry: StudioEntry;
-  appText: string;
-  designMode: DesignModeValue | null;
-}) {
-  const { t } = useObjectTranslation();
-  // objectstack#36363 — a read-only package's app (an installed one) enters
-  // the mode too: what the mode saves goes to the package's customization,
-  // as Studio's menu editing does. Not where the customization door is walled
-  // off for this caller (only the platform operator may call it there).
-  const posture = useTenancyPosture();
-  const { user } = useAuth();
-  const customizable = !postureHasOrgWall(posture) || user?.isPlatformAdmin === true;
-  if (entry.posture === 'view' && !(designMode && customizable)) {
-    const viewText = t('topbar.openAppInStudio', { defaultValue: 'Open {{app}} in Studio', app: appText });
-    return (
-      <Button
-        variant="ghost"
-        size="sm"
-        className="h-8 shrink-0 gap-1.5 px-2 max-w-[14rem]"
-        asChild
-        data-testid="shell-page-actions-view-app"
-        title={viewText}
-      >
-        <Link to={entry.path} aria-label={viewText}>
-          <Eye className="h-4 w-4 shrink-0" aria-hidden="true" />
-          <span className="hidden lg:inline truncate text-xs font-medium">{viewText}</span>
-        </Link>
-      </Button>
-    );
-  }
-  const label = t('topbar.editApp', { defaultValue: 'Edit app' });
-  if (designMode) {
-    return (
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        className="h-8 shrink-0 gap-1.5 px-2"
-        data-testid="shell-page-actions-edit-app"
-        title={label}
-        aria-label={label}
-        onClick={designMode.enter}
-      >
-        <Blocks className="h-4 w-4 shrink-0" aria-hidden="true" />
-        <span className="hidden lg:inline text-xs font-medium">{label}</span>
-      </Button>
-    );
-  }
-  return (
-    <Button
-      variant="ghost"
-      size="sm"
-      className="h-8 shrink-0 gap-1.5 px-2"
-      asChild
-      data-testid="shell-page-actions-edit-app"
-      title={label}
-    >
-      <Link to={entry.path} aria-label={label}>
-        <Blocks className="h-4 w-4 shrink-0" aria-hidden="true" />
-        <span className="hidden lg:inline text-xs font-medium">{label}</span>
-      </Link>
-    </Button>
-  );
-}
-
 export type ShellPageActionsProps = ShellPageActionsSlotProps;
 
 /** The group, where the shell turned it on; nothing anywhere else. */
@@ -300,17 +216,13 @@ function renderShellPageActionsGroup(props: ShellPageActionsSlotProps): React.Re
 }
 
 function ShellPageActionsGroup({ comments }: ShellPageActionsProps) {
-  const { entry, currentApp } = useAppStudioEntry(true);
-  const { appLabel } = useServedAppLabel();
+  // The app only: the group draws no Studio entry, so it reads no gate.
+  const { currentApp } = useAppStudioEntry(false);
   const { enabled: aiEnabled } = useAiSurfaceEnabled();
   const appPackageId = (currentApp as { _packageId?: string } | undefined)?._packageId;
-  const designMode = useDesignMode();
   return (
     <div className="flex shrink-0 items-center gap-0.5" data-testid="shell-page-actions">
       {comments}
-      {entry && !designMode?.active && (
-        <EditAppButton entry={entry} appText={currentApp ? appLabel(currentApp as any) : ''} designMode={designMode} />
-      )}
       {aiEnabled && <AssistantTopBarButton className="max-md:size-8" />}
       <HelpMenu inApp appPackageId={appPackageId} triggerClassName="h-8 w-8 shrink-0" triggerTestId="shell-page-actions-help" />
     </div>

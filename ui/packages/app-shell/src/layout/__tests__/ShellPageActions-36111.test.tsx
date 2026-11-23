@@ -2,17 +2,17 @@
 
 /**
  * The page's top-right button group (objectstack#36111): comments slot,
- * 「Edit app」, AI, help, placed by the shell.
+ * AI, help, placed by the shell.
  *
  * - The shell decides: on in a scope unless the scope turns it off
  *   (objectstack#36112: no top bar carries the buttons any more), never
  *   outside a scope or on a phone.
  * - The console `PageHeader` draws it after the page's own actions, behind a
  *   hairline; turned off, the header is exactly what it was.
- * - 「Edit app」 reads the top bar pencil's gate and opens its target
- *   (`useAppStudioEntry`): words beside an icon that is not the pencil, the
- *   words dropped below `lg`; a read-only package gets the eye; a caller
- *   without `manage_metadata` gets nothing.
+ * - objectstack#36485 — it carries nothing that edits the app: no
+ *   「Edit app」 and no 「Open {app} in Studio」, for a writable package, a
+ *   read-only one, and under a shell that holds the design mode (the
+ *   app-name menu is the way in, `SidebarAppMenu-36112.test.tsx`).
  *
  * Real subjects: `ShellPageActionsScope`, `ShellPageActions`, `PageHeader`,
  * under the real `MePermissionsProvider` and a router at a page route; the
@@ -59,7 +59,6 @@ import {
 } from '../ShellPageActions';
 import { PageHeader } from '../PageHeader';
 import { DesignModeProvider, useDesignModeController } from '../designMode';
-import { appStudioRoutePath } from '../../utils/appRoute';
 
 function permissions(systemPermissions: string[]): MePermissionsAuthenticatedResponse {
   return {
@@ -138,7 +137,7 @@ describe('the shell decides whether the group is drawn (objectstack#36111)', () 
     expect(screen.queryByTestId('shell-page-actions')).not.toBeInTheDocument();
   });
 
-  it('in order: the comments slot, Edit app, then help (AI only where the server serves it)', async () => {
+  it('in order: the comments slot, then help (AI only where the server serves it)', async () => {
     await mount(
       <ShellPageActionsScope on>
         <ShellPageActions comments={<span data-testid="comments-slot" />} />
@@ -146,7 +145,7 @@ describe('the shell decides whether the group is drawn (objectstack#36111)', () 
     );
     const group = screen.getByTestId('shell-page-actions');
     const ids = Array.from(group.children).map((c) => c.getAttribute('data-testid'));
-    expect(ids).toEqual(['comments-slot', 'shell-page-actions-edit-app', 'shell-page-actions-help']);
+    expect(ids).toEqual(['comments-slot', 'shell-page-actions-help']);
   });
 });
 
@@ -190,122 +189,54 @@ describe('the console page header places the group (objectstack#36111)', () => {
   });
 });
 
-describe('「Edit app」 in the group opens what the top bar pencil opens (objectstack#36111)', () => {
-  const group = (
+describe('the group carries no 「Edit app」 and no 「Open APP in Studio」 (objectstack#36485)', () => {
+  /** The shell's hold on the mode, as `ConsoleLayout` keeps it, and whether it is on. */
+  function Shell({ children }: { children: React.ReactNode }) {
+    const mode = useDesignModeController({ appName: 'cloud_control', appBasePath: '/apps/cloud_control', enabled: true });
+    return <DesignModeProvider value={mode}>{children}</DesignModeProvider>;
+  }
+  const bare = (
     <ShellPageActionsScope on>
       <ShellPageActions />
     </ShellPageActionsScope>
   );
+  const held = <Shell>{bare}</Shell>;
 
-  it('on a page route: the page\'s surface in Studio, the pencil\'s own derivation', async () => {
-    await mount(group);
-    const link = screen.getByTestId('shell-page-actions-edit-app');
-    expect(link.getAttribute('href')).toBe('/studio/com.objectstack.cloud/interfaces?surface=page:welcome');
-    expect(link.getAttribute('href')).toBe(appStudioRoutePath(APP, true, { type: 'page', name: 'welcome' }));
-  });
-
-  it('on an object route: the package Studio opens for the app, as the pencil does', async () => {
-    await mount(group, { route: '/apps/cloud_control/crm_lead' });
-    expect(screen.getByTestId('shell-page-actions-edit-app').getAttribute('href')).toBe(
-      appStudioRoutePath(APP, true, { type: 'crm_lead', name: undefined }),
-    );
-  });
-
-  it('its words beside an icon that is not the pencil, the words dropped below `lg` with the tooltip keeping them', async () => {
-    await mount(group);
-    const link = screen.getByTestId('shell-page-actions-edit-app');
-    expect(link).toHaveAccessibleName('Edit app');
-    expect(link.getAttribute('title')).toBe('Edit app');
-    expect(link.querySelector('svg.lucide-blocks')).not.toBeNull();
-    expect(link.querySelector('svg.lucide-pencil')).toBeNull();
-    const words = within(link).getByText('Edit app');
-    expect(words.className).toContain('hidden');
-    expect(words.className).toContain('lg:inline');
-  });
-
-  it('a read-only package: the top bar\'s eye and 「Open APP in Studio」, never the edit', async () => {
-    writable = false;
-    await mount(group);
-    expect(screen.queryByTestId('shell-page-actions-edit-app')).not.toBeInTheDocument();
-    expect(screen.getByTestId('shell-page-actions-view-app')).toHaveAccessibleName('Open Cloud in Studio');
-  });
-
-  it('a caller without `manage_metadata` gets no Studio entry; help stays', async () => {
-    await mount(group, { who: MEMBER });
-    expect(screen.queryByTestId('shell-page-actions-edit-app')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('shell-page-actions-view-app')).not.toBeInTheDocument();
-    expect(screen.getByTestId('shell-page-actions-help')).toBeInTheDocument();
-  });
-});
-
-describe('「Edit app」 turns the shell\'s design mode on instead of opening Studio (objectstack#36362)', () => {
-  /** The shell's hold on the mode, as `ConsoleLayout` keeps it, and whether it is on. */
-  function Shell({ children }: { children: React.ReactNode }) {
-    const mode = useDesignModeController({ appName: 'cloud_control', appBasePath: '/apps/cloud_control', enabled: true });
-    return (
-      <DesignModeProvider value={mode}>
-        <output data-testid="mode">{mode.active ? 'on' : 'off'}</output>
-        {children}
-      </DesignModeProvider>
-    );
+  /** Neither entry, by test id or by name; help stays. */
+  function expectNoAppEntry() {
+    const group = screen.getByTestId('shell-page-actions');
+    expect(within(group).queryByTestId('shell-page-actions-edit-app')).toBeNull();
+    expect(within(group).queryByTestId('shell-page-actions-view-app')).toBeNull();
+    expect(within(group).queryByRole('button', { name: 'Edit app' })).toBeNull();
+    expect(within(group).queryByRole('link', { name: 'Edit app' })).toBeNull();
+    expect(within(group).queryByRole('link', { name: 'Open Cloud in Studio' })).toBeNull();
+    expect(within(group).getByTestId('shell-page-actions-help')).toBeInTheDocument();
   }
-  const group = (
-    <Shell>
-      <ShellPageActionsScope on>
-        <ShellPageActions />
-      </ShellPageActionsScope>
-    </Shell>
-  );
 
-  it('a button, not a link: a press turns the mode on in place, and the button is gone while it is on', async () => {
-    await mount(group);
-    const button = screen.getByTestId('shell-page-actions-edit-app');
-    expect(button.tagName).toBe('BUTTON');
-    expect(button.getAttribute('href')).toBeNull();
-    expect(button).toHaveAccessibleName('Edit app');
-    expect(button.querySelector('svg.lucide-blocks')).not.toBeNull();
-    expect(screen.getByTestId('mode')).toHaveTextContent('off');
-
-    await act(async () => button.click());
-    expect(screen.getByTestId('mode')).toHaveTextContent('on');
-    expect(screen.queryByTestId('shell-page-actions-edit-app')).not.toBeInTheDocument();
-    expect(screen.getByTestId('shell-page-actions-help')).toBeInTheDocument();
+  it('to an author, on a writable package and on a read-only (installed) one, with and without a shell holding the design mode', async () => {
+    for (const isWritable of [true, false]) {
+      for (const node of [bare, held]) {
+        writable = isWritable;
+        await mount(node);
+        expectNoAppEntry();
+        cleanup();
+      }
+    }
   });
 
-  it('the gate is unchanged: a caller without `manage_metadata` gets no 「Edit app」', async () => {
-    await mount(group, { who: MEMBER });
-    expect(screen.queryByTestId('shell-page-actions-edit-app')).not.toBeInTheDocument();
-  });
-
-  it('a read-only package (an installed app) enters the mode too: its changes are this environment\'s customization (objectstack#36363)', async () => {
-    writable = false;
-    await mount(group);
-    expect(screen.queryByTestId('shell-page-actions-view-app')).not.toBeInTheDocument();
-    const button = screen.getByTestId('shell-page-actions-edit-app');
-    expect(button.tagName).toBe('BUTTON');
-    await act(async () => button.click());
-    expect(screen.getByTestId('mode')).toHaveTextContent('on');
-  });
-
-  it('where the customization door is walled off for this caller, a read-only package keeps the eye into Studio', async () => {
+  it('where the customization door is walled off, a read-only package gets no eye into Studio either', async () => {
     writable = false;
     authOverride.value = { getAuthConfig: async () => ({ features: { tenancyPosture: 'isolated' } }), user: { isPlatformAdmin: false } };
     try {
-      await mount(group);
-      expect(screen.queryByTestId('shell-page-actions-edit-app')).not.toBeInTheDocument();
-      expect(screen.getByTestId('shell-page-actions-view-app')).toHaveAccessibleName('Open Cloud in Studio');
+      await mount(held);
+      expectNoAppEntry();
     } finally {
       authOverride.value = {};
     }
   });
 
-  it('a writable package under the same wall still enters the mode: nothing of it goes through that door', async () => {
-    authOverride.value = { getAuthConfig: async () => ({ features: { tenancyPosture: 'isolated' } }), user: { isPlatformAdmin: false } };
-    try {
-      await mount(group);
-      expect(screen.getByTestId('shell-page-actions-edit-app').tagName).toBe('BUTTON');
-    } finally {
-      authOverride.value = {};
-    }
+  it('control: the group itself is still drawn for a member, with help', async () => {
+    await mount(held, { who: MEMBER });
+    expectNoAppEntry();
   });
 });
