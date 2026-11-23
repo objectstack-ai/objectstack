@@ -1,8 +1,8 @@
 ---
-'@objectstack/spec': minor
+'@objectstack/spec': patch
 '@objectstack/plugin-audit': patch
 '@objectstack/platform-objects': patch
-'@object-ui/app-shell': minor
+'@object-ui/app-shell': patch
 '@object-ui/i18n': patch
 ---
 
