@@ -532,16 +532,12 @@ function JsonField({
 }
 
 /**
- * A row's targets with `named` as its named next states, keeping its `''`
- * target (a clear of the field, allowed from this state) when `clearable`.
- * An existing `''` keeps its place, so an unchanged edit writes the row back
- * as it was read.
+ * A row's targets: its named next states, then the `''` target (a clear of
+ * the field, allowed from this state) when `clearable`. Targets are a set, so
+ * `''` is always written last.
  */
-function rowTargets(named: string[], clearable: boolean, prev: string[]): string[] {
-  if (!clearable) return named;
-  const at = prev.indexOf('');
-  const idx = at < 0 ? named.length : Math.min(at, named.length);
-  return [...named.slice(0, idx), '', ...named.slice(idx)];
+function rowTargets(named: string[], clearable: boolean): string[] {
+  return clearable ? [...named, ''] : named;
 }
 
 /**
@@ -614,7 +610,7 @@ function TransitionsField({
               setRow(
                 i,
                 from,
-                rowTargets(e.target.value.split(',').map((s) => s.trim()).filter(Boolean), to.includes(''), to),
+                rowTargets(e.target.value.split(',').map((s) => s.trim()).filter(Boolean), to.includes('')),
               )
             }
             className={`min-w-0 flex-1 rounded border bg-background px-2 py-1 text-[12px] ${DISABLED_LOOK}`}
@@ -627,7 +623,7 @@ function TransitionsField({
               type="checkbox"
               checked={to.includes('')}
               disabled={disabled}
-              onChange={(e) => setRow(i, from, rowTargets(to.filter((s) => s !== ''), e.target.checked, to))}
+              onChange={(e) => setRow(i, from, rowTargets(to.filter((s) => s !== ''), e.target.checked))}
             />
             {t('engine.studio.rules.transitionClearable', locale)}
           </label>
