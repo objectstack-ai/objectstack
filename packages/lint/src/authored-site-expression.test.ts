@@ -210,6 +210,11 @@ const SITE_CALLS: Record<ObjectSite, Record<string, Classified>> = {
     rulePredicates: { kind: 'plumbing', why: "lists the rule's predicates" },
     faultOutcomeOf: { kind: 'plumbing', why: "the rule's fault outcome, from its severity" },
     check: { kind: 'plumbing', why: 'the helper whose calls are the first region of this site' },
+    // [#35356] ADR-0157 D4: a working-day call where no calendar is loaded.
+    refuseWorkingDayElsewhere: {
+      kind: 'pass',
+      fixture: { objects: [REQ, BAL], expression: 'addWorkingDays(today(), 3) < now()', severity: 'error', names: 'addWorkingDays()' },
+    },
     validationRuleParentIssue: {
       kind: 'pass',
       fixture: { objects: [REQ, BAL], expression: 'parent.remaining > 1', severity: 'error', names: 'parent' },
@@ -224,6 +229,11 @@ const SITE_CALLS: Record<ObjectSite, Record<string, Classified>> = {
     celSourceOf: { kind: 'plumbing', why: 'reads the CEL source off the field' },
     refuseStoredMetadataBodyHop: { kind: 'pass', fixture: asValue(BODY_HOP) },
     refuseUndeclaredHopField: { kind: 'pass', fixture: asValue(HOP_FIELD) },
+    // [#35356] ADR-0157 D4: a working-day call whose calendar code is not a quoted literal.
+    computedCalendarCodeMessage: {
+      kind: 'pass',
+      fixture: { objects: [REQ, BAL], expression: 'addWorkingDays(today(), 3, record.title)', severity: 'error', names: 'addWorkingDays()' },
+    },
     warnUnprovisionedAnchors: { kind: 'pass', fixture: asValue(ANCHOR) },
     // [#33100] The formula-cycle pass, after the fields loop. It locates each
     // finding on a cycle member's own `expression`; the probe is named
@@ -494,6 +504,11 @@ const FLOW_CALLS: Record<string, FlowClassified> = {
   checkDeclaredPredicate: { kind: 'plumbing', why: "a `decision` branch's helper, the second region" },
   withAttachedBlocks: { kind: 'plumbing', why: 'the field list handed to the shared validator' },
   isBareReferenceToAny: { kind: 'plumbing', why: "filters the shared validator's findings on a field-rule slot" },
+  // [#35356] ADR-0157 D4: a working-day call where no calendar is loaded.
+  refuseWorkingDayElsewhere: {
+    kind: 'pass',
+    fixture: { objects: [FLOW_OBJ], expression: 'addWorkingDays(today(), 3) < now()', severity: 'error', names: 'addWorkingDays()' },
+  },
   checkFlowNullGuards: {
     kind: 'pass',
     fixture: { objects: [FLOW_OBJ], expression: 'record.days > 3', severity: 'error', names: 'record.days' },

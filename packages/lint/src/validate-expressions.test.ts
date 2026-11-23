@@ -4438,6 +4438,10 @@ describe('validateStackExpressions — reads only keys the spec declares (meta-t
       // [#36167] object name → its list-valued field names; its keys are Map
       // methods (`get`), never metadata keys.
       'multiValueFieldIndex',
+      // [#35356] The working-day functions a source calls (an array of
+      // function names), read to word the refusal; its keys are Array
+      // methods (`map`), never metadata keys.
+      'called',
       // [#33494] The names the door's stored extensions add (a Set of field
       // names), read to keep the target's served copy from filling a tied
       // name back in. Its keys are Set methods (`add`, `has`), never metadata keys.

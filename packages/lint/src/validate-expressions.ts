@@ -95,6 +95,9 @@ import {
   analyzeRelationshipTraversals,
   buildScope,
   declaresOptionsOnceServed,
+  WORKING_DAY_FUNCTIONS,
+  callsWorkingDayFunction,
+  computedCalendarCodeMessage,
 } from '@objectstack/formula';
 import type { ExprFaultOutcome, RelationshipTraversalAnalysis } from '@objectstack/formula';
 import {
@@ -889,6 +892,29 @@ function celSourceOf(raw: unknown): string | undefined {
     if (typeof rec.source === 'string') return rec.source;
   }
   return undefined;
+}
+
+/**
+ * ADR-0157 D4/D6: the working-day functions (`addWorkingDays`,
+ * `workingDaysBetween`, `addWorkingHours`) count with a working calendar the
+ * engine loads for exactly two sites: a formula field's and a computed field's
+ * `expression`, evaluated on the server ({@link judgeFieldFormula}). Every
+ * other expression site — a validation rule, a sharing rule's filter, a flow
+ * condition or value, a visibility rule, a hook condition — is handed no
+ * calendar, so the call throws there and the site's fault outcome applies on
+ * every evaluation. The refusal prescribes the D6 shape: store the due time.
+ * `undefined` when `raw` calls none of the three.
+ */
+function workingDayElsewhereMessage(raw: unknown): string | undefined {
+  const source = celSourceOf(raw);
+  if (!callsWorkingDayFunction(source)) return undefined;
+  const called = WORKING_DAY_FUNCTIONS.filter((fn) => new RegExp(`\\b${fn}\\s*\\(`).test(source!));
+  const names = called.map((fn) => `${fn}()`).join(', ');
+  return `${names} counts with the organization's working calendar, which the engine loads only for a ` +
+    "formula field's or a computed field's `expression`; here it has no calendar and fails on every evaluation, " +
+    'and no calendar arithmetic runs as a database filter. Store the due time instead: give the object a ' +
+    `datetime field whose \`expression\` calls ${called[0]}(), computed when the record is written, and read ` +
+    'or compare that field here, against now().';
 }
 
 /** One predicate a validation rule carries — see {@link rulePredicates}. */
@@ -2931,6 +2957,12 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     }
   };
 
+  /** ADR-0157 D4: a working-day call at a site the engine loads no calendar for ({@link workingDayElsewhereMessage}). */
+  const refuseWorkingDayElsewhere = (where: string, raw: unknown): void => {
+    const message = workingDayElsewhereMessage(raw);
+    if (message) issues.push({ where, message, source: celSourceOf(raw) ?? '', severity: 'error' });
+  };
+
   const check = (
     where: string,
     raw: unknown,
@@ -3055,6 +3087,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     // in the source, so flattened flow conditions are covered without ever
     // judging a bare identifier.
     warnUnprovisionedAnchors(where, raw, objectName);
+    refuseWorkingDayElsewhere(where, raw);
   };
 
   /**
@@ -3164,6 +3197,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     const res = validateExpression('predicate', raw as string | { dialect?: string; source?: string });
     for (const e of res.errors) issues.push({ where, message: e.message, source: e.source, severity: 'error' });
     for (const w of res.warnings) issues.push({ where, message: w.message, source: w.source, severity: 'warning' });
+    refuseWorkingDayElsewhere(where, raw);
     return { refused: false };
   };
 
@@ -3222,6 +3256,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     for (const w of res.warnings) {
       issues.push({ where, message: w.message, source: w.source, severity: 'warning' });
     }
+    refuseWorkingDayElsewhere(where, raw);
     return { refused: false };
   };
 
@@ -3946,6 +3981,10 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
       // [#8116] Formulas read the same record binding the predicates do, so
       // a `record.<anchor>` read inside one degrades identically.
       warnUnprovisionedAnchors(fieldWhere, f.expression, objectName);
+      // ADR-0157 D4: the engine loads the calendars an expression names before
+      // evaluating it, so a calendar code must be a quoted literal.
+      const computedCode = computedCalendarCodeMessage(celSourceOf(f.expression));
+      if (computedCode) issues.push({ where: fieldWhere, message: computedCode, source: celSourceOf(f.expression) ?? '', severity: 'error' });
       // [#32529, #32554] A STORED field's `expression` (any field but a
       // `formula`) is computed at the write and kept: a read of another
       // record, of the clock, of the acting user or of a permission is
