@@ -70,8 +70,8 @@ export interface SlackChannelWiring extends SlackChannelOptions {
  *   channel: they run in fan-out and the dispatcher, before this.
  * - **What is sent.** `conversations.open` with the linked user, then
  *   `chat.postMessage`: the title in bold, linked to the notification's deep
- *   link made absolute (a Console route, so under the Console's mount:
- *   {@link consoleLinkBase}), then the body; both already in the recipient's
+ *   link made absolute (a Console route, so under the Console's mount when
+ *   `MessagingServicePlugin` mounts it), then the body; both already in the recipient's
  *   language. No text of its own, so nothing here needs translating.
  * - **Outcome.** A link gone or never confirmed by the time a row is sent,
  *   or a Slack user Slack no longer finds ⇒ `invalid_recipient` (suppressed,
@@ -157,7 +157,7 @@ function escapeSlack(text: string): string {
 /**
  * The DM's text: the title in bold, linked to the deep link when one can be
  * made absolute, then the body. `origin` is the base a relative `actionUrl`
- * is made absolute under: the channel hands it {@link consoleLinkBase}.
+ * is made absolute under: the channel hands it the origin plus the Console mount.
  */
 export function slackDmText(n: Pick<Notification, 'title' | 'body' | 'actionUrl'>, origin: string | undefined): string {
     const title = escapeSlack(n.title);
@@ -171,7 +171,7 @@ export function slackDmText(n: Pick<Notification, 'title' | 'body' | 'actionUrl'
  * under `origin` when it is a path on this server, else none (a DM reader is
  * outside the Console, so a relative link opens nothing). A relative
  * `actionUrl` is a Console route (the inbox row's call-to-action), so the
- * channel passes `origin` with the Console's mount on it ({@link consoleLinkBase}).
+ * channel passes `origin` with the Console's mount on it.
  */
 export function absoluteLink(actionUrl: string | undefined, origin: string | undefined): string | undefined {
     if (!actionUrl) return undefined;
