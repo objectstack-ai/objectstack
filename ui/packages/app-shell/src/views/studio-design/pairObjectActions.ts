@@ -5,37 +5,36 @@
  * to one of the base's objects, for the Data pillar's Actions view.
  *
  * On a writable package an action is edited on the object draft
- * (`draft.actions`, saved by the object's autosave). A read-only base's object
+ * (`draft.actions`, saved with the object). A read-only base's object
  * is never written, so an action added to it is its own `action` item in the
  * base's pair (`<base>.custom`), bound to the object by `objectName`: the item
- * the metadata door already takes (`PUT /meta/action/NAME?package=PAIR&mode=draft`)
- * and the pair's `publish-drafts` publishes with the rest of its drafts.
+ * the metadata door already takes (`PUT /meta/action/NAME?package=PAIR&mode=draft`),
+ * then publishes on its own (`POST /meta/action/NAME/publish?package=PAIR`).
  *
- * This hook is that item's list and buffer:
+ * This hook is that item's list and buffer. It lives at the Data pillar, not
+ * in the Actions view, so an unsaved edit outlives a tab switch:
  *
  *  - **Read** at the pair the surface lists (or the one the ensure door
  *    answered): its published actions and its pending drafts, each draft read
  *    at the address its save writes, so the version it serves pins that save
  *    (objectui#11773). Only the items whose `objectName` is this object are
  *    kept. A draft wins over the published row of its name.
- *  - **Create** asks the ensure door for the pair (once per base, again only
- *    after a refusal) and writes the new item there as a draft, pinned
- *    `ifNoneMatch: '*'`. ⛔ The pair a write names is the door's answer, never
- *    a `<base>.custom` spelled here.
- *  - **Edit** patches the row, which is the buffer; the shared autosave
- *    (`useDraftAutoSave`) sends it 1.5 s after the last edit, held while a CEL
- *    syntax error stands (`blockingOf`) or while the name differs from the one
- *    the item is stored under (an item is stored under its name, so a rename
- *    sent per keystroke would stage one more action per pause, as the hooks
- *    panel measured; `renamedFrom`).
- *  - **Remove** deletes the pair's draft, then its published row, at the pair:
- *    the Automations pillar's Delete flow. The base's actions are never
- *    written.
+ *  - **Create**, **Edit** and **Remove** stay on the page and send nothing
+ *    (objectstack#36511). The top bar's Save asks the ensure door for the pair
+ *    (once per base, again only after a refusal) and there deletes each
+ *    removed row's draft and published item, then writes each added or edited
+ *    row's draft and publishes that one action, so it is live at once. A new
+ *    item's write is pinned `ifNoneMatch: '*'`. ⛔ The pair a write names is
+ *    the door's answer, never a `<base>.custom` spelled here. Cancel drops it
+ *    all and reads the pair again.
+ *  - The Save is held while a row's name differs from the one it is stored
+ *    under (an item is stored under its name; `renamedFrom`), or while its
+ *    editor reports an expression error (`reportBlocking`).
  *
  * objectstack#35054 (route D) — a row's BUFFER is the action as its author
  * stored it. The pair's list and its served drafts are translated for the
  * console's locale (`action` is a translatable type: its `label`, its
- * confirmation and success text), and the autosave sends the buffer whole, so
+ * confirmation and success text), and a Save sends the buffer whole, so
  * a buffer seeded from them stored the translations as the action's source
  * text. The served reads decide which rows are listed and the draft pins; each
  * row's body comes from the layered read at the same pair, through the one
@@ -49,9 +48,10 @@ import * as React from 'react';
 import { stripReadDecorations } from '@objectstack/spec/kernel';
 import { authoredBuffer, extractDraftBody, formatMetadataError, type AuthoredLayers } from '@object-ui/data-objectstack';
 import { useMetadataClient } from '../metadata-admin/useMetadata.js';
-import { t as tStudio, useMetadataLocale } from '../metadata-admin/i18n.js';
+import { t as tStudio, tFormat, useMetadataLocale } from '../metadata-admin/i18n.js';
 import { readDraftForSave, useDraftSaveGuard, type DraftPin } from '../metadata-admin/DraftConflictDialog.js';
-import { useDraftAutoSave, type DraftSend } from './useDraftAutoSave.js';
+import { publishSavedItem, useStudioSaveEntry, type StudioSaveResult } from './studioSaveBar.js';
+import { emitMetadataRefresh } from '../../assistant/assistantBus.js';
 import type { RailCustomizations } from './StudioRailCustomizations.js';
 import type { StudioSavedDraft } from './StudioPillarKit.js';
 
@@ -88,26 +88,26 @@ export interface PairActionRow {
 }
 
 export interface PairObjectActions {
-  /** The pair's actions on this object, the listing's order. Empty without a door. */
+  /** The pair's actions on this object, the listing's order, a removed one left out. Empty without a door. */
   rows: readonly PairActionRow[];
   /** The pair the rows are read and written at, once known. */
   pairId: string | null;
   /** A read or write of the pair failed: the server's sentence. */
   error: string | null;
-  /** A write is in flight. */
+  /** A Save of the pair's actions is in flight. */
   saving: boolean;
-  /** The row whose buffer holds an unsent edit, or `null`. */
-  dirty: string | null;
-  /** When the last draft save of a row landed. */
-  savedAt: { name: string; at: Date } | null;
+  /** Some row holds an edit, an addition or a removal the server does not have. */
+  dirty: boolean;
   /** The row's stored name, while its buffer's `name` differs from it (the edit is held). */
   renamedFrom(name: string): string | null;
-  /** Write a new action into the pair as a draft. Resolves whether it landed. */
+  /** Add a new action to the page; Save writes it into the pair. Resolves whether it was added. */
   create(action: Record<string, unknown>): Promise<boolean>;
-  /** Patch a row's buffer; the autosave sends it. */
+  /** Patch a row's buffer; Save sends it. */
   patch(name: string, patch: Record<string, unknown>): void;
-  /** Delete the row's draft and published item at the pair. */
+  /** Take a row off the page; Save deletes its draft and published item at the pair. */
   remove(name: string): Promise<void>;
+  /** The open action editor's expression errors for a row, by its name. */
+  reportBlocking(name: string, count: number): void;
   /** The draft conflict dialog; render it once. */
   dialog: React.ReactElement;
 }
@@ -127,32 +127,41 @@ function ownBody(raw: unknown): Record<string, unknown> {
   return body;
 }
 
+/** The order the pair's actions save in, after the object and its extension. */
+const PAIR_ACTIONS_SAVE_ORDER = 2;
+
 /**
  * The pair's actions on `objectName`. `door` null (a writable package, an
  * object the pair adds, a base whose list has not answered) reads nothing and
  * offers nothing; the Actions view then edits `draft.actions` as before.
- * `blockingOf` is the open editor's CEL verdict for a row, by its name.
+ * Nothing is read until `opened` (the Actions tab is shown) for this object;
+ * the read then stays with the object, so an edit outlives a tab switch.
  */
 export function usePairObjectActions(
   door: PairActionsDoor | null,
   objectName: string,
-  blockingOf: (name: string) => number,
+  opened: boolean,
 ): PairObjectActions {
   const client = useMetadataClient();
   const locale = useMetadataLocale();
   const localeRef = React.useRef(locale);
-  const active = door !== null;
+  const [openedFor, setOpenedFor] = React.useState<string | null>(null);
+  if (opened && door !== null && objectName && openedFor !== objectName) setOpenedFor(objectName);
+  const active = door !== null && openedFor === objectName;
   const listedPair = door?.pairId ?? null;
   const publishNonce = door?.publishNonce ?? 0;
   // The door's answer once a write asked it: it names every later write, and
   // the reads follow it until the surface lists the same pair.
   const [ensured, setEnsured] = React.useState<string | null>(null);
   const pairId = listedPair ?? ensured;
-  const [rows, setRows] = React.useState<{ for: string; pair: string; list: PairActionRow[] } | null>(null);
+  const [rows, setRows] = React.useState<{ for: string; pair: string | null; list: PairActionRow[] } | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [saving, setSaving] = React.useState(false);
-  const [dirty, setDirty] = React.useState<string | null>(null);
-  const [savedAt, setSavedAt] = React.useState<{ name: string; at: Date } | null>(null);
+  // The page's unsaved work: rows edited, rows added and not written, rows taken off.
+  const [edited, setEdited] = React.useState<ReadonlySet<string>>(() => new Set());
+  const [created, setCreated] = React.useState<ReadonlySet<string>>(() => new Set());
+  const [removed, setRemoved] = React.useState<ReadonlySet<string>>(() => new Set());
+  const [blocking, setBlocking] = React.useState<Readonly<Record<string, number>>>({});
   const [nonce, setNonce] = React.useState(0);
   const reload = React.useCallback(() => setNonce((n) => n + 1), []);
   const { save: saveGuarded, recordRead, forget, dialog } = useDraftSaveGuard(client, reload);
@@ -163,12 +172,21 @@ export function usePairObjectActions(
   // Read per render by the callbacks below, never an effect's dependency
   // (ui/AGENTS.md #10): the door object is rebuilt by every render of the pillar.
   const doorRef = React.useRef(door);
-  const dirtyRef = React.useRef(dirty);
+  const pendingRef = React.useRef({ edited, created });
   React.useLayoutEffect(() => {
     doorRef.current = door;
-    dirtyRef.current = dirty;
+    pendingRef.current = { edited, created };
     localeRef.current = locale;
   });
+
+  // Another object: nothing of the last one's unsaved work is kept.
+  React.useEffect(() => {
+    setEdited(new Set());
+    setCreated(new Set());
+    setRemoved(new Set());
+    setBlocking({});
+    setError(null);
+  }, [objectName]);
 
   // The ensure door's answer for this base: asked by the first write, once,
   // and again only after a refusal.
@@ -244,19 +262,20 @@ export function usePairObjectActions(
             body && Object.keys(body).length > 0 ? { ...row, body } : { ...row, unserved: true },
           );
         });
-        const open = dirtyRef.current;
+        const open = pendingRef.current;
         setRows((prev) => {
           const list = [...byName.values()];
-          // A buffer holding an unsent edit is newer than what the read served.
-          const kept = open !== null && prev?.for === objectName ? prev.list.find((r) => r.name === open) : undefined;
-          return {
-            for: objectName,
-            pair: readAt,
-            list: kept ? list.map((r) => (r.name === kept.name ? { ...r, body: kept.body } : r)) : list,
-          };
+          // A buffer holding unsaved work is newer than what the read served.
+          const mine = prev?.for === objectName ? prev.list : [];
+          const merged = list.map((r) => {
+            const kept = open.edited.has(r.name) ? mine.find((m) => m.name === r.name) : undefined;
+            return kept ? { ...r, body: kept.body } : r;
+          });
+          const added = mine.filter((m) => open.created.has(m.name) && !byName.has(m.name));
+          return { for: objectName, pair: readAt, list: [...merged, ...added] };
         });
         for (const [name, pin] of pins) {
-          if (name !== open) recordRead('action', name, readAt, pin);
+          if (!open.edited.has(name)) recordRead('action', name, readAt, pin);
         }
         setError(null);
       } catch (e) {
@@ -268,10 +287,11 @@ export function usePairObjectActions(
     };
   }, [client, active, pairId, objectName, publishNonce, nonce, recordRead]);
 
-  const list = active && rows !== null && rows.for === objectName && rows.pair === pairId ? rows.list : NO_ROWS;
-  const listRef = React.useRef(list);
+  const all = active && rows !== null && rows.for === objectName && (rows.pair === pairId || rows.pair === null) ? rows.list : NO_ROWS;
+  const list = React.useMemo(() => (removed.size === 0 ? all : all.filter((r) => !removed.has(r.name))), [all, removed]);
+  const allRef = React.useRef(all);
   React.useLayoutEffect(() => {
-    listRef.current = list;
+    allRef.current = all;
   });
 
   const renamedFrom = React.useCallback(
@@ -282,121 +302,183 @@ export function usePairObjectActions(
     [list],
   );
 
-  const patch = React.useCallback(
-    (name: string, change: Record<string, unknown>) => {
-      if (doorRef.current?.walled) return;
-      // A row with no stored copy served takes no edit (objectstack#35054).
-      if (listRef.current.find((r) => r.name === name)?.unserved) {
-        setError(tStudio('engine.studio.refusal.draftUnreadable', localeRef.current));
-        return;
-      }
-      setRows((prev) =>
-        prev === null
-          ? prev
-          : { ...prev, list: prev.list.map((r) => (r.name === name ? { ...r, body: { ...r.body, ...change } } : r)) },
-      );
-      setDirty(name);
-    },
-    [],
-  );
+  const patch = React.useCallback((name: string, change: Record<string, unknown>) => {
+    if (doorRef.current?.walled) return;
+    // A row with no stored copy served takes no edit (objectstack#35054).
+    if (allRef.current.find((r) => r.name === name)?.unserved) {
+      setError(tStudio('engine.studio.refusal.draftUnreadable', localeRef.current));
+      return;
+    }
+    setRows((prev) =>
+      prev === null
+        ? prev
+        : { ...prev, list: prev.list.map((r) => (r.name === name ? { ...r, body: { ...r.body, ...change } } : r)) },
+    );
+    setEdited((prev) => (prev.has(name) ? prev : new Set(prev).add(name)));
+  }, []);
 
   const create = React.useCallback(
     async (action: Record<string, unknown>): Promise<boolean> => {
       const name = String(action.name ?? '');
-      if (!name) return false;
-      setSaving(true);
+      if (!name || doorRef.current?.walled) return false;
       setError(null);
-      try {
-        const pair = await pairForWrite();
-        // objectui#11773 — a create is the first-write pin: refused where the
-        // name already holds a draft, instead of written over it.
-        await client.save('action', name, action, { mode: 'draft', packageId: pair, ifNoneMatch: '*', surface: 'studio' });
-        setRows((prev) => {
-          const row: PairActionRow = { name, body: action, published: false, draft: true };
-          const base = prev !== null && prev.for === objectName && prev.pair === pair ? prev.list : listRef.current;
-          return { for: objectName, pair, list: [...base.filter((r) => r.name !== name), row] };
-        });
-        setSavedAt({ name, at: new Date() });
-        doorRef.current?.onDraftSaved?.({ type: 'action', name });
-        // The pair may be new: the surface lists it from here on.
-        reload();
-        return true;
-      } catch (e) {
-        setError(formatMetadataError(e));
-        return false;
-      } finally {
-        setSaving(false);
-      }
+      setRows((prev) => {
+        const row: PairActionRow = { name, body: action, published: false, draft: false };
+        const base = prev !== null && prev.for === objectName ? prev : { for: objectName, pair: pairId, list: [] };
+        return { ...base, list: [...base.list.filter((r) => r.name !== name), row] };
+      });
+      setCreated((prev) => new Set(prev).add(name));
+      return true;
     },
-    [client, objectName, pairForWrite, reload],
+    [objectName, pairId],
   );
 
-  const send = React.useCallback(
-    async (sent: DraftSend) => {
-      const name = dirtyRef.current;
-      const row = name === null ? undefined : listRef.current.find((r) => r.name === name);
-      if (!row) return;
-      setSaving(true);
-      setError(null);
-      try {
-        const pair = await pairForWrite();
-        const outcome = await saveGuarded('action', row.name, row.body, { mode: 'draft', packageId: pair, surface: 'studio' });
-        if (outcome === 'reloaded') {
-          setDirty(null);
-          return;
-        }
-        if (sent.unmoved()) setDirty(null);
-        setRows((prev) =>
-          prev === null ? prev : { ...prev, list: prev.list.map((r) => (r.name === row.name ? { ...r, draft: true } : r)) },
-        );
-        setSavedAt({ name: row.name, at: new Date() });
-        doorRef.current?.onDraftSaved?.({ type: 'action', name: row.name });
-      } catch (e) {
-        setError(formatMetadataError(e));
-      } finally {
-        setSaving(false);
-      }
-    },
-    [pairForWrite, saveGuarded],
-  );
-
-  const dirtyRow = dirty === null ? undefined : list.find((r) => r.name === dirty);
-  useDraftAutoSave({
-    target: `action:${dirty ?? ''}`,
-    loadedFor: `action:${dirtyRow ? dirtyRow.name : ''}`,
-    dirty: dirtyRow !== undefined,
-    blocked:
-      dirtyRow === undefined ||
-      saving ||
-      !!door?.walled ||
-      blockingOf(dirtyRow.name) > 0 ||
-      (typeof dirtyRow.body.name === 'string' && dirtyRow.body.name !== dirtyRow.name),
-    snapshot: dirtyRow?.body ?? null,
-    save: send,
-  });
-
-  const remove = React.useCallback(
-    async (name: string) => {
-      const row = listRef.current.find((r) => r.name === name);
-      if (!row || doorRef.current?.walled) return;
-      const pair = rows?.pair ?? null;
-      if (pair === null) return;
-      setSaving(true);
-      setError(null);
-      try {
-        if (row.draft) await client.reset('action', name, { state: 'draft', packageId: pair });
-        if (row.published) await client.reset('action', name, { packageId: pair });
-      } catch (e) {
-        setError(formatMetadataError(e));
-        return;
-      } finally {
-        setSaving(false);
-      }
-      if (dirtyRef.current === name) setDirty(null);
+  const remove = React.useCallback(async (name: string) => {
+    if (doorRef.current?.walled) return;
+    if (pendingRef.current.created.has(name)) {
+      // Never written: it simply leaves the page.
       setRows((prev) => (prev === null ? prev : { ...prev, list: prev.list.filter((r) => r.name !== name) }));
-      doorRef.current?.onDraftSaved?.({ type: 'action', name });
-    },
-    [client, rows],
+      setCreated((prev) => {
+        const next = new Set(prev);
+        next.delete(name);
+        return next;
+      });
+      return;
+    }
+    setRemoved((prev) => new Set(prev).add(name));
+  }, []);
+
+  const reportBlocking = React.useCallback((name: string, count: number) => {
+    setBlocking((prev) => (prev[name] === count ? prev : { ...prev, [name]: count }));
+  }, []);
+
+  const dirty = edited.size > 0 || created.size > 0 || removed.size > 0;
+
+  // objectstack#36511 — the top bar's Save: each removed row's draft and
+  // published item deleted at the pair, then each added or edited row's draft
+  // written there and that one action published, so it is live at once.
+  const save = React.useCallback(async (): Promise<StudioSaveResult> => {
+    setSaving(true);
+    setError(null);
+    const refusals: string[] = [];
+    try {
+      let pair: string;
+      try {
+        pair = await pairForWrite();
+      } catch (e) {
+        const reason = formatMetadataError(e);
+        setError(reason);
+        return { kind: 'refused', reason };
+      }
+      for (const name of removed) {
+        const row = allRef.current.find((r) => r.name === name);
+        try {
+          if (row?.draft) await client.reset('action', name, { state: 'draft', packageId: pair });
+          if (row?.published) await client.reset('action', name, { packageId: pair });
+          setRows((prev) => (prev === null ? prev : { ...prev, list: prev.list.filter((r) => r.name !== name) }));
+          setRemoved((prev) => {
+            const next = new Set(prev);
+            next.delete(name);
+            return next;
+          });
+          emitMetadataRefresh();
+        } catch (e) {
+          refusals.push(`${name}: ${formatMetadataError(e)}`);
+        }
+      }
+      for (const name of [...created, ...edited]) {
+        if (removed.has(name)) continue;
+        const row = allRef.current.find((r) => r.name === name);
+        if (!row) continue;
+        const isNew = created.has(name);
+        try {
+          if (isNew) {
+            // objectui#11773 — a create is the first-write pin.
+            await client.save('action', name, row.body, { mode: 'draft', packageId: pair, ifNoneMatch: '*', surface: 'studio' });
+          } else if (
+            (await saveGuarded('action', name, row.body, { mode: 'draft', packageId: pair, surface: 'studio' })) === 'reloaded'
+          ) {
+            setEdited(new Set());
+            continue;
+          }
+          const outcome = await publishSavedItem(client, { type: 'action', name, packageId: pair }, row.draft);
+          if (!outcome.ok) {
+            if (outcome.draftDiscarded) recordRead('action', name, pair, { ifNoneMatch: '*' });
+            else setRows((prev) => (prev === null ? prev : { ...prev, list: prev.list.map((r) => (r.name === name ? { ...r, draft: true } : r)) }));
+            refusals.push(`${String(row.body.label ?? name)}: ${formatMetadataError(outcome.error)}`);
+            continue;
+          }
+          recordRead('action', name, pair, { ifNoneMatch: '*' });
+          setRows((prev) =>
+            prev === null
+              ? prev
+              : { ...prev, pair, list: prev.list.map((r) => (r.name === name ? { ...r, draft: false, published: true } : r)) },
+          );
+          const sentBody = row.body;
+          const unmoved = JSON.stringify(allRef.current.find((r) => r.name === name)?.body) === JSON.stringify(sentBody);
+          if (isNew) {
+            setCreated((prev) => {
+              const next = new Set(prev);
+              next.delete(name);
+              return next;
+            });
+          }
+          if (unmoved && !isNew) {
+            setEdited((prev) => {
+              const next = new Set(prev);
+              next.delete(name);
+              return next;
+            });
+          } else if (!unmoved) setEdited((prev) => new Set(prev).add(name));
+        } catch (e) {
+          refusals.push(`${String(row.body.label ?? name)}: ${formatMetadataError(e)}`);
+        }
+      }
+      // The pair may be new: the surface lists it from here on.
+      reload();
+    } finally {
+      setSaving(false);
+    }
+    if (refusals.length > 0) {
+      const reason = refusals.join('\n');
+      setError(reason);
+      return { kind: 'refused', reason };
+    }
+    return { kind: 'saved' };
+  }, [client, created, edited, removed, pairForWrite, saveGuarded, recordRead, reload]);
+
+  const cancel = React.useCallback(() => {
+    setError(null);
+    setCreated(new Set());
+    setEdited(new Set());
+    setRemoved(new Set());
+    setRows((prev) => (prev === null ? prev : { ...prev, list: prev.list.filter((r) => !pendingRef.current.created.has(r.name)) }));
+    // The edited rows are read again as the pair holds them.
+    reload();
+  }, [reload]);
+
+  const firstRenamed = list.find((r) => typeof r.body.name === 'string' && r.body.name !== r.name && edited.has(r.name));
+  const firstBlocked = list.find((r) => (blocking[r.name] ?? 0) > 0 && (edited.has(r.name) || created.has(r.name)));
+  const held = firstRenamed
+    ? tFormat('engine.studio.held.pairActionRename', locale, { name: firstRenamed.name })
+    : firstBlocked
+      ? tFormat('engine.studio.held.celInvalidAction', locale, { action: String(firstBlocked.body.label ?? firstBlocked.name) })
+      : null;
+  const labels = [...created, ...edited, ...removed].map((n) => {
+    const row = all.find((r) => r.name === n);
+    return String(row?.body.label ?? n);
+  });
+  useStudioSaveEntry(
+    active && !door?.walled
+      ? {
+          label: [...new Set(labels)].join(tStudio('engine.studio.save.itemSeparator', locale)),
+          order: PAIR_ACTIONS_SAVE_ORDER,
+          dirty,
+          held,
+          save,
+          cancel,
+        }
+      : null,
   );
 
   return {
@@ -404,12 +486,12 @@ export function usePairObjectActions(
     pairId: active ? (rows?.pair ?? pairId) : null,
     error: active ? error : null,
     saving,
-    dirty: dirtyRow ? dirtyRow.name : null,
-    savedAt,
+    dirty,
     renamedFrom,
     create,
     patch,
     remove,
+    reportBlocking,
     dialog,
   };
 }

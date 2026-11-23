@@ -2740,10 +2740,11 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.auto.unregisteredTitle': 'The automation engine on this deployment holds no registration for this flow',
   'engine.studio.auto.enabled': 'Switched on',
   'engine.studio.auto.disabled': 'Switched off',
-  'engine.studio.auto.enableTitle': 'Enable this automation (publish to apply)',
-  'engine.studio.auto.disableTitle': 'Disable this automation (publish to apply)',
-  'engine.studio.auto.enabledToast': 'Switched on — publish to apply',
-  'engine.studio.auto.disabledToast': 'Switched off — publish to apply',
+  // objectstack#36511 — the switch is live at once, as an installed app's is.
+  'engine.studio.auto.enableTitle': 'Enable this automation. It takes effect at once.',
+  'engine.studio.auto.disableTitle': 'Disable this automation. It takes effect at once.',
+  'engine.studio.auto.enabledToast': 'Switched on, live now',
+  'engine.studio.auto.disabledToast': 'Switched off, live now',
   'engine.studio.auto.newTitle': 'New automation',
   'engine.studio.auto.none': 'No automations yet — click “+” above to create one',
   'engine.studio.auto.emptyMain': 'No automations in this package yet.',
@@ -3328,10 +3329,6 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.createDraft': 'Save as draft',
   'engine.studio.saveDraft': 'Save draft',
   'engine.studio.autoSaving': 'Saving…',
-  // objectstack#34818 — the flow header's landed-autosave mark, its spoken form, and the one toast left (a failed save).
-  'engine.studio.autoSaved': 'Saved',
-  'engine.studio.flowSavedNamed': 'Flow "{item}" saved',
-  'engine.studio.flowSaveFailed': 'The draft of "{item}" was not saved',
   // Standard create-dialog field labels (shared by object / app / flow / permission).
   'engine.studio.app.nameLabel': 'App name',
   'engine.studio.app.idLabel': 'Identifier',
@@ -3424,6 +3421,10 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.held.celInvalidRule': 'an expression on the rule “{rule}” has an error to fix',
   'engine.studio.held.celInvalidAction': 'an expression on the action “{action}” has an error to fix',
   'engine.studio.held.inspectorInvalid': '“{item}” has an error to fix in its inspector',
+  // objectstack#36511 — a hook's Save held: an expression error, or a name changed from the one it is stored under.
+  'engine.studio.held.celInvalidHook': 'an expression on the hook “{hook}” has an error to fix',
+  'engine.studio.held.hookRename': 'the hook {name} keeps the name it was created with',
+  'engine.studio.held.pairActionRename': 'the action {name} keeps the name it was created with',
   'engine.studio.held.line': 'Not saved yet: {clause}. Your changes are kept here and saved once it is filled in.',
   'engine.studio.held.publish': 'Not published: {clause}, so that change is not saved yet. Finish it, then publish.',
   'engine.studio.held.inputHint': 'Required. Changes are saved once this has a value.',
@@ -3520,6 +3521,8 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.customize.overrides': 'Overrides {package}',
   'engine.studio.customize.overridesTitle': 'This item replaces {package}’s item of the same name on this deployment. It was taken from {package} {basedOn}.',
   'engine.studio.customize.draftFooter': 'Edits save as a draft of this deployment’s customization; Publish applies them.',
+  // objectstack#36511 — the same footer in a Studio pillar, where the top bar's Save makes an edit live.
+  'engine.studio.customize.saveFooter': 'Edits go into this deployment’s customization when you press Save in the top bar.',
   'engine.studio.customize.restore': 'Restore package original',
   'engine.studio.customize.restoreConfirm': 'Restore {package}’s “{item}”?',
   'engine.studio.customize.restoreBody': 'This deployment’s customization of “{item}” is deleted, and {package}’s version is served again.',
@@ -3590,7 +3593,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.landing.envCatalog.description': 'Positions, capabilities, permission sets and sharing rules, across every package.',
   // objectstack#34715 — the landing ordered by what the author came to do, in
   // words that name no package mechanism.
-  'engine.studio.landing.lead': 'Change an installed app, or build an app of your own. Changes save as drafts and take effect when you publish.',
+  'engine.studio.landing.lead': 'Change an installed app, or build an app of your own. Changes take effect when you press Save.',
   'engine.studio.landing.appsHeading': 'Installed apps',
   'engine.studio.landing.appsHint': 'Each app is upgraded by its vendor. Your changes are kept separately, so an upgrade does not overwrite them.',
   'engine.studio.landing.marketplaceInstall': 'Install from the marketplace',
@@ -3864,7 +3867,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.actions.presets': 'Common actions',
   'engine.studio.actions.notSaved': 'Not saved — needs “{input}”',
   'engine.studio.actions.heldNeeds': 'the action “{action}” needs “{input}”',
-  'engine.studio.actions.renameHeld': 'Not saved yet: an action added to an installed app keeps the name it was created with. Change the name back to {name} to save your changes.',
+  'engine.studio.actions.renameHeld': 'Not ready to save: an action added to an installed app keeps the name it was created with. Change the name back to {name}, then Save.',
   'engine.studio.actions.preset.change': 'Change a picklist field',
   'engine.studio.actions.preset.changeHint': 'Asks for a new “{field}”, then saves it.',
   'engine.studio.actions.preset.changeNeeds': 'Needs a picklist field on this object.',
@@ -3885,7 +3888,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.api.body': 'Example body',
   'engine.studio.api.bodyOmitted': 'Required fields come first. Optional fields not shown: {fields}',
   // Hooks view
-  'engine.studio.hooks.renameHeld': 'Not saved yet: a hook keeps the name it was created with. Change the name back to {name} to save your changes.',
+  'engine.studio.hooks.renameHeld': 'Not ready to save: a hook keeps the name it was created with. Change the name back to {name}, then Save.',
   'engine.studio.hooks.none': 'No hooks target this object.',
   'engine.studio.hooks.newButton': 'New hook',
   'engine.studio.hooks.async': 'async',
@@ -4614,7 +4617,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.draftConflict.back': 'Back',
   'engine.draftConflict.notSaved': 'Not saved: {type} “{name}” was saved elsewhere after you opened it.',
   'engine.studio.inspector.props': 'Properties',
-  'engine.studio.inspector.draftFooter': 'Edits save as drafts. Publish the package to apply them.',
+  'engine.studio.inspector.draftFooter': 'Edits go live when you press Save in the top bar.',
   'engine.studio.inspector.collapse': 'Collapse properties',
   'engine.studio.inspector.expand': 'Show properties',
   'engine.studio.inspector.emptyLine1': 'Click a block on the canvas,',
