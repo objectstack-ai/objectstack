@@ -4,9 +4,10 @@
  * The full-page inbox (objectstack#36741). What these pin:
  *  - three tabs with the bell's counts, «Needs your action» on top of the
  *    notifications, which goes to the approvals tab;
- *  - the first row is selected on arrival, and selecting a notification marks
- *    its whole coalesced row read through the bell's own write, then re-reads
- *    the shared feed so the sidebar's badge drops;
+ *  - the first row is shown on arrival but not read; opening a notification
+ *    marks its whole coalesced row read through the bell's own write, then
+ *    re-reads the shared feed so the sidebar's badge drops; a phone picks
+ *    nothing by itself; «Mark all read» reaches the server for older rows;
  *  - the right pane embeds the record a notification is about, and the
  *    request an approval row names, through the record view;
  *  - «Unread only» keeps a row read on this visit listed;
@@ -69,6 +70,8 @@ vi.mock('../../RecordDetailView', () => ({
 }));
 
 import { InboxPage } from '../InboxPage';
+import { postInboxReadReceipts } from '../../../hooks/useInboxBell';
+import { readEarlierInboxMessages } from '../../../hooks/sharedUserFeeds';
 
 const note = (id: string, extra: Partial<InboxNotification> = {}): InboxNotification => ({
   id,
@@ -122,6 +125,7 @@ let markManyRead: ReturnType<typeof vi.fn>;
 let refreshed: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
+  vi.mocked(postInboxReadReceipts).mockClear();
   setViewport(1280);
   markManyRead = vi.fn(async () => {});
   refreshed = vi.fn();
@@ -160,16 +164,46 @@ describe('InboxPage — the full-page inbox (objectstack#36741)', () => {
     expect(location()).toMatch(/^\/apps\/crm\/inbox\/approvals/);
   });
 
-  it('selects the first row on arrival, marks it read through the bell, and re-reads the shared feed', async () => {
+  it('shows the first row on arrival without reading it', () => {
     render(page('/apps/crm/inbox'));
     expect(location()).toBe('/apps/crm/inbox?item=n1');
-    expect(markManyRead).toHaveBeenCalledWith(['n1']);
-    await act(async () => {});
-    expect(refreshed).toHaveBeenCalled();
+    expect(markManyRead).not.toHaveBeenCalled();
     // The pane embeds the record the notification is about.
     const stub = screen.getByTestId('record-stub');
     expect(stub.textContent).toBe('task/t1');
     expect(stub.getAttribute('data-embedded')).toBe('true');
+  });
+
+  it('reads a row the user opens through the bell, and re-reads the shared feed', async () => {
+    render(page('/apps/crm/inbox'));
+    const first = rows().find((r) => r.getAttribute('data-item-id') === 'n1')!;
+    fireEvent.click(first);
+    expect(markManyRead).toHaveBeenCalledWith(['n1']);
+    await act(async () => {});
+    expect(refreshed).toHaveBeenCalled();
+    fireEvent.click(rows().find((r) => r.textContent?.includes('Daily digest'))!);
+    expect(markManyRead).toHaveBeenCalledWith(['d1', 'd2']);
+  });
+
+  it('a phone shows the list and picks nothing by itself', () => {
+    setViewport(375);
+    render(page('/apps/crm/inbox'));
+    expect(location()).toBe('/apps/crm/inbox');
+    expect(markManyRead).not.toHaveBeenCalled();
+  });
+
+  it('«Mark all read» reaches the server when only older loaded rows are unread', async () => {
+    const window20 = Array.from({ length: 20 }, (_, i) => note(`w${i}`, { is_read: true, title: `Window ${i}` }));
+    bellState.current = { ...bellState.current, notifications: window20, unreadCount: 0 };
+    vi.mocked(readEarlierInboxMessages).mockResolvedValueOnce([note('old1', { title: 'Older one' })]);
+    render(page('/apps/crm/inbox?item=w0'));
+    fireEvent.click(screen.getByTestId('inbox-page-load-earlier'));
+    await act(async () => {});
+    const markAll = screen.getByTestId('inbox-page-mark-all-read') as HTMLButtonElement;
+    expect(markAll.disabled).toBe(false);
+    fireEvent.click(markAll);
+    expect(bellState.current.markAllRead).not.toHaveBeenCalled();
+    expect(postInboxReadReceipts).toHaveBeenCalledWith('read/all');
   });
 
   it('opens the full record from the pane', () => {
@@ -179,6 +213,7 @@ describe('InboxPage — the full-page inbox (objectstack#36741)', () => {
   });
 
   it('keeps a coalesced row one row, lists each occurrence, and marks them all read', () => {
+    // An address that names the row is the user opening it.
     render(page('/apps/crm/inbox?item=d1'));
     const digest = rows().find((r) => r.textContent?.includes('Daily digest'))!;
     expect(within(digest).getByText('×2')).toBeTruthy();

@@ -5,10 +5,11 @@
  * notification's link points at, and how the selection moves.
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   inboxPagePath,
   inboxTabFromSegment,
+  isDesktopViewport,
   isInboxPagePath,
   isTypingTarget,
   notificationSubject,
@@ -99,5 +100,16 @@ describe('moving the selection', () => {
     expect(isTypingTarget(el('DIV', true))).toBe(true);
     expect(isTypingTarget(el('BUTTON'))).toBe(false);
     expect(isTypingTarget(null)).toBe(false);
+  });
+
+  it('the desktop is read from the viewport now, not from a hook’s first guess', () => {
+    try {
+      vi.stubGlobal('window', { innerWidth: 375 });
+      expect(isDesktopViewport()).toBe(false);
+      vi.stubGlobal('window', { innerWidth: 768 });
+      expect(isDesktopViewport()).toBe(true);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

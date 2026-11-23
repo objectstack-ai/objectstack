@@ -3704,7 +3704,7 @@ const zh = {
     notifications: '通知',
     approvals: '审批',
     inbox: '收件箱',
-    inboxAriaLabel: '打开消息中心',
+    inboxAriaLabel: '打开收件箱',
     area: '区域',
     packageManagement: '软件包管理',
     searchNavigation: '搜索导航…',

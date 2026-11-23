@@ -58,7 +58,7 @@ import { ActivityObjectLabel } from './ActivityObjectLabel.js';
 import { confirmUnsavedLeave } from '../chrome/unsavedEdits.js';
 import { RECORD_DRAWER_PARAM } from '../urlParams.js';
 import { InboxApprovalItem } from './InboxApprovalItem.js';
-import { inboxPagePath, isInboxPagePath } from '../views/inbox/inboxPageModel.js';
+import { inboxPagePath, isDesktopViewport, isInboxPagePath } from '../views/inbox/inboxPageModel.js';
 
 // Re-exported so importers of the notification/group shapes keep resolving
 // through this module (the pure logic itself lives in inboxGrouping.ts).
@@ -552,7 +552,7 @@ export function InboxPopover({
   // objectstack#36741 — from 768 px up the bell is the way into the full-page
   // inbox, in the current app's shell; the panel below is the phone's. On the
   // page already, the bell is marked as the current page and stays put.
-  if (opensPageOnDesktop && !isMobile) {
+  if (opensPageOnDesktop && !isMobile && isDesktopViewport()) {
     const onInboxPage = isInboxPagePath(location.pathname);
     return (
       <Button

@@ -251,7 +251,7 @@ describe('Home "My work → Notifications": opening a notification marks it read
       expect(markReadBodies).toEqual([{ ids: ['ntf_1'] }]);
       expect(timeline).toEqual([
         'POST /api/v1/notifications/read',
-        'navigate /apps/crm/sys_inbox_message?view=mine',
+        'navigate /apps/crm/inbox',
       ]);
     } finally {
       INBOX[0].action_url = original;

@@ -3704,7 +3704,7 @@ const zhHant = {
     notifications: '通知',
     approvals: '審批',
     inbox: '收件箱',
-    inboxAriaLabel: '開啟訊息中心',
+    inboxAriaLabel: '開啟收件箱',
     area: '區域',
     packageManagement: '軟體包管理',
     searchNavigation: '搜尋導航…',

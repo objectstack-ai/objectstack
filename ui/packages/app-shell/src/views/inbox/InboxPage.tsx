@@ -48,6 +48,7 @@ import {
   INBOX_PAGE_TABS,
   inboxPagePath,
   inboxTabFromSegment,
+  isDesktopViewport,
   isTypingTarget,
   notificationSubject,
   selectionAfterLeaving,
@@ -150,9 +151,17 @@ export function InboxPage({ dataSource, objects }: InboxPageProps) {
     [bell],
   );
   const markAllRead = useCallback(() => {
-    setReadHere((prev) => new Set([...prev, ...allNotifications.filter((n) => !n.is_read).map((n) => n.id)]));
+    const unread = allNotifications.filter((n) => !n.is_read);
+    if (unread.length === 0) return;
+    setReadHere((prev) => new Set([...prev, ...unread.map((n) => n.id)]));
     setEarlierRead(new Set(earlier.rows.map((n) => n.id)));
-    void bell.markAllRead().then(refreshSharedInbox, refreshSharedInbox);
+    // The bell's write only posts while its own window holds an unread row;
+    // when the unread ones are all older rows loaded here, post the same
+    // «read all» receipt directly so the server agrees after a reload.
+    const write = bell.notifications.some((n) => !n.is_read)
+      ? bell.markAllRead()
+      : postInboxReadReceipts('read/all');
+    void write.then(refreshSharedInbox, refreshSharedInbox);
   }, [allNotifications, bell, earlier.rows]);
 
   // ── The current tab's rows, as ids in list order ─────────────────────────
@@ -166,6 +175,10 @@ export function InboxPage({ dataSource, objects }: InboxPageProps) {
   const listAnswered =
     tab === 'approvals' ? approvals.status !== 'loading' : tab === 'activity' ? activity.status !== 'idle' && activity.status !== 'loading' : bell.status !== 'idle' && bell.status !== 'loading';
 
+  // The row the page picked by itself (on arrival, or after the selected row
+  // left the list). Showing it is not reading it: only a row the user opens —
+  // a click, J / K, or an address naming it — is marked read.
+  const autoPicked = useRef<string | null>(null);
   const select = useCallback(
     (id: string | null) => {
       setSearchParams(
@@ -181,6 +194,19 @@ export function InboxPage({ dataSource, objects }: InboxPageProps) {
     [setSearchParams],
   );
 
+  // A row the user opens: read it, even when it is the one already shown.
+  const pick = useCallback(
+    (id: string) => {
+      autoPicked.current = null;
+      if (id === selectedId && tab === 'notifications') {
+        const group = groups.find((g) => g.items.some((n) => n.id === id));
+        if (group) markNotificationsRead(group.items);
+      }
+      select(id);
+    },
+    [selectedId, tab, groups, markNotificationsRead, select],
+  );
+
   // Keep a row selected on the desktop: the first one on arrival, and the
   // next one when the selected row leaves the list (a request decided). A
   // phone shows the list until a row is picked.
@@ -193,10 +219,15 @@ export function InboxPage({ dataSource, objects }: InboxPageProps) {
     // A notification selected by a member id of its coalesced row stays put.
     if (selectedId && tab === 'notifications' && groups.some((g) => g.items.some((n) => n.id === selectedId))) return;
     if (selectedId && prev.tab === tab && prev.ids.includes(selectedId)) {
-      select(selectionAfterLeaving(prev.ids, selectedId, ids));
+      const next = selectionAfterLeaving(prev.ids, selectedId, ids);
+      autoPicked.current = next;
+      select(next);
       return;
     }
-    if (!isMobile && !selectedId && ids.length > 0) select(ids[0]);
+    if (!isMobile && isDesktopViewport() && !selectedId && ids.length > 0) {
+      autoPicked.current = ids[0];
+      select(ids[0]);
+    }
   }, [tab, ids, selectedId, listAnswered, groups, isMobile, select]);
 
   // J / K move through the list, as on the approvals queue and the record pages.
@@ -209,6 +240,7 @@ export function InboxPage({ dataSource, objects }: InboxPageProps) {
       const next = stepSelection(ids, selectedId, key === 'j' ? 1 : -1);
       if (next && next !== selectedId) {
         e.preventDefault();
+        autoPicked.current = null;
         select(next);
       }
     };
@@ -219,10 +251,10 @@ export function InboxPage({ dataSource, objects }: InboxPageProps) {
   const selectedGroup =
     tab === 'notifications' ? groups.find((g) => g.items.some((n) => n.id === selectedId)) : undefined;
   useEffect(() => {
-    if (selectedGroup) markNotificationsRead(selectedGroup.items);
+    if (selectedGroup && !(selectedId && autoPicked.current === selectedId)) markNotificationsRead(selectedGroup.items);
     // Marked once per selection, not again when the overlay redraws it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedGroup?.key, selectedGroup?.unreadCount]);
+  }, [selectedGroup?.key, selectedGroup?.unreadCount, selectedId]);
 
   // ── Leaving the page ─────────────────────────────────────────────────────
   const leaveTo = useCallback((to: string) => confirmUnsavedLeave(() => navigate(to)), [navigate]);
@@ -278,7 +310,7 @@ export function InboxPage({ dataSource, objects }: InboxPageProps) {
               time={r.createdAt}
               title={r.recordTitle || approvalRequestTitle(r)}
               summary={typeof r.row?.submitter_name === 'string' ? r.row.submitter_name : undefined}
-              onSelect={select}
+              onSelect={pick}
             />
           ))}
           {approvals.total > approvalRows.length && (
@@ -322,7 +354,7 @@ export function InboxPage({ dataSource, objects }: InboxPageProps) {
               time={a.timestamp}
               title={a.user}
               summary={a.description}
-              onSelect={select}
+              onSelect={pick}
             />
           ))}
         </ul>
@@ -376,7 +408,7 @@ export function InboxPage({ dataSource, objects }: InboxPageProps) {
                   summary={lead.body}
                   count={g.items.length}
                   countLabel={t('notifications.groupCount', { defaultValue: '{{count}} notifications', count: g.items.length }) as string}
-                  onSelect={select}
+                  onSelect={pick}
                 />
               );
             })}

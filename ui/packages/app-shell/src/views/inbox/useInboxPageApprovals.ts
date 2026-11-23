@@ -44,7 +44,9 @@ export function useInboxPageApprovals(sharedTotal: number): InboxPageApprovals {
   const key = user?.id && identities.length > 0 ? identities.join(',') : null;
   const nonce = useDataInvalidation(APPROVAL_REQUEST_OBJECT);
   const [state, setState] = useState<InboxPageApprovals>({ requests: [], total: 0, status: 'loading' });
-  const firstNonce = useRef(nonce);
+  // The bus nonce this hook last answered: a re-read for any other reason (the
+  // shared count moved) does not ask the shared feed to read again.
+  const answeredNonce = useRef(nonce);
 
   useEffect(() => {
     if (!key) {
@@ -53,7 +55,10 @@ export function useInboxPageApprovals(sharedTotal: number): InboxPageApprovals {
     }
     let live = true;
     // A decision moved the request: the badge's own feed reads again too.
-    if (nonce !== firstNonce.current) refreshSharedPendingApprovals();
+    if (nonce !== answeredNonce.current) {
+      answeredNonce.current = nonce;
+      refreshSharedPendingApprovals();
+    }
     void fetchPendingApprovalPage(key.split(','), INBOX_PAGE_APPROVAL_ROWS).then((answer) => {
       if (!live) return;
       if (answer.status === 'ok') setState({ ...answer.page, status: 'ready' });

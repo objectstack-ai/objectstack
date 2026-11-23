@@ -134,6 +134,18 @@ export function selectionAfterLeaving(
   return after[0] ?? null;
 }
 
+/** The width from which the bell opens this page instead of its panel. */
+export const INBOX_PAGE_MIN_WIDTH = 768;
+
+/**
+ * Whether the viewport is the desktop's, read now. `useIsMobile` answers
+ * `false` on its first render, before it has measured; a phone must not be
+ * taken for a desktop on that frame.
+ */
+export function isDesktopViewport(): boolean {
+  return typeof window !== 'undefined' && window.innerWidth >= INBOX_PAGE_MIN_WIDTH;
+}
+
 /** Is a key event typed into a field, where J / K are letters and not moves? */
 export function isTypingTarget(target: EventTarget | null): boolean {
   const el = target as HTMLElement | null;
