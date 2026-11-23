@@ -3635,6 +3635,13 @@ const pt = {
       pendingDraft: 'Este aplicativo tem alterações não publicadas no Studio. Publique ou descarte-as lá e salve novamente.',
       noVersion: 'O pacote deste aplicativo não declara versão, então o menu não pode ser personalizado.',
       notWritable: 'O pacote de personalização deste aplicativo não pode ser gravado, então o menu não pode ser salvo.',
+      newDashboard: 'Novo painel…',
+      newDashboardTitle: 'Novo painel',
+      newItemSavesAll: 'Ao criá-lo, suas outras alterações de design também são salvas e ele é aberto para edição.',
+      create: 'Criar',
+      creating: 'Criando…',
+      newItemPendingDraft: 'Já existe um rascunho pendente com este nome. Tente novamente.',
+      newItemLeft: 'Não foi possível remover o novo painel "{{name}}"; remova-o no Studio.',
     },
   },
   topbar: {

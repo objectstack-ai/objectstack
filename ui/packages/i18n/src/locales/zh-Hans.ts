@@ -3639,6 +3639,13 @@ const zh = {
       pendingDraft: '这个应用在 Studio 里有未发布的改动。请先在那里发布或丢弃，再保存。',
       noVersion: '这个应用所在的包没有声明版本，菜单无法定制。',
       notWritable: '这个应用的定制包不可写，菜单无法保存。',
+      newDashboard: '新建仪表盘…',
+      newDashboardTitle: '新建仪表盘',
+      newItemSavesAll: '创建时会一并保存设计模式里的其他改动，然后打开它进行编辑。',
+      create: '创建',
+      creating: '正在创建…',
+      newItemPendingDraft: '这个名称下已有一份未发布的草稿，请再试一次。',
+      newItemLeft: '新建的仪表盘「{{name}}」没能删除，请在 Studio 里删除它。',
     },
   },
   topbar: {

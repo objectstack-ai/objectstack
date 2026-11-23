@@ -12,7 +12,7 @@
  */
 
 import { useState, useEffect, useMemo, useRef, type ComponentProps } from 'react';
-import { useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { DashboardRenderer } from '@object-ui/plugin-dashboard';
 import { DrillNavigationProvider, notifyDataChanged } from '@object-ui/react';
 import { useRecordListDrillNavigation } from './useOpenRecordList.js';
@@ -51,6 +51,7 @@ import {
 } from './DashboardInPageEditor.js';
 import { useInSetupApp } from '../console/setupApp.js';
 import { useCustomizeDoorWalled } from './studio-design/StudioCustomizeControls.js';
+import { readDashboardEditArrival, withoutDashboardEditArrival } from '../layout/designModeArrival.js';
 
 /**
  * One refresh of this dashboard's data: the `onRefresh` handed to
@@ -295,6 +296,25 @@ export function DashboardView({ dataSource }: { dataSource?: any }) {
       toast.error(tt('dashboard.inPageEdit.saveFailed', 'The dashboard could not be saved'), { description: err?.message || String(err) });
     }
   };
+
+  // objectstack#36364 — a dashboard the design mode just created arrives with
+  // its page asked to open the edit state, once the Edit button is offered;
+  // the landing is cleared as it is read, so Back or a reload opens nothing.
+  const location = useLocation();
+  const navigate = useNavigate();
+  const arrivedToEdit = readDashboardEditArrival(location.state, dashboardName);
+  const landedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!arrivedToEdit || !dashboard || !editOffered || editing) return;
+    if (landedRef.current === location.key) return;
+    landedRef.current = location.key;
+    navigate(`${location.pathname}${location.search}${location.hash}`, {
+      replace: true,
+      state: withoutDashboardEditArrival(location.state),
+    });
+    void startEdit();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once per landing; `startEdit` is a fresh closure each render
+  }, [arrivedToEdit, dashboard, editOffered, editing, location.key]);
 
   const previewSchema = useMemo(() => {
     if (!dashboard || !unregistered) return dashboard;

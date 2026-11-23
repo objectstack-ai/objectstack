@@ -3639,6 +3639,13 @@ const zhHant = {
       pendingDraft: '這個應用在 Studio 裡有未釋出的改動。請先在那裡釋出或丟棄，再儲存。',
       noVersion: '這個應用所在的包沒有宣告版本，選單無法定製。',
       notWritable: '這個應用的定製包不可寫，選單無法儲存。',
+      newDashboard: '新建儀表盤…',
+      newDashboardTitle: '新建儀表盤',
+      newItemSavesAll: '建立時會一併儲存設計模式裡的其他變更，然後開啟它進行編輯。',
+      create: '建立',
+      creating: '正在建立…',
+      newItemPendingDraft: '這個名稱下已有一份未發佈的草稿，請再試一次。',
+      newItemLeft: '新建的儀表盤「{{name}}」沒能刪除，請在 Studio 裡刪除它。',
     },
   },
   topbar: {

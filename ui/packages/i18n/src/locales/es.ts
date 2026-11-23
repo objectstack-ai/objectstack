@@ -3640,6 +3640,13 @@ const es = {
       pendingDraft: 'Esta aplicación tiene cambios sin publicar en Studio. Publícalos o descártalos allí y vuelve a guardar.',
       noVersion: 'El paquete de esta aplicación no declara versión, así que su menú no se puede personalizar.',
       notWritable: 'El paquete de personalización de esta aplicación no se puede escribir, así que su menú no se puede guardar.',
+      newDashboard: 'Nuevo panel…',
+      newDashboardTitle: 'Nuevo panel',
+      newItemSavesAll: 'Al crearlo también se guardan tus otros cambios de diseño y luego se abre para editarlo.',
+      create: 'Crear',
+      creating: 'Creando…',
+      newItemPendingDraft: 'Ya hay un borrador pendiente con este nombre. Inténtalo de nuevo.',
+      newItemLeft: 'No se pudo eliminar el nuevo panel "{{name}}"; elimínalo en Studio.',
     },
   },
   topbar: {

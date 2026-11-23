@@ -3560,6 +3560,13 @@ const ja = {
       pendingDraft: 'このアプリには Studio に未公開の変更があります。そちらで公開または破棄してから、もう一度保存してください。',
       noVersion: 'このアプリのパッケージにはバージョンがないため、メニューをカスタマイズできません。',
       notWritable: 'このアプリのカスタマイズパッケージに書き込めないため、メニューを保存できません。',
+      newDashboard: '新しいダッシュボード…',
+      newDashboardTitle: '新しいダッシュボード',
+      newItemSavesAll: '作成すると、デザインモードの他の変更も保存され、編集用に開きます。',
+      create: '作成',
+      creating: '作成中…',
+      newItemPendingDraft: 'この名前の未公開の下書きがすでにあります。もう一度お試しください。',
+      newItemLeft: '新しいダッシュボード「{{name}}」を削除できませんでした。Studio で削除してください。',
     },
   },
   topbar: {

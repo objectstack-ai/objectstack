@@ -92,15 +92,32 @@ function storedApp(layers: unknown): Record<string, unknown> {
 }
 
 /**
- * Save the menu edits that turned `served` (the menu the editor was seeded
- * from) into `navigation`, as the menu of the app `appName` of the package
- * `packageId`, and publish it.
+ * The menu save once every check has passed: the package it writes to and
+ * the app document it writes there. Nothing has been written yet, save the
+ * customization package the ensure door creates on first use.
  */
-export async function saveAppMenu(
+export interface PreparedAppMenuSave {
+  readonly appName: string;
+  /**
+   * The package the menu is written to: the app's own when the server lists
+   * it writable, else its customization package. A thing created in design
+   * mode for the menu to open is saved here too (objectstack#36364).
+   */
+  readonly target: string;
+  readonly body: Record<string, unknown>;
+}
+
+/**
+ * Every check of a save of the menu edits that turned `served` (the menu the
+ * editor was seeded from) into `navigation`, as the menu of the app `appName`
+ * of the package `packageId`, and its body. Throws, in the viewer's language,
+ * where the menu cannot be saved; nothing is written then.
+ */
+export async function prepareAppMenuSave(
   input: { appName: string; packageId: string; served: Menu; navigation: Menu },
   texts: AppMenuSaveTexts,
   doors: AppMenuSaveDoors,
-): Promise<void> {
+): Promise<PreparedAppMenuSave> {
   const { appName, packageId, served, navigation } = input;
   const manifests = await doors.listPackages();
   const listed = manifests.get(packageId);
@@ -118,6 +135,16 @@ export async function saveAppMenu(
     if (!pair.writable) throw new Error(texts.notWritable);
     target = pair.packageId;
   }
+  return { appName, target, body };
+}
+
+/** Write and publish a prepared menu save ({@link prepareAppMenuSave}). */
+export async function writeAppMenu(
+  prepared: PreparedAppMenuSave,
+  texts: Pick<AppMenuSaveTexts, 'pendingDraft'>,
+  doors: Pick<AppMenuSaveDoors, 'client'>,
+): Promise<void> {
+  const { appName, target, body } = prepared;
   try {
     await doors.client.save('app', appName, body, { mode: 'draft', packageId: target, ifNoneMatch: '*' });
   } catch (err) {
@@ -136,6 +163,19 @@ export async function saveAppMenu(
     throw err;
   }
   emitMetadataRefresh();
+}
+
+/**
+ * Save the menu edits that turned `served` (the menu the editor was seeded
+ * from) into `navigation`, as the menu of the app `appName` of the package
+ * `packageId`, and publish it.
+ */
+export async function saveAppMenu(
+  input: { appName: string; packageId: string; served: Menu; navigation: Menu },
+  texts: AppMenuSaveTexts,
+  doors: AppMenuSaveDoors,
+): Promise<void> {
+  await writeAppMenu(await prepareAppMenuSave(input, texts, doors), texts, doors);
 }
 
 /** The console's doors, around `client` (`useMetadataClient()`). */

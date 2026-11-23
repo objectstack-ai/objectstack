@@ -3636,6 +3636,13 @@ const fr = {
       pendingDraft: 'Cette application a des modifications non publiées dans Studio. Publiez-les ou annulez-les là-bas, puis enregistrez à nouveau.',
       noVersion: 'Le package de cette application ne déclare aucune version : son menu ne peut pas être personnalisé.',
       notWritable: 'Le package de personnalisation de cette application n’est pas modifiable : son menu ne peut pas être enregistré.',
+      newDashboard: 'Nouveau tableau de bord…',
+      newDashboardTitle: 'Nouveau tableau de bord',
+      newItemSavesAll: 'Le créer enregistre aussi vos autres modifications de design, puis l’ouvre en modification.',
+      create: 'Créer',
+      creating: 'Création…',
+      newItemPendingDraft: 'Un brouillon portant ce nom est déjà en attente. Réessayez.',
+      newItemLeft: 'Le nouveau tableau de bord « {{name}} » n’a pas pu être supprimé ; supprimez-le dans Studio.',
     },
   },
   topbar: {

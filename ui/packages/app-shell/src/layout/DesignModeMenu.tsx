@@ -32,6 +32,13 @@
  * item before or after it stays open; no other entry is moved past it (a
  * move up, a move down or a drop onto it), since its place is that package's.
  *
+ * In the picker's 「Dashboards」, the first row is 「New dashboard…」
+ * (objectstack#36364): it asks for a name, and on 「Create」 the dashboard is
+ * created, empty, where the menu is saved, its entry takes the dashed row's
+ * place, and the mode saves at once, every other staged change with it
+ * (`saveAppMenuWithNewItem`); then the mode is left and the new dashboard
+ * opens for editing (`dashboardEditArrival`). 「Cancel」 writes nothing.
+ *
  * Every edit is staged with the mode (`useDesignModeChange`), under one key
  * for the app's menu: the mode's 「Save」 writes it (`saveAppMenu`), its
  * 「Cancel」 drops it. The menu drawn is the staged one, so it survives a page
@@ -45,7 +52,8 @@
  */
 
 import * as React from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
+import { toast } from 'sonner';
 import {
   DndContext,
   KeyboardSensor,
@@ -145,6 +153,8 @@ import {
   readStoredMenu,
   saveAppMenu,
 } from './designModeMenuSave.js';
+import { freeItemName, isNewMenuItemKind, saveAppMenuWithNewItem, type NewMenuItemKind } from './designModeMenuCreate.js';
+import { dashboardEditArrival } from './designModeArrival.js';
 
 /**
  * The group label's icon-mode hiding, as the sidebar's own labels declare it
@@ -355,6 +365,51 @@ export default function DesignModeMenu({ app, basePath, resolveTargetLabel, reso
     setAddAt(null);
   };
 
+  // objectstack#36364 — a new dashboard, in the held place: created, put in
+  // the menu and saved with every other staged change in one act, then opened
+  // for editing. Resolves `false` when nothing was saved (the mode has said
+  // why); the held place and the picker stay, for another try or a cancel.
+  const navigate = useNavigate();
+  const saveWith = change.saveWith;
+  const createItem = async (kind: NewMenuItemKind, label: string, taken: readonly string[]): Promise<boolean> => {
+    if (!addAt) return false;
+    let name: string;
+    try {
+      name = await freeItemName(kind, label, taken, client as never);
+    } catch (err) {
+      toast.error(
+        t('designMode.saveFailed', {
+          defaultValue: 'Some changes were not saved: {{reason}}',
+          reason: err instanceof Error ? err.message : String(err),
+        }),
+      );
+      return false;
+    }
+    const entry = entryFor(kind, name, newEntryId([...menu, ...(storedMenu ?? [])]));
+    const item = { kind, name, label };
+    const itemTexts = {
+      ...texts,
+      itemPendingDraft: t('designMode.menu.newItemPendingDraft', {
+        defaultValue: 'A draft with this name is already pending. Try again.',
+      }),
+      itemLeft: t('designMode.menu.newItemLeft', {
+        defaultValue: 'The new dashboard "{{name}}" could not be removed again; remove it in Studio.',
+        name: label,
+      }),
+    };
+    const saved = await saveWith(insertEntry(menu, addAt.parentId, addAt.index, entry), (navigation) =>
+      saveAppMenuWithNewItem(
+        { appName, packageId, served, navigation, item },
+        itemTexts,
+        consoleAppMenuDoors(client as never),
+      ),
+    );
+    if (!saved) return false;
+    setAddAt(null);
+    navigate(resolveHref(entry as unknown as NavigationItem, basePath).href, { state: dashboardEditArrival(name) });
+    return true;
+  };
+
   const renderLeaf = (entry: MenuEntry, depth: number) => {
     const id = String(entry.id);
     const place = placeOf(menu, id);
@@ -460,6 +515,7 @@ export default function DesignModeMenu({ app, basePath, resolveTargetLabel, reso
           inMenu={menuTargets(menu)}
           onClose={() => setAddAt(null)}
           onPick={(kind, name, link) => pick(entryFor(kind, name, newEntryId([...menu, ...(storedMenu ?? [])]), link))}
+          onCreate={createItem}
           language={language}
         />
       )}
@@ -747,12 +803,15 @@ function MenuItemPicker({
   inMenu,
   onClose,
   onPick,
+  onCreate,
   language,
 }: {
   packageId: string;
   inMenu: ReadonlySet<string>;
   onClose: () => void;
   onPick: (kind: MenuTargetKind, name: string, link?: { label: string; url: string }) => void;
+  /** Create a new `kind` named `label`; `taken` is every name of that kind the picker lists. */
+  onCreate: (kind: NewMenuItemKind, label: string, taken: readonly string[]) => Promise<boolean>;
   language: string;
 }) {
   const { t } = useObjectTranslation();
@@ -760,6 +819,23 @@ function MenuItemPicker({
   const [kind, setKind] = React.useState<MenuTargetKind | null>(null);
   const [query, setQuery] = React.useState('');
   const [link, setLink] = React.useState({ label: '', url: '' });
+  /** The kind being named for creation (objectstack#36364), `null` while picking. */
+  const [naming, setNaming] = React.useState<NewMenuItemKind | null>(null);
+  if (naming !== null) {
+    return (
+      <NewItemDialog
+        kind={naming}
+        onCancel={onClose}
+        onCreate={(label) =>
+          onCreate(naming, label, rows.filter((row) => row.kind === naming).map((row) => row.name))
+        }
+      />
+    );
+  }
+  // Each key written whole, so the i18n call-site gate sees every one.
+  const newTexts: Record<NewMenuItemKind, string> = {
+    dashboard: t('designMode.menu.newDashboard', { defaultValue: 'New dashboard…' }),
+  };
   // Each key written whole, so the i18n call-site gate sees every one.
   const kindTexts: Record<MenuTargetKind, string> = {
     object: t('designMode.menu.kind.object', { defaultValue: 'Objects' }),
@@ -847,6 +923,19 @@ function MenuItemPicker({
           </ul>
         ) : (
           <ul className="flex max-h-72 flex-col overflow-y-auto" data-testid="design-menu-picker-rows">
+            {kind !== null && isNewMenuItemKind(kind) && (
+              <li>
+                <button
+                  type="button"
+                  onClick={() => setNaming(kind)}
+                  className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm font-medium text-primary hover:bg-accent"
+                  data-testid={`design-menu-picker-new-${kind}`}
+                >
+                  <Plus className="h-4 w-4 shrink-0" aria-hidden="true" />
+                  <span className="flex-1 truncate">{newTexts[kind]}</span>
+                </button>
+              </li>
+            )}
             {loading ? (
               <li className="px-2 py-2 text-sm text-muted-foreground">{t('designMode.menu.loading', { defaultValue: 'Loading…' })}</li>
             ) : offered.length === 0 ? (
@@ -873,6 +962,86 @@ function MenuItemPicker({
             )}
           </ul>
         )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/**
+ * The name step of 「New dashboard…」 (objectstack#36364): a name, and
+ * 「Create」 or 「Cancel」. 「Cancel」 (and closing the dialog) writes nothing;
+ * 「Create」 waits on `onCreate`, and stays open with the name when it fails.
+ */
+function NewItemDialog({
+  kind,
+  onCancel,
+  onCreate,
+}: {
+  kind: NewMenuItemKind;
+  onCancel: () => void;
+  onCreate: (label: string) => Promise<boolean>;
+}) {
+  const { t } = useObjectTranslation();
+  const [label, setLabel] = React.useState('');
+  const [busy, setBusy] = React.useState(false);
+  const busyRef = React.useRef(false);
+  // Each key written whole, so the i18n call-site gate sees every one.
+  const titles: Record<NewMenuItemKind, string> = {
+    dashboard: t('designMode.menu.newDashboardTitle', { defaultValue: 'New dashboard' }),
+  };
+  const submit = async () => {
+    const name = label.trim();
+    if (!name || busyRef.current) return;
+    busyRef.current = true;
+    setBusy(true);
+    try {
+      await onCreate(name);
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
+    }
+  };
+  return (
+    <Dialog open onOpenChange={(open) => !open && !busyRef.current && onCancel()}>
+      <DialogContent className="sm:max-w-sm" data-testid={`design-menu-new-${kind}`}>
+        <DialogHeader>
+          <DialogTitle>{titles[kind]}</DialogTitle>
+        </DialogHeader>
+        <form
+          className="flex flex-col gap-3"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void submit();
+          }}
+        >
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="design-menu-new-name">{t('designMode.menu.name', { defaultValue: 'Name' })}</Label>
+            <Input
+              id="design-menu-new-name"
+              autoFocus
+              value={label}
+              disabled={busy}
+              onChange={(e) => setLabel(e.target.value)}
+              aria-describedby="design-menu-new-hint"
+              data-testid="design-menu-new-name"
+            />
+            <p id="design-menu-new-hint" className="text-xs text-muted-foreground">
+              {t('designMode.menu.newItemSavesAll', {
+                defaultValue: 'Creating it saves your other design changes too, then opens it for editing.',
+              })}
+            </p>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={onCancel} disabled={busy} data-testid="design-menu-new-cancel">
+              {t('common.cancel', { defaultValue: 'Cancel' })}
+            </Button>
+            <Button type="submit" disabled={busy || !label.trim()} data-testid="design-menu-new-create">
+              {busy
+                ? t('designMode.menu.creating', { defaultValue: 'Creating…' })
+                : t('designMode.menu.create', { defaultValue: 'Create' })}
+            </Button>
+          </DialogFooter>
+        </form>
       </DialogContent>
     </Dialog>
   );
