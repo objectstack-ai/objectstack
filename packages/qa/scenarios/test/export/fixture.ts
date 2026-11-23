@@ -67,7 +67,9 @@ export function crmArtifact(iterated: boolean) {
     manifest: { id: `com.example.${NS}`, namespace: NS },
     objects,
     permissions: [
-      { name: n('sdr'), objects: { [n('account')]: { allowRead: true }, [n('contact')]: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true } }, fields: { [`${n('contact')}.email`]: { readable: false } } },
+      // `writeScope: 'org'` lifts the platform's owner-only delete floor for the sdr's
+      // card deletes of admin-owned contacts, as Modify All would without unmasking `email`.
+      { name: n('sdr'), objects: { [n('account')]: { allowRead: true }, [n('contact')]: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true, writeScope: 'org' } }, fields: { [`${n('contact')}.email`]: { readable: false } } },
       { name: n('partner_user'), objects: { [n('contact')]: { allowRead: true, allowCreate: true } } },
     ],
   };
