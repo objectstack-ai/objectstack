@@ -1755,6 +1755,9 @@ const zhHant = {
     fieldChangeEmpty: '空',
     fieldChangeExpand: '展開',
     fieldChangeCollapse: '收起',
+    fieldHistory: '修改歷史',
+    fieldHistoryNone: '沒有修改記錄',
+    fieldHistoryNoneRecent: '最近的動態裡沒有修改記錄',
     // Replies
     replyCount: '{{count}} 條回覆',
     replyCount_one: '{{count}} 條回覆',

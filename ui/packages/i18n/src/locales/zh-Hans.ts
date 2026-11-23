@@ -1755,6 +1755,9 @@ const zh = {
     fieldChangeEmpty: '空',
     fieldChangeExpand: '展开',
     fieldChangeCollapse: '收起',
+    fieldHistory: '修改历史',
+    fieldHistoryNone: '没有修改记录',
+    fieldHistoryNoneRecent: '最近的动态里没有修改记录',
     // Replies
     replyCount: '{{count}} 条回复',
     replyCount_one: '{{count}} 条回复',
