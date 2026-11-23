@@ -809,6 +809,10 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Spalten der verknüpften Liste",
         helpText: "Spalten der verknüpften Liste dieser Beziehung auf der Detailseite des übergeordneten Datensatzes, als Feldnamen dieses (untergeordneten) Objekts, z. B. name, status. Nicht gesetzt: vom untergeordneten Objekt abgeleitet. Nur Namen – Bezeichnungen, Zelltypen und Formatierung stammen aus den Felddefinitionen des untergeordneten Objekts."
       },
+      inlineEdit: {
+        label: "Inline Edit",
+        helpText: "How the parent's form edits this child's rows when a field group of the parent names this child (fieldGroups[].relatedList). Unset: picked from this object's fields."
+      },
       inlineTitle: {
         label: "Inline-Titel",
         helpText: "Titel des Inline-Master-Detail-Rasters im übergeordneten Datensatz."

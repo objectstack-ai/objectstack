@@ -809,6 +809,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Columnas de la lista relacionada",
         helpText: "Columnas de la lista relacionada de esta relación en la página de detalle del registro padre, como nombres de campo de este objeto (el hijo), p. ej., name, status. Sin definir: se derivan del objeto hijo. Solo nombres: etiquetas, tipos de celda y formato vienen de las definiciones de campo del hijo."
       },
+      inlineEdit: {
+        label: "Forma de edición en línea",
+        helpText: "Cómo edita el formulario del padre las filas de este hijo cuando un grupo de campos del padre lo nombra (fieldGroups[].relatedList). Sin definir: se elige según los campos de este objeto."
+      },
       inlineTitle: {
         label: "Título en línea",
         helpText: "Título de la cuadrícula maestro-detalle incrustada en el registro padre."

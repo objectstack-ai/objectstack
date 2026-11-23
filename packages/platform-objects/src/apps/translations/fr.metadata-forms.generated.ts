@@ -809,6 +809,10 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Colonnes de la liste associée",
         helpText: "Colonnes de la liste associée de cette relation sur la page de détail du parent, sous forme de noms de champs de cet objet (l’enfant), par ex. name, status. Non défini : dérivées de l’objet enfant. Noms uniquement — les libellés, types de cellule et formats proviennent des définitions de champs de l’enfant."
       },
+      inlineEdit: {
+        label: "Inline Edit",
+        helpText: "How the parent's form edits this child's rows when a field group of the parent names this child (fieldGroups[].relatedList). Unset: picked from this object's fields."
+      },
       inlineTitle: {
         label: "Titre en ligne",
         helpText: "Titre de la grille maître-détail en ligne sur l’enregistrement parent."

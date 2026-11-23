@@ -809,6 +809,10 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "أعمدة القائمة المرتبطة",
         helpText: "أعمدة القائمة المرتبطة الخاصة بهذه العلاقة في صفحة تفاصيل السجل الأصل، كأسماء حقول من هذا الكائن (الفرعي)، مثل name، status. عند عدم التعيين: تُشتق من الكائن الفرعي. أسماء فقط — التسميات وأنواع الخلايا والتنسيق تأتي من تعريفات حقول الكائن الفرعي."
       },
+      inlineEdit: {
+        label: "Inline Edit",
+        helpText: "How the parent's form edits this child's rows when a field group of the parent names this child (fieldGroups[].relatedList). Unset: picked from this object's fields."
+      },
       inlineTitle: {
         label: "العنوان المضمَّن",
         helpText: "عنوان الشبكة المضمَّنة الرئيسية-التفصيلية في السجل الأصل."

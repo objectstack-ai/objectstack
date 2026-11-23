@@ -325,6 +325,15 @@ export const fieldForm = defineForm({
         // are the CHILD object's (this field's own object), and no widget here
         // reads a catalog from the field draft.
         { field: 'relatedListColumns', widget: 'string-tags', visibleWhen: "data.type in ['lookup','master_detail']", helpText: "Columns of this relationship's related list on the parent's detail page, as field names of this (the child) object, e.g. name, status. Unset: derived from the child object. Names only — labels, cell types and formatting come from the child's field definitions." },
+        // #35926 — `inlineEdit` is `'grid' | 'form'` since its boolean arm was
+        // retired, so a select now spells every value: the union that kept it
+        // off this form (ruling record 5861442317, "no registered widget spells
+        // this union") is gone. Same gate as the relationship keys above;
+        // unset keeps the form factor picked from the child's shape.
+        { field: 'inlineEdit', type: 'select', visibleWhen: "data.type in ['lookup','master_detail']", helpText: "How the parent's form edits this child's rows when a field group of the parent names this child (fieldGroups[].relatedList). Unset: picked from this object's fields.", options: [
+          { label: 'Grid (edit rows in a table)', value: 'grid' },
+          { label: 'Form (open each row in its full form)', value: 'form' },
+        ] },
         { field: 'inlineTitle', visibleWhen: "data.type == 'master_detail'", helpText: 'Title for the inline master-detail grid on the parent record.' },
         // #19332 (flight G2b of ruling record 5861442317) — the inline grid's
         // explicit columns, between the grid's title and its total and behind the

@@ -1,6 +1,7 @@
 ---
 '@objectstack/spec': minor
 '@objectstack/cli': patch
+'@objectstack/platform-objects': patch
 ---
 
 feat(spec)!: retire the boolean arm of a relationship field's `inlineEdit` — `true` and `false` both read as the key left out
@@ -24,4 +25,5 @@ The one-line fix: delete a boolean `inlineEdit` wherever it is written; `os migr
 The retirement kit:
 
 - **`@objectstack/spec`**: `FieldSchema.inlineEdit` is `z.enum(['grid', 'form'])`, and a boolean meets the prescription from the enum's own error map. The D2 conversion `field-inline-edit-boolean-removed` (lossless, retired from the load path) deletes a boolean `inlineEdit` from `objects[]` and `objectExtensions[]` field maps on every data-at-rest seam (stored rows, built artifacts, `os migrate meta`); the D3 entry `field-inline-edit-boolean-retired` names what the upgrade still owes: whether the child should be placed by a field group of the parent. The liveness ledger keeps the key `live` for the two surviving values, with the narrowing recorded.
+- **Field form** (`@objectstack/spec` `field.form.ts`, labels in `@objectstack/platform-objects`): with the boolean arm gone a select spells every value, so the field designer now offers `inlineEdit` as a `Grid` / `Form` select on `lookup` and `master_detail` fields; left unset, the form factor is picked from the child's shape. Before, the form left the key out because no widget could spell a boolean-or-string union.
 - **`@objectstack/cli`**: the golden metadata-eval corpus places its line items with a field group of the parent instead of `inlineEdit: true`.

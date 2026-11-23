@@ -20,6 +20,8 @@
 export const koGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "metadataForms.email_template.fields.fromOverride.helpText": "c5e29fa12ee1525b",
   "metadataForms.email_template.fields.variables.helpText": "27197774c2cda633",
+  "metadataForms.field.fields.inlineEdit.helpText": "1ce60e4c6d5fc0e1",
+  "metadataForms.field.fields.inlineEdit.label": "f29ea014320f588e",
   "metadataForms.permission.fields.fields.helpText": "887a0bae04a950e2",
   "metadataForms.permission.fields.objects.helpText": "e2512cfb3b501aae",
   "metadataForms.permission.fields.tabPermissions.helpText": "8942e2aebe59897c",

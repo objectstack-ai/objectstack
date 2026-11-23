@@ -809,6 +809,10 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
         label: "相關清單欄",
         helpText: "父記錄詳細資料頁面上此關係的相關清單的欄，寫作本物件（即子物件）的欄位名，例如 name、status。未設定：從子物件推導。只寫名稱——標籤、儲存格類型和格式都來自子物件的欄位定義。"
       },
+      inlineEdit: {
+        label: "Inline Edit",
+        helpText: "How the parent's form edits this child's rows when a field group of the parent names this child (fieldGroups[].relatedList). Unset: picked from this object's fields."
+      },
       inlineTitle: {
         label: "內嵌表格標題",
         helpText: "父記錄上內嵌主從表格的標題。"

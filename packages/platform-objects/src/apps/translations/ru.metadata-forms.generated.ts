@@ -809,6 +809,10 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Столбцы связанного списка",
         helpText: "Столбцы связанного списка этой связи на странице родительской записи в виде имён полей этого (дочернего) объекта, например name, status. Если не задано: выводятся из дочернего объекта. Только имена — метки, типы ячеек и форматирование берутся из определений полей дочернего объекта."
       },
+      inlineEdit: {
+        label: "Inline Edit",
+        helpText: "How the parent's form edits this child's rows when a field group of the parent names this child (fieldGroups[].relatedList). Unset: picked from this object's fields."
+      },
       inlineTitle: {
         label: "Встроенный заголовок",
         helpText: "Заголовок встроенной таблицы master-detail в родительской записи."
