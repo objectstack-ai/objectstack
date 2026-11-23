@@ -37,6 +37,9 @@
  */
 
 import '@testing-library/jest-dom/vitest';
+// Paid at collection, not inside a clocked case (check:test-source-alias):
+// the source under test loads `@objectstack/lint` lazily.
+import '@objectstack/lint';
 import * as React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, render, screen } from '@testing-library/react';
