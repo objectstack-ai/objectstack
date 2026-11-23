@@ -352,6 +352,16 @@ function denialTranslator(
  * label as written, never the `defaultLocale` row `t()` falls to. ⛔ No key is
  * spelled here.
  *
+ * `locale` is the sentence's locale, which may be a regional tag the service
+ * holds no pack for (`en-US`). It is first negotiated against what
+ * `getLocales()` reports, by `resolveBundleLocale` — the one negotiation rule
+ * objectql (`negotiatedMessageLocale`), plugin-approvals
+ * (`negotiatedReaderLocale`) and the metadata route ask before they translate
+ * — so `en-US` reads as the authored `en` and names the master as `/meta`
+ * names it, instead of walking the fallback chain to the default language.
+ * The tag passes through untouched when nothing matches. Every caller of this
+ * function (the field-write and master-detail refusals) reads through it.
+ *
  * The declared document comes back with no i18n service, one that cannot hand
  * its translations over (no `getLocales` / `getTranslations`), and one that
  * throws: a misbehaving i18n service must not turn a 403 into a 500.
@@ -361,17 +371,23 @@ function denialLabels<T extends ObjectLike>(ctx: PluginContext, doc: T, locale: 
     const i18n = ctx.getService<II18nService>('i18n');
     if (!i18n || typeof i18n.getLocales !== 'function' || typeof i18n.getTranslations !== 'function') return doc;
     const bundle: Record<string, unknown> = {};
+    // `resolveBundleLocale` matches against a bundle's KEYS; the offered
+    // locales are exactly that key set, with no data behind them.
+    const offered: Record<string, true> = {};
     for (const code of i18n.getLocales()) {
+      if (typeof code !== 'string' || code.length === 0) continue;
+      offered[code] = true;
       const data = i18n.getTranslations(code);
       if (data && typeof data === 'object') bundle[code] = data;
     }
+    const negotiated = resolveBundleLocale(offered, locale) ?? locale;
     const fallback = typeof i18n.getFallbackLocale === 'function' ? i18n.getFallbackLocale() : undefined;
     const source = typeof i18n.getSourceLocale === 'function' ? i18n.getSourceLocale() : undefined;
     const authored = typeof source === 'string' && source.length > 0
       ? source
       : typeof i18n.getDefaultLocale === 'function' ? i18n.getDefaultLocale() : undefined;
     const options: ResolveOptions = {
-      locale,
+      locale: negotiated,
       ...(typeof fallback === 'string' && fallback.length > 0 ? { fallbackChain: [fallback] } : {}),
       ...(typeof authored === 'string' && authored.length > 0 ? { defaultLocale: authored } : {}),
     };
