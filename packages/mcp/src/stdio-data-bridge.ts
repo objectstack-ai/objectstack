@@ -925,8 +925,8 @@ export async function enforceApiExposure(
  * against its target's field map, and every target on the way is asked the
  * whole of {@link enforceApiExposure} (disabled package first, then exposure)
  * at its full position (`where.c_ref.b_ref`), the order the data door's walk
- * asks in. A system context is asked nothing, as {@link enforceApiExposure}
- * asks it nothing. `depth` is a backstop against a self-referential
+ * asks in. A system context is asked nothing at any hop: {@link enforceApiExposure}
+ * owns that bypass, and this walk only reaches it. `depth` is a backstop against a self-referential
  * in-process `where`, never the hop limit.
  */
 async function enforceRelationTargetExposure(
@@ -937,7 +937,7 @@ async function enforceRelationTargetExposure(
   prefix = 'where',
   depth = 0,
 ): Promise<void> {
-  if (where == null || context?.isSystem || depth > RELATION_CONDITION_WALK_DEPTH) return;
+  if (where == null || depth > RELATION_CONDITION_WALK_DEPTH) return;
   let def: ObjectDef | null | undefined;
   try {
     // [#25138] The field map from the definition the gate judged, so a
