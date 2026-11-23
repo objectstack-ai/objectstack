@@ -21,6 +21,9 @@
 import * as React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, within } from '@testing-library/react';
+// The source under test reaches `import('@objectstack/lint')` inside a function
+// body; pay that load during collection, never inside a clocked case.
+import '@objectstack/lint';
 
 vi.stubGlobal(
   'fetch',
