@@ -47,8 +47,16 @@ export function FirstRunChecklistPill({ where }: { where: SidebarFooterSlotPlace
   const count = t('console.firstRunChecklist.pill.count', { done, total });
   const phone = where === 'phoneAppHome';
 
+  // On a phone the pill is the app home's last row, and the page's own end
+  // padding does not scroll out from under the bottom bar there (the route
+  // slot is `h-full` and the page overflows it), so the slot keeps the bar's
+  // height (3.5 rem plus the safe area, as `ConsoleLayout` sizes it) free
+  // below the pill itself.
   return (
-    <div className={cn(phone && 'px-4 pb-4 pt-2')} data-testid="first-run-checklist-pill-slot">
+    <div
+      className={cn(phone && 'px-4 pt-2 pb-[calc(1rem+3.5rem+env(safe-area-inset-bottom))]')}
+      data-testid="first-run-checklist-pill-slot"
+    >
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
           <button
