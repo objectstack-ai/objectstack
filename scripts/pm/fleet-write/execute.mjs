@@ -5219,6 +5219,7 @@ export async function selfTest() {
       'for that key and read alone, no part on a failed seal, the marker and the id on no public surface and the marker not in the sealed answer, ' +
       "an advisory listing gated before its first GET, walked per state on the platform's own cursor under a page cap, projected to five fields, padded and sealed as exactly ten parts, " +
       "an advisory note opened with the relay's own key judged first, appended after two fenced reads by ONE PATCH and read back byte for byte, its text masked and printed nowhere, " +
+      "an advisory rewrite opened through the note's door under its own associated data, refused on a published advisory, its fields replaced by ONE PATCH and read back byte for byte, its notice digesting the stored text, " +
       'every failure emitting nothing and no id, count or cursor on any public surface, one summary row per request, ' +
       "one annotation per created or moved card carrying the number the platform answered, read back by the reader's own parser, a stroke at or " +
       'above the batch threshold announced as ONE rule ⑤ batch and paced at the batch gap (one the job cannot hold refused with zero requests), and a known ' +

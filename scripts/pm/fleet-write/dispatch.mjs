@@ -352,7 +352,27 @@
  *     `result.notes` and `--json`'s `advisory_notes`. Anything else — no
  *     notice, two, another seal's, or no seal in this process — is
  *     `unverified`, exit 6, ⛔ never re-sent: the run's PATCH was sent, so the
- *     seat reads the advisory (`advisory_read`) first.
+ *     seat reads the advisory (`advisory_read`) first;
+ *   - `advisory_rewrite` is the note's path end to end, and ONE path — no
+ *     second seal, key or confirm (`ops.mjs`, "The one row that REPLACES an
+ *     advisory's text"). It requires `sealed_note`, so `ADVISORY_NOTE_OPS`
+ *     derives it and `armAdvisoryNotes` seals it; what differs is what is
+ *     sealed. The actions file names `summary_file` and/or `description_file`
+ *     (`ADVISORY_REWRITE_FILE_KEYS`) — never `note_file` — and each is placed
+ *     by `advisoryNoteFilePlace` before it is read, so neither text lives in a
+ *     repository's files. `advisoryRewriteCompose` drops the summary's
+ *     surrounding whitespace and the description's leading blank lines and
+ *     trailing whitespace, adds NO signature line and no stamp — this is the
+ *     advisory's public text — spells the fields as one JSON object
+ *     (`advisoryRewriteText`) and judges it (`advisoryRewriteFailure`: an
+ *     empty description, an empty or multi-line summary, a control character
+ *     or the note's byte cap refused, exit 2). The seal is bound to the
+ *     rewrite's own associated data (`advisorySealAad`, op
+ *     `advisory_rewrite`), so it never opens as a note. The executor's ONE
+ *     notice is the note's spelling with op `advisory_rewrite`, its keyed
+ *     digest taken over the text the advisory STORES after the PATCH;
+ *     `confirmRunAdvisoryNotes` holds it to the digest sealed here, and
+ *     anything else is `unverified`, exit 6, ⛔ never re-sent.
  *
  * ## The started run — the one outcome only the seat can name
  *
@@ -4848,6 +4868,7 @@ export async function selfTest() {
       "an advisory read whose one-time key pair this process made and never let out, its sealed answer reassembled from the run's notices and opened byte for byte, " +
       'UNVERIFIED (6) when it does not open, and printed to stdout on --reveal alone; an advisory listing opened the same way under its own associated data, ' +
       'its pad trimmed for its --reveal display alone; ' +
+      "an advisory note or rewrite read from a file outside every git repository, sealed here to the relay's committed key and confirmed by its run's keyed digest; " +
       'and every relay sender, discovered from the source, answering an accepted dispatch with no run, or none completed, UNCONFIRMED (6) with ZERO direct writes, under auto as under dispatch (the no-run conformance).',
   );
   selfTestReachedVerdict = true;
@@ -4921,6 +4942,10 @@ const USAGE = [
   "  signature line; this process adds the UTC stamp and seals the section to the relay's committed key, so the note's",
   '  text never enters the payload. A sealed_note in the actions file, or a note file inside a repository, is refused',
   '  (2); no committed relay key is a prerequisite (3). The run\'s notice confirms it.',
+  '  An advisory_rewrite names ghsa_id and summary_file and/or description_file, each outside every git repository:',
+  "  the new public text, no signature line and no stamp. This process seals it to the relay's committed key the way",
+  '  a note is sealed; the executor replaces those fields of an unpublished advisory and reads them back. An empty',
+  '  description, a file inside a repository or a seal in the actions file is refused (2). The run\'s notice confirms it.',
   `  Exits: ${EXIT_OK} run succeeded, every body reads back as sent and every started run is listed · ${EXIT_USAGE} usage / payload refused · ${EXIT_PREREQUISITE} prerequisite ·`,
   `         ${EXIT_NOT_STORED} NOT STORED (the run succeeded, a body reads back otherwise — go READ, never retry) · ${EXIT_PLATFORM_REFUSAL} dispatch refused or run failed ·`,
   `         ${EXIT_UNCONFIRMED} UNCONFIRMED (no run, no completion within the ceiling, a body not read back, or a started run not listed) · ${EXIT_WRITE_PACE_REFUSED} throttle refused`,

@@ -2611,7 +2611,8 @@ export async function selfTest() {
       'and never echoed, its answer sealed to that key and opening for that read alone; and one that lists — advisory_list, public_key alone, ' +
       'three states walked on the platform\'s own cursor under a page cap, five fields each, padded to one sealed size and sealed the same way; ' +
       'and one that appends — advisory_note, its note sealed to the relay\'s own key, judged by shape and never opened or echoed here, ' +
-      'the key reaching the execute step for that stroke alone.',
+      'the key reaching the execute step for that stroke alone; and one that replaces — advisory_rewrite, an unpublished ' +
+      "advisory's summary and description sealed through the note's own path and mark, never opened or echoed here.",
   );
   selfTestReachedVerdict = true;
   return 0;
