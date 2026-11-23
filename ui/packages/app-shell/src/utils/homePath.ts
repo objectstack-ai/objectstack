@@ -45,6 +45,8 @@
  */
 
 import { appAddressSegment } from './appRoute.js';
+import { isPlatformBuiltinApp } from './platformApp.js';
+import { SETUP_APP_NAME, SETUP_APP_PACKAGE_ID } from '../console/setupApp.js';
 
 /**
  * The multi-app workspace launcher — the environment layer's own home
@@ -64,6 +66,8 @@ export type DeclaredHomeApp = {
   isDefault?: boolean;
   /** ADR-0048 owning package — the app's canonical route segment. */
   _packageId?: string;
+  active?: boolean;
+  hidden?: boolean;
 };
 
 /**
@@ -88,4 +92,46 @@ export function resolveDeclaredHomePath(
 ): string | null {
   const declared = (apps ?? []).find((a) => a?.isDefault === true && Boolean(a?.name));
   return declared ? `/apps/${appAddressSegment(apps, declared)}` : null;
+}
+
+/** An app this viewer can see: not switched off, not hidden. */
+export function isVisible(app: DeclaredHomeApp): boolean {
+  return app.active !== false && app.hidden !== true;
+}
+
+/**
+ * Is this an app somebody put into the environment rather than one the
+ * platform ships into every deployment (Setup by package id or name, Studio
+ * and Account by the platform's reserved package namespace)? A viewer with
+ * none has no product app yet: the desktop's Home draws its no-apps empty
+ * state (objectstack#36732).
+ */
+export function isProductApp(app: { name?: unknown; _packageId?: unknown }): boolean {
+  if (app._packageId === SETUP_APP_PACKAGE_ID || app.name === SETUP_APP_NAME) return false;
+  return !isPlatformBuiltinApp(app);
+}
+
+/**
+ * Where "home" is from 768 px up, now the platform home page is retired
+ * (objectstack#36732): the app this person last had open while it is still an
+ * active, visible app; else the App the product declares `isDefault`; else the
+ * first visible product app; else {@link HOME_LAUNCHER_PATH}, which on a
+ * desktop draws only the no-apps empty state.
+ *
+ * The same answer `/` redirects to on a desktop (`resolveDesktopLandingPath`
+ * in apps/console), so a Home affordance and the post-login landing cannot
+ * disagree; `landingHomeParity-7256.test.ts` holds the two equal. A phone keeps
+ * {@link resolveDeclaredHomePath}: its Home still opens the app list.
+ */
+export function resolveDesktopHomePath(
+  apps: readonly DeclaredHomeApp[] | null | undefined,
+  lastApp: string | null | undefined,
+): string {
+  const list = (apps ?? []).filter((a): a is DeclaredHomeApp & { name: string } => Boolean(a?.name));
+  const last = lastApp ? list.find((a) => a.name === lastApp && isVisible(a)) : undefined;
+  if (last) return `/apps/${appAddressSegment(apps, last)}`;
+  const declared = resolveDeclaredHomePath(apps);
+  if (declared) return declared;
+  const first = list.find((a) => isVisible(a) && isProductApp(a));
+  return first ? `/apps/${appAddressSegment(apps, first)}` : HOME_LAUNCHER_PATH;
 }

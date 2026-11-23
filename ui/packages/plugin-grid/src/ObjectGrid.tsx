@@ -81,6 +81,8 @@ import {
   useDetailTranslation,
   StageChangeStarts,
   useRecordUpdateStarts,
+  FieldHistoryPopover,
+  fieldHistoryOffered,
   type ConcurrentUpdateConflict,
 } from '@object-ui/plugin-detail';
 import { ChevronRight, ChevronLeft, ChevronsLeft, ChevronsRight, Download, Rows2, Rows3, Rows4, AlignJustify, Loader2, Check } from 'lucide-react';
@@ -958,6 +960,11 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   onRowGroupsChange,
 }) => {
   const [data, setData] = useState<any[]>([]);
+  // objectstack#36290 — the field change-history card a cell's context menu
+  // opened: which record and field, and where. Ephemeral, like the menu.
+  const [fieldHistoryAt, setFieldHistoryAt] = useState<
+    { recordId: string; field: string; x: number; y: number } | null
+  >(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
   // Tenant default currency (ADR-0053) backstops amount cells that lack a code.
@@ -3567,6 +3574,21 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     return (orderedColumns as any[]).map((c) => (c === titleColumn ? adorned : c));
   })();
 
+  // objectstack#36290 — the card a cell's 「Change history」 item opened
+  // (`fieldHistoryAt`, declared with the grid's other state above).
+  const fieldHistoryPopover = fieldHistoryAt && dataSource && schema.objectName ? (
+    <FieldHistoryPopover
+      key={`${fieldHistoryAt.recordId}:${fieldHistoryAt.field}`}
+      at={{ x: fieldHistoryAt.x, y: fieldHistoryAt.y }}
+      onClose={() => setFieldHistoryAt(null)}
+      dataSource={dataSource}
+      objectName={schema.objectName}
+      recordId={fieldHistoryAt.recordId}
+      field={fieldHistoryAt.field}
+      objectSchema={objectSchema}
+    />
+  ) : null;
+
   /**
    * objectstack#28434 — what a right-click (or the context-menu key) on a row
    * opens; `data-table` owns the menu and calls this for its items.
@@ -3582,7 +3604,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
    *   browser's menu: the menu is a second way to reach the row's actions, not
    *   a new surface.
    */
-  const renderRowContextMenu = (row: any, context: { selected: boolean }): React.ReactNode => {
+  const renderRowContextMenu = (row: any, context: { selected: boolean; column?: string }): React.ReactNode => {
     if (context.selected && selectedRows.length >= 2) {
       return (
         <SelectionContextMenuItems
@@ -3598,12 +3620,29 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
         />
       );
     }
+    const recordId = rowRecordId(row);
+    // objectstack#36290 — the change history of the field whose cell the menu
+    // opened on: a field the object declares, whose changes are recorded with
+    // their values, that the reader may read, on a stored record. Offered on
+    // any table that reads its rows from a data source, row actions or none.
+    const historyField =
+      context.column
+      && typeof dataSource?.find === 'function'
+      && schema.objectName
+      && recordId != null && recordId !== ''
+      && Object.prototype.hasOwnProperty.call(objectSchema?.fields ?? {}, context.column)
+      && fieldHistoryOffered(perms, schema.objectName, context.column, objectSchema)
+        ? context.column
+        : null;
+    const onFieldHistory = historyField
+      ? (at: { x: number; y: number }) =>
+          setFieldHistoryAt({ recordId: String(recordId), field: historyField, ...at })
+      : undefined;
     // The browser's menu stays on a table that offers no row action at all and
     // whose rows cannot be selected — a face-level answer, so a row whose own
     // actions are all hidden by their predicates still opens Open / Open in
-    // new tab like its neighbours.
-    if (!tableOffersRowActions && !selectionMode) return null;
-    const recordId = rowRecordId(row);
+    // new tab like its neighbours — unless the cell offers its field's history.
+    if (!tableOffersRowActions && !selectionMode && !onFieldHistory) return null;
     const newTabHref =
       schema.objectName && recordId != null && recordId !== '' && recordLinkHost?.recordHref
         ? recordLinkHost.recordHref(schema.objectName, recordId)
@@ -3615,13 +3654,14 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     const opens = rowOpensRecord !== false
       && (!!onRowClick || (navigation.mode !== 'none' && !schema.navigation?.preventNavigation));
     const openHref = rowOpensRecord === false ? null : newTabHref;
-    // Nothing at all to list for this row: no Open, no URL, no action.
-    if (!opens && !openHref && !rowOffersAction(row)) return null;
+    // Nothing at all to list for this row: no Open, no URL, no history, no action.
+    if (!opens && !openHref && !onFieldHistory && !rowOffersAction(row)) return null;
     return (
       <RowContextMenuItems
         menu={rowActionMenuProps(row)}
         onOpen={opens ? () => navigation.handleClick(row) : undefined}
         newTabHref={openHref}
+        onFieldHistory={onFieldHistory}
       />
     );
   };
@@ -5035,6 +5075,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
       </HorizontalOverflowBox>
       {selectionBar && <FloatingSelectionBarAnchor>{selectionBar}</FloatingSelectionBarAnchor>}
       {groupedPager}
+      {fieldHistoryPopover}
     </div>
   ) : (
     <div className="flex flex-col flex-1 min-h-0">
@@ -5047,6 +5088,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
         <SchemaRenderer schema={dataTableSchema} />
       </div>
       {summaryFooter}
+      {fieldHistoryPopover}
     </div>
   );
 

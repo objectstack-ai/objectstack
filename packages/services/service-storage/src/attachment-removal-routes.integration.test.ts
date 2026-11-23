@@ -83,6 +83,7 @@ type Answer = { status: number; body: any };
 interface DoorStack {
   engine: ObjectQL;
   routes: Map<string, RouteHandler>;
+  services: Map<string, unknown>;
   rootDir: string;
   caseId: string;
 }
@@ -93,7 +94,7 @@ interface DoorStack {
  * a read middleware refuses DAVE every user row: the fixture's stand-in for a
  * reader without user-read rights.
  */
-async function bootDoorStack(): Promise<DoorStack> {
+async function bootDoorStack(opts: { httpServer?: boolean } = {}): Promise<DoorStack> {
   const routes = new Map<string, RouteHandler>();
   const services = new Map<string, unknown>();
   let rootDir: string;
@@ -136,7 +137,10 @@ async function bootDoorStack(): Promise<DoorStack> {
     hook: (event: string, fn: () => unknown) => { phases.set(event, [...(phases.get(event) ?? []), fn]); },
   };
   ctx.registerService('objectql', dataEngine);
-  ctx.registerService('http-server', {
+  // [#36506] `httpServer: false` is the hosted tenant kernel's shape: no
+  // `http-server`, so nothing is mounted and the doors are the
+  // `file-attachments` service's member.
+  if (opts.httpServer !== false) ctx.registerService('http-server', {
     get: mount('GET'), post: mount('POST'), put: mount('PUT'), delete: mount('DELETE'), patch: mount('PATCH'),
     use: vi.fn(),
     listen: vi.fn().mockResolvedValue(undefined),
@@ -241,7 +245,7 @@ async function bootDoorStack(): Promise<DoorStack> {
   for (const fn of phases.get('kernel:bootstrapped') ?? []) await fn();
 
   caseId = String((await engine.insert(CASE, { name: 'the case', organization_id: ORG }, { context: SYS })).id);
-  return { engine, routes, rootDir, caseId };
+  return { engine, routes, services, rootDir, caseId };
 }
 
 async function stopDoorStack(stack: DoorStack | undefined): Promise<void> {
@@ -519,5 +523,69 @@ describe('an attachment read serves its uploader as the reader may read that use
     expect(row, 'the reader reads the attachment itself').toMatchObject({ id, file_name: 'f_alice_unnamed.txt' });
     expect(row?.uploaded_by).toBe(ALICE);
     expect(JSON.stringify(row)).not.toContain('Alice Uploader');
+  });
+});
+
+// [#36506] The same two doors on a kernel with no `http.server` (a hosted
+// tenant kernel): nothing is mounted, and the `file-attachments` service's
+// `handleAttachmentDoor` — what the runtime dispatcher's `/attachments` domain
+// forwards to — runs the very mount the `http.server` branch runs, over the
+// same kernel. Driven with web-standard requests, as the dispatcher hands them.
+describe('[#36506] with no http.server, the file-attachments member serves the removal and rename doors', () => {
+  let stack: DoorStack;
+  const { attachmentRow, seedFile, attachAs } = doorFixture(() => stack);
+  const member = () => {
+    const service = stack.services.get('file-attachments') as { handleAttachmentDoor?: (r: Request) => Promise<Response> };
+    expect(typeof service?.handleAttachmentDoor, 'the file-attachments service carries the door member').toBe('function');
+    return service.handleAttachmentDoor!;
+  };
+  const send = async (method: string, id: string, user: string | null, body?: unknown): Promise<Answer> => {
+    const res = await member()(new Request(`http://tenant.example/api/v1/attachments/${id}`, {
+      method,
+      headers: { 'content-type': 'application/json', ...(user === null ? {} : { 'x-test-user': user }) },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    }));
+    return { status: res.status, body: await res.json() };
+  };
+
+  beforeAll(async () => {
+    stack = await bootDoorStack({ httpServer: false });
+  });
+
+  afterAll(async () => {
+    await stopDoorStack(stack);
+  });
+
+  it('mounts nothing: the kernel has no http-server', () => {
+    expect(stack.routes.size).toBe(0);
+  });
+
+  it('the uploader renames, then removes, their own attachment: 200 each, and the store follows', async () => {
+    await seedFile('f_hosted_own', ALICE);
+    const id = await attachAs(ALICE, 'f_hosted_own');
+
+    const renamed = await send('PATCH', id, ALICE, { file_name: ' hosted-name.txt ' });
+    expect(renamed, JSON.stringify(renamed.body)).toEqual({ status: 200, body: { success: true, data: { id, file_name: 'hosted-name.txt' } } });
+    expect((await attachmentRow(id))?.file_name).toBe('hosted-name.txt');
+
+    const removed = await send('DELETE', id, ALICE);
+    expect(removed, JSON.stringify(removed.body)).toEqual({ status: 200, body: { success: true, data: { id, deleted: true } } });
+    expect(await attachmentRow(id)).toBeFalsy();
+  });
+
+  it('another member is refused 403 PERMISSION_DENIED, nobody named is 401, and the row stays', async () => {
+    await seedFile('f_hosted_kept', ALICE);
+    const id = await attachAs(ALICE, 'f_hosted_kept');
+
+    expect(await send('DELETE', id, BOB)).toMatchObject({ status: 403, body: { error: { code: 'PERMISSION_DENIED' } } });
+    expect(await send('DELETE', id, null)).toMatchObject({ status: 401, body: { error: { code: 'UNAUTHENTICATED' } } });
+    expect(await send('PATCH', id, null, { file_name: 'x.txt' })).toMatchObject({ status: 401, body: { error: { code: 'UNAUTHENTICATED' } } });
+    expect(await attachmentRow(id)).toMatchObject({ id, uploaded_by: ALICE });
+  });
+
+  it('a method or path that is neither door answers 404 ENDPOINT_NOT_FOUND without reaching a door', async () => {
+    const res = await member()(new Request('http://tenant.example/api/v1/attachments/a_1', { method: 'GET' }));
+    expect(res.status).toBe(404);
+    expect(await res.json()).toMatchObject({ success: false, error: { code: 'ENDPOINT_NOT_FOUND' } });
   });
 });

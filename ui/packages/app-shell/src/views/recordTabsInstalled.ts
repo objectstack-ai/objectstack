@@ -64,7 +64,7 @@ import {
   type RecordTabId,
   type RecordTabsCatalog,
   type RecordTabsDraft,
-} from './recordTabsConfig.js';
+} from './recordTabsConfigModel.js';
 
 type RecordTabsObjectDef = Record<string, unknown> & { name?: string };
 

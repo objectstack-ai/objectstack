@@ -115,7 +115,7 @@ const SAME_SPELLING_ON_LIVE_FACES = new Set(['$in', '$ne', '$nin', '$gt', '$lte'
  * The text family the draft preview does not evaluate on any column: it refuses
  * it `INVALID_FILTER` / 400 as an unevaluable operator, ahead of this refusal.
  */
-const PREVIEW_UNEVALUATED = new Set(['$startsWith', '$endsWith', '$icontains', '$notContains']);
+const PREVIEW_UNEVALUATED = new Set(['$startsWith', '$endsWith', '$icontains']);
 /** …and the filters the draft preview names as the native face names them. */
 const SAME_SPELLING_ON_PREVIEW = new Set(
   [...SAME_SPELLING_ON_LIVE_FACES, '$eq', 'implicit equality'].filter((label) => !PREVIEW_UNEVALUATED.has(label)),

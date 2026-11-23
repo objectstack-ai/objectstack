@@ -14,7 +14,7 @@ import {
   LazyIcon,
   toKebabIconName,
 } from '@object-ui/components';
-import { ExternalLink, PanelRightOpen, Trash2, X } from 'lucide-react';
+import { ExternalLink, History, PanelRightOpen, Trash2, X } from 'lucide-react';
 import type { BulkActionDef } from '@object-ui/types';
 import { useObjectTranslation } from '@object-ui/react';
 import {
@@ -37,6 +37,7 @@ import { BULK_SELECT_ALL_MATCHING_CAP, exceedsBulkSelectAllMatchingCap } from '.
 const CONTEXT_MENU_FALLBACKS: Record<string, string> = {
   'table.open': 'Open',
   'detail.openInNewTab': 'Open in new tab',
+  'detail.fieldHistory': 'Change history',
 };
 
 function useContextMenuTranslation() {
@@ -61,10 +62,16 @@ export const RowContextMenuItems: React.FC<{
   onOpen?: () => void;
   /** The record URL the row links to. Absent ⇒ no Open in new tab item. */
   newTabHref?: string | null;
-}> = ({ menu, onOpen, newTabHref }) => {
+  /**
+   * Open the change history of the field whose cell the menu opened on
+   * (objectstack#36290), at the point the item was chosen. Absent ⇒ no
+   * Change history item.
+   */
+  onFieldHistory?: (at: { x: number; y: number }) => void;
+}> = ({ menu, onOpen, newTabHref, onFieldHistory }) => {
   const t = useContextMenuTranslation();
   const plan = useRowActionPlan(menu, 0);
-  const hasOpen = !!onOpen || !!newTabHref;
+  const hasOpen = !!onOpen || !!newTabHref || !!onFieldHistory;
   return (
     <>
       {onOpen && (
@@ -79,6 +86,21 @@ export const RowContextMenuItems: React.FC<{
             <ExternalLink className="mr-2 h-4 w-4" />
             {t('detail.openInNewTab')}
           </a>
+        </DropdownMenuItem>
+      )}
+      {onFieldHistory && (
+        <DropdownMenuItem
+          onClick={(e) => {
+            // A pointer click opens the card where it was; the keyboard has no
+            // pointer, so the card opens at the item.
+            const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+            const pointer = e.clientX !== 0 || e.clientY !== 0;
+            onFieldHistory(pointer ? { x: e.clientX, y: e.clientY } : { x: rect.left, y: rect.top });
+          }}
+          data-testid="row-context-field-history"
+        >
+          <History className="mr-2 h-4 w-4" />
+          {t('detail.fieldHistory')}
         </DropdownMenuItem>
       )}
       {hasOpen && plan.menuCount > 0 && <DropdownMenuSeparator />}
