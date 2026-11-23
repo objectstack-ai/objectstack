@@ -56,14 +56,16 @@ import {
 import type { MetadataTypeStatus } from '@object-ui/app-shell';
 
 /** Minimal shape this resolver needs off each App metadata record. */
-interface LandingApp {
+// A type alias, not an interface: `useServedApps` takes records indexable by
+// string, which an interface never is.
+type LandingApp = {
   name?: string;
   isDefault?: boolean;
   active?: boolean;
   hidden?: boolean;
   /** ADR-0048 owning package — the canonical identity of a shipped app. */
   _packageId?: string;
-}
+};
 
 /**
  * Is this the platform's built-in Setup console (objectui#4048)?
@@ -337,7 +339,7 @@ export function RootLandingRedirect({ home }: RootLandingRedirectProps = {}) {
   // From 768 px up, `/` (a sign-in, the SSO callback) goes to `/home`, the one
   // desktop resolver, which sits inside the `/me/apps` provider.
   if (!phone && home === undefined) {
-    return <RedirectWithSplash to={`/home${location.search}${location.hash}`} replace />;
+    return <RedirectWithSplash to={`/home${location.search}${location.hash}`} replace state={location.state} />;
   }
   if (loading || unresolved) return <LoadingFallback />;
   if (!lastAppSettled && !lastAppWaitOver) return <LoadingFallback />;
@@ -356,5 +358,5 @@ export function RootLandingRedirect({ home }: RootLandingRedirectProps = {}) {
     ? resolvePhoneLandingPath(apps as LandingApp[] | undefined, lastApp)
     : resolveDesktopLandingPath(servedApps, lastApp);
   if (home !== undefined && landing === '/home') return <>{home}</>;
-  return <RedirectWithSplash to={`${landing}${location.search}${location.hash}`} replace />;
+  return <RedirectWithSplash to={`${landing}${location.search}${location.hash}`} replace state={location.state} />;
 }

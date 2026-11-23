@@ -113,10 +113,10 @@ vi.mock('@object-ui/app-shell', async (importOriginal) => ({
   // pinned where the real component lives —
   // `packages/app-shell/src/chrome/RedirectWithSplash.test.tsx` — and
   // end-to-end by `e2e/console-boot-indicator.spec.ts`.
-  RedirectWithSplash: ({ to, replace }: { to: string; replace?: boolean }) => (
+  RedirectWithSplash: ({ to, replace, state }: { to: string; replace?: boolean; state?: unknown }) => (
     <>
       <div data-testid="redirect-splash" />
-      <Navigate to={to} replace={replace} />
+      <Navigate to={to} replace={replace} state={state} />
     </>
   ),
   usePhoneViewport: () => phone.value.isPhone,
@@ -158,6 +158,7 @@ function LocationProbe() {
     <>
       <div data-testid="location">{location.pathname + location.search}</div>
       <div data-testid="location-hash">{location.hash}</div>
+      <div data-testid="location-state">{JSON.stringify(location.state ?? null)}</div>
     </>
   );
 }
@@ -501,7 +502,7 @@ describe('a phone lands in the app the person used last (objectstack#35881)', ()
 // ── objectstack#36732 — the retired `/home` address on a desktop ────────────
 describe('the retired /home address redirects into an app (objectstack#36732)', () => {
   /** The `/home` route as App.tsx mounts it on a desktop: the resolver with the no-apps page. */
-  function renderHome(entry: string) {
+  function renderHome(entry: string | { pathname: string; state?: unknown }) {
     return render(
       <MemoryRouter initialEntries={[entry]}>
         <LocationProbe />
@@ -526,6 +527,15 @@ describe('the retired /home address redirects into an app (objectstack#36732)', 
     renderHome('/home?palette=1');
     expect(location()).toBe('/apps/showcase_app?palette=1');
     expect(screen.queryByTestId('home-no-apps-page')).toBeNull();
+  });
+
+  it('carries the visit\'s navigation state on to the app (an old /ai address\'s Builder handoff)', () => {
+    // `AiAddressRedirect` and the chrome's Home outside the `/me/apps`
+    // provider name `/home`; what their visit carries must survive the hop.
+    metadata.value.apps = [OTHER_APP, DEFAULT_APP];
+    renderHome({ pathname: '/home', state: { handoff: { prompt: 'Build a CRM' } } });
+    expect(location()).toBe('/apps/crm_app');
+    expect(screen.getByTestId('location-state').textContent).toBe('{"handoff":{"prompt":"Build a CRM"}}');
   });
 
   it('with no record it lands in the declared default, else the first app', () => {

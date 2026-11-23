@@ -64,6 +64,15 @@ vi.mock('../../providers/MetadataProvider', () => ({
   useMetadata: () => ({ apps }),
 }));
 
+// objectstack#36732 — on `/apps/*` the console's chrome sits under
+// `LauncherAppsProvider`, whose `/me/apps` answer is held once the first read
+// lands; this host mounts none, so the held answer is stated here. Without one
+// a desktop's Home names `/home` (pinned in `useHomePath.servedAnswer-36732`).
+vi.mock('../../hooks/useLauncherApps', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  useServedAppsSettled: () => true,
+}));
+
 import { AppSwitcher } from '../AppSwitcher';
 
 const HOTCRM = { name: 'hotcrm', label: 'HotCRM', icon: 'flame', _packageId: 'com.acme.hotcrm' };

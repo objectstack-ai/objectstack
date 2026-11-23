@@ -123,6 +123,15 @@ vi.mock('../../providers/AdapterProvider', () => ({
   useAdapter: () => ({ find: () => Promise.resolve({ data: [] }), getClient: () => undefined }),
 }));
 
+// objectstack#36732 — on `/apps/*` the console's chrome sits under
+// `LauncherAppsProvider`, whose `/me/apps` answer is held once the first read
+// lands; this host mounts none, so the held answer is stated here. Without one
+// a desktop's Home names `/home` (pinned in `useHomePath.servedAnswer-36732`).
+vi.mock('../../hooks/useLauncherApps', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  useServedAppsSettled: () => true,
+}));
+
 import { AppHeader } from '../AppHeader';
 import { CommandPaletteProvider } from '../../context/CommandPaletteProvider';
 import { GO_HOME_SHORTCUT, useAdvertisedShortcuts, type ShortcutChord } from '../../chrome/advertisedShortcuts';

@@ -25,7 +25,7 @@ import { renderHook } from '@testing-library/react';
 
 const metadata = vi.hoisted(() => ({ apps: undefined as unknown }));
 /** objectstack#36732 — the width and the person's last app. */
-const viewer = vi.hoisted(() => ({ phone: false, lastApp: null as string | null, hidden: [] as string[] }));
+const viewer = vi.hoisted(() => ({ phone: false, lastApp: null as string | null, hidden: [] as string[], settled: true }));
 
 vi.mock('../../providers/MetadataProvider', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -40,11 +40,13 @@ vi.mock('../../context/LastAppProvider', async (importOriginal) => ({
   useLastApp: () => ({ lastApp: viewer.lastApp, settled: true, rememberApp: () => {} }),
 }));
 
-// The member's `/me/apps` answer: the app names a permission set hides. The
-// real narrowing is pinned beside `useLauncherApps`.
+// The member's `/me/apps` answer: the app names a permission set hides, and
+// whether that answer is held. The real provider is pinned in
+// `useHomePath.servedAnswer-36732.test.tsx`.
 vi.mock('../useLauncherApps', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useServedApps: (apps: Array<{ name?: string }>) => apps.filter((app) => !viewer.hidden.includes(app?.name ?? '')),
+  useServedAppsSettled: () => viewer.settled,
 }));
 
 const { useHomePath } = await import('../useHomePath');
@@ -54,6 +56,7 @@ beforeEach(() => {
   viewer.phone = false;
   viewer.lastApp = null;
   viewer.hidden = [];
+  viewer.settled = true;
 });
 
 describe('useHomePath', () => {
@@ -113,6 +116,20 @@ describe('useHomePath', () => {
     metadata.apps = [{ name: 'cloud_control', isDefault: true }];
     rerender();
     expect(result.current).toBe('/apps/cloud_control');
+  });
+
+  it('objectstack#36732 — a desktop with no held /me/apps answer names /home, which waits for it', () => {
+    viewer.settled = false;
+    viewer.lastApp = 'crm';
+    metadata.apps = [{ name: 'crm' }, { name: 'cloud_control', isDefault: true }];
+    expect(renderHook(() => useHomePath()).result.current).toBe('/home');
+  });
+
+  it('objectstack#36732 — a phone does not wait on the /me/apps answer', () => {
+    viewer.settled = false;
+    viewer.phone = true;
+    metadata.apps = [{ name: 'crm' }, { name: 'cloud_control', isDefault: true }];
+    expect(renderHook(() => useHomePath()).result.current).toBe('/apps/cloud_control');
   });
 
   it('objectstack#36732 — a desktop never goes to an app a permission set hides', () => {
