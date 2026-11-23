@@ -17,6 +17,12 @@
  * The harness feeds every `onPatch` back into `draft`, as the Data pillar does.
  */
 
+// The panel reaches a dynamic `import()` of each module below: its first load
+// is paid here, at collection, never inside a case's clocked window
+// (`check:test-source-alias`).
+import '@objectstack/formula';
+import '@objectstack/lint';
+import '@object-ui/core';
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
