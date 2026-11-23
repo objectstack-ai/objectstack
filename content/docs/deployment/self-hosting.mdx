@@ -497,6 +497,27 @@ a named volume), set `OS_STORAGE_LOCAL_ROOT_SHARED=true`. That variable is a
 declaration, not a check. A `ReadWriteOnce` volume, as on Kubernetes, cannot be
 shared across replicas: use S3 there.
 
+**An S3 bucket needs a CORS rule for browser uploads and file previews.** With
+S3 or an S3-compatible store (R2, MinIO), the browser talks to the bucket
+directly: an upload `PUT`s the file to a presigned URL, and the in-page preview
+of a text or CSV file reads it with a `GET` on its signed download link. Both
+are cross-origin requests from the Console's origin, so the bucket's CORS
+configuration must allow them:
+
+| CORS field | Value |
+|:---|:---|
+| `AllowedOrigins` | the Console's public origin, exactly (`https://app.example.com`) — never `*` |
+| `AllowedMethods` | `GET`, `HEAD`, `PUT` |
+| `AllowedHeaders` | `content-type` (or `*`) |
+| `ExposeHeaders` | `Content-Length`, `Content-Type`, `Content-Disposition`, `ETag` |
+| `MaxAgeSeconds` | `3000` |
+
+A PDF preview needs no CORS: the Console shows it in a frame, and its
+content-security-policy already allows frames from the bucket's origin, the same
+origin it allows uploads to. Without the rule, uploads to the bucket fail, and a
+text or CSV preview cannot read the file: the preview then offers to open the
+file in a new tab, which needs neither CORS nor a frame source.
+
 **`/ready` reports the cluster driver's health once replicas are declared.**
 When the deployment declares itself multi-node — `OS_EXPECT_MULTI_NODE=true` or
 `OS_CLUSTER_REPLICAS` greater than 1; `OS_CLUSTER_DRIVER` alone is not a
