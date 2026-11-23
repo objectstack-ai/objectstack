@@ -4138,6 +4138,62 @@ const pt = {
     editor: {
       panelTitle: "Editar relatório",
     },
+    // objectstack#36374 — the report builder's 「Computed values」 fold under the chart.
+    computedValues: "Valores calculados",
+    // objectstack#36374 — the report builder (`ReportBuilder`, `ReportNewPage`).
+    builder: {
+      close: "Fechar",
+      name: "Nome do relatório",
+      namePlaceholder: "Relatório sem título",
+      description: "Descrição",
+      descriptionPlaceholder: "Adicionar uma descrição",
+      discard: "Descartar",
+      save: "Salvar",
+      settings: "Configurações do relatório",
+      pendingDraft: "Este relatório tem alterações não publicadas. Publique ou descarte-as acima e depois salve.",
+      nameTaken: "Todos os identificadores gerados a partir deste nome já estão em uso. Dê outro nome ao relatório e salve.",
+      adminOnlyTitle: "Somente administradores do espaço de trabalho podem criar relatórios",
+      adminOnly: "Um relatório é compartilhado com todo o espaço de trabalho, por isso um administrador o cria.",
+      type: {
+        label: "Tipo de relatório",
+        snapshot: "Situação atual",
+      },
+      source: {
+        label: "Fonte de dados",
+        placeholder: "Escolha uma fonte de dados",
+        loading: "Carregando fontes de dados…",
+        none: "Ainda não há fontes de dados",
+      },
+      measure: {
+        label: "Medida",
+        placeholder: "Escolha uma medida",
+      },
+      grouping: {
+        label: "Agrupar por",
+        none: "Sem agrupamento",
+        placeholder: "Escolha um campo",
+        addLayer: "Adicionar outro nível",
+        removeLayer: "Remover este nível",
+      },
+      chart: {
+        label: "Gráfico",
+        bar: "Barras",
+        line: "Linhas",
+        donut: "Rosca",
+        metric: "Número",
+        table: "Tabela",
+        showValues: "Mostrar valores",
+        targetLine: "Linha de meta",
+        targetLabel: "Meta",
+        secondLayerTableOnly: "Este gráfico desenha o primeiro agrupamento; o segundo está nos valores calculados.",
+      },
+      missing: {
+        source: "Escolha uma fonte de dados",
+        noMeasures: "Esta fonte de dados não tem medidas",
+        measure: "Escolha uma medida",
+        grouping: "Escolha um campo para agrupar",
+      },
+    },
   },
   organizations: {
     create: "Criar organização",

@@ -4242,6 +4242,62 @@ const ru = {
     editor: {
       panelTitle: "Редактировать отчёт",
     },
+    // objectstack#36374 — the report builder's 「Computed values」 fold under the chart.
+    computedValues: "Вычисленные значения",
+    // objectstack#36374 — the report builder (`ReportBuilder`, `ReportNewPage`).
+    builder: {
+      close: "Закрыть",
+      name: "Название отчёта",
+      namePlaceholder: "Отчёт без названия",
+      description: "Описание",
+      descriptionPlaceholder: "Добавить описание",
+      discard: "Отменить изменения",
+      save: "Сохранить",
+      settings: "Настройки отчёта",
+      pendingDraft: "В этом отчёте есть неопубликованные изменения. Опубликуйте или отмените их выше, затем сохраните.",
+      nameTaken: "Все идентификаторы, полученные из этого имени, уже заняты. Дайте отчёту другое имя и сохраните.",
+      adminOnlyTitle: "Создавать отчёты могут только администраторы рабочего пространства",
+      adminOnly: "Отчёт виден всем в рабочем пространстве, поэтому его создаёт администратор.",
+      type: {
+        label: "Тип отчёта",
+        snapshot: "Текущее состояние",
+      },
+      source: {
+        label: "Источник данных",
+        placeholder: "Выберите источник данных",
+        loading: "Загрузка источников данных…",
+        none: "Источников данных пока нет",
+      },
+      measure: {
+        label: "Показатель",
+        placeholder: "Выберите показатель",
+      },
+      grouping: {
+        label: "Группировка",
+        none: "Без группировки",
+        placeholder: "Выберите поле",
+        addLayer: "Добавить уровень",
+        removeLayer: "Убрать этот уровень",
+      },
+      chart: {
+        label: "Диаграмма",
+        bar: "Столбцы",
+        line: "Линия",
+        donut: "Кольцо",
+        metric: "Число",
+        table: "Таблица",
+        showValues: "Показывать значения",
+        targetLine: "Целевая линия",
+        targetLabel: "Цель",
+        secondLayerTableOnly: "Эта диаграмма показывает первую группировку; вторая — в вычисленных значениях.",
+      },
+      missing: {
+        source: "Выберите источник данных",
+        noMeasures: "У этого источника данных нет показателей",
+        measure: "Выберите показатель",
+        grouping: "Выберите поле для группировки",
+      },
+    },
   },
   organizations: {
     create: "Создать организацию",

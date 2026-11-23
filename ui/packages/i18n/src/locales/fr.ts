@@ -4139,6 +4139,62 @@ const fr = {
     editor: {
       panelTitle: "Modifier le rapport",
     },
+    // objectstack#36374 — the report builder's 「Computed values」 fold under the chart.
+    computedValues: "Valeurs calculées",
+    // objectstack#36374 — the report builder (`ReportBuilder`, `ReportNewPage`).
+    builder: {
+      close: "Fermer",
+      name: "Nom du rapport",
+      namePlaceholder: "Rapport sans titre",
+      description: "Description",
+      descriptionPlaceholder: "Ajouter une description",
+      discard: "Abandonner",
+      save: "Enregistrer",
+      settings: "Paramètres du rapport",
+      pendingDraft: "Ce rapport a des modifications non publiées. Publiez-les ou supprimez-les ci-dessus, puis enregistrez.",
+      nameTaken: "Tous les identifiants dérivés de ce nom sont déjà pris. Donnez un autre nom au rapport, puis enregistrez.",
+      adminOnlyTitle: "Seuls les administrateurs de l’espace de travail peuvent créer des rapports",
+      adminOnly: "Un rapport est partagé avec tout l’espace de travail ; c’est donc un administrateur qui le crée.",
+      type: {
+        label: "Type de rapport",
+        snapshot: "État actuel",
+      },
+      source: {
+        label: "Source de données",
+        placeholder: "Choisir une source de données",
+        loading: "Chargement des sources de données…",
+        none: "Aucune source de données pour l’instant",
+      },
+      measure: {
+        label: "Mesure",
+        placeholder: "Choisir une mesure",
+      },
+      grouping: {
+        label: "Regrouper par",
+        none: "Aucun regroupement",
+        placeholder: "Choisir un champ",
+        addLayer: "Ajouter un niveau",
+        removeLayer: "Retirer ce niveau",
+      },
+      chart: {
+        label: "Graphique",
+        bar: "Barres",
+        line: "Courbe",
+        donut: "Anneau",
+        metric: "Nombre",
+        table: "Tableau",
+        showValues: "Afficher les valeurs",
+        targetLine: "Ligne d’objectif",
+        targetLabel: "Objectif",
+        secondLayerTableOnly: "Ce graphique trace le premier regroupement ; le second figure dans les valeurs calculées.",
+      },
+      missing: {
+        source: "Choisissez une source de données",
+        noMeasures: "Cette source de données n’a aucune mesure",
+        measure: "Choisissez une mesure",
+        grouping: "Choisissez un champ de regroupement",
+      },
+    },
   },
   organizations: {
     create: "Créer une organisation",

@@ -2181,6 +2181,62 @@ const en = {
       // any retired key that returns.
       panelTitle: 'Edit report',
     },
+    // objectstack#36374 — the report builder's 「Computed values」 fold under the chart.
+    computedValues: 'Computed values',
+    // objectstack#36374 — the report builder (`ReportBuilder`, `ReportNewPage`).
+    builder: {
+      close: 'Close',
+      name: 'Report name',
+      namePlaceholder: 'Untitled report',
+      description: 'Description',
+      descriptionPlaceholder: 'Add a description',
+      discard: 'Discard',
+      save: 'Save',
+      settings: 'Report settings',
+      pendingDraft: 'This report has unpublished changes. Publish or discard them above, then save.',
+      nameTaken: 'Every name made from this one is already taken. Give the report another name, then save.',
+      adminOnlyTitle: 'Only workspace admins can build reports',
+      adminOnly: 'A report is shared with everyone in the workspace, so an admin builds it.',
+      type: {
+        label: 'Report type',
+        snapshot: 'Current state',
+      },
+      source: {
+        label: 'Data source',
+        placeholder: 'Choose a data source',
+        loading: 'Loading data sources…',
+        none: 'No data sources yet',
+      },
+      measure: {
+        label: 'Measure',
+        placeholder: 'Choose a measure',
+      },
+      grouping: {
+        label: 'Group by',
+        none: 'No grouping',
+        placeholder: 'Choose a field',
+        addLayer: 'Add another layer',
+        removeLayer: 'Remove this layer',
+      },
+      chart: {
+        label: 'Chart',
+        bar: 'Bar',
+        line: 'Line',
+        donut: 'Donut',
+        metric: 'Number',
+        table: 'Table',
+        showValues: 'Show values',
+        targetLine: 'Target line',
+        targetLabel: 'Target',
+        secondLayerTableOnly: 'This chart draws the first grouping; the second is in the computed values.',
+      },
+      missing: {
+        source: 'Choose a data source',
+        noMeasures: 'This data source has no measures',
+        measure: 'Choose a measure',
+        grouping: 'Choose a field to group by',
+      },
+    },
   },
   designer: {
     undo: 'Undo',

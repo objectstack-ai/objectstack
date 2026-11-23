@@ -1821,6 +1821,62 @@ const zhHant = {
     editor: {
       panelTitle: '編輯報表',
     },
+    // objectstack#36374 — the report builder's 「Computed values」 fold under the chart.
+    computedValues: '計算值',
+    // objectstack#36374 — the report builder (`ReportBuilder`, `ReportNewPage`).
+    builder: {
+      close: '關閉',
+      name: '報表名稱',
+      namePlaceholder: '未命名報表',
+      description: '說明',
+      descriptionPlaceholder: '新增一句說明',
+      discard: '放棄',
+      save: '儲存',
+      settings: '報表設定',
+      pendingDraft: '這張報表有一份還沒釋出的修改。先在上方釋出或丟棄它，再儲存。',
+      nameTaken: '由這個名稱生成的標識都已被佔用。請給報表換個名稱再儲存。',
+      adminOnlyTitle: '只有系統管理員能搭建報表',
+      adminOnly: '報表對工作區裡所有人生效，所以由系統管理員搭建。',
+      type: {
+        label: '報表型別',
+        snapshot: '現狀分析',
+      },
+      source: {
+        label: '資料來源',
+        placeholder: '選一個數據來源',
+        loading: '正在讀取資料來源…',
+        none: '還沒有資料來源',
+      },
+      measure: {
+        label: '指標',
+        placeholder: '選一個指標',
+      },
+      grouping: {
+        label: '分組',
+        none: '不分組',
+        placeholder: '選一個欄位',
+        addLayer: '再分一層',
+        removeLayer: '去掉這一層',
+      },
+      chart: {
+        label: '圖表',
+        bar: '柱狀圖',
+        line: '折線圖',
+        donut: '環形圖',
+        metric: '數字',
+        table: '表格',
+        showValues: '顯示數值',
+        targetLine: '目標線',
+        targetLabel: '目標',
+        secondLayerTableOnly: '這種圖只畫第一層分組，第二層在計算值裡。',
+      },
+      missing: {
+        source: '選一個數據來源',
+        noMeasures: '這個資料來源沒有可用的指標',
+        measure: '選一個指標',
+        grouping: '選一個分組欄位',
+      },
+    },
   },
   dashboard: {
     total: '總計',

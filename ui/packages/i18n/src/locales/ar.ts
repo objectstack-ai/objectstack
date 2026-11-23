@@ -4411,6 +4411,62 @@ const ar = {
     editor: {
       panelTitle: "تعديل التقرير",
     },
+    // objectstack#36374 — the report builder's 「Computed values」 fold under the chart.
+    computedValues: "القيم المحسوبة",
+    // objectstack#36374 — the report builder (`ReportBuilder`, `ReportNewPage`).
+    builder: {
+      close: "إغلاق",
+      name: "اسم التقرير",
+      namePlaceholder: "تقرير بلا عنوان",
+      description: "الوصف",
+      descriptionPlaceholder: "أضف وصفًا",
+      discard: "تجاهل",
+      save: "حفظ",
+      settings: "إعدادات التقرير",
+      pendingDraft: "يحتوي هذا التقرير على تغييرات غير منشورة. انشرها أو تجاهلها في الأعلى، ثم احفظ.",
+      nameTaken: "كل المعرّفات المشتقة من هذا الاسم مستخدمة بالفعل. أعطِ التقرير اسمًا آخر ثم احفظ.",
+      adminOnlyTitle: "يمكن لمسؤولي مساحة العمل فقط إنشاء التقارير",
+      adminOnly: "التقرير مشترك مع الجميع في مساحة العمل، لذا ينشئه مسؤول.",
+      type: {
+        label: "نوع التقرير",
+        snapshot: "الوضع الحالي",
+      },
+      source: {
+        label: "مصدر البيانات",
+        placeholder: "اختر مصدر بيانات",
+        loading: "جارٍ تحميل مصادر البيانات…",
+        none: "لا توجد مصادر بيانات بعد",
+      },
+      measure: {
+        label: "المقياس",
+        placeholder: "اختر مقياسًا",
+      },
+      grouping: {
+        label: "التجميع حسب",
+        none: "بدون تجميع",
+        placeholder: "اختر حقلًا",
+        addLayer: "إضافة مستوى آخر",
+        removeLayer: "إزالة هذا المستوى",
+      },
+      chart: {
+        label: "المخطط",
+        bar: "أعمدة",
+        line: "خطي",
+        donut: "حلقي",
+        metric: "رقم",
+        table: "جدول",
+        showValues: "إظهار القيم",
+        targetLine: "خط الهدف",
+        targetLabel: "الهدف",
+        secondLayerTableOnly: "يرسم هذا المخطط التجميع الأول؛ أما الثاني ففي القيم المحسوبة.",
+      },
+      missing: {
+        source: "اختر مصدر بيانات",
+        noMeasures: "لا يحتوي مصدر البيانات هذا على مقاييس",
+        measure: "اختر مقياسًا",
+        grouping: "اختر حقلًا للتجميع",
+      },
+    },
   },
   organizations: {
     create: "إنشاء مؤسسة",

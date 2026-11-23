@@ -4055,6 +4055,62 @@ const ja = {
     editor: {
       panelTitle: "レポートを編集",
     },
+    // objectstack#36374 — the report builder's 「Computed values」 fold under the chart.
+    computedValues: "計算値",
+    // objectstack#36374 — the report builder (`ReportBuilder`, `ReportNewPage`).
+    builder: {
+      close: "閉じる",
+      name: "レポート名",
+      namePlaceholder: "無題のレポート",
+      description: "説明",
+      descriptionPlaceholder: "説明を追加",
+      discard: "破棄",
+      save: "保存",
+      settings: "レポート設定",
+      pendingDraft: "このレポートには未公開の変更があります。上で公開または破棄してから保存してください。",
+      nameTaken: "この名前から作れる識別子はすべて使用済みです。レポートに別の名前を付けてから保存してください。",
+      adminOnlyTitle: "レポートを作成できるのはワークスペース管理者のみです",
+      adminOnly: "レポートはワークスペースの全員に共有されるため、管理者が作成します。",
+      type: {
+        label: "レポートの種類",
+        snapshot: "現状分析",
+      },
+      source: {
+        label: "データソース",
+        placeholder: "データソースを選択",
+        loading: "データソースを読み込み中…",
+        none: "データソースがまだありません",
+      },
+      measure: {
+        label: "指標",
+        placeholder: "指標を選択",
+      },
+      grouping: {
+        label: "グループ化",
+        none: "グループ化しない",
+        placeholder: "項目を選択",
+        addLayer: "さらにグループ化",
+        removeLayer: "このグループ化を削除",
+      },
+      chart: {
+        label: "グラフ",
+        bar: "棒グラフ",
+        line: "折れ線グラフ",
+        donut: "ドーナツグラフ",
+        metric: "数値",
+        table: "表",
+        showValues: "値を表示",
+        targetLine: "目標線",
+        targetLabel: "目標",
+        secondLayerTableOnly: "このグラフは最初のグループ化のみを描画します。2 つ目は計算値にあります。",
+      },
+      missing: {
+        source: "データソースを選択してください",
+        noMeasures: "このデータソースには指標がありません",
+        measure: "指標を選択してください",
+        grouping: "グループ化する項目を選択してください",
+      },
+    },
   },
   organizations: {
     create: "組織を作成",

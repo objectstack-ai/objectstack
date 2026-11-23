@@ -4052,6 +4052,62 @@ const ko = {
     editor: {
       panelTitle: "보고서 편집",
     },
+    // objectstack#36374 — the report builder's 「Computed values」 fold under the chart.
+    computedValues: "계산 값",
+    // objectstack#36374 — the report builder (`ReportBuilder`, `ReportNewPage`).
+    builder: {
+      close: "닫기",
+      name: "보고서 이름",
+      namePlaceholder: "제목 없는 보고서",
+      description: "설명",
+      descriptionPlaceholder: "설명 추가",
+      discard: "취소",
+      save: "저장",
+      settings: "보고서 설정",
+      pendingDraft: "이 보고서에 게시되지 않은 변경 사항이 있습니다. 위에서 게시하거나 버린 후 저장하세요.",
+      nameTaken: "이 이름으로 만들 수 있는 식별자가 모두 사용 중입니다. 보고서 이름을 바꾼 뒤 저장하세요.",
+      adminOnlyTitle: "워크스페이스 관리자만 보고서를 만들 수 있습니다",
+      adminOnly: "보고서는 워크스페이스의 모든 사람에게 공유되므로 관리자가 만듭니다.",
+      type: {
+        label: "보고서 유형",
+        snapshot: "현황 분석",
+      },
+      source: {
+        label: "데이터 소스",
+        placeholder: "데이터 소스 선택",
+        loading: "데이터 소스를 불러오는 중…",
+        none: "아직 데이터 소스가 없습니다",
+      },
+      measure: {
+        label: "지표",
+        placeholder: "지표 선택",
+      },
+      grouping: {
+        label: "그룹화",
+        none: "그룹화 안 함",
+        placeholder: "필드 선택",
+        addLayer: "한 단계 더 그룹화",
+        removeLayer: "이 단계 제거",
+      },
+      chart: {
+        label: "차트",
+        bar: "막대",
+        line: "선",
+        donut: "도넛",
+        metric: "숫자",
+        table: "표",
+        showValues: "값 표시",
+        targetLine: "목표선",
+        targetLabel: "목표",
+        secondLayerTableOnly: "이 차트는 첫 번째 그룹화만 그립니다. 두 번째는 계산 값에 있습니다.",
+      },
+      missing: {
+        source: "데이터 소스를 선택하세요",
+        noMeasures: "이 데이터 소스에는 지표가 없습니다",
+        measure: "지표를 선택하세요",
+        grouping: "그룹화할 필드를 선택하세요",
+      },
+    },
   },
   organizations: {
     create: "조직 만들기",
