@@ -1042,3 +1042,90 @@ describe('RecordAttachmentsPanel — Rename sends the new name to the rename doo
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * objectstack#36442 — a row's name opens the file in the page. The preview
+ * mints its link through the download's own door (`/files/:id/url`, with the
+ * console's token), so a refused reader gets the download's own copy; the
+ * download itself stays in the row's ⋮ menu.
+ */
+describe('RecordAttachmentsPanel — the name opens the in-page preview (objectstack#36442)', () => {
+  const ROWS = [
+    { ...ROW, id: 'a1', file_id: 'f1', file_name: 'report.pdf', mime_type: 'application/pdf' },
+    { ...ROW, id: 'a2', file_id: 'f2', file_name: 'photo.png', mime_type: 'image/png' },
+    { ...ROW, id: 'a3', file_id: 'f3', file_name: 'memo.docx', mime_type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
+  ];
+  const signed = (id: string) =>
+    new Response(JSON.stringify({ success: true, data: { url: `/api/v1/storage/_local/raw/tok-${id}` } }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+
+  it('clicking the name previews the file on the signed link the download mints', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => signed(String(input).match(/files\/(\w+)\/url/)![1]!));
+    setup(makeDataSource({ find: vi.fn(async () => ROWS) }));
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'report.pdf' }));
+    const dialog = await screen.findByTestId('file-preview-dialog');
+    await waitFor(() => expect(dialog.querySelector('iframe')?.getAttribute('src')).toContain('/api/v1/storage/_local/raw/tok-f1'));
+    expect(String(fetchSpy.mock.calls[0]![0])).toContain('/api/v1/storage/files/f1/url');
+    expect(within(dialog).getByText('1 / 3')).toBeInTheDocument();
+  });
+
+  it('next walks to the following row, with its own signed link', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => signed(String(input).match(/files\/(\w+)\/url/)![1]!));
+    setup(makeDataSource({ find: vi.fn(async () => ROWS) }));
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'report.pdf' }));
+    const dialog = await screen.findByTestId('file-preview-dialog');
+    await user.click(within(dialog).getByRole('button', { name: 'Next file' }));
+    await waitFor(() =>
+      expect((within(dialog).getByRole('img', { name: 'photo.png' }) as HTMLImageElement).getAttribute('src')).toContain('tok-f2'),
+    );
+    expect(within(dialog).getByText('2 / 3')).toBeInTheDocument();
+  });
+
+  it('a reader the download refuses is refused by the preview, with the same copy', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(
+      async () =>
+        new Response(JSON.stringify({ success: false, error: { code: 'ATTACHMENT_DOWNLOAD_DENIED', message: 'no' } }), {
+          status: 403,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+    );
+    setup(makeDataSource({ find: vi.fn(async () => ROWS) }));
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'photo.png' }));
+    const dialog = await screen.findByTestId('file-preview-dialog');
+    await waitFor(() =>
+      expect(within(dialog).getByRole('alert')).toHaveTextContent("You don't have access to download this attachment."),
+    );
+    expect(dialog.querySelector('img, iframe')).toBeNull();
+    // Asked once: a refusal is not re-asked on every render.
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('a Word file offers the download only, and its download is the row menu\'s download', async () => {
+    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => signed(String(input).match(/files\/(\w+)\/url/)![1]!));
+    setup(makeDataSource({ find: vi.fn(async () => ROWS) }));
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'memo.docx' }));
+    const dialog = await screen.findByTestId('file-preview-dialog');
+    expect(within(dialog).getByText('This file type cannot be previewed. Please download it.')).toBeInTheDocument();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    const view = dialog.querySelector('[data-preview-state="unsupported"]') as HTMLElement;
+    await user.click(within(view).getByRole('button', { name: 'Download' }));
+    await waitFor(() =>
+      expect(openSpy).toHaveBeenCalledWith(expect.stringContaining('tok-f3'), '_blank', 'noopener,noreferrer'),
+    );
+  });
+
+  it('the row menu still carries the download', async () => {
+    setup(makeDataSource({ find: vi.fn(async () => [ROW]) }));
+    const user = userEvent.setup();
+    await screen.findByRole('button', { name: 'report.pdf' });
+    await user.click(screen.getByRole('button', { name: /^More for / }));
+    expect(await screen.findByRole('menuitem', { name: 'Download' })).toBeInTheDocument();
+  });
+});

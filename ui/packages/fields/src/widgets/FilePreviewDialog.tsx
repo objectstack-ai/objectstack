@@ -86,6 +86,29 @@ export interface FilePreviewDialogProps {
   fetchImpl?: typeof fetch;
 }
 
+/**
+ * The English copy, as the `en` pack says it: what a host without a loaded
+ * catalogue still shows (`t`'s `defaultValue`), never a bare key.
+ */
+const DEFAULT_COPY: Record<string, string> = {
+  'fields.filePreview.title': 'File preview',
+  'fields.filePreview.previous': 'Previous file',
+  'fields.filePreview.next': 'Next file',
+  'fields.filePreview.download': 'Download',
+  'fields.filePreview.openInNewTab': 'Open in new tab',
+  'fields.filePreview.loading': 'Loading preview…',
+  'fields.filePreview.tooLarge': 'This file is too large to preview. Please download it.',
+  'fields.filePreview.unsupported': 'This file type cannot be previewed. Please download it.',
+  'fields.filePreview.denied': 'You do not have access to this file.',
+  'fields.filePreview.loadFailed': 'The preview could not be loaded.',
+  'fields.filePreview.blocked': 'This file cannot be read in the page. Open it in a new tab instead.',
+  'fields.filePreview.pdfOutside': 'On this device, a PDF opens in a new tab or in the device viewer.',
+  'fields.filePreview.truncatedRows': 'Showing the first {{limit}} rows.',
+  'fields.filePreview.truncatedLines': 'Showing the first {{limit}} lines.',
+  'fields.filePreview.empty': 'This file is empty.',
+  'fields.image.counter': '{{current}} / {{total}}',
+};
+
 type PreviewKind = 'image' | 'pdf' | 'text' | 'csv' | 'unsupported';
 
 const MB = 1024 * 1024;
@@ -170,8 +193,14 @@ function useResolver(
   t: (key: string, params?: Record<string, unknown>) => string,
 ) {
   const cache = React.useRef(new Map<string, Promise<string>>());
+  // Read through a ref, so the resolver is ONE function for the dialog's life:
+  // the view's effect keys on it, and a caller's fresh closure each render
+  // must not re-run a read (nor, after a refusal, re-ask in a loop).
+  const latest = React.useRef({ resolveUrl, fetchImpl, t });
+  latest.current = { resolveUrl, fetchImpl, t };
   return React.useCallback(
     (file: FilePreviewItem, index: number): Promise<string> => {
+      const { resolveUrl, fetchImpl, t } = latest.current;
       const key = fileKey(file, index);
       const hit = cache.current.get(key);
       if (hit) return hit;
@@ -202,7 +231,7 @@ function useResolver(
       run.catch(() => cache.current.delete(key));
       return run;
     },
-    [resolveUrl, fetchImpl, t],
+    [],
   );
 }
 
@@ -260,8 +289,13 @@ export function FilePreviewDialog({
   onDownload,
   fetchImpl,
 }: FilePreviewDialogProps) {
-  const { t } = useObjectTranslation();
-  const tr = t as (key: string, params?: Record<string, unknown>) => string;
+  const { t: translate } = useObjectTranslation();
+  const tr = React.useCallback(
+    (key: string, params?: Record<string, unknown>) =>
+      (translate as (k: string, p?: Record<string, unknown>) => string)(key, { defaultValue: DEFAULT_COPY[key], ...params }),
+    [translate],
+  );
+  const t = tr;
   const isMobile = useIsMobile();
   const doFetch = fetchImpl ?? ((...args: Parameters<typeof fetch>) => fetch(...args));
   const resolve = useResolver(resolveUrl, doFetch, tr);

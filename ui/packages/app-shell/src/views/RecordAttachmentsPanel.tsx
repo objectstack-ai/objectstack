@@ -665,7 +665,7 @@ export const RecordAttachmentsPanel: React.FC<RecordAttachmentsPanelProps> = ({
   const previewSignedUrl = React.useCallback(
     async (file: FilePreviewItem): Promise<string> => {
       const row = rows.find((r) => r.file_id === file.id);
-      if (!row) throw new Error(t('fields.filePreview.loadFailed'));
+      if (!row) throw new Error(t('fields.filePreview.loadFailed', { defaultValue: 'The preview could not be loaded.' }));
       try {
         return await signedUrlFor(row);
       } catch (err) {

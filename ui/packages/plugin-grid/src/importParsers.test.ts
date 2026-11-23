@@ -261,3 +261,12 @@ describe('suggestColumnMappings', () => {
     expect(scoreToConfidence(0)).toBeNull();
   });
 });
+
+describe('the delimited-text reader is one copy, in @object-ui/fields (objectstack#36442)', () => {
+  it('the wizard reads with the very functions the file preview reads with', async () => {
+    const wizard = await import('./importParsers');
+    const fields = await import('@object-ui/fields');
+    expect(wizard.parseDelimited).toBe(fields.parseDelimited);
+    expect(wizard.decodeSpreadsheetText).toBe(fields.decodeSpreadsheetText);
+  });
+});
