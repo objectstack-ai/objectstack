@@ -135,7 +135,7 @@ export interface FirstRunChecklistData {
   rows: ChecklistRowState[];
   completion: ChecklistCompletion;
   /** The environment's own apps (the first-record row opens the first). */
-  ownApps: ChecklistApp[];
+  ownApps: Array<ChecklistApp & Record<string, unknown>>;
   /**
    * This administrator hid the checklist in this organization on this device
    * (`dismissRecordKey`): the sidebar pill and Home's card stand aside. The

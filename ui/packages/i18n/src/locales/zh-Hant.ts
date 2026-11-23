@@ -2390,14 +2390,14 @@ const zhHant = {
       view: '檢視',
       cancel: '取消',
       continue: '繼續',
-      showList: '查看清單',
+      showList: '檢視清單',
       // objectstack#36739 — the one required platform row: one form, one save.
       organizationBasics: {
         title: '組織基本資訊',
         todo: '組織名稱、預設語言和國家/地區、時區、貨幣，一次儲存。',
         name: '組織名稱',
         nameRequired: '請填寫組織名稱。',
-        prefilled: '尚未設定的項目已依你的瀏覽器提供建議。按下「儲存」之前不會儲存任何內容。',
+        prefilled: '尚未設定的項已按你的瀏覽器給出建議。點“儲存”之前不會儲存任何內容。',
         save: '儲存',
         saved: '組織基本資訊已儲存',
       },
