@@ -28,7 +28,7 @@
 
 import * as React from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, cleanup, waitFor, act, fireEvent } from '@testing-library/react';
+import { render, screen, cleanup, waitFor, act, fireEvent, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 import { RelatedRecordActionsProvider } from '@object-ui/react';
@@ -120,11 +120,6 @@ describe('LookupField option preview: a record chip selects its option (objectst
     });
     expect(chip).toHaveTextContent('Fabrikam');
 
-    // No anchor anywhere inside the option: an anchor is a second click
-    // target competing with the option's own select.
-    const option = screen.getByRole('option');
-    expect(option.querySelector('a')).toBeNull();
-
     const user = userEvent.setup();
     await user.pointer({ keys, target: chip });
 
@@ -133,16 +128,28 @@ describe('LookupField option preview: a record chip selects its option (objectst
     expect(onChange.mock.calls[0][0]).toBe('prj_1');
   });
 
+  it('draws the chip with no anchor, so the option is the one click target', async () => {
+    await openPicker(['account']);
+    await waitFor(() =>
+      expect(previewValue('account').querySelector('[data-record-chip]')).toHaveTextContent('Fabrikam'),
+    );
+    expect(screen.getByRole('option').querySelector('a')).toBeNull();
+  });
+
   it('draws a self-linking column with its text face, so a tap on it selects too', async () => {
     const { onChange } = await openPicker(['contact_email']);
     const value = previewValue('contact_email');
     await waitFor(() => expect(value).toHaveTextContent('pm@fabrikam.example.com'));
-    expect(screen.getByRole('option').querySelector('a')).toBeNull();
+
+    // Read before the pick: a pick closes the popover.
+    const anchor = screen.getByRole('option').querySelector('a');
 
     const user = userEvent.setup();
-    await user.click(value);
+    // The element that carries the address's text: the anchor, before the fix.
+    await user.click(within(value).getByText('pm@fabrikam.example.com'));
 
     expect(onChange).toHaveBeenCalledTimes(1);
     expect(onChange.mock.calls[0][0]).toBe('prj_1');
+    expect(anchor).toBeNull();
   });
 });
