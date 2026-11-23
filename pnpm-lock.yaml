@@ -1951,6 +1951,9 @@ importers:
       '@objectstack/platform-objects':
         specifier: workspace:*
         version: link:../../platform-objects
+      '@objectstack/plugin-hono-server':
+        specifier: workspace:*
+        version: link:../plugin-hono-server
       '@objectstack/rest':
         specifier: workspace:*
         version: link:../../rest
@@ -1985,9 +1988,6 @@ importers:
       '@objectstack/objectql':
         specifier: workspace:*
         version: link:../../objectql
-      '@objectstack/plugin-hono-server':
-        specifier: workspace:*
-        version: link:../plugin-hono-server
       '@objectstack/plugin-security':
         specifier: workspace:*
         version: link:../plugin-security

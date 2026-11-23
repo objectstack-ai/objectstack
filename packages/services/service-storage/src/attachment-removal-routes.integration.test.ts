@@ -586,6 +586,6 @@ describe('[#36506] with no http.server, the file-attachments member serves the r
   it('a method or path that is neither door answers 404 ENDPOINT_NOT_FOUND without reaching a door', async () => {
     const res = await member()(new Request('http://tenant.example/api/v1/attachments/a_1', { method: 'GET' }));
     expect(res.status).toBe(404);
-    expect((await res.json())?.error?.code).toBe('ENDPOINT_NOT_FOUND');
+    expect(await res.json()).toMatchObject({ success: false, error: { code: 'ENDPOINT_NOT_FOUND' } });
   });
 });
