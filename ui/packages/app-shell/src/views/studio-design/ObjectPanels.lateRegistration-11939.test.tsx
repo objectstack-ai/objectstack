@@ -51,6 +51,8 @@ vi.mock('../metadata-admin/useMetadata', async (importOriginal) => {
 
 import { ObjectSettingsPanel } from './ObjectSettingsPanel';
 import { ObjectActionsPanel } from './ObjectActionsPanel';
+// The source reaches a dynamic `import('@objectstack/lint')`: its first load is paid at collection (`check:test-source-alias`).
+import '@objectstack/lint';
 import { HooksPanelHost } from './__tests__/hooksPanelHost';
 import {
   getMetadataDefaultInspector,

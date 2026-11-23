@@ -118,6 +118,8 @@ vi.mock('../../preview/DraftChangesPanel', () => ({
 
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() } }));
 
+// The source reaches a dynamic `import('@objectstack/lint')`: its first load is paid at collection (`check:test-source-alias`).
+import '@objectstack/lint';
 import { StudioDesignSurface } from './StudioDesignSurface';
 import { createEmptyDataSource } from './__tests__/emptyDataSource';
 import { registerMetadataPreview } from '../metadata-admin/preview-registry';

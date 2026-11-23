@@ -57,6 +57,8 @@ import { HooksPanelHost } from './__tests__/hooksPanelHost';
 import { pressStudioSave } from './__tests__/studioSaveHarness';
 import { tFormat } from '../metadata-admin/i18n';
 import { registerBuiltinInspectors } from '../metadata-admin/inspectors';
+// The source reaches a dynamic `import('@objectstack/lint')`: its first load is paid at collection (`check:test-source-alias`).
+import '@objectstack/lint';
 import { __setCelFormulaLoader } from '../metadata-admin/celAuthoring';
 
 // The panel resolves the curated hook editor through the default registry.

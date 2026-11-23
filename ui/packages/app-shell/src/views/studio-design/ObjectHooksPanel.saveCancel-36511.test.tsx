@@ -84,6 +84,8 @@ import { ObjectHooksPanel } from './ObjectHooksPanel';
 import { useObjectHooksBuffer } from './objectHooksBuffer';
 import { StudioSaveHarness, pressStudioCancel, pressStudioSave } from './__tests__/studioSaveHarness';
 import { registerBuiltinInspectors } from '../metadata-admin/inspectors';
+// The source reaches a dynamic `import('@objectstack/lint')`: its first load is paid at collection (`check:test-source-alias`).
+import '@objectstack/lint';
 import { __setCelFormulaLoader } from '../metadata-admin/celAuthoring';
 import { tFormat } from '../metadata-admin/i18n';
 
