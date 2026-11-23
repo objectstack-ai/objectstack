@@ -102,6 +102,7 @@ import { StudioRefusalStrip } from './StudioRefusalStrip.js';
 import { StudioNavItemInspector, StudioPicker } from './StudioNavItemInspector.js';
 import { PACKAGE_LIST_TOAST_ID, STUDIO_LANDING_PATH } from './PackageSwitcher.js';
 import { StudioBackToApp, type StudioAppTarget } from './StudioBackToApp.js';
+import { addNewObjectToAppMenu } from './newObjectJoinsAppMenu.js';
 import {
   ContributedNavRows,
   InterfacesNavContributionsContext,
@@ -1675,6 +1676,7 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
                   picked in the app, or on the Studio landing. */}
               <StudioBackToApp
                 packageId={packageId}
+                packageLabel={pkgEntry?.id === packageId ? pkgEntry.name : null}
                 apps={publishedApps}
                 locale={locale}
                 beforeNavigate={confirmLeavePillar}
@@ -6666,6 +6668,34 @@ export function DataPillar({
         setFormMode('layout');
         setCreating(false);
         toast.success(tFormat('engine.studio.save.done', locale, { items: label }), { id: STUDIO_SAVE_TOAST_ID });
+        // objectstack#36748 — and it joins the menu of its package's one app,
+        // so an app made before its objects does not open empty. Only in the
+        // rail's own package (not a customization pair); a failure keeps the
+        // object and says the menu was left as it was.
+        if (target.packageId === railPackageId && !packageReadOnly) {
+          const join = await addNewObjectToAppMenu(
+            client as unknown as Parameters<typeof addNewObjectToAppMenu>[0],
+            { packageId: target.packageId, objectName: name },
+            {
+              notListed: t('engine.studio.data.appMenu.unreadable', locale),
+              pendingDraft: t('engine.studio.data.appMenu.pendingDraft', locale),
+              noVersion: t('engine.studio.data.appMenu.unreadable', locale),
+              notWritable: t('engine.studio.data.appMenu.unreadable', locale),
+            },
+          );
+          if (join.kind === 'failed') {
+            const reason = plainRefusal(join.error).message;
+            toast.warning(
+              join.app
+                ? tFormat('engine.studio.data.appMenu.failed', locale, {
+                    object: label,
+                    app: navItemLabelText(join.app.label, locale) || join.app.name,
+                    reason,
+                  })
+                : tFormat('engine.studio.data.appMenu.failedNoApp', locale, { object: label, reason }),
+            );
+          }
+        }
       } catch (e) {
         // Shown in the create dialog, which prints the message only: kept whole.
         setError(plainRefusal(e));

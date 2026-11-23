@@ -3916,6 +3916,10 @@ const de = {
     appNoReadableObjectGrantDescription: "Ihr Konto kann noch keine Datensätze in dieser App lesen. Sie können den Zugriff in der Einrichtung gewähren.",
     appOpensFromMenu: "{{app}} wird über das Menü bedient",
     appOpensFromMenuDescription: "Diese App hat keine eigene Seite. Wählen Sie einen Eintrag im Menü, um einen Link zu öffnen oder eine Aktion auszuführen.",
+    // objectstack#36748 — an app whose stored menu is empty, for a caller who can fill it.
+    appMenuEmpty: "Das Menü von {{app}} ist noch leer",
+    appMenuEmptyDescription: "Legen Sie in Studio Objekte für diese App an; sie erscheinen automatisch im Menü. Einträge lassen sich auch im Designmodus hinzufügen.",
+    openInStudio: "In Studio öffnen",
     openSetup: "Einrichtung öffnen",
     createFirstApp: "Erste App erstellen",
     systemSettings: "Systemeinstellungen",

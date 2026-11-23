@@ -4002,6 +4002,10 @@ const es = {
     appNoReadableObjectGrantDescription: "Su cuenta aún no puede leer ningún registro de esta aplicación. Puede conceder el acceso en la configuración.",
     appOpensFromMenu: "{{app}} se usa desde su menú",
     appOpensFromMenuDescription: "Esta aplicación no tiene una página propia. Elija una entrada de su menú para abrir un enlace o ejecutar una acción.",
+    // objectstack#36748 — an app whose stored menu is empty, for a caller who can fill it.
+    appMenuEmpty: "El menú de {{app}} todavía está vacío",
+    appMenuEmptyDescription: "Crea objetos para esta aplicación en Studio y se añadirán a su menú, o añade entradas en el modo de diseño.",
+    openInStudio: "Abrir en Studio",
     openSetup: "Abrir la configuración",
     createFirstApp: "Crear primera aplicación",
     systemSettings: "Configuración del sistema",

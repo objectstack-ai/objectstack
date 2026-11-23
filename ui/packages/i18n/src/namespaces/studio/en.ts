@@ -2595,6 +2595,11 @@ const STUDIO_EN: Record<string, string> = {
   // Data pillar
   'engine.studio.data.newFieldLabel': 'New field',
   'engine.studio.data.nameFieldLabel': 'Name',
+  // objectstack#36748 — a new object joins its package's one app menu.
+  'engine.studio.data.appMenu.failed': '“{object}” was created, but it could not be added to the menu of “{app}”: {reason} You can add it in the app’s design mode.',
+  'engine.studio.data.appMenu.failedNoApp': '“{object}” was created, but it could not be added to its app’s menu: {reason} You can add it in the app’s design mode.',
+  'engine.studio.data.appMenu.pendingDraft': 'The app has unpublished changes in Studio.',
+  'engine.studio.data.appMenu.unreadable': 'The app’s menu could not be read.',
   'engine.studio.data.fieldCount': '{count} fields',
   'engine.studio.data.fieldCountOne': '{count} field',
   // The platform's own columns, counted apart from the author's fields.
@@ -3620,6 +3625,26 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.landing.ownHeading': 'Your own apps',
   'engine.studio.landing.newApp': 'New app of your own',
   'engine.studio.landing.newAppDescription': 'Start from a blank app.',
+  // objectstack#36748 — the Studio landing's new-app door: one dialog creates
+  // the package and its app, worded for an app throughout.
+  'engine.studio.newApp.title': 'New app',
+  'engine.studio.newApp.description': 'Give your app a name; everything else is filled in for you. It opens as soon as it is created.',
+  'engine.studio.newApp.advancedHint': 'App ID, namespace, version and type, filled in from the name.',
+  'engine.studio.newApp.id': 'App ID',
+  'engine.studio.newApp.help.id': 'The app’s unique ID, in reverse-domain form. It is also the app’s address.',
+  'engine.studio.newApp.help.name': 'The app’s name, as people see it.',
+  'engine.studio.newApp.help.description': 'What the app is for.',
+  'engine.studio.newApp.help.namespace': 'A short identifier that starts the name of every object in this app (e.g. “todo” → “todo_task”, “todo_project”).',
+  'engine.studio.newApp.help.version': 'The app’s version (semantic versioning).',
+  'engine.studio.newApp.help.type': 'The app’s kind.',
+  'engine.studio.newApp.help.defaultDatasource': 'Where every object in this app stores its data by default.',
+  'engine.studio.newApp.help.dependencies': 'Other apps or modules this app builds on.',
+  'engine.studio.newApp.nsDerived': 'Filled in from the app ID until you edit it.',
+  'engine.studio.newApp.created': 'Created app “{name}”.',
+  'engine.studio.newApp.exists': 'An app with the same ID already exists.',
+  'engine.studio.newApp.failed': 'Could not create the app',
+  'engine.studio.newApp.nameTaken': 'The app “{label}” already uses the identifier “{name}”. Change the namespace under Advanced.',
+  'engine.studio.newApp.appFailed': '“{name}” was created, but its app could not go live: {reason}. Use Create app in the Studio top bar to try again.',
   'engine.studio.landing.outsideHeading': 'Outside any app',
   'engine.studio.landing.rolesPermissions.name': 'Positions and permissions',
   'engine.studio.landing.rolesPermissions.description': 'Positions, permission sets and sharing rules, shared by every app.',

@@ -4692,6 +4692,10 @@ const en = {
     // objectstack-ai/objectstack#29771 — the app root when every entry it shows is a `url` or `action` link (`AppNoAccessEmptyState`, reason `menu-only`).
     appOpensFromMenu: '{{app}} opens from its menu',
     appOpensFromMenuDescription: 'This app has no page of its own. Choose an entry in its menu to open a link or run an action.',
+    // objectstack#36748 — an app whose stored menu is empty, for a caller who can fill it.
+    appMenuEmpty: "{{app}} has nothing in its menu yet",
+    appMenuEmptyDescription: "Create objects for this app in Studio and they join its menu, or add entries in design mode.",
+    openInStudio: "Open in Studio",
     openSetup: 'Open Setup',
     createFirstApp: 'Create Your First App',
     systemSettings: 'System Settings',
