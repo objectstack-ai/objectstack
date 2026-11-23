@@ -818,6 +818,15 @@ export class PlatformGlobalFacet {
  * (`PLACEMENT_ARRANGES_DECLARED_ONLY`), or no extender places a list. Only the
  * lists pass is read off: the groups and fields the same call arranges stay
  * the owner's in the packaged base, and its notes are the fold's to name.
+ *
+ * Why the packaged base carries them (`SchemaRegistry#getPackagedObjectBase`):
+ * the sentence that holds for a field a code extender adds holds for a
+ * record-page tab it places (`place: [{ list, label? }]`). The catalog row
+ * for the placed title (`_relatedLists.<list>.label`) can only translate what
+ * that extender ships; read off the owner alone, the placed title counted as
+ * authored after the fact and `/meta` served it untranslated. A paired
+ * `.custom` arrangement (ADR-0146 D10) is the customization layer and is
+ * never folded in: its titles diverge and read the pair's own translations.
  */
 function packagedPlacedRelatedLists(
   owner: ServiceObject,

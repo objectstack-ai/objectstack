@@ -3652,22 +3652,10 @@ export class SchemaRegistry {
    * and `/meta` served its label and option labels untranslated in every
    * locale while the extender's own pack carried them.
    *
-   * [#36528] The same sentence holds for a record-page TAB a code extender
-   * places (`place: [{ list, label? }]`): the base carries the owner's
-   * `relatedLists` with those entries spliced in as the fold splices them
-   * (`applyExtensionPlacements`, so only where the owner declares
-   * `relatedLists`), because the catalog row for the placed title
-   * (`_relatedLists.<list>.label`) can only translate what that extender
-   * ships. Read off the owner alone, the placed title counted as authored
-   * after the fact and `/meta` served it untranslated. Only the list entries
-   * widen: the groups and fields the same placements arrange stay the
-   * owner's here, and a paired `.custom` arrangement (ADR-0146 D10) is the
-   * customization layer, never folded in.
-   *
-   * ⛔ Exactly those three widen: rules by name, field NAMES the owner does
-   * not declare, and placed list entries. The scalars stay the owner's, and so does every field the
-   * owner declares, even one an extender redeclares; an extender's
-   * `fieldPatches` are never folded in. Each must keep reading as diverged from
+   * ⛔ Exactly three widen: rules by name, field NAMES the owner does not declare, and the
+   * tabs a code extender places (#36528: the facet's `packagedPlacedRelatedLists`). The scalars
+   * stay the owner's, and so does every field the owner declares, even one an extender redeclares;
+   * an extender's `fieldPatches` are never folded in. Each must keep reading as diverged from
    * the packaged one, or the catalog — which translates the owner's text under
    * the owner's keys — takes back the case #8037 filed. A tenant overlay and an
    * extension of tenant provenance (`_provenance: 'org'`) add nothing here:
