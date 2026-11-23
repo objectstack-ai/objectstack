@@ -563,10 +563,19 @@ export async function applyDriftOpInPlace(this: Pick<SchemaSyncHost, 'applyIndex
         await this.knex.raw('ALTER TABLE ?? DROP COLUMN ??', [table, column]);
         return true;
       case 'drop_column_default':
-        // `ALTER … ALTER COLUMN … DROP DEFAULT` — the one ALTER COLUMN form
-        // MySQL accepts without restating the type, so it cannot lose a
-        // varchar length the way MODIFY can.
-        await this.knex.raw('ALTER TABLE ?? ALTER COLUMN ?? DROP DEFAULT', [table, column]);
+        // `ALTER … ALTER COLUMN …` — the one form MySQL accepts without
+        // restating the type, so it cannot lose a varchar length the way
+        // MODIFY can. [#36596] On a NULLABLE column it is `SET DEFAULT NULL`,
+        // never `DROP DEFAULT`: MySQL 8's DROP DEFAULT leaves the column with
+        // no default at all, and a strict-mode insert that omits it is then
+        // refused ("Field … doesn't have a default value", ER 1364) where
+        // Postgres and SQLite store NULL. Measured on 8.0.46. A NOT NULL
+        // column keeps DROP DEFAULT: NULL is not a default it can take.
+        if (ci?.nullable === true) {
+          await this.knex.raw('ALTER TABLE ?? ALTER COLUMN ?? SET DEFAULT NULL', [table, column]);
+        } else {
+          await this.knex.raw('ALTER TABLE ?? ALTER COLUMN ?? DROP DEFAULT', [table, column]);
+        }
         return true;
       case 'set_column_default':
         // `ALTER … ALTER COLUMN … SET DEFAULT` — the same MODIFY-free form.
@@ -1545,7 +1554,17 @@ export async function reconcileAndWarnDrift(this: Pick<SchemaSyncHost, 'applyMig
 function isPublishedColumnChange(d: ManagedDriftEntry, fields: Record<string, any> | undefined): boolean {
   if (isIndexDriftOp(d.op)) return false;
   if (d.category === 'safe') return true;
-  return d.op.type === 'relax_not_null' && d.category === 'needs_confirm'
+  return isDeclaredRelaxPair(d, fields);
+}
+
+/**
+ * [#32590 / #36596] The `needs_confirm` entries a declared `storage: { notNull:
+ * false }` makes deliberate: the relax of the NOT NULL column, and the drop of
+ * a stale literal DEFAULT the differ pairs with that relax (never proposed
+ * without it). Applying the relax alone would keep storing the old default.
+ */
+function isDeclaredRelaxPair(d: ManagedDriftEntry, fields: Record<string, any> | undefined): boolean {
+  return (d.op.type === 'relax_not_null' || d.op.type === 'drop_column_default') && d.category === 'needs_confirm'
     && fields?.[d.op.column]?.storage?.notNull === false;
 }
 
@@ -1579,8 +1598,7 @@ export async function applyPublishedColumnChanges(this: Pick<SchemaSyncHost, 'ap
  * installing package's own declaration says so for.
  */
 function isInstallRelaxation(d: ManagedDriftEntry, fields: Record<string, any> | undefined, columns: ReadonlySet<string>): boolean {
-  return d.op.type === 'relax_not_null' && d.category === 'needs_confirm'
-    && columns.has(d.op.column) && fields?.[d.op.column]?.storage?.notNull === false;
+  return isDeclaredRelaxPair(d, fields) && columns.has(d.op.column ?? '');
 }
 
 /** The body of `SqlDriver#relaxDeclaredNotNull`; the method's docblock there is its contract. */

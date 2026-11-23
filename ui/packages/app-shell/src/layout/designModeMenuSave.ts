@@ -51,7 +51,7 @@ import {
   type ListedPackageManifest,
 } from '../views/studio-design/packages-io.js';
 import { navPayloadOf } from '../views/metadata-admin/previews/AppNavCanvas.js';
-import { rebaseMenuEdits, type Menu } from './designModeMenu.js';
+import { rebaseMenuEdits, type Menu } from './designModeMenuModel.js';
 
 /** The doors the save goes through; the defaults are the console's own. */
 export interface AppMenuSaveDoors {
