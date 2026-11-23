@@ -1598,7 +1598,7 @@ export async function applyPublishedColumnChanges(this: Pick<SchemaSyncHost, 'ap
  * installing package's own declaration says so for.
  */
 function isInstallRelaxation(d: ManagedDriftEntry, fields: Record<string, any> | undefined, columns: ReadonlySet<string>): boolean {
-  return columns.has(d.op.column) && isDeclaredRelaxPair(d, fields);
+  return isDeclaredRelaxPair(d, fields) && columns.has(d.op.column ?? '');
 }
 
 /** The body of `SqlDriver#relaxDeclaredNotNull`; the method's docblock there is its contract. */
