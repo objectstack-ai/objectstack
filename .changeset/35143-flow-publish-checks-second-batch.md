@@ -1,13 +1,13 @@
 ---
-'@objectstack/lint': patch
+'@objectstack/lint': minor
 '@objectstack/spec': patch
 ---
 
 fix(lint)!: ten publish-time checks for flows that save and do not run — seven refuse the publish, three warn
 
 Clause-②: yes (narrowing)
-Metadata-protocol: none
-Skills-docs: follow-up owed — skills/objectstack-automation/SKILL.md, skills/objectstack-automation/references/examples-flows.md
+Metadata-protocol: narrowed
+Skills-docs: follow-up owed — skills/objectstack-automation/SKILL.md, skills/objectstack-automation/references/examples-flows.md, skills/objectstack-automation/references/integration-recipes.md
 
 <!-- adr-0087: registered publish-refuses-flows-that-save-and-do-not-run -->
 
@@ -15,8 +15,8 @@ Skills-docs: follow-up owed — skills/objectstack-automation/SKILL.md, skills/o
 
 Seven errors, run by the runtime publish gate and the CLI:
 
-- `flow-trigger-object-missing`: a record-triggered flow with no `objectName` registers its hook with no object, so it fires on writes to every object.
-- `flow-condition-option-label`: a start condition compares a select field with one of its option labels (`record.stage == 'Closed Lost'`) where the row holds the option value (`closed_lost`), so it is never true. Judged only when the field's options are inline in this stack.
+- `flow-trigger-object-missing`: a record-triggered flow with no `objectName` registers its hook with no object, so it fires on writes to every object; a blank `objectName` is refused too, because the engine will not register a hook on an empty name and the flow never starts.
+- `flow-condition-option-label`: a start condition compares a select field with one of its option labels (`record.stage == 'Closed Lost'`) where the row holds the option value (`closed_lost`), so it is never true. Reported only when the label is that field's own comparand (`F == 'L'`, `F != 'L'`, `'L' == F`, or a member of `F in [...]`); judged only when the field's options are inline in this stack.
 - `flow-time-relative-shadowed`: a `timeRelative` block under a record `triggerType` never sweeps, because a record trigger wins.
 - `flow-time-relative-key-misplaced`: `filter` or `maxRecords` written beside `timeRelative` is ignored; the sweep reads them only inside the block.
 - `flow-time-relative-date-field-invalid`: a `timeRelative.dateField` the swept object does not have, or that is not a `date` / `datetime` field, matches no record. Judged only when the stack declares the object; `created_at` / `updated_at` count as datetime fields.

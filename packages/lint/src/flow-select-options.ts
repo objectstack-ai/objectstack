@@ -94,22 +94,46 @@ export interface OptionLabelComparison {
   readonly value: string;
 }
 
-/** Is `literal` written in `src` as a quoted string, either quote? */
-function hasQuotedLiteral(src: string, literal: string): boolean {
-  return src.includes(`'${literal}'`) || src.includes(`"${literal}"`);
-}
+/** One quoted literal, either quote (no escapes: a label with a quote in it is not judged). */
+const QUOTED = String.raw`(?:'([^'\\]*)'|"([^"\\]*)")`;
 
-/** Is `field` read in `src` (`record.F`, `previous.F`, or bare `F`)? */
-function readsField(src: string, field: string): boolean {
+/** A read of `field`: `record.F`, `previous.F` or bare `F`, not a member of something else. */
+function readOf(field: string): string {
   const escaped = field.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  return new RegExp(`(?:^|[^\\w.])(?:(?:record|previous)\\.)?${escaped}(?![\\w])`).test(src);
+  return String.raw`(?:(?:record|previous)\.)?${escaped}(?![\w.])`;
 }
 
 /**
- * The option labels a CEL source compares where the row holds values: a
- * select field of the object is read, one of its option labels is written as
- * a quoted literal, and that option's value is not. A label that is also some
- * option's value is never reported (the literal may be that value).
+ * The quoted literals `src` compares with `field` itself: `F == 'L'`, `F != 'L'`,
+ * `'L' == F`, `'L' != F`, and each member of `F in [...]`. A literal that sits
+ * elsewhere in the source (the comparand of another field) is not one.
+ */
+function comparandsOf(src: string, field: string): string[] {
+  const read = readOf(field);
+  const lead = String.raw`(?:^|[^\w.])`;
+  const out: string[] = [];
+  const pick = (m: RegExpExecArray, at: number) => {
+    const v = m[at] ?? m[at + 1];
+    if (v !== undefined) out.push(v);
+  };
+  const fieldFirst = new RegExp(String.raw`${lead}${read}\s*(?:==|!=)\s*${QUOTED}`, 'g');
+  for (let m = fieldFirst.exec(src); m; m = fieldFirst.exec(src)) pick(m, 1);
+  const literalFirst = new RegExp(String.raw`${QUOTED}\s*(?:==|!=)\s*${read}`, 'g');
+  for (let m = literalFirst.exec(src); m; m = literalFirst.exec(src)) pick(m, 1);
+  const inList = new RegExp(String.raw`${lead}${read}\s+in\s*\[([^\]]*)\]`, 'g');
+  for (let m = inList.exec(src); m; m = inList.exec(src)) {
+    const members = new RegExp(QUOTED, 'g');
+    for (let k = members.exec(m[1]); k; k = members.exec(m[1])) pick(k, 1);
+  }
+  return out;
+}
+
+/**
+ * The option labels a CEL source compares a select field with, where the row
+ * holds that option's value: the label must be the comparand of that field
+ * (`F == 'L'`, `'L' != F`, `F in ['L', ...]`), not merely quoted somewhere in
+ * the source. A label that is also some option's value is never reported
+ * (the literal may be that value).
  */
 export function optionLabelComparisons(
   src: string,
@@ -117,9 +141,13 @@ export function optionLabelComparisons(
 ): OptionLabelComparison[] {
   const out: OptionLabelComparison[] = [];
   for (const [field, opts] of options) {
-    if (opts.labels.size === 0 || !readsField(src, field)) continue;
-    for (const [label, value] of opts.labels) {
-      if (hasQuotedLiteral(src, label) && !hasQuotedLiteral(src, value)) out.push({ field, label, value });
+    if (opts.labels.size === 0) continue;
+    const seen = new Set<string>();
+    for (const literal of comparandsOf(src, field)) {
+      const value = opts.labels.get(literal);
+      if (value === undefined || seen.has(literal)) continue;
+      seen.add(literal);
+      out.push({ field, label: literal, value });
     }
   }
   return out;

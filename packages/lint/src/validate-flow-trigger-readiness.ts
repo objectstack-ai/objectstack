@@ -851,8 +851,11 @@ export function validateFlowTriggerReadiness(
           where: `flow "${flowName}" › start node`,
           path: `flows[${flowIndex}].nodes[${start.index}].config.objectName`,
           message:
-            `is a record-change flow ('${triggerType}') with no config.objectName, so its trigger watches every ` +
-            `object: it starts on a write to any object, with that row as \`record\``,
+            objectName === undefined
+              ? `is a record-change flow ('${triggerType}') with no config.objectName, so its trigger watches every ` +
+                `object: it starts on a write to any object, with that row as \`record\``
+              : `is a record-change flow ('${triggerType}') whose config.objectName is blank; the engine refuses to ` +
+                `register a hook on an empty object name, so the trigger is never bound and the flow never starts`,
           hint: `Set config.objectName to the object whose records should start this flow`,
         });
       } else {

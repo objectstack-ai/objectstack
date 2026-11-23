@@ -6537,6 +6537,8 @@ const FLOW_TRIGGER_OBJECT_MISSING_EXPLANATION: RuleExplanation = {
       'With none, the trigger registers its hook with no object target, and the data engine reads an absent ' +
       'target as every object. So the flow is not idle: it starts on a write to any object, with that row as ' +
       '`record`, and its conditions and steps read fields that row usually does not have.',
+    'A blank name (`\'\'` or spaces) is refused too, for the opposite reason: the data engine refuses to ' +
+      'register a hook on an empty object name, so the trigger is never bound and the flow never starts.',
     'An error: the start node alone settles it. Name the object whose records should start the flow.',
   ],
 };
@@ -6549,9 +6551,11 @@ const FLOW_CONDITION_OPTION_LABEL_EXPLANATION: RuleExplanation = {
       'reads the field and compares it with a quoted label (`record.stage == \'Closed Lost\'` where the option ' +
       'is `{ value: \'closed_lost\', label: \'Closed Lost\' }`) is false on every record, or true on every ' +
       'record for `!=`, so the condition never tells one record from another.',
-    'Reported when the condition reads the field, writes a label as a quoted literal and does not write that ' +
-      'option\'s value. A label that is also some option\'s value is never reported. Fields whose options come ' +
-      'from a shared picklist are not judged: the stack does not hold that list.',
+    'Reported only when the label is the comparand of that field: `F == \'L\'`, `F != \'L\'`, `\'L\' == F`, or ' +
+      'a member of `F in [...]`, with `F` read bare or as `record.F` / `previous.F`. A label quoted elsewhere ' +
+      'in the condition, such as the comparand of another field, is not. A label that is also some option\'s ' +
+      'value is never reported. Fields whose options come from a shared picklist are not judged: the stack ' +
+      'does not hold that list.',
   ],
 };
 

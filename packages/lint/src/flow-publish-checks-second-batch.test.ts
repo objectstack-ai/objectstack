@@ -91,11 +91,14 @@ describe('flow-trigger-object-missing', () => {
     expect(hit[0].message).toMatch(/every object/);
   });
 
-  it('refuses a blank object name the same way', () => {
+  it('refuses a blank object name, saying the flow is never bound (not that it watches every object)', () => {
     const findings = validateFlowTriggerReadiness(
       stack(flow('notify', { triggerType: 'record-after-create', objectName: '  ' })),
     );
-    expect(rulesOf(findings)).toContain(FLOW_TRIGGER_OBJECT_MISSING);
+    const hit = findings.filter((f) => f.rule === FLOW_TRIGGER_OBJECT_MISSING);
+    expect(hit).toHaveLength(1);
+    expect(hit[0].message).toMatch(/never bound/);
+    expect(hit[0].message).not.toMatch(/every object/);
   });
 
   it('is silent on a record-change start that names its object, and on a flow with no record trigger', () => {
@@ -146,6 +149,43 @@ describe('flow-condition-option-label', () => {
         FLOW_CONDITION_OPTION_LABEL,
       );
     }
+  });
+
+  it('reads the literal-first spelling and each member of an `in` list', () => {
+    for (const condition of ["'Closed Lost' == record.stage", "stage in ['open', 'Closed Lost']"]) {
+      const hit = validateFlowTriggerReadiness(withCondition(condition)).filter(
+        (f) => f.rule === FLOW_CONDITION_OPTION_LABEL,
+      );
+      expect(hit, condition).toHaveLength(1);
+      expect(hit[0].hint).toContain("'closed_lost'");
+    }
+  });
+
+  it('is silent when the label is the comparand of another field, not of the select field', () => {
+    expect(
+      rulesOf(validateFlowTriggerReadiness(withCondition("record.stage == 'open' && record.name == 'Closed Lost'"))),
+    ).not.toContain(FLOW_CONDITION_OPTION_LABEL);
+
+    // One select field's label is the other's value: comparing `severity` with 'High' is right.
+    const TICKET = {
+      name: 'ticket',
+      label: 'Ticket',
+      fields: {
+        priority: { type: 'select', label: 'Priority', options: [{ value: 'high', label: 'High' }, { value: 'low', label: 'Low' }] },
+        severity: { type: 'select', label: 'Severity', options: ['High', 'Low'] },
+      },
+    };
+    const ticketStack = (condition: string) => ({
+      objects: [TICKET],
+      flows: [flow('triage', { triggerType: 'record-after-update', objectName: 'ticket', condition })],
+    });
+    expect(
+      rulesOf(validateFlowTriggerReadiness(ticketStack("record.severity == 'High' && record.priority != null"))),
+    ).not.toContain(FLOW_CONDITION_OPTION_LABEL);
+    // …while comparing `priority` with its own label still is reported.
+    expect(rulesOf(validateFlowTriggerReadiness(ticketStack("record.priority == 'High'")))).toContain(
+      FLOW_CONDITION_OPTION_LABEL,
+    );
   });
 
   it('is silent when no select field is read, and for an object the stack does not declare', () => {
