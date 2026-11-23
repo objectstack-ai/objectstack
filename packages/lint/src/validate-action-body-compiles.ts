@@ -188,6 +188,93 @@ function regexpPatternReason(error: string): string | undefined {
   return error.slice(error.lastIndexOf(': ') + 2);
 }
 
+/**
+ * V8's two reasons for a Unicode property escape (`\p{…}` / `\P{…}`) whose
+ * name it does not know, outside and inside a character class. V8 resolves the
+ * name against its own list and the host's Unicode tables, so on these reasons
+ * the judgement is per property name ({@link REGEXP_PROPERTY_NAMES_ONLY_QUICKJS_KNOWS}).
+ */
+const REGEXP_PROPERTY_REASONS: readonly string[] = Object.freeze([
+  'Invalid property name',
+  'Invalid property name in character class',
+]);
+
+/**
+ * The property-escape bodies Node 22's V8 refuses and the runtime's QuickJS
+ * compiles — the property-name half of the `warning` arm. Measured, not
+ * picked: every name in quickjs-emscripten 0.32.0's own property, script and
+ * general-category tables (2,909 identifiers read out of its release-sync wasm,
+ * so every name QuickJS accepts is among them), in seven forms (bare, `gc=`,
+ * `General_Category=`, `sc=`, `Script=`, `scx=`, `Script_Extensions=`), under
+ * `u` and `v`, outside and inside a class — 81,452 literals compiled in the
+ * action wrapper on both engines (Node 22.23.5, V8 12.4, ICU 78.3, Unicode
+ * 17.0). These twelve spellings are every disagreement; none ran the other way.
+ * Measured on a host with Unicode 17.0 tables: {@link HOST_UNICODE_MEASURED}.
+ */
+const REGEXP_PROPERTY_NAMES_ONLY_QUICKJS_KNOWS: ReadonlySet<string> = new Set([
+  'IDS_Unary_Operator',
+  'IDSU',
+  'Modifier_Combining_Mark',
+  'MCM',
+  'sc=Katakana_Or_Hiragana',
+  'sc=Hrkt',
+  'Script=Katakana_Or_Hiragana',
+  'Script=Hrkt',
+  'scx=Katakana_Or_Hiragana',
+  'scx=Hrkt',
+  'Script_Extensions=Katakana_Or_Hiragana',
+  'Script_Extensions=Hrkt',
+]);
+
+/**
+ * The Unicode version of the tables the property-name list was measured
+ * against. A host whose tables are older (an early Node 22 ships Unicode 15.1)
+ * can refuse a script or property Unicode added later that QuickJS knows, and
+ * that half was not measured, so there a refused property name is judged a
+ * `warning`: a refusal missed, never a body that runs refused. A host that
+ * names no Unicode version (a page) is judged the same way.
+ */
+const HOST_UNICODE_MEASURED = 17.0;
+
+function hostUnicodeAtLeastMeasured(): boolean {
+  const v = (globalThis as { process?: { versions?: { unicode?: unknown } } }).process?.versions?.unicode;
+  return typeof v === 'string' && Number.parseFloat(v) >= HOST_UNICODE_MEASURED;
+}
+
+/** Every `\p{BODY}` / `\P{BODY}` in a pattern, an escaped backslash before it excluded. */
+const PROPERTY_ESCAPE = /(?<!\\)(?:\\\\)*\\[pP]\{([^}]*)\}/g;
+
+/**
+ * On a property-name reason: is every property escape the host refuses one
+ * only QuickJS knows? The pattern and flags are read back from V8's sentence
+ * (`/PATTERN/FLAGS: REASON`), and each escape is compiled alone with the
+ * literal's `u` or `v`, so the name V8 refused is the one judged. A host older
+ * than the measured tables, or an escape this read cannot find, is not judged:
+ * that is the `warning` arm too.
+ */
+function onlyQuickJsKnowsTheRefusedProperty(error: string, reason: string): boolean {
+  if (!hostUnicodeAtLeastMeasured()) return true;
+  const literal = error.slice('SyntaxError: Invalid regular expression: '.length, error.length - reason.length - 2);
+  const close = literal.lastIndexOf('/');
+  const pattern = literal.slice(1, close);
+  const flag = literal.slice(close + 1).includes('v') ? 'v' : 'u';
+  const refused = [...pattern.matchAll(PROPERTY_ESCAPE)].map((m) => m[1]).filter((body) => {
+    try {
+      new RegExp(`\\p{${body}}`, flag);
+      return false;
+    } catch {
+      return true;
+    }
+  });
+  return refused.every((body) => REGEXP_PROPERTY_NAMES_ONLY_QUICKJS_KNOWS.has(body));
+}
+
+/** Is this V8 pattern failure one of the measured dialect gaps — the `warning` arm? */
+function isRegexpDialectGap(error: string, reason: string): boolean {
+  if (REGEXP_DIALECT_GAP_REASONS.includes(reason)) return true;
+  return REGEXP_PROPERTY_REASONS.includes(reason) && onlyQuickJsKnowsTheRefusedProperty(error, reason);
+}
+
 /** V8's sentence for a regular-expression literal that never closes on its line. */
 const REGEXP_UNTERMINATED = /^SyntaxError: Invalid regular expression: missing \//;
 
@@ -245,7 +332,7 @@ export function judgeBodyCompile(expression: string, parameters: readonly string
   const shape: BodyCompileShape = parameter !== undefined
     ? 'redeclared-parameter'
     : reason !== undefined
-      ? REGEXP_DIALECT_GAP_REASONS.includes(reason) ? 'regexp-dialect-gap' : 'regexp-pattern'
+      ? isRegexpDialectGap(failure.error, reason) ? 'regexp-dialect-gap' : 'regexp-pattern'
       : REGEXP_UNTERMINATED.test(failure.error)
         ? 'regexp-unterminated'
         : REGEXP_FLAGS.test(failure.error)
