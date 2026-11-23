@@ -456,6 +456,7 @@ import { PackageOwdOverviewPanel } from './PackageOwdOverviewPanel.js';
 import { ObjectApiPanel } from './ObjectApiPanel.js';
 import { ObjectHooksPanel } from './ObjectHooksPanel.js';
 import { useObjectHooksBuffer } from './objectHooksBuffer.js';
+import { usePairObjectActions, type PairActionsDoor } from './pairObjectActions.js';
 import { ObjectActionsPanel } from './ObjectActionsPanel.js';
 import { getIcon } from '../../utils/getIcon.js';
 import {
@@ -6992,7 +6993,21 @@ export function DataPillar({
   // objectstack#36511 — opening another object replaces the buffers the open
   // object's unsaved edits live in, so the author is asked first, as every
   // departure asks (objectstack#26705); nothing is sent by the switch.
-  const pageDirty = dirty || extDirty || hooksBuffer.dirty;
+  // objectstack#30088 — a base object's new actions are items of the pair;
+  // objectstack#36511 — read and buffered here, as the hooks are.
+  const pairDoor: PairActionsDoor | null =
+    extendsBase && customization
+      ? {
+          pairId: railPairId,
+          ensure: customization.ensure,
+          walled: customization.walled,
+          marks: railMarks,
+          publishNonce,
+          onDraftSaved,
+        }
+      : null;
+  const pairActions = usePairObjectActions(pairDoor, current?.name ?? '', viewMode === 'actions');
+  const pageDirty = dirty || extDirty || hooksBuffer.dirty || pairActions.dirty;
   const openObject = React.useCallback(
     (next: Surface): boolean => {
       if (next.name !== current?.name && !confirmDropUnsavedWork(pageDirty, locale)) return false;
@@ -7366,8 +7381,9 @@ export function DataPillar({
   return (
     <div ref={pillarRef} className="flex h-full flex-col">
       {objConflictDialog}
-      {/* objectstack#36511 — the hooks buffer's, here: a Save may ask while the Hooks tab is closed. */}
+      {/* objectstack#36511 — the hooks' and the pair actions' buffers', here: a Save may ask while their tab is closed. */}
       {hooksBuffer.dialog}
+      {pairActions.dialog}
       {/* objectstack#34931 — the door's other 409: confirmed, it is sent again forced; else what it would lose is kept. */}
       <AlertDialog open={destructive !== null} onOpenChange={(open) => !open && keepDestructive()}>
         <AlertDialogContent data-testid="object-destructive-confirm">
@@ -7726,18 +7742,8 @@ export function DataPillar({
                     actionSchema={typeSchemas.action}
                     onCelVerdictsChange={reportPanelVerdicts}
                     // objectstack#30088 — a base object's new actions are items of the pair.
-                    pair={
-                      extendsBase && customization
-                        ? {
-                            pairId: railPairId,
-                            ensure: customization.ensure,
-                            walled: customization.walled,
-                            marks: railMarks,
-                            publishNonce,
-                            onDraftSaved,
-                          }
-                        : null
-                    }
+                    pair={pairDoor}
+                    pairActions={pairActions}
                   />
                 </div>
               ) : viewMode === 'api' ? (
