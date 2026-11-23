@@ -102,9 +102,6 @@ const QUEUE_FIELD = 'queue';
  */
 const OWNER_WRITE_OPTIONS = { strictReadonlyWrites: true } as const;
 
-/** The engine's code for a write `strictReadonlyWrites` refused (`ERROR_CODE_LEDGER`, `@objectstack/objectql`). */
-const READONLY_FIELD_REJECTED = 'ERR_READONLY_FIELD_REJECTED';
-
 /**
  * The row's refusal for an owner write the engine refused under
  * `strictReadonlyWrites`, or `undefined` for any other throw. The engine's own
@@ -114,7 +111,8 @@ const READONLY_FIELD_REJECTED = 'ERR_READONLY_FIELD_REJECTED';
  */
 function lockedOwnerRefusal(err: unknown, object: string, id: string): Error | undefined {
   const e = err as { code?: unknown; fields?: unknown } | null;
-  if (!e || e.code !== READONLY_FIELD_REJECTED) return undefined;
+  // The engine's code for a write `strictReadonlyWrites` refused (`@objectstack/objectql`'s, read here, never stamped).
+  if (!e || e.code !== 'ERR_READONLY_FIELD_REJECTED') return undefined;
   const fields = Array.isArray(e.fields) && e.fields.length > 0 ? e.fields.map(String) : [SystemFieldName.OWNER_ID];
   const named = fields.map((f) => `${object}.${f}`).join(', ');
   const refusal = new Error(
