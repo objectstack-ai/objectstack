@@ -85,6 +85,8 @@
  *     ^ a bulk param spells its hint `help`; an ACTION param spells the same
  *       idea `helpText` (`ui/bulk-action.zod.ts`'s known divergence)
  *   objects.<name>._validations.<rule>.message
+ *   objects.<name>._relatedLists.<list>.label   (an object-form `relatedLists`
+ *                                                entry that authors a `label`)
  *   objects.<name>._actions.<action>.label
  *   objects.<name>._actions.<action>.description
  *   objects.<name>._actions.<action>.confirmText
@@ -998,6 +1000,28 @@ function pushValidationMessages(
   }
 }
 
+/**
+ * Emit `objects.<object>._relatedLists.<list>.label` for every object-form
+ * `relatedLists` entry of an object that authors a `label` (the record page's
+ * tab title and table heading for that list, which wins over the child FK's
+ * `relatedListTitle`). The key is the entry's literal `list`, a dotted
+ * `object.field` included, indexed as is. Only an AUTHORED label is emitted:
+ * `translateObject` translates that label and swaps nothing in for an entry
+ * that has none, so a key for one would ask a translator for a string no
+ * screen shows.
+ */
+function pushRelatedListLabels(out: ExpectedEntry[], objectName: string, entries: unknown): void {
+  if (!Array.isArray(entries)) return;
+  for (const entry of entries) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
+    const list = (entry as any).list;
+    if (typeof list !== 'string' || list.length === 0) continue;
+    const label = (entry as any).label;
+    if (typeof label !== 'string' || label.length === 0) continue;
+    pushEntry(out, ['objects', objectName, '_relatedLists', list, 'label'], label, 'object', { objectName });
+  }
+}
+
 // ─── Object sections (`objects.<o>._sections.<section>.label`) ─────────
 //
 // A section heading is authored in TWO independent places and rendered from
@@ -1626,6 +1650,14 @@ export function collectExpectedEntries(
 
     // Custom validation-rule rejection messages (`_validations.<rule>.message`).
     pushValidationMessages(out, objectName, obj.validations, 0);
+
+    // Record-page related-list titles (`_relatedLists.<list>.label`): the
+    // `label` an object-form `relatedLists` entry authors on this parent,
+    // keyed by the entry's literal `list` (`object.field` is one key).
+    // `translateObject` overlays only an authored label, so an entry without
+    // one — and a bare-string entry or built-in tab — gets no key: its title
+    // is the child FK's `relatedListTitle`, keyed on the child above.
+    pushRelatedListLabels(out, objectName, obj.relatedLists);
   }
 
   // ── Top-level views ──────────────────────────────────────────────

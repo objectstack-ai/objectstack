@@ -16,6 +16,7 @@ export const SysAccount = ObjectSchema.create({
   label: 'Account',
   pluralLabel: 'Accounts',
   icon: 'link',
+  color: 'purple',
   isSystem: true,
   managedBy: 'better-auth',
   // ADR-0010 §3.7 — managed by better-auth; tenants may not edit schema,

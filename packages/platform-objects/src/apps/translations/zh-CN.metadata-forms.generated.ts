@@ -278,7 +278,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "fields.fieldHistory": {
         label: "字段修改值",
-        helpText: "在记录的活动时间线上显示该字段的旧值 → 新值。未设置即为开启，尽管开关显示为关：只有先打开再关闭才会写入 false，此时只写出字段名。打开时，媒体或 JSON 字段也会显示值。"
+        helpText: "在记录的活动时间线上显示该字段的旧值 → 新值。默认跟随平台：大多数类型为开，媒体、JSON 或凭据字段为关。关：只写出字段名；开：媒体或 JSON 字段也显示值。凭据字段始终不显示值；对象自身的字段修改值设为关时，以对象为准。"
       },
       "fields.trackHistory": {
         label: "历史跟踪",
@@ -305,7 +305,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "enable.fieldHistory": {
         label: "字段修改值",
-        helpText: "在记录的活动时间线上显示被修改字段的旧值 → 新值。未设置即为开启，尽管开关显示为关：只有先打开再关闭才会写入 false，此时整个对象都不显示值。"
+        helpText: "在记录的活动时间线上显示被修改字段的旧值 → 新值。默认为开。关：整个对象都不显示值，无论字段如何设置。"
       },
       "enable.searchable": {
         label: "可搜索"
@@ -911,7 +911,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       fieldHistory: {
         label: "字段修改值",
-        helpText: "在记录的活动时间线上显示该字段的旧值 → 新值。未设置即为开启，尽管开关显示为关：只有先打开再关闭才会写入 false，此时只写出字段名。打开时，媒体或 JSON 字段也会显示值。"
+        helpText: "在记录的活动时间线上显示该字段的旧值 → 新值。默认跟随平台：大多数类型为开，媒体、JSON 或凭据字段为关。关：只写出字段名；开：媒体或 JSON 字段也显示值。凭据字段始终不显示值；对象自身的字段修改值设为关时，以对象为准。"
       },
       trackHistory: {
         label: "记录变更历史",

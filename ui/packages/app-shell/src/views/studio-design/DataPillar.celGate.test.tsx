@@ -49,6 +49,7 @@ const objectDef = {
 const siteDef = { name: 'showcase_site', label: 'Site', fields: [{ name: 'address', label: 'Address', type: 'text' }] };
 
 const mockClient = {
+  publish: vi.fn(async () => ({})), reset: vi.fn(async () => ({})),
   save: vi.fn(async () => ({})),
   list: vi.fn(async () => [
     { name: 'showcase_task', label: 'Task' },
@@ -107,6 +108,7 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 });
 
 import { DataPillar } from './StudioDesignSurface';
+import { StudioSaveHarness, pressStudioSave } from './__tests__/studioSaveHarness';
 import { createEmptyDataSource, failOnAbsorbedFetchError } from './__tests__/emptyDataSource';
 import { registerBuiltinInspectors } from '../metadata-admin/inspectors';
 // The source under test reaches a dynamic import of `@objectstack/lint`: its first
@@ -155,9 +157,9 @@ function stubEngine() {
 async function openFormulaField() {
   stubEngine();
   render(
-    <MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
+    <StudioSaveHarness><MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
       <DataPillar packageId="com.example.showcase" />
-    </MemoryRouter>,
+    </MemoryRouter></StudioSaveHarness>,
   );
   fireEvent.click(await screen.findByRole('button', { name: 'Form' }));
   const card = (await screen.findByText('Total')).closest('.cursor-grab') as HTMLElement;
@@ -166,34 +168,35 @@ async function openFormulaField() {
   return label.parentElement!.querySelector('[role="combobox"]') as HTMLTextAreaElement;
 }
 
-// objectui#5813 retired the 保存草稿 button for debounced AUTO-save; the CEL
-// gate now guards the TIMER (the objectui#4306 rule verbatim: gating only a
-// button would let the timer persist the malformed definition a second later).
-// The observable is therefore client.save itself.
-describe('DataPillar — auto-save is gated on the field inspector’s CEL verdict (#4306/#5813)', () => {
-  it("refuses the card's repro: a dangling operator blocks the auto-save", async () => {
+// objectstack#36511 — the CEL gate guards the top bar's Save (the objectui#4306
+// rule verbatim: a malformed definition is never sent). The observable is
+// therefore client.save itself, after Save is pressed.
+describe('DataPillar — Save is gated on the field inspector’s CEL verdict (#4306/#36511)', () => {
+  it("refuses the card's repro: a dangling operator blocks the Save", async () => {
     const box = await openFormulaField();
 
-    // A valid formula first: the auto-save fires — pins the must-not-change
-    // half (a good formula never blocks) and clears the dirty window.
+    // A valid formula first: Save sends it — pins the must-not-change half (a
+    // good formula never blocks).
     fireEvent.change(box, { target: { value: 'record.est_hours * 2' } });
+    await pressStudioSave();
     await waitFor(() => expect(mockClient.save).toHaveBeenCalled(), { timeout: 4000 });
     mockClient.save.mockClear();
 
-    // Now the card's exact input: well past the debounce, still no save.
+    // Now the card's exact input: Save sends nothing.
     fireEvent.change(box, { target: { value: 'record.est_hours *' } });
-    await new Promise((r) => setTimeout(r, 2300));
+    await pressStudioSave();
     expect(mockClient.save).not.toHaveBeenCalled();
   });
 
-  it('re-arms the auto-save once the formula parses again', async () => {
+  it('re-arms the Save once the formula parses again', async () => {
     const box = await openFormulaField();
 
     fireEvent.change(box, { target: { value: 'record.est_hours *' } });
-    await new Promise((r) => setTimeout(r, 2300));
+    await pressStudioSave();
     expect(mockClient.save).not.toHaveBeenCalled();
 
     fireEvent.change(box, { target: { value: 'record.est_hours * 2' } });
+    await pressStudioSave();
     await waitFor(() => expect(mockClient.save).toHaveBeenCalled(), { timeout: 4000 });
   });
 });
@@ -241,7 +244,7 @@ describe('DataPillar — the CEL hold belongs to the draft, not to the open insp
   it.each(CLOSERS)('closing the inspector by %s keeps the hold, and the held line names the field', async (_how, close) => {
     await breakFormula();
     close();
-    await new Promise((r) => setTimeout(r, 2300));
+    await pressStudioSave();
     expect(mockClient.save).not.toHaveBeenCalled();
     expect(screen.getByTestId('studio-held-message')).toHaveTextContent('Total');
   });
@@ -255,8 +258,9 @@ describe('DataPillar — the CEL hold belongs to the draft, not to the open insp
     const box = label.parentElement!.querySelector('[role="combobox"]') as HTMLTextAreaElement;
     expect(box.value).toBe('record.est_hours *');
     fireEvent.change(box, { target: { value: 'record.est_hours * 2' } });
-    await waitFor(() => expect(mockClient.save).toHaveBeenCalled(), { timeout: 4000 });
     expect(screen.queryByTestId('studio-held')).toBeNull();
+    await pressStudioSave();
+    await waitFor(() => expect(mockClient.save).toHaveBeenCalled(), { timeout: 4000 });
   });
 
   it('removing the field ends the hold: nothing judged is left in the draft', async () => {
@@ -265,6 +269,8 @@ describe('DataPillar — the CEL hold belongs to the draft, not to the open insp
     // here, see the mock above), and it asks before it removes.
     fireEvent.click(screen.getByRole('button', { name: 'Remove “Total”' }));
     fireEvent.click(within(await screen.findByRole('alertdialog')).getByTestId('field-remove-confirm-action'));
+    confirmSpy.mockReturnValue(true); // Save asks again: the published field leaves.
+    await pressStudioSave();
     await waitFor(() => expect(mockClient.save).toHaveBeenCalled(), { timeout: 4000 });
     const body = (mockClient.save.mock.calls.at(-1) as unknown[] | undefined)?.[2] as { fields: Array<{ name: string }> };
     expect(body.fields.map((f) => f.name)).toEqual(['est_hours']);

@@ -16,8 +16,15 @@
  * added, removed or renamed here (out of the card); entries move within a
  * group, between groups and to the menu's top level.
  *
+ * The edits read a level's ARRAY order as its shown order. The sidebar sorts
+ * each level by `order` (objectstack#36591), so the editor is seeded with each
+ * level put in that order ({@link inShownOrder}), and a save writes the order
+ * back as `order` ({@link withOrderRewritten}).
+ *
  * @module
  */
+
+import { inMenuOrder } from '../views/metadata-admin/previews/AppNavCanvas.js';
 
 /** One menu entry, as the app document holds it. */
 export type MenuEntry = Readonly<Record<string, unknown>> & { readonly id?: unknown; readonly type?: unknown };
@@ -82,6 +89,44 @@ export function withEntryIds(menu: Menu): Menu {
   };
   const answer = walk(menu);
   return changed ? answer : menu;
+}
+
+/**
+ * The menu with each level, at every depth, in the order the sidebar draws it
+ * (objectstack#36591): through `inMenuOrder`, the menu's own rule (`order`
+ * ascending, an absent `order` as `0`, ties in array order). A level already
+ * in that order (one whose entries carry no `order`, say) is the same array,
+ * and an entry whose children are already in it is the same object.
+ */
+export function inShownOrder(menu: Menu): Menu {
+  const sorted = inMenuOrder(menu as ReadonlyArray<MenuEntry & { order?: number }>).map(([entry]) => {
+    if (!Array.isArray(entry.children)) return entry;
+    const kids = inShownOrder(entry.children as Menu);
+    return kids === entry.children ? entry : { ...entry, children: kids };
+  });
+  return sorted.every((entry, i) => entry === menu[i]) ? menu : sorted;
+}
+
+/**
+ * The menu with `order` written as each entry's place in its level, at every
+ * depth (objectstack#36591): a level in which any entry carries `order` has
+ * every entry numbered `0`, `1`, … in array order, so the sidebar's sort
+ * (`order` ascending) draws the level as the array reads. A level in which no
+ * entry carries `order` is left without it, so a menu authored by array order
+ * gains no key. An entry already holding its number is the same object.
+ */
+export function withOrderRewritten(menu: Menu): Menu {
+  const numbered = menu.some((entry) => entry.order !== undefined);
+  const next = menu.map((entry, i) => {
+    let out: MenuEntry = entry;
+    if (Array.isArray(entry.children)) {
+      const kids = withOrderRewritten(entry.children as Menu);
+      if (kids !== entry.children) out = { ...out, children: kids };
+    }
+    if (numbered && out.order !== i) out = { ...out, order: i };
+    return out;
+  });
+  return next.every((entry, i) => entry === menu[i]) ? menu : next;
 }
 
 /** A new entry id no entry of `menu` holds. */

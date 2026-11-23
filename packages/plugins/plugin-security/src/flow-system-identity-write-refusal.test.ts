@@ -85,16 +85,27 @@ const ADMIN = 'usr_admin';
 const PLAIN = 'usr_plain';
 const TARGET = 'usr_target';
 
-/** A `runAs: 'system'` run's data context, as `resolveRunDataContext` builds it for a user-triggered run. */
-const FLOW_SYSTEM = { isSystem: true, actor: 'svc:flow:qa_flow', userId: ADMIN, flowRunId: 'run_1' };
+/**
+ * A `runAs: 'system'` run's data context, as `resolveRunDataContext` builds it for a run a member triggered
+ * in their active organization: the trigger's organization and the member's membership set ride along, so
+ * the organization wall (`app-automation-organization-wall.ts`) scopes the run as it scopes that member.
+ */
+const FLOW_SYSTEM = {
+  isSystem: true,
+  actor: 'svc:flow:qa_flow',
+  userId: ADMIN,
+  tenantId: 'org_default',
+  accessible_org_ids: ['org_default'],
+  flowRunId: 'run_1',
+};
 /** The same for a user-less (scheduled) run. */
 const FLOW_SYSTEM_USERLESS = { isSystem: true, actor: 'svc:flow:qa_flow', positions: [], permissions: [], flowRunId: 'run_2' };
 /** A platform writer's own system context: no run. */
 const SEEDER = { isSystem: true };
-/** A `runAs: 'user'` run's data context for a tenant-level administrator. */
-const FLOW_USER_ADMIN = { isSystem: false, userId: ADMIN, positions: [], permissions: ['qa_tenant_admin'], flowRunId: 'run_3' };
+/** A `runAs: 'user'` run's data context for a tenant-level administrator (run setup seeds the membership set). */
+const FLOW_USER_ADMIN = { isSystem: false, userId: ADMIN, positions: [], permissions: ['qa_tenant_admin'], accessible_org_ids: ['org_default'], flowRunId: 'run_3' };
 /** A `runAs: 'user'` run's data context for a plain member. */
-const FLOW_USER_PLAIN = { isSystem: false, userId: PLAIN, positions: [], permissions: ['qa_member'], flowRunId: 'run_4' };
+const FLOW_USER_PLAIN = { isSystem: false, userId: PLAIN, positions: [], permissions: ['qa_member'], accessible_org_ids: ['org_default'], flowRunId: 'run_4' };
 
 const opts = (context: Record<string, unknown>) => ({ context: { ...context } }) as never;
 
@@ -242,9 +253,9 @@ function expectFlowSystemRefusal(err: any, object: string, operation: string): v
 const OBJECTS = [...FLOW_SYSTEM_IDENTITY_WRITE_OBJECTS];
 
 /** A `runAs: 'system'` hook's api context, fired by a user's write. */
-const HOOK_SYSTEM = markAppAutomationElevation({ isSystem: true, userId: ADMIN }, 'hook');
+const HOOK_SYSTEM = markAppAutomationElevation({ isSystem: true, userId: ADMIN, tenantId: 'org_default', accessible_org_ids: ['org_default'] }, 'hook');
 /** An action body's context, invoked by a user. */
-const ACTION_SYSTEM = markAppAutomationElevation({ isSystem: true, userId: ADMIN }, 'action');
+const ACTION_SYSTEM = markAppAutomationElevation({ isSystem: true, userId: ADMIN, tenantId: 'org_default', accessible_org_ids: ['org_default'] }, 'action');
 
 describe('the predicate: isSystem AND flowRunId, the D12 gate\'s verbs, the four objects', () => {
   it('names exactly the four identity-assignment objects', () => {
@@ -668,7 +679,8 @@ describe("the platform's own audit and activity rows for an elevated automation'
     name: 'qa_ledger_writer',
     objects: { [NOTE]: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true } },
   });
-  const envelope = { userId: INVOKER, tenantId: ORG, positions: [], permissions: [WRITER.name] };
+  // The invoker's membership set rides the envelope, as the request resolver carries it.
+  const envelope = { userId: INVOKER, tenantId: ORG, positions: [], permissions: [WRITER.name], accessible_org_ids: [ORG] };
   let kernel: ObjectKernel;
   let ql: ObjectQL;
   let warn: ReturnType<typeof vi.fn>;

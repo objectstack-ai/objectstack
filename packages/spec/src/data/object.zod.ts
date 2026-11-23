@@ -42,7 +42,11 @@ import { isMaskedOnReadFieldType } from './masked-field-types';
 // refuse one set. Public: re-exported from `@objectstack/spec/data`, with the
 // field predicate `isControlledByParentMasterField` it counts and the
 // resolver `controlledByParentMasterOf` it judges the one master with.
-import { controlledByParentMasterRefusal } from './controlled-by-parent-master';
+import {
+  CONTROLLED_BY_PARENT_MASTER_INVALID,
+  controlledByParentMasterRefusal,
+  type ControlledByParentMasterIssueParams,
+} from './controlled-by-parent-master';
 // The ADR-0015 §4.2 binding predicate, shared with `defineStack`'s
 // cross-reference pass and the v18 stored-row listing. Internal to the spec.
 import { externalBindingDatasourceRefusal } from './external-binding-datasource';
@@ -3709,6 +3713,11 @@ function refuseFieldGroupMembershipConflicts(fieldGroups: unknown, fields: unkno
  * ({@link controlledByParentMasterRefusal}), which the v18 upgrade's stored-row
  * listing reads too: `os migrate meta --stored` lists each stored object this
  * refinement refuses, by object, with the fate of its shape (#23270).
+ *
+ * The issue carries `params: { code: CONTROLLED_BY_PARENT_MASTER_INVALID, shape }`
+ * ({@link CONTROLLED_BY_PARENT_MASTER_INVALID}), so a surface that shows the
+ * refusal in the author's language selects its wording by the shape instead of
+ * reading the English `message`.
  */
 function refuseControlledByParentWithoutOneMaster(
   objectName: unknown,
@@ -3718,7 +3727,11 @@ function refuseControlledByParentWithoutOneMaster(
 ): void {
   const refusal = controlledByParentMasterRefusal(objectName, sharingModel, fields);
   if (refusal === undefined) return;
-  ctx.addIssue({ code: 'custom', path: [refusal.path], message: refusal.message });
+  const params: ControlledByParentMasterIssueParams = {
+    code: CONTROLLED_BY_PARENT_MASTER_INVALID,
+    shape: refusal.shape,
+  };
+  ctx.addIssue({ code: 'custom', path: [refusal.path], message: refusal.message, params });
 }
 
 /**

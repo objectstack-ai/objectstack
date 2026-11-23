@@ -422,11 +422,12 @@ let gridFieldWidgetModule: GridFieldWidgetModule | undefined;
 let gridFieldWidgetLoad: Promise<GridFieldWidgetModule> | undefined;
 
 /**
- * The ONE loader of the grid's body: the lazy face below, {@link
- * preloadGridField} and the `grid` form-field loader in `../index.tsx` all go
- * through it, so the body is requested once and a mount after any of them has
- * resolved renders without a boundary. A failed load is forgotten, so the next
- * caller asks again rather than inheriting the failure.
+ * The ONE loader of the grid's body: the face below and {@link
+ * preloadGridField} go through it (and the `grid` form-field loader in
+ * `../index.tsx` reaches it through the face), so the body is requested once
+ * and a mount after any of them has resolved renders without a boundary. A
+ * failed load is forgotten, so the next caller asks again rather than
+ * inheriting the failure.
  */
 export function loadGridFieldWidget(): Promise<GridFieldWidgetModule> {
   gridFieldWidgetLoad ??= import('./grid-field/GridFieldWidget.js').then(
@@ -458,10 +459,6 @@ export function preloadGridField(): Promise<void> {
   );
 }
 
-const LazyGridFieldWidget = React.lazy(() =>
-  loadGridFieldWidget().then((loaded) => ({ default: loaded.GridFieldWidget })),
-);
-
 /**
  * What a grid mounted before its body arrived shows meanwhile: a box of the
  * grid's header height, marked busy, so the form does not jump when the table
@@ -480,18 +477,50 @@ function GridFieldLoading(): React.ReactElement {
  * props as the body, see `GridFieldWidgetProps`.
  */
 export function GridField(props: GridFieldWidgetProps): React.ReactElement {
-  // Decided once per mount: switching from the boundary to the direct render
-  // when the load finishes would remount the body and drop the focused cell.
+  // Decided once per mount: switching from the loading face to the direct
+  // render when the load finishes would remount the body and drop the focused
+  // cell.
   const [loadedAtMount] = React.useState(() => gridFieldWidgetModule);
   if (loadedAtMount) {
     const { GridFieldWidget } = loadedAtMount;
     return React.createElement(GridFieldWidget, props);
   }
-  return React.createElement(
-    React.Suspense,
-    { fallback: React.createElement(GridFieldLoading) },
-    React.createElement(LazyGridFieldWidget, props),
-  );
+  return React.createElement(GridFieldOnceLoaded, props);
+}
+
+type GridFieldLoadOutcome =
+  | { readonly loaded: GridFieldWidgetModule }
+  | { readonly failed: unknown };
+
+/**
+ * A grid mounted before its body arrived: {@link GridFieldLoading} until the
+ * body loads, then the body. Each COMMITTED mount asks the loader once, from an
+ * effect, and a failed load is thrown from the next render to the nearest
+ * error boundary. Not `React.lazy`: a lazy component keeps its first outcome
+ * for good, a rejection included, so a later mount would rethrow that failure
+ * until the page is reloaded. A render React discards before it commits runs
+ * no effect, so it requests nothing, and the loader forgets a failure, so the
+ * next mount (an error boundary's reset, a reopened form) loads again.
+ */
+function GridFieldOnceLoaded(props: GridFieldWidgetProps): React.ReactElement {
+  const [outcome, setOutcome] = React.useState<GridFieldLoadOutcome | undefined>(undefined);
+  React.useEffect(() => {
+    let mounted = true;
+    loadGridFieldWidget().then(
+      (loaded) => {
+        if (mounted) setOutcome({ loaded });
+      },
+      (failed: unknown) => {
+        if (mounted) setOutcome({ failed });
+      },
+    );
+    return () => {
+      mounted = false;
+    };
+  }, []);
+  if (!outcome) return React.createElement(GridFieldLoading);
+  if ('failed' in outcome) throw outcome.failed;
+  return React.createElement(outcome.loaded.GridFieldWidget, props);
 }
 
 /** Semantic alias — the master-detail subform's child grid. */

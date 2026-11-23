@@ -31,6 +31,7 @@ import { SkeletonDetail } from '../skeletons/index.js';
 import { ManagedByBadge, useManagedByNote } from '../components/ManagedByBadge.js';
 import { isSetupAppSegment } from '../console/setupApp.js';
 import { authoredBodyTableIds, deriveRelatedLists } from '../utils/deriveRelatedLists.js';
+import { RECORD_TABS_CONFIG_ACTION, useRecordTabsConfig } from './RecordTabsConfig.js';
 import { pruneUnregisteredRecordPageObjects, recordPageChildObjects } from './recordPageChildObjects.js';
 import { stripDiscussionNodes, hasExplicitAttachments, hasExplicitApprovals } from '../utils/pageSchemaIntrospect.js';
 import { ActionConfirmDialog, type ConfirmDialogState } from './ActionConfirmDialog.js';
@@ -903,6 +904,9 @@ function ApprovalGroupBeacon({ onHosted }: { onHosted: (update: (n: number) => n
   }, [onHosted]);
   return null;
 }
+
+/** The reader's arrangement is not written while the tab configuration previews the default (objectstack#36499). */
+const ignoreArrangementChange = (): void => {};
 
 export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverride, recordIdOverride, embedded }: RecordDetailViewProps) {
 
@@ -2585,15 +2589,35 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // `resolveRecordHeaderActionGates(objectDef, perms)`: the affordance-to-grant
   // map asks both itself (objectui#12082), so this view no longer threads
   // either one by hand.
+  // objectstack#36499 — 「Configure tabs」: an administrator arranges this
+  // object's record-page tabs in place. While its edit state is on, the page
+  // is drawn from the object with the draft's `relatedLists`
+  // (`tabsConfig.previewObject`), the preview of what Save writes.
+  const canReadChild = useMemo(
+    () => (permissionsLoaded ? (name: string) => canOnObject(name, 'read') : undefined),
+    [permissionsLoaded, canOnObject],
+  );
+  const tabsConfig = useRecordTabsConfig({
+    objectDef,
+    objects,
+    enabled: !embedded && !phone && pageColumnsEligible,
+    canRead: canReadChild,
+    titleOf: (list) => {
+      if (list.title) return list.title;
+      const childDef = objects.find((o: any) => o.name === list.childObject);
+      return childDef ? servedObjectPluralLabel(childDef, language, objectPluralLabel, list.childLabel) : list.childLabel;
+    },
+  });
+  const tabsObjectDef = tabsConfig.previewObject ?? objectDef;
   const childRelations = useMemo(
-    () => deriveRelatedLists(objectDef, objects, {
+    () => deriveRelatedLists(tabsObjectDef, objects, {
       canRead: permissionsLoaded ? (name) => canOnObject(name, 'read') : undefined,
       // A related list is a list of the child's records, so the multi-FK
       // title it composes names it with the plural, as the single-FK title
       // below does (objectui#11733).
       listLabel: (child) => servedObjectPluralLabel(child, language, objectPluralLabel, child.name),
     }),
-    [objectDef, objects, canOnObject, permissionsLoaded, objectPluralLabel, language],
+    [tabsObjectDef, objects, canOnObject, permissionsLoaded, objectPluralLabel, language],
   );
 
   // [objectui#12244] A write to a CHILD re-reads this record, in place.
@@ -5307,6 +5331,24 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           : onEdit({ id: pureRecordId }, objectName)),
       } as any);
     }
+    // objectstack#36499 — 「Configure tabs」, the first item of the `⋯`
+    // (`leadsMenu`, ahead of Refresh), for an administrator who may arrange
+    // this object's tabs (`useRecordTabsConfig`'s gate: never on a phone, a
+    // drawer or a pane).
+    if (tabsConfig.offered && !tabsConfig.active && !recordEditState) {
+      items.push({
+        name: RECORD_TABS_CONFIG_ACTION,
+        leadsMenu: true,
+        label: t('designMode.recordTabs.entry', { defaultValue: 'Configure tabs' }),
+        icon: 'panels-top-left',
+        type: 'script',
+        locations: ['record_header'],
+        variant: 'outline',
+        order: 101,
+        component: 'action:menu',
+        onClick: () => tabsConfig.enter(),
+      } as any);
+    }
     // The record's favorites control is the star beside the record's name
     // (objectstack#36246), drawn by `page:header` from the record context
     // below, so the `⋯` holds no second entry. A print page draws no
@@ -5550,7 +5592,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     : null;
   const composedPage = assignedPage
     ? effectivePage
-    : buildDefaultPageSchema(objectDef as any, {
+    : buildDefaultPageSchema(tabsObjectDef as any, {
         sections: synthParts.sections,
         headerActions: synthParts.headerActions,
         related: synthParts.related,
@@ -5770,21 +5812,17 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       <span className="flex shrink-0 items-center gap-2 empty:hidden" data-record-page-badges="">{recordBadges}</span>
     </>
   );
-  // objectstack#35853 — ✕ at the far right of the navigation row, on every
-  // desktop face: back to the list the page came from as it was left
+  // objectstack#36557 — ✕ is the first control of the navigation row, on
+  // every desktop face: back to the list the page came from as it was left
   // (objectstack#35854), else the object's default list.
   const closePage = pageReturn.toList ?? (objectListPath ? () => navigate(objectListPath) : undefined);
-  const pageFrame = closePage || shellActions ? (
-    <>
-      {/* objectstack#36112 — the comments icon is the group's first button. */}
-      {shellActions && renderShellGroup?.({ comments: commentsButton })}
-      {closePage && (
-        <RecordTopBarButton label={t('common.close', { defaultValue: 'Close' })} onClick={closePage} data-testid="record-page-close">
-          <X className="h-3.5 w-3.5" />
-        </RecordTopBarButton>
-      )}
-    </>
+  const pageClose = closePage ? (
+    <RecordTopBarButton label={t('common.close', { defaultValue: 'Close' })} onClick={closePage} data-testid="record-page-close">
+      <X className="h-3.5 w-3.5" />
+    </RecordTopBarButton>
   ) : undefined;
+  // objectstack#36112 — the comments icon is the group's first button.
+  const pageFrame = shellActions ? renderShellGroup?.({ comments: commentsButton }) : undefined;
   // objectstack#27058, Target 8 — the path row of a page one level down
   // (「线索 Mira Costa › 任务」): the `?from=` trail, each ancestor a link, the
   // parent going back in the history when the page was pushed from it.
@@ -5841,6 +5879,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       toggles={approvalQueueSwitch || panelToggles ? <>{approvalQueueSwitch}{panelToggles}</> : undefined}
       comments={shellActions ? undefined : commentsButton}
       frame={pageFrame}
+      close={pageClose}
       record={pageRecordRow}
     />
   );
@@ -6004,6 +6043,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     <RecordHeaderStateContext.Provider value={recordHeaderState}>
     <RecordReadReportContext.Provider value={objectName === SYS_APPROVAL_REQUEST_OBJECT ? reportRecordRead : null}>
     <div ref={setPageRootEl} className="h-full bg-background overflow-hidden flex flex-col relative" data-record-page-root="">
+      {tabsConfig.bar}
       {pageBar}
       {/* In a pane, the record's ⊟ goes into the pane's own top bar. */}
       {embedded && paneBar && <RecordPaneBarToggles>{panelToggles}</RecordPaneBarToggles>}
@@ -6016,7 +6056,15 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
             'absolute right-2 sm:right-4 z-50 flex items-center gap-2',
             // Under a phone's one 44 px bar row; in a pane, over the page's
             // top-right corner, level with its first row (objectstack#35745).
-            pageBar ? 'top-12' : headerBarForRecord ? 'top-3' : 'top-2 sm:top-4',
+            // While the tab configuration's bar is drawn: its 48 px (3rem)
+            // plus the page's own top-2 / sm:top-4 gap under it.
+            pageBar
+              ? 'top-12'
+              : tabsConfig.bar
+                ? 'top-[calc(3rem+0.5rem)] sm:top-[calc(3rem+1rem)]'
+                : headerBarForRecord
+                  ? 'top-3'
+                  : 'top-2 sm:top-4',
           )}
         >
           {sharedChrome}
@@ -6327,8 +6375,11 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                     detailsWidth={detailsWidth}
                     onDetailsWidthChange={setDetailsWidth}
                     onShownTabChange={setShownRecordTab}
-                    relatedArrangement={relatedArrangement}
-                    onRelatedArrangementChange={setRelatedArrangement}
+                    // objectstack#36499 — the edit state previews the
+                    // default order, the reader's own arrangement set aside.
+                    relatedArrangement={tabsConfig.active ? EMPTY_RELATED_ARRANGEMENT : relatedArrangement}
+                    onRelatedArrangementChange={tabsConfig.active ? ignoreArrangementChange : setRelatedArrangement}
+                    tabRowEditor={tabsConfig.editor ?? undefined}
                     enlargedRelated={enlargedRelatedParam}
                     onEnlargeRelated={openEnlargedRelated}
                     onCloseEnlargedRelated={closeEnlargedRelated}

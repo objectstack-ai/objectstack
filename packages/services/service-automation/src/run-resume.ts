@@ -20,7 +20,7 @@ import type { FlowParsed, FlowRunSummary } from '@objectstack/spec/automation';
 import type { DroppedFieldsEvent } from '@objectstack/spec/data';
 import type { AutomationContext, AutomationResult, ResumeSignal } from '@objectstack/spec/contracts';
 import { RESUME_AUTHORITY_SERVICE } from '@objectstack/spec/contracts';
-import { runIsUnscopedUserMode, flowTouchesData, runAccessibleOrgIds, runOrgUserIds, runTriggerUserId, type SeededRunContext } from './runtime-identity.js';
+import { runIsUnscopedUserMode, flowTouchesData, runAccessibleOrgIds, runDecidedSegmentCaller, runOrgUserIds, runTriggerUserId, type SeededRunContext } from './runtime-identity.js';
 import { refuseNode } from './guard-refusal.js';
 import { describeThrownForLog } from './thrown-cause-diagnostics.js';
 import { carriedRefusalOfResult, readCarriedRefusal } from './inner-refusal.js';
@@ -243,6 +243,43 @@ export async function seedRunGrants(
         // (`resolveRunDataContext`'s system arm), where it narrows nothing.
         if (runContext.runAs !== 'system') delete (runContext as SeededRunContext).principalKind;
         delete (runContext as SeededRunContext).permissionSetAddresses;
+    }
+    // [ADR-0095 D1 · ADR-0093 D8.1, as amended] A `runAs:'system'` run that
+    // names a user reads no grants — elevation lifts them — but the
+    // organization wall it meets is that user's (plugin-security's app
+    // automation wall), and the engine projects that wall from the run's own
+    // facts. So the trigger user's membership set and posture rung are seeded
+    // once here, as for a user-mode run, and every data operation of the run
+    // is judged on them with no resolution of its own: under `group` its reads
+    // span the union of the user's memberships, as the user's request does.
+    // A run that names no user gains nothing; a decided segment keeps the
+    // facts of the run it belongs to (the wall judges it by that run's caller).
+    // A run whose user is not its caller (a decided segment, a run that began
+    // for no caller, and a child run of either) takes nothing of that user:
+    // no set, no rung (`runDecidedSegmentCaller`).
+    if (runContext.runAs === 'system' && whose === 'triggering' && runContext.userId && runDecidedSegmentCaller(runContext) === undefined && this.userGrantsResolver) {
+        const needsRung = (runContext as SeededRunContext).posture === undefined;
+        if (needsMembership || needsRung) {
+            try {
+                const grants = await this.userGrantsResolver(runContext.userId, runContext.tenantId);
+                if (needsMembership && Array.isArray(grants?.accessible_org_ids)) {
+                    (runContext as SeededRunContext).accessible_org_ids = grants.accessible_org_ids;
+                }
+                if (needsRung && grants?.posture) (runContext as SeededRunContext).posture = grants.posture;
+            } catch (err) {
+                // Narrower, never wider: a membership run setup could not read
+                // is not a current membership, so the wall judges the run as it
+                // judges a person who holds none.
+                if (needsMembership) (runContext as SeededRunContext).accessible_org_ids = [];
+                this.logger.warn(
+                    `[runAs] flow '${flowName}' could not resolve the memberships of the user '${runContext.userId}' ` +
+                    `its system run runs for — the organization wall judges its data ops as for a person who ` +
+                    `holds none. The resolver's failure is in this record's meta.`,
+                    describeThrownForLog(err),
+                );
+            }
+        }
+        return;
     }
     if (
         runContext.runAs !== 'system' &&

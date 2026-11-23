@@ -18,6 +18,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import { SidebarProvider } from '@object-ui/components';
+import { NavigationRenderer } from '@object-ui/layout';
+import type { NavigationItem } from '@object-ui/types';
 
 const session = vi.hoisted(() => ({ language: 'en', defaultLocale: 'en' }));
 vi.mock('@object-ui/i18n', async (importOriginal) => ({
@@ -67,6 +69,8 @@ const listed = vi.hoisted(() => ({
 }) as Record<string, Array<Record<string, unknown>>>);
 /** objectstack#36364 — names the server holds (`type/name`), and a refusal of the app's save. */
 const server = vi.hoisted(() => ({ held: new Set<string>(), appSave: null as Error | null }));
+/** The app's menu as served (`null`: `NAVIGATION`). */
+const servedNav = vi.hoisted(() => ({ current: null as unknown[] | null }));
 /** The app's menu as stored (`null`: as served). */
 const storedNav = vi.hoisted(() => ({ current: null as unknown[] | null, failReads: 0 }));
 const client = vi.hoisted(() => ({
@@ -76,7 +80,7 @@ const client = vi.hoisted(() => ({
       storedNav.failReads -= 1;
       throw new Error('layered read failed');
     }
-    const code = { name: 'crm', label: 'CRM', navigation: storedNav.current ?? NAVIGATION };
+    const code = { name: 'crm', label: 'CRM', navigation: storedNav.current ?? servedNav.current ?? NAVIGATION };
     return { code, effective: code };
   },
   get: async (type: string, name: string) => (server.held.has(`${type}/${name}`) ? { name } : null),
@@ -141,7 +145,7 @@ function Harness() {
       <SidebarProvider>
         {mode.active && (
           <DesignModeMenu
-            app={{ name: 'crm', navigation: NAVIGATION, _packageId: 'com.acme.crm' }}
+            app={{ name: 'crm', navigation: servedNav.current ?? NAVIGATION, _packageId: 'com.acme.crm' }}
             basePath="/apps/crm"
             resolveTargetLabel={(target) => (target.kind === 'object' ? OBJECT_LABELS[target.objectName] : undefined)}
           />
@@ -211,6 +215,7 @@ beforeEach(() => {
   storedNav.failReads = 0;
   server.held.clear();
   server.appSave = null;
+  servedNav.current = null;
   __resetDefaultLocale();
   vi.stubGlobal(
     'fetch',
@@ -769,5 +774,166 @@ describe('a new dashboard from 「Add menu item」 (objectstack#36364)', () => {
     expect(screen.getByTestId('design-menu-new-dashboard')).toBeInTheDocument();
     expect(order()).toEqual(['home', ['sales', ['accounts', 'leads']], ['insights', ['…']]]);
     expect(screen.getByTestId('landing')).toHaveTextContent('/apps/crm null');
+  });
+});
+
+// ── objectstack#36591 ─────────────────────────────────────────────────────────
+
+/**
+ * objectstack#36591 — the design mode's menu reads, and saves, in the order
+ * the sidebar draws it.
+ *
+ * The sidebar sorts each level by `order` (`byNavOrder`, internal to
+ * `@object-ui/layout`); the editor read and saved array order, so a move in an
+ * app whose entries carry `order` (an AI-built app's do) was saved and changed
+ * nothing on screen. The sidebar here is the real one (`NavigationRenderer`),
+ * drawn over what the save wrote, so these pins state no sort of their own.
+ */
+describe('the design-mode menu in the sidebar order (objectstack#36591)', () => {
+  const object = (id: string, objectName: string, label: string, order?: number) => ({
+    id,
+    type: 'object',
+    objectName,
+    label,
+    ...(order === undefined ? {} : { order }),
+  });
+
+  /** Authored out of `order`: the sidebar reads Customers, Contacts, Opportunities, Reports (Follow-ups, Pipeline). */
+  const ORDERED = () => [
+    object('opps', 'crm_opportunity', 'Opportunities', 2),
+    object('customers', 'crm_customer', 'Customers', 0),
+    {
+      id: 'reports',
+      type: 'group',
+      label: 'Reports',
+      order: 3,
+      expanded: true,
+      children: [
+        { id: 'pipeline', type: 'report', reportName: 'pipeline', label: 'Pipeline', order: 1 },
+        object('followups', 'crm_follow_up', 'Follow-ups', 0),
+      ],
+    },
+    object('contacts', 'crm_contact', 'Contacts', 1),
+  ];
+
+  const LABELS = ['Customers', 'Contacts', 'Opportunities', 'Reports', 'Follow-ups', 'Pipeline', 'Cases', 'Leads', 'Accounts', 'Home', 'Sales', 'Insights'];
+
+  /** The labels `el` shows, in the order it shows them; each must show once. */
+  function labelsIn(el: Element): string[] {
+    const text = el.textContent ?? '';
+    const shown = LABELS.filter((l) => text.includes(l));
+    for (const l of shown) expect(text.indexOf(l)).toBe(text.lastIndexOf(l));
+    return shown.sort((a, b) => text.indexOf(a) - text.indexOf(b));
+  }
+
+  /** The running app's sidebar over `nav`. */
+  function sidebarOrder(nav: unknown): string[] {
+    const { container, unmount } = render(
+      <MemoryRouter initialEntries={['/apps/crm']}>
+        <SidebarProvider defaultOpen>
+          <NavigationRenderer
+            items={nav as NavigationItem[]}
+            basePath="/apps/crm"
+            resolveTargetLabel={(target) => (target.kind === 'object' ? OBJECT_LABELS[target.objectName] : undefined)}
+          />
+        </SidebarProvider>
+      </MemoryRouter>,
+    );
+    const shown = labelsIn(container);
+    unmount();
+    return shown;
+  }
+
+  /** The design mode's menu, as it reads. */
+  const editorOrder = () => labelsIn(screen.getByTestId('design-mode-menu'));
+
+  async function save(): Promise<Array<Record<string, unknown>>> {
+    fireEvent.click(screen.getByTestId('design-mode-save'));
+    await flush();
+    await flush();
+    expect(written.map(([verb]) => verb)).toEqual(['save', 'publish']);
+    return (written[0][3] as { navigation: Array<Record<string, unknown>> }).navigation;
+  }
+
+  /** Every `order` key of `nav`, at every depth. */
+  const orderKeys = (nav: unknown): unknown[] =>
+    (nav as Array<Record<string, unknown>>).flatMap((e) => [
+      ...('order' in e ? [e.order] : []),
+      ...(Array.isArray(e.children) ? orderKeys(e.children) : []),
+    ]);
+
+  it('an app whose entries carry `order` reads in the design mode as in the sidebar', () => {
+    servedNav.current = ORDERED();
+    start();
+    expect(editorOrder()).toEqual(['Customers', 'Contacts', 'Opportunities', 'Reports', 'Follow-ups', 'Pipeline']);
+    cleanup();
+    expect(sidebarOrder(ORDERED())).toEqual(['Customers', 'Contacts', 'Opportunities', 'Reports', 'Follow-ups', 'Pipeline']);
+  });
+
+  it('「Move up」 on Contacts, saved: the sidebar reads Contacts, Customers, …, and the design mode reads the same again', async () => {
+    servedNav.current = ORDERED();
+    start();
+    await act_on('contacts', 'Move up');
+    const shown = editorOrder();
+    expect(shown).toEqual(['Contacts', 'Customers', 'Opportunities', 'Reports', 'Follow-ups', 'Pipeline']);
+    const saved = await save();
+    cleanup();
+    expect(sidebarOrder(saved)).toEqual(shown);
+    // The saved app, served again, opens the design mode in that order.
+    servedNav.current = saved;
+    storedNav.current = saved;
+    start();
+    expect(editorOrder()).toEqual(shown);
+  });
+
+  it('「Add an item after」 and 「Move to group」, saved: the sidebar puts both where the design mode showed them', async () => {
+    servedNav.current = ORDERED();
+    start();
+    await flush();
+    await act_on('contacts', 'Add an item after');
+    const picker = await screen.findByTestId('design-menu-picker');
+    fireEvent.click(within(picker).getByRole('button', { name: 'Objects' }));
+    await flush();
+    fireEvent.click(within(picker).getByRole('button', { name: 'Cases' }));
+    await flush();
+    const trigger = within(entry('customers')).getByTestId('design-menu-actions');
+    fireEvent.pointerDown(trigger, { button: 0, pointerType: 'mouse' });
+    await flush();
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Move to group' }));
+    await flush();
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Reports' }));
+    await flush();
+    const shown = editorOrder();
+    expect(shown).toEqual(['Contacts', 'Cases', 'Opportunities', 'Reports', 'Follow-ups', 'Pipeline', 'Customers']);
+    const saved = await save();
+    cleanup();
+    expect(sidebarOrder(saved)).toEqual(shown);
+  });
+
+  it('CONTROL: an app whose entries carry no `order` saves a move by array order, and gains no `order` key', async () => {
+    start();
+    await act_on('accounts', 'Move up');
+    const shown = editorOrder();
+    expect(shown).toEqual(['Home', 'Sales', 'Accounts', 'Leads', 'Insights']);
+    const saved = await save();
+    expect(orderKeys(saved)).toEqual([]);
+    cleanup();
+    // The sidebar draws no empty group: Insights is the editor's alone.
+    expect(sidebarOrder(saved)).toEqual(shown.filter((label) => label !== 'Insights'));
+  });
+
+  it('a level where some entries carry `order` and some do not: one save, and the sidebar reads as the design mode', async () => {
+    // The sidebar reads an absent `order` as 0: Customers, Contacts, Opportunities.
+    const MIXED = () => [object('opps', 'crm_opportunity', 'Opportunities', 1), object('customers', 'crm_customer', 'Customers'), object('contacts', 'crm_contact', 'Contacts')];
+    servedNav.current = MIXED();
+    start();
+    expect(editorOrder()).toEqual(['Customers', 'Contacts', 'Opportunities']);
+    await act_on('opps', 'Move up');
+    const shown = editorOrder();
+    expect(shown).toEqual(['Customers', 'Opportunities', 'Contacts']);
+    const saved = await save();
+    expect(orderKeys(saved)).toEqual([0, 1, 2]);
+    cleanup();
+    expect(sidebarOrder(saved)).toEqual(shown);
   });
 });

@@ -276,6 +276,7 @@ import {
   pageTabItemKey,
   walkAddressedPageComponents,
 } from '@objectstack/spec/system';
+import { isRecordPageBuiltinTab, relatedListEntryHidden } from '@objectstack/spec/data';
 import { walkFlowNodes } from './flow-walk.js';
 import { objectExtensionsByTarget, packagesOf, recordsOf, suggestName } from './object-graph.js';
 import { walkPageComponents } from './page-walk.js';
@@ -482,6 +483,24 @@ interface ObjectFacts {
    * for why that is the only carrier and how the object binding is resolved.
    */
   tabs: Set<string>;
+  /**
+   * `_relatedLists` names — the `list` of every object-form `relatedLists`
+   * entry this object declares WITH a `label`, the only entries
+   * `translateObject` overlays `objects.<obj>._relatedLists.<list>.label` onto.
+   */
+  relatedListLabels: Set<string>;
+  /**
+   * Every list this object's `relatedLists` names, labelled or not (a bare
+   * string, an object entry, a built-in tab) — read only to say WHY a
+   * `_relatedLists` key over a named but unlabelled entry resolves nothing.
+   */
+  relatedListNames: Set<string>;
+  /**
+   * The lists a paired `.custom` arrangement hides (`{ list, hidden: true }`,
+   * ADR-0146 D10): no tab shows them, so their title is read nowhere — read
+   * only to say so.
+   */
+  relatedListHidden: Set<string>;
 }
 
 /** Everything a `flows.<name>.screens.<node_id>` key may legally name. */
@@ -649,6 +668,9 @@ function emptyFacts(): ObjectFacts {
     sectionEntries: new Map(),
     validations: new Set(),
     tabs: new Set(),
+    relatedListLabels: new Set(),
+    relatedListNames: new Set(),
+    relatedListHidden: new Set(),
   };
 }
 
@@ -1130,18 +1152,24 @@ function contributedNavItemsByApp(stack: AnyRec): Map<string, unknown[]> {
  * its declared keys: `extend`, `priority`, `fields`, `validations`, `indexes`,
  * `label`, `pluralLabel`, `description`, and the arrangement keys the base's
  * paired `.custom` package writes, `fieldGroups` and `relatedLists`
- * (ADR-0146 D10). Everything else is refused BY NAME at the extension level
+ * (ADR-0146 D10), and `place`, which positions the items the extension brings.
+ * Everything else is refused BY NAME at the extension level
  * with authoring guidance (`actions`, `listViews`, `hooks` carry their own
  * `guidance` text; `views`, `sections` and `tabs` fall to the shared
  * unknown-key refusal). Measured against the schema rather than read off the
  * merge: each of those six produced an extension-level `unrecognized_keys`
  * issue, while `fields`, `validations` and `fieldGroups` parsed.
  *
- * ⇒ THREE of this rule's rungs are reachable through an extension:
- * `objects.<obj>.fields.*`, `objects.<obj>._validations.*`, and
+ * ⇒ FOUR of this rule's rungs are reachable through an extension:
+ * `objects.<obj>.fields.*`, `objects.<obj>._validations.*`,
  * `objects.<obj>._sections.*` for the groups a `.custom` arrangement brings
- * (`fieldGroups[].key` is the section anchor, ADR-0085). `indexes` and
- * `relatedLists` are not translatable here; `label` / `pluralLabel` /
+ * (`fieldGroups[].key` is the section anchor, ADR-0085), and
+ * `objects.<obj>._relatedLists.*` for a labelled tab entry it brings: an
+ * object-form entry of a `.custom` arrangement's `relatedLists` that is not
+ * `hidden`, or a list placement in `place` (spliced, where the target declares
+ * `relatedLists`, into the served target and into the packaged base the read
+ * compares with, `getPackagedObjectBase`), each titling a tab of
+ * the served target by its `list`. `indexes` is not translatable; `label` / `pluralLabel` /
  * `description` are leaf copy on an object that already resolved, and this
  * rule checks no leaf. ⛔ Do not grow this fold to `_views` / `_tabs` /
  * `_actions` "for symmetry": an extension cannot contribute any of them, so a
@@ -1310,6 +1338,16 @@ function buildUniverse(stack: AnyRec): Universe {
     for (const rule of recordsOf(obj.validations)) {
       collectValidationRuleNames(rule, facts.validations);
     }
+    // `_relatedLists.<list>` is keyed by an object-form `relatedLists` entry's
+    // literal `list` (`object.field` is one key), and resolves only over an
+    // entry that authors a `label`: `translateObject` overlays that label and
+    // swaps nothing in for an entry without one.
+    for (const entry of Array.isArray(obj.relatedLists) ? obj.relatedLists : []) {
+      const list = typeof entry === 'string' ? entry : isRec(entry) ? strName(entry.list) : undefined;
+      if (!list) continue;
+      facts.relatedListNames.add(list);
+      if (isRec(entry) && typeof entry.label === 'string' && entry.label.length > 0) facts.relatedListLabels.add(list);
+    }
   };
 
   for (const obj of recordsOf(stack.objects)) {
@@ -1385,6 +1423,26 @@ function buildUniverse(stack: AnyRec): Universe {
       for (const group of extension.fieldGroups) {
         const key = strName(group.key);
         if (key) facts.sections.add(key);
+      }
+      // `_relatedLists.<list>` is keyed by a labelled entry's `list`: a
+      // `.custom` arrangement's `relatedLists` entry (ADR-0146 D10) and a
+      // list placement's `place` entry each title a tab of the target, and
+      // where the target declares `relatedLists` the served target carries
+      // that entry, which `translateObject` translates as it does the
+      // target's own (a placed entry is part of the packaged base it is
+      // compared with, `getPackagedObjectBase`). A placement on a target
+      // that declares none is not applied, and its key is accepted here all
+      // the same: this fold does not read whether the target declares the
+      // list. An arrangement entry with `hidden: true` titles no tab.
+      for (const entry of extension.relatedListEntries) {
+        const list = strName(entry.list);
+        if (!list) continue;
+        facts.relatedListNames.add(list);
+        if (relatedListEntryHidden(entry)) {
+          facts.relatedListHidden.add(list);
+          continue;
+        }
+        if (typeof entry.label === 'string' && entry.label.length > 0) facts.relatedListLabels.add(list);
       }
     }
   }
@@ -2078,6 +2136,48 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
                 `renamed or removed.`
               : `Declare the tab in a page's \`interfaceConfig.userFilters.tabs\` (a list view's own ` +
                 `\`tabs\` has no renderer), or drop the key.`,
+          );
+        }
+
+        // _relatedLists.<list>
+        //
+        // A record-page related-list title the parent declares on an
+        // object-form `relatedLists` entry. A key over a list the object names
+        // without a `label` translates nothing: that tab's title is the child
+        // FK's `relatedListTitle`, keyed on the child.
+        for (const listName of Object.keys(asRecord(rawNode._relatedLists))) {
+          if (facts.relatedListLabels.has(listName)) continue;
+          const listWhere = `${inLocale} · object "${objectName}" · related list "${listName}"`;
+          const listPath = `${objPath}._relatedLists${memberPath(listName)}`;
+          if (isRecordPageBuiltinTab(listName)) {
+            orphan(listWhere, listPath,
+              `"${listName}" is a built-in record-page tab, written only bare and titled by the platform, ` +
+              `so no title of object "${objectName}" reads this key.`,
+              `Drop this key: a built-in tab takes no \`label\` here.`);
+            continue;
+          }
+          if (facts.relatedListHidden.has(listName)) {
+            orphan(listWhere, listPath,
+              `Related list "${listName}" of object "${objectName}" is hidden by the \`.custom\` ` +
+              `arrangement (\`hidden: true\`), so no tab shows a title from this key.`,
+              `Drop this key, or show the tab (drop \`hidden\`) and give the entry a \`label\`.`);
+            continue;
+          }
+          const named = facts.relatedListNames.has(listName);
+          orphan(
+            listWhere,
+            listPath,
+            named
+              ? `Related list "${listName}" of object "${objectName}" carries no \`label\` in ` +
+                `\`relatedLists\`, so no title reads this key.`
+              : `Translations are keyed to related list "${listName}", which no \`relatedLists\` entry ` +
+                `of object "${objectName}" names, so nothing reads this key.` +
+                suggest(listName, facts.relatedListLabels),
+            named
+              ? `Give the entry a \`label\` ({ list, label }) to title it here, or translate the ` +
+                `child lookup field's \`relatedListTitle\` instead, and drop this key.`
+              : `Match the key to the entry's \`list\` (a dotted object.field is one key), or drop ` +
+                `it if the entry was renamed or removed.`,
           );
         }
 

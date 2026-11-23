@@ -20,9 +20,9 @@
  * claim on its buffer reads moved once the item has changed. The previous
  * item's pending edit is dropped by the hook, which is what every pillar did
  * whenever the new load landed inside the debounce. The Data pillar is the
- * control: its rail sends the pending edit to its own object with the hook's
- * `flush` before it switches (objectstack#27511), so nothing of it reaches the
- * object opened next either.
+ * control: it saves with the top bar's Save (objectstack#36511), so its rail
+ * asks before a switch drops an unsaved edit, and nothing of it reaches either
+ * object.
  *
  * objectui#11203 (folded in): a package switch keeps the Interfaces pillar
  * mounted, so the nav editor's dirty flag and open editing survived into the
@@ -208,6 +208,7 @@ vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => null }));
 vi.mock('../../preview/DraftChangesPanel', () => ({ DraftChangesPanel: () => null }));
 
 import { AutomationsPillar, DataPillar, InterfacesPillar, StudioDesignSurface } from './StudioDesignSurface';
+import { StudioSaveHarness, pressStudioSave } from './__tests__/studioSaveHarness';
 import { ADD_FIELD_OFFERED, addFieldFromGrid } from './__tests__/dataPillarAddField';
 import { createEmptyDataSource } from './__tests__/emptyDataSource';
 import { registerMetadataPreview } from '../metadata-admin/preview-registry';
@@ -454,37 +455,34 @@ describe('Interfaces page inspector — a save in flight across a page switch (o
   }, 30000);
 });
 
-describe('Data pillar — an object switch inside the debounce, the control (objectui#11232)', () => {
-  it('sends nothing to the newly opened object; the pending edit goes to its own (objectstack#27511)', async () => {
+describe('Data pillar — an object switch over an unsaved edit, the control (objectui#11232)', () => {
+  it('sends nothing to either object; an edit on the opened object goes to it on Save (objectstack#36511)', async () => {
     render(
-      <MemoryRouter initialEntries={[`/studio/${PKG}/data`]}>
-        <DataPillar packageId={PKG} />
-      </MemoryRouter>,
+      <StudioSaveHarness>
+        <MemoryRouter initialEntries={[`/studio/${PKG}/data`]}>
+          <DataPillar packageId={PKG} />
+        </MemoryRouter>
+      </StudioSaveHarness>,
     );
     await waitFor(() => expect(screen.getByText(/^\d+ fields?( \(\+\d+ system\))?$/)).toHaveTextContent('2 fields'), SLOW);
 
     await addFieldFromGrid();
     const release = holdLoad('object', 'acme_note');
+    // The edit is unsaved: the switch asks, and the author drops it.
+    confirmSpy.mockReturnValue(true);
     fireEvent.click(screen.getByRole('button', { name: /Note/ }));
-    await pastDebounce();
-
-    expect(savesOf('object', 'acme_note')).toEqual([]);
-    // objectstack#27511 — the switch sent the edit to Task before it opened Note.
-    expect(savesOf('object', 'acme_task').map((b) => readFields(b.fields).entries.map((e) => e.name))).toEqual([
-      ['title', 'status', 'new_field'],
-    ]);
-    server.saves.length = 0;
-
+    expect(confirmSpy).toHaveBeenCalledTimes(1);
     await release();
     await waitFor(() => expect(screen.getByText(/^\d+ fields?( \(\+\d+ system\))?$/)).toHaveTextContent('1 field'), SLOW);
     await pastDebounce(1800);
     expect(server.saves).toEqual([]);
     // The control's own control: an edit on the opened object saves to it.
     await addFieldFromGrid();
-    await waitFor(() => expect(server.saves).toHaveLength(1), SLOW);
+    await pressStudioSave();
     expect(savesOf('object', 'acme_note').map((b) => readFields(b.fields).entries.map((e) => e.name))).toEqual([
       ['body', 'new_field'],
     ]);
+    expect(savesOf('object', 'acme_task')).toEqual([]);
   }, 30000);
 });
 
@@ -712,9 +710,11 @@ describe("the load window: nothing of the previous item is offered, shown or sav
 
   it('Data: a field added during the load saves nothing; one added after the load saves once, to the object opened', async () => {
     render(
-      <MemoryRouter initialEntries={[`/studio/${PKG}/data`]}>
-        <DataPillar packageId={PKG} />
-      </MemoryRouter>,
+      <StudioSaveHarness>
+        <MemoryRouter initialEntries={[`/studio/${PKG}/data`]}>
+          <DataPillar packageId={PKG} />
+        </MemoryRouter>
+      </StudioSaveHarness>,
     );
     await waitFor(() => expect(screen.getByText(/^\d+ fields?( \(\+\d+ system\))?$/)).toHaveTextContent('2 fields'), SLOW);
 
@@ -737,6 +737,7 @@ describe("the load window: nothing of the previous item is offered, shown or sav
 
     // The control: a field added after the load saves once, to its own object.
     await addFieldFromGrid();
+    await pressStudioSave();
     await waitFor(() => expect(server.saves).toHaveLength(1), SLOW);
     expect(server.saves.map((s) => [s.type, s.name, s.body.label, fieldNamesOf(s.body)])).toEqual([
       ['object', 'acme_note', 'Note', ['body', 'new_field']],
@@ -793,6 +794,7 @@ describe('a package switch: Automations and Data open nothing of the previous pa
     await screen.findByRole('button', { name: /Beta item/ }, SLOW);
     await waitFor(() => expect(screen.getByText(/^\d+ fields?( \(\+\d+ system\))?$/)).toBeInTheDocument(), SLOW);
     await addFieldFromGrid();
+    await pressStudioSave();
     await waitFor(() => expect(server.saves).toHaveLength(1), SLOW);
     expect(server.saves.map((s) => [s.type, s.name, s.packageId, s.body.label, fieldNamesOf(s.body)])).toEqual([
       ['object', 'beta_item', PKG_B, 'Beta item', ['name', 'new_field']],

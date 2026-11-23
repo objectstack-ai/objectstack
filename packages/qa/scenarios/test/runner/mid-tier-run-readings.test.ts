@@ -205,6 +205,19 @@ describe('2. the app\'s own refusal meets a declared VALIDATION_FAILED, read fro
     expect(refusalMeets('PERMISSION_DENIED', { kind: 'refused', code: 'VALIDATION_ERROR', status: 400, declaredCode: 'NOT_REQUESTER' })).toBe(false);
   });
 
+  it("a hook's own refusal with no declared code (HOOK_ABORTED) meets a declared VALIDATION_FAILED at a client-error status, and nothing else", () => {
+    // order_to_cash `overpay_invoice`: the seed posture forbids a validation rule comparing a loaded payment with
+    // its invoice's stored balance, so a build refuses the overpayment in a hook, which answers HOOK_ABORTED at 400.
+    for (const status of [400, 409, 422]) {
+      expect(refusalMeets('VALIDATION_FAILED', { kind: 'refused', code: 'HOOK_ABORTED', status }), String(status)).toBe(true);
+    }
+    // ⛔ A sandbox fault is served 5xx, and an answer with no status is no door's: not the app's refusal.
+    expect(refusalMeets('VALIDATION_FAILED', { kind: 'refused', code: 'HOOK_ABORTED', status: 500 })).toBe(false);
+    expect(refusalMeets('VALIDATION_FAILED', { kind: 'refused', code: 'HOOK_ABORTED' })).toBe(false);
+    // ⛔ Only a declared VALIDATION_FAILED reads it: a declared denial stays the platform's own.
+    expect(refusalMeets('PERMISSION_DENIED', { kind: 'refused', code: 'HOOK_ABORTED', status: 400 })).toBe(false);
+  });
+
   it('a declared code meets its declaredCode exactly; a catalogue code with no declaredCode never meets a different declared code', () => {
     const served = { kind: 'refused', code: 'RESOURCE_CONFLICT', status: 409, declaredCode: 'ASSET_NOT_IN_STOCK' } as const;
     expect(refusalMeets('ASSET_NOT_IN_STOCK', served)).toBe(true);

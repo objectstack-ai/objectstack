@@ -21,7 +21,7 @@ vi.mock('../../assistant/assistantBus', async (importOriginal) => ({
 }));
 
 import { loadHanRomanizer } from '../../views/metadata-admin/romanizeHan';
-import type { Menu } from '../designModeMenu';
+import type { Menu } from '../designModeMenuModel';
 import type { AppMenuSaveDoors } from '../designModeMenuSave';
 import {
   freeItemName,

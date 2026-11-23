@@ -154,7 +154,9 @@ describe('Studio shell header below and above 640 px (objectui#12509)', () => {
     const groups = Array.from(header.children);
     expect(groups).toHaveLength(3);
     expect(groups[1]).toBe(nav);
-    expect(within(groups[2] as HTMLElement).getByText(t('engine.studio.publish', 'en'))).toBeInTheDocument();
+    // The actions column: with nothing pending and nothing edited, no Publish (objectstack#36511).
+    expect(groups[2]).toHaveClass('justify-end');
+    expect(within(groups[2] as HTMLElement).queryByText(t('engine.studio.publish', 'en'))).toBeNull();
 
     for (const key of ['data', 'automations', 'interfaces', 'access']) {
       const link = within(nav).getByRole('link', { name: t(`engine.studio.pillar.${key}`, 'en') });

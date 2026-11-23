@@ -35,7 +35,7 @@ import { emitMetadataRefresh } from '../assistant/assistantBus.js';
 import { slugify } from '../views/metadata-admin/createDerive.js';
 import { loadHanRomanizer, romanizeHan, romanizerPending } from '../views/metadata-admin/romanizeHan.js';
 import { saveDashboardInPlace } from '../views/runtime-metadata-persistence.js';
-import type { Menu } from './designModeMenu.js';
+import type { Menu } from './designModeMenuModel.js';
 import {
   prepareAppMenuSave,
   writeAppMenu,

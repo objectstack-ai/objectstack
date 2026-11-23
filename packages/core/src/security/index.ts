@@ -654,6 +654,11 @@ export {
   type AppAutomationElevation,
 } from './app-automation-elevation.js';
 
+// The mark a decided flow segment's data context carries naming the user the
+// run began for (or none). Set by service-automation, read by plugin-security's
+// organization wall.
+export { RUN_CALLER, markRunCaller, runCallerOf } from './run-caller.js';
+
 // #28881 — the mark a flow run's system elevation carries so its record writes
 // keep the write-time reference check. Set by service-automation, read by
 // objectql.

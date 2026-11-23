@@ -15,6 +15,7 @@ export const Category = ObjectSchema.create({
   label: 'Category',
   pluralLabel: 'Categories',
   icon: 'list-tree',
+  color: 'amber',
   description: 'Hierarchical tagging tree — demonstrates self-referencing relations.',
 
   fields: {

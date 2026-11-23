@@ -32,6 +32,7 @@ export const Contact = ObjectSchema.create({
   label: 'Contact',
   pluralLabel: 'Contacts',
   icon: 'user',
+  color: 'blue',
   description:
     'Demonstrates derive-default + sparse-override forms: one flat, grouped, intent-tagged field set projects into both a full edit form and a slim create form (ADR-0047).',
   sharingModel: 'private',

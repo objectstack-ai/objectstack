@@ -24,6 +24,7 @@ export const SysQueueMember = ObjectSchema.create({
   label: 'Queue Member',
   pluralLabel: 'Queue Members',
   icon: 'users',
+  color: 'orange',
   isSystem: true,
   managedBy: 'config',
   description: 'Who belongs to a queue: a user, a team, a position or a business unit.',
