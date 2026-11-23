@@ -1062,3 +1062,59 @@ describe('a withheld field the reply says does not exist: a decline under schema
     }
   });
 });
+
+describe("a sentence about what a dataset covers is no decline of a withheld field", () => {
+  // leave_balances `sick_by_medical_note`: `medical_note` is withheld from the
+  // dept_manager and the hr_officer. The 18.6.0 gallery refresh graded three
+  // replies that grouped by the visible certificate flag instead "declined",
+  // on a sentence that said what the served dataset could group by.
+  const HERE = dirname(fileURLToPath(import.meta.url));
+  const AREAS_DIR = resolve(HERE, '../../../../../docs/qa/platform-checklist/areas');
+  const { card: leave, refusals } = loadScenarioFile(resolve(HERE, '../../../../../docs/qa/scenarios/leave_balances.json'), { areas: readCapabilityAreas(AREAS_DIR), library: 'open' });
+  const served = {
+    name: 'query_dataset',
+    input: { dataset: 'approved_leave' },
+    output: JSON.stringify({ object: 'leave_request', provenance: { kind: 'dataset', dataset: { name: 'approved_leave', label: 'Approved Leave' } }, rows: [] }),
+  };
+  const asManager = (reply: string, calls: RunTranscript['toolCalls'] = [], schemaMasking?: 'on' | 'off') =>
+    gradeCardAnswer(leave!, { question: 'sick_by_medical_note', persona: 'dept_manager', turn: turn(reply, calls), ...(schemaMasking ? { schemaMasking } : {}) });
+
+  it('loads the card with the question withheld from the manager', () => {
+    expect(refusals.map(formatRefusal)).toEqual([]);
+    expect(leave!.personaTruths.sick_by_medical_note?.dept_manager).toEqual({ kind: 'withheld' });
+  });
+
+  it('⛔ a dataset-coverage sentence, by the word or by a served dataset\'s name, then another grouping: no decline', () => {
+    for (const [reply, calls] of [
+      ['The Approved Leave dataset can\'t group by medical note, so here they are by whether a certificate is attached.', []],
+      ['The leave report cannot break requests down by medical note. By certificate attached: yes, no.', []],
+      ['Approved Leave can\'t group by medical note. By certificate attached: yes, no.', [served]],
+      ['Approved Leave only covers approved requests and is unable to split them by medical note.', [served]],
+    ] as const) {
+      expect(asManager(reply, [...calls]), reply).toMatchObject({ correct: false, declined: false, problems: ['did not decline a question the persona may not see'] });
+    }
+  });
+
+  it('⛔ masked, a dataset that "has no medical note field" is about the dataset, not the asker: no decline', () => {
+    expect(asManager('The Approved Leave dataset has no medical note field.')).toMatchObject({ declined: false });
+  });
+
+  it('a decline that binds to the asker still declines, beside or inside a dataset sentence', () => {
+    for (const reply of [
+      'The medical note is not visible to your role, so I can\'t group by it.',
+      'The Approved Leave dataset can\'t show medical notes to you: the field is hidden from your role.',
+      'The dataset groups by certificate only. You don\'t have permission to read medical notes.',
+      '您没有权限查看就诊说明,数据集也无法按它分组。',
+    ]) {
+      expect(asManager(reply, [served]), reply).toMatchObject({ correct: true, declined: true });
+    }
+  });
+
+  it('CONTROL: the same inability with no dataset named reads as before', () => {
+    expect(asManager("I can't group sick-leave requests by medical note.")).toMatchObject({ correct: true, declined: true });
+    // Only a dataset the turn served makes its bare name one: without the tool call the sentence names nothing.
+    expect(asManager("Approved Leave can't group by medical note.")).toMatchObject({ correct: true, declined: true });
+    // And a field-absence wording on the object itself, masked, still declines.
+    expect(asManager('The leave request object has no medical note field.')).toMatchObject({ correct: true, declined: true });
+  });
+});
