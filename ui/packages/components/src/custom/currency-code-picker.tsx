@@ -144,6 +144,22 @@ export function CurrencyCodePicker({
   const [open, setOpen] = React.useState(false)
   const current = typeof value === "string" && value !== "" ? value : undefined
   const groups = currencyCodeGroups({ home, rated, used, current })
+
+  // The trigger is the picker's one element in the form (its list is portaled
+  // out), and a form host that reads its header off the DOM finds the field by
+  // the trigger's `name`: the master-detail form's line grid reads the
+  // header's currency that way (objectstack#36321). So the trigger carries the
+  // code as its `value`, and a changed code bubbles a `change` event from it,
+  // as a native select does when its value changes (Radix Select's hidden
+  // select does the same). Without them the host read the button's empty
+  // value, and a header in the home currency read as "no currency chosen".
+  const triggerRef = React.useRef<HTMLButtonElement>(null)
+  const announced = React.useRef(current)
+  React.useEffect(() => {
+    if (announced.current === current) return
+    announced.current = current
+    triggerRef.current?.dispatchEvent(new Event("change", { bubbles: true }))
+  }, [current])
   const item = (code: string) => (
     <CommandItem
       key={code}
@@ -165,6 +181,8 @@ export function CurrencyCodePicker({
         <Button
           type="button"
           {...triggerProps}
+          ref={triggerRef}
+          value={current ?? ""}
           variant="outline"
           role="combobox"
           aria-expanded={open}
