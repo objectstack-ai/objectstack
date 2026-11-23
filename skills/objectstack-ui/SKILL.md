@@ -42,10 +42,9 @@ metadata:
 Two more: [List Views](#list-views), [Actions](#actions).
 
 1. **New and Edit are the object's fields and `fieldGroups`, never a form
-   view**: a container's `form` or `formViews.create` parses and is not
-   loaded. `showOnCreate: false` leaves a field off every create surface
-   (refused beside `required: true`):
-   [Form Views](./rules/list-views.md#form-views).
+   view**: they load no `form` or `formViews.create`, which parse.
+   `showOnCreate: false` keeps a field off every create surface (refused
+   beside `required: true`): [Form Views](./rules/list-views.md#form-views).
 2. **A record entered with its line items is a parent field group naming the
    child** (`fieldGroups: [{ key: 'lines', label: 'Lines', relatedList:
    'invoice_line' }]`), before any custom page; without it nothing changes:
@@ -75,7 +74,7 @@ Two more: [List Views](#list-views), [Actions](#actions).
 | Authoring | In | Open first |
 |:--|:--|:--|
 | A list, board, calendar, gallery or gantt: columns, `filter`, quick filters, toolbar search, sorting, grouping | `src/views/*.view.ts` | [List Views](./rules/list-views.md) |
-| The New / Edit form (field groups, `showOnCreate`, line items, field conditional rules); a form an action opens by name, a public form | the object; `src/views/*.view.ts` | [Form Views](./rules/list-views.md#form-views) |
+| New / Edit form (field groups, `showOnCreate`, line items, field rules); a named or public form | the object; `src/views/*.view.ts` | [Form Views](./rules/list-views.md#form-views) |
 | An app and its navigation; who sees or opens it; object nav, a `filters` slice or an interface page | `src/apps/*.app.ts` | [Navigation](./rules/navigation.md) |
 | What a record page shows: related lists, a slotted or full page; how a record opens | the object | [Record Page](./rules/record-page.md) |
 | A button or operation: `locations`, visibility, dialog and toast copy, params, new tab, the body's `ctx`, refusing by code (`refusals`) | `src/actions/*.action.ts`, `*.actions.ts` | [Actions](./rules/actions.md) |
