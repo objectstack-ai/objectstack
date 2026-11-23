@@ -62,6 +62,16 @@ export default defineConfig({
         find: /^@objectstack\/plugin-auth$/,
         replacement: path.resolve(__dirname, '../../plugins/plugin-auth/src/index.ts'),
       },
+      // `hono-own-row-doors.conformance.test.ts` boots the REAL
+      // StorageServicePlugin on both of its doors — the self-hosted mount on
+      // `http.server` and the `handleAttachmentDoor` member behind the
+      // dispatcher's `/attachments` domain — so its verdict about either is
+      // about this checkout's storage source. (Its personal-view half rides the
+      // plugin-auth entry above.)
+      {
+        find: /^@objectstack\/service-storage$/,
+        replacement: path.resolve(__dirname, '../../services/service-storage/src/index.ts'),
+      },
       // `hono-mcp-stateless-verbs.conformance.test.ts` serves `/api/v1/mcp`
       // from the REAL `MCPServerRuntime` on both doors, so its verdict on which
       // verbs the transport answers is about this checkout's mcp source.
