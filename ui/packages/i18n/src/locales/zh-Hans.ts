@@ -1847,6 +1847,10 @@ const zh = {
         placeholder: '选一个数据来源',
         loading: '正在读取数据来源…',
         none: '还没有数据来源',
+        addFilter: '筛选',
+        filterAdvanced: '这个筛选条件不能在这里修改，会按保存时的样子保留。',
+        filterLoading: '正在读取字段…',
+        filterNoFields: '这个数据来源没有可以筛选的字段。',
       },
       measure: {
         label: '指标',

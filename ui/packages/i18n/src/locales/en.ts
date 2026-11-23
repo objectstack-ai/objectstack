@@ -2207,6 +2207,10 @@ const en = {
         placeholder: 'Choose a data source',
         loading: 'Loading data sources…',
         none: 'No data sources yet',
+        addFilter: 'Filter',
+        filterAdvanced: 'This filter cannot be changed here. It is kept as saved.',
+        filterLoading: 'Loading fields…',
+        filterNoFields: 'This data source has no fields to filter on.',
       },
       measure: {
         label: 'Measure',

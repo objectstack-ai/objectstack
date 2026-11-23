@@ -4082,6 +4082,10 @@ const de = {
         placeholder: "Datenquelle wählen",
         loading: "Datenquellen werden geladen…",
         none: "Noch keine Datenquellen",
+        addFilter: "Filter",
+        filterAdvanced: "Dieser Filter kann hier nicht geändert werden. Er bleibt so, wie er gespeichert wurde.",
+        filterLoading: "Felder werden geladen…",
+        filterNoFields: "Diese Datenquelle hat keine Felder zum Filtern.",
       },
       measure: {
         label: "Kennzahl",

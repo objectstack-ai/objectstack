@@ -1847,6 +1847,10 @@ const zhHant = {
         placeholder: '選一個數據來源',
         loading: '正在讀取資料來源…',
         none: '還沒有資料來源',
+        addFilter: '篩選',
+        filterAdvanced: '這個篩選條件不能在這裡修改，會按儲存時的樣子保留。',
+        filterLoading: '正在讀取欄位…',
+        filterNoFields: '這個資料來源沒有可以篩選的欄位。',
       },
       measure: {
         label: '指標',

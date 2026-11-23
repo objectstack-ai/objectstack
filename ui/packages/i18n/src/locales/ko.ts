@@ -4081,6 +4081,10 @@ const ko = {
         placeholder: "데이터 소스 선택",
         loading: "데이터 소스를 불러오는 중…",
         none: "아직 데이터 소스가 없습니다",
+        addFilter: "필터",
+        filterAdvanced: "이 필터는 여기에서 변경할 수 없습니다. 저장된 그대로 유지됩니다.",
+        filterLoading: "필드를 불러오는 중…",
+        filterNoFields: "이 데이터 소스에는 필터링할 필드가 없습니다.",
       },
       measure: {
         label: "지표",

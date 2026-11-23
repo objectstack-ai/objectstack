@@ -313,3 +313,90 @@ describe('the computed values fold (objectstack#36374)', () => {
     expect(screen.queryByTestId('dataset-report-computed-values-toggle')).toBeNull();
   });
 });
+
+describe('the report filter under the data source (objectstack#36645)', () => {
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  const box = (value = '') => ({ value, onChange: () => {} });
+
+  /**
+   * The builder with a host filter control: a button that sets the report's
+   * `runtimeFilter` and one that clears it, standing in for the console's
+   * filter editor (the real one is `ReportBuilderHost.filter-36645`'s subject).
+   */
+  function FilterHarness({ initial, dataSource }: { initial: ReportDraft; dataSource?: unknown }) {
+    const [report, setReport] = React.useState<ReportDraft>(initial);
+    const setFilter = (fc: Record<string, unknown> | undefined) =>
+      setReport((r) => {
+        const next = { ...r };
+        if (fc) next.runtimeFilter = fc;
+        else delete next.runtimeFilter;
+        return next;
+      });
+    return (
+      <>
+        <ReportBuilder
+          report={report}
+          onChange={setReport}
+          name={box(String(report.label ?? ''))}
+          description={box()}
+          datasets={[{ name: 'pipeline', label: 'Pipeline' }, { name: 'other', label: 'Other' }]}
+          members={report.dataset ? MEMBERS : undefined}
+          onSave={() => {}}
+          onDiscard={() => setReport(initial)}
+          onClose={() => {}}
+          dataSource={dataSource}
+          filter={
+            <>
+              <button type="button" data-testid="host-filter-won" onClick={() => setFilter({ stage: { $eq: 'won' } })}>won</button>
+              <button type="button" data-testid="host-filter-clear" onClick={() => setFilter(undefined)}>clear</button>
+            </>
+          }
+        />
+        <pre data-testid="report-json">{JSON.stringify(report)}</pre>
+      </>
+    );
+  }
+
+  const current = () => JSON.parse(screen.getByTestId('report-json').textContent ?? '{}');
+
+  it('draws the host filter under the data source, and only once a data source is bound', () => {
+    const { unmount } = render(<FilterHarness initial={{ name: '', label: '' }} />);
+    expect(screen.queryByTestId('report-builder-filter')).toBeNull();
+    unmount();
+    render(<FilterHarness initial={EXISTING} />);
+    const slot = screen.getByTestId('report-builder-filter');
+    // Under the data source: inside that section, after its picker.
+    const source = screen.getByTestId('report-builder-source');
+    expect(source).toContainElement(slot);
+    expect(screen.getByTestId('report-builder-source-trigger').compareDocumentPosition(slot) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('a filter added redraws the preview at once with it; removing it redraws without', async () => {
+    ComponentRegistry.register('chart', () => <div data-testid="chart-stub" />);
+    const queryDataset = vi.fn(async (_dataset: string, _selection: Record<string, unknown>) => ({ rows: [{ stage: 'Won', total_amount: 10 }], fields: [] }));
+    render(<FilterHarness initial={EXISTING} dataSource={{ queryDataset }} />);
+    await waitFor(() => expect(queryDataset).toHaveBeenCalled());
+    expect(queryDataset.mock.calls.at(-1)?.[1]).not.toHaveProperty('runtimeFilter');
+
+    fireEvent.click(screen.getByTestId('host-filter-won'));
+    expect(current().runtimeFilter).toEqual({ stage: { $eq: 'won' } });
+    await waitFor(() => expect(queryDataset.mock.calls.at(-1)?.[1]).toHaveProperty('runtimeFilter', { stage: { $eq: 'won' } }));
+    expectSpecValid(current());
+
+    fireEvent.click(screen.getByTestId('host-filter-clear'));
+    expect(current()).not.toHaveProperty('runtimeFilter');
+    await waitFor(() => expect(queryDataset.mock.calls.at(-1)?.[1]).not.toHaveProperty('runtimeFilter'));
+  });
+
+  it('switching the data source drops the filter: its fields are the old dataset object\'s', () => {
+    const next = pickDataset({ ...EXISTING, runtimeFilter: { stage: { $eq: 'won' } } }, 'other', MEMBERS);
+    expect(next).not.toHaveProperty('runtimeFilter');
+    // Picking the data source already bound is no switch: the filter stays.
+    const same = pickDataset({ ...EXISTING, runtimeFilter: { stage: { $eq: 'won' } } }, 'pipeline', MEMBERS);
+    expect(same.runtimeFilter).toEqual({ stage: { $eq: 'won' } });
+  });
+});
