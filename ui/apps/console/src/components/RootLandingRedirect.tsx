@@ -49,7 +49,9 @@ import {
   SETUP_APP_NAME,
   isPlatformBuiltinApp,
   useLastApp,
+  useLauncherApps,
   usePhoneViewport,
+  useServedApps,
 } from '@object-ui/app-shell';
 import type { MetadataTypeStatus } from '@object-ui/app-shell';
 
@@ -296,6 +298,12 @@ export function RootLandingRedirect({ home }: RootLandingRedirectProps = {}) {
   // objectstack#35881 — a phone lands in the person's last app, and from
   // 768 px up so does a desktop (objectstack#36732).
   const phone = usePhoneViewport();
+  // objectstack#36732 — a desktop chooses only among the apps the member's
+  // permission sets show (`/me/apps`, the answer every launcher surface reads):
+  // a set-hidden app is never the landing. That answer is held under `/home`
+  // and `/apps/*`, not `/`, so a desktop `/` hands off to `/home` below.
+  const servedApps = useServedApps((apps ?? []) as LandingApp[]);
+  const { pending: servedPending } = useLauncherApps(apps as LandingApp[] | undefined);
   const { lastApp, settled: lastAppSettled } = useLastApp();
   const [lastAppWaitOver, setLastAppWaitOver] = useState(false);
   useEffect(() => {
@@ -326,8 +334,14 @@ export function RootLandingRedirect({ home }: RootLandingRedirectProps = {}) {
     return () => clearTimeout(id);
   }, [unresolved, refresh]);
 
+  // From 768 px up, `/` (a sign-in, the SSO callback) goes to `/home`, the one
+  // desktop resolver, which sits inside the `/me/apps` provider.
+  if (!phone && home === undefined) {
+    return <RedirectWithSplash to={`/home${location.search}${location.hash}`} replace />;
+  }
   if (loading || unresolved) return <LoadingFallback />;
   if (!lastAppSettled && !lastAppWaitOver) return <LoadingFallback />;
+  if (!phone && servedPending) return <LoadingFallback />;
   // `RedirectWithSplash`, not a bare `<Navigate>` (objectui#6378). This is the
   // widest measured instance of the boot blank: the line above holds the splash
   // while the app list loads, and handing off to a null-rendering redirect left
@@ -340,7 +354,7 @@ export function RootLandingRedirect({ home }: RootLandingRedirectProps = {}) {
   // app root it lands on carries them on to the app's own landing in turn.
   const landing = phone
     ? resolvePhoneLandingPath(apps as LandingApp[] | undefined, lastApp)
-    : resolveDesktopLandingPath(apps as LandingApp[] | undefined, lastApp);
+    : resolveDesktopLandingPath(servedApps, lastApp);
   if (home !== undefined && landing === '/home') return <>{home}</>;
   return <RedirectWithSplash to={`${landing}${location.search}${location.hash}`} replace />;
 }

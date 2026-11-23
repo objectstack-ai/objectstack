@@ -3878,7 +3878,7 @@ const zhHant = {
     welcomeAdminDescriptionNoAi: '從左側的「管理」選單建立你的第一個應用。',
     noAppsTitle: '還沒有應用',
     noAppsDescription: '系統正在準備中——管理員共享給你的應用會顯示在這裡。',
-    noAppsAddDescription: '建一個，或者請管理員把你加進已有的應用。',
+    noAppsAddDescription: '搭建你的第一個應用，或者從模板、應用市場開始。',
     buildWithAI: '用 AI 搭建',
     askAI: '問 AI',
     recoveryReminder: {

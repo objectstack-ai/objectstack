@@ -22,8 +22,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 // here, at collection, never inside a case's clock (`check:test-source-alias`).
 import '@objectstack/lint';
 import React from 'react';
-import { render, screen } from '@testing-library/react';
-import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom';
+import { render, screen, act } from '@testing-library/react';
+import { MemoryRouter, Routes, Route, useLocation, useNavigate, type NavigateFunction } from 'react-router-dom';
 import { MePermissionsProvider, type MePermissionsResponse } from '@object-ui/permissions';
 import { SchemaRendererContext, type ApiFetch } from '@object-ui/react';
 
@@ -139,10 +139,17 @@ const EVERYTHING_READABLE = {
 } as MePermissionsResponse;
 
 
+let navigateTo: NavigateFunction | null = null;
+function NavigatorProbe() {
+  navigateTo = useNavigate();
+  return null;
+}
+
 function renderConsoleAt(initialUrl: string, withSlot = true) {
   const routes = (
     <MemoryRouter initialEntries={[initialUrl]}>
       <LocationProbe />
+      <NavigatorProbe />
       <Routes>
         <Route path="/apps/:appName/*" element={<AppContent />} />
       </Routes>
@@ -204,7 +211,19 @@ describe('objectstack#36732 — the checklist sits on the Setup app\'s first pag
     expect(pathname()).toBe('/apps/com.objectstack.setup/sys_user');
     const top = screen.getByTestId('setup-first-page');
     expect(top).toContainElement(screen.getByTestId('host-checklist'));
-    expect(top).toContainElement(screen.getByTestId('object-view'));
+    // Above the page, in the one scrolling column.
+    expect(top.compareDocumentPosition(screen.getByTestId('object-view')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('moving off the first page keeps the routes mounted: only the slot goes', async () => {
+    renderConsoleAt('/apps/com.objectstack.setup/sys_user');
+    const page = await screen.findByTestId('object-view');
+    expect(screen.getByTestId('host-checklist')).toBeInTheDocument();
+    act(() => navigateTo!('/apps/com.objectstack.setup/sys_team'));
+    expect(pathname()).toBe('/apps/com.objectstack.setup/sys_team');
+    expect(screen.queryByTestId('host-checklist')).not.toBeInTheDocument();
+    // The same element: the route below the slot was not unmounted and mounted again.
+    expect(screen.getByTestId('object-view')).toBe(page);
   });
 
   it('draws it on a direct visit to that page too', async () => {

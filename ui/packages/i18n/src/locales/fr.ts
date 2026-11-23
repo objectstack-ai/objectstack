@@ -3783,7 +3783,7 @@ const fr = {
     welcomeAdminDescriptionNoAi: "Configurez votre première application depuis le menu Administration à gauche.",
     noAppsTitle: "Aucune application pour l'instant",
     noAppsDescription: "Le système est en cours de configuration — les applications partagées par votre administrateur apparaîtront ici.",
-    noAppsAddDescription: "Créez-en une, ou demandez à votre administrateur de vous ajouter à une application existante.",
+    noAppsAddDescription: "Créez votre première application, ou partez d'un modèle ou de la place de marché.",
     buildWithAI: "Créer avec l'IA",
     askAI: "Demander à l'IA",
     recoveryReminder: {

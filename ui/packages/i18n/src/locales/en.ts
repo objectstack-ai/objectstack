@@ -4498,7 +4498,7 @@ const en = {
     welcomeAdminDescriptionNoAi: 'Set up your first application from the Administration menu on the left.',
     noAppsTitle: 'No applications yet',
     noAppsDescription: 'The system is being set up — apps your admin shares with you will show up here.',
-    noAppsAddDescription: 'Build one, or ask an administrator to add you to an existing app.',
+    noAppsAddDescription: 'Build your first app, or start from a template or the app marketplace.',
     buildWithAI: 'Build with AI',
     askAI: 'Ask AI',
     recoveryReminder: {

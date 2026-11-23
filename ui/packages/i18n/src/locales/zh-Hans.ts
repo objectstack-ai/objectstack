@@ -3878,7 +3878,7 @@ const zh = {
     welcomeAdminDescriptionNoAi: '从左侧的「管理」菜单创建你的第一个应用。',
     noAppsTitle: '还没有应用',
     noAppsDescription: '系统正在准备中——管理员共享给你的应用会显示在这里。',
-    noAppsAddDescription: '建一个，或者请管理员把你加进已有的应用。',
+    noAppsAddDescription: '搭建你的第一个应用，或者从模板、应用市场开始。',
     buildWithAI: '用 AI 搭建',
     askAI: '问 AI',
     recoveryReminder: {

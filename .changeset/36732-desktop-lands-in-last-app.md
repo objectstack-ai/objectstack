@@ -1,5 +1,6 @@
 ---
 '@object-ui/console': patch
+'@object-ui/app-shell': patch
 '@object-ui/auth': patch
 '@object-ui/i18n': patch
 ---
@@ -9,7 +10,7 @@ feat(console): from 768 px up a sign-in lands in the last-used app, and the plat
 Clause-②: yes (widening)
 Metadata-protocol: none
 
-From 768 px up there is no platform home page any more. A sign-in, the SSO round trip and the old `/home` address all land the person in an app, in this order: the app they last had open, while it is still there for them; else the app the product declares `isDefault`; else the first app somebody put into the environment (never Setup or Studio).
+From 768 px up there is no platform home page any more. A sign-in, the SSO round trip and the old `/home` address all land the person in an app their permission sets show, in this order: the app they last had open, while it is still there for them; else the app the product declares `isDefault`; else the first app somebody put into the environment (never Setup or Studio).
 
 - A person with no such app at all stays on `/home`, which now draws only the no-apps empty state: 「No applications yet」, and for a viewer who may add an app the same doors the sidebar's 「Add app」 offers (build with AI, start from a template, the app marketplace). An administrator's first-run checklist stays above it.
 - An administrator's first-run checklist, while it has open items, moves to the top of the Setup app's first page (the page Setup opens on). It is drawn from 768 px up only, and a phone is unchanged.

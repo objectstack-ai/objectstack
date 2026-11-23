@@ -233,7 +233,7 @@ function DesktopNoApps({
       {mayAddApp ? (
         <EmptyDescription>
           {t('home.noAppsAddDescription', {
-            defaultValue: 'Build one, or ask an administrator to add you to an existing app.',
+            defaultValue: 'Build your first app, or start from a template or the app marketplace.',
           })}
         </EmptyDescription>
       ) : showAuthoringGate ? (
@@ -750,7 +750,9 @@ export function HomePage({ checklist }: HomePageProps = {}) {
 
   // objectstack#36732 — a desktop with no product app (none at all, or only
   // the platform's own Setup and Studio) draws the no-apps empty state.
-  const desktopNoApps = !phone && !activeApps.some(isProductApp);
+  // The launcher's list (`/me/apps`): an app a permission set hides is not one
+  // of the viewer's, as the landing that sent them here reads it.
+  const desktopNoApps = !phone && !launcher.apps.some(isProductApp);
 
   if (activeApps.length === 0 || desktopNoApps) {
     return (

@@ -1972,6 +1972,20 @@ function carryQueryOntoLanding(target: string, search: string, hash: string): st
 }
 
 /**
+ * The route an app's root lands on for this member: `resolveLandingRoute` over
+ * the trees the member is shown, as `AppRootLanding` asks it once the reads
+ * are decided.
+ */
+function memberLandingRoute(app: any, gates: ReturnType<typeof useNavMemberGates>, ctx: NavTemplateContext): string {
+  const areas = (app?.areas || []) as Array<{ navigation?: NavigationItem[] } | null | undefined>;
+  const trees = [
+    navEntriesShownToMember(app?.navigation || [], gates),
+    ...areas.map((area) => navEntriesShownToMember(area?.navigation || [], gates)),
+  ];
+  return resolveLandingRoute(app, trees, gates.evaluateVisibility, ctx);
+}
+
+/**
  * objectstack#36732 (item 5, option A) — the host's element above the Setup
  * app's first page (`setupFirstPageSlot.ts`): the page Setup's root lands on
  * for this member, asked the way `AppRootLanding` asks it, over the trees the
@@ -1993,19 +2007,14 @@ function SetupFirstPageTop({
   const phone = usePhoneViewport();
   const gates = useNavMemberGates();
   const location = useLocation();
-  if (!slot || !inSetup || phone) return <>{children}</>;
-  const areas = (app?.areas || []) as Array<{ navigation?: NavigationItem[] } | null | undefined>;
-  const trees = [
-    navEntriesShownToMember(app?.navigation || [], gates),
-    ...areas.map((area) => navEntriesShownToMember(area?.navigation || [], gates)),
-  ];
-  const landing = resolveLandingRoute(app, trees, gates.evaluateVisibility, ctx);
   // The path below `/apps/SEGMENT/`, the base every landing route is relative to.
   const inAppPath = location.pathname.split('/').slice(3).join('/');
-  if (!isLandingPath(inAppPath, landing)) return <>{children}</>;
+  const onFirstPage = Boolean(slot) && inSetup && !phone && isLandingPath(inAppPath, memberLandingRoute(app, gates, ctx));
+  // The same two wrappers on every route, the slot's place held by `null`
+  // elsewhere, so moving onto or off the first page never remounts the routes.
   return (
-    <div className="h-full overflow-y-auto" data-testid="setup-first-page">
-      {slot()}
+    <div className={onFirstPage ? 'h-full overflow-y-auto' : 'h-full'}>
+      {onFirstPage && slot ? <div data-testid="setup-first-page">{slot()}</div> : null}
       <div className="h-full">{children}</div>
     </div>
   );

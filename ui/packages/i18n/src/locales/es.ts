@@ -3787,7 +3787,7 @@ const es = {
     welcomeAdminDescriptionNoAi: "Configure su primera aplicación desde el menú de Administración de la izquierda.",
     noAppsTitle: "Todavía no hay aplicaciones",
     noAppsDescription: "El sistema se está preparando — las aplicaciones que su administrador comparta aparecerán aquí.",
-    noAppsAddDescription: "Cree una o pida a su administrador que le añada a una aplicación existente.",
+    noAppsAddDescription: "Cree su primera aplicación, o empiece con una plantilla o el mercado de aplicaciones.",
     buildWithAI: "Crear con IA",
     askAI: "Preguntar a la IA",
     recoveryReminder: {

@@ -28,6 +28,7 @@
 import { useMetadata } from '../providers/MetadataProvider.js';
 import { useLastApp } from '../context/LastAppProvider.js';
 import { usePhoneViewport } from './usePhoneViewport.js';
+import { useServedApps } from './useLauncherApps.js';
 import {
   HOME_LAUNCHER_PATH,
   resolveDeclaredHomePath,
@@ -46,6 +47,9 @@ export function useHomePath(): string {
   const { apps } = useMetadata();
   const phone = usePhoneViewport();
   const { lastApp } = useLastApp();
+  // objectstack#36732 — never an app the member's permission sets hide
+  // (`/me/apps`), the same narrowing the desktop landing reads.
+  const served = useServedApps((apps ?? []) as DeclaredHomeApp[]);
   if (phone) return resolveDeclaredHomePath(apps as DeclaredHomeApp[] | undefined) ?? HOME_LAUNCHER_PATH;
-  return resolveDesktopHomePath(apps as DeclaredHomeApp[] | undefined, lastApp);
+  return resolveDesktopHomePath(served, lastApp);
 }

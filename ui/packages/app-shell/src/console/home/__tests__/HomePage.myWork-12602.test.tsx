@@ -130,7 +130,8 @@ vi.mock('../../../runtime-config', () => ({
 }));
 vi.mock('../../../hooks/useRecentItems', () => ({ useRecentItems: () => ({ recentItems: [] }) }));
 vi.mock('../../../hooks/useFavorites', () => ({ useFavorites: () => ({ favorites: [] }) }));
-vi.mock('../../../hooks/useAiSurface', () => ({ resolveAiApiBase: () => '' }));
+// `useAiSurfaceEnabled`: the desktop no-apps page's 「Add app」 doors read it (objectstack#36732).
+vi.mock('../../../hooks/useAiSurface', () => ({ resolveAiApiBase: () => '', useAiSurfaceEnabled: () => ({ enabled: false, loading: false }) }));
 // The drafts row's two seams, the ones the retired banner read.
 vi.mock('../../../preview/usePendingDrafts', () => ({
   usePendingDrafts: () => ({ count: state.draftCount, entries: state.draftEntries }),
@@ -359,6 +360,18 @@ describe('the pending-drafts row (objectui#12602)', () => {
     } finally {
       restoreWidth();
     }
+  });
+
+  it('objectstack#36732 — on a desktop with no app it is drawn above the no-apps page', async () => {
+    state.apps = [];
+    state.draftCount = 1;
+    state.draftEntries = [{ type: 'app', name: 'helpdesk', packageId: 'p' }];
+    render(<HomePage />);
+    const row = screen.getByTestId('home-pending-drafts');
+    const empty = screen.getByTestId('home-no-apps');
+    expect(row.compareDocumentPosition(empty) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    await userEvent.setup().click(screen.getByTestId('pending-drafts-publish'));
+    expect(publishAllMock).toHaveBeenCalledTimes(1);
   });
 
   it('is absent with nothing to publish', () => {
