@@ -35,6 +35,7 @@
 import type { DroppedFieldsEvent, EngineUpdateOptions, HookContext, QueryAST } from '@objectstack/spec/data';
 import type { WriteObservabilityOptions } from '@objectstack/spec/contracts';
 import { collectComposableReadableIds } from './filter-comparand-shape.js';
+import { refuseSyncProvenanceWrite } from './sync-provenance-write.js';
 // [ADR-0155 D4] The fixed-read leaf seam reads the engine through the security
 // resolvers' host, built once per engine, which carries every member it reads.
 import { securityResolversHost } from './engine-facet-hosts.js';
@@ -188,6 +189,11 @@ export class UpdateFacet {
        ownUnit ? () => this.inAfterAbortUnit(body) : body;
      this.logger.debug('Update operation starting', { object });
      this.assertWriteAllowed(object, 'update');
+     // [ADR-0153 D4] The insert face's rule: a `_sync_` provenance column is the
+     // sync-in pull's alone, judged on the caller's payload before anything
+     // runs, and the pull's mark does not travel past this write.
+     const syncJudgedContext = refuseSyncProvenanceWrite(object, data, options?.context, 'update');
+     if (syncJudgedContext !== options?.context) options = { ...options, context: syncJudgedContext } as typeof options;
      // [#8844] See the insert face — an organization row that changes identity
      // invalidates the memo just as one that appears does.
      if (object === ORGANIZATION_OBJECT) this.invalidateOrganizationProbe();

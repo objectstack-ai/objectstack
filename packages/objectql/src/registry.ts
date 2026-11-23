@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { ServiceObject, ObjectOwnership, type RelatedListsArrangement, resolveInjectedSystemColumns, resolveInjectedColumnProvenance as injectedColumnProvenance, AUDIT_PROVENANCE_FIELDS } from '@objectstack/spec/data';
+import { ServiceObject, ObjectOwnership, type RelatedListsArrangement, resolveInjectedSystemColumns, resolveInjectedColumnProvenance as injectedColumnProvenance, AUDIT_PROVENANCE_FIELDS, SYNC_PROVENANCE_COLUMNS, SYNC_PROVENANCE_FIELD_DEFS } from '@objectstack/spec/data';
 // [#4513] The audit-family governance table, and [#6562] the injected-column
 // DEFINITION tables it governs — see the re-exports below for why both live in a
 // package `objectql` and `metadata-protocol` both depend on.
@@ -35,6 +35,7 @@ import {
 import { resolveTenancyPosture, resolveSearchPinyinEnabled } from '@objectstack/types';
 import { postureEnforcesWall } from '@objectstack/spec/security';
 import { provisionSearchCompanion } from './search-companion.js';
+import { provisionSyncProvenanceIndex } from './sync-provenance-index.js';
 import type { ExtensionPlacementNote } from './registry-extension-placement.js';
 import { ObjectStackManifest, InstalledPackage, type InstalledPackageSource, customizationBasePackageId, type NamespaceObjectNameClash } from '@objectstack/spec/kernel';
 import { applyProtection } from '@objectstack/spec/shared';
@@ -567,6 +568,8 @@ export function applySystemFields(
   // [ADR-0142 D3] The queue column rides with the owner anchor (the plan's
   // `queue` is its `owner`): "sits in Q" is `queue == Q AND owner_id IS NULL`.
   const wantQueue = plan.queue;
+  // [ADR-0153 D4] The five `_sync_` provenance columns of a `synced` object.
+  const wantSync = plan.sync;
 
   // Nothing to INJECT — the two opt-out rows (`systemFields: false`,
   // `managedBy: 'better-auth'`) and objects whose every column is already
@@ -580,7 +583,7 @@ export function applySystemFields(
   // `systemFields.tenant` only, so `systemFields: false` leaves the wall live).
   // Returning `schema` here was the last exit that decided the index by NOT
   // asking, which is how the withholding survived #8375's convergence.
-  if (!wantTenant && !wantAudit && !wantOwner && !wantOwningBusinessUnit && !wantQueue) {
+  if (!wantTenant && !wantAudit && !wantOwner && !wantOwningBusinessUnit && !wantQueue && !wantSync) {
     return provisionTenantScopeIndex(schema, opts);
   }
 
@@ -712,16 +715,32 @@ export function applySystemFields(
     additions[QUEUE_FIELD] = { ...QUEUE_FIELD_DEF };
   }
 
+  // [ADR-0153 D4] The sync-in provenance columns, on a `synced` object only:
+  // the mapping that wrote the row, its key in the source, when and by which
+  // run it was last written, and D3's mark (planned with the rest, written by
+  // nothing until the delete marking lands). `readonly`, `system`, `hidden`:
+  // the pull, writing as the system, is their one writer, and the engine
+  // refuses any other write that names one (`refuseSyncProvenanceWrite`). No
+  // author field can take a `_sync_` name, so the guard below only ever admits
+  // the platform's own definition coming back through a re-registration. Their
+  // index is {@link provisionSyncProvenanceIndex}, stamped after the tenant
+  // index on the merged result.
+  if (wantSync) {
+    for (const name of SYNC_PROVENANCE_COLUMNS) {
+      if (!schema.fields?.[name]) additions[name] = { ...SYNC_PROVENANCE_FIELD_DEFS[name] };
+    }
+  }
+
   // [#8375] The tenant INDEX is decided over the MERGED result, never over the
   // input — so this function and the read-exit seam ask the same question of the
   // same document shape. Both cases below route through it, including the one
   // that adds no field at all (an object whose every system column is already
   // declared still owes the index decision).
   if (Object.keys(additions).length === 0 && Object.keys(overrides).length === 0) {
-    return provisionTenantScopeIndex(schema, opts);
+    return provisionSyncProvenanceIndex(provisionTenantScopeIndex(schema, opts));
   }
 
-  return provisionTenantScopeIndex(
+  return provisionSyncProvenanceIndex(provisionTenantScopeIndex(
     {
       ...schema,
       // `additions` LOSE to an author's field (a declared `owner_id` is theirs);
@@ -729,7 +748,7 @@ export function applySystemFields(
       fields: { ...additions, ...(schema.fields ?? {}), ...overrides },
     },
     opts,
-  );
+  ));
 }
 
 /**

@@ -47,6 +47,7 @@ import { SummaryRecomputeError } from './summary-errors.js';
 import { ReadonlyFieldRejectedError } from './readonly-strict-errors.js';
 import { DuplicateRecordError } from './duplicate-record-error.js';
 import { NotNullRefusalError, envelopeDriverWriteRefusal } from './not-null-refusal-error.js';
+import { refuseSyncProvenanceWrite } from './sync-provenance-write.js';
 import { ASSIGNMENT_RULE_TYPE, AssignmentRuleEvaluator, OWNERSHIP_QUEUE_SOURCE_SLOT } from './assignment-rules.js';
 import type { AssignmentQueueService } from './assignment-rules.js';
 import { redactBoundStatement } from '@objectstack/types';
@@ -342,6 +343,12 @@ export class InsertFacet {
       ownUnit ? () => this.inAfterAbortUnit(body) : body;
     this.logger.debug('Insert operation starting', { object, isBatch: Array.isArray(data) });
     this.assertWriteAllowed(object, 'insert');
+    // [ADR-0153 D4] A `_sync_` provenance column is written by the sync-in pull
+    // alone, whatever the caller's context: judged on the caller's payload,
+    // before anything runs. The pull's mark is consumed here, so the hooks and
+    // flows this write triggers write as any other system caller.
+    const syncJudgedContext = refuseSyncProvenanceWrite(object, data, options?.context, 'insert');
+    if (syncJudgedContext !== options?.context) options = { ...options, context: syncJudgedContext } as typeof options;
     // [#8844] The organization set is about to change. Dropped BEFORE the write
     // rather than after it, so a concurrent read cannot repopulate the memo from
     // a snapshot this insert is in the middle of invalidating.

@@ -82,6 +82,8 @@ import {
 } from './connector-input-schema.js';
 import { ConnectorPullError, type ConnectorPullRefusalReason } from './pull-refusal.js';
 import { pullDatasourceSource, type DatasourcePullResult } from './datasource-pull.js';
+import { markSyncPullWrite } from '@objectstack/objectql';
+import { carriesSyncProvenanceColumns, mappedSyncProvenanceTarget, stampSyncProvenance } from './sync-provenance-stamp.js';
 import {
     SYNC_RUN_OBJECT,
     type SyncRunCounts,
@@ -774,6 +776,25 @@ async function pullOnce(
             schema = await protocol.getObjectSchema(objectName, environmentId);
         }
     } catch { /* judged by nobody, coerced as pass-through — the door's rule */ }
+    // [ADR-0153 D4] The provenance columns are the pull's to stamp, never a
+    // mapping's to write. A `synced` target carries them (the plan injects
+    // them); one that withholds every injected column (`systemFields: false`)
+    // cannot record what wrote its rows, and is refused like the datasource
+    // pull refuses it. A target of another bucket is refused at build (a
+    // sourced mapping targets a `synced` object) and gets no stamp here.
+    const mappedSync = mappedSyncProvenanceTarget(artifact.fieldMapping);
+    if (mappedSync) {
+        return refuse('VALIDATION_ERROR', 400, 'mapping_target_refused',
+            `Mapping "${mappingName}": fieldMapping writes '${mappedSync}', a sync-in provenance column the pull stamps `
+            + 'itself (ADR-0153 D4); remove that entry.');
+    }
+    const stampsProvenance = carriesSyncProvenanceColumns(schema);
+    if (!stampsProvenance && isPlainObject(schema) && schema.managedBy === 'synced') {
+        return refuse('VALIDATION_ERROR', 400, 'mapping_target_refused',
+            `Mapping "${mappingName}": targetObject '${objectName}' carries no _sync_ provenance columns (it declares `
+            + 'systemFields: false, which withholds every injected column), so a pull cannot record which mapping and '
+            + 'run wrote a row. Remove systemFields: false from the synced target.');
+    }
     const refusedTarget = refuseUnknownMappingTargets(artifact, objectName, schema);
     if (refusedTarget) return refuseWith(refusedTarget, 'mapping_target_refused');
 
@@ -876,12 +897,21 @@ async function pullOnce(
     });
     if (!applied.ok) return refuseWith(applied, 'mapping_apply_refused');
 
+    // [ADR-0153 D4] Stamped onto a `synced` target, and written with the
+    // pull's mark — the one context the engine admits a `_sync_` column from —
+    // as the system when the caller handed no context: the columns are
+    // `readonly`, which only a system write keeps.
+    const rows = stampsProvenance
+        ? stampSyncProvenance(applied.rows, matchFields, {
+            mapping: mappingName, runId: run.id, pulledAt: new Date().toISOString(),
+        })
+        : applied.rows;
     const summary = await runImport({
         p: protocol,
         objectName,
         environmentId,
-        context,
-        rows: applied.rows as Array<Record<string, any>>,
+        context: stampsProvenance ? markSyncPullWrite(context ?? { isSystem: true }) : context,
+        rows: rows as Array<Record<string, any>>,
         metaMap: buildFieldMetaMap(schema),
         writeMode,
         matchFields,

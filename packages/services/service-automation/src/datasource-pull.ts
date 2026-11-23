@@ -77,7 +77,7 @@ import {
     type ImportRunSummary,
     type MappingArtifactLike,
 } from '@objectstack/core';
-import { needsExternalDriverFloor, resolveExternalRowCap } from '@objectstack/objectql';
+import { markSyncPullWrite, needsExternalDriverFloor, resolveExternalRowCap } from '@objectstack/objectql';
 import { EXTERNAL_SCOPE_REMEDY, externalOrganizationScopeOf } from '@objectstack/core';
 import { postureEnforcesWall } from '@objectstack/spec/security';
 import { resolveQueryReadLimits, resolveTenancyPosture } from '@objectstack/types';
@@ -97,6 +97,7 @@ import {
 // cycle of call-time references only, which neither module evaluates at load.
 import { refuseBlankMatchKeys } from './connector-pull.js';
 import { ConnectorPullError, type ConnectorPullRefusalReason } from './pull-refusal.js';
+import { carriesSyncProvenanceColumns, mappedSyncProvenanceTarget, stampSyncProvenance } from './sync-provenance-stamp.js';
 
 /** A datasource source's pull: the federated object, its read path and the window positions. */
 export interface DatasourcePullResult {
@@ -217,6 +218,21 @@ export async function pullDatasourceSource(
             `targetObject '${targetObject}' is not managedBy: 'synced' (it is `
             + `${target.managedBy === undefined ? 'unset' : `'${String(target.managedBy)}'`}). A pulled copy is read-only `
             + "to members, so a member's edit is never kept or lost silently by the next pull; declare managedBy: 'synced' on it.");
+    }
+    // [ADR-0153 D4] The provenance columns are the pull's to stamp, never a
+    // mapping's to write; and a target without them (`systemFields: false`
+    // withholds every injected column) cannot record what wrote its rows.
+    const mappedSync = mappedSyncProvenanceTarget(artifact.fieldMapping);
+    if (mappedSync) {
+        return invalid('mapping_target_refused',
+            `fieldMapping writes '${mappedSync}', a sync-in provenance column the pull stamps itself (ADR-0153 D4); `
+            + 'remove that entry.');
+    }
+    if (!carriesSyncProvenanceColumns(target)) {
+        return invalid('mapping_target_refused',
+            `targetObject '${targetObject}' carries no _sync_ provenance columns (it declares systemFields: false, which `
+            + 'withholds every injected column), so a pull cannot record which mapping and run wrote a row. Remove '
+            + "systemFields: false from the synced target.");
     }
     const refusedTarget = refuseUnknownMappingTargets(artifact, targetObject, target);
     if (refusedTarget) {
@@ -342,17 +358,25 @@ export async function pullDatasourceSource(
     const summary = emptySummary();
     const trimWhitespace = true;
     const metaMap = buildFieldMetaMap(target);
+    // [ADR-0153 D4] The writes carry the pull's mark, the one context the
+    // engine admits a `_sync_` column from, and run as the system when the
+    // caller handed no context (as the reads do): the provenance columns are
+    // `readonly`, which only a system write keeps.
+    const writeContext = markSyncPullWrite(context ?? { isSystem: true });
     const write = async (rows: Rec[]): Promise<boolean[]> => {
         const applied = applyMappingToRows(rows, artifact, { objectSchema: target, trimWhitespace });
         if (!applied.ok) {
             return refuse(applied.code, applied.status, 'mapping_apply_refused', `Mapping "${mapping}": ${applied.error}`);
         }
+        const stamped = stampSyncProvenance(applied.rows, matchFields, {
+            mapping, runId: run.id, pulledAt: new Date().toISOString(),
+        });
         const ran = await runImport({
             p: protocol,
             objectName: targetObject,
             environmentId,
-            context,
-            rows: applied.rows as Array<Record<string, any>>,
+            context: writeContext,
+            rows: stamped as Array<Record<string, any>>,
             metaMap,
             writeMode: 'upsert',
             matchFields,
