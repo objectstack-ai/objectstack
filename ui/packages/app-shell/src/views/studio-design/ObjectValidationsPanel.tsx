@@ -532,7 +532,24 @@ function JsonField({
 }
 
 /**
+ * A row's targets with `named` as its named next states, keeping its `''`
+ * target (a clear of the field, allowed from this state) when `clearable`.
+ * An existing `''` keeps its place, so an unchanged edit writes the row back
+ * as it was read.
+ */
+function rowTargets(named: string[], clearable: boolean, prev: string[]): string[] {
+  if (!clearable) return named;
+  const at = prev.indexOf('');
+  const idx = at < 0 ? named.length : Math.min(at, named.length);
+  return [...named.slice(0, idx), '', ...named.slice(idx)];
+}
+
+/**
  * State-machine `transitions` editor: from-state → allowed next states (CSV).
+ *
+ * The CSV box holds the named next states; the `''` target, which lets a user
+ * clear the field while the record is in the row's state, is the row's
+ * "May be cleared" checkbox, and editing the box keeps it.
  *
  * objectstack#26731 — the row "Add transition" opens is kept HERE until it has
  * a from-state. It used to be written as the key `""`, which is no transition:
@@ -590,14 +607,30 @@ function TransitionsField({
           />
           <span className="text-muted-foreground">→</span>
           <input
-            value={to.join(', ')}
+            value={to.filter((s) => s !== '').join(', ')}
             disabled={disabled}
             placeholder={t('engine.studio.rules.transitionTo', locale)}
             onChange={(e) =>
-              setRow(i, from, e.target.value.split(',').map((s) => s.trim()).filter(Boolean))
+              setRow(
+                i,
+                from,
+                rowTargets(e.target.value.split(',').map((s) => s.trim()).filter(Boolean), to.includes(''), to),
+              )
             }
             className={`min-w-0 flex-1 rounded border bg-background px-2 py-1 text-[12px] ${DISABLED_LOOK}`}
           />
+          <label
+            title={t('engine.studio.rules.transitionClearableHint', locale)}
+            className="flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground"
+          >
+            <input
+              type="checkbox"
+              checked={to.includes('')}
+              disabled={disabled}
+              onChange={(e) => setRow(i, from, rowTargets(to.filter((s) => s !== ''), e.target.checked, to))}
+            />
+            {t('engine.studio.rules.transitionClearable', locale)}
+          </label>
           {!disabled && (
             <button
               type="button"
