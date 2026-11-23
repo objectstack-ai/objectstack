@@ -5,7 +5,7 @@
 
 fix(runtime)!: `callData` refuses a disabled package's data at every relation hop and for a system context too; the MCP stdio bridge asks every hop
 
-Clause-②: no (narrowing: `callData` newly refuses 404 `OBJECT_PACKAGE_DISABLED` for a nested-relation condition into a disabled package's object at any hop, not only directly beneath the queried object's lookup, for every caller including a system context, and refuses a disabled package's addressed object for a system context and on a host with no protocol service; a non-system caller is also refused 404 `OBJECT_API_DISABLED` / 405 `OBJECT_API_METHOD_NOT_ALLOWED` for an unexposed target past the first hop, on `callData` and on the MCP stdio bridge; no export is added or removed)
+Clause-②: yes (narrowing: `callData` newly refuses 404 `OBJECT_PACKAGE_DISABLED` for a nested-relation condition into a disabled package's object at any hop, not only directly beneath the queried object's lookup, for every caller including a system context, and refuses a disabled package's addressed object for a system context and on a host with no protocol service; a non-system caller is also refused 404 `OBJECT_API_DISABLED` / 405 `OBJECT_API_METHOD_NOT_ALLOWED` for an unexposed target past the first hop, on `callData` and on the MCP stdio bridge; no export is added or removed)
 Metadata-protocol: none
 
 <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed or renamed, and nothing stored is rewritten: every moved answer is what the protocol's data route already answers for the same object and the same condition. A caller that needs those records re-enables the package or exposes the object. -->
