@@ -21,7 +21,7 @@ import {
   shownArrangement,
   staleNames,
   togglePin,
-} from '../designModeHeaderPins';
+} from '../designModeHeaderPinsModel';
 
 const ACTIONS = [
   { name: 'log_call', label: 'Log call', locations: ['record_more'] },

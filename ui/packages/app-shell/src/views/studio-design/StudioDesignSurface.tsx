@@ -102,6 +102,7 @@ import { StudioRefusalStrip } from './StudioRefusalStrip.js';
 import { StudioNavItemInspector, StudioPicker } from './StudioNavItemInspector.js';
 import { PACKAGE_LIST_TOAST_ID, STUDIO_LANDING_PATH } from './PackageSwitcher.js';
 import { StudioBackToApp, type StudioAppTarget } from './StudioBackToApp.js';
+import { addNewObjectToAppMenu } from './newObjectJoinsAppMenu.js';
 import {
   ContributedNavRows,
   InterfacesNavContributionsContext,
@@ -294,7 +295,7 @@ import type { FormViewSpec } from '../metadata-admin/form-spec.js';
 import { getMetadataResource } from '../metadata-admin/registry.js';
 import { useMetadataClient, useMetadataTypes } from '../metadata-admin/useMetadata.js';
 // objectui#11773 — every draft save of an existing item sends the version its buffer was built on.
-import { readDraftForSave, useDraftSaveGuard } from '../metadata-admin/DraftConflictDialog.js';
+import { publishedPinOf, isPublishConflictKeptEditing, readDraftForSave, useDraftSaveGuard } from '../metadata-admin/DraftConflictDialog.js';
 import {
   authoredObjectBuffer,
   authoredPublishedObject,
@@ -1675,6 +1676,7 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
                   picked in the app, or on the Studio landing. */}
               <StudioBackToApp
                 packageId={packageId}
+                packageLabel={pkgEntry?.id === packageId ? pkgEntry.name : null}
                 apps={publishedApps}
                 locale={locale}
                 beforeNavigate={confirmLeavePillar}
@@ -1746,8 +1748,9 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
                 </button>
               )}
               {/* objectstack#36511 — Changes and Publish are for drafts, which
-                  only the copilot leaves now: drawn only while one is pending,
-                  at the left of Cancel and Save. */}
+                  the copilot and the editors still on drafts (the Interfaces
+                  pillar, the Metadata area) leave: drawn only while one is
+                  pending, at the left of Cancel and Save. */}
               {hasPending && (
                 <>
                 {/* objectui#12459 — the pending count is a pill, not "· N" text. */}
@@ -6021,6 +6024,9 @@ export function DataPillar({
   const {
     save: saveObjDraft,
     recordRead: recordObjRead,
+    // objectstack#36601 — and the published row the buffer was loaded at, for the Save's publish.
+    recordPublished: recordObjPublished,
+    publish: publishObj,
     dialog: objConflictDialog,
   } = useDraftSaveGuard(client, reloadObjDraft);
   // objectstack#28575 — the extension buffer's own guard, pinned by its draft read at the pair.
@@ -6324,6 +6330,8 @@ export function DataPillar({
         setObjDraftChanges(draftBody ? readDraftChanges(draftRead.answer) : null);
         // objectui#11773 — the next save is pinned to what the draft read served.
         recordObjRead('object', current.name, packageId, draftRead.pin);
+        // objectstack#36601 — …and its publish to the published row the layers served.
+        recordObjPublished('object', current.name, packageId, publishedPinOf(layRaw));
         // objectui#11272 — the buffer installed is clean, as every pillar's
         // is: an edit a period began while it was another object's is dropped
         // with it, never sent as this object's.
@@ -6357,7 +6365,7 @@ export function DataPillar({
         loadedNameRef.current = null;
       }
     };
-  }, [client, current, packageId, publishNonce, objReloadNonce, objRefreshNonce, recordObjRead]);
+  }, [client, current, packageId, publishNonce, objReloadNonce, objRefreshNonce, recordObjRead, recordObjPublished]);
 
   // objectstack#28575 — the pair's extension of the open base object: its
   // pending draft at the pair, else its published row there, else a new
@@ -6665,6 +6673,34 @@ export function DataPillar({
         setFormMode('layout');
         setCreating(false);
         toast.success(tFormat('engine.studio.save.done', locale, { items: label }), { id: STUDIO_SAVE_TOAST_ID });
+        // objectstack#36748 — and it joins the menu of its package's one app,
+        // so an app made before its objects does not open empty. Only in the
+        // rail's own package (not a customization pair); a failure keeps the
+        // object and says the menu was left as it was.
+        if (target.packageId === railPackageId && !packageReadOnly) {
+          const join = await addNewObjectToAppMenu(
+            client as unknown as Parameters<typeof addNewObjectToAppMenu>[0],
+            { packageId: target.packageId, objectName: name },
+            {
+              notListed: t('engine.studio.data.appMenu.unreadable', locale),
+              pendingDraft: t('engine.studio.data.appMenu.pendingDraft', locale),
+              noVersion: t('engine.studio.data.appMenu.unreadable', locale),
+              notWritable: t('engine.studio.data.appMenu.unreadable', locale),
+            },
+          );
+          if (join.kind === 'failed') {
+            const reason = plainRefusal(join.error).message;
+            toast.warning(
+              join.app
+                ? tFormat('engine.studio.data.appMenu.failed', locale, {
+                    object: label,
+                    app: navItemLabelText(join.app.label, locale) || join.app.name,
+                    reason,
+                  })
+                : tFormat('engine.studio.data.appMenu.failedNoApp', locale, { object: label, reason }),
+            );
+          }
+        }
       } catch (e) {
         // Shown in the create dialog, which prints the message only: kept whole.
         setError(plainRefusal(e));
@@ -6729,14 +6765,20 @@ export function DataPillar({
       objStoredRef.current = draft;
       setHasDraft(true);
       setSaving('publish');
-      const live = await publishSavedItem(client, { type: 'object', name, packageId: to }, hadDraft);
+      // objectstack#36601 — pinned to the published row this buffer was loaded at.
+      const live = await publishSavedItem(client, { type: 'object', name, packageId: to }, hadDraft, publishObj);
+      // The published row moved and the author chose to reload: the load replaces the buffer.
+      if (!live.ok && 'reloaded' in live) return { kind: 'declined' };
       if (!live.ok) {
         if (live.draftDiscarded) {
           objStoredRef.current = storedBefore;
           setHasDraft(false);
           recordObjRead('object', name, to, { ifNoneMatch: '*' });
         }
-        const refusal = publishRefusal(publishFailureOf('object', name, live.error), 'object', body, locale);
+        // The published row moved and the author kept editing: read as the draft conflict's "not saved".
+        const refusal = isPublishConflictKeptEditing(live.error)
+          ? objectSaveRefusal(live.error, body, locale)
+          : publishRefusal(publishFailureOf('object', name, live.error), 'object', body, locale);
         setError(refusal);
         return { kind: 'refused', reason: refusal.message };
       }
@@ -6760,7 +6802,7 @@ export function DataPillar({
     } finally {
       setSaving(false);
     }
-  }, [saveObjDraft, recordObjRead, client, current, objDraft, hasDraft, publishedFieldNames, packageId, locale]);
+  }, [saveObjDraft, recordObjRead, publishObj, client, current, objDraft, hasDraft, publishedFieldNames, packageId, locale]);
 
   // objectstack#34931 — Cancel keeps what the refused save would have lost:
   // each field a finding names goes back as the server holds it, and nothing
@@ -8872,6 +8914,10 @@ export function AutomationsPillar({
         }
         const item: Surface = target === null ? { type: 'flow', name, label } : { type: 'flow', name, label, addedIn: target };
         setFlows((fs) => [...fs.filter((f) => f.name !== name), item]);
+        // objectstack#36742 — the engine's row for the new flow is read, as
+        // after a Save: the snapshot held was taken before the flow existed,
+        // and its missing row read as 「未发布草稿」 over a published flow.
+        setStatusNonce((n) => n + 1);
         // objectstack#28572 — the rail reads again after the save, so the
         // pair's list it reads holds the new flow.
         if (target !== null) setFlowListNonce((n) => n + 1);
@@ -8880,7 +8926,9 @@ export function AutomationsPillar({
         setCurrent(item);
         setHasDraft(false);
         setCreating(false);
-        toast.success(tFormat('engine.studio.save.done', locale, { items: label }), { id: STUDIO_SAVE_TOAST_ID });
+        // objectstack#36742 — its own words: the flow is published, but born
+        // switched off, so 「已保存并生效」 would promise a run it will not do.
+        toast.success(tFormat('engine.studio.auto.createdOff', locale, { name: label }), { id: STUDIO_SAVE_TOAST_ID });
       } catch (e) {
         // Shown in the create dialog, which prints the message only: kept whole.
         setError(plainRefusal(e));
