@@ -1835,6 +1835,7 @@ const zhHant = {
       settings: '報表設定',
       pendingDraft: '這張報表有一份還沒釋出的修改。先在上方釋出或丟棄它，再儲存。',
       nameTaken: '由這個名稱生成的標識都已被佔用。請給報表換個名稱再儲存。',
+      addsToMenu: '儲存後會建好這張報表，放進選單裡你佔好的位置，並一併儲存設計模式裡的其他改動。',
       adminOnlyTitle: '只有系統管理員能搭建報表',
       adminOnly: '報表對工作區裡所有人生效，所以由系統管理員搭建。',
       type: {
@@ -3750,11 +3751,13 @@ const zhHant = {
       notWritable: '這個應用的定製包不可寫，選單無法儲存。',
       newDashboard: '新建儀表盤…',
       newDashboardTitle: '新建儀表盤',
+      newReport: '新建報表…',
       newItemSavesAll: '建立時會一併儲存設計模式裡的其他改動，然後開啟它進行編輯。',
       create: '建立',
       creating: '正在建立…',
       newItemPendingDraft: '這個名稱下已有一份未釋出的草稿，請再試一次。',
       newItemLeft: '新建的儀表盤「{{name}}」沒能刪除，請在 Studio 裡刪除它。',
+      newReportLeft: '新建的報表「{{name}}」沒能刪除，請在 Studio 裡刪除它。',
     },
     recordTabs: {
       entry: '配置頁籤',
