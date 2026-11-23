@@ -12,4 +12,4 @@ Studio's object page (fields, validation rules, actions, settings and field grou
 
 Changes and Publish are drawn only while drafts are pending (a copilot's, or another editor's), and a publish waits while the page holds edits Save has not sent. A Save refused by the server keeps the edits on the page with the reason, and its toast names each refused item with its reason and lists the items that were saved. Removing or retyping a published field asks first. Save waits out the expression checks of the last keystroke, so a formula or rule guard that does not parse is never sent. Leaving the page, or opening another object, with unsaved edits asks, as every departure does.
 
-Other Studio editors (flows, hooks, list and form views, navigation, permissions) keep their draft autosave for now.
+Hooks, flows and permission sets moved to the same Save in later changes; list views and navigation keep their draft autosave for now.

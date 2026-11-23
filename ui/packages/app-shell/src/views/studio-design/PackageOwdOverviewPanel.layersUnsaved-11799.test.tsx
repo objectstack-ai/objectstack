@@ -34,6 +34,7 @@ vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
 import { t } from '../metadata-admin/i18n';
 import { PackageOwdOverviewPanel } from './PackageOwdOverviewPanel';
+import { StudioSaveHarness } from './__tests__/studioSaveHarness';
 
 const en = (key: string) => t(key, 'en-US');
 
@@ -98,6 +99,15 @@ async function serve(input: RequestInfo | URL, init?: RequestInit): Promise<Resp
           .filter((r) => r.type === seg[0] && (!q.get('package') || r.packageId === q.get('package')))
           .map((r) => r.body),
       };
+    } else if (seg.length === 3 && seg[2] === 'publish' && method === 'POST') {
+      // objectstack#36511 — the Save's second step: that one item's draft goes live.
+      const key = `${seg[0]}/${seg[1]}`;
+      const row = server.drafts.get(key);
+      if (row) {
+        server.active.set(key, row);
+        server.drafts.delete(key);
+        body = { success: true };
+      } else [status, body] = [404, { error: { code: 'NO_DRAFT', message: 'absent' } }];
     } else if (seg.length === 3 && seg[2] === 'layers') {
       const row = server.active.get(`${seg[0]}/${seg[1]}`);
       if (row) body = { code: null, overlay: row.body, overlayScope: 'env', effective: row.body };
@@ -160,7 +170,7 @@ afterEach(() => {
 });
 
 async function openPanel() {
-  render(<PackageOwdOverviewPanel client={client} packageId={PKG} locale="en-US" />);
+  render(<StudioSaveHarness><PackageOwdOverviewPanel client={client} packageId={PKG} locale="en-US" /></StudioSaveHarness>);
   await screen.findByTestId(`owd-row-${FRESH.name}`);
   await screen.findByTestId(`owd-row-${ACCOUNT.name}`);
   await settle();
@@ -190,13 +200,15 @@ describe('PackageOwdOverviewPanel — an unsaved object is not asked for /layers
 
     await pickOwd(`owd-internal-${FRESH.name}`, OWD_LABEL.public_read);
     await pickOwd(`owd-internal-${ACCOUNT.name}`, OWD_LABEL.private);
-    fireEvent.click(screen.getByTestId('owd-save'));
+    fireEvent.click(await screen.findByTestId('studio-save'));
     await waitFor(() => expect(draftPuts(FRESH.name)).toHaveLength(1));
     await waitFor(() => expect(draftPuts(ACCOUNT.name)).toHaveLength(1));
     await settle();
 
-    // The save itself asked nothing of the unsaved object's layer; the reload after it neither.
-    expect(layersAsked(FRESH.name) - before.fresh).toBe(0);
+    // The save itself asked nothing of the unsaved object's layer. objectstack#36511
+    // — the Save made it live, so the reload after it reads its layer once, as
+    // it reads every published object's.
+    expect(layersAsked(FRESH.name) - before.fresh).toBe(1);
     // The edit landed on the draft as-is: every draft key kept, the model replaced.
     expect(draftPuts(FRESH.name)[0]).toEqual({ ...FRESH, sharingModel: 'public_read' });
     // CONTROL: the published object is read as before: once for the save, and

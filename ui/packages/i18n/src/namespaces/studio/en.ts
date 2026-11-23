@@ -2776,17 +2776,17 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.access.title': 'Permission matrix',
   'engine.studio.access.subtitle': 'Object permissions · field-level read/write',
   'engine.studio.access.bannerTitle':
-    'Only this app’s objects are listed here, and saving changes only this app’s grants — grants from other apps stay as they are. Changes are saved as a draft and go live when you Publish the app (top bar), as in Data and Interfaces.',
-  'engine.studio.access.banner': 'This app’s objects · live on publish',
+    'Only this app’s objects are listed here, and saving changes only this app’s grants — grants from other apps stay as they are. Changes go live when you press Save in the top bar, as in Data and Interfaces.',
+  'engine.studio.access.banner': 'This app’s objects · live on save',
   // objectstack#29674 — the note on an open set the base's pair adds: its matrix lists the base's objects too.
-  'engine.studio.access.bannerPair': 'This app’s and {package}’s objects · live on publish',
+  'engine.studio.access.bannerPair': 'This app’s and {package}’s objects · live on save',
   // objectstack#35018 — the open set's origin in the builder's words (the Studio title note).
   'engine.studio.access.origin.app': 'Included with the app',
   // objectstack#35018 — the word before the open item's label on the copilot's "Viewing" line.
   'engine.studio.copilot.subject.access': 'Access',
   'engine.studio.copilot.subject.flow': 'Flow',
   'engine.studio.access.bannerTitlePair':
-    'This permission set is part of the customization of {package}, so {package}’s objects are listed as well as this app’s, and saving changes only these grants — grants from other apps stay as they are. Changes are saved as a draft and go live when you Publish (top bar).',
+    'This permission set is part of the customization of {package}, so {package}’s objects are listed as well as this app’s, and saving changes only these grants — grants from other apps stay as they are. Changes go live when you press Save in the top bar.',
   // objectui#11781 — a read-only package saves no draft; objectui#12453 makes this the header link's title.
   'engine.studio.access.bannerTitleReadOnly':
     'Only this app’s objects are listed here. This app is read-only: you can view its permission sets but not change them.',
@@ -3364,6 +3364,19 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.save.confirmRemoveField': '• Delete the field “{field}”: its values on every record are removed.',
   'engine.studio.save.confirmRetypeField':
     '• Change “{field}” from {from} to {to}: values already stored may be converted or cleared.',
+  // objectstack#36511 item 6 — an item the AI assistant left an unpublished
+  // draft on: the page shows that version, says Save makes it live too, and
+  // offers to drop that one item's draft.
+  'engine.studio.aiDraft.notice': 'This item has unpublished changes from the AI assistant. Saving makes them live too.',
+  'engine.studio.aiDraft.discard': 'Discard the AI’s changes',
+  'engine.studio.aiDraft.discardTitle': 'Drop this item’s unpublished draft and go back to the live version',
+  'engine.studio.aiDraft.discardConfirmUnsaved':
+    'Discarding the AI’s changes also drops the changes on this page that you have not saved. Discard anyway?',
+  'engine.studio.aiDraft.discardFailed': 'The AI’s changes were not discarded: {reason}',
+  // objectstack#36511 — the create dialogs of the editors whose Save is live
+  // (objects, automations, permission sets): the item is created and live at
+  // once, so the confirm says Create, never Save as draft.
+  'engine.studio.createLive': 'Create',
   'engine.studio.held.lineExplicit': 'Not ready to save: {clause}. Your changes are kept here; fill it in, then Save.',
   'engine.studio.loading': 'Loading…',
   'engine.studio.loadFailed': 'Failed to load',
@@ -3916,14 +3929,11 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.owd.title': 'Who can see which records',
   'engine.studio.owd.subtitle': 'Record visibility of each object in this package',
   'engine.studio.owd.description':
-    'Who can see which records, for every object this package owns — check it at a glance and change it in bulk. Changes save as per-object drafts and go live with the package Publish, exactly like the object’s Settings tab.',
+    'Who can see which records, for every object this package owns — check it at a glance and change it in bulk. Save makes the changes live at once, exactly like the object’s Settings tab.',
   'engine.studio.owd.colObject': 'Object',
   'engine.studio.owd.colInternal': 'Who can see which records',
   'engine.studio.owd.none': 'This package declares no objects.',
   'engine.studio.owd.loadFailed': 'Failed to load this package’s objects.',
-  'engine.studio.owd.save': 'Save {count} change(s)',
-  'engine.studio.owd.saveNone': 'No changes',
-  'engine.studio.owd.saved': 'Saved {count} object draft(s).',
   'engine.studio.owd.unsaved': 'Unsaved',
   'engine.studio.owd.byParent': 'Follows its {master}',
   'engine.studio.owd.cbpPrereqTitle': 'Make the relationship required?',
