@@ -177,6 +177,7 @@ const CASES: Case[] = [
   { key: 'multiselect', variant: 'no-options', schema: { type: 'array', title: TITLE, items: { type: 'string' } }, value: ['a'] },
   { key: 'code', schema: { type: 'string', title: TITLE }, spec: { language: 'javascript' }, value: 'x = 1' },
   { key: 'secret', schema: { type: 'string', title: TITLE }, value: 's3cr3t' },
+  { key: 'field-history', schema: { type: 'boolean', title: TITLE }, formData: { type: 'json' }, value: false },
   { key: 'dynamic-config', schema: { type: 'object', title: TITLE }, spec: { dependsOn: 'driver' }, formData: { driver: 'pg' }, ctx: { dynamicSchemas: { pg: { properties: { host: { type: 'string' } } } } }, value: {} },
   { key: 'dynamic-config', variant: 'unconfigured', schema: { type: 'object', title: TITLE }, spec: { dependsOn: 'driver' }, formData: { driver: '' }, value: {} },
 ];
