@@ -422,11 +422,12 @@ let gridFieldWidgetModule: GridFieldWidgetModule | undefined;
 let gridFieldWidgetLoad: Promise<GridFieldWidgetModule> | undefined;
 
 /**
- * The ONE loader of the grid's body: the lazy face below, {@link
- * preloadGridField} and the `grid` form-field loader in `../index.tsx` all go
- * through it, so the body is requested once and a mount after any of them has
- * resolved renders without a boundary. A failed load is forgotten, so the next
- * caller asks again rather than inheriting the failure.
+ * The ONE loader of the grid's body: the lazy face below and {@link
+ * preloadGridField} go through it (and the `grid` form-field loader in
+ * `../index.tsx` reaches it through the face), so the body is requested once
+ * and a mount after any of them has resolved renders without a boundary. A
+ * failed load is forgotten, so the next caller asks again rather than
+ * inheriting the failure.
  */
 export function loadGridFieldWidget(): Promise<GridFieldWidgetModule> {
   gridFieldWidgetLoad ??= import('./grid-field/GridFieldWidget.js').then(
@@ -458,9 +459,27 @@ export function preloadGridField(): Promise<void> {
   );
 }
 
-const LazyGridFieldWidget = React.lazy(() =>
-  loadGridFieldWidget().then((loaded) => ({ default: loaded.GridFieldWidget })),
-);
+/**
+ * The lazy body a mount that finds it still loading renders. `React.lazy`
+ * keeps its first outcome for good, a rejection included, so a lazy whose load
+ * failed is replaced by a fresh one: the failed mount still hands the error to
+ * the nearest error boundary, and the next mount asks the loader again instead
+ * of rethrowing that failure until the page is reloaded.
+ */
+let LazyGridFieldWidget = lazyGridFieldWidget();
+
+function lazyGridFieldWidget(): React.LazyExoticComponent<React.ComponentType<GridFieldWidgetProps>> {
+  const lazy = React.lazy(() =>
+    loadGridFieldWidget().then(
+      (loaded) => ({ default: loaded.GridFieldWidget }),
+      (error: unknown) => {
+        if (LazyGridFieldWidget === lazy) LazyGridFieldWidget = lazyGridFieldWidget();
+        throw error;
+      },
+    ),
+  );
+  return lazy;
+}
 
 /**
  * What a grid mounted before its body arrived shows meanwhile: a box of the
@@ -481,8 +500,10 @@ function GridFieldLoading(): React.ReactElement {
  */
 export function GridField(props: GridFieldWidgetProps): React.ReactElement {
   // Decided once per mount: switching from the boundary to the direct render
-  // when the load finishes would remount the body and drop the focused cell.
+  // when the load finishes would remount the body and drop the focused cell,
+  // and so would switching to the lazy that replaces a failed one.
   const [loadedAtMount] = React.useState(() => gridFieldWidgetModule);
+  const [LazyAtMount] = React.useState(() => LazyGridFieldWidget);
   if (loadedAtMount) {
     const { GridFieldWidget } = loadedAtMount;
     return React.createElement(GridFieldWidget, props);
@@ -490,7 +511,7 @@ export function GridField(props: GridFieldWidgetProps): React.ReactElement {
   return React.createElement(
     React.Suspense,
     { fallback: React.createElement(GridFieldLoading) },
-    React.createElement(LazyGridFieldWidget, props),
+    React.createElement(LazyAtMount, props),
   );
 }
 
