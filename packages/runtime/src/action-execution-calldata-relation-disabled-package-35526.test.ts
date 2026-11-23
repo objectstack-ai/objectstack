@@ -49,7 +49,7 @@
  *   - the ADDRESSED object of a disabled package is refused on every arm for
  *     both callers, a host with no protocol service included (it used to
  *     serve it there, the refusal living only in the protocol's by-name read).
- */ */
+ */
 
 import { afterEach, describe, expect, it } from 'vitest';
 // The source under test reaches `@objectstack/metadata` through a dynamic
