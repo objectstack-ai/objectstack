@@ -186,16 +186,11 @@ tests: every entry resolves at runtime, and this table documents them all.
 | Hours between | `double((datetime(record.end_at) - datetime(record.start_at)).getMinutes()) / 60.0` |
 | Sub-day offset | `now() + duration("3h")` |
 
-**Working days** (the organization's working calendar, holidays and make-up days included)
-
-| Function | Returns | Notes |
-|:---|:---|:---|
-| `addWorkingDays(d, n[, code])` | timestamp | The day `n` working days after `d` (`d` not counted) |
-| `workingDaysBetween(a, b[, code])` | int | Working days after `a` through `b`; the inverse |
-| `addWorkingHours(t, h[, code])` | timestamp | The instant `h` working hours after `t` |
-
-No `code`: the default calendar; a `code` is a quoted literal. Formula or stored `expression`
-only, refused elsewhere (filters too): to filter, store the due time in a `datetime` field.
+**Working days** (the organization's working calendar, holidays and make-up days included):
+`addWorkingDays(d, n[, code])` is the day `n` working days after `d`; `workingDaysBetween(a, b[, code])`
+its inverse; `addWorkingHours(t, h[, code])` the instant `h` working hours after `t`. No `code`:
+the default calendar; a `code` is a quoted literal. Formula or stored `expression` only, refused
+elsewhere: to filter, store the due time in a `datetime` field.
 
 **Numbers**
 
@@ -294,14 +289,7 @@ P`!isBlank(record.po_number)`;
 ```
 
 Conditional requiredness: [objectstack-data](../objectstack-data/SKILL.md#conditional-field-rules).
-
-❌ Salesforce-flavor — **fails CEL compile**:
-
-```ts
-"status = 'qualified'"
-"amount > 10000 AND region IN ('us', 'eu')"
-"NOT(ISBLANK(po_number))"
-```
+Salesforce-flavor (`AND`, `IN (…)`, `NOT(ISBLANK(x))`) fails CEL compile: see the translation table.
 
 ### 4. Dynamic seed value — use `cel\`\`` not `new Date()`
 
