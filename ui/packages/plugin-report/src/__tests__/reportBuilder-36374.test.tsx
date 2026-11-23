@@ -128,6 +128,31 @@ describe('report builder model (objectstack#36374)', () => {
     expectSpecValid(next);
   });
 
+  it('an authored chart keeps the measure and axis it draws until the person picks another', () => {
+    // yAxis is not values[0] and xAxis is not rows[0]: what the picker shows is what is charted.
+    const authored: ReportDraft = {
+      ...EXISTING,
+      rows: ['owner', 'stage'],
+      values: ['total_amount', 'deal_count'],
+      chart: { type: 'bar', xAxis: 'stage', yAxis: 'deal_count' },
+    };
+    const line = pickChartType(authored, 'line', MEMBERS);
+    expect(line.chart).toMatchObject({ type: 'line', xAxis: 'stage', yAxis: 'deal_count', seriesBy: 'owner' });
+    expect(line.values).toEqual(['total_amount', 'deal_count']);
+    expectSpecValid(line);
+
+    // Picking a measure replaces the charted one, in its place.
+    const remeasured = pickMeasure({ ...authored, values: ['total_amount', 'deal_count'] }, 'total_amount', MEMBERS);
+    expect(remeasured.values).toEqual(['total_amount']);
+    expect((remeasured.chart as any).yAxis).toBe('total_amount');
+    expect((remeasured.chart as any).xAxis).toBe('stage');
+
+    // Picking a grouping charts the grouping the picker shows.
+    const regrouped = pickGrouping(authored, 'owner', 'stage', MEMBERS);
+    expect(regrouped.chart).toMatchObject({ xAxis: 'owner', seriesBy: 'stage', yAxis: 'deal_count' });
+    expectSpecValid(regrouped);
+  });
+
   it('grouping by a date adds the period chip; ungrouping it removes the chip again', () => {
     const dated = pickGrouping(EXISTING, 'close_month', '', MEMBERS);
     expect(dated.dateRange).toEqual({ dimension: 'close_month', defaultRange: 'this_year' });

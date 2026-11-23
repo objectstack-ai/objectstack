@@ -89,11 +89,14 @@ export type ReportDraft = Record<string, unknown>;
 /** Which of the five sections a missing piece belongs to. */
 export type ReportBuilderSection = 'type' | 'source' | 'measure' | 'grouping' | 'chart';
 
+/** Why the report cannot draw yet; each one is a `report.builder.missing.*` sentence. */
+export type ReportBuilderMissingReason = 'source' | 'noMeasures' | 'measure' | 'grouping';
+
 /** The piece the report still lacks before it can draw, and where it is set. */
 export interface ReportBuilderMissing {
   section: ReportBuilderSection;
   /** The i18n key under `report.builder.missing.*`. */
-  reason: 'source' | 'noMeasures' | 'measure' | 'grouping';
+  reason: ReportBuilderMissingReason;
 }
 
 function names(value: unknown): string[] {
@@ -156,17 +159,26 @@ function reconcile(
   members: ReportBuilderMembers | undefined,
   chartType: string,
   prevRows: readonly string[] = names(report.rows),
+  picked: { measure?: string; grouping?: boolean } = {},
 ): ReportDraft {
   const out: ReportDraft = { ...report };
-  const measure = names(out.values)[0] ?? '';
-  const { first, second } = selectedGrouping(out);
+  const values = names(out.values);
+  const rows2 = names(out.rows).slice(0, 2);
+  const prev = chartOf(report) ?? {};
+  // The charted measure and axis are the ones the author drew, kept until the
+  // person picks another: an authored `yAxis` that is not `values[0]` (or an
+  // `xAxis` that is not `rows[0]`) is never switched by an unrelated pick.
+  const keptMeasure = typeof prev.yAxis === 'string' && values.includes(prev.yAxis) ? prev.yAxis : '';
+  const measure = picked.measure ?? (keptMeasure || values[0] || '');
+  const keptAxis = !picked.grouping && typeof prev.xAxis === 'string' && rows2.includes(prev.xAxis) ? prev.xAxis : '';
+  const xAxis = keptAxis || rows2[0] || '';
+  const split = rows2.find((r) => r !== xAxis) ?? '';
 
   if (chartType === 'table') {
     delete out.chart;
   } else {
-    const prev = chartOf(report) ?? {};
-    const chart: Record<string, unknown> = { ...prev, type: chartType, xAxis: first, yAxis: measure };
-    if (second && SPLITS_SERIES.has(chartType)) chart.seriesBy = second;
+    const chart: Record<string, unknown> = { ...prev, type: chartType, xAxis, yAxis: measure };
+    if (split && SPLITS_SERIES.has(chartType)) chart.seriesBy = split;
     else delete chart.seriesBy;
     if (!TAKES_TARGET_LINE.has(chartType)) delete chart.annotations;
     out.chart = chart;
@@ -231,15 +243,20 @@ export function fillDefaults(report: ReportDraft, members: ReportBuilderMembers 
 
 /** Select `measure` as the report's measure (the one it charts). */
 export function pickMeasure(report: ReportDraft, measure: string, members: ReportBuilderMembers | undefined): ReportDraft {
-  // The measure replaces the FIRST value; further values the author selected
-  // (a summary table may show several) stay after it.
-  const rest = names(report.values).slice(1).filter((v) => v !== measure);
-  const out: ReportDraft = { ...report, values: measure ? [measure, ...rest] : rest };
+  // The measure replaces the one the picker shows (the charted measure, else
+  // the first value); further values the author selected (a summary table may
+  // show several) keep their places.
+  const values = names(report.values);
+  const shown = selectedMeasure(report);
+  const at = Math.max(0, values.indexOf(shown));
+  const next = values.filter((v, i) => i !== at && v !== measure);
+  if (measure) next.splice(Math.min(at, next.length), 0, measure);
+  const out: ReportDraft = { ...report, values: next };
   if (Array.isArray(out.order)) {
     const keep = new Set([...names(out.values), ...names(out.rows), ...names(out.columns)]);
     out.order = (out.order as Array<{ by?: unknown }>).filter((o) => typeof o?.by === 'string' && keep.has(o.by));
   }
-  return reconcile(out, members, selectedChartType(report));
+  return reconcile(out, members, selectedChartType(report), names(report.rows), { measure });
 }
 
 /**
@@ -265,7 +282,7 @@ export function pickGrouping(
   let chartType = selectedChartType(report);
   if (rows.length > 0 && chartType === 'metric') chartType = 'bar';
   if (rows.length === 0 && NEEDS_GROUPING.has(chartType)) chartType = 'metric';
-  return reconcile(out, members, chartType, names(report.rows));
+  return reconcile(out, members, chartType, names(report.rows), { grouping: true });
 }
 
 /** Draw the report as `chartType`. */

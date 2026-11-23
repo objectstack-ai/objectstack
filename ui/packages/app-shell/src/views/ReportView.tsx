@@ -73,12 +73,19 @@ export function previewWithServedText(
  * builder draws ONE dataset-bound report (or a new one); a `joined` report
  * (several datasets, one per block) and a pre-dataset report (`objectName`,
  * `dataSource` or inline `data`) keep the report inspector panel, which edits
- * every shape the spec allows.
+ * every shape the spec allows; so does a dataset report the builder has no
+ * setting for (a cross-tab, a saved filter, several values).
  */
 export function opensInBuilder(report: Record<string, unknown> | null | undefined): boolean {
   if (!report) return false;
   if (report.type === 'joined') return false;
-  return report.objectName === undefined && report.dataSource === undefined && report.data === undefined;
+  if (report.objectName !== undefined || report.dataSource !== undefined || report.data !== undefined) return false;
+  // Shapes the builder has no setting for keep the panel, which edits them: a
+  // cross-tab (`columns`), a saved filter (`runtimeFilter`) and several values.
+  const filled = (v: unknown) => Array.isArray(v) ? v.length > 0 : v !== undefined && v !== null;
+  if (filled(report.columns) || filled(report.runtimeFilter)) return false;
+  if (Array.isArray(report.values) && report.values.length > 1) return false;
+  return true;
 }
 
 // Fallback fields when no schema is available

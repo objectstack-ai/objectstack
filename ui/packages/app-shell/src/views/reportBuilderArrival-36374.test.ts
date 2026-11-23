@@ -12,7 +12,7 @@ import {
   reportBuilderArrival,
   withoutReportBuilderArrival,
 } from './reportBuilderArrival';
-import { newReportName } from './ReportNewPage';
+import { freeReportName, newReportName } from './ReportNewPage';
 
 describe('the report builder landing (objectstack#36374)', () => {
   it('opens only the report it names, and is cleared once read', () => {
@@ -34,3 +34,21 @@ describe('a new report\'s identifier (objectstack#36374, newReportName)', () => 
     expect(newReportName('', new Set())).toBe('report');
   });
 });
+
+describe('a new report never lands on a report that exists (objectstack#36374, freeReportName)', () => {
+  it('asks the server for each candidate and moves past one it holds, even one the list does not', async () => {
+    const served = new Set(['pipeline', 'pipeline_2']);
+    const asked: string[] = [];
+    const name = await freeReportName('Pipeline', new Set(), async (n) => {
+      asked.push(n);
+      return served.has(n);
+    });
+    expect(name).toBe('pipeline_3');
+    expect(asked).toEqual(['pipeline', 'pipeline_2', 'pipeline_3']);
+  });
+
+  it('gives up rather than ask forever', async () => {
+    expect(await freeReportName('Pipeline', new Set(), async () => true)).toBeNull();
+  });
+});
+

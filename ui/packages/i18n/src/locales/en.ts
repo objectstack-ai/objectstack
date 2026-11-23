@@ -2176,6 +2176,7 @@ const en = {
       save: 'Save',
       settings: 'Report settings',
       pendingDraft: 'This report has unpublished changes. Publish or discard them above, then save.',
+      nameTaken: 'Every name made from this one is already taken. Give the report another name, then save.',
       adminOnlyTitle: 'Only workspace admins can build reports',
       adminOnly: 'A report is shared with everyone in the workspace, so an admin builds it.',
       type: {

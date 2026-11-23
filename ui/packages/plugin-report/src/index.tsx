@@ -42,11 +42,6 @@ export { mergeFilters } from './mergeFilters';
 // catalog and the bound dataset's members, and owns Save / Discard / Close.
 export { ReportBuilder } from './builder/ReportBuilder';
 export type { ReportBuilderProps, ReportBuilderTextBox } from './builder/ReportBuilder';
-export {
-  REPORT_BUILDER_CHART_TYPES,
-  missingPiece as reportBuilderMissingPiece,
-  pickDataset as reportBuilderPickDataset,
-} from './builder/reportBuilderModel';
 export type {
   ReportBuilderDataset,
   ReportBuilderMeasure,

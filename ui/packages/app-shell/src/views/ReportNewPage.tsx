@@ -51,6 +51,31 @@ export function newReportName(label: string, taken: ReadonlySet<string>): string
   }
 }
 
+/** How many names {@link freeReportName} asks about before it gives up. */
+const NAME_TRIES = 50;
+
+/**
+ * The identifier a new report is created under, asked of the server by name.
+ * A create never lands on a report that exists: the console's list can miss
+ * one (read before another admin's create, or held by a package the list does
+ * not show), and the draft pin of the save stops only a pending draft, so each
+ * candidate is asked of every served layer (`exists`) first and a name it
+ * holds moves on to the next suffix. `null` once {@link NAME_TRIES} are taken.
+ */
+export async function freeReportName(
+  label: string,
+  known: ReadonlySet<string>,
+  exists: (name: string) => Promise<boolean>,
+): Promise<string | null> {
+  const taken = new Set(known);
+  for (let tries = 0; tries < NAME_TRIES; tries += 1) {
+    const name = newReportName(label, taken);
+    if (!(await exists(name))) return name;
+    taken.add(name);
+  }
+  return null;
+}
+
 export function ReportNewPage({ dataSource }: { dataSource?: DataSource }) {
   const { t, language } = useObjectTranslation();
   const { appName } = useParams<{ appName: string }>();
@@ -73,9 +98,18 @@ export function ReportNewPage({ dataSource }: { dataSource?: DataSource }) {
       // the placeholder the box showed.
       const typed = pickLocalized(draft.label, language).trim();
       const label = typed ? draft.label : t('report.builder.namePlaceholder');
-      const name = newReportName(typed || String(draft.dataset ?? ''), taken);
-      const body = { ...draft, label, name };
+      let name: string | null;
       try {
+        name = await freeReportName(
+          typed || String(draft.dataset ?? ''),
+          taken,
+          async (candidate) => !!(await metadataClient.get('report', candidate)),
+        );
+        if (!name) {
+          toast.error(t('form.saveError'), { description: t('report.builder.nameTaken') });
+          return false;
+        }
+        const body = { ...draft, label, name };
         const outcome = await saveAndPublishRuntimeMetadata('report', name, body, {
           metadataClient,
           dataSource: dataSource as any,

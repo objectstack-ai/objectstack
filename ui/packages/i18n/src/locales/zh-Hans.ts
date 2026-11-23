@@ -1816,6 +1816,7 @@ const zh = {
       save: '保存',
       settings: '报表设置',
       pendingDraft: '这张报表有一份还没发布的修改。先在上方发布或丢弃它，再保存。',
+      nameTaken: '由这个名称生成的标识都已被占用。请给报表换个名称再保存。',
       adminOnlyTitle: '只有系统管理员能搭建报表',
       adminOnly: '报表对工作区里所有人生效，所以由系统管理员搭建。',
       type: {

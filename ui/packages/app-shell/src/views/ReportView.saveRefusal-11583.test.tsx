@@ -326,4 +326,11 @@ describe('which reports open in the builder (objectstack#36374, opensInBuilder)'
     expect(opensInBuilder({ name: 'r', label: 'R', data: [] })).toBe(false);
     expect(opensInBuilder(null)).toBe(false);
   });
+
+  it('a dataset report the builder has no setting for keeps the panel: a cross-tab, a saved filter, several values', () => {
+    expect(opensInBuilder({ ...DATASET_REPORT, columns: ['owner'] })).toBe(false);
+    expect(opensInBuilder({ ...DATASET_REPORT, columns: [] })).toBe(true);
+    expect(opensInBuilder({ ...DATASET_REPORT, runtimeFilter: { stage: 'won' } })).toBe(false);
+    expect(opensInBuilder({ ...DATASET_REPORT, values: ['a', 'b'] })).toBe(false);
+  });
 });

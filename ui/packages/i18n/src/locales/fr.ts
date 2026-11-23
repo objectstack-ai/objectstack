@@ -4120,6 +4120,7 @@ const fr = {
       save: "Enregistrer",
       settings: "Paramètres du rapport",
       pendingDraft: "Ce rapport a des modifications non publiées. Publiez-les ou supprimez-les ci-dessus, puis enregistrez.",
+      nameTaken: "Tous les identifiants dérivés de ce nom sont déjà pris. Donnez un autre nom au rapport, puis enregistrez.",
       adminOnlyTitle: "Seuls les administrateurs de l’espace de travail peuvent créer des rapports",
       adminOnly: "Un rapport est partagé avec tout l’espace de travail ; c’est donc un administrateur qui le crée.",
       type: {
