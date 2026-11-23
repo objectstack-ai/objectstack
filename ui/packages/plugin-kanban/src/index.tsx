@@ -194,6 +194,7 @@ export type { KanbanCard, KanbanColumn, CardTemplate, InlineFieldDefinition } fr
 export { ObjectKanban };
 export type { ObjectKanbanComponentProps } from './ObjectKanban';
 export type { KanbanLaneRows } from './KanbanImpl';
+export type { KanbanLaneMenuRequest } from './KanbanLaneMenu';
 
 /**
  * @deprecated Use `ObjectKanbanComponentProps`. Renamed in objectui#4650

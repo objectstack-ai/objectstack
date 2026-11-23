@@ -1044,6 +1044,16 @@ const es = {
     inlineEditLabel: "Editar registros en línea (haga clic en una celda para editar)",
     // The list's Options menu.
     optionsMenu: {
+      // objectstack#36370 — a board's own settings.
+      kanbanLaneField: "Columnas por",
+      kanbanLanes: "Columnas visibles",
+      kanbanCardFields: "Campos de la tarjeta",
+      kanbanAddCardField: "Añadir campo",
+      kanbanShowFieldLabels: "Mostrar nombres de campo",
+      kanbanHideEmptyFields: "Ocultar campos vacíos",
+      kanbanSummary: "Resumen de columna",
+      kanbanHiddenLanes: "Columnas ocultas",
+      kanbanHiddenLanesHint: "Las tarjetas de una columna oculta aparecen en Sin categoría.",
       viewName: 'Nombre de la vista',
       fields: 'Campos',
       fieldsShown: 'Visibles: {{count}}',
@@ -1088,6 +1098,19 @@ const es = {
     },
   },
   kanban: {
+    // objectstack#36370 — the lane header's 「+」 and 「⋯」 menu, and an empty lane's create row.
+    laneMenu: {
+      actions: "Acciones de la columna {{column}}",
+      collapse: "Contraer columna",
+      expand: "Expandir columna",
+      hide: "Ocultar columna",
+      hideHint: "Sus tarjetas pasan a Sin categoría",
+      createIn: "Nuevo registro en {{column}}",
+      create: "Nuevo",
+    },
+    laneStatistic: {
+      loadedOnly: "tarjetas cargadas",
+    },
     uncategorized: "Sin categoría",
     loadMore: "Cargar más",
     columns: "columnas",
@@ -2881,6 +2904,7 @@ const es = {
       },
       linkFilterRefused: 'No se aplicó el filtro de este enlace. Incluye un campo por el que no puede filtrar aquí, así que la lista muestra la vista sin él.',
       personalizedParts: {
+        kanban: "Ajustes del tablero",
         filters: "Filtros",
         search: "Búsqueda",
         sort: "Ordenación",

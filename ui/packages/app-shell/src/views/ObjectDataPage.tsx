@@ -350,12 +350,10 @@ export function ObjectDataPage({ dataSource, objects }: any) {
   // empty instead of refusing the whole list query; outside it, the adapter.
   const listDataSource = usePreviewListDataSource(dataSource, objectDef);
 
-  // ADR-0047 filter persistence — same wiring as InterfaceListPage: restore
-  // `uf_*` once at mount, mirror selection changes back (replace, no history
-  // spam).
-  const [initialUfSelections] = React.useState<Record<string, string[]> | undefined>(
-    () => parseUserFilterParams(new URLSearchParams(window.location.search)),
-  );
+  // ADR-0047 filter persistence — same wiring as InterfaceListPage: the
+  // `uf_*` chips are restored with the list's seed (below), once per object
+  // and list generation, and selection changes are mirrored back (replace,
+  // no history spam).
   const handleUserFilterSelectionsChange = React.useCallback(
     (selections: Record<string, Array<string | number | boolean>>) => {
       setSearchParams((prev) => applyUserFilterParams(prev, selections), { replace: true });
@@ -378,8 +376,11 @@ export function ObjectDataPage({ dataSource, objects }: any) {
    * view's filter. The list applies both (the conditions AND the panel).
    *
    * The SEED — what the list opens with — is read from the address once per
-   * object and list generation (`ListView` takes its search and panel once, at
-   * mount). Unlike `ObjectView`, a reload is not a reset here: this page has
+   * object and list generation, and the list is keyed on the same pair
+   * (`ListView` takes its search, panel and chips once, at mount): a move
+   * straight from one object's data page to another's — a link, the history —
+   * keeps this page mounted, so the list remounts on the new address's seed
+   * instead of keeping the previous object's (objectstack#36577). Unlike `ObjectView`, a reload is not a reset here: this page has
    * no view to return to, and its address is the list ("the URL is the view").
    * Each piece passes `ObjectView`'s field gate: a field the object does not
    * declare, or one this user cannot read once permissions are loaded, is
@@ -396,6 +397,8 @@ export function ObjectDataPage({ dataSource, objects }: any) {
   const listSeedRef = React.useRef<{
     key: string;
     state: ListUrlState;
+    /** The `uf_<field>` chips' selections (ADR-0047), read with the rest. */
+    userFilterSelections?: Record<string, string[]>;
     /** Taken by a 「Reset」, which wrote the address itself. */
     reset?: boolean;
     refusedPanelFilter?: boolean;
@@ -414,10 +417,16 @@ export function ObjectDataPage({ dataSource, objects }: any) {
       const carried = addressPanelFilterConditionCount(searchParams);
       const refusedPanelFilter = carried > 0 && (state.filters?.conditions.length ?? 0) < carried;
       if (refusedPanelFilter) delete state.filters;
-      listSeedRef.current = { key: listSeedKey, state, refusedPanelFilter };
+      listSeedRef.current = {
+        key: listSeedKey,
+        state,
+        userFilterSelections: parseUserFilterParams(searchParams),
+        refusedPanelFilter,
+      };
     }
   }
-  const listSeed = listSeedRef.current?.key === listSeedKey ? listSeedRef.current?.state : undefined;
+  const listSeedEntry = listSeedRef.current?.key === listSeedKey ? listSeedRef.current : undefined;
+  const listSeed = listSeedEntry?.state;
   React.useEffect(() => {
     const seed = listSeedRef.current;
     // A 「Reset」's seed writes nothing: the reset already cleared the
@@ -447,9 +456,9 @@ export function ObjectDataPage({ dataSource, objects }: any) {
     },
     [setSearchParams],
   );
-  // The chips' selections the list remounts with: the address's at mount; none
+  // The chips' selections the list mounts with: the seed's address's; none
   // after a 「Reset」, which cleared their params.
-  const listUserFilterSelections = listGeneration === 0 ? initialUfSelections : undefined;
+  const listUserFilterSelections = listSeedEntry?.userFilterSelections;
 
   // URL filter triples, trimmed to readable fields. Predicates on unreadable
   // fields are dropped here for UX honesty; the SERVER is the actual
@@ -1063,7 +1072,9 @@ export function ObjectDataPage({ dataSource, objects }: any) {
       <div className="flex-1 min-h-0 overflow-auto">
         {schema && (
           <ListView
-            key={listGeneration}
+            // objectstack#36577 — one list per seed: a new object or a
+            // 「Reset」 remounts it on the address it was seeded from.
+            key={listSeedKey}
             schema={schema as any}
             dataSource={listDataSource}
             userFilterSelections={listUserFilterSelections}

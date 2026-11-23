@@ -1011,6 +1011,16 @@ const ko = {
     inlineEditLabel: "레코드를 인라인으로 편집(셀을 클릭하여 편집)",
     // The list's Options menu.
     optionsMenu: {
+      // objectstack#36370 — a board's own settings.
+      kanbanLaneField: "열 기준",
+      kanbanLanes: "표시할 열",
+      kanbanCardFields: "카드 필드",
+      kanbanAddCardField: "필드 추가",
+      kanbanShowFieldLabels: "필드 이름 표시",
+      kanbanHideEmptyFields: "빈 필드 숨기기",
+      kanbanSummary: "열 요약",
+      kanbanHiddenLanes: "숨긴 열",
+      kanbanHiddenLanesHint: "숨긴 열의 카드는 「미분류」에 표시됩니다.",
       viewName: '보기 이름',
       fields: '필드',
       fieldsShown: '{{count}}개 표시됨',
@@ -1054,6 +1064,19 @@ const ko = {
     },
   },
   kanban: {
+    // objectstack#36370 — the lane header's 「+」 and 「⋯」 menu, and an empty lane's create row.
+    laneMenu: {
+      actions: "{{column}} 열 작업",
+      collapse: "열 접기",
+      expand: "열 펼치기",
+      hide: "열 숨기기",
+      hideHint: "카드는 「미분류」로 이동합니다",
+      createIn: "{{column}}에 새로 만들기",
+      create: "새로 만들기",
+    },
+    laneStatistic: {
+      loadedOnly: "불러온 카드",
+    },
     uncategorized: "미분류",
     loadMore: "더 보기",
     columns: "열",
@@ -2805,6 +2828,7 @@ const ko = {
       },
       linkFilterRefused: '이 링크의 필터가 적용되지 않았습니다. 여기서 필터링할 수 없는 필드가 포함되어 있어 뷰를 그대로 표시합니다.',
       personalizedParts: {
+        kanban: "보드 설정",
         filters: "필터",
         search: "검색",
         sort: "정렬",

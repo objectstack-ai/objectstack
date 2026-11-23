@@ -1011,6 +1011,16 @@ const de = {
     inlineEditLabel: "Datensätze inline bearbeiten (Zelle anklicken zum Bearbeiten)",
     // The list's Options menu.
     optionsMenu: {
+      // objectstack#36370 — a board's own settings.
+      kanbanLaneField: "Spalten nach",
+      kanbanLanes: "Sichtbare Spalten",
+      kanbanCardFields: "Kartenfelder",
+      kanbanAddCardField: "Feld hinzufügen",
+      kanbanShowFieldLabels: "Feldnamen anzeigen",
+      kanbanHideEmptyFields: "Leere Felder ausblenden",
+      kanbanSummary: "Spaltenauswertung",
+      kanbanHiddenLanes: "Ausgeblendete Spalten",
+      kanbanHiddenLanesHint: "Karten einer ausgeblendeten Spalte erscheinen unter „Nicht kategorisiert“.",
       viewName: 'Ansichtsname',
       fields: 'Felder',
       fieldsShown: '{{count}} angezeigt',
@@ -1054,6 +1064,19 @@ const de = {
     },
   },
   kanban: {
+    // objectstack#36370 — the lane header's 「+」 and 「⋯」 menu, and an empty lane's create row.
+    laneMenu: {
+      actions: "Aktionen für Spalte {{column}}",
+      collapse: "Spalte einklappen",
+      expand: "Spalte ausklappen",
+      hide: "Spalte ausblenden",
+      hideHint: "Die Karten wandern nach „Nicht kategorisiert“",
+      createIn: "Neuer Datensatz in {{column}}",
+      create: "Neu",
+    },
+    laneStatistic: {
+      loadedOnly: "geladene Karten",
+    },
     uncategorized: "Nicht kategorisiert",
     loadMore: "Mehr laden",
     columns: "Spalten",
@@ -2805,6 +2828,7 @@ const de = {
       },
       linkFilterRefused: 'Der Filter dieses Links wurde nicht angewendet. Er nennt ein Feld, nach dem Sie hier nicht filtern können, daher zeigt die Liste die Ansicht ohne ihn.',
       personalizedParts: {
+        kanban: "Board-Einstellungen",
         filters: "Filter",
         search: "Suche",
         sort: "Sortierung",

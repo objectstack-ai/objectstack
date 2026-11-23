@@ -561,7 +561,7 @@ export const ObjectTranslationDataSchema = lazySchema(() => strictObject({
     // The group prefixes are the whole point of the `_`-prefixed convention,
     // and the un-prefixed spelling is the one an author reaches for first.
     views: '_views', actions: '_actions', sections: '_sections', validations: '_validations',
-    validationRules: '_validations', rules: '_validations',
+    validationRules: '_validations', rules: '_validations', relatedLists: '_relatedLists',
     plural: 'pluralLabel', labelPlural: 'pluralLabel', name: 'label', title: 'label',
     columns: 'fields', properties: 'fields', attributes: 'fields',
   },
@@ -864,6 +864,40 @@ export const ObjectTranslationDataSchema = lazySchema(() => strictObject({
   }, {
     label: z.string().optional().describe('Translated tab label'),
   })).optional().describe('Filter-preset tab translations keyed by tab name'),
+
+  /**
+   * Record-page related-list titles keyed by the `list` of an object-form
+   * `relatedLists` entry (`RelatedListEntryObjectSchema`) on THIS object, the
+   * parent whose record page draws the list. Convention (overlaid by
+   * `translateObject` onto the served object's `relatedLists`):
+   *   objects.<object>._relatedLists.<list>.label
+   *
+   * `<list>` is the entry's literal `list` value, indexed directly and never
+   * split: `event.related_to` (a child with several relationships to this
+   * object, written `object.field`) is ONE key, as `resultDialog.fields` keys
+   * its dotted paths.
+   *
+   * **The hole this closes.** An entry's `label` is the tab's title and its
+   * table's heading, and it wins over the child FK's `relatedListTitle`, which
+   * the bundle already translated at
+   * `objects.<child>.fields.<field>.relatedListTitle`. The winning title had no
+   * key, so a declared tab title showed its authored text in every locale.
+   *
+   * **It translates the entry's own `label` and nothing else.** An entry with
+   * no `label` keeps the precedence it has without one (the FK's
+   * `relatedListTitle`, then the child object's plural label, each translated
+   * where it is declared): a bundle translates an attribute and never swaps
+   * another in, the rule `inlineTitle` and `relatedListTitle` above follow. A
+   * bare-string entry and a built-in tab (`sys_attachment`, …) carry no label,
+   * so they have no key here.
+   */
+  _relatedLists: z.record(z.string(), strictObject({
+    surface: 'this related list title translation',
+    history: TRANSLATION_HISTORY,
+    aliases: { name: 'label', title: 'label', heading: 'label', text: 'label' },
+  }, {
+    label: z.string().optional().describe("Translated related list title (overlays the relatedLists entry's own `label`)"),
+  })).optional().describe('Record-page related list titles keyed by the relatedLists entry list name'),
 
   /**
    * Custom validation-rule messages keyed by rule name
