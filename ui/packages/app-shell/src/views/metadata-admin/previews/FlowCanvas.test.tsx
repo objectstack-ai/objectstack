@@ -625,8 +625,8 @@ describe('Flow designer — package label translations (flows.<flow>.label, appr
       opportunity_approval: {
         label: '大额商机审批',
         approvals: { manager_review: { label: '经理审核' }, director_signoff: { label: '总监签批' } },
-        nodes: { big: { label: '超过一百万？' }, tell_signer: { label: '通知签署人' } },
-        screens: { confirm: { title: '确认' }, review_deal: { title: '审阅交易' } },
+        nodes: { big: { label: '超过一百万？' }, tell_signer: { label: '通知签署人' }, review_deal: { label: '审阅交易步骤' } },
+        screens: { confirm: { title: '确认' }, review_deal: { title: '审阅交易' }, greet: { title: '你好 {{vars.name}}' } },
       },
     },
   };
@@ -677,8 +677,8 @@ describe('Flow designer — package label translations (flows.<flow>.label, appr
     expect(t.stepLabel({ id: 'tell_signer', type: 'notify' })).toBe('通知签署人');
     // An untitled screen by `screens.<node_id>.title`, the key its run-time title already uses.
     expect(t.stepLabel({ id: 'confirm', type: 'screen' })).toBe('确认');
-    // A titled screen's label has no key: its `screens` title overlays the heading, read apart.
-    expect(t.stepLabel({ id: 'review_deal', type: 'screen', config: { title: 'Review the deal' } })).toBeUndefined();
+    // A titled screen's label by `nodes.<node_id>.label`; its `screens` title overlays the heading, read apart.
+    expect(t.stepLabel({ id: 'review_deal', type: 'screen', config: { title: 'Review the deal' } })).toBe('审阅交易步骤');
     expect(t.screenTitle({ id: 'review_deal', type: 'screen' })).toBe('审阅交易');
     // One string, one key: a type reads its own group only, whatever the id.
     expect(t.stepLabel({ id: 'manager_review', type: 'decision' })).toBeUndefined();
@@ -726,6 +726,25 @@ describe('Flow designer — package label translations (flows.<flow>.label, appr
     expect(card('each').textContent).not.toContain('Director sign-off');
     expect(card('each').textContent).toContain('通知签署人');
     expect(card('each').textContent).not.toContain('Tell signer');
+  });
+
+  it('draws a titled screen by its nodes key; an untitled screen whose translated title adds a hole keeps its authored label', () => {
+    const screens = [
+      { id: 'review_deal', type: 'screen', label: 'Review deal step', config: { title: 'Review the deal' } },
+      { id: 'greet', type: 'screen', label: 'Greeting' },
+    ];
+    const t = zh();
+    expect(t.stepLabel({ id: 'greet', type: 'screen' })).toBeUndefined();
+    const { container } = render(
+      <FlowLabelTranslationsProvider value={t}>
+        <FlowCanvas nodes={screens} edges={[{ source: 'review_deal', target: 'greet' }]} editable={false} designMode={false} selectedId={null} onSelect={() => {}} />
+      </FlowLabelTranslationsProvider>,
+    );
+    const card = (id: string) => container.querySelector(`[data-node-id="${id}"]`) as HTMLElement;
+    expect(card('review_deal').textContent).toContain('审阅交易步骤');
+    expect(card('review_deal').textContent).not.toContain('Review deal step');
+    expect(card('greet').textContent).toContain('Greeting');
+    expect(card('greet').textContent).not.toContain('{{');
   });
 
   it('with no translation the canvas draws the authored labels, as before', () => {

@@ -5,9 +5,10 @@
  *
  * Emits both a sanitized ASCII `filename=` (legacy fallback) and the RFC 5987
  * `filename*=UTF-8''…` form that modern browsers prefer — so a download saves
- * under its real name instead of the opaque URL token. Used by the local
- * adapter's `_local/raw` route (header) and the S3 adapter's
- * `ResponseContentDisposition` (baked into the signed URL).
+ * under its real name instead of the opaque URL token. Called through
+ * `served-bytes-policy.ts`, which decides the disposition for every door that
+ * answers stored bytes (the local `_local/raw` route's header and the S3
+ * adapter's `ResponseContentDisposition`); a door never picks it itself.
  */
 export function contentDispositionValue(
   filename: string,

@@ -680,7 +680,7 @@ export type RemoteDriftOpAnswer =
  * The `satisfies` clause is the pin, as for {@link REMOTE_FACE_ANSWERS}: an op
  * added to `DriftOp` fails this package's typecheck and build until its remote
  * answer is decided here. Of these, the SQLite differ emits `relax_not_null`,
- * `tighten_not_null`, `drop_column_default`, `drop_column` and the index ops;
+ * `tighten_not_null`, `drop_column_default`, `set_column_default`, `drop_column` and the index ops;
  * the two varchar widths and the two `manual_*` findings are PostgreSQL /
  * MySQL only, and answered here for completeness.
  */
@@ -700,6 +700,9 @@ export const REMOTE_DRIFT_OP_ANSWERS = {
   widen_varchar: 'needs-table-rebuild',
   narrow_varchar: 'needs-table-rebuild',
   drop_column_default: 'needs-table-rebuild',
+  // [#36245] A changed literal DEFAULT is restated by the same rebuild that
+  // drops one: SQLite cannot alter a column's DEFAULT in place.
+  set_column_default: 'needs-table-rebuild',
   // [#32590] Never emitted by the SQLite differ: a SQLite `date` column already
   // holds the canonical datetime text, so the widening is Postgres / MySQL
   // only. Answered as the varchar widths are, since a SQLite column's declared

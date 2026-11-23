@@ -400,9 +400,6 @@ When migrating Salesforce-flavor metadata, apply these rules in order:
 | `ISCHANGED(x)` | `previous.x != record.x` |
 | `MONTH_DIFF`, `MID`, `LEFT`, `RIGHT`, `SUBSTITUTE` | _not in stdlib — propose addition_ |
 
-> ⚠️ `previous.x` **fails the write** on an insert unless guarded by
-> `previous != null &&` (§5).
-
 > ⚠️ **Flow conditions are the exception to row 1.** The engine spreads the
 > trigger record's fields, nulls included, to top level wherever no flow variable
 > or node id holds the name, so in a start, edge or `decision` condition a bare
@@ -447,8 +444,9 @@ and `autonumber` have real columns and need no such care.
 is CLIENT-SIDE only, and an unbound root falls back to `true`, so the control
 renders for everyone — never use one as access control; that is permission-set
 field-level security. Everywhere else on this table the opposite holds: an
-unevaluable `Hook` / `SharingRule` `condition` or validation predicate **aborts
-the write** (§5).
+unevaluable `Hook` `condition` or validation predicate **aborts the write**
+(§5); a `SharingRule` `condition` that does not lower to a filter fails the
+build, and at runtime the rule is skipped and grants nothing (one WARN).
 
 View list filters are **not** a CEL surface — they are structured JSON filter
 rules (`ViewFilterRuleSchema`), so do not emit CEL there. For "last 30 days"
@@ -457,7 +455,7 @@ objectstack-query `rules/filters.md` has the token list.
 
 ### Cron and template surfaces
 
-Two more dialects ride the same envelope. Neither is CEL; both take
+Neither dialect is CEL; both take
 a bare string (auto-wrapped) or their helper, and read the same variable scope.
 
 | Dialect | Helper | Grammar | Carriers |
