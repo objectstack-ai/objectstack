@@ -40,12 +40,14 @@ const transferDenied = () => Object.assign(
   { name: 'PermissionDeniedError', code: 'PERMISSION_DENIED', status: 403 },
 );
 
-function mockEngine(refuse: (id: string) => unknown = () => undefined) {
+function mockEngine(refuse: (id: string) => unknown = () => undefined, disabledPackageObjects: string[] = []) {
   const rows: Record<string, any>[] = [{ id: 'l1', owner_id: 'u_a' }, { id: 'l2', owner_id: 'u_b' }];
   const users = [{ id: 'u_next', banned: false }, { id: 'u_gone', banned: true }];
   return {
     rows,
     getSchema: vi.fn((name: string) => SCHEMAS[name]),
+    // The engine registry's package predicate: a disabled package's object stays registered (getSchema resolves it).
+    registry: { isObjectPackageDisabled: vi.fn((name: string) => disabledPackageObjects.includes(name)) },
     // Equality on plain fields only; a combinator this double does not implement is refused, never read as a field.
     find: vi.fn(async (o: string, q: any) => (o === 'sys_user' ? users : rows).filter((r: any) =>
       Object.entries(q.where).every(([k, v]) => {
@@ -247,5 +249,45 @@ describe('[#35402] POST /data/:object/change-owner — bulk', () => {
       expect(res.body.error.code).toBe('VALIDATION_ERROR');
       expect(engine.update).not.toHaveBeenCalled();
     }
+  });
+});
+
+describe('[#36261] Change Owner on an object of a disabled package', () => {
+  it('the single door answers the /data door\'s 404 OBJECT_PACKAGE_DISABLED: no write, no notification', async () => {
+    const engine = mockEngine(undefined, ['lead']);
+    const messaging = { emit: vi.fn(async () => ({})) };
+    const { single } = buildServer(engine, { messaging });
+    const res = mockRes();
+    await single!.handler(req({ object: 'lead', id: 'l1' }, { ownerId: 'u_next', notify: true }), res);
+    expect(res.statusCode).toBe(404);
+    expect(res.body.error.code).toBe('OBJECT_PACKAGE_DISABLED');
+    expect(engine.update).not.toHaveBeenCalled();
+    expect(messaging.emit).not.toHaveBeenCalled();
+    expect(engine.rows[0]!.owner_id).toBe('u_a');
+  });
+
+  it('the bulk door refuses the whole call 404 OBJECT_PACKAGE_DISABLED: no write, no notification', async () => {
+    const engine = mockEngine(undefined, ['lead']);
+    const messaging = { emit: vi.fn(async () => ({})) };
+    const { bulk } = buildServer(engine, { messaging });
+    const res = mockRes();
+    await bulk!.handler(req({ object: 'lead' }, { ids: ['l1', 'l2'], ownerId: 'u_next', notify: true }), res);
+    expect(res.statusCode).toBe(404);
+    expect(res.body.error.code).toBe('OBJECT_PACKAGE_DISABLED');
+    expect(engine.update).not.toHaveBeenCalled();
+    expect(messaging.emit).not.toHaveBeenCalled();
+  });
+
+  it('control: the same object with its package enabled answers 200, single and bulk', async () => {
+    const engine = mockEngine();
+    const { single, bulk } = buildServer(engine);
+    const one = mockRes();
+    await single!.handler(req({ object: 'lead', id: 'l1' }, { ownerId: 'u_next' }), one);
+    expect(one.statusCode).toBe(200);
+    const many = mockRes();
+    await bulk!.handler(req({ object: 'lead' }, { ids: ['l2'], ownerId: 'u_next' }), many);
+    expect(many.statusCode).toBe(200);
+    expect(many.body.data).toMatchObject({ updated: 1, failed: 0 });
+    expect(engine.registry.isObjectPackageDisabled).toHaveBeenCalledWith('lead');
   });
 });
