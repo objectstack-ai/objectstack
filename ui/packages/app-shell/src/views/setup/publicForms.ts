@@ -61,9 +61,9 @@ import {
 } from '../runtime-metadata-persistence.js';
 import { declaredOverrideOf, overrideDraftBody } from '../studio-design/StudioCustomizeControls.js';
 
-type Doc = Record<string, any>;
+type FormDoc = Record<string, any>;
 
-const isDoc = (v: unknown): v is Doc => !!v && typeof v === 'object' && !Array.isArray(v);
+const isDoc = (v: unknown): v is FormDoc => !!v && typeof v === 'object' && !Array.isArray(v);
 
 /** One public form, as the list read serves it. */
 export interface PublicFormRow {
@@ -82,7 +82,7 @@ export interface PublicFormRow {
 }
 
 /** `form` with its switch set to `on`: the only key a switch writes. */
-function withSwitch(form: Doc, on: boolean): Doc {
+function withSwitch(form: FormDoc, on: boolean): FormDoc {
   return { ...form, sharing: { ...(isDoc(form.sharing) ? form.sharing : {}), enabled: on } };
 }
 
@@ -94,8 +94,8 @@ const text = (v: unknown): string | undefined => (typeof v === 'string' && v.tri
  * first section (what the form's own page heads it with), else its name
  * without the object prefix (`crm_lead.web_to_lead` → `web_to_lead`).
  */
-function shownName(item: Doc): string {
-  const config: Doc = isDoc(item.config) ? item.config : {};
+function shownName(item: FormDoc): string {
+  const config: FormDoc = isDoc(item.config) ? item.config : {};
   const first = Array.isArray(config.sections) ? config.sections.find(isDoc) : undefined;
   const dot = item.name.lastIndexOf('.');
   return (
@@ -167,8 +167,8 @@ export class PublicFormSwitchRefusal extends Error {
 }
 
 /** A document without the read's `_` decorations. */
-function authored(doc: Doc): Doc {
-  const out: Doc = {};
+function authored(doc: FormDoc): FormDoc {
+  const out: FormDoc = {};
   for (const [key, value] of Object.entries(doc)) if (!key.startsWith('_')) out[key] = value;
   return out;
 }
@@ -185,8 +185,8 @@ function canonical(value: unknown): string {
  * the two are the same once the declaration, the read's decorations and the
  * switch are set aside.
  */
-export function overrideHoldsOnlySwitch(override: Doc, base: Doc): boolean {
-  const strip = (doc: Doc) => {
+export function overrideHoldsOnlySwitch(override: FormDoc, base: FormDoc): boolean {
+  const strip = (doc: FormDoc) => {
     const out = authored(doc);
     delete out.overrides;
     if (isDoc(out.config)) out.config = withSwitch(out.config, true);
