@@ -48,7 +48,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SRC = resolve(HERE, '../src');
@@ -399,15 +399,37 @@ function allowedFunction(sf: ts.SourceFile, allowance: Allowance): ts.Node | und
 
 const key = (file: string, f: Finding): string => `${file} · ${f.rule} · ${f.fn} · ${f.site}`;
 
+/**
+ * The tree walk's budget. Measured locally on a box running a build beside
+ * it: reading all 622 `.ts` files under `src` and parsing the 39 that pass the
+ * prefilter took 0.10-0.19 s, against 1.0-2.3 s for parsing all 622; a CI
+ * runner under full-suite load ran the unfiltered walk inside the test past
+ * vitest's 5 s default. The bound is a ceiling for a loaded runner, not an
+ * expectation.
+ */
+const TREE_WALK_TIMEOUT_MS = 60_000;
+
 describe('the CLI starts programs from an argv array, without a shell', () => {
-  const files = sourceFiles(SRC).map((file) => ({
-    rel: relative(SRC, file).split('\\').join('/'),
-    source: readFileSync(file, 'utf-8'),
-    file,
-  }));
+  let files: Array<{ rel: string; source: string; file: string }> = [];
+  let found: string[] = [];
+
+  beforeAll(() => {
+    files = sourceFiles(SRC).map((file) => ({
+      rel: relative(SRC, file).split('\\').join('/'),
+      source: readFileSync(file, 'utf-8'),
+      file,
+    }));
+    // Sound prefilter: every finding needs a `child_process` load (an import,
+    // `require` or `import()` naming it by a string literal), so a file whose
+    // text never holds that name has none. Only the rest are parsed.
+    found = files
+      .filter(({ source }) => source.includes('child_process'))
+      .flatMap(({ rel, source, file }) => launchFindings(source, file).map((f) => key(rel, f)))
+      .sort();
+  }, TREE_WALK_TIMEOUT_MS);
 
   it('finds no exec with a built command line, no exec as a value, no shell option and no shell program outside the measured allowances', () => {
-    const found = files.flatMap(({ rel, source, file }) => launchFindings(source, file).map((f) => key(rel, f))).sort();
+    expect(files.length).toBeGreaterThan(0);
     expect(found).toEqual(ALLOWED.map((a) => key(a.file, a)).sort());
   });
 
@@ -432,7 +454,8 @@ describe('the CLI starts programs from an argv array, without a shell', () => {
       const wrapper = allowance.literalCallers!;
       let calls = 0;
       const offenders: string[] = [];
-      for (const { rel, source, file } of files) {
+      // A file whose text never holds the wrapper's name has no reference to it.
+      for (const { rel, source, file } of files.filter((f) => f.source.includes(wrapper))) {
         const sf = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
         const walk = (node: ts.Node): void => {
           if (ts.isIdentifier(node) && node.text === wrapper) {
