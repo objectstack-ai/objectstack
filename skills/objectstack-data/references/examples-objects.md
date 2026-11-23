@@ -60,6 +60,7 @@ export default ObjectSchema.create({
   pluralLabel: 'Support Cases',
   description: 'A customer-reported issue tracked to resolution.',
   icon: 'life-buoy',
+  color: 'orange',
   sharingModel: 'private',                 // required in practice
   highlightFields: ['subject', 'status', 'priority'],
   enable: {
