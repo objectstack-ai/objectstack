@@ -681,11 +681,25 @@ export class MessagingServicePlugin implements Plugin {
             // (sys_channel_account). [#34730 step 3] Setup's Slack entry
             // (`slack-setup-ui.ts`) is registered on the same condition, so a
             // composition without connector-slack lists no Slack page.
+            // [#36301] The DM's link is a Console page, so it goes under the
+            // Console's mount, read from the auth service's composer
+            // (`getConsoleUrl`, which reads `AuthConfig.uiBasePath`) at send
+            // time, the one source the approval e-mail reads; without an auth
+            // service the link carries no mount.
+            const getConsoleUrl = (path: string): string | undefined => {
+                let auth: { getConsoleUrl?: (path: string) => string } | undefined;
+                try {
+                    auth = ctx.getService<{ getConsoleUrl?: (path: string) => string }>('auth');
+                } catch {
+                    return undefined;
+                }
+                return typeof auth?.getConsoleUrl === 'function' ? auth.getConsoleUrl(path) : undefined;
+            };
             ctx.hook('kernel:ready', async () => {
                 if (!getSlack()) return;
                 service.registerChannelProvider('slack', lazyChannelMount({
                     resolveTransport: getSlack,
-                    create: () => createSlackChannel({ store: slackLinks }),
+                    create: () => createSlackChannel({ store: slackLinks, getConsoleUrl }),
                     announce: '[messaging] slack channel registered (a DM to the recipient\'s confirmed sys_channel_user_link, with their organization\'s sys_channel_account token)',
                     logger: ctx.logger,
                 }));

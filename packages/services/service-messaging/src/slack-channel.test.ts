@@ -10,7 +10,7 @@
 
 import { describe, it, expect } from 'vitest';
 import type { Delivery } from './channel.js';
-import { absoluteLink, createSlackChannel, deploymentOrigin, slackDmText } from './slack-channel.js';
+import { absoluteLink, consoleLinkBase, createSlackChannel, deploymentOrigin, slackDmText, type ConsolePageComposer } from './slack-channel.js';
 import type { SlackAnswer, SlackLinkStore } from './slack-links.js';
 
 const ACCOUNT = { id: 'acc_1', organizationId: 'org_a', displayName: 'Acme', externalId: 'T1', status: 'active' as const };
@@ -18,7 +18,7 @@ const LINK = { id: 'l_1', accountId: 'acc_1', userId: 'u_ada', externalUserId: '
 const ok = (body: Record<string, unknown>): SlackAnswer => ({ ok: true, status: 200, body: { ok: true, ...body } });
 const refused = (error: string, status = 200): SlackAnswer => ({ ok: false, status, body: { ok: false, error }, error });
 
-function channelOver(answers: Record<string, SlackAnswer>, opts: { linked?: boolean } = {}) {
+function channelOver(answers: Record<string, SlackAnswer>, opts: { linked?: boolean; getConsoleUrl?: ConsolePageComposer } = {}) {
     const sent: Array<{ method: string; params?: Record<string, unknown> }> = [];
     const revoked: string[] = [];
     const store = {
@@ -30,7 +30,7 @@ function channelOver(answers: Record<string, SlackAnswer>, opts: { linked?: bool
         },
         async markRevoked(a: { id: string }) { revoked.push(a.id); },
     } as unknown as SlackLinkStore;
-    const channel = createSlackChannel({ store, getPublicOrigin: () => 'https://os.example.com' });
+    const channel = createSlackChannel({ store, getPublicOrigin: () => 'https://os.example.com', getConsoleUrl: opts.getConsoleUrl });
     const delivery = (recipient = 'u_ada'): Delivery => ({
         channel: 'slack',
         recipient,
@@ -103,5 +103,46 @@ describe('the slack channel — the deep link', () => {
         expect(deploymentOrigin({ OS_BASE_URL: 'https://base.example.com/app/' })).toBe('https://base.example.com/app');
         expect(deploymentOrigin({ OS_BASE_URL: 'ftp://base.example.com' })).toBeUndefined();
         expect(deploymentOrigin({})).toBeUndefined();
+    });
+});
+
+/**
+ * [#36301] The DM's link is a Console page, so it goes under the Console's
+ * mount, read from the auth service's composer (`getConsoleUrl`, whose path
+ * is `AuthConfig.uiBasePath`), as the approval e-mail's link does.
+ */
+describe('the slack channel — the deep link under the Console mount', () => {
+    /** `AuthManager.getConsoleUrl` over a canonical origin and a `uiBasePath`. */
+    const composer = (origin: string, uiBasePath = '/_console'): ConsolePageComposer =>
+        (path) => `${origin}${uiBasePath.replace(/\/$/, '')}${path.startsWith('/') ? path : `/${path}`}`;
+
+    it('posts the approval link under the mount the auth service composes', async () => {
+        const t = channelOver(
+            { 'conversations.open': ok({ channel: { id: 'D1' } }), 'chat.postMessage': ok({ ts: '1700.1' }) },
+            { getConsoleUrl: composer('https://os.example.com') },
+        );
+        expect(await t.channel.send({} as never, t.delivery())).toEqual({ ok: true, externalId: '1700.1' });
+        expect(t.sent[1]?.params?.text).toBe('*<https://os.example.com/_console/system/approvals?request=r1|Approve &lt;PO-7&gt;>*\nAda &amp; Bob asked.');
+    });
+
+    it('follows uiBasePath: a custom mount, and none for a Console served at the root', () => {
+        expect(consoleLinkBase('https://os.example.com', composer('https://os.example.com', '/console'))).toBe('https://os.example.com/console');
+        expect(consoleLinkBase('https://os.example.com', composer('https://os.example.com', '/'))).toBe('https://os.example.com');
+    });
+
+    it('a deployment under a sub-path is not prefixed twice, and only the composer\'s path is taken', () => {
+        expect(consoleLinkBase('https://h.example.com/app', composer('https://h.example.com/app'))).toBe('https://h.example.com/app/_console');
+        expect(absoluteLink('/system/approvals?request=r1', consoleLinkBase('https://h.example.com/app', composer('https://h.example.com/app'))))
+            .toBe('https://h.example.com/app/_console/system/approvals?request=r1');
+        // The composer's origin is not the DM's: the origin stays the channel's own.
+        expect(consoleLinkBase('https://public.example.com', composer('http://internal:3000'))).toBe('https://public.example.com/_console');
+    });
+
+    it('no composer, one that answers nothing, throws or answers a non-URL: no mount; no origin: no base', () => {
+        expect(consoleLinkBase('https://os.example.com', undefined)).toBe('https://os.example.com');
+        expect(consoleLinkBase('https://os.example.com', () => undefined)).toBe('https://os.example.com');
+        expect(consoleLinkBase('https://os.example.com', () => { throw new Error('no auth'); })).toBe('https://os.example.com');
+        expect(consoleLinkBase('https://os.example.com', () => '/_console/')).toBe('https://os.example.com');
+        expect(consoleLinkBase(undefined, composer('https://os.example.com'))).toBeUndefined();
     });
 });

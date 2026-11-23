@@ -32,7 +32,23 @@ export interface SlackChannelOptions {
      * under; default {@link deploymentOrigin}, read per delivery.
      */
     getPublicOrigin?(): string | undefined;
+    /**
+     * [#36301] The auth service's Console page composer
+     * (`AuthManager.getConsoleUrl`), read per delivery: a relative `actionUrl`
+     * is a Console route, and the Console is served under its mount
+     * (`AuthConfig.uiBasePath`, default `/_console`), so the DM link is made
+     * absolute under `origin + mount` ({@link consoleLinkBase}). Absent, or
+     * answering nothing, when the kernel has no auth service: no mount.
+     */
+    getConsoleUrl?: ConsolePageComposer;
 }
+
+/**
+ * The auth service's Console page composer (`AuthManager.getConsoleUrl`):
+ * `${origin}${uiBasePath}${path}`. Only its PATH is read here, never its
+ * origin: the origin is {@link SlackChannelOptions.getPublicOrigin}'s.
+ */
+export type ConsolePageComposer = (path: string) => string | undefined;
 
 /**
  * The `slack` channel (ADR-0013 addendum of 2026-11-19, ADR-0022 §3) — a
@@ -48,7 +64,8 @@ export interface SlackChannelOptions {
  *   channel: they run in fan-out and the dispatcher, before this.
  * - **What is sent.** `conversations.open` with the linked user, then
  *   `chat.postMessage`: the title in bold, linked to the notification's deep
- *   link made absolute, then the body; both already in the recipient's
+ *   link made absolute (a Console route, so under the Console's mount:
+ *   {@link consoleLinkBase}), then the body; both already in the recipient's
  *   language. No text of its own, so nothing here needs translating.
  * - **Outcome.** A link gone or never confirmed by the time a row is sent,
  *   or a Slack user Slack no longer finds ⇒ `invalid_recipient` (suppressed,
@@ -58,7 +75,7 @@ export interface SlackChannelOptions {
  */
 export function createSlackChannel(opts: SlackChannelOptions): MessagingChannel {
     const { store } = opts;
-    const origin = () => (opts.getPublicOrigin ?? deploymentOrigin)();
+    const linkBase = () => consoleLinkBase((opts.getPublicOrigin ?? deploymentOrigin)(), opts.getConsoleUrl);
 
     return {
         id: SLACK_CHANNEL_ID,
@@ -89,7 +106,7 @@ export function createSlackChannel(opts: SlackChannelOptions): MessagingChannel 
             if (!opened.ok || typeof channel !== 'string') return failure(store, target.account, opened);
             const posted = await call('chat.postMessage', {
                 channel,
-                text: slackDmText(n, origin()),
+                text: slackDmText(n, linkBase()),
                 unfurl_links: false,
                 unfurl_media: false,
             });
@@ -125,7 +142,8 @@ function escapeSlack(text: string): string {
 
 /**
  * The DM's text: the title in bold, linked to the deep link when one can be
- * made absolute, then the body.
+ * made absolute, then the body. `origin` is the base a relative `actionUrl`
+ * is made absolute under: the channel hands it {@link consoleLinkBase}.
  */
 export function slackDmText(n: Pick<Notification, 'title' | 'body' | 'actionUrl'>, origin: string | undefined): string {
     const title = escapeSlack(n.title);
@@ -137,7 +155,9 @@ export function slackDmText(n: Pick<Notification, 'title' | 'body' | 'actionUrl'
 /**
  * `actionUrl` as an absolute `http(s)` URL: as it is when it already is one,
  * under `origin` when it is a path on this server, else none (a DM reader is
- * outside the Console, so a relative link opens nothing).
+ * outside the Console, so a relative link opens nothing). A relative
+ * `actionUrl` is a Console route (the inbox row's call-to-action), so the
+ * channel passes `origin` with the Console's mount on it ({@link consoleLinkBase}).
  */
 export function absoluteLink(actionUrl: string | undefined, origin: string | undefined): string | undefined {
     if (!actionUrl) return undefined;
@@ -169,4 +189,55 @@ export function deploymentOrigin(env: Readonly<Record<string, string | undefined
     } catch {
         return undefined;
     }
+}
+
+/**
+ * [#36301] The base a relative `actionUrl` is made absolute under: `origin`
+ * plus the Console's mount. `actionUrl` is the in-app route the Console routes
+ * on (`/system/approvals?request=ID`), and a server mounts the Console under a
+ * path of its own (`AuthConfig.uiBasePath`, `/_console` by default; `os serve`
+ * serves nothing at `/system/*`), so a link without the mount opens a "not
+ * found" page.
+ *
+ * The mount is read from the auth service's composer, never written here, so
+ * the DM follows `uiBasePath` exactly as the approval e-mail (plugin-approvals
+ * `consolePageLink`), the auth e-mails and the mention e-mail do: nothing for
+ * a deployment that sets it to `/`. Only the composer's PATH is taken, less
+ * any base path it shares with `origin`, so a deployment under a sub-path is
+ * not prefixed twice: the same rule as `consolePageLink`, which lives in a
+ * package this one does not depend on. No composer, or one that throws or
+ * answers something that is not a URL: no mount, the base the channel used
+ * before. No `origin`: none, and the DM carries no link.
+ *
+ * The origin is the caller's: the channel's `getPublicOrigin` option, else
+ * {@link deploymentOrigin}. A host that resolves the origin elsewhere hands it
+ * in through that option and keeps this mount rule.
+ */
+export function consoleLinkBase(origin: string | undefined, composer: ConsolePageComposer | undefined): string | undefined {
+    if (!origin) return undefined;
+    return `${origin.replace(/\/+$/, '')}${consoleMountPath(origin, composer)}`;
+}
+
+function consoleMountPath(origin: string, composer: ConsolePageComposer | undefined): string {
+    let composed: string | undefined;
+    try {
+        composed = composer?.('/');
+    } catch {
+        return '';
+    }
+    if (!composed) return '';
+    let mount: string;
+    try {
+        mount = new URL(composed).pathname.replace(/\/+$/, '');
+    } catch {
+        return '';
+    }
+    let basePath = '';
+    try {
+        basePath = new URL(origin).pathname.replace(/\/+$/, '');
+    } catch {
+        basePath = '';
+    }
+    if (basePath && (mount === basePath || mount.startsWith(`${basePath}/`))) return mount.slice(basePath.length);
+    return mount;
 }

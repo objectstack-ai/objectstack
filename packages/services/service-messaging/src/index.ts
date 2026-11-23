@@ -82,8 +82,8 @@ export { createPushChannel } from './push-channel.js';
 export type { PushChannelOptions, PushSenderSurface, PushDeviceSurface } from './push-channel.js';
 // [#34730 step 2] Slack DM delivery: the channel, the per-person link store
 // and its HTTP doors.
-export { createSlackChannel, slackDmText, absoluteLink, deploymentOrigin } from './slack-channel.js';
-export type { SlackChannelOptions } from './slack-channel.js';
+export { createSlackChannel, slackDmText, absoluteLink, deploymentOrigin, consoleLinkBase } from './slack-channel.js';
+export type { SlackChannelOptions, ConsolePageComposer } from './slack-channel.js';
 export {
     SlackLinkStore,
     SlackLinkError,
