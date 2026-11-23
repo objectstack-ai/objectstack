@@ -4028,6 +4028,7 @@ const ar = {
     welcomeAdminDescriptionNoAi: "أعدّ تطبيقك الأول من قائمة الإدارة على اليسار.",
     noAppsTitle: "لا توجد تطبيقات بعد",
     noAppsDescription: "يجري إعداد النظام — وستظهر هنا التطبيقات التي يشاركها معك المسؤول.",
+    noAppsAddDescription: "أنشئ تطبيقك الأول، أو ابدأ من قالب أو من سوق التطبيقات.",
     buildWithAI: "الإنشاء بالذكاء الاصطناعي",
     askAI: "اسأل الذكاء الاصطناعي",
     recoveryReminder: {
@@ -4257,6 +4258,10 @@ const ar = {
     appNoReadableObjectGrantDescription: "لا يمكن لحسابك قراءة أي سجلات في هذا التطبيق بعد. يمكنك منح حق الوصول من الإعداد.",
     appOpensFromMenu: "يُستخدم {{app}} من قائمته",
     appOpensFromMenuDescription: "لا يحتوي هذا التطبيق على صفحة خاصة به. اختر عنصرًا من قائمته لفتح رابط أو تنفيذ إجراء.",
+    // objectstack#36748 — an app whose stored menu is empty, for a caller who can fill it.
+    appMenuEmpty: "قائمة {{app}} فارغة حتى الآن",
+    appMenuEmptyDescription: "أنشئ كائنات لهذا التطبيق في Studio وستنضم إلى قائمته، أو أضف عناصر في وضع التصميم.",
+    openInStudio: "فتح في Studio",
     openSetup: "فتح الإعداد",
     createFirstApp: "إنشاء أول تطبيق",
     systemSettings: "إعدادات النظام",
@@ -4460,6 +4465,10 @@ const ar = {
         placeholder: "اختر مصدر بيانات",
         loading: "جارٍ تحميل مصادر البيانات…",
         none: "لا توجد مصادر بيانات بعد",
+        addFilter: "تصفية",
+        filterAdvanced: "لا يمكن تغيير عامل التصفية هذا هنا. يبقى كما تم حفظه.",
+        filterLoading: "جارٍ تحميل الحقول…",
+        filterNoFields: "لا يحتوي مصدر البيانات هذا على حقول للتصفية.",
       },
       measure: {
         label: "المقياس",

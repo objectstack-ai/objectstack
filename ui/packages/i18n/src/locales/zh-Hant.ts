@@ -1850,6 +1850,10 @@ const zhHant = {
         placeholder: '選一個數據來源',
         loading: '正在讀取資料來源…',
         none: '還沒有資料來源',
+        addFilter: '篩選',
+        filterAdvanced: '這個篩選條件不能在這裡修改，會按儲存時的樣子保留。',
+        filterLoading: '正在讀取欄位…',
+        filterNoFields: '這個資料來源沒有可以篩選的欄位。',
       },
       measure: {
         label: '指標',
@@ -3878,6 +3882,7 @@ const zhHant = {
     welcomeAdminDescriptionNoAi: '從左側的「管理」選單建立你的第一個應用。',
     noAppsTitle: '還沒有應用',
     noAppsDescription: '系統正在準備中——管理員共享給你的應用會顯示在這裡。',
+    noAppsAddDescription: '搭建你的第一個應用，或者從模板、應用市場開始。',
     buildWithAI: '用 AI 搭建',
     askAI: '問 AI',
     recoveryReminder: {
@@ -4062,6 +4067,10 @@ const zhHant = {
     appNoReadableObjectGrantDescription: '你的賬號暫時無法讀取此應用中的任何記錄。你可以在 Setup 中授予訪問權限。',
     appOpensFromMenu: '{{app}} 的內容都在選單裡',
     appOpensFromMenuDescription: '此應用沒有自己的頁面。請在選單中選擇一個條目，開啟連結或執行操作。',
+    // objectstack#36748 — an app whose stored menu is empty, for a caller who can fill it.
+    appMenuEmpty: "{{app}} 的選單還是空的",
+    appMenuEmptyDescription: "在 Studio 裡為這個應用新建物件，它們會自動加入選單；也可以在設計模式裡新增。",
+    openInStudio: "在 Studio 中開啟",
     openSetup: '開啟 Setup',
     createFirstApp: '建立您的第一個應用',
     systemSettings: '系統設定',

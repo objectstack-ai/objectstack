@@ -75,7 +75,7 @@ import {
   type RecordTabsCatalog,
   type RecordTabsDraft,
   type RecordTabsEdit,
-} from './recordTabsConfig.js';
+} from './recordTabsConfigModel.js';
 import { consoleRecordTabsDoors, saveRecordTabs } from './recordTabsConfigSave.js';
 import {
   initialInstalledTabsDraft,

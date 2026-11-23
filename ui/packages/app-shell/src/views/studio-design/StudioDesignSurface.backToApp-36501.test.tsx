@@ -10,8 +10,9 @@
  *     returns to that very page, query included.
  *  2. Opened directly (no record), it names the package's published app and
  *     lands on its first screen; with several apps, the first, by its name.
- *  3. A package with no published app (none, or only a draft) reads
- *     「Back to app」 with no name and goes to the console's default landing.
+ *  3. A package with no published app (none, or only a draft) goes to the
+ *     console's default landing; with no app to name, the name slot names the
+ *     package instead (objectstack#36748).
  *
  * The REAL `StudioDesignSurface` and metadata client over a fetch stub that
  * serves the package list, the package's apps and objects. The running app is
@@ -192,15 +193,17 @@ describe('opened directly, 「‹ Back to app」 lands on the package app\'s fir
   });
 });
 
-describe('a package with no app: 「‹ Back to app」 with no name, to the default landing (objectstack#36501)', () => {
-  it('no app at all: no name, and the link goes to the console landing', async () => {
+describe('a package with no app: 「‹ Back to app」 names the package and goes to the default landing (objectstack#36501, objectstack#36748)', () => {
+  it('no app at all: the package is named, and the link goes to the console landing', async () => {
     srv.apps = [];
     renderAt(`/studio/${OWN}/data`);
     const link = await backLink();
     // Settled: the header has read the package's apps (it offers Create app).
     await within(header()).findByRole('button', { name: /Create app/ }, { timeout: 8000 });
-    expect(within(header()).queryByTestId('studio-back-app-name')).toBeNull();
-    expect(within(header()).getByTestId('studio-back')).toHaveTextContent(/^Back to app·Studio$/);
+    // objectstack#36748 — the name slot names the open package, by its label.
+    const name = await within(header()).findByTestId('studio-back-app-name', undefined, { timeout: 8000 });
+    expect(name).toHaveAttribute('data-names', 'package');
+    expect(within(header()).getByTestId('studio-back')).toHaveTextContent(/^Back to app·Sales·Studio$/);
     fireEvent.click(link);
     expect(await screen.findByTestId('elsewhere')).toHaveTextContent('/home');
   });
@@ -212,8 +215,8 @@ describe('a package with no app: 「‹ Back to app」 with no name, to the defa
     const link = await backLink();
     // The draft app is resolved (the header's create-app slot reads it) ...
     await waitFor(() => expect(within(header()).queryByRole('button', { name: /Create app/ })).toBeNull(), { timeout: 8000 });
-    // ... and still no app is named or opened.
-    expect(within(header()).queryByTestId('studio-back-app-name')).toBeNull();
+    // ... and still no app is named or opened: the slot names the package.
+    expect(await within(header()).findByTestId('studio-back-app-name')).toHaveAttribute('data-names', 'package');
     fireEvent.click(link);
     expect(await screen.findByTestId('elsewhere')).toHaveTextContent('/home');
   });

@@ -3705,6 +3705,7 @@ const ko = {
     welcomeAdminDescriptionNoAi: "왼쪽 관리 메뉴에서 첫 애플리케이션을 설정하세요.",
     noAppsTitle: "아직 애플리케이션이 없습니다",
     noAppsDescription: "시스템을 준비하고 있습니다 — 관리자가 공유한 앱이 여기에 표시됩니다.",
+    noAppsAddDescription: "첫 앱을 만들거나, 템플릿이나 앱 마켓플레이스에서 시작하세요.",
     buildWithAI: "AI로 빌드",
     askAI: "AI에게 질문",
     recoveryReminder: {
@@ -3914,6 +3915,10 @@ const ko = {
     appNoReadableObjectGrantDescription: "계정으로 아직 이 앱의 레코드를 읽을 수 없습니다. 설정에서 접근 권한을 부여할 수 있습니다.",
     appOpensFromMenu: "{{app}}은(는) 메뉴에서 사용합니다",
     appOpensFromMenuDescription: "이 앱에는 자체 페이지가 없습니다. 메뉴에서 항목을 선택해 링크를 열거나 작업을 실행하세요.",
+    // objectstack#36748 — an app whose stored menu is empty, for a caller who can fill it.
+    appMenuEmpty: "{{app}} 메뉴가 아직 비어 있습니다",
+    appMenuEmptyDescription: "Studio에서 이 앱의 개체를 만들면 메뉴에 자동으로 추가됩니다. 디자인 모드에서 추가할 수도 있습니다.",
+    openInStudio: "Studio에서 열기",
     openSetup: "설정 열기",
     createFirstApp: "첫 번째 앱 만들기",
     systemSettings: "시스템 설정",
@@ -4101,6 +4106,10 @@ const ko = {
         placeholder: "데이터 소스 선택",
         loading: "데이터 소스를 불러오는 중…",
         none: "아직 데이터 소스가 없습니다",
+        addFilter: "필터",
+        filterAdvanced: "이 필터는 여기에서 변경할 수 없습니다. 저장된 그대로 유지됩니다.",
+        filterLoading: "필드를 불러오는 중…",
+        filterNoFields: "이 데이터 소스에는 필터링할 필드가 없습니다.",
       },
       measure: {
         label: "지표",

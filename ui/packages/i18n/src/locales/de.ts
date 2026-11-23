@@ -3705,6 +3705,7 @@ const de = {
     welcomeAdminDescriptionNoAi: "Richten Sie Ihre erste Anwendung über das Verwaltungsmenü links ein.",
     noAppsTitle: "Noch keine Anwendungen",
     noAppsDescription: "Das System wird eingerichtet — Apps, die Ihr Administrator für Sie freigibt, erscheinen hier.",
+    noAppsAddDescription: "Erstellen Sie Ihre erste App, oder beginnen Sie mit einer Vorlage oder dem App-Marktplatz.",
     buildWithAI: "Mit KI erstellen",
     askAI: "KI fragen",
     recoveryReminder: {
@@ -3915,6 +3916,10 @@ const de = {
     appNoReadableObjectGrantDescription: "Ihr Konto kann noch keine Datensätze in dieser App lesen. Sie können den Zugriff in der Einrichtung gewähren.",
     appOpensFromMenu: "{{app}} wird über das Menü bedient",
     appOpensFromMenuDescription: "Diese App hat keine eigene Seite. Wählen Sie einen Eintrag im Menü, um einen Link zu öffnen oder eine Aktion auszuführen.",
+    // objectstack#36748 — an app whose stored menu is empty, for a caller who can fill it.
+    appMenuEmpty: "Das Menü von {{app}} ist noch leer",
+    appMenuEmptyDescription: "Legen Sie in Studio Objekte für diese App an; sie erscheinen automatisch im Menü. Einträge lassen sich auch im Designmodus hinzufügen.",
+    openInStudio: "In Studio öffnen",
     openSetup: "Einrichtung öffnen",
     createFirstApp: "Erste App erstellen",
     systemSettings: "Systemeinstellungen",
@@ -4102,6 +4107,10 @@ const de = {
         placeholder: "Datenquelle wählen",
         loading: "Datenquellen werden geladen…",
         none: "Noch keine Datenquellen",
+        addFilter: "Filter",
+        filterAdvanced: "Dieser Filter kann hier nicht geändert werden. Er bleibt so, wie er gespeichert wurde.",
+        filterLoading: "Felder werden geladen…",
+        filterNoFields: "Diese Datenquelle hat keine Felder zum Filtern.",
       },
       measure: {
         label: "Kennzahl",
