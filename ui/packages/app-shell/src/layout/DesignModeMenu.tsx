@@ -38,6 +38,10 @@
  * change. Groups are not added, removed or renamed here, and nothing about
  * who sees an entry is changed: both stay in Studio.
  *
+ * Each level is drawn in the order the sidebar draws it, `order` first
+ * (`inShownOrder`, objectstack#36591), so the menu reads the same in and out
+ * of the mode, and a move is saved as `order` where the level carries it.
+ *
  * Loaded only while the mode is on (`UnifiedSidebar` lazy-loads it): it
  * brings the metadata client and the package doors the menu's write needs.
  *
@@ -121,6 +125,7 @@ import {
   entryFor,
   entryOf,
   groupsOf,
+  inShownOrder,
   insertEntry,
   isGroup,
   menuTargets,
@@ -186,7 +191,9 @@ export default function DesignModeMenu({ app, basePath, resolveTargetLabel, reso
   const client = useMetadataClient();
   const packageId = typeof app._packageId === 'string' ? app._packageId : '';
   const served = React.useMemo(
-    () => withEntryIds(Array.isArray(app.navigation) ? (app.navigation as Menu) : []),
+    // Each level in the sidebar's order (objectstack#36591): the edits read a
+    // level's array order as its shown order, and the save writes it back.
+    () => withEntryIds(inShownOrder(Array.isArray(app.navigation) ? (app.navigation as Menu) : [])),
     [app.navigation],
   );
   const menu = change.value ?? served;

@@ -24,6 +24,13 @@
  * replayed on its navigation by entry id (`rebaseMenuEdits`); an entry
  * naming no target is left out (`navPayloadOf`, as Studio's nav save).
  *
+ * The order written is the order the editor showed (objectstack#36591). The
+ * sidebar sorts each level by `order`, so the editor shows each level, and the
+ * edits are replayed on each stored level, in that order (`inShownOrder`);
+ * each level whose entries carry `order` then has it rewritten from the
+ * result's order (`withOrderRewritten`). A level with no `order` is saved by
+ * array order alone, as before.
+ *
  * Nothing is created before every check has passed: the base's version is
  * read before the customization package is asked for, and a pair the server
  * does not list writable is refused before anything is written to it.
@@ -51,7 +58,7 @@ import {
   type ListedPackageManifest,
 } from '../views/studio-design/packages-io.js';
 import { navPayloadOf } from '../views/metadata-admin/previews/AppNavCanvas.js';
-import { rebaseMenuEdits, type Menu } from './designModeMenuModel.js';
+import { inShownOrder, rebaseMenuEdits, withOrderRewritten, type Menu } from './designModeMenuModel.js';
 
 /** The doors the save goes through; the defaults are the console's own. */
 export interface AppMenuSaveDoors {
@@ -108,7 +115,11 @@ export async function saveAppMenu(
   // The app as stored, a customization of an installed app folded in.
   const stored = storedApp(await doors.client.layered('app', appName, { packageId }));
   const storedNav = Array.isArray(stored.navigation) ? (stored.navigation as Menu) : [];
-  const nextNav = navPayloadOf(rebaseMenuEdits(served, navigation, storedNav) as unknown[]);
+  // The stored menu in its shown order, as the editor's is (`inShownOrder`),
+  // so the edits land where the editor showed them; the result's order is
+  // then written as `order` on each level that carries it (objectstack#36591).
+  const rebased = rebaseMenuEdits(served, navigation, inShownOrder(storedNav));
+  const nextNav = withOrderRewritten(navPayloadOf(rebased as unknown[]) as Menu);
   let body: Record<string, unknown> | null = { ...stored, name: appName, navigation: nextNav };
   let target = packageId;
   if (!listed.writable) {
