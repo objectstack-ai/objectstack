@@ -875,6 +875,16 @@ describe('a menu opened from the float keeps it out (objectstack#36471)', () => 
     expect(screen.getByTestId('sidebar-app-menu')).toBeInTheDocument();
   });
 
+  it('a menu opened from the float with no press in it (the keyboard) holds the float when the moment is up', () => {
+    floatThenPointerAway();
+    fireEvent.keyDown(within(panel()).getByTestId('sidebar-app-menu-trigger'), { key: 'Enter' });
+    expect(screen.getByTestId('sidebar-app-menu')).toBeInTheDocument();
+    act(() => {
+      vi.advanceTimersByTime(SIDEBAR_FLOAT_CLOSE_DELAY_MS * 3);
+    });
+    expectFloat();
+  });
+
   it('a press in the float stops the fold’s clock; a later move away starts it again', () => {
     floatThenPointerAway();
     fireEvent.pointerDown(within(panel()).getByRole('link', { name: 'Contacts' }), { button: 0, pointerType: 'mouse' });
