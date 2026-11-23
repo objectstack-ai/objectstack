@@ -27,9 +27,9 @@ import { contentDispositionValue } from './content-disposition.js';
  *     and its script ban, keeps the document's origin so the load is
  *     same-origin, and allows media from that origin only. Under `nosniff`
  *     those bytes are only ever read as media. The policy is a request: how a
- *     browser's built-in viewer applies it (Chromium's PDF viewer among them)
- *     is the browser's, so no rule here rests on any answer being rendered as
- *     an opaque-origin document — it rests on rules 1, 2 and 4.
+ *     browser's built-in viewer applies it is the browser's, so no rule here
+ *     rests on any answer being rendered as an opaque-origin document — it
+ *     rests on rules 1, 2 and 4.
  *  4. **Inline only for bytes that begin with their type's signature.** A
  *     door that holds the bytes when it answers previews an allow-listed type
  *     in place only when {@link bytesBeginWithTheirTypeSignature}; any other
