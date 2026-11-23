@@ -10,7 +10,7 @@
 
 import { describe, it, expect } from 'vitest';
 import type { Delivery } from './channel.js';
-import { absoluteLink, consoleLinkBase, createSlackChannel, deploymentOrigin, slackDmText, type ConsolePageComposer } from './slack-channel.js';
+import { absoluteLink, consoleLinkBase, createSlackChannel, deploymentOrigin, mountSlackChannel, slackDmText, type ConsolePageComposer } from './slack-channel.js';
 import type { SlackAnswer, SlackLinkStore } from './slack-links.js';
 
 const ACCOUNT = { id: 'acc_1', organizationId: 'org_a', displayName: 'Acme', externalId: 'T1', status: 'active' as const };
@@ -30,7 +30,10 @@ function channelOver(answers: Record<string, SlackAnswer>, opts: { linked?: bool
         },
         async markRevoked(a: { id: string }) { revoked.push(a.id); },
     } as unknown as SlackLinkStore;
-    const channel = createSlackChannel({ store, getPublicOrigin: () => 'https://os.example.com', getConsoleUrl: opts.getConsoleUrl });
+    // The published factory, or the plugin's wiring when a composer is handed in.
+    const channel = opts.getConsoleUrl
+        ? mountSlackChannel({ store, getPublicOrigin: () => 'https://os.example.com', getConsoleUrl: opts.getConsoleUrl })
+        : createSlackChannel({ store, getPublicOrigin: () => 'https://os.example.com' });
     const delivery = (recipient = 'u_ada'): Delivery => ({
         channel: 'slack',
         recipient,

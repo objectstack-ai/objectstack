@@ -32,15 +32,6 @@ export interface SlackChannelOptions {
      * under; default {@link deploymentOrigin}, read per delivery.
      */
     getPublicOrigin?(): string | undefined;
-    /**
-     * [#36301] The auth service's Console page composer
-     * (`AuthManager.getConsoleUrl`), read per delivery: a relative `actionUrl`
-     * is a Console route, and the Console is served under its mount
-     * (`AuthConfig.uiBasePath`, default `/_console`), so the DM link is made
-     * absolute under `origin + mount` ({@link consoleLinkBase}). Absent, or
-     * answering nothing, when the kernel has no auth service: no mount.
-     */
-    getConsoleUrl?: ConsolePageComposer;
 }
 
 /**
@@ -49,6 +40,21 @@ export interface SlackChannelOptions {
  * origin: the origin is {@link SlackChannelOptions.getPublicOrigin}'s.
  */
 export type ConsolePageComposer = (path: string) => string | undefined;
+
+/**
+ * [#36301] What `MessagingServicePlugin` mounts the channel with: the public
+ * options plus the auth service's Console page composer, read per delivery.
+ * A relative `actionUrl` is a Console route, and the Console is served under
+ * its mount (`AuthConfig.uiBasePath`, default `/_console`), so the DM link is
+ * made absolute under `origin + mount` ({@link consoleLinkBase}). Absent, or
+ * answering nothing, when the kernel has no auth service: no mount.
+ *
+ * Module-internal wiring, deliberately not on the package entry: the
+ * published {@link createSlackChannel} keeps its options as they were.
+ */
+export interface SlackChannelWiring extends SlackChannelOptions {
+    getConsoleUrl?: ConsolePageComposer;
+}
 
 /**
  * The `slack` channel (ADR-0013 addendum of 2026-11-19, ADR-0022 §3) — a
@@ -74,6 +80,14 @@ export type ConsolePageComposer = (path: string) => string | undefined;
  *   (retried). Anything else ⇒ `retryable`.
  */
 export function createSlackChannel(opts: SlackChannelOptions): MessagingChannel {
+    return mountSlackChannel(opts);
+}
+
+/**
+ * {@link createSlackChannel} with the plugin's wiring
+ * ({@link SlackChannelWiring}): the one implementation both run.
+ */
+export function mountSlackChannel(opts: SlackChannelWiring): MessagingChannel {
     const { store } = opts;
     const linkBase = () => consoleLinkBase((opts.getPublicOrigin ?? deploymentOrigin)(), opts.getConsoleUrl);
 

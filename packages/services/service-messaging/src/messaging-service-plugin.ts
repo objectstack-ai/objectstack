@@ -20,7 +20,7 @@ import { HttpDispatcher } from './http-dispatcher.js';
 import { createEmailChannel } from './email-channel.js';
 import { createSmsChannel } from './sms-channel.js';
 import { createPushChannel } from './push-channel.js';
-import { createSlackChannel } from './slack-channel.js';
+import { mountSlackChannel } from './slack-channel.js';
 import {
     SlackLinkStore,
     bindSlackLinkRemovalTriggers,
@@ -699,7 +699,7 @@ export class MessagingServicePlugin implements Plugin {
                 if (!getSlack()) return;
                 service.registerChannelProvider('slack', lazyChannelMount({
                     resolveTransport: getSlack,
-                    create: () => createSlackChannel({ store: slackLinks, getConsoleUrl }),
+                    create: () => mountSlackChannel({ store: slackLinks, getConsoleUrl }),
                     announce: '[messaging] slack channel registered (a DM to the recipient\'s confirmed sys_channel_user_link, with their organization\'s sys_channel_account token)',
                     logger: ctx.logger,
                 }));
