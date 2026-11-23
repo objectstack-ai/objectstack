@@ -1733,6 +1733,10 @@ const zh = {
     foldedMoreFields_other: '其他 {{count}} 项',
     expandFolded: '展开每次更新',
     collapseFolded: '收起更新',
+    fieldChangeLabel: '{{field}}：',
+    fieldChangeEmpty: '空',
+    fieldChangeExpand: '展开',
+    fieldChangeCollapse: '收起',
     // Replies
     replyCount: '{{count}} 条回复',
     replyCount_one: '{{count}} 条回复',
