@@ -247,11 +247,15 @@ export function useStudioSaveCoordinator(locale: string): StudioSaveCoordinator 
   return { registry, dirty, saving, save, cancel };
 }
 
-/** What {@link publishSavedItem} did. */
-export type PublishSavedOutcome =
+/** What an unpinned {@link publishSavedItem} did. */
+export type UnpinnedPublishOutcome =
   | { ok: true }
   /** Refused; `draftDiscarded` says the draft the save wrote was taken back. */
-  | { ok: false; error: unknown; draftDiscarded: boolean }
+  | { ok: false; error: unknown; draftDiscarded: boolean };
+
+/** What {@link publishSavedItem} did; only a pinned publish can answer `reloaded`. */
+export type PublishSavedOutcome =
+  | UnpinnedPublishOutcome
   /**
    * objectstack#36601 — the published row moved since the buffer was loaded,
    * and the author chose to reload it: nothing went live, the draft the save
@@ -281,6 +285,17 @@ export type PinnedPublish = DraftSaveGuard['publish'];
  * editor published since is refused and asked about (reload or overwrite)
  * instead of replacing it. Omitted, the publish is unpinned, as before.
  */
+export async function publishSavedItem(
+  client: Pick<MetadataClient, 'publish' | 'reset'>,
+  item: { type: string; name: string; packageId: string | null },
+  hadDraft: boolean,
+): Promise<UnpinnedPublishOutcome>;
+export async function publishSavedItem(
+  client: Pick<MetadataClient, 'publish' | 'reset'>,
+  item: { type: string; name: string; packageId: string | null },
+  hadDraft: boolean,
+  pinned: PinnedPublish,
+): Promise<PublishSavedOutcome>;
 export async function publishSavedItem(
   client: Pick<MetadataClient, 'publish' | 'reset'>,
   item: { type: string; name: string; packageId: string | null },

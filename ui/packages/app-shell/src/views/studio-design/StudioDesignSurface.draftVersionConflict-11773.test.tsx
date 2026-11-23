@@ -456,11 +456,14 @@ describe('Data pillar — two Saves over one published object are not last-write
     fireEvent.click(screen.getByTestId('draft-conflict-cancel'));
     await waitFor(() => expect(screen.queryByTestId('draft-conflict-dialog')).toBeNull(), { timeout: 8000 });
     // Keep editing: nothing went live, the draft B's Save wrote is taken back,
-    // and B's edit stays on screen, unsaved.
+    // and B's edit stays on screen, unsaved, read as the draft conflict's own
+    // "not saved" line (never as a refused publish).
+    expect(await within(b).findByText(/^Not saved:/, undefined, { timeout: 8000 })).toBeInTheDocument();
+    expect(within(b).queryByText(/^Not published:/)).toBeNull();
     expect(liveFields()).toEqual(['title', 'status', 'new_field']);
     expect(server.drafts.size).toBe(0);
     expect(within(b).getByTestId('studio-save')).toBeInTheDocument();
-    expect(within(b).getByText(/^Not saved:/)).toBeInTheDocument();
+    expect(within(b).queryByText('Unpublished draft')).toBeNull();
   });
 
   it('"reload" takes B\'s draft back, re-reads A\'s live object, and B\'s next Save is pinned to it', async () => {

@@ -29,6 +29,7 @@ import {
   DraftVersionGuard,
   draftPinOf,
   publishedPinOf,
+  isPublishConflictKeptEditing,
   isDraftVersionConflict,
   isDraftReadRefused,
   readDraftForSave,
@@ -603,7 +604,11 @@ describe('DraftVersionGuard — the Save\'s publish is pinned to the published r
     const kept = publishDoor(v(2));
     const b = guardWith('cancel');
     b.guard.recordPublished('object', 'acme_task', PKG, { ifMatch: v(1) });
-    await expect(b.guard.publish(kept.client, 'object', 'acme_task', { packageId: PKG })).rejects.toThrow(/not saved/);
+    const keptEditing = await b.guard.publish(kept.client, 'object', 'acme_task', { packageId: PKG }).catch((e: unknown) => e);
+    expect(String((keptEditing as Error).message)).toMatch(/not saved/);
+    // Told apart from a refused publish, so the Save reads it as "not saved".
+    expect(isPublishConflictKeptEditing(keptEditing)).toBe(true);
+    expect(isPublishConflictKeptEditing(new Error('not saved'))).toBe(false);
     expect(kept.state.sent).toHaveLength(1);
     expect(kept.state.live).toBe(v(2));
   });

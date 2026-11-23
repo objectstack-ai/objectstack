@@ -129,6 +129,18 @@ export interface DraftConflict {
   layer?: 'draft' | 'published';
 }
 
+const KEPT_EDITING = new WeakSet<object>();
+
+/**
+ * objectstack#36601 — `err` is the "not saved" error the guarded publish
+ * throws when the author, asked about a published row that moved, chose to
+ * keep editing: no request failed, so the caller shows it as the draft
+ * conflict's own "not saved" line, never as a refused publish.
+ */
+export function isPublishConflictKeptEditing(err: unknown): boolean {
+  return typeof err === 'object' && err !== null && KEPT_EDITING.has(err);
+}
+
 /**
  * The version-conflict refusal of the `/meta` draft door, told apart from the
  * door's OTHER 409 (`DESTRUCTIVE_CHANGE`) by its code, never by its prose.
@@ -368,7 +380,11 @@ export class DraftVersionGuard {
           this.deps.reload();
           return 'reloaded';
         }
-        if (choice !== 'overwrite') throw this.deps.notSaved(conflict);
+        if (choice !== 'overwrite') {
+          const kept = this.deps.notSaved(conflict);
+          KEPT_EDITING.add(kept);
+          throw kept;
+        }
         // As for a draft: the re-send is pinned to the version the refusal
         // names, so a publish landing in between is asked about again.
         pin = pinOfConflict(err);

@@ -292,7 +292,7 @@ import { useRegisteredMetadataDefaultInspector } from '../metadata-admin/default
 import { getMetadataResource } from '../metadata-admin/registry.js';
 import { useMetadataClient, useMetadataTypes } from '../metadata-admin/useMetadata.js';
 // objectui#11773 — every draft save of an existing item sends the version its buffer was built on.
-import { publishedPinOf, readDraftForSave, useDraftSaveGuard } from '../metadata-admin/DraftConflictDialog.js';
+import { publishedPinOf, isPublishConflictKeptEditing, readDraftForSave, useDraftSaveGuard } from '../metadata-admin/DraftConflictDialog.js';
 import {
   authoredObjectBuffer,
   authoredPublishedObject,
@@ -6714,7 +6714,10 @@ export function DataPillar({
           setHasDraft(false);
           recordObjRead('object', name, to, { ifNoneMatch: '*' });
         }
-        const refusal = publishRefusal(publishFailureOf('object', name, live.error), 'object', body, locale);
+        // The published row moved and the author kept editing: read as the draft conflict's "not saved".
+        const refusal = isPublishConflictKeptEditing(live.error)
+          ? objectSaveRefusal(live.error, body, locale)
+          : publishRefusal(publishFailureOf('object', name, live.error), 'object', body, locale);
         setError(refusal);
         return { kind: 'refused', reason: refusal.message };
       }
