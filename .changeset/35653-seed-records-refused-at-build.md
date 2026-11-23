@@ -8,7 +8,7 @@ feat(cli): `os validate` and `os build` refuse seed records the seed load would 
 Clause-②: no
 Metadata-protocol: narrowed
 
-<!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no stored row, registry key or authored value changes. What tightens is the authoring verdict: a seed record the seed load already refuses (its own validation rule, or a blank key field) is now refused by os validate and os build first. Nothing is converted and there is no tombstone; the fix is to the record or the rule, below. -->
+<!-- adr-0087: registered seed-record-refused-before-load -->
 
 A seed write is held to the object's own validation rules (every type but `state_machine`), and a record a rule refuses is dropped from the load while the rest land. Until now nothing at authoring time judged a seed record against those rules: `os validate` and `os build` passed, and the first sign was a `[Seeder] … dropped record(s)` line at boot carrying the rule's message, not its name. Both commands now refuse such a config (exit 1), one line per record, naming where the record sits, its index and the refusing rule:
 
