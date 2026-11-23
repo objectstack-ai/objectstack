@@ -711,14 +711,14 @@ describe('RecordDetailView.auditDisplayLocale-10442', () => {
   /**
    * The rendered diff line for `close_date`, under an ENGLISH UI with `locale` as
    * the display locale. Since objectstack#27055 the record page draws the audit
-   * entries in the one 动态 stream, each change as one compact line
-   * (`data-stream-change`).
+   * entries in the one 动态 stream; since objectstack#36290 each changed field
+   * is its own line under the entry (`data-field-change`).
    */
   async function diffLine(locale: string): Promise<string> {
     renderHistory(locale);
     let text = '';
     await waitFor(() => {
-      const line = Array.from(document.querySelectorAll('[data-stream-change]')).find((el) =>
+      const line = Array.from(document.querySelectorAll('[data-field-change]')).find((el) =>
         (el.textContent ?? '').startsWith('Close date'),
       );
       expect(line).toBeTruthy();
@@ -729,7 +729,7 @@ describe('RecordDetailView.auditDisplayLocale-10442', () => {
   }
 
   const expected = (locale: string) =>
-    `Close date ${new Date(`${FROM_DATE}T00:00:00Z`).toLocaleDateString(locale)} → ${new Date(`${TO_DATE}T00:00:00Z`).toLocaleDateString(locale)}`;
+    `Close date: ${new Date(`${FROM_DATE}T00:00:00Z`).toLocaleDateString(locale)} → ${new Date(`${TO_DATE}T00:00:00Z`).toLocaleDateString(locale)}`;
 
   beforeEach(() => {
     // Unrelated chrome on this view reaches for the platform API; answering it
@@ -754,13 +754,13 @@ describe('RecordDetailView.auditDisplayLocale-10442', () => {
   describe('RecordDetailView — the audit history dates follow the display locale (objectui#10442)', () => {
     it('formats the date diff as de-CH under an English UI with a de-CH display locale', async () => {
       const text = await diffLine('de-CH');
-      expect(text, `got: ${text}`).toBe('Close date 3.3.2020 → 4.3.2020');
+      expect(text, `got: ${text}`).toBe('Close date: 3.3.2020 → 4.3.2020');
       expect(text).toBe(expected('de-CH'));
     });
 
     it('control: formats the date diff as en-US under an en-US display locale', async () => {
       const text = await diffLine('en-US');
-      expect(text, `got: ${text}`).toBe('Close date 3/3/2020 → 3/4/2020');
+      expect(text, `got: ${text}`).toBe('Close date: 3/3/2020 → 3/4/2020');
       expect(text).toBe(expected('en-US'));
     });
 
@@ -892,17 +892,16 @@ describe('RecordDetailView.auditTenantCurrency-27640', () => {
         </LocalizationProvider>
       </I18nProvider>,
     );
-    // One audit entry draws its changes as one compact line (`data-stream-change`),
-    // joined with `; `, so each field's part is split out and keyed by label.
+    // One audit entry draws each changed field as its own line under the entry
+    // (`data-field-change`, objectstack#36290), keyed here by label.
     const lines: Record<string, string> = {};
     await waitFor(() => {
-      const line = Array.from(document.querySelectorAll('[data-stream-change]')).find((el) =>
-        (el.textContent ?? '').includes('Amount'),
+      const parts = Array.from(document.querySelectorAll('[data-field-change]')).map((el) =>
+        (el.textContent ?? '').replace(/\s+/g, ' ').trim(),
       );
-      expect(line, 'no History diff line').toBeTruthy();
-      const parts = (line!.textContent ?? '').replace(/\s+/g, ' ').trim().split('; ');
+      expect(parts.length, 'no History diff line').toBeGreaterThan(0);
       for (const label of ['Amount', 'List price']) {
-        const part = parts.find((p) => p.startsWith(`${label} `));
+        const part = parts.find((p) => p.startsWith(`${label}: `));
         expect(part, `no change for ${label} in: ${parts.join(' | ')}`).toBeTruthy();
         lines[label] = part!;
       }
@@ -934,17 +933,17 @@ describe('RecordDetailView.auditTenantCurrency-27640', () => {
   describe('RecordDetailView — a dynamic currency diff reads in the tenant currency (objectstack#27640)', () => {
     it('formats a dynamic-mode change from 1500 to 2500 with the EUR face under an EUR tenant', async () => {
       const lines = await diffLines('EUR');
-      expect(lines['Amount'], `got: ${lines['Amount']}`).toBe('Amount €1,500.00 → €2,500.00');
+      expect(lines['Amount'], `got: ${lines['Amount']}`).toBe('Amount: €1,500.00 → €2,500.00');
     });
 
     it('keeps a record-mode change a plain number: the tenant currency is not its fallback', async () => {
       const lines = await diffLines('EUR');
-      expect(lines['List price'], `got: ${lines['List price']}`).toBe('List price 1,500.00 → 2,500.00');
+      expect(lines['List price'], `got: ${lines['List price']}`).toBe('List price: 1,500.00 → 2,500.00');
     });
 
     it('control: with no tenant currency, the dynamic change reads as a plain number', async () => {
       const lines = await diffLines(undefined);
-      expect(lines['Amount'], `got: ${lines['Amount']}`).toBe('Amount 1,500.00 → 2,500.00');
+      expect(lines['Amount'], `got: ${lines['Amount']}`).toBe('Amount: 1,500.00 → 2,500.00');
     });
   });
 });

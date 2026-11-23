@@ -17,6 +17,7 @@ export const Project = ObjectSchema.create({
   label: 'Project',
   pluralLabel: 'Projects',
   icon: 'folder-kanban',
+  color: 'orange',
   description: 'A delivery project for an account.',
 
   // [#2727 / #2970] Opt in to the generic Attachments panel on the record

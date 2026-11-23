@@ -58,8 +58,9 @@ gradeCardAnswer(card, { question: 'account_count', persona: 'sdr', turn }); // a
   the artifact into the graph both score.
 - `scenario-tags.ts` — the capability-tag checks and the agent-action exposure check (each
   declared action exists on its object, carries `ai.exposed: true`, and carries
-  `ai.requiresConfirmation: true` where the card says `confirm`; a missing action fails, never
-  skipped), and the persona grant checks (`gradePersonaGrants`): one Build check per persona ×
+  `ai.requiresConfirmation: true` where the card says `confirm`, and not where it says the agent
+  acts at once, `->not-confirm-gated`, since an over-gated action meets the door's confirmation
+  the card never gives; a missing action fails, never skipped), and the persona grant checks (`gradePersonaGrants`): one Build check per persona ×
   object × verb the card implies, `persona-grant:<persona>:<object>:<verb>`, against that
   persona's own set (`<namespace>_<persona id>`). A question asked as the persona needs `read` on
   its object (not when the persona hides that object: it declines), and an `applied` or
@@ -77,6 +78,13 @@ gradeCardAnswer(card, { question: 'account_count', persona: 'sdr', turn }); // a
   card designs for a write that asks first, and its body writes as the platform, so whether the
   write goes through it is the run's to observe (ruling A on #31999 item 9, carried to the Build
   side). An `applied` write stays measured against the grant, whatever actions the build adds.
+  A `delete` the set grants is also read against the platform's owner-only delete floor
+  (`owner_only_deletes`, `created_by == current_user.id`, which the runner's admin-loaded seed
+  rows never meet): it passes on each deleted seed row the persona owns (`rowOwner`) or holds
+  Modify All or a write depth of `org` on, where the object's org-wide default is not public and
+  it has an `owner_id`; it is not measured where only an authored delete policy, a
+  `controlled_by_parent` master's gate or a declared route action could admit the row, and fails
+  otherwise (`deleteFloorReading`).
 - `scenario-operation-grade.ts` — an observed write against `applied` / `refused` /
   `pending_confirmation`; a fact the observation does not carry fails. An `applied` state
   entry may be an aggregate over every row its `where` matches: `sum` (`state:LABEL.sum(amount)`,
@@ -89,12 +97,12 @@ gradeCardAnswer(card, { question: 'account_count', persona: 'sdr', turn }); // a
   asks for a correction) and the platform half, `platform:` checks (the runner's own write of
   the declared values, the probe, was refused with that code and stored nothing); so is every
   other `refused` create or update, permission oversteps included (`isProbedOperation`). A
-  declared `VALIDATION_FAILED` is met by the app's own refusal at any 4xx status, or by the
-  app's flow refusal (`refusalMeets`). A hook's declared refusal reaches the MCP data tools
+  declared `VALIDATION_FAILED` is met by the app's own refusal at any 4xx status, a hook's
+  undeclared one (`HOOK_ABORTED`) included, or by the app's flow refusal (`refusalMeets`). A hook's declared refusal reaches the MCP data tools
   with `code` set to the status's catalogue code (`RESOURCE_CONFLICT` at 409) and the hook's
   own code beside it as `declaredCode` (`ASSET_NOT_IN_STOCK`); the runner keeps both, and a
   declared code meets its `declaredCode` exactly. A platform catalogue code other than the
-  declared one, with no `declaredCode`, never meets it. The platform half is not measured, out of passed and total with the reason in the
+  declared one and `HOOK_ABORTED`, with no `declaredCode`, never meets it. The platform half is not measured, out of passed and total with the reason in the
   scorecard's findings, when the probe met the build's own lock: refused 403
   `PERMISSION_DENIED`, nothing written, and the build locks a field the probe writes for the
   persona and declares an action on the object (`buildLockOf`; ruling A on #31999 item 9).
@@ -173,6 +181,9 @@ gradeCardAnswer(card, { question: 'account_count', persona: 'sdr', turn }); // a
   and `USD3,000` still are. A figure a `query_dataset` answer served over its object is cited by a
   source line naming that answer's dataset, or by the answer's `sourceLine` carried verbatim — the
   source the door tells the client to cite, which names the dataset rather than the object.
+  On a `withheld` truth a sentence about what a dataset or report covers ("The Approved Leave
+  dataset can't group by medical note") is no decline unless it binds to the asker
+  (`datasetCoverage`).
 
 ### The closed capability-tag table
 
@@ -199,7 +210,7 @@ discrimination test; ⛔ never match by area prefix.
 | `automation.record-triggered-flow` | carries a record-triggered flow, each bound to an object it serves, one bound to an object the card names |
 | `dashboards.widget-measures` | carries a dashboard widget with a measure, and every widget measure resolves on the dataset it binds |
 | `dashboards.report` | carries a report whose dataset binds an object the card names, every report selecting only measures and dimensions its datasets declare |
-| `ai.agent-actions` | carries every action in `run.agentActions` on its object, AI-exposed and confirm-gated where the card says `confirm` (the agent-action checks) |
+| `ai.agent-actions` | carries every action in `run.agentActions` on its object, AI-exposed and confirm-gated where the card says `confirm`, and only there (the agent-action checks) |
 
 ## Running the cards in a Claude Code cloud session
 

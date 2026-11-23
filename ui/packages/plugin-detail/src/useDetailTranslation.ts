@@ -278,6 +278,11 @@ export const DETAIL_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'detail.foldedMoreFields_other': '{{count}} more',
   'detail.expandFolded': 'Show each update',
   'detail.collapseFolded': 'Hide updates',
+  // objectstack#36290 — the per-field lines under an activity entry.
+  'detail.fieldChangeLabel': '{{field}}:',
+  'detail.fieldChangeEmpty': 'Empty',
+  'detail.fieldChangeExpand': 'Show all',
+  'detail.fieldChangeCollapse': 'Show less',
   // …and the punctuation that joins its field list: the shared list key the
   // form's field lists already use, not a second spelling of it.
   'validation.formInvalidJoiner': ', ',

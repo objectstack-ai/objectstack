@@ -36,6 +36,7 @@ export const SysScimConnectionCredential = ObjectSchema.create({
   label: 'SCIM Connection Credential',
   pluralLabel: 'SCIM Connection Credentials',
   icon: 'users',
+  color: 'purple',
   isSystem: true,
   // ObjectStack owns this lifecycle end to end — plugin-auth's SCIM connection
   // service is the only writer; no user CRUD, no better-auth involvement.

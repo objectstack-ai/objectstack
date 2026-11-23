@@ -13,6 +13,7 @@
  */
 
 import { createContext, useCallback, useContext, useLayoutEffect, useState } from 'react';
+import { useParams } from 'react-router-dom';
 import type { Dispatch, ReactNode, SetStateAction } from 'react';
 import {
   Button,
@@ -28,7 +29,12 @@ import {
 import { ArrowUpDown, ChevronDown, Download, Loader2, Upload, MoreVertical } from 'lucide-react';
 import type { ListExportDoor } from '@object-ui/plugin-list';
 import type { useObjectLabel, useObjectTranslation } from '@object-ui/i18n';
-import { FavoriteMenuItem } from '../layout/SidebarItemMenu.js';
+import {
+  FavoriteMenuItem,
+  ObjectSettingsMenuItem,
+  useObjectSettingsGate,
+  useObjectSettingsPath,
+} from '../layout/SidebarItemMenu.js';
 import type { useObjectListFavorite } from '../layout/SidebarItemMenu.js';
 import { PageHeader } from '../layout/PageHeader.js';
 import { ManagedByBadge } from '../components/ManagedByBadge.js';
@@ -86,8 +92,9 @@ export interface ObjectViewBarEnd {
  * objectstack#35878 — the page's own acts, after the list's search at the
  * right end of the view bar (or of the page bar where no view bar draws them):
  * the schema-driven toolbar, the create button, then ⋮ More, last at the right
- * edge (objectstack#35678). The ⋮ menu holds what is not used every time: the
- * object's description and the favorites entry (objectui#12427).
+ * edge (objectstack#35678). The ⋮ menu holds what is not used every time:
+ * Object settings first, for an admin (objectstack#36487), then the object's
+ * description and the favorites entry (objectui#12427).
  *
  * objectstack#36113 — at the view bar's end (`barEnd`), Import and the list's
  * export are one 「Import / Export」 menu before the rest, folded into ⋮ More
@@ -110,6 +117,13 @@ export function ObjectViewPageBarActions({
     barEnd,
 }: ObjectViewPageBarProps & { barEnd?: ObjectViewBarEnd }) {
     const description = objectDef.description ? objectDesc(objectDef) : undefined;
+    // objectstack#36487 — Object settings: this object in Studio, for the
+    // principal the app bar's Studio entry is drawn for. The app is the one
+    // the list's route names, as for the page's favorite.
+    const { appName } = useParams();
+    const objectSettingsPath = useObjectSettingsGate(
+        useObjectSettingsPath({ appSegment: appName, objectName: objectDef?.name }),
+    );
     // objectstack#36366 — the object's list scope arrangement
     // (`actionLayout.list`): `pinned` is the header's buttons, in order, the
     // page's Import and Export among them (`$import`, `$export`), and `more`
@@ -126,9 +140,10 @@ export function ObjectViewPageBarActions({
     // and on the page bar, its entries are ⋮ More's.
     const ioAtEnd = !!barEnd && !barEnd.folded && (importInMenus || !!exportDoor);
     const ioInMore = !ioAtEnd;
-    // The ⋮ menu: the description (no longer a resident subtitle), Import and
-    // the favorites entry — the page's once-in-a-while acts.
-    const moreShown = !!description || !!listFavorite || (ioInMore && (importInMenus || !!exportDoor));
+    // The ⋮ menu: Object settings, the description (no longer a resident
+    // subtitle), Import and the favorites entry — the page's once-in-a-while
+    // acts.
+    const moreShown = !!objectSettingsPath || !!description || !!listFavorite || (ioInMore && (importInMenus || !!exportDoor));
     const drawsToolbar = !!listActions?.some((a: any) => a.locations?.includes('list_toolbar'));
     return (
         <>
@@ -199,6 +214,7 @@ export function ObjectViewPageBarActions({
 
             {moreShown && (
               <ObjectViewMoreMenu
+                objectSettingsPath={objectSettingsPath}
                 description={description}
                 importShown={ioInMore && importInMenus}
                 setShowImport={setShowImport}
@@ -288,7 +304,12 @@ function PinnedListHeaderActions({
 }
 
 export interface ObjectViewMoreMenuProps extends Pick<ObjectViewPageBarProps, 'importShown' | 'setShowImport' | 'importDisabled' | 'listFavorite' | 't'> {
-    /** The object's description, the menu's first line; absent ⇒ none. */
+    /**
+     * objectstack#36487 — where Object settings goes, already passed by the
+     * gate (`useObjectSettingsGate`): the menu's first entry. Absent ⇒ none.
+     */
+    objectSettingsPath?: string | null;
+    /** The object's description, the first line after Object settings; absent ⇒ none. */
     description?: string;
     /** The list's export door, after Import (objectstack#36113: a narrow view bar); absent ⇒ none. */
     exportDoor?: ListExportDoor;
@@ -299,13 +320,14 @@ export interface ObjectViewMoreMenuProps extends Pick<ObjectViewPageBarProps, 'i
 }
 
 /**
- * The page's ⋮ More: the object's description, Import and the favorites
- * entry (objectui#12427), at the right edge of the view bar from `sm` up and of
+ * The page's ⋮ More: Object settings (objectstack#36487), the object's
+ * description, Import and the favorites entry (objectui#12427), at the right edge of the view bar from `sm` up and of
  * the phone's top row below it (objectstack#35883), where 「Select」 leads it.
  * From `sm` up Import, with the list's export after it, is here only while the
  * view bar is too narrow for 「Import / Export」 (objectstack#36113).
  */
 export function ObjectViewMoreMenu({
+    objectSettingsPath,
     description,
     importShown,
     setShowImport,
@@ -316,7 +338,8 @@ export function ObjectViewMoreMenu({
     triggerClassName = 'shadow-none h-7 w-7 px-0',
     t,
 }: ObjectViewMoreMenuProps) {
-    const rest = !!description || importShown || !!exportDoor || !!listFavorite;
+    const afterSettings = !!description || importShown || !!exportDoor || !!listFavorite;
+    const rest = !!objectSettingsPath || afterSettings;
     return (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -333,6 +356,14 @@ export function ObjectViewMoreMenu({
                 <DropdownMenuContent align="end" className="w-64">
                   {leading}
                   {leading && rest && <DropdownMenuSeparator />}
+                  {/* objectstack#36487 — first: the object's own settings
+                      lead the menu of the page that lists it. */}
+                  {objectSettingsPath && (
+                    <>
+                      <ObjectSettingsMenuItem path={objectSettingsPath} testId="object-view-object-settings" />
+                      {afterSettings && <DropdownMenuSeparator />}
+                    </>
+                  )}
                   {description && (
                     <>
                       <DropdownMenuLabel

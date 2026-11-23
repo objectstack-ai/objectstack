@@ -69,6 +69,7 @@ export const SysExchangeRate = ObjectSchema.create({
   label: 'Exchange Rate',
   pluralLabel: 'Exchange Rates',
   icon: 'arrow-right-left',
+  color: 'green',
   isSystem: true,
   // Platform-defined schema, organization-administered data.
   managedBy: 'system-data',

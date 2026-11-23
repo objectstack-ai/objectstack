@@ -21,6 +21,7 @@ export const PrivateNote = ObjectSchema.create({
   label: 'Personal Note',
   pluralLabel: 'Personal Notes',
   icon: 'lock',
+  color: 'pink',
   description: 'A private journal entry visible only to its owner — declarative `private` OWD (ADR-0056).',
 
   // The entire access policy: owner-private. No RLS authored anywhere.

@@ -28,6 +28,7 @@ export const FieldZoo = ObjectSchema.create({
   label: 'Field Zoo',
   pluralLabel: 'Field Zoo',
   icon: 'shapes',
+  color: 'amber',
   description: 'One field of every supported type — exhaustive data-layer coverage.',
   // The record's picture: the record page header draws `f_image` beside the
   // title. It must name an `image` or `avatar` field of this object; anything

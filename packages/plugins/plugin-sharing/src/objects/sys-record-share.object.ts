@@ -39,6 +39,7 @@ export const SysRecordShare = ObjectSchema.create({
   label: 'Record Share',
   pluralLabel: 'Record Shares',
   icon: 'share',
+  color: 'purple',
   isSystem: true,
   managedBy: 'engine-owned',
   // Each row widens one record beyond the object's sharing model (its OWD
