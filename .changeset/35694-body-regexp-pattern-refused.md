@@ -20,7 +20,7 @@ What moves (FROM → TO):
 - `BodyCompileShape` (`@objectstack/lint`) gains `regexp-dialect-gap`, the one `warning` arm; `regexp-pattern` is now an `error`.
 - The unterminated-literal hint names a line terminator inside the literal as a cause (a `\n` written with one backslash in a quoted or JSON-carried `body.source`).
 - A hook lowered from an inline `handler` whose body does not compile gets a hint that names the handler instead of `body.source`.
-- The runtime's QuickJS runner (`@objectstack/runtime`): a hook or job body that does not compile FROM the generic `hook 'NAME' threw: SyntaxError: …` TO `hook 'NAME' does not compile: SyntaxError: …` (and `job 'NAME' …`), a declared `500` with the sentence `Hook 'NAME' cannot run: its body does not compile (…)`, the answer an action body already gets. The `/data` door's answer is unchanged (the sanitised `500`).
+- The runtime's QuickJS runner (`@objectstack/runtime`): a hook or job body that does not compile is reported FROM the generic `hook 'NAME' threw: SyntaxError: …` (the sentence a body that ran and threw gets) TO `hook 'NAME' does not compile: SyntaxError: …` (and `job 'NAME' …`), the way an action body's is. The caller's answer is unchanged: the `/data` door still answers the sanitised `500 INTERNAL_ERROR`.
 - `os explain` for the three rules and the ADR-0087 entries `action-body-does-not-compile-refused`, `action-body-regexp-literal-token-refused` and `hook-job-body-does-not-compile-refused` now say which pattern failures warn.
 
 The fix: close every group, give each quantifier something to repeat or escape it, write a class range low to high, reference only a group the pattern names, and use a Unicode property that exists.

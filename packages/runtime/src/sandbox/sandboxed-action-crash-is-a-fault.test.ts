@@ -279,14 +279,14 @@ describe('an action body that times out answers naming the action and its limit'
 });
 
 /**
- * A hook body and a job body that do not compile answer the way an action's
- * does: the runner names the body's owner and the compiler, says `does not
- * compile` where a body that ran and threw says `threw`, and declares `500`.
- * Both run in the `(ctx)` wrapper (`hookBodyFunctionExpression`); the two
- * bodies are the ones the author-time rules `hook-body-does-not-compile` /
+ * A hook body and a job body that do not compile are reported the way an
+ * action's is: the runner names the body's owner and the compiler, and says
+ * `does not compile` where a body that ran and threw says `threw`. Both run in
+ * the `(ctx)` wrapper (`hookBodyFunctionExpression`); the two bodies are the
+ * ones the author-time rules `hook-body-does-not-compile` /
  * `job-body-does-not-compile` pin, so this is also the run-time proof that
- * QuickJS refuses them inside that wrapper. The `/data` door still answers the
- * sanitised fault: a server-band sentence is withheld there, as before.
+ * QuickJS refuses them inside that wrapper. The `/data` door's answer is the
+ * sanitised `500 INTERNAL_ERROR` it gave before, byte for byte.
  */
 describe('a hook body or a job body that does not compile answers naming it and the compile error', () => {
     /** The two bodies `validate-hook-body-compiles.test.ts` pins: 0 parse diagnostics, refused in the `(ctx)` wrapper. */
@@ -302,17 +302,18 @@ describe('a hook body or a job body that does not compile answers naming it and 
     }
 
     it.each([
-        ['hook', 'stamp_owner', REDECLARED_CTX, 'Hook'],
-        ['hook', 'stamp_owner', REDECLARED_LOCAL, 'Hook'],
-        ['job', 'nightly_close', REDECLARED_CTX, 'Job'],
-        ['job', 'nightly_close', REDECLARED_LOCAL, 'Job'],
-    ] as const)('a %s named %s with %j: QuickJS refuses it in the (ctx) wrapper, coded', async (kind, name, source, Kind) => {
+        ['hook', 'stamp_owner', REDECLARED_CTX],
+        ['hook', 'stamp_owner', REDECLARED_LOCAL],
+        ['job', 'nightly_close', REDECLARED_CTX],
+        ['job', 'nightly_close', REDECLARED_LOCAL],
+    ] as const)('a %s named %s with %j: QuickJS refuses it in the (ctx) wrapper, coded', async (kind, name, source) => {
         const err = await failure(source, { kind, name });
         expect(err.message).toMatch(new RegExp(`^${kind} '${name}' does not compile: SyntaxError: `));
         expect(err.message).not.toContain('threw');
-        expect(err.status).toBe(500);
+        // The compiler's own text, as before: no door relays a hook's or a job's server-band sentence.
+        expect(err.innerMessage).toMatch(/^SyntaxError: /);
+        expect(err.status).toBeUndefined();
         expect(err.code).toBeUndefined();
-        expect(err.innerMessage).toContain(`${Kind} '${name}' cannot run: its body does not compile (SyntaxError: `);
 
         const door = mapDataError(err, 'crm_invoice');
         expect(door.status).toBe(500);
@@ -323,5 +324,8 @@ describe('a hook body or a job body that does not compile answers naming it and 
         const err = await failure("JSON.parse('{'); return 1;", { kind: 'hook', name: 'stamp_owner' });
         expect(err.message).toContain("hook 'stamp_owner' threw:");
         expect(err.message).not.toContain('does not compile');
+        // …and the caller of either is answered alike: the change is the operator's line, not the wire.
+        const compiled = await failure(REDECLARED_LOCAL, { kind: 'hook', name: 'stamp_owner' });
+        expect(mapDataError(compiled, 'crm_invoice')).toEqual(mapDataError(err, 'crm_invoice'));
     });
 });

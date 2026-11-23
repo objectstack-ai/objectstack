@@ -2414,19 +2414,29 @@ function isCompileFailure(err: unknown): boolean {
  * The error an action, a hook or a job whose body does not compile answers
  * with, on every run.
  *
- * Not a crash, and not a refusal. A crash (`TypeError` in `innerMessage`) is
- * answered with the sanitised `500 Internal server error`, because its text may
- * carry the data the body was reading; a compile error carries none, and the
- * opaque answer was all an MCP caller of `run_action` ever saw for a body that
- * can never run. So the sentence names the body's owner and the compiler's
- * reason, and the declared status is `500`: the caller sent nothing wrong, the
- * deployed metadata is broken, and no retry of the same call can succeed. No
- * code is declared, so the doors answer the status's own `INTERNAL_ERROR`; the
- * `/actions` door relays the sentence (a declared 5xx code would withhold it),
- * and the `/data` door withholds a server-band sentence as it always has, so a
- * hook's caller is answered as before. The operator line keeps the runner's
- * `KIND 'NAME' …` shape, and says `does not compile` where a body that ran and
- * threw says `threw`, so the log tells the two apart for every body kind.
+ * Its `.message`, the operator line, keeps the runner's `KIND 'NAME' …` shape
+ * and says `does not compile` where a body that ran and threw says `threw`, so
+ * the log tells the two apart for every body kind and names the body's owner
+ * and the compiler's reason.
+ *
+ * An ACTION's is not a crash, and not a refusal. A crash (`TypeError` in
+ * `innerMessage`) is answered with the sanitised `500 Internal server error`,
+ * because its text may carry the data the body was reading; a compile error
+ * carries none, and the opaque answer was all an MCP caller of `run_action`
+ * ever saw for a body that can never run. So its caller sentence names the
+ * action and the compiler's reason, and the declared status is `500`: the
+ * caller sent nothing wrong, the deployed metadata is broken, and no retry of
+ * the same call can succeed. No code is declared, so the `/actions` door
+ * answers the status's own `INTERNAL_ERROR` and relays the sentence (a declared
+ * 5xx code would withhold it).
+ *
+ * A HOOK's and a JOB's keep the compiler's own text in `innerMessage` and
+ * declare no status, exactly as before: no door that answers a hook or a job
+ * relays a server-band sentence (the `/data` door withholds it, and answers a
+ * declared `500` without its `INTERNAL_ERROR` code), so a caller sentence there
+ * would reach nobody and the declared status would only cost the envelope its
+ * code. The native `SyntaxError: …` keeps the doors' crash read, the sanitised
+ * `500 INTERNAL_ERROR`, unchanged.
  *
  * The author-time rules `action-body-does-not-compile`,
  * `hook-body-does-not-compile` and `job-body-does-not-compile` refuse such a
@@ -2436,12 +2446,14 @@ function isCompileFailure(err: unknown): boolean {
  * author's host accepted).
  */
 function bodyCompileFailure(origin: ScriptOrigin, compilerError: string): SandboxError {
+  if (origin.kind !== 'action') {
+    return new SandboxError(`${origin.kind} '${origin.name}' does not compile: ${compilerError}`, userFacingMessage(compilerError));
+  }
   const reason = compilerError.split('\n')[0].slice(0, 240);
-  const Kind = origin.kind === 'action' ? 'Action' : origin.kind === 'hook' ? 'Hook' : 'Job';
   return markRunnerOwnFault(new SandboxError(
     `${origin.kind} '${origin.name}' does not compile: ${compilerError}`,
-    `${Kind} '${origin.name}' cannot run: its body does not compile (${reason}). ` +
-      `The ${origin.kind}'s author must fix its body.source and publish it again.`,
+    `Action '${origin.name}' cannot run: its body does not compile (${reason}). ` +
+      'The action\'s author must fix its body.source and publish it again.',
     { status: 500 },
   ));
 }
@@ -2609,8 +2621,8 @@ export function isHostRelayedSandboxError(err: unknown): boolean {
 
 /**
  * The faults this runner made itself that still carry a caller sentence: an
- * action's timeout ({@link actionTimeoutSentence}) and a body that does not
- * compile ({@link bodyCompileFailure}). Both are `innerMessage` + a
+ * action's timeout ({@link actionTimeoutSentence}) and an action body that does
+ * not compile ({@link bodyCompileFailure}). Both are `innerMessage` + a
  * declared `500` + no `code`, which is also what a body's own code-less throw
  * of `{ status: 500 }` looks like, so no field tells them apart: identity does,
  * for the reason {@link relayedRefusals} gives. The runner's other faults carry
