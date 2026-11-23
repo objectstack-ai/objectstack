@@ -414,6 +414,7 @@ describe('where the OAuth provider is mounted, a completed reset and a forced re
     }
   });
   afterEach(() => {
+    vi.useRealTimers();
     for (const key of ENV_KEYS) {
       if (saved[key] === undefined) delete process.env[key];
       else process.env[key] = saved[key];
@@ -527,6 +528,11 @@ describe('where the OAuth provider is mounted, a completed reset and a forced re
     await authorize(s, s.userId, 'user');
     await authorize(s, s.adminUserId, 'admin');
 
+    // A routine reset that takes longer than a second, as an administrator's
+    // call does under load: the wall clock moves two seconds on before it
+    // writes, so the change it stamps lies past any second read before the call.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(Date.now() + 2_000);
     const routine = await s.fire(
       '/admin/set-user-password',
       { userId: s.userId, newPassword: SECOND, mustChangePassword: false, revokeSessionsAndKeys: false },
@@ -536,10 +542,10 @@ describe('where the OAuth provider is mounted, a completed reset and a forced re
     // A token of the grant minted after the routine reset: its `iat` (no
     // millisecond claim, so placed at `iat * 1000`) is the first whole second
     // at or after the change that reset wrote, read back from the row, so it
-    // does not depend on how long the reset took. The change time is absent
-    // only while the row still reads as the account's first password.
+    // stands however long the reset took.
     const changedAtMs = await readCredentialChangedAt(s.auth.internalAdapter, s.userId);
-    const issuedAt = Math.ceil((changedAtMs ?? Date.now()) / 1000);
+    expect(changedAtMs, 'the routine reset stamps a credential change').toBeTypeOf('number');
+    const issuedAt = Math.ceil(changedAtMs! / 1000);
     const grantStands = () => mcpConsentAdmits(s.auth.adapter, { clientId: CLIENT_ID, userId: s.userId }, issuedAt, s.auth.internalAdapter);
     expect(await grantsOf(s, s.userId), 'a routine reset ends nothing').toEqual(ALL);
     expect(await grantStands(), 'the MCP door admits a token of the grant minted after the routine reset').toBe(true);
