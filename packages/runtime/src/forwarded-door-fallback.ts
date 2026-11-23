@@ -79,7 +79,9 @@ export async function toWebRequest(req: FallbackRequestLike): Promise<Request> {
     const init: RequestInit = { method, headers };
     if (method !== 'GET' && method !== 'HEAD' && typeof req.rawBody === 'function') {
         const bytes = await req.rawBody();
-        if (bytes.byteLength > 0) init.body = bytes;
+        // Copied into a plain `ArrayBuffer`-backed view: `BodyInit` does not
+        // take a view over a possibly shared buffer.
+        if (bytes.byteLength > 0) init.body = new Uint8Array(bytes);
     }
     return new Request(url, init);
 }
