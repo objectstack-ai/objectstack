@@ -29,15 +29,28 @@
  *  - the text is `II18nService.t(key, locale)`; a miss is the key echoed back,
  *    and then the authored text stands.
  *
- * [#35384] Except the OBJECT's label, which is metadata `/meta` serves: it is
- * resolved as `/meta` resolves it — `translateObject`
+ * [#35384] Except a METADATA label: the object's, the flow's and the
+ * position's. Each is resolved by the spec translator of its type
  * (`@objectstack/spec/system`) over every locale the service holds, with the
- * metadata route's `ResolveOptions` ({@link objectLabelTranslation}: the
+ * metadata route's `ResolveOptions` ({@link metaLabelTranslation}: the
  * reader's locale, the DECLARED fallback chain, and the authored language,
- * the declared `sourceLocale` else `defaultLocale`). So a reader in a
- * deployment's declared `sourceLocale` reads the object's label as authored,
- * never the `defaultLocale` row `t()` falls back to; `t()` carries the
- * catalog sentences.
+ * the declared `sourceLocale` else `defaultLocale`):
+ *
+ *  - the object's by `translateObject`, as `GET /meta/object` serves it, over
+ *    the object's served definition and with its packaged base
+ *    (`packagedBase`, {@link ReaderObjectSource}), so a renamed packaged
+ *    object reads its rename, never the bundle's translation of its old label;
+ *  - the position's by `translatePosition`, as `GET /meta/position` serves it;
+ *  - the flow's by `translateFlow`, the translator the flow runner names a
+ *    flow by. `/meta` serves a flow document untranslated (`translateFlow` is
+ *    deliberately not in `translateMetadataDocument`'s table), so this is the
+ *    spec's one reading of `flows.<flow>.label`.
+ *
+ * So a reader in a deployment's declared `sourceLocale` reads these labels as
+ * authored, never the `defaultLocale` row `t()` falls back to. `t()` carries
+ * the catalog sentences, and still the approval STEP's label: no spec
+ * translator reads `flows.<flow>.approvals.<node_id>.label` yet, and a second
+ * walk of the locale chain here would be a second resolver.
  *
  * objectql names a refused write's object this way (`objectDisplayLabel`,
  * through `objectLabelKey`), the REST door names a NOT NULL field this way
@@ -56,6 +69,10 @@
  *  - [#35418] a position: `positions.<name>.label`, the security catalog face's
  *    own `label` (`translation.zod.ts`, `positions`), which `translatePosition`
  *    overlays on every served `position` document.
+ *
+ * [#35384] Only the step's key is asked of `t()`. The flow and position keys
+ * are still spelled here, for the contract pin and for the readers that name
+ * them; `translateFlow` and `translatePosition` read the same addresses.
  *
  * `<flow>` is the request's `process_name` without its `flow:` prefix, the
  * `Flow.name` the engine hands the node (`$flowName`), and `<node_id>` is its
@@ -83,15 +100,19 @@
 import type { II18nService } from '@objectstack/spec/contracts';
 import {
   resolveBundleLocale,
+  translateFlow,
   translateObject,
+  translatePosition,
+  type FlowLike,
   type ObjectLike,
   type ResolveOptions,
+  type SecurityCatalogItemLike,
   type TranslationBundle,
 } from '@objectstack/spec/system';
 
 /**
  * The slice of `II18nService` this read asks: `t()`, `getLocales()` to
- * negotiate when offered, and [#35384] the members an object label is
+ * negotiate when offered, and [#35384] the members a metadata label is
  * resolved by, as the metadata route reads them: `getTranslations()` per
  * locale, and the declared `getFallbackLocale()` / `getSourceLocale()` /
  * `getDefaultLocale()`.
@@ -183,15 +204,61 @@ export function negotiatedReaderLocale(
   return resolveBundleLocale(offered, requested) ?? requested;
 }
 
-/** What an object label is translated with: the bundle and the metadata route's `ResolveOptions`. */
-interface ObjectLabelTranslation {
+/** What a metadata label is translated with: the bundle and the metadata route's `ResolveOptions`. */
+interface MetaLabelTranslation {
   bundle: TranslationBundle | undefined;
   options: ResolveOptions;
 }
 
 /**
- * [#35384] What the metadata route (`GET /meta/object/:name`) translates an
- * object document with, for a request in `locale`: the bundle — every locale
+ * [#35384] Where an object's label is served from, as the metadata route
+ * serves it: the data engine the reader's door already holds.
+ *
+ *  - `getSchema(name)`: the object's served definition, whose `label` is the
+ *    text `translateObject` overlays (a code extension's rename included);
+ *  - `registry.getPackagedObjectBase(name)`: the object's packaged (code-layer)
+ *    declaration, which `translateObject` compares the served label against
+ *    (`packagedBase`, ADR-0029 D9.2a). It is the body the metadata protocol's
+ *    `getPackagedObjectBase` reads (`engine.registry`), the accessor `/meta`
+ *    hands `translateObject` as `packagedBase` through (`packagedObjectBaseOf`
+ *    in rest).
+ *
+ * Each member is feature-detected and every read survives a throw: an absent
+ * or failing `getSchema` translates the name alone, as before; an absent or
+ * failing packaged base is "no baseline known", which the translator answers
+ * with the catalog.
+ */
+export interface ReaderObjectSource {
+  getSchema?(objectName: string): unknown;
+  registry?: unknown;
+}
+
+/** The object's served definition, `undefined` when the source cannot answer. */
+function servedObjectDef(objects: ReaderObjectSource | undefined, objectName: string): Record<string, unknown> | undefined {
+  if (!objects || typeof objects.getSchema !== 'function') return undefined;
+  try {
+    const def = objects.getSchema(objectName);
+    return def && typeof def === 'object' ? (def as Record<string, unknown>) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** The object's packaged base ({@link ReaderObjectSource}), `undefined` when none is known. */
+function packagedBaseOf(objects: ReaderObjectSource | undefined, objectName: string): unknown {
+  const registry = objects?.registry as { getPackagedObjectBase?: (name: string) => unknown } | undefined;
+  if (!registry || typeof registry.getPackagedObjectBase !== 'function') return undefined;
+  try {
+    const base = registry.getPackagedObjectBase(objectName);
+    return base && typeof base === 'object' ? base : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * [#35384] What the metadata route (`GET /meta/object/:name`) translates a
+ * metadata document with, for a request in `locale`: the bundle — every locale
  * `service` holds, keyed by locale (`translationBundleOf` in rest) — and the
  * `ResolveOptions` that route builds (`metaTranslateOptions` in rest): the
  * request's locale, the DECLARED fallback chain (`getFallbackLocale()`), and
@@ -207,7 +274,7 @@ interface ObjectLabelTranslation {
  * its translations over (no `getLocales` / `getTranslations`). A throwing
  * service is the caller's to survive.
  */
-function objectLabelTranslation(service: ReaderLabelI18n, locale: string): ObjectLabelTranslation | undefined {
+function metaLabelTranslation(service: ReaderLabelI18n, locale: string): MetaLabelTranslation | undefined {
   if (typeof service.getLocales !== 'function' || typeof service.getTranslations !== 'function') return undefined;
   const bundle: Record<string, unknown> = {};
   for (const code of service.getLocales()) {
@@ -227,15 +294,26 @@ function objectLabelTranslation(service: ReaderLabelI18n, locale: string): Objec
   return { bundle: Object.keys(bundle).length > 0 ? (bundle as TranslationBundle) : undefined, options };
 }
 
+/** A non-blank label, or `undefined`. */
+function labelText(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim().length > 0 ? value : undefined;
+}
+
 /**
  * The labels for a reader whose `ExecutionContext.locale` is `requested`, or
  * `undefined` when this read can pick nothing: no locale, or no service with a
  * `t()`. Each answer is memoised for the life of the returned object, which is
  * one read.
+ *
+ * [#35384] `objects` is where an object's label is served from
+ * ({@link ReaderObjectSource}): with it, the object's label is its served
+ * definition's, translated as `/meta` translates it, packaged base included;
+ * without it, the name alone is translated and nothing else is inferred.
  */
 export function readerLabelsFor(
   service: ReaderLabelI18n | undefined,
   requested: string | undefined,
+  objects?: ReaderObjectSource,
 ): ReaderLabels | undefined {
   if (typeof requested !== 'string' || requested.length === 0) return undefined;
   if (!service || typeof service.t !== 'function') return undefined;
@@ -262,27 +340,46 @@ export function readerLabelsFor(
   };
   const picked = new Map<string, string | undefined>();
   const pick = (key: string): string | undefined => memo(picked, key, () => render(key));
-  // [#35384] Built on the first object label this read asks, once.
-  let translation: { value: ObjectLabelTranslation | undefined } | undefined;
+  // [#35384] Built on the first metadata label this read asks, once.
+  let translation: { value: MetaLabelTranslation | undefined } | undefined;
+  /** One metadata label through its spec translator; `undefined` on any miss or throw. */
+  const translated = (read: (meta: MetaLabelTranslation) => unknown): string | undefined => {
+    try {
+      translation ??= { value: metaLabelTranslation(service, locale) };
+      return translation.value ? labelText(read(translation.value)) : undefined;
+    } catch {
+      // A misbehaving i18n service or registry must not fail the read: the stored label stands.
+      return undefined;
+    }
+  };
+  const flowLabels = new Map<string, string | undefined>();
+  const flowLabel = (flowName: string): string | undefined =>
+    memo(flowLabels, flowName, () =>
+      translated(({ bundle, options }) => {
+        const doc: FlowLike = { name: flowName };
+        return translateFlow(doc, bundle, options).label;
+      }));
+  const positionLabels = new Map<string, string | undefined>();
+  const positionLabel = (positionName: string): string | undefined =>
+    memo(positionLabels, positionName, () =>
+      translated(({ bundle, options }) => {
+        const doc: SecurityCatalogItemLike = { name: positionName };
+        return translatePosition(doc, bundle, options).label;
+      }));
   const objectLabels = new Map<string, string | undefined>();
   const objectLabel = (objectName: string): string | undefined =>
-    memo(objectLabels, objectName, () => {
-      try {
-        translation ??= { value: objectLabelTranslation(service, locale) };
-        if (!translation.value) return undefined;
-        const doc: ObjectLike = { name: objectName };
-        const label = translateObject(doc, translation.value.bundle, translation.value.options).label;
-        return typeof label === 'string' && label.trim().length > 0 ? label : undefined;
-      } catch {
-        // A misbehaving i18n service must not fail the read: the stored label stands.
-        return undefined;
-      }
-    });
+    memo(objectLabels, objectName, () =>
+      translated(({ bundle, options }) => {
+        const served = labelText(servedObjectDef(objects, objectName)?.label);
+        const doc: ObjectLike = { name: objectName, ...(served !== undefined ? { label: served } : {}) };
+        const packagedBase = packagedBaseOf(objects, objectName);
+        return translateObject(doc, bundle, { ...options, ...(packagedBase !== undefined ? { packagedBase } : {}) }).label;
+      }));
   return {
-    flowLabel: (flowName) => pick(flowLabelKey(flowName)),
+    flowLabel,
     stepLabel: (flowName, nodeId) => pick(approvalStepLabelKey(flowName, nodeId)),
     objectLabel,
-    positionLabel: (positionName) => pick(positionLabelKey(positionName)),
+    positionLabel,
     sentence: (key, params) => render(key, params),
   };
 }
