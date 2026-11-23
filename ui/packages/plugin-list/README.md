@@ -751,6 +751,21 @@ says how many records its list holds. `page:tabs` mounts a tab holding a list
 block while it is inactive (hidden), so the badge is there before the tab is
 opened; a tab with an authored `count` is not mounted early.
 
+A host that mounts the block with its own `onTotalChange` hears the count as
+well: the block calls both, so the dashboard drill (which hands the count to
+the record page it opens, for its 「N of M」) and the tab badge each get it.
+
+### The query behind the rows — `onFindParamsChange`
+
+`onFindParamsChange(findParams)` is called with the params of the read that
+drew the rows `onRowsChange` reports (filter, sort, search, select and the
+window) each time that query settles with a different answer. It is answered
+where `onRowsChange` answers with rows, a paged grid that draws the rows it
+fetched; any other kind answers `null`. A host re-issues it to read past the
+page drawn: the dashboard drill reads the ids of its whole result with it, so
+the record page it opens steps through every record the drill matched. A host
+prop, never a schema key.
+
 ## Export
 
 The Export entry (the wide toolbar's button and the Display panel's footer) is
