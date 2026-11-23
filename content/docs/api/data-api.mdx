@@ -552,15 +552,20 @@ relationships to move along, and only with an `ownerId` target:
 For each record that moved, the child records that point at it **and are
 owned by its previous owner** move to the new owner too; no other child record
 moves. Each is updated by id as the caller, so each needs the caller's own
-transfer grant on the child object. A relationship that does not declare
-`transferBehavior: 'cascade'`, or whose child object does not offer Change
-Owner itself (not eligible, a `controlled_by_parent` detail, or its
-`userActions.transfer` off), is refused `400 VALIDATION_ERROR` before anything
-is written.
+transfer grant on the child object. A relationship that is not one of the
+object's cascade candidates (see the route below) is refused `400
+VALIDATION_ERROR` before anything is written. `'cascade'` on a multi-value
+reference (`multiple: true`) is refused when the metadata is saved: a record
+there points at several parents, so no single Change Owner decides its owner.
 
-The answer gains one outcome per named relationship. Every child record that
-did not move is listed; one call moves at most **500** child records, and
-`remaining` counts those the limit left with the previous owner:
+The answer gains one outcome per named relationship:
+
+- a child record the caller's write refuses is listed in `failures` with its
+  id, code and sentence, and counted in `failed`;
+- one call moves at most **500** child records; the records past that limit
+  are not listed but counted in `remaining`, still with the previous owner;
+- when a relationship's child records could not be read at all, the outcome
+  carries `readFailure` (`code` and `message`) and none of those records moved.
 
 ```json
 "cascade": [
@@ -573,7 +578,9 @@ did not move is listed; one call moves at most **500** child records, and
 
 The relationships a Change Owner of `object` may cascade along: each child
 reference field to it that declares `transferBehavior: 'cascade'`, on a child
-that offers Change Owner itself. Whether the caller may transfer on each child
+that offers Change Owner itself. Two more filters apply: a child whose declared
+API exposure does not serve `update` is left out, and so is a child that belongs
+to a disabled package. Whether the caller may transfer on each child
 is the explain engine's `transfer` operation (`POST /security/explain`), which
 the Console's dialog asks before it offers a tick. Takes no query parameter;
 an object that does not offer Change Owner is refused `403
