@@ -84,7 +84,7 @@ const sweepOf = (name: string, object: string) => ({
             id: 'start',
             type: 'start',
             label: 'Daily sweep',
-            config: { timeRelative: { object, dateField: 'title', withinDays: 7 } },
+            config: { timeRelative: { object, dateField: 'created_at', withinDays: 7 } },
         },
         { id: 'end', type: 'end', label: 'End' },
     ],
