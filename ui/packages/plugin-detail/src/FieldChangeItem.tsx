@@ -118,6 +118,8 @@ export const FieldChangeItem: React.FC<FieldChangeItemProps> = ({
       <span className="shrink-0 font-medium text-foreground" data-field-change-label="">
         {shownLabel}
       </span>
+      {/* A space a flex line does not lay out, so the line reads and copies as `Label: old → new`. */}
+      {' '}
       {value(before, 'old', oldRef)}
       {/* The arrow is text, so the line reads and copies as `Label: old → new`. */}
       <span className="shrink-0 text-muted-foreground" data-field-change-arrow="">

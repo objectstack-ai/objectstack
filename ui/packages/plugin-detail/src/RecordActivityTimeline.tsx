@@ -861,12 +861,17 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
     const Icon = FEED_TYPE_ICONS[item.type] || Zap;
     const lines = fieldChangeLinesOf(item);
     if (lines) {
-      // The row names the fields it changed; the values are the lines under it.
-      const what = t('detail.foldedUpdates', {
-        fields: Array.from(new Set(lines.map((change) => change.fieldLabel || labelOfField(change.field)))).join(
-          t('validation.formInvalidJoiner'),
-        ),
-      });
+      // The values are the lines under the row. An entry whose own changes
+      // they are names the fields it changed (its stored summary would say the
+      // lines again); an activity row carrying its paired audit entry keeps its
+      // own summary.
+      const what = lines === item.fieldChanges
+        ? t('detail.foldedUpdates', {
+            fields: Array.from(new Set(lines.map((change) => change.fieldLabel || labelOfField(change.field)))).join(
+              t('validation.formInvalidJoiner'),
+            ),
+          })
+        : systemLineText(item);
       return streamRow(
         item,
         Icon,

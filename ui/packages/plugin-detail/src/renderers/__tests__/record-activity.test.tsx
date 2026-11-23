@@ -490,7 +490,7 @@ describe('record:activity — one line per changed field, old → new (objectsta
     await waitFor(() => expect(container.querySelector('[data-stream-field-change]')).not.toBeNull());
     expect(container.querySelectorAll('[data-stream-system-row]')).toHaveLength(1);
     expect(linesOf(container)).toEqual([
-      { field: 'notes', label: 'Customer notes:', old: 'Old words', new: 'New words', text: 'Customer notes:Old words → New words' },
+      { field: 'notes', label: 'Customer notes:', old: 'Old words', new: 'New words', text: 'Customer notes: Old words → New words' },
     ]);
   });
 
