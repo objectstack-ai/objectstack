@@ -71,7 +71,10 @@ describe('an empty stored menu is said as such, not as missing access (objectsta
     expect(String(fetchMock.mock.calls[0]?.[0])).toBe(`/api/v1/meta/app/visits/layers?package=${encodeURIComponent(PKG)}`);
   });
 
-  it('a stored menu with entries this caller is not shown keeps the access answer', async () => {
+  it('an author whose stored menu has entries the served menu filtered away keeps the access answer', async () => {
+    // `/layers` serves an AUTHOR (`manage_metadata`) the stored, unpruned app:
+    // entries there, none served, is the access case. A non-author is never
+    // read for (below), since `/layers` would serve them the pruned app.
     stubLayers(200, { effective: { navigation: [{ id: 'n', type: 'object', objectName: 'secret' }] } });
     renderState();
     const status = await screen.findByRole('status');
