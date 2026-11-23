@@ -21,6 +21,9 @@ import { ActionProvider, RecordContextProvider } from '@object-ui/react';
 import { I18nProvider } from '@object-ui/i18n';
 // Registers `page:header` at module scope (object-ui/no-dynamic-import-in-test-hook).
 import '../renderers';
+// The renderers reach `@object-ui/react-runtime` through a dynamic import in a
+// function body; its first load is paid here, at collection, not in a clocked case.
+import '@object-ui/react-runtime';
 
 function PageHeader({ schema }: { schema: any }) {
   const Component = ComponentRegistry.get('page:header');
