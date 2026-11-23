@@ -1,4 +1,4 @@
-import { test as base, expect, type APIRequestContext, type Page, type Response } from '@playwright/test';
+import { test as base, expect, type APIRequestContext, type Page, type Request, type Response } from '@playwright/test';
 
 /**
  * Live e2e for the ADR-0146 customization journey, walked through the Studio
@@ -12,9 +12,10 @@ import { test as base, expect, type APIRequestContext, type Page, type Response 
  *      type's list) — not what the canvas draws.
  *   2. Restore package original: the pair's draft and row are deleted at the
  *      pair, and the three reads serve the shipped column set again.
- *   3. Add `region__c`: Add field on the base object's Form writes an
- *      `object_extension` into the pair; once published, the base object is
- *      served with the field and the pair's own read and export carry it.
+ *   3. Add `region__c`: Add field on the base object's Form, then the top
+ *      bar's Save (objectstack#36511), writes an `object_extension` into the
+ *      pair and publishes that one item there, so the base object is served
+ *      with the field at once and the pair's own read and export carry it.
  *   4. Uninstall the base: the uninstall door refuses the read-only showcase
  *      with 422 `WRITABLE_PACKAGE_REQUIRED` and removes nothing. This is the
  *      refusal `main` answers here, and the one asserted: `DELETE
@@ -230,19 +231,45 @@ test('a read-only base is customized, restored and extended through Studio, and 
       await page.getByTestId('add-field-label-input').fill(FIELD.label);
       await expect(page.getByTestId('add-field-api-name-preview')).toContainText(FIELD.name);
 
+      // objectstack#36511 — the add stays on the page until the top bar's
+      // Save: no write of the extension leaves before it is pressed.
+      const extensionWrites: string[] = [];
+      const onRequest = (r: Request) => {
+        if (r.method() !== 'GET' && r.url().includes(`/api/v1/meta/object_extension/${OBJECT}`)) {
+          extensionWrites.push(`${r.method()} ${r.url()}`);
+        }
+      };
+      page.on('request', onRequest);
+      await page.getByTestId('add-field-create').click();
+      await expect(page.getByTestId('studio-save')).toBeVisible();
+      expect(extensionWrites).toEqual([]);
+
+      // Save writes the extension's draft into the pair, then publishes that
+      // one item there: live at once, with no package publish.
       const drafted = page.waitForResponse(
         (r) => r.request().method() === 'PUT' && r.url().includes(`/api/v1/meta/object_extension/${OBJECT}?`),
       );
-      await page.getByTestId('add-field-create').click();
+      const published = page.waitForResponse(
+        (r) => r.request().method() === 'POST' && r.url().includes(`/api/v1/meta/object_extension/${OBJECT}/publish`),
+      );
+      await page.getByTestId('studio-save').click();
       const draft = await drafted;
       expect(draft.ok(), await draft.text()).toBeTruthy();
       expect(new URL(draft.url()).searchParams.get('package')).toBe(PAIR);
+      expect(new URL(draft.url()).searchParams.get('mode')).toBe('draft');
       expect(draft.request().postDataJSON()).toEqual({
         extend: OBJECT,
         fields: { [FIELD.name]: { type: 'text', label: FIELD.label } },
       });
-
-      await publishPair(page);
+      const publish = await published;
+      expect(publish.ok(), await publish.text()).toBeTruthy();
+      expect(new URL(publish.url()).searchParams.get('package')).toBe(PAIR);
+      // The Save left nothing to save, and no draft for the package publish.
+      await expect(page.getByTestId('studio-save')).toHaveCount(0);
+      page.off('request', onRequest);
+      expect(extensionWrites.map((w) => w.split(' ')[0])).toEqual(['PUT', 'POST']);
+      const pending = await request.get(`${API}/api/v1/meta/object_extension/${OBJECT}?state=draft&package=${PAIR}`);
+      expect(pending.status(), await pending.text()).toBe(404);
       const object = await request.get(`${API}/api/v1/meta/object/${OBJECT}`);
       expect(object.ok(), await object.text()).toBeTruthy();
       const objectBody = await object.json();

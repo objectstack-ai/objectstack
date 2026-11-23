@@ -11,7 +11,8 @@
  * guard the publish refuses read clean and autosaved until Publish refused
  * it. The verdict judges the stored draft and nothing else: it holds while the
  * guard still shows the text it judged, and lets the edit that changes that
- * text go out, since only that save brings the next verdict. ⛔ The fake door
+ * text go out. objectstack#36511 — Save is the draft and the item's publish, so
+ * a guard the publish refuses is refused at Save, at the rule, edits kept. ⛔ The fake door
  * below is the only place the refusal is decided; the editor restates no rule.
  */
 
@@ -71,6 +72,21 @@ let server: Server;
 const PUBLISHED = objectWith(ACCEPTED);
 
 const mockClient: Record<string, unknown> = {
+  // objectstack#36511 — the Save's own publish: the door refuses the guard, and
+  // the draft it judged stays pending; an accepted one goes live.
+  publish: vi.fn(async () => {
+    const errors = server.draft ? verdictOf(server.draft).errors : undefined;
+    if (errors) {
+      const issues = errors.map((e) => ({ ...e, path: `objects.showcase_task.${e.path}` }));
+      throw Object.assign(new Error(REFUSAL), { status: 422, code: 'VALIDATION_FAILED', issues });
+    }
+    server.draft = null;
+    return {};
+  }),
+  reset: vi.fn(async () => {
+    server.draft = null;
+    return {};
+  }),
   save: vi.fn(async (_type: string, _name: string, body: Record<string, unknown>) => {
     const copy = JSON.parse(JSON.stringify(body)) as Record<string, unknown>;
     server.sent.push(copy);
@@ -130,6 +146,7 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 });
 
 import { DataPillar } from './StudioDesignSurface';
+import { StudioSaveHarness, pressStudioSave } from './__tests__/studioSaveHarness';
 import { createEmptyDataSource, failOnAbsorbedFetchError } from './__tests__/emptyDataSource';
 import { registerBuiltinInspectors } from '../metadata-admin/inspectors';
 import { __setCelFormulaLoader } from '../metadata-admin/celAuthoring';
@@ -159,17 +176,15 @@ afterEach(() => {
   vi.mocked(mockClient.save as () => unknown).mockClear();
 });
 
-/** The shared autosave fires 1.5 s after the last edit. */
 const AUTOSAVE = { timeout: 5000 };
-/** Longer than the autosave's pause. */
-const pause = (ms = 2500) => new Promise((r) => setTimeout(r, ms));
+const pause = (ms = 600) => new Promise((r) => setTimeout(r, ms));
 
 function mount(draft: Record<string, unknown> | null) {
   server = { draft, sent: [] };
   render(
-    <MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
+    <StudioSaveHarness><MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
       <DataPillar packageId="com.example.showcase" />
-    </MemoryRouter>,
+    </MemoryRouter></StudioSaveHarness>,
   );
 }
 
@@ -196,7 +211,7 @@ async function rawGuard(): Promise<HTMLTextAreaElement> {
 const editMessage = (value: string) =>
   fireEvent.change(screen.getByPlaceholderText(t('engine.studio.rules.messagePlaceholder', 'en')), { target: { value } });
 
-describe('a server error at a validation rule\'s path holds the Data pillar autosave (objectstack#27644)', () => {
+describe('a server error at a validation rule\'s path holds the Data pillar Save (objectstack#27644)', () => {
   it('(a) a stored draft the publish refuses: another edit to the rule is held, no PUT, the message stays', async () => {
     mount(objectWith(REFUSED));
     await openRule();
@@ -205,35 +220,36 @@ describe('a server error at a validation rule\'s path holds the Data pillar auto
     editMessage('Amount is over the cap');
 
     await waitFor(() => expect(screen.getByTestId('studio-held-message')).toHaveTextContent('Amount cap'), AUTOSAVE);
-    await pause();
+    await pressStudioSave();
     expect(server.sent).toHaveLength(0);
     expect(screen.getByText(REFUSAL)).toBeInTheDocument();
   });
 
-  it('(b) the card flow: the refused guard saves once, its re-read holds the next edit', async () => {
+  it('(b) the card flow: Save sends the guard once; the publish refuses it with its reason, and the edit stays', async () => {
     mount(objectWith(ACCEPTED));
     await openRule();
     const box = await rawGuard();
     await screen.findByText('Valid CEL', {}, { timeout: 3000 });
 
-    // No client copy of the rule: the lint passes it and the first save goes out.
+    // No client copy of the rule: the lint passes it and Save sends it.
     fireEvent.change(box, { target: { value: REFUSED } });
-    await waitFor(() => expect(server.sent).toHaveLength(1), AUTOSAVE);
-    expect(await screen.findByText(REFUSAL, {}, AUTOSAVE)).toBeInTheDocument();
-    expect(screen.queryByText('Valid CEL')).toBeNull();
-
-    editMessage('Amount is over the cap');
-    await waitFor(() => expect(screen.getByTestId('studio-held-message')).toHaveTextContent('Amount cap'), AUTOSAVE);
-    await pause();
+    await pressStudioSave();
     expect(server.sent).toHaveLength(1);
+    expect(mockClient.publish).toHaveBeenCalled();
+    expect(await screen.findByTestId('studio-refusal', {}, AUTOSAVE)).toHaveTextContent(REFUSAL);
+    // Refused, the edit is still the page's, unsaved; the draft that was pending carries it.
+    expect(guardRaw().value).toBe(REFUSED);
+    expect(screen.getByTestId('studio-save')).toBeInTheDocument();
+    expect((server.draft?.validations as Array<{ condition?: string }>)[1]!.condition).toBe(REFUSED);
   });
 
-  it('(c) editing the guard away releases: the save goes out and its clean re-read clears the verdict', async () => {
+  it('(c) editing the guard away releases: Save sends it, it goes live, and the re-read clears the verdict', async () => {
     mount(objectWith(REFUSED));
     await openRule();
     await screen.findByText(REFUSAL);
 
     fireEvent.change(await rawGuard(), { target: { value: ACCEPTED } });
+    await pressStudioSave();
 
     await waitFor(() => expect(server.sent).toHaveLength(1), AUTOSAVE);
     const saved = server.sent[0]!.validations as Array<{ condition?: string }>;
@@ -242,7 +258,7 @@ describe('a server error at a validation rule\'s path holds the Data pillar auto
     expect(screen.queryByTestId('studio-held')).toBeNull();
   });
 
-  it('(d) typed back to the judged text before the autosave fires: held again, no PUT', async () => {
+  it('(d) typed back to the judged text before Save: held again, no PUT', async () => {
     mount(objectWith(REFUSED));
     await openRule();
     await screen.findByText(REFUSAL);
@@ -252,7 +268,7 @@ describe('a server error at a validation rule\'s path holds the Data pillar auto
     fireEvent.change(box, { target: { value: REFUSED } });
 
     await waitFor(() => expect(screen.getByTestId('studio-held-message')).toHaveTextContent('Amount cap'), AUTOSAVE);
-    await pause();
+    await pressStudioSave();
     expect(server.sent).toHaveLength(0);
   });
 
@@ -264,7 +280,7 @@ describe('a server error at a validation rule\'s path holds the Data pillar auto
 
     fireEvent.click(screen.getByRole('button', { name: 'Form' }));
     await waitFor(() => expect(screen.getByTestId('studio-held-message')).toHaveTextContent('Amount cap'), AUTOSAVE);
-    await pause();
+    await pressStudioSave();
     expect(server.sent).toHaveLength(0);
   });
 
@@ -294,25 +310,19 @@ describe('a rename keeps the served verdict\'s hold on the rule (objectstack#274
     fireEvent.click(await screen.findByTestId('rule-preset-reject_when'));
   }
 
-  it('(a) the minted rule: its first save goes out, and the message edit that renames it is held', async () => {
+  it('(a) the minted rule: Save sends it under the name its message gives, and the refusal names it', async () => {
     mount(objectWith(ACCEPTED));
     await newRejectWhenRule();
     // The card's flow: the guard first, then the message, which settles the rule into the draft.
     fireEvent.change(await rawGuard(), { target: { value: REFUSED } });
     editMessage('Over the cap');
+    expect(screen.getByDisplayValue('over_the_cap')).toBeInTheDocument();
 
-    // No client copy of the rule: the first save goes out and its re-read brings the verdict.
-    await waitFor(() => expect(server.sent).toHaveLength(1), AUTOSAVE);
+    await pressStudioSave();
+    expect(server.sent).toHaveLength(1);
     const first = server.sent[0]!.validations as Array<{ name?: string; condition?: string }>;
     expect(first[2]).toMatchObject({ name: 'over_the_cap', condition: REFUSED });
-    expect(await screen.findByText(REFUSAL, {}, AUTOSAVE)).toBeInTheDocument();
-
-    // The next message edit renames the rule; the guard still shows the judged text.
-    editMessage('Over the cap now');
-    expect(screen.getByDisplayValue('over_the_cap_now')).toBeInTheDocument();
-    await waitFor(() => expect(screen.getByTestId('studio-held-message')).toHaveTextContent('over_the_cap_now'), AUTOSAVE);
-    await pause();
-    expect(server.sent).toHaveLength(1);
+    expect(await screen.findByTestId('studio-refusal', {}, AUTOSAVE)).toBeInTheDocument();
   });
 
   it('(b) a rename through the name input is held the same way', async () => {
@@ -323,7 +333,7 @@ describe('a rename keeps the served verdict\'s hold on the rule (objectstack#274
     fireEvent.change(screen.getByDisplayValue('amount_cap'), { target: { value: 'amount_limit' } });
 
     await waitFor(() => expect(screen.getByTestId('studio-held-message')).toHaveTextContent('Amount cap'), AUTOSAVE);
-    await pause();
+    await pressStudioSave();
     expect(server.sent).toHaveLength(0);
   });
 
@@ -334,6 +344,7 @@ describe('a rename keeps the served verdict\'s hold on the rule (objectstack#274
     await screen.findByDisplayValue('x');
 
     fireEvent.change(screen.getByDisplayValue('status_set'), { target: { value: 'status_needed' } });
+    await pressStudioSave();
 
     // The refused rule beside it was never opened, so nothing holds this edit.
     await waitFor(() => expect(server.sent).toHaveLength(1), AUTOSAVE);
