@@ -164,6 +164,51 @@ describe('「Compare with previous period」 on a report (objectstack-ai/objects
     expect(src.selections[src.selections.length - 1]).not.toHaveProperty('compareTo');
   });
 
+  it('on the window\'s own date axis, each current bucket carries the earlier value the executor keyed onto it', async () => {
+    // The executor restates the earlier window's buckets in the current
+    // window's keys, pairing them by position from each window's start; the
+    // chart plots those rows as they come, one comparison value per month.
+    const selections: any[] = [];
+    const src = {
+      selections,
+      queryDataset: vi.fn(async (_dataset: string, selection: any) => {
+        selections.push(selection);
+        const compare = !!selection.compareTo;
+        const months: Array<[string, number, number]> = [['2026-09', 2, 1], ['2026-10', 2, 1], ['2026-11', 3, 1]];
+        const dims: string[] = selection.dimensions ?? [];
+        const rows = dims.includes('issued_on')
+          ? months.map(([m, cur, prev]) => ({ issued_on: m, amount: cur, ...(compare ? { amount__compare: prev } : {}) }))
+          : [{ amount: 7 }];
+        return { rows, fields: [{ name: 'amount', label: 'Amount', aggregate: 'count' }], object: 'invoice', dimensionFields: { issued_on: 'issued_on' } };
+      }),
+    };
+    renderReport(
+      {
+        ...BASE,
+        rows: ['issued_on'],
+        dateRange: { dimension: 'issued_on', defaultRange: 'last_90_days' },
+        chart: { type: 'bar', xAxis: 'issued_on', yAxis: 'amount' },
+      },
+      src as unknown as ReturnType<typeof makeSource>,
+    );
+    await waitFor(() => expect(chartProps?.schema?.series).toBeDefined());
+    fireEvent.click(compareSwitch());
+    await waitFor(() => expect(chartProps!.schema.series).toHaveLength(2));
+
+    const chartQuery = selections.find((s) => s.compareTo);
+    expect(chartQuery).toMatchObject({
+      dimensions: ['issued_on'],
+      timeDimensions: [{ dimension: 'issued_on', dateRange: 'last_90_days' }],
+      compareTo: { kind: 'previousPeriod', dimension: 'issued_on' },
+    });
+    expect(chartProps!.schema.xAxisKey).toBe('issued_on');
+    expect(chartProps!.schema.data.map((r: any) => [r.issued_on, r.amount, r.amount__compare])).toEqual([
+      ['2026-09', 2, 1],
+      ['2026-10', 2, 1],
+      ['2026-11', 3, 1],
+    ]);
+  });
+
   it('a line chart draws the comparison series too', async () => {
     const src = makeSource();
     renderReport({ ...BASE, chart: { type: 'line', xAxis: 'stage', yAxis: 'amount' } }, src);

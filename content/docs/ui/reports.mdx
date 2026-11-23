@@ -256,6 +256,12 @@ same custom-range switch, on by default.
   `compareTo: { kind: 'previousPeriod' }` on the window's dimension: a bar or line chart draws
   the earlier window as a muted series, and a single number shows the previous value and the
   change under it. All time names no window, so nothing is compared.
+- **The earlier window is the same number of days**, ending the day before the current window
+  starts. That is the previous calendar period when the two are equally long (the previous ISO
+  week, `last_30_days` against the 30 days before), and not otherwise: `this_month` in a 31-day
+  month compares with the 31 days before it, not with the calendar month before. On a chart whose
+  x axis is the window's own date dimension, the earlier window's buckets pair with the current
+  ones by position, counted from each window's start.
 
 **`exportOptions`** uses the list export's key and member names: `formats`,
 `includeHeaders`, `fileNamePrefix`. A report table downloads as `csv` or `xlsx`. Export is on
