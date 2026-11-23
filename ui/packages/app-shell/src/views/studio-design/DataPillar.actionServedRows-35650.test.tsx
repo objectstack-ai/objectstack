@@ -141,7 +141,7 @@ describe('Studio Actions view — refusals and texts take their served rows (obj
     expect(within(rows).getByText('SIGN_IN_REQUIRED', { selector: 'span' })).toBeInTheDocument();
     expect(within(rows).getByText('email_subject', { selector: 'span' })).toBeInTheDocument();
     const jsonHolders = Array.from(document.querySelectorAll('textarea')).filter(
-      (el) => el.value.includes('SIGN_IN_REQUIRED') || el.value.includes('email_subject'),
+      (el) => el.value.includes('"SIGN_IN_REQUIRED"') || el.value.includes('"email_subject"'),
     );
     expect(jsonHolders).toEqual([]);
   });

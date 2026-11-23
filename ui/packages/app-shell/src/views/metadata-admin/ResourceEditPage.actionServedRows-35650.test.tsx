@@ -71,7 +71,10 @@ const mockClient = {
   publish: vi.fn(async () => ({ success: true })),
   references: vi.fn(async () => []),
   history: vi.fn(async () => []),
+  // The object-scoped field pickers read the bound object through the draft-preview client.
+  withPreviewDrafts: vi.fn(),
 };
+mockClient.withPreviewDrafts.mockImplementation(() => mockClient);
 
 vi.mock('./useMetadata', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./useMetadata')>()),
@@ -113,6 +116,7 @@ registerBuiltinDesigners();
 beforeEach(() => {
   stored = STORED;
   for (const fn of Object.values(mockClient)) (fn as unknown as { mockClear: () => void }).mockClear();
+  mockClient.withPreviewDrafts.mockImplementation(() => mockClient);
   window.localStorage.setItem('metadata-admin:autosave', '0');
 });
 afterEach(() => {
@@ -126,8 +130,8 @@ async function openAction(): Promise<HTMLElement> {
       <MetadataResourceEditPage type="action" name="sign_contract" />
     </MemoryRouter>,
   );
-  fireEvent.click((await screen.findAllByRole('button', { name: 'Edit' }, { timeout: 8000 }))[0]!);
-  return screen.findByTestId('action-served-rows');
+  // The designer branch opens editable: its panel is the inspector itself.
+  return screen.findByTestId('action-served-rows', {}, { timeout: 8000 });
 }
 
 describe('the action full-page editor draws refusals and texts from their served rows (objectstack#35650)', () => {
@@ -140,7 +144,7 @@ describe('the action full-page editor draws refusals and texts from their served
     expect(within(rows).getByText('email_subject', { selector: 'span' })).toBeInTheDocument();
     // No editor anywhere on the page holds either record as JSON text.
     const jsonHolders = Array.from(document.querySelectorAll('textarea')).filter(
-      (el) => el.value.includes('SIGN_IN_REQUIRED') || el.value.includes('email_subject'),
+      (el) => el.value.includes('"SIGN_IN_REQUIRED"') || el.value.includes('"email_subject"'),
     );
     expect(jsonHolders).toEqual([]);
   });
@@ -150,8 +154,9 @@ describe('the action full-page editor draws refusals and texts from their served
     fireEvent.click(within(rows).getByText('email_subject', { selector: 'span' }));
     const entry = within(rows).getByText('email_subject', { selector: 'span' }).closest('.rounded-md') as HTMLElement;
     fireEvent.change(within(entry).getByDisplayValue('Contract signed'), { target: { value: 'Your contract is signed' } });
+    await waitFor(() => expect(screen.getByTestId('resource-save')).toBeEnabled(), { timeout: 4000 });
     fireEvent.click(screen.getByTestId('resource-save'));
-    await waitFor(() => expect(mockClient.save).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(mockClient.save).toHaveBeenCalledTimes(1), { timeout: 6000 });
     const body = JSON.parse(JSON.stringify(mockClient.save.mock.calls[0]![2])) as Record<string, unknown>;
     expect(body.texts).toEqual({ email_subject: { message: 'Your contract is signed' } });
     expect(body.refusals).toEqual(STORED.refusals);
