@@ -3707,6 +3707,7 @@ const ja = {
     welcomeAdminDescriptionNoAi: "左の管理メニューから最初のアプリケーションを設定してください。",
     noAppsTitle: "アプリケーションがまだありません",
     noAppsDescription: "システムを準備中です — 管理者が共有したアプリがここに表示されます。",
+    noAppsAddDescription: "アプリを作成するか、既存のアプリに追加してもらうよう管理者に依頼してください。",
     buildWithAI: "AI でビルド",
     askAI: "AI に質問",
     recoveryReminder: {

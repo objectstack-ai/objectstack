@@ -128,7 +128,7 @@ export {
 // emptiness heuristic on top of the SAME declaration reader the chrome's Home
 // affordances use, so the post-login landing and the top-bar logo cannot name
 // two different homes.
-export { HOME_LAUNCHER_PATH, resolveDeclaredHomePath } from './utils/index.js';
+export { HOME_LAUNCHER_PATH, resolveDeclaredHomePath, resolveDesktopHomePath } from './utils/index.js';
 
 // `a810bb2ae` — ONE read of the ADR-0112 failure envelope, published so a
 // consumer OUTSIDE this package inherits the pinned rule instead of writing a

@@ -4028,6 +4028,7 @@ const ar = {
     welcomeAdminDescriptionNoAi: "أعدّ تطبيقك الأول من قائمة الإدارة على اليسار.",
     noAppsTitle: "لا توجد تطبيقات بعد",
     noAppsDescription: "يجري إعداد النظام — وستظهر هنا التطبيقات التي يشاركها معك المسؤول.",
+    noAppsAddDescription: "أنشئ تطبيقًا، أو اطلب من المسؤول إضافتك إلى تطبيق موجود.",
     buildWithAI: "الإنشاء بالذكاء الاصطناعي",
     askAI: "اسأل الذكاء الاصطناعي",
     recoveryReminder: {

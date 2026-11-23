@@ -26,14 +26,26 @@
  */
 
 import { useMetadata } from '../providers/MetadataProvider.js';
+import { useLastApp } from '../context/LastAppProvider.js';
+import { usePhoneViewport } from './usePhoneViewport.js';
 import {
   HOME_LAUNCHER_PATH,
   resolveDeclaredHomePath,
+  resolveDesktopHomePath,
   type DeclaredHomeApp,
 } from '../utils/homePath.js';
 
-/** The path the console chrome's Home affordances navigate to. */
+/**
+ * The path the console chrome's Home affordances navigate to. From 768 px up
+ * the platform home page is retired (objectstack#36732), so Home is where `/`
+ * lands a desktop: the last-used app, the declared default, the first product
+ * app (`resolveDesktopHomePath`). A phone keeps the declared landing, else its
+ * app list at `/home`.
+ */
 export function useHomePath(): string {
   const { apps } = useMetadata();
-  return resolveDeclaredHomePath(apps as DeclaredHomeApp[] | undefined) ?? HOME_LAUNCHER_PATH;
+  const phone = usePhoneViewport();
+  const { lastApp } = useLastApp();
+  if (phone) return resolveDeclaredHomePath(apps as DeclaredHomeApp[] | undefined) ?? HOME_LAUNCHER_PATH;
+  return resolveDesktopHomePath(apps as DeclaredHomeApp[] | undefined, lastApp);
 }

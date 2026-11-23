@@ -260,13 +260,23 @@ describe('a genuinely empty app list still falls through to /home', () => {
     expect(screen.getByTestId('home-launcher')).toBeTruthy();
   });
 
-  it('lands on the launcher for a multi-app deployment with no isDefault', () => {
+  it('a phone lands on its app list for a multi-app deployment with no isDefault', () => {
     auth.value.isAuthenticated = true;
+    phone.value = { isPhone: true, lastApp: null, settled: true };
     metadata.value.apps = [OTHER_APP, { name: 'ops_app' }];
 
     renderAt('/');
 
     expect(location()).toBe('/home');
+  });
+
+  it('objectstack#36732 — a desktop lands in the first app of a multi-app deployment with no isDefault', () => {
+    auth.value.isAuthenticated = true;
+    metadata.value.apps = [OTHER_APP, { name: 'ops_app' }];
+
+    renderAt('/');
+
+    expect(location()).toBe('/apps/showcase_app');
   });
 });
 
@@ -381,7 +391,7 @@ describe('the landing carries the query and hash `/` arrived with', () => {
 
   it('lands on the launcher with the query kept too', () => {
     auth.value.isAuthenticated = true;
-    metadata.value.apps = [OTHER_APP, { name: 'ops_app' }];
+    metadata.value.apps = [{ name: 'setup', _packageId: 'com.objectstack.setup' }];
 
     renderAt('/?palette=1');
 
@@ -434,9 +444,78 @@ describe('a phone lands in the app the person used last (objectstack#35881)', ()
     }
   });
 
-  it('CONTROL — a desktop ignores the last app and keeps the declared default', () => {
+  it('objectstack#36732 — a desktop lands in the last app too, ahead of the declared default', () => {
     phone.value = { isPhone: false, lastApp: 'showcase_app', settled: true };
     renderAt('/');
+    expect(location()).toBe('/apps/showcase_app');
+  });
+
+  it('objectstack#36732 — a desktop waits for the record too, then resolves without it after the wait', () => {
+    vi.useFakeTimers();
+    try {
+      phone.value = { isPhone: false, lastApp: null, settled: false };
+      renderAt('/');
+      expect(location()).toBe('/');
+      expect(screen.getByTestId('loading-fallback')).toBeInTheDocument();
+      act(() => {
+        vi.advanceTimersByTime(2000);
+      });
+      expect(location()).toBe('/apps/crm_app');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+// ── objectstack#36732 — the retired `/home` address on a desktop ────────────
+describe('the retired /home address redirects into an app (objectstack#36732)', () => {
+  /** The `/home` route as App.tsx mounts it on a desktop: the resolver with the no-apps page. */
+  function renderHome(entry: string) {
+    return render(
+      <MemoryRouter initialEntries={[entry]}>
+        <LocationProbe />
+        <Routes>
+          <Route
+            path="/home"
+            element={<RootLandingRedirect home={<div data-testid="home-no-apps-page" />} />}
+          />
+          <Route path="/apps/*" element={<div data-testid="app-surface" />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+  }
+
+  beforeEach(() => {
+    auth.value.isAuthenticated = true;
+  });
+
+  it('opening /home lands in the last-used app, keeping the query', () => {
+    metadata.value.apps = [OTHER_APP, DEFAULT_APP];
+    phone.value = { isPhone: false, lastApp: 'showcase_app', settled: true };
+    renderHome('/home?palette=1');
+    expect(location()).toBe('/apps/showcase_app?palette=1');
+    expect(screen.queryByTestId('home-no-apps-page')).toBeNull();
+  });
+
+  it('with no record it lands in the declared default, else the first app', () => {
+    metadata.value.apps = [OTHER_APP, DEFAULT_APP];
+    renderHome('/home');
     expect(location()).toBe('/apps/crm_app');
+  });
+
+  it('a viewer with no product app stays on /home and is drawn the no-apps page', () => {
+    metadata.value.apps = [{ name: 'setup', _packageId: 'com.objectstack.setup' }];
+    renderHome('/home');
+    expect(location()).toBe('/home');
+    expect(screen.getByTestId('home-no-apps-page')).toBeInTheDocument();
+  });
+
+  it('CONTROL: an app list that failed to load draws neither — it waits, as `/` does', () => {
+    metadata.value.apps = [];
+    metadata.value.status = 'error';
+    renderHome('/home');
+    expect(location()).toBe('/home');
+    expect(screen.queryByTestId('home-no-apps-page')).toBeNull();
+    expect(screen.getByTestId('loading-fallback')).toBeInTheDocument();
   });
 });

@@ -3705,6 +3705,7 @@ const ko = {
     welcomeAdminDescriptionNoAi: "왼쪽 관리 메뉴에서 첫 애플리케이션을 설정하세요.",
     noAppsTitle: "아직 애플리케이션이 없습니다",
     noAppsDescription: "시스템을 준비하고 있습니다 — 관리자가 공유한 앱이 여기에 표시됩니다.",
+    noAppsAddDescription: "앱을 만들거나, 기존 앱에 추가해 달라고 관리자에게 요청하세요.",
     buildWithAI: "AI로 빌드",
     askAI: "AI에게 질문",
     recoveryReminder: {

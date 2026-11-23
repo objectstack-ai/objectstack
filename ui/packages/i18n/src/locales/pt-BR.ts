@@ -3782,6 +3782,7 @@ const pt = {
     welcomeAdminDescriptionNoAi: "Configure seu primeiro aplicativo pelo menu de Administração à esquerda.",
     noAppsTitle: "Ainda não há aplicativos",
     noAppsDescription: "O sistema está sendo preparado — os aplicativos que seu administrador compartilhar aparecerão aqui.",
+    noAppsAddDescription: "Crie um ou peça ao administrador para adicionar você a um aplicativo existente.",
     buildWithAI: "Criar com IA",
     askAI: "Perguntar à IA",
     recoveryReminder: {

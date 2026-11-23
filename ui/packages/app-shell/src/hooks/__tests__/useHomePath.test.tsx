@@ -24,16 +24,28 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook } from '@testing-library/react';
 
 const metadata = vi.hoisted(() => ({ apps: undefined as unknown }));
+/** objectstack#36732 — the width and the person's last app. */
+const viewer = vi.hoisted(() => ({ phone: false, lastApp: null as string | null }));
 
 vi.mock('../../providers/MetadataProvider', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useMetadata: () => ({ apps: metadata.apps }),
+}));
+vi.mock('../usePhoneViewport', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  usePhoneViewport: () => viewer.phone,
+}));
+vi.mock('../../context/LastAppProvider', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  useLastApp: () => ({ lastApp: viewer.lastApp, settled: true, rememberApp: () => {} }),
 }));
 
 const { useHomePath } = await import('../useHomePath');
 
 beforeEach(() => {
   metadata.apps = undefined;
+  viewer.phone = false;
+  viewer.lastApp = null;
 });
 
 describe('useHomePath', () => {
@@ -45,8 +57,32 @@ describe('useHomePath', () => {
     expect(renderHook(() => useHomePath()).result.current).toBe('/apps/cloud_control');
   });
 
-  it('keeps the launcher on an ordinary environment — the unchanged status quo', () => {
+  it('a phone keeps its app list on an ordinary environment — unchanged', () => {
+    viewer.phone = true;
     metadata.apps = [{ name: 'crm' }, { name: 'setup' }];
+    expect(renderHook(() => useHomePath()).result.current).toBe('/home');
+  });
+
+  it('a phone keeps the declared landing, whatever the last app', () => {
+    viewer.phone = true;
+    viewer.lastApp = 'crm';
+    metadata.apps = [{ name: 'crm' }, { name: 'cloud_control', isDefault: true }];
+    expect(renderHook(() => useHomePath()).result.current).toBe('/apps/cloud_control');
+  });
+
+  it('objectstack#36732 — a desktop goes to the last-used app, ahead of the declared default', () => {
+    viewer.lastApp = 'crm';
+    metadata.apps = [{ name: 'crm' }, { name: 'cloud_control', isDefault: true }];
+    expect(renderHook(() => useHomePath()).result.current).toBe('/apps/crm');
+  });
+
+  it('objectstack#36732 — a desktop with no record and no declaration goes to the first product app', () => {
+    metadata.apps = [{ name: 'setup' }, { name: 'crm' }];
+    expect(renderHook(() => useHomePath()).result.current).toBe('/apps/crm');
+  });
+
+  it('objectstack#36732 — a desktop with no product app keeps /home, the no-apps page', () => {
+    metadata.apps = [{ name: 'setup' }];
     expect(renderHook(() => useHomePath()).result.current).toBe('/home');
   });
 

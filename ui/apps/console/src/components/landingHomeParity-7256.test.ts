@@ -30,8 +30,8 @@
  * whose "Your apps" tiles are the control plane's own internal management apps.
  */
 import { describe, it, expect } from 'vitest';
-import { HOME_LAUNCHER_PATH, resolveDeclaredHomePath } from '@object-ui/app-shell';
-import { resolveLandingPath } from './RootLandingRedirect';
+import { HOME_LAUNCHER_PATH, resolveDeclaredHomePath, resolveDesktopHomePath } from '@object-ui/app-shell';
+import { resolveLandingPath, resolveDesktopLandingPath } from './RootLandingRedirect';
 
 const SETUP = { name: 'setup', _packageId: 'com.objectstack.setup' };
 
@@ -99,5 +99,29 @@ describe('objectui#7256 — one declaration, one home', () => {
     const apps = [{ isDefault: true }, { name: 'crm' }, SETUP];
     expect(resolveDeclaredHomePath(apps)).toBeNull();
     expect(resolveLandingPath(apps)).toBe(HOME_LAUNCHER_PATH);
+  });
+});
+
+// objectstack#36732 — from 768 px up the platform home page is retired, and
+// `/` and the chrome's Home both read the last-used app first. Two readers of
+// one order, held equal across every list above and every kind of record.
+describe('objectstack#36732 — a desktop\'s landing and its Home are one answer', () => {
+  const STUDIO = { name: 'studio', _packageId: 'com.objectstack.studio' };
+  const DESKTOP_LISTS = [
+    ...LISTS,
+    { label: 'Setup and Studio only — a fresh environment for an administrator', apps: [SETUP, STUDIO] },
+    { label: 'built-ins listed first, then products', apps: [SETUP, STUDIO, { name: 'hidden_app', hidden: true }, { name: 'off', active: false }, { name: 'sales' }] },
+  ];
+  const RECORDS = [null, undefined, 'crm', 'ops', 'setup', 'cloud_control', 'removed', 'hidden_app', 'off'];
+
+  it.each(DESKTOP_LISTS)('$label: every record lands both on the same path', ({ apps }) => {
+    for (const lastApp of RECORDS) {
+      expect(resolveDesktopHomePath(apps, lastApp)).toBe(resolveDesktopLandingPath(apps, lastApp));
+    }
+  });
+
+  it('with no product app both fall back to the no-apps page at /home', () => {
+    expect(resolveDesktopHomePath([SETUP, STUDIO], null)).toBe(HOME_LAUNCHER_PATH);
+    expect(resolveDesktopLandingPath([SETUP, STUDIO], null)).toBe(HOME_LAUNCHER_PATH);
   });
 });
