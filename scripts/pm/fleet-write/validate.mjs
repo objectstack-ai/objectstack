@@ -2143,23 +2143,33 @@ export async function selfTest() {
     t('…its sentences: none listed, or how many of how many are not in the spelling — never a value', [advisoryFenceText(advisoryFenceFailures({ ghsaId: GHSA, answer: answer(advisory({ vulnerabilities: [] })), from: ['draft'], to: 'published' })), advisoryFenceText(advisoryFenceFailures({ ghsaId: GHSA, answer: answer(advisory({ vulnerabilities: [...onWire(VERSION), { package: { ecosystem: 'npm', name: '@objectstack/rest' }, vulnerable_version_range: PROSE, patched_versions: PROSE }] })), from: ['draft'], to: 'published' })).includes(PROSE)], ["fence `versions`: the advisory lists no vulnerabilities entry, and the relay writes only to versions set first — at least one vulnerabilities entry, every one an npm package with a vulnerable_version_range and patched_versions in the versions row's spelling", false]);
     t('…and every other action passes the versions fence untouched — the collaborators, the accept, the reopen and the close, whatever the list reads', [fenced(answer(advisory())), fenced(answer(advisory({ state: 'triage' })), { from: ADVISORY_TRANSITIONS.draft, to: 'draft' }), fenced(answer(advisory({ state: 'closed' })), { from: ADVISORY_TRANSITIONS.draft, to: 'draft' }), fenced(answer(advisory()), { from: ADVISORY_TRANSITIONS.closed, to: 'closed' })], [[], [], [], []]);
     t('⛔ fence advisory, refused: an answer naming another advisory, or none', [fenced(answer(advisory({ ghsa_id: 'GHSA-wxyz-2345-abcd' }))), fenced(answer(advisory({ ghsa_id: undefined })))], [['advisory'], ['advisory']]);
-    // The notes fence: a publish refused while the description still carries a seat-note section.
+    // The notes fence: a publish refused while the description still carries a seat signature line, the head of a seat note.
     const SIG = 'domain:security#2 · os-dev-a · session_01ABCDEFGHJKMNPQRSTVWXYZ';
     const SECTION = (n = 1) => `${SIG}\n2026-11-12T04:0${n}:00Z\n\nNOTES MARKER: a seat's analysis ${n}`;
-    const counts = [
+    const counted = [
+      [`NOTES MARKER: the finder's text${ADVISORY_NOTE_SEPARATOR}${SECTION(1)}`, 1],
+      [SECTION(1), 1],
+      [`NOTES MARKER: text${ADVISORY_NOTE_SEPARATOR}${SECTION(1)}${ADVISORY_NOTE_SEPARATOR}${SECTION(2)}`, 2],
+      [`NOTES MARKER: public text\r\n\r\n---\r\n\r\n${SIG}\r\n2026-11-12T04:00:00Z\r\n\r\nNOTES MARKER: a note saved with CRLF`, 1],
+      [`NOTES MARKER: public text\n  ${SIG}\t\n 2026-11-12T04:00:00Z \n\nNOTES MARKER: a padded head`, 1],
+      [`NOTES MARKER: public text\n${SIG}\nNOTES MARKER: the stamp and the blank line deleted\nmore`, 1],
+      [`${SIG}\n2026-11-12T04:00Z\n\nNOTES MARKER: a minute-grain stamp`, 1],
+      [`${SIG}\n2026-11-12T04:00:00Z\nNOTES MARKER: no blank line under the stamp`, 1],
+      [`NOTES MARKER: public text\n\n${SIG}`, 1],
+      ['oldlane#3 · os-dev-a · session_01ABCDEFGH\n2026-11-12T04:00:00Z\n\nNOTES MARKER: a lane retired from the live list', 1],
+    ];
+    const clear = [
       'NOTES MARKER: the public text, no note in it',
-      `NOTES MARKER: the finder's text${ADVISORY_NOTE_SEPARATOR}${SECTION(1)}`,
-      SECTION(1),
-      `NOTES MARKER: text${ADVISORY_NOTE_SEPARATOR}${SECTION(1)}${ADVISORY_NOTE_SEPARATOR}${SECTION(2)}`,
-      `${SIG}\nNOTES MARKER: a signature line with no stamp under it`,
-      `NOTES MARKER: a stamp alone\n2026-11-12T04:00:00Z\n\ntext`,
+      'NOTES MARKER: public text quoting a stamp-shaped line\n\n---\n\n2026-11-12T04:00:00Z\n\nmore public text',
+      'NOTES MARKER: a hash and dots · not a signature #3 · session',
+      'see issue#12 · build · release',
       '',
       null,
-    ].map(advisoryNoteSectionCount);
-    t('the note-section count: a signature line, a stamp and a blank line under it are one section — none in public text, one after the separator or alone, two for two; a signature with no stamp, a stamp with no signature, an empty or absent description are none', counts, [0, 1, 1, 2, 0, 0, 0, 0]);
+    ];
+    t("the seat-signature count — on the signature line alone, each line trimmed: a note after the separator, alone, two of them, saved with CRLF, its head padded, its stamp or blank line edited away, its stamp at minute grain, its body deleted, and one signed in a lane retired from the live list are each counted; public text, a stamp-shaped line with no signature, signature-like punctuation and an empty or absent description are not", [counted.map(([d]) => advisoryNoteSectionCount(d)), clear.map(advisoryNoteSectionCount)], [counted.map(([, n]) => n), clear.map(() => 0)]);
     const publishFence = (description, to = 'published') => advisoryFenceFailures({ ghsaId: GHSA, answer: answer(advisory({ state: to === 'published' ? 'draft' : 'closed', description, vulnerabilities: onWire(VERSION) })), from: ADVISORY_TRANSITIONS[to], to });
     const noted = publishFence(`NOTES MARKER: the finder's text${ADVISORY_NOTE_SEPARATOR}${SECTION(1)}`);
-    t("⛔ fence notes, judged for a publish alone: a draft whose description still carries a seat-note section is refused by the notes fence, naming the count and no byte of the text; the same draft rewritten passes; a reopen to draft with a note in it is not judged by it", [noted.map((f) => f.fence), advisoryFenceText(noted).includes('still carries 1 seat-note section(s)'), advisoryFenceText(noted).includes('MARKER'), publishFence('NOTES MARKER: the public text').map((f) => f.fence), publishFence(SECTION(1), 'draft').map((f) => f.fence)], [['notes'], true, false, [], []]);
+    t("⛔ fence notes, judged for a publish alone: a draft whose description still carries a seat signature line is refused by the notes fence, naming the count and no byte of the text; a description that is neither text nor none is refused too; the same draft rewritten passes; a reopen to draft with a note in it is not judged by it", [noted.map((f) => f.fence), advisoryFenceText(noted).includes('still carries 1 seat signature line(s)'), advisoryFenceText(noted).includes('MARKER'), publishFence(['NOTES MARKER']).map((f) => f.fence), advisoryFenceText(publishFence({ text: 'NOTES MARKER' })).includes('is object, so it cannot be judged free of seat notes'), publishFence('NOTES MARKER: the public text').map((f) => f.fence), publishFence(null).map((f) => f.fence), publishFence(SECTION(1), 'draft').map((f) => f.fence)], [['notes'], true, false, ['notes'], true, [], [], []]);
     t('⛔ fence read, refused: a 404, a 403, an array and null — never read as an advisory, the other fences failing as not judged; for the versions row and a publish the versions fence too, and for a publish the notes fence', [...[answer({ message: 'Not Found' }, 404), answer({ message: 'Forbidden' }, 403), answer([advisory()]), answer(null)].map((a) => fenced(a)), fenced(answer(null, 404), { from: ADVISORY_VERSIONS_STATES, versions: [VERSION] }), fenced(answer(null, 404), { from: ADVISORY_TRANSITIONS.published, to: 'published' })], [...[0, 1, 2, 3].map(() => ['read', 'advisory', 'state']), ['read', 'advisory', 'state', 'versions'], ['read', 'advisory', 'state', 'versions', 'notes']]);
     const leaky = advisoryFenceFailures({ ghsaId: GHSA, answer: answer(advisory({ ghsa_id: PROSE, state: PROSE })) });
     t('⛔ a fence sentence prints the answer\'s id and state only in their own shapes — prose in either reaches it as a placeholder, never as itself', [leaky.map((f) => f.fence), advisoryFenceText(leaky).includes(PROSE), advisoryFenceText(leaky).includes('(not an advisory id)') && advisoryFenceText(leaky).includes('(not an advisory state)')], [['advisory', 'state'], false, true]);

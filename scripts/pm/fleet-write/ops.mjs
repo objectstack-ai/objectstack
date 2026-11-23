@@ -643,11 +643,16 @@
  * `draft` alone, and only once the executor's own GET reads at least one
  * `vulnerabilities` entry, every one in the versions row's spelling (the
  * `versions` fence, `ADVISORY_FENCES`) — the versions are set first — and a
- * description that carries no seat-note section (the `notes` fence,
- * `advisoryNoteSectionCount`: a signature line, a stamp and a blank line, the
- * head of every `advisory_note` section). A publish makes the whole
+ * description that is text or none and carries no seat signature line (the
+ * `notes` fence, `advisoryNoteSectionCount`: every `advisory_note` section
+ * opens with one, and none belongs in public text, so a section whose stamp
+ * or body was edited away is still seen). A publish makes the whole
  * description public, so the working text is replaced first
- * (`advisory_rewrite`); the refusal names the count and no byte of the text. No other
+ * (`advisory_rewrite`); the refusal names the count and no byte of the text.
+ * The fence proves the description holds no seat note, not that a rewrite
+ * happened. Its window is the row's one read: a note landing between that GET
+ * and the PATCH is published, because `advisoryStateReadBack` judges the state
+ * and the versions, never the description. No other
  * field takes it as a value, and no body but the executor's `{ state }` can
  * carry it: the report's and the draft's bodies are the row's, holding no state
  * (the endpoint creates a draft and takes none), the versions row's is its
@@ -1104,7 +1109,6 @@
 import { createCipheriv, createDecipheriv, createHmac, createPrivateKey, createPublicKey, diffieHellman, generateKeyPairSync, hkdfSync, randomBytes } from 'node:crypto';
 
 import { GOVERNED_REPOS, HUMAN_MERGE_LINE_THRESHOLD } from '../check-governed-merges.mjs';
-import { SEAT_SIGNATURE_LINE } from '../check-half-states.mjs';
 
 /**
  * The relay's four files, repo-relative — the population a card touching any
@@ -2049,19 +2053,22 @@ const publishes = (c) => c.to === ADVISORY_PUBLISHED_STATE;
 export const ADVISORY_NOTE_STAMP_SHAPE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
 
 /**
- * How many seat-note sections `description` carries (header: "The rows that write a security advisory", the
- * `notes` fence): a line that is a seat signature line (`SEAT_SIGNATURE_LINE`, trimmed), the next line a stamp in
- * `ADVISORY_NOTE_STAMP_SHAPE` and the line after it blank — the head every `advisory_note` section opens with. A
- * count and nothing else: ⛔ never a byte of the text. Pure.
+ * A seat signature line in ANY lane — `LANE#N · ACCOUNT · SESSION`, the lane any word without a space. Looser than the
+ * signature check's live lane list on purpose: a lane retired from that list later still signs the notes already
+ * sealed under it, and the `notes` fence must still see them.
+ */
+export const ADVISORY_SEAT_SIGNATURE_SHAPE = /^\S+#[1-9][0-9]* · [A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38} · session_[A-Za-z0-9]{6,}$/u;
+
+/**
+ * How many seat signature lines `description` carries (header: "The rows that write a security advisory", the
+ * `notes` fence): each line, trimmed — so a CRLF line end, a padded line or a tab does not hide one — that is
+ * `ADVISORY_SEAT_SIGNATURE_SHAPE`. Every `advisory_note` section opens with one, and a signature line has no place in
+ * an advisory's public text, so the count is taken on the signature alone: a section whose stamp, blank line or body
+ * was edited away still counts. A count and nothing else: ⛔ never a byte of the text. Pure.
  */
 export function advisoryNoteSectionCount(description) {
   if (typeof description !== 'string' || description === '') return 0;
-  const lines = description.split('\n');
-  let count = 0;
-  for (let i = 0; i + 2 < lines.length; i += 1) {
-    if (SEAT_SIGNATURE_LINE.test(lines[i].trim()) && ADVISORY_NOTE_STAMP_SHAPE.test(lines[i + 1].trim()) && lines[i + 2].trim() === '') count += 1;
-  }
-  return count;
+  return description.split('\n').filter((line) => ADVISORY_SEAT_SIGNATURE_SHAPE.test(line.trim())).length;
 }
 
 export const ADVISORY_FENCES = Object.freeze([
@@ -2118,16 +2125,18 @@ export const ADVISORY_FENCES = Object.freeze([
     },
   }),
   // The notes (header): judged for a publish alone, on the executor's own GET just before its PATCH. A publish makes
-  // the whole description public, so it is refused while a seat-note section is still in it — the rewrite replaces
+  // the whole description public, so it is refused while a seat note's signature line is still in it — the rewrite replaces
   // the working text first. A count alone, ⛔ never a byte of the description.
   Object.freeze({
     fence: 'notes',
-    wants: () => 'a description that carries no seat-note section — advisory_rewrite replaces the working text before the publish',
+    wants: () => 'a description that is text or none and carries no seat signature line, the head of every seat note — advisory_rewrite replaces the working text before the publish',
     fails: (c) => {
       if (!publishes(c)) return null;
       if (!advisoryRead(c)) return 'not judged, because the advisory was not read';
-      const n = advisoryNoteSectionCount(typeof c.answer.json.description === 'string' ? c.answer.json.description : '');
-      return n === 0 ? null : `the advisory's description still carries ${n} seat-note section(s)`;
+      const d = c.answer.json.description;
+      if (d !== undefined && d !== null && typeof d !== 'string') return `the advisory's description is ${Array.isArray(d) ? 'an array' : typeof d}, so it cannot be judged free of seat notes`;
+      const n = advisoryNoteSectionCount(d ?? '');
+      return n === 0 ? null : `the advisory's description still carries ${n} seat signature line(s), the head of a seat note`;
     },
   }),
 ]);
