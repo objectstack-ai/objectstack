@@ -192,7 +192,11 @@ afterEach(() => {
 /** Fill the create dialog's label (the identifier derives from it) and submit. */
 function submitCreate(dialog: HTMLElement, label: string) {
   fireEvent.change(dialog.querySelectorAll('input')[0], { target: { value: label } });
-  fireEvent.click(within(dialog).getByRole('button', { name: en('engine.studio.createDraft') }));
+  // objectstack#36511 — a live editor's dialog says Create; an app's still says Save as draft.
+  fireEvent.click(
+    within(dialog).queryByRole('button', { name: en('engine.studio.createLive') }) ??
+      within(dialog).getByRole('button', { name: en('engine.studio.createDraft') }),
+  );
 }
 
 describe('objectstack#26917 — Automations: New automation over a taken identifier', () => {

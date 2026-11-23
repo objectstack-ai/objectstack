@@ -133,7 +133,7 @@ async function pickObject(name: string): Promise<void> {
 }
 
 function create(): void {
-  fireEvent.click(screen.getByRole('button', { name: en('engine.studio.createDraft') }));
+  fireEvent.click(screen.getByRole('button', { name: en('engine.studio.createLive') }));
 }
 
 /** Wait for save number `n` and return its body, judged by the spec. */

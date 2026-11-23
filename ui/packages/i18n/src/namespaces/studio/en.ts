@@ -3359,6 +3359,19 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.save.confirmRemoveField': '• Delete the field “{field}”: its values on every record are removed.',
   'engine.studio.save.confirmRetypeField':
     '• Change “{field}” from {from} to {to}: values already stored may be converted or cleared.',
+  // objectstack#36511 item 6 — an item the AI assistant left an unpublished
+  // draft on: the page shows that version, says Save makes it live too, and
+  // offers to drop that one item's draft.
+  'engine.studio.aiDraft.notice': 'This item has unpublished changes from the AI assistant. Saving makes them live too.',
+  'engine.studio.aiDraft.discard': 'Discard the AI’s changes',
+  'engine.studio.aiDraft.discardTitle': 'Drop this item’s unpublished draft and go back to the live version',
+  'engine.studio.aiDraft.discardConfirmUnsaved':
+    'Discarding the AI’s changes also drops the changes on this page that you have not saved. Discard anyway?',
+  'engine.studio.aiDraft.discardFailed': 'The AI’s changes were not discarded: {reason}',
+  // objectstack#36511 — the create dialogs of the editors whose Save is live
+  // (objects, automations, permission sets): the item is created and live at
+  // once, so the confirm says Create, never Save as draft.
+  'engine.studio.createLive': 'Create',
   'engine.studio.held.lineExplicit': 'Not ready to save: {clause}. Your changes are kept here; fill it in, then Save.',
   'engine.studio.loading': 'Loading…',
   'engine.studio.loadFailed': 'Failed to load',
@@ -3911,14 +3924,11 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.owd.title': 'Who can see which records',
   'engine.studio.owd.subtitle': 'Record visibility of each object in this package',
   'engine.studio.owd.description':
-    'Who can see which records, for every object this package owns — check it at a glance and change it in bulk. Changes save as per-object drafts and go live with the package Publish, exactly like the object’s Settings tab.',
+    'Who can see which records, for every object this package owns — check it at a glance and change it in bulk. Save makes the changes live at once, exactly like the object’s Settings tab.',
   'engine.studio.owd.colObject': 'Object',
   'engine.studio.owd.colInternal': 'Who can see which records',
   'engine.studio.owd.none': 'This package declares no objects.',
   'engine.studio.owd.loadFailed': 'Failed to load this package’s objects.',
-  'engine.studio.owd.save': 'Save {count} change(s)',
-  'engine.studio.owd.saveNone': 'No changes',
-  'engine.studio.owd.saved': 'Saved {count} object draft(s).',
   'engine.studio.owd.unsaved': 'Unsaved',
   'engine.studio.owd.byParent': 'Follows its {master}',
   'engine.studio.owd.cbpPrereqTitle': 'Make the relationship required?',

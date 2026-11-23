@@ -478,7 +478,7 @@ async function openNewObject(): Promise<HTMLElement> {
 async function submitObject(): Promise<string> {
   const dialog = screen.getByRole('dialog');
   fireEvent.change(dialog.querySelectorAll('input')[0], { target: { value: 'Visit' } });
-  fireEvent.click(within(dialog).getByRole('button', { name: en('engine.studio.createDraft') }));
+  fireEvent.click(within(dialog).getByRole('button', { name: en('engine.studio.createLive') }));
   await waitFor_(() => expect(mockClient.save).toHaveBeenCalledTimes(1));
   return JSON.stringify((mockClient.save as ReturnType<typeof vi.fn>).mock.calls[0]);
 }
@@ -546,7 +546,7 @@ async function openNewFlow(): Promise<HTMLElement> {
 
 /** Submit and return the JSON text of the saved flow. */
 async function submitFlow(): Promise<string> {
-  fireEvent.click(screen.getByRole('button', { name: en('engine.studio.createDraft') }));
+  fireEvent.click(screen.getByRole('button', { name: en('engine.studio.createLive') }));
   await waitFor_(() => expect(server.saves).toHaveLength(1));
   return JSON.stringify(server.saves[0].body);
 }

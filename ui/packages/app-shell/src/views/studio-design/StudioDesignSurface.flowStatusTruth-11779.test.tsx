@@ -347,7 +347,7 @@ describe('a new flow is born switched off, as the bar promises (objectui#11779)'
     });
     // objectui#11861 — the blank flow is the dialog's *Advanced* choice.
     fireEvent.click(screen.getByRole('radio', { name: en('engine.studio.rules.advanced') }));
-    fireEvent.click(screen.getByRole('button', { name: en('engine.studio.createDraft') }));
+    fireEvent.click(screen.getByRole('button', { name: en('engine.studio.createLive') }));
 
     await waitFor(() => expect(server.saves).toHaveLength(1), { timeout: 8000 });
     const { name, body } = server.saves[0]!;
