@@ -155,17 +155,23 @@ function withPackageCandidates(
 }
 
 /** The body of `ObjectStackProtocolImplementation#getMetaItemLayered`; the method's docblock there is its contract. */
-export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockLayerAt' | 'convertStoredItem' | 'declinesStoredRow' | 'engine' | 'findPairAddedMemberRow' | 'findServedOverlayRow' | 'foldObjectExtendersFromRegistry' | 'getServicesRegistry' | 'governServedObject' | 'isArtifactBacked' | 'isStoredEntryOfDeclinedName' | 'lookupArtifactItem' | 'overlayLockLayerAt' | 'packagelessAddress' | 'packagelessReadAddress' | 'shippedArtifactsOf' | 'readItemActiveRows' | 'readItemFromMetadataService' | 'resolveRowlessExpandedView' | 'resolveWritePackageScope' | 'rethrowUnlessMetadataStoreUnprovisioned' | 'servedLockState' | 'strictDraftReadAddress' | 'throwMetadataServiceUnavailable'>, request: {
+export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockLayerAt' | 'convertStoredItem' | 'declinesStoredRow' | 'engine' | 'findPairAddedMemberRow' | 'findServedOverlayRow' | 'foldObjectExtendersFromRegistry' | 'getServicesRegistry' | 'governServedObject' | 'isArtifactBacked' | 'isStoredEntryOfDeclinedName' | 'lookupArtifactItem' | 'overlayLockLayerAt' | 'packagelessAddress' | 'packagelessReadAddress' | 'shippedArtifactsOf' | 'readItemActiveRows' | 'readItemFromMetadataService' | 'resolveRowlessExpandedView' | 'readVersionToken' | 'resolveWritePackageScope' | 'rethrowUnlessMetadataStoreUnprovisioned' | 'servedLockState' | 'strictDraftReadAddress' | 'throwMetadataServiceUnavailable'>, request: {
         type: string;
         name: string;
         packageId?: string;
         /** [#26699] The bundle member whose layers to read — {@link resolveBundleMemberSelector}; omitted, the canonical one. */
         member?: string;
-    }, opts: { withDraft?: boolean } = {}): Promise<{
+    }, opts: { withDraft?: boolean; withVersion?: boolean } = {}): Promise<{
         type: string;
         name: string;
         code: unknown | null;
         overlay: unknown | null;
+        /**
+         * [#36601] The keyed version token of the active row at this read's
+         * address — present only when the caller asked for it
+         * (`opts.withVersion`); `null` when no active row is stored there.
+         */
+        overlayVersion?: string | null;
         overlayScope: 'env' | null;
         effective: unknown | null;
         /**
@@ -935,11 +941,40 @@ export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockL
     // subtracts a credential and nothing else.
     const servedDraft = draft === undefined ? undefined : redactMetadataItem(request.type, draft);
 
+    // ── [#36601] The published layer's version, only when the caller asked ──
+    //
+    // The keyed token of the stored ACTIVE row at this read's address
+    // (`?package=`, the bundle member): the row a per-item publish at the same
+    // address replaces, and the token that publish takes as `If-Match`
+    // (`PublishMetaItemRequestSchema.parentVersion`). The one producer the
+    // plain read's `version` and a save receipt's `version` use
+    // ({@link readVersionToken}), so the three agree byte for byte. `null`
+    // when no active row is stored there (code or a package artifact alone).
+    // Asked for by the doors; in-process readers of this method pay no read.
+    let overlayVersion: string | null | undefined;
+    if (opts.withVersion === true) {
+        try {
+            overlayVersion = await host.readVersionToken({
+                type: request.type,
+                name: request.name,
+                ...(request.packageId ? { packageId: request.packageId } : {}),
+                ...memberOption(member),
+            }, 'active');
+        } catch (error) {
+            // [#5707] The overlay read's rule: an unprovisioned store holds
+            // no active row (`null` is then the truth); any other failure is
+            // a read that did not happen, never "no row".
+            host.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
+            overlayVersion = null;
+        }
+    }
+
     return {
         type: request.type,
         name: request.name,
         code: servedCode,
         overlay: servedOverlay,
+        ...(overlayVersion !== undefined ? { overlayVersion } : {}),
         overlayScope,
         effective: servedEffective,
         ...(servedDraft !== undefined ? { draft: servedDraft } : {}),

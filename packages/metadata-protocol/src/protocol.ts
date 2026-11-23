@@ -4350,6 +4350,12 @@ export class ObjectStackProtocolImplementation implements
      * `@objectstack/rest`, and its runtime twin) asks for it; every other
      * reader of this method reads no draft. A failed draft read throws, as
      * the overlay read does, for the same [#5707] reason.
+     *
+     * [#36601] `opts.withVersion` adds `overlayVersion`
+     * (`GetMetaItemLayeredResponseSchema.overlayVersion`): the keyed version
+     * token of the active row at this read's address, the `If-Match` a
+     * per-item publish there takes, or `null` when none is stored. Without
+     * the option the answer carries no `overlayVersion` key ("not served").
      */
     async getMetaItemLayered(request: {
         type: string;
@@ -4357,11 +4363,13 @@ export class ObjectStackProtocolImplementation implements
         packageId?: string;
         /** [#26699] The bundle member whose layers to read — {@link resolveBundleMemberSelector}; omitted, the canonical one. */
         member?: string;
-    }, opts: { withDraft?: boolean } = {}): Promise<{
+    }, opts: { withDraft?: boolean; withVersion?: boolean } = {}): Promise<{
         type: string;
         name: string;
         code: unknown | null;
         overlay: unknown | null;
+        /** [#36601] The active row's keyed version token at this address, only when `opts.withVersion` asked; `null` for none. */
+        overlayVersion?: string | null;
         overlayScope: 'env' | null;
         effective: unknown | null;
         /** [#29814] The pending draft row as stored, only when `opts.withDraft` asked; `null` for none. */
@@ -9807,6 +9815,8 @@ export class ObjectStackProtocolImplementation implements
         member?: string;
         /** [#32656] The write request's `userTextLocales`, for the findings' `userMessage`. */
         userTextLocales?: readonly (string | undefined)[];
+        /** [#36601] The caller's pin on the active row this promotion replaces (`PublishMetaItemRequestSchema.parentVersion`). */
+        parentVersion?: string | null;
         /** The registry question this promotion asks (`registry-question.ts`). */
         registryQuestion: RegistryQuestion;
         /** [#32396] Judge every refusal, write nothing: the answer then carries no `result`. */
