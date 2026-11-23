@@ -14,25 +14,25 @@ a row or a number here — fix the code, or the census, and regenerate.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 115 |
-| Object name statically decidable | 64 |
-| Object name chosen at run time | 51 |
-| Object name spelled inline | 51 |
+| Write call sites | 110 |
+| Object name statically decidable | 60 |
+| Object name chosen at run time | 50 |
+| Object name spelled inline | 47 |
 | Object name spelled through a `const` | 13 |
 | Object name is an `object: string` parameter | 4 |
-| Object name is some other run-time expression | 47 |
-| Against a tenancy-enabled object | 62 |
+| Object name is some other run-time expression | 46 |
+| Against a tenancy-enabled object | 58 |
 | Against an object declaring tenancy off | 2 |
-| Threading a tenant context | 69 |
-| Provably carrying none (options read, no context key) | 17 |
-| …and decidably tenancy-enabled | 5 |
+| Threading a tenant context | 66 |
+| Provably carrying none (options read, no context key) | 15 |
+| …and decidably tenancy-enabled | 3 |
 | Options argument unreadable | 29 |
 | …and decidably tenancy-enabled | 16 |
-| Threading a decidably elevated (`isSystem`) context | 51 |
+| Threading a decidably elevated (`isSystem`) context | 48 |
 | Threading a decidably non-elevated context | 0 |
 | Threading a context of undecidable elevation | 47 |
-| Receiver carried a readable engine type | 84 |
-| Receiver erased, placed by the object NAME | 28 |
+| Receiver carried a readable engine type | 81 |
+| Receiver erased, placed by the object NAME | 26 |
 | Receiver erased, placed by an `object: string` PARAMETER | 2 |
 | Receiver erased, placed by an `UNTYPED_RECEIVERS` row | 1 |
 
@@ -66,15 +66,16 @@ a row or a number here — fix the code, or the census, and regenerate.
 | `packages/plugins/plugin-auth/src/auth-manager.ts` | `update` | `sys_session` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/auth-manager.ts` | `delete` | `sys_verification` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/auth-manager.ts` | `insert` | `sys_verification` | enabled | elevated | 1 |
-| `packages/plugins/plugin-auth/src/auth-plugin.ts` | `update` | `sys_oauth_application` | enabled | PROVABLY NONE | 3 |
-| `packages/plugins/plugin-auth/src/auth-plugin.ts` | `update` | `sys_user` | enabled | elevated | 3 |
-| `packages/plugins/plugin-auth/src/auth-plugin.ts` | `update` | `SystemObjectName.USER` | undecidable | elevated | 3 |
+| `packages/plugins/plugin-auth/src/auth-plugin.ts` | `update` | `sys_oauth_application` | enabled | PROVABLY NONE | 1 |
+| `packages/plugins/plugin-auth/src/auth-plugin.ts` | `update` | `sys_user` | enabled | elevated | 1 |
+| `packages/plugins/plugin-auth/src/auth-plugin.ts` | `update` | `SystemObjectName.USER` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-auth/src/credential-change-ends-reset-tokens.ts` | `delete` | `VERIFICATION` | undecidable | PROVABLY NONE | 3 |
 | `packages/plugins/plugin-auth/src/default-organization-invariant.ts` | `insert` | `sys_organization` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/demo-staff.ts` | `update` | `sys_user` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/demo-staff.ts` | `insert` | `sys_user_permission_set` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/demo-staff.ts` | `insert` | `sys_user_position` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/dev-seed-credential-retirement.ts` | `delete` | `object` | undecidable | elevated | 1 |
+| `packages/plugins/plugin-auth/src/dev-seed-credential-retirement.ts` | `update` | `SystemObjectName.SESSION` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-auth/src/dev-seed-credential.ts` | `update` | `SystemObjectName.USER` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-auth/src/ensure-default-organization.ts` | `insert` | `object` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-auth/src/ensure-default-organization.ts` | `update` | `sys_member` | enabled | elevated | 1 |
