@@ -44,6 +44,11 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 // `@objectstack/objectql` — that import would close a cycle turbo rejects.
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
+// `@objectstack/lint` loads lazily, behind the source's own dynamic `import()`
+// (`metadata-diagnostics.ts`). Paid here, at collection, so no case's
+// `testTimeout` window pays that first load
+// (`scripts/check-test-source-alias.mjs`, "The source reach").
+import '@objectstack/lint';
 
 const OWN = 'com.acme.crm';
 const DEP = 'com.acme.core';
