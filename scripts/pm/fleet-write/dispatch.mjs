@@ -637,6 +637,7 @@ import {
   advisoryReadAad,
   advisorySealAad,
   advisoryNoteDigest,
+  ADVISORY_NOTE_STAMP_SHAPE,
   advisoryRewriteFailure,
   advisoryRewriteText,
   ADVISORY_REWRITE_FIELDS,
@@ -1699,7 +1700,7 @@ export function advisoryNoteStamp(ms) {
   return new Date(ms).toISOString().replace(/\.\d{3}Z$/, 'Z');
 }
 /** The stamp line's one spelling — the one this door writes. */
-export const ADVISORY_NOTE_STAMP_SHAPE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
+export { ADVISORY_NOTE_STAMP_SHAPE };
 /** A stamp a seat TYPED, at either grain seat posts use — refused where the door's own goes. */
 const TYPED_STAMP_SHAPE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?Z$/;
 /** The characters no note carries: every control character but the tab and the newline — the carriage return among them. */

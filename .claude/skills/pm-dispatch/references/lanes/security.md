@@ -1,6 +1,6 @@
 # 车道章程:安全席(security)
 
-见 seat-lifecycle.md;本文是本车道岗位说明,现值状态恒在座位贴,⛔ 不迁入本文。
+见 seat-lifecycle.md;现值状态恒在座位贴,⛔ 不迁入本文。
 永不公开的规则只住 `../security-findings.md`(下文「第 N 节」皆指它),本文只指向、⛔ 不复述。
 本文与座位贴不载任何发现、编号、路径、对象名或机制。
 
@@ -43,7 +43,7 @@
 - 清单按组列,成员列在牵头下。
 - 修复在版本 X 内,只当其合并提交是 X 打标提交的祖先(`git merge-base --is-ancestor`)。
 - ⛔ 合并时刻早于打标时刻不是证据。
-- 维护者批准即 `awaiting publish`;本席经中继依序 `advisory_rewrite` 换正文、`advisory_versions`、`advisory_state` 发布即 `published`,照第 3 节;⛔ 不发清单外的。
+- 维护者批准即 `awaiting publish`;本席经中继依序 `advisory_rewrite` 换正文、`advisory_versions`、`advisory_state` 发布即 `published`,照第 3 节;正文含席位追加即拒;⛔ 不发清单外的。
 
 ## 收口(逐对象)
 

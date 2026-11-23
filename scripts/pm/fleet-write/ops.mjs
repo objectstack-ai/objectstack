@@ -642,7 +642,12 @@
  * `published` is reached by ONE row and ONE transition: `advisory_state`, from
  * `draft` alone, and only once the executor's own GET reads at least one
  * `vulnerabilities` entry, every one in the versions row's spelling (the
- * `versions` fence, `ADVISORY_FENCES`) — the versions are set first. No other
+ * `versions` fence, `ADVISORY_FENCES`) — the versions are set first — and a
+ * description that carries no seat-note section (the `notes` fence,
+ * `advisoryNoteSectionCount`: a signature line, a stamp and a blank line, the
+ * head of every `advisory_note` section). A publish makes the whole
+ * description public, so the working text is replaced first
+ * (`advisory_rewrite`); the refusal names the count and no byte of the text. No other
  * field takes it as a value, and no body but the executor's `{ state }` can
  * carry it: the report's and the draft's bodies are the row's, holding no state
  * (the endpoint creates a draft and takes none), the versions row's is its
@@ -730,7 +735,7 @@
  *     transition with nothing sent (`ADVISORY_TRANSITIONS`: `draft` from
  *     `triage` — the accept — or from `closed` — the reopen; `closed` from
  *     `triage` or `draft`; `published` from `draft` alone, through the
- *     `versions` fence; nothing from `published` or `withdrawn`, and a state
+ *     `versions` and `notes` fences; nothing from `published` or `withdrawn`, and a state
  *     the table does not name fails closed). Its PATCH body is `{ state }` and
  *     nothing else, and it LANDS only when the answer shows that state
  *     (`advisoryStateReadBack`) — a publish only when the published answer
@@ -1099,6 +1104,7 @@
 import { createCipheriv, createDecipheriv, createHmac, createPrivateKey, createPublicKey, diffieHellman, generateKeyPairSync, hkdfSync, randomBytes } from 'node:crypto';
 
 import { GOVERNED_REPOS, HUMAN_MERGE_LINE_THRESHOLD } from '../check-governed-merges.mjs';
+import { SEAT_SIGNATURE_LINE } from '../check-half-states.mjs';
 
 /**
  * The relay's four files, repo-relative — the population a card touching any
@@ -2038,6 +2044,26 @@ const fromOf = (c) => (Array.isArray(c.from) ? c.from : c.to ? [] : ADVISORY_OPE
 const setsVersions = (c) => Array.isArray(c.versions);
 const orList = (xs) => (xs.length > 1 ? `${xs.slice(0, -1).join(', ')} or ${xs[xs.length - 1]}` : xs.join(''));
 const publishes = (c) => c.to === ADVISORY_PUBLISHED_STATE;
+
+/** A note section's stamp line — the one spelling the seat's door writes under the signature (`advisoryNoteSection`, `dispatch.mjs`). */
+export const ADVISORY_NOTE_STAMP_SHAPE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
+
+/**
+ * How many seat-note sections `description` carries (header: "The rows that write a security advisory", the
+ * `notes` fence): a line that is a seat signature line (`SEAT_SIGNATURE_LINE`, trimmed), the next line a stamp in
+ * `ADVISORY_NOTE_STAMP_SHAPE` and the line after it blank — the head every `advisory_note` section opens with. A
+ * count and nothing else: ⛔ never a byte of the text. Pure.
+ */
+export function advisoryNoteSectionCount(description) {
+  if (typeof description !== 'string' || description === '') return 0;
+  const lines = description.split('\n');
+  let count = 0;
+  for (let i = 0; i + 2 < lines.length; i += 1) {
+    if (SEAT_SIGNATURE_LINE.test(lines[i].trim()) && ADVISORY_NOTE_STAMP_SHAPE.test(lines[i + 1].trim()) && lines[i + 2].trim() === '') count += 1;
+  }
+  return count;
+}
+
 export const ADVISORY_FENCES = Object.freeze([
   Object.freeze({
     fence: 'read',
@@ -2089,6 +2115,19 @@ export const ADVISORY_FENCES = Object.freeze([
       if (listed.total === 0) return 'the advisory lists no vulnerabilities entry';
       const unspelled = listed.foreign + listed.entries.filter((v) => advisoryVersionEntryFailure(v) !== null).length;
       return unspelled ? `${unspelled} of the advisory's ${entriesText(listed.total)} carry no npm package, version range or patched versions in the versions row's spelling` : null;
+    },
+  }),
+  // The notes (header): judged for a publish alone, on the executor's own GET just before its PATCH. A publish makes
+  // the whole description public, so it is refused while a seat-note section is still in it — the rewrite replaces
+  // the working text first. A count alone, ⛔ never a byte of the description.
+  Object.freeze({
+    fence: 'notes',
+    wants: () => 'a description that carries no seat-note section — advisory_rewrite replaces the working text before the publish',
+    fails: (c) => {
+      if (!publishes(c)) return null;
+      if (!advisoryRead(c)) return 'not judged, because the advisory was not read';
+      const n = advisoryNoteSectionCount(typeof c.answer.json.description === 'string' ? c.answer.json.description : '');
+      return n === 0 ? null : `the advisory's description still carries ${n} seat-note section(s)`;
     },
   }),
 ]);
