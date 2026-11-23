@@ -4577,6 +4577,11 @@ describe('validateStackExpressions — reads only keys the spec declares (meta-t
       // The served body the hop's field index is read from is indexed by
       // position (`typedObjects[objectPosition]`), so it is no receiver here.
       'inputs', 'fieldDefs', 'finding',
+      // [#36237] The hop list-equality refusal: the object's own list-valued
+      // field names, one hop target's, and the reference → leaves map handed
+      // to the formula package. Their keys are Array / Map methods, never
+      // metadata keys; the reference is read off the tabled `def` receiver.
+      'ownLists', 'leaves', 'listLeaves',
     ]);
     expect(receivers.filter((r) => !tabled.has(r) && !PLUMBING.has(r))).toEqual([]);
   });
