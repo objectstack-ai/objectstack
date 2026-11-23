@@ -43,6 +43,7 @@ import { useRecordChangeOwnerOffer } from './changeOwner.js';
 import { FlowRunner, type ScreenFlowState, type ScreenSpec } from './FlowRunner.js';
 import { FlowRefusalNotice, type FlowRefusalState } from './FlowRefusalNotice.js';
 import { RelatedRecordActionsBridge } from './RelatedRecordActionsBridge.js';
+import { PublishRecordEditCommand, type RecordHeaderEditEntry } from './recordPaletteEdit.js';
 import { RecordEditStateController, bodyTablesSaveTogether, isMasterDetailChild, withDetailWritesWithheld, type RecordEditStateControl, type RecordEditStateEntry } from './recordEditState.js';
 import { isRecordPagePushed, useRecordPageScrollMemory } from './recordPagePush.js';
 import { phoneRecordHeader } from './recordPhoneHeader.js';
@@ -5595,6 +5596,11 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     }
     return items;
   })();
+  // objectstack#36286 — the header's Edit, offered by the ⌘K palette on the
+  // record's own page (not a drawer or a pane over a list).
+  const paletteEdit = embedded
+    ? undefined
+    : (synthSystemActions.find((action) => action.name === 'sys_edit') as RecordHeaderEditEntry | undefined);
 
   // The synth path hands ONLY business actions (authored on objectDef and
   // routed to the record_header location, e.g. Lead.convert) to the page
@@ -6182,6 +6188,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
             defaultValue: 'This record has a pending approval request; editing is locked',
           })}
         >
+        <PublishRecordEditCommand edit={paletteEdit} />
         <RecordEditStateController
           active={recordEditState}
           onExit={exitRecordEditState}

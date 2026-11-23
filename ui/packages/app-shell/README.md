@@ -1436,6 +1436,14 @@ opens the object's create page (`/apps/APP/OBJECT/new`), the second with the
 words in its title field. An object is offered exactly where its list offers
 New. A footer names what Enter does to the selected entry.
 
+With nothing typed, the palette leads with a "Current page" group: on an
+object's list, the list's favorites entry and "Add view"; on a record page, the
+record's star and "Edit". Each row runs the page's own control and is listed
+only while the page draws that control. "Add view" and "Edit" are published by
+the page beside the control (`usePublishPageCommand`, `chrome/paletteCommands.ts`)
+with the control's own handler and verdict, so an Edit the header draws off is
+listed off, with the header's reason.
+
 ```tsx
 import { useCommandPalette } from '@object-ui/app-shell';
 
