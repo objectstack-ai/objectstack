@@ -11,11 +11,11 @@
 import React from 'react';
 
 /** What `React.lazy` takes: a dynamic import of a module whose `default` is the component. */
-export type LazyWidgetLoader<P> = () => Promise<{ default: React.ComponentType<P> }>;
+export type LazyWidgetLoader<C extends React.ComponentType<any>> = () => Promise<{ default: C }>;
 
 /** One request for the chunk, shared by every mount that asks while it stands. */
-interface LoadAttempt<P> {
-  readonly Lazy: React.ComponentType<P>;
+interface LoadAttempt {
+  readonly Lazy: React.ComponentType<any>;
   /** Set once a failure of this request has been shown; the next mount asks again. */
   retired: boolean;
 }
@@ -47,28 +47,30 @@ interface LoadAttempt<P> {
  * Call it at module scope (or once per registration), never during render:
  * each call is its own cache, as each `React.lazy` call is.
  */
-export function recoverableLazy<P>(loader: LazyWidgetLoader<P>): React.ComponentType<P> {
-  let current: LoadAttempt<P> | undefined;
+export function recoverableLazy<C extends React.ComponentType<any>>(
+  loader: LazyWidgetLoader<C>,
+): React.ComponentType<React.ComponentProps<C>> {
+  let current: LoadAttempt | undefined;
 
-  const currentAttempt = (): LoadAttempt<P> => {
+  const currentAttempt = (): LoadAttempt => {
     if (!current || current.retired) {
-      const attempt: { Lazy?: React.ComponentType<P>; retired: boolean } = { retired: false };
-      attempt.Lazy = React.lazy(() =>
+      const attempt: { Lazy?: React.ComponentType<any>; retired: boolean } = { retired: false };
+      attempt.Lazy = React.lazy<React.ComponentType<any>>(() =>
         loader().then(
           (loaded) => loaded,
-          (error: unknown) => ({ default: failedLoad<P>(attempt as LoadAttempt<P>, error) }),
+          (error: unknown) => ({ default: failedLoad(attempt as LoadAttempt, error) }),
         ),
-      ) as unknown as React.ComponentType<P>;
-      current = attempt as LoadAttempt<P>;
+      );
+      current = attempt as LoadAttempt;
     }
     return current;
   };
 
-  function RecoverableLazy(props: P): React.ReactElement {
+  function RecoverableLazy(props: React.ComponentProps<C>): React.ReactElement {
     // Picked once per mount: the mount that saw a failure keeps rethrowing it
     // rather than asking the network again on every re-render.
     const [attempt] = React.useState(currentAttempt);
-    return React.createElement(attempt.Lazy as React.ComponentType<any>, props);
+    return React.createElement(attempt.Lazy, props);
   }
   return RecoverableLazy;
 }
@@ -78,7 +80,7 @@ export function recoverableLazy<P>(loader: LazyWidgetLoader<P>): React.Component
  * the request so the next mount asks again, then throws the failure from its
  * next render to the nearest error boundary.
  */
-function failedLoad<P>(attempt: LoadAttempt<P>, error: unknown): React.ComponentType<P> {
+function failedLoad(attempt: LoadAttempt, error: unknown): React.ComponentType<any> {
   return function FailedLazyLoad(): null {
     const [committed, setCommitted] = React.useState(false);
     React.useEffect(() => {
