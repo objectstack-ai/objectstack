@@ -112,3 +112,30 @@ describe('bucketCardsIntoColumns', () => {
     expect(result.find((c) => c.id === KANBAN_UNCOLUMNED_ID)!.cards[0].coverImage).toBe('https://img/b.png');
   });
 });
+
+describe('bucketCardsIntoColumns — expanded reference values (objectstack#36430)', () => {
+  const owners = [
+    { id: 'u1', title: 'Alice' },
+    { id: 'u2', title: 'Bob' },
+  ];
+
+  it('buckets an expanded reference by its foreign key, not by "[object Object]"', () => {
+    const data = [
+      { id: '1', owner_id: { id: 'u1', name: 'Alice' } },
+      { id: '2', owner_id: { id: 'u2', name: 'Bob' } },
+      { id: '3', owner_id: 'u1' },
+      { id: '4', owner_id: null },
+    ];
+    const result = bucketCardsIntoColumns(owners, data, 'owner_id', undefined, 'Uncategorized');
+    expect(result.map((c) => c.id)).toEqual(['u1', 'u2', KANBAN_UNCOLUMNED_ID]);
+    expect(result[0].cards.map((c: any) => c.id)).toEqual(['1', '3']);
+    expect(result[1].cards.map((c: any) => c.id)).toEqual(['2']);
+    expect(result[2].cards.map((c: any) => c.id)).toEqual(['4']);
+  });
+
+  it('puts an expanded value with no key in Uncategorized', () => {
+    const data = [{ id: '1', owner_id: { name: 'Nobody' } }];
+    const result = bucketCardsIntoColumns(owners, data, 'owner_id', undefined, 'Uncategorized');
+    expect(result.find((c) => c.id === KANBAN_UNCOLUMNED_ID)!.cards.map((c: any) => c.id)).toEqual(['1']);
+  });
+});
