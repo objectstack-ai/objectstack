@@ -2232,7 +2232,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
   // objectstack#28434 — the row context menu: which row it is open on, where,
   // and the element focus goes back to when it closes (the focused cell for
   // the keyboard, the cell under the pointer for a right-click).
-  const [rowContextMenu, setRowContextMenu] = useState<{ row: any; selected: boolean; x: number; y: number } | null>(null);
+  const [rowContextMenu, setRowContextMenu] = useState<{ row: any; selected: boolean; column?: string; x: number; y: number } | null>(null);
   const rowContextMenuReturnFocusRef = useRef<HTMLElement | null>(null);
   // The last pointer that pressed a row: a touch long-press raises
   // `contextmenu` too, and touch keeps the row's "⋮" instead.
@@ -4426,9 +4426,9 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
    * selection of two or more — a selection is a bulk act, and this table holds
    * no bulk actions to offer it — and never on a row with nothing to offer.
    */
-  const rowContextMenuItems = (row: any, selected: boolean): React.ReactNode => {
+  const rowContextMenuItems = (row: any, selected: boolean, column?: string): React.ReactNode => {
     if (schema.renderRowContextMenu) {
-      const items = schema.renderRowContextMenu(row, { selected });
+      const items = schema.renderRowContextMenu(row, column !== undefined ? { selected, column } : { selected });
       return items === false || items === undefined ? null : items;
     }
     if (!rowActions || rowActionsColumnIsEditOnly) return null;
@@ -4472,7 +4472,10 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
       if (pointerType === 'touch') return;
     }
     if (keepsBrowserContextMenu(target, rowEl)) return;
-    const items = rowContextMenuItems(row, selected);
+    // The data cell the menu opened on (objectstack#36290): its column's
+    // accessor, for the host's cell-level items.
+    const column = target.closest<HTMLElement>('[data-cell-column]')?.getAttribute('data-cell-column') ?? undefined;
+    const items = rowContextMenuItems(row, selected, column);
     if (items == null) return;
     e.preventDefault();
     const pointer = fromKeyboard ? null : (e as React.MouseEvent);
@@ -4491,11 +4494,11 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     const focusable = fromKeyboard ? target : target.closest<HTMLElement>('[tabindex]');
     rowContextMenuReturnFocusRef.current = focusable && rowEl.contains(focusable) ? focusable : null;
     rowContextMenuClosedOutsideRef.current = false;
-    setRowContextMenu({ row, selected, x, y });
+    setRowContextMenu({ row, selected, column, x, y });
   };
   // The open menu's items, re-asked each render so they follow the row.
   const openRowContextMenuItems = rowContextMenu
-    ? rowContextMenuItems(rowContextMenu.row, rowContextMenu.selected)
+    ? rowContextMenuItems(rowContextMenu.row, rowContextMenu.selected, rowContextMenu.column)
     : null;
   const showToolbar = searchEnabled || exportable || (showSelectionCount && selectable && selectedRowIds.size > 0) || hasPendingChanges;
 
@@ -5431,6 +5434,8 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                             // focus tracking exist only in the first case.
                             tabIndex={keyboardNavigation ? (rowIndex === rovingRowIndex && colIndex === rovingColIndex && !isSelectedCell ? 0 : -1) : 0}
                             data-grid-cell={keyboardNavigation ? `${rowIndex}:${colIndex}` : undefined}
+                            // objectstack#36290 — which column a context menu opened on.
+                            data-cell-column={col.accessorKey}
                             onFocus={keyboardNavigation ? () => rove(rowIndex, colIndex) : undefined}
                             aria-invalid={cellError !== undefined || undefined}
                             // objectstack#28434 — a cell in edit mode keeps the

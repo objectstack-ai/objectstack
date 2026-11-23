@@ -278,3 +278,36 @@ describe('ADR-0146 D10 — the paired `.custom` package arranges an installed ob
     expect(on._relatedListsArrangement).toEqual({ packageId: PAIR, hidden: ['crm_note'], unlisted: 'hidden' });
   });
 });
+
+describe('objectstack#36366 — `actionLayout` is the pair\'s third arrangement key, through the protocol', () => {
+  const PAIR_LAYOUT = { actionLayout: { record: { pinned: ['convert_lead'], more: ['log_call'] } } };
+
+  it('the pair\'s extension is saved and its arm is served; a non-`.custom` writer is refused at the save door with code and status, and nothing is stored or served', async () => {
+    const { protocol, stores } = await boot();
+    const refused = await outcome(() => saveExtension(protocol, ADDON, { actionLayout: { record: { pinned: ['log_call'] } } }));
+    expect(refused).toMatchObject({ ok: false, code: 'VALIDATION_ERROR', status: 400, issues: 1 });
+    expect((refused as any).message).toContain('`actionLayout`');
+    expect((refused as any).message, 'prescribes the action\'s own placement').toContain('`locations` and `order`');
+    const rows = Array.from(stores.get('sys_metadata')?.values() ?? []).filter((r) => r.type === 'object_extension' && r.package_id === ADDON);
+    expect(rows, 'no row was written').toEqual([]);
+    expect('actionLayout' in (await servedObject(protocol))).toBe(false);
+
+    // CONTROL: the same key in the object's pair is saved and served.
+    expect(await outcome(() => saveExtension(protocol, PAIR, PAIR_LAYOUT))).toEqual({ ok: true });
+    expect((await servedObject(protocol)).actionLayout).toEqual(PAIR_LAYOUT.actionLayout);
+  });
+
+  it('a package body\'s `objectExtensions` entry carries the key to the fold: the pair\'s arm is served, another package\'s is not', async () => {
+    const { engine } = await boot();
+    engine.registerApp({
+      id: 'com.example.partner', name: 'partner', version: '1.0.0', namespace: 'crm', type: 'app', dependencies: { [BASE]: '^1.0.0' },
+      objectExtensions: [{ extend: OBJ, actionLayout: { record: { pinned: ['a_partner'] }, list: { pinned: [] } }, priority: 900 }],
+    } as any);
+    expect('actionLayout' in (engine.registry.getObject(OBJ) as object), 'another package\'s arrangement is not applied').toBe(false);
+    engine.registerApp({
+      id: PAIR, name: 'crm-custom', version: '0.1.0', namespace: 'crm_custom', type: 'app', dependencies: { [BASE]: '^1' },
+      objectExtensions: [{ extend: OBJ, ...PAIR_LAYOUT }],
+    } as any);
+    expect((engine.registry.getObject(OBJ) as any).actionLayout).toEqual(PAIR_LAYOUT.actionLayout);
+  });
+});

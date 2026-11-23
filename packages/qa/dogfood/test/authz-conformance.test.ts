@@ -1083,6 +1083,8 @@ describe('the ledger-sourced population and its baseline bite', () => {
       'dispatcher-domain:route-ledger.ts:/analytics',
       // [#22576] classified by `approval-action-token`.
       'dispatcher-domain:route-ledger.ts:/approvals/act',
+      // [#36506] classified by `own-row-doors-session`.
+      'dispatcher-domain:route-ledger.ts:/attachments',
       'dispatcher-domain:route-ledger.ts:/automation',
       // [#36469] classified by `comment-doors-session`.
       'dispatcher-domain:route-ledger.ts:/comments',
@@ -1097,6 +1099,8 @@ describe('the ledger-sourced population and its baseline bite', () => {
       // [ADR-0138 D2] classified by `anonymous-deny-notifications`.
       'dispatcher-domain:route-ledger.ts:/notifications',
       'dispatcher-domain:route-ledger.ts:/packages',
+      // [#36506] classified by `own-row-doors-session`.
+      'dispatcher-domain:route-ledger.ts:/personal-views',
       // [ADR-0138 D2] classified by `anonymous-deny-share-links`.
       'dispatcher-domain:route-ledger.ts:/share-links',
       // [ADR-0138 D2, second slice] classified by `anonymous-deny-ui`.

@@ -1686,8 +1686,13 @@ export interface DataTableSchema extends BaseSchema {
    * Answering `null` (or `undefined` / `false`) keeps the browser's menu for
    * that row. Absent, a table with its own row "⋮" menu opens those items, and
    * every other table keeps the browser's menu, exactly as before.
+   *
+   * `context.column` (objectstack#36290) is the accessor of the data cell the
+   * menu opened on, absent when it opened elsewhere on the row (the selection
+   * or "⋮" cell, or the keyboard on the row itself), so a host can add items
+   * about that cell, such as the field's change history.
    */
-  renderRowContextMenu?: (row: any, context: { selected: boolean }) => React.ReactNode;
+  renderRowContextMenu?: (row: any, context: { selected: boolean; column?: string }) => React.ReactNode;
   /**
    * Group bands (objectui#12620): draw the table as ONE table, with one header,
    * whose body is a band row per group followed by that group's rows.

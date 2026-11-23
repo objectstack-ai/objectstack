@@ -43,6 +43,7 @@ import { useRecordChangeOwnerOffer } from './changeOwner.js';
 import { FlowRunner, type ScreenFlowState, type ScreenSpec } from './FlowRunner.js';
 import { FlowRefusalNotice, type FlowRefusalState } from './FlowRefusalNotice.js';
 import { RelatedRecordActionsBridge } from './RelatedRecordActionsBridge.js';
+import { PublishRecordEditCommand, type RecordHeaderEditEntry } from './recordPaletteEdit.js';
 import { RecordEditStateController, bodyTablesSaveTogether, isMasterDetailChild, withDetailWritesWithheld, type RecordEditStateControl, type RecordEditStateEntry } from './recordEditState.js';
 import { isRecordPagePushed, useRecordPageScrollMemory } from './recordPagePush.js';
 import { phoneRecordHeader } from './recordPhoneHeader.js';
@@ -74,6 +75,9 @@ import { editFormLockedByState } from '../utils/editFormLockedByState.js';
 import { matchAppBySegment, resolveHostAppSegment } from '../utils/appRoute.js';
 import { hostInConsolePath } from '../utils/hostInConsolePath.js';
 import { useShellPageActionsSlot, useShellSidebarExpandSlot } from '../layout/shellPageActionsSlot.js';
+import { DesignModeHeaderPins, useObjectPins } from '../layout/DesignModeHeaderPins.js';
+import { headerReadsPins } from '../layout/designModeHeaderPins.js';
+import { useDesignModeActive } from '../layout/designMode.js';
 import { recycleBinRefusalLabelsOf, recycleBinRestoreOf } from '../utils/recycleBinRestore.js';
 import { launchConsoleFlow } from '../utils/flowLaunch.js';
 import type { TranslateFn } from '@object-ui/i18n';
@@ -86,7 +90,7 @@ import { useNavigationContext, useRecordBreadcrumbTitle } from '../context/Navig
 // Both sets are derived, not restated — see record-detail-system-fields.ts.
 import { deriveRecordDetailSections } from './recordDetailSections.js';
 import type { DataSource, FeedItem, Reaction, RecordPageOperation, RecordPagePayload } from '@object-ui/types';
-import { placedHeaderActions } from '@object-ui/types';
+import { arrangedHeaderActions, placedHeaderActions } from '@object-ui/types';
 import type { ActionDef, ActionParamDef, ActionResult, ConfirmationHandler, ParamCollectionHandler } from '@object-ui/core';
 import type { ConsoleActionDispatch } from '../consoleActionDispatch.js';
 import { useRecordApprovals, openApprovalOf, isSubmitterOf } from '../hooks/useRecordApprovals.js';
@@ -1070,6 +1074,12 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   const [heldRecordTitle, setHeldRecordTitle] = useState<{ record: string; title: string } | undefined>();
   const recordTitle = heldRecordTitle?.record === routeRecordKey ? heldRecordTitle.title : undefined;
   const objectDef = objects.find((o: any) => o.name === objectName);
+  // objectstack#36366 — the object's action arrangement as the header draws
+  // it: staged under the design mode, else as served. Keyed on content for the
+  // synthesized page's memo below.
+  const objectPins = useObjectPins(objectDef as any);
+  const recordPinsKey = JSON.stringify(objectPins.record ?? null);
+  const designModeOn = useDesignModeActive();
   // objectui#13385 (maintainer ruling, option B) — a record page inside the
   // Setup app draws no floating `ManagedByBadge`; the header's object-label
   // chip carries the badge's note instead. Read off the route's `:appName`, so
@@ -4675,8 +4685,16 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     // (objectstack#29951), so the synthesized header and such a page draw the
     // same actions, an action another package places on the object included.
     const recordHeaderActions = (() => {
-      const base = placedHeaderActions<any>(objectDef.actions as any[] | undefined)
-        .map((a: any) => localizeActionTexts(objectDef.name, a));
+      // objectstack#36366 — the object's record scope arrangement
+      // (`actionLayout.record`): `pinned` chooses which of them are buttons, in
+      // order, and `more` orders the rest in ⋯. The same list feeds the side
+      // preview (an embedded mount) and the phone's bottom bar (the header's
+      // `bar` face). No arm: the header's own choice, as before.
+      const base = arrangedHeaderActions<any>(
+        placedHeaderActions<any>(objectDef.actions as any[] | undefined),
+        objectPins.record,
+        'record',
+      ).map((a: any) => localizeActionTexts(objectDef.name, a));
 
       // ⛔ No approval actions are injected here any more (objectui#3055).
       // They used to be two hand-written buttons (approve/reject only, no
@@ -4822,7 +4840,10 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // the panel's headline is the pending one. (The decision actions no longer
   // ride this list at all — objectui#3055 moved them to the declared-action
   // bar, which reads the pending row directly.)
-  }, [objectDef?.name, childRelations, t, objectPluralLabel, language, objects, approvals.available, approvals.pendingRequest, approvals.requests, user?.id]);
+  // `recordPinsKey`: the record scope arrangement (objectstack#36366), staged under
+  // the design mode without `objects` changing.
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- `objectPins` is keyed on content by `recordPinsKey`
+  }, [objectDef?.name, childRelations, t, objectPluralLabel, language, objects, approvals.available, approvals.pendingRequest, approvals.requests, user?.id, recordPinsKey]);
   // objectstack#30344 — whether this record page shows the record's field
   // history: the history gate, AND this reader's audit read answered. A read
   // the server refuses (or that fails) answers nothing, so the stream offers
@@ -5575,6 +5596,11 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     }
     return items;
   })();
+  // objectstack#36286 — the header's Edit, offered by the ⌘K palette on the
+  // record's own page (not a drawer or a pane over a list).
+  const paletteEdit = embedded
+    ? undefined
+    : (synthSystemActions.find((action) => action.name === 'sys_edit') as RecordHeaderEditEntry | undefined);
 
   // The synth path hands ONLY business actions (authored on objectDef and
   // routed to the record_header location, e.g. Lead.convert) to the page
@@ -5988,14 +6014,8 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // any (`DeclaredActionsBar`'s header face says which) and the record's own
   // row otherwise. Remind is the submitter's 「催办」 here, so it is not
   // excluded as it was from the band (the approvals panel keeps its own).
-  const recordHeaderState: RecordHeaderState = {
-    tags: approvalTag || (headerBarForRecord ? stateLockChip : null) ? (
-      <>
-        {approvalTag}
-        {headerBarForRecord ? stateLockChip : null}
-      </>
-    ) : undefined,
-    group: approvalBarMounted
+  // The pending request's levers, when the viewer has any.
+  const approvalGroup = approvalBarMounted
       ? (parts: RecordHeaderGroupParts) => (
         <>
         <ApprovalGroupBeacon onHosted={setApprovalGroupHosts} />
@@ -6011,7 +6031,36 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         />
         </>
       )
-      : undefined,
+      : undefined;
+  // objectstack#36366 — under the design mode the group ends with
+  // 「Header buttons」 (the record row, or the approval's levers, unchanged),
+  // on a header that reads the pins: not on one authored with its own
+  // `actions` list, nor on one that draws none of the object's actions.
+  const headerTakesPins = headerReadsPins(assignedPage ?? assignedSlots);
+  const recordHeaderState: RecordHeaderState = {
+    tags: approvalTag || (headerBarForRecord ? stateLockChip : null) ? (
+      <>
+        {approvalTag}
+        {headerBarForRecord ? stateLockChip : null}
+      </>
+    ) : undefined,
+    group: designModeOn && objectDef
+      ? (parts: RecordHeaderGroupParts) => (
+        <>
+        {approvalGroup ? approvalGroup(parts) : parts.recordRow}
+        {parts.face === 'row' && headerTakesPins && (
+          <DesignModeHeaderPins
+            objectDef={objectDef as any}
+            page="record"
+            actions={placedHeaderActions<any>((objectDef as any).actions).map((a: any) => localizeActionTexts(objectDef.name, a))}
+          />
+        )}
+        </>
+      )
+      : approvalGroup,
+    // objectstack#36366 — the record scope arrangement the header draws, a staged one
+    // included, for a page that places the object's actions itself.
+    actionLayout: objectPins.record,
     // objectstack#35891 — the stage tag is the stage's menu: the default
     // page draws no stage bar, so the header is where the stage moves.
     stage: (parts) => <RecordStageMenu {...parts} />,
@@ -6139,6 +6188,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
             defaultValue: 'This record has a pending approval request; editing is locked',
           })}
         >
+        <PublishRecordEditCommand edit={paletteEdit} />
         <RecordEditStateController
           active={recordEditState}
           onExit={exitRecordEditState}
