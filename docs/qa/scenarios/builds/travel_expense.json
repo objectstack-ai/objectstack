@@ -155,7 +155,10 @@
             ],
             "approved": [],
             "rejected": []
-          }
+          },
+          "initialStates": [
+            "pending"
+          ]
         }
       ],
       "highlightFields": [
@@ -842,7 +845,10 @@
             ],
             "paid": [],
             "rejected": []
-          }
+          },
+          "initialStates": [
+            "draft"
+          ]
         },
         {
           "name": "submit_needs_lines",
@@ -1428,7 +1434,10 @@
             "rejected": [
               "draft"
             ]
-          }
+          },
+          "initialStates": [
+            "draft"
+          ]
         }
       ],
       "nameField": "name",

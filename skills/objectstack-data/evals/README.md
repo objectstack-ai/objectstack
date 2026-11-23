@@ -7,7 +7,8 @@ JSON fixtures in the objectui shape (`skill_name`, `evals[]`: `prompt`,
   `password`), relationships (junction vs multi-value lookup,
   `deleteBehavior`, on a `user` field too), validation (`state_machine`, unique **index**),
   conditional field rules, the record owner (负责人 is `owner_id`), an
-  object extension placing what it brings (`place`).
+  object extension placing what it brings (`place`), the `.custom` pair's
+  whole arrangement (`relatedLists`, `{ list, hidden: true }`).
 - `hooks-security-seeds-datasources.json` — search mirrors via hooks,
   permission-set scopes, external datasources, seeds (`externalId`,
   CEL dynamic values).

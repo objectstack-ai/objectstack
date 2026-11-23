@@ -1073,6 +1073,16 @@ const ru = {
     inlineEditLabel: "Редактировать записи в таблице (щёлкните ячейку для редактирования)",
     // The list's Options menu.
     optionsMenu: {
+      // objectstack#36370 — a board's own settings.
+      kanbanLaneField: "Столбцы по",
+      kanbanLanes: "Видимые столбцы",
+      kanbanCardFields: "Поля карточки",
+      kanbanAddCardField: "Добавить поле",
+      kanbanShowFieldLabels: "Показывать названия полей",
+      kanbanHideEmptyFields: "Скрывать пустые поля",
+      kanbanSummary: "Итог по столбцу",
+      kanbanHiddenLanes: "Скрытые столбцы",
+      kanbanHiddenLanesHint: "Карточки скрытого столбца показываются в «Без категории».",
       viewName: 'Название представления',
       fields: 'Поля',
       fieldsShown: 'Показано: {{count}}',
@@ -1118,6 +1128,19 @@ const ru = {
     },
   },
   kanban: {
+    // objectstack#36370 — the lane header's 「+」 and 「⋯」 menu, and an empty lane's create row.
+    laneMenu: {
+      actions: "Действия со столбцом {{column}}",
+      collapse: "Свернуть столбец",
+      expand: "Развернуть столбец",
+      hide: "Скрыть столбец",
+      hideHint: "Карточки переместятся в «Без категории»",
+      createIn: "Новая запись в {{column}}",
+      create: "Создать",
+    },
+    laneStatistic: {
+      loadedOnly: "загруженные карточки",
+    },
     uncategorized: "Без категории",
     loadMore: "Загрузить ещё",
     columns: "колонок",
@@ -2955,6 +2978,7 @@ const ru = {
       },
       linkFilterRefused: 'Фильтр из этой ссылки не применён: в нём есть поле, по которому здесь нельзя фильтровать, поэтому список показан по представлению без него.',
       personalizedParts: {
+        kanban: "Настройки доски",
         filters: "Фильтры",
         search: "Поиск",
         sort: "Сортировка",

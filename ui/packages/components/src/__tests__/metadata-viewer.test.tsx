@@ -318,7 +318,8 @@ describe('element:metadata_viewer flow embed: package label translations (flows.
  * view draws has a key. A start, decision, notify or end step is named by
  * `flows.<flow>.nodes.<node_id>.label`; an untitled screen by
  * `screens.<node_id>.title`; a titled screen by its heading, translated under
- * that same key, unless the heading holds a `{{ }}` hole a drawing cannot fill.
+ * that same key, unless the heading holds a `{{ }}` hole a drawing cannot fill;
+ * it is then named by its label's `nodes.<node_id>.label`.
  * The steps folded away are the spec's `FLOW_TECHNICAL_NODE_TYPES`, the table
  * the i18n coverage check reads to ask for exactly these translations.
  */
@@ -374,7 +375,7 @@ describe('element:metadata_viewer flow embed: every drawn step by its key (flows
     renderIn(ZH, ONBOARDING);
     await waitFor(() => expect(screen.getByText('欢迎加入')).toBeTruthy());
     expect(screen.queryByText('Welcome screen')).toBeNull();
-    // `Hello {{vars.name}}` cannot be filled in a drawing: the authored label, which has no key, stands.
+    // `Hello {{vars.name}}` cannot be filled in a drawing: with no `nodes` key in the bundle, the authored label stands.
     expect(screen.getByText('Greeting screen')).toBeTruthy();
     expect(screen.queryByText(/你好/)).toBeNull();
     cleanup();
@@ -384,6 +385,25 @@ describe('element:metadata_viewer flow embed: every drawn step by its key (flows
     await waitFor(() => expect(screen.getByText('Welcome aboard')).toBeTruthy());
     expect(screen.getByText('On Hire')).toBeTruthy();
     expect(screen.getByText('Greeting screen')).toBeTruthy();
+  });
+
+  it('names a titled screen whose heading holds a hole by its nodes key, and never by its heading', async () => {
+    const zh = ZH.flows!.onboarding!;
+    renderIn({ flows: { onboarding: { ...zh, nodes: { ...zh.nodes, greet: { label: '问候页' }, welcome: { label: '欢迎页' } } } } }, ONBOARDING);
+    await waitFor(() => expect(screen.getByText('问候页')).toBeTruthy());
+    expect(screen.queryByText('Greeting screen')).toBeNull();
+    expect(screen.queryByText(/你好/)).toBeNull();
+    // A heading with no hole still names its screen; the label key does not displace it.
+    expect(screen.getByText('欢迎加入')).toBeTruthy();
+    expect(screen.queryByText('欢迎页')).toBeNull();
+  });
+
+  it('names an untitled screen whose translated title adds a hole by its authored label', async () => {
+    const zh = ZH.flows!.onboarding!;
+    renderIn({ flows: { onboarding: { ...zh, screens: { ...zh.screens, confirm: { title: '确认 {{vars.name}}' } } } } }, ONBOARDING);
+    await waitFor(() => expect(screen.getByText('入职时')).toBeTruthy());
+    expect(screen.getByText('Confirm')).toBeTruthy();
+    expect(screen.queryByText(/确认/)).toBeNull();
   });
 
   it('names the step a decision branch leads to by its nodes key too', async () => {

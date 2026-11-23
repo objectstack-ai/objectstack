@@ -1313,6 +1313,16 @@ const en = {
     inlineEditLabel: 'Edit records inline (click a cell to edit)',
     // The list's Options menu.
     optionsMenu: {
+      // objectstack#36370 — a board's own settings.
+      kanbanLaneField: "Columns by",
+      kanbanLanes: "Visible columns",
+      kanbanCardFields: "Card fields",
+      kanbanAddCardField: "Add field",
+      kanbanShowFieldLabels: "Show field names",
+      kanbanHideEmptyFields: "Hide empty fields",
+      kanbanSummary: "Column summary",
+      kanbanHiddenLanes: "Hidden columns",
+      kanbanHiddenLanesHint: "Cards of a hidden column show under Uncategorized.",
       viewName: 'View name',
       fields: 'Fields',
       fieldsShown: '{{count}} shown',
@@ -1356,6 +1366,19 @@ const en = {
     },
   },
   kanban: {
+    // objectstack#36370 — the lane header's 「+」 and 「⋯」 menu, and an empty lane's create row.
+    laneMenu: {
+      actions: "{{column}} column actions",
+      collapse: "Collapse column",
+      expand: "Expand column",
+      hide: "Hide column",
+      hideHint: "Its cards move to Uncategorized",
+      createIn: "New record in {{column}}",
+      create: "New",
+    },
+    laneStatistic: {
+      loadedOnly: "loaded cards",
+    },
     addCard: 'Add card',
     addColumn: 'Add column',
     moveCard: 'Move card',
@@ -3405,6 +3428,7 @@ const en = {
       },
       linkFilterRefused: 'This link’s filter was not applied. It names a field you can’t filter on here, so the list shows the view without it.',
       personalizedParts: {
+        kanban: "Board settings",
         filters: 'Filters',
         search: 'Search',
         sort: 'Sort',

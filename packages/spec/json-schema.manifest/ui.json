@@ -94,6 +94,7 @@
     "ui/InterfacePageConfig",
     "ui/JoinedReportBlock",
     "ui/KanbanConfig",
+    "ui/KanbanLaneSummary",
     "ui/ListChartConfig",
     "ui/ListColumn",
     "ui/ListMapConfig",

@@ -54,7 +54,7 @@ import {
 } from './ReportDefaultInspector.js';
 import { useDatasetCatalog, useDatasetSemantics, type DatasetDimensionInfo } from '../previews/useDatasetCatalog.js';
 import { datasetLabelOptions, packageDatasetsFirst } from './dataset-picker-options.js';
-import { shownLabel, writtenLabel, useLabelLanguage } from './servedLabel.js';
+import { shownLabel, writtenLabel, servedLabelNote, useLabelLanguage } from './servedLabel.js';
 import { useServedWidgetText } from '../../studio-design/servedDashboardText.js';
 import { DatasetCreateEntry, useStudioDatasetAuthoring } from '../../studio-design/datasetCreate.js';
 import type { ObjectFieldInfo } from '../previews/useObjectFields.js';
@@ -233,6 +233,9 @@ export function DashboardWidgetInspector({
   const { widget, index } = hit;
   const widgetServedTitle =
     servedWidgets && typeof widget.id === 'string' ? servedWidgets.widgets.get(widget.id) ?? null : null;
+  // objectstack#36481 — when readers in this language are served a
+  // translation instead of the title saved here, the box says so before Save.
+  const titleNote = servedLabelNote(widget.title, widgetServedTitle, language);
   // The box the grid auto-places this widget in, and the widget's layout
   // completed against it — what the width / height inputs show and write.
   const placement = defaultWidgetPlacement(index);
@@ -356,7 +359,23 @@ export function DashboardWidgetInspector({
             })
           }
           disabled={readOnly}
+          aria-describedby={titleNote ? 'widget-title-served-note' : undefined}
         />
+        {titleNote && (
+          <p
+            id="widget-title-served-note"
+            role="note"
+            data-testid="widget-title-served-note"
+            data-note-kind={titleNote.kind}
+            className="text-[11px] leading-snug text-muted-foreground"
+          >
+            {tFormat(
+              titleNote.kind === 'kept' ? 'engine.inspector.servedLabel.kept' : 'engine.inspector.servedLabel.ifKept',
+              locale,
+              { served: titleNote.served },
+            )}
+          </p>
+        )}
       </Field>
 
       <Field id="widget-type" label={t('engine.inspector.widget.type', locale)}>

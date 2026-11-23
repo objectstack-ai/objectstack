@@ -45,13 +45,14 @@
     {
       "id": 3,
       "prompt": "On `employee`: email must be unique within each organization, `status` may only move draft → active → terminated, and a `contract_end` earlier than `contract_start` must be rejected.",
-      "expected_output": "Uniqueness is an index, not a validation type: `indexes: [{ fields: ['email'], unique: 'organization' }]` (the scope is stated; `type` / `partial` are retired). The lifecycle is one `state_machine` validation with `field: 'status'`, `transitions: { draft: ['active'], active: ['terminated'], terminated: [] }` and a `message`. The date rule is a `script` validation (inverted: fails when the expression is true) or `cross_field`, written as bare CEL over `record.` with explicit `!= null` guards.",
+      "expected_output": "Uniqueness is an index, not a validation type: `indexes: [{ fields: ['email'], unique: 'organization' }]` (the scope is stated; `type` / `partial` are retired). The lifecycle is one `state_machine` validation with `field: 'status'`, `transitions: { draft: ['active'], active: ['terminated'], terminated: [] }`, `initialStates: ['draft']` and a `message` — `transitions` governs only UPDATE, so publish refuses a machine that runs on insert without it (`state-machine-no-initial-states`). The date rule is a `script` validation (inverted: fails when the expression is true) or `cross_field`, written as bare CEL over `record.` with explicit `!= null` guards.",
       "files": [],
       "assertions": {
         "must_contain": [
           "unique: 'organization'",
           "state_machine",
           "transitions",
+          "initialStates",
           "record.",
           "!= null"
         ],
@@ -450,7 +451,7 @@
     {
       "id": 26,
       "prompt": "Our add-on package `acme_contracts` depends on HotCRM (`hotcrm`, namespace `crm`). Its extension of `crm_account` adds a `tax_id` text field, and the package ships an `acme_contract` object whose `account` lookup points at `crm_account`. On the account record page, show Tax ID right after Industry in the Basic section, and the Contracts tab right after Opportunities. `crm_account` declares `fieldGroups: [{ key: 'basic', label: 'Basic', fields: ['name', 'industry', 'website'] }]` and `relatedLists: ['crm_contact', 'crm_opportunity', 'crm_lead', 'sys_activity']`. We cannot edit HotCRM.",
-      "expected_output": "Two `place` entries on the package's own object extension, registered in its stack's `objectExtensions`: `defineObjectExtension({ extend: 'crm_account', fields: { tax_id: Field.text({ label: 'Tax ID' }) }, place: [{ field: 'tax_id', group: 'basic', after: 'industry' }, { list: 'acme_contract', after: 'crm_opportunity' }] })`. `place` arranges only what the extension brings (its own field, its package's child list), each right after (or `before`) an item the account already has, and it applies here because the account declares `fieldGroups` and `relatedLists`. Without it the field arrives after the account's own and the Contracts tab at the end of the tabs, before the activity stream. The extension does not carry `fieldGroups` or `relatedLists` of its own (an extension has neither key), does not redeclare the account, and nothing in HotCRM is edited.",
+      "expected_output": "Two `place` entries on the package's own object extension, registered in its stack's `objectExtensions`: `defineObjectExtension({ extend: 'crm_account', fields: { tax_id: Field.text({ label: 'Tax ID' }) }, place: [{ field: 'tax_id', group: 'basic', after: 'industry' }, { list: 'acme_contract', after: 'crm_opportunity' }] })`. `place` arranges only what the extension brings (its own field, its package's child list), each right after (or `before`) an item the account already has, and it applies here because the account declares `fieldGroups` and `relatedLists`. Without it the field arrives after the account's own and the Contracts tab at the end of the tabs, before the activity stream. The extension does not carry `fieldGroups` or `relatedLists` of its own (only the object extension of HotCRM's paired `hotcrm.custom` package writes those keys; here they are refused), does not redeclare the account, and nothing in HotCRM is edited.",
       "files": [],
       "assertions": {
         "must_contain": [
@@ -459,6 +460,26 @@
           "place:",
           "after: 'industry'",
           "after: 'crm_opportunity'"
+        ],
+        "must_not_contain": [
+          "name: 'crm_account'",
+          "overrides:"
+        ]
+      }
+    },
+    {
+      "id": 27,
+      "prompt": "We installed HotCRM (`hotcrm`, namespace `crm`) and cannot edit it. Its `crm_account` declares `relatedLists: ['crm_contact', 'crm_opportunity', 'crm_lead', 'sys_activity']`. On the account record page our admins want Opportunities before Contacts and the Leads tab gone, for every user. Our add-on package `acme_contracts` already extends `crm_account`, so a colleague put `relatedLists: ['crm_opportunity', 'crm_contact', { list: 'crm_lead', hidden: true }]` on that extension, and `os validate` refused it. Where does this arrangement go, and what may `acme_contracts` write instead?",
+      "expected_output": "The arrangement goes on the object extension of HotCRM's paired customization package `hotcrm.custom`, registered in that stack's `objectExtensions`: `defineObjectExtension({ extend: 'crm_account', relatedLists: ['crm_opportunity', 'crm_contact', { list: 'crm_lead', hidden: true }] })`. Only the pair's extension writes `relatedLists` (and `fieldGroups`), in the shape an object declares them. The key it writes replaces the tab list whole (HotCRM's own list and every other extension's `place`); a tab it does not name still shows after the listed ones (the activity stream here), so hiding is written, as `{ list: 'crm_lead', hidden: true }`; `fieldGroups`, not written, keeps the groups as they were. `acme_contracts` is not a `.custom` package, so both keys are refused there at save, publish and install and by `os validate` / `os build`, and the refusal prescribes `place`: that package places only what it brings, e.g. `place: [{ list: 'acme_contract', after: 'crm_opportunity' }]`, and cannot reorder or hide HotCRM's tabs. The account is not redeclared, takes no `overrides` declaration, and nothing in HotCRM is edited.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "hotcrm.custom",
+          "defineObjectExtension",
+          "extend: 'crm_account'",
+          "relatedLists",
+          "hidden: true",
+          "place:"
         ],
         "must_not_contain": [
           "name: 'crm_account'",

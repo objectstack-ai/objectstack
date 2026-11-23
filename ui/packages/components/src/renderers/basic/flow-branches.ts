@@ -32,6 +32,8 @@
  * read at all.
  */
 
+import { flowDecisionEdgeBranch } from '@objectstack/spec/automation';
+
 // ---------------------------------------------------------------------------
 // Graph: decisions and their branches
 // ---------------------------------------------------------------------------
@@ -54,9 +56,6 @@ export interface DecisionBranch {
   target: string;
   guard: BranchGuard;
 }
-
-/** The label a decision's fall-through branch carries (`DEFAULT_BRANCH_LABEL` in the engine). */
-const DEFAULT_BRANCH = 'default';
 
 type Rec = Record<string, unknown>;
 
@@ -89,27 +88,28 @@ function outEdges(flow: unknown, nodeId: string): Rec[] {
  * The branches of the decision node `node`, in declaration order. An out-edge
  * no branch can ever take (a labelled edge of a `config.conditions` decision
  * whose label no condition and no default claims) is left out.
+ *
+ * Which out-edges are branches is the spec's `flowDecisionEdgeBranch`, the one
+ * rule the i18n walk (`packages/lint`, `decisionBranchTechnicalTargets`) also
+ * reads to ask a translation for each step a branch here names.
  */
 export function decisionBranches(flow: unknown, node: unknown): DecisionBranch[] {
   if (!isRec(node) || node.type !== 'decision' || typeof node.id !== 'string') return [];
-  const config = isRec(node.config) ? node.config : undefined;
-  const conditions = Array.isArray(config?.conditions) ? config.conditions.filter(isRec) : [];
+  const conditions = isRec(node.config) ? node.config.conditions : undefined;
   const branches: DecisionBranch[] = [];
   outEdges(flow, node.id).forEach((edge, i) => {
     const key = typeof edge.id === 'string' ? edge.id : String(i);
     const target = edge.target as string;
-    if (edge.isDefault === true || (conditions.length > 0 && edge.label === DEFAULT_BRANCH)) {
+    const branch = flowDecisionEdgeBranch(edge, conditions);
+    if (!branch) return;
+    if (branch.kind === 'default') {
       branches.push({ key, target, guard: { kind: 'otherwise' } });
-      return;
-    }
-    if (conditions.length === 0) {
+    } else if (branch.kind === 'edge') {
       branches.push({ key, target, guard: guardOf(edge.condition) });
-      return;
+    } else {
+      const guard = guardOf(branch.condition.expression);
+      branches.push({ key, target, guard: guard.kind === 'none' ? { kind: 'opaque' } : guard });
     }
-    const claimed = conditions.find((c) => typeof edge.label === 'string' && c.label === edge.label);
-    if (!claimed) return;
-    const guard = guardOf(claimed.expression);
-    branches.push({ key, target, guard: guard.kind === 'none' ? { kind: 'opaque' } : guard });
   });
   return branches;
 }
