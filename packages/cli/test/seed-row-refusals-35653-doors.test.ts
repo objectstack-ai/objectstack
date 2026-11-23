@@ -3,8 +3,9 @@
 /**
  * The two doors (#35653, folding #35486): `os validate` and `os build` refuse a
  * config whose seed records the seed load would drop — one its own validation
- * rule refuses, one keyed on a blank field — naming the record and the rule;
- * the control config, the same records corrected, passes both. The walk and the
+ * rule refuses, one keyed on a blank field — naming the record and the rule.
+ * Not named `.e2e` on purpose: it pins the wiring, so it runs on every pull
+ * request rather than nightly, and it spawns the CLI twice only. The walk and the
  * evaluator's verdicts are pinned in-process by `seed-row-refusals-35653.test.ts`;
  * this file pins that both command files make the call.
  */
@@ -42,9 +43,9 @@ const stack = (records: Array<Record<string, unknown>>) => ({
   data: [{ object: 'xt_payment', mode: 'upsert', records }],
 });
 
+// P1 passes, P2 is refused by its rule, the third leaves its key field blank.
 const FIXTURES = {
   refused: stack([{ name: 'P1', amount: 25 }, { name: 'P2', amount: -10 }, { name: '', amount: 5 }]),
-  control: stack([{ name: 'P1', amount: 25 }, { name: 'P2', amount: 10 }, { name: 'P3', amount: 5 }]),
 } as const;
 
 interface Run { code: number; stdout: string; stderr: string }
@@ -100,11 +101,6 @@ describe('os validate / os build refuse seed records the seed load would drop', 
           field: 'name',
         }),
       ]);
-    }, SPAWN_TIMEOUT_MS);
-
-    it(`CONTROL: os ${command} passes the same records corrected`, async () => {
-      const run = await runCli(command, dirs.get('control')!);
-      expect(run.code, `expected exit 0:\n${run.stdout}\n${run.stderr}`).toBe(0);
     }, SPAWN_TIMEOUT_MS);
   }
 });
