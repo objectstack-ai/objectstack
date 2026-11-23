@@ -38,7 +38,8 @@ import { render, screen, waitFor, cleanup, fireEvent } from '@testing-library/re
 import { RecordContextProvider, DiscussionContextProvider } from '@object-ui/react';
 import type { FeedItem } from '@object-ui/types';
 import { RecordActivityRenderer } from '../record-activity';
-import { resetWithheldCommentComposerWarnings } from '../recordActivityFeed';
+import { activityRowToFeedItem, resetWithheldCommentComposerWarnings } from '../recordActivityFeed';
+import { RecordActivityTimeline } from '../../RecordActivityTimeline';
 
 const COMPOSER_PLACEHOLDER = 'Leave a comment… (Ctrl+Enter to submit)';
 const EMPTY_FEED = 'No activity recorded';
@@ -504,6 +505,9 @@ describe('record:activity — one line per changed field, old → new (objectsta
     await waitFor(() => expect(container.querySelectorAll('[data-stream-field-change]')).toHaveLength(2));
     const entries = container.querySelectorAll('[data-stream-system-row]');
     expect(entries).toHaveLength(1);
+    // The entry is ONE row: its line and the field lines under it.
+    expect(container.querySelectorAll('[data-stream-row]')).toHaveLength(1);
+    expect(entries[0].hasAttribute('data-stream-row')).toBe(true);
     expect(entries[0].querySelectorAll('[data-stream-field-change]')).toHaveLength(2);
     expect(entries[0].querySelector('[data-stream-change]')?.textContent).toBe('Updated Phone, Email');
     expect(linesOf(container).map((l) => [l.field, l.old, l.new])).toEqual([
@@ -568,6 +572,28 @@ describe('record:activity — one line per changed field, old → new (objectsta
     expect(side.className).toContain('whitespace-pre-wrap');
     expect(side.className).not.toContain('truncate');
     expect(side.textContent).toBe(long);
+  });
+
+  it('the 动态 stream: two saves by one person on one day fold, and each save opens to its own lines', () => {
+    const at = (minute: number) => {
+      const d = new Date();
+      d.setHours(9, minute, 0, 0);
+      return d.toISOString();
+    };
+    const items = [
+      updatedRow('s1', [{ field: 'phone', from: { text: '111' }, to: { text: '222' } }], { timestamp: at(5) }),
+      updatedRow('s2', [
+        { field: 'notes', from: { text: '∅' }, to: { text: 'First note' } },
+        { field: 'email', from: { text: 'a@x.io' }, to: { text: 'b@x.io' } },
+      ], { timestamp: at(4) }),
+    ].map((row) => activityRowToFeedItem(row, 'System')!);
+    const { container } = render(<RecordActivityTimeline items={items} variant="stream" titleLabel="Timeline" />);
+    const fold = container.querySelector('[data-testid="activity-fold"]')!;
+    expect(fold.getAttribute('data-fold-count')).toBe('2');
+    fireEvent.click(fold.querySelector('button[aria-expanded]')!);
+    const rows = Array.from(container.querySelectorAll('[data-testid="activity-fold-entries"] [data-stream-row]'));
+    expect(rows.map((row) => row.querySelectorAll('[data-stream-field-change]').length)).toEqual([1, 2]);
+    expect(rows[1].querySelector('[data-field-change="notes"]')?.textContent).toBe('notes: Empty → First note');
   });
 
   it('CONTROL — a short value offers no control, and a row with no served code draws its summary as before', async () => {

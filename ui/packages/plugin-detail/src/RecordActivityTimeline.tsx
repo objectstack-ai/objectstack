@@ -807,8 +807,7 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
         key={item.id}
         className="flex min-h-[30px] items-center gap-2 text-sm leading-[18px]"
         title={`${item.actor} · ${whatTitle} · ${when}`}
-        data-stream-row=""
-        {...(below ? {} : rowProps)}
+        {...(below ? { 'data-stream-line': '' } : { 'data-stream-row': '', ...rowProps })}
       >
         <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
         <span className="max-w-[40%] shrink-0 truncate font-medium text-foreground" data-stream-actor="">
@@ -827,10 +826,10 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
       </div>
     );
     if (!below) return line;
-    // The entry is its line and what sits under it; the entry carries the
-    // row's markers, so a reader of the entry reads both.
+    // The row is its line and what sits under it: the row's markers go on the
+    // whole, so a reader of the row reads both.
     return (
-      <div key={item.id} data-stream-entry="" {...rowProps}>
+      <div key={item.id} data-stream-row="" {...rowProps}>
         {line}
         {below}
       </div>
