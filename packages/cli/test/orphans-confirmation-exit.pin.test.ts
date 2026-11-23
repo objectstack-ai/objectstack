@@ -47,6 +47,12 @@ import { isExitSignal } from '../src/utils/format.js';
 // Pay the first load of what the commands `import()` at the point of use,
 // outside any clocked case (`pnpm check:test-source-alias`).
 import '@objectstack/objectql';
+import '@objectstack/service-settings';
+import '../src/utils/sys-secret-orphan-sweep.js';
+import '../src/utils/sys-secret-holder-report.js';
+// `oneShotSettingsPlugins()` reaches the serve command's crypto provider.
+import '@objectstack/core';
+import '../src/commands/serve.js';
 
 const seams = vi.hoisted(() => ({
   bootSchemaStack: vi.fn(),
