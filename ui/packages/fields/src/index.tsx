@@ -5506,6 +5506,12 @@ export * from './widgets/FileField.js';
 export * from './widgets/ImageField.js';
 export { ImageCropperDialog } from './widgets/ImageCropperDialog.js';
 export type { ImageCropperDialogProps } from './widgets/ImageCropperDialog.js';
+// The in-page file preview a record's attachments and a file field open
+// (objectstack#36442), and the delimited-text reader its CSV view shares with
+// the grid's import wizard.
+export { FilePreviewDialog } from './widgets/FilePreviewDialog.js';
+export type { FilePreviewDialogProps, FilePreviewItem } from './widgets/FilePreviewDialog.js';
+export { decodeSpreadsheetText, parseDelimited } from './widgets/delimitedText.js';
 export * from './widgets/LocationField.js';
 export * from './widgets/FormulaField.js';
 export * from './widgets/SummaryField.js';

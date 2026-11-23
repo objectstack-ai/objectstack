@@ -46,6 +46,7 @@ import { createAuthenticatedFetch, useAuth } from '@object-ui/auth';
 import { useDisplayLocale } from '@object-ui/i18n';
 import { useObjectTranslation, isPermissionError, classifyLoadError } from '@object-ui/react';
 import { usePermissions } from '@object-ui/permissions';
+import { FilePreviewDialog, type FilePreviewItem } from '@object-ui/fields';
 import { resolveAffordance, type ConfirmationHandler } from '@object-ui/core';
 import {
   NATIVE_FILE_MAX_BYTES,
@@ -77,6 +78,9 @@ import { RECORD_PAGE_ATTACHMENT_ROWS, recordAttachmentsCountField } from './reco
  * Downloads fetch a short-lived signed URL from `/storage/files/:fileId/url`
  * with the console's Bearer token (the endpoint requires an authenticated
  * session for attachments-scope files, objectstack-ai/objectstack#2970), then open it.
+ * A row's NAME opens the file in the page (`FilePreviewDialog`, objectstack#36442),
+ * which mints its link through that same door, so a reader the download refuses
+ * is refused the same way; the download itself stays in the row's ⋮ menu.
  *
  * The list read expands `uploaded_by` (the record page payload's attachments
  * part does the same), so the uploader column names whoever uploaded a row
@@ -591,51 +595,85 @@ export const RecordAttachmentsPanel: React.FC<RecordAttachmentsPanelProps> = ({
     [authFetch, baseUrl, friendlyError, t],
   );
 
+  /**
+   * The signed link for a row: the one door both the download and the preview
+   * read through. Throws the server's code on a refusal.
+   */
+  const signedUrlFor = React.useCallback(
+    async (row: AttachmentRow): Promise<string> => {
+      // The stable `/files/:fileId` endpoint now requires an authenticated
+      // session for attachments-scope files (objectstack-ai/objectstack#2970) — an <a href> can't
+      // carry the Bearer token. Fetch a short-lived signed URL with auth,
+      // then open it (the signed URL itself needs no credentials).
+      const res = await authFetch(
+        `${baseUrl}/api/v1/storage/files/${encodeURIComponent(row.file_id)}/url`,
+      );
+      if (!res.ok) {
+        let code: string | undefined;
+        try {
+          // Read BOTH error dialects, the same way the success branch below
+          // reads both `url` shapes. The storage service moved its error
+          // code from a sibling of `error` into the declared
+          // `{ success: false, error: { code, message } }` envelope
+          // (objectstack#3675); a console build is deployed independently of
+          // the server it talks to, so it has to keep understanding the
+          // older top-level `code` too. Without the nested branch the 401/403
+          // downgrade silently to "Download failed (403)" and the friendly
+          // copy below never fires.
+          const body = (await res.json()) as { code?: string; error?: { code?: string } } | null;
+          code = body?.error?.code ?? body?.code;
+        } catch {
+          /* non-JSON body */
+        }
+        throw Object.assign(new Error(code ?? `Download failed (${res.status})`), { code });
+      }
+      const body = await res.json();
+      // Both URL dialects, for the same independent-deploy reason as the
+      // error branch above: the route answered a bare `{ url }` until
+      // objectstack#3689 moved it into the declared
+      // `{ success: true, data: { url } }` envelope.
+      const url: string | undefined = body?.url ?? body?.data?.url;
+      if (!url) throw new Error('Download URL missing from response');
+      return /^https?:/i.test(url) ? url : `${baseUrl}${url}`;
+    },
+    [authFetch, baseUrl],
+  );
+
   const handleDownload = React.useCallback(
     async (row: AttachmentRow) => {
       setError(null);
       try {
-        // The stable `/files/:fileId` endpoint now requires an authenticated
-        // session for attachments-scope files (objectstack-ai/objectstack#2970) — an <a href> can't
-        // carry the Bearer token. Fetch a short-lived signed URL with auth,
-        // then open it (the signed URL itself needs no credentials).
-        const res = await authFetch(
-          `${baseUrl}/api/v1/storage/files/${encodeURIComponent(row.file_id)}/url`,
-        );
-        if (!res.ok) {
-          let code: string | undefined;
-          try {
-            // Read BOTH error dialects, the same way the success branch below
-            // reads both `url` shapes. The storage service moved its error
-            // code from a sibling of `error` into the declared
-            // `{ success: false, error: { code, message } }` envelope
-            // (objectstack#3675); a console build is deployed independently of
-            // the server it talks to, so it has to keep understanding the
-            // older top-level `code` too. Without the nested branch the 401/403
-            // downgrade silently to "Download failed (403)" and the friendly
-            // copy below never fires.
-            const body = (await res.json()) as { code?: string; error?: { code?: string } } | null;
-            code = body?.error?.code ?? body?.code;
-          } catch {
-            /* non-JSON body */
-          }
-          throw Object.assign(new Error(code ?? `Download failed (${res.status})`), { code });
-        }
-        const body = await res.json();
-        // Both URL dialects, for the same independent-deploy reason as the
-        // error branch above: the route answered a bare `{ url }` until
-        // objectstack#3689 moved it into the declared
-        // `{ success: true, data: { url } }` envelope.
-        const url: string | undefined = body?.url ?? body?.data?.url;
-        if (!url) throw new Error('Download URL missing from response');
-        const target = /^https?:/i.test(url) ? url : `${baseUrl}${url}`;
+        const target = await signedUrlFor(row);
         if (await openInNativeShell(target, row)) return;
         window.open(target, '_blank', 'noopener,noreferrer');
       } catch (err: any) {
         setError(friendlyError(err));
       }
     },
-    [authFetch, baseUrl, friendlyError],
+    [signedUrlFor, friendlyError],
+  );
+
+  // The in-page preview (objectstack#36442): the row whose name was clicked,
+  // and the rows as the dialog's set, so previous / next walk the list.
+  const [previewIndex, setPreviewIndex] = React.useState<number | null>(null);
+  const previewFiles: FilePreviewItem[] = rows.map((row) => ({
+    id: row.file_id,
+    name: row.file_name || row.file_id,
+    mimeType: row.mime_type ?? undefined,
+    size: row.size ?? undefined,
+  }));
+  const previewSignedUrl = React.useCallback(
+    async (file: FilePreviewItem): Promise<string> => {
+      const row = rows.find((r) => r.file_id === file.id);
+      if (!row) throw new Error(t('fields.filePreview.loadFailed'));
+      try {
+        return await signedUrlFor(row);
+      } catch (err) {
+        // The download's own copy for the download's own refusal.
+        throw new Error(friendlyError(err));
+      }
+    },
+    [rows, signedUrlFor, friendlyError, t],
   );
 
   // Upload is offered (the header's 「+ 上传」, the empty line's 「选择文件」 and
@@ -835,7 +873,7 @@ export const RecordAttachmentsPanel: React.FC<RecordAttachmentsPanelProps> = ({
         </div>
       ) : (
         <ul className="divide-y border-t">
-          {rows.map((row) => {
+          {rows.map((row, index) => {
             const TypeIcon = fileTypeIcon(row.mime_type);
             const name = row.file_name || row.file_id;
             const uploader = uploaderOf(row);
@@ -844,7 +882,15 @@ export const RecordAttachmentsPanel: React.FC<RecordAttachmentsPanelProps> = ({
               // and uploader step aside in a narrow container (a drawer).
               <li key={row.id} className="flex h-[33px] items-center gap-2 px-1 text-sm" data-attachment-row="">
                 <TypeIcon className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-                <span className="min-w-0 flex-1 truncate" title={name}>{name}</span>
+                <button
+                  type="button"
+                  className="min-w-0 flex-1 truncate text-left hover:underline focus-visible:underline focus-visible:outline-none"
+                  title={name}
+                  onClick={() => setPreviewIndex(index)}
+                  data-attachment-preview=""
+                >
+                  {name}
+                </button>
                 <span className="hidden w-16 shrink-0 text-right text-xs text-muted-foreground tabular-nums @md:inline">
                   {formatSize(row.size)}
                 </span>
@@ -908,6 +954,20 @@ export const RecordAttachmentsPanel: React.FC<RecordAttachmentsPanelProps> = ({
           if (!open) setConfirmState((s) => ({ ...s, open: false }));
         }}
       />
+      {previewIndex !== null && previewIndex < rows.length && (
+        <FilePreviewDialog
+          files={previewFiles}
+          index={previewIndex}
+          open
+          onOpenChange={(open) => !open && setPreviewIndex(null)}
+          onIndexChange={setPreviewIndex}
+          resolveUrl={previewSignedUrl}
+          onDownload={(_file, index) => {
+            const row = rows[index];
+            if (row) void handleDownload(row);
+          }}
+        />
+      )}
       <AttachmentRenameDialog
         row={renaming}
         onOpenChange={(open) => {
