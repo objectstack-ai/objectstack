@@ -3575,7 +3575,10 @@ export function InterfacesPillar({
   const listViewAsked = customizing && listViewTargetId !== null;
   const listViewServed = useServedOverride(
     client,
-    listViewAsked && listViewTargetId ? { type: 'view', name: listViewTargetId } : null,
+    // objectstack#36750 — the fallback default view has no published layer to ask.
+    listViewAsked && listViewTargetId
+      ? { type: 'view', name: listViewTargetId, ...(listView.targetIsFallback ? { unpublished: true } : {}) }
+      : null,
     customizeBase,
     customizePair,
     `${servedKey}:${listViewRestoreNonce}`,

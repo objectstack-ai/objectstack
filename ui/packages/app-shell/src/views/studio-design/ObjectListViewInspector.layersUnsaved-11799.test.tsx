@@ -22,11 +22,13 @@
  *    the buffer holds its published layer, as before.
  *
  * A view that exists nowhere yet (no draft, no layer: the default list view of
- * an object that has none) still asks `/layers` and gets its 404. Nothing the
- * hook holds says the view was never saved: its draft read says only whether a
- * draft is pending, and the object's `listViews` from the metadata cache is not
- * read as that answer here (the 11823 pillar suite serves a default view its
- * object definition does not list). The framework keeps that 404 by design
+ * an object that has none) still asks `/layers` HERE and gets its 404: this
+ * suite's metadata context reports no load status, so the object's `listViews`
+ * from it is no answer that the view was never saved (the 11823 pillar suite
+ * serves a default view its object definition does not list). Under a
+ * metadata cache that reports its objects loaded, the fallback id is not asked
+ * at all (objectstack#36750, ObjectListViewInspector.fallbackNoLayers-36750).
+ * The framework keeps that 404 by design
  * (objectstack-ai/objectstack#22397, answer (a)), and `MetadataClient.layered()`
  * resolves it as an envelope with every layer null, so the buffer reads it as
  * "not created yet": no row, no failure, and the canvas shows the view the first
