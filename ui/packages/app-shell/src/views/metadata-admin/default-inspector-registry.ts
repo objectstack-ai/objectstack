@@ -24,6 +24,7 @@ import type { ComponentType, ReactNode } from 'react';
 import type { SupportedLocale } from './i18n.js';
 import { createObservableTypeRegistry, type MetadataSelection } from './preview-registry.js';
 import type { SchemaFormIssue } from './SchemaForm.js';
+import type { FormViewSpec } from './form-spec.js';
 
 export interface MetadataDefaultInspectorProps {
   /** Metadata type, e.g. 'view'. */
@@ -73,6 +74,16 @@ export interface MetadataDefaultInspectorProps {
    * server schema is available (offline / older server).
    */
   serverSchema?: Record<string, unknown>;
+  /**
+   * The served FormView layout for this type (`RichMetadataTypeEntry.form`,
+   * from `/meta/types`), the form a generic host hands `SchemaForm` beside
+   * {@link serverSchema}. A curated inspector reads the rows it names from it,
+   * so a row the server declares a face for (a widget, help text, a
+   * visibility predicate) is drawn with that face rather than the one the
+   * bare schema implies (objectstack#35650). Undefined when the host has no
+   * served form: such an inspector draws those keys as it did without one.
+   */
+  serverForm?: FormViewSpec;
   /**
    * The host's issues on the draft (a refused save, the live pass), paths
    * relative to the draft — what the host's fallback form is handed. An

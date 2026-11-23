@@ -670,6 +670,7 @@ export function StudioBundleItemEditor({
                 readOnly={!editable}
                 locale={locale}
                 serverSchema={entry?.schema as Record<string, unknown> | undefined}
+                serverForm={entry?.form}
               />
             ) : (
               <SchemaForm
