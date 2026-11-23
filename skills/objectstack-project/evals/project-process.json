@@ -123,18 +123,19 @@
     {
       "id": 8,
       "prompt": "Our ObjectStack app's case SLA must count business hours only. Add a `business_hours_calendar` object (weekday ranges per organization) and a `holiday` table, and make the SLA formula read them.",
-      "expected_output": "Does not create `business_hours_calendar` or `holiday`: the platform catalog lists `sys_work_calendar` (weekly working periods, per organization) and `sys_work_calendar_exception` (dated holidays and make-up workdays) as what the platform ships, and each organization keeps its own rows in Setup. The formula half is different: working-day formulas are in the catalog's Planned section, marked not available, so no formula reads a calendar today. That is a missing capability, not a defect, so §3 does not apply: the app is not blocked and no workaround language is used. It links the contract at objectstack-ai/objectstack and may compute the business-hours due time in the app meanwhile, reading the platform's calendar rows and marked `// PLATFORM-CANDIDATE: <link>` so the bump sweep (§5 step 4) replaces it when the platform ships the formulas. Where the SLA is an approval step's deadline, it sets `escalation.clock: 'working_time'` instead, which reads the calendar today.",
+      "expected_output": "Does not create `business_hours_calendar` or `holiday`: the platform catalog lists `sys_work_calendar` (weekly working periods, per organization) and `sys_work_calendar_exception` (dated holidays and make-up workdays) as what the platform ships, and each organization keeps its own rows in Setup. The formula half ships too: the SLA due time is a formula over the platform calendar, `addWorkingHours(record.opened_at, 8)` (or `addWorkingDays` for a due day), counting with the organization's default calendar or a calendar code written as a quoted literal. Because a list view, a report or an escalation flow filters on the due time, and no calendar arithmetic runs as a database filter, it stores it: a `datetime` field (not `formula`) whose `expression` calls `addWorkingHours()`, computed on each write, compared with `now()`. It writes no hand-rolled calendar walk and no workaround marker, since nothing is missing. Where the SLA is an approval step's deadline, it sets `escalation.clock: 'working_time'` instead.",
       "files": [],
       "assertions": {
         "must_contain": [
           "sys_work_calendar",
-          "PLATFORM-CANDIDATE"
+          "addWorkingHours("
         ],
         "must_not_contain": [
           "name: 'business_hours_calendar'",
           "name: 'holiday'",
           "Blocked by",
-          "PLATFORM-GAP"
+          "PLATFORM-GAP",
+          "PLATFORM-CANDIDATE"
         ]
       }
     },

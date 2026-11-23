@@ -178,17 +178,24 @@ tests: every entry resolves at runtime, and this table documents them all.
 > `isoDate(date(record.start_at))`, `date(record.start_date).getFullYear()`.
 > `+` with text and ordering against a text literal take the text as is.
 
-> **No date arithmetic.** The build refuses `date + n` and `end - start`: a
-> date or date-time mixed with a number, or minus another, reads `null`, and
-> `today()` / `now()` minus a date field reads `{}`.
-
-| Want | Write — never bare `end - start`, `date + n`, `today() + 30` |
+| Want | The build refuses `end - start`, `date + n`, `today() + 30` (they read `null` / `{}`); write |
 |:---|:---|
 | Inclusive span | `daysBetween(record.start_date, record.end_date) + 1` |
 | Shift a date | `daysFromNow(n)` / `addDays(d, n)` / `addMonths(d, n)` |
 | Tenure in years | `daysBetween(record.hire_date, today()) / 365` |
 | Hours between | `double((datetime(record.end_at) - datetime(record.start_at)).getMinutes()) / 60.0` |
 | Sub-day offset | `now() + duration("3h")` |
+
+**Working days** (the organization's working calendar, holidays and make-up days included)
+
+| Function | Returns | Notes |
+|:---|:---|:---|
+| `addWorkingDays(d, n[, code])` | timestamp | The day `n` working days after `d` (`d` not counted) |
+| `workingDaysBetween(a, b[, code])` | int | Working days after `a` through `b`; the inverse |
+| `addWorkingHours(t, h[, code])` | timestamp | The instant `h` working hours after `t` |
+
+No `code`: the default calendar; a `code` is a quoted literal. Formula or stored `expression`
+only, refused elsewhere (filters too): to filter, store the due time in a `datetime` field.
 
 **Numbers**
 
@@ -227,10 +234,7 @@ tests: every entry resolves at runtime, and this table documents them all.
 | `label(record.f)` | string | A select value's option label in the reader's locale: `'v' + string(record.version_no) + ' · ' + label(record.kind)` reads `v2 · 清稿` (zh-CN), `v2 · Clean` (en-US). Only `record.<field>`; `''` for null or an empty selection. A multi-select (`multiple: true`) reads each selected label in stored order, joined with `, `. A stored (non-formula) field stores the declared label. Formula fields only: in a predicate (validation, visibility, hook) it faults, so compare the stored value |
 
 Plus CEL built-ins: `has(x)`, `size(x)`, `int(x)`, `string(x)`, `bool(x)`,
-`double(x)`, `timestamp(s)`, `duration(s)`. `timestamp()` parses only a full
-ISO instant, so over a `date` field (`YYYY-MM-DD`) the build refuses it
-(`date-text-call`), `+ duration(…)` included; shift a date with
-`isoDate(addDays(record.d, n))`.
+`double(x)`, `timestamp(s)` (a full ISO instant only), `duration(s)`.
 
 > Receiver methods (`s.split(',')`,
 > `list.map(...)`) are called on a value, never bare, and are not in this table;
@@ -238,8 +242,7 @@ ISO instant, so over a `date` field (`YYYY-MM-DD`) the build refuses it
 > from the catalogue by an authoring decision — don't reach for them. An UNKNOWN
 > function — `PRIOR()`, a legacy `ISBLANK()`, a typo'd `isBlnk()` — **fails
 > `os build`** with a "no matching overload" type error, rather than silently
-> no-op'ing the predicate at run time. Use `previous.x` (not `PRIOR()`),
-> `isBlank()` (not `ISBLANK()`).
+> no-op'ing the predicate at run time (translations: table below).
 
 ---
 

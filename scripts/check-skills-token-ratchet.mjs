@@ -734,7 +734,18 @@ export const CEILINGS = new Map([
   // bytes -> ceil(24030 / 4) = 6008; the ceiling moves +11, the measured
   // remainder only. Pinned AT the measurement.
   //   ceil(($(wc -c < skills/objectstack-formula/SKILL.md) - 20) / 4) == ceil(24030 / 4)
-  ['skills/objectstack-formula/SKILL.md', 6008], //     -53 (was 6055), then -5 A2′ (was 6002), then +11 (was 5997)
+  // #35356 (ADR-0157 D4), by the standing ruling 「A:先削重复,余额按实测提高」
+  // (record 6513306068): the working-day functions table, its calendar-code
+  // and served-site paragraph, paid first by deleting restatement IN THIS
+  // FILE: the built-ins line's `timestamp()` / `date-text-call` repeat of the
+  // ISO-text note, the "No date arithmetic" note folded into the table header
+  // it repeated, and the PRIOR()/ISBLANK() translations the translation table
+  // already lists. Priced bytes against `main`'s 24016 (headroom 4): the text
+  // adds 615, the cuts remove 394, so the LANDED priced text is 24237 bytes
+  // -> ceil(24237 / 4) = 6060; the ceiling moves +52, the measured remainder
+  // only. Pinned AT the measurement.
+  //   ceil(($(wc -c < skills/objectstack-formula/SKILL.md) - 20) / 4) == ceil(24237 / 4)
+  ['skills/objectstack-formula/SKILL.md', 6060], //     -53 (was 6055), then -5 A2′ (was 6002), then +11 (was 5997), then +52 (was 6008)
   ['skills/objectstack-i18n/SKILL.md', 6333], //        -11 (was 6349), then -5 A2′ (was 6338)
   // 12705 -> 12984 (2026-08-31 app-repo-principles raise, see the block above).
   // The largest of the five and the frame the other four are read under: what an

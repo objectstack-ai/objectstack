@@ -51,7 +51,7 @@ a seed) without declaring it.
 |:--|:--|:--|:--|
 | `sys_exchange_rate` | every boot | an exchange-rate table | `currencyConfig.homeAmount` converts at write; Setup edits rates; data API |
 | `sys_unit` | every boot | a unit table or picklist | `unitConfig` on a `number` field (`unitMode: 'fixed'` with `unit`, `'record'` with `unitField`) or a `text` field (`'code'`); a stored code is standard (UN/ECE Rec 20: `KGM`, `H87`) or a row added here in Setup; data API, no delete |
-| `sys_work_calendar` | every boot | a business-hours calendar | kept per organization in Setup; an approval's `escalation.clock: 'working_time'` reads it; data API |
+| `sys_work_calendar` | every boot | a business-hours calendar | kept per organization in Setup; an approval's `escalation.clock: 'working_time'` and `addWorkingDays()`-style formulas read it; data API |
 | `sys_work_calendar_exception` | every boot | a holiday table | a calendar's holidays and make-up workdays, kept in Setup; data API |
 | `sys_import_job` | every boot | a bulk-import job table | `POST /api/v1/data/OBJECT/import/jobs`; data API read |
 | `sys_approval_request` | `requires: ['approvals']` | an approvals table | a flow approval node opens it; `/api/v1/approvals` routes decide; data API read |
@@ -150,4 +150,3 @@ meanwhile, marked `// PLATFORM-CANDIDATE:` with the link.
 | Concept | State | Contract |
 |:--|:--|:--|
 | Unit display, totals and conversion | **not available** (contract accepted; a quantity shows and sums as a bare number) | https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0158-units-of-measure-standard-unit-table-org-units-quantity-unit-declaration-base-quantity.md |
-| Working-day formulas | **not available** (contract accepted; no formula reads a calendar yet) | https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0157-working-calendars-are-org-editable-runtime-data-resolved-by-code-or-refused.md |
