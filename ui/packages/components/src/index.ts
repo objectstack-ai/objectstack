@@ -103,7 +103,9 @@ export type { PageBlockSpan } from './renderers/layout/page-block-span';
 // renderer (objectui#12703): `compact` when the region is narrower than half
 // the page. Exported for the blocks that read it in other packages — the
 // `list-view` block in `@object-ui/plugin-list` draws a short list there.
-export { usePageRegionPosture } from './renderers/layout/page-region-posture';
+// `PageRegionPostureReset` clears it for a surface a block opens over the page
+// (a drill dialog), so the list there draws in full (objectstack#36256).
+export { usePageRegionPosture, PageRegionPostureReset } from './renderers/layout/page-region-posture';
 export type { PageRegionPosture } from './renderers/layout/page-region-posture';
 
 // The count channel a `page:tabs` panel opens to the blocks inside it
