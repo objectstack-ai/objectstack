@@ -49,6 +49,9 @@
  * the writes each option's `change` made.
  */
 
+// Warmed at module top so the first load of the console's lazily loaded
+// authoring code is paid during collection, not inside a test's clock.
+import '@objectstack/lint';
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';

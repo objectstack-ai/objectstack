@@ -24,6 +24,10 @@
  * bulk arms, in `PermissionMatrixEditor.bulkMergeKeys.test.tsx`.
  */
 
+// Warmed at module top so the first load of the console's lazily loaded
+// authoring code is paid during collection, not inside a test's clock.
+import '@objectstack/formula';
+import '@objectstack/lint';
 import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, cleanup, fireEvent, waitFor, within } from '@testing-library/react';

@@ -20,6 +20,9 @@
  * metadata client is a double that records each save.
  */
 
+// Warmed at module top so the first load of the console's lazily loaded
+// authoring code is paid during collection, not inside a test's clock.
+import '@objectstack/lint';
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';

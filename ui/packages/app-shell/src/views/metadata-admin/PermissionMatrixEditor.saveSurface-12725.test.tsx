@@ -17,6 +17,9 @@
  * query string the server would read.
  */
 
+// Warmed at module top so the first load of the console's lazily loaded
+// authoring code is paid during collection, not inside a test's clock.
+import '@objectstack/lint';
 import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
