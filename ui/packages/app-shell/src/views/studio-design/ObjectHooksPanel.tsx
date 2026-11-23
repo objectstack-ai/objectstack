@@ -71,7 +71,6 @@ export function ObjectHooksPanel({
     replace,
     addHook,
     reportCel,
-    dialog: hookConflictDialog,
   } = buffer;
 
   // objectui#12514 — an object no hook targets is one centered block whose
@@ -79,7 +78,6 @@ export function ObjectHooksPanel({
   if (!loading && hooks.length === 0) {
     return (
       <div className="flex min-h-0 flex-1 flex-col">
-        {hookConflictDialog}
         {error && (
           <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-1.5 text-[11px] text-destructive whitespace-pre-line">
             {error}
@@ -106,7 +104,6 @@ export function ObjectHooksPanel({
 
   return (
     <div className="flex min-h-0 flex-1 gap-4">
-      {hookConflictDialog}
       {/* hook list */}
       <div className="flex w-72 shrink-0 flex-col rounded-lg border">
         <header className="flex items-center gap-2 border-b px-3 py-2">

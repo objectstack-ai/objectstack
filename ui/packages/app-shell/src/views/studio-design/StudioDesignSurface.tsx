@@ -7366,6 +7366,8 @@ export function DataPillar({
   return (
     <div ref={pillarRef} className="flex h-full flex-col">
       {objConflictDialog}
+      {/* objectstack#36511 — the hooks buffer's, here: a Save may ask while the Hooks tab is closed. */}
+      {hooksBuffer.dialog}
       {/* objectstack#34931 — the door's other 409: confirmed, it is sent again forced; else what it would lose is kept. */}
       <AlertDialog open={destructive !== null} onOpenChange={(open) => !open && keepDestructive()}>
         <AlertDialogContent data-testid="object-destructive-confirm">
