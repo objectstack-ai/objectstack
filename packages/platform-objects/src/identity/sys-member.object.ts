@@ -24,6 +24,7 @@ export const SysMember = ObjectSchema.create({
   label: 'Member',
   pluralLabel: 'Members',
   icon: 'user-check',
+  color: 'blue',
   isSystem: true,
   managedBy: 'better-auth',
   // ADR-0010 §3.7 — managed by better-auth; tenants may not edit schema,

@@ -889,7 +889,7 @@
       {
         "name": "log_ticket",
         "object": "ticket",
-        "summary": "Log a ticket for a customer, with its first comment, in the right group's queue.",
+        "summary": "Log a ticket for a customer, with its first comment, in the right group's queue; it assigns the ticket to the signed-in agent who logs it and opens it (status open), so the agent can go on to work it.",
         "confirm": false
       },
       {

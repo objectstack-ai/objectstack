@@ -454,7 +454,9 @@ for not guessing a name.
   it answers, the kind of each write it applies or confirms, and a refusal of each write the card
   refuses it with `PERMISSION_DENIED` (no grant, or a field it may not edit). A write the card
   has wait on confirmation may instead go through the card's confirm-gated agent action: when
-  the set withholds the verb and the build declares that action, the check is not measured. The prompt names
+  the set withholds the verb and the build declares that action, the check is not measured. A delete
+  is also read against the platform's owner-only delete floor: a granted delete of a seed row the
+  persona does not own needs Modify All (or a write depth of `org`) on it as well. The prompt names
   the set and the persona's role; the questions and operations stay out of it, so the role the
   card's prose gives a persona must already imply its reads and writes. A grant it does not imply
   is a card fix, never a sentence added to the prompt.

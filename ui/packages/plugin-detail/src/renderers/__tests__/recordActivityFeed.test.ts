@@ -21,6 +21,7 @@ import type { FeedItem } from '@object-ui/types';
 import {
   ACTIVITY_TYPE_TO_FEED_TYPE,
   DEFAULT_ACTIVITY_LIMIT,
+  activityFieldChangesOf,
   activityRowToFeedItem,
   activityTimestamp,
   applyFeedConfig,
@@ -972,5 +973,56 @@ describe('an unrecognised `filterMode` still folds onto `all`, but says so (obje
     normalizeFeedTypes(['comments_only'], 'record:activity'); // a declared filter mode, not a feed type
     expect(warn).toHaveBeenCalledTimes(2);
     resetUnrecognisedFeedTypeWarnings();
+  });
+});
+
+describe('activityFieldChangesOf — the served field-change code as one entry per field (objectstack#36290)', () => {
+  const rowWith = (code: unknown, extra: Record<string, unknown> = {}) => ({
+    id: 'r1',
+    type: 'updated',
+    metadata: JSON.stringify({ summary_message: code, ...extra }),
+  });
+  const code = (changes: unknown) => ({ key: 'fieldChanges', object: 'crm_account', changes });
+
+  it('maps each change: text, option, yes/no, and the writer\'s empty mark', () => {
+    expect(
+      activityFieldChangesOf(
+        rowWith(
+          code([
+            { field: 'notes', from: { text: 'Old' }, to: { text: 'New' } },
+            { field: 'stage', from: { text: 'Prospect', option: 'prospect' }, to: { text: '∅' } },
+            { field: 'vip', from: { text: 'No', boolean: false }, to: { text: '' } },
+          ]),
+        ),
+      ),
+    ).toEqual([
+      { field: 'notes', oldValue: 'Old', newValue: 'New', oldDisplayValue: 'Old', newDisplayValue: 'New' },
+      { field: 'stage', oldValue: 'prospect', newValue: null, oldDisplayValue: 'Prospect', oldOption: 'prospect' },
+      { field: 'vip', oldValue: false, newValue: null },
+    ]);
+  });
+
+  it('rides onto the feed item, beside the summary', () => {
+    const fed = activityRowToFeedItem(
+      { ...rowWith(code([{ field: 'phone', from: { text: '1' }, to: { text: '2' } }])), summary: 'Phone: 1 → 2' },
+      'System',
+    );
+    expect(fed?.body).toBe('Phone: 1 → 2');
+    expect(fed?.fieldChanges).toEqual([
+      { field: 'phone', oldValue: '1', newValue: '2', oldDisplayValue: '1', newDisplayValue: '2' },
+    ]);
+  });
+
+  it('gives nothing for a row with no code, another code, or a code it cannot read whole', () => {
+    expect(activityFieldChangesOf({ id: 'r', type: 'updated' })).toBeUndefined();
+    expect(activityFieldChangesOf({ id: 'r', type: 'updated', metadata: 'not json' })).toBeUndefined();
+    expect(activityFieldChangesOf(rowWith({ key: 'activityUpdated', object: 'crm_account', label: 'A' }))).toBeUndefined();
+    expect(activityFieldChangesOf(rowWith(code([])))).toBeUndefined();
+    expect(
+      activityFieldChangesOf(
+        rowWith(code([{ field: 'a', from: { text: '1' }, to: { text: '2' } }, { field: 'b', from: { text: 1 }, to: { text: '2' } }])),
+      ),
+    ).toBeUndefined();
+    expect(activityRowToFeedItem({ id: 'r', type: 'updated', summary: 's' }, 'System')).not.toHaveProperty('fieldChanges');
   });
 });

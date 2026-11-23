@@ -13,7 +13,7 @@
  *   group after Recent any more. A stored favorite renders there as stored:
  *   no migration, and the store is not rewritten.
  * - On a phone no navigation entry has a trigger, as before (objectui#1055).
- * - Design opens the entry's Studio surface in the app the sidebar draws, and
+ * - Object settings opens the entry's Studio surface in the app the sidebar draws, and
  *   a favorite's in the app its own address names (objectui#12520).
  *
  * Harness: the provider and chrome stand-ins of
@@ -157,7 +157,7 @@ function Where() {
 }
 
 function renderSidebar(scope: Partial<Pick<typeof metadataState, 'readObjectScope' | 'getTypeStatus'>> = {}) {
-  // Each app is owned by a package, so Design has a Studio surface to open
+  // Each app is owned by a package, so Object settings has a Studio surface to open
   // (objectui#12520); `sales` is the app another favorite was starred in. Both
   // packages are served writable (`beforeEach`), so the gate's package half
   // passes (objectui#12615).
@@ -201,7 +201,7 @@ const menuRows = () =>
   );
 
 async function openMenu(label: string, scope: HTMLElement = document.body): Promise<string[]> {
-  // objectui#12615 — Design waits on the package list's verdict; let it settle.
+  // objectui#12615 — Object settings waits on the package list's verdict; let it settle.
   await tick();
   fireEvent.keyDown(within(scope).getByRole('button', { name: `More actions for ${label}` }), { key: 'Enter' });
   return (await screen.findAllByRole('menuitem')).map((el) => el.textContent ?? '');
@@ -211,7 +211,7 @@ beforeEach(() => {
   localStorage.clear();
   viewer.isAdmin = true;
   viewer.canAuthorMetadata = true;
-  // objectui#12615 — both apps' packages are served writable, so the Design
+  // objectui#12615 — both apps' packages are served writable, so the Object settings
   // gate's package half passes and this file's own questions are the ones asked.
   vi.stubGlobal(
     'fetch',
@@ -251,7 +251,7 @@ describe('UnifiedSidebar: one ⋯ trigger per entry, no pin icon (objectui#12427
 
   it('an object entry\'s menu lists four entries for an admin who may author metadata', async () => {
     renderSidebar();
-    expect(await openMenu('Leads')).toEqual(['Add to favorites', 'Open in new tab', 'Copy link', 'Design']);
+    expect(await openMenu('Leads')).toEqual(['Add to favorites', 'Open in new tab', 'Copy link', 'Object settings']);
   });
 
   it('and three for a non-admin', async () => {
@@ -265,7 +265,7 @@ describe('UnifiedSidebar: one ⋯ trigger per entry, no pin icon (objectui#12427
     await tick();
     fireEvent.contextMenu(screen.getByRole('link', { name: 'Leads' }));
     const items = await screen.findAllByRole('menuitem');
-    expect(items.map((el) => el.textContent)).toEqual(['Add to favorites', 'Open in new tab', 'Copy link', 'Design']);
+    expect(items.map((el) => el.textContent)).toEqual(['Add to favorites', 'Open in new tab', 'Copy link', 'Object settings']);
   });
 
   it('Add to favorites writes one nav pin, lands the entry at the top, and the entry then reads Remove', async () => {
@@ -324,12 +324,12 @@ describe('UnifiedSidebar: the Favorites section sits at the top (objectui#12427)
     expect(favoriteLabels()).toEqual(['Accounts', 'Acme']);
   });
 
-  it('a stored favorite\'s menu removes it; Design shows for an object favorite and not for a record', async () => {
+  it('a stored favorite\'s menu removes it; Object settings shows for an object favorite and not for a record', async () => {
     seed([OBJECT_FAVORITE, RECORD_FAVORITE]);
     renderSidebar();
     await tick();
 
-    expect(await openMenu('Deals')).toEqual(['Remove from favorites', 'Open in new tab', 'Copy link', 'Design']);
+    expect(await openMenu('Deals')).toEqual(['Remove from favorites', 'Open in new tab', 'Copy link', 'Object settings']);
     fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
     await waitFor(() => expect(screen.queryAllByRole('menuitem')).toHaveLength(0));
 
@@ -339,11 +339,11 @@ describe('UnifiedSidebar: the Favorites section sits at the top (objectui#12427)
   });
 });
 
-describe('UnifiedSidebar: Design opens the Studio surface the app bar opens (objectui#12520)', () => {
-  it('an object entry\'s Design opens the Data surface for its object, in the app\'s package', async () => {
+describe('UnifiedSidebar: Object settings opens the Studio surface the app bar opens (objectui#12520, objectstack#36487)', () => {
+  it('an object entry\'s Object settings opens the Data surface for its object, in the app\'s package', async () => {
     renderSidebar();
     await openMenu('Leads');
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Design' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Object settings' }));
     await waitFor(() =>
       expect(screen.getByTestId('where')).toHaveTextContent('/studio/com.acme.crm/data?surface=object:crm_lead'),
     );
@@ -353,11 +353,18 @@ describe('UnifiedSidebar: Design opens the Studio surface the app bar opens (obj
     seed([OTHER_APP_FAVORITE]);
     renderSidebar();
     await tick();
-    expect(await openMenu('Quotes')).toEqual(['Remove from favorites', 'Open in new tab', 'Copy link', 'Design']);
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Design' }));
+    expect(await openMenu('Quotes')).toEqual(['Remove from favorites', 'Open in new tab', 'Copy link', 'Object settings']);
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Object settings' }));
     await waitFor(() =>
       expect(screen.getByTestId('where')).toHaveTextContent('/studio/com.acme.sales/data?surface=object:sales_quote'),
     );
+  });
+
+  it('a dashboard favorite\'s menu offers no Studio entry: a dashboard is edited on its own page (objectstack#36487)', async () => {
+    seed([{ id: 'dashboard:pipeline', label: 'Pipeline', href: '/apps/crm/dashboard/pipeline', type: 'dashboard', favoritedAt: '2026-10-03T00:00:00.000Z' }]);
+    renderSidebar();
+    await tick();
+    expect(await openMenu('Pipeline')).toEqual(['Remove from favorites', 'Open in new tab', 'Copy link']);
   });
 });
 

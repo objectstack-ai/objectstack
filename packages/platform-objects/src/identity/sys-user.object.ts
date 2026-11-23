@@ -101,6 +101,7 @@ export const SysUser = ObjectSchema.create({
   label: 'User',
   pluralLabel: 'Users',
   icon: 'user',
+  color: 'blue',
   isSystem: true,
   managedBy: 'better-auth',
   // ADR-0092 D4 — the ONE generic affordance opened on an identity table:

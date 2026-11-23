@@ -13,6 +13,7 @@ export const Lead = ObjectSchema.create({
   label: 'Lead',
   pluralLabel: 'Leads',
   icon: 'funnel',
+  color: 'green',
   description: 'An inbound prospect not yet qualified as an opportunity.',
   // The record's most important fields: the hover card, list columns and
   // the record picker read them. The stage is not here: the record header
