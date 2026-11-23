@@ -42,7 +42,8 @@ describe('drillRecordOrigin (#36554)', () => {
     expect(object).toBe('deal');
     expect(params).toEqual({
       $filter: QUERY.$filter,
-      $orderby: QUERY.$orderby,
+      // The list's sort, with the record id as the last tiebreaker.
+      $orderby: [...QUERY.$orderby, { field: 'id', order: 'asc' }],
       $search: 'acme',
       $searchFields: ['name'],
       $select: ['id'],
@@ -78,6 +79,57 @@ describe('drillRecordOrigin (#36554)', () => {
     expect(ds.find.mock.calls.map(([, params]) => (params as { $top?: number }).$top)).toEqual([250, 250]);
   });
 
+  it('reads a sort with ties in a stable order: every record once, across windows', async () => {
+    // 150 deals that all tie on the list's sort, so the result spans two
+    // windows. Like a database, the source answers ties in no fixed order
+    // unless the sort settles them: here a later window sees the ties reversed.
+    const rows = Array.from({ length: 150 }, (_, i) => ({ id: `d${String(i + 1).padStart(3, '0')}`, amount: 1 }));
+    const ds = {
+      find: vi.fn(async (_object: string, params: { $top: number; $skip?: number; $orderby?: Array<{ field: string }> }) => {
+        const skip = params.$skip ?? 0;
+        const settled = params.$orderby?.[params.$orderby.length - 1]?.field === 'id';
+        const ordered = settled || skip === 0 ? rows : [...rows].reverse();
+        return { data: ordered.slice(skip, skip + params.$top).map(({ id }) => ({ id })), total: rows.length };
+      }),
+    };
+    const origin = await drillRecordOrigin({
+      dataSource: ds, objectName: 'deal', recordId: 'd002', drawn: ['d001', 'd002'], total: 150, findParams: QUERY,
+    });
+    expect(ds.find).toHaveBeenCalledTimes(2);
+    for (const [, params] of ds.find.mock.calls) {
+      expect(params.$orderby).toEqual([{ field: 'amount', order: 'desc' }, { field: 'id', order: 'asc' }]);
+    }
+    expect(origin.siblings).toEqual(rows.map(({ id }) => id));
+  });
+
+  it('sorts by the record id alone when the list has no sort, and keeps an id sort as written', async () => {
+    const ds = source(40);
+    const { $orderby: _unsorted, ...noSort } = QUERY;
+    await drillRecordOrigin({ dataSource: ds, objectName: 'deal', recordId: 'd1', drawn: ['d1', 'd2'], total: 40, findParams: noSort });
+    expect(ds.find.mock.calls[0][1]).toMatchObject({ $orderby: [{ field: 'id', order: 'asc' }] });
+
+    const byId = [{ field: 'id', order: 'desc' }];
+    await drillRecordOrigin({
+      dataSource: ds, objectName: 'deal', recordId: 'd1', drawn: ['d1', 'd2'], total: 40, findParams: { ...QUERY, $orderby: byId },
+    });
+    expect(ds.find.mock.calls[1][1]).toMatchObject({ $orderby: byId });
+  });
+
+  it('counts a record once when two windows both answer it', async () => {
+    // A source whose second window starts one row early: the boundary row comes back twice.
+    const ids = Array.from({ length: 150 }, (_, i) => `d${i + 1}`);
+    const ds = {
+      find: vi.fn(async (_object: string, params: { $top: number; $skip?: number }) => {
+        const skip = Math.max(0, (params.$skip ?? 0) - 1);
+        return { data: ids.slice(skip, skip + params.$top).map((id) => ({ id })), total: ids.length };
+      }),
+    };
+    const origin = await drillRecordOrigin({
+      dataSource: ds, objectName: 'deal', recordId: 'd1', drawn: ['d1', 'd2'], total: 150, findParams: QUERY,
+    });
+    expect(origin.siblings).toEqual(ids);
+  });
+
   it('control: a result all drawn reads nothing and hands the rows drawn with the count, at once', () => {
     const ds = source(3);
     const origin = drillRecordOrigin({
@@ -102,6 +154,7 @@ describe('drillRecordOrigin (#36554)', () => {
   });
 
   it('keeps the rows drawn when the read fails or no longer holds the record opened', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const failing = { find: vi.fn(async () => { throw new Error('offline'); }) };
     expect(await drillRecordOrigin({
       dataSource: failing, objectName: 'deal', recordId: 'd1', drawn: ['d1', 'd2'], total: 40, findParams: QUERY,
@@ -111,5 +164,11 @@ describe('drillRecordOrigin (#36554)', () => {
     expect(await drillRecordOrigin({
       dataSource: moved, objectName: 'deal', recordId: 'gone', drawn: ['gone', 'd2'], total: 40, findParams: QUERY,
     })).toEqual({ siblings: ['gone', 'd2'], total: 40 });
+    // The failure is said once, not on every click.
+    await drillRecordOrigin({
+      dataSource: failing, objectName: 'deal', recordId: 'd1', drawn: ['d1', 'd2'], total: 40, findParams: QUERY,
+    });
+    expect(warn).toHaveBeenCalledTimes(1);
+    warn.mockRestore();
   });
 });

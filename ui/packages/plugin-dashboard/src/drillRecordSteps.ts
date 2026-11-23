@@ -34,6 +34,9 @@ export const DRILL_RECORD_STEP_CAP = 1000;
  * The fewest rows one id read asks for: the list's own fetch batch
  * (`DEFAULT_LIST_FETCH_BATCH_SIZE` in `@object-ui/plugin-list`), which a host
  * already serves to the list itself. A list paged wider asks for its own page.
+ * A deployment that caps a read's page size or row budget below a window
+ * (`OS_DATA_MAX_PAGE_SIZE`, `OS_DATA_QUERY_ROW_BUDGET`; neither is set by
+ * default) refuses the read, and the rows drawn stay the step set.
  */
 const MIN_STEP_WINDOW = 100;
 
@@ -66,6 +69,20 @@ const rowsOf = (result: unknown): Row[] => {
   const data = (result as { data?: unknown } | null | undefined)?.data;
   return Array.isArray(data) ? (data as Row[]) : [];
 };
+
+/**
+ * The read's sort with the record id last: the windows are read side by side,
+ * so a sort with ties (or none) would let a row land in two windows, or in
+ * none. A sort the list did not write as a field list is kept as written.
+ */
+const stableOrder = (orderby: unknown): unknown => {
+  if (orderby == null) return [{ field: 'id', order: 'asc' }];
+  if (!Array.isArray(orderby)) return orderby;
+  const last = orderby[orderby.length - 1] as { field?: unknown } | undefined;
+  return last?.field === 'id' ? orderby : [...orderby, { field: 'id', order: 'asc' }];
+};
+
+let failureLogged = false;
 
 const positiveInt = (value: unknown): number | undefined =>
   typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : undefined;
@@ -103,6 +120,7 @@ async function readWholeResult(
 ): Promise<DrillRecordOrigin> {
   const query: Record<string, unknown> = { ...findParams };
   for (const key of ['$top', '$skip', '$select', '$expand', '$count']) delete query[key];
+  query.$orderby = stableOrder(findParams.$orderby);
   const window = Math.max(positiveInt(findParams.$top) ?? 0, MIN_STEP_WINDOW);
   const wanted = Math.min(total, DRILL_RECORD_STEP_CAP);
   const windows = Math.ceil(wanted / window);
@@ -111,14 +129,19 @@ async function readWholeResult(
       Array.from({ length: windows }, (_, w) =>
         ds.find(objectName, { ...query, $select: ['id'], $top: window, ...(w > 0 ? { $skip: w * window } : {}) })),
     );
-    const ids = answers
-      .flatMap(rowsOf)
-      .map(idOf)
-      .filter((id): id is string => !!id)
-      .slice(0, DRILL_RECORD_STEP_CAP);
+    const ids = [...new Set(
+      answers
+        .flatMap(rowsOf)
+        .map(idOf)
+        .filter((id): id is string => !!id),
+    )].slice(0, DRILL_RECORD_STEP_CAP);
     if (!ids.includes(recordId)) return drawnOrigin;
     return { siblings: ids, total: Math.max(total, ids.length) };
-  } catch {
+  } catch (error) {
+    if (!failureLogged) {
+      failureLogged = true;
+      console.warn('[drill] the drill\'s whole result could not be read; the record steps through the rows drawn.', error);
+    }
     return drawnOrigin;
   }
 }

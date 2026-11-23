@@ -64,6 +64,11 @@ export interface DrillRecordListProps {
   dataSource?: any;
   /** Called after the host opened a record's page. */
   onNavigate?: () => void;
+  /**
+   * Whether the drill's dialog is open (default: open). A record whose step
+   * set is still being read when it closes is not opened.
+   */
+  open?: boolean;
 }
 
 type Summary = string | Record<string, unknown>;
@@ -84,6 +89,7 @@ export const DrillRecordList: React.FC<DrillRecordListProps> = ({
   maxRows,
   dataSource: ownDataSource,
   onNavigate,
+  open: dialogOpen = true,
 }) => {
   const context = React.useContext(SchemaRendererContext);
   const dataSource = ownDataSource ?? context?.dataSource;
@@ -124,8 +130,14 @@ export const DrillRecordList: React.FC<DrillRecordListProps> = ({
     total?: number;
     findParams?: Readonly<Record<string, unknown>> | null;
   }>({ ids: [] });
-  // One record page at a time: a second click while the step set is read is dropped.
-  const opening = React.useRef(false);
+  // The record a click asks for while its step set is read: the last click
+  // wins, and none opens once the drill is closed or gone (objectstack#36554).
+  const lastOpen = React.useRef(0);
+  const live = React.useRef(dialogOpen);
+  React.useLayoutEffect(() => {
+    live.current = dialogOpen;
+    return () => { live.current = false; };
+  }, [dialogOpen]);
   const [opened, setOpened] = React.useState<Record<string, unknown> | null>(null);
 
   const baseColumns = React.useMemo(() => {
@@ -189,16 +201,17 @@ export const DrillRecordList: React.FC<DrillRecordListProps> = ({
       onRowClick={(record: Record<string, unknown>) => {
         if (!openRecord) return setOpened(record);
         const id = rowId(record);
-        if (!id || opening.current) return;
+        if (!id) return;
+        const click = ++lastOpen.current;
         const open = (origin: DrillRecordOrigin) => {
+          if (click !== lastOpen.current || !live.current) return;
           openRecord(objectName, id, origin);
           onNavigate?.();
         };
         const { ids, total, findParams } = shown.current;
         const origin = drillRecordOrigin({ dataSource, objectName, recordId: id, drawn: ids, total, findParams });
-        if (!(origin instanceof Promise)) return open(origin);
-        opening.current = true;
-        void origin.then(open).finally(() => { opening.current = false; });
+        if (origin instanceof Promise) void origin.then(open);
+        else open(origin);
       }}
     />
     {!openRecord && (
