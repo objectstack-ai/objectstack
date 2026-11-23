@@ -43,6 +43,8 @@
  */
 
 import { spawnSync, type SpawnSyncReturns } from 'node:child_process';
+import { statSync } from 'node:fs';
+import { win32 as winPath } from 'node:path';
 import { Command, Flags } from '@oclif/core';
 import { OBJECTSTACK_MCP_SERVER_NAME } from '@objectstack/mcp';
 import { printError, printHeader, printStep, printSuccess, isExitSignal } from '../../utils/format.js';
@@ -111,11 +113,68 @@ export function mcpUrlFromBase(raw: string): { ok: true; mcpUrl: string } | { ok
   return { ok: true, mcpUrl: `${parsed.origin}${path}${MCP_ENDPOINT_PATH}` };
 }
 
-/** Runs a client's own CLI. A seam, so a test can stand in for `claude`. */
+/**
+ * Where a client's CLI is, so it can run without a shell.
+ *
+ * Off Windows the bare name is the answer: `spawnSync` walks `PATH` itself.
+ * On Windows it is the file `cmd.exe` would have run for the name, minus the
+ * current directory: the first `PATH` entry, of those that are absolute,
+ * holding `NAME.com`, `NAME.exe`, `NAME.bat` or `NAME.cmd` (that order in
+ * each entry). An `.exe` or `.com` is `found` by its absolute path. A
+ * batch-file shim (`.cmd`/`.bat`, what an npm global install writes) runs
+ * only inside `cmd.exe`, and Node refuses to start one without a shell, so it
+ * is `batch-shim` and is not run: the caller leaves the line to run instead.
+ */
+export function resolveClientExecutable(
+  name: string,
+  options: { platform?: NodeJS.Platform; env?: NodeJS.ProcessEnv; isFile?: (candidate: string) => boolean } = {},
+): { kind: 'found'; path: string } | { kind: 'batch-shim'; path: string } | { kind: 'missing' } {
+  const platform = options.platform ?? process.platform;
+  const env = options.env ?? process.env;
+  if (platform !== 'win32') return { kind: 'found', path: name };
+  // A plain object has no case-insensitive `Path` the way `process.env` does on Windows.
+  const read = (key: string): string | undefined =>
+    env[Object.keys(env).find((candidate) => candidate.toUpperCase() === key) ?? key];
+  const dirs = (read('PATH') ?? '')
+    .split(';')
+    .map((dir) => dir.trim().replace(/^"(.*)"$/, '$1'))
+    .filter((dir) => dir && winPath.isAbsolute(dir));
+  const isFile = options.isFile ?? ((candidate: string): boolean => {
+    try {
+      return statSync(candidate, { throwIfNoEntry: false })?.isFile() === true;
+    } catch {
+      return false;
+    }
+  });
+  for (const dir of dirs) {
+    for (const ext of ['.com', '.exe', '.bat', '.cmd']) {
+      const candidate = winPath.join(dir, `${name}${ext}`);
+      if (!isFile(candidate)) continue;
+      return ext === '.com' || ext === '.exe' ? { kind: 'found', path: candidate } : { kind: 'batch-shim', path: candidate };
+    }
+  }
+  return { kind: 'missing' };
+}
+
+/** A `spawnSync`-shaped answer for a client that was never started. */
+function notStarted(error: NodeJS.ErrnoException): SpawnSyncReturns<Buffer> {
+  return { pid: 0, output: [], stdout: Buffer.alloc(0), stderr: Buffer.alloc(0), status: null, signal: null, error };
+}
+
+/**
+ * Runs a client's own CLI, without a shell on every platform. A seam, so a
+ * test can stand in for `claude`.
+ */
 export const mcpClientRunner = {
   run(command: string, args: string[]): SpawnSyncReturns<Buffer> {
-    // `claude` is a `.cmd` shim on Windows, which only a shell resolves.
-    return spawnSync(command, args, { stdio: 'inherit', shell: process.platform === 'win32' });
+    const resolved = resolveClientExecutable(command);
+    if (resolved.kind === 'missing') {
+      return notStarted(Object.assign(new Error(`${command} was not found on PATH`), { code: 'ENOENT' }));
+    }
+    if (resolved.kind === 'batch-shim') {
+      return notStarted(Object.assign(new Error(resolved.path), { code: 'EBATCHSHIM' }));
+    }
+    return spawnSync(resolved.path, args, { stdio: 'inherit', shell: false });
   },
 };
 
@@ -250,12 +309,15 @@ export default class McpConnect extends Command {
         printStep(`Registering ${name} with Claude Code...`);
         const ran = mcpClientRunner.run('claude', claudeMcpAddArgs(name, mcpUrl));
         if (ran.error) {
-          const missing = (ran.error as NodeJS.ErrnoException).code === 'ENOENT';
+          const code = (ran.error as NodeJS.ErrnoException).code;
           printError(
-            missing
+            code === 'ENOENT'
               ? 'Claude Code\'s `claude` command was not found on your PATH. Install Claude Code, then run the Connect line above '
                 + '(or `os mcp connect` again). For another client, add the Endpoint above as a remote HTTP MCP server in its settings.'
-              : `\`claude\` could not be started: ${ran.error.message}. Run the Connect line above yourself.`,
+              : code === 'EBATCHSHIM'
+                ? `The \`claude\` on your PATH is a batch-file shim (${ran.error.message}), `
+                  + 'which this command does not run because it starts commands without a shell. Run the Connect line above yourself.'
+                : `\`claude\` could not be started: ${ran.error.message}. Run the Connect line above yourself.`,
           );
           this.exit(1);
           return;

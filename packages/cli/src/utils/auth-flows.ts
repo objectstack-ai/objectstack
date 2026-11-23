@@ -27,6 +27,7 @@
  */
 
 import { ObjectStackClient } from '@objectstack/client';
+import { browserOpenNotice, openBrowser } from './open-browser.js';
 
 export interface AuthFlowUser {
   id?: string;
@@ -60,23 +61,6 @@ export async function loginWithPassword(
     token,
     user: response.data?.user ? { id: response.data.user.id, email: response.data.user.email } : { email },
   };
-}
-
-/**
- * Open a URL in the system default browser (best-effort, cross-platform).
- */
-async function openBrowser(url: string): Promise<void> {
-  const { exec } = await import('node:child_process');
-  const platform = process.platform;
-  const cmd =
-    platform === 'darwin'
-      ? `open "${url}"`
-      : platform === 'win32'
-      ? `start "" "${url}"`
-      : `xdg-open "${url}"`;
-  exec(cmd, () => {
-    /* best-effort */
-  });
 }
 
 /**
@@ -177,8 +161,7 @@ export async function loginWithBrowser(
   }
 
   if (!opts.noBrowser && !silent) {
-    await openBrowser(verificationUrl);
-    console.log('  (Browser opened automatically. Press Ctrl+C to cancel.)');
+    console.log(browserOpenNotice(openBrowser(verificationUrl)));
     console.log('');
   }
 

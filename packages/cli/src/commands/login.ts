@@ -97,6 +97,7 @@ import { Command, Flags } from '@oclif/core';
 import type { CliExitCode } from '../utils/format.js';
 import { printHeader, printSuccess, printError, printKV, emitJson, errorCodeFields } from '../utils/format.js';
 import { writeAuthConfig, readAuthConfig } from '../utils/auth-config.js';
+import { browserOpenNotice, openBrowser } from '../utils/open-browser.js';
 import { ObjectStackClient } from '@objectstack/client';
 import * as readline from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
@@ -224,16 +225,6 @@ async function promptPassword(promptText: string): Promise<string> {
 
     process.stdin.on('data', handler);
   });
-}
-
-/**
- * Open a URL in the system default browser (cross-platform).
- */
-async function openBrowser(url: string): Promise<void> {
-  const { exec } = await import('node:child_process');
-  const platform = process.platform;
-  const cmd = platform === 'darwin' ? `open "${url}"` : platform === 'win32' ? `start "" "${url}"` : `xdg-open "${url}"`;
-  exec(cmd, () => { /* best-effort */ });
 }
 
 export default class AuthLogin extends Command {
@@ -462,8 +453,7 @@ export default class AuthLogin extends Command {
     }
 
     if (!noBrowser && !jsonOutput) {
-      await openBrowser(verificationUrl);
-      console.log('  (Browser opened automatically. Press Ctrl+C to cancel.)');
+      console.log(browserOpenNotice(openBrowser(verificationUrl)));
       console.log('');
     }
 
