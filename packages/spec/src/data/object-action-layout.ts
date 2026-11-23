@@ -21,8 +21,12 @@ import { strictObject } from '../shared/strict-object';
  *   every surface that draws that header: the record page, the side preview
  *   and a phone's bottom action bar.
  *
- * An arm is a scope, not a page (ADR-0085 §2 keeps per-page keys off the
- * object): one arm arranges one set of actions wherever that set is drawn.
+ * An arm is a scope, not a page: one arm arranges one set of actions wherever
+ * that set is drawn. The key only re-arranges, so it sits on the object as a
+ * ruled exception to ADR-0085 §2's re-arrange sentence, the second after
+ * `relatedLists` (the maintainer's ruling on #36635; the dated ADR note is
+ * carried by #36086). The `list` arm has one reader today, the list page
+ * toolbar.
  *
  * Each arm has two parts. `pinned` names the buttons, at most
  * {@link OBJECT_ACTION_LAYOUT_PINNED_LIMIT}, in the order they are drawn;
