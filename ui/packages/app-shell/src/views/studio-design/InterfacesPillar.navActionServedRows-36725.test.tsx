@@ -115,7 +115,10 @@ describe('Interfaces pillar — a nav action draws refusals and texts from their
       </MemoryRouter>,
     );
     fireEvent.click(await screen.findByTitle('action · sign_now'));
-    await screen.findByText(t('engine.inspector.moreFields', 'en'), {}, { timeout: 8000 });
+    // The rail's home inspector is the action designer (its Behavior section)…
+    await screen.findByText(t('engine.inspector.action.behavior', 'en'), {}, { timeout: 8000 });
+    // …and, handed the served schema, it draws its "More fields".
+    expect(screen.getByText(t('engine.inspector.moreFields', 'en'))).toBeInTheDocument();
 
     // No editor on the rail holds either record as JSON text (the raw JSON face).
     const jsonHolders = Array.from(document.querySelectorAll('textarea')).filter(
