@@ -1675,6 +1675,7 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
                   picked in the app, or on the Studio landing. */}
               <StudioBackToApp
                 packageId={packageId}
+                packageLabel={pkgEntry?.id === packageId ? pkgEntry.name : null}
                 apps={publishedApps}
                 locale={locale}
                 beforeNavigate={confirmLeavePillar}
