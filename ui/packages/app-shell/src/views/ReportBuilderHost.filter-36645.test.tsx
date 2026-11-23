@@ -48,6 +48,7 @@ const OBJECT_DEF = {
     amount: { type: 'currency', label: 'Amount', currencyConfig: { mode: 'record', currencyField: 'currency' } },
     organization_id: { type: 'lookup', label: 'Organization', reference: 'sys_organization', hidden: true },
     account: { type: 'lookup', label: 'Account', reference: 'account' },
+    weighted: { type: 'formula', label: 'Weighted', expression: 'amount * 0.5' },
   },
 };
 
@@ -83,8 +84,9 @@ afterEach(() => {
 });
 
 describe('the report filter fields (objectstack#36645)', () => {
-  it('are the object\'s own fields, minus the hidden ones, with no currency pairing', () => {
+  it('are the object\'s own fields, minus the hidden and the virtual ones, with no currency pairing', () => {
     const fields = reportFilterFields(OBJECT_DEF, (_f, fallback) => fallback, (_f, raw) => (Array.isArray(raw) ? raw : undefined));
+    // `weighted` is a formula: the dataset door refuses a filter on it (400 INVALID_FIELD).
     expect(fields.map((f) => f.value)).toEqual(['name', 'stage', 'amount', 'account']);
     // Business fields first, system fields after, as the list's Filter panel orders them.
     const withSystem = reportFilterFields(
@@ -147,5 +149,16 @@ describe('「+ Filter」 under the report builder\'s data source (objectstack#36
     expect(await screen.findByText('This filter cannot be changed here. It is kept as saved.')).toBeInTheDocument();
     await save();
     expect(onSave.mock.calls.at(-1)?.[0].runtimeFilter).toEqual(odd);
+  });
+
+  it('a filter holdable by shape but not by its field\'s type is kept as saved, once the fields are read', async () => {
+    // One operator on one field (so the report opens here), but `name` is text
+    // and its dropdown has no 「greater than」.
+    const byType = { name: { $gt: 'M' } };
+    const { onSave, dataSource } = mount({ ...REPORT, runtimeFilter: byType });
+    await waitFor(() => expect(dataSource.getObjectSchema).toHaveBeenCalledWith('opportunity'));
+    expect(await screen.findByText('This filter cannot be changed here. It is kept as saved.')).toBeInTheDocument();
+    await save();
+    expect(onSave.mock.calls.at(-1)?.[0].runtimeFilter).toEqual(byType);
   });
 });

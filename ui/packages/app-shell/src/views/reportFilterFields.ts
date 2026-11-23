@@ -23,6 +23,8 @@
  *
  * - a field the object marks `hidden: true` is not offered, as the list's
  *   Filter panel does not offer it;
+ * - a virtual field (`isVirtualSearchField`: a formula, no column) is not
+ *   offered — the dataset door refuses a filter on one (400 INVALID_FIELD);
  * - a `record`-mode amount's currency pairing (`currencyField`) is dropped: the
  *   pairing writes a second, companion condition the bridge reads back as a
  *   row of its own, so the amount is offered as the dataset designer offers
@@ -35,6 +37,7 @@
  */
 
 import * as React from 'react';
+import { isVirtualSearchField, type SearchFieldMeta } from '@objectstack/spec/data';
 import { isSystemManagedField, type DataSource } from '@object-ui/types';
 import { useObjectLabel } from '@object-ui/i18n';
 import { conditionCandidatesOf, conditionOptionsOf, type ConditionCandidateField } from '@object-ui/plugin-list';
@@ -59,6 +62,11 @@ export function reportFilterFields(
   for (const [name, field] of Object.entries(defs)) {
     if (!field || typeof field !== 'object') continue;
     if ((field as { hidden?: unknown }).hidden === true) continue;
+    // A virtual field (a formula, no column) is refused by the dataset door
+    // with 400 INVALID_FIELD, so offering it would let a report be saved that
+    // fails for every viewer. The spec's own predicate, as the list's
+    // grouping uses it.
+    if (isVirtualSearchField(field as SearchFieldMeta)) continue;
     (isSystemManagedField(name, field as { system?: boolean }) ? system : business).push([name, field]);
   }
   const shown: Record<string, unknown> = Object.fromEntries([...business, ...system]);
