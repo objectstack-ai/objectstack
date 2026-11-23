@@ -21,13 +21,15 @@
 
 import { describe, it, expect } from 'vitest';
 import { createMemoryI18n } from '@objectstack/core';
-import { TranslationDataSchema, objectLabelKey } from '@objectstack/spec/system';
+import { SchemaRegistry } from '@objectstack/objectql';
+import { TranslationDataSchema, objectLabelKey, translateMetadataDocument } from '@objectstack/spec/system';
 
 import {
   approvalStepLabelKey,
   flowLabelKey,
   flowNameOfProcess,
   localizeRequestLabels,
+  negotiatedReaderLocale,
   positionLabelKey,
   readerLabelsFor,
   type ReaderLabelI18n,
@@ -108,11 +110,12 @@ describe('[#24863] the pick', () => {
 
   it('negotiates through `resolveBundleLocale` even for a service that resolves exactly', () => {
     // A service that answers only the exact tag it holds, as `FileI18nAdapter` does.
+    // [#35384] Asked of the step's label, the one label still read through `t()`.
     const exact: ReaderLabelI18n = {
-      t: (key, locale) => (locale === 'zh-CN' && key === flowLabelKey('f') ? '流程' : key),
+      t: (key, locale) => (locale === 'zh-CN' && key === approvalStepLabelKey('f', 'n') ? '步骤' : key),
       getLocales: () => ['en', 'zh-CN'],
     };
-    expect(readerLabelsFor(exact, 'zh')!.flowLabel('f')).toBe('流程');
+    expect(readerLabelsFor(exact, 'zh')!.stepLabel('f', 'n')).toBe('步骤');
   });
 
   it('picks nothing on a miss: no entry, an empty entry, a blank entry', () => {
@@ -145,9 +148,9 @@ describe('[#24863] the pick', () => {
     const asked: string[] = [];
     const counting: ReaderLabelI18n = { t: (key) => { asked.push(key); return key; } };
     const labels = readerLabelsFor(counting, 'zh-CN')!;
-    labels.flowLabel('f');
-    labels.flowLabel('f');
-    expect(asked).toEqual([flowLabelKey('f')]);
+    labels.stepLabel('f', 'n');
+    labels.stepLabel('f', 'n');
+    expect(asked).toEqual([approvalStepLabelKey('f', 'n')]);
   });
 });
 
@@ -278,5 +281,182 @@ describe('[#35384] the object label in the declared sourceLocale reads as author
       getTranslations: () => { throw new Error('translations exploded'); },
     };
     expect(readerLabelsFor(throwing, 'zh-CN')!.objectLabel('account')).toBeUndefined();
+  });
+});
+
+/**
+ * [#35384] The flow's and the position's labels are metadata too, so they are
+ * resolved by the spec translators of their types — `translateFlow` (the
+ * flow runner's reading of `flows.<flow>.label`; `/meta` serves a flow
+ * document untranslated) and `translatePosition` (what `GET /meta/position`
+ * serves) — with `/meta`'s `ResolveOptions`, and never through `t()`.
+ *
+ * The scenario: an app authored in English (`sourceLocale: 'en'`) that
+ * defaults its users to Chinese (`defaultLocale: 'zh-CN'`, declared fallback
+ * `zh-CN`) and ships an `en` pack beside the `zh-CN` one, which holds neither
+ * label. `t('flows.<flow>.label', 'en')` falls to the `zh-CN` row; an `en` and
+ * an `en-US` reader must read the authored label (the stored snapshot). An
+ * `en-US` reader is negotiated to the `en` pack first, the authored language.
+ * CONTROLS: a `zh-CN` reader reads the `zh-CN` rows, an `en` pack entry is
+ * read by an `en` reader, and with no `sourceLocale` declared an `en` reader
+ * walks the declared fallback to the `zh-CN` rows.
+ */
+describe('[#35384] the flow and position labels in the declared sourceLocale read as authored', () => {
+  const EN = { [flowLabelKey('other_flow')]: 'Other flow' };
+  const declared = (sourceLocale: string | undefined, en: Record<string, string> = EN) => {
+    const i18n = i18nWith({ 'zh-CN': ZH, en });
+    i18n.setDefaultLocale('zh-CN');
+    i18n.setFallbackLocale('zh-CN');
+    if (sourceLocale) i18n.setSourceLocale(sourceLocale);
+    return i18n;
+  };
+  const served = () => ({
+    process_name: 'flow:account_approval', current_step: 'manager_review', object_name: 'account',
+    process_label: 'Account Approval', step_label: 'Manager Review', current_step_label: 'Manager Review',
+    object_label: 'Account',
+  });
+
+  it('the defect\'s precondition: t() answers an en reader with the zh-CN rows', () => {
+    const i18n = declared('en');
+    expect(i18n.t(flowLabelKey('account_approval'), 'en')).toBe('客户审批');
+    expect(i18n.t(positionLabelKey('crm_sales_manager'), 'en')).toBe('销售经理');
+  });
+
+  it('an en-US reader is negotiated to the en pack, the authored language', () => {
+    expect(negotiatedReaderLocale(declared('en'), 'en-US')).toBe('en');
+  });
+
+  for (const locale of ['en', 'en-US']) {
+    it(`an ${locale} reader picks no defaultLocale row: the flow and position labels stand as authored`, () => {
+      const labels = readerLabelsFor(declared('en'), locale)!;
+      expect(labels.flowLabel('account_approval')).toBeUndefined();
+      expect(labels.positionLabel('crm_sales_manager')).toBeUndefined();
+      const row = served();
+      localizeRequestLabels(row, labels);
+      expect(row.process_label).toBe('Account Approval');
+    });
+  }
+
+  it('CONTROL: a zh-CN reader still reads the zh-CN rows', () => {
+    const labels = readerLabelsFor(declared('en'), 'zh-CN')!;
+    expect(labels.flowLabel('account_approval')).toBe('客户审批');
+    expect(labels.positionLabel('crm_sales_manager')).toBe('销售经理');
+  });
+
+  it('CONTROL: an en pack entry is what an en and an en-US reader read', () => {
+    const en = { [flowLabelKey('account_approval')]: 'Account sign-off', [positionLabelKey('crm_sales_manager')]: 'Sales lead' };
+    for (const locale of ['en', 'en-US']) {
+      const labels = readerLabelsFor(declared('en', en), locale)!;
+      expect(labels.flowLabel('account_approval')).toBe('Account sign-off');
+      expect(labels.positionLabel('crm_sales_manager')).toBe('Sales lead');
+    }
+  });
+
+  it('CONTROL: with no sourceLocale declared, an en reader walks the declared fallback to the zh-CN rows', () => {
+    const labels = readerLabelsFor(declared(undefined), 'en')!;
+    expect(labels.flowLabel('account_approval')).toBe('客户审批');
+    expect(labels.positionLabel('crm_sales_manager')).toBe('销售经理');
+  });
+
+  it('reads neither label through t(): a service that cannot hand its translations over picks none', () => {
+    const tOnly: ReaderLabelI18n = { t: (key) => (key === flowLabelKey('f') ? '流程' : key === positionLabelKey('p') ? '岗位' : key) };
+    const labels = readerLabelsFor(tOnly, 'zh-CN')!;
+    expect(labels.flowLabel('f')).toBeUndefined();
+    expect(labels.positionLabel('p')).toBeUndefined();
+  });
+
+  it('reads each label once per read', () => {
+    let reads = 0;
+    const i18n = declared('en');
+    const counting: ReaderLabelI18n = {
+      t: (key) => key,
+      getLocales: () => i18n.getLocales(),
+      getTranslations: (code) => { reads += 1; return i18n.getTranslations(code); },
+    };
+    const labels = readerLabelsFor(counting, 'zh-CN')!;
+    labels.flowLabel('account_approval');
+    labels.flowLabel('account_approval');
+    labels.positionLabel('crm_sales_manager');
+    // One bundle for the read, built once: a read of each locale the service holds.
+    expect(reads).toBe(2);
+  });
+});
+
+/**
+ * [#35384] A renamed packaged object is named by its rename, as `/meta` names
+ * it: the object's served definition is translated with its packaged base as
+ * `packagedBase` (ADR-0029 D9.2a), the base read off the engine's registry
+ * (`getPackagedObjectBase`, the body the metadata protocol's accessor reads).
+ * The bundle's `objects.crm_deal.label` translates the PACKAGED label, so it
+ * says nothing about the rename, in any locale.
+ *
+ * The registry is the real `SchemaRegistry`: a packaged `Opportunity` that a
+ * code extension renames `Deal`. The oracle is the call `/meta` makes,
+ * `translateMetadataDocument('object', served, bundle, { …resolveOptions,
+ * packagedBase })`. CONTROLS: the unrenamed object reads the bundle in every
+ * locale, and a registry that cannot answer translates the name alone.
+ */
+describe('[#35384] a renamed packaged object is named by its rename, as /meta names it', () => {
+  const PKG = 'com.acme.crm';
+  const PAIR = 'com.acme.crm.custom';
+  const engineWith = (renamed: boolean) => {
+    const registry = new SchemaRegistry({ multiTenant: false });
+    registry.logLevel = 'silent';
+    registry.registerObject({ name: 'crm_deal', label: 'Opportunity', fields: {} } as never, PKG, undefined, 'own');
+    if (renamed) registry.registerObjectExtension({ extend: 'crm_deal', label: 'Deal' } as never, PAIR);
+    return { getSchema: (name: string) => registry.getObject(name), registry };
+  };
+  const i18n = () => {
+    const service = i18nWith({
+      'zh-CN': { [objectLabelKey('crm_deal')]: '商机' },
+      en: { [objectLabelKey('crm_deal')]: 'Opportunity' },
+    });
+    service.setDefaultLocale('zh-CN');
+    service.setFallbackLocale('zh-CN');
+    service.setSourceLocale('en');
+    return service;
+  };
+  /** What `GET /meta/object/crm_deal` serves as the label for a request in `locale`. */
+  const metaLabel = (engine: ReturnType<typeof engineWith>, locale: string): unknown => {
+    const service = i18n();
+    const bundle = Object.fromEntries(service.getLocales().map((code) => [code, service.getTranslations(code)]));
+    return translateMetadataDocument('object', engine.getSchema('crm_deal'), bundle as never, {
+      locale: negotiatedReaderLocale(service, locale),
+      fallbackChain: ['zh-CN'],
+      defaultLocale: 'en',
+      packagedBase: engine.registry.getPackagedObjectBase('crm_deal'),
+    }).label;
+  };
+
+  it('the fixture: the served label is the rename, the packaged base keeps the old one', () => {
+    const engine = engineWith(true);
+    expect((engine.getSchema('crm_deal') as { label?: string }).label).toBe('Deal');
+    expect((engine.registry.getPackagedObjectBase('crm_deal') as { label?: string }).label).toBe('Opportunity');
+  });
+
+  for (const locale of ['en', 'en-US', 'zh-CN']) {
+    it(`a ${locale} reader reads the rename, as /meta serves it`, () => {
+      const engine = engineWith(true);
+      expect(metaLabel(engine, locale)).toBe('Deal');
+      expect(readerLabelsFor(i18n(), locale, engine)!.objectLabel('crm_deal')).toBe('Deal');
+      const row = { object_name: 'crm_deal', object_label: 'Deal' };
+      localizeRequestLabels(row, readerLabelsFor(i18n(), locale, engine)!);
+      expect(row.object_label).toBe('Deal');
+    });
+  }
+
+  it('CONTROL: the unrenamed object reads the bundle, as /meta serves it', () => {
+    const engine = engineWith(false);
+    expect(readerLabelsFor(i18n(), 'zh-CN', engine)!.objectLabel('crm_deal')).toBe('商机');
+    expect(metaLabel(engine, 'zh-CN')).toBe('商机');
+    expect(readerLabelsFor(i18n(), 'en', engine)!.objectLabel('crm_deal')).toBe('Opportunity');
+  });
+
+  it('CONTROL: a registry that throws is no baseline known, and the read does not throw', () => {
+    const engine = engineWith(true);
+    const failing = { getSchema: engine.getSchema, registry: { getPackagedObjectBase: () => { throw new Error('registry exploded'); } } };
+    expect(readerLabelsFor(i18n(), 'zh-CN', failing)!.objectLabel('crm_deal')).toBe('商机');
+    const blind = { getSchema: () => { throw new Error('schema exploded'); } };
+    expect(readerLabelsFor(i18n(), 'zh-CN', blind)!.objectLabel('crm_deal')).toBe('商机');
   });
 });

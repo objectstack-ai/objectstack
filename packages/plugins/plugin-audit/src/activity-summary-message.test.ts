@@ -10,12 +10,15 @@
 
 import { describe, it, expect } from 'vitest';
 import { createMemoryI18n } from '@objectstack/core';
+import { SchemaRegistry } from '@objectstack/objectql';
+import { translateMetadataDocument } from '@objectstack/spec/system';
 
 import { AuditTranslations } from './translations/index.js';
 import {
   ACTIVITY_SUMMARY_MESSAGE_KEY,
   composeActivitySummary,
   composeStoredSummary,
+  installActivitySummaryLocale,
   localizeActivityRow,
   readActivitySummaryMessage,
   readerSummaryLocale,
@@ -263,5 +266,112 @@ describe('[#35384] a reader in the declared sourceLocale reads the labels as aut
       getTranslations: () => { throw new Error('translations exploded'); },
     };
     expect(composeActivitySummary(CREATED, readerSummaryLocale(throwing, 'zh-CN', getObjectDef)!)).toBe('创建了 Deal "Acme"');
+  });
+});
+
+/**
+ * [#35384] A renamed packaged object is named by its rename in a reader's
+ * activity summary, as `/meta` names it: the reader's object definition is
+ * translated with the object's packaged base as `packagedBase` (ADR-0029
+ * D9.2a), read off the engine's registry (`getPackagedObjectBase`, the body
+ * the metadata protocol's accessor reads). The bundle's
+ * `objects.biz_deal.label` translates the PACKAGED label, so it says nothing
+ * about the rename, in any locale.
+ *
+ * Driven through the installed `sys_activity` middleware over the real
+ * `SchemaRegistry` — a packaged `Opportunity` a code extension renames
+ * `Deal` — so the wiring from the engine to the translator is what is pinned.
+ * The oracle is the call `/meta` makes, `translateMetadataDocument('object',
+ * served, bundle, { …resolveOptions, packagedBase })`. CONTROLS: the
+ * unrenamed object reads the bundle, and the field labels still translate.
+ */
+describe('[#35384] a renamed packaged object is named by its rename, as /meta names it', () => {
+  const PKG = 'com.acme.crm';
+  const PAIR = 'com.acme.crm.custom';
+  const engineWith = (renamed: boolean) => {
+    const registry = new SchemaRegistry({ multiTenant: false });
+    registry.logLevel = 'silent';
+    registry.registerObject(
+      { name: 'biz_deal', label: 'Opportunity', fields: { amount: { name: 'amount', type: 'number', label: 'Amount' } } } as never,
+      PKG, undefined, 'own',
+    );
+    if (renamed) registry.registerObjectExtension({ extend: 'biz_deal', label: 'Deal' } as never, PAIR);
+    let middleware: ((ctx: any, next: () => Promise<void>) => Promise<void>) | undefined;
+    const engine = {
+      registerMiddleware: (fn: typeof middleware) => { middleware = fn; },
+      getSchema: (name: string) => registry.getObject(name),
+      registry,
+    };
+    return { engine, registry, read: () => middleware! };
+  };
+  const i18n = () => {
+    const service = createMemoryI18n();
+    for (const [locale, data] of Object.entries(AuditTranslations)) service.loadTranslations(locale, data as Record<string, any>);
+    service.loadTranslations('zh-CN', { objects: { biz_deal: { label: '商机', fields: { amount: { label: '金额' } } } } });
+    service.loadTranslations('en', { objects: { biz_deal: { label: 'Opportunity' } } });
+    service.setDefaultLocale('zh-CN');
+    service.setFallbackLocale('zh-CN');
+    service.setSourceLocale('en');
+    return service;
+  };
+  /** The summary a reader in `locale` is served for one stored code, through the installed middleware. */
+  const summaryRead = async (renamed: boolean, locale: string, message: ActivitySummaryMessage): Promise<unknown> => {
+    const { engine, read } = engineWith(renamed);
+    const service = i18n();
+    installActivitySummaryLocale(engine, () => service);
+    const ctx: any = { operation: 'find', ast: {}, context: { locale } };
+    await read()(ctx, async () => {
+      ctx.result = [{ summary: 'stored', metadata: { [ACTIVITY_SUMMARY_MESSAGE_KEY]: message } }];
+    });
+    return ctx.result[0].summary;
+  };
+  const created: ActivitySummaryMessage = { key: 'activityCreated', object: 'biz_deal', label: 'Acme' };
+  const named: ActivitySummaryMessage = { key: 'activityUpdatedFields', object: 'biz_deal', label: 'Acme', fields: ['amount'], more: 0 };
+
+  it('the fixture: /meta serves the rename in every locale', () => {
+    const { registry } = engineWith(true);
+    const service = i18n();
+    const bundle = Object.fromEntries(service.getLocales().map((code) => [code, service.getTranslations(code)]));
+    for (const locale of ['en', 'zh-CN']) {
+      expect(translateMetadataDocument('object', registry.getObject('biz_deal'), bundle as never, {
+        locale, fallbackChain: ['zh-CN'], defaultLocale: 'en', packagedBase: registry.getPackagedObjectBase('biz_deal'),
+      }).label).toBe('Deal');
+    }
+  });
+
+  it('an en reader reads the rename', async () => {
+    expect(await summaryRead(true, 'en', created)).toBe('Created Deal "Acme"');
+  });
+
+  it('an en-US reader reads the rename', async () => {
+    expect(await summaryRead(true, 'en-US', created)).toBe('Created Deal "Acme"');
+  });
+
+  it('a zh-CN reader reads the rename, and the field label still translates', async () => {
+    expect(await summaryRead(true, 'zh-CN', created)).toBe('创建了 Deal "Acme"');
+    expect(await summaryRead(true, 'zh-CN', named)).toContain('金额');
+  });
+
+  it('CONTROL: the unrenamed object reads the bundle', async () => {
+    expect(await summaryRead(false, 'zh-CN', created)).toBe('创建了 商机 "Acme"');
+    expect(await summaryRead(false, 'en', created)).toBe('Created Opportunity "Acme"');
+  });
+
+  it('CONTROL: a registry whose packaged-base read throws is no baseline known, and the read does not throw', async () => {
+    let middleware: ((ctx: any, next: () => Promise<void>) => Promise<void>) | undefined;
+    const { engine } = engineWith(true);
+    const failing = {
+      registerMiddleware: (fn: typeof middleware) => { middleware = fn; },
+      getSchema: engine.getSchema,
+      registry: { getPackagedObjectBase: () => { throw new Error('registry exploded'); } },
+    };
+    const service = i18n();
+    installActivitySummaryLocale(failing, () => service);
+    const ctx: any = { operation: 'find', ast: {}, context: { locale: 'zh-CN' } };
+    await middleware!(ctx, async () => {
+      ctx.result = [{ summary: 'stored', metadata: { [ACTIVITY_SUMMARY_MESSAGE_KEY]: created } }];
+    });
+    // No baseline known: the catalog applies to the served label, as before the base was read.
+    expect(ctx.result[0].summary).toBe('创建了 商机 "Acme"');
   });
 });
