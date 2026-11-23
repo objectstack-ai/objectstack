@@ -9,9 +9,11 @@
  * which the server refuses any caller without `manage_metadata`; one of the
  * reader's own views is a `sys_personal_view` row (`./personalViews.ts`). So:
  *
- * - **who** ({@link mayShareViews}): an administrator whose session holds the
+ * - **who** ({@link mayManageViews}): an administrator whose session holds the
  *   capability that door asks. An organization administrator without it is not
- *   offered a Shared choice the server would answer `403`;
+ *   offered a Shared choice the server would answer `403`. objectstack#36448:
+ *   the same answer gates every entry that leads to a `view` metadata write —
+ *   Manage views, the view settings panel and Create View;
  * - **Create, shared** ({@link UseViewSharing.createShared}), from the add-view
  *   card: the new view is saved and published in one act
  *   (`saveAndPublishRuntimeMetadata`, the maintainer's 「保存即生效」), so
@@ -32,12 +34,16 @@ import { viewSaveRefusalText } from './viewSaveRefusal.js';
 type TFn = ReturnType<typeof useObjectTranslation>['t'];
 
 /**
- * May this reader share views? An administrator (`useWorkspaceAdminStatus`)
- * whose session holds `manage_metadata` (`useCanAuthorMetadata`, the
- * capability the shared view's write door asks). The server refuses every
- * other caller regardless; this is the presentational half.
+ * May this reader share and manage the object's views? An administrator
+ * (`useWorkspaceAdminStatus`) whose session holds `manage_metadata`
+ * (`useCanAuthorMetadata`, the capability every `view` metadata write door
+ * asks). The server refuses every other caller regardless; this is the
+ * presentational half, the ONE answer the list page reads for a Shared
+ * choice, Manage views, the view settings panel, Create View and the saved
+ * view's rename and save in place (objectstack#36448), so an organization
+ * administrator without the capability is offered none of them.
  */
-export function mayShareViews(isAdmin: boolean, canAuthorMetadata: boolean): boolean {
+export function mayManageViews(isAdmin: boolean, canAuthorMetadata: boolean): boolean {
     return isAdmin && canAuthorMetadata;
 }
 
