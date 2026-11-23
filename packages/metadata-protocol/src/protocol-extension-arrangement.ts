@@ -6,9 +6,10 @@
  *
  * Maintainer, verbatim: 「软件包字段、子表自定义分三种，原始软件包，继承软件包和环境管理员覆盖，
  * 继承软件包 我记得已经有一套标准，只能申明插入位置，原始软件包、环境管理员 应该可以申明完整的配置」.
- * An object extension carries two keys for it, `fieldGroups` and
- * `relatedLists` (`CUSTOM_ARRANGEMENT_KEYS`, `@objectstack/spec/data`), in the
- * shape an object declares them in. Which package an extension belongs to is
+ * An object extension carries the keys for it, `fieldGroups`,
+ * `relatedLists` and [objectstack#36366] `actionLayout`
+ * (`CUSTOM_ARRANGEMENT_KEYS`, `@objectstack/spec/data`), in the shape an
+ * object declares them in. Which package an extension belongs to is
  * not in its body, so the schema cannot say who wrote them; this module is
  * the ONE judge and every door calls it, as the `__c` reservation's doors
  * call theirs (`protocol-extension-field-suffix.ts`):
@@ -24,7 +25,8 @@
  * In a package that is NOT a base's paired `.custom`
  * ({@link isCustomizationPackage}, the `__c` judge's predicate), every
  * arrangement key an `objectExtensions` entry writes is refused, with the
- * prescription to place what the package brings with `place`. In a `.custom`
+ * prescription to place what the package brings with `place` (an action it
+ * brings, by the action's own `locations` and `order`). In a `.custom`
  * package nothing is refused. A body bound to no package is not judged: the
  * rule is about packages, as the `__c` reservation is.
  *
@@ -70,17 +72,19 @@ export interface ExtensionArrangementSubject {
 const isRecord = (v: unknown): v is Record<string, unknown> =>
     v !== null && typeof v === 'object' && !Array.isArray(v);
 
-/** What `place` writes instead, per key. */
-const PLACE_EXAMPLE: Readonly<Record<CustomArrangementKey, string>> = Object.freeze({
-    fieldGroups: "`place: [{ field: 'tax_id', group: 'basic', after: 'industry' }]`",
-    relatedLists: "`place: [{ list: 'contract', after: 'opportunity' }]`",
+/** What the package writes instead, per key: `place` for fields and lists, the action's own placement for actions. */
+const PRESCRIPTION: Readonly<Record<CustomArrangementKey, string>> = Object.freeze({
+    fieldGroups: "place what this package brings with `place`, e.g. `place: [{ field: 'tax_id', group: 'basic', after: 'industry' }]`",
+    relatedLists: "place what this package brings with `place`, e.g. `place: [{ list: 'contract', after: 'opportunity' }]`",
+    actionLayout: "place an action this package brings by the action's own `locations` and `order`, e.g. "
+        + "`{ name: 'send_quote', objectName: 'crm_lead', locations: ['record_more'], order: 50 }`",
 });
 
 /** The sentence. Prescription inside the first 500 characters: a 4xx message crosses the REST boundary capped there. */
 function arrangementOutsidePairMessage(key: CustomArrangementKey, object: string, packageId: string): string {
     return `\`${key}\` in the extension of object '${object}' in package '${packageId}': only the object extension of a `
         + 'base\'s paired `.custom` package declares an object\'s whole arrangement (ADR-0146 D10). Remove the key and '
-        + `place what this package brings with \`place\`, e.g. ${PLACE_EXAMPLE[key]}.`;
+        + `${PRESCRIPTION[key]}.`;
 }
 
 /**

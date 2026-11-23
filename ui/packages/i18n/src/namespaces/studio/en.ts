@@ -442,7 +442,7 @@ const STUDIO_EN: Record<string, string> = {
   'designer.field.hint.pickTarget': 'Pick the object to link to. Changes are saved once the field has one.',
   'designer.field.hint.stageKinds': 'This is the object’s lifecycle field: give every option a kind (Open for a step, Won or Lost for an end). The object is saved once every option has one.',
   'designer.field.relatedObject': 'Related object',
-  'designer.field.objectNamePlaceholder': 'object_name',
+  'designer.field.objectNamePlaceholder': 'Select object…',
   // Lookup "Picker config" advanced sub-panel
   'designer.field.lookup.pickerConfig': 'Picker config',
   'designer.field.lookup.displayField': 'Display field',
@@ -477,7 +477,6 @@ const STUDIO_EN: Record<string, string> = {
   'designer.field.relatedList.help.shown': 'Listed with the other related records on the {ref} record page.',
   'designer.field.relatedList.help.hidden': 'Not listed on the {ref} record page.',
   'designer.field.relatedList.help.primary': 'A core relationship: the {ref} record page shows it most prominently, in the record body as a full-width table.',
-  'designer.field.relatedList.parentFallback': 'parent',
   'designer.field.relatedList.filter': 'Related list filter',
   'designer.field.relatedList.filterHelp': 'Only child records matching these conditions are listed, on top of the match on the parent record; the tab count matches the list.',
   'designer.field.relatedList.filterAdvanced': 'This filter uses nested or OR conditions the builder cannot show; it is kept exactly as stored.',
@@ -2615,7 +2614,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.data.readOnlyPackage': 'This package is read-only — switch to or create a writable package to add objects',
   'engine.studio.data.firstObjectTitle': 'Start with your first object',
   'engine.studio.data.firstObjectHint':
-    'Objects are your app’s data foundation (e.g. “Orders”, “Customers”). Create one below; then design its fields, forms, and automations, and publish once at the end.',
+    'Objects are your app’s data foundation (e.g. “Orders”, “Customers”). Create one below; then design its fields, forms, and automations. Each Save is live at once.',
   'engine.studio.data.tab.records': 'Records',
   'engine.studio.data.tab.form': 'Form',
   'engine.studio.data.tab.rules': 'Validations',
@@ -2745,6 +2744,8 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.auto.disableTitle': 'Disable this automation. It takes effect at once.',
   'engine.studio.auto.enabledToast': 'Switched on, live now',
   'engine.studio.auto.disabledToast': 'Switched off, live now',
+  // objectstack#36742 — a new flow is published but born switched off: the create toast says so.
+  'engine.studio.auto.createdOff': 'Created: {name} (switched off; it runs once you switch it on)',
   'engine.studio.auto.newTitle': 'New automation',
   'engine.studio.auto.none': 'No automations yet — click “+” above to create one',
   'engine.studio.auto.emptyMain': 'No automations in this package yet.',
@@ -3748,6 +3749,8 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.rules.transitions': 'Allowed transitions (from → next states)',
   'engine.studio.rules.transitionFrom': 'From state',
   'engine.studio.rules.transitionTo': 'Next states (comma-separated)',
+  'engine.studio.rules.transitionClearable': 'May be cleared',
+  'engine.studio.rules.transitionClearableHint': 'Lets a user clear the field while the record is in this state',
   'engine.studio.rules.addTransition': 'Add transition',
   'engine.studio.rules.jsonSchema': 'JSON Schema',
   'engine.studio.rules.invalidJson': 'Invalid JSON',

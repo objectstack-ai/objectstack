@@ -290,6 +290,7 @@ import {
   useRegisteredMetadataInspectorTypes,
 } from '../metadata-admin/inspector-registry.js';
 import { useRegisteredMetadataDefaultInspector } from '../metadata-admin/default-inspector-registry.js';
+import type { FormViewSpec } from '../metadata-admin/form-spec.js';
 import { getMetadataResource } from '../metadata-admin/registry.js';
 import { useMetadataClient, useMetadataTypes } from '../metadata-admin/useMetadata.js';
 // objectui#11773 — every draft save of an existing item sends the version its buffer was built on.
@@ -1745,8 +1746,9 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
                 </button>
               )}
               {/* objectstack#36511 — Changes and Publish are for drafts, which
-                  only the copilot leaves now: drawn only while one is pending,
-                  at the left of Cancel and Save. */}
+                  the copilot and the editors still on drafts (the Interfaces
+                  pillar, the Metadata area) leave: drawn only while one is
+                  pending, at the left of Cancel and Save. */}
               {hasPending && (
                 <>
                 {/* objectui#12459 — the pending count is a pill, not "· N" text. */}
@@ -5627,6 +5629,13 @@ export function DataPillar({
     for (const e of metaTypes) idx[e.type] = e.schema;
     return idx;
   }, [metaTypes]);
+  // objectstack#35650 — the served form layouts beside them, so a panel's
+  // curated inspector draws a row the server declares a face for with it.
+  const typeForms = React.useMemo(() => {
+    const idx: Record<string, FormViewSpec | undefined> = {};
+    for (const e of metaTypes) idx[e.type] = e.form;
+    return idx;
+  }, [metaTypes]);
   // Below the mobile breakpoint the Objects rail overlays the canvas instead
   // of a permanent 208px column (which otherwise squeezed the grid/form
   // canvas down to almost nothing on phones) — closed by default, toggled by
@@ -7821,6 +7830,7 @@ export function DataPillar({
                     disabled={readOnly}
                     focus={actionFocus}
                     actionSchema={typeSchemas.action}
+                    actionForm={typeForms.action}
                     onCelVerdictsChange={reportPanelVerdicts}
                     // objectstack#30088 — a base object's new actions are items of the pair.
                     pair={pairDoor}
@@ -8863,6 +8873,10 @@ export function AutomationsPillar({
         }
         const item: Surface = target === null ? { type: 'flow', name, label } : { type: 'flow', name, label, addedIn: target };
         setFlows((fs) => [...fs.filter((f) => f.name !== name), item]);
+        // objectstack#36742 — the engine's row for the new flow is read, as
+        // after a Save: the snapshot held was taken before the flow existed,
+        // and its missing row read as 「未发布草稿」 over a published flow.
+        setStatusNonce((n) => n + 1);
         // objectstack#28572 — the rail reads again after the save, so the
         // pair's list it reads holds the new flow.
         if (target !== null) setFlowListNonce((n) => n + 1);
@@ -8871,7 +8885,9 @@ export function AutomationsPillar({
         setCurrent(item);
         setHasDraft(false);
         setCreating(false);
-        toast.success(tFormat('engine.studio.save.done', locale, { items: label }), { id: STUDIO_SAVE_TOAST_ID });
+        // objectstack#36742 — its own words: the flow is published, but born
+        // switched off, so 「已保存并生效」 would promise a run it will not do.
+        toast.success(tFormat('engine.studio.auto.createdOff', locale, { name: label }), { id: STUDIO_SAVE_TOAST_ID });
       } catch (e) {
         // Shown in the create dialog, which prints the message only: kept whole.
         setError(plainRefusal(e));
