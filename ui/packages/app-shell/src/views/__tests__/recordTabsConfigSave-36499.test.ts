@@ -11,11 +11,10 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const emitMetadataRefresh = vi.hoisted(() => vi.fn());
-vi.mock('../../assistant/assistantBus', async (importOriginal) => ({
-  ...(await importOriginal<Record<string, unknown>>()),
-  emitMetadataRefresh,
-}));
+// The announcement is a door, not a module mock: the `unit` project runs
+// with `isolate: false`, where a module another file loaded first keeps its
+// real binding.
+const emitMetadataRefresh = vi.fn();
 
 import { recordTabsCatalog, type RecordTabsDraft } from '../recordTabsConfig';
 import { resolveRecordTabsSaveTarget, saveRecordTabs, type RecordTabsSaveDoors } from '../recordTabsConfigSave';
@@ -60,6 +59,7 @@ function doors(opts: { writable?: boolean; listed?: boolean; save?: () => Promis
         return {};
       },
     },
+    refreshed: emitMetadataRefresh,
   };
   return { d, calls };
 }

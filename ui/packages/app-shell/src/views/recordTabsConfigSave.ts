@@ -48,6 +48,8 @@ export interface RecordTabsSaveDoors {
     publish: (type: string, name: string, options: { packageId?: string }) => Promise<unknown>;
     reset: (type: string, name: string, options: Record<string, unknown>) => Promise<unknown>;
   };
+  /** Announces the object changed, so the console reads it again (`emitMetadataRefresh`). */
+  readonly refreshed: () => void;
 }
 
 /** The sentences a refused save is said with, in the viewer's language. */
@@ -126,15 +128,15 @@ export async function saveRecordTabs(
     } catch (discardErr) {
       console.error('[record-tabs] a refused publish left the object draft pending:', discardErr);
     }
-    emitMetadataRefresh();
+    doors.refreshed();
     throw err;
   }
-  emitMetadataRefresh();
+  doors.refreshed();
 }
 
 /** The console's doors, around `client` (`useMetadataClient()`). */
 export function consoleRecordTabsDoors(client: RecordTabsSaveDoors['client']): RecordTabsSaveDoors {
-  return { listPackages: fetchListedPackageManifests, client };
+  return { listPackages: fetchListedPackageManifests, client, refreshed: emitMetadataRefresh };
 }
 
 /**
