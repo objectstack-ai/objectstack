@@ -2350,7 +2350,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.data.readOnlyPackage': '此包为只读——请切换到或新建一个可写的包后再添加对象',
   'engine.studio.data.firstObjectTitle': '从第一个对象开始',
   'engine.studio.data.firstObjectHint':
-    '对象是应用的数据基座(如「订单」「客户」)。点击下方按钮创建一个;之后为它设计字段、表单与自动化,最后一次发布。',
+    '对象是应用的数据基座(如「订单」「客户」)。点击下方按钮创建一个;之后为它设计字段、表单与自动化,每次保存即生效。',
   'engine.studio.data.tab.records': '记录',
   'engine.studio.data.tab.form': '表单',
   'engine.studio.data.tab.rules': '验证',
@@ -2452,6 +2452,8 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.auto.disableTitle': '停用此自动化，立即生效',
   'engine.studio.auto.enabledToast': '已启用，立即生效',
   'engine.studio.auto.disabledToast': '已停用，立即生效',
+  // objectstack#36742 — a new flow is published but born switched off: the create toast says so.
+  'engine.studio.auto.createdOff': '已创建：{name}（已停用，启用后才会运行）',
   'engine.studio.auto.newTitle': '新建自动化',
   'engine.studio.auto.none': '还没有自动化 — 点上方的「+」新建',
   'engine.studio.auto.emptyMain': '这个软件包还没有自动化。',
