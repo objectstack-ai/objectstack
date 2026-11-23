@@ -2606,12 +2606,13 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
   // what draws the face.
   const pendingActionKeysRef = React.useRef<Set<string>>(new Set());
   const [pendingActionKeys, setPendingActionKeys] = React.useState<ReadonlySet<string>>(() => new Set());
-  const runHeaderAction = React.useCallback((action: any, key: string) => {
-    if (pendingActionKeysRef.current.has(key)) return;
+  /** Runs a header action; answers whether it is still running (a promise it returned is pending). */
+  const runHeaderAction = React.useCallback((action: any, key: string): boolean => {
+    if (pendingActionKeysRef.current.has(key)) return true;
     const outcome: unknown = typeof action.onClick === 'function'
       ? action.onClick()
       : dispatchHeaderAction(action);
-    if (!outcome || typeof (outcome as PromiseLike<unknown>).then !== 'function') return;
+    if (!outcome || typeof (outcome as PromiseLike<unknown>).then !== 'function') return false;
     pendingActionKeysRef.current.add(key);
     setPendingActionKeys(new Set(pendingActionKeysRef.current));
     const settle = () => {
@@ -2623,6 +2624,7 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
       // A failed click stays loud: the button is the promise's last holder.
       console.error(`[page:header] action "${String(action?.name ?? action?.id ?? key)}" failed`, err);
     });
+    return true;
   }, [dispatchHeaderAction]);
 
   const hasTrailing = trailing !== null && trailing !== undefined && trailing !== false;
@@ -3025,8 +3027,11 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
           aria-labelledby={disabledReason ? labelId : undefined}
           aria-describedby={disabledReason ? reasonId : undefined}
           onSelect={(e) => {
-            e.preventDefault();
-            runHeaderAction(action, itemKey);
+            // A running entry keeps the menu open, its row busy, until it
+            // settles. One that finished on the click (an in-place change
+            // of the page, objectstack#36499) closes the menu, as Refresh
+            // does: kept open, it stayed over the page it had just changed.
+            if (runHeaderAction(action, itemKey)) e.preventDefault();
           }}
           className={cn(
             'gap-2',

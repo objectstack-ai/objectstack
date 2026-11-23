@@ -28,6 +28,18 @@
  * neither reported nor changed; a changed literal stores the new value; a row
  * stored before is not rewritten; and with no auto-reconcile the two entries
  * are reported `safe` and applied by the explicit apply door.
+ *
+ * [#36596] §3, one cell per dialect: the same removal on a NOT NULL column.
+ * #36245 first shipped a MySQL `DROP DEFAULT`, which on MySQL 8 leaves even a
+ * NULLABLE column with no default at all, so §2's unset insert was refused
+ * ("Field 'digest' doesn't have a default value", ER 1364) — MariaDB 10.11,
+ * where it was measured, stores NULL. §2 now holds on MySQL 8 as it stands. On
+ * a NOT NULL column the drop never travels alone, since an omitting insert
+ * would then be refused: where the declaration does not hold the column NOT
+ * NULL it is paired with the `relax_not_null` (`needs_confirm`, both applied by
+ * the explicit apply door, and by the publish when the field says `storage:
+ * { notNull: false }` in words), after which an unset insert stores NULL;
+ * where it does, the column is left alone and the entry reported `destructive`.
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -196,6 +208,128 @@ function measure(cell: DialectCell): void {
       expect(Number(repaired.batch)).toBe(25);
       expect(repaired.channel).toBe('inbox');
       expect(await second.detectManagedDrift([SECOND])).toEqual([]);
+    });
+  });
+
+  describe(`#36596 §3 — a stale literal DEFAULT on a NOT NULL column (${cell.label})`, () => {
+    const NN = 'os36596_pref';
+    const open: SqlDriver[] = [];
+    let dir: string | undefined;
+
+    const config = (): Record<string, any> => {
+      if (cell.id !== 'sqlite') return cell.config();
+      dir ??= mkdtempSync(join(tmpdir(), 'os36596-'));
+      return { ...cell.config(), connection: { filename: join(dir, 'db.sqlite') } };
+    };
+
+    const boot = async (obj: any, opts: Record<string, any> = {}): Promise<SqlDriver> => {
+      const driver = new SqlDriver({ ...config(), ...opts } as any);
+      (driver as any).logger = quietLogger();
+      open.push(driver);
+      await driver.initObjects([obj]);
+      return driver;
+    };
+
+    const insertUnset = async (driver: SqlDriver, id: string) => {
+      await driver.create(NN, { id, title: id }, { bypassTenantAudit: true } as any);
+      return (driver as any).knex(NN).where('id', id).first();
+    };
+
+    /** The first release: `code` is NOT NULL, with a literal default. */
+    const FIRST_NN = {
+      name: NN,
+      fields: {
+        title: { type: 'string' },
+        code: { type: 'string', defaultValue: 'none', storage: { notNull: true } },
+      },
+    } as any;
+    const second = (code: Record<string, any>) => ({ name: NN, fields: { title: { type: 'string' }, code: { type: 'string', ...code } } }) as any;
+
+    /** Create the first release's table, then boot the second declaration over it. */
+    const upgrade = async (next: any, opts: Record<string, any> = {}): Promise<SqlDriver> => {
+      const first = await boot(FIRST_NN);
+      await (first as any).knex.schema.dropTableIfExists(NN);
+      await first.initObjects([FIRST_NN]);
+      await first.disconnect();
+      open.splice(open.indexOf(first), 1);
+      return boot(next, opts);
+    };
+
+    const nullable = async (driver: SqlDriver): Promise<boolean> =>
+      (await (driver as any).knex(NN).columnInfo())?.code?.nullable === true;
+
+    afterEach(async () => {
+      const last = open[open.length - 1];
+      if (last) await (last as any).knex.schema.dropTableIfExists(NN);
+      for (const d of open.splice(0)) await d.disconnect();
+      if (dir) rmSync(dir, { recursive: true, force: true });
+      dir = undefined;
+    });
+
+    it('no default, no storage declaration, not required: the drop is paired with the relax and an unset insert then stores NULL', async () => {
+      const next = second({});
+      const driver = await upgrade(next, { autoMigrate: 'safe', schemaMode: 'managed' });
+
+      const drift = await driver.detectManagedDrift([next]);
+      expect(drift.map((d) => [d.column, d.op.type, d.category]).sort()).toEqual([
+        ['code', 'drop_column_default', 'needs_confirm'],
+        ['code', 'relax_not_null', 'needs_confirm'],
+      ]);
+      // Dev auto-reconcile applies neither (ADR-0113 D5): the column is left as
+      // it was, so an unset insert still stores the old default, never refused.
+      expect(await nullable(driver)).toBe(false);
+      expect((await insertUnset(driver, 'unrepaired')).code).toBe('none');
+
+      const { applied, skipped } = await driver.applyMigrationEntries(drift, { allowDestructive: false });
+      expect(skipped).toEqual([]);
+      expect(applied).toHaveLength(2);
+      expect(await nullable(driver)).toBe(true);
+      expect((await insertUnset(driver, 'repaired')).code).toBeNull();
+      expect(await driver.detectManagedDrift([next])).toEqual([]);
+      // The row stored before keeps what it holds.
+      expect((await (driver as any).knex(NN).where('id', 'unrepaired').first()).code).toBe('none');
+    });
+
+    it('`storage: { notNull: false }` declared: the publish applies the relax and the drop together', async () => {
+      const next = second({ storage: { notNull: false } });
+      const driver = await upgrade(next);
+      expect((await insertUnset(driver, 'unrepaired')).code).toBe('none');
+
+      const { applied, skipped } = await driver.applyPublishedColumnChanges(next);
+      expect(skipped).toEqual([]);
+      expect(applied.map((d) => d.op.type).sort()).toEqual(['drop_column_default', 'relax_not_null']);
+      expect((await insertUnset(driver, 'repaired')).code).toBeNull();
+      expect(await driver.detectManagedDrift([next])).toEqual([]);
+    });
+
+    it('a declaration that still holds the column NOT NULL: the column is left alone and the entry reported `destructive`', async () => {
+      const next = second({ storage: { notNull: true } });
+      const driver = await upgrade(next, { autoMigrate: 'safe', schemaMode: 'managed' });
+
+      const drift = await driver.detectManagedDrift([next]);
+      expect(drift.map((d) => [d.column, d.op.type, d.category])).toEqual([['code', 'drop_column_default', 'destructive']]);
+      expect(drift[0].message).toMatch(/Left as it is/);
+
+      // Neither the boot, the publish nor the non-destructive apply door touches it.
+      expect((await driver.applyPublishedColumnChanges(next)).applied).toEqual([]);
+      const { applied } = await driver.applyMigrationEntries(drift, { allowDestructive: false });
+      expect(applied).toEqual([]);
+      expect(await nullable(driver)).toBe(false);
+      expect((await insertUnset(driver, 'kept')).code).toBe('none');
+    });
+
+    it('a `required` field over the NOT NULL column (no storage declaration): left alone and reported `destructive`', async () => {
+      const next = second({ required: true });
+      const driver = await upgrade(next);
+
+      const drift = await driver.detectManagedDrift([next]);
+      // The relax stays silent for a legacy `required` field (ADR-0113); the
+      // stale default is reported, never applied by a non-destructive door.
+      expect(drift.map((d) => [d.column, d.op.type, d.category])).toEqual([['code', 'drop_column_default', 'destructive']]);
+      expect((await driver.applyMigrationEntries(drift, { allowDestructive: false })).applied).toEqual([]);
+      expect(await nullable(driver)).toBe(false);
+      await driver.create(NN, { id: 'r', title: 'r', code: 'given' }, { bypassTenantAudit: true } as any);
+      expect((await (driver as any).knex(NN).where('id', 'r').first()).code).toBe('given');
     });
   });
 }

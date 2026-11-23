@@ -15,8 +15,8 @@
  *
  * Pinned:
  *  - an object with a default internal form view: the field groups are the
- *    canvas, the chip says so, Add group saves the object's `fieldGroups` and
- *    writes no view; Preview shows the field groups, not the view's sections;
+ *    canvas, the chip says so, Add group then the top bar's Save
+ *    (objectstack#36511) saves the object's `fieldGroups` and writes no view; Preview shows the field groups, not the view's sections;
  *  - CONTROL: no form view: the same canvas and the same save.
  */
 
@@ -109,6 +109,7 @@ const mockClient = {
     return pending ? { item: pending.served, version: 'v7' } : null;
   }),
   get: vi.fn(async () => null),
+  publish: vi.fn(async () => ({})), reset: vi.fn(async () => ({})),
   save: vi.fn(async () => ({ ok: true, version: 'v2', state: 'draft' })),
 };
 
@@ -140,6 +141,7 @@ vi.mock('@object-ui/plugin-view', async (importOriginal) => {
 // warmed here so its first load is paid at import, not inside a test's clock.
 import '@objectstack/lint';
 import { DataPillar, type StudioBaseCustomization } from './StudioDesignSurface';
+import { StudioSaveHarness, pressStudioSave } from './__tests__/studioSaveHarness';
 import { t } from '../metadata-admin/i18n';
 
 const FORM = t('engine.studio.data.tab.form', 'en');
@@ -160,9 +162,9 @@ afterEach(() => {
 
 async function openForm(props: { readOnly?: boolean; customization?: StudioBaseCustomization } = {}) {
   render(
-    <MemoryRouter initialEntries={[`/studio/${PKG}/data`]}>
+    <StudioSaveHarness><MemoryRouter initialEntries={[`/studio/${PKG}/data`]}>
       <DataPillar packageId={PKG} {...props} />
-    </MemoryRouter>,
+    </MemoryRouter></StudioSaveHarness>,
   );
   await waitFor(() => expect(screen.getByTestId('records-panel')).toBeInTheDocument(), { timeout: 8000 });
   await userEvent.click(screen.getAllByRole('button', { name: FORM })[0]);
@@ -186,6 +188,7 @@ describe('the Form tab lays out by field groups, internal form or not (objectsta
     expect(screen.queryByTestId('form-layout-flow')).toBeNull();
 
     await userEvent.click(screen.getByTestId('form-designer-add-section-footer'));
+    await pressStudioSave();
     await waitFor(() => expect(saves().length).toBe(1), { timeout: 4000 });
     const [type, name, body] = saves()[0];
     expect([type, name]).toEqual(['object', OBJECT]);
@@ -219,6 +222,7 @@ describe('the Form tab lays out by field groups, internal form or not (objectsta
     expect(screen.getByText(UNGROUPED)).toBeInTheDocument();
 
     await userEvent.click(screen.getByTestId('form-designer-add-section-footer'));
+    await pressStudioSave();
     await waitFor(() => expect(saves().length).toBe(1), { timeout: 4000 });
     const [type, name, body] = saves()[0];
     expect([type, name]).toEqual(['object', OBJECT]);

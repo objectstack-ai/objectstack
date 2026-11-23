@@ -13,7 +13,7 @@
  * Now the pillar asks the same guard BEFORE sending: such an edit stays dirty
  * and unsent, the inspector hints the input it needs, a neutral line names it
  * (with "Show me" when that input is not the one open), and completing it lets
- * the next autosave go. Errors stay for what the author finished: a server
+ * the next Save go. Errors stay for what the author finished: a server
  * refusal of a complete body still shows objectui#11785's red strip.
  *
  * The client is a real `MetadataClient`, so the door that runs the guard is the
@@ -24,7 +24,7 @@
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, fireEvent, cleanup, act, waitFor, within } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { MetadataClient } from '@object-ui/data-objectstack';
@@ -41,6 +41,8 @@ const puts: Array<Record<string, unknown>> = [];
 let refuseWith: Record<string, unknown> | null = null;
 
 const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+  // objectstack#36511 — the Save's own publish of the item, and a refused one's discard.
+  if (init?.method === 'POST' || init?.method === 'DELETE') return new Response('{"success":true}', { status: 200 });
   if (init?.method === 'PUT') {
     puts.push(JSON.parse(String(init.body)) as Record<string, unknown>);
     if (refuseWith) {
@@ -77,7 +79,10 @@ vi.mock('@object-ui/react', async (importOriginal) => {
   return { ...mod, useAdapter: () => dataSource };
 });
 
+// The source reaches a dynamic import of it: its first load is paid at collection (`check:test-source-alias`).
+import '@objectstack/lint';
 import { DataPillar } from './StudioDesignSurface';
+import { StudioSaveHarness, pressStudioSave } from './__tests__/studioSaveHarness';
 import { addFieldFromFormToolbar } from './__tests__/dataPillarAddField';
 import { createEmptyDataSource } from './__tests__/emptyDataSource';
 import { registerBuiltinInspectors } from '../metadata-admin/inspectors';
@@ -92,13 +97,6 @@ afterEach(() => {
   refuseWith = null;
   fetchImpl.mockClear();
 });
-
-/** Past the autosave's 1.5 s debounce. */
-async function outlastDebounce(): Promise<void> {
-  await act(async () => {
-    await new Promise((r) => setTimeout(r, 2300));
-  });
-}
 
 /** The inspector control under a visible label. */
 function controlUnder(label: string): HTMLElement {
@@ -117,9 +115,9 @@ function lastSentField(name: string): Record<string, unknown> | undefined {
 /** Mount, add a field on the Form tab, and retype it; returns its API name and label. */
 async function addFieldAs(typeOption: RegExp): Promise<{ name: string; label: string }> {
   render(
-    <MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
+    <StudioSaveHarness><MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
       <DataPillar packageId="com.example.showcase" />
-    </MemoryRouter>,
+    </MemoryRouter></StudioSaveHarness>,
   );
   fireEvent.click(await screen.findByRole('button', { name: 'Form' }));
   await addFieldFromFormToolbar();
@@ -132,12 +130,12 @@ async function addFieldAs(typeOption: RegExp): Promise<{ name: string; label: st
   return { name, label };
 }
 
-const heldLine = (clause: string) => tFormat('engine.studio.held.line', 'en', { clause });
+const heldLine = (clause: string) => tFormat('engine.studio.held.lineExplicit', 'en', { clause });
 
 describe('Studio data page — Picklist is held until it has an option (objectui#11786)', () => {
   it('sends no save and shows no red strip; the options editor carries the hint; one option lets the save go', async () => {
     const { name, label } = await addFieldAs(/^Picklist$/);
-    await outlastDebounce();
+    await pressStudioSave();
 
     expect(puts, 'an incomplete Picklist is not sent').toEqual([]);
     expect(screen.queryByTestId('studio-refusal'), 'no red strip on the normal path').toBeNull();
@@ -150,6 +148,7 @@ describe('Studio data page — Picklist is held until it has an option (objectui
     expect(screen.getByTestId('field-held-hint')).toHaveTextContent(t('designer.field.hint.addOption', 'en'));
 
     fireEvent.change(screen.getByPlaceholderText(t('designer.field.optValue', 'en')), { target: { value: 'open' } });
+    await pressStudioSave();
     await waitFor(() => expect(puts.length).toBe(1), { timeout: 4000 });
     expect(lastSentField(name)).toEqual(
       expect.objectContaining({ type: 'select', options: [expect.objectContaining({ value: 'open' })] }),
@@ -161,7 +160,7 @@ describe('Studio data page — Picklist is held until it has an option (objectui
 
   it('"Show me" on the line reopens the held field once its inspector is closed', async () => {
     const { name } = await addFieldAs(/^Picklist$/);
-    await outlastDebounce();
+    await pressStudioSave();
 
     const railHeader = screen.getByText(t('engine.studio.data.fieldProps', 'en')).closest('header') as HTMLElement;
     fireEvent.click(within(railHeader).getByRole('button', { name: t('engine.studio.close', 'en') }));
@@ -178,7 +177,7 @@ describe('Studio data page — Picklist is held until it has an option (objectui
 describe('Studio data page — Lookup is held until it has a target (objectui#11786)', () => {
   it('sends no save and shows no red strip; the related-object picker carries the hint; a target lets the save go', async () => {
     const { name, label } = await addFieldAs(/^Lookup$/);
-    await outlastDebounce();
+    await pressStudioSave();
 
     expect(puts, 'a Lookup with no target is not sent').toEqual([]);
     expect(screen.queryByTestId('studio-refusal')).toBeNull();
@@ -192,6 +191,7 @@ describe('Studio data page — Lookup is held until it has a target (objectui#11
     await userEvent.click(target);
     await userEvent.type(target, 'showcase_task');
     await userEvent.keyboard('{Enter}');
+    await pressStudioSave();
     await waitFor(() => expect(puts.length).toBe(1), { timeout: 4000 });
     expect(lastSentField(name)).toEqual(expect.objectContaining({ type: 'lookup', reference: 'showcase_task' }));
     await waitFor(() => expect(screen.queryByTestId('studio-held')).toBeNull());
@@ -200,14 +200,15 @@ describe('Studio data page — Lookup is held until it has a target (objectui#11
 });
 
 describe('Studio data page — complete bodies are sent as before (objectui#11786 controls)', () => {
-  it('a complete edit autosaves, with no held line', async () => {
+  it('a complete edit is sent by Save, with no held line', async () => {
     render(
-      <MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
+      <StudioSaveHarness><MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
         <DataPillar packageId="com.example.showcase" />
-      </MemoryRouter>,
+      </MemoryRouter></StudioSaveHarness>,
     );
     fireEvent.click(await screen.findByRole('button', { name: 'Form' }));
     await addFieldFromFormToolbar();
+    await pressStudioSave();
     await waitFor(() => expect(puts.length).toBe(1), { timeout: 4000 });
     expect(screen.queryByTestId('studio-held')).toBeNull();
   });
@@ -225,12 +226,13 @@ describe('Studio data page — complete bodies are sent as before (objectui#1178
       },
     };
     render(
-      <MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
+      <StudioSaveHarness><MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
         <DataPillar packageId="com.example.showcase" />
-      </MemoryRouter>,
+      </MemoryRouter></StudioSaveHarness>,
     );
     fireEvent.click(await screen.findByRole('button', { name: 'Form' }));
     await addFieldFromFormToolbar();
+    await pressStudioSave();
     const strip = await screen.findByTestId('studio-refusal', undefined, { timeout: 4000 });
     expect(puts.length).toBe(1);
     expect(within(strip).getByTestId('studio-refusal-message')).toHaveTextContent(
