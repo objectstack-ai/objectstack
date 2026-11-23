@@ -185,6 +185,23 @@ describe('ObjectSettingsPanel — the controlled_by_parent refusal speaks the au
       { field: '「Account」' },
     ],
     [
+      'two required lookups only',
+      {
+        account: { type: 'lookup', label: 'Account', reference: 'crm_account', required: true },
+        contact: { type: 'lookup', reference: 'crm_contact', required: true },
+      },
+      'engine.studio.settings.cbpRefusalRequiredLookupsOnly',
+      { fields: '“Account”, “contact”' },
+      { fields: '「Account」、「contact」' },
+    ],
+    [
+      'a master that writes no required, marked readonly (the parse reads it as the optional master)',
+      { account: { type: 'master_detail', label: 'Account', reference: 'crm_account', readonly: true } },
+      'engine.studio.settings.cbpRefusalMasterNotWritable',
+      { field: '“Account”' },
+      { field: '「Account」' },
+    ],
+    [
       'a required master marked system',
       { account: { type: 'master_detail', reference: 'crm_account', required: true, system: true } },
       'engine.studio.settings.cbpRefusalMasterNotWritable',

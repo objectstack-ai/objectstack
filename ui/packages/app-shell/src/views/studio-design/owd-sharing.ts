@@ -166,8 +166,16 @@ function refusalShape(params: unknown): ControlledByParentMasterShape | undefine
 }
 
 /**
- * The fields a refusal of this shape names, read off the same probe the spec
- * judged. It selects what to show; the verdict and the shape stay the spec's.
+ * The fields a refusal of this shape names, read off the probe the spec judged.
+ * It selects what to show; the verdict and the shape stay the spec's.
+ *
+ * The master of a `master-not-writable` refusal is read the way the PARSE read
+ * it, not off the raw probe: the one `master_detail` declared `required: true`,
+ * else the object's only `master_detail`. On the parsed map an omitted
+ * `required` has already defaulted to `false`, so the only `master_detail` is
+ * the optional master there (the spec module's header), while the raw probe
+ * still has `required` unwritten and `controlledByParentMasterOf` would name no
+ * master on it.
  */
 function refusalFields(
   shape: ControlledByParentMasterShape,
@@ -184,8 +192,9 @@ function refusalFields(
     case 'required-lookup-only':
       return entries.filter((e) => e.def.type === 'lookup' && probe[e.name]?.required === true);
     case 'master-not-writable': {
-      const master = controlledByParentMasterOf(probe);
-      return master ? entries.filter((e) => e.name === master.field) : [];
+      const required = masterDetails.filter((e) => probe[e.name]?.required === true);
+      if (required.length === 1) return required;
+      return masterDetails.length === 1 ? masterDetails : [];
     }
     case 'no-master':
       return [];
@@ -209,9 +218,10 @@ function refusalFields(
  * probe is needed because a whole draft can carry an issue elsewhere (an
  * unknown key, a malformed field) that stops `ObjectSchema` before the master
  * check runs, and the panel would then read a refused object as accepted. Of
- * the probe's issues it keeps the custom ones at `sharingModel` (zero masters)
- * and at `fields` (two or more, or an unwritable master), the two paths the
- * spec reports this refusal at.
+ * the probe's issues it keeps the one whose `params.code` is the spec's code;
+ * when none carries it, the custom one at `sharingModel` (zero masters) or at
+ * `fields` (two or more, or an unwritable master), the two paths the spec
+ * reports this refusal at.
  */
 export function cbpMasterRefusal(objectName: unknown, fields: unknown): CbpMasterRefusal | undefined {
   const entries = readFields(fields).entries;
@@ -235,9 +245,13 @@ export function cbpMasterRefusal(objectName: unknown, fields: unknown): CbpMaste
     fields: probeFields,
   });
   if (result.success) return undefined;
-  const issue = result.error.issues.find(
-    (i) => i.code === 'custom' && i.path.length === 1 && CBP_REFUSAL_PATHS.has(String(i.path[0])),
-  );
+  // The issue carrying the spec's code; with none (a spec that stamps no
+  // code), the custom issue at one of the refusal's two paths.
+  const issue =
+    result.error.issues.find((i) => refusalShape((i as { params?: unknown }).params) !== undefined)
+    ?? result.error.issues.find(
+      (i) => i.code === 'custom' && i.path.length === 1 && CBP_REFUSAL_PATHS.has(String(i.path[0])),
+    );
   if (!issue) return undefined;
   const shape = refusalShape((issue as { params?: unknown }).params);
   return {

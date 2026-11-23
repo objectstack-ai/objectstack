@@ -191,7 +191,12 @@ function cbpRefusalText(refusal: CbpMasterRefusal, locale: SupportedLocale | str
       name: typeof e.def.label === 'string' && e.def.label ? e.def.label : e.name,
     }),
   );
-  return tFormat(CBP_REFUSAL_KEYS[refusal.shape], locale, {
+  // The en row for one required lookup speaks of one field; several take their own row.
+  const key =
+    refusal.shape === 'required-lookup-only' && names.length > 1
+      ? 'engine.studio.settings.cbpRefusalRequiredLookupsOnly'
+      : CBP_REFUSAL_KEYS[refusal.shape];
+  return tFormat(key, locale, {
     fields: names.join(t('engine.studio.settings.cbpRefusalFieldSeparator', locale)),
     field: names[0] ?? '',
   });

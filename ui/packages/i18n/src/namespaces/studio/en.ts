@@ -2421,7 +2421,10 @@ const STUDIO_EN: Record<string, string> = {
     'This object is set to “Follows its parent record”, but {fields} are all master-detail fields and none of them is required, so none of them is the parent that decides who sees its records, and saving it is refused. Keep master-detail on the one parent that decides access, and change the others to lookup fields.',
   'engine.studio.settings.cbpRefusalMasterNotRequired':
     'This object is set to “Follows its parent record”, but the master-detail field {field} does not say whether every record must have a parent, and saving it is refused. Mark {field} as required, so every record has a parent, or as not required, so a record may have none.',
+  // One required lookup; `…RequiredLookupsOnly` below is the row for several.
   'engine.studio.settings.cbpRefusalRequiredLookupOnly':
+    'This object is set to “Follows its parent record”, but it has no master-detail field, only the required lookup field {fields}, and a lookup does not pass access on from a parent, so saving it is refused. Change it into a master-detail field (its records are then deleted with the parent), or, if these records should outlive their parent, pick another sharing option.',
+  'engine.studio.settings.cbpRefusalRequiredLookupsOnly':
     'This object is set to “Follows its parent record”, but it has no master-detail field, only the required lookup fields {fields}, and a lookup does not pass access on from a parent, so saving it is refused. Change the one that points to the parent into a master-detail field (its records are then deleted with the parent), or, if these records should outlive their parent, pick another sharing option.',
   'engine.studio.settings.cbpRefusalNoMaster':
     'This object is set to “Follows its parent record”, but it has no master-detail field to follow, so saving it is refused. Add a master-detail field that points to the parent object, or, if these records stand on their own, pick another sharing option.',

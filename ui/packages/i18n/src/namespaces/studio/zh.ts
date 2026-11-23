@@ -2205,6 +2205,8 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.settings.cbpRefusalMasterNotRequired':
     '该对象设为「跟随所属的主记录」,但主从关系字段 {field} 没有说明每条记录是否必须有主记录,因此无法保存。请把 {field} 设为必填(每条记录都有主记录)或非必填(记录可以没有主记录)。',
   'engine.studio.settings.cbpRefusalRequiredLookupOnly':
+    '该对象设为「跟随所属的主记录」,但它没有主从关系字段,只有必填的查找关系字段 {fields};查找关系不会把主记录的访问权限传下来,因此无法保存。请把该字段改为主从关系(删除主记录时会一并删除这些记录);如果这些记录应在主记录删除后保留,请改选其他共享方式。',
+  'engine.studio.settings.cbpRefusalRequiredLookupsOnly':
     '该对象设为「跟随所属的主记录」,但它没有主从关系字段,只有必填的查找关系字段 {fields};查找关系不会把主记录的访问权限传下来,因此无法保存。请把指向主对象的那个字段改为主从关系(删除主记录时会一并删除这些记录);如果这些记录应在主记录删除后保留,请改选其他共享方式。',
   'engine.studio.settings.cbpRefusalNoMaster':
     '该对象设为「跟随所属的主记录」,但它没有可跟随的主从关系字段,因此无法保存。请添加一个指向主对象的主从关系字段;如果这些记录各自独立,请改选其他共享方式。',

@@ -252,6 +252,13 @@ describe('owd-sharing — cbpMasterRefusal reads the spec\'s code and shape off 
       expect(r?.shape, flag).toBe('master-not-writable');
       expect(names(r), flag).toEqual(['account']);
     }
+    // A master that writes no `required`: the parse defaults it to `false` and
+    // judges it the optional master, so the refusal still names it.
+    for (const flag of ['readonly', 'system'] as const) {
+      const r = cbpMasterRefusal('crm_case', { account: { type: 'master_detail', reference: 'crm_account', [flag]: true } });
+      expect(r?.shape, `omitted required, ${flag}`).toBe('master-not-writable');
+      expect(names(r), `omitted required, ${flag}`).toEqual(['account']);
+    }
     // `false` is no refusal: the flag is carried as written, not as present.
     expect(cbpMasterRefusal('crm_case', {
       account: { type: 'master_detail', reference: 'crm_account', required: true, readonly: false, system: false },
