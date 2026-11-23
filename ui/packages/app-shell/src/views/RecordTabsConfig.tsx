@@ -79,6 +79,22 @@ const RecordTabsConfigIo = React.lazy(() => import('./recordTabsConfigIo.js'));
 /** The record's 「…」 entry's name: the host action it is drawn as. */
 export const RECORD_TABS_CONFIG_ACTION = 'sys_configure_tabs';
 
+/**
+ * Closes the 「…」 menu the entry was chosen from. The record header's menu
+ * keeps itself open on a choice (`action:menu` prevents Radix's close on
+ * select: an action that opens a dialog or reloads the page takes the menu
+ * away itself), and the edit state changes the page in place, so the menu
+ * would stay open over the editor. The Escape the menu's own dismiss layer
+ * listens for, sent from the focused item; nothing else on the record page
+ * acts on it (measured in the booted console).
+ */
+export function dismissFocusedMenu(): void {
+  if (typeof document === 'undefined') return;
+  const from = document.activeElement;
+  if (!from?.closest('[role="menu"]')) return;
+  from.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+}
+
 /** The package an object is kept in, as served (`_packageId`), or `null`. */
 export function objectPackageId(objectDef: ObjectLike | null | undefined): string | null {
   const id = objectDef?._packageId;

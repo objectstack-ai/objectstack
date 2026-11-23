@@ -31,7 +31,7 @@ import { SkeletonDetail } from '../skeletons/index.js';
 import { ManagedByBadge, useManagedByNote } from '../components/ManagedByBadge.js';
 import { isSetupAppSegment } from '../console/setupApp.js';
 import { authoredBodyTableIds, deriveRelatedLists } from '../utils/deriveRelatedLists.js';
-import { RECORD_TABS_CONFIG_ACTION, useRecordTabsConfig } from './RecordTabsConfig.js';
+import { RECORD_TABS_CONFIG_ACTION, dismissFocusedMenu, useRecordTabsConfig } from './RecordTabsConfig.js';
 import { pruneUnregisteredRecordPageObjects, recordPageChildObjects } from './recordPageChildObjects.js';
 import { stripDiscussionNodes, hasExplicitAttachments, hasExplicitApprovals } from '../utils/pageSchemaIntrospect.js';
 import { ActionConfirmDialog, type ConfirmDialogState } from './ActionConfirmDialog.js';
@@ -5344,7 +5344,10 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         variant: 'outline',
         order: 101,
         component: 'action:menu',
-        onClick: () => tabsConfig.enter(),
+        onClick: () => {
+          dismissFocusedMenu();
+          tabsConfig.enter();
+        },
       } as any);
     }
     // The record's favorites control is the star beside the record's name
