@@ -292,7 +292,7 @@ import { useRegisteredMetadataDefaultInspector } from '../metadata-admin/default
 import { getMetadataResource } from '../metadata-admin/registry.js';
 import { useMetadataClient, useMetadataTypes } from '../metadata-admin/useMetadata.js';
 // objectui#11773 — every draft save of an existing item sends the version its buffer was built on.
-import { readDraftForSave, useDraftSaveGuard } from '../metadata-admin/DraftConflictDialog.js';
+import { publishedPinOf, readDraftForSave, useDraftSaveGuard } from '../metadata-admin/DraftConflictDialog.js';
 import {
   authoredObjectBuffer,
   authoredPublishedObject,
@@ -6012,6 +6012,9 @@ export function DataPillar({
   const {
     save: saveObjDraft,
     recordRead: recordObjRead,
+    // objectstack#36601 — and the published row the buffer was loaded at, for the Save's publish.
+    recordPublished: recordObjPublished,
+    publish: publishObj,
     dialog: objConflictDialog,
   } = useDraftSaveGuard(client, reloadObjDraft);
   // objectstack#28575 — the extension buffer's own guard, pinned by its draft read at the pair.
@@ -6302,6 +6305,8 @@ export function DataPillar({
         setObjDraftChanges(draftBody ? readDraftChanges(draftRead.answer) : null);
         // objectui#11773 — the next save is pinned to what the draft read served.
         recordObjRead('object', current.name, packageId, draftRead.pin);
+        // objectstack#36601 — …and its publish to the published row the layers served.
+        recordObjPublished('object', current.name, packageId, publishedPinOf(layRaw));
         // objectui#11272 — the buffer installed is clean, as every pillar's
         // is: an edit a period began while it was another object's is dropped
         // with it, never sent as this object's.
@@ -6335,7 +6340,7 @@ export function DataPillar({
         loadedNameRef.current = null;
       }
     };
-  }, [client, current, packageId, publishNonce, objReloadNonce, objRefreshNonce, recordObjRead]);
+  }, [client, current, packageId, publishNonce, objReloadNonce, objRefreshNonce, recordObjRead, recordObjPublished]);
 
   // objectstack#28575 — the pair's extension of the open base object: its
   // pending draft at the pair, else its published row there, else a new
@@ -6699,7 +6704,10 @@ export function DataPillar({
       objStoredRef.current = draft;
       setHasDraft(true);
       setSaving('publish');
-      const live = await publishSavedItem(client, { type: 'object', name, packageId: to }, hadDraft);
+      // objectstack#36601 — pinned to the published row this buffer was loaded at.
+      const live = await publishSavedItem(client, { type: 'object', name, packageId: to }, hadDraft, publishObj);
+      // The published row moved and the author chose to reload: the load replaces the buffer.
+      if (!live.ok && 'reloaded' in live) return { kind: 'declined' };
       if (!live.ok) {
         if (live.draftDiscarded) {
           objStoredRef.current = storedBefore;
@@ -6730,7 +6738,7 @@ export function DataPillar({
     } finally {
       setSaving(false);
     }
-  }, [saveObjDraft, recordObjRead, client, current, objDraft, hasDraft, publishedFieldNames, packageId, locale]);
+  }, [saveObjDraft, recordObjRead, publishObj, client, current, objDraft, hasDraft, publishedFieldNames, packageId, locale]);
 
   // objectstack#34931 — Cancel keeps what the refused save would have lost:
   // each field a finding names goes back as the server holds it, and nothing

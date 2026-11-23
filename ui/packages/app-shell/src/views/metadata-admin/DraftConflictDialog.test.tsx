@@ -28,6 +28,7 @@ import { MetadataClient } from '@object-ui/data-objectstack';
 import {
   DraftVersionGuard,
   draftPinOf,
+  publishedPinOf,
   isDraftVersionConflict,
   isDraftReadRefused,
   readDraftForSave,
@@ -513,5 +514,110 @@ describe('DraftVersionGuard — the door\'s two 409s stay apart (objectui#11773)
     expect(isDraftVersionConflict(Object.assign(new Error('has been modified since you loaded it'), { status: 409 }))).toBe(
       false,
     );
+  });
+});
+
+describe('DraftVersionGuard — the Save\'s publish is pinned to the published row (objectstack#36601)', () => {
+  /** A publish door over one live row: `If-Match` / `If-None-Match: *` judged on it, the refusal parsed by the real client. */
+  function publishDoor(live: string | null) {
+    const state = { live, sent: [] as Array<[string | null, string | null]>, events: [] as string[] };
+    const fetchImpl = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const headers = new Headers(init?.headers);
+      const ifMatch = headers.get('If-Match');
+      const ifNoneMatch = headers.get('If-None-Match');
+      state.sent.push([ifMatch, ifNoneMatch]);
+      state.events.push('publish');
+      if ((ifMatch !== null && ifMatch !== state.live) || (ifNoneMatch !== null && state.live !== null)) {
+        return json(409, {
+          error: `object/acme_task published row advanced while you held the draft. The version token sent is not the current version (current is ${state.live}).`,
+          code: 'METADATA_CONFLICT',
+          currentVersion: state.live,
+        });
+      }
+      state.live = v(100 + state.sent.length);
+      return json(200, { success: true, version: state.live, seq: 1 });
+    }) as typeof fetch;
+    return { state, client: new MetadataClient({ baseUrl: 'http://localhost:3000', fetch: fetchImpl }) };
+  }
+
+  function guardWith(...answers: DraftConflictChoice[]) {
+    const queue = [...answers];
+    const ask = vi.fn(async () => queue.shift() ?? 'cancel');
+    const reload = vi.fn();
+    const guard = new DraftVersionGuard({
+      client: () => measuredDoor().client,
+      ask,
+      reload,
+      notSaved: (c) => new Error(`not saved: ${c.type}/${c.name}`),
+    });
+    return { guard, ask, reload };
+  }
+
+  it('publishedPinOf reads `overlayVersion` through the spec\'s member: a token, a served null, a server without it', () => {
+    expect(publishedPinOf({ overlayVersion: v(7) })).toEqual({ ifMatch: v(7) });
+    expect(publishedPinOf({ overlayVersion: null })).toEqual({ ifNoneMatch: '*' });
+    expect(publishedPinOf({ overlay: {} })).toBeNull();
+    expect(publishedPinOf(null)).toBeNull();
+    expect(publishedPinOf({ overlayVersion: 42 })).toBeNull();
+  });
+
+  it('sends the recorded pin, and holds the receipt\'s version for the next publish', async () => {
+    const door = publishDoor(v(1));
+    const { guard, ask } = guardWith();
+    guard.recordPublished('object', 'acme_task', PKG, { ifMatch: v(1) });
+    expect(await guard.publish(door.client, 'object', 'acme_task', { packageId: PKG })).toBe('published');
+    expect(await guard.publish(door.client, 'object', 'acme_task', { packageId: PKG })).toBe('published');
+    expect(door.state.sent).toEqual([
+      [v(1), null],
+      [v(101), null],
+    ]);
+    expect(ask).not.toHaveBeenCalled();
+  });
+
+  it('a stale pin asks once, worded for the published layer; "reload" runs beforeReload before the caller\'s reload', async () => {
+    const door = publishDoor(v(2));
+    const { guard, ask, reload } = guardWith('reload');
+    guard.recordPublished('object', 'acme_task', PKG, { ifMatch: v(1) });
+    reload.mockImplementation(() => door.state.events.push('reload'));
+    const beforeReload = vi.fn(async () => {
+      door.state.events.push('discard');
+    });
+    expect(await guard.publish(door.client, 'object', 'acme_task', { packageId: PKG }, beforeReload)).toBe('reloaded');
+    expect(ask).toHaveBeenCalledWith({ type: 'object', name: 'acme_task', layer: 'published' });
+    expect(door.state.events).toEqual(['publish', 'discard', 'reload']);
+    expect(door.state.live).toBe(v(2));
+    // The reload drops every pin: the re-read records the next one.
+    expect(guard.publishedFor('object', 'acme_task', PKG)).toBeNull();
+  });
+
+  it('"overwrite" re-sends pinned to the refusal\'s currentVersion; "keep editing" rejects and sends nothing more', async () => {
+    const won = publishDoor(v(2));
+    const a = guardWith('overwrite');
+    a.guard.recordPublished('object', 'acme_task', PKG, { ifMatch: v(1) });
+    expect(await a.guard.publish(won.client, 'object', 'acme_task', { packageId: PKG })).toBe('published');
+    expect(won.state.sent).toEqual([
+      [v(1), null],
+      [v(2), null],
+    ]);
+
+    const kept = publishDoor(v(2));
+    const b = guardWith('cancel');
+    b.guard.recordPublished('object', 'acme_task', PKG, { ifMatch: v(1) });
+    await expect(b.guard.publish(kept.client, 'object', 'acme_task', { packageId: PKG })).rejects.toThrow(/not saved/);
+    expect(kept.state.sent).toHaveLength(1);
+    expect(kept.state.live).toBe(v(2));
+  });
+
+  it('a served null pins If-None-Match: *; with nothing recorded the publish is unpinned, as before', async () => {
+    const first = publishDoor(v(3));
+    const { guard } = guardWith('cancel');
+    guard.recordPublished('object', 'acme_task', PKG, { ifNoneMatch: '*' });
+    await expect(guard.publish(first.client, 'object', 'acme_task', { packageId: PKG })).rejects.toThrow(/not saved/);
+    expect(first.state.sent).toEqual([[null, '*']]);
+
+    const unpinned = publishDoor(v(3));
+    const other = guardWith();
+    expect(await other.guard.publish(unpinned.client, 'object', 'acme_task', { packageId: PKG })).toBe('published');
+    expect(unpinned.state.sent).toEqual([[null, null]]);
   });
 });

@@ -4616,6 +4616,12 @@ const STUDIO_EN: Record<string, string> = {
   'engine.draftConflict.overwriteConfirm': 'Overwrite',
   'engine.draftConflict.back': 'Back',
   'engine.draftConflict.notSaved': 'Not saved: {type} “{name}” was saved elsewhere after you opened it.',
+  'engine.draftConflict.publishedTitle': 'This changed since you opened it',
+  'engine.draftConflict.publishedDescription':
+    '{type} “{name}” was saved elsewhere — by someone else or in another tab — after you opened it, and that change is live. Reload the saved version (your unsaved edits here are dropped), or overwrite it with yours.',
+  'engine.draftConflict.publishedOverwriteTitle': 'Overwrite the saved version?',
+  'engine.draftConflict.publishedOverwriteDescription':
+    'Your version of {type} “{name}” will go live in place of the saved one, and the changes saved after you opened it will be lost.',
   'engine.studio.inspector.props': 'Properties',
   'engine.studio.inspector.draftFooter': 'Edits go live when you press Save in the top bar.',
   'engine.studio.inspector.collapse': 'Collapse properties',
