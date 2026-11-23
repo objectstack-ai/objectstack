@@ -38,11 +38,15 @@
  * carries is a claim about behaviour, and each is pinned in the sibling suite
  * rather than merely string-matched:
  *
- *  - **The invitation row is the way out.** `decideAudienceAdmission` short-
- *    circuits on `hasPendingInvitation` BEFORE the posture switch, so a
- *    self-serve creation holding a pending, unexpired `sys_invitation`
- *    (`audience-posture.ts`, "The invitation carve-out") is admitted under
- *    every posture in `AUDIENCE_POSTURES`. No door needs widening. Under
+ *  - **The invitation row is the way out.** A self-serve creation holding a
+ *    pending, unexpired `sys_invitation` (`audience-posture.ts`, "The
+ *    invitation carve-out") is admitted under every posture in
+ *    `AUDIENCE_POSTURES`, though not always BY the invitation:
+ *    `decideAudienceAdmission` reads the posture's own rule first, so under
+ *    `open`, and for an address on the `email_domain` allowlist, the posture
+ *    admits it, invitation or not; the invitation admits it under
+ *    `invite_only` and for an address off the allowlist. No door needs
+ *    widening. Under
  *    `invite_only` a sign-up holds it only by presenting it — the row's `id`
  *    as the body's `invitationId` (`presented-invitation.ts`) — so the
  *    message has the operator give the row an id of their own and send it
@@ -546,8 +550,10 @@ export function resolveNoSignInAccountReport(
     'lowercases the address it searches for, so a mixed-case row is never found), then have that ' +
     "person register through the ordinary sign-up endpoint, sending that row's 'id' as " +
     "'invitationId' beside the email: under 'invite_only' a sign-up is admitted only by the " +
-    'invitation it presents. The invitation carve-out admits that ' +
-    'ONE creation under EVERY audience posture, so no door needs widening — but it is an ADMISSION ' +
+    'invitation it presents. That ONE creation is admitted under EVERY audience posture — by the ' +
+    "invitation under 'invite_only' and for an address off the 'email_domain' list, by the posture's " +
+    "own rule, read first, under 'open' and on the list — so no door needs widening; but the " +
+    'carve-out is an ADMISSION ' +
     'verdict, not a verification bypass: the INVITED login meets the same email-verification rule as ' +
     "any sign-up. Under 'email_domain' verification is always ON; under 'open' it is ON unless the " +
     'DEPLOYMENT has itself declared it off (emailAndPassword.requireEmailVerification: false, or ' +

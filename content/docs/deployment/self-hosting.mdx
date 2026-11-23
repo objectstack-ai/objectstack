@@ -700,8 +700,10 @@ dead end this section describes.
 directly against the store the deployment reads, then have that person register
 through the ordinary sign-up endpoint, sending the row's `id` as `invitationId`
 beside the email — under `invite_only` a sign-up is admitted only by the
-invitation it presents. The invitation carve-out admits that one creation under
-every posture, so the `invite_only` default stays where it is. One
+invitation it presents. That one creation is admitted under every posture — by
+the invitation under `invite_only` and off an `email_domain` list, by the
+posture's own rule, read first, under `open` and on the list — so the `invite_only` default stays where
+it is. One
 `sys_invitation` row:
 
 | Column | Value |
@@ -814,7 +816,10 @@ refused `403 SELF_REGISTRATION_CLOSED`, whatever the list or an invitation
 says ([Authentication](/docs/permissions/authentication#2-handle-callback)).
 Once the provider verifies the address, the next sign-in is admitted.
 Under `open` every address is admitted by the posture, invitation or not, so an
-invited sign-up likewise receives the declared set beside its invitation.
+invited sign-up likewise receives the declared set beside its invitation — except
+a sign-in through a social provider whose address the provider did not verify
+while email verification is in force, which is refused
+`403 SELF_REGISTRATION_CLOSED` as above.
 
 **A sign-up the posture admits needs its declared set, invited or not.** When
 `selfRegistrationPermissionSet` cannot be resolved (no such set, or the set is
