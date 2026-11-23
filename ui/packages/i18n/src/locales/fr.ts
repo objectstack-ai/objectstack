@@ -4188,6 +4188,10 @@ const fr = {
         placeholder: "Choisir une source de données",
         loading: "Chargement des sources de données…",
         none: "Aucune source de données pour l’instant",
+        addFilter: "Filtre",
+        filterAdvanced: "Ce filtre ne peut pas être modifié ici. Il est conservé tel qu’il a été enregistré.",
+        filterLoading: "Chargement des champs…",
+        filterNoFields: "Cette source de données n’a aucun champ à filtrer.",
       },
       measure: {
         label: "Mesure",

@@ -4104,6 +4104,10 @@ const ja = {
         placeholder: "データソースを選択",
         loading: "データソースを読み込み中…",
         none: "データソースがまだありません",
+        addFilter: "フィルター",
+        filterAdvanced: "このフィルターはここでは変更できません。保存されたまま残ります。",
+        filterLoading: "フィールドを読み込み中…",
+        filterNoFields: "このデータソースには絞り込めるフィールドがありません。",
       },
       measure: {
         label: "指標",

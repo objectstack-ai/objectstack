@@ -327,10 +327,25 @@ describe('which reports open in the builder (objectstack#36374, opensInBuilder)'
     expect(opensInBuilder(null)).toBe(false);
   });
 
-  it('a dataset report the builder has no setting for keeps the panel: a cross-tab, a saved filter, several values', () => {
+  it('a dataset report the builder has no setting for keeps the panel: a cross-tab, several values', () => {
     expect(opensInBuilder({ ...DATASET_REPORT, columns: ['owner'] })).toBe(false);
     expect(opensInBuilder({ ...DATASET_REPORT, columns: [] })).toBe(true);
-    expect(opensInBuilder({ ...DATASET_REPORT, runtimeFilter: { stage: 'won' } })).toBe(false);
     expect(opensInBuilder({ ...DATASET_REPORT, values: ['a', 'b'] })).toBe(false);
+  });
+
+  it('a saved filter opens in the builder when its 「+ Filter」 can hold it, and keeps the panel when not (objectstack#36645)', () => {
+    // The rows the builder's filter edits: implicit equality, an operator map, a flat `$and`.
+    expect(opensInBuilder({ ...DATASET_REPORT, runtimeFilter: { stage: 'won' } })).toBe(true);
+    expect(opensInBuilder({ ...DATASET_REPORT, runtimeFilter: { amount: { $gt: 100 } } })).toBe(true);
+    expect(opensInBuilder({ ...DATASET_REPORT, runtimeFilter: { $and: [{ stage: 'won' }, { amount: { $gte: 5 } }] } })).toBe(true);
+    // Shapes it cannot hold stay in the panel, which edits them as written.
+    expect(opensInBuilder({ ...DATASET_REPORT, runtimeFilter: { $or: [{ stage: 'won' }, { stage: 'lost' }] } })).toBe(false);
+    expect(opensInBuilder({ ...DATASET_REPORT, runtimeFilter: { amount: { $gt: 1, $lt: 9 } } })).toBe(false);
+    expect(opensInBuilder({ ...DATASET_REPORT, runtimeFilter: { $and: [{ $or: [{ stage: 'won' }] }] } })).toBe(false);
+    // `$and` beside other top-level keys is a valid spec shape the builder
+    // would narrow to the `$and` rows on the next edit: it keeps the panel.
+    expect(opensInBuilder({ ...DATASET_REPORT, runtimeFilter: { $and: [{ stage: 'won' }], amount: { $gt: 5 } } as never })).toBe(false);
+    expect(opensInBuilder({ ...DATASET_REPORT, runtimeFilter: { $and: [{ stage: 'won' }], $not: { stage: 'lost' } } as never })).toBe(false);
+    expect(opensInBuilder({ ...DATASET_REPORT, runtimeFilter: { $not: { stage: 'lost' } } as never })).toBe(false);
   });
 });

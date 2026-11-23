@@ -4187,6 +4187,10 @@ const pt = {
         placeholder: "Escolha uma fonte de dados",
         loading: "Carregando fontes de dados…",
         none: "Ainda não há fontes de dados",
+        addFilter: "Filtro",
+        filterAdvanced: "Este filtro não pode ser alterado aqui. Ele é mantido como foi salvo.",
+        filterLoading: "Carregando campos…",
+        filterNoFields: "Esta fonte de dados não tem campos para filtrar.",
       },
       measure: {
         label: "Medida",

@@ -4192,6 +4192,10 @@ const es = {
         placeholder: "Elige un origen de datos",
         loading: "Cargando orígenes de datos…",
         none: "Aún no hay orígenes de datos",
+        addFilter: "Filtro",
+        filterAdvanced: "Este filtro no se puede cambiar aquí. Se conserva tal como se guardó.",
+        filterLoading: "Cargando campos…",
+        filterNoFields: "Este origen de datos no tiene campos para filtrar.",
       },
       measure: {
         label: "Medida",
