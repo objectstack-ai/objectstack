@@ -6063,7 +6063,7 @@ const fr = {
     refresh: "Actualiser",
     emptyTitle: "Aucun formulaire public pour l'instant",
     emptyBody: "Les formulaires publics se conçoivent dans Studio. Dès qu'une application en a un, il apparaît ici.",
-    loadFailed: "Impossible de charger les formulaires publics : {{message}}",
+    loadFailed: "Impossible de charger les formulaires publics. Actualisez pour réessayer.",
     columnName: "Nom",
     columnObject: "Crée un enregistrement de",
     columnAddress: "Adresse",
@@ -6090,6 +6090,7 @@ const fr = {
     switchedOnEarlierVersion: "{{name}} est activé. Il reste sur la version antérieure {{version}} de l'application, que cet environnement a personnalisée ; pour utiliser le formulaire actuel de l'application, restaurez l'original dans Studio.",
     noSwitchPermission: "Activer ou désactiver des formulaires nécessite l'autorisation de modifier la configuration de l'application, que vous n'avez pas.",
     shippedOff: "Désactivé (par son application)",
+    statusUnknown: "Inconnu (impossible de lire la version de ce formulaire dans son application)",
   },
   slackSetup: {
     title: "Messages directs Slack",

@@ -5903,7 +5903,7 @@ const ko = {
     refresh: "새로 고침",
     emptyTitle: "아직 공개 양식이 없습니다",
     emptyBody: "공개 양식은 Studio에서 디자인합니다. 앱에 공개 양식이 있으면 여기에 표시됩니다.",
-    loadFailed: "공개 양식을 불러오지 못했습니다: {{message}}",
+    loadFailed: "공개 양식을 불러오지 못했습니다. 새로 고쳐 다시 시도하세요.",
     columnName: "이름",
     columnObject: "생성되는 레코드",
     columnAddress: "주소",
@@ -5930,6 +5930,7 @@ const ko = {
     switchedOnEarlierVersion: "{{name}}을(를) 켰습니다. 이 환경에서 사용자 지정한 앱의 이전 버전 {{version}}이(가) 계속 사용됩니다. 앱의 현재 양식을 사용하려면 Studio에서 원본으로 복원하세요.",
     noSwitchPermission: "양식을 켜거나 끄려면 앱 구성을 변경할 권한이 필요하지만 권한이 없습니다.",
     shippedOff: "꺼짐(앱에서 꺼짐)",
+    statusUnknown: "알 수 없음(앱의 이 양식을 읽지 못했습니다)",
   },
   slackSetup: {
     title: "Slack 다이렉트 메시지",

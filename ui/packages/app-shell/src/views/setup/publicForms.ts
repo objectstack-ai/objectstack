@@ -44,14 +44,16 @@
  *
  * ## A form the app ships switched off
  *
- * An installed app that ships a form with its address and anonymous access
- * but its switch off (`enabled: false`, or no `enabled`, which the stack
- * schema reads as `false`) WITHDRAWS it: the anonymous routes judge the app's
- * own document as a kill switch that no override re-opens
- * (`anonymousFormIntakeWithdrawnIn`, pinned in
- * `packages/rest/src/public-form-withdrawal-effective-read.test.ts`). Such a
- * form is listed, never as on ({@link markShippedOff}), and switching it on
- * writes nothing and says the app ships it switched off.
+ * An installed app whose own document keeps a form's address but switches it
+ * off (`enabled: false` or `allowAnonymous: false`, matched by slot or by
+ * slug) WITHDRAWS it: the anonymous routes judge the app's own document as a
+ * kill switch that no override re-opens (`anonymousFormIntakeWithdrawnIn`,
+ * pinned in `packages/rest/src/public-form-withdrawal-effective-read.test.ts`).
+ * This page judges it with that same function, imported from the spec. A
+ * switch the app's document omits counts as off too, as the stack schema
+ * parses it (`enabled` defaults to `false`). Such a form is listed, never as
+ * on ({@link markShippedOff}), and switching it on writes nothing and says the
+ * app ships it switched off.
  *
  * A switch is refused, and nothing is written, over a draft already pending
  * where it would save: that draft is its saver's and is never published on
@@ -62,7 +64,7 @@
  * nothing to read.
  */
 
-import { anonymousFormIntakeCandidates, anonymousFormObjectName } from '@objectstack/spec/ui';
+import { anonymousFormIntakeCandidates, anonymousFormIntakeWithdrawnIn, anonymousFormObjectName } from '@objectstack/spec/ui';
 import { emitMetadataRefresh } from '../../assistant/assistantBus.js';
 import {
   resolveDashboardEditTarget,
@@ -100,6 +102,11 @@ export interface PublicFormRow {
    * Set by {@link markShippedOff}; absent until then.
    */
   shippedOff?: boolean;
+  /**
+   * {@link markShippedOff} could not read the app's own document, so whether
+   * the routes serve the form is not known: the row is not shown as on.
+   */
+  unknown?: boolean;
 }
 
 /** `form` with its switch set to `on`: the only key a switch writes. */
@@ -222,13 +229,22 @@ export function overrideHoldsOnlySwitch(override: FormDoc, base: FormDoc): boole
 
 /**
  * Whether an installed app's own document `base` of the form `name` ships it
- * switched off (module header): its switch on would open it, yet as shipped it
- * is not open. A switch the document omits counts as off, as the stack schema
- * parses it, so the console fails closed where the routes do.
+ * switched off (module header), judged by the routes' own rule: `base`
+ * withdraws the form `served` carries (the effective item, an override
+ * included; `base` itself when omitted), matched by slot or by slug
+ * (`anonymousFormIntakeWithdrawnIn`). The served form is judged with its switch
+ * on, the state a switch-on would leave it in. A switch the app's document
+ * omits counts as off as well, as the stack schema parses it, so the console
+ * fails closed where the routes do.
  */
-export function baseShipsFormOff(base: unknown, name: string): boolean {
+export function baseShipsFormOff(base: unknown, name: string, served?: unknown): boolean {
   if (!isDoc(base) || !isDoc(base.config)) return false;
   const named = { ...base, name };
+  const view: FormDoc = isDoc(served) ? { ...served, name } : named;
+  const probe = isDoc(view.config) ? { ...view, config: withSwitch(view.config, true) } : view;
+  const candidates = anonymousFormIntakeCandidates(probe).filter((c) => c.key === name);
+  if (candidates.some((c) => anonymousFormIntakeWithdrawnIn([named], probe, c))) return true;
+  // An omitted switch: the app's document would open the form switched on, but does not as written.
   const wouldOpen = anonymousFormIntakeCandidates({ ...named, config: withSwitch(base.config, true) }).some((c) => c.key === name);
   return wouldOpen && !anonymousFormIntakeCandidates(named).some((c) => c.key === name);
 }
@@ -261,7 +277,8 @@ async function readFormLayers(name: string, target: ResolvedTarget, client: Pick
  * `shippedOff` and shown off (module header): the list read serves the
  * effective item, which an override may switch on although the routes keep the
  * form closed. Reads the package list once and the layers of each installed
- * app's form; a row whose layers cannot be read is left as listed.
+ * app's form; a row whose layers cannot be read is marked `unknown` and is not
+ * shown as on.
  */
 export async function markShippedOff(
   rows: readonly PublicFormRow[],
@@ -279,9 +296,10 @@ export async function markShippedOff(
       if (target.kind !== 'customization') return row;
       try {
         const layers = await readFormLayers(row.name, target, client);
-        return baseShipsFormOff(layers.code, row.name) ? { ...row, on: false, shippedOff: true } : row;
+        const served = isDoc(layers.effective) ? layers.effective : layers.code;
+        return baseShipsFormOff(layers.code, row.name, served) ? { ...row, on: false, shippedOff: true } : row;
       } catch {
-        return row;
+        return { ...row, on: false, unknown: true };
       }
     }),
   );
@@ -321,7 +339,7 @@ export async function switchPublicForm(
   const override = declared ? effective : null;
   const base = isDoc(layers.code) ? layers.code : null;
   // The app ships the form switched off: no override re-opens it, so nothing is written.
-  if (on && baseShipsFormOff(base, row.name)) throw new PublicFormSwitchRefusal('shipped-off', target.base);
+  if (on && baseShipsFormOff(base, row.name, effective)) throw new PublicFormSwitchRefusal('shipped-off', target.base);
   if (on && override && base && isDoc(base.config)) {
     const baseOn = anonymousFormIntakeCandidates({ ...base, name: row.name }).some((c) => c.key === row.name);
     if (baseOn && overrideHoldsOnlySwitch(override, base) && target.pair) {

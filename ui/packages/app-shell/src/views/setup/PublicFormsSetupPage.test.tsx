@@ -15,6 +15,7 @@ import { MemoryRouter } from 'react-router-dom';
 
 const fake = vi.hoisted(() => ({
   items: [] as unknown[],
+  listFails: null as string | null,
   layered: (_name: string, _packageId?: string): { code?: unknown; effective?: unknown; draft?: unknown } => ({}),
   packages: new Map<string, { writable: boolean; manifest: { id: string; version?: string } }>(),
   save: undefined as unknown as (...args: unknown[]) => Promise<unknown>,
@@ -31,7 +32,16 @@ vi.mock('@object-ui/i18n', async (importOriginal) => ({
 vi.mock('sonner', () => ({ toast: fake.toast }));
 vi.mock('../../providers/AdapterProvider.js', () => {
   // One adapter for the whole run, as the provider holds one: the page re-reads when it changes.
-  const adapter = { getClient: () => ({ meta: { getItems: async () => ({ items: fake.items }) } }) };
+  const adapter = {
+    getClient: () => ({
+      meta: {
+        getItems: async () => {
+          if (fake.listFails) throw new Error(fake.listFails);
+          return { items: fake.items };
+        },
+      },
+    }),
+  };
   return { useAdapter: () => adapter };
 });
 vi.mock('@object-ui/react', async (importOriginal) => ({
@@ -97,6 +107,7 @@ const ADMIN = ['manage_platform_settings', 'manage_metadata'];
 
 beforeEach(() => {
   fake.items = [];
+  fake.listFails = null;
   fake.layered = () => ({});
   fake.packages = new Map();
   fake.save = async () => ({});
@@ -137,6 +148,29 @@ describe('PublicFormsSetupPage', () => {
       expect(screen.getByTestId('public-form-switch-web_to_lead')).toBeDisabled();
     });
   }
+
+  it('a list read that fails says so in business words, never the server\'s own message', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    fake.listFails = 'GET /api/v1/meta/view failed: ECONNRESET upstream';
+    render(<PublicFormsSetupPage />, { wrapper: host(ADMIN) });
+    const alert = await screen.findByTestId('public-forms-load-failed');
+    expect(alert).toHaveTextContent('«publicFormsSetup.loadFailed»');
+    expect(alert).not.toHaveTextContent('ECONNRESET');
+    warn.mockRestore();
+  });
+
+  it('a form whose app\'s document cannot be read is not shown as on', async () => {
+    fake.items = [form(true)];
+    fake.layered = () => {
+      throw new Error('503');
+    };
+    fake.packages.set('crm', { writable: false, manifest: { id: 'crm', version: '3.0.0' } });
+    render(<PublicFormsSetupPage />, { wrapper: host(ADMIN) });
+    const row = await screen.findByTestId('public-form-row-web_to_lead');
+    await waitFor(() => expect(row).toHaveAttribute('data-unknown', 'true'));
+    expect(row).toHaveAttribute('data-on', 'false');
+    expect(screen.getByTestId('public-form-unknown-web_to_lead')).toHaveTextContent('«publicFormsSetup.statusUnknown»');
+  });
 
   it('a switch over a pending draft says so and does not read as done', async () => {
     fake.items = [form(true)];

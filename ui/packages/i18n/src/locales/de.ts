@@ -5905,7 +5905,7 @@ const de = {
     refresh: "Aktualisieren",
     emptyTitle: "Noch keine öffentlichen Formulare",
     emptyBody: "Öffentliche Formulare werden in Studio gestaltet. Sobald eine App eines hat, wird es hier aufgeführt.",
-    loadFailed: "Die öffentlichen Formulare konnten nicht geladen werden: {{message}}",
+    loadFailed: "Die öffentlichen Formulare konnten nicht geladen werden. Aktualisieren Sie, um es erneut zu versuchen.",
     columnName: "Name",
     columnObject: "Erstellt einen Datensatz von",
     columnAddress: "Adresse",
@@ -5932,6 +5932,7 @@ const de = {
     switchedOnEarlierVersion: "{{name}} ist eingeschaltet. Es bleibt bei der früheren App-Version {{version}}, die diese Umgebung angepasst hat; um das aktuelle Formular der App zu verwenden, stellen Sie das Original in Studio wieder her.",
     noSwitchPermission: "Zum Ein- oder Ausschalten von Formularen ist die Berechtigung zum Ändern der App-Konfiguration nötig, die Sie nicht haben.",
     shippedOff: "Aus (von der App ausgeschaltet)",
+    statusUnknown: "Unbekannt (die App-Version dieses Formulars konnte nicht gelesen werden)",
   },
   slackSetup: {
     title: "Slack-Direktnachrichten",

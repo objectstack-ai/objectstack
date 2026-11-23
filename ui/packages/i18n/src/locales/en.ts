@@ -6841,7 +6841,7 @@ const en = {
     refresh: "Refresh",
     emptyTitle: "No public forms yet",
     emptyBody: "Public forms are designed in Studio. Once an app has one, it is listed here.",
-    loadFailed: "Couldn't load the public forms: {{message}}",
+    loadFailed: "Couldn't load the public forms. Refresh to try again.",
     columnName: "Name",
     columnObject: "Creates a record of",
     columnAddress: "Address",
@@ -6868,6 +6868,7 @@ const en = {
     switchedOnEarlierVersion: "{{name}} is on. It stays on the app's earlier version {{version}}, which this environment customized; to take the app's current form, restore the original in Studio.",
     noSwitchPermission: "Switching forms on or off needs permission to change app configuration, which you don't have.",
     shippedOff: "Off (switched off by its app)",
+    statusUnknown: "Unknown (couldn't read its app's version of this form)",
   },
   slackSetup: {
     title: "Slack direct messages",

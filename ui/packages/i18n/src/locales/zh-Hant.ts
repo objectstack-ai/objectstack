@@ -5964,7 +5964,7 @@ const zhHant = {
     refresh: "重新整理",
     emptyTitle: "還沒有對外表單",
     emptyBody: "對外表單在 Studio 裡設計。應用裡有了對外表單，就會列在這裡。",
-    loadFailed: "對外表單載入失敗：{{message}}",
+    loadFailed: "無法載入對外表單。請重新整理重試。",
     columnName: "名稱",
     columnObject: "提交後新增",
     columnAddress: "地址",
@@ -5991,6 +5991,7 @@ const zhHant = {
     switchedOnEarlierVersion: "{{name}} 已開啟。它仍沿用本環境定製時的應用舊版本 {{version}}；如需使用應用當前版本的表單，請在 Studio 中恢復原樣。",
     noSwitchPermission: "開啟或關閉表單需要修改應用配置的權限，你目前沒有。",
     shippedOff: "關閉（應用自帶關閉）",
+    statusUnknown: "未知（無法讀取所屬應用中的此表單）",
   },
   slackSetup: {
     title: "Slack 私信",

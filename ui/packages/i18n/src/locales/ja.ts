@@ -5906,7 +5906,7 @@ const ja = {
     refresh: "更新",
     emptyTitle: "公開フォームはまだありません",
     emptyBody: "公開フォームは Studio で設計します。アプリに公開フォームがあると、ここに表示されます。",
-    loadFailed: "公開フォームを読み込めませんでした: {{message}}",
+    loadFailed: "公開フォームを読み込めませんでした。更新して再試行してください。",
     columnName: "名前",
     columnObject: "作成されるレコード",
     columnAddress: "アドレス",
@@ -5933,6 +5933,7 @@ const ja = {
     switchedOnEarlierVersion: "{{name}} をオンにしました。この環境でカスタマイズしたアプリの以前のバージョン {{version}} のままです。アプリの現在のフォームを使うには、Studio で元に戻してください。",
     noSwitchPermission: "フォームのオン/オフにはアプリ構成を変更する権限が必要ですが、お持ちではありません。",
     shippedOff: "オフ（アプリによりオフ）",
+    statusUnknown: "不明（所属アプリのこのフォームを読み込めませんでした）",
   },
   slackSetup: {
     title: "Slack のダイレクトメッセージ",

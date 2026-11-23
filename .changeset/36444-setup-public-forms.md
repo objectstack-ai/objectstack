@@ -2,21 +2,23 @@
 '@object-ui/app-shell': patch
 '@object-ui/i18n': patch
 '@objectstack/platform-objects': patch
+'@objectstack/spec': patch
+'@objectstack/metadata-core': patch
 ---
 
 feat(setup): Setup → Configuration → Public forms lists every public form of the environment and switches it on or off
 
-Clause-②: yes (widening) — a new Setup navigation id `nav_public_forms`, a new component id `forms:public-forms`, and new language-pack keys (the `publicFormsSetup` block and the nav label) in every shipped locale
+Clause-②: yes (widening) — a new Setup navigation id `nav_public_forms`, a new component id `forms:public-forms`, new language-pack keys (the `publicFormsSetup` block and the nav label) in every shipped locale, and `anonymousFormIntakeWithdrawnIn` newly exported from `@objectstack/spec/ui` (moved from `@objectstack/metadata-core`, which re-exports the same binding)
 Metadata-protocol: none
 
 A system administrator (`manage_platform_settings`, the capability the Setup entry asks) now has one page for the operations side of public forms. It lists every public form of the environment: its name, the object a submission creates a record of, its address, and whether it is on. Per row: switch it on or off, copy its address, or open it in a new tab. A form is designed (created, deleted, its fields and title changed) in Studio, not here.
 
 - **Which forms are listed.** A form view whose `sharing` opens it to anonymous intake once switched on (`allowAnonymous: true` and a `publicLink`), read by the same rule the anonymous form routes use (`anonymousFormIntakeCandidates`). A switched-off form stays listed and can be switched back on. A form with no public address or no anonymous access is an internal form and is not listed. The list is the effective one (`GET /meta/view`), so an installed app's form switched off in this environment lists as off.
 - **Where a switch is saved.** The switch is the form's `sharing.enabled`, saved and published at once. A form of a writable package is saved in that package. A form of an installed (read-only) app is saved as this environment's customization, an override in the app's `.custom` package (ADR-0146), never an edit of the app's own package, so the app upgrades as before. Switching such a form back on removes the override when it held nothing but the switch, so the app's own form is served again; an override that also carries design changes keeps them, with the switch on.
-- **A form its installed app ships switched off** (its address and anonymous access kept, its switch `false` or omitted, which the stack schema reads as `false`) stays closed whatever the environment saves: the anonymous routes treat the app's own document as a withdrawal that no override re-opens. The page lists such a form as "Off (switched off by its app)" with its switch disabled, also when an override already switches it on, and a switch-on writes nothing and says the app ships it switched off.
+- **A form its installed app ships switched off** (its address kept, `enabled` or `allowAnonymous` set to `false`, or `enabled` omitted, which the stack schema reads as `false`) stays closed whatever the environment saves: the anonymous routes treat the app's own document as a withdrawal that no override re-opens. The page judges this with the routes' own function, `anonymousFormIntakeWithdrawnIn`, now declared in `@objectstack/spec/ui` beside the rest of the intake rule; `@objectstack/metadata-core` re-exports the same binding, so the server's import is unchanged. The page lists such a form as "Off (switched off by its app)" with its switch disabled, also when an override already switches it on, and a switch-on writes nothing and says the app ships it switched off. A form whose app's document cannot be read is shown as status unknown, never as on.
 - **After an app upgrade**, switching back on an override taken from an earlier version restores the app's own form when the form is otherwise unchanged. When it is not, the override is kept with the switch on and the page says the form stays on the app's earlier version, which Studio's "Restore package original" undoes.
 - A switch over a draft already pending where it would save writes nothing and says so: that draft is its saver's and is never published on their behalf.
-- A switch writes the form's metadata, which the server lets only a `manage_metadata` holder do. Without it the page still lists the forms but disables the switches and says why. A refused switch is told in business words, never the server's raw message.
+- A switch writes the form's metadata, which the server lets only a `manage_metadata` holder do. Without it the page still lists the forms but disables the switches and says why. A refused switch, and a list read that fails, are told in business words, never the server's raw message.
 - A switched-off form keeps answering as it does today: `404 FORM_NOT_FOUND` at its address. No route, error code or stored key is added.
 
 New Setup navigation entry `nav_public_forms` in `group_configuration` (label "Public Forms", in every shipped locale) opening the component `forms:public-forms`; the Setup navigation now carries 35 entries. New locale block `publicFormsSetup` in every console locale. Not shown: when a form last took a submission, since a submission is an ordinary record of the form's object and records no form.

@@ -85,7 +85,7 @@ function serverRefusalText(t: Translate, err: unknown): string {
   return t('publicFormsSetup.refusalServer');
 }
 
-type Read = { kind: 'loading' } | { kind: 'failed'; message: string } | { kind: 'ready'; rows: PublicFormRow[] };
+type Read = { kind: 'loading' } | { kind: 'failed' } | { kind: 'ready'; rows: PublicFormRow[] };
 
 export function PublicFormsSetupPage() {
   const { t } = useObjectTranslation();
@@ -133,7 +133,9 @@ function PublicFormsSetupBody() {
         const rows = await markShippedOff(publicFormRowsOf(answer), metadataClient as any);
         if (live) setRead({ kind: 'ready', rows });
       } catch (err) {
-        if (live) setRead({ kind: 'failed', message: formatMetadataError(err) });
+        // The server's own words go to the console log; the page says it in business words.
+        console.warn('[public forms] list read failed:', formatMetadataError(err));
+        if (live) setRead({ kind: 'failed' });
       }
     })();
     return () => {
@@ -220,7 +222,7 @@ function PublicFormsSetupBody() {
       <Alert variant="destructive" data-testid="public-forms-load-failed">
         <AlertCircle className="h-4 w-4" />
         <AlertDescription className="flex flex-wrap items-center gap-2">
-          {t('publicFormsSetup.loadFailed', { message: read.message })}
+          {t('publicFormsSetup.loadFailed')}
           {refresh}
         </AlertDescription>
       </Alert>
@@ -264,6 +266,7 @@ function PublicFormsSetupBody() {
                     data-testid={`public-form-row-${row.name}`}
                     data-on={row.on ? 'true' : 'false'}
                     data-shipped-off={row.shippedOff ? 'true' : undefined}
+                    data-unknown={row.unknown ? 'true' : undefined}
                   >
                     <TableCell className="font-medium">{row.title}</TableCell>
                     <TableCell>{label ? <Badge variant="secondary">{label}</Badge> : null}</TableCell>
@@ -288,6 +291,8 @@ function PublicFormsSetupBody() {
                             t('publicFormsSetup.on')
                           ) : row.shippedOff ? (
                             <span data-testid={`public-form-shipped-off-${row.name}`}>{t('publicFormsSetup.shippedOff')}</span>
+                          ) : row.unknown ? (
+                            <span data-testid={`public-form-unknown-${row.name}`}>{t('publicFormsSetup.statusUnknown')}</span>
                           ) : (
                             t('publicFormsSetup.off')
                           )}

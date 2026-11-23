@@ -256,6 +256,30 @@ describe('switchPublicForm', () => {
       });
     }
 
+    it('(allowAnonymous: false) the routes\' own rule: an app that ships the form closed to anonymous visitors withdraws it, even once an override opens it', async () => {
+      const base = formItem({ config: { title: 'Contact us', data: { object: 'crm_lead' }, sharing: sharing(true, { allowAnonymous: false }) } });
+      const override = { ...stripped(formItem()), overrides: { package: 'crm', basedOn: '3.0.0' } };
+      expect(baseShipsFormOff(base, 'web_to_lead', override)).toBe(true);
+      // The served override reads on, by the candidates rule alone.
+      const served = publicFormRowOf({ ...override, _packageId: 'crm' })!;
+      expect(served.on).toBe(true);
+      const client = clientOf(() => ({ code: base, effective: override }));
+      const [marked] = await markShippedOff([served], client, doors());
+      expect(marked).toMatchObject({ on: false, shippedOff: true });
+      await expect(switchPublicForm(row, true, client, {}, doors())).rejects.toMatchObject({ reason: 'shipped-off' });
+      expect(client.save).not.toHaveBeenCalled();
+    });
+
+    it('does not read a form whose app\'s document cannot be read as on', async () => {
+      const client = clientOf(() => {
+        throw new Error('503');
+      });
+      const served = publicFormRowOf(formItem())!;
+      const [marked] = await markShippedOff([served], client, doors());
+      expect(marked).toMatchObject({ on: false, unknown: true });
+      expect(marked.shippedOff).toBeUndefined();
+    });
+
     it('leaves a form the app ships on, a writable package\'s form and a form with no package as listed', async () => {
       const on = formItem();
       expect(baseShipsFormOff(on, 'web_to_lead')).toBe(false);

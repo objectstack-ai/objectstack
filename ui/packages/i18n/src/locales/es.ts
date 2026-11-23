@@ -6067,7 +6067,7 @@ const es = {
     refresh: "Actualizar",
     emptyTitle: "Aún no hay formularios públicos",
     emptyBody: "Los formularios públicos se diseñan en Studio. Cuando una aplicación tenga uno, aparecerá aquí.",
-    loadFailed: "No se pudieron cargar los formularios públicos: {{message}}",
+    loadFailed: "No se pudieron cargar los formularios públicos. Actualice para intentarlo de nuevo.",
     columnName: "Nombre",
     columnObject: "Crea un registro de",
     columnAddress: "Dirección",
@@ -6094,6 +6094,7 @@ const es = {
     switchedOnEarlierVersion: "{{name}} está activado. Sigue en la versión anterior {{version}} de la aplicación, que este entorno personalizó; para usar el formulario actual de la aplicación, restaure el original en Studio.",
     noSwitchPermission: "Para activar o desactivar formularios se necesita permiso para cambiar la configuración de la aplicación, y usted no lo tiene.",
     shippedOff: "Desactivado (por su aplicación)",
+    statusUnknown: "Desconocido (no se pudo leer la versión de la aplicación de este formulario)",
   },
   slackSetup: {
     title: "Mensajes directos de Slack",
