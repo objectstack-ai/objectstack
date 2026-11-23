@@ -14,4 +14,4 @@ A required lookup now counts as the child's source catalog only when a pick make
 - its candidates are the same for every row — no `dependsOn` and no `lookupFilters` comparand reading `$record` (a contact scoped to the contract's account is a party of that contract, not a catalog);
 - every other required field of the child is filled without a person: a non-null `defaultValue`, a select option marked `default`, `readonly`, or a computed type (formula, summary, rollup, autonumber).
 
-Otherwise 「+ 添加」 creates a new row directly, as on a master-detail tab with no catalog. A line under a header whose product is required and whose quantity defaults (quote, order and opportunity lines) keeps its product picker.
+Otherwise 「+ 添加」 creates a new row directly, as on a master-detail tab with no catalog. A line under a header whose product is required and whose quantity defaults (quote and opportunity lines) keeps its product picker.
