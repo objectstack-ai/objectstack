@@ -2580,6 +2580,8 @@ const de = {
       description: "Was Sie einrichten sollten, bevor Ihre Kollegen loslegen. Jeder Punkt lässt sich später in Setup ändern.",
       progress: "{{done}} von {{total}} erledigt",
       dismiss: "Checkliste ausblenden",
+      // objectstack#36739 — the popover's own action: hides the pill and Home's card here; its X only closes.
+      hideHere: 'Auf diesem Gerät ausblenden',
       showDone: "Erledigte anzeigen ({{done}})",
       hideDone: "Erledigte ausblenden",
       optional: "Optional",

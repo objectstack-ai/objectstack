@@ -2580,6 +2580,8 @@ const ko = {
       description: "동료가 사용을 시작하기 전에 설정해 둘 항목입니다. 모든 항목은 나중에 설정에서 변경할 수 있습니다.",
       progress: "{{total}}개 중 {{done}}개 완료",
       dismiss: "체크리스트 숨기기",
+      // objectstack#36739 — the popover's own action: hides the pill and Home's card here; its X only closes.
+      hideHere: '이 기기에서 숨기기',
       showDone: "완료된 항목 보기({{done}})",
       hideDone: "완료된 항목 접기",
       optional: "선택 사항",

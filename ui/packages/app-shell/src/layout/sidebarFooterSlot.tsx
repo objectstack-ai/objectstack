@@ -22,7 +22,10 @@
 
 import * as React from 'react';
 
-/** Where the sidebar draws the host's element. */
+/**
+ * Where the sidebar draws the host's element. A later release may add a place:
+ * a host draws nothing for a place it does not know.
+ */
 export type SidebarFooterSlotPlace = 'sidebar' | 'phoneAppHome';
 
 /** Draws what the host puts at the bottom of an app's sidebar, or nothing. */

@@ -2382,6 +2382,8 @@ const zhHant = {
       description: '同事開始使用之前，先設定好這幾項。每一項之後都可以在系統設定中修改。',
       progress: '已完成 {{done}}/{{total}}',
       dismiss: '隱藏清單',
+      // objectstack#36739 — the popover's own action: hides the pill and Home's card here; its X only closes.
+      hideHere: '在本機隱藏',
       showDone: '顯示已完成的項（{{done}}）',
       hideDone: '收起已完成的項',
       optional: '可選',

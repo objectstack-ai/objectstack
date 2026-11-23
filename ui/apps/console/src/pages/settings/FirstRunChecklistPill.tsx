@@ -14,13 +14,14 @@
  * - A press opens the checklist in place, in a popover beside the pill; a row's
  *   link closes it as the page it opens loads.
  * - From 768 px up it sits in the sidebar's footer; while the sidebar is folded
- *   to its icon rail it keeps its icon and its count. On a phone, which has no
+ *   to its icon rail it keeps only its icon, the count staying in its
+ *   accessible name and tooltip. On a phone, which has no
  *   resident sidebar, it sits after the app's menu on the app's home page.
  *
  * @module
  */
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { ListChecks } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger, cn } from '@object-ui/components';
@@ -32,14 +33,13 @@ import { useFirstRunChecklist } from './firstRunChecklistState';
 export function FirstRunChecklistPill({ where }: { where: SidebarFooterSlotPlace }) {
   const { t } = useObjectTranslation();
   const data = useFirstRunChecklist();
-  const [open, setOpen] = useState(false);
   const location = useLocation();
-
-  // A row's link opened another page: the popover goes with the page it was on.
+  // The popover is open on the page it was opened on: a row's link that opens
+  // another page closes it, with no effect to run.
   const here = `${location.pathname}${location.search}`;
-  useEffect(() => {
-    setOpen(false);
-  }, [here]);
+  const [openOn, setOpenOn] = useState<string | null>(null);
+  const open = openOn === here;
+  const setOpen = (next: boolean) => setOpenOn(next ? here : null);
 
   if (!data || data.dismissed || data.completion.complete) return null;
   const { done, total } = data.completion;

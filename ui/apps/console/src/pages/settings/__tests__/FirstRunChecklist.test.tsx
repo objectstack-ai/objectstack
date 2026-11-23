@@ -451,6 +451,22 @@ describe('the basics: one form, pre-filled from the browser, written by one Save
     expect(AUTH.updateOrganization).not.toHaveBeenCalled();
   });
 
+  it('a setting with no value and no suggestion is required like the name: no write, no 「saved」, the form stays open', async () => {
+    // An es-419 browser names no country, so it offers neither a country nor a currency.
+    browserLanguages = ['es-419'];
+    renderChecklist(ADMIN);
+    fireEvent.click(await screen.findByTestId('first-run-checklist-set-organization_basics'));
+    fireEvent.change(screen.getByLabelText('Organization name'), { target: { value: 'Acme' } });
+    fireEvent.click(screen.getByTestId('first-run-checklist-save-organization_basics'));
+    expect((await screen.findAllByText('This field is required')).length).toBeGreaterThanOrEqual(2);
+    await settle();
+    expect(puts()).toHaveLength(0);
+    expect(AUTH.updateOrganization).not.toHaveBeenCalled();
+    expect(toastSuccess).not.toHaveBeenCalled();
+    expect(screen.getByTestId('first-run-checklist-editor-organization_basics')).toBeTruthy();
+    expect(row('organization_basics').getAttribute('data-done')).toBe('false');
+  });
+
   it('a name of its own and keys already set are not written again: Save sends only what changed', async () => {
     AUTH.activeOrganization = { id: 'org_1', name: 'Acme' };
     localizationValues = { ...ALL_KEYS_SET(), currency: resolved(null) };
@@ -612,6 +628,22 @@ describe('the sidebar pill: 「Get started n/m」 for an administrator, in every
     fireEvent.click(screen.getByTestId('first-run-checklist-save-organization_basics'));
     await waitFor(() => expect(puts()).toHaveLength(1));
     await waitFor(() => expect(screen.queryByTestId('first-run-checklist-pill')).toBeNull());
+  });
+
+  it("the popover's X only closes it: the pill stays, and nothing is hidden on this device", async () => {
+    renderPill(ADMIN);
+    fireEvent.click(await screen.findByTestId('first-run-checklist-pill'));
+    const card = await screen.findByTestId('first-run-checklist');
+    // The X is a close, not the hide action.
+    expect(within(card).getByTestId('first-run-checklist-close').getAttribute('aria-label')).toBe('Close');
+    expect(within(card).getByTestId('first-run-checklist-dismiss').textContent).toBe('Hide on this device');
+    fireEvent.click(within(card).getByTestId('first-run-checklist-close'));
+    await waitFor(() => expect(screen.queryByTestId('first-run-checklist')).toBeNull());
+    expect(screen.getByTestId('first-run-checklist-pill')).toBeTruthy();
+    expect(localStorage.getItem('os:first-run-checklist:org_1:u_admin')).toBeNull();
+    cleanup();
+    renderPill(ADMIN);
+    expect(await screen.findByTestId('first-run-checklist-pill')).toBeTruthy();
   });
 
   it('hiding from the popover hides the pill on this device and writes nothing', async () => {

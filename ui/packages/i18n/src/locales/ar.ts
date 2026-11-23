@@ -2868,6 +2868,8 @@ const ar = {
       description: "ما ينبغي إعداده قبل أن يبدأ زملاؤك. يمكن تغيير كل عنصر لاحقًا في الإعداد.",
       progress: "اكتمل {{done}} من {{total}}",
       dismiss: "إخفاء القائمة",
+      // objectstack#36739 — the popover's own action: hides the pill and Home's card here; its X only closes.
+      hideHere: 'إخفاء على هذا الجهاز',
       showDone: "عرض العناصر المكتملة ({{done}})",
       hideDone: "إخفاء العناصر المكتملة",
       optional: "اختياري",

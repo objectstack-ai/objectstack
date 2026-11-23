@@ -2582,6 +2582,8 @@ const ja = {
       description: "同僚が使い始める前に設定しておく項目です。どの項目も後から「セットアップ」で変更できます。",
       progress: "{{total}} 件中 {{done}} 件完了",
       dismiss: "チェックリストを非表示",
+      // objectstack#36739 — the popover's own action: hides the pill and Home's card here; its X only closes.
+      hideHere: 'このデバイスで非表示にする',
       showDone: "完了した項目を表示（{{done}}）",
       hideDone: "完了した項目を折りたたむ",
       optional: "任意",

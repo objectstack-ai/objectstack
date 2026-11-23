@@ -2830,6 +2830,8 @@ const en = {
       description: 'What to set up before your colleagues start. Every item can be changed later in Setup.',
       progress: '{{done}} of {{total}} done',
       dismiss: 'Hide checklist',
+      // objectstack#36739 — the popover's own action: hides the pill and Home's card here; its X only closes.
+      hideHere: 'Hide on this device',
       showDone: 'Show completed ({{done}})',
       hideDone: 'Hide completed',
       optional: 'Optional',

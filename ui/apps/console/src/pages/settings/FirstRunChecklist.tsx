@@ -11,8 +11,8 @@
  *
  * - `popover`: opened in place from the sidebar's 「Get started n/m」 pill
  *   (`FirstRunChecklistPill`), in every app, while a required row is left
- *   (objectstack#36739). Done rows fold away; its close button hides the pill
- *   on this device.
+ *   (objectstack#36739). Done rows fold away; its X only closes the popover,
+ *   and 「Hide on this device」 under the list hides the pill and Home's card.
  * - `setupPage`: the top of the Setup app's first page (objectstack#36732),
  *   handed to app-shell's `SetupFirstPageSlotProvider` by the console's app
  *   route. The FULL list, done rows included, so an administrator can look
@@ -255,7 +255,8 @@ function OrganizationBasicsEditor({
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
 
   // The keys Save writes: a field holding a value that is not already the
-  // key's own. A cleared field is left as it is.
+  // key's own. A field the server already holds that is cleared here is left
+  // as it is; one it holds no value for is required (`onSave`).
   const changes: Record<string, string> = {};
   for (const field of basics.fields) {
     const draft = drafts[field.key] ?? '';
@@ -278,8 +279,20 @@ function OrganizationBasicsEditor({
     if (saving) return;
     // The row is done only with a name of the organization's own: the name the
     // platform created it with does not count, so it is not accepted here.
+    // The row is done only once every setting holds a value too, so a field
+    // the server holds no value for and the browser offered none for (an
+    // `es-419` browser names no country, so no currency either) is required
+    // here like the name: Save never reports 「saved」 and closes while the
+    // row it was opened from stays undone.
+    const missing: FieldErrors = {};
     if (!isOrganizationNamed(trimmed)) {
-      setFieldErrors({ [NAME_FIELD]: t('console.firstRunChecklist.organizationBasics.nameRequired') });
+      missing[NAME_FIELD] = t('console.firstRunChecklist.organizationBasics.nameRequired');
+    }
+    for (const field of basics.fields) {
+      if (!field.set && (drafts[field.key] ?? '') === '') missing[field.key] = t('form.fieldRequired');
+    }
+    if (Object.keys(missing).length > 0) {
+      setFieldErrors(missing);
       return;
     }
     if (!hasChanges) {
@@ -599,8 +612,23 @@ export function FirstRunChecklist({
     data.hide();
     onClose?.();
   };
+  // Home's card: the X hides the checklist on this device (the pill too).
+  // In the popover the X only closes it, as a popover's X does; hiding there
+  // is its own labelled action under the list, so a press meant to close the
+  // popover never hides the pill for good.
   const dismissButton =
-    placement === 'setupPage' ? null : (
+    placement === 'setupPage' ? null : placement === 'popover' ? (
+      <button
+        type="button"
+        onClick={() => onClose?.()}
+        aria-label={t('common.close')}
+        title={t('common.close')}
+        className="shrink-0 rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+        data-testid="first-run-checklist-close"
+      >
+        <X className="h-4 w-4" />
+      </button>
+    ) : (
       <button
         type="button"
         onClick={hide}
@@ -758,8 +786,9 @@ export function FirstRunChecklist({
       <ol className="mt-2 divide-y divide-border" id="first-run-checklist-rows">
         {rows.filter((row) => showDone || !row.done).map((row) => row.node)}
       </ol>
-      {doneCount > 0 ? (
-        <div className="border-t border-border py-2">
+      {doneCount > 0 || popover ? (
+        <div className="flex items-center justify-between gap-2 border-t border-border py-2">
+          {doneCount > 0 ? (
           <button
             type="button"
             onClick={() => setShowDone((shown) => !shown)}
@@ -775,6 +804,19 @@ export function FirstRunChecklist({
             )}
             {showDone ? t('console.firstRunChecklist.hideDone') : t('console.firstRunChecklist.showDone', { done: doneCount })}
           </button>
+          ) : (
+            <span />
+          )}
+          {popover ? (
+            <button
+              type="button"
+              onClick={hide}
+              className="rounded-md px-1 py-0.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+              data-testid="first-run-checklist-dismiss"
+            >
+              {t('console.firstRunChecklist.hideHere')}
+            </button>
+          ) : null}
         </div>
       ) : null}
     </section>

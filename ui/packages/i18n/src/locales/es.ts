@@ -2654,6 +2654,8 @@ const es = {
       description: "Lo que conviene configurar antes de que empiecen sus compañeros. Cada elemento se puede cambiar más tarde en Configuración.",
       progress: "{{done}} de {{total}} completados",
       dismiss: "Ocultar lista",
+      // objectstack#36739 — the popover's own action: hides the pill and Home's card here; its X only closes.
+      hideHere: 'Ocultar en este dispositivo',
       showDone: "Mostrar completados ({{done}})",
       hideDone: "Ocultar completados",
       optional: "Opcional",
