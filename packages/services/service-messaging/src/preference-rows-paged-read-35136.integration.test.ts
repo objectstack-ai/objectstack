@@ -23,17 +23,30 @@ import { join } from 'node:path';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
-import { assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
+import {
+    assertEngineDeleteDispatch,
+    assertEngineFindOnePredicate,
+    assertEngineUpdateDispatch,
+    type EngineFindOneQueryInput,
+} from '@objectstack/metadata-core';
 import { NotificationPreference } from './objects/notification-preference.object.js';
 import { PreferenceResolver, PREFERENCE_PAGE_SIZE } from './preference-resolver.js';
 
 type Row = Record<string, unknown>;
 
+/**
+ * The WHERE shapes the walk sends — equality, `$and`, and `{ $gt }` — and
+ * nothing else: any other combinator or operator is REFUSED, never read as a
+ * field name.
+ */
 function matches(row: Row, where: unknown): boolean {
     if (where == null) return true;
     return Object.entries(where as Row).every(([key, cond]) => {
         if (key === '$and') return (cond as unknown[]).every((w) => matches(row, w));
-        if (cond !== null && typeof cond === 'object' && '$gt' in (cond as Row)) {
+        if (key.startsWith('$')) throw new Error(`pagedData: unsupported combinator ${key}`);
+        if (cond !== null && typeof cond === 'object') {
+            const ops = Object.keys(cond as Row);
+            if (ops.length !== 1 || ops[0] !== '$gt') throw new Error(`pagedData: unsupported operator ${ops.join(',')}`);
             return String(row[key]) > String((cond as Row).$gt);
         }
         return cond === null ? row[key] == null : row[key] === cond;
@@ -65,8 +78,14 @@ function pagedData(rows: Row[], opts: { ignoreSeek?: boolean } = {}) {
                 return null;
             },
             async insert(_o: string, r: any) { return { id: 'x', ...r }; },
-            async update() { return {}; },
-            async delete() { return {}; },
+            async update(_o: string, d: any, options?: any) {
+                assertEngineUpdateDispatch(d, options);
+                return {};
+            },
+            async delete(_o: string, options?: any) {
+                assertEngineDeleteDispatch(options);
+                return {};
+            },
             async count() { return 0; },
             async aggregate() { return []; },
         } as any,
