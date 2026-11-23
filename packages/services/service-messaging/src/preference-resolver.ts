@@ -25,8 +25,6 @@ export interface PreferenceResolverOptions {
     mandatoryTopics?: readonly string[];
     /** Object name override (default {@link PREFERENCE_OBJECT}). */
     objectName?: string;
-    /** Rows per page of a {@link PreferenceResolver.filter} read (default {@link PREFERENCE_PAGE_SIZE}; tests shrink it). */
-    pageSize?: number;
 }
 
 /**
@@ -34,6 +32,20 @@ export interface PreferenceResolverOptions {
  * makes. A page size, never a cap: each read walks every page to the end.
  */
 export const PREFERENCE_PAGE_SIZE = 1000;
+
+/** Per-resolver page sizes set by {@link setPreferencePageSizeForTests}. */
+const PAGE_SIZE_OVERRIDES = new WeakMap<PreferenceResolver, number>();
+
+/**
+ * Shrink one resolver's page size so a test can put rows past page one.
+ * ⛔ Test seam only: it is deliberately NOT re-exported from the package
+ * entry, so no published type carries a page-size option. A value that is
+ * not a positive integer is ignored (the resolver keeps
+ * {@link PREFERENCE_PAGE_SIZE}).
+ */
+export function setPreferencePageSizeForTests(resolver: PreferenceResolver, pageSize: number): void {
+    if (Number.isInteger(pageSize) && pageSize > 0) PAGE_SIZE_OVERRIDES.set(resolver, pageSize);
+}
 
 export interface PreferenceContext {
     topic: string;
@@ -173,15 +185,10 @@ function isGlobalDefaultUser(userId: unknown): boolean {
 export class PreferenceResolver {
     private readonly objectName: string;
     private readonly mandatory: readonly string[];
-    private readonly pageSize: number;
 
     constructor(private readonly opts: PreferenceResolverOptions) {
         this.objectName = opts.objectName ?? PREFERENCE_OBJECT;
         this.mandatory = opts.mandatoryTopics ?? [];
-        const pageSize = opts.pageSize;
-        this.pageSize = Number.isInteger(pageSize) && (pageSize as number) > 0
-            ? (pageSize as number)
-            : PREFERENCE_PAGE_SIZE;
     }
 
     /** Whether a topic bypasses preferences (exact or `prefix.` match). */
@@ -282,6 +289,7 @@ export class PreferenceResolver {
     ): Promise<Record<string, unknown>[]> {
         const base: Record<string, unknown> = {};
         if (ctx.organizationId) base.organization_id = ctx.organizationId;
+        const pageSize = PAGE_SIZE_OVERRIDES.get(this) ?? PREFERENCE_PAGE_SIZE;
         const read = async (topic: string): Promise<Record<string, unknown>[]> => {
             const walk = keysetWalk<Record<string, unknown>>(
                 // The explicit system opt-in — see FAN_OUT_SYSTEM_CONTEXT: the rows are
@@ -291,7 +299,7 @@ export class PreferenceResolver {
                     { ...(q.where !== undefined ? { where: q.where as Record<string, unknown> } : {}), orderBy: q.orderBy, limit: q.limit },
                     { context: FAN_OUT_SYSTEM_CONTEXT },
                 )) ?? []) as Record<string, unknown>[],
-                { where: { ...base, topic }, pageSize: this.pageSize },
+                { where: { ...base, topic }, pageSize },
             );
             const kept: Record<string, unknown>[] = [];
             let lastPage = 0;
@@ -304,7 +312,7 @@ export class PreferenceResolver {
             // A SHORT last page is the whole rest of the topic, so the walk read
             // everything even when it could not take a cursor from that page.
             // Only a FULL page it could not move past leaves rows unread.
-            if (walk.truncated && lastPage >= this.pageSize) {
+            if (walk.truncated && lastPage >= pageSize) {
                 throw new Error(
                     `${this.objectName} rows for topic '${topic}' could not be read to the end: a page did not move past ` +
                         `the last id after ${walk.scanned} row(s); refusing to filter on a partial set.`,

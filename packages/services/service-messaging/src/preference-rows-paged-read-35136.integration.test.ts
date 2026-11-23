@@ -30,7 +30,7 @@ import {
     type EngineFindOneQueryInput,
 } from '@objectstack/metadata-core';
 import { NotificationPreference } from './objects/notification-preference.object.js';
-import { PreferenceResolver, PREFERENCE_PAGE_SIZE } from './preference-resolver.js';
+import { PreferenceResolver, PREFERENCE_PAGE_SIZE, setPreferencePageSizeForTests } from './preference-resolver.js';
 
 type Row = Record<string, unknown>;
 
@@ -116,7 +116,8 @@ describe('PreferenceResolver.filter reads every page of the preference rows', ()
         const rows = crowdedTopic();
         const data = pagedData(rows);
         const log = recordingLogger();
-        const r = new PreferenceResolver({ getData: () => data.engine, logger: log.logger, pageSize: 2 });
+        const r = new PreferenceResolver({ getData: () => data.engine, logger: log.logger });
+        setPreferencePageSizeForTests(r, 2);
 
         const out = await r.filter(['u1'], ['inbox', 'email'], { topic: 'task.assigned', organizationId: 'org_a' });
 
@@ -145,7 +146,8 @@ describe('PreferenceResolver.filter reads every page of the preference rows', ()
     it('a walk that cannot advance is refused, and filter fails open loudly instead of filtering on a partial set', async () => {
         const data = pagedData(crowdedTopic(), { ignoreSeek: true });
         const log = recordingLogger();
-        const r = new PreferenceResolver({ getData: () => data.engine, logger: log.logger, pageSize: 2 });
+        const r = new PreferenceResolver({ getData: () => data.engine, logger: log.logger });
+        setPreferencePageSizeForTests(r, 2);
 
         const out = await r.filter(['u1'], ['inbox', 'email'], { topic: 'task.assigned', organizationId: 'org_a' });
 
@@ -207,7 +209,8 @@ describe('on a real SqlDriver database', () => {
         await engine.insert(PREF, { id: 'p30', user_id: 'u1', topic: 'task.assigned', channel: 'email', enabled: true }, sys('org_b'));
 
         const log = recordingLogger();
-        const r = new PreferenceResolver({ getData: () => engine as any, logger: log.logger, pageSize: 2 });
+        const r = new PreferenceResolver({ getData: () => engine as any, logger: log.logger });
+        setPreferencePageSizeForTests(r, 2);
         const out = await r.filter(['u1'], ['inbox', 'email', 'sms'], { topic: 'task.assigned', organizationId: 'org_a' });
 
         expect(log.warns).toEqual([]);
