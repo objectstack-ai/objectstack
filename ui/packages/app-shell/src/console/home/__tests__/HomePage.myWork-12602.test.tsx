@@ -286,6 +286,18 @@ describe('two columns until an inbox row can say what kind it is (objectui#12602
   });
 });
 
+
+/**
+ * objectstack#36732 — from 768 px up a viewer with no product app is drawn the
+ * no-apps empty state (`HomePage.desktopNoApps-36732.test.tsx`); the empty
+ * state these cases read is a phone's, so they render at phone width.
+ */
+function atPhoneWidth() {
+  const real = window.innerWidth;
+  Object.defineProperty(window, 'innerWidth', { value: 375, configurable: true, writable: true });
+  return () => Object.defineProperty(window, 'innerWidth', { value: real, configurable: true, writable: true });
+}
+
 describe('the pending-drafts row (objectui#12602)', () => {
   const DRAFTS = [
     { type: 'object', name: 'ticket', label: 'Ticket', packageId: 'studio_test' },
@@ -336,12 +348,17 @@ describe('the pending-drafts row (objectui#12602)', () => {
   });
 
   it('is still offered with no app yet — the moment the assistant drafted the first one', async () => {
-    state.apps = [];
-    state.draftCount = 1;
-    state.draftEntries = [{ type: 'app', name: 'helpdesk', packageId: 'p' }];
-    render(<HomePage />);
-    await userEvent.setup().click(screen.getByTestId('pending-drafts-publish'));
-    expect(publishAllMock).toHaveBeenCalledTimes(1);
+    const restoreWidth = atPhoneWidth();
+    try {
+      state.apps = [];
+      state.draftCount = 1;
+      state.draftEntries = [{ type: 'app', name: 'helpdesk', packageId: 'p' }];
+      render(<HomePage />);
+      await userEvent.setup().click(screen.getByTestId('pending-drafts-publish'));
+      expect(publishAllMock).toHaveBeenCalledTimes(1);
+    } finally {
+      restoreWidth();
+    }
   });
 
   it('is absent with nothing to publish', () => {

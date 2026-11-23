@@ -107,6 +107,9 @@ vi.mock('@object-ui/auth', async (importOriginal) => ({
   useWorkspaceAdminStatus: () => ({ isAdmin: false, isResolved: true }),
 }));
 
+/** objectstack#36732 — the desktop's home for the one product app below. */
+const DESKTOP_HOME = '/apps/com.example.crm';
+
 vi.mock('../../providers/MetadataProvider', () => ({
   useMetadata: () => ({
     apps: [{ name: 'crm', label: 'CRM', _packageId: 'com.example.crm' }],
@@ -232,17 +235,19 @@ describe('inside an app the product mark is the way home (objectui#12605)', () =
     expect(separator.textContent).toBe('');
   });
 
-  it('the mark is named 「PRODUCT home」 and links to `/home`', () => {
+  // objectstack#36732 — from 768 px up home is where `/` lands: with no last
+  // app and nothing declared, the first product app, not the retired page.
+  it('the mark is named 「PRODUCT home」 and links home', () => {
     mount('/apps/crm/lead');
     const link = screen.getByRole('link', { name: `${getProductName()} home` });
     expect(link).toBe(mark());
-    expect(link).toHaveAttribute('href', '/home');
+    expect(link).toHaveAttribute('href', DESKTOP_HOME);
   });
 
-  it('a click on the mark lands on `/home`', () => {
+  it('a click on the mark lands home', () => {
     mount('/apps/crm/lead');
     fireEvent.click(mark());
-    expect(location()).toHaveAttribute('data-path', '/home');
+    expect(location()).toHaveAttribute('data-path', DESKTOP_HOME);
   });
 
   it('the app pill is drawn at every width — no breakpoint class hides it', () => {
@@ -299,7 +304,7 @@ describe('CONTROL — the home page draws the same mark and leaves the chord alo
   it('one mark, named and linked the same way; no `/` rule and no advertisement', () => {
     mount('/home');
     expect(screen.getByRole('link', { name: `${getProductName()} home` })).toBe(mark());
-    expect(mark()).toHaveAttribute('href', '/home');
+    expect(mark()).toHaveAttribute('href', DESKTOP_HOME);
     expect(mark()).toHaveAttribute('title', getProductName());
     expect(screen.queryByTestId('app-bar-home-separator')).not.toBeInTheDocument();
     expect(advertised().map((s) => s.id)).not.toContain('go-home');

@@ -106,7 +106,7 @@ export function isVisible(app: DeclaredHomeApp): boolean {
  * none has no product app yet: the desktop's Home draws its no-apps empty
  * state (objectstack#36732).
  */
-export function isProductApp(app: DeclaredHomeApp): boolean {
+export function isProductApp(app: { name?: unknown; _packageId?: unknown }): boolean {
   if (app._packageId === SETUP_APP_PACKAGE_ID || app.name === SETUP_APP_NAME) return false;
   return !isPlatformBuiltinApp(app);
 }

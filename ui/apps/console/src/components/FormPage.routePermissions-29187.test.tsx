@@ -128,6 +128,10 @@ vi.mock('@object-ui/app-shell', async (importOriginal) => ({
   // boot fallback, which is the splash off an app route.
   LoadingFallback: () => <div data-testid="loading-screen" />,
   DefaultHomePage: () => <HomeProbe />,
+  // objectstack#36732 — from 768 px up `/home` redirects into an app; the page
+  // these cases read is a phone's (and a desktop's with no product app), so
+  // they render at phone width.
+  usePhoneViewport: () => true,
   DefaultAppContent: () => null,
   BuilderLanding: () => null,
   StudioDesignSurface: () => null,

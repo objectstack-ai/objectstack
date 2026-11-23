@@ -336,19 +336,20 @@ describe('/studio/* — the entry decision, both ways', () => {
     expect(designSurface).not.toHaveBeenCalled();
   });
 
-  it('keeps the launcher for an environment that declares no landing', async () => {
-    // The status quo, as its own case: a real app list WITHOUT a declaration
-    // resolves to the launcher, exactly like the no-context cases above.
+  it('objectstack#36732 — on a desktop with no declaration it goes to the first product app', async () => {
+    // The platform home page is retired from 768 px up: a real app list
+    // WITHOUT a declaration resolves to its first product app, the place `/`
+    // lands, never to Setup.
     renderStudioDeepLink('/studio/hotcrm/data', [
-      { name: 'crm', label: 'CRM' },
       { name: 'setup', label: 'Setup' },
+      { name: 'crm', label: 'CRM' },
     ]);
 
-    await expectRefusedAt('/studio/hotcrm/data', '/home');
+    await expectRefusedAt('/studio/hotcrm/data', '/apps/crm');
     await userEvent.click(screen.getByRole('link', { name: WAY_HOME }));
 
-    await waitFor(() => expect(pathname()).toBe('/home'));
-    expect(screen.getByTestId('home-launcher')).toBeInTheDocument();
+    await waitFor(() => expect(pathname()).toBe('/apps/crm'));
+    expect(screen.queryByTestId('home-launcher')).not.toBeInTheDocument();
     expect(designSurface).not.toHaveBeenCalled();
   });
 
