@@ -2157,6 +2157,7 @@ const en = {
     dateRange: {
       from: 'From',
       to: 'To',
+      comparePrevious: 'Compare with previous period',
       datasetUnreadable: 'This report’s date range names no dimension, and the “{{dataset}}” dataset could not be read to find its date dimension ({{reason}}).',
       noSingleDateDimension: 'This report’s date range names no dimension, and the “{{dataset}}” dataset declares {{total}} date dimensions ({{found}}) where it needs exactly one. Name the date dimension in the report’s dateRange.dimension.',
     },

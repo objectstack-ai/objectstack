@@ -4151,6 +4151,7 @@ const es = {
     dateRange: {
       from: "Desde",
       to: "Hasta",
+      comparePrevious: "Comparar con el período anterior",
       datasetUnreadable: "El periodo de este informe no indica ninguna dimensión y no se pudo leer el conjunto de datos «{{dataset}}» para encontrar su dimensión de fecha ({{reason}}).",
       noSingleDateDimension: "El periodo de este informe no indica ninguna dimensión y el conjunto de datos «{{dataset}}» declara {{total}} dimensiones de fecha ({{found}}) cuando necesita exactamente una. Indique la dimensión de fecha en dateRange.dimension del informe.",
     },

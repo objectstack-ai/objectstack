@@ -36,11 +36,13 @@ import * as React from 'react';
 import { CalendarIcon } from 'lucide-react';
 import {
   Input,
+  Label,
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
+  Switch,
 } from '@object-ui/components';
 import { DATE_RANGE_PRESETS } from '@object-ui/core';
 import { useObjectTranslation, useSafeTranslate } from '@object-ui/i18n';
@@ -57,6 +59,16 @@ export interface ReportDateRangeDeclaration {
 export interface ReportTimeWindow {
   dimension: string;
   dateRange: string | [string, string];
+}
+
+/**
+ * The comparison the viewer turned on beside the chip (objectstack#36645): the
+ * dataset contract's `DatasetSelection.compareTo`, always the equal-length
+ * window just before the active one, shifted on the window's own dimension.
+ */
+export interface ReportCompareTo {
+  kind: 'previousPeriod';
+  dimension: string;
 }
 
 /** What the viewer picked on the chip. */
@@ -248,6 +260,81 @@ export function ReportDateRangeControl({
           />
         </>
       )}
+    </div>
+  );
+}
+
+/**
+ * The chart types that draw a comparison as a second, muted series beside the
+ * current one. A pie, donut or funnel has no second series to draw it as, a
+ * single-series family (treemap, sankey) would read it as another group, and a
+ * table type draws no chart at all, so none of those is offered the switch.
+ */
+const COMPARABLE_SERIES_CHART_TYPES: ReadonlySet<string> = new Set([
+  'bar',
+  'column',
+  'horizontal-bar',
+  'line',
+  'area',
+]);
+
+/** The single-number chart types: they show the previous period's number under the current one. */
+const COMPARABLE_SINGLE_VALUE_CHART_TYPES: ReadonlySet<string> = new Set(['metric', 'kpi']);
+
+/**
+ * Whether a report's embedded `chart` can draw "compare with the previous
+ * period" (objectstack#36645). A `seriesBy` split is excluded: its series are
+ * values of the split dimension, not the measure, so no one series pairs with
+ * the measure's earlier window.
+ */
+export function reportChartComparable(chart: Record<string, unknown> | null | undefined): boolean {
+  if (!chart) return false;
+  const type = chart.type;
+  if (typeof type !== 'string') return false;
+  if (COMPARABLE_SINGLE_VALUE_CHART_TYPES.has(type)) return true;
+  if (!COMPARABLE_SERIES_CHART_TYPES.has(type)) return false;
+  return !(typeof chart.seriesBy === 'string' && chart.seriesBy);
+}
+
+/**
+ * The comparison a query carries: only while the switch is on AND the period
+ * names a window. All time, or a custom pick missing an end, has no window to
+ * step back from, so nothing is compared.
+ */
+export function reportCompareTo(on: boolean, window: ReportTimeWindow | undefined): ReportCompareTo | undefined {
+  if (!on || !window) return undefined;
+  return { kind: 'previousPeriod', dimension: window.dimension };
+}
+
+/**
+ * 「Compare with previous period」 beside the period chip. Like the chip's own
+ * pick it is the viewer's, never saved into the report. It is off, and cannot
+ * be turned on, while the period names no window.
+ */
+export function ReportCompareToggle({
+  checked,
+  available,
+  onChange,
+}: {
+  checked: boolean;
+  /** Whether the active period names a window to compare with. */
+  available: boolean;
+  onChange: (next: boolean) => void;
+}) {
+  const tt = useSafeTranslate();
+  const id = React.useId();
+  return (
+    <div className="flex items-center gap-2" data-testid="report-compare-previous">
+      <Switch
+        id={id}
+        checked={checked && available}
+        disabled={!available}
+        onCheckedChange={(on) => onChange(on)}
+        data-testid="report-compare-previous-switch"
+      />
+      <Label htmlFor={id} className={`text-sm font-normal ${available ? '' : 'text-muted-foreground'}`}>
+        {tt('report.dateRange.comparePrevious', 'Compare with previous period')}
+      </Label>
     </div>
   );
 }
