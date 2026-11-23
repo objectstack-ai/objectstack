@@ -1,7 +1,6 @@
 ---
 '@object-ui/plugin-detail': patch
 '@object-ui/i18n': patch
-'@object-ui/app-shell': patch
 ---
 
 feat(record-page): each changed field is its own line under an activity entry, `Label: old → new`
