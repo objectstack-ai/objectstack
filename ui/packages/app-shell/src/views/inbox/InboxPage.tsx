@@ -410,12 +410,9 @@ export function InboxPage({ dataSource, objects }: InboxPageProps) {
             title={r.recordTitle || approvalRequestTitle(r)}
             onOpenFull={() => openApproval(r.id)}
             openFullLabel={t('inboxPage.openRequest', { defaultValue: 'Open request' }) as string}
+            body={t('inboxPage.nextHint', { defaultValue: 'Moves to the next once decided · J / K to move' }) as string}
             onBack={back}
-          >
-            <span className="self-center text-xs text-muted-foreground max-lg:hidden">
-              {t('inboxPage.nextHint', { defaultValue: 'Moves to the next once decided · J / K to move' })}
-            </span>
-          </InboxDetailHeader>
+          />
           <InboxEmbeddedRecord objectName={APPROVAL_REQUEST_OBJECT} recordId={r.id} dataSource={dataSource} objects={objects} />
         </>
       );

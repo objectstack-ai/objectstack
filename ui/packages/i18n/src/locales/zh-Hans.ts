@@ -3703,7 +3703,7 @@ const zh = {
     activityFeed: '活动动态',
     notifications: '通知',
     approvals: '审批',
-    inbox: '消息中心',
+    inbox: '收件箱',
     inboxAriaLabel: '打开消息中心',
     area: '区域',
     packageManagement: '软件包管理',

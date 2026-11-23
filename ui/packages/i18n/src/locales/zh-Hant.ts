@@ -3703,7 +3703,7 @@ const zhHant = {
     activityFeed: '活動動態',
     notifications: '通知',
     approvals: '審批',
-    inbox: '訊息中心',
+    inbox: '收件箱',
     inboxAriaLabel: '開啟訊息中心',
     area: '區域',
     packageManagement: '軟體包管理',
