@@ -60,7 +60,7 @@ describe('the New package form after the lazy zh catalogue lands (objectstack#29
     await screen.findByTestId('package-form');
 
     expect(screen.getByText('新建软件包')).toBeInTheDocument();
-    expect(screen.getByText('显示名称')).toBeInTheDocument();
+    expect(screen.getByText('显示名')).toBeInTheDocument();
     expect(screen.getByText('软件包的可读名称。')).toBeInTheDocument();
     // The card's exact complaint, read from the installed spec so it cannot
     // go vacuous when the spec rewords a `.describe()`.

@@ -442,7 +442,7 @@ const STUDIO_EN: Record<string, string> = {
   'designer.field.hint.pickTarget': 'Pick the object to link to. Changes are saved once the field has one.',
   'designer.field.hint.stageKinds': 'This is the object’s lifecycle field: give every option a kind (Open for a step, Won or Lost for an end). The object is saved once every option has one.',
   'designer.field.relatedObject': 'Related object',
-  'designer.field.objectNamePlaceholder': 'object_name',
+  'designer.field.objectNamePlaceholder': 'Select object…',
   // Lookup "Picker config" advanced sub-panel
   'designer.field.lookup.pickerConfig': 'Picker config',
   'designer.field.lookup.displayField': 'Display field',
@@ -477,7 +477,6 @@ const STUDIO_EN: Record<string, string> = {
   'designer.field.relatedList.help.shown': 'Listed with the other related records on the {ref} record page.',
   'designer.field.relatedList.help.hidden': 'Not listed on the {ref} record page.',
   'designer.field.relatedList.help.primary': 'A core relationship: the {ref} record page shows it most prominently, in the record body as a full-width table.',
-  'designer.field.relatedList.parentFallback': 'parent',
   'designer.field.relatedList.filter': 'Related list filter',
   'designer.field.relatedList.filterHelp': 'Only child records matching these conditions are listed, on top of the match on the parent record; the tab count matches the list.',
   'designer.field.relatedList.filterAdvanced': 'This filter uses nested or OR conditions the builder cannot show; it is kept exactly as stored.',

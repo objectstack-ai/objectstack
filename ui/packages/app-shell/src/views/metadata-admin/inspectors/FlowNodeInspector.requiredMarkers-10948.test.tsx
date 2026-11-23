@@ -118,7 +118,7 @@ describe('each seeded kind: markers exactly where the spec requires the key (obj
     // objectui#11968 removed the http group's Output variable row: the `http`
     // contract declares no `outputVariable`.
     ['http', ['URL'], ['Method', 'Headers', 'Body', 'Timeout (ms)']],
-    ['notify', ['Recipients', 'Title'], ['Message', 'Channels', 'Topic', 'Severity', 'Click-through URL']],
+    ['notify', ['Recipients', 'Title'], ['Message', 'Channels', 'Category', 'Severity', 'Click-through URL']],
     ['script', ['Function'], ['Inputs', 'Output variable', 'Timeout (ms)']],
     ['subflow', ['Flow'], ['Input mapping', 'Output variable', 'Timeout (ms)']],
     ['map', ['Collection', 'Per-item flow'], ['Item variable', 'Item object', 'Output variable']],
