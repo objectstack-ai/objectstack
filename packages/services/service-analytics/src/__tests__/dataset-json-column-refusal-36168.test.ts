@@ -354,3 +354,44 @@ describe('[#36168] NativeSQLStrategy: refused on every named dialect, declined o
     expect({ raw, aggregates }).toEqual({ raw: 0, aggregates: 1 });
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('[#36264] svc.query and svc.generateSql refuse it too, on a named dialect', () => {
+  const CUBE = {
+    name: OBJECT,
+    sql: OBJECT,
+    measures: { cnt: { label: 'Count', type: 'count', sql: '*' } },
+    dimensions: { seen: { label: 'Seen', type: 'time', sql: 'seen' } },
+    public: true,
+  } as unknown as Cube;
+  const SHAPES: Record<string, ValueShapeFieldDef> = {
+    tags: { type: 'select', multiple: true },
+    seen: { type: 'datetime', multiple: true },
+  };
+  const svc = new AnalyticsService({
+    cubes: [CUBE],
+    logger: quiet,
+    sourceFieldMeta: (object: string, field: string) => (object === OBJECT ? SHAPES[field] : undefined),
+    sqlDialect: () => 'postgres',
+    hasObjectMiddleware: () => false,
+    queryCapabilities: () => ({ nativeSql: true, objectqlAggregate: false, inMemory: false }),
+    executeRawSql: async () => [],
+  } as never);
+  const ask = (door: 'query' | 'generateSql', extra: Partial<AnalyticsQuery>) =>
+    svc[door]({ cube: OBJECT, measures: ['cnt'], ...extra } as AnalyticsQuery);
+
+  for (const door of ['query', 'generateSql'] as const) {
+    it(`${door}: \$in on a multiple: true field → 400 INVALID_FILTER; CONTROL: \$contains answers`, async () => {
+      const err = await refusalOf(ask(door, { where: { tags: { $in: ['a'] } } }));
+      expect(err.code, err.message).toBe('INVALID_FILTER');
+      expect(err.status).toBe(400);
+      await expect(ask(door, { where: { tags: { $contains: 'a' } } })).resolves.toBeDefined();
+    });
+  }
+
+  it('PROBE dateRange', async () => {
+    const err = await refusalOf(ask('query', { timeDimensions: [{ dimension: 'seen', dateRange: ['2026-01-01', '2026-02-01'] }] }));
+    expect(err.message).toBe('x');
+  });
+});
