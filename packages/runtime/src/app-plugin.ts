@@ -42,6 +42,7 @@ import { QuickJSScriptRunner } from './sandbox/quickjs-runner.js';
 import { hookBodyRunnerFactory, actionBodyRunnerFactory } from './sandbox/body-runner.js';
 import { hookRefusalI18nReader } from './sandbox/hook-refusal-catalogue.js';
 import { bindAppArtifactHandlers, scheduleAppArtifactJobs } from './app-artifact-handlers.js';
+import { warnUnmountedDeclaredPlugins } from './artifact-declared-plugins.js';
 import { countServerTiming } from '@objectstack/observability';
 
 /**
@@ -315,6 +316,8 @@ export class AppPlugin implements Plugin {
     readonly securityMetadataRegistrar: AppPluginSecurityMetadataRegistrar;
     /** [#31382] The host's per-kernel scheduled-work policy for this app's jobs; absent ⇒ the deployment switch. */
     private readonly scheduledWorkPolicy: ScheduledWorkPolicySource | undefined;
+    /** See the `artifactBoot` constructor option. */
+    private readonly artifactBoot: boolean;
     /**
      * [#34458] The inline boot seed's loader while it holds person references
      * its pass 2 left NULL because no `sys_user` row answered yet — the first
@@ -484,10 +487,21 @@ export class AppPlugin implements Plugin {
              * exactly as before.
              */
             scheduledWorkPolicy?: ScheduledWorkPolicySource;
+            /**
+             * The bundle is a compiled artifact booted by the artifact door
+             * (`createStandaloneStack`), so its `plugins` are inert descriptors
+             * that nothing on this boot turns back into plugins. `start()` then
+             * names every listed plugin the kernel does not run
+             * (`./artifact-declared-plugins.ts`). Off for a config bundle, whose
+             * `plugins` the host itself materializes, under names a descriptor
+             * cannot predict (a specifier, a wrapped bundle).
+             */
+            artifactBoot?: boolean;
         } = {},
     ) {
         this.bundle = bundle;
         this.scheduledWorkPolicy = opts.scheduledWorkPolicy;
+        this.artifactBoot = opts.artifactBoot === true;
         this.projectContext = projectContext;
         this.skipSeedData = opts.skipSeedData ?? false;
         this.skipOnEnable = opts.skipOnEnable ?? false;
@@ -1439,7 +1453,17 @@ export class AppPlugin implements Plugin {
         }
         const sys = this.bundle.manifest || this.bundle;
         const appId = sys.id || sys.name;
-        
+
+        // The artifact's `plugins` (an envelope key: top level only) that this
+        // kernel does not run, named once. An artifact carries descriptors for
+        // them and nothing that can start, so a boot from the artifact alone
+        // mounts none of them; before this it said nothing. Read in `start()`:
+        // the kernel's plugin table is closed once bootstrap begins. See
+        // `./artifact-declared-plugins.ts`.
+        if (this.artifactBoot) {
+            warnUnmountedDeclaredPlugins(ctx, (this.bundle as { plugins?: unknown }).plugins, String(appId));
+        }
+
         // Execute Runtime Step
         // Retrieve ObjectQL engine from services
         // ctx.getService throws when a service is not registered, so we

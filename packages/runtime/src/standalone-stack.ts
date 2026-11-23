@@ -1165,6 +1165,9 @@ export async function createStandaloneStack(config?: StandaloneStackConfig): Pro
             // the door runs here, which is why it is set in this function and
             // nowhere else: the two lines that make it true are 20 lines apart.
             securityMetadataRegistrar: 'artifact-door',
+            // The artifact's `plugins` are descriptors this boot never
+            // constructs: name the ones the kernel does not run.
+            artifactBoot: true,
         }));
     }
 
