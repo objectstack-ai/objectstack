@@ -1,13 +1,14 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * The mark a decided flow segment's data context carries naming the user the
- * run began for — its caller — or `null` when the run began for no caller (a
- * scheduled run, a record-change run fired by a write that carried no user).
+ * The mark a flow run's data context carries, wherever the run's own user is
+ * not its caller, naming the user the run began for — its caller — or `null`
+ * when the run began for no caller (a scheduled run, a record-change run fired
+ * by a write that carried no user).
  *
  * ## Why a mark
  *
- * An app-authored elevation is bounded by its caller's organization wall
+ * An app-authored elevation is judged by its caller's organization wall
  * (`app-automation-organization-wall.ts`,
  * plugin-security), so the wall judges a `runAs: 'system'` run by the user it
  * runs for. After a human decision the run's segment carries the decider as
@@ -18,12 +19,14 @@
  * the published `runAs` text promises: a system flow keeps its system
  * privileges after a decision.
  *
- * A segment no decision switched carries no mark: its `userId` is the caller.
+ * A run whose own user is its caller carries no mark. A decided segment, a
+ * run recorded as begun for no caller (in every segment) and a child run of
+ * either carry it.
  *
  * ## Where it is set
  *
- * By service-automation's system arm (`resolveRunDataContext`), on a segment a
- * decision switched to its decider. When the run began for no caller (`null`),
+ * By service-automation's system arm (`resolveRunDataContext`), wherever the
+ * run's caller is not its own user. When the run began for no caller (`null`),
  * objectql's hook session of the segment's writes carries it too
  * (`buildSession`), and the record-change trigger reads it there, so a run
  * such a write starts begins for no caller as well. Read by plugin-security's

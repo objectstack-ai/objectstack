@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * An app-authored elevation is bounded by its caller's organization wall,
+ * An app-authored elevation is judged by its caller's organization wall,
  * under the `single` and `group` postures — the
  * system flow's case, whose run envelope is built by the automation engine
  * rather than spread from the request (the `isolated` matrix, every elevation
@@ -122,6 +122,51 @@ const APP = {
         { id: 'e2', source: 'hold', target: 'read' },
         { id: 'e3', source: 'read', target: 'report' },
         { id: 'e4', source: 'report', target: 'end' },
+      ],
+    },
+    {
+      // A child run: counts every row it reads.
+      name: 'eop_sys_child_count',
+      label: 'System child count',
+      type: 'autolaunched',
+      status: 'active',
+      runAs: 'system',
+      variables: [{ name: 'found', type: 'record_collection', isInput: false, isOutput: false }],
+      nodes: [
+        { id: 'start', type: 'start', label: 'Start' },
+        { id: 'read', type: 'get_record', label: 'Read', config: { objectName: TASK, limit: 100, outputVariable: 'found' } },
+        {
+          id: 'report',
+          type: 'create_record',
+          label: 'Report',
+          config: { objectName: NOTE, fields: { name: 'seen-child', seen: { dialect: 'cel', source: 'string(size(found))' } } },
+        },
+        { id: 'end', type: 'end', label: 'End' },
+      ],
+      edges: [
+        { id: 'e1', source: 'start', target: 'read' },
+        { id: 'e2', source: 'read', target: 'report' },
+        { id: 'e3', source: 'report', target: 'end' },
+      ],
+    },
+    {
+      // Begins for no caller, pauses on a signal; after the decision, starts
+      // a child run.
+      name: 'eop_sys_sub_after_decision',
+      label: 'System subflow after decision',
+      type: 'autolaunched',
+      status: 'active',
+      runAs: 'system',
+      nodes: [
+        { id: 'start', type: 'start', label: 'Start' },
+        { id: 'hold', type: 'wait', label: 'Hold', waitEventConfig: { eventType: 'signal', signalName: 'eop.decided.sub' } },
+        { id: 'call', type: 'subflow', label: 'Call', config: { flowName: 'eop_sys_child_count' } },
+        { id: 'end', type: 'end', label: 'End' },
+      ],
+      edges: [
+        { id: 'e1', source: 'start', target: 'hold' },
+        { id: 'e2', source: 'hold', target: 'call' },
+        { id: 'e3', source: 'call', target: 'end' },
       ],
     },
     {
@@ -404,6 +449,19 @@ describe('group: a system flow run for a member of two organizations reads exact
       if (seen === undefined) await new Promise((done) => setTimeout(done, 100));
     }
     expect(seen).toBe('3');
+  });
+
+  // A child run a decided segment starts belongs to the run it is part of:
+  // it takes nothing of the decider (carol, one membership).
+  it('a child run a caller-less run’s decided segment starts takes nothing of the decider', async () => {
+    await clearNotes(orgA);
+    const automation: any = await stack.kernel.getServiceAsync('automation');
+    const [carol] = await ql.find('sys_user', { where: { email: 'eop-carol@verify.test' }, limit: 1 }, SYS);
+    const paused = await automation.execute('eop_sys_sub_after_decision', {});
+    expect(paused.status, JSON.stringify(paused)).toBe('paused');
+    const resumed = await automation.resume(paused.runId, { [RESUME_AUTHORITY_SERVICE]: true, resumedBy: carol.id });
+    expect(resumed.success, JSON.stringify(resumed)).toBe(true);
+    expect(await noteSeen('seen-child')).toBe('3');
   });
 
   it('after a decision by another user, the run is still judged by the member it began for', async () => {

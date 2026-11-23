@@ -97,6 +97,17 @@ describe('[ADR-0093 D8.1] a runAs:\'user\' run carries the acting user\'s member
         expect('accessible_org_ids' in (resolveRunDataContext(run) as object)).toBe(false);
     });
 
+    it('a runAs:\'system\' child run of a decided segment resolves nothing of the decider', async () => {
+        for (const triggerUserId of [null, 'u_alice']) {
+            const run: any = { userId: 'u_decider', runAs: 'system', triggerUserId };
+            const h = host({ ...MEMBER_GRANTS, posture: 'MEMBER' });
+            await seedRunGrants.call(h, 'child', run, 'triggering');
+            expect(h.userGrantsResolver).not.toHaveBeenCalled();
+            expect(run.posture).toBeUndefined();
+            expect('accessible_org_ids' in (resolveRunDataContext(run) as object)).toBe(false);
+        }
+    });
+
     it('a runAs:\'system\' run that names no user resolves nothing and carries no set', async () => {
         const run: any = { tenantId: 'org_1', runAs: 'system' };
         const h = host(MEMBER_GRANTS);

@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * An app-authored elevation is bounded by its caller's organization wall
+ * An app-authored elevation is judged by its caller's organization wall
  * (ADR-0095 D1, ADR-0123 D1/D2).
  *
  * An action body and a hook that runs as system run `{ ...the caller's
@@ -425,7 +425,7 @@ const APP = {
 
 const SYS = { context: { isSystem: true } } as const;
 
-describe('an app-authored elevation is bounded by its caller’s organization wall', () => {
+describe('an app-authored elevation is judged by its caller’s organization wall', () => {
   const restoreEnv: Array<[string, string | undefined]> = [];
   let stack: VerifyStack;
   let ql: any;

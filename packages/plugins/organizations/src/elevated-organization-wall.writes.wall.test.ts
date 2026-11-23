@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * An app-authored elevation's WRITES are bounded by its caller's organization
+ * An app-authored elevation's WRITES are judged by its caller's organization
  * wall, for every caller the wall judges — not only
  * one the wall may deny (`elevated-organization-wall.wall.test.ts` holds the
  * read and denial matrix):
@@ -73,7 +73,7 @@ const APP = {
 
 const SYS = { context: { isSystem: true } } as const;
 
-describe('an app-authored elevation writes through the organization wall what its caller writes there', () => {
+describe('an app-authored elevation’s writes are judged by its caller’s organization wall', () => {
   const restoreEnv: Array<[string, string | undefined]> = [];
   let stack: VerifyStack;
   let ql: any;

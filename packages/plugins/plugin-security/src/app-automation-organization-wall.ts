@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * An app-authored elevation is bounded by its caller's organization wall
+ * An app-authored elevation is judged by its caller's organization wall
  * (ADR-0095 D1, ADR-0123 D1/D2).
  *
  * App-authored automation elevates by declaration: an action body always, a
@@ -14,11 +14,9 @@
  * middleware returns `next()` for `isSystem` ahead of every gate below it, the
  * Layer 0 tenant wall among them. Elevation lifts the caller's business rules (Layer
  * 1: object and field permissions, ownership, sharing); it does not lift the
- * organization wall. So the wall that judges the elevation's operation is the
- * caller's own, the one the caller's plain door composes: what the operation
- * reads, and the existing records it writes, are those that wall admits, and
- * a write whose own data names an organization outside it, or empties a row's
- * organization, is refused.
+ * organization wall. So the elevation's reads and writes are judged by the
+ * organization wall of the caller they run for, the one the caller's plain
+ * door composes.
  *
  * ## The caller's own wall
  *
@@ -28,7 +26,7 @@
  * object outside tenancy, an object with no organization column, a platform
  * operator crossing the wall on an object whose posture permits it, and the
  * verified platform owner's read are answered as that door answers them. The
- * verdict is then applied as the door applies it:
+ * verdict judges the operation:
  *
  * - a read takes the wall's filter on its predicate (the deny sentinel, the
  *   active organization, or the `group` membership set), and the verdict is
@@ -38,12 +36,11 @@
  * - a by-id write is checked against the row it names first, read inside the
  *   transaction the write carries: a row the caller's wall does not admit
  *   answers as a row that is not there;
- * - an insert lands only where the caller's wall lets a new row land: never
- *   without an active organization on a walled tenant object, and never in an
- *   organization the wall does not admit;
- * - a write that names an organization names one the wall admits, and an
- *   update never empties the organization of a row — judged for every caller,
- *   since the engine keeps an elevated payload's organization as sent;
+ * - an insert with no active organization on a walled tenant object is
+ *   refused;
+ * - a write whose own data names an organization the wall does not admit, and
+ *   an update whose own data empties a row's organization, are refused —
+ *   judged for every caller;
  * - a caller the wall DENIES — no active organization under `isolated`, an
  *   empty membership set under `group`, a person outside every organization
  *   under `single` (ADR-0093 D8.1, as amended) — reads nothing (zero rows, no
@@ -53,30 +50,13 @@
  *   is refused `403 PERMISSION_DENIED`, naming the missing active organization
  *   (ADR-0123 D4).
  *
- * ## When the engine's own projection already is the caller's wall
- *
- * The engine scopes every operation's driver call by the same ladder over the
- * operation's context (`engine-driver-options.ts`), so for most elevations it
- * already projects exactly the caller's wall, and nothing here runs. That holds
- * only while the context carries the facts the wall reads. The wall is asked
- * here whenever it might not:
- *
- * - the caller has no active organization, or no membership set, or an empty
- *   one (the states the wall can deny);
- * - the caller is a platform operator (the crossing the engine does not grant);
- * - the object is federated: the engine withholds every driver scope there, so
- *   Layer 0's predicate is the only wall it has;
- * - the operation is a decided segment's: its own facts are its decider's, so
- *   the engine's projection of them is not its caller's wall;
- * - the write names or empties the organization column (above).
- *
- * The wall asks Layer 0 alone: the permission sets are loaded only where they
+ * The wall reads Layer 0 alone: the permission sets are loaded only where they
  * decide a platform operator's crossing. When the context lacks the facts the
  * wall reads (a decided segment, a hook under a platform write that names a
  * user), they are resolved for the caller by the one resolver the request
  * path uses (`resolveUserAuthzGrants`), once per flow run
- * ({@link RunCallerFactsMemo}). A system run's own context carries its
- * caller's membership set and rung from run setup.
+ * ({@link RunCallerFactsMemo}). A system run whose own user is its caller
+ * carries that user's membership set and rung from run setup.
  *
  * ## Which elevations: the predicate the identity refusal reads
  *
@@ -226,7 +206,7 @@ export function appAutomationOrganizationWallRefusal(
       `so this ${operation} has no organization to act in, and ${ELEVATION[source]} does not lift the ` +
       `organization wall. ${remedy}`,
     { operation, object },
-    `[ADR-0123 D2] An app-authored elevation is bounded by its caller's organization wall: the caller's ` +
+    `[ADR-0123 D2] An app-authored elevation is judged by its caller's organization wall: the caller's ` +
       `Layer 0 leaves '${object}' no organization for this ${operation}, so the elevation's ` +
       'reads resolve to nothing, its delete and purge match nothing, and its other writes are refused. System work ' +
       'that runs for no caller is unaffected.',
@@ -442,8 +422,8 @@ export async function applyAppAutomationOrganizationWall(
   }
 
   if (isWrite) {
-    // A write never moves a row into an organization the wall does not admit,
-    // and an update never leaves one in none.
+    // A write whose own data names an organization the wall does not admit is
+    // refused, and so is an update whose own data empties a row's organization.
     const admitted = admittedOrganizations(tenantLayer0Verdict);
     if (admitted) {
       for (const row of rows) {

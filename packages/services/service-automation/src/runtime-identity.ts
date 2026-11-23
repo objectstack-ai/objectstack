@@ -402,9 +402,10 @@ export function runPrincipalKind(context: AutomationContext | undefined): 'agent
  *    (#5494; after an approval decision `userId` is the decider, the run's
  *    elevation unchanged) — the security middleware short-circuits on `isSystem`, so the
  *    run bypasses RLS (its business rules: object and field permissions,
- *    ownership, sharing) — but not the organization wall, which judges a run
- *    for a user as that user's own request is judged (plugin-security's
- *    app-automation wall; a run that began for no user is not judged by it) —
+ *    ownership, sharing) — but not the organization wall: its reads and writes
+ *    are judged by the organization wall of the user it runs for
+ *    (plugin-security's app-automation wall; a run that began for no caller is
+ *    not judged by it) —
  *    and save its writes to the
  *    identity-assignment objects (`sys_user_position`, `sys_user_permission_set`,
  *    `sys_invitation`, `sys_member`), which plugin-security refuses for a system
@@ -491,6 +492,9 @@ export function resolveRunDataContext(context: AutomationContext | undefined): R
     // `userId` is absent, which is what keeps a genuinely user-less run's
     // writes attributable instead of "Unknown user" (#4366).
     const actor = `svc:flow:${context.flowName ?? 'automation'}`;
+    // The run's caller as the run-caller mark reads it: `undefined` where the
+    // run's own user is its caller.
+    const caller = runDecidedSegmentCaller(context);
     // [#28881] Elevation is for authorization, not for links to rows that do
     // not exist: the mark keeps the engine's write-time reference check on
     // this run's record writes (`reference_not_found`, as on the user path),
@@ -556,22 +560,24 @@ export function resolveRunDataContext(context: AutomationContext | undefined): R
       // engine scopes the run's driver calls by the same set under `group`.
       // Carried only when the run context carries them; the wall resolves them
       // for the user otherwise.
-      // The run user's organization facts, for the wall the run meets — none
-      // for a run that began for no caller: its user is attribution only.
-      ...(context.userId && !runBeganForNoCaller(context) && runAccessibleOrgIds(context)
+      // The run user's organization facts, for the wall the run meets — only
+      // where that user is the run's caller: none for a decided segment, a run
+      // that began for no caller, or a child run of either (`caller` below).
+      ...(context.userId && caller === undefined && runAccessibleOrgIds(context)
         ? { accessible_org_ids: runAccessibleOrgIds(context) }
         : {}),
-      ...(context.userId && !runBeganForNoCaller(context) && runPosture(context) ? { posture: runPosture(context) } : {}),
+      ...(context.userId && caller === undefined && runPosture(context) ? { posture: runPosture(context) } : {}),
       ...(flowRunId ? { flowRunId } : {}),
       ...(locale ? { locale } : {}),
       ...(impersonatedBy ? { impersonatedBy } : {}),
     });
-    // A segment a decision switched to its decider names the decider only as
-    // its attribution user. The wall goes on judging the run by the user it
-    // began for, and a run that began for no caller stays unjudged in every
-    // segment: the run context records the trigger's user (`triggerUserId`,
-    // `null` for none) when a decision switches the user.
-    const caller = runDecidedSegmentCaller(context);
+    // Wherever the run's own user is not its caller — a decided segment (its
+    // user is the decider, attribution only), a run recorded as begun for no
+    // caller, in every segment, and a child run of either — the run carries
+    // the run-caller mark: the wall goes on judging the run by the user it
+    // began for, and a run that began for no caller stays unjudged. The run
+    // context records the trigger's user (`triggerUserId`, `null` for none)
+    // when a decision switches the user.
     return caller === undefined ? elevated : markRunCaller(elevated, caller);
   }
   if (!context?.userId) {

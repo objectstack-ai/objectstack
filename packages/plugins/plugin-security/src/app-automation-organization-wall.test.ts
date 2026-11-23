@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * An app-authored elevation is bounded by its caller's organization wall —
+ * An app-authored elevation is judged by its caller's organization wall —
  * the module's own pins. The real-stack half (an
  * action body, a system hook and a system flow, under `isolated`, `group` and
  * `single`, on a local and on a federated object) is
@@ -80,7 +80,7 @@ const refusalOf = async (run: () => Promise<unknown>): Promise<{ code?: string; 
   throw new Error('expected a refusal');
 };
 
-describe('an app-authored elevation is bounded by its caller’s organization wall', () => {
+describe('an app-authored elevation is judged by its caller’s organization wall', () => {
   for (const [kind, context] of [
     ['an action body', actionBody],
     ['a system hook', systemHook],
