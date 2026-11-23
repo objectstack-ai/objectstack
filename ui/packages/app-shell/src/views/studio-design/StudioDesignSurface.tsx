@@ -6234,14 +6234,24 @@ export function DataPillar({
     setLoading(true);
     setError(null);
     if (!refreshOnly) setFieldSel(null);
-    // objectstack#27485 — kept CEL verdicts judged the buffer this load replaces.
-    setCelVerdicts({});
-    setPanelCelVerdicts({});
-    // objectstack#27644 — and so did the served one; a save's re-read in flight is dropped.
-    objVerdictSeq.current += 1;
-    setObjVerdict(undefined);
-    setObjVerdictBody(undefined);
-    setDirty(false);
+    // What the buffer this load replaces carried, dropped with it.
+    const dropReplacedBuffer = () => {
+      // objectstack#27485 — kept CEL verdicts judged the buffer this load replaces.
+      setCelVerdicts({});
+      setPanelCelVerdicts({});
+      // objectstack#27644 — and so did the served one; a save's re-read in flight is dropped.
+      objVerdictSeq.current += 1;
+      setObjVerdict(undefined);
+      setObjVerdictBody(undefined);
+      setDirty(false);
+    };
+    // objectstack#36648 — a re-read on the pulse alone drops nothing until it
+    // installs: the pulse is released the moment a Save ends, and an edit made
+    // before this effect runs (a keystroke right after the Save) is the
+    // author's, kept by the in-flight rule below exactly as one made while the
+    // read is out. Dropped here, its dirty flag went, the read then installed
+    // over it, and the edit was lost with no Save left to press.
+    if (!refreshOnly) dropReplacedBuffer();
     (async () => {
       try {
         // objectui#11773 — the draft is read at the address the object saves
@@ -6285,7 +6295,10 @@ export function DataPillar({
         // objectstack#32610 — an edit begun while the re-read was in flight
         // keeps its buffer; its save is pinned to the read it was made on.
         if (refreshOnly && objBuffersHeldRef.current) return;
-        if (refreshOnly) refreshInstalledRef.current = true;
+        if (refreshOnly) {
+          refreshInstalledRef.current = true;
+          dropReplacedBuffer();
+        }
         objStoredRef.current = authored.body;
         setDestructive(null);
         setObjDraft(authored.body);
