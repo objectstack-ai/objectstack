@@ -525,8 +525,6 @@ describe('where the OAuth provider is mounted, a completed reset and a forced re
     await registerClient(s);
     await authorize(s, s.userId, 'user');
     await authorize(s, s.adminUserId, 'admin');
-    const issuedAt = Math.floor(Date.now() / 1000) + 1;
-    const grantStands = () => mcpConsentAdmits(s.auth.adapter, { clientId: CLIENT_ID, userId: s.userId }, issuedAt, s.auth.internalAdapter);
 
     const routine = await s.fire(
       '/admin/set-user-password',
@@ -535,7 +533,13 @@ describe('where the OAuth provider is mounted, a completed reset and a forced re
     );
     expect(routine.status, await routine.clone().text()).toBe(200);
     expect(await grantsOf(s, s.userId), 'a routine reset ends nothing').toEqual(ALL);
-    expect(await grantStands()).toBe(true);
+    // A token the provider mints on the grant after the routine reset: its
+    // whole-second `iat` is taken once the reset has answered, rounded up, so
+    // it is never before the credential-change time that reset wrote, however
+    // long the call took.
+    const issuedAt = Math.ceil(Date.now() / 1000);
+    const grantStands = () => mcpConsentAdmits(s.auth.adapter, { clientId: CLIENT_ID, userId: s.userId }, issuedAt, s.auth.internalAdapter);
+    expect(await grantStands(), 'the grant stands after a routine reset').toBe(true);
 
     const forced = await s.fire(
       '/admin/set-user-password',
