@@ -478,7 +478,7 @@
           "extend: 'crm_account'",
           "relatedLists",
           "hidden: true",
-          "place"
+          "place:"
         ],
         "must_not_contain": [
           "name: 'crm_account'",

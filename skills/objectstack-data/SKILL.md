@@ -387,7 +387,7 @@ Only the pair's extension may also write `fieldGroups` and `relatedLists`, shape
 as on an object. A written key replaces that arrangement whole (the owner's and
 every `place`): an unlisted field shows after the last group, an unnamed tab
 still shows after the listed ones, and `{ list: 'crm_note', hidden: true }` hides
-a tab. In any other package both keys are refused at those doors: use `place`.
+a tab. Outside a `.custom` package both keys are refused at those doors: use `place`.
 Studio's **Add field** on a base object writes the same extension, as an
 `object_extension` item of the pair.
 
