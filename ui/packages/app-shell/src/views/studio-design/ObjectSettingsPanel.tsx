@@ -40,7 +40,10 @@
  *     switches. Only LIVE flags are exposed (every toggle is enforced at
  *     runtime — writer gates, 403s, or UI surfaces): trackHistory & files
  *     are opt-IN (spec default false), feeds/activities/clone are opt-OUT
- *     (spec default true, explicit false disables). `trash`/`mru` were
+ *     (spec default true, explicit false disables). fieldHistory
+ *     (objectstack#36290) has NO default: unset shows values, so its switch
+ *     writes `false` to turn them off and REMOVES the key to turn them back
+ *     on — never a `true` the author did not need. `trash`/`mru` were
  *     REMOVED from the spec (framework#2377 — ObjectCapabilities is now
  *     .strict(), authoring them is a parse error).
  *  5. Developer options — the same inspector's developer half: the internal
@@ -312,11 +315,20 @@ export function ObjectSettingsPanel({
   // EFFECTIVE runtime value; toggling writes an explicit boolean into the
   // enable block (preserving sibling keys). trackHistory/files are opt-in
   // (=== true enables); searchable/feeds/activities/clone are opt-out (only
-  // an explicit false disables).
+  // an explicit false disables). fieldHistory is opt-out with no default
+  // (objectstack#36290): on is the key ABSENT, so turning it on removes it.
   const enable = (draft.enable && typeof draft.enable === 'object' ? draft.enable : {}) as Record<string, unknown>;
-  const patchEnable = (key: string, value: boolean) => onPatch({ enable: { ...enable, [key]: value } });
-  const CAPABILITIES: Array<{ key: string; optIn: boolean; labelKey: string; descKey: string }> = [
+  const patchEnable = (key: string, value: boolean, unsetWhenOn = false) => {
+    if (value && unsetWhenOn) {
+      const { [key]: _removed, ...rest } = enable;
+      onPatch({ enable: rest });
+      return;
+    }
+    onPatch({ enable: { ...enable, [key]: value } });
+  };
+  const CAPABILITIES: Array<{ key: string; optIn: boolean; unsetWhenOn?: boolean; labelKey: string; descKey: string }> = [
     { key: 'trackHistory', optIn: true,  labelKey: 'engine.studio.settings.capTrackHistory', descKey: 'engine.studio.settings.capTrackHistoryDesc' },
+    { key: 'fieldHistory', optIn: false, unsetWhenOn: true, labelKey: 'engine.studio.settings.capFieldHistory', descKey: 'engine.studio.settings.capFieldHistoryDesc' },
     { key: 'files',        optIn: true,  labelKey: 'engine.studio.settings.capFiles',        descKey: 'engine.studio.settings.capFilesDesc' },
     { key: 'feeds',        optIn: false, labelKey: 'engine.studio.settings.capFeeds',        descKey: 'engine.studio.settings.capFeedsDesc' },
     { key: 'activities',   optIn: false, labelKey: 'engine.studio.settings.capActivities',   descKey: 'engine.studio.settings.capActivitiesDesc' },
@@ -514,7 +526,7 @@ export function ObjectSettingsPanel({
           </span>
         </header>
         <div className="grid max-w-xl gap-3 p-3">
-          {CAPABILITIES.map(({ key, optIn, labelKey, descKey }) => {
+          {CAPABILITIES.map(({ key, optIn, unsetWhenOn, labelKey, descKey }) => {
             const raw = enable[key];
             const checked = optIn ? raw === true : raw !== false;
             // The title and the description both label the switch; the key
@@ -528,7 +540,7 @@ export function ObjectSettingsPanel({
                   checked={checked}
                   disabled={disabled}
                   data-testid={`cap-${key}`}
-                  onChange={(e) => patchEnable(key, e.target.checked)}
+                  onChange={(e) => patchEnable(key, e.target.checked, unsetWhenOn)}
                   className="mt-0.5"
                 />
                 <span className="min-w-0">

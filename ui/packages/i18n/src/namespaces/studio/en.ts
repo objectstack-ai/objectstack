@@ -393,7 +393,9 @@ const STUDIO_EN: Record<string, string> = {
   'designer.field.description': 'Description',
   'designer.field.readonly': 'Read-only',
   'designer.field.hidden': 'Hidden',
-  'designer.field.trackHistory': 'Track history',
+  'designer.field.fieldHistory': 'Field change values',
+  'designer.field.fieldHistoryObjectOff':
+    'This object turns field change values off for every field, so changes to this field name the field only, whatever is chosen here.',
   'designer.field.showOnCreate': 'Show on create',
   'designer.field.showOnCreateRequired': 'A required field is always asked for when a record is created, so Show on create stays on.',
   'designer.field.placeholder': 'Placeholder',
@@ -2448,7 +2450,10 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.settings.capabilitiesHint': 'Turn record-page features on or off for this object; every switch really takes effect',
   'engine.studio.settings.capTrackHistory': 'Field change history',
   'engine.studio.settings.capTrackHistoryDesc':
-    "Shows the record's field changes: on the default record page they join the record's one timeline stream, under its Changes filter. Pair with per-field history tracking to pick which field diffs are summarized; audit capture itself is always on for compliance.",
+    "Shows the record's field changes: on the default record page they join the record's one timeline stream, under its Changes filter. Whether a change shows its old → new values is Field change values, below; audit capture itself is always on for compliance.",
+  'engine.studio.settings.capFieldHistory': 'Field change values',
+  'engine.studio.settings.capFieldHistoryDesc':
+    "Shows each changed field's old → new values in the record's activity. On by default, and a single field can turn its own off. Off = a change names its fields only, for every field of this object.",
   'engine.studio.settings.capFiles': 'Attachments',
   'engine.studio.settings.capFilesDesc':
     'Generic Attachments panel on record pages (upload/download/delete). Off = the server also rejects new attachments targeting this object.',
