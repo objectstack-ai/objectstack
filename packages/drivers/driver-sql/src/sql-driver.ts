@@ -7149,13 +7149,7 @@ export class SqlDriver implements IDataDriver {
    * `driver-turso`'s remote transport asks the same question through this
    * method, so both faces of one `TursoDriver` word one refusal.
    *
-   * [#36190] PUBLIC for the analytics host, which compiles its own SQL over
-   * this driver's tables (`@objectstack/service-analytics`'s native dataset
-   * face and its draft preview). Whether a single-value media column is JSON
-   * is this deployment's storage fact, not a declaration that host can read,
-   * so it asks here through `getDriverForObject` (with the object's name,
-   * which is its table's name) and refuses the same operators in the same
-   * words. Read-only: it records nothing.
+   * [#36190] PUBLIC: the analytics host compiles its own SQL over these tables and cannot read this deployment fact.
    */
   public jsonColumnFieldClass(table: string | null | undefined, localField: string): JsonColumnFieldClass | undefined {
     // [#29520 codemod] The body moved to `sql-driver-filter-helpers.ts` (see `FilterHelpersHost`).
