@@ -3627,7 +3627,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     // source, row actions or none.
     const historyField =
       context.column
-      && dataSource
+      && typeof dataSource?.find === 'function'
       && schema.objectName
       && recordId != null && recordId !== ''
       && Object.prototype.hasOwnProperty.call(objectSchema?.fields ?? {}, context.column)
