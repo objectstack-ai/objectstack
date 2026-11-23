@@ -1038,6 +1038,16 @@ const zh = {
     inlineEditLabel: '行内编辑记录(点击单元格进行编辑)',
     // The list's Options menu.
     optionsMenu: {
+      // objectstack#36370 — a board's own settings.
+      kanbanLaneField: "分列字段",
+      kanbanLanes: "显示哪几列",
+      kanbanCardFields: "卡片上显示的字段",
+      kanbanAddCardField: "添加字段",
+      kanbanShowFieldLabels: "显示字段名",
+      kanbanHideEmptyFields: "隐藏空字段",
+      kanbanSummary: "列底统计",
+      kanbanHiddenLanes: "隐藏的列",
+      kanbanHiddenLanesHint: "隐藏的列里的卡片会显示在「未分类」。",
       viewName: '视图名称',
       fields: '字段',
       fieldsShown: '已显示 {{count}} 个',
@@ -1081,6 +1091,19 @@ const zh = {
     },
   },
   kanban: {
+    // objectstack#36370 — the lane header's 「+」 and 「⋯」 menu, and an empty lane's create row.
+    laneMenu: {
+      actions: "{{column}} 列的操作",
+      collapse: "折叠这一列",
+      expand: "展开这一列",
+      hide: "隐藏这一列",
+      hideHint: "这一列的卡片会移到「未分类」",
+      createIn: "在「{{column}}」新建",
+      create: "新建",
+    },
+    laneStatistic: {
+      loadedOnly: "仅已加载的卡片",
+    },
     addCard: '添加卡片',
     addColumn: '添加列',
     moveCard: '移动卡片',
@@ -2888,6 +2911,7 @@ const zh = {
       },
       linkFilterRefused: '此链接的筛选条件未应用：其中包含你在此处无法筛选的字段，因此列表按视图本身显示。',
       personalizedParts: {
+        kanban: "看板设置",
         filters: '筛选',
         search: '搜索',
         sort: '排序',

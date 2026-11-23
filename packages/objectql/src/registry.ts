@@ -3652,10 +3652,10 @@ export class SchemaRegistry {
    * and `/meta` served its label and option labels untranslated in every
    * locale while the extender's own pack carried them.
    *
-   * ⛔ Exactly those two widen: rules by name, and field NAMES the owner does
-   * not declare. The scalars stay the owner's, and so does every field the
-   * owner declares, even one an extender redeclares; an extender's
-   * `fieldPatches` are never folded in. Each must keep reading as diverged from
+   * ⛔ Exactly three widen: rules by name, field NAMES the owner does not declare, and the
+   * tabs a code extender places (#36528: the facet's `packagedPlacedRelatedLists`). The scalars
+   * stay the owner's, and so does every field the owner declares, even one an extender redeclares;
+   * an extender's `fieldPatches` are never folded in. Each must keep reading as diverged from
    * the packaged one, or the catalog — which translates the owner's text under
    * the owner's keys — takes back the case #8037 filed. A tenant overlay and an
    * extension of tenant provenance (`_provenance: 'org'`) add nothing here:
@@ -3664,7 +3664,7 @@ export class SchemaRegistry {
    * still reads every code extender, disabled ones included.)
    *
    * Returns the owner's definition BY REFERENCE when no code extender ships a
-   * rule or adds a field, and `undefined` exactly where
+   * rule, adds a field or places a list, and `undefined` exactly where
    * {@link getPackagedObjectOwner} does.
    */
   getPackagedObjectBase(name: string): ServiceObject | undefined {

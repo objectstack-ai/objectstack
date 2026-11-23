@@ -904,27 +904,29 @@ before and after values, and every activity event, `created` and `updated`
 included, sits under Activity; one action that wrote both an activity row and
 an audit entry is one row, its before and after values on it), and paging.
 
-The related panels load counts first and rows on demand (`RelatedCardStack`).
-Every panel's count is asked in one request set, and each panel is a
-placeholder until the set has answered. A panel counted at 0 reads no rows. A
-panel above 0 reads its first three rows, projected to the name field and one
-status or date field, once it is in view (`IntersectionObserver`). The details
-column never waits for any of it. `RecordPageColumns` takes `relatedFieldsOf`,
-the child objects' field definitions the host already holds, so the counts
-read no child schema first; `prefetchRelatedCounts` and
+The related tabs load their counts first and their rows on demand. Every
+related list the page places, the ones the reader hid included, is counted in
+one request set when the record opens, and the tab row draws its counts from
+it: a tab shows no number while its count is unknown, and a count of 0 mutes
+the tab's label instead of drawing a number. A write to a child list counts it
+again. A related list reads its rows only when its tab is open (on a pinned
+page the first tab of the row is open from the start), and then draws the full
+list. The details never wait for the counts. `RecordPageColumns` takes
+`relatedFieldsOf`, the child objects' field definitions the host already
+holds, so the counts read no child schema first; `prefetchRelatedCounts` and
 `relatedCountTargetsIn` warm another record's counts, which the console's
-drawer does for the record `↑` / `↓` would show next.
+drawer does for the records `↑` / `↓` would show next.
 
-One header (title, stage tag, actions) serves every tier, and
+One header (title, stage tag, actions) serves every layout, and
 the page description stays the tabbed one: its blocks are read off it by each
 tab's stable `value` (`buildDefaultPageColumns`), so Studio's page-create
 seed, a slotted page and the running page never disagree, and no metadata key
 or node type says "columns". An authored record page (`kind: 'full'`) is drawn
 as authored at every width, and so is a page whose strip the partition cannot
 read; `?tab=` addresses those strips. A slotted page keeps the synthesized
-strip, so it takes the tiers.
+strip, so it takes the layout above.
 
-A host wires it with three exports:
+A host wires it with four exports:
 
 ```tsx
 import * as React from 'react';
@@ -935,7 +937,7 @@ import type { ObjectDefLike } from '@object-ui/plugin-detail';
 declare const objectDef: ObjectDefLike;
 
 export function RecordPage() {
-  // The element the record page occupies: its width picks the tier.
+  // The element the record page occupies, measured for the tier.
   const [root, setRoot] = React.useState<HTMLDivElement | null>(null);
   const page = buildDefaultPageSchema(objectDef);
   // `null` until the first reading lands, so nothing is drawn for that one commit.
@@ -945,7 +947,9 @@ export function RecordPage() {
   return (
     <div ref={setRoot}>
       {columns ? (
-        tier === null ? null : <RecordPageColumns tier={tier} columns={columns} />
+        // `fullPage`: a full page, which may pin the details to a left column;
+        // a drawer or a pane leaves it out and keeps the details as a tab.
+        tier === null ? null : <RecordPageColumns tier={tier} columns={columns} fullPage />
       ) : (
         <SchemaRenderer schema={page} />
       )}
@@ -1046,8 +1050,9 @@ export function RecordCommentsSwitch() {
 
 The "Reference Rail" is a right-hand column of summary cards for related
 collections, drawn by the `record:reference_rail` component. The synthesized
-default page never emits it: its right column already shows every related
-list as a compact panel (see *One record page, laid out by its width* above). The
+default page never emits it: each related list it places is a tab of its own
+on the record's tab row, with its count (see *One record page, laid out by its
+width* above). The
 `buildDefaultPageSchema` options that used to opt into the rail
 (`showReferenceRail`, `hideReferenceRail`, `hideRelatedTab`) and the `rightRail`
 slot were removed with the other surface hints ADR-0085 does not admit
