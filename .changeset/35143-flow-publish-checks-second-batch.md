@@ -7,7 +7,7 @@ fix(lint)!: ten publish-time checks for flows that save and do not run — seven
 
 Clause-②: yes (narrowing)
 Metadata-protocol: narrowed
-Skills-docs: follow-up owed — skills/objectstack-automation/SKILL.md, skills/objectstack-automation/references/examples-flows.md, skills/objectstack-automation/references/integration-recipes.md
+Skills-docs: follow-up #36718
 
 <!-- adr-0087: registered publish-refuses-flows-that-save-and-do-not-run -->
 
