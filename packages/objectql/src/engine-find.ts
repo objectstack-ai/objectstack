@@ -94,6 +94,7 @@ export interface FindHost {
   resolveFileReferences: ObjectQL['resolveFileReferences'];
   resolveFormulaPermissions: ObjectQL['resolveFormulaPermissions'];
   resolveFormulaRelated: ObjectQL['resolveFormulaRelated'];
+  resolveFormulaWorkCalendars: ObjectQL['resolveFormulaWorkCalendars'];
   resolveObjectName: ObjectQL['resolveObjectName'];
   resolveRelateThenLowerWhere: ObjectQL['resolveRelateThenLowerWhere'];
   resolveSearchQueryableFields: ObjectQL['resolveSearchQueryableFields'];
@@ -423,7 +424,7 @@ export class FindFacet {
   }
 
   /** The body of `ObjectQL#find`; the method's docblock there is its contract. */
-  static async find(this: Pick<FindHost, '_registry' | 'buildDriverOptions' | 'buildHookApi' | 'buildProvenance' | 'buildSession' | 'buildUser' | 'composeReadableIdsAtBoundary' | 'executeWithMiddleware' | 'expandRelatedRecords' | 'expandSearchOnAst' | 'facade' | 'fillQueryAstDefaults' | 'formulaFaultSink' | 'formulaOptionLabels' | 'getDriver' | 'hasHooksFor' | 'logger' | 'maskSecretFields' | 'permissionResolution' | 'relatedSchemaOf' | 'reportFindFailure' | 'resolveFileReferences' | 'resolveFormulaPermissions' | 'resolveFormulaRelated' | 'resolveObjectName' | 'resolveWhereTokens' | 'stripSearchCompanionFromRead' | 'triggerHooks'>, object: string, query?: EngineQueryOptions, options?: EngineReadOptions): Promise<any[]> {
+  static async find(this: Pick<FindHost, '_registry' | 'buildDriverOptions' | 'buildHookApi' | 'buildProvenance' | 'buildSession' | 'buildUser' | 'composeReadableIdsAtBoundary' | 'executeWithMiddleware' | 'expandRelatedRecords' | 'expandSearchOnAst' | 'facade' | 'fillQueryAstDefaults' | 'formulaFaultSink' | 'formulaOptionLabels' | 'getDriver' | 'hasHooksFor' | 'logger' | 'maskSecretFields' | 'permissionResolution' | 'relatedSchemaOf' | 'reportFindFailure' | 'resolveFileReferences' | 'resolveFormulaPermissions' | 'resolveFormulaRelated' | 'resolveFormulaWorkCalendars' | 'resolveObjectName' | 'resolveWhereTokens' | 'stripSearchCompanionFromRead' | 'triggerHooks'>, object: string, query?: EngineQueryOptions, options?: EngineReadOptions): Promise<any[]> {
     object = this.resolveObjectName(object);
     // Normalize the alias spellings (`filter`→`where`, `top`→`limit`) by the
     // spec's slot table — the driver AST only understands the canonical keys,
@@ -633,7 +634,8 @@ export class FindFacet {
               // [#24197] One batched read per reference field for this PAGE —
               // the rows the driver returned, after limit/offset.
               _findSchema, _findFormula.plan, result, opCtx.context, query,
-            ), this.formulaOptionLabels(_findSchema, _findFormula.plan, opCtx.context));
+            ), this.formulaOptionLabels(_findSchema, _findFormula.plan, opCtx.context),
+            await this.resolveFormulaWorkCalendars(_findFormula.plan, result, opCtx.context));
           }
 
           // Post-process: expand related records if expand is requested
@@ -794,7 +796,7 @@ export class FindFacet {
   }
 
   /** The body of `ObjectQL#findOne`; the method's docblock there is its contract. */
-  static async findOne(this: Pick<FindHost, '_registry' | 'buildDriverOptions' | 'buildHookApi' | 'buildProvenance' | 'buildSession' | 'buildUser' | 'composeReadableIdsAtBoundary' | 'executeWithMiddleware' | 'expandRelatedRecords' | 'expandSearchOnAst' | 'facade' | 'fillQueryAstDefaults' | 'formulaFaultSink' | 'formulaOptionLabels' | 'getDriver' | 'logger' | 'maskSecretFields' | 'permissionResolution' | 'relatedSchemaOf' | 'requireFindOnePredicate' | 'resolveFileReferences' | 'resolveFormulaPermissions' | 'resolveFormulaRelated' | 'resolveObjectName' | 'resolveWhereTokens' | 'stripSearchCompanionFromRead' | 'triggerHooks'>, objectName: string, query?: EngineQueryOptions, options?: EngineReadOptions): Promise<Record<string, any> | null> {
+  static async findOne(this: Pick<FindHost, '_registry' | 'buildDriverOptions' | 'buildHookApi' | 'buildProvenance' | 'buildSession' | 'buildUser' | 'composeReadableIdsAtBoundary' | 'executeWithMiddleware' | 'expandRelatedRecords' | 'expandSearchOnAst' | 'facade' | 'fillQueryAstDefaults' | 'formulaFaultSink' | 'formulaOptionLabels' | 'getDriver' | 'logger' | 'maskSecretFields' | 'permissionResolution' | 'relatedSchemaOf' | 'requireFindOnePredicate' | 'resolveFileReferences' | 'resolveFormulaPermissions' | 'resolveFormulaRelated' | 'resolveFormulaWorkCalendars' | 'resolveObjectName' | 'resolveWhereTokens' | 'stripSearchCompanionFromRead' | 'triggerHooks'>, objectName: string, query?: EngineQueryOptions, options?: EngineReadOptions): Promise<Record<string, any> | null> {
     objectName = this.resolveObjectName(objectName);
     // Same alias fold as find() (#4346). Without it, `findOne({ filter })`
     // matched the first row of the WHOLE table rather than the predicate.
@@ -907,7 +909,8 @@ export class FindFacet {
           objectName, _findOneFormula.plan, [result], opCtx.context, this.permissionResolution(opCtx.context),
         ), this.formulaFaultSink(objectName), await this.resolveFormulaRelated(
           _findOneSchema, _findOneFormula.plan, [result], opCtx.context, query,
-        ), this.formulaOptionLabels(_findOneSchema, _findOneFormula.plan, opCtx.context));
+        ), this.formulaOptionLabels(_findOneSchema, _findOneFormula.plan, opCtx.context),
+            await this.resolveFormulaWorkCalendars(_findOneFormula.plan, [result], opCtx.context));
       }
 
       // Post-process: expand related records if expand is requested

@@ -48,6 +48,7 @@ import {
 // [#25522 cut 1] The validation-message localisation helpers; the methods of the
 // same names below hand each body the members it reads (`ValidationMessageHost`).
 import { negotiatedMessageLocale, objectDisplayLabel, validationMessageContext } from './engine-validation-messages.js';
+import { resolveFormulaWorkCalendars, type FormulaWorkCalendarResolver, type FormulaWorkCalendars } from './formula-work-calendars.js';
 // [#25522 cut 2] The datasource-routing bodies; the methods of the same names
 // below hand each body the members it reads (`DatasourceRoutingHost`).
 import { getDriver, matchPattern, resolveDatasourceFromMapping } from './engine-datasource-routing.js';
@@ -1686,6 +1687,32 @@ export class ObjectQL implements IObjectQLEngine {
    * never rides a context, a hook or a middleware anywhere else.
    */
   private readonly formulaHopReads = new WeakSet<object>();
+
+  /**
+   * [ADR-0157 D1, D2] The working-calendar service the working-day formula
+   * functions count through, installed by the engine plugin
+   * ({@link setWorkCalendarService}). Absent, every working-day formula reads
+   * `null` with the refusal a kernel without calendars gives.
+   */
+  private workCalendarService?: FormulaWorkCalendarResolver;
+
+  /** [ADR-0157 D4] Install the calendar service the working-day formula functions resolve through. */
+  setWorkCalendarService(service: FormulaWorkCalendarResolver | undefined): void {
+    this.workCalendarService = service;
+  }
+
+  /**
+   * [ADR-0157 D4] The calendars a formula plan's working-day functions count
+   * with, resolved per organization over `rows` before the plan is evaluated
+   * (`formula-work-calendars.ts`); `undefined` when no entry calls one.
+   */
+  private resolveFormulaWorkCalendars(
+    plan: readonly FormulaPlanEntry[],
+    rows: ReadonlyArray<Record<string, unknown> | undefined | null>,
+    context: { tenantId?: unknown } | undefined,
+  ): Promise<FormulaWorkCalendars | undefined> {
+    return resolveFormulaWorkCalendars(this.workCalendarService, plan, rows, context);
+  }
 
   private resolveFormulaRelated(
     schema: any,
@@ -4671,6 +4698,7 @@ export class ObjectQL implements IObjectQLEngine {
       resolveOptionPermissions: (...a) => this.resolveOptionPermissions(...a),
       getSummaryDescriptors: (...a) => this.getSummaryDescriptors(...a),
       facade: this, getSchema: (...a) => this.getSchema(...a), resolveFormulaPermissions: (...a) => this.resolveFormulaPermissions(...a), resolveFormulaRelated: (...a) => this.resolveFormulaRelated(...a), formulaOptionLabels: (...a) => this.formulaOptionLabels(...a), // [#34821]
+      resolveFormulaWorkCalendars: (...a) => this.resolveFormulaWorkCalendars(...a),
       assertReferencesResolve: (...a) => this.assertReferencesResolve(...a),
       previewHomeAmounts: (...a) => this.previewHomeAmounts(...a),
       homeAmountServing: (...a) => this.homeAmountServing(...a),
@@ -5928,6 +5956,7 @@ export class ObjectQL implements IObjectQLEngine {
       resolveFileReferences: (...a) => engine.resolveFileReferences(...a),
       resolveFormulaPermissions: (...a) => engine.resolveFormulaPermissions(...a),
       resolveFormulaRelated: (...a) => engine.resolveFormulaRelated(...a),
+      resolveFormulaWorkCalendars: (...a) => engine.resolveFormulaWorkCalendars(...a),
       resolveObjectName: (...a) => engine.resolveObjectName(...a),
       resolveRelateThenLowerWhere: (...a) => engine.resolveRelateThenLowerWhere(...a),
       resolveSearchQueryableFields: (...a) => engine.resolveSearchQueryableFields(...a),
@@ -6007,6 +6036,7 @@ export class ObjectQL implements IObjectQLEngine {
       resolveDefaultPermissions: (...a) => engine.resolveDefaultPermissions(...a),
       resolveFormulaPermissions: (...a) => engine.resolveFormulaPermissions(...a),
       resolveFormulaRelated: (...a) => engine.resolveFormulaRelated(...a),
+      resolveFormulaWorkCalendars: (...a) => engine.resolveFormulaWorkCalendars(...a),
       resolveMasterDetailParents: (...a) => engine.resolveMasterDetailParents(...a),
       resolveObjectName: (...a) => engine.resolveObjectName(...a),
       resolveOptionPermissions: (...a) => engine.resolveOptionPermissions(...a),
@@ -6159,6 +6189,7 @@ export class ObjectQL implements IObjectQLEngine {
       resolveDatasourceBinding: (...a) => engine.resolveDatasourceBinding(...a),
       resolveFormulaPermissions: (...a) => engine.resolveFormulaPermissions(...a),
       resolveFormulaRelated: (...a) => engine.resolveFormulaRelated(...a),
+      resolveFormulaWorkCalendars: (...a) => engine.resolveFormulaWorkCalendars(...a),
       resolveOneHopRelated: (...a) => engine.resolveOneHopRelated(...a),
       resolveReadableIdsSecurity: (...a) => engine.resolveReadableIdsSecurity(...a),
       uncomposableReadableIdsParent: (...a) => engine.uncomposableReadableIdsParent(...a),
@@ -6242,6 +6273,7 @@ export class ObjectQL implements IObjectQLEngine {
       releaseSecretHandles: (...a) => engine.releaseSecretHandles(...a),
       resolveFormulaPermissions: (...a) => engine.resolveFormulaPermissions(...a),
       resolveFormulaRelated: (...a) => engine.resolveFormulaRelated(...a),
+      resolveFormulaWorkCalendars: (...a) => engine.resolveFormulaWorkCalendars(...a),
       resolveMasterDetailParent: (...a) => engine.resolveMasterDetailParent(...a),
       resolveMasterDetailParents: (...a) => engine.resolveMasterDetailParents(...a),
       resolveObjectName: (...a) => engine.resolveObjectName(...a),

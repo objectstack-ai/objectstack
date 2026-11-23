@@ -1667,6 +1667,10 @@ export class ObjectQLPlugin implements Plugin {
         // that leaves `timezone` out takes the organization's
         // `localization.timezone` from the same read.
         if (this.workCalendarService) {
+            // [ADR-0157 D4] The working-day formula functions resolve their
+            // calendars through the same service, so a formula and the
+            // approval clock count with one cache and one refusal.
+            this.ql.setWorkCalendarService(this.workCalendarService);
             installWorkCalendarHooks(this.ql as never, this.workCalendarService, {
                 timezoneOf: async (organizationId) => (await readLocalization(organizationId))?.timezone,
             }, ctx.logger);

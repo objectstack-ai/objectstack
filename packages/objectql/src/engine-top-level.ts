@@ -37,6 +37,7 @@ import { SEARCHABLE_ENUM_TYPES, SEARCHABLE_TEXTUAL_TYPES } from './search-filter
 import { ExpressionEngine, analyzeRelationshipTraversals, formulaReadOrder, isUnparseableDate } from '@objectstack/formula';
 import type { EvalError, EvalOptionLabels, EvalPermissions } from '@objectstack/formula';
 import { declaredOptionLabels, planCallsOptionLabel } from './formula-option-labels.js';
+import { planWorkCalendarNeeds, type FormulaWorkCalendars } from './formula-work-calendars.js';
 import { ASSEMBLED_VIEW_ITEMS_KEY, AssembledViewArtifactSchema, isAggregatedViewContainer, isViewContainerShaped } from '@objectstack/spec';
 import type { Expression } from '@objectstack/spec';
 import { deriveViewContainerObject } from '@objectstack/metadata/view-container';
@@ -3023,6 +3024,14 @@ function applyFormulaPlan(
    * when no formula of the plan calls `label()`.
    */
   optionLabels?: EvalOptionLabels,
+  /**
+   * [ADR-0157 D4] What the working-day functions count with: each row's
+   * organization's calendars, resolved once per call by
+   * {@link ObjectQL.resolveFormulaWorkCalendars}. `undefined` when no formula
+   * of the plan calls one, or where no resolution runs (a synchronous
+   * evaluation), where such a formula then reads `null` and says why.
+   */
+  workCalendars?: FormulaWorkCalendars,
 ): void {
   if (!plan.length) return;
   const now = new Date();
@@ -3058,7 +3067,9 @@ function applyFormulaPlan(
         scope = hop.record;
         empty = hop.empty;
       }
-      const evaluated = ExpressionEngine.evaluate(fp.expression, { now, timezone, user, org, permissions, optionLabels, record: scope });
+      const evaluated = ExpressionEngine.evaluate(fp.expression, {
+        now, timezone, user, org, permissions, optionLabels, workCalendars: workCalendars?.(rec), record: scope,
+      });
       // An invalid Date minted from text `date()` could not parse evaluates
       // `ok` (a predicate relies on that) but serializes to the `null` an empty
       // source gives: for a field it is a fault, said like any other.
@@ -3138,6 +3149,8 @@ async function hydrateWriteFormulas(
   relatedFor?: (plan: FormulaPlanEntry[], records: ReadonlyArray<Record<string, unknown>>) => Promise<FormulaRelated | undefined>,
   /** [#26608] The option labels `label()` reads, in the writer's locale — the reader of this response. */
   optionLabelsFor?: (plan: FormulaPlanEntry[]) => EvalOptionLabels | undefined,
+  /** [ADR-0157 D4] The calendars the working-day functions count with, resolved over `records`. */
+  workCalendarsFor?: (plan: FormulaPlanEntry[], records: ReadonlyArray<Record<string, unknown>>) => Promise<FormulaWorkCalendars | undefined>,
 ): Promise<void> {
   const records = results.filter(
     (r): r is Record<string, unknown> => r != null && typeof r === 'object',
@@ -3147,7 +3160,7 @@ async function hydrateWriteFormulas(
   if (plan.length === 0) return;
   applyFormulaPlan(
     plan, records, execCtx, await permissionsFor(plan, records), onFault, await relatedFor?.(plan, records),
-    optionLabelsFor?.(plan),
+    optionLabelsFor?.(plan), await workCalendarsFor?.(plan, records),
   );
 }
 
@@ -3241,6 +3254,10 @@ function unservableReason(
     return { reason: `reads through ${[...entry.hops.keys()].map((f) => `'${f}'`).join(', ')}, a reference the write path does not follow` };
   }
   if (planCallsOptionLabel([entry])) return { reason: 'calls label(), which the write path does not answer' };
+  // [ADR-0157 D4] The validator's formula values resolve no working calendar.
+  if (planWorkCalendarNeeds([entry])) {
+    return { reason: 'calls a working-day function, which counts with a working calendar the write path does not load' };
+  }
   if (!permissions && readsPermissionPredicate(entry.expression)) {
     return { reason: 'calls current_user.can(), and this write resolved no permission map' };
   }
@@ -3356,6 +3373,14 @@ interface StoredExpressionServing {
    * every later reader and by search, so it never depends on the writer's locale.
    */
   optionLabelsFor?: (plan: FormulaPlanEntry[]) => EvalOptionLabels | undefined;
+  /**
+   * [ADR-0157 D4, open point 1] The calendars the working-day functions count
+   * with, resolved over the images in each one's organization. A calendar
+   * refusal (D8) stores the field blank, as any expression that does not
+   * evaluate does, with the fault reported once through `onFault`; the write
+   * itself goes through.
+   */
+  workCalendarsFor?: (plan: FormulaPlanEntry[], records: ReadonlyArray<Record<string, unknown>>) => Promise<FormulaWorkCalendars | undefined>;
 }
 
 /**
@@ -3377,7 +3402,7 @@ async function computeStoredExpressions(
   const scratch = images.map((image) => ({ ...image }));
   applyFormulaPlan(
     plan, scratch, execCtx, await serving.permissionsFor(plan, scratch), serving.onFault,
-    await serving.relatedFor?.(plan, scratch), serving.optionLabelsFor?.(plan),
+    await serving.relatedFor?.(plan, scratch), serving.optionLabelsFor?.(plan), await serving.workCalendarsFor?.(plan, scratch),
   );
   return scratch.map((row) => {
     const values: Record<string, unknown> = {};

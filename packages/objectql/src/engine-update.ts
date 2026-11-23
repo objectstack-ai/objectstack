@@ -149,6 +149,7 @@ export interface UpdateHost {
   releaseSecretHandles: ObjectQLClass['releaseSecretHandles'];
   resolveFormulaPermissions: ObjectQLClass['resolveFormulaPermissions'];
   resolveFormulaRelated: ObjectQLClass['resolveFormulaRelated'];
+  resolveFormulaWorkCalendars: ObjectQLClass['resolveFormulaWorkCalendars'];
   resolveMasterDetailParent: ObjectQLClass['resolveMasterDetailParent'];
   resolveMasterDetailParents: ObjectQLClass['resolveMasterDetailParents'];
   resolveObjectName: ObjectQLClass['resolveObjectName'];
@@ -168,7 +169,7 @@ export interface UpdateHost {
 /** The bodies of the "Update" section of `ObjectQL`: a stateless facet, called by the class's stubs. */
 export class UpdateFacet {
   /** The body of `ObjectQL#update`; the method's docblock there is its contract. */
-  static async update(this: Pick<UpdateHost, '_registry' | 'admittedViolationSink' | 'assertBulkPerRowHookBudget' | 'assertReferencesResolve' | 'assertWriteAllowed' | 'buildDriverOptions' | 'buildEvalUser' | 'buildHookApi' | 'buildPerRowAfterContexts' | 'buildProvenance' | 'buildReferentialFieldClear' | 'buildSession' | 'buildUser' | 'dispatchPerRowBeforeHooks' | 'dispatchUnscopedMultiWriteHooks' | 'encryptSecretFields' | 'enforceTransactionOrigin' | 'executeWithMiddleware' | 'facade' | 'formulaFaultSink' | 'formulaOptionLabels' | 'getDriver' | 'getSchema' | 'hasHooksFor' | 'homeAmountServing' | 'inAfterAbortUnit' | 'invalidateOrganizationProbe' | 'logger' | 'mediaValueShapeStrictFor' | 'opensAfterAbortUnit' | 'permissionResolution' | 'persistSecretRows' | 'priorMasterIdsCallerReads' | 'projectHomeAmountsOntoPatch' | 'publishBulkDataEvent' | 'publishDataEvent' | 'readUpdatePriorRow' | 'realtimeService' | 'recomputeSummaries' | 'refuseEmptyPasswordFields' | 'relatedSchemaOf' | 'releaseSecretHandles' | 'resolveFormulaPermissions' | 'resolveFormulaRelated' | 'resolveMasterDetailParent' | 'resolveMasterDetailParents' | 'resolveObjectName' | 'resolveOptionPermissions' | 'resolvePredicateRelated' | 'settleMasterDetailLanding' | 'summaryDescriptorsReadByRules' | 'summaryForeignKeyColumns' | 'triggerHooks' | 'update' | 'updateByIdExpecting' | 'validationMessageContext' | 'valueShapeStrictFor' | 'withResolvedWhere'>, object: string, data: any, options?: EngineUpdateOptions & WriteObservabilityOptions): Promise<Record<string, any> | number | null> {
+  static async update(this: Pick<UpdateHost, '_registry' | 'admittedViolationSink' | 'assertBulkPerRowHookBudget' | 'assertReferencesResolve' | 'assertWriteAllowed' | 'buildDriverOptions' | 'buildEvalUser' | 'buildHookApi' | 'buildPerRowAfterContexts' | 'buildProvenance' | 'buildReferentialFieldClear' | 'buildSession' | 'buildUser' | 'dispatchPerRowBeforeHooks' | 'dispatchUnscopedMultiWriteHooks' | 'encryptSecretFields' | 'enforceTransactionOrigin' | 'executeWithMiddleware' | 'facade' | 'formulaFaultSink' | 'formulaOptionLabels' | 'getDriver' | 'getSchema' | 'hasHooksFor' | 'homeAmountServing' | 'inAfterAbortUnit' | 'invalidateOrganizationProbe' | 'logger' | 'mediaValueShapeStrictFor' | 'opensAfterAbortUnit' | 'permissionResolution' | 'persistSecretRows' | 'priorMasterIdsCallerReads' | 'projectHomeAmountsOntoPatch' | 'publishBulkDataEvent' | 'publishDataEvent' | 'readUpdatePriorRow' | 'realtimeService' | 'recomputeSummaries' | 'refuseEmptyPasswordFields' | 'relatedSchemaOf' | 'releaseSecretHandles' | 'resolveFormulaPermissions' | 'resolveFormulaRelated' | 'resolveFormulaWorkCalendars' | 'resolveMasterDetailParent' | 'resolveMasterDetailParents' | 'resolveObjectName' | 'resolveOptionPermissions' | 'resolvePredicateRelated' | 'settleMasterDetailLanding' | 'summaryDescriptorsReadByRules' | 'summaryForeignKeyColumns' | 'triggerHooks' | 'update' | 'updateByIdExpecting' | 'validationMessageContext' | 'valueShapeStrictFor' | 'withResolvedWhere'>, object: string, data: any, options?: EngineUpdateOptions & WriteObservabilityOptions): Promise<Record<string, any> | number | null> {
      object = this.resolveObjectName(object);
      // [#22782, #34412] An aborting `afterUpdate`, or a refusal after a `beforeUpdate` hook's
      // `ctx.api` write, rolls this write back with it — see `opensAfterAbortUnit`.
@@ -564,6 +565,7 @@ export class UpdateFacet {
          onFault: this.formulaFaultSink(object),
          relatedFor: (plan, records) => this.resolveFormulaRelated(updateSchema, plan, records, opCtx.context),
          optionLabelsFor: (plan) => declaredOptionLabels(updateSchema, plan),
+         workCalendarsFor: (plan, records) => this.resolveFormulaWorkCalendars(plan, records, opCtx.context),
        };
        const undeclared = undeclaredWriteFieldErrors(
          object,
@@ -2342,6 +2344,7 @@ export class UpdateFacet {
                this.formulaFaultSink(object),
                (plan, records) => this.resolveFormulaRelated(updateSchema, plan, records, opCtx.context),
                (plan) => this.formulaOptionLabels(updateSchema, plan, opCtx.context),
+               (plan, records) => this.resolveFormulaWorkCalendars(plan, records, opCtx.context),
              );
            }
            // Coerce boolean fields (SQLite 0/1 → JS bool) on the after-hook view
@@ -2596,7 +2599,7 @@ export async function attachInsertSummaryDependents(
 }
 
 export async function loadSummaryFoldDependents(
-  host: Pick<UpdateHost, 'facade' | 'getSchema' | 'permissionResolution' | 'resolveFormulaPermissions' | 'resolveFormulaRelated' | 'formulaOptionLabels'>,
+  host: Pick<UpdateHost, 'facade' | 'getSchema' | 'permissionResolution' | 'resolveFormulaPermissions' | 'resolveFormulaRelated' | 'resolveFormulaWorkCalendars' | 'formulaOptionLabels'>,
   folded: Map<string, { fields: Set<string>; parentIds: Set<string> }>,
   context: Parameters<UpdateHost['resolveFormulaPermissions']>[3],
 ): Promise<SummaryDependents> {
@@ -2611,6 +2614,7 @@ export async function loadSummaryFoldDependents(
     related: Awaited<ReturnType<UpdateHost['resolveFormulaRelated']>>;
     storedLabels: ReturnType<UpdateHost['formulaOptionLabels']>;
     formulaLabels: ReturnType<UpdateHost['formulaOptionLabels']>;
+    calendars: Awaited<ReturnType<UpdateHost['resolveFormulaWorkCalendars']>>;
   }>();
   const systemCtx = { ...(context ?? {}), isSystem: true } as typeof context;
   const systemResolution = host.permissionResolution(systemCtx);
@@ -2642,6 +2646,7 @@ export async function loadSummaryFoldDependents(
       related: await host.resolveFormulaRelated(schema, plan, storedRows, systemCtx),
       storedLabels: declaredOptionLabels(schema, storedPlan),
       formulaLabels: host.formulaOptionLabels(schema, formulaPlan, systemCtx),
+      calendars: await host.resolveFormulaWorkCalendars(plan, storedRows, systemCtx),
     });
   }
   type Served = NonNullable<ReturnType<typeof served.get>>;
@@ -2651,7 +2656,7 @@ export async function loadSummaryFoldDependents(
     for (const name of entry.formulaFields) delete scratch[name];
     // Twice, as the write computes them: before its hooks, then over the row with the moved values.
     for (let pass = 0; pass < 2 && entry.storedPlan.length > 0; pass += 1) {
-      applyFormulaPlan(entry.storedPlan, [scratch], systemCtx, entry.permissions, undefined, entry.related, entry.storedLabels);
+      applyFormulaPlan(entry.storedPlan, [scratch], systemCtx, entry.permissions, undefined, entry.related, entry.storedLabels, entry.calendars);
     }
     return scratch;
   };
@@ -2667,7 +2672,7 @@ export async function loadSummaryFoldDependents(
     const scratch = image ? { ...image, ...moved } : written(entry, stored, moved);
     // The read's row: the formulas the plan does not recompute back at their stored values.
     for (const name of entry.unplannedFormulas) if (name in stored) scratch[name] = stored[name];
-    if (entry.formulaPlan.length > 0) applyFormulaPlan(entry.formulaPlan, [scratch], systemCtx, entry.permissions, undefined, entry.related, entry.formulaLabels);
+    if (entry.formulaPlan.length > 0) applyFormulaPlan(entry.formulaPlan, [scratch], systemCtx, entry.permissions, undefined, entry.related, entry.formulaLabels, entry.calendars);
     const values: Record<string, unknown> = {};
     for (const step of [...entry.storedPlan, ...entry.formulaPlan]) values[step.name] = scratch[step.name];
     return values;

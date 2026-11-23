@@ -105,6 +105,7 @@ export interface ValidateHost {
   getSchema: ObjectQL['getSchema'];
   resolveFormulaPermissions: ObjectQL['resolveFormulaPermissions'];
   resolveFormulaRelated: ObjectQL['resolveFormulaRelated'];
+  resolveFormulaWorkCalendars: ObjectQL['resolveFormulaWorkCalendars'];
   formulaOptionLabels: ObjectQL['formulaOptionLabels'];
   assertReferencesResolve: ObjectQL['assertReferencesResolve'];
   previewHomeAmounts: ObjectQL['previewHomeAmounts'];
@@ -116,7 +117,7 @@ export interface ValidateHost {
 
 /** The body of `ObjectQL#validate`; the method's docblock there is its contract. */
 export async function validate(
-  this: Pick<ValidateHost, 'resolveObjectName' | '_registry' | 'permissionResolution' | 'resolveDefaultPermissions' | 'initializeSummaryFields' | 'applyFieldDefaults' | '_writeWallVerdict' | 'staticReadonlyCreateStrip' | 'logger' | 'mediaValueShapeStrictFor' | 'valueShapeStrictFor' | 'validationMessageContext' | 'buildEvalUser' | 'findOne' | 'readUpdatePriorRow' | 'resolvePreviewParents' | '_writeGateProbe' | 'resolvePredicateRelated' | 'resolveOptionPermissions' | 'getSummaryDescriptors' | 'facade' | 'getSchema' | 'resolveFormulaPermissions' | 'resolveFormulaRelated' | 'formulaOptionLabels' | 'assertReferencesResolve' | 'previewHomeAmounts' | 'homeAmountServing' | 'find' | 'getDriver' | 'buildDriverOptions'>,
+  this: Pick<ValidateHost, 'resolveObjectName' | '_registry' | 'permissionResolution' | 'resolveDefaultPermissions' | 'initializeSummaryFields' | 'applyFieldDefaults' | '_writeWallVerdict' | 'staticReadonlyCreateStrip' | 'logger' | 'mediaValueShapeStrictFor' | 'valueShapeStrictFor' | 'validationMessageContext' | 'buildEvalUser' | 'findOne' | 'readUpdatePriorRow' | 'resolvePreviewParents' | '_writeGateProbe' | 'resolvePredicateRelated' | 'resolveOptionPermissions' | 'getSummaryDescriptors' | 'facade' | 'getSchema' | 'resolveFormulaPermissions' | 'resolveFormulaRelated' | 'resolveFormulaWorkCalendars' | 'formulaOptionLabels' | 'assertReferencesResolve' | 'previewHomeAmounts' | 'homeAmountServing' | 'find' | 'getDriver' | 'buildDriverOptions'>,
   object: string,
   data: Record<string, unknown> | Record<string, unknown>[],
   options?: {

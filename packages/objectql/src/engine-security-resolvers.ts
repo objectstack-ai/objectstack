@@ -83,6 +83,7 @@ export interface SecurityResolversHost {
   resolveDatasourceBinding: ObjectQL['resolveDatasourceBinding'];
   resolveFormulaPermissions: ObjectQL['resolveFormulaPermissions'];
   resolveFormulaRelated: ObjectQL['resolveFormulaRelated'];
+  resolveFormulaWorkCalendars: ObjectQL['resolveFormulaWorkCalendars'];
   resolveOneHopRelated: ObjectQL['resolveOneHopRelated'];
   resolveReadableIdsSecurity: ObjectQL['resolveReadableIdsSecurity'];
   uncomposableReadableIdsParent: ObjectQL['uncomposableReadableIdsParent'];
@@ -384,7 +385,7 @@ export class SecurityResolversFacet {
   }
 
   /** The body of `ObjectQL#serveFormulaField`; the method's docblock there is its contract. */
-  static async serveFormulaField(this: Pick<SecurityResolversHost, '_registry' | 'formulaFaultSink' | 'formulaOptionLabels' | 'permissionResolution' | 'resolveFormulaPermissions' | 'resolveFormulaRelated'>, objectName: string, record: Record<string, unknown>, field: string, context?: ExecutionContext): Promise<unknown> {
+  static async serveFormulaField(this: Pick<SecurityResolversHost, '_registry' | 'formulaFaultSink' | 'formulaOptionLabels' | 'permissionResolution' | 'resolveFormulaPermissions' | 'resolveFormulaRelated' | 'resolveFormulaWorkCalendars'>, objectName: string, record: Record<string, unknown>, field: string, context?: ExecutionContext): Promise<unknown> {
     const schema = this._registry.getObject(objectName);
     const { plan } = planFormulaProjection(schema, [field]);
     if (plan.length === 0) return undefined;
@@ -392,12 +393,12 @@ export class SecurityResolversFacet {
     applyFormulaPlan(plan, [scratch], context, await this.resolveFormulaPermissions(
       objectName, plan, [scratch], context, this.permissionResolution(context),
     ), this.formulaFaultSink(objectName), await this.resolveFormulaRelated(schema, plan, [scratch], context),
-    this.formulaOptionLabels(schema, plan, context));
+    this.formulaOptionLabels(schema, plan, context), await this.resolveFormulaWorkCalendars(plan, [scratch], context));
     return scratch[field];
   }
 
   /** The body of `ObjectQL#computeStoredExpressionsOver` (#29961); the method's docblock there is its contract. */
-  static async computeStoredExpressionsOver(this: Pick<SecurityResolversHost, '_registry' | 'formulaFaultSink' | 'permissionResolution' | 'resolveFormulaPermissions' | 'resolveFormulaRelated'>, object: string, rows: ReadonlyArray<Record<string, unknown>>, context?: ExecutionContext, onFault?: (field: string, message: string) => void): Promise<Array<Record<string, unknown>>> {
+  static async computeStoredExpressionsOver(this: Pick<SecurityResolversHost, '_registry' | 'formulaFaultSink' | 'permissionResolution' | 'resolveFormulaPermissions' | 'resolveFormulaRelated' | 'resolveFormulaWorkCalendars'>, object: string, rows: ReadonlyArray<Record<string, unknown>>, context?: ExecutionContext, onFault?: (field: string, message: string) => void): Promise<Array<Record<string, unknown>>> {
     const schema = this._registry.getObject(object);
     const resolution = this.permissionResolution(context);
     return computeStoredExpressions(planStoredExpressions(schema), rows, context, {
@@ -405,6 +406,7 @@ export class SecurityResolversFacet {
       onFault: onFault ? (field, error) => onFault(field, error.message) : this.formulaFaultSink(object),
       relatedFor: (plan, records) => this.resolveFormulaRelated(schema, plan, records, context),
       optionLabelsFor: (plan) => declaredOptionLabels(schema, plan),
+      workCalendarsFor: (plan, records) => this.resolveFormulaWorkCalendars(plan, records, context),
     });
   }
 
