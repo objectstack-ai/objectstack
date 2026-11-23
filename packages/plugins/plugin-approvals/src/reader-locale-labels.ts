@@ -103,8 +103,10 @@ import {
   translateFlow,
   translateObject,
   translatePosition,
+  type FlowLike,
   type ObjectLike,
   type ResolveOptions,
+  type SecurityCatalogItemLike,
   type TranslationBundle,
 } from '@objectstack/spec/system';
 
@@ -353,11 +355,17 @@ export function readerLabelsFor(
   const flowLabels = new Map<string, string | undefined>();
   const flowLabel = (flowName: string): string | undefined =>
     memo(flowLabels, flowName, () =>
-      translated(({ bundle, options }) => translateFlow({ name: flowName }, bundle, options).label));
+      translated(({ bundle, options }) => {
+        const doc: FlowLike = { name: flowName };
+        return translateFlow(doc, bundle, options).label;
+      }));
   const positionLabels = new Map<string, string | undefined>();
   const positionLabel = (positionName: string): string | undefined =>
     memo(positionLabels, positionName, () =>
-      translated(({ bundle, options }) => translatePosition({ name: positionName }, bundle, options).label));
+      translated(({ bundle, options }) => {
+        const doc: SecurityCatalogItemLike = { name: positionName };
+        return translatePosition(doc, bundle, options).label;
+      }));
   const objectLabels = new Map<string, string | undefined>();
   const objectLabel = (objectName: string): string | undefined =>
     memo(objectLabels, objectName, () =>
