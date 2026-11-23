@@ -69,8 +69,12 @@ export function ReportNewPage({ dataSource }: { dataSource?: DataSource }) {
       if (!metadataClient) return false;
       await loadHanRomanizer().catch(() => {});
       const taken = new Set(((reports as Array<{ name?: unknown }>) ?? []).map((r) => String(r?.name ?? '')));
-      const name = newReportName(pickLocalized(draft.label, language), taken);
-      const body = { ...draft, name };
+      // A report needs a name to be listed by: one left blank is saved under
+      // the placeholder the box showed.
+      const typed = pickLocalized(draft.label, language).trim();
+      const label = typed ? draft.label : t('report.builder.namePlaceholder');
+      const name = newReportName(typed || String(draft.dataset ?? ''), taken);
+      const body = { ...draft, label, name };
       try {
         const outcome = await saveAndPublishRuntimeMetadata('report', name, body, {
           metadataClient,
