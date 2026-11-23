@@ -7,6 +7,7 @@
  */
 
 import React from 'react';
+import { recoverableLazy } from './recoverableLazy.js';
 import type { FieldWidgetComponentProps } from './widgets/types.js';
 // The package's own executor of the DOM pass-through declaration, reused here
 // rather than re-listed — see the note on this component's return statement.
@@ -92,10 +93,10 @@ import { RICH_TEXT_FIELD_TYPES } from './widgets/richTextDisplay.js';
  * what makes that text reach the edit (objectui#12664, the `renderCellEditor`
  * contract on `DataTableSchema`).
  */
-const DatePickerEditWidget = React.lazy(() =>
+const DatePickerEditWidget = recoverableLazy(() =>
   import('./widgets/date-picker/DatePickerField.js').then((m) => ({ default: m.DatePickerField })),
 );
-const DateTimePickerEditWidget = React.lazy(() =>
+const DateTimePickerEditWidget = recoverableLazy(() =>
   import('./widgets/date-picker/DatePickerField.js').then((m) => ({ default: m.DateTimePickerField })),
 );
 
@@ -105,7 +106,7 @@ const DateTimePickerEditWidget = React.lazy(() =>
  * uses for these three types, for the list grid's cell panel
  * ({@link IN_CELL_PANEL_EDIT_WIDGETS}).
  */
-const RichTextPanelEditWidget = React.lazy(() =>
+const RichTextPanelEditWidget = recoverableLazy(() =>
   import('./widgets/RichTextField.js').then((m) => ({ default: m.RichTextField })),
 );
 
