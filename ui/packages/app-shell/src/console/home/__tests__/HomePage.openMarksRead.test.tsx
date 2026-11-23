@@ -176,6 +176,9 @@ function installServerDouble() {
   );
 }
 
+// The console's preview and authoring code loads `@objectstack/lint` lazily;
+// warmed here so its first load is paid at import, not inside a test's clock.
+import '@objectstack/lint';
 import { HomePage } from '../HomePage';
 import { __resetSharedUserFeeds } from '../../../hooks/sharedUserFeeds';
 
