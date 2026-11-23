@@ -568,6 +568,12 @@ const zhHant = {
     // objectstack#36023 — why a list cell's typed value was not saved, under the editor.
     cellNotNumber: '請輸入數字。',
     cellInvalid: '這個值無效。',
+    // objectstack#36289 — a list cell's menu, and why its Paste left the cell as it was.
+    copyCell: '複製',
+    pasteCell: '貼上',
+    clearCell: '清空',
+    pasteNotValue: '複製的內容不能放進這個格子。',
+    pasteUnavailable: '瀏覽器不允許列表讀取剪貼簿。請選中這個格子，按 Ctrl+V（⌘V）貼上。',
     // objectstack#35685 — a list cell's own save state, and the way out of a rule the list cannot complete.
     cellSaving: '儲存中…',
     cellSaved: '已儲存',

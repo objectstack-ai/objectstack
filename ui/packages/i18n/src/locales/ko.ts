@@ -555,6 +555,12 @@ const ko = {
     // objectstack#36023 — why a list cell's typed value was not saved, under the editor.
     cellNotNumber: "숫자를 입력하세요.",
     cellInvalid: "이 값은 유효하지 않습니다.",
+    // objectstack#36289 — a list cell's menu, and why its Paste left the cell as it was.
+    copyCell: "복사",
+    pasteCell: "붙여넣기",
+    clearCell: "지우기",
+    pasteNotValue: "복사한 텍스트는 이 셀에 넣을 수 없습니다.",
+    pasteUnavailable: "브라우저가 클립보드 읽기를 허용하지 않았습니다. 셀을 선택하고 Ctrl+V(⌘V)를 눌러 붙여넣으세요.",
     // objectstack#35685 — a list cell's own save state, and the way out of a rule the list cannot complete.
     cellSaving: "저장 중…",
     cellSaved: "저장됨",

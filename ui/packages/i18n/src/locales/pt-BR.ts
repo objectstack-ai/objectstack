@@ -562,6 +562,12 @@ const pt = {
     // objectstack#36023 — why a list cell's typed value was not saved, under the editor.
     cellNotNumber: "Digite um número.",
     cellInvalid: "Este valor não é válido.",
+    // objectstack#36289 — a list cell's menu, and why its Paste left the cell as it was.
+    copyCell: "Copiar",
+    pasteCell: "Colar",
+    clearCell: "Limpar",
+    pasteNotValue: "O texto copiado não pode ir nesta célula.",
+    pasteUnavailable: "O navegador não permitiu ler a área de transferência. Selecione a célula e pressione Ctrl+V (⌘V) para colar.",
     // objectstack#35685 — a list cell's own save state, and the way out of a rule the list cannot complete.
     cellSaving: "Salvando…",
     cellSaved: "Salvo",
