@@ -137,7 +137,7 @@ import {
   type Menu,
   type MenuEntry,
   type MenuTargetKind,
-} from './designModeMenu.js';
+} from './designModeMenuModel.js';
 import {
   consoleAppMenuDoors,
   fetchDefaultLocale,

@@ -24,7 +24,7 @@ import {
   targetKeyOf,
   withEntryIds,
   type Menu,
-} from '../designModeMenu';
+} from '../designModeMenuModel';
 
 const MENU: Menu = Object.freeze([
   { id: 'home', type: 'dashboard', dashboardName: 'home' },
