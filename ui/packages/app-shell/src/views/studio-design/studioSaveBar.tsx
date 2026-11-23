@@ -67,7 +67,8 @@ export interface StudioSaveEntry {
 }
 
 interface StudioSaveRegistry {
-  register: (id: number, entry: React.MutableRefObject<StudioSaveEntry | null>) => () => void;
+  /** Add a buffer; the answer removes it. (Not `register`: that name is the component registry's.) */
+  enlist: (id: number, entry: React.MutableRefObject<StudioSaveEntry | null>) => () => void;
   /** An entry's `dirty` or `held` changed: the top bar re-reads them. */
   changed: () => void;
 }
@@ -94,7 +95,7 @@ export function useStudioSaveEntry(entry: StudioSaveEntry | null): void {
   const [id] = React.useState(() => ++nextEntryId);
   React.useEffect(() => {
     if (!registry) return;
-    return registry.register(id, ref);
+    return registry.enlist(id, ref);
   }, [registry, id]);
   const dirty = entry?.dirty ?? false;
   const held = entry?.held ?? null;
@@ -127,7 +128,7 @@ export function useStudioSaveCoordinator(locale: string): StudioSaveCoordinator 
   }, []);
   // A state initializer, so its identity is the surface's for life (AGENTS.md #10).
   const [registry] = React.useState<StudioSaveRegistry>(() => ({
-    register: (id, ref) => {
+    enlist: (id, ref) => {
       entriesRef.current.set(id, ref);
       setDirty(readDirty());
       return () => {
