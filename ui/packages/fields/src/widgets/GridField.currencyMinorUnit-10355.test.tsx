@@ -30,6 +30,7 @@ import * as React from 'react';
 import { LocalizationProvider } from '@object-ui/i18n';
 import { GridFieldWidget as GridField } from './grid-field/GridFieldWidget';
 import { computeRow, type GridColumn } from './GridField';
+import { INSET_LADDER } from './adornmentInset';
 
 afterEach(() => cleanup());
 
@@ -169,5 +170,53 @@ describe('GridField shows a currency cell in its resolved currency (objectui#103
     // Three places: the dinar's width, padded, under the authored symbol.
     expect(flat(document.querySelector('[data-computed="amount"]')?.textContent)).toBe('KD 3.600');
     expect(flat(screen.getAllByLabelText('Unit Price')[0].parentElement?.textContent)).toBe('KD');
+  });
+});
+
+/**
+ * objectstack#36678 — a cell's adornment never sits on the typed amount. The
+ * cell control reserved a fixed `pl-6` for a `left-2` symbol sized like `$`;
+ * zh-CN renders USD as `US$`, wider than that inset. jsdom has no layout, so
+ * the adornment is given the box Chromium gives it (text-xs).
+ */
+describe('GridField cell adornment — the control reserves at least the symbol\'s width (objectstack#36678)', () => {
+  const SYMBOL_PX: Record<string, number> = { $: 7, 'US$': 23 };
+  const SYMBOL_LEFT_PX = 8;
+
+  afterEach(() => vi.restoreAllMocks());
+
+  function layOut(): void {
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const width = this.tagName === 'SPAN' ? SYMBOL_PX[this.textContent ?? ''] ?? 0 : 120;
+      const left = this.tagName === 'SPAN' ? SYMBOL_LEFT_PX : 0;
+      return { x: left, y: 0, left, top: 0, width, height: 20, right: left + width, bottom: 20, toJSON: () => ({}) } as DOMRect;
+    });
+  }
+
+  const reservedRem = (input: Element): number =>
+    INSET_LADDER.find((r) => input.classList.contains(r.className))?.rem ?? 0;
+
+  function priceInput(locale: string): HTMLElement {
+    render(
+      <LocalizationProvider value={{ currency: 'USD', locale }}>
+        <GridField value={[{ quantity: 1, unit_price: 150000, amount: 150000 }]} onChange={vi.fn()} field={{ columns: lineColumns } as never} />
+      </LocalizationProvider>,
+    );
+    return screen.getAllByLabelText('Unit Price')[0];
+  }
+
+  it('zh-CN `US$`: the control starts past the symbol', () => {
+    layOut();
+    const input = priceInput('zh-CN');
+    expect(flat(input.parentElement?.textContent)).toBe('US$');
+    expect(reservedRem(input) * 16).toBeGreaterThan(SYMBOL_LEFT_PX + SYMBOL_PX['US$']);
+    expect(input).not.toHaveClass('pl-6');
+  });
+
+  it('`$` keeps exactly the inset it always had', () => {
+    layOut();
+    const input = priceInput('en-US');
+    expect(flat(input.parentElement?.textContent)).toBe('$');
+    expect(input).toHaveClass('pl-6');
   });
 });
