@@ -99,6 +99,41 @@ describe('validateTranslationReferences — _relatedLists', () => {
       .toEqual(['translations[0]["zh-CN"].objects.account._relatedLists.quote']);
   });
 
+  it('names a built-in tab as such, listed or not: no form, no child field to point at', () => {
+    const findings = validateTranslationReferences(stackWith({
+      sys_activity: { label: '动态' },
+      sys_attachment: { label: '附件' },
+    }));
+    expect(findings.map((f) => f.path)).toEqual([
+      'translations[0]["zh-CN"].objects.account._relatedLists.sys_activity',
+      'translations[0]["zh-CN"].objects.account._relatedLists.sys_attachment',
+    ]);
+    for (const f of findings) {
+      expect(f.message).toContain('built-in record-page tab');
+      expect(f.hint).not.toContain('relatedListTitle');
+      expect(f.hint).not.toContain('{ list, label }');
+      expect(f.hint.length, f.hint).toBeLessThanOrEqual(200);
+    }
+  });
+
+  it('does not count a `.custom` entry with `hidden: true` as labelled', () => {
+    const translations = [{ 'zh-CN': { objects: { account: { _relatedLists: { quote: { label: '报价' } } } } } }];
+    const findings = validateTranslationReferences({
+      objects: [ACCOUNT],
+      objectExtensions: [{ extend: 'account', relatedLists: [{ list: 'quote', label: 'Quotes', hidden: true }, 'contact'] }],
+      translations,
+    });
+    expect(findings.map((f) => f.path)).toEqual(['translations[0]["zh-CN"].objects.account._relatedLists.quote']);
+    expect(findings[0].message).toContain('hidden');
+    expect(findings[0].message.length).toBeLessThanOrEqual(200);
+  });
+
+  it('brackets a dotted list in the finding path, as the locale segment is', () => {
+    const findings = validateTranslationReferences(stackWith({ 'event.owner_id': { label: '会议' } }));
+    expect(findings.map((f) => f.path))
+      .toEqual(['translations[0]["zh-CN"].objects.account._relatedLists["event.owner_id"]']);
+  });
+
   it('flags every key on an object that declares no relatedLists', () => {
     const findings = validateTranslationReferences({
       objects: [{ ...ACCOUNT, relatedLists: undefined }],

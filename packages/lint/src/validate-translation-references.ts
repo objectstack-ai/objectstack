@@ -276,6 +276,7 @@ import {
   pageTabItemKey,
   walkAddressedPageComponents,
 } from '@objectstack/spec/system';
+import { isRecordPageBuiltinTab, relatedListEntryHidden } from '@objectstack/spec/data';
 import { walkFlowNodes } from './flow-walk.js';
 import { objectExtensionsByTarget, packagesOf, recordsOf, suggestName } from './object-graph.js';
 import { walkPageComponents } from './page-walk.js';
@@ -494,6 +495,12 @@ interface ObjectFacts {
    * `_relatedLists` key over a named but unlabelled entry resolves nothing.
    */
   relatedListNames: Set<string>;
+  /**
+   * The lists a paired `.custom` arrangement hides (`{ list, hidden: true }`,
+   * ADR-0146 D10): no tab shows them, so their title is read nowhere — read
+   * only to say so.
+   */
+  relatedListHidden: Set<string>;
 }
 
 /** Everything a `flows.<name>.screens.<node_id>` key may legally name. */
@@ -656,6 +663,7 @@ function emptyFacts(): ObjectFacts {
     tabs: new Set(),
     relatedListLabels: new Set(),
     relatedListNames: new Set(),
+    relatedListHidden: new Set(),
   };
 }
 
@@ -1150,9 +1158,10 @@ function contributedNavItemsByApp(stack: AnyRec): Map<string, unknown[]> {
  * `objects.<obj>._sections.*` for the groups a `.custom` arrangement brings
  * (`fieldGroups[].key` is the section anchor, ADR-0085), and
  * `objects.<obj>._relatedLists.*` for a labelled tab entry it brings: an
- * object-form entry of a `.custom` arrangement's `relatedLists`, or a list
- * placement in `place`, each titling a tab of the served target by its
- * `list`. `indexes` is not translatable; `label` / `pluralLabel` /
+ * object-form entry of a `.custom` arrangement's `relatedLists` that is not
+ * `hidden`, or a list placement in `place` (spliced into the packaged base
+ * the read compares with too, `getPackagedObjectBase`), each titling a tab of
+ * the served target by its `list`. `indexes` is not translatable; `label` / `pluralLabel` /
  * `description` are leaf copy on an object that already resolved, and this
  * rule checks no leaf. ⛔ Do not grow this fold to `_views` / `_tabs` /
  * `_actions` "for symmetry": an extension cannot contribute any of them, so a
@@ -1411,11 +1420,17 @@ function buildUniverse(stack: AnyRec): Universe {
       // `.custom` arrangement's `relatedLists` entry (ADR-0146 D10) and a
       // list placement's `place` entry each title a tab of the target, and
       // the served target carries that entry, which `translateObject`
-      // translates as it does the target's own.
+      // translates as it does the target's own (a placed entry is part of
+      // the packaged base it is compared with, `getPackagedObjectBase`). An
+      // arrangement entry with `hidden: true` titles no tab.
       for (const entry of extension.relatedListEntries) {
         const list = strName(entry.list);
         if (!list) continue;
         facts.relatedListNames.add(list);
+        if (relatedListEntryHidden(entry)) {
+          facts.relatedListHidden.add(list);
+          continue;
+        }
         if (typeof entry.label === 'string' && entry.label.length > 0) facts.relatedListLabels.add(list);
       }
     }
@@ -2120,10 +2135,26 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
         // FK's `relatedListTitle`, keyed on the child.
         for (const listName of Object.keys(asRecord(rawNode._relatedLists))) {
           if (facts.relatedListLabels.has(listName)) continue;
+          const listWhere = `${inLocale} · object "${objectName}" · related list "${listName}"`;
+          const listPath = `${objPath}._relatedLists${memberPath(listName)}`;
+          if (isRecordPageBuiltinTab(listName)) {
+            orphan(listWhere, listPath,
+              `"${listName}" is a built-in record-page tab, written only bare and titled by the platform, ` +
+              `so no title of object "${objectName}" reads this key.`,
+              `Drop this key: a built-in tab takes no \`label\` here.`);
+            continue;
+          }
+          if (facts.relatedListHidden.has(listName)) {
+            orphan(listWhere, listPath,
+              `Related list "${listName}" of object "${objectName}" is hidden by the \`.custom\` ` +
+              `arrangement (\`hidden: true\`), so no tab shows a title from this key.`,
+              `Drop this key, or show the tab (drop \`hidden\`) and give the entry a \`label\`.`);
+            continue;
+          }
           const named = facts.relatedListNames.has(listName);
           orphan(
-            `${inLocale} · object "${objectName}" · related list "${listName}"`,
-            `${objPath}._relatedLists.${listName}`,
+            listWhere,
+            listPath,
             named
               ? `Related list "${listName}" of object "${objectName}" carries no \`label\` in ` +
                 `\`relatedLists\`, so no title reads this key.`
