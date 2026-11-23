@@ -278,7 +278,7 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fields.fieldHistory": {
         label: "Feldänderungswerte",
-        helpText: "Alte → neue Werte dieses Felds in der Aktivitätszeitleiste des Datensatzes. Nicht gesetzt bedeutet AN, auch wenn der Schalter aus wirkt: Nur ein ein- und wieder ausgeschalteter Schalter schreibt false, dann wird die Änderung nur mit dem Feldnamen genannt. Eingeschaltet zeigt auch ein Medien- oder JSON-Feld seine Werte."
+        helpText: "Alte → neue Werte dieses Felds in der Aktivitätszeitleiste des Datensatzes. Standard folgt der Plattform: an für die meisten Typen, aus für ein Medien-, JSON- oder Zugangsdaten-Feld. Aus nennt die Änderung nur mit dem Feldnamen; An zeigt auch die Werte eines Medien- oder JSON-Felds. Ein Zugangsdaten-Feld zeigt nie Werte, und ist die Einstellung des Objekts selbst aus, gilt diese."
       },
       "fields.trackHistory": {
         label: "Verlauf verfolgen",
@@ -305,7 +305,7 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "enable.fieldHistory": {
         label: "Feldänderungswerte",
-        helpText: "Alte → neue Werte geänderter Felder in der Aktivitätszeitleiste des Datensatzes. Nicht gesetzt bedeutet AN, auch wenn der Schalter aus wirkt: Nur ein ein- und wieder ausgeschalteter Schalter schreibt false, dann zeigt das ganze Objekt keine Werte."
+        helpText: "Alte → neue Werte geänderter Felder in der Aktivitätszeitleiste des Datensatzes. Standard ist an. Aus schaltet die Werte für das ganze Objekt ab, gleich was ein Feld sagt."
       },
       "enable.searchable": {
         label: "Durchsuchbar"
@@ -873,6 +873,10 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Ausgeblendet",
         helpText: "Feld in den Standardansichten der Oberfläche ausblenden"
       },
+      showOnCreate: {
+        label: "Beim Anlegen anzeigen",
+        helpText: "Dieses Feld beim Anlegen eines Datensatzes abfragen. Aus: Der Anlegen-Dialog, das Anlegen auf ganzer Seite und ein von einer Aktion geöffnetes Anlegen lassen es weg; Bearbeiten, die Datensatzseite und Listen zeigen es weiterhin. Ein Pflichtfeld wird immer abgefragt und kann daher nicht ausgeschaltet werden."
+      },
       searchable: {
         label: "Durchsuchbar",
         helpText: "In die Ergebnisse der globalen Suche einbeziehen"
@@ -907,7 +911,7 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       fieldHistory: {
         label: "Feldänderungswerte",
-        helpText: "Alte → neue Werte dieses Felds in der Aktivitätszeitleiste des Datensatzes. Nicht gesetzt bedeutet AN, auch wenn der Schalter aus wirkt: Nur ein ein- und wieder ausgeschalteter Schalter schreibt false, dann wird die Änderung nur mit dem Feldnamen genannt. Eingeschaltet zeigt auch ein Medien- oder JSON-Feld seine Werte."
+        helpText: "Alte → neue Werte dieses Felds in der Aktivitätszeitleiste des Datensatzes. Standard folgt der Plattform: an für die meisten Typen, aus für ein Medien-, JSON- oder Zugangsdaten-Feld. Aus nennt die Änderung nur mit dem Feldnamen; An zeigt auch die Werte eines Medien- oder JSON-Felds. Ein Zugangsdaten-Feld zeigt nie Werte, und ist die Einstellung des Objekts selbst aus, gilt diese."
       },
       trackHistory: {
         label: "Verlauf verfolgen",

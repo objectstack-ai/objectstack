@@ -66,7 +66,9 @@ describe('ObjectSettingsPanel — record sharing (OWD)', () => {
     renderPanel(baseDraft);
     const desc = screen.getByTestId('owd-internal-desc');
     expect(desc.textContent).toMatch(/refused/i);
-    expect(desc.textContent).toMatch(/security-owd-unset/);
+    // objectstack#36512 — the warning speaks the author's language: no rule
+    // code or ADR number on the page.
+    expect(desc.textContent).not.toMatch(/security-owd-unset|ADR-/);
     // The runtime fallback is still stated — it is what makes `private` the
     // safe pick — but as context, not as an all-clear.
     expect(desc.textContent).toMatch(/Only the owner can see/);

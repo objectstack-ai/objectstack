@@ -23,7 +23,7 @@
 
 import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, render, screen, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
 const PACKAGE_ID = 'app.n4rr';
@@ -150,11 +150,13 @@ describe('Studio shell header below and above 640 px (objectui#12509)', () => {
     const nav = within(header).getByTestId('studio-pillar-nav');
     expect(nav).toHaveClass(...STUDIO_HEADER_PILLAR_NAV.split(' '));
 
-    // Source order stays package · switcher · actions; only `order-last` moves the switcher below `sm`.
+    // Source order stays back link · switcher · actions; only `order-last` moves the switcher below `sm`.
     const groups = Array.from(header.children);
     expect(groups).toHaveLength(3);
     expect(groups[1]).toBe(nav);
-    expect(within(groups[2] as HTMLElement).getByText(t('engine.studio.publish', 'en'))).toBeInTheDocument();
+    // The actions column: with nothing pending and nothing edited, no Publish (objectstack#36511).
+    expect(groups[2]).toHaveClass('justify-end');
+    expect(within(groups[2] as HTMLElement).queryByText(t('engine.studio.publish', 'en'))).toBeNull();
 
     for (const key of ['data', 'automations', 'interfaces', 'access']) {
       const link = within(nav).getByRole('link', { name: t(`engine.studio.pillar.${key}`, 'en') });
@@ -168,12 +170,8 @@ describe('Studio shell header below and above 640 px (objectui#12509)', () => {
       );
     }
 
-    // The chip is the piece that gives way on a tight row.
-    const chip = await waitFor(() => {
-      const el = within(header).getByTestId('studio-pkg-chip');
-      expect(el).toHaveAttribute('data-pkg-list-state', 'loaded');
-      return el;
-    });
-    expect(chip).toHaveClass('min-w-0');
+    // objectstack#36501 — the left group is 「‹ Back to app」, and it gives way
+    // on a tight row (the app's name truncates inside it).
+    expect(within(groups[0] as HTMLElement).getByTestId('studio-back')).toHaveClass('min-w-0');
   });
 });

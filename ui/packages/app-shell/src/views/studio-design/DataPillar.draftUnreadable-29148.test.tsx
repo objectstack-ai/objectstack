@@ -70,6 +70,7 @@ const mockClient = {
   get: vi.fn(async (type: string, name: string, opts?: { packageId?: string }) =>
     type === 'object_extension' && name === OBJECT && opts?.packageId === PAIR ? srv.publishedExt : null,
   ),
+  publish: vi.fn(async () => ({})), reset: vi.fn(async () => ({})),
   save: vi.fn(async (_type: string, _name: string, _body: unknown, _opts?: { packageId?: string }) => ({
     ok: true,
     version: 'v2',
@@ -110,7 +111,10 @@ vi.mock('@object-ui/plugin-view', async (importOriginal) => {
   return { ...mod, ObjectView: GridDouble };
 });
 
+// The source reaches a dynamic import of it: its first load is paid at collection (`check:test-source-alias`).
+import '@objectstack/lint';
 import { DataPillar, type StudioBaseCustomization } from './StudioDesignSurface';
+import { StudioSaveHarness, pressStudioSave } from './__tests__/studioSaveHarness';
 import { t } from '../metadata-admin/i18n';
 import { registerMetadataInspector } from '../metadata-admin/inspector-registry';
 import { ObjectFieldInspector } from '../metadata-admin/inspectors/ObjectFieldInspector';
@@ -165,9 +169,9 @@ afterEach(() => {
 
 async function renderBase(over: Partial<StudioBaseCustomization> = {}) {
   render(
-    <MemoryRouter initialEntries={[`/studio/${BASE}/data`]}>
+    <StudioSaveHarness><MemoryRouter initialEntries={[`/studio/${BASE}/data`]}>
       <DataPillar packageId={BASE} readOnly customization={customizationOf(over)} />
-    </MemoryRouter>,
+    </MemoryRouter></StudioSaveHarness>,
   );
   await waitFor(() => expect(screen.getByTestId('records-panel')).toBeInTheDocument(), { timeout: 8000 });
 }
@@ -222,6 +226,7 @@ describe('DataPillar — a pair extension draft the server refuses to read is no
     const popover = await screen.findByTestId('add-field-popover');
     await userEvent.type(within(popover).getByTestId('add-field-label-input'), 'Region');
     await userEvent.click(within(popover).getByTestId('add-field-create'));
+    await pressStudioSave();
     await waitFor(() => expect(extensionSaves()).toHaveLength(1), { timeout: 8000 });
     expect(extensionSaves()[0]![3]).toMatchObject({ mode: 'draft', packageId: PAIR });
   });

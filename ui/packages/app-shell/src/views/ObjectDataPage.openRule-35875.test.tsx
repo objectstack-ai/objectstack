@@ -32,7 +32,7 @@
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, cleanup, screen, fireEvent, waitFor, within, act } from '@testing-library/react';
-import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom';
+import { MemoryRouter, Routes, Route, useLocation, useNavigate } from 'react-router-dom';
 import { createI18n, I18nProvider } from '@object-ui/i18n';
 import { MePermissionsProvider, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 
@@ -345,5 +345,300 @@ describe('objectstack#36300 — the data page\'s side drawer draws ⤢ 「Open a
     expect(params.get('recordId')).toBeNull();
     await settle();
     expect(screen.queryByRole('dialog')).toBeNull();
+  });
+});
+
+/**
+ * objectstack#36408 — the data page's list keeps its own state in the address,
+ * under the keys `ObjectView` keeps it in: the search (`uf__search`), the sort
+ * (`uf__sort`), the grouping (`uf__group`) and the Filter panel (`uf__filter`).
+ * So the record page's ✕, which returns to the address the list was left at,
+ * and a reload of that address, open the list as the reader left it. The
+ * page's own address conditions (`filter[...]`) are a separate layer the list
+ * applies with the panel; neither rewrites the other.
+ */
+describe('objectstack#36408 — the data page keeps its list\'s search, sort, grouping and Filter panel in the address', () => {
+  const SOURCE_OBJECTS = [
+    {
+      ...OBJECTS[0],
+      fields: { ...OBJECTS[0].fields, parent: { type: 'lookup', reference: 'demo_parent', label: 'Parent' } },
+    },
+    { name: 'demo_parent', label: 'Parent', pluralLabel: 'Parents', fields: { name: { type: 'text', label: 'Name' } } },
+  ];
+  const CITY_OSLO = { logic: 'and', conditions: [{ field: 'city', operator: 'equals', value: 'Oslo' }] };
+  const BY_STATUS = { fields: [{ field: 'status', order: 'asc', collapsed: false }] };
+  /** The list queries, newest last; the record-count probe (`$top: 0`) is left out. */
+  let queries: Array<Record<string, any>> = [];
+  let groupQueries: Array<{ groupBy?: string[] }> = [];
+  const lastQuery = () => queries[queries.length - 1];
+  const filterOf = (query: Record<string, any> | undefined) => JSON.stringify(query?.$filter ?? null);
+  const addressParams = () => new URLSearchParams(search() ?? '');
+
+  function address(params: Record<string, unknown>): string {
+    const sp = new URLSearchParams();
+    for (const [key, value] of Object.entries(params)) {
+      sp.set(key, typeof value === 'string' ? value : JSON.stringify(value));
+    }
+    return `?${sp.toString()}`;
+  }
+
+  async function mountAt(entrySearch: string, objects: unknown[] = OBJECTS, waitForRows = true) {
+    queries = [];
+    groupQueries = [];
+    const dataSource = {
+      find: vi.fn(async (_object: string, params: Record<string, any>) => {
+        if (params?.$top !== 0) queries.push(params);
+        return { data: ROWS, total: MATCHED };
+      }),
+      findOne: vi.fn(async () => null),
+      // A grouped grid asks the server for its groups; recorded so a case can
+      // read which fields the list is grouped by.
+      queryGroupHeaders: vi.fn(async (_object: string, query: { groupBy?: string[] }) => {
+        groupQueries.push(query);
+        return [];
+      }),
+      create: vi.fn(async () => ({})),
+      update: vi.fn(async () => ({})),
+      delete: vi.fn(async () => ({})),
+      getObjectSchema: vi.fn(async (name: string) => (objects as Array<{ name: string }>).find((o) => o.name === name) ?? null),
+    } as never;
+    window.history.replaceState(null, '', DATA_PATH);
+    render(
+      <MePermissionsProvider initialPermissions={answer()}>
+        <I18nProvider instance={createI18n({ defaultLanguage: 'en', detectBrowserLanguage: false })}>
+          <ExpressionProvider user={{ id: 'u1', name: 'Ada', profile: 'admin' }}>
+            <MemoryRouter initialEntries={[`${DATA_PATH}${entrySearch}`]}>
+              <Routes>
+                <Route path="/apps/:appName/:objectName/data" element={<ObjectDataPage dataSource={dataSource} objects={objects} />} />
+                <Route path="/apps/:appName/:objectName/record/:recordId" element={<RecordPageProbe />} />
+              </Routes>
+              <LocationProbe />
+            </MemoryRouter>
+          </ExpressionProvider>
+        </I18nProvider>
+      </MePermissionsProvider>,
+    );
+    if (waitForRows) await screen.findByText('Globex', undefined, { timeout: 5000 });
+    else await waitFor(() => expect(queries.length).toBeGreaterThan(0), { timeout: 5000 });
+    await settle();
+  }
+
+  /** The record's full page by its name, then the page's ✕ back to the data page. */
+  async function openAndClose(name: string) {
+    clickName(name);
+    await screen.findByTestId('record-page', undefined, { timeout: 5000 });
+    const from = JSON.parse(screen.getByTestId('record-from').textContent ?? 'null');
+    fireEvent.click(screen.getByTestId('record-close'));
+    await screen.findByText('Globex', undefined, { timeout: 5000 });
+    await settle();
+    return from as { pathname: string };
+  }
+
+  it('a search, then a record opened and closed: the search is still applied', async () => {
+    await mountAt(DATA_SEARCH);
+    fireEvent.click(screen.getByTestId('search-icon-button'));
+    fireEvent.change(screen.getByPlaceholderText(/search/i), { target: { value: 'Acm' } });
+    await settle();
+    expect(addressParams().get('uf__search')).toBe('Acm');
+    expect(lastQuery().$search).toBe('Acm');
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
+    await settle();
+
+    const from = await openAndClose('Acme');
+    // The record page's origin is the address with the search in it.
+    expect(new URLSearchParams(from.pathname.split('?')[1]).get('uf__search')).toBe('Acm');
+    expect(pathname()).toBe(DATA_PATH);
+    expect(addressParams().get('uf__search')).toBe('Acm');
+    expect(addressParams().get('filter[status]')).toBe('active');
+    // The list the close returned to searches, and says so on its toolbar.
+    expect(lastQuery().$search).toBe('Acm');
+    expect(screen.getByTestId('search-active-keyword').textContent).toBe('Acm');
+  });
+
+  it('a reload of an address with a search, a sort and a Filter panel opens that list, on top of its own conditions', async () => {
+    await mountAt(address({
+      'filter[status]': 'active',
+      uf__search: 'Glo',
+      uf__sort: [{ field: 'city', order: 'desc' }],
+      uf__filter: CITY_OSLO,
+    }));
+    const q = lastQuery();
+    expect(q.$search).toBe('Glo');
+    expect(q.$orderby).toEqual([{ field: 'city', order: 'desc' }]);
+    // The two layers, both applied: the page's condition and the panel's.
+    expect(filterOf(q)).toContain('"status","=","active"');
+    expect(filterOf(q)).toContain('"city","=","Oslo"');
+    // Neither layer rewrote the other: the address keeps both as they came.
+    const params = addressParams();
+    expect(params.get('filter[status]')).toBe('active');
+    expect(JSON.parse(params.get('uf__filter')!)).toEqual(CITY_OSLO);
+    expect(JSON.parse(params.get('uf__sort')!)).toEqual([{ field: 'city', order: 'desc' }]);
+    // The panel condition is the list's, not one of the page's 「Filtered by」 tags.
+    expect(screen.queryByTestId('object-data-remove-filter-city')).toBeNull();
+    expect(screen.getByTestId('object-data-remove-filter-status')).toBeTruthy();
+
+    // And they survive a record opened and closed.
+    const from = await openAndClose('Globex');
+    expect(new URLSearchParams(from.pathname.split('?')[1]).get('uf__sort')).toBe(params.get('uf__sort'));
+    const back = lastQuery();
+    expect(back.$search).toBe('Glo');
+    expect(back.$orderby).toEqual([{ field: 'city', order: 'desc' }]);
+    expect(filterOf(back)).toContain('"status","=","active"');
+    expect(filterOf(back)).toContain('"city","=","Oslo"');
+  });
+
+  it('a reload of an address with a grouping groups the list, and the address keeps it', async () => {
+    await mountAt(address({ uf__group: BY_STATUS }), OBJECTS, false);
+    await waitFor(() => expect(groupQueries.length).toBeGreaterThan(0), { timeout: 5000 });
+    expect(groupQueries[groupQueries.length - 1].groupBy).toEqual(['status']);
+    expect(JSON.parse(addressParams().get('uf__group')!)).toEqual(BY_STATUS);
+  });
+
+  it('CONTROL — an address without list state: no search, no sort, no grouping, and none is written', async () => {
+    await mountAt(DATA_SEARCH);
+    const q = lastQuery();
+    expect(q.$search).toBeUndefined();
+    expect(q.$orderby ?? []).toEqual([]);
+    expect(groupQueries).toHaveLength(0);
+    for (const key of ['uf__search', 'uf__sort', 'uf__group', 'uf__filter']) {
+      expect(addressParams().has(key)).toBe(false);
+    }
+  });
+
+  it('a Filter panel naming a field the object does not declare is refused whole, and leaves the address', async () => {
+    await mountAt(address({
+      'filter[status]': 'active',
+      uf__filter: { logic: 'and', conditions: [{ field: 'ghost', operator: 'equals', value: 'x' }, ...CITY_OSLO.conditions] },
+    }));
+    for (const q of queries) {
+      expect(filterOf(q)).not.toContain('ghost');
+      expect(filterOf(q)).not.toContain('Oslo');
+    }
+    expect(addressParams().has('uf__filter')).toBe(false);
+    expect(addressParams().get('filter[status]')).toBe('active');
+  });
+
+  it('「Reset」 to the source clears the list\'s search with its address param, and the list stops searching', async () => {
+    const trail = JSON.stringify([{ o: 'demo_parent', i: 'P-1', t: 'Launch' }]);
+    await mountAt(address({ 'filter[parent]': 'P-1', 'filter[status]': 'active', from: trail, uf__search: 'Glo' }), SOURCE_OBJECTS);
+    expect(lastQuery().$search).toBe('Glo');
+    const reset = screen.getByTestId('object-data-reset-source') as HTMLButtonElement;
+    expect(reset.disabled).toBe(false);
+    fireEvent.click(reset);
+    await screen.findByText('Globex', undefined, { timeout: 5000 });
+    await settle();
+    expect(addressParams().has('uf__search')).toBe(false);
+    expect(addressParams().get('filter[parent]')).toBe('P-1');
+    expect(addressParams().has('filter[status]')).toBe(false);
+    // The list on screen is the address's: no search term left in it.
+    expect(lastQuery().$search).toBeUndefined();
+    expect(screen.queryByTestId('search-active-keyword')).toBeNull();
+    expect((screen.getByTestId('object-data-reset-source') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('a sort the reader removes leaves the address, and the list asks for none', async () => {
+    await mountAt(address({ 'filter[status]': 'active', uf__sort: [{ field: 'city', order: 'desc' }] }));
+    expect(lastQuery().$orderby).toEqual([{ field: 'city', order: 'desc' }]);
+    fireEvent.click(await within(screen.getByTestId('list-condition-row')).findByTestId('condition-sort'));
+    const row = await screen.findByTestId('sort-builder-row');
+    fireEvent.click(within(row).getByRole('button', { name: 'Remove sort' }));
+    await settle();
+    expect(addressParams().has('uf__sort')).toBe(false);
+    expect(lastQuery().$orderby ?? []).toEqual([]);
+    // No sort is this page's own: the list offers no 「Reset to default」 for the address's.
+    expect(screen.queryByTestId('sort-reset-default')).toBeNull();
+  });
+});
+
+describe('objectstack#36577 — moving straight from one object\'s data page to another\'s opens the new address\'s list', () => {
+  const CONTACT = 'demo_contact';
+  const CONTACT_PATH = `/apps/sales/${CONTACT}/data`;
+  const TWO_OBJECTS = [
+    OBJECTS[0],
+    {
+      name: CONTACT,
+      label: 'Contact',
+      pluralLabel: 'Contacts',
+      fields: {
+        name: { type: 'text', label: 'Name' },
+        city: { type: 'text', label: 'City' },
+        stage: { type: 'select', label: 'Stage', options: [{ value: 'won', label: 'Won' }, { value: 'lost', label: 'Lost' }] },
+      },
+    },
+  ];
+  /** The list queries with the object each asked, newest last; the count probe (`$top: 0`) is left out. */
+  let queries: Array<{ object: string; params: Record<string, any> }> = [];
+  const lastQueryOf = (object: string) => [...queries].reverse().find((q) => q.object === object)?.params;
+  const addressParams = () => new URLSearchParams(search() ?? '');
+
+  function permissions(): MePermissionsAuthenticatedResponse {
+    const base = answer();
+    return { ...base, objects: { ...base.objects, [CONTACT]: base.objects[OBJECT_NAME] } } as MePermissionsAuthenticatedResponse;
+  }
+
+  /** In-app navigation, as a link or the history does it: no reload. */
+  function GoTo({ to }: { to: string }) {
+    const navigate = useNavigate();
+    return <button type="button" data-testid="go-to" onClick={() => navigate(to)}>go</button>;
+  }
+
+  async function mountThenSwitch(fromSearch: string, toSearch: string) {
+    queries = [];
+    const dataSource = {
+      find: vi.fn(async (object: string, params: Record<string, any>) => {
+        if (params?.$top !== 0) queries.push({ object, params });
+        return { data: ROWS, total: MATCHED };
+      }),
+      findOne: vi.fn(async () => null),
+      create: vi.fn(async () => ({})),
+      update: vi.fn(async () => ({})),
+      delete: vi.fn(async () => ({})),
+      getObjectSchema: vi.fn(async (name: string) => TWO_OBJECTS.find((o) => o.name === name) ?? null),
+    } as never;
+    window.history.replaceState(null, '', DATA_PATH);
+    render(
+      <MePermissionsProvider initialPermissions={permissions()}>
+        <I18nProvider instance={createI18n({ defaultLanguage: 'en', detectBrowserLanguage: false })}>
+          <ExpressionProvider user={{ id: 'u1', name: 'Ada', profile: 'admin' }}>
+            <MemoryRouter initialEntries={[`${DATA_PATH}${fromSearch}`]}>
+              <Routes>
+                <Route path="/apps/:appName/:objectName/data" element={<ObjectDataPage dataSource={dataSource} objects={TWO_OBJECTS} />} />
+              </Routes>
+              <LocationProbe />
+              <GoTo to={`${CONTACT_PATH}${toSearch}`} />
+            </MemoryRouter>
+          </ExpressionProvider>
+        </I18nProvider>
+      </MePermissionsProvider>,
+    );
+    await screen.findByText('Globex', undefined, { timeout: 5000 });
+    await settle();
+    fireEvent.click(screen.getByTestId('go-to'));
+    await waitFor(() => expect(lastQueryOf(CONTACT)).toBeDefined(), { timeout: 5000 });
+    await screen.findByText('Globex', undefined, { timeout: 5000 });
+    await settle();
+  }
+
+  it('a search and a chip on the new address: the new object\'s list searches and filters by them, not by the old one\'s', async () => {
+    await mountThenSwitch('?uf__search=Acm', '?uf__search=Glo&uf_stage=won');
+    expect(pathname()).toBe(CONTACT_PATH);
+    const q = lastQueryOf(CONTACT)!;
+    expect(q.$search).toBe('Glo');
+    expect(JSON.stringify(q.$filter ?? null)).toContain('stage');
+    expect(JSON.stringify(q.$filter ?? null)).toContain('won');
+    expect(screen.getByTestId('search-active-keyword').textContent).toBe('Glo');
+    // The address and the list say the same thing.
+    expect(addressParams().get('uf__search')).toBe('Glo');
+    expect(addressParams().get('uf_stage')).toBe('won');
+  });
+
+  it('a new address with no list state: the new object\'s list carries none of the old one\'s, and none is written', async () => {
+    await mountThenSwitch('?uf__search=Acm', '');
+    expect(pathname()).toBe(CONTACT_PATH);
+    for (const { params } of queries.filter((entry) => entry.object === CONTACT)) {
+      expect(params.$search).toBeUndefined();
+    }
+    expect(screen.queryByTestId('search-active-keyword')).toBeNull();
+    expect(addressParams().has('uf__search')).toBe(false);
   });
 });

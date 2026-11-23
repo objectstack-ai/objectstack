@@ -23,8 +23,11 @@
  *     (objectstack#35995): see `handleSave`.
  *
  * While the session is active the bar also owns the record-level keyboard
- * shortcuts (objectui#2572): **Esc** cancels (when no popover/dialog is open)
- * and **Cmd/Ctrl+Enter** saves — both respecting `saving`/`locked`.
+ * shortcuts (objectui#2572): **Esc** cancels (when no popover/dialog is open
+ * over the session) and **Cmd/Ctrl+Enter** saves — both respecting
+ * `saving`/`locked`. In a record pane (the side preview's drawer) the session
+ * owns the pane's Esc too (objectstack#36472): the first Esc ends the edit and
+ * the pane stays open, as the full page does.
  *
  * The bar renders nothing unless the record is actively being edited.
  *
@@ -129,7 +132,30 @@ export interface InlineEditSaveBarProps {
   /** Tooltip/label explaining why the record is locked. */
   lockedHint?: string;
   className?: string;
+  /**
+   * How the session is committed (objectstack#36475).
+   *
+   * - `bar` (default) — the sticky Save / Cancel bar, with the session's
+   *   Cmd/Ctrl+Enter and Esc shortcuts.
+   * - `field` — the session edits ONE field of the record page in place
+   *   (`FieldInPlaceEditor`): no bar and no shortcuts are drawn, because the
+   *   field's editor saves on Enter or a click elsewhere and owns Esc. Every
+   *   write behaviour stays this component's: the one guarded update, the
+   *   refusal attributed per field, the 409 dialog and the fill-in dialog for
+   *   a value that makes other fields required.
+   */
+  face?: 'bar' | 'field';
+  /**
+   * Receives this bar's save, for a `field` face host to call when its editor
+   * is done. Called with a draft, the save writes that draft instead of the
+   * session's: a pick that saves at once hands its value over before the
+   * session's own state has caught up with it.
+   */
+  saveRef?: React.MutableRefObject<InlineEditSave | null>;
 }
+
+/** The save an {@link InlineEditSaveBar} hands its `field` face host. */
+export type InlineEditSave = (draft?: Record<string, unknown>) => Promise<void>;
 
 /**
  * The shape `isConcurrentUpdateError` narrows to, DERIVED from the predicate
@@ -312,6 +338,26 @@ export async function updateVia(
   }
 }
 
+/**
+ * Whether an `Esc` belongs to a layer over the edit session: open floating
+ * content (a lookup or select popover, a menu, a tooltip), an alert, or an
+ * open dialog the session is not inside (the conflict or fill-in dialog, a
+ * confirm). The dialog that holds the session — a record pane's drawer — is
+ * not one (objectstack#36472).
+ */
+function escapeOwnedByLayerOver(bar: Element | null): boolean {
+  const doc = bar?.ownerDocument ?? document;
+  if (doc.querySelector('[data-radix-popper-content-wrapper], [role="alertdialog"][data-state="open"]')) return true;
+  return Array.from(doc.querySelectorAll('[role="dialog"][data-state="open"]')).some(
+    (dialog) => !bar || !dialog.contains(bar),
+  );
+}
+
+/** Whether the session is drawn inside a pane's dialog (the side preview's drawer). */
+function paneHolding(bar: Element | null): boolean {
+  return !!bar?.closest('[role="dialog"]');
+}
+
 export const InlineEditSaveBar: React.FC<InlineEditSaveBarProps> = ({
   dataSource,
   objectName,
@@ -323,6 +369,8 @@ export const InlineEditSaveBar: React.FC<InlineEditSaveBarProps> = ({
   locked = false,
   lockedHint,
   className,
+  face = 'bar',
+  saveRef,
 }) => {
   const { t } = useDetailTranslation();
   const inline = useInlineEdit();
@@ -516,9 +564,9 @@ export const InlineEditSaveBar: React.FC<InlineEditSaveBarProps> = ({
     setEditBase((prev) => prev ?? { version: dataVersion });
   }, [editing, dataVersion]);
 
-  const handleSave = React.useCallback(async () => {
+  const handleSave = React.useCallback<InlineEditSave>(async (handed) => {
     if (!inline) return;
-    const draft = inline.draft;
+    const draft = handed ?? inline.draft;
     const entries = Object.entries(draft);
     // No edits staged → just leave edit mode (matches the old empty-save path).
     if (entries.length === 0) {
@@ -627,16 +675,30 @@ export const InlineEditSaveBar: React.FC<InlineEditSaveBarProps> = ({
 
   // Record-level keyboard shortcuts for the shared edit session
   // (objectui#2572 item 5): Cmd/Ctrl+Enter commits the draft, Esc cancels.
-  // Installed only while editing. Esc defers to any open Radix layer
-  // (popover / select / dropdown / dialog) — those own Escape for "close the
-  // layer", so the session only cancels when nothing is stacked on top.
-  // Both respect the in-flight `saving` state; save also respects `locked`
-  // and stands down while the conflict dialog drives the session.
+  // Installed only while editing. Esc defers to any open Radix layer over the
+  // session (popover / select / dropdown / dialog) — those own Escape for
+  // "close the layer", so the session only cancels when nothing is stacked on
+  // top. Both respect the in-flight `saving` state; save also respects
+  // `locked` and stands down while the conflict dialog drives the session.
+  //
+  // objectstack#36472 — in a record pane (the side preview's drawer) the
+  // dialog that HOLDS the session is not a layer over it. The drawer holds
+  // itself open while the bar is drawn (`data-owns-pane-escape` below), and
+  // marks the key handled to do so, so inside a pane `defaultPrevented` says
+  // nothing; whether a layer was stacked over the session is read when the
+  // key is pressed — on the window in the capture phase, before any layer
+  // closes on it — instead.
   const saving = !!inline?.saving;
   const cancel = inline?.cancel;
   const conflictOpen = !!conflict;
+  const barRef = React.useRef<HTMLDivElement | null>(null);
   React.useEffect(() => {
-    if (!editing) return;
+    // The `field` face's editor owns its keys (objectstack#36475).
+    if (!editing || face === 'field') return;
+    let layeredPress: KeyboardEvent | null = null;
+    const onKeyDownCapture = (e: KeyboardEvent) => {
+      layeredPress = e.key === 'Escape' && escapeOwnedByLayerOver(barRef.current) ? e : null;
+    };
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
         if (saving || locked || conflictOpen) return;
@@ -645,23 +707,34 @@ export const InlineEditSaveBar: React.FC<InlineEditSaveBarProps> = ({
         return;
       }
       if (e.key === 'Escape') {
-        if (e.defaultPrevented || saving || conflictOpen) return;
+        const layered = layeredPress === e;
+        layeredPress = null;
+        if (saving || conflictOpen) return;
+        // On the full page a key already handled is not the session's; in a
+        // pane the pane marks every key it holds itself open on.
+        if (e.defaultPrevented && !paneHolding(barRef.current)) return;
         // An open floating layer (lookup/select popover, dropdown, dialog)
         // owns this Esc — let it close instead of tearing down the draft.
-        if (
-          document.querySelector(
-            '[data-radix-popper-content-wrapper], [role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"]',
-          )
-        ) {
-          return;
-        }
+        if (layered || escapeOwnedByLayerOver(barRef.current)) return;
         e.preventDefault();
         cancel?.();
       }
     };
+    window.addEventListener('keydown', onKeyDownCapture, true);
     window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [editing, saving, locked, conflictOpen, handleSave, cancel]);
+    return () => {
+      window.removeEventListener('keydown', onKeyDownCapture, true);
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [editing, saving, locked, conflictOpen, handleSave, cancel, face]);
+
+  React.useEffect(() => {
+    if (!saveRef) return undefined;
+    saveRef.current = handleSave;
+    return () => {
+      if (saveRef.current === handleSave) saveRef.current = null;
+    };
+  }, [saveRef, handleSave]);
 
   const changedWhileEditing =
     !saving && editBase !== null && editBase.version !== undefined && dataVersion !== undefined && dataVersion !== editBase.version;
@@ -743,6 +816,24 @@ export const InlineEditSaveBar: React.FC<InlineEditSaveBarProps> = ({
   // Render nothing unless a provider is present and the record is being edited.
   if (!inline || !inline.editing) return null;
 
+  // The `field` face draws no bar: its editor shows the reason under the
+  // field, and only the dialogs a save may open are drawn here.
+  if (face === 'field') {
+    return (
+      <>
+        {requiredAsk && renderRequiredAsk(requiredAsk)}
+        <ConcurrentUpdateDialog
+          open={!!conflict}
+          conflict={conflict}
+          busy={conflictBusy}
+          onCancel={closeConflict}
+          onReload={handleConflictReload}
+          onOverwrite={handleConflictOverwrite}
+        />
+      </>
+    );
+  }
+
   const recordMessages =
     recordRefusal && recordRefusal.error === inline.error ? recordRefusal.messages : [];
 
@@ -753,8 +844,13 @@ export const InlineEditSaveBar: React.FC<InlineEditSaveBarProps> = ({
           'sticky bottom-0 z-30 mt-4 flex flex-wrap items-center justify-end gap-2 rounded-md border bg-background/95 px-3 py-2 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-background/80',
           className,
         )}
+        ref={barRef}
         role="region"
         aria-label={t('detail.editFieldsInline')}
+        // objectstack#36472: while the edit session is drawn, a record pane
+        // round it (the side preview's drawer) leaves every Esc to it — the
+        // first Esc ends the edit, the next one closes the pane.
+        data-owns-pane-escape=""
         // objectui#12248: this bar sticks to the bottom edge with Save at its
         // right end, which is where a host's floating launcher sits (the
         // console assistant's button covered Save at 1440 wide). The marker
@@ -819,7 +915,7 @@ export const InlineEditSaveBar: React.FC<InlineEditSaveBarProps> = ({
         <Button
           variant="default"
           size="sm"
-          onClick={handleSave}
+          onClick={() => void handleSave()}
           disabled={inline.saving || locked}
           className="h-11 gap-2 sm:h-9"
           title={locked ? lockedHint : undefined}

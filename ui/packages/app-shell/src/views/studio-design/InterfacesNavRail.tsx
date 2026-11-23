@@ -479,6 +479,17 @@ export function offNavViewReachedByEntry(
 }
 
 /**
+ * objectstack-ai/objectstack#36425 — whether the 视图 group leaves `item` out
+ * as an internal create / edit form (`internalForm`: the object's default or
+ * `OBJECT.create` form, not shared publicly). The console no longer loads one,
+ * so the Studio does not list it. A public form stays listed, as do a named
+ * form an action opens and a view whose body is unknown (a draft-only row).
+ */
+export function offNavViewIsInternalForm(item: Pick<PackageSurface, 'internalForm'>): boolean {
+  return item.internalForm === true;
+}
+
+/**
  * objectstack#30046 — the 视图 group's heading, saying what it holds once
  * the list views the dropdowns reach are gone: form views, list views (of
  * objects no entry opens), or both.

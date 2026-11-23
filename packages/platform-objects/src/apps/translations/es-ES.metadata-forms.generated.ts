@@ -278,7 +278,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "fields.fieldHistory": {
         label: "Valores de cambios de campo",
-        helpText: "Valores anterior → nuevo de este campo en la cronología de actividad del registro. Sin definir equivale a ACTIVADO, aunque el interruptor se vea apagado: solo un interruptor encendido y luego apagado escribe false, y entonces el cambio se nombra solo con la etiqueta. Encendido también muestra los valores de un campo multimedia o JSON."
+        helpText: "Valores anterior → nuevo de este campo en la cronología de actividad del registro. Predeterminado sigue a la plataforma: activado para la mayoría de los tipos, desactivado para un campo multimedia, JSON o de credenciales. Desactivado nombra el cambio solo con la etiqueta; Activado también muestra los valores de un campo multimedia o JSON. Un campo de credenciales nunca muestra valores, y si el propio objeto lo desactiva, manda el objeto."
       },
       "fields.trackHistory": {
         label: "Seguimiento de historial",
@@ -305,7 +305,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "enable.fieldHistory": {
         label: "Valores de cambios de campo",
-        helpText: "Valores anterior → nuevo de los campos modificados en la cronología de actividad del registro. Sin definir equivale a ACTIVADO, aunque el interruptor se vea apagado: solo un interruptor encendido y luego apagado escribe false, y entonces el objeto entero deja de mostrar valores."
+        helpText: "Valores anterior → nuevo de los campos modificados en la cronología de actividad del registro. Predeterminado es activado. Desactivado deja de mostrar valores en todo el objeto, diga lo que diga un campo."
       },
       "enable.searchable": {
         label: "Buscable"
@@ -873,6 +873,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Oculto",
         helpText: "Oculta el campo en las vistas UI predeterminadas"
       },
+      showOnCreate: {
+        label: "Mostrar al crear",
+        helpText: "Pedir este campo al crear un registro. Desactivado: el diálogo de creación, la creación a página completa y una creación abierta por una acción lo omiten; la edición, la página del registro y las listas lo siguen mostrando. Un campo obligatorio siempre se pide, así que no se puede desactivar."
+      },
       searchable: {
         label: "Buscable",
         helpText: "Incluye en los resultados de búsqueda global"
@@ -907,7 +911,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       fieldHistory: {
         label: "Valores de cambios de campo",
-        helpText: "Valores anterior → nuevo de este campo en la cronología de actividad del registro. Sin definir equivale a ACTIVADO, aunque el interruptor se vea apagado: solo un interruptor encendido y luego apagado escribe false, y entonces el cambio se nombra solo con la etiqueta. Encendido también muestra los valores de un campo multimedia o JSON."
+        helpText: "Valores anterior → nuevo de este campo en la cronología de actividad del registro. Predeterminado sigue a la plataforma: activado para la mayoría de los tipos, desactivado para un campo multimedia, JSON o de credenciales. Desactivado nombra el cambio solo con la etiqueta; Activado también muestra los valores de un campo multimedia o JSON. Un campo de credenciales nunca muestra valores, y si el propio objeto lo desactiva, manda el objeto."
       },
       trackHistory: {
         label: "Registrar historial",

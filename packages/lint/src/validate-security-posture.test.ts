@@ -2393,7 +2393,11 @@ const READ_SURFACES: Array<{ receiver: string; expected: string[]; declaredBy: s
   },
   {
     receiver: 'ext',
-    expected: ['extend', 'fieldPatches', 'fields', 'label', 'priority', 'validations'],
+    // `fieldGroups` [ADR-0146 D10]: carried by the shared extension fold for
+    // the translation rule's `_sections` anchors; `place` and `relatedLists`
+    // likewise, for its `_relatedLists` anchors (the tab entries an extension
+    // brings). This rule reads none of them.
+    expected: ['extend', 'fieldGroups', 'fieldPatches', 'fields', 'label', 'place', 'priority', 'relatedLists', 'validations'],
     declaredBy: 'ObjectStackSchema.objectExtensions[]',
     keys: () => shapeKeysOf(ObjectStackSchema.shape.objectExtensions),
   },

@@ -7,19 +7,27 @@
  */
 
 /**
- * The two flow labels a surface that DRAWS a flow resolves from the app's
- * `flows` translation group (`activeFlowsBundle`, `flowsBundle.ts`): the
- * flow's own label (`flows.<flow>.label`) and an `approval` node's step label
- * (`flows.<flow>.approvals.<node_id>.label`).
+ * The flow labels a surface that DRAWS a flow resolves from the app's `flows`
+ * translation group (`activeFlowsBundle`, `flowsBundle.ts`): the flow's own
+ * label (`flows.<flow>.label`) and each step's label, from the one key the
+ * spec gives that step's name:
+ *
+ *  - an `approval` node: `flows.<flow>.approvals.<node_id>.label`;
+ *  - a `screen` node with no `config.title`: `flows.<flow>.screens.<node_id>.title`
+ *    (the executor titles such a screen by its label, so one key covers both);
+ *  - any other node, a screen that authors its own `config.title` included:
+ *    `flows.<flow>.nodes.<node_id>.label` (ruling 7076440876). Such a screen is
+ *    titled apart from its label, so its label is keyed like any other step's.
+ *
+ * An untitled screen's translated title is a run-time template: one holding a
+ * `{{ }}` hole a drawing cannot fill is not a step name, so `stepLabel`
+ * answers nothing for it and the drawing keeps the authored label.
  *
  * The Studio flow designer and the docs viewer's `type: flow` embed
  * (`element:metadata_viewer`) both read them here, and the flow label goes
  * through the spec's `translateFlow`, the runner's resolution path, so no two
- * surfaces can disagree about what a flow or a step is called.
- *
- * Only those two keys exist in the spec's `flows` group for a label a flow
- * drawing shows. A start, decision, notify or end node's label and an edge
- * label have no key, so they stay the authored text.
+ * surfaces can disagree about what a flow or a step is called. An edge label
+ * has no key and stays the authored text.
  *
  * Display only: nothing here rewrites the flow, so an editor keeps working on
  * the authored label.
@@ -33,8 +41,19 @@ import { activeFlowsBundle } from './flowsBundle.js';
 export interface FlowLabelTranslations {
   /** `flows.<flow>.label`. */
   flowLabel?: string;
-  /** `flows.<flow>.approvals.<node_id>.label`, for an `approval` node only. */
-  stepLabel: (node: { id?: unknown; type?: unknown }) => string | undefined;
+  /**
+   * The step's translated label: `approvals.<node_id>.label` for an `approval`,
+   * `screens.<node_id>.title` for an untitled `screen` (unless it holds a
+   * `{{ }}` hole), `nodes.<node_id>.label` for any other node, a titled screen
+   * included. `undefined` for an id-less node.
+   */
+  stepLabel: (node: { id?: unknown; type?: unknown; config?: unknown }) => string | undefined;
+  /**
+   * `flows.<flow>.screens.<node_id>.title` for a `screen` node, titled or not:
+   * the translated heading the screen shows at run time. A drawing that names
+   * a titled screen by its heading reads it here.
+   */
+  screenTitle: (node: { id?: unknown; type?: unknown }) => string | undefined;
 }
 
 /**
@@ -42,8 +61,8 @@ export interface FlowLabelTranslations {
  * `undefined` when there is no bundle (nothing to translate with).
  *
  * The flow label goes through the spec's `translateFlow`, the runner's
- * resolution path; the step label is the spec-typed address
- * `flows.<flow>.approvals.<node_id>.label`, read for `approval` nodes only.
+ * resolution path; the step label is the spec-typed address of the node's
+ * name (see the module note), read by node type.
  */
 export function flowLabelTranslations(
   bundle: TranslationBundle | undefined,
@@ -52,14 +71,24 @@ export function flowLabelTranslations(
 ): FlowLabelTranslations | undefined {
   if (!bundle || !flowName) return undefined;
   const flowLabel = translateFlow<{ name: string; label?: string }>({ name: flowName }, bundle, { locale: language }).label;
-  const approvals = bundle[language]?.flows?.[flowName]?.approvals;
+  const flow = bundle[language]?.flows?.[flowName];
+  const text = (value: unknown) => (typeof value === 'string' && value ? value : undefined);
   return {
-    flowLabel: typeof flowLabel === 'string' && flowLabel ? flowLabel : undefined,
+    flowLabel: text(flowLabel),
     stepLabel: (node) => {
-      if (node.type !== 'approval' || typeof node.id !== 'string' || !node.id) return undefined;
-      const label = approvals?.[node.id]?.label;
-      return typeof label === 'string' && label ? label : undefined;
+      if (typeof node.id !== 'string' || !node.id) return undefined;
+      if (node.type === 'approval') return text(flow?.approvals?.[node.id]?.label);
+      if (node.type === 'screen') {
+        const config = node.config && typeof node.config === 'object' ? (node.config as { title?: unknown }) : {};
+        if (config.title === undefined || config.title === null || config.title === '') {
+          const title = text(flow?.screens?.[node.id]?.title);
+          return title?.includes('{{') ? undefined : title;
+        }
+      }
+      return text(flow?.nodes?.[node.id]?.label);
     },
+    screenTitle: (node) =>
+      node.type === 'screen' && typeof node.id === 'string' && node.id ? text(flow?.screens?.[node.id]?.title) : undefined,
   };
 }
 

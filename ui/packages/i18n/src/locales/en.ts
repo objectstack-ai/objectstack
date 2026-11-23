@@ -68,6 +68,11 @@ const en = {
     nextPage: 'Next page',
     jumpToPage: 'Jump to page',
     retry: 'Retry',
+    // objectstack#36249 — why a pick left an amount empty: the picked amount is
+    // in another currency than the field it would fill (nothing is converted).
+    autofillCurrencyDiffers: '{{field}} was not filled: the picked amount is {{amount}} in {{from}}, but {{field}} here is in {{to}}. Enter it in {{to}}.',
+    autofillSourceNoCurrency: '{{field}} was not filled: the picked amount {{amount}} names no currency, but {{field}} here is in {{to}}. Enter it in {{to}}.',
+    autofillNoCurrency: '{{field}} was not filled: the picked amount is {{amount}}, but no currency is chosen here yet. Choose the currency, then enter {{field}}.',
   },
   common: {
     // objectui#13461 — a disclosure toggle's name (the tree-view node toggle).
@@ -1308,6 +1313,16 @@ const en = {
     inlineEditLabel: 'Edit records inline (click a cell to edit)',
     // The list's Options menu.
     optionsMenu: {
+      // objectstack#36370 — a board's own settings.
+      kanbanLaneField: "Columns by",
+      kanbanLanes: "Visible columns",
+      kanbanCardFields: "Card fields",
+      kanbanAddCardField: "Add field",
+      kanbanShowFieldLabels: "Show field names",
+      kanbanHideEmptyFields: "Hide empty fields",
+      kanbanSummary: "Column summary",
+      kanbanHiddenLanes: "Hidden columns",
+      kanbanHiddenLanesHint: "Cards of a hidden column show under Uncategorized.",
       viewName: 'View name',
       fields: 'Fields',
       fieldsShown: '{{count}} shown',
@@ -1351,6 +1366,19 @@ const en = {
     },
   },
   kanban: {
+    // objectstack#36370 — the lane header's 「+」 and 「⋯」 menu, and an empty lane's create row.
+    laneMenu: {
+      actions: "{{column}} column actions",
+      collapse: "Collapse column",
+      expand: "Expand column",
+      hide: "Hide column",
+      hideHint: "Its cards move to Uncategorized",
+      createIn: "New record in {{column}}",
+      create: "New",
+    },
+    laneStatistic: {
+      loadedOnly: "loaded cards",
+    },
     addCard: 'Add card',
     addColumn: 'Add column',
     moveCard: 'Move card',
@@ -2015,6 +2043,13 @@ const en = {
     foldedMoreFields_other: '{{count}} more',
     expandFolded: 'Show each update',
     collapseFolded: 'Hide updates',
+    // objectstack#36290 — one line per changed field under an activity entry:
+    // the field's label before its values, the word for an empty side, and
+    // the control that shows a long value in full and clamps it again.
+    fieldChangeLabel: '{{field}}:',
+    fieldChangeEmpty: 'Empty',
+    fieldChangeExpand: 'Show all',
+    fieldChangeCollapse: 'Show less',
     // Replies
     replyCount: '{{count}} reply',
     replyCount_one: '{{count}} reply',
@@ -2847,6 +2882,7 @@ const en = {
       enterSwitchApp: 'Switch app',
       enterApplyTheme: 'Apply theme',
       enterOpen: 'Open',
+      currentPage: 'Current page',
     },
     ai: {
       pendingDrafts: {
@@ -3399,6 +3435,7 @@ const en = {
       },
       linkFilterRefused: 'This link’s filter was not applied. It names a field you can’t filter on here, so the list shows the view without it.',
       personalizedParts: {
+        kanban: "Board settings",
         filters: 'Filters',
         search: 'Search',
         sort: 'Sort',
@@ -4195,6 +4232,66 @@ const en = {
     title: 'Design mode',
     leaveUnsaved: 'Leave design mode? Your unsaved changes will be lost.',
     saveFailed: 'Some changes were not saved: {{reason}}',
+    menu: {
+      title: 'Menu',
+      addItem: 'Add menu item',
+      placeholder: 'Choose a menu item…',
+      actions: 'Actions for {{name}}',
+      moveUp: 'Move up',
+      moveDown: 'Move down',
+      moveToGroup: 'Move to group',
+      topLevel: 'Top level',
+      addBefore: 'Add an item before',
+      addAfter: 'Add an item after',
+      rename: 'Rename and icon',
+      renameSourceOnly: 'Menu names are changed in the app\'s source language',
+      remove: 'Remove from menu',
+      contributed: 'Another package adds this item. It is moved, renamed or removed there.',
+      pickerTitle: 'Add menu item',
+      search: 'Search…',
+      kind: {
+        object: 'Objects',
+        view: 'Views',
+        dashboard: 'Dashboards',
+        report: 'Reports',
+        page: 'Pages',
+        url: 'Link',
+      },
+      linkLabel: 'Label',
+      linkUrl: 'URL',
+      add: 'Add',
+      name: 'Name',
+      icon: 'Icon',
+      iconHint: 'A Lucide icon name, such as "briefcase".',
+      done: 'Done',
+      none: 'Nothing to add here',
+      loading: 'Loading…',
+      notListed: 'This app\'s package is not listed, so its menu cannot be saved.',
+      pendingDraft: 'This app has unpublished changes in Studio. Publish or discard them there, then save again.',
+      noVersion: 'This app\'s package states no version, so its menu cannot be customized.',
+      notWritable: 'This app\'s customization package cannot be written, so its menu cannot be saved.',
+    },
+    recordTabs: {
+      entry: 'Configure tabs',
+      title: 'Configure tabs',
+      leaveUnsaved: 'Leave without saving? Your tab changes will be lost.',
+      saveFailed: 'The tabs were not saved: {{reason}}',
+      notListed: 'This object\'s package is not listed, so its tabs cannot be saved.',
+      pendingDraft: 'This object has unpublished changes in Studio. Publish or discard them there, then save again.',
+      notWritable: 'This object\'s package cannot be written, so its tabs cannot be saved here.',
+      name: 'Tab name',
+      rename: 'Rename {{name}}',
+      drag: 'Move {{name}}',
+      hide: 'Hide {{name}}',
+      show: 'Show {{name}}',
+      shown: 'Tabs',
+      hidden: 'Hidden',
+      noneHidden: 'None',
+      contributed: 'Another package adds this tab. It is placed there.',
+      renameSourceOnly: 'Tab names are changed in the app\'s source language',
+      builtinFixed: 'The platform draws this tab last, under its own name.',
+      adjustFieldGroups: 'Adjust field groups',
+    },
   },
   topbar: {
     aiAssistant: 'AI Assistant',
@@ -6002,6 +6099,7 @@ const en = {
       dragSort: 'Drag to change the sort priority',
       viewOwn: 'Part of this view; it cannot be removed here',
       viewFilter: 'View filter',
+      relationPath: '{{lookup}} › {{field}}',
     },
   },
   sortBuilder: {

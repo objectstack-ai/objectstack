@@ -1,8 +1,8 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
-import { ObjectSchema } from '@objectstack/spec/data';
-import { OWD_MODELS, cbpMasterRefusal, deriveMasterObject, requireCbpMasterDetails } from './owd-sharing';
+import { CONTROLLED_BY_PARENT_MASTER_INVALID, ObjectSchema } from '@objectstack/spec/data';
+import { CBP_REFUSAL_KEYS, OWD_MODELS, cbpMasterRefusal, deriveMasterObject, requireCbpMasterDetails } from './owd-sharing';
 
 describe('owd-sharing — canonical values (ADR-0090 D4)', () => {
   it('offers exactly the four canonical models', () => {
@@ -184,10 +184,12 @@ describe('owd-sharing — cbpMasterRefusal reports the installed spec\'s refusal
     ],
     ['a required lookup only', { account: { type: 'lookup', reference: 'crm_account', required: true } }],
     ['no relationship field', { subject: { type: 'text', label: 'Subject' } }],
+    ['a required master marked readonly', { account: { type: 'master_detail', reference: 'crm_account', required: true, readonly: true } }],
+    ['an optional master marked system', { account: { type: 'master_detail', reference: 'crm_account', required: false, system: true } }],
   ];
 
   it.each(CASES)('%s: the same verdict and the same text as the spec', (_label, fields) => {
-    expect(cbpMasterRefusal('crm_case', fields)).toBe(specRefusal(fields));
+    expect(cbpMasterRefusal('crm_case', fields)?.message).toBe(specRefusal(fields));
   });
 
   it('still reports the refusal when another part of the draft would stop the spec first', () => {
@@ -198,14 +200,95 @@ describe('owd-sharing — cbpMasterRefusal reports the installed spec\'s refusal
       subject: { type: 'text', bogus_key: 1 },
     };
     expect(specRefusal(fields)).toBeUndefined();
-    expect(cbpMasterRefusal('crm_case', fields)).toBe(
+    expect(cbpMasterRefusal('crm_case', fields)?.message).toBe(
       specRefusal({ account: { type: 'master_detail', reference: 'crm_account' } }),
     );
   });
 
   it('accepts the array fields shape', () => {
-    expect(cbpMasterRefusal('crm_case', [{ name: 'account', type: 'master_detail', reference: 'crm_account' }])).toBe(
+    expect(cbpMasterRefusal('crm_case', [{ name: 'account', type: 'master_detail', reference: 'crm_account' }])?.message).toBe(
       specRefusal({ account: { type: 'master_detail', reference: 'crm_account' } }),
     );
+  });
+});
+
+describe('owd-sharing — cbpMasterRefusal reads the spec\'s code and shape off the issue (objectstack#36526)', () => {
+  const names = (r: ReturnType<typeof cbpMasterRefusal>) => r?.fields.map((e) => e.name);
+
+  it('two required masters: shape several-required-masters, naming both', () => {
+    const r = cbpMasterRefusal('crm_case', {
+      account: { type: 'master_detail', reference: 'crm_account', required: true },
+      subject: { type: 'text' },
+      contact: { type: 'master_detail', reference: 'crm_contact', required: true },
+    });
+    expect(r?.shape).toBe('several-required-masters');
+    expect(names(r)).toEqual(['account', 'contact']);
+  });
+
+  it('two master-detail fields, none required: shape several-masters, naming both', () => {
+    const r = cbpMasterRefusal('crm_case', {
+      account: { type: 'master_detail', reference: 'crm_account', required: false },
+      contact: { type: 'master_detail', reference: 'crm_contact', required: false },
+    });
+    expect(r?.shape).toBe('several-masters');
+    expect(names(r)).toEqual(['account', 'contact']);
+  });
+
+  it('a required lookup only: shape required-lookup-only, naming the required lookups and no optional one', () => {
+    const r = cbpMasterRefusal('crm_case', {
+      account: { type: 'lookup', reference: 'crm_account', required: true },
+      owner: { type: 'lookup', reference: 'sys_user' },
+    });
+    expect(r?.shape).toBe('required-lookup-only');
+    expect(names(r)).toEqual(['account']);
+  });
+
+  it('a master marked readonly or system: shape master-not-writable, naming the master', () => {
+    for (const flag of ['readonly', 'system'] as const) {
+      const r = cbpMasterRefusal('crm_case', {
+        account: { type: 'master_detail', reference: 'crm_account', required: true, [flag]: true },
+        owner: { type: 'lookup', reference: 'sys_user', [flag]: true },
+      });
+      expect(r?.shape, flag).toBe('master-not-writable');
+      expect(names(r), flag).toEqual(['account']);
+    }
+    // A master that writes no `required`: the parse defaults it to `false` and
+    // judges it the optional master, so the refusal still names it.
+    for (const flag of ['readonly', 'system'] as const) {
+      const r = cbpMasterRefusal('crm_case', { account: { type: 'master_detail', reference: 'crm_account', [flag]: true } });
+      expect(r?.shape, `omitted required, ${flag}`).toBe('master-not-writable');
+      expect(names(r), `omitted required, ${flag}`).toEqual(['account']);
+    }
+    // `false` is no refusal: the flag is carried as written, not as present.
+    expect(cbpMasterRefusal('crm_case', {
+      account: { type: 'master_detail', reference: 'crm_account', required: true, readonly: false, system: false },
+    })).toBeUndefined();
+  });
+
+  it('no relationship field: shape no-master, naming nothing', () => {
+    const r = cbpMasterRefusal('crm_case', { subject: { type: 'text' } });
+    expect(r?.shape).toBe('no-master');
+    expect(names(r)).toEqual([]);
+  });
+
+  it('the shape is the one the spec stamped beside its code on the save door\'s parse', () => {
+    const fields = { subject: { type: 'text' } };
+    const parsed = ObjectSchema.safeParse({ name: 'crm_case', sharingModel: 'controlled_by_parent', fields });
+    const issue = parsed.success ? undefined : parsed.error.issues.find((i) => i.path.join('.') === 'sharingModel');
+    expect((issue as { params?: unknown } | undefined)?.params).toEqual({
+      code: CONTROLLED_BY_PARENT_MASTER_INVALID,
+      shape: cbpMasterRefusal('crm_case', fields)?.shape,
+    });
+  });
+
+  it('every spec shape has a wording row', () => {
+    expect(Object.keys(CBP_REFUSAL_KEYS).sort()).toEqual([
+      'master-not-required',
+      'master-not-writable',
+      'no-master',
+      'required-lookup-only',
+      'several-masters',
+      'several-required-masters',
+    ]);
   });
 });

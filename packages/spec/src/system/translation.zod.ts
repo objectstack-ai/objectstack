@@ -561,7 +561,7 @@ export const ObjectTranslationDataSchema = lazySchema(() => strictObject({
     // The group prefixes are the whole point of the `_`-prefixed convention,
     // and the un-prefixed spelling is the one an author reaches for first.
     views: '_views', actions: '_actions', sections: '_sections', validations: '_validations',
-    validationRules: '_validations', rules: '_validations',
+    validationRules: '_validations', rules: '_validations', relatedLists: '_relatedLists',
     plural: 'pluralLabel', labelPlural: 'pluralLabel', name: 'label', title: 'label',
     columns: 'fields', properties: 'fields', attributes: 'fields',
   },
@@ -864,6 +864,40 @@ export const ObjectTranslationDataSchema = lazySchema(() => strictObject({
   }, {
     label: z.string().optional().describe('Translated tab label'),
   })).optional().describe('Filter-preset tab translations keyed by tab name'),
+
+  /**
+   * Record-page related-list titles keyed by the `list` of an object-form
+   * `relatedLists` entry (`RelatedListEntryObjectSchema`) on THIS object, the
+   * parent whose record page draws the list. Convention (overlaid by
+   * `translateObject` onto the served object's `relatedLists`):
+   *   objects.<object>._relatedLists.<list>.label
+   *
+   * `<list>` is the entry's literal `list` value, indexed directly and never
+   * split: `event.related_to` (a child with several relationships to this
+   * object, written `object.field`) is ONE key, as `resultDialog.fields` keys
+   * its dotted paths.
+   *
+   * **The hole this closes.** An entry's `label` is the tab's title and its
+   * table's heading, and it wins over the child FK's `relatedListTitle`, which
+   * the bundle already translated at
+   * `objects.<child>.fields.<field>.relatedListTitle`. The winning title had no
+   * key, so a declared tab title showed its authored text in every locale.
+   *
+   * **It translates the entry's own `label` and nothing else.** An entry with
+   * no `label` keeps the precedence it has without one (the FK's
+   * `relatedListTitle`, then the child object's plural label, each translated
+   * where it is declared): a bundle translates an attribute and never swaps
+   * another in, the rule `inlineTitle` and `relatedListTitle` above follow. A
+   * bare-string entry and a built-in tab (`sys_attachment`, …) carry no label,
+   * so they have no key here.
+   */
+  _relatedLists: z.record(z.string(), strictObject({
+    surface: 'this related list title translation',
+    history: TRANSLATION_HISTORY,
+    aliases: { name: 'label', title: 'label', heading: 'label', text: 'label' },
+  }, {
+    label: z.string().optional().describe("Translated related list title (overlays the relatedLists entry's own `label`)"),
+  })).optional().describe('Record-page related list titles keyed by the relatedLists entry list name'),
 
   /**
    * Custom validation-rule messages keyed by rule name
@@ -1788,6 +1822,7 @@ const appTranslationDataShape = () => ({
    *   flows.<flow_name>.screens.<node_id>.fields.<field_name>.options.<value>   (#22507)
    *   flows.<flow_name>.refusals.<node_id>.message   (a refused `end` node, #22450)
    *   flows.<flow_name>.approvals.<node_id>.label    (an `approval` node's step label)
+   *   flows.<flow_name>.nodes.<node_id>.label        (any other node's display label, a titled screen's included, ruling 7076440876)
    *   flows.<flow_name>.records.<node_id>.fields.<field_name>   (text a record write keeps)
    *
    * Every user-read string slot of the flow schemas is either one of these
@@ -1913,6 +1948,41 @@ const appTranslationDataShape = () => ({
    * spec half of a contract-first split: the reader that renders the step
    * label in the reader's locale is `plugin-approvals`'s, a downstream change.
    *
+   * ## `nodes` — any other node's display label (ruling 7076440876)
+   *
+   *   flows.<flow_name>.nodes.<node_id>.label
+   *
+   * A drawing of the flow names each step by its node's `label`
+   * (`FlowNode.label`): the docs viewer's `type: flow` embed
+   * (`element:metadata_viewer`, ADR-0051) lists them for a manual's reader, and
+   * the Studio designer draws them on its canvas. Until this key a decision, a
+   * notify, a start or an end step had nowhere to put a translation, so a
+   * manual read in a translated locale named its steps in the authored
+   * language (the maintainer ruled them translatable on objectstack#35979,
+   * option A: 「补上翻译位，可以翻译」).
+   *
+   * - **Grouped by what it overlays, not by node type.** Every other group
+   *   addresses one node type; this one addresses the node label of every
+   *   node whose label has no key of its own, at any depth (an ADR-0031 region
+   *   included). That excludes an `approval` (`approvals.<node_id>.label`)
+   *   and an untitled `screen`, whose `screens.<node_id>.title` covers
+   *   `config.title ?? node.label`, so one string keeps one key.
+   *   `objectstack validate` points a `nodes` key over either at its own key.
+   * - **A titled screen's label is keyed here.** A screen that authors its
+   *   own non-empty `config.title` is titled apart from its label, so its
+   *   label has no other key: the Studio canvas draws it, and the docs embed
+   *   draws it where the heading holds a `{{ }}` hole a drawing cannot fill
+   *   (elsewhere the embed names the screen by its heading). Its heading
+   *   stays `screens.<node_id>.title`.
+   * - **Start and end nodes included.** Their labels are the author's words
+   *   like any other step's, and often name an outcome or a trigger
+   *   ("Approved", "On Task Created"), so a viewer does not substitute words of
+   *   its own for them.
+   * - **Plain text, not a template.** `FlowNode.label` is drawn as authored and
+   *   never rendered over a run's variables, so the leaf is a plain string.
+   * - **Display only.** A reader overlays the label it draws; the flow
+   *   document, the run and the `{{ }}` copy the engine renders are untouched.
+   *
    * ## `notices` — a `save_notice` node's message (#28251)
    *
    *   flows.<flow_name>.notices.<node_id>.message
@@ -2035,7 +2105,9 @@ const appTranslationDataShape = () => ({
     surface: 'this flow translation',
     history: TRANSLATION_HISTORY,
     aliases: {
-      name: 'label', title: 'label', nodes: 'screens', steps: 'screens', screen: 'screens', pages: 'screens',
+      name: 'label', title: 'label', screen: 'screens', pages: 'screens',
+      // A step's name is a node label: `steps.<node_id>.label` means `nodes`.
+      node: 'nodes', steps: 'nodes', step: 'nodes',
       refusal: 'refusals', ends: 'refusals',
       approval: 'approvals',
       notice: 'notices', saveNotices: 'notices',
@@ -2149,6 +2221,37 @@ const appTranslationDataShape = () => ({
         + 'request shows its submitter and approvers',
       ),
     })).optional().describe("Approval-step translations keyed by the node id (`FlowNode.id`) of an `approval` node"),
+    // [ruling 7076440876] Any other node's display label, the step name a
+    // drawing of the flow shows (the docs viewer's `type: flow` embed and the
+    // Studio designer). Grouped by what it overlays, `FlowNode.label`, not by
+    // node type: an untitled screen's heading and an approval step's label
+    // already have their own keys, so `objectstack validate` points a key over
+    // either at it; a screen that authors its own `config.title` has its label
+    // keyed here.
+    nodes: z.record(z.string(), strictObject({
+      surface: 'this flow node translation',
+      history: TRANSLATION_HISTORY,
+      // The leaf is the node's own `label`; the spellings a neighbouring group
+      // uses for the same string are renames onto it.
+      aliases: { title: 'label', name: 'label', heading: 'label', stepLabel: 'label', text: 'label' },
+      guidance: {
+        message:
+          'A node label is a name, not a message. A refused `end` node\'s message is '
+          + '`refusals.<node_id>.message`; a `save_notice` node\'s is `notices.<node_id>.message`.',
+        description:
+          'A drawing of the flow shows a node by its label alone. Translate `label`; a screen\'s body text is '
+          + '`screens.<node_id>.description`.',
+      },
+    }, {
+      label: z.string().optional().describe(
+        "Translated node label — overlays the node's own `label` (`FlowNode.label`), the step name a drawing of the "
+        + 'flow shows; for any node but an untitled `screen` (keyed `screens.<node_id>.title`) and an `approval` '
+        + '(keyed `approvals.<node_id>.label`). A screen that authors its own `config.title` has its label keyed here',
+      ),
+    })).optional().describe(
+      'Node-label translations keyed by node id (`FlowNode.id`) — every node other than an untitled `screen` or an '
+      + '`approval`',
+    ),
     // [#28251] A `save_notice` node's message, picked by the ENGINE in the
     // triggering writer's locale before its holes are filled — the `refusals`
     // posture, one group over, addressed the same way (by `FlowNode.id`).

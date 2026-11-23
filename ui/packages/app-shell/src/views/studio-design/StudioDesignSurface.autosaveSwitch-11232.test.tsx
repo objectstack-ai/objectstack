@@ -20,9 +20,9 @@
  * claim on its buffer reads moved once the item has changed. The previous
  * item's pending edit is dropped by the hook, which is what every pillar did
  * whenever the new load landed inside the debounce. The Data pillar is the
- * control: its rail sends the pending edit to its own object with the hook's
- * `flush` before it switches (objectstack#27511), so nothing of it reaches the
- * object opened next either.
+ * control: it saves with the top bar's Save (objectstack#36511), so its rail
+ * asks before a switch drops an unsaved edit, and nothing of it reaches either
+ * object.
  *
  * objectui#11203 (folded in): a package switch keeps the Interfaces pillar
  * mounted, so the nav editor's dirty flag and open editing survived into the
@@ -37,13 +37,16 @@
  */
 
 import '@testing-library/jest-dom/vitest';
+// The surface's reach loads `@objectstack/lint` lazily; pay that load during
+// collection, not inside a case's clocked window (`check:test-source-alias`).
+import '@objectstack/lint';
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 // Module scope as well as in the `vi.mock` factory below: the cold transform is paid
 // during collection, which no test or hook timeout clocks (AGENTS.md, flaky-test discipline).
 import '@object-ui/components';
 import { render, screen, fireEvent, cleanup, waitFor, within, act } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom';
 
 const PKG = 'com.acme.app';
 const PKG_B = 'com.beta.app';
@@ -205,6 +208,7 @@ vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => null }));
 vi.mock('../../preview/DraftChangesPanel', () => ({ DraftChangesPanel: () => null }));
 
 import { AutomationsPillar, DataPillar, InterfacesPillar, StudioDesignSurface } from './StudioDesignSurface';
+import { StudioSaveHarness, pressStudioSave } from './__tests__/studioSaveHarness';
 import { ADD_FIELD_OFFERED, addFieldFromGrid } from './__tests__/dataPillarAddField';
 import { createEmptyDataSource } from './__tests__/emptyDataSource';
 import { registerMetadataPreview } from '../metadata-admin/preview-registry';
@@ -216,6 +220,25 @@ import { PagePreview } from '../metadata-admin/previews/PagePreview';
 import { PageBlockInspector } from '../metadata-admin/inspectors/PageBlockInspector';
 import { PageDefaultInspector } from '../metadata-admin/inspectors/PageDefaultInspector';
 import { readFields } from '../metadata-admin/previews/object-fields-io';
+import { confirmUnsavedLeave } from '../../chrome/unsavedEdits';
+
+/**
+ * A door to another package that leaves the surface mounted, asking first
+ * when a pillar holds unsaved work: the shell seam's question, the one the
+ * contributed rows' doors ask (`useOpenContributor`). The package switcher
+ * was these tests' door until objectstack#36501 removed it.
+ */
+function PackageDoor({ to }: { to: string }) {
+  const navigate = useNavigate();
+  return (
+    <button
+      type="button"
+      aria-label="test door: other package"
+      data-testid="package-door"
+      onClick={() => confirmUnsavedLeave(() => navigate(to))}
+    />
+  );
+}
 
 const dataSource = createEmptyDataSource();
 
@@ -432,37 +455,34 @@ describe('Interfaces page inspector — a save in flight across a page switch (o
   }, 30000);
 });
 
-describe('Data pillar — an object switch inside the debounce, the control (objectui#11232)', () => {
-  it('sends nothing to the newly opened object; the pending edit goes to its own (objectstack#27511)', async () => {
+describe('Data pillar — an object switch over an unsaved edit, the control (objectui#11232)', () => {
+  it('sends nothing to either object; an edit on the opened object goes to it on Save (objectstack#36511)', async () => {
     render(
-      <MemoryRouter initialEntries={[`/studio/${PKG}/data`]}>
-        <DataPillar packageId={PKG} />
-      </MemoryRouter>,
+      <StudioSaveHarness>
+        <MemoryRouter initialEntries={[`/studio/${PKG}/data`]}>
+          <DataPillar packageId={PKG} />
+        </MemoryRouter>
+      </StudioSaveHarness>,
     );
     await waitFor(() => expect(screen.getByText(/^\d+ fields?( \(\+\d+ system\))?$/)).toHaveTextContent('2 fields'), SLOW);
 
     await addFieldFromGrid();
     const release = holdLoad('object', 'acme_note');
+    // The edit is unsaved: the switch asks, and the author drops it.
+    confirmSpy.mockReturnValue(true);
     fireEvent.click(screen.getByRole('button', { name: /Note/ }));
-    await pastDebounce();
-
-    expect(savesOf('object', 'acme_note')).toEqual([]);
-    // objectstack#27511 — the switch sent the edit to Task before it opened Note.
-    expect(savesOf('object', 'acme_task').map((b) => readFields(b.fields).entries.map((e) => e.name))).toEqual([
-      ['title', 'status', 'new_field'],
-    ]);
-    server.saves.length = 0;
-
+    expect(confirmSpy).toHaveBeenCalledTimes(1);
     await release();
     await waitFor(() => expect(screen.getByText(/^\d+ fields?( \(\+\d+ system\))?$/)).toHaveTextContent('1 field'), SLOW);
     await pastDebounce(1800);
     expect(server.saves).toEqual([]);
     // The control's own control: an edit on the opened object saves to it.
     await addFieldFromGrid();
-    await waitFor(() => expect(server.saves).toHaveLength(1), SLOW);
+    await pressStudioSave();
     expect(savesOf('object', 'acme_note').map((b) => readFields(b.fields).entries.map((e) => e.name))).toEqual([
       ['body', 'new_field'],
     ]);
+    expect(savesOf('object', 'acme_task')).toEqual([]);
   }, 30000);
 });
 
@@ -470,6 +490,7 @@ describe('Studio surface — a package switch over an unsaved nav edit (objectui
   function surfaceTree() {
     return (
       <MemoryRouter initialEntries={[`/studio/${PKG}/interfaces`]}>
+        <PackageDoor to={`/studio/${PKG_B}/interfaces`} />
         <Routes>
           <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
         </Routes>
@@ -491,10 +512,9 @@ describe('Studio surface — a package switch over an unsaved nav edit (objectui
     fireEvent.keyDown(screen.getByTestId('nav-link-object'), { key: 'ArrowDown' });
     fireEvent.click(await screen.findByRole('option', { name: new RegExp(`\\(${objectName}\\)$`) }));
   };
-  async function switchTo(name: RegExp, confirmed: boolean): Promise<void> {
-    fireEvent.click(await screen.findByTestId('studio-pkg-chip', undefined, SLOW));
+  async function switchTo(confirmed: boolean): Promise<void> {
     confirmSpy.mockReturnValueOnce(confirmed);
-    fireEvent.click(await screen.findByRole('button', { name }, SLOW));
+    fireEvent.click(screen.getByTestId('package-door'));
   }
   const savedNav = (body: Record<string, unknown>) =>
     (body.navigation as Array<Record<string, unknown>>).map((n) =>
@@ -510,7 +530,7 @@ describe('Studio surface — a package switch over an unsaved nav edit (objectui
     await addItem();
     expect(addedItems()).toBe(1);
 
-    await switchTo(/Beta/, true);
+    await switchTo(true);
     expect(confirmSpy).toHaveBeenCalledTimes(1);
     await screen.findByRole('button', { name: /Board menu/ }, SLOW);
     await pastDebounce(3500);
@@ -535,7 +555,7 @@ describe('Studio surface — a package switch over an unsaved nav edit (objectui
     await addItem();
 
     const release = holdLoad('app', 'beta_app');
-    await switchTo(/Beta/, true);
+    await switchTo(true);
     await pastDebounce();
     expect(server.saves).toEqual([]);
 
@@ -550,7 +570,7 @@ describe('Studio surface — a package switch over an unsaved nav edit (objectui
     await screen.findByRole('button', { name: 'Select hello' }, SLOW);
 
     // No nav edit, so no prompt: page edits are not what the guard holds.
-    await switchTo(/Beta/, true);
+    await switchTo(true);
     expect(confirmSpy).not.toHaveBeenCalled();
     await screen.findByRole('button', { name: /Board menu/ }, SLOW);
     // The previous package's page does not stay open on the new package.
@@ -573,9 +593,10 @@ describe('Studio surface — a package switch over an unsaved nav edit (objectui
     await openEditing();
     await addItem();
 
-    await switchTo(/Beta/, false);
+    await switchTo(false);
     expect(confirmSpy).toHaveBeenCalledTimes(1);
-    expect(screen.getByTestId('studio-pkg-chip')).toHaveTextContent('Acme');
+    // Still package A: its own nav entry is on the rail.
+    expect(screen.getByRole('button', { name: /Landing menu/ })).toBeInTheDocument();
     expect(addedItems()).toBe(1);
 
     await waitFor(() => expect(server.saves).toHaveLength(1), SLOW);
@@ -689,9 +710,11 @@ describe("the load window: nothing of the previous item is offered, shown or sav
 
   it('Data: a field added during the load saves nothing; one added after the load saves once, to the object opened', async () => {
     render(
-      <MemoryRouter initialEntries={[`/studio/${PKG}/data`]}>
-        <DataPillar packageId={PKG} />
-      </MemoryRouter>,
+      <StudioSaveHarness>
+        <MemoryRouter initialEntries={[`/studio/${PKG}/data`]}>
+          <DataPillar packageId={PKG} />
+        </MemoryRouter>
+      </StudioSaveHarness>,
     );
     await waitFor(() => expect(screen.getByText(/^\d+ fields?( \(\+\d+ system\))?$/)).toHaveTextContent('2 fields'), SLOW);
 
@@ -714,6 +737,7 @@ describe("the load window: nothing of the previous item is offered, shown or sav
 
     // The control: a field added after the load saves once, to its own object.
     await addFieldFromGrid();
+    await pressStudioSave();
     await waitFor(() => expect(server.saves).toHaveLength(1), SLOW);
     expect(server.saves.map((s) => [s.type, s.name, s.body.label, fieldNamesOf(s.body)])).toEqual([
       ['object', 'acme_note', 'Note', ['body', 'new_field']],
@@ -724,11 +748,12 @@ describe("the load window: nothing of the previous item is offered, shown or sav
 });
 
 describe('a package switch: Automations and Data open nothing of the previous package (objectui#11272)', () => {
-  // Through the real surface and its `PackageSwitcher`: the route keeps the
+  // Through the real surface and a door to package B: the route keeps the
   // surface mounted across `:packageId`, as the console's does.
   function surfaceTree(tab: string) {
     return (
       <MemoryRouter initialEntries={[`/studio/${PKG}/${tab}`]}>
+        <PackageDoor to={`/studio/${PKG_B}/${tab}`} />
         <Routes>
           <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
         </Routes>
@@ -736,10 +761,8 @@ describe('a package switch: Automations and Data open nothing of the previous pa
     );
   }
   async function switchToBeta(): Promise<void> {
-    fireEvent.click(await screen.findByTestId('studio-pkg-chip', undefined, SLOW));
     confirmSpy.mockReturnValue(true);
-    fireEvent.click(await screen.findByRole('button', { name: /Beta/ }, SLOW));
-    await waitFor(() => expect(screen.getByTestId('studio-pkg-chip')).toHaveTextContent('Beta'), SLOW);
+    fireEvent.click(screen.getByTestId('package-door'));
   }
 
   it("Automations: package A's open flow is not kept; an edit saves package B's own flow, in B", async () => {
@@ -771,6 +794,7 @@ describe('a package switch: Automations and Data open nothing of the previous pa
     await screen.findByRole('button', { name: /Beta item/ }, SLOW);
     await waitFor(() => expect(screen.getByText(/^\d+ fields?( \(\+\d+ system\))?$/)).toBeInTheDocument(), SLOW);
     await addFieldFromGrid();
+    await pressStudioSave();
     await waitFor(() => expect(server.saves).toHaveLength(1), SLOW);
     expect(server.saves.map((s) => [s.type, s.name, s.packageId, s.body.label, fieldNamesOf(s.body)])).toEqual([
       ['object', 'beta_item', PKG_B, 'Beta item', ['name', 'new_field']],

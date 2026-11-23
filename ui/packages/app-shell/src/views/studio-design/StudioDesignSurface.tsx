@@ -99,8 +99,8 @@ import {
 } from './flowGrouping.js';
 import { StudioRefusalStrip } from './StudioRefusalStrip.js';
 import { StudioNavItemInspector, StudioPicker } from './StudioNavItemInspector.js';
-import { PACKAGE_LIST_TOAST_ID, PackageSwitcher, STUDIO_LANDING_PATH } from './PackageSwitcher.js';
-import { StudioOpenApp, type StudioOpenAppTarget } from './StudioOpenApp.js';
+import { PACKAGE_LIST_TOAST_ID, STUDIO_LANDING_PATH } from './PackageSwitcher.js';
+import { StudioBackToApp, type StudioAppTarget } from './StudioBackToApp.js';
 import {
   ContributedNavRows,
   InterfacesNavContributionsContext,
@@ -117,6 +117,7 @@ import {
   offNavViewHeading,
   offNavViewLabel,
   offNavViewReachedByEntry,
+  offNavViewIsInternalForm,
   type OffNavType,
 } from './InterfacesNavRail.js';
 import {
@@ -219,7 +220,6 @@ import {
   Rocket,
   ChevronDown,
   Lock,
-  Home as HomeIcon,
   Shield,
   ShieldCheck,
   ShieldQuestion,
@@ -320,6 +320,15 @@ import { fetchPendingDrafts, usePendingDrafts } from '../../preview/usePendingDr
 import { emitMetadataRefresh, subscribeMetadataRefresh } from '../../assistant/assistantBus.js';
 import { STUDIO_CHANGES_PARAM, STUDIO_CHANGES_REVIEW } from './studioChangesLink.js';
 import {
+  publishSavedItem,
+  StudioSaveControls,
+  StudioSaveProvider,
+  useStudioSaveCoordinator,
+  useStudioSaveEntry,
+  type StudioSaveResult,
+} from './studioSaveBar.js';
+import { irreversibleFieldChanges } from './objectSaveConfirm.js';
+import {
   BATCH_ABORTED_CODE,
   causalPublishFailures,
   dashboardHeldEdit,
@@ -332,6 +341,7 @@ import {
   objectHeldEdit,
   objectSaveRefusal,
   plainRefusal,
+  publishFailureOf,
   publishRefusal,
   reportHeldEdit,
   type PublishFailure,
@@ -360,7 +370,8 @@ import { StudioMetadataArea } from './StudioMetadataArea.js';
 import { useMetadataRefreshNonce } from './useMetadataRefreshNonce.js';
 import { resolveSurface, findSurfaceInTree, isSameSurface, type NavNode, type Surface } from './navSurface.js';
 import { servedNavTextOf, displayNavTree, displayAppLabel, type ServedNavText } from './servedNavText.js';
-import { ServedWidgetTextContext, servedWidgetTextOf } from './servedDashboardText.js';
+import { ServedWidgetTextContext, servedWidgetTextOf, shownWidgetTitle } from './servedDashboardText.js';
+import { useLabelLanguage } from '../metadata-admin/inspectors/servedLabel.js';
 import { ServedReportTextContext, servedReportTextOf } from './servedReportText.js';
 import {
   useSurfaceDeepLink,
@@ -438,14 +449,6 @@ import { StudioGridAddFieldButton, StudioGridAddFieldProvider, type StudioGridAd
 import { useDraftAutoSave, type DraftSend } from './useDraftAutoSave.js';
 import { FLOW_PRESETS, flowPresetTrigger, type FlowPreset } from './flowPresets.js';
 import { FormToolbar, ObjectFormDesigner } from './ObjectFormDesigner.js';
-import { formLayoutChoiceOf, useFormViewDraft } from './useFormViewDraft.js';
-import { formViewBodyOf, formViewSectionsOf } from './formViewSections.js';
-import {
-  resolveFormViewLayout,
-  type FormViewDefinition,
-  type ObjectDefinitionForFormView,
-  type RecordFormFlow,
-} from '../../utils/recordFormNavigation.js';
 import { isStudioHiddenSystemField } from './studioHiddenSystemField.js';
 import { ObjectGroupInspector } from './ObjectGroupInspector.js';
 import { ObjectValidationsPanel } from './ObjectValidationsPanel.js';
@@ -830,7 +833,7 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
   const ensurePair = React.useCallback(async (): Promise<string> => (await ensurePairPackage()).packageId, [ensurePairPackage]);
   const baseLabel = pkgEntry?.id === packageId ? pkgEntry.name : (packageId ?? '');
 
-  // objectui#2600 — the header's pillar links, Home button and PackageSwitcher
+  // objectui#2600 — the header's pillar links and its 「‹ Back to app」 link
   // are pure SPA client navigation, so the editors' `beforeunload` guard never
   // fires; a dirty pillar unmounts silently and its unsaved edits are gone
   // (Access matrix cells, Interfaces nav). Each pillar mirrors its dirty state
@@ -844,10 +847,14 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
   // promotes the drafts the server holds, which do not carry that edit, so it is
   // refused while one is held rather than going around it silently.
   const [heldEdit, setHeldEdit] = React.useState<string | null>(null);
+  // objectstack#36511 — the open page's buffers that save with the top bar's
+  // Save and Cancel (`studioSaveBar.tsx`).
+  const saveBar = useStudioSaveCoordinator(locale);
   // objectstack#26705 — a held edit lives only in the pillar's buffer, so a
   // departure drops it exactly as it drops a dirty pillar's edits: both are
-  // unsaved work, and every guard below reads this one bit.
-  const unsavedPillarWork = pillarDirty || heldEdit !== null;
+  // unsaved work, and every guard below reads this one bit. objectstack#36511
+  // — so does an edit waiting for the top bar's Save.
+  const unsavedPillarWork = pillarDirty || heldEdit !== null || saveBar.dirty;
   const confirmLeavePillar = React.useCallback(
     () => confirmDropUnsavedWork(unsavedPillarWork, locale),
     [unsavedPillarWork, locale],
@@ -879,11 +886,14 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
   // what makes the gate's per-draft findings reach the author (objectui#10039).
   const shellClient = useMetadataClient();
 
-  // Package-level publish (ADR-0033/0037/0048): edits accumulate as per-item
-  // drafts STAMPED with this package (each save passes packageId → the draft row's
+  // Package-level publish (ADR-0033/0037/0048): drafts are per item, STAMPED
+  // with this package (each save passes packageId → the draft row's
   // sys_metadata.package_id). Publishing promotes exactly THIS package's drafts in
   // one atomic pass (POST /packages/:id/publish-drafts), reviewed as a whole in
-  // DraftChangesPanel. There is no per-item publish.
+  // DraftChangesPanel. objectstack#36511 — an editor converted to the top bar's
+  // Save writes its item's draft and publishes that one item at once
+  // (`publishSavedItem`), so it leaves no draft; Changes and Publish are for the
+  // drafts other writers (the copilot) and the editors not yet converted leave.
   const [changesOpen, setChangesOpen] = React.useState(false);
   // objectui#12517 — which trigger opened the sheet: Publish opens it to
   // confirm (rows expanded, focus on Publish all), Changes opens it to review.
@@ -997,6 +1007,12 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
   const doPublish = React.useCallback(async (options?: DraftPublishOptions) => {
     if (heldEdit !== null) {
       toast.error(tFormat('engine.studio.held.publish', locale, { clause: heldEdit }));
+      return;
+    }
+    // objectstack#36511 — a publish re-reads the open page from the server, so
+    // it would drop edits still waiting for Save: they are saved or cancelled first.
+    if (saveBar.dirty) {
+      toast.error(t('engine.studio.save.publishFirst', locale));
       return;
     }
     setPublishing(true);
@@ -1210,7 +1226,7 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
       setPublishing(false);
     }
     await refreshPending();
-  }, [shellClient, packageId, pairId, draftScope, refreshPending, locale, heldEdit]);
+  }, [shellClient, packageId, pairId, draftScope, refreshPending, locale, heldEdit, saveBar.dirty]);
 
   // objectui#11787 — a Studio draft save reports here when it lands, and the
   // count follows it: the read it asks for is sent after the save, never
@@ -1264,22 +1280,18 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
     }),
     [shownPendingCount, packageId, pendingEntries, behindSave],
   );
-  const publishNoneReasonId = React.useId();
   const publishReadOnlyReasonId = React.useId();
-  // The reason a disabled Publish gives, or `null` when it gives none: the
-  // button is enabled, or a publish is in flight (a spinner, for a moment, not
-  // a state the author has to get out of). A read-only package outranks an
-  // empty ledger; with neither, the button is the primary action.
+  // The reason a disabled Publish gives, or `null` when it gives none.
+  // objectstack#36511 — Publish is drawn only while a draft is pending, so the
+  // one reason left is a read-only package.
   const publishDisabledReason: { id: string; text: string; testId?: string } | null = publishReadOnly
     ? { id: publishReadOnlyReasonId, text: t('engine.studio.pkg.readonlyHint', locale) }
-    : !hasPending && !publishing
-      ? { id: publishNoneReasonId, text: t('engine.studio.publishNoneTitle', locale), testId: 'publish-none-reason' }
-      : null;
+    : null;
 
-  // Builder → running-app bridge (Airtable's Launch): the builder edits the
-  // package (the design surface), the app is its published front-end. If this
-  // package ships a published app, the header offers Open app (`StudioOpenApp`,
-  // objectstack#34593), in the same tab, mirroring the app bar's Edit app.
+  // Builder → running-app bridge: the builder edits the package (the design
+  // surface), the app is its published front-end. The header's way back to it
+  // is 「‹ Back to app」 at the left (`StudioBackToApp`, objectstack#36501), in
+  // the same tab, mirroring the app bar's Edit app.
   const shellNavigate = useNavigate();
   React.useEffect(() => {
     openAccessRef.current = () => {
@@ -1296,13 +1308,14 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
   // order: the Automations rail orders its groups by it. Read off the same
   // app row as `packageApp`, so the pillar adds no read of its own.
   const [packageAppObjectOrder, setPackageAppObjectOrder] = React.useState<readonly string[]>([]);
-  // objectstack#34593 — the package's PUBLISHED apps, the header's Open app
-  // targets: a draft app has no running front-end to open. Read off the same
-  // list as `packageApp`.
-  const [publishedApps, setPublishedApps] = React.useState<readonly StudioOpenAppTarget[]>([]);
+  // objectstack#36501 — the package's PUBLISHED apps, where the header's
+  // 「‹ Back to app」 goes when the author did not come from an app: a draft
+  // app has no running front-end to open. Read off the same list as
+  // `packageApp`.
+  const [publishedApps, setPublishedApps] = React.useState<readonly StudioAppTarget[]>([]);
   // Create app (package has no app yet): create a draft `app` item — the
-  // published front-end's on-ramp. The button flips to Open app after the
-  // package publish.
+  // published front-end's on-ramp. After the package publish, 「‹ Back to
+  // app」 names it.
   const [appCreating, setAppCreating] = React.useState(false);
   const [appBusy, setAppBusy] = React.useState(false);
   const [appErr, setAppErr] = React.useState<string | null>(null);
@@ -1605,11 +1618,11 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
         setChangesPosture('confirm');
         setChangesOpen(true);
       }}
-      disabled={publishing || !hasPending || publishReadOnly}
+      disabled={publishing || publishReadOnly}
       aria-describedby={publishDisabledReason?.id}
       // A disabled Publish's reason is its wrapper's (objectui#12303,
       // objectstack#31495), never a `title` the disabled button cannot show.
-      title={hasPending && !publishReadOnly ? t('engine.studio.publishTitle', locale) : undefined}
+      title={publishReadOnly ? undefined : t('engine.studio.publishTitle', locale)}
       // objectui#8219 — the primary style is for a publish the author
       // CAN do. A disabled one (no draft, or a read-only package)
       // drops to an outline, instead of staying the loudest element
@@ -1617,7 +1630,8 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
       className={cn(
         // The border is on both states so the swap never shifts the bar.
         'inline-flex h-8 items-center gap-1.5 rounded-md border px-3 text-[13px] font-medium',
-        publishing || (hasPending && !publishReadOnly)
+        // objectstack#36511 — beside the top bar's Save, Save is the primary action.
+        publishing || (!publishReadOnly && !saveBar.dirty)
           ? 'border-transparent bg-primary text-primary-foreground disabled:opacity-50'
           : 'text-muted-foreground',
         // The wrapper takes the hover: the disabled button lets it through.
@@ -1631,6 +1645,7 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
 
   return (
     <SurfaceDeepLinkProvider onRequest={requestSurface}>
+      <StudioSaveProvider value={saveBar.registry}>
       <StudioRightSlotContext.Provider value={slotHandle}>
       <div className="flex h-screen w-full overflow-hidden bg-background text-foreground">
         {/* The ADR-0080 `aiSlot` seam — a cloud edition may still inject its own
@@ -1642,37 +1657,24 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
 
         <div className="flex min-w-0 flex-1 flex-col">
           <header className={STUDIO_HEADER} data-testid="studio-shell-header">
-            {/* objectui#12459 — three columns: the package at the left, the
-                pillars centered, the package actions at the right.
+            {/* objectui#12459 — three columns: the way back to the app at the
+                left, the pillars centered, the package actions at the right.
                 objectui#12509 — below `sm` the pillars take a second row of
                 their own (`STUDIO_HEADER_PILLAR_NAV`), and on any row the
-                package chip is the piece that gives way. */}
+                app's name is the piece that gives way. */}
             <div className={cn('flex min-w-0 items-center gap-1', STUDIO_HEADER_PACKAGE_COLUMN)}>
-              {/* Never a dead end: walk back to the Studio landing
-                  (objectui#12513), where the author picks the next package.
-                  The console home stays one click away from there, through
-                  the landing's own top bar. */}
-              <button
-                type="button"
-                data-testid="studio-home"
-                onClick={() => {
-                  if (!confirmLeavePillar()) return;
-                  shellNavigate(STUDIO_LANDING_PATH);
-                }}
-                title={t('engine.studio.landingHome', locale)}
-                className={STUDIO_HEADER_ICON_BUTTON}
-              >
-                <HomeIcon className="h-4 w-4" />
-              </button>
-              <div className="flex min-w-0">
-                <PackageSwitcher
-                  packageId={packageId}
-                  tab={tab}
-                  beforeNavigate={confirmLeavePillar}
-                  app={packageApp}
-                  openEntry={pkgEntry?.id === packageId ? pkgEntry : null}
-                />
-              </div>
+              {/* objectstack#36501 — 「‹ Back to app」, the app's name and the
+                  Studio mark: Studio's one way out, to the app page the author
+                  came from. It replaced the Studio-home button, the package
+                  switcher and the top-right Open app; a different package is
+                  picked in the app, or on the Studio landing. */}
+              <StudioBackToApp
+                packageId={packageId}
+                apps={publishedApps}
+                locale={locale}
+                beforeNavigate={confirmLeavePillar}
+                navigate={shellNavigate}
+              />
             </div>
             <nav className={STUDIO_HEADER_PILLAR_NAV} data-testid="studio-pillar-nav">
               {/* objectui#11553 — the package-less scope offers its one pillar. */}
@@ -1718,20 +1720,6 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
               {/* objectstack#26708 — nothing to create, review or publish in a
                   package that is not there. */}
               {!pkgMissing && (<>
-              {/* objectstack#34593 — the way back to the running app, the
-                  mirror of the app bar's Edit app: it lands on the object (or
-                  interface) in focus, in the same tab. The canvas's Run mode
-                  stays the way to try the app without leaving the workbench.
-                  objectui#11553 — the package-less scope has no app. */}
-              {packageId !== null && (
-                <StudioOpenApp
-                  packageId={packageId}
-                  apps={publishedApps}
-                  locale={locale}
-                  beforeNavigate={confirmLeavePillar}
-                  navigate={shellNavigate}
-                />
-              )}
               {/* objectui#11553 — the package-less scope has no app to create. */}
               {packageId === null || packageApp ? null : appDraftPending ? (
                 <span
@@ -1752,64 +1740,71 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
                   <span className={STUDIO_HEADER_WIDE_WORD}>{t('engine.studio.app.create', locale)}</span>
                 </button>
               )}
-              {/* objectui#12459 — the pending count is a pill, not "· N" text. */}
-              <button
-                type="button"
-                onClick={() => {
-                  setChangesPosture('review');
-                  setChangesOpen(true);
-                }}
-                className="inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-[13px] text-foreground hover:bg-muted"
-              >
-                <GitBranch className="h-3.5 w-3.5 text-muted-foreground" />
-                {t('engine.studio.changes', locale)}
-                {hasPending && <span className="sr-only"> · </span>}
-                {hasPending && (
+              {/* objectstack#36511 — Changes and Publish are for drafts, which
+                  only the copilot leaves now: drawn only while one is pending,
+                  at the left of Cancel and Save. */}
+              {hasPending && (
+                <>
+                {/* objectui#12459 — the pending count is a pill, not "· N" text. */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setChangesPosture('review');
+                    setChangesOpen(true);
+                  }}
+                  className="inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-[13px] text-foreground hover:bg-muted"
+                >
+                  <GitBranch className="h-3.5 w-3.5 text-muted-foreground" />
+                  {t('engine.studio.changes', locale)}
+                  <span className="sr-only"> · </span>
                   <span
                     data-testid="studio-changes-count"
                     className="inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-primary px-1.5 text-[11px] font-semibold text-primary-foreground"
                   >
                     {shownPendingCount}
                   </span>
-                )}
-              </button>
-              {/* A disabled Publish says why, to the mouse, the keyboard and
-                  assistive tech alike — the record page's Archive pattern
-                  (`DeclaredActionsBar`, objectui#11811), for both reasons it
-                  can be off: a read-only package (objectui#12303) and nothing
-                  pending (objectui#8219, objectstack#31495). A natively
-                  disabled button fires no hover or focus, so the wrapping span
-                  is the tooltip trigger and a tab stop, and the button and the
-                  span both point `aria-describedby` at an `sr-only` copy of
-                  the reason. objectstack#28562 — a read-only base with a
-                  customization package publishes that package's drafts, so it
-                  is not read-only here. */}
-              {publishDisabledReason ? (
-                <TooltipProvider delayDuration={200}>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <span
-                        tabIndex={0}
-                        aria-describedby={publishDisabledReason.id}
-                        data-disabled-reason=""
-                        className="inline-flex rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                      >
-                        {publishButton}
+                </button>
+                {/* A disabled Publish says why, to the mouse, the keyboard and
+                    assistive tech alike — the record page's Archive pattern
+                    (`DeclaredActionsBar`, objectui#11811), for the reason it
+                    can be off: a read-only package (objectui#12303). A natively
+                    disabled button fires no hover or focus, so the wrapping span
+                    is the tooltip trigger and a tab stop, and the button and the
+                    span both point `aria-describedby` at an `sr-only` copy of
+                    the reason. objectstack#28562 — a read-only base with a
+                    customization package publishes that package's drafts, so it
+                    is not read-only here. */}
+                {publishDisabledReason ? (
+                  <TooltipProvider delayDuration={200}>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
                         <span
-                          id={publishDisabledReason.id}
-                          className="sr-only"
-                          data-testid={publishDisabledReason.testId}
+                          tabIndex={0}
+                          aria-describedby={publishDisabledReason.id}
+                          data-disabled-reason=""
+                          className="inline-flex rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                         >
-                          {publishDisabledReason.text}
+                          {publishButton}
+                          <span
+                            id={publishDisabledReason.id}
+                            className="sr-only"
+                            data-testid={publishDisabledReason.testId}
+                          >
+                            {publishDisabledReason.text}
+                          </span>
                         </span>
-                      </span>
-                    </TooltipTrigger>
-                    <TooltipContent>{publishDisabledReason.text}</TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-              ) : (
-                publishButton
+                      </TooltipTrigger>
+                      <TooltipContent>{publishDisabledReason.text}</TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                ) : (
+                  publishButton
+                )}
+                </>
               )}
+              {/* objectstack#36511 — the page's Cancel and Save, where Publish
+                  was: drawn only while the open page holds unsaved edits. */}
+              <StudioSaveControls coordinator={saveBar} locale={locale} />
               </>)}
               {/* objectui#12725 — the top bar's right-most icon shows or hides
                   the right slot; `⌘.` switches what it shows.
@@ -2093,6 +2088,7 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
         />
       </div>
       </StudioRightSlotContext.Provider>
+      </StudioSaveProvider>
     </SurfaceDeepLinkProvider>
   );
 }
@@ -3350,6 +3346,9 @@ export function InterfacesPillar({
         : null,
     [currentType, leafPublished, leafKey, servedDashboard],
   );
+  // objectstack#36480 — the language the widget panel's Title box reads in,
+  // which the canvas selection strip names a selected widget in too.
+  const labelLanguage = useLabelLanguage(locale);
   const servedReportText = React.useMemo(
     () =>
       currentType === 'report' && leafPublished.key === leafKey && leafPublished.read
@@ -4412,9 +4411,20 @@ export function InterfacesPillar({
   // objectui#12725 — one status line above the canvas instead of the canvas's
   // own tabs: what the canvas shows, and (beside the right slot) what a click
   // on it does. An object entry's canvas is the running list; its line keeps
-  // saying where the structure is edited (objectui#12455).
+  // saying where the structure is edited (objectui#12455). objectstack#36480 —
+  // a selected dashboard widget is named by the text its panel's Title box
+  // shows (the served, current-language title), never the authored source the
+  // canvas put in `selection.label`.
   const selectionLabel =
-    editNav && navSel ? (navInspectorHead?.title ?? navSel.id) : selection ? (selection.label || selection.id) : null;
+    editNav && navSel
+      ? (navInspectorHead?.title ?? navSel.id)
+      : selection
+        ? ((currentType === 'dashboard' && selection.kind === 'widget'
+            ? shownWidgetTitle(draft, selection.id, servedWidgets, labelLanguage)
+            : undefined) ||
+          selection.label ||
+          selection.id)
+        : null;
   const canvasHint = !inSlot
     ? null
     : selectionLabel !== null
@@ -5134,13 +5144,16 @@ export function InterfacesPillar({
   // objectstack#30046 — under 视图: a list view an entry's header dropdown
   // reaches is not listed again (Scope 7); a form view reads a readable name,
   // and the heading says what the group holds (Scope 8).
+  // objectstack-ai/objectstack#36425 — an internal form view is not listed
+  // (the console no longer loads one); a public form is.
   const offNavSections = OFF_NAV_TYPES.map((type) => {
     const items = listOnlyCustomized
       ? markedOf(type)
       : itemsRead
         ? (packageItems?.byType[type] ?? []).filter(
             (item) =>
-              !navOpened.has(itemKeyOf(type, item.name)) && !(type === 'view' && offNavViewReachedByEntry(item, navOpened)),
+              !navOpened.has(itemKeyOf(type, item.name))
+              && !(type === 'view' && (offNavViewReachedByEntry(item, navOpened) || offNavViewIsInternalForm(item))),
           )
         : [];
     if (type !== 'view') return { type, items };
@@ -5601,10 +5614,6 @@ export function DataPillar({
   const client = useMetadataClient();
   const adapter = useAdapter();
   const locale = useMetadataLocale();
-  // The last-saved time reads the DISPLAY locale — not `locale` above, which
-  // picks the pillar's strings and is `'en-US'` for every non-zh language
-  // (objectui#10232).
-  const displayLocale = useDisplayLocale();
   // Live server JSONSchemas per metadata type (`/meta/types`) — handed to the
   // Actions/Hooks config panels so their forms are driven by the real metadata
   // contract (and stay forward-compatible when the server spec adds fields).
@@ -5791,10 +5800,6 @@ export function DataPillar({
   const [dirty, setDirty] = React.useState(false);
   const [hasDraft, setHasDraft] = React.useState(false);
   const [saving, setSaving] = React.useState<false | 'draft' | 'publish'>(false);
-  // Timestamp of the last successful draft save — renders a "last saved HH:MM"
-  // hint next to the Save button (framework#2615 P3: nothing confirmed a draft
-  // save persisted, unlike the sibling pillars which toast).
-  const [savedAt, setSavedAt] = React.useState<Date | null>(null);
   const [gridVer, setGridVer] = React.useState(0);
   // Records grid ⇄ Form ⇄ Validations ⇄ Settings — four views of the SAME
   // object. Grid/Form are the runtime renderer (same-renderer principle);
@@ -6545,70 +6550,18 @@ export function DataPillar({
     [formFieldsExtKey ?? formFieldsComputed],
   );
 
-  // objectstack#30057 — the form view the app's New and Edit dialogs open for
-  // this object, asked of the app's own resolver over the shell's merged
-  // objects (`formLayoutChoiceOf` → `selectRecordFormView`). With one, the
-  // Form tab lays out THAT view's sections and saves them to its draft (on a
-  // read-only base, as a declared override in its pair, ADR-0146 D2); with
-  // none, the object's field groups, as before. Where New and Edit open
-  // different form views, the author picks which one is shown.
-  const shellMetadata = useMetadata();
-  const [formFlow, setFormFlow] = React.useState<RecordFormFlow>('create');
-  const servedFormObject = current
-    ? (findByName(shellMetadata.objects, current.name) as ObjectDefinitionForFormView | undefined)
-    : undefined;
-  const formChoice = formLayoutChoiceOf(servedFormObject, formFlow);
-  const formViewCustomization = extendsBase ? customization : null;
-  const formViewId = formChoice.viewId;
-  const formView = useFormViewDraft({
-    client,
-    packageId,
-    viewId: formViewId,
-    publishNonce,
-    customization: formViewCustomization,
-    locale,
-    onDraftSaved: () => onDraftSaved?.({ type: 'view', name: formViewId }),
-  });
-  // A read-only package edits a form view only where its pair takes the override.
-  const formViewReadOnly = !formViewId || (readOnly && (formViewCustomization === null || formViewCustomization.walled));
-  const { flush: flushFormView } = useDraftAutoSave({
-    target: formView.targetKey,
-    loadedFor: formView.loadedFor,
-    dirty: formView.dirty,
-    blocked: !formView.row || formView.saving || formViewReadOnly,
-    snapshot: formView.row,
-    save: formView.save,
-  });
-  const formViewDirty = formView.dirty;
-  // Until the buffer loads, the served view's sections, read-only.
-  const formViewLayout = formChoice.view
-    ? formView.sections && !formViewReadOnly
-      ? { sections: formView.sections, onSectionsChange: formView.setSections }
-      : { sections: formView.sections ?? formViewSectionsOf(formChoice.view as Record<string, unknown>), onSectionsChange: () => {} }
-    : null;
-
   // objectui#12515 — what the Form tab's Preview renders. The draft differs
   // from the published definition when there is no published one, a pending
   // draft, or an unsaved edit; then Preview shows the draft unless the author
   // picked Published (offered only when a published version exists).
-  // objectstack#30057 — the form view's draft counts too.
   const draftDiffers =
     !hasBaseline ||
     hasDraft ||
     dirty ||
-    (extOpen !== null && (extHasDraft || extDirty)) ||
-    (formChoice.view !== null && (formView.hasDraft || formViewDirty));
+    (extOpen !== null && (extHasDraft || extDirty));
   const previewShowsDraft = !hasBaseline || (draftDiffers && previewSource === 'draft');
   const previewDraft = previewShowsDraft ? shownDraft : null;
   const previewObjectName = current?.name ?? '';
-  // objectstack#30057 — Preview lays the form out as the dialog it previews
-  // does: the chosen form view's sections (its draft beside a draft preview),
-  // through the dialog's own resolver.
-  const previewFormView =
-    formChoice.view && previewShowsDraft && formView.row ? formViewBodyOf(formView.row) : formChoice.view;
-  const previewFormLayout = resolveFormViewLayout(
-    previewFormView ? { name: previewObjectName, form: previewFormView as FormViewDefinition } : null,
-  );
   const previewDataSource = React.useMemo(
     () =>
       formPreviewSource(
@@ -6690,20 +6643,25 @@ export function DataPillar({
   );
 
   // objectstack#34931 — a save the door refused `409 DESTRUCTIVE_CHANGE`, held
-  // for the author's answer: what it would lose, and the save itself. While it
-  // is held the autosave sends nothing.
+  // for the author's answer: what it would lose, and the save itself.
   const [destructive, setDestructive] = React.useState<ObjDraftSend & {
-    sent: DraftSend;
     findings: DestructiveChangeIssue[];
   } | null>(null);
   // The object as the server holds it for this buffer (as loaded, or as last
   // saved): what keeping a field restores it from.
   const objStoredRef = React.useRef<Record<string, unknown> | null>(null);
+  // The buffer as last committed: a save that lands clears the dirty flag
+  // only while the buffer is still the body it sent.
+  const objDraftRef = React.useRef(objDraft);
+  React.useLayoutEffect(() => {
+    objDraftRef.current = objDraft;
+  });
 
-  const doSave = React.useCallback(async (sent: DraftSend, forced?: ObjDraftSend) => {
-    if (!current) return;
-    setSaving('draft');
-    setError(null);
+  // objectstack#36511 — the top bar's Save for the object: its draft, then that
+  // object's own publish, so the save is live at once. A refused publish keeps
+  // the edits on the page, unsaved, with the reason in the refusal strip.
+  const doSave = React.useCallback(async (forced?: ObjDraftSend): Promise<StudioSaveResult> => {
+    if (!current) return { kind: 'declined' };
     // objectui#10202 — the buffer was seeded from the served object, whose
     // picklist-bound fields carry the list's resolved `options`; the door
     // refuses them beside `picklist`, so they stay out of the body.
@@ -6712,6 +6670,20 @@ export function DataPillar({
     // body, to the address it wrote (`packageId` included), never re-derived.
     const { name, packageId: to, draft, body } =
       forced ?? { name: current.name, packageId, draft: objDraft, body: dropServedPicklistOptions(objDraft) };
+    // A removed or retyped published field is asked about before anything is sent.
+    if (!forced) {
+      const changes = irreversibleFieldChanges(objStoredRef.current, draft, publishedFieldNames, locale);
+      if (
+        changes.length > 0 &&
+        !window.confirm(tFormat('engine.studio.save.confirmIrreversible', locale, { changes: changes.join('\n') }))
+      ) {
+        return { kind: 'declined' };
+      }
+    }
+    setSaving('draft');
+    setError(null);
+    const hadDraft = hasDraft;
+    const storedBefore = objStoredRef.current;
     try {
       const outcome = await saveObjDraft('object', name, body, {
         mode: 'draft',
@@ -6720,38 +6692,42 @@ export function DataPillar({
         ...(forced ? { force: true } : {}),
       });
       // objectui#11773 — the author chose the saved version; the load replaces the buffer.
-      if (outcome === 'reloaded') return;
+      if (outcome === 'reloaded') return { kind: 'declined' };
       objStoredRef.current = draft;
       setHasDraft(true);
-      // objectui#11204 — clean only if nothing was edited while it was in flight.
-      if (sent.unmoved()) setDirty(false);
-      setSavedAt(new Date());
-      // objectstack#27644 — the draft this save stored carries its own publish
-      // verdict on its next read; the one held described the body before it.
-      const seq = ++objVerdictSeq.current;
-      void readDraftForSave(client, 'object', name, to).then((read) => {
-        if (seq !== objVerdictSeq.current) return;
-        setObjVerdict(draftEnvelopeDiagnostics(read.answer));
-        setObjVerdictBody(extractDraftBody(read.answer) ?? undefined);
-      });
-      // objectstack#28984 — named by the label this save stored; one toast per
-      // object however many editing pauses save it (`announceDraftSaved`).
-      announceDraftSaved(
-        { type: 'object', name },
-        typeof body.label === 'string' && body.label ? body.label : current.label,
-        locale,
-      );
-      onDraftSaved?.({ type: 'object', name });
+      setSaving('publish');
+      const live = await publishSavedItem(client, { type: 'object', name, packageId: to }, hadDraft);
+      if (!live.ok) {
+        if (live.draftDiscarded) {
+          objStoredRef.current = storedBefore;
+          setHasDraft(false);
+          recordObjRead('object', name, to, { ifNoneMatch: '*' });
+        }
+        const refusal = publishRefusal(publishFailureOf('object', name, live.error), 'object', body, locale);
+        setError(refusal);
+        return { kind: 'refused', reason: refusal.message };
+      }
+      // Live: no draft is left, so the next save asserts none. The pulse the
+      // publish sent re-reads the object once this save has settled.
+      setHasDraft(false);
+      recordObjRead('object', name, to, { ifNoneMatch: '*' });
+      if (JSON.stringify(objDraftRef.current) === JSON.stringify(draft)) setDirty(false);
+      return { kind: 'saved' };
     } catch (e) {
       // objectstack#34931 — what the save would lose is asked about, once:
       // a forced save refused again reads as any other refusal.
       const findings = forced ? null : destructiveFindings(e);
-      if (findings) setDestructive({ name, packageId: to, draft, body, sent, findings });
-      else setError(objectSaveRefusal(e, body, locale));
+      if (findings) {
+        setDestructive({ name, packageId: to, draft, body, findings });
+        return { kind: 'declined' };
+      }
+      const refusal = objectSaveRefusal(e, body, locale);
+      setError(refusal);
+      return { kind: 'refused', reason: refusal.message };
     } finally {
       setSaving(false);
     }
-  }, [saveObjDraft, client, current, objDraft, onDraftSaved, packageId, locale]);
+  }, [saveObjDraft, recordObjRead, client, current, objDraft, hasDraft, publishedFieldNames, packageId, locale]);
 
   // objectstack#34931 — Cancel keeps what the refused save would have lost:
   // each field a finding names goes back as the server holds it, and nothing
@@ -6785,17 +6761,8 @@ export function DataPillar({
     [dirty, objDraft, locale],
   );
 
-  // objectui#5813 — auto-save replaces the Save draft button; the blocked guard
-  // is the button's old disabled-condition verbatim, plus the hold above.
-  const { flush: flushObjSave, sending: sendingObjDraft, loaded: objLoaded } = useDraftAutoSave({
-    // objectui#11232 — the object `doSave` addresses.
-    target: `object:${current?.name ?? ''}`,
-    loadedFor: objDraftFor,
-    dirty,
-    blocked: !current || !!saving || readOnly || saveBlocking > 0 || objIncomplete !== null || destructive !== null,
-    snapshot: objDraft,
-    save: doSave,
-  });
+  // objectui#11272 — the buffer is the open object's own once its load installed it.
+  const objLoaded = current !== null && objDraftFor === `object:${current.name}`;
 
   // objectstack#28575 — the ensure door's answer for this base's extension
   // writes: asked by the first add (no prompt), once per base, and again only
@@ -6811,46 +6778,58 @@ export function DataPillar({
     });
     return asked;
   }, []);
-  // The extension's draft save, into the pair the door answered. A refusal
-  // (the suffix, a structural key, the ensure door's walled 403) is shown as
-  // the server sent it.
-  const doSaveExt = React.useCallback(
-    async (sent: DraftSend) => {
-      if (!extOpen || !customization) return;
-      const { for: name, body } = extOpen;
-      setSaving('draft');
-      setError(null);
-      try {
-        const pair = await extPairFor(customization);
-        const outcome = await saveExtDraft(OBJECT_EXTENSION_TYPE, name, extensionBodyForSave(body), {
-          mode: 'draft',
-          packageId: pair,
-          surface: 'studio',
-        });
-        if (outcome === 'reloaded') return;
-        setExtHasDraft(true);
-        if (sent.unmoved()) setExtDirty(false);
-        setSavedAt(new Date());
-        // objectstack#28984 — the extension customizes the open object, so it
-        // is named by that object's label.
-        announceDraftSaved({ type: OBJECT_EXTENSION_TYPE, name }, current?.label ?? '', locale);
-        onDraftSaved?.({ type: OBJECT_EXTENSION_TYPE, name });
-      } catch (e) {
-        setError(plainRefusal(e));
-      } finally {
-        setSaving(false);
-      }
-    },
-    [extOpen, customization, extPairFor, saveExtDraft, onDraftSaved, current, locale],
-  );
-  const { flush: flushExtSave } = useDraftAutoSave({
-    target: `${OBJECT_EXTENSION_TYPE}:${current?.name ?? ''}`,
-    loadedFor: extOpen ? `${OBJECT_EXTENSION_TYPE}:${extOpen.for}` : '',
-    dirty: extDirty,
-    blocked: !extWritable || !!saving || saveBlocking > 0,
-    snapshot: extOpen?.body ?? null,
-    save: doSaveExt,
+  const extBodyRef = React.useRef(extOpen?.body ?? null);
+  React.useLayoutEffect(() => {
+    extBodyRef.current = extOpen?.body ?? null;
   });
+  // The extension's Save, into the pair the door answered, then that
+  // extension's own publish there (objectstack#36511): an installed app's
+  // object takes the page's fields live at once, in its `.custom` package. A
+  // refusal (the suffix, a structural key, the ensure door's walled 403) is
+  // shown as the server sent it.
+  const doSaveExt = React.useCallback(async (): Promise<StudioSaveResult> => {
+    if (!extOpen || !customization) return { kind: 'declined' };
+    const { for: name, body } = extOpen;
+    setSaving('draft');
+    setError(null);
+    const hadDraft = extHasDraft;
+    try {
+      const pair = await extPairFor(customization);
+      const outcome = await saveExtDraft(OBJECT_EXTENSION_TYPE, name, extensionBodyForSave(body), {
+        mode: 'draft',
+        packageId: pair,
+        surface: 'studio',
+      });
+      if (outcome === 'reloaded') return { kind: 'declined' };
+      setExtHasDraft(true);
+      setSaving('publish');
+      const live = await publishSavedItem(client, { type: OBJECT_EXTENSION_TYPE, name, packageId: pair }, hadDraft);
+      if (!live.ok) {
+        if (live.draftDiscarded) {
+          setExtHasDraft(false);
+          recordExtRead(OBJECT_EXTENSION_TYPE, name, pair, { ifNoneMatch: '*' });
+        }
+        const refusal = publishRefusal(
+          publishFailureOf(OBJECT_EXTENSION_TYPE, name, live.error),
+          OBJECT_EXTENSION_TYPE,
+          extensionBodyForSave(body),
+          locale,
+        );
+        setError(refusal);
+        return { kind: 'refused', reason: refusal.message };
+      }
+      setExtHasDraft(false);
+      recordExtRead(OBJECT_EXTENSION_TYPE, name, pair, { ifNoneMatch: '*' });
+      if (JSON.stringify(extBodyRef.current) === JSON.stringify(body)) setExtDirty(false);
+      return { kind: 'saved' };
+    } catch (e) {
+      const refusal = plainRefusal(e);
+      setError(refusal);
+      return { kind: 'refused', reason: refusal.message };
+    } finally {
+      setSaving(false);
+    }
+  }, [extOpen, customization, extPairFor, saveExtDraft, recordExtRead, client, extHasDraft, locale]);
   // An edit of the folded object's fields, written into the extension: an
   // extension field whole, a base field's whitelisted change as its patch.
   const onExtFieldsPatch = React.useCallback(
@@ -6978,52 +6957,54 @@ export function DataPillar({
     }
   }, [adapter, locale, objects, packageId, reloadObjDraft]);
   useHeldEditReport(onHeldEditChange, objHeld?.clause ?? null);
-  // objectstack#27511 — opening another object replaces the one buffer the
-  // open object's edits live in, and the autosave's timer sends nothing once
-  // the open object has changed (objectui#11232). So an edit still inside the
-  // debounce was dropped by the switch with nothing on screen. The switch now
-  // sends it first with the autosave's own `flush` and opens the object once
-  // the buffer is clean, as the Interfaces nav's "Done" closes (objectui#11189);
-  // a save already in flight is waited out the same way. An edit that cannot
-  // be sent (held, or its save refused with the refusal on screen) is the
-  // author's to drop: the switch asks (objectstack#26705).
-  const [switchTo, setSwitchTo] = React.useState<Surface | null>(null);
+  // objectstack#36511 — the object page's buffers, saved and cancelled by the
+  // top bar's one Save and Cancel: the object (its fields, rules, actions and
+  // settings), then a read-only base's extension of it in the pair. A CEL
+  // verdict no field or rule names yet (Settings reports one count) holds the
+  // Save as a named edit does.
+  const objSaveHeld =
+    objHeld?.clause ??
+    (saveBlocking > 0 && current
+      ? tFormat('engine.studio.held.inspectorInvalid', locale, { item: current.label || current.name })
+      : null);
+  useStudioSaveEntry(
+    current && objLoaded && !readOnly
+      ? {
+          label: current.label || current.name,
+          order: 0,
+          dirty,
+          held: objSaveHeld,
+          save: () => doSave(),
+          cancel: () => {
+            setDestructive(null);
+            reloadObjDraft();
+          },
+        }
+      : null,
+  );
+  useStudioSaveEntry(
+    current && extOpen !== null && extWritable
+      ? {
+          label: current.label || current.name,
+          order: 1,
+          dirty: extDirty,
+          held: saveBlocking > 0 ? tFormat('engine.studio.held.inspectorInvalid', locale, { item: current.label || current.name }) : null,
+          save: () => doSaveExt(),
+          cancel: reloadExt,
+        }
+      : null,
+  );
+  // objectstack#36511 — opening another object replaces the buffer the open
+  // object's unsaved edits live in, so the author is asked first, as every
+  // departure asks (objectstack#26705); nothing is sent by the switch.
   const openObject = React.useCallback(
     (next: Surface): boolean => {
-      if (next.name === current?.name) {
-        setSwitchTo(null);
-        setCurrent(next);
-        return true;
-      }
-      // objectstack#28575 — and the base object's extension buffer the same way.
-      // objectstack#30057 — and the form view's buffer.
-      if (
-        saving ||
-        (dirty && objHeld === null && flushObjSave()) ||
-        (extDirty && flushExtSave()) ||
-        (formViewDirty && flushFormView())
-      ) {
-        setSwitchTo(next);
-        return true;
-      }
-      if (!confirmDropUnsavedWork(dirty || extDirty || formViewDirty, locale)) return false;
-      setSwitchTo(null);
+      if (next.name !== current?.name && !confirmDropUnsavedWork(dirty || extDirty, locale)) return false;
       setCurrent(next);
       return true;
     },
-    [current, saving, dirty, extDirty, formViewDirty, objHeld, flushObjSave, flushExtSave, flushFormView, locale],
+    [current, dirty, extDirty, locale],
   );
-  React.useEffect(() => {
-    if (!switchTo || saving || formView.saving) return;
-    if (dirty && objHeld === null && flushObjSave()) return;
-    if (extDirty && flushExtSave()) return;
-    if (formViewDirty && flushFormView()) return;
-    setSwitchTo(null);
-    // Still dirty: the save was refused (on screen) or an edit taken meanwhile
-    // is held. The author stays; the next switch asks.
-    if (dirty || extDirty || formViewDirty) return;
-    setCurrent(switchTo);
-  }, [switchTo, saving, dirty, extDirty, formViewDirty, formView.saving, objHeld, flushObjSave, flushExtSave, flushFormView]);
   // The live request's apply (see `requestedSurface` above). objectstack#26845
   // — another object's load replaces the buffer a held edit lives in, so it
   // goes through the rail's own switch (`openObject`): an unsent edit is sent
@@ -7123,14 +7104,12 @@ export function DataPillar({
   );
 
   // Drag-reorder columns → reorder the object's `fields` metadata (field display
-  // order follows metadata order), saved as a DRAFT. Published later via the
-  // package release — NOT auto-published per reorder as it used to be.
-  // objectui#11204 — this save is sent here, not by the autosave, so it takes
-  // its claim on the buffer from the autosave's `sending`: an edit taken while
-  // it is in flight stays dirty, and the autosave sends it next.
+  // order follows metadata order). objectstack#36511 — an edit of the buffer
+  // like any other: it is sent by the top bar's Save, never on the drop.
   const doReorderFields = React.useCallback(
-    async (orderedNames: string[]) => {
-      if (!current) return;
+    (orderedNames: string[]) => {
+      // objectui#11272 — never onto another object's buffer.
+      if (!current || !objLoaded || readOnly) return;
       const view = readFields(objDraft.fields);
       // Reorder only the visible fields among their own slots; keep system /
       // hidden fields (not shown as columns) in their original positions.
@@ -7140,32 +7119,11 @@ export function DataPillar({
         .filter((e): e is (typeof view.entries)[number] => Boolean(e));
       let vi = 0;
       const entries = view.entries.map((e) => (visible.has(e.name) ? visibleInOrder[vi++] : e));
-      const body = { ...objDraft, fields: writeFields({ ...view, entries }) };
-      // objectui#11272 — no claim, no save: the buffer is not this object's.
-      const sent = sendingObjDraft(body);
-      if (!sent) return;
-      setObjDraft(body);
-      setSaving('draft');
-      setError(null);
-      // objectui#10202 — same served `options` as `doSave` above.
-      const wire = dropServedPicklistOptions(body);
-      try {
-        const outcome = await saveObjDraft('object', current.name, wire, { mode: 'draft', packageId, surface: 'studio' });
-        if (outcome === 'reloaded') return;
-        objStoredRef.current = body;
-        setHasDraft(true);
-        if (sent.unmoved()) setDirty(false);
-        onDraftSaved?.({ type: 'object', name: current.name });
-        setGridVer((v) => v + 1); // remount so the grid reflects the new (draft) order
-      } catch (e) {
-        const findings = destructiveFindings(e);
-        if (findings) setDestructive({ name: current.name, packageId, draft: body, body: wire, sent, findings });
-        else setError(objectSaveRefusal(e, wire, locale));
-      } finally {
-        setSaving(false);
-      }
+      setObjDraft({ ...objDraft, fields: writeFields({ ...view, entries }) });
+      setDirty(true);
+      setGridVer((v) => v + 1); // remount so the grid reflects the new order
     },
-    [saveObjDraft, current, objDraft, onDraftSaved, sendingObjDraft, packageId, locale],
+    [current, objLoaded, readOnly, objDraft],
   );
 
   // Observed (objectui#11939): an object inspector registered after this pillar
@@ -7301,51 +7259,18 @@ export function DataPillar({
       </button>
     </div>
   );
-  // objectstack#30057 — which layout the tab shows, and, where New and Edit
-  // open different form views, the pick between them. A pending edit of the
-  // shown view is sent before the other one loads, or the author is asked.
-  const switchFormFlow = (next: RecordFormFlow) => {
-    if (next === formFlow) return;
-    if (formViewDirty && !flushFormView() && !confirmDropUnsavedWork(true, locale)) return;
-    setFormFlow(next);
-  };
+  // objectstack-ai/objectstack#36425 — the create and edit dialogs lay out by
+  // the object's field groups, never by an internal form view, so the Form tab
+  // always edits the field groups and says so.
   const formLayoutSource = current ? (
     <div className="inline-flex items-center gap-2" data-testid="form-layout-source">
-      {formChoice.flowsDiffer && (
-        <div
-          role="group"
-          aria-label={t('engine.studio.data.form.flowLabel', locale)}
-          data-testid="form-layout-flow"
-          className="inline-flex items-center gap-0.5 rounded-md bg-muted p-0.5"
-        >
-          {(['create', 'edit'] as const).map((flow) => (
-            <button
-              key={flow}
-              type="button"
-              onClick={() => switchFormFlow(flow)}
-              aria-pressed={formFlow === flow}
-              className={formModeItem(formFlow === flow)}
-            >
-              {t(flow === 'create' ? 'engine.studio.data.form.flowCreate' : 'engine.studio.data.form.flowEdit', locale)}
-            </button>
-          ))}
-        </div>
-      )}
       <span
         data-testid="form-layout-source-chip"
-        data-source={formChoice.view ? 'form-view' : 'field-groups'}
-        data-view={formViewId || undefined}
-        title={t(
-          formChoice.view
-            ? 'engine.studio.data.form.layoutSource.formViewTitle'
-            : 'engine.studio.data.form.layoutSource.fieldGroupsTitle',
-          locale,
-        )}
+        data-source="field-groups"
+        title={t('engine.studio.data.form.layoutSource.fieldGroupsTitle', locale)}
         className="inline-flex h-6 items-center rounded bg-muted px-2 text-[11px] text-muted-foreground"
       >
-        {formChoice.view
-          ? tFormat('engine.studio.data.form.layoutSource.formView', locale, { name: formViewId || current.name })
-          : t('engine.studio.data.form.layoutSource.fieldGroups', locale)}
+        {t('engine.studio.data.form.layoutSource.fieldGroups', locale)}
       </span>
     </div>
   ) : null;
@@ -7469,7 +7394,10 @@ export function DataPillar({
               onClick={() => {
                 if (!destructive) return;
                 setDestructive(null);
-                void doSave(destructive.sent, destructive);
+                const label = current?.label || destructive.name;
+                void doSave(destructive).then((result) => {
+                  if (result.kind === 'saved') toast.success(tFormat('engine.studio.save.done', locale, { items: label }));
+                });
               }}
             >
               {t('engine.edit.forceSave', locale)}
@@ -7478,7 +7406,6 @@ export function DataPillar({
         </AlertDialogContent>
       </AlertDialog>
       {extConflictDialog}
-      {formView.conflictDialog}
       <div className="relative flex min-h-0 flex-1">
         {isMobile && railOpen && (
           <div
@@ -7582,21 +7509,6 @@ export function DataPillar({
             status={objDraftStatus}
             actions={
               <>
-                {/* objectui#5813 — drafts auto-save (see useDraftAutoSave above); the
-                    hint is the whole affordance: saving spinner while in flight, the
-                    last-saved time once landed. The old Save draft button is retired. */}
-                {saving === 'draft' ? (
-                  <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground" data-testid="data-autosaving">
-                    <Loader2 className="h-3 w-3 animate-spin" />
-                    {t('engine.studio.autoSaving', locale)}
-                  </span>
-                ) : savedAt && !dirty && !extDirty ? (
-                  <span className="text-[11px] text-muted-foreground" data-testid="data-saved-at">
-                    {tFormat('engine.studio.data.lastSaved', locale, {
-                      time: savedAt.toLocaleTimeString(displayLocale, { hour: '2-digit', minute: '2-digit' }),
-                    })}
-                  </span>
-                ) : null}
                 {/* objectstack#28239 — the item tools Setup's item page opens. */}
                 {current && objLoaded && (
                   <StudioItemTools
@@ -7715,6 +7627,7 @@ export function DataPillar({
                 <StudioHeldNotice
                   held={objHeld}
                   locale={locale}
+                  explicitSave
                   // objectui#11786 — no "Show me" while that field is the one open.
                   onShow={
                     fieldSel?.kind === objHeld.target.kind && fieldSel.id === objHeld.target.id
@@ -7985,15 +7898,6 @@ export function DataPillar({
                   to trail it is each item's title. */}
               {formMode === 'layout' ? (
                 <>
-                {formChoice.view && formView.failure && (
-                  <div
-                    role="alert"
-                    data-testid="form-view-failure"
-                    className="shrink-0 border-b bg-destructive/5 px-6 py-2 text-xs text-destructive"
-                  >
-                    {plainRefusal(formView.failure.error).message}
-                  </div>
-                )}
                 <ObjectFormDesigner
                   draft={shownDraft}
                   objectName={current.name}
@@ -8006,11 +7910,10 @@ export function DataPillar({
                   // objectstack#30057 — on a base object a new field goes into
                   // the pair's extension, from the toolbar beside the mode control.
                   onAddField={canAddFields && !extendsBase ? addField : undefined}
-                  readOnly={formViewLayout ? formViewReadOnly || !formView.sections : readOnly}
+                  readOnly={readOnly}
                   modeControl={formToolbarLeading}
                   contributedFields={contributedFields}
                   draftMarkedFields={agentMarkedFields}
-                  formView={formViewLayout}
                 />
                 </>
               ) : (
@@ -8112,9 +8015,6 @@ export function DataPillar({
                           type: 'object-form',
                           objectName: current.name,
                           mode: 'create',
-                          // objectstack#30057 — the chosen form view's layout, as the dialog lays it out.
-                          ...(previewFormLayout.sections ? { sections: previewFormLayout.sections } : {}),
-                          ...(previewFormLayout.contentLayout === 'tabbed' ? { formType: 'tabbed' } : {}),
                           // Memoized above at the top of the component: this array's
                           // IDENTITY is a dependency of ObjectForm's field-generation
                           // effect, so rebuilding it inline here re-ran that effect on

@@ -278,7 +278,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "fields.fieldHistory": {
         label: "フィールド変更値",
-        helpText: "このフィールドの旧値 → 新値をレコードのアクティビティタイムラインに表示します。未設定はオンです（スイッチはオフに見えます）。一度オンにしてからオフにしたときだけ false が書かれ、変更は項目名だけで示されます。オンにするとメディアや JSON の項目も値を表示します。"
+        helpText: "このフィールドの旧値 → 新値をレコードのアクティビティタイムラインに表示します。既定はプラットフォームに従い、ほとんどの型ではオン、メディア・JSON・資格情報のフィールドではオフです。オフでは変更は項目名だけで示され、オンではメディアや JSON の項目も値を表示します。資格情報のフィールドは常に値を表示せず、オブジェクト自体のフィールド変更値がオフなら、そちらが優先されます。"
       },
       "fields.trackHistory": {
         label: "履歴追跡",
@@ -305,7 +305,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "enable.fieldHistory": {
         label: "フィールド変更値",
-        helpText: "変更されたフィールドの旧値 → 新値をレコードのアクティビティタイムラインに表示します。未設定はオンです（スイッチはオフに見えます）。一度オンにしてからオフにしたときだけ false が書かれ、オブジェクト全体で値が表示されなくなります。"
+        helpText: "変更されたフィールドの旧値 → 新値をレコードのアクティビティタイムラインに表示します。既定はオンです。オフにすると、フィールドの設定にかかわらずオブジェクト全体で値が表示されなくなります。"
       },
       "enable.searchable": {
         label: "検索可能"
@@ -873,6 +873,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "非表示",
         helpText: "既定 UI ビューからフィールドを非表示"
       },
+      showOnCreate: {
+        label: "作成時に表示",
+        helpText: "レコード作成時にこのフィールドを入力させます。オフにすると、作成ダイアログ、全画面の作成、アクションから開く作成には表示されません。編集、レコードページ、リストには引き続き表示されます。必須フィールドは作成時に必ず入力するため、オフにできません。"
+      },
       searchable: {
         label: "検索可能",
         helpText: "グローバル検索結果に含める"
@@ -907,7 +911,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       fieldHistory: {
         label: "フィールド変更値",
-        helpText: "このフィールドの旧値 → 新値をレコードのアクティビティタイムラインに表示します。未設定はオンです（スイッチはオフに見えます）。一度オンにしてからオフにしたときだけ false が書かれ、変更は項目名だけで示されます。オンにするとメディアや JSON の項目も値を表示します。"
+        helpText: "このフィールドの旧値 → 新値をレコードのアクティビティタイムラインに表示します。既定はプラットフォームに従い、ほとんどの型ではオン、メディア・JSON・資格情報のフィールドではオフです。オフでは変更は項目名だけで示され、オンではメディアや JSON の項目も値を表示します。資格情報のフィールドは常に値を表示せず、オブジェクト自体のフィールド変更値がオフなら、そちらが優先されます。"
       },
       trackHistory: {
         label: "変更履歴を記録",

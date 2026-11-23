@@ -278,7 +278,7 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fields.fieldHistory": {
         label: "필드 변경 값",
-        helpText: "레코드 활동 타임라인에 이 필드의 이전 값 → 새 값을 표시합니다. 설정하지 않으면 켜져 있으며 스위치는 꺼진 것처럼 보입니다. 켰다가 다시 끈 경우에만 false가 기록되고, 변경은 필드 이름으로만 표시됩니다. 켜면 미디어나 JSON 필드도 값을 표시합니다."
+        helpText: "레코드 활동 타임라인에 이 필드의 이전 값 → 새 값을 표시합니다. 기본값은 플랫폼을 따르며, 대부분의 유형은 켜짐, 미디어·JSON·자격 증명 필드는 꺼짐입니다. 끄면 변경이 필드 이름으로만 표시되고, 켜면 미디어나 JSON 필드도 값을 표시합니다. 자격 증명 필드는 항상 값을 표시하지 않으며, 객체 자체의 필드 변경 값이 꺼져 있으면 그것이 우선합니다."
       },
       "fields.trackHistory": {
         label: "기록 추적",
@@ -305,7 +305,7 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "enable.fieldHistory": {
         label: "필드 변경 값",
-        helpText: "레코드 활동 타임라인에 변경된 필드의 이전 값 → 새 값을 표시합니다. 설정하지 않으면 켜져 있으며 스위치는 꺼진 것처럼 보입니다. 켰다가 다시 끈 경우에만 false가 기록되고, 객체 전체에서 값이 표시되지 않습니다."
+        helpText: "레코드 활동 타임라인에 변경된 필드의 이전 값 → 새 값을 표시합니다. 기본값은 켜짐입니다. 끄면 필드 설정과 관계없이 객체 전체에서 값이 표시되지 않습니다."
       },
       "enable.searchable": {
         label: "검색 가능"
@@ -873,6 +873,10 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "숨김",
         helpText: "기본 UI 뷰에서 필드 숨김"
       },
+      showOnCreate: {
+        label: "생성 시 표시",
+        helpText: "레코드를 생성할 때 이 필드를 입력받습니다. 끄면 생성 대화상자, 전체 페이지 생성, 액션으로 여는 생성에서 표시되지 않으며, 편집·레코드 페이지·목록에는 계속 표시됩니다. 필수 필드는 생성 시 항상 입력받으므로 끌 수 없습니다."
+      },
       searchable: {
         label: "검색 가능",
         helpText: "전역 검색 결과에 포함"
@@ -907,7 +911,7 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       fieldHistory: {
         label: "필드 변경 값",
-        helpText: "레코드 활동 타임라인에 이 필드의 이전 값 → 새 값을 표시합니다. 설정하지 않으면 켜져 있으며 스위치는 꺼진 것처럼 보입니다. 켰다가 다시 끈 경우에만 false가 기록되고, 변경은 필드 이름으로만 표시됩니다. 켜면 미디어나 JSON 필드도 값을 표시합니다."
+        helpText: "레코드 활동 타임라인에 이 필드의 이전 값 → 새 값을 표시합니다. 기본값은 플랫폼을 따르며, 대부분의 유형은 켜짐, 미디어·JSON·자격 증명 필드는 꺼짐입니다. 끄면 변경이 필드 이름으로만 표시되고, 켜면 미디어나 JSON 필드도 값을 표시합니다. 자격 증명 필드는 항상 값을 표시하지 않으며, 객체 자체의 필드 변경 값이 꺼져 있으면 그것이 우선합니다."
       },
       trackHistory: {
         label: "기록 추적",

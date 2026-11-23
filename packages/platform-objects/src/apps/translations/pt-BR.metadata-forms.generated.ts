@@ -278,7 +278,7 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "fields.fieldHistory": {
         label: "Valores de alterações de campo",
-        helpText: "Valores antigo → novo deste campo na linha do tempo de atividades do registro. Não definido significa LIGADO, embora o interruptor pareça desligado: só um interruptor ligado e depois desligado grava false, e então a alteração é nomeada só pelo rótulo. Ligado também mostra os valores de um campo de mídia ou JSON."
+        helpText: "Valores antigo → novo deste campo na linha do tempo de atividades do registro. Padrão segue a plataforma: ligado para a maioria dos tipos, desligado para um campo de mídia, JSON ou credencial. Desligado nomeia a alteração só pelo rótulo; Ligado também mostra os valores de um campo de mídia ou JSON. Um campo de credencial nunca mostra valores, e se o próprio objeto desligar, vale o objeto."
       },
       "fields.trackHistory": {
         label: "Acompanhar histórico",
@@ -305,7 +305,7 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "enable.fieldHistory": {
         label: "Valores de alterações de campo",
-        helpText: "Valores antigo → novo dos campos alterados na linha do tempo de atividades do registro. Não definido significa LIGADO, embora o interruptor pareça desligado: só um interruptor ligado e depois desligado grava false, e então o objeto inteiro deixa de mostrar valores."
+        helpText: "Valores antigo → novo dos campos alterados na linha do tempo de atividades do registro. Padrão é ligado. Desligado deixa de mostrar valores em todo o objeto, seja o que for que um campo diga."
       },
       "enable.searchable": {
         label: "Pesquisável"
@@ -873,6 +873,10 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Oculto",
         helpText: "Ocultar o campo nas visualizações padrão da interface"
       },
+      showOnCreate: {
+        label: "Mostrar ao criar",
+        helpText: "Pedir este campo ao criar um registro. Desligado: a caixa de criação, a criação em página inteira e uma criação aberta por uma ação o omitem; a edição, a página do registro e as listas continuam a mostrá-lo. Um campo obrigatório é sempre pedido, por isso não pode ser desligado."
+      },
       searchable: {
         label: "Pesquisável",
         helpText: "Incluir nos resultados da busca global"
@@ -907,7 +911,7 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       fieldHistory: {
         label: "Valores de alterações de campo",
-        helpText: "Valores antigo → novo deste campo na linha do tempo de atividades do registro. Não definido significa LIGADO, embora o interruptor pareça desligado: só um interruptor ligado e depois desligado grava false, e então a alteração é nomeada só pelo rótulo. Ligado também mostra os valores de um campo de mídia ou JSON."
+        helpText: "Valores antigo → novo deste campo na linha do tempo de atividades do registro. Padrão segue a plataforma: ligado para a maioria dos tipos, desligado para um campo de mídia, JSON ou credencial. Desligado nomeia a alteração só pelo rótulo; Ligado também mostra os valores de um campo de mídia ou JSON. Um campo de credencial nunca mostra valores, e se o próprio objeto desligar, vale o objeto."
       },
       trackHistory: {
         label: "Acompanhar histórico",

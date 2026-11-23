@@ -64,6 +64,15 @@ export const LIST_CONDITION_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'listConditions.operators.between': 'between',
   'listConditions.operators.before': 'before',
   'listConditions.operators.after': 'after',
+  // The operators only the advanced panel writes, in the panel's own words:
+  // one key per operator, so a chip and the panel row it came from never differ.
+  'filterBuilder.operators.not_equals': 'Does not equal',
+  'filterBuilder.operators.greater_than': 'Greater than',
+  'filterBuilder.operators.less_than': 'Less than',
+  'filterBuilder.operators.is_null': 'Is null',
+  'filterBuilder.operators.is_not_null': 'Is not null',
+  'filterBuilder.operators.icontains': 'Contains (ignore case)',
+  'filterBuilder.operators.ends_with': 'Ends with',
   'listConditions.sort.advanced': 'All sort levels',
   'listConditions.sort.direction': 'Direction',
   'listConditions.sort.ascending': 'Ascending',
@@ -90,6 +99,7 @@ export const LIST_CONDITION_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'listConditions.chips.dragSort': 'Drag to change the sort priority',
   'listConditions.chips.viewOwn': 'Part of this view; it cannot be removed here',
   'listConditions.chips.viewFilter': 'View filter',
+  'listConditions.chips.relationPath': '{{lookup}} › {{field}}',
   'dashboard.filters.range.today': 'Today',
   'dashboard.filters.range.this_week': 'This week',
   'dashboard.filters.range.this_month': 'This month',
@@ -129,8 +139,19 @@ export function quickOperatorLabel(operator: string, t: Translate): string {
     case 'between': return t('listConditions.operators.between');
     case 'before': return t('listConditions.operators.before');
     case 'after': return t('listConditions.operators.after');
-    // An operator only the advanced panel writes keeps its stored id.
-    default: return operator;
+    // An operator only the advanced panel writes reads as that panel names it.
+    case 'not_equals': return t('filterBuilder.operators.not_equals');
+    case 'greater_than': return t('filterBuilder.operators.greater_than');
+    case 'less_than': return t('filterBuilder.operators.less_than');
+    case 'is_null': return t('filterBuilder.operators.is_null');
+    case 'is_not_null': return t('filterBuilder.operators.is_not_null');
+    case 'icontains': return t('filterBuilder.operators.icontains');
+    case 'ends_with': return t('filterBuilder.operators.ends_with');
+    // A view triple's comparison symbol (`['amount', '>=', 10]`) already reads
+    // as a comparison, so it is shown as written.
+    case '=': case '!=': case '>': case '>=': case '<': case '<=': return operator;
+    // Any other spelling is named as a condition: a chip never shows a machine name.
+    default: return t('listConditions.filter.operator');
   }
 }
 

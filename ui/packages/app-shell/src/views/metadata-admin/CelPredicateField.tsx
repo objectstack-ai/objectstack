@@ -79,7 +79,7 @@ import { useServerHoldAt, type ServerDiagnosticEntry } from './draftVerdict.js';
 // fields as lists (`celAuthoring.ts` stays free of any import at load).
 import { multiValueFieldsOf, type CelFieldDef } from './clientValidation.js';
 
-const LINT_DEBOUNCE_MS = 250;
+import { LINT_DEBOUNCE_MS } from './celLintDebounce.js';
 
 const KIND_TAG: Record<CelSuggestionKind, string> = {
   field: 'field',

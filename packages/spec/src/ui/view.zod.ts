@@ -2174,9 +2174,10 @@ const ADD_RECORD_ENABLED_REQUIRED =
 /**
  * `addRecord.mode` / `addRecord.formView` — retired (#24692, ADR-0049
  * enforce-or-remove; ruling letter B′). No renderer ever read either key:
- * every Add opens the object's create form, chosen by convention —
- * `formViews.create` when the object's view container declares one, else the
- * default form. How that form opens stays the renderer's. D2:
+ * every Add opens the object's create form, which lays out by the object's
+ * `fieldGroups` and leaves out every field marked `showOnCreate: false`
+ * (#36425: an internal `formViews.create` or default `form` is no longer
+ * loaded). How that form opens stays the renderer's. D2:
  * `add-record-mode-form-view-removed`.
  */
 const ADD_RECORD_MODE_RETIRED =
@@ -2188,9 +2189,9 @@ const ADD_RECORD_MODE_RETIRED =
 
 const ADD_RECORD_FORM_VIEW_RETIRED =
   '`addRecord.formView` was removed in @objectstack/spec 18.1.0 (ADR-0049 enforce-or-remove) — no '
-  + 'renderer ever read it: the Add button opens the create form chosen by convention, never a named '
-  + 'form. Delete the key, and to give the Add button its own form declare it as `formViews.create` '
-  + 'on the object\'s view container (without one, the default form is used). '
+  + 'renderer ever read it: the Add button opens the object\'s create form, never a named form. '
+  + 'Delete the key. The create form lays out by the object\'s `fieldGroups`; to leave a field out of '
+  + 'it, set `showOnCreate: false` on that field. '
   + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` '
   + 'applies the ones it can prove, and you apply the rest by hand.';
 
@@ -2202,8 +2203,10 @@ const ADD_RECORD_FORM_VIEW_RETIRED =
  * REQUIRED (no default — `addRecord: {}` is refused instead of drawing
  * nothing), `position` defaults to `top` (where the renderer places an absent
  * position), and `mode` / `formView`, which no renderer read, are tombstoned.
- * The create form is chosen by convention: `formViews.create` when declared,
- * else `form` / `formViews.default`. The stored-row half of `enabled` is the D2
+ * The create form is the object's own: it lays out by the object's
+ * `fieldGroups` and asks for every field not marked `showOnCreate: false`
+ * (#36425: an internal `formViews.create`, `form` or `formViews.default` is no
+ * longer loaded). The stored-row half of `enabled` is the D2
  * conversion `add-record-enabled-defaulted`, which writes the old default
  * (`true`) onto a block that omits it.
  *
@@ -2368,6 +2371,42 @@ export const EmptyStateSchema = lazySchema(() => strictObject({
 }));
 
 /**
+ * objectstack#36370 — a board lane's foot statistic (`kanban.summary`).
+ *
+ * Its own closed set, not the list footer's `ColumnSummaryConfigSchema`: the
+ * board computes these in the browser, so the set is exactly what a reader
+ * computes. `count` counts the lane's records (the lane's own count, the one
+ * its header shows); `sum` totals a number field (`field` required) over the
+ * cards the lane has LOADED, not over every record of the lane, and says so
+ * at the foot when the lane holds more than it drew; `none` shows nothing,
+ * also over `summarizeField`. A sum over the whole lane, and an average, a
+ * minimum or a maximum, wait for a lane aggregate the query answers
+ * (objectstack#36520): over a lane that has loaded only part of its cards none
+ * of them is even a bound.
+ */
+export const KanbanLaneSummarySchema = lazySchema(() => z.discriminatedUnion('type', [
+  strictObject({
+    surface: 'this `none` lane statistic',
+    history: VIEW_HISTORY,
+  }, {
+    type: z.literal('none'),
+  }),
+  strictObject({
+    surface: 'this `count` lane statistic',
+    history: VIEW_HISTORY,
+  }, {
+    type: z.literal('count'),
+  }),
+  strictObject({
+    surface: 'this `sum` lane statistic',
+    history: VIEW_HISTORY,
+  }, {
+    type: z.literal('sum'),
+    field: z.string().min(1).describe('The number field the lane totals over its loaded cards (e.g. amount)'),
+  }),
+]).describe('Lane foot statistic: none, the count of the lane\'s records, or the sum of a number field over the lane\'s loaded cards'));
+
+/**
  * Kanban Settings
  */
 export const KanbanConfigSchema = lazySchema(() => strictObject({
@@ -2430,6 +2469,41 @@ export const KanbanConfigSchema = lazySchema(() => strictObject({
       + 'the view. List each value once.',
     ),
   summarizeField: z.string().optional().describe('Field to sum at top of column (e.g. amount)'),
+  /**
+   * objectstack#36370 — the statistic each lane shows at its foot
+   * ({@link KanbanLaneSummarySchema}): `{ type: 'count' }` counts the lane's
+   * records; `{ type: 'sum', field }` totals a number field over the cards
+   * the lane has loaded (not the lane's every record: objectstack#36520);
+   * `{ type: 'none' }` shows nothing, also over a `summarizeField`. Without
+   * it a lane shows the sum of `summarizeField` where that is set, as before
+   * this key, and nothing otherwise.
+   *
+   * ⛔ No spec-side default: absence keeps a board stored before this key
+   * exactly as it was.
+   */
+  summary: KanbanLaneSummarySchema.optional().describe(
+    'The statistic each lane shows at its foot. `{ type: \'count\' }` counts the lane records; '
+    + '`{ type: \'sum\', field: \'amount\' }` totals a number field over the cards the lane has loaded, '
+    + 'not every record of the lane (the foot says so when the lane holds more); `{ type: \'none\' }` shows nothing. '
+    + 'Takes precedence over summarizeField. Omit to keep summarizeField\'s sum, or no statistic without it.',
+  ),
+  /**
+   * objectstack#36370 — whether a card names each field beside its value.
+   * Absent means `true`, the card as boards drew it before this key; `false`
+   * leaves the values alone.
+   */
+  showFieldLabels: z.boolean().optional().describe(
+    'Whether each card names its fields beside their values. Omit for true (names shown); false shows the values alone.',
+  ),
+  /**
+   * objectstack#36370 — whether a card leaves out a field that holds nothing.
+   * Absent means `true`, the card as boards drew it before this key; `false`
+   * keeps the field's row with an empty value, so every card of the lane
+   * lines up.
+   */
+  hideEmptyFields: z.boolean().optional().describe(
+    'Whether a card leaves out a field that holds no value. Omit for true (left out); false keeps the field with an empty value.',
+  ),
   /**
    * [#16894] The one item-titled view config of the family that omitted this
    * key. `GalleryConfigSchema`, `TimelineConfigSchema`, `CalendarConfigSchema`,
@@ -5124,7 +5198,7 @@ const FORM_VIEW_TYPE_RETIRED = {
   modal:
     "'modal' was removed from the form view `type` enum in @objectstack/spec 18.3.0 (ADR-0050) — `type` is "
     + 'the form\'s layout, and where a form opens is decided by whoever opens it: the console\'s New and Edit '
-    + 'dialogs open the record form themselves (sized by the form\'s `modalSize`), and an action '
+    + 'dialogs open the record form themselves (laid out by the object\'s `fieldGroups`), and an action '
     + '`type: \'modal\'` opens the page it targets. Delete the value for the `simple` default, or write the '
     + 'layout you want: `simple`, `tabbed` or `wizard`. '
     + FORM_VIEW_TYPE_RETIRED_FIX,
@@ -5350,9 +5424,9 @@ export const FormViewSchema = lazySchema(() => strictObject({
   /** [#29012] RETIRED — {@link FORM_VIEW_DRAWER_WIDTH_RETIRED}. */
   drawerWidth: retiredKey(FORM_VIEW_DRAWER_WIDTH_RETIRED),
   /**
-   * Size bucket of the dialog a caller opens this form in. Live on every
-   * layout: the console's New / Edit dialog reads it off the form view it
-   * selects, whatever the form's `type` ([#27155] it outlived `type: 'modal'`).
+   * Size bucket of the dialog a caller opens this form in. [#36425] The
+   * console's New / Edit dialog no longer reads a form view, so it is not that
+   * caller: it sizes itself. Its liveness verdict is re-audited on #36544.
    */
   modalSize: z.enum(['sm', 'default', 'lg', 'xl', 'full']).optional().describe("Size bucket of the dialog a caller opens this form in: the console's New / Edit dialog, or the modal container of the React `ObjectForm` block (formType 'modal')"),
 
@@ -8330,6 +8404,8 @@ export type CalendarConfig = z.input<typeof CalendarConfigSchema>;
 export type GanttConfig = z.input<typeof GanttConfigSchema>;
 export type GanttQuickFilter = z.input<typeof GanttQuickFilterSchema>;
 export type KanbanConfig = z.input<typeof KanbanConfigSchema>;
+export type KanbanLaneSummary = z.input<typeof KanbanLaneSummarySchema>;
+export type KanbanLaneSummaryParsed = z.infer<typeof KanbanLaneSummarySchema>;
 export type ListMapConfig = z.input<typeof ListMapConfigSchema>;
 export type NavigationMode = z.input<typeof NavigationModeSchema>;
 export type TreeConfig = z.input<typeof TreeConfigSchema>;

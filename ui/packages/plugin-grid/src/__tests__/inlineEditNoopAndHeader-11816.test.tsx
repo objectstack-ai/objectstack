@@ -96,7 +96,6 @@ function renderGrid() {
     type: 'object-grid',
     objectName: OBJECT,
     editable: true,
-    singleClickEdit: true,
     columns: [
       { field: 'title', label: 'Title', type: 'text' },
       { field: 'priority', label: 'Priority', type: 'select' },
@@ -109,7 +108,7 @@ function renderGrid() {
         <div>
           <button data-testid="outside">outside</button>
           {/* Row Edit/Delete handlers: the grid's own row-menu column exists. */}
-          <ObjectGrid schema={schema} dataSource={ds} onEdit={() => {}} onDelete={() => {}} />
+          <ObjectGrid cellSelection={false} schema={schema} dataSource={ds} onEdit={() => {}} onDelete={() => {}} />
         </div>
       </SchemaRendererProvider>
     </ActionProvider>,

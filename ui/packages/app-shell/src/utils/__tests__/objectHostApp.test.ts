@@ -68,6 +68,13 @@ describe('objectHostAppSegment', () => {
     expect(objectHostAppSegment([LEAVE, { name: 'setup' }], 'invoice', 'com.example.leave')).toBe('setup');
   });
 
+  it('orSetup: false (an approval request, objectstack#35505) stops after the owner: no Setup step', () => {
+    expect(objectHostAppSegment([LEAVE, SETUP], 'invoice', 'com.example.leave', { orSetup: false })).toBeUndefined();
+    expect(objectHostAppSegment([LEAVE, FINANCE, SETUP], 'invoice', 'com.example.leave', { orSetup: false })).toBe(
+      'com.example.finance',
+    );
+  });
+
   it('no owner and no Setup the user can open: no answer, so the caller keeps its own app', () => {
     expect(objectHostAppSegment([LEAVE], 'invoice', 'com.example.leave')).toBeUndefined();
   });

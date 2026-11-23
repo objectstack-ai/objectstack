@@ -54,14 +54,12 @@ import { useObjectTranslation, useObjectLabel, recordSaveMessage } from '@object
 import { useMetadata } from '../providers/MetadataProvider.js';
 import { useAdapter } from '../providers/AdapterProvider.js';
 import { claimAnswerWarnings, toastRecordSave, type AnswerWarningClaim } from '@object-ui/react';
-import {
-  ExpressionProvider,
-  isObjectFieldListed,
-} from '../providers/ExpressionProvider.js';
+import { ExpressionProvider } from '../providers/ExpressionProvider.js';
 import { buildExpressionUser } from '../providers/expressionUser.js';
 import { SkeletonDetail } from '../skeletons/index.js';
 import { ManagedByBadge } from '../components/ManagedByBadge.js';
-import { resolveFormViewChrome, selectRecordFormView } from '../utils/recordFormNavigation.js';
+import { recordFormSubforms, resolveRecordFormChrome } from '../utils/recordFormNavigation.js';
+import { recordFormFieldNames } from '../utils/recordFormFields.js';
 import { servedObjectLabel, servedObjectPluralLabel } from '../hooks/servedObjectLabel.js';
 import { readRecordFormAiChanges, readRecordFormAiDraft } from '../utils/recordFormAiDraft.js';
 import { usePreviewFormDataSource } from '../utils/previewFormDataSource.js';
@@ -286,24 +284,16 @@ export function RecordFormPage({ mode }: RecordFormPageProps) {
   // beside the provider is what makes the shared normaliser reachable here.
   const expressionUser = useMemo(() => buildExpressionUser(user), [user]);
 
-  // The list the form may draw: `isObjectFieldListed`, the same gate as the
+  // The list the form may draw: `recordFormFieldNames`, the same gate as the
   // console's global record-form modal, so page mode and modal mode list the
   // same fields. It reads the static `hidden` only (objectui#6514's declared
   // keys; the refused `visible` is not read). A field's `visibleWhen` is
   // evaluated by the form under the `ExpressionProvider` below, where the
   // record is bound — evaluated here, with no record, a `has()`-guarded
-  // predicate dropped the field before the form could draw it.
-  const fields = useMemo(() => {
-    if (!objectDef?.fields) return [];
-    if (Array.isArray(objectDef.fields)) {
-      return (objectDef.fields as any[])
-        .filter((f: any) => typeof f === 'string' || isObjectFieldListed(f))
-        .map((f: any) => (typeof f === 'string' ? f : f.name));
-    }
-    return Object.entries(objectDef.fields as Record<string, any>)
-      .filter(([, f]) => isObjectFieldListed(f))
-      .map(([key]) => key);
-  }, [objectDef]);
+  // predicate dropped the field before the form could draw it. A create
+  // leaves out a field declaring `showOnCreate: false` (`isFieldAskedOnFlow`,
+  // objectstack-ai/objectstack#36425), as the modal does; an edit lists it.
+  const fields = useMemo(() => recordFormFieldNames(objectDef?.fields, mode), [objectDef, mode]);
 
   // Show skeleton while metadata is still loading rather than the
   // "Object Not Found" empty state — otherwise direct/refreshed loads of
@@ -334,39 +324,13 @@ export function RecordFormPage({ mode }: RecordFormPageProps) {
     );
   }
 
-  // Honour the object's form view layout (objectstack-ai/objectstack#1890): wire the declared `type`
-  // (simple/tabbed/wizard) + `sections` through to ObjectForm, which renders
-  // each layout. Those three are the form view `type`'s whole vocabulary
-  // (ADR-0050); anything else — a stored row not yet converted — falls back
-  // to `simple` here.
-  // The form view is the one the record flow selects (objectui#13099): a
-  // create uses the object's `create` form view when it declares one, an edit
-  // the default form view — the same selection the New/Edit modal makes.
-  const formDef: any = selectRecordFormView(objectDef as any, mode) ?? {};
-  const pageFormType: 'simple' | 'tabbed' | 'wizard' =
-    ['tabbed', 'wizard'].includes(formDef.type) ? formDef.type : 'simple';
-  // Curated `sections` are wired through for EVERY layout family — a `simple`
-  // form view's sections still carry the authored field selection, order,
-  // grouping and per-field `visibleOn` predicates (#2212). Dropping them for
-  // `simple` made the page-mode form fall back to the raw schema (every field,
-  // no conditional visibility) while the New/Edit modal honored the same view
-  // via resolveFormViewLayout.
-  const formLayoutProps = Array.isArray(formDef.sections) && formDef.sections.length > 0
-    ? {
-        sections: formDef.sections,
-        defaultTab: formDef.defaultTab,
-        tabPosition: formDef.tabPosition,
-        allowSkip: formDef.allowSkip,
-        showStepIndicator: formDef.showStepIndicator,
-      }
-    : {};
-  // objectstack-ai/objectstack#26843 — the form view's `buttons`, `layout`
-  // and `defaults`, which this page used to hard-set over (`showSubmit: true`,
-  // `layout: 'vertical'`, its own labels). `defaults` seed a create under the
-  // AI chat draft, and both under the URL prefill, which still wins per field.
-  const formChrome = resolveFormViewChrome(formDef, {
+  // objectstack-ai/objectstack#36425 — the page lays out by the object's field
+  // groups and follows its fields' rules, as the New/Edit modal does. No
+  // internal form view is read: not its layout family (tabbed / wizard), its
+  // sections, subforms, buttons, layout or `defaults`. A create opens on the
+  // AI chat draft and the URL prefill, which wins per field.
+  const formChrome = resolveRecordFormChrome({
     flow: mode,
-    language,
     submitText: t('form.saveRecord'),
     cancelText: t('common.cancel'),
     createValues,
@@ -454,18 +418,16 @@ export function RecordFormPage({ mode }: RecordFormPageProps) {
                   key={`${mode}:${objectName}:${recordId ?? 'new'}`}
                   schema={{
                     type: 'object-form',
-                    formType: pageFormType,
-                    ...formLayoutProps,
+                    formType: 'simple',
                     objectName: objectDef.name,
                     mode,
                     recordId: mode === 'edit' ? recordId : undefined,
                     title: pageTitle,
                     fields,
-                    // Master-detail by config: if the object's form view declares
-                    // inline child collections, ObjectForm renders them as an atomic
-                    // master-detail form on this page — no bespoke page needed.
-                    subforms: (objectDef as any).form?.subforms
-                      ?? (objectDef as any).formViews?.default?.subforms,
+                    // Master-detail: the child collections the object's field
+                    // groups place (`fieldGroups[].relatedList`), rendered as an
+                    // atomic master-detail form on this page.
+                    subforms: recordFormSubforms(objectDef as any),
                     onSuccess: handleSuccess,
                     onCancel: handleCancel,
                     ...formChrome,

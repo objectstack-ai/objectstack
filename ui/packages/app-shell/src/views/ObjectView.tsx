@@ -117,6 +117,7 @@ import { ChangeOwnerDialog } from './ChangeOwnerDialog.js';
 import { changeOwnerEligibleRows, changeOwnerObjectOffer, useListChangeOwnerOffered } from './changeOwner.js';
 import { parseListStateParams } from './userFilterUrlState.js';
 import { FILTER_FOLD_REFUSAL_KEYS } from './viewFilterFold.js';
+import { kanbanDraftToSave } from './objectViewOptions.js';
 
 // objectstack#25992 slice 1: these module-level helpers moved to the sibling
 // `objectView*.ts` modules above. Every name this file exported stays
@@ -770,6 +771,9 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     const draftDisplay = {
         ...(listDraft.draft.viewType ? { viewType: listDraft.draft.viewType } : {}),
         ...(listDraft.draft.rowColor !== undefined ? { rowColor: listDraft.draft.rowColor } : {}),
+        // objectstack#36370 — and a board's changed settings, with the lane
+        // field the board draws when the view declares none (`kanbanDraftToSave`).
+        ...(listDraft.draft.kanban ? { kanban: kanbanDraftToSave(activeView, objectDef, listDraft.draft.kanban) } : {}),
     };
     // objectstack#25992 slice 8: the list's toolbar state in the URL (seed, write-back,
     // "Reset view") moved to `./objectViewListUrlState.ts`.
@@ -1029,7 +1033,12 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         if (!activeView) return false;
         // objectstack#35955 — the draft's layout is the new view's type (so
         // the type's own field list is filled as the create card fills it),
-        // and its row colour is laid over the body.
+        // and its row colour is laid over the body; objectstack#36370 — so are
+        // a board's changed settings.
+        const saveAsDisplay = {
+            ...(listDraft.draft.rowColor !== undefined ? { rowColor: listDraft.draft.rowColor } : {}),
+            ...(listDraft.draft.kanban ? { kanban: kanbanDraftToSave(activeView, objectDef, listDraft.draft.kanban) } : {}),
+        };
         const built = buildInPlaceViewConfig(
             objectDef.name,
             activeView,
@@ -1039,7 +1048,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
                 preference: draftPreferenceOf(activeView.id),
                 panelFilters: viewPanelFilters,
                 summaries: listDraft.draft.summaries,
-                ...(listDraft.draft.rowColor !== undefined ? { display: { rowColor: listDraft.draft.rowColor } } : {}),
+                ...(Object.keys(saveAsDisplay).length > 0 ? { display: saveAsDisplay } : {}),
             },
         );
         if (!built.ok) {
@@ -1116,7 +1125,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     // objectstack#27058 — on a phone the record is always a page: a row tap
     // navigates to it, and no pane is mounted beside or over the list.
     const phone = usePhoneViewport();
-    const { listRecordActions, navOverlay, handleDrawerClose, handleRowClick, handleOpenAsPage, handleOpenRowInPanel, handleOpenReferencedRecord, drawerRoot, drawerRestore, handleListRowsChange, handleListTotalChange, handleRootStep, listLabel } = useObjectViewRecordNavigation({
+    const { listRecordActions, navOverlay, drawerWidthKey, handleDrawerClose, handleRowClick, handleOpenAsPage, handleOpenRowInPanel, handleOpenReferencedRecord, drawerRoot, drawerRestore, handleListRowsChange, handleListTotalChange, handleRootStep, listLabel } = useObjectViewRecordNavigation({
         activeView,
         objectDef,
         objects,
@@ -1704,6 +1713,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         <ObjectViewRecordOverlay
             navOverlay={navOverlay}
             mode={navOverlay.mode}
+            widthKey={drawerWidthKey}
             list={pageColumn}
             handleDrawerClose={handleDrawerClose}
             objectDef={objectDef}
