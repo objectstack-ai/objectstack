@@ -262,12 +262,12 @@ describe('a readonlyWhen lock that holds: the answer is what was saved, not what
     for (const r of engine.tables.lead) if (ids.includes(r.id)) r.status = 'closed';
   };
 
-  it('single: a locked owner_id is the row\'s refusal, ERR_READONLY_FIELD_REJECTED, nothing written and nobody told', async () => {
+  it('single: a locked owner_id is the row\'s refusal, 403 FIELD_NOT_ACCESSIBLE, nothing written and nobody told', async () => {
     const engine = fakeEngine({ locked: lockedWhenClosed() });
     closed(engine, ['l1']);
     const messaging = { emit: vi.fn(async () => SENT) };
     const err = await refusalOf(changeRecordOwner(engine, 'lead', 'l1', { ownerId: 'u_next' }, CALLER, { notify: true, messaging }));
-    expect({ code: err.code, fields: err.fields }).toEqual({ code: 'ERR_READONLY_FIELD_REJECTED', fields: ['owner_id'] });
+    expect({ code: err.code, status: err.status, fields: err.fields }).toEqual({ code: 'FIELD_NOT_ACCESSIBLE', status: 403, fields: ['owner_id'] });
     expect(engine.tables.lead[0]!.owner_id).toBe('u_a');
     expect(messaging.emit).not.toHaveBeenCalled();
   });
@@ -278,8 +278,8 @@ describe('a readonlyWhen lock that holds: the answer is what was saved, not what
     const messaging = { emit: vi.fn(async () => SENT) };
     const report = await changeRecordsOwner(engine, 'lead', ['l1', 'l2', 'l3'], { ownerId: 'u_next' }, CALLER, { notify: true, messaging });
     expect(report).toMatchObject({ updated: 2, failed: 1, notified: true });
-    expect(report.failures.map((f) => [f.id, f.code])).toEqual([['l2', 'ERR_READONLY_FIELD_REJECTED']]);
-    expect(engine.tables.lead.map((r) => r.owner_id)).toEqual(['u_next', 'u_a', 'u_next']);
+    expect(report.failures.map((f) => [f.id, f.code])).toEqual([['l2', 'FIELD_NOT_ACCESSIBLE']]);
+    expect(engine.tables.lead.map((r) => r.owner_id)).toEqual(['u_next', 'u_b', 'u_next']);
     expect((messaging.emit.mock.calls[0] as any[])[0].payload.recordIds).toEqual(['l1', 'l3']);
   });
 
@@ -296,7 +296,7 @@ describe('a readonlyWhen lock that holds: the answer is what was saved, not what
     const single = fakeEngine({ locked: lockedWhenClosed() });
     closed(single, ['l1']);
     const err = await refusalOf(changeRecordOwner(single, 'lead', 'l1', { queue: 'triage' }, CALLER));
-    expect({ code: err.code, fields: err.fields }).toEqual({ code: 'ERR_READONLY_FIELD_REJECTED', fields: ['owner_id'] });
+    expect({ code: err.code, status: err.status, fields: err.fields }).toEqual({ code: 'FIELD_NOT_ACCESSIBLE', status: 403, fields: ['owner_id'] });
     expect(single.tables.lead[0]).toMatchObject({ owner_id: 'u_a' });
     expect(single.tables.lead[0]!.queue).toBeUndefined();
 
@@ -304,7 +304,7 @@ describe('a readonlyWhen lock that holds: the answer is what was saved, not what
     closed(bulk, ['l1']);
     const report = await changeRecordsOwner(bulk, 'lead', ['l1', 'l3'], { queue: 'triage' }, CALLER);
     expect(report).toMatchObject({ ownerId: null, queue: 'triage', updated: 1, failed: 1 });
-    expect(report.failures.map((f) => [f.id, f.code])).toEqual([['l1', 'ERR_READONLY_FIELD_REJECTED']]);
+    expect(report.failures.map((f) => [f.id, f.code])).toEqual([['l1', 'FIELD_NOT_ACCESSIBLE']]);
     expect(bulk.tables.lead[0]!.queue).toBeUndefined();
   });
 
