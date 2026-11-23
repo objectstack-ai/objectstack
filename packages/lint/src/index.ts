@@ -173,6 +173,15 @@ export {
   FLOW_TRIGGER_UNROUTABLE,
   FLOW_API_TRIGGER_SECRET_MISSING,
   FLOW_API_TRIGGER_SIGNATURE_UNUSABLE,
+  // #35143 — the second batch of publish-time flow checks.
+  validateFlowSubflowTargets,
+  FLOW_TRIGGER_OBJECT_MISSING,
+  FLOW_CONDITION_OPTION_LABEL,
+  FLOW_TIME_RELATIVE_SHADOWED,
+  FLOW_TIME_RELATIVE_KEY_MISPLACED,
+  FLOW_TIME_RELATIVE_DATE_FIELD_INVALID,
+  FLOW_SCHEDULE_TIMEZONE_MISSING,
+  FLOW_SUBFLOW_UNKNOWN,
 } from './validate-flow-trigger-readiness.js';
 export type {
   FlowTriggerReadinessFinding,
@@ -1105,6 +1114,8 @@ export {
   validateFlowNodeWrites,
   FLOW_NODE_WRITE_UNKNOWN_FIELD,
   FLOW_NODE_WRITE_UNPROVISIONED_ANCHOR,
+  FLOW_NODE_WRITE_UNKNOWN_OPTION,
+  FLOW_NODE_WRITE_DATE_HELPER_TEXT,
   FLOW_WRITE_NODE_TYPES,
   FLOW_WRITE_NODE_TYPES_DEFERRED,
 } from './validate-flow-node-writes.js';
@@ -1179,6 +1190,7 @@ export {
   FLOW_DECISION_INCLUSIVE_OVERLAP,
   FLOW_APPROVAL_DECISION_UNROUTED,
   FLOW_HTTP_TIMEOUT_MISSING,
+  FLOW_CREATE_UPDATE_PAIR,
 } from './lint-flow-patterns.js';
 
 // A credential typed as a literal into a served flow position — the advisory,
