@@ -308,7 +308,8 @@ describe('[#35384] the flow and position labels in the declared sourceLocale rea
     i18n.setDefaultLocale('zh-CN');
     i18n.setFallbackLocale('zh-CN');
     if (sourceLocale) i18n.setSourceLocale(sourceLocale);
-    return i18n;
+    // The served adapter's shape (`FileI18nAdapter`): the declared fallback, read back by `getFallbackLocale()`.
+    return Object.assign(i18n, { getFallbackLocale: () => 'zh-CN' });
   };
   const served = () => ({
     process_name: 'flow:account_approval', current_step: 'manager_review', object_name: 'account',
@@ -414,7 +415,7 @@ describe('[#35384] a renamed packaged object is named by its rename, as /meta na
     service.setDefaultLocale('zh-CN');
     service.setFallbackLocale('zh-CN');
     service.setSourceLocale('en');
-    return service;
+    return Object.assign(service, { getFallbackLocale: () => 'zh-CN' });
   };
   /** What `GET /meta/object/crm_deal` serves as the label for a request in `locale`. */
   const metaLabel = (engine: ReturnType<typeof engineWith>, locale: string): unknown => {

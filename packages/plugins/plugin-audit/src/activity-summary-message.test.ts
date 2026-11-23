@@ -312,7 +312,7 @@ describe('[#35384] a renamed packaged object is named by its rename, as /meta na
     service.setDefaultLocale('zh-CN');
     service.setFallbackLocale('zh-CN');
     service.setSourceLocale('en');
-    return service;
+    return Object.assign(service, { getFallbackLocale: () => 'zh-CN' });
   };
   /** The summary a reader in `locale` is served for one stored code, through the installed middleware. */
   const summaryRead = async (renamed: boolean, locale: string, message: ActivitySummaryMessage): Promise<unknown> => {
