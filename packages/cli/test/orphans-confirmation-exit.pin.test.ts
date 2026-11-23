@@ -50,9 +50,6 @@ import '@objectstack/objectql';
 import '@objectstack/service-settings';
 import '../src/utils/sys-secret-orphan-sweep.js';
 import '../src/utils/sys-secret-holder-report.js';
-// `oneShotSettingsPlugins()` reaches the serve command's crypto provider.
-import '@objectstack/core';
-import '../src/commands/serve.js';
 
 const seams = vi.hoisted(() => ({
   bootSchemaStack: vi.fn(),
@@ -76,6 +73,10 @@ vi.mock('../src/utils/secret-reference-union.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   collectSecretReferenceUnion: seams.collectSecretReferenceUnion,
 }));
+// The settings plugins `os secret orphans` composes into its boot: handed to
+// the (replaced) boot and never used, and the real ones reach the serve
+// command's crypto provider, a load no case here should pay.
+vi.mock('../src/utils/one-shot-settings.js', () => ({ oneShotSettingsPlugins: async () => [] }));
 // Constructed and handed to the (replaced) boot, never used.
 vi.mock('@objectstack/platform-objects/plugin', () => ({ PlatformObjectsPlugin: class {} }));
 // The `[y/N]` prompt. Reached only on a terminal: each `confirm()` answers
