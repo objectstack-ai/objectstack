@@ -2215,6 +2215,10 @@ const en = {
     widgetForbiddenTitle: 'You don’t have access',
     widgetForbiddenMessage: 'You don’t have permission to view the data behind this widget.',
     allWidgetsForbiddenMessage: 'You don’t have permission to view the data behind this dashboard.',
+    noCards: {
+      title: 'No cards yet',
+      message: 'This dashboard has no cards yet.',
+    },
     details: 'Details',
     openInList: 'Open in list',
     config: {
@@ -4292,6 +4296,13 @@ const en = {
       pendingDraft: 'This app has unpublished changes in Studio. Publish or discard them there, then save again.',
       noVersion: 'This app\'s package states no version, so its menu cannot be customized.',
       notWritable: 'This app\'s customization package cannot be written, so its menu cannot be saved.',
+      newDashboard: 'New dashboard…',
+      newDashboardTitle: 'New dashboard',
+      newItemSavesAll: 'Creating it saves your other design changes too, then opens it for editing.',
+      create: 'Create',
+      creating: 'Creating…',
+      newItemPendingDraft: 'A draft with this name is already pending. Try again.',
+      newItemLeft: 'The new dashboard "{{name}}" could not be removed again; remove it in Studio.',
     },
     recordTabs: {
       entry: 'Configure tabs',

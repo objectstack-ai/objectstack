@@ -1834,6 +1834,10 @@ const fr = {
     widgetForbiddenTitle: "Accès refusé",
     widgetForbiddenMessage: "Vous n’avez pas l’autorisation de voir les données de ce widget.",
     allWidgetsForbiddenMessage: "Vous n’avez pas l’autorisation de voir les données de ce tableau de bord.",
+    noCards: {
+      title: 'Pas encore de cartes',
+      message: 'Ce tableau de bord n’a pas encore de cartes.',
+    },
     details: "Détails",
     openInList: "Ouvrir dans la liste",
     inPageEdit: {
@@ -3685,6 +3689,13 @@ const fr = {
       pendingDraft: 'Cette application a des modifications non publiées dans Studio. Publiez-les ou annulez-les là-bas, puis enregistrez à nouveau.',
       noVersion: 'Le package de cette application ne déclare aucune version : son menu ne peut pas être personnalisé.',
       notWritable: 'Le package de personnalisation de cette application n’est pas modifiable : son menu ne peut pas être enregistré.',
+      newDashboard: 'Nouveau tableau de bord…',
+      newDashboardTitle: 'Nouveau tableau de bord',
+      newItemSavesAll: 'Le créer enregistre aussi vos autres modifications de design, puis l’ouvre en modification.',
+      create: 'Créer',
+      creating: 'Création…',
+      newItemPendingDraft: 'Un brouillon portant ce nom est déjà en attente. Réessayez.',
+      newItemLeft: 'Le nouveau tableau de bord « {{name}} » n’a pas pu être supprimé ; supprimez-le dans Studio.',
     },
     recordTabs: {
       entry: 'Configurer les onglets',

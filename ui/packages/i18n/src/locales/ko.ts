@@ -1778,6 +1778,10 @@ const ko = {
     widgetForbiddenTitle: "접근 권한 없음",
     widgetForbiddenMessage: "이 위젯의 데이터를 볼 수 있는 권한이 없습니다.",
     allWidgetsForbiddenMessage: "이 대시보드의 데이터를 볼 수 있는 권한이 없습니다.",
+    noCards: {
+      title: '아직 카드가 없습니다',
+      message: '이 대시보드에는 아직 카드가 없습니다.',
+    },
     details: "세부 정보",
     openInList: "목록에서 열기",
     inPageEdit: {
@@ -3607,6 +3611,13 @@ const ko = {
       pendingDraft: '이 앱에는 Studio에 게시되지 않은 변경 사항이 있습니다. 그곳에서 게시하거나 취소한 뒤 다시 저장하세요.',
       noVersion: '이 앱의 패키지에 버전이 없어 메뉴를 사용자 지정할 수 없습니다.',
       notWritable: '이 앱의 사용자 지정 패키지에 쓸 수 없어 메뉴를 저장할 수 없습니다.',
+      newDashboard: '새 대시보드…',
+      newDashboardTitle: '새 대시보드',
+      newItemSavesAll: '만들면 디자인 모드의 다른 변경 사항도 함께 저장되고 편집할 수 있게 열립니다.',
+      create: '만들기',
+      creating: '만드는 중…',
+      newItemPendingDraft: '이 이름으로 게시되지 않은 초안이 이미 있습니다. 다시 시도하세요.',
+      newItemLeft: '새 대시보드 "{{name}}"을(를) 삭제하지 못했습니다. Studio에서 삭제하세요.',
     },
     recordTabs: {
       entry: '탭 구성',

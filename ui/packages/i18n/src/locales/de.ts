@@ -1778,6 +1778,10 @@ const de = {
     widgetForbiddenTitle: "Kein Zugriff",
     widgetForbiddenMessage: "Sie haben keine Berechtigung, die Daten dieses Widgets anzuzeigen.",
     allWidgetsForbiddenMessage: "Sie haben keine Berechtigung, die Daten dieses Dashboards anzuzeigen.",
+    noCards: {
+      title: 'Noch keine Karten',
+      message: 'Dieses Dashboard hat noch keine Karten.',
+    },
     details: "Details",
     openInList: "In Liste öffnen",
     inPageEdit: {
@@ -3607,6 +3611,13 @@ const de = {
       pendingDraft: 'Diese App hat unveröffentlichte Änderungen in Studio. Veröffentlichen oder verwerfen Sie sie dort und speichern Sie dann erneut.',
       noVersion: 'Das Paket dieser App nennt keine Version, daher kann ihr Menü nicht angepasst werden.',
       notWritable: 'Das Anpassungspaket dieser App ist nicht beschreibbar, daher kann ihr Menü nicht gespeichert werden.',
+      newDashboard: 'Neues Dashboard…',
+      newDashboardTitle: 'Neues Dashboard',
+      newItemSavesAll: 'Beim Erstellen werden auch Ihre anderen Designänderungen gespeichert; danach wird es zum Bearbeiten geöffnet.',
+      create: 'Erstellen',
+      creating: 'Wird erstellt…',
+      newItemPendingDraft: 'Unter diesem Namen liegt bereits ein unveröffentlichter Entwurf. Versuchen Sie es erneut.',
+      newItemLeft: 'Das neue Dashboard „{{name}}“ konnte nicht wieder entfernt werden; entfernen Sie es in Studio.',
     },
     recordTabs: {
       entry: 'Tabs konfigurieren',
