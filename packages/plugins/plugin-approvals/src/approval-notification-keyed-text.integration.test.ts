@@ -361,3 +361,81 @@ describe('#24978 — end to end: a real messaging service renders each approver\
     ]);
   });
 });
+
+/**
+ * [#35384] The object an approval notification names is labelled as
+ * `GET /meta/object/:name` serves it: the subject param is the messaging
+ * service's typed object-label param (`{ objectLabel, fallback }`), resolved
+ * per recipient by `translateObject` with the metadata route's resolve options
+ * and the object's packaged base, never through `t()`.
+ *
+ * The deployment: authored in English (`sourceLocale: 'en'`), defaulting its
+ * users to Chinese (`defaultLocale` and the declared fallback `zh-CN`), with a
+ * `zh-CN` pack for the object. `t('objects.crm_deal.label', 'en')` falls to the
+ * `zh-CN` row, so before this an English approver read `商机` inside an
+ * English sentence. CONTROL: the Chinese approver still reads `商机`.
+ */
+describe('[#35384] the object an approval notification names reads as /meta serves it', () => {
+  /** The en-authored, zh-CN-default deployment's i18n service. */
+  const sourceLocaleI18n = () => {
+    const i18n = i18nWithBundle('zh-CN');
+    i18n.setFallbackLocale('zh-CN');
+    i18n.setSourceLocale('en');
+    // The served adapter's shape (`FileI18nAdapter`): the declared fallback, read back.
+    return Object.assign(i18n, { getFallbackLocale: () => 'zh-CN' });
+  };
+
+  /** Open one request on a fresh engine; `rename` extends the packaged `Deal` into a new label first. */
+  const openOn = async (rename?: string) => {
+    const engine = await bootEngine([
+      { id: 'u_sub', name: 'Sun Submitter', email: 'sun@example.com', locale: 'zh-CN' },
+      { id: 'u_zh', name: 'Zhang', email: 'zhang@example.com', locale: 'zh-CN' },
+      { id: 'u_en', name: 'Ada', email: 'ada@example.com', locale: 'en' },
+    ]);
+    try {
+      if (rename) engine.registry.registerObjectExtension({ extend: 'crm_deal', label: rename } as never, 'com.acme.crm.custom');
+      const i18n = sourceLocaleI18n();
+      const getData = () => engine as any;
+      const messaging = new MessagingService({
+        logger: silent,
+        getData,
+        textRenderer: new NotificationTextRenderer({
+          getData, getI18n: () => i18n, getDefaultLocale: () => i18n.getDefaultLocale(), logger: silent,
+        }),
+      });
+      messaging.registerChannel(createInboxChannel({ getData }));
+      let now = Date.parse('2026-10-01T09:00:00.000Z');
+      const svc = approvalService(engine, () => new Date(now += 1000));
+      svc.attachMessaging(messaging as any);
+      await engine.insert('crm_deal', { id: 'D_1', title: 'Big deal', organization_id: ORG }, { context: SYSTEM } as any);
+      await svc.openNodeRequest({
+        object: 'crm_deal', recordId: 'D_1', runId: 'run_1', nodeId: 'review', flowName: FLOW.name,
+        config: { approvers: [{ type: 'user', value: 'u_zh' }, { type: 'user', value: 'u_en' }], behavior: 'first_response' } as any,
+        submitterId: 'u_sub', record: { id: 'D_1', title: 'Big deal' },
+      }, asUser('u_sub'));
+      const bodyOf = async (userId: string) => {
+        const rows = (await engine.find('sys_inbox_message', { where: { user_id: userId }, fields: ['body_md'] }, { context: SYSTEM })) as any[];
+        return rows.map((r) => r.body_md);
+      };
+      return { en: await bodyOf('u_en'), zh: await bodyOf('u_zh'), i18n };
+    } finally {
+      try { await engine.destroy(); } catch { /* noop */ }
+    }
+  };
+
+  it("the defect's precondition: t() answers an en reader with the zh-CN row", () => {
+    expect(sourceLocaleI18n().t('objects.crm_deal.label', 'en')).toBe('商机');
+  });
+
+  it('an en approver reads the authored label; CONTROL: a zh-CN approver reads the zh-CN row', async () => {
+    const { en, zh } = await openOn();
+    expect(en).toEqual(['A decision on Deal Big deal is waiting on you.']);
+    expect(zh).toEqual(['商机 Big deal 正在等待您的审批决定。']);
+  });
+
+  it('a renamed packaged object is named by its rename, in every language, as /meta names it', async () => {
+    const { en, zh } = await openOn('Opportunity');
+    expect(en).toEqual(['A decision on Opportunity Big deal is waiting on you.']);
+    expect(zh).toEqual(['Opportunity Big deal 正在等待您的审批决定。']);
+  });
+});

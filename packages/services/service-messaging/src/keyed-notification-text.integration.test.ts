@@ -51,7 +51,8 @@ import { NotificationTemplateStore } from './template-renderer.js';
 import { SqlNotificationOutbox, DELIVERY_OBJECT } from './sql-outbox.js';
 import { MemoryNotificationOutbox } from './memory-outbox.js';
 import { NotificationDispatcher } from './dispatcher.js';
-import { NotificationTextRenderer } from './notification-text.js';
+import { NotificationTextRenderer, type NotificationTextKeys } from './notification-text.js';
+import { translateMetadataDocument } from '@objectstack/spec/system';
 import { DIGEST_HEADING_KEY } from './digest-render.js';
 import { MessagingTranslations } from './translations/index.js';
 import { enMessages as messagingEnMessages, messagingMessages } from './translations/messages.js';
@@ -720,5 +721,162 @@ describe("#32240 — an inbox row reads in the READER's language", () => {
 
         // ja-JP holds the object label and no message entries: nothing renders.
         expect(await readAs(ql, 'u_none', 'ja-JP')).toEqual([{ title: LITERAL.title, body_md: LITERAL.body }]);
+    });
+});
+
+/**
+ * [#35384] The typed object-label param, `{ objectLabel, fallback }`: an
+ * object's label is METADATA, so it is resolved as `GET /meta/object/:name`
+ * serves it — `translateObject` over the object's served definition and its
+ * packaged base, with the metadata route's resolve options (the recipient's
+ * negotiated locale, the declared fallback chain, the declared `sourceLocale`
+ * else `defaultLocale`) — on the inline fan-out, on the durable path and on
+ * the inbox reader's render. The `{ key, fallback }` param keeps its `t()`
+ * reading, so a row stored before the typed param existed renders as it did.
+ *
+ * The deployment: authored in English (`sourceLocale: 'en'`), defaulting its
+ * users to Chinese (`defaultLocale` and the declared fallback `zh-CN`), with a
+ * `zh-CN` pack holding the object's label. `t('objects.crm_deal.label', 'en')`
+ * falls to the `zh-CN` row. The oracle is `/meta`'s own call,
+ * `translateMetadataDocument('object', served, bundle, { …options, packagedBase })`.
+ */
+describe('#35384 — an object label param reads as /meta serves the object', () => {
+    const DEAL_CATALOG: Record<string, Record<string, unknown>> = {
+        en: { messages: { dealTitle: 'Approval requested', dealBody: 'Your {{object}} {{record}} awaits approval.' } },
+        'zh-CN': {
+            messages: { dealTitle: '审批请求', dealBody: '您的{{object}} {{record}} 待审批。' },
+            objects: { crm_deal: { label: '商机' } },
+        },
+    };
+    const TYPED: NotificationTextKeys = {
+        titleKey: 'messages.dealTitle',
+        bodyKey: 'messages.dealBody',
+        params: { object: { objectLabel: 'crm_deal', fallback: 'Opportunity' }, record: 'D_1' },
+    };
+    const LEGACY: NotificationTextKeys = {
+        ...TYPED,
+        params: { object: { key: 'objects.crm_deal.label', fallback: 'Opportunity' }, record: 'D_1' },
+    };
+    const DEAL_LITERAL = { title: 'Approval requested', body: 'Your Opportunity D_1 awaits approval.' };
+    const enBody = (label: string) => `Your ${label} D_1 awaits approval.`;
+    const zhBody = (label: string) => `您的${label} D_1 待审批。`;
+
+    /** The en-authored, zh-CN-default deployment's i18n service, as `AppPlugin` declares it. */
+    function sourceLocaleI18n() {
+        const i18n = createMemoryI18n();
+        for (const [locale, data] of Object.entries(DEAL_CATALOG)) i18n.loadTranslations(locale, data);
+        i18n.setDefaultLocale('zh-CN');
+        i18n.setFallbackLocale('zh-CN');
+        i18n.setSourceLocale('en');
+        // The served adapter's shape (`FileI18nAdapter`): the declared fallback, read back.
+        return Object.assign(i18n, { getFallbackLocale: (): string | undefined => 'zh-CN' });
+    }
+
+    /** A real engine holding `crm_deal` as a package declares it, renamed by a code extension when `rename` is given. */
+    async function bootDeal(rename?: string): Promise<ObjectQL> {
+        const ql = await boot();
+        ql.registry.registerObject(
+            { name: 'crm_deal', label: 'Opportunity', fields: { name: { type: 'text', label: 'Name' } } } as never,
+            'com.acme.crm', undefined, 'own',
+        );
+        if (rename) ql.registry.registerObjectExtension({ extend: 'crm_deal', label: rename } as never, 'com.acme.crm.custom');
+        return ql;
+    }
+
+    /** What `GET /meta/object/crm_deal` serves as the label for a request in `locale`. */
+    function metaLabel(ql: ObjectQL, locale: string): unknown {
+        const i18n = sourceLocaleI18n();
+        const bundle = Object.fromEntries(i18n.getLocales().map((code) => [code, i18n.getTranslations(code)]));
+        return translateMetadataDocument('object', ql.getSchema('crm_deal') as never, bundle as never, {
+            locale, fallbackChain: ['zh-CN'], defaultLocale: 'en',
+            packagedBase: ql.registry.getPackagedObjectBase('crm_deal'),
+        }).label;
+    }
+
+    const emitDeal = (audience: string[], keyedText: NotificationTextKeys, over: Partial<EmitInput> = {}): EmitInput => ({
+        topic: 'deal.approval', audience, organizationId: ORG, channels: ['inbox'],
+        payload: { ...DEAL_LITERAL }, keyedText, ...over,
+    });
+
+    it("the defect's precondition: t() answers an en reader with the zh-CN row, and so does the { key } param", async () => {
+        const ql = await bootDeal();
+        const i18n = sourceLocaleI18n();
+        expect(i18n.t('objects.crm_deal.label', 'en')).toBe('商机');
+        const c = compose(ql, { i18n });
+        await c.messaging.emit(emitDeal(['u_en'], LEGACY));
+        expect((await inboxOf(ql, 'u_en'))[0]?.body_md).toBe(enBody('商机'));
+    });
+
+    it('inline fan-out: an en recipient reads the authored label; CONTROL: a zh-CN recipient reads the zh-CN row', async () => {
+        const ql = await bootDeal();
+        const c = compose(ql, { i18n: sourceLocaleI18n() });
+        await c.messaging.emit(emitDeal(['u_en', 'u_zh'], TYPED));
+        expect(metaLabel(ql, 'en')).toBe('Opportunity');
+        expect(metaLabel(ql, 'zh-CN')).toBe('商机');
+        expect(await inboxOf(ql, 'u_en')).toEqual([{ title: 'Approval requested', body_md: enBody('Opportunity') }]);
+        expect(await inboxOf(ql, 'u_zh')).toEqual([{ title: '审批请求', body_md: zhBody('商机') }]);
+    });
+
+    it('durable path (SQL outbox + dispatcher): the same, and the snapshot stores the typed param as emitted', async () => {
+        const ql = await bootDeal();
+        const c = compose(ql, { i18n: sourceLocaleI18n(), outbox: 'sql' });
+        expect((await c.messaging.emit(emitDeal(['u_en', 'u_zh'], TYPED))).enqueued).toBe(2);
+        const [row] = (await ql.find(DELIVERY_OBJECT, { fields: ['payload'] }, SYSTEM)) as any[];
+        const payload = typeof row.payload === 'string' ? JSON.parse(row.payload) : row.payload;
+        expect(payload.keyedText).toEqual(TYPED);
+        await c.dispatcher!.tick();
+        expect((await inboxOf(ql, 'u_en'))[0]?.body_md).toBe(enBody('Opportunity'));
+        expect((await inboxOf(ql, 'u_zh'))[0]?.body_md).toBe(zhBody('商机'));
+    });
+
+    it('a renamed packaged object is named by its rename in every language, as /meta names it', async () => {
+        const ql = await bootDeal('Deal');
+        expect(metaLabel(ql, 'en')).toBe('Deal');
+        expect(metaLabel(ql, 'zh-CN')).toBe('Deal');
+        const c = compose(ql, { i18n: sourceLocaleI18n() });
+        await c.messaging.emit(emitDeal(['u_en', 'u_zh'], TYPED));
+        expect((await inboxOf(ql, 'u_en'))[0]?.body_md).toBe(enBody('Deal'));
+        expect((await inboxOf(ql, 'u_zh'))[0]?.body_md).toBe(zhBody('Deal'));
+    });
+
+    it("the inbox reader's render resolves it the same way, in the READER's language", async () => {
+        const ql = await bootDeal();
+        const c = compose(ql, { i18n: sourceLocaleI18n(), deploymentDefault: 'zh-CN' });
+        expect(installInboxReaderLocale(ql, c.textRenderer!)).toBe(true);
+        await c.messaging.emit(emitDeal(['u_none'], TYPED));
+        const readAs = async (locale: string) => ((await ql.find(
+            INBOX_OBJECT, { where: { user_id: 'u_none' }, fields: ['body_md'] },
+            { context: { userId: 'u_none', locale } as ExecutionContext },
+        )) as any[]).map((r) => r.body_md);
+        expect(await readAs('en')).toEqual([enBody('Opportunity')]);
+        expect(await readAs('en-US')).toEqual([enBody('Opportunity')]);
+        expect(await readAs('zh-CN')).toEqual([zhBody('商机')]);
+    });
+
+    it('never reads the label through t(): a service that cannot hand its translations over delivers the fallback', async () => {
+        const ql = await bootDeal();
+        const full = sourceLocaleI18n();
+        const tOnly = { t: full.t.bind(full), getLocales: full.getLocales.bind(full) };
+        const c = compose(ql, { i18n: tOnly as unknown as ReturnType<typeof catalog> });
+        await c.messaging.emit(emitDeal(['u_zh'], TYPED));
+        expect((await inboxOf(ql, 'u_zh'))[0]?.body_md).toBe(zhBody('Opportunity'));
+    });
+
+    it('the typed param is closed: a malformed one is refused before anything is written', async () => {
+        const ql = await bootDeal();
+        const { messaging } = compose(ql, { i18n: sourceLocaleI18n() });
+        const bad: unknown[] = [
+            { objectLabel: 'crm_deal' },                                   // no fallback
+            { objectLabel: 'crm deal', fallback: 'Deal' },                 // not an object's API name
+            { objectLabel: 'objects.crm_deal.label', fallback: 'Deal' },   // a catalog key is not a name
+            { objectLabel: 'crm_deal', fallback: 'Deal', key: 'objects.crm_deal.label' }, // both shapes at once
+            { objectLabel: 7, fallback: 'Deal' },
+        ];
+        for (const object of bad) {
+            const keyedText = { ...TYPED, params: { object, record: 'D_1' } };
+            await expect(messaging.emit(emitDeal(['u_zh'], keyedText as unknown as NotificationTextKeys)), JSON.stringify(object))
+                .rejects.toBeInstanceOf(TypeError);
+        }
+        expect(await ql.find(NOTIFICATION_EVENT_OBJECT, { fields: ['id'] }, SYSTEM)).toEqual([]);
     });
 });
