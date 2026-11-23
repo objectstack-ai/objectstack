@@ -470,16 +470,16 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         helpText: "L’action Changer de propriétaire, unitaire et en masse : activée, elle est proposée ; désactivée, elle est masquée. Non défini : activée, sauf désactivée sur un objet de détail controlled_by_parent. Proposée uniquement sur un objet dont les enregistrements ont un propriétaire réattribuable (ownership user ou non défini, sans managedBy, pas un objet sys_, owner_id non en lecture seule et, sur un objet externe, déclaré ou mappé) ; l’activer sur tout autre objet est refusé. Elle ne contrôle que l’action, pas une simple modification de owner_id. Un objet {enabled, visibleWhen, disabledWhen} enregistré se modifie clé par clé ; écrivez-en un dans le source pour conditionner l’action à chaque enregistrement."
       },
       actionLayout: {
-        label: "Actions épinglées",
-        helpText: "Les actions que chaque en-tête de page affiche en boutons, dans l'ordre, 3 au plus par page ; toute autre action de l'en-tête va dans son menu Plus. Non défini : chaque en-tête choisit ses boutons selon l'ordre des actions, comme avant."
+        label: "Disposition des actions",
+        helpText: "L’ordre des actions de cet objet et celles qui sont des boutons, par portée : pinned (au plus 3 boutons, dans l’ordre) et more (l’ordre du menu Plus ; une action nommée dans aucun des deux suit dans son ordre par défaut). Non défini : chaque surface choisit ses boutons selon l’ordre des actions, comme avant."
       },
       "actionLayout.list": {
-        label: "Page de liste",
-        helpText: "Noms d'actions placées dans la barre d'outils de la liste, ou $import / $export, dans l'ordre d'affichage. 3 au plus. os validate refuse un nom qui n'est pas une action de cet objet ou qui n'est pas placé dans la barre de la liste ; un tel nom n'affiche aucun bouton."
+        label: "Liste",
+        helpText: "La barre d’outils de la page de liste, sous la forme {\"pinned\": [...], \"more\": [...]} : noms d’actions placées dans la barre de la liste, ou $import / $export. Au plus 3 épinglées. os validate refuse un nom qui n’est pas une action de cet objet ou qui n’est pas placé dans la barre de la liste ; un tel nom n’affiche rien."
       },
       "actionLayout.record": {
-        label: "Page d'enregistrement",
-        helpText: "Noms d'actions placées dans l'en-tête de l'enregistrement ou dans son menu Plus, dans l'ordre d'affichage. 3 au plus. os validate refuse un nom qui n'est pas une action de cet objet ou qui n'est pas placé sur la page d'enregistrement ; un tel nom n'affiche aucun bouton."
+        label: "Enregistrement",
+        helpText: "L’en-tête de l’enregistrement (page de l’enregistrement, aperçu latéral, barre du bas sur téléphone), sous la forme {\"pinned\": [...], \"more\": [...]} : noms d’actions placées dans l’en-tête de l’enregistrement ou son menu Plus. Au plus 3 épinglées. os validate refuse un nom qui n’est pas une action de cet objet ou qui n’est pas placé sur la page de l’enregistrement ; un tel nom n’affiche rien."
       },
       editMode: {
         label: "Mode de modification",

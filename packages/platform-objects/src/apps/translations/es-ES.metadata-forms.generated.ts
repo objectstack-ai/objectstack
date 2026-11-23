@@ -470,16 +470,16 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "La acción Cambiar propietario, individual y masiva: activada la ofrece, desactivada la oculta. Sin definir: activada, salvo desactivada en un objeto de detalle controlled_by_parent. Solo se ofrece en un objeto cuyos registros tienen un propietario reasignable (ownership user o sin definir, sin managedBy, no es un objeto sys_, owner_id no es de solo lectura y, en un objeto externo, está declarado o mapeado); activarla en cualquier otro objeto se rechaza. Solo controla la acción, no una edición directa de owner_id. Un objeto {enabled, visibleWhen, disabledWhen} almacenado se edita clave por clave; escriba uno en el código fuente para condicionar la acción a cada registro."
       },
       actionLayout: {
-        label: "Acciones fijadas",
-        helpText: "Qué acciones muestra como botones cada cabecera de página, en orden, como máximo 3 por página; cualquier otra acción de la cabecera va a su menú Más. Sin definir: cada cabecera elige sus botones por el orden de las acciones, como antes."
+        label: "Disposición de acciones",
+        helpText: "El orden de las acciones de este objeto y cuáles son botones, por ámbito: pinned (como máximo 3 botones, en orden) y more (el orden del menú Más; una acción que no aparece en ninguno sigue en su orden predeterminado). Sin definir: cada superficie elige sus botones por el orden de las acciones, como antes."
       },
       "actionLayout.list": {
-        label: "Página de lista",
-        helpText: "Nombres de acciones situadas en la barra de herramientas de la lista, o $import / $export, en el orden en que se muestran. Como máximo 3. os validate rechaza un nombre que no es una acción de este objeto o que no está en la barra de la lista; ese nombre no muestra botón."
+        label: "Lista",
+        helpText: "La barra de herramientas de la página de lista, como {\"pinned\": [...], \"more\": [...]}: nombres de acciones colocadas en la barra de la lista, o $import / $export. Como máximo 3 fijadas. os validate rechaza un nombre que no es una acción de este objeto o que no está en la barra de la lista; ese nombre no dibuja nada."
       },
       "actionLayout.record": {
-        label: "Página de registro",
-        helpText: "Nombres de acciones situadas en la cabecera del registro o en su menú Más, en el orden en que se muestran. Como máximo 3. os validate rechaza un nombre que no es una acción de este objeto o que no está en la página de registro; ese nombre no muestra botón."
+        label: "Registro",
+        helpText: "El encabezado del registro (página del registro, vista previa lateral, barra inferior del teléfono), como {\"pinned\": [...], \"more\": [...]}: nombres de acciones colocadas en el encabezado del registro o en su menú Más. Como máximo 3 fijadas. os validate rechaza un nombre que no es una acción de este objeto o que no está en la página del registro; ese nombre no dibuja nada."
       },
       editMode: {
         label: "Modo de edición",
