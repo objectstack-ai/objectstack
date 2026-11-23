@@ -128,15 +128,30 @@ describe('#36647 — an artifact boot names every listed plugin it does not run'
     }, BOOT_TIMEOUT);
 
     it('CONTROL: a config boot (no artifactBoot) never judges its plugins — the host materializes them', async () => {
-        const kernel: any = new Runtime({ cluster: false }).getKernel();
+        // `os serve objectstack.config.ts` with no compiled artifact: the door
+        // finds none and pushes no AppPlugin, and the CLI wraps the config.
+        const dir = mkdtempSync(join(tmpdir(), 'os-36647-config-'));
+        let kernel: any;
         try {
+            const standalone = await createStandaloneStack({
+                artifactPath: join(dir, 'dist', 'objectstack.json'),
+                projectRoot: dir,
+                databaseUrl: ':memory:',
+                skipSeedData: true,
+                runPlatformMigrations: false,
+            });
+            expect(standalone.plugins.some((p: any) => p instanceof AppPlugin)).toBe(false);
+            kernel = new Runtime({ cluster: false }).getKernel();
             const warn = vi.spyOn(kernel.logger, 'warn');
-            await kernel.use(new AppPlugin(artifact([descriptor(VECTOR)])) as any);
+            for (const p of [...standalone.plugins, new AppPlugin(artifact([descriptor(VECTOR)]))]) await kernel.use(p as any);
             await kernel.bootstrap();
+            // CONTROL: the plugin really is absent, so only the gate keeps this silent.
+            expect(kernel.hasPlugin(VECTOR)).toBe(false);
             const warnings = warn.mock.calls.filter(([, meta]) => (meta as any)?.appId === APP_ID && Array.isArray((meta as any)?.plugins));
             expect(warnings).toEqual([]);
         } finally {
-            try { await kernel.shutdown(); } catch { /* noop */ }
+            try { await kernel?.shutdown(); } catch { /* noop */ }
+            rmSync(dir, { recursive: true, force: true });
         }
     }, BOOT_TIMEOUT);
 });

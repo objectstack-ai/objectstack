@@ -150,6 +150,7 @@ rotate. Two variables would make "URL updated, hash not" a state you can reach.
 | `#sha256=` present, artifact host unreachable | Falls back to the cached copy **only** if it still hashes to the pin, with a loud warning that the instance is running on cached content. |
 | Artifact's `engines.protocol` excludes this runtime | **Refuses to boot** — the safety belt of the two-axis split. Repoint the reference, or run a matching image version. |
 | The artifact needs a destructive schema change | Safe migrations run at boot; a destructive one **refuses to boot** and names each change. Run `os migrate apply --allow-destructive` deliberately, then restart. Never skipped in silence. |
+| The app's stack lists code plugins (`plugins: [new XPlugin()]`) | Boots **without them**: an artifact carries the app's metadata and hook handlers, not its code plugins, so nothing those plugins register exists. The boot warns once, naming each listed plugin the kernel does not run. To run them, boot a host config that loads the artifact and lists the plugins in its own `plugins`, or package them as a plugin (`os plugin build`, then `os plugin install`). |
 
 **Recommended production discipline** (convention, not enforced by the runtime):
 publish immutable, version-named objects; give only CI write access to the
