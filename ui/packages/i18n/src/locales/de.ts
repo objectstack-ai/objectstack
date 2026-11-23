@@ -3568,6 +3568,7 @@ const de = {
     allReports: "Alle Berichte",
     collapse: 'Seitenleiste einklappen',
     expand: 'Seitenleiste ausklappen',
+    resize: 'Breite der Seitenleiste ändern',
   },
   designMode: {
     title: 'Designmodus',

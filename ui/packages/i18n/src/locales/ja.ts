@@ -3570,6 +3570,7 @@ const ja = {
     allReports: "すべてのレポート",
     collapse: 'サイドバーを折りたたむ',
     expand: 'サイドバーを展開',
+    resize: 'サイドバーの幅を調整',
   },
   designMode: {
     title: 'デザインモード',

@@ -3650,6 +3650,7 @@ const es = {
     allReports: "Todos los informes",
     collapse: 'Contraer la barra lateral',
     expand: 'Expandir la barra lateral',
+    resize: 'Cambiar el ancho de la barra lateral',
   },
   designMode: {
     title: 'Modo de diseño',

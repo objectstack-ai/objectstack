@@ -54,12 +54,44 @@ import {
 } from '../utils/workspacePreference.js';
 
 /**
- * The expanded sidebar's width in CSS pixels: the sidebar primitive's
+ * The expanded sidebar's default width in CSS pixels: the sidebar primitive's
  * `--sidebar-width` (16rem) in `@object-ui/components`.
  * `consoleSidebarRail.width-27593.test.tsx` reads the primitive's value and
- * holds this equal to it. The width is fixed (objectstack#36112 F2).
+ * holds this equal to it. From the phone breakpoint up the reader drags the
+ * docked sidebar's right edge between {@link CONSOLE_SIDEBAR_MIN_WIDTH} and
+ * {@link CONSOLE_SIDEBAR_MAX_WIDTH}, and a double-click on it comes back here
+ * (objectstack#36227).
  */
 export const CONSOLE_EXPANDED_SIDEBAR_WIDTH = 256;
+
+/** The narrowest the reader can drag the sidebar, in CSS pixels (objectstack#36227, as Attio). */
+export const CONSOLE_SIDEBAR_MIN_WIDTH = 200;
+
+/** The widest the reader can drag the sidebar, in CSS pixels (objectstack#36227, as Attio). */
+export const CONSOLE_SIDEBAR_MAX_WIDTH = 350;
+
+/** A width held to the sidebar's range, in whole pixels. */
+export function clampConsoleSidebarWidth(width: number): number {
+  return Math.round(Math.min(CONSOLE_SIDEBAR_MAX_WIDTH, Math.max(CONSOLE_SIDEBAR_MIN_WIDTH, width)));
+}
+
+/**
+ * The width, in CSS px, the reader dragged the sidebar to (objectstack#36227):
+ * a reader preference, per browser, never metadata. Stored as
+ * `{"width":N,"v":1}`. With no choice: {@link CONSOLE_EXPANDED_SIDEBAR_WIDTH}.
+ * The docked sidebar and the menu floating over a collapsed one both take it.
+ */
+export const CONSOLE_SIDEBAR_WIDTH_PREFERENCE = defineWorkspacePreference<number>({
+  name: 'console.sidebar.width',
+  codec: versionedPreferenceCodec<number>({
+    version: 1,
+    toRecord: (width) => ({ width }),
+    fromRecord: (record) =>
+      typeof record.width === 'number' && Number.isFinite(record.width)
+        ? clampConsoleSidebarWidth(record.width)
+        : undefined,
+  }),
+});
 
 /**
  * The record drawer's width in CSS pixels: a list record opens in the side
@@ -315,8 +347,26 @@ export const SIDEBAR_EDGE_ZONE = 'fixed left-0 z-40 w-2';
  */
 export const RAIL_OVERLAY_FRAME_NO_GAP = '[&>[data-collapsible=offcanvas]>div:first-child]:w-0';
 
-/** The panel's classes while the menu floats: above the page, with a shadow. */
-export const RAIL_OVERLAY_PANEL = 'z-40 shadow-xl';
+/**
+ * The panel's classes while the menu floats: a card above the page, 8 px off
+ * the window's left, top and bottom edges, with rounded corners, a border and
+ * a shadow, and nothing dimmed under it (objectstack#36227, as Attio).
+ */
+export const RAIL_OVERLAY_PANEL =
+  'z-40 inset-y-2 left-2 h-auto overflow-hidden rounded-lg border border-sidebar-border shadow-xl';
+
+/**
+ * The panel's classes while the sidebar is hidden: the float's card, parked
+ * past the window's left edge by its own width and 2 rem more, so its shadow
+ * does not show at the edge. The card keeps its shape as it slides in and out.
+ */
+export const RAIL_HIDDEN_PANEL = `${RAIL_OVERLAY_PANEL} group-data-[state=collapsed]:group-data-[collapsible=offcanvas]:left-[calc(var(--sidebar-width)*-1-2rem)]`;
+
+/**
+ * The frame's class while the reader drags the sidebar's edge: the gap and the
+ * panel follow the pointer at once, without the primitive's width transition.
+ */
+export const SIDEBAR_RESIZING_FRAME = '[&>[data-collapsible]>div]:transition-none';
 
 /** A layer drawn over the page that takes Esc for itself, or holds the pointer while it is open. */
 const ESCAPE_LAYER = '[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"]';
@@ -337,6 +387,21 @@ function escapeOnlyForHiddenTooltip(): boolean {
   const tooltips = Array.from(document.querySelectorAll('[role="tooltip"]'));
   if (!tooltips.some((el) => el.closest('[hidden]'))) return false;
   return !layerShown();
+}
+
+/**
+ * Is this point on the float: on the sidebar's panel (the fixed box the float
+ * is drawn in, the last child of the primitive's `data-collapsible` root), or
+ * in the margin the card keeps from the window's edges (objectstack#36227),
+ * where the pointer that floated it rests?
+ */
+function pointerOnFloat(root: HTMLElement | null, point: { x: number; y: number } | null): boolean {
+  const panel = root?.lastElementChild;
+  if (!panel || !point) return false;
+  const box = panel.getBoundingClientRect();
+  if (box.width === 0 || box.height === 0) return false;
+  const margin = Math.max(0, box.left);
+  return point.x < box.right && point.y >= box.top - margin && point.y < box.bottom + margin;
 }
 
 /**
@@ -369,6 +434,8 @@ export interface ConsoleSidebarRailPanel {
   collapsible: 'offcanvas' | 'icon';
   /** The menu floats over the content. */
   overlayOpen: boolean;
+  /** From the phone breakpoint up, the sidebar is open beside the content: its right edge resizes it. */
+  docked: boolean;
   /** The class of the `display: contents` frame around the sidebar. */
   frameClassName: string;
   /** Classes added to the sidebar panel. */
@@ -443,6 +510,8 @@ export function useConsoleSidebarRailPanel(
   // tell them from outside ones.
   const insidePress = useRef<Event | null>(null);
   const insideMove = useRef<Event | null>(null);
+  // Where the pointer last moved outside the float, for the fold's last look.
+  const awayAt = useRef<{ x: number; y: number } | null>(null);
 
   useLayoutEffect(() => {
     setOpenRef.current = setOpen;
@@ -605,14 +674,20 @@ export function useConsoleSidebarRailPanel(
     // A float the pointer opened folds once the pointer has been away from it a moment.
     const onPointerMove = (event: globalThis.PointerEvent) => {
       if (openedBy.current !== 'hover' || event.pointerType === 'touch') return;
-      if (event === insideMove.current || layerShown()) {
+      if (event === insideMove.current || layerShown() || pointerOnFloat(sidebarRef.current, { x: event.clientX, y: event.clientY })) {
         clearTimeout(closeTimer.current);
         closeTimer.current = undefined;
         return;
       }
+      awayAt.current = { x: event.clientX, y: event.clientY };
       if (closeTimer.current !== undefined) return;
       closeTimer.current = setTimeout(() => {
         closeTimer.current = undefined;
+        // Still away when the moment is up (objectstack#36471): not if a menu
+        // or dialog opened from the float since (a press on the app name
+        // while the float was still sliding in under the pointer), nor if the
+        // float slid in under a pointer that has not moved since.
+        if (layerShown() || pointerOnFloat(sidebarRef.current, awayAt.current)) return;
         close('away');
       }, SIDEBAR_FLOAT_CLOSE_DELAY_MS);
     };
@@ -638,10 +713,13 @@ export function useConsoleSidebarRailPanel(
       clearTimeout(closeTimer.current);
       closeTimer.current = undefined;
     };
-  }, [overlayOpen, close]);
+  }, [overlayOpen, close, sidebarRef]);
 
   const onPointerDown = useCallback((event: PointerEvent<HTMLDivElement>) => {
     insidePress.current = event.nativeEvent;
+    // A press in the float: the pointer is on it, not away (objectstack#36471).
+    clearTimeout(closeTimer.current);
+    closeTimer.current = undefined;
   }, []);
 
   const onPointerMove = useCallback((event: PointerEvent<HTMLDivElement>) => {
@@ -678,8 +756,9 @@ export function useConsoleSidebarRailPanel(
   return {
     collapsible: enabled ? 'offcanvas' : 'icon',
     overlayOpen,
+    docked: desktop && open && !overlayOpen,
     frameClassName: cn('contents', overlayOpen && RAIL_OVERLAY_FRAME_NO_GAP),
-    panelClassName: overlayOpen ? RAIL_OVERLAY_PANEL : undefined,
+    panelClassName: overlayOpen ? RAIL_OVERLAY_PANEL : hidden ? RAIL_HIDDEN_PANEL : undefined,
     panelProps,
     edgeZoneProps: hidden ? { onPointerEnter: onEdgeEnter, onPointerLeave: onEdgeLeave, onClick: onEdgePress } : null,
   };

@@ -3891,6 +3891,7 @@ const ar = {
     allReports: "كل التقارير",
     collapse: 'طي الشريط الجانبي',
     expand: 'توسيع الشريط الجانبي',
+    resize: 'تغيير حجم الشريط الجانبي',
   },
   designMode: {
     title: 'وضع التصميم',

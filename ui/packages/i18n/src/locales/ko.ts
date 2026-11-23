@@ -3568,6 +3568,7 @@ const ko = {
     allReports: "모든 보고서",
     collapse: '사이드바 접기',
     expand: '사이드바 펼치기',
+    resize: '사이드바 너비 조정',
   },
   designMode: {
     title: '디자인 모드',

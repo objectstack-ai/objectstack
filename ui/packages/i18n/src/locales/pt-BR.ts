@@ -3645,6 +3645,7 @@ const pt = {
     allReports: "Todos os relatórios",
     collapse: 'Recolher a barra lateral',
     expand: 'Expandir a barra lateral',
+    resize: 'Redimensionar a barra lateral',
   },
   designMode: {
     title: 'Modo de design',

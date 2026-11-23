@@ -4309,6 +4309,7 @@ const en = {
     allReports: 'All reports',
     collapse: 'Collapse sidebar',
     expand: 'Expand sidebar',
+    resize: 'Resize sidebar',
   },
   designMode: {
     title: 'Design mode',
