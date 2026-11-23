@@ -124,6 +124,8 @@ export function PublicFormsDesigner(props: PublicFormsDesignerProps): React.Reac
   const { objectName, objectDef, client, packageId, readOnly, customization, publishNonce, onDraftSaved, locale } = props;
   const [listed, setListed] = React.useState<ListedForm[] | null>(null);
   const [taken, setTaken] = React.useState<Map<string, string>>(new Map());
+  /** Every view item name of the environment, published or only drafted: a new form's name must be none of them. */
+  const [viewNames, setViewNames] = React.useState<ReadonlySet<string>>(new Set());
   const [listError, setListError] = React.useState<string | null>(null);
   const [listNonce, setListNonce] = React.useState(0);
   const [open, setOpen] = React.useState<OpenForm | null>(null);
@@ -183,6 +185,12 @@ export function PublicFormsDesigner(props: PublicFormsDesignerProps): React.Reac
         marked.sort((a, b) => a.title.localeCompare(b.title));
         setListed(marked);
         setTaken(takenAddresses([...items, ...draftItems]));
+        setViewNames(
+          new Set([
+            ...items.map((i) => i.name).filter((n): n is string => typeof n === 'string'),
+            ...(drafts ?? []).map((d) => d?.name).filter((n): n is string => typeof n === 'string'),
+          ]),
+        );
       } catch (err) {
         if (live) setListError(err instanceof Error ? err.message : String(err));
       }
@@ -242,6 +250,27 @@ export function PublicFormsDesigner(props: PublicFormsDesignerProps): React.Reac
   const isNew = open !== null && open.base === null;
   const shippedByApp = open !== null && readOnly && open.owner !== null && open.owner === customization?.base;
 
+  /**
+   * The form's on/off switch as stored now. Switching is Setup's, never the
+   * designer's, so a save carries the switch as it stands at save time, not as
+   * it stood when the form was opened: the served item when there is one, else
+   * the draft or the shipped document; a form never stored is on.
+   */
+  const currentSwitch = async (form: OpenForm): Promise<boolean> => {
+    if (form.base === null) return form.model.enabled;
+    const enabledIn = (doc: unknown): boolean | undefined =>
+      isDoc(doc) && isDoc(doc.config) && isDoc(doc.config.sharing) ? doc.config.sharing.enabled === true : undefined;
+    const read = async (at: string | null) => client.layered<FormDoc>('view', form.name, at ? { packageId: at } : {});
+    const where = form.at ?? form.owner;
+    const reads = [(await read(where)) as FormDoc];
+    // Saved at a customization package: the served item may be read at the package that ships it.
+    if (!isDoc(reads[0].effective) && form.owner && form.owner !== where) reads.push((await read(form.owner)) as FormDoc);
+    const first = (layer: 'effective' | 'draft' | 'code') => reads.map((r) => enabledIn(r[layer])).find((v) => v !== undefined);
+    const now = first('effective') ?? first('draft') ?? first('code');
+    if (now === undefined) throw new Error(tFormat('engine.studio.publicForms.unreadable', locale, { name: form.model.title || form.name }));
+    return now;
+  };
+
   /** Where a save lands, and the body it writes. */
   const writeTarget = async (model: PublicFormModel): Promise<{ packageId: string; body: FormDoc }> => {
     const body = publicFormItemOf(model, open?.base ?? null);
@@ -260,7 +289,7 @@ export function PublicFormsDesigner(props: PublicFormsDesignerProps): React.Reac
     setBusy('save');
     setNotice(null);
     try {
-      const target = await writeTarget(open.model);
+      const target = await writeTarget({ ...open.model, enabled: await currentSwitch(open) });
       await client.save('view', open.model.name, target.body, {
         mode: 'draft',
         packageId: target.packageId,
@@ -268,7 +297,8 @@ export function PublicFormsDesigner(props: PublicFormsDesignerProps): React.Reac
         // A form nobody has drafted yet: a draft written meanwhile is never overwritten.
         ...(open.hasDraft ? {} : { ifNoneMatch: '*' }),
       } as never);
-      setOpen({ ...open, at: target.packageId, hasDraft: true, dirty: false, base: { ...(open.base ?? {}), ...target.body } });
+      const enabled = target.body.config?.sharing?.enabled === true;
+      setOpen({ ...open, at: target.packageId, hasDraft: true, dirty: false, base: { ...(open.base ?? {}), ...target.body }, model: { ...open.model, enabled } });
       onDraftSaved?.({ type: 'view', name: open.model.name });
       toast.success(tFormat('engine.studio.publicForms.saved', locale, { name: open.model.title || open.model.name }));
       setListNonce((n) => n + 1);
@@ -285,6 +315,16 @@ export function PublicFormsDesigner(props: PublicFormsDesignerProps): React.Reac
     setBusy('publish');
     setNotice(null);
     try {
+      // The draft goes live with the switch as it stands now: a draft that carries another is saved again first.
+      const enabled = await currentSwitch(open);
+      const draft = (await client.getDraft<FormDoc>('view', open.model.name, { packageId: open.at }).catch(() => null)) as FormDoc | null;
+      const drafted = isDoc(draft) && isDoc(draft.item) ? draft.item : draft;
+      const draftSwitch = isDoc(drafted) && isDoc(drafted.config) && isDoc(drafted.config.sharing) ? drafted.config.sharing.enabled === true : undefined;
+      if (isDoc(drafted) && draftSwitch !== enabled) {
+        const body = { ...drafted, config: { ...drafted.config, sharing: { ...drafted.config.sharing, enabled } } };
+        for (const key of Object.keys(body)) if (key.startsWith('_')) delete (body as FormDoc)[key];
+        await client.save('view', open.model.name, body, { mode: 'draft', packageId: open.at, surface: 'studio' } as never);
+      }
       await client.publish('view', open.model.name, { packageId: open.at });
       toast.success(tFormat('engine.studio.publicForms.published', locale, { name: open.model.title || open.model.name }));
       setOpen({ ...open, hasDraft: false, owner: open.owner ?? open.at });
@@ -351,10 +391,8 @@ export function PublicFormsDesigner(props: PublicFormsDesignerProps): React.Reac
   };
 
   const createProblem = creating ? addressProblem(creating.slug, newPublicFormName(objectName, creating.slug), taken) : null;
-  const nameTaken =
-    creating !== null &&
-    !!creating.slug &&
-    (listed ?? []).some((r) => r.name === newPublicFormName(objectName, creating.slug));
+  // The new form's view item name may be no other view item's (a list view's, an internal form's, a draft's).
+  const nameTaken = creating !== null && !!creating.slug && viewNames.has(newPublicFormName(objectName, creating.slug));
 
   const create = () => {
     if (!creating || !creating.title.trim() || createProblem || nameTaken) return;

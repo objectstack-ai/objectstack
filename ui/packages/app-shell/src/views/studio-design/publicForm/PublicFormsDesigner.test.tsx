@@ -12,7 +12,9 @@
  *  - a new form (four fields) is drafted where the object is edited;
  *  - an address another form uses is refused, and nothing can be saved;
  *  - the preview renders the form being edited;
- *  - a form the app ships cannot be deleted; a form of a writable package can.
+ *  - a form the app ships cannot be deleted; a form of a writable package can;
+ *  - a new form's name may be no other view item's;
+ *  - a save and a publish carry the form's on/off switch as stored at that time.
  *
  * The runtime form renderer is stubbed: it renders the sections it is given.
  */
@@ -105,22 +107,37 @@ const drafted = {
 function clientDouble(opts: { owner?: string; appDoc?: Record<string, unknown> } = {}) {
   const owner = opts.owner ?? BASE;
   const appDoc = opts.appDoc ?? contactUs();
-  return {
+  // What is stored now: the served contact-us form (Setup may switch it meanwhile), and the drafts saved.
+  const stored = { served: { ...contactUs(), _packageId: owner } as Record<string, any>, drafts: new Map<string, Record<string, any>>([['crm_lead.event_rsvp', drafted]]) };
+  const client = {
+    stored,
     list: vi.fn(async () => [
-      { ...contactUs(), _packageId: owner },
+      stored.served,
       { name: 'crm_lead.form', object: 'crm_lead', viewKind: 'form', config: { sections: [] }, _packageId: owner },
       { name: 'crm_lead.all', object: 'crm_lead', viewKind: 'list', config: {}, _packageId: owner },
       { ...contactUs(), name: 'crm_account.signup', object: 'crm_account', config: { ...contactUs().config, data: { provider: 'object', object: 'crm_account' }, sharing: { enabled: false, allowAnonymous: true, publicLink: '/forms/signup' } }, _packageId: owner },
     ]),
     listDrafts: vi.fn(async () => [{ type: 'view', name: 'crm_lead.event_rsvp', packageId: owner }]),
-    getDraft: vi.fn(async () => drafted),
+    getDraft: vi.fn(async (_t: string, name: string) => stored.drafts.get(name) ?? null),
     layered: vi.fn(async (_t: string, name: string) =>
-      name === 'crm_lead.web_to_lead' ? { code: appDoc, effective: { ...contactUs(), _packageId: owner }, draft: null } : { code: null, effective: null, draft: drafted },
+      name === 'crm_lead.web_to_lead'
+        ? { code: appDoc, effective: stored.served, draft: stored.drafts.get(name) ?? null }
+        : { code: null, effective: null, draft: stored.drafts.get(name) ?? null },
     ),
-    save: vi.fn(async () => ({})),
+    save: vi.fn(async (_t: string, name: string, body: Record<string, any>) => {
+      stored.drafts.set(name, body);
+      return {};
+    }),
     publish: vi.fn(async () => ({})),
     reset: vi.fn(async () => ({})),
   };
+  return client;
+}
+
+/** Setup switches the served contact-us form on or off. */
+function switchServed(client: ReturnType<typeof clientDouble>, enabled: boolean) {
+  const served = client.stored.served;
+  client.stored.served = { ...served, config: { ...served.config, sharing: { ...served.config.sharing, enabled } } };
 }
 
 const customization = () => ({
@@ -329,5 +346,66 @@ describe('Studio public form designer (objectstack#36444)', () => {
     await user.click(await screen.findByTestId('public-form-delete'));
     await user.click(screen.getByTestId('public-form-delete-yes'));
     await waitFor(() => expect(own.reset).toHaveBeenCalledWith('view', 'crm_lead.web_to_lead', { packageId: 'com.acme.sales' }));
+  });
+  it('refuses a new form whose name another view item of the object already has', async () => {
+    const user = userEvent.setup();
+    const client = clientDouble();
+    renderDesigner(client);
+    await screen.findByTestId('public-form-item-crm_lead.web_to_lead');
+    await user.click(screen.getByTestId('public-form-new'));
+    // `all` names the new form `crm_lead.all`: the object's list view.
+    await user.type(screen.getByTestId('public-form-create-title'), 'All');
+    expect(screen.getByTestId('public-form-create-address')).toHaveValue('all');
+    expect(screen.getByTestId('public-form-create-address-problem')).toHaveTextContent('Another form already uses this address');
+    expect(screen.getByTestId('public-form-create-confirm')).toBeDisabled();
+    // An internal form's name too.
+    await user.clear(screen.getByTestId('public-form-create-address'));
+    await user.type(screen.getByTestId('public-form-create-address'), 'form');
+    expect(screen.getByTestId('public-form-create-confirm')).toBeDisabled();
+    // A free one is accepted.
+    await user.clear(screen.getByTestId('public-form-create-address'));
+    await user.type(screen.getByTestId('public-form-create-address'), 'all-leads');
+    expect(screen.getByTestId('public-form-create-confirm')).toBeEnabled();
+    expect(client.save).not.toHaveBeenCalled();
+  });
+
+  it('saves and publishes the form\'s on/off switch as it is stored at that time, not as it was when the form was opened', async () => {
+    const user = userEvent.setup();
+    const client = clientDouble({ owner: 'com.acme.sales' });
+    renderDesigner(client, { readOnly: false, customization: null, packageId: 'com.acme.sales' });
+    await user.click(await screen.findByTestId('public-form-item-crm_lead.web_to_lead'));
+    const title = await screen.findByTestId('public-form-title');
+    // Switched off in Setup after the form was opened here.
+    switchServed(client, false);
+    await user.type(title, '!');
+    await user.click(screen.getByTestId('public-form-save'));
+    await waitFor(() => expect(client.save).toHaveBeenCalledTimes(1));
+    const [, , body] = client.save.mock.calls[0] as unknown as [string, string, any];
+    expect(body.config.sharing.enabled).toBe(false);
+    expect(body.config.title).toBe('!');
+
+    // Switched back on before the draft is published: the draft is brought in line first.
+    switchServed(client, true);
+    await user.click(screen.getByTestId('public-form-publish'));
+    await waitFor(() => expect(client.publish).toHaveBeenCalledTimes(1));
+    expect(client.save).toHaveBeenCalledTimes(2);
+    const [, , again, options] = client.save.mock.calls[1] as unknown as [string, string, any, any];
+    expect(again.config.sharing.enabled).toBe(true);
+    expect(again.config.title).toBe('!');
+    expect(options).toMatchObject({ mode: 'draft', packageId: 'com.acme.sales' });
+    expect(client.save.mock.invocationCallOrder[1]).toBeLessThan(client.publish.mock.invocationCallOrder[0]);
+  });
+
+  it('publishes a draft whose switch is the stored one without saving it again', async () => {
+    const user = userEvent.setup();
+    const client = clientDouble({ owner: 'com.acme.sales' });
+    renderDesigner(client, { readOnly: false, customization: null, packageId: 'com.acme.sales' });
+    await user.click(await screen.findByTestId('public-form-item-crm_lead.web_to_lead'));
+    await user.type(await screen.findByTestId('public-form-title'), '!');
+    await user.click(screen.getByTestId('public-form-save'));
+    await waitFor(() => expect(client.save).toHaveBeenCalledTimes(1));
+    await user.click(screen.getByTestId('public-form-publish'));
+    await waitFor(() => expect(client.publish).toHaveBeenCalledTimes(1));
+    expect(client.save).toHaveBeenCalledTimes(1);
   });
 });

@@ -165,11 +165,39 @@ export function publicFormShownName(item: Readonly<FormDoc>): string {
   );
 }
 
+/** A form's stored sections, the objects among them, in order. */
+function storedSections(config: FormDoc): FormDoc[] {
+  return (Array.isArray(config.sections) ? config.sections : []).filter(isDoc);
+}
+
+/**
+ * The key of each stored section, in order: its `name`, or for a section
+ * stored without one `section_<n>` by its place (never one another section
+ * uses). The model and the write-back key sections by the same rule, so an
+ * unnamed section is matched with what it stored.
+ */
+function sectionKeysOf(sections: readonly FormDoc[]): string[] {
+  const named = new Set(sections.map((s) => text(s.name)).filter(Boolean));
+  const used = new Set<string>();
+  return sections.map((s, i) => {
+    let key = text(s.name);
+    if (!key || used.has(key)) {
+      let n = i + 1;
+      while (named.has(`section_${n}`) || used.has(`section_${n}`)) n += 1;
+      key = `section_${n}`;
+    }
+    used.add(key);
+    return key;
+  });
+}
+
 /** The designer's model of a public form item. */
 export function publicFormModelOf(item: FormDoc): PublicFormModel {
   const config: FormDoc = isDoc(item.config) ? item.config : {};
-  const sections = (Array.isArray(config.sections) ? config.sections : []).filter(isDoc).map((s, i) => ({
-    key: text(s.name) || `section_${i + 1}`,
+  const stored = storedSections(config);
+  const keys = sectionKeysOf(stored);
+  const sections = stored.map((s, i) => ({
+    key: keys[i],
     label: text(s.label),
     fields: (Array.isArray(s.fields) ? s.fields : [])
       .map((f: unknown) =>
@@ -195,62 +223,88 @@ export function publicFormModelOf(item: FormDoc): PublicFormModel {
   };
 }
 
-/** A section's stored body, keeping the keys the designer does not edit. */
-function sectionBody(section: PublicFormSection, was: FormDoc | undefined): FormDoc {
-  const fieldsWas = new Map<string, FormDoc>();
-  for (const f of Array.isArray(was?.fields) ? was!.fields : []) {
-    if (isDoc(f) && typeof f.field === 'string') fieldsWas.set(f.field, f);
-  }
+/**
+ * A section's stored body, keeping the keys the designer does not edit.
+ * `was` is the section as stored (by the same key); `fieldsWas` every field
+ * entry the form stored, so a field moved to another section keeps its own
+ * keys. A label the designer shows as it was (including one stored as a map
+ * of translations, which it shows empty) is kept as stored.
+ */
+function sectionBody(section: PublicFormSection, was: FormDoc | undefined, fieldsWas: ReadonlyMap<string, FormDoc>): FormDoc {
   const body: FormDoc = { ...(was ?? {}), name: section.key, fields: section.fields.map((f) => {
     const entry: FormDoc = { ...(fieldsWas.get(f.field) ?? {}), field: f.field };
     if (f.required) entry.required = true;
     else delete entry.required;
     return entry;
   }) };
+  if (was && section.label === text(was.label)) return body;
   if (section.label) body.label = section.label;
   else delete body.label;
-  if (body.columns === undefined) body.columns = 1;
   return body;
 }
 
 /**
  * The view item a model is saved as. `base` is the item as its author stored
  * it (the layered read, untranslated), or `null` for a new form: every key the
- * designer does not edit is kept as it is.
+ * designer does not edit is kept as it is, and a text the designer did not
+ * change (its title, description, after-submit message, a section's label) is
+ * kept as stored, even one stored as a map of translations.
  */
 export function publicFormItemOf(model: PublicFormModel, base: FormDoc | null): FormDoc {
   const item: FormDoc = {};
   for (const [key, value] of Object.entries(base ?? {})) if (!key.startsWith('_')) item[key] = value;
   const config: FormDoc = isDoc(item.config) ? { ...item.config } : {};
-  const sectionsWas = new Map<string, FormDoc>();
-  for (const s of Array.isArray(config.sections) ? config.sections : []) {
-    if (isDoc(s) && typeof s.name === 'string') sectionsWas.set(s.name, s);
+  // What the designer read from `base`: a text equal to it was not edited.
+  const read = base ? publicFormModelOf({ ...base, name: model.name }) : null;
+  const stored = storedSections(config);
+  const keys = sectionKeysOf(stored);
+  const sectionsWas = new Map<string, FormDoc>(stored.map((s, i) => [keys[i], s]));
+  const fieldsWas = new Map<string, FormDoc>();
+  for (const s of stored) {
+    for (const f of Array.isArray(s.fields) ? s.fields : []) {
+      if (isDoc(f) && typeof f.field === 'string' && !fieldsWas.has(f.field)) fieldsWas.set(f.field, f);
+    }
   }
   config.type = config.type ?? 'simple';
   config.data = isDoc(config.data) ? { ...config.data, object: model.object } : { provider: 'object', object: model.object };
-  if (model.title) config.title = model.title;
-  else delete config.title;
-  if (model.description) config.description = model.description;
-  else delete config.description;
-  config.sections = model.sections.map((s) => sectionBody(s, sectionsWas.get(s.key)));
+  const titleEdited = !read || model.title !== read.title;
+  if (titleEdited) {
+    if (model.title) config.title = model.title;
+    else delete config.title;
+  }
+  if (!read || model.description !== read.description) {
+    if (model.description) config.description = model.description;
+    else delete config.description;
+  }
+  config.sections = model.sections.map((s) => sectionBody(s, sectionsWas.get(s.key), fieldsWas));
   config.sharing = {
     ...(isDoc(config.sharing) ? config.sharing : {}),
     enabled: model.enabled,
     allowAnonymous: true,
     publicLink: `/forms/${model.slug}`,
   };
-  if (model.thankYouTitle || model.thankYouMessage) {
-    const thankYou: FormDoc = { kind: 'thank-you' };
-    if (model.thankYouTitle) thankYou.title = model.thankYouTitle;
-    if (model.thankYouMessage) thankYou.message = model.thankYouMessage;
-    config.submitBehavior = thankYou;
-  } else if (isDoc(config.submitBehavior) && config.submitBehavior.kind === 'thank-you') {
-    delete config.submitBehavior;
+  if (!read || model.thankYouTitle !== read.thankYouTitle || model.thankYouMessage !== read.thankYouMessage) {
+    const was = isDoc(config.submitBehavior) && config.submitBehavior.kind === 'thank-you' ? config.submitBehavior : null;
+    if (model.thankYouTitle || model.thankYouMessage) {
+      const thankYou: FormDoc = { ...(was ?? {}), kind: 'thank-you' };
+      // Each of the two texts is kept as stored unless it was edited.
+      for (const [key, value, before] of [
+        ['title', model.thankYouTitle, read?.thankYouTitle],
+        ['message', model.thankYouMessage, read?.thankYouMessage],
+      ] as const) {
+        if (was && value === before) continue;
+        if (value) thankYou[key] = value;
+        else delete thankYou[key];
+      }
+      config.submitBehavior = thankYou;
+    } else if (was) {
+      delete config.submitBehavior;
+    }
   }
   item.name = model.name;
   item.object = model.object;
   item.viewKind = 'form';
-  if (model.title) item.label = model.title;
+  if (titleEdited && model.title) item.label = model.title;
   item.config = config;
   return item;
 }

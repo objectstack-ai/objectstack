@@ -21,6 +21,7 @@ import {
   withoutSection,
   withRequired,
   withSection,
+  withSectionLabel,
   withSectionMoved,
 } from './publicFormDesign';
 
@@ -159,6 +160,96 @@ describe('the model of a stored public form', () => {
     const redirecting = { ...stored, config: { ...stored.config, submitBehavior: { kind: 'redirect', url: '/thanks' } } };
     const item = publicFormItemOf(publicFormModelOf(redirecting), redirecting);
     expect(item.config.submitBehavior).toEqual({ kind: 'redirect', url: '/thanks' });
+  });
+});
+
+describe('writing back a form stored in other shapes the spec allows', () => {
+  it('keeps every key of a section stored without a name, and of its field entries', () => {
+    const unnamed = {
+      ...stored,
+      config: {
+        ...stored.config,
+        sections: [
+          {
+            label: 'About you',
+            description: 'Tell us who you are',
+            columns: 2,
+            collapsible: true,
+            collapsed: false,
+            visibleOn: "record.source == 'web'",
+            fields: [{ field: 'name', required: true, span: 'full' }, { field: 'company', helpText: 'Where you work' }, 'email'],
+          },
+          { name: 'more', columns: 1, fields: [{ field: 'phone', placeholder: '+1' }] },
+        ],
+      },
+    };
+    let model = publicFormModelOf(unnamed);
+    expect(model.sections.map((s) => s.key)).toEqual(['section_1', 'more']);
+    model = withRequired(model, 'company', true, required);
+    model = withFieldMoved(model, 'phone', 'section_1', 0);
+    const item = publicFormItemOf(model, unnamed);
+    expect(item.config.sections[0]).toEqual({
+      name: 'section_1',
+      label: 'About you',
+      description: 'Tell us who you are',
+      columns: 2,
+      collapsible: true,
+      collapsed: false,
+      visibleOn: "record.source == 'web'",
+      fields: [
+        // A field moved from another section keeps its own keys.
+        { field: 'phone', placeholder: '+1' },
+        { field: 'name', required: true, span: 'full' },
+        { field: 'company', helpText: 'Where you work', required: true },
+        // A field stored as its bare name is written as an entry.
+        { field: 'email' },
+      ],
+    });
+    expect(item.config.sections[1]).toEqual({ name: 'more', columns: 1, fields: [] });
+  });
+
+  it('keys an unnamed section apart from a section named like its place', () => {
+    const clash = { ...stored, config: { ...stored.config, sections: [{ label: 'A', columns: 2, fields: ['name'] }, { name: 'section_1', label: 'B', fields: ['email'] }] } };
+    const model = publicFormModelOf(clash);
+    expect(model.sections.map((s) => s.key)).toEqual(['section_2', 'section_1']);
+    const item = publicFormItemOf(model, clash);
+    expect(item.config.sections.map((s: { label: string; columns?: number }) => [s.label, s.columns])).toEqual([['A', 2], ['B', undefined]]);
+  });
+
+  it('keeps titles and labels stored as maps of translations when they were not edited', () => {
+    const translated = {
+      ...stored,
+      label: undefined,
+      config: {
+        ...stored.config,
+        title: { en: 'Contact us', 'zh-CN': '联系我们' },
+        description: { en: 'We reply in a day', 'zh-CN': '一天内回复' },
+        sections: [{ ...stored.config.sections[0], label: { en: 'About you', 'zh-CN': '关于你' } }],
+        submitBehavior: { kind: 'thank-you', title: { en: 'Thanks', 'zh-CN': '谢谢' }, message: 'We will be in touch.' },
+      },
+    };
+    const model = withRequired(publicFormModelOf(translated), 'phone', true, required);
+    const item = publicFormItemOf({ ...model, thankYouMessage: 'Talk soon.' }, translated);
+    expect(item.config.title).toEqual(translated.config.title);
+    expect(item.config.description).toEqual(translated.config.description);
+    expect(item.config.sections[0].label).toEqual({ en: 'About you', 'zh-CN': '关于你' });
+    expect(item.config.submitBehavior).toEqual({ kind: 'thank-you', title: { en: 'Thanks', 'zh-CN': '谢谢' }, message: 'Talk soon.' });
+    expect(item.label).toBeUndefined();
+
+    // A text the person did edit replaces the map.
+    const renamed = withSectionLabel({ ...model, title: 'Get in touch' }, 'contact_us', 'Who you are');
+    const edited = publicFormItemOf(renamed, translated);
+    expect(edited.config.title).toBe('Get in touch');
+    expect(edited.label).toBe('Get in touch');
+    expect(edited.config.sections[0].label).toBe('Who you are');
+  });
+
+  it('writes no column count onto a section that had none', () => {
+    const model = withSection(newPublicFormModel('crm_lead', 'Demo signup', 'demo-signup', lead), 'More');
+    const item = publicFormItemOf(model, null);
+    expect(item.config.sections.map((s: Record<string, unknown>) => 'columns' in s)).toEqual([false, false]);
+    const kept = publicFormItemOf(publicFormModelOf(stored), stored);
+    expect(kept.config.sections[0].columns).toBe(1);
   });
 });
 
