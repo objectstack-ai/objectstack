@@ -30,7 +30,7 @@ const REST = {
     name: 'crm_billing', label: 'Billing', type: 'api', provider: 'rest',
     providerConfig: {
         baseUrl: 'https://billing.example.com',
-        headers: { 'X-Billing-Key': 'sk_live_FAKE_secret' },
+        headers: { 'X-Billing-Key': 'sk_live_secret' },
         defaultHeaders: { Accept: 'application/json' },
     },
 };
@@ -105,7 +105,7 @@ describe('[#28640 ruling ③A] GET /packages/:id/export names each connector map
         const billing = manifest.connectors.find((c: any) => c.name === 'crm_billing');
         expect(billing.providerConfig).toEqual({ baseUrl: 'https://billing.example.com' });
         const text = JSON.stringify(manifest);
-        for (const secret of ['X-Billing-Key', 'sk_live_FAKE_secret', 'Authorization', 'tok_secret', 'CRM_TOKEN', 'env_secret']) {
+        for (const secret of ['X-Billing-Key', 'sk_live_secret', 'Authorization', 'tok_secret', 'CRM_TOKEN', 'env_secret']) {
             expect(text).not.toContain(secret);
         }
     });
