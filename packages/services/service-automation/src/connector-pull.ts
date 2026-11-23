@@ -778,10 +778,10 @@ async function pullOnce(
     } catch { /* judged by nobody, coerced as pass-through — the door's rule */ }
     // [ADR-0153 D4] The provenance columns are the pull's to stamp, never a
     // mapping's to write. A `synced` target carries them (the plan injects
-    // them); one that withholds every injected column (`systemFields: false`)
-    // cannot record what wrote its rows, and is refused like the datasource
-    // pull refuses it. A target of another bucket is refused at build (a
-    // sourced mapping targets a `synced` object) and gets no stamp here.
+    // them) and gets them stamped. One that withholds every injected column
+    // (`systemFields: false`), or a target of another bucket (refused at build:
+    // a sourced mapping targets a `synced` object), is written unstamped, as
+    // before; D3's delete marking, which needs the columns, judges it.
     const mappedSync = mappedSyncProvenanceTarget(artifact.fieldMapping);
     if (mappedSync) {
         return refuse('VALIDATION_ERROR', 400, 'mapping_target_refused',
@@ -789,12 +789,6 @@ async function pullOnce(
             + 'itself (ADR-0153 D4); remove that entry.');
     }
     const stampsProvenance = carriesSyncProvenanceColumns(schema);
-    if (!stampsProvenance && isPlainObject(schema) && schema.managedBy === 'synced') {
-        return refuse('VALIDATION_ERROR', 400, 'mapping_target_refused',
-            `Mapping "${mappingName}": targetObject '${objectName}' carries no _sync_ provenance columns (it declares `
-            + 'systemFields: false, which withholds every injected column), so a pull cannot record which mapping and '
-            + 'run wrote a row. Remove systemFields: false from the synced target.');
-    }
     const refusedTarget = refuseUnknownMappingTargets(artifact, objectName, schema);
     if (refusedTarget) return refuseWith(refusedTarget, 'mapping_target_refused');
 

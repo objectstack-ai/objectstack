@@ -220,20 +220,16 @@ export async function pullDatasourceSource(
             + "to members, so a member's edit is never kept or lost silently by the next pull; declare managedBy: 'synced' on it.");
     }
     // [ADR-0153 D4] The provenance columns are the pull's to stamp, never a
-    // mapping's to write; and a target without them (`systemFields: false`
-    // withholds every injected column) cannot record what wrote its rows.
+    // mapping's to write. (A target that withholds them, `systemFields: false`,
+    // is written unstamped, as before: refusing it is a narrowing this slice
+    // does not take; D3's delete marking, which needs the columns, judges it.)
     const mappedSync = mappedSyncProvenanceTarget(artifact.fieldMapping);
     if (mappedSync) {
         return invalid('mapping_target_refused',
             `fieldMapping writes '${mappedSync}', a sync-in provenance column the pull stamps itself (ADR-0153 D4); `
             + 'remove that entry.');
     }
-    if (!carriesSyncProvenanceColumns(target)) {
-        return invalid('mapping_target_refused',
-            `targetObject '${targetObject}' carries no _sync_ provenance columns (it declares systemFields: false, which `
-            + 'withholds every injected column), so a pull cannot record which mapping and run wrote a row. Remove '
-            + "systemFields: false from the synced target.");
-    }
+    const stampsProvenance = carriesSyncProvenanceColumns(target);
     const refusedTarget = refuseUnknownMappingTargets(artifact, targetObject, target);
     if (refusedTarget) {
         return refuse(refusedTarget.code, refusedTarget.status, 'mapping_target_refused', `Mapping "${mapping}": ${refusedTarget.error}`);
@@ -362,15 +358,15 @@ export async function pullDatasourceSource(
     // engine admits a `_sync_` column from, and run as the system when the
     // caller handed no context (as the reads do): the provenance columns are
     // `readonly`, which only a system write keeps.
-    const writeContext = markSyncPullWrite(context ?? { isSystem: true });
+    const writeContext = stampsProvenance ? markSyncPullWrite(context ?? { isSystem: true }) : context;
     const write = async (rows: Rec[]): Promise<boolean[]> => {
         const applied = applyMappingToRows(rows, artifact, { objectSchema: target, trimWhitespace });
         if (!applied.ok) {
             return refuse(applied.code, applied.status, 'mapping_apply_refused', `Mapping "${mapping}": ${applied.error}`);
         }
-        const stamped = stampSyncProvenance(applied.rows, matchFields, {
-            mapping, runId: run.id, pulledAt: new Date().toISOString(),
-        });
+        const stamped = stampsProvenance
+            ? stampSyncProvenance(applied.rows, matchFields, { mapping, runId: run.id, pulledAt: new Date().toISOString() })
+            : applied.rows;
         const ran = await runImport({
             p: protocol,
             objectName: targetObject,

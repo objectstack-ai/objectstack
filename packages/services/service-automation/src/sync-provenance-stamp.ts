@@ -11,7 +11,7 @@
  * | `_sync_source` | the mapping's name |
  * | `_sync_external_id` | the row's key in the source, as text ({@link encodeSyncExternalId}) |
  * | `_sync_pulled_at` | when this write was made |
- * | `_sync_run_id` | the `sys_sync_run` row of this pull, or empty when no ledger keeps the run |
+ * | `_sync_run_id` | the `sys_sync_run` row of this pull; not written when no ledger keeps the run |
  * | `_sync_deleted_at` | nothing yet: D3's mark, stamped by the delete marking when it lands |
  *
  * Both pulls (the connector source and the datasource source) stamp through
@@ -21,18 +21,19 @@
  * `_sync_` column in any other write, whatever its context.
  */
 
-import { SYNC_PROVENANCE_COLUMNS, SYNC_PROVENANCE_PREFIX } from '@objectstack/spec/data';
+import { resolveInjectedSystemColumns, SYNC_PROVENANCE_COLUMNS, SYNC_PROVENANCE_PREFIX } from '@objectstack/spec/data';
 
 type Rec = Record<string, unknown>;
 
 const [SYNC_SOURCE, SYNC_EXTERNAL_ID, SYNC_PULLED_AT, SYNC_RUN_ID] = SYNC_PROVENANCE_COLUMNS;
 
-const isPlainObject = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
-
-/** Does the target object carry the provenance columns a pull stamps? */
+/**
+ * Does the target object carry the provenance columns a pull stamps? Asked of
+ * the injected-columns plan, the one answer the registry injects by, so the
+ * verdict is the same on the served document and on the authored one.
+ */
 export function carriesSyncProvenanceColumns(target: unknown): boolean {
-  const fields = isPlainObject(target) && isPlainObject(target.fields) ? target.fields : undefined;
-  return fields !== undefined && [SYNC_SOURCE, SYNC_EXTERNAL_ID, SYNC_PULLED_AT, SYNC_RUN_ID].every((f) => fields[f] !== undefined);
+  return resolveInjectedSystemColumns(target).sync;
 }
 
 /**
@@ -99,7 +100,7 @@ export function encodeSyncExternalId(values: readonly unknown[]): string | undef
 /** What a pull stamps: the mapping, the run, and the write's time. */
 export interface SyncProvenanceStamp {
   mapping: string;
-  /** The `sys_sync_run` id, when a ledger keeps the run. */
+  /** The `sys_sync_run` id, when a ledger keeps the run; `undefined` leaves `_sync_run_id` unwritten. */
   runId: string | undefined;
   /** ISO 8601; one value per batch the pull writes. */
   pulledAt: string;
@@ -122,7 +123,10 @@ export function stampSyncProvenance(
       [SYNC_SOURCE]: stamp.mapping,
       ...(externalId !== undefined ? { [SYNC_EXTERNAL_ID]: externalId } : {}),
       [SYNC_PULLED_AT]: stamp.pulledAt,
-      [SYNC_RUN_ID]: stamp.runId ?? null,
+      // A pull with no run ledger leaves the column out: the import runner
+      // reads a blank cell as "leave the field as it is", so a `null` here
+      // would not clear it either. The column's description says so.
+      ...(stamp.runId !== undefined ? { [SYNC_RUN_ID]: stamp.runId } : {}),
     };
   });
 }

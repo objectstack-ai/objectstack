@@ -24,6 +24,7 @@ import {
     type ConnectorPullDeps,
     type ConnectorPullRefusalReason,
 } from './connector-pull.js';
+import { SYNC_PULL_WRITE } from '@objectstack/objectql';
 
 const silent = { debug() {}, info() {}, warn() {}, error() {} } as unknown as ConnectorPullDeps['logger'];
 
@@ -67,6 +68,8 @@ function harness(opts: {
     stored?: Array<Record<string, unknown>>;
     /** The `inputSchema` the action declares on `GET /connectors`; absent ⇒ none declared. */
     inputSchema?: Record<string, unknown>;
+    /** The target `contact` as the protocol serves it; absent ⇒ {@link contactObject}. */
+    object?: Record<string, unknown>;
 } = {}): Harness {
     const writes: unknown[] = [];
     const handler = vi.fn(async () => (opts.result ?? { status: 200, ok: true, body: [] }) as Record<string, unknown>);
@@ -77,7 +80,7 @@ function harness(opts: {
                 if (type === 'mapping' && mapping && name === (mapping as { name: string }).name) {
                     return { type, name, item: mapping };
                 }
-                if (type === 'object' && name === 'contact') return { type, name, item: contactObject };
+                if (type === 'object' && name === 'contact') return { type, name, item: opts.object ?? contactObject };
                 return undefined;
             },
             async findData() { return { records: opts.stored ?? [] }; },
@@ -904,5 +907,60 @@ describe('[#31699] connector pull — the connector resolves from the mapping\'s
         h.deps.mappingByPackage = undefined;
         await pullConnectorSource(h.deps, { mapping: 'crm_contacts' });
         expect(pulled).toEqual([BETA, BETA]);
+    });
+});
+
+describe('[ADR-0153 D4] a connector pull stamps provenance on a synced target', () => {
+    const syncedContact = { ...contactObject, managedBy: 'synced' };
+    const body = [{ id: 'c-1', name: 'Ada', updated_at: '2026-01-02' }, { id: 'c-2', name: 'Lin', updated_at: '2026-01-03' }];
+
+    it('every write carries the mapping, the source key and the write time, and no run column without a ledger, under the pull\'s mark', async () => {
+        const h = harness({ object: syncedContact, result: { status: 200, ok: true, body } });
+        await pullConnectorSource(h.deps, { mapping: 'crm_contacts', context: { isSystem: true } });
+        expect(h.writes).toHaveLength(2);
+        for (const [i, w] of (h.writes as Array<{ data: Record<string, unknown>; context: Record<PropertyKey, unknown> }>).entries()) {
+            expect(w.data).toMatchObject({ _sync_source: 'crm_contacts', _sync_external_id: body[i]!.id });
+            expect('_sync_run_id' in w.data).toBe(false);
+            expect(typeof w.data._sync_pulled_at).toBe('string');
+            expect('_sync_deleted_at' in w.data).toBe(false);
+            expect(w.context[SYNC_PULL_WRITE]).toBe(true);
+            expect(w.context.isSystem).toBe(true);
+        }
+    });
+
+    it('a pull with no context writes as the system, so the read-only stamps are kept', async () => {
+        const h = harness({ object: syncedContact, result: { status: 200, ok: true, body: body.slice(0, 1) } });
+        await pullConnectorSource(h.deps, { mapping: 'crm_contacts' });
+        const [w] = h.writes as Array<{ context: Record<PropertyKey, unknown> }>;
+        expect(w!.context).toMatchObject({ isSystem: true });
+        expect(w!.context[SYNC_PULL_WRITE]).toBe(true);
+    });
+
+    it('CONTROL: a target of no synced bucket gets no stamp and no mark', async () => {
+        const h = harness({ result: { status: 200, ok: true, body: body.slice(0, 1) } });
+        const context = { isSystem: true, tenantId: 'org_1' };
+        await pullConnectorSource(h.deps, { mapping: 'crm_contacts', context });
+        const [w] = h.writes as Array<{ data: Record<string, unknown>; context: unknown }>;
+        expect(Object.keys(w!.data).filter((k) => k.startsWith('_sync_'))).toEqual([]);
+        expect(w!.context).toMatchObject(context);
+        expect(SYNC_PULL_WRITE in (w!.context as object)).toBe(false);
+    });
+
+    it('a mapping that writes a _sync_ column itself is refused mapping_target_refused (400) before the action is called', async () => {
+        const h = harness({
+            object: syncedContact,
+            mapping: baseMapping({ fieldMapping: [...baseMapping().fieldMapping, { source: 'name', target: '_sync_source' }] }),
+        });
+        expectRefused(await refusal(h), { code: 'VALIDATION_ERROR', status: 400, reason: 'mapping_target_refused' });
+        expect(h.handler).not.toHaveBeenCalled();
+        expect(h.writes).toEqual([]);
+    });
+
+    it('a synced target that withholds every injected column (systemFields: false) is written unstamped, unmarked', async () => {
+        const h = harness({ object: { ...syncedContact, systemFields: false }, result: { status: 200, ok: true, body: body.slice(0, 1) } });
+        await pullConnectorSource(h.deps, { mapping: 'crm_contacts', context: { isSystem: true } });
+        const [w] = h.writes as Array<{ data: Record<string, unknown>; context: object }>;
+        expect(Object.keys(w!.data).filter((k) => k.startsWith('_sync_'))).toEqual([]);
+        expect(SYNC_PULL_WRITE in w!.context).toBe(false);
     });
 });

@@ -239,7 +239,8 @@ export const SYNC_PROVENANCE_FIELD_DEFS = {
     system: true,
     description:
       'The sys_sync_run row of the pull that last wrote this row, as text, never a lookup (ADR-0153 D4, D7). '
-      + 'Empty when the pull kept no run record. Written by the pull only.',
+      + 'Not written by a pull that keeps no run record (no run ledger is composed): empty on a row such a pull '
+      + 'created, and left as it was on a row it updated. Written by the pull only.',
   },
   _sync_deleted_at: {
     type: 'datetime',
