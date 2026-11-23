@@ -168,7 +168,9 @@ function reconcile(
   // The charted measure and axis are the ones the author drew, kept until the
   // person picks another: an authored `yAxis` that is not `values[0]` (or an
   // `xAxis` that is not `rows[0]`) is never switched by an unrelated pick.
-  const keptMeasure = typeof prev.yAxis === 'string' && values.includes(prev.yAxis) ? prev.yAxis : '';
+  // A charted measure need not be among `values` (the spec lets `yAxis` name
+  // any measure of the bound dataset), so it is kept whether or not it is one.
+  const keptMeasure = typeof prev.yAxis === 'string' ? prev.yAxis : '';
   const measure = picked.measure ?? (keptMeasure || values[0] || '');
   const keptAxis = !picked.grouping && typeof prev.xAxis === 'string' && rows2.includes(prev.xAxis) ? prev.xAxis : '';
   const xAxis = keptAxis || rows2[0] || '';
@@ -235,7 +237,10 @@ export function pickDataset(
  */
 export function fillDefaults(report: ReportDraft, members: ReportBuilderMembers | undefined): ReportDraft {
   if (!boundDataset(report) || !members || names(report.values).length > 0) return report;
-  const measure = defaultMeasure(members);
+  // A chart that already names its measure seeds `values` with it, so opening
+  // such a report never re-points the chart at the count measure.
+  const charted = chartOf(report)?.yAxis;
+  const measure = (typeof charted === 'string' && charted) || defaultMeasure(members);
   if (!measure) return report;
   // A report with no chart yet starts on the single number, as `pickDataset` does.
   return reconcile({ ...report, values: [measure] }, members, chartOf(report) ? selectedChartType(report) : 'metric');
