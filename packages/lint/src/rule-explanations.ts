@@ -5116,7 +5116,9 @@ const FORM_VIEW_INTERNAL_NOT_LOADED_EXPLANATION: RuleExplanation = {
       'its `formViews.default` and `formViews.create`, and a stored form view item that is the default ' +
       '(`isDefault`) or is named `<object>.create`. A form shared publicly (`sharing.enabled: true`) keeps ' +
       'loading at its own link and is never reported; neither is a form view under any other name, which ' +
-      'an action of type `form` opens by that name.',
+      'an action of type `form` opens by that name. Nor is a default or create form that an action of type ' +
+      '`form` opens by name: its `target` equals the name the form is served under (`<object>.form` for a ' +
+      'container\'s default form, `<object>.create` for its `formViews.create`), so it keeps loading there.',
     'The rule is a warning: the declared form still parses, installs and runs, and changes nothing. To ' +
       'clear it, move the sections into the object\'s field groups, put each required and show/hide rule ' +
       'on its field (a create-time default goes on the field\'s `defaultValue`), and delete the form.',
