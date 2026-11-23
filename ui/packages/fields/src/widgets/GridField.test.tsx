@@ -1575,4 +1575,68 @@ describe('GridField — the lazy face the package exports (objectstack#36102)', 
     const cell = screen.getByTestId('line-items').querySelector('input[aria-label="Description"]') as HTMLInputElement;
     expect(cell.value).toBe('Widget');
   });
+
+  // objectstack#36451 — a host that renders the grid without preloading it,
+  // whose first request for the body fails once (a network blip, a deploy that
+  // swapped chunk names), must not keep that failure for the whole session.
+  describe('after one failed load of the body', () => {
+    class Boundary extends React.Component<{ children: React.ReactNode }, { failed: boolean }> {
+      state = { failed: false };
+      static getDerivedStateFromError() {
+        return { failed: true };
+      }
+      render() {
+        return this.state.failed ? <div data-testid="grid-load-failed" /> : this.props.children;
+      }
+    }
+
+    /** Fail the next load of the body once, then let it through; restored by the returned call. */
+    function failTheNextBodyLoad(): () => void {
+      vi.resetModules();
+      let failNextLoad = true;
+      vi.doMock('./grid-field/GridFieldWidget', async (importOriginal) => {
+        if (failNextLoad) {
+          failNextLoad = false;
+          throw new Error('Failed to fetch dynamically imported module: fields-grid');
+        }
+        return importOriginal();
+      });
+      const quiet = vi.spyOn(console, 'error').mockImplementation(() => {});
+      return () => {
+        quiet.mockRestore();
+        vi.doUnmock('./grid-field/GridFieldWidget');
+      };
+    }
+
+    async function expectFailedThenRecovered(Grid: React.ComponentType<React.ComponentProps<typeof GridFieldFace>>): Promise<void> {
+      const first = render(<Boundary><React.Suspense fallback={null}><Grid value={lines} onChange={() => {}} field={field} /></React.Suspense></Boundary>);
+      await screen.findByTestId('grid-load-failed');
+      first.unmount();
+
+      render(<Boundary><React.Suspense fallback={null}><Grid value={lines} onChange={() => {}} field={field} /></React.Suspense></Boundary>);
+      const cell = (await screen.findByTestId('line-items')).querySelector('input[aria-label="Description"]') as HTMLInputElement;
+      expect(cell.value).toBe('Widget');
+      expect(screen.queryByTestId('grid-load-failed')).toBeNull();
+    }
+
+    it('a later mount of GridField renders the grid once the body is reachable, with no reload', async () => {
+      const restore = failTheNextBodyLoad();
+      try {
+        const face = await import('./GridField');
+        await expectFailedThenRecovered(face.GridField);
+      } finally {
+        restore();
+      }
+    });
+
+    it('a later mount of the grid form-field widget renders the grid too', async () => {
+      const restore = failTheNextBodyLoad();
+      try {
+        const fields = await import('../index');
+        await expectFailedThenRecovered(fields.getLazyFieldWidget('grid'));
+      } finally {
+        restore();
+      }
+    });
+  });
 });
