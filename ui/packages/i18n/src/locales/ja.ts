@@ -555,6 +555,12 @@ const ja = {
     // objectstack#36023 — why a list cell's typed value was not saved, under the editor.
     cellNotNumber: "数値を入力してください。",
     cellInvalid: "この値は無効です。",
+    // objectstack#36289 — a list cell's menu, and why its Paste left the cell as it was.
+    copyCell: "コピー",
+    pasteCell: "貼り付け",
+    clearCell: "クリア",
+    pasteNotValue: "コピーしたテキストはこのセルに入力できません。",
+    pasteUnavailable: "ブラウザーがクリップボードの読み取りを許可しませんでした。セルを選択して Ctrl+V（⌘V）で貼り付けてください。",
     // objectstack#35685 — a list cell's own save state, and the way out of a rule the list cannot complete.
     cellSaving: "保存中…",
     cellSaved: "保存しました",

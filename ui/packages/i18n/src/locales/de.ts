@@ -555,6 +555,12 @@ const de = {
     // objectstack#36023 — why a list cell's typed value was not saved, under the editor.
     cellNotNumber: "Geben Sie eine Zahl ein.",
     cellInvalid: "Dieser Wert ist ungültig.",
+    // objectstack#36289 — a list cell's menu, and why its Paste left the cell as it was.
+    copyCell: "Kopieren",
+    pasteCell: "Einfügen",
+    clearCell: "Leeren",
+    pasteNotValue: "Der kopierte Text passt nicht in diese Zelle.",
+    pasteUnavailable: "Der Browser hat das Lesen der Zwischenablage nicht erlaubt. Wählen Sie die Zelle aus und drücken Sie Strg+V (⌘V), um einzufügen.",
     // objectstack#35685 — a list cell's own save state, and the way out of a rule the list cannot complete.
     cellSaving: "Wird gespeichert…",
     cellSaved: "Gespeichert",

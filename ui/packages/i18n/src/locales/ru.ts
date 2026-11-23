@@ -572,6 +572,12 @@ const ru = {
     // objectstack#36023 — why a list cell's typed value was not saved, under the editor.
     cellNotNumber: "Введите число.",
     cellInvalid: "Это значение недопустимо.",
+    // objectstack#36289 — a list cell's menu, and why its Paste left the cell as it was.
+    copyCell: "Копировать",
+    pasteCell: "Вставить",
+    clearCell: "Очистить",
+    pasteNotValue: "Скопированный текст нельзя поместить в эту ячейку.",
+    pasteUnavailable: "Браузер не разрешил читать буфер обмена. Выберите ячейку и нажмите Ctrl+V (⌘V), чтобы вставить.",
     // objectstack#35685 — a list cell's own save state, and the way out of a rule the list cannot complete.
     cellSaving: "Сохранение…",
     cellSaved: "Сохранено",

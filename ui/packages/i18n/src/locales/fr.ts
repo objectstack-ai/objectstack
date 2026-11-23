@@ -562,6 +562,12 @@ const fr = {
     // objectstack#36023 — why a list cell's typed value was not saved, under the editor.
     cellNotNumber: "Saisissez un nombre.",
     cellInvalid: "Cette valeur n'est pas valide.",
+    // objectstack#36289 — a list cell's menu, and why its Paste left the cell as it was.
+    copyCell: "Copier",
+    pasteCell: "Coller",
+    clearCell: "Effacer",
+    pasteNotValue: "Le texte copié ne peut pas aller dans cette cellule.",
+    pasteUnavailable: "Le navigateur n'a pas autorisé la lecture du presse-papiers. Sélectionnez la cellule et appuyez sur Ctrl+V (⌘V) pour coller.",
     // objectstack#35685 — a list cell's own save state, and the way out of a rule the list cannot complete.
     cellSaving: "Enregistrement…",
     cellSaved: "Enregistré",
