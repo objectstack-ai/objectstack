@@ -28,6 +28,7 @@ import {
   useDisplayLocale,
   useFlowLabelTranslations,
   useLocalization,
+  type FlowLabelTranslations,
   useObjectTranslation,
 } from '@object-ui/i18n';
 import type { AriaProps } from '@object-ui/types';
@@ -43,6 +44,7 @@ import {
   AlertTriangle,
 } from 'lucide-react';
 import type { SelectOption as SpecSelectOption } from '@objectstack/spec/data';
+import { isFlowTechnicalNodeType } from '@objectstack/spec/automation';
 import { cn } from '../../lib/utils';
 import { readProps } from './readProps';
 import {
@@ -388,17 +390,31 @@ function StateMachineView({ object, name }: ViewerProps) {
 // Node-action families that are infrastructure, not business steps. With
 // `detail: business` (the default), these are folded away so a non-technical
 // reader sees the process, not the plumbing (ADR-0051 §3.4 altitude projection).
-const TECHNICAL_NODE_TYPES = new Set([
-  'script',
-  'http',
-  'connector_action',
-  'assignment',
-  'get_record',
-  'create_record',
-  'update_record',
-  'delete_record',
-  'boundary_event',
-]);
+// The table is the spec's (`FLOW_TECHNICAL_NODE_TYPES`), the one the i18n
+// coverage check reads to ask a translation for exactly the steps drawn here.
+
+/**
+ * What the embed names a step by, in the reader's language where the package
+ * translates it.
+ *
+ * A screen that authors its own `config.title` is named by that heading — the
+ * words its reader meets at run time, translated under
+ * `screens.<node_id>.title` — unless the heading holds a `{{ }}` hole a
+ * drawing cannot fill. Every other step, and such a screen, by its label's one
+ * key (`approvals` / untitled `screens` / `nodes`, `useFlowLabelTranslations`),
+ * else the authored label.
+ */
+function flowStepName(node: any, translated: FlowLabelTranslations | undefined): string | undefined {
+  if (!node) return undefined;
+  const title = node.type === 'screen' ? node.config?.title : undefined;
+  if (typeof title === 'string' && title) {
+    const heading = translated?.screenTitle(node) ?? title;
+    if (!heading.includes('{{')) return heading;
+  }
+  const own = translated?.stepLabel(node);
+  if (own) return own;
+  return typeof node.label === 'string' && node.label ? node.label : node.id;
+}
 
 /**
  * How the business view reads a condition (`flow-branches.ts`): field labels
@@ -503,13 +519,13 @@ function Branches({
   flow,
   node,
   nodes,
-  stepLabel,
+  translated,
 }: {
   flow: unknown;
   node: any;
   nodes: any[];
-  /** The step's translated label (`flows.<flow>.approvals.<node_id>.label`), or `undefined`. */
-  stepLabel?: (node: any) => string | undefined;
+  /** The package's step-label translations ({@link flowStepName}), or `undefined`. */
+  translated?: FlowLabelTranslations;
 }) {
   const ctx = React.useContext(ConditionScope);
   const branches = decisionBranches(flow, node);
@@ -522,7 +538,7 @@ function Branches({
           <li key={b.key} data-branch-target={b.target} className="flex flex-wrap items-center gap-1.5">
             <ConditionText guard={b.guard} ctx={ctx} />
             <ArrowRight className="h-3 w-3 shrink-0 text-muted-foreground" />
-            <span>{(target && stepLabel?.(target)) ?? target?.label ?? b.target}</span>
+            <span>{flowStepName(target, translated) ?? b.target}</span>
           </li>
         );
       })}
@@ -534,8 +550,9 @@ function FlowView({ name, detail }: ViewerProps) {
   const { item: flow, loading, error } = useMetadataItem('flow', name ?? null);
   const { t, ...view } = useViewStates();
   // The package's `flows` translations in the reader's language: the flow label
-  // and each `approval` step's label, the resolution the Studio designer and
-  // the runner share. Any other step has no key and keeps its authored label.
+  // and each step's label (`flowStepName`), the resolution the Studio designer
+  // and the runner share. A step the package leaves untranslated keeps its
+  // authored label.
   const translated = useFlowLabelTranslations(name ?? '');
   const business = (detail ?? 'business') === 'business';
 
@@ -545,7 +562,7 @@ function FlowView({ name, detail }: ViewerProps) {
   if (!flow) return view.notFound(name);
 
   const allNodes: any[] = Array.isArray(flow.nodes) ? flow.nodes : [];
-  const nodes = business ? allNodes.filter((n) => !TECHNICAL_NODE_TYPES.has(n?.type)) : allNodes;
+  const nodes = business ? allNodes.filter((n) => !isFlowTechnicalNodeType(n?.type)) : allNodes;
   const hiddenCount = allNodes.length - nodes.length;
 
   const card = (
@@ -569,9 +586,7 @@ function FlowView({ name, detail }: ViewerProps) {
                 {i + 1}
               </span>
               <span className="text-sm">
-                {(n && translated?.stepLabel(n)) ??
-                  n?.label ??
-                  n?.id ??
+                {flowStepName(n, translated) ??
                   t('element.metadataViewer.untitledStep', { defaultValue: '(step)' })}
               </span>
               {n?.type && (
@@ -579,7 +594,7 @@ function FlowView({ name, detail }: ViewerProps) {
                   {n.type}
                 </span>
               )}
-              {business && <Branches flow={flow} node={n} nodes={allNodes} stepLabel={translated?.stepLabel} />}
+              {business && <Branches flow={flow} node={n} nodes={allNodes} translated={translated} />}
             </li>
           ))}
         </ol>

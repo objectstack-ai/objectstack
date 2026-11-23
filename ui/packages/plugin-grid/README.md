@@ -217,8 +217,8 @@ const grid: ObjectGridBlockNode = {
 | `data` | `ViewData` | Bypasses the object query — see [Inline data](#inline-data). |
 | `selection` | `SelectionConfig` | `{ type: 'none' \| 'single' \| 'multiple' }`. |
 | `rowActions` / `bulkActions` | `string[]` | **Names** of actions, not definitions. |
-| `editable` / `singleClickEdit` | `boolean` | Inline editing — see [Inline Editing](#inline-editing). |
-| `keyboardNavigation` | `boolean` | Arrow keys move focus between cells, and the cells are one Tab stop — see [Keyboard navigation](#keyboard-navigation). On by default when the grid renders editable. |
+| `editable` | `boolean` | Inline editing — see [Inline Editing](#inline-editing). `singleClickEdit` is retired (objectstack#36270). |
+| `keyboardNavigation` | `boolean` | Arrow keys move focus between cells, and the cells are one Tab stop — see [Keyboard navigation](#keyboard-navigation). Always on when the grid renders editable. |
 | `navigation` | `NavigationConfig` | What a row click does, `{ mode: 'drawer' \| 'page' \| 'new_window' \| 'none', … }`; a block written without `mode` opens the drawer. |
 | `operations` | `object` | Toggles the built-in CRUD/export/import affordances, e.g. `{ delete: false }`. |
 | `rowHeight`, `frozenColumns`, `resizable`, `reorderableColumns`, `showColumnTypeIcons`, `rowColor`, `conditionalFormatting`, `aggregations`, `exportOptions` | | The rest of the declared surface. (`className` is a base prop: it stays on the node, beside the bag.) |
@@ -976,20 +976,23 @@ const schema: ObjectGridBlockNode = {
       { field: 'status', label: 'Status', type: 'select' },
     ],
     editable: true,
-    singleClickEdit: false,
   } satisfies ObjectGridProps,
 };
 ```
 
 `editable` is the only switch: it is a grid-level flag, and edits persist through
-the host's data source (`dataSource.update`) with no callback to wire.
+the host's data source (`dataSource.update`) with no callback to wire. A grid that
+renders editable (`editable` set and the viewer allowed to edit the object) selects
+a cell first, and each committed cell is saved on its own, with no "Save All"
+(objectstack#36270). A grid that renders read-only keeps its click-to-open row.
+`singleClickEdit` is retired: `@objectstack/spec` refuses it, and `os migrate meta`
+deletes it from existing sources.
 
 **Inline Editing Features:**
-- **Double-click to edit**: double-click any editable cell to enter edit mode
-  (`singleClickEdit: true` opens it on the first click instead)
+- **Select, then edit**: a click selects a cell; double-click, `Enter`, `F2` or
+  typing opens its editor
 - **Keyboard shortcuts**:
-  - Press `Enter` on a focused cell to start editing
-  - Press `Enter` while editing to save changes
+  - Press `Enter` while editing to save the cell
   - Press `Escape` to cancel editing
 - **Per-field read-only**: which cells open is decided by the **field definition**,
   not by a column key — a field marked `readonly`, and computed/binary field types
@@ -1039,38 +1042,48 @@ WAI-ARIA grid pattern (objectui#11068):
 - **Editing.** On an editable grid, Enter still opens the focused cell, and an
   open cell's editor keeps every key. An edit ended with Enter or Escape hands
   focus back to its cell, so the arrows carry on from there.
-- **Default.** On when the grid renders editable — the authored `editable` *and*
-  the viewer's permission to update the object, the same value inline editing
-  obeys. A read-only grid keeps every cell its own Tab stop unless you write
-  `true`, and `false` turns it off on an editable grid.
+- **Default.** Always on when the grid renders editable — the authored
+  `editable` *and* the viewer's permission to update the object, the same value
+  inline editing obeys — because that grid selects a cell first and moves the
+  selection with these keys; `false` does not turn it off there
+  (objectstack#36270), except where a React host keeps the staged model with
+  `cellSelection={false}` (see Batch Editing below). A read-only grid keeps every
+  cell its own Tab stop unless you write `true`.
 - While it is on, the table is exposed to assistive technology as a `grid`. A
   grouped grid navigates within each group's table; the mobile card layout has
   no cells and is unaffected.
 
 ### Batch Editing & Multi-Row Save
 
-Edit multiple cells across multiple rows and save them individually or all at once:
+Edit multiple cells across multiple rows and save them individually or all at once.
+This is the staged model, which no metadata selects: since objectstack#36270 every
+grid that renders editable saves each cell as it is committed. A React host that
+draws `ObjectGrid` itself opts back into it with `cellSelection={false}`; then a
+click opens a cell's editor, and the save/cancel affordances appear on their own
+once a row has pending changes:
 
-The schema half is just `editable` — the save/cancel affordances appear on their
-own once a row has pending changes:
+```tsx
+import { ObjectGrid, type ObjectGridComponentProps } from '@object-ui/plugin-grid';
 
-```typescript
-import type { ObjectGridBlockNode } from '@object-ui/types';
-import type { ObjectGridProps } from '@objectstack/spec/ui';
+declare const dataSource: NonNullable<ObjectGridComponentProps['dataSource']>;
 
-const schema: ObjectGridBlockNode = {
-  type: 'object-grid',
-  properties: {
-    objectName: 'products',
-    columns: [
-      { field: 'sku', label: 'SKU' },
-      { field: 'name', label: 'Name' },
-      { field: 'price', label: 'Price', type: 'currency', align: 'right' },
-      { field: 'stock', label: 'Stock', type: 'number', align: 'right' },
-    ],
-    editable: true,
-  } satisfies ObjectGridProps,
-};
+export const ProductsGrid = () => (
+  <ObjectGrid
+    cellSelection={false}
+    dataSource={dataSource}
+    schema={{
+      type: 'object-grid',
+      objectName: 'products',
+      columns: [
+        { field: 'sku', label: 'SKU' },
+        { field: 'name', label: 'Name' },
+        { field: 'price', label: 'Price', type: 'currency', align: 'right' },
+        { field: 'stock', label: 'Stock', type: 'number', align: 'right' },
+      ],
+      editable: true,
+    }}
+  />
+);
 ```
 
 Left alone, saving goes through the host's data source. A React host that needs to
@@ -1109,7 +1122,9 @@ const persistence = (
   - "Cancel All" button to discard all pending changes
 - **Flexible callbacks** — all three are `ObjectGridComponentProps`, never schema keys:
   - `onRowSave`: called when saving a single row
-  - `onBatchSave`: called when saving multiple rows at once
+  - `onBatchSave`: called when saving multiple rows at once — `@deprecated`: only
+    this staged model calls it; on a select-first grid each cell saves through
+    `onRowSave` (or the grid's own write) and `onBatchSave` is never called
   - `onCellChange`: called for each staged cell edit
 - **A concurrent write is refused, not overwritten**: the default saves send each
   row's `updated_at` as `If-Match`, and an editable grid asks for that column even

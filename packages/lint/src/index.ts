@@ -303,6 +303,13 @@ export {
   FORM_SECTION_GROUP_UNKNOWN,
 } from './validate-form-layout.js';
 export type { FormLayoutFinding, FormLayoutSeverity } from './validate-form-layout.js';
+// #36425 — an app still declaring an internal create / edit form, which the
+// Console no longer loads. Advisory.
+export {
+  validateInternalFormViews,
+  FORM_VIEW_INTERNAL_NOT_LOADED,
+} from './validate-internal-form-views.js';
+export type { InternalFormViewFinding } from './validate-internal-form-views.js';
 
 // A form open to anonymous intake that declares a file field (ruling C on #25572).
 export { validatePublicFormFileFields, PUBLIC_FORM_FILE_FIELD } from './validate-public-form-file-fields.js';

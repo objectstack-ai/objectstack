@@ -195,6 +195,38 @@ declare const handleAddComment: (text: string) => void;
 - **Positioning**: Panel can be placed at `bottom`, `right`, or `left` of the record view
 - **Collapsible**: Optional collapse/expand with configurable default state
 
+## Editing a field on the record page
+
+A record page offers two ways to edit, and both save through
+`InlineEditSaveBar`'s one guarded update:
+
+| Where | What a user does | What happens |
+|---|---|---|
+| The default record page's field list: the full page, the side preview, a phone, the wide page's pinned column | Clicks an editable value, or its pencil | `FieldInPlaceEditor` turns that value alone into the list cell's editor (`FieldEditWidget` with `inCell`), drawn over it. No other field changes and no save bar appears |
+| The header's Edit, and a page an author laid out | Presses Edit; on an authored page, double-clicks a field or uses its pencil | The fields become one shared draft (`InlineEditProvider`), saved together by the Save / Cancel bar |
+
+In place, a value saves on Enter or a click elsewhere; a multi-line text saves
+on Cmd/Ctrl+Enter, since Enter starts a new line. Esc discards the edit and
+writes nothing, and an unchanged value writes nothing. A single select, a date,
+a record or a person opens its panel at once and saves on the pick; a
+multi-select saves when you move on; a check flips and saves on the click.
+
+The write carries that one field, guarded by the record's version. A refused
+save keeps the editor open with the typed value and the server's reason under
+the field; a conflicting change opens the reload / overwrite dialog; a value
+that makes other fields required asks for them first. After a save the record
+is read again, so the fields whose visibility, read-only state or requirement
+depend on it are judged anew. Esc in the editor inside the side preview closes
+the editor and leaves the preview open.
+
+The in-place path is offered where the page's record context can write the
+record it shows; elsewhere a click enters the whole-record draft. A host that
+draws its own field editor reuses the write by rendering
+`<InlineEditSaveBar face="field" saveRef={ref} …/>` inside its own
+`InlineEditProvider`: `face="field"` draws no bar and binds no window
+shortcuts (its dialogs only), and `ref.current(draft)` saves. The default
+`face` is `"bar"`.
+
 ## The record's comment panel
 
 On the desktop console, a record's comments live in a panel of their own,

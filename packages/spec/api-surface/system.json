@@ -911,6 +911,7 @@
     "resolveBundleLocale (function)",
     "resolveDocAudiences (function)",
     "resolveDocLocale (function)",
+    "resolveFlowApprovalStepLabel (function)",
     "resolveFlowScreenFieldOptions (function)",
     "resolveFlowScreenTitle (function)",
     "resolveLocaleAmong (function)",

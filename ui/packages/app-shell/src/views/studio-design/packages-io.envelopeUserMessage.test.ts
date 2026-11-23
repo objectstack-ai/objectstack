@@ -210,8 +210,8 @@ describe('fetchPackages — how `code` composes, and what is not a mark', () => 
 describe('fetchPackages — negative controls (GREEN with the fix reverted)', () => {
   /**
    * ⭐ §7. A proxy's HTML 502 has no envelope to read. The status is then the
-   * only honest thing to say, and it is what `packageListErrorPosture` /
-   * `manageSnapshotRefresh` already pin downstream.
+   * only honest thing to say, and it is what `fetchInstalledPackageRow-7881`
+   * pins for the sibling read.
    */
   it('§7 an unparseable body still names the status', async () => {
     stubFetch({

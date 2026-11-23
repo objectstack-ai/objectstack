@@ -101,7 +101,7 @@ const METADATA = {
 const STORE_KEY = 'objectui-favorites';
 const stored = (): FavoriteItem[] => JSON.parse(localStorage.getItem(STORE_KEY) ?? '[]');
 
-async function mountRecordPage(opts: { embedded?: boolean } = {}) {
+async function mountRecordPage(opts: { embedded?: boolean; ready?: string } = {}) {
   const dataSource = {
     find: vi.fn(async () => ({ data: [] })),
     findOne: vi.fn(async () => ({ id: RECORD_ID, name: 'Intro call' })),
@@ -139,7 +139,9 @@ async function mountRecordPage(opts: { embedded?: boolean } = {}) {
     </I18nProvider>,
   );
   await waitFor(() => expect(dataSource.findOne).toHaveBeenCalled());
-  await waitFor(() => expect(document.querySelector('[role="toolbar"]')).toBeTruthy());
+  // The header's actions are drawn: its toolbar, or on a phone whose object
+  // declares no action of its own, the top bar's ⋯ (objectstack#36151).
+  await waitFor(() => expect(document.querySelector(opts.ready ?? '[role="toolbar"]')).toBeTruthy());
 }
 
 /** The record header's favorite star, by either of its two names. */
@@ -156,8 +158,7 @@ function isFilled(star: HTMLElement): boolean {
 }
 
 /** Opens the header's overflow and returns its entries' text. */
-async function openOverflow(): Promise<string[]> {
-  const [trigger] = screen.getAllByRole('button', { name: 'More actions' });
+async function openOverflow(trigger: HTMLElement = screen.getAllByRole('button', { name: 'More actions' })[0]): Promise<string[]> {
   fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false, pointerType: 'mouse' });
   await waitFor(() => expect(screen.getByRole('menu')).toBeInTheDocument());
   return screen.getAllByRole('menuitem').map((el) => (el.textContent ?? '').trim());
@@ -277,7 +278,7 @@ describe('record page: the favorite star beside the record name, none in the ⋯
     expect(items.filter((text) => /favorites$/.test(text))).toEqual([]);
   });
 
-  it('a phone draws the star beside the name, and its bottom bar\'s ⋯ holds no favorites entry', async () => {
+  it('a phone draws the star beside the name, and the top bar\'s ⋯ holds no favorites entry', async () => {
     Object.defineProperty(window, 'innerWidth', { value: 390, configurable: true, writable: true });
     const measure = HTMLElement.prototype.getBoundingClientRect;
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
@@ -285,9 +286,17 @@ describe('record page: the favorite star beside the record name, none in the ⋯
       return { x: 0, y: 0, top: 0, left: 0, right: 390, bottom: 800, width: 390, height: 800, toJSON: () => ({}) } as DOMRect;
     });
     try {
-      await mountRecordPage();
-      // CONTROL: the phone face is drawn — its bottom bar holds the actions.
-      await waitFor(() => expect(document.querySelector('[data-record-action-bar] [role="toolbar"]')).toBeTruthy());
+      await mountRecordPage({ ready: '[data-record-phone-more] button[aria-label="More actions"]' });
+      // CONTROL: the phone face is drawn. This object declares no action of
+      // its own, so its bottom bar is drawn empty (and hidden), and the
+      // record's ⋯ is the one at the top bar's right end (objectstack#36151).
+      const topMore = await waitFor(() => {
+        const trigger = document.querySelector<HTMLElement>('[data-record-phone-more] button[aria-label="More actions"]');
+        expect(trigger).toBeTruthy();
+        return trigger!;
+      });
+      expect(document.querySelector('[data-record-action-bar]')!.childElementCount).toBe(0);
+      expect(screen.getAllByRole('button', { name: 'More actions' })).toEqual([topMore]);
       const star = await waitFor(() => {
         const [only, ...rest] = headerStars();
         expect(rest).toHaveLength(0);
@@ -299,8 +308,9 @@ describe('record page: the favorite star beside the record name, none in the ⋯
       fireEvent.click(star);
       await waitFor(() => expect(stored()).toHaveLength(1));
 
-      const items = await openOverflow();
-      expect(items).toContain('Share');
+      const items = await openOverflow(topMore);
+      // CONTROL: the top ⋯ is open and holds the record's Edit and Share.
+      expect(items).toEqual(expect.arrayContaining(['Edit', 'Share']));
       expect(items.filter((text) => /favorites$/.test(text))).toEqual([]);
     } finally {
       vi.restoreAllMocks();

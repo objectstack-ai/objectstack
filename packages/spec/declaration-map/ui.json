@@ -171,6 +171,8 @@
     "JoinedReportBlockSchema": "ui/JoinedReportBlock",
     "KanbanConfig": "ui/KanbanConfig",
     "KanbanConfigSchema": "ui/KanbanConfig",
+    "KanbanLaneSummary": "ui/KanbanLaneSummary",
+    "KanbanLaneSummarySchema": "ui/KanbanLaneSummary",
     "ListChartConfig": "ui/ListChartConfig",
     "ListChartConfigSchema": "ui/ListChartConfig",
     "ListColumn": "ui/ListColumn",

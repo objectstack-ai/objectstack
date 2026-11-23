@@ -18,6 +18,7 @@ export const Announcement = ObjectSchema.create({
   label: 'Announcement',
   pluralLabel: 'Announcements',
   icon: 'megaphone',
+  color: 'pink',
   description: 'A team announcement everyone can read but only its owner can edit — `read` OWD (ADR-0056).',
 
   // Everyone reads; owner writes. Canonical OWD vocabulary only — the legacy

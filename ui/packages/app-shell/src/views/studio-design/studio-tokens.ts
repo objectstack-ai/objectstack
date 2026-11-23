@@ -30,14 +30,11 @@ export const STUDIO_HEADER_PILLAR =
   'inline-flex h-7 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md px-2.5 text-[13px] transition-colors sm:flex-none sm:shrink-0 xl:px-3';
 
 /**
- * objectui#12611 — the package chip at a narrow width. The header's package
- * column is the container: its width is the grid track's, so the chip's
- * fold answers the room the column really has (the pillar switcher and the
- * actions beside it), never the viewport. Below 300 px the chip's
- * "Read-only" word gives way and its lock stays; the package name truncates
- * only after that. At 300 px the 280 px chip still leaves the name 120 px
- * with the word shown. The full name and the posture are in the chip's
- * tooltip. Literal class strings: Tailwind finds a class by scanning source.
+ * objectui#12611 — the header's left column is a container: its width is the
+ * grid track's, so what it holds folds to the room the column really has (the
+ * pillar switcher and the actions beside it), never the viewport.
+ * objectstack#36501 — it holds 「‹ Back to app」, the app's name and the
+ * Studio mark, and the app's name is the piece that truncates.
  */
 export const STUDIO_HEADER_PACKAGE_COLUMN = '@container';
 
@@ -55,7 +52,6 @@ export const STUDIO_HEADER_PACKAGE_COLUMN = '@container';
  */
 export const STUDIO_HEADER_PILLAR_NAME = 'sr-only @min-[724px]/studio-header:not-sr-only';
 export const STUDIO_HEADER_WIDE_WORD = 'sr-only @min-[920px]/studio-header:not-sr-only';
-export const STUDIO_PKG_READONLY_WORD = 'hidden @min-[300px]:inline';
 
 /** Rail: 240 px, the sidebar surface, a right border. */
 export const STUDIO_RAIL_WIDTH = 'w-60';

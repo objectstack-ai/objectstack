@@ -11587,6 +11587,16 @@ export class AutomationEngine implements IAutomationService {
      * Shared deliberately: a predicate and a value expression that disagreed
      * about what `rows` means would be two dialects wearing one name.
      *
+     * ## No variable key reaches a prototype
+     *
+     * Every container the builder creates has no prototype, and a key with a
+     * `__proto__` segment binds nothing here — skipped, not refused (a dotted
+     * tail whose head names a value the run holds is still written into that
+     * value);
+     * `./scope-key-segments.ts` states the rule and why `constructor` and
+     * `prototype` stay ordinary keys. The text-hole scope
+     * (`textTemplateScope`) follows the same rule.
+     *
      * ## `current_user` — the run's user, or `null` (#19939)
      *
      * The scope also binds `current_user`, ADR-0068's canonical user root, from

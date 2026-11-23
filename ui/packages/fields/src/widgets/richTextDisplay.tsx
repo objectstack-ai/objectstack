@@ -40,6 +40,55 @@ import type { CellRendererProps } from '../index.js';
 const LazyMarkdownContent = React.lazy(() => import('./MarkdownContent.js'));
 
 /**
+ * The two faces a rich-content value is drawn in, shared by the markdown and
+ * the HTML pipeline so a heading in a grid cell is drawn one way whichever
+ * pipeline the field type reads through.
+ *
+ * - `document` — a full-size display (the record page, a readonly form field):
+ *   headings keep their heading elements and the typography scale's sizes.
+ * - `cell` — one cell of a grid column, whose row is one line of the cell's own
+ *   text (objectstack#36344, objectstack#36452). A heading is drawn as a bold
+ *   line at the cell's text size, not as a heading element, and the body
+ *   inherits the cell's font size and line height, so a value that starts with
+ *   a heading keeps the row the height of every other row.
+ */
+export type RichTextFace = 'document' | 'cell';
+
+/** The document face: the typography scale at its own sizes. */
+export const RICH_TEXT_DOCUMENT_CLASS = 'prose prose-sm max-w-none dark:prose-invert break-words';
+
+/** The cell face: the same typography, at the size and line height of the cell around it. */
+export const RICH_TEXT_CELL_FACE_CLASS = `${RICH_TEXT_DOCUMENT_CLASS} text-[length:inherit] leading-[inherit]`;
+
+type HeadingTag = 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6';
+type CellHeadingComponent = (props: { children?: React.ReactNode }) => React.ReactElement;
+
+/**
+ * The element map the cell face draws headings with: every heading level is a
+ * `p.font-semibold` carrying `marker`, so the pipeline's own pins can find it.
+ * A heading element inside a table cell is drawn at heading size by the
+ * typography scale, and it would also add one entry per row to the page's
+ * heading outline, so the cell face draws none.
+ *
+ * Call it once per pipeline at module scope: the returned components are the
+ * element types React reconciles against, so a fresh map per render would
+ * remount every heading.
+ */
+export function cellFaceHeadings(
+  marker: 'data-markdown-heading' | 'data-html-heading',
+): Record<HeadingTag, CellHeadingComponent> {
+  const CellHeading: CellHeadingComponent = ({ children }) => (
+    <p className="font-semibold" {...{ [marker]: '' }}>
+      {children}
+    </p>
+  );
+  return { h1: CellHeading, h2: CellHeading, h3: CellHeading, h4: CellHeading, h5: CellHeading, h6: CellHeading };
+}
+
+/** The HTML pipeline's cell-face headings. */
+const HTML_CELL_HEADINGS = cellFaceHeadings('data-html-heading');
+
+/**
  * The text a rich-content cell formats, or `undefined` when the record holds
  * nothing to format (objectui#8580).
  *
@@ -129,17 +178,36 @@ export function MarkdownCellRenderer({ value, inGridColumn }: CellRendererProps)
  * are the stored bytes — its output pinned byte-for-byte in
  * `__tests__/cellRenderers.childlessContainer-8580.test.tsx`.
  *
- * The parse is memoised on the text for cost only (a grid renders many
- * cells); nothing depends on the identity of the memoised value.
+ * In a grid column (`inGridColumn`) the value is drawn in the `cell` face
+ * (objectstack#36452), the same face the markdown cell draws: every heading
+ * level is a bold line at the cell's own text size, so a stored `<h1>` does
+ * not grow its row. The face changes only which elements the SANITIZED tree
+ * is drawn with; what the sanitiser keeps and drops is the same in both
+ * faces. Every other caller — the record page, a readonly form field — keeps
+ * the `document` face and its heading sizes.
+ *
+ * The parse is memoised on the text and the face for cost only (a grid
+ * renders many cells); nothing depends on the identity of the memoised value.
  */
-export function HtmlCellRenderer({ value }: CellRendererProps): React.ReactElement {
+export function HtmlCellRenderer({ value, inGridColumn }: CellRendererProps): React.ReactElement {
   const text = richTextSource(value);
+  const face: RichTextFace = inGridColumn ? 'cell' : 'document';
   const content = React.useMemo(
-    () => (text === undefined ? undefined : renderSanitizedHtml(text)),
-    [text],
+    () =>
+      text === undefined
+        ? undefined
+        : renderSanitizedHtml(text, face === 'cell' ? HTML_CELL_HEADINGS : undefined),
+    [text, face],
   );
   if (text === undefined) return <EmptyValue />;
-  return <div className="prose prose-sm max-w-none dark:prose-invert break-words">{content}</div>;
+  return (
+    <div
+      className={face === 'cell' ? RICH_TEXT_CELL_FACE_CLASS : RICH_TEXT_DOCUMENT_CLASS}
+      data-html-face={face}
+    >
+      {content}
+    </div>
+  );
 }
 
 /**

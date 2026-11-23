@@ -436,7 +436,6 @@ export const OBJECT_VIEW_TABLE_RELAY_KEYS = [
   'showColumnTypeIcons',
   'showPagination',
   'showSearch',
-  'singleClickEdit',
 ] as const satisfies readonly (keyof NonNullable<ObjectViewSchema['table']>)[];
 
 type TableRelayKey = (typeof OBJECT_VIEW_TABLE_RELAY_KEYS)[number];
@@ -2344,6 +2343,13 @@ export const ObjectView: React.FC<ObjectViewProps> = ({
           titleField: kanbanCfg.titleField || 'name',
           cardFields,
           ...(kanbanCfg.summarizeField ? { summarizeField: kanbanCfg.summarizeField } : {}),
+          // objectstack#36370 — the lane statistic and the two card toggles,
+          // each only when the block declares it (`ListView`'s twin relays the
+          // same three), so `summary: { type: 'none' }` hides the header total
+          // here too and a board without them draws as before.
+          ...(kanbanCfg.summary && typeof kanbanCfg.summary === 'object' ? { summary: kanbanCfg.summary } : {}),
+          ...(typeof kanbanCfg.showFieldLabels === 'boolean' ? { showFieldLabels: kanbanCfg.showFieldLabels } : {}),
+          ...(typeof kanbanCfg.hideEmptyFields === 'boolean' ? { hideEmptyFields: kanbanCfg.hideEmptyFields } : {}),
           ...(kanbanConditionalFormatting ? { conditionalFormatting: kanbanConditionalFormatting } : {}),
         };
       }

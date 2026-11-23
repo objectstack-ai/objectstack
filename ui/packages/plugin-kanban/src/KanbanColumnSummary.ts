@@ -36,8 +36,16 @@ import { isEmptyValue } from '@object-ui/core';
  * and every board whose node carries no `summarizeField` render the header
  * exactly as they did before.
  */
+/**
+ * objectstack#36370 — the lane statistics the board computes, the closed set
+ * the spec's `KanbanLaneSummarySchema` publishes (with `none`). An average, a
+ * minimum or a maximum over a lane that has loaded part of its cards is not
+ * even a bound, so those wait for a server-side lane read.
+ */
+export type KanbanLaneStatisticType = 'count' | 'sum';
+
 export interface KanbanColumnSummary {
-  /** The record field each lane totals — the view's `summarizeField`. */
+  /** The record field each lane totals — the view's `summarizeField`. Empty for a count. */
   field: string;
   /** The field's display label: the tooltip and the screen-reader name of the total. */
   label: string;
@@ -47,6 +55,16 @@ export interface KanbanColumnSummary {
    * field keeps its declared `scale`. No format code of its own.
    */
   renderTotal: (total: number) => ReactNode;
+  /**
+   * objectstack#36370 — what the lane computes (absent ⇒ `sum`, the
+   * `summarizeField` total) and where it is drawn: `header`, beside the count
+   * (absent; the `summarizeField` total, as before), or `foot`, under the
+   * lane's cards (the view's `kanban.summary`).
+   */
+  type?: KanbanLaneStatisticType;
+  placement?: 'header' | 'foot';
+  /** The calculation's name at the foot (「Sum」, 「Count」), beside `label`. */
+  typeLabel?: string;
 }
 
 export const KanbanColumnSummaryContext = createContext<KanbanColumnSummary | null>(null);
@@ -101,4 +119,17 @@ export function sumLaneField(
     widest = Math.max(widest, fractionDigitsOf(value));
   }
   return widest === 0 ? total : Number(total.toFixed(widest));
+}
+
+/**
+ * objectstack#36370 — a lane's statistic over its cards: the count of cards,
+ * or the sum of `field` as {@link sumLaneField} reads it (`null` when a value
+ * is not a number).
+ */
+export function laneStatistic(
+  cards: ReadonlyArray<Record<string, unknown>>,
+  field: string,
+  type: KanbanLaneStatisticType,
+): number | null {
+  return type === 'count' ? cards.length : sumLaneField(cards, field);
 }

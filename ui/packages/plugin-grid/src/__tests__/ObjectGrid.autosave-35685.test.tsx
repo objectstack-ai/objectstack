@@ -125,7 +125,6 @@ function renderGrid(dataSource: any, cellSelection: boolean) {
     type: 'object-grid',
     objectName: OBJECT,
     editable: true,
-    singleClickEdit: true,
     columns: [
       { field: 'name', label: 'Name' },
       { field: 'amount', label: 'Amount', type: 'number' },
@@ -134,7 +133,7 @@ function renderGrid(dataSource: any, cellSelection: boolean) {
   };
   return render(
     <ActionProvider>
-      <ObjectGrid schema={schema} dataSource={dataSource} cellSelection={cellSelection || undefined} />
+      <ObjectGrid schema={schema} dataSource={dataSource} cellSelection={cellSelection} />
     </ActionProvider>,
   );
 }

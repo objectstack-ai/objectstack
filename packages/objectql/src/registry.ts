@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { ServiceObject, ObjectOwnership, resolveInjectedSystemColumns, resolveInjectedColumnProvenance as injectedColumnProvenance, AUDIT_PROVENANCE_FIELDS } from '@objectstack/spec/data';
+import { ServiceObject, ObjectOwnership, type RelatedListsArrangement, resolveInjectedSystemColumns, resolveInjectedColumnProvenance as injectedColumnProvenance, AUDIT_PROVENANCE_FIELDS } from '@objectstack/spec/data';
 // [#4513] The audit-family governance table, and [#6562] the injected-column
 // DEFINITION tables it governs — see the re-exports below for why both live in a
 // package `objectql` and `metadata-protocol` both depend on.
@@ -232,7 +232,7 @@ export {
  * Declarative authors never reach that silence, though: `ObjectExtensionSchema`
  * (`packages/spec/src/data/object.zod.ts`) is `.strict()` — its shape is
  * exactly `extend` / `fields` / `fieldPatches` / `label` / `pluralLabel` /
- * `description` / `validations` / `indexes` / `place` / `priority`, so an `objectExtensions` entry
+ * `description` / `validations` / `indexes` / `place` / `fieldGroups` / `relatedLists` / `priority`, so an `objectExtensions` entry
  * naming `tenancy`, `permissions`, or any other key outside that list fails
  * LOUDLY at authoring time with a prescription (#4001; the same rule is
  * documented at `content/docs/data-modeling/object-extensions.mdx`). This
@@ -2956,6 +2956,10 @@ export class SchemaRegistry {
     return ObjectRegistrationFacet.getWithheldExtensionFields.call(objectRegistrationHost.of(this), name);
   }
 
+  getRelatedListsArrangement(name: string): RelatedListsArrangement | undefined { // [ADR-0146 D10] contract: `ObjectRegistrationFacet.getRelatedListsArrangement`
+    return ObjectRegistrationFacet.getRelatedListsArrangement.call(objectRegistrationHost.of(this), name);
+  }
+
   private withholdDisabledExtensions(contributors: readonly ObjectContributor[], asEnabled?: string): WithheldExtensions | undefined {
     // [#33949 codemod] The body moved to `registry-object-registration.ts`, its docblock with it (see `ObjectRegistrationHost`).
     return ObjectRegistrationFacet.withholdDisabledExtensions.call(objectRegistrationHost.of(this), contributors, asEnabled);
@@ -3648,10 +3652,10 @@ export class SchemaRegistry {
    * and `/meta` served its label and option labels untranslated in every
    * locale while the extender's own pack carried them.
    *
-   * ⛔ Exactly those two widen: rules by name, and field NAMES the owner does
-   * not declare. The scalars stay the owner's, and so does every field the
-   * owner declares, even one an extender redeclares; an extender's
-   * `fieldPatches` are never folded in. Each must keep reading as diverged from
+   * ⛔ Exactly three widen: rules by name, field NAMES the owner does not declare, and the
+   * tabs a code extender places (#36528: the facet's `packagedPlacedRelatedLists`). The scalars
+   * stay the owner's, and so does every field the owner declares, even one an extender redeclares;
+   * an extender's `fieldPatches` are never folded in. Each must keep reading as diverged from
    * the packaged one, or the catalog — which translates the owner's text under
    * the owner's keys — takes back the case #8037 filed. A tenant overlay and an
    * extension of tenant provenance (`_provenance: 'org'`) add nothing here:
@@ -3660,7 +3664,7 @@ export class SchemaRegistry {
    * still reads every code extender, disabled ones included.)
    *
    * Returns the owner's definition BY REFERENCE when no code extender ships a
-   * rule or adds a field, and `undefined` exactly where
+   * rule, adds a field or places a list, and `undefined` exactly where
    * {@link getPackagedObjectOwner} does.
    */
   getPackagedObjectBase(name: string): ServiceObject | undefined {
@@ -6155,6 +6159,7 @@ export class SchemaRegistry {
       getObject: (...a) => registry.getObject(...a),
       getObjectContributors: (...a) => registry.getObjectContributors(...a),
       getObjectOwner: (...a) => registry.getObjectOwner(...a),
+      getPackage: (...a) => registry.getPackage(...a),
       hasDisabledPackage: (...a) => registry.hasDisabledPackage(...a),
       isActionWithheldByDisabledPackage: (...a) => registry.isActionWithheldByDisabledPackage(...a),
       isPackageDisabled: (...a) => registry.isPackageDisabled(...a),

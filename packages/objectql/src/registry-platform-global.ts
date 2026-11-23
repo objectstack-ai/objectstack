@@ -47,6 +47,7 @@ import { TENANT_SCOPE_FIELD_DEF, isCodeArtifactBody } from '@objectstack/metadat
 import { DEFAULT_EXTENDER_PRIORITY, applyFieldPatches, ownFieldNamesOf, packagedAddedFields, stableStringify, withoutField } from './registry-top-level.js';
 import type { ObjectContributor, ObjectExtensionBody, ObjectExtensionFoldOptions } from './registry-top-level.js';
 import { TENANT_SCOPE_INDEX, extendContributionRefusal, provisionTenantScopeIndex } from './registry.js';
+import { applyExtensionPlacements, fieldGroupKeysOf, placementContributorsOf } from './registry-extension-placement.js';
 import type { SchemaRegistry } from './registry.js';
 
 /**
@@ -520,7 +521,7 @@ export class PlatformGlobalFacet {
   }
 
   /** The body of `SchemaRegistry#getPackagedObjectBase`; the method's docblock there is its contract. */
-  static getPackagedObjectBase(this: Pick<PlatformGlobalHost, 'getPackagedObjectOwner' | 'isPackageDisabled' | 'objectContributors' | 'packagedRules' | 'resolveObjectKey'>, name: string): ServiceObject | undefined {
+  static getPackagedObjectBase(this: Pick<PlatformGlobalHost, 'getObjectOwner' | 'getPackagedObjectOwner' | 'isPackageDisabled' | 'objectContributors' | 'packagedRules' | 'resolveObjectKey'>, name: string): ServiceObject | undefined {
     const owner = this.getPackagedObjectOwner(name);
     if (!owner) return undefined;
     const fqn = this.resolveObjectKey(name);
@@ -536,13 +537,27 @@ export class PlatformGlobalFacet {
       owner.definition,
       contributors.filter((c) => !(c.ownership === 'extend' && this.isPackageDisabled(c.packageId))),
     );
-    if (!extended && addedFields === undefined) return owner.definition;
+    // [#36528] The record-page tabs a code extender's list placement (`place`)
+    // splices into the owner's `relatedLists`, as the fold splices them, with
+    // the same filter as the added fields; only the lists pass is read off.
+    const placedLists = packagedPlacedRelatedLists(
+      owner.definition,
+      contributors.filter((c) => c.ownership === 'extend' && isCodeArtifactBody(c.definition) && !this.isPackageDisabled(c.packageId)),
+      (child) => {
+        const childKey = this.resolveObjectKey(child);
+        const childOwner = childKey === undefined ? undefined : this.getObjectOwner(childKey);
+        if (childOwner === undefined) return undefined;
+        return childOwner.packageId ?? null;
+      },
+    );
+    if (!extended && addedFields === undefined && placedLists === undefined) return owner.definition;
     return {
       ...owner.definition,
       ...(extended ? { validations: (this.packagedRules(contributors) ?? []) as ServiceObject['validations'] } : {}),
       ...(addedFields !== undefined
         ? { fields: { ...owner.definition.fields, ...addedFields } as ServiceObject['fields'] }
         : {}),
+      ...(placedLists !== undefined ? { relatedLists: placedLists as ServiceObject['relatedLists'] } : {}),
     };
   }
 
@@ -794,4 +809,38 @@ export class PlatformGlobalFacet {
     );
     return true;
   }
+}
+
+/**
+ * [#36528] The owner's `relatedLists` with the list placements (`place`) of
+ * `extenders` spliced in by the fold's own pass ({@link applyExtensionPlacements}),
+ * or `undefined` when none applies — an owner that declares no `relatedLists`
+ * (`PLACEMENT_ARRANGES_DECLARED_ONLY`), or no extender places a list. Only the
+ * lists pass is read off: the groups and fields the same call arranges stay
+ * the owner's in the packaged base, and its notes are the fold's to name.
+ *
+ * Why the packaged base carries them (`SchemaRegistry#getPackagedObjectBase`):
+ * the sentence that holds for a field a code extender adds holds for a
+ * record-page tab it places (`place: [{ list, label? }]`). The catalog row
+ * for the placed title (`_relatedLists.<list>.label`) can only translate what
+ * that extender ships; read off the owner alone, the placed title counted as
+ * authored after the fact and `/meta` served it untranslated. A paired
+ * `.custom` arrangement (ADR-0146 D10) is the customization layer and is
+ * never folded in: its titles diverge and read the pair's own translations.
+ */
+function packagedPlacedRelatedLists(
+  owner: ServiceObject,
+  extenders: readonly ObjectContributor[],
+  childPackageOf: (child: string) => string | null | undefined,
+): unknown[] | undefined {
+  const placing = placementContributorsOf(extenders, ownFieldNamesOf(owner));
+  if (placing.length === 0) return undefined;
+  const placed = applyExtensionPlacements(owner, placing, {
+    objectName: String(owner.name ?? ''),
+    ownerGroupKeys: fieldGroupKeysOf(owner),
+    childPackageOf,
+  });
+  const before = (owner as { relatedLists?: unknown }).relatedLists;
+  const after = (placed.object as { relatedLists?: unknown }).relatedLists;
+  return after !== before && Array.isArray(after) ? after : undefined;
 }

@@ -369,6 +369,7 @@ const zh: TranslationData = {
       },
       _views:  { all_accounts: { label: '全部客户' } },
       _sections: { basic_info: { label: '基本信息' } },
+      _relatedLists: { contact: { label: '联系人' } },   // a relatedLists entry's own label
       _actions: { convert: { label: '转换', confirmText: '确认转换？' } },
     },
   },
@@ -1168,6 +1169,7 @@ beneath an action entry are judged the same way under either.
 | `objects.{object}._views.{view}` | the key the view registry assigns a view over that object: a `listViews` / `formViews` map key, or the default `list`'s `name` — `default` when it has none (see [ObjectUI Integration](#objectui-integration)) |
 | `objects.{object}._sections.{section}` | a `fieldGroups[].key`, a named section of a form view over that object (a `formViews` entry or the default `form`), or a named section of a `record:details` component on a page bound to it |
 | `objects.{object}._tabs.{tab}` | a filter-preset tab's `name` in `interfaceConfig.userFilters.tabs` on a page over that object (`interfaceConfig.source`, else the page's `object`) — a list view's own `tabs` has no renderer and is not resolvable |
+| `objects.{object}._relatedLists.{list}` | the `list` of an object-form `relatedLists` entry on that object that authors a `label` — a dotted `object.field` is one key; a key over an entry with no `label`, a bare-string entry or a built-in tab is an orphan, because that tab's title is the child lookup field's `relatedListTitle`, translated on the child |
 | `objects.{object}._validations.{rule}` | a validation rule's `name` in that object's `validations[]` or in an `objectExtensions[]` entry aimed at it — a `conditional` rule's `then` / `otherwise` branch included |
 | `objects.{object}._actions.{action}` | an action bound to that object: one in its `actions`, or a stack-level action whose `objectName` is that object |
 | `globalActions.{action}` | an action with **no** `objectName` — a key naming a bound action is an error whose message names the `objects.{owner}._actions.{action}` key to write instead, `{owner}` being the action's own `objectName` |
@@ -1189,6 +1191,7 @@ beneath an action entry are judged the same way under either.
 | `hooks.{hook}.refusals.{code}.reasons.{reason}` | a reason that code declares under `reasons` |
 | `flows.{flow}.screens.{node}` | the `id` of a `type: 'screen'` node in that flow, nodes nested in loop, parallel and try/catch regions included |
 | `flows.{flow}.screens.{node}.fields.{field}` | a `config.fields[].name` on that screen — an object-form screen (`config.objectName`) declares none, and its input labels live under `objects.{objectName}.fields` |
+| `flows.{flow}.nodes.{node}` | the `id` of a node in that flow that is neither a `screen` nor an `approval` (those two are keyed under `screens` and `approvals`), nodes nested in loop, parallel and try/catch regions included |
 
 An unresolvable key is an **error**, not a warning: `os validate`, `os lint` and
 `os compile` each report it as `translation-target-unknown` and exit non-zero, so

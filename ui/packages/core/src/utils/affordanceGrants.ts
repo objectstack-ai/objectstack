@@ -197,7 +197,13 @@ export const AFFORDANCE_GRANTS = {
   lookupCreateNew: { crud: 'create', grant: 'create' },
   /** The record Attachments panel's Upload, asked of `sys_attachment` (storage route, not the data door). */
   attachmentUpload: { crud: null, grant: 'create' },
-  /** The record Attachments panel's per-row delete, asked of `sys_attachment`. */
+  /**
+   * The record Attachments panel's per-row delete of ANOTHER user's upload,
+   * asked of `sys_attachment`: that delete goes through the data door, which
+   * needs the grant. The caller's own upload is removed through the storage
+   * service's removal door (`DELETE /api/v1/attachments/:id`), which needs
+   * none, so the panel asks this row only for rows the caller did not upload.
+   */
   attachmentDelete: { crud: null, grant: 'delete' },
   /**
    * The same panel's per-row Rename on ANOTHER user's upload, asked of
@@ -205,7 +211,7 @@ export const AFFORDANCE_GRANTS = {
    * (`PATCH /api/v1/attachments/:id`, the storage service, not the data door)
    * writes such a rename through the engine as the caller, which needs the edit
    * grant; the uploader's own rename needs none, so the panel asks this row
-   * only for rows the caller did not upload, behind `attachmentDelete`.
+   * only for rows the caller did not upload.
    */
   attachmentRename: { crud: null, grant: 'update' },
   /**

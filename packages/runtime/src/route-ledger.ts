@@ -301,7 +301,7 @@ export const NON_DISPATCH_MOUNT_PREFIXES = [
 /**
  * The ledger.
  *
- * CENSUS (generated): this list holds 150 rows.
+ * CENSUS (generated): this list holds 153 rows.
  *
  * ⛔ THAT NUMBER IS WRITTEN BY A TOOL — never by hand.
  * `pnpm check:route-ledger-census` counts the rows below and fails when the two
@@ -727,6 +727,14 @@ export const ROUTE_LEDGER: readonly RouteLedgerEntry[] = [
   // ── webhooks redeliver (the hosted door) ──────────────────────────────────
   { route: 'POST /webhooks/redeliver', domain: '/webhooks/redeliver', disposition: 'server-only',
     note: 'the operator button that sends a finished webhook delivery again. Forwarded with its JSON body UNREAD to the webhooks slot\'s IWebhookService.handleRedeliver, resolved per request (plugin-webhooks registers the slot at kernel:ready, only once its redelivery veto is installed), and the member\'s Response returned as it is: the member judges the caller from the request\'s own credentials through the auth service (401 UNAUTHENTICATED with no signed-in user, exactly as the self-hosted mount answers it), scopes the row to the caller\'s active organization and answers every refusal itself. No preamble-gate exemption: unlike /approvals/act the credential is the session, so the ADR-0069 auth gate and the project-membership gate both apply, which makes this door stricter than the self-hosted mount, never looser. An absent slot or member answers 501 NOT_IMPLEMENTED, never ROUTE_NOT_FOUND; a body consumed before it got here is a transport fault, answered 500 and logged. POST only: the member does not match the method, so no other method is claimed and the member never runs for one. This is the door for a kernel with no raw app; a self-hosted kernel serves the same path from plugin-webhooks\' raw-app mount, which never passes through the dispatcher. NOT JS-SDK surface: the self-hosted route it bridges has never been, and this door declares no client method. Pinned in `domains/webhooks-redeliver.test.ts`' },
+
+  // ── comment doors (the hosted door) ───────────────────────────────────────
+  { route: 'DELETE /comments/reactions/:id', domain: '/comments', disposition: 'server-only',
+    note: 'the unreact door: a member removes their own comment reaction, and only theirs, with no object delete grant. Forwarded with its body UNREAD to the comments slot\'s ICommentDoorsService.handleCommentDoor, resolved per request (plugin-audit registers the slot in init), and the member\'s Response returned as it is: the member runs the very registration the self-hosted mount runs, so the caller (resolved from the request\'s own credentials, 401 with none), every refusal and every answer are the mount\'s. No preamble-gate exemption: the credential is the session, so the ADR-0069 auth gate and the project-membership gate both apply, which makes this door stricter than the self-hosted mount, never looser. An absent slot or member answers 501 NOT_IMPLEMENTED, never the dispatcher\'s 404 ROUTE_NOT_FOUND; a body consumed before it got here is a transport fault, answered 500 and logged. This is the door for a kernel with no http.server; a self-hosted kernel serves the same path from plugin-audit\'s own mount on its http.server, which never passes through the dispatcher. NOT JS-SDK surface here: the console\'s comment panel is the consumer, and the SDK gap is acknowledged once, on the mount\'s own ledger rows (plugin-audit comment-reaction-route-ledger.ts / comment-route-ledger.ts). Pinned in `domains/comments.test.ts`' },
+  { route: 'PUT /comments/:id/resolution', domain: '/comments', disposition: 'server-only',
+    note: 'the resolution door: whoever can read a thread (and may post on it) resolves or reopens it, body exactly { resolved: boolean }. Same forwarding, credential, absence and door notes as the unreact row' },
+  { route: 'DELETE /comments/:id', domain: '/comments', disposition: 'server-only',
+    note: 'the own-comment delete door: a member removes a comment they wrote, with no object delete grant. Same forwarding, credential, absence and door notes as the unreact row' },
 
   // ── ai (dynamic route table, owned by another repo) ───────────────────────
   { route: '* /ai/**', domain: '/ai', disposition: 'dynamic',

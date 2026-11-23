@@ -98,7 +98,6 @@ async function loaded(dataSource: ReturnType<typeof makeDataSource>) {
     type: 'object-grid',
     objectName: OBJECT,
     editable: true,
-    singleClickEdit: true,
     columns: [
       { field: 'title', label: 'Title', editable: false },
       { field: 'estimate_hours', label: 'Estimate', type: 'number' },
@@ -109,6 +108,7 @@ async function loaded(dataSource: ReturnType<typeof makeDataSource>) {
     <ActionProvider>
       {/* Row Edit/Delete handlers: the per-row save button exists. */}
       <ObjectGrid
+        cellSelection={false}
         schema={schema}
         // The in-memory double implements the three members the default saves read.
         dataSource={dataSource as unknown as GridProps['dataSource']}

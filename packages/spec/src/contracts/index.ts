@@ -68,6 +68,8 @@ export * from './share-link-service.js';
 // ListView.
 export * from './approval-service.js';
 export * from './webhook-service.js';
+// [#36469] The comment doors' slot (`comments`), for the dispatcher's hosted door.
+export * from './comment-doors-service.js';
 export * from './package-service.js';
 export * from './knowledge-service.js';
 export * from './knowledge-adapter.js';

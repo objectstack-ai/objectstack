@@ -261,6 +261,7 @@ const JOIN: Readonly<Record<string, readonly Renderer[]>> = {
   ),
   'object-external-sharing-model-removed': [tombstone(ObjectSchema, 'object', 'externalSharingModel')],
   'object-grid-default-filters-removed': [tombstone(ObjectGridPropsSchema, 'object-grid', 'defaultFilters')],
+  'object-grid-single-click-edit-removed': [tombstone(ObjectGridPropsSchema, 'object-grid', 'singleClickEdit')],
   'email-template-category-is-system-removed': [
     tombstone(EmailTemplateDefinitionSchema, 'email_template', 'category'),
     tombstone(EmailTemplateDefinitionSchema, 'email_template', 'isSystem'),

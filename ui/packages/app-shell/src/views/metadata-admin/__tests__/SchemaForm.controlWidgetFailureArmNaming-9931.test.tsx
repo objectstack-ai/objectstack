@@ -168,6 +168,8 @@ const CASES: ControlCase[] = [
   { key: 'string-tags', schema: { type: 'array', items: { type: 'string' } }, value: ['a'], banner: null },
   { key: 'related-list-entries', schema: { type: 'array' }, value: ['task'], banner: null },
   { key: 'secret', schema: { type: 'string' }, value: 's3cr3t', banner: null },
+  // No catalog: the one face is the trigger, on every arm.
+  { key: 'field-history', schema: { type: 'boolean' }, value: false, banner: null },
 ];
 
 /**

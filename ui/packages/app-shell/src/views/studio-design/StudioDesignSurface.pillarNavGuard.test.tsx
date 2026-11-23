@@ -3,16 +3,17 @@
 /**
  * Studio header — unsaved-changes guard on SPA navigation (objectui#2600).
  *
- * The pillar links, the Home button and the PackageSwitcher are pure
- * react-router client navigation, so the editors' `beforeunload` guard never
+ * The pillar links and 「‹ Back to app」 (objectstack#36501; it replaced the
+ * Home button and the PackageSwitcher, whose package switch the shell seam
+ * below still guards for every other door) are pure react-router client
+ * navigation, so the editors' `beforeunload` guard never
  * fires; before this guard existed they unmounted a dirty pillar silently and
  * discarded its unsaved edits. Pillars now mirror their dirty state up to the
  * surface (same `onDirtyChange` contract as the Access rail guard, PR #2588),
  * and every header-driven departure gates on a native confirm:
  *
  *   • dirty + pillar switch → confirm; cancel keeps the pillar and its edits,
- *   • dirty + Home → same confirm; cancel stays, confirm leaves,
- *   • dirty + package switch → same confirm,
+ *   • dirty + 「‹ Back to app」 → same confirm; cancel stays, confirm leaves,
  *   • dirty OWD overview rows + pillar switch → same confirm (the pillar
  *     folds the overview's report into the same bit, objectui#2600 follow-up),
  *   • clean navigation never prompts,
@@ -187,6 +188,7 @@ async function renderSurfaceOnAccess() {
       <Routes>
         <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
         <Route path="/studio" element={<div data-testid="studio-landing-page" />} />
+        <Route path="*" element={<div data-testid="left-studio" />} />
       </Routes>
     </MemoryRouter>,
   );
@@ -315,55 +317,28 @@ describe('Studio header — unsaved pillar edits guard (#2600)', () => {
     matrixEditSurvived();
   });
 
-  it('gates the Studio home button; cancel stays, confirm returns to the Studio landing', async () => {
+  it('gates 「‹ Back to app」; cancel stays, confirm leaves Studio (objectstack#36501)', async () => {
     await renderSurfaceOnAccess();
     dirtyTheMatrix();
 
     confirmSpy.mockReturnValueOnce(false);
-    fireEvent.click(screen.getByTitle('Studio home'));
+    fireEvent.click(screen.getByTestId('studio-back-to-app'));
     expect(confirmSpy).toHaveBeenCalledTimes(1);
     expect(inSetHeader().getByTitle('set_a')).toBeInTheDocument();
     matrixEditSurvived();
 
     confirmSpy.mockReturnValueOnce(true);
-    fireEvent.click(screen.getByTitle('Studio home'));
-    expect(await screen.findByTestId('studio-landing-page')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('studio-back-to-app'));
+    expect(await screen.findByTestId('left-studio')).toBeInTheDocument();
   });
 
-  it('gates a package switch; cancel keeps the edits in place', async () => {
-    await renderSurfaceOnAccess();
-    dirtyTheMatrix();
-
-    // Open the switcher (its label resolves once fetchPackages lands).
-    fireEvent.click(await screen.findByRole('button', { name: /App A/ }));
-    const other = await screen.findByRole('button', { name: /App B/ });
-
-    confirmSpy.mockReturnValueOnce(false);
-    fireEvent.click(other);
-    expect(confirmSpy).toHaveBeenCalledTimes(1);
-    expect(inSetHeader().getByTitle('set_a')).toBeInTheDocument();
-    matrixEditSurvived();
-
-    // Confirming jumps to the other package (header re-labels; matrix reloads).
-    fireEvent.click(await screen.findByRole('button', { name: /App A/ }));
-    confirmSpy.mockReturnValueOnce(true);
-    fireEvent.click(await screen.findByRole('button', { name: /App B/ }));
-    expect(confirmSpy).toHaveBeenCalledTimes(2);
-    await waitFor(() =>
-      expect(screen.getByTestId('studio-pkg-chip')).toHaveTextContent('App B'),
-    );
-  });
-
-  it('never prompts a clean package switch', async () => {
+  it('never prompts a clean 「‹ Back to app」', async () => {
     await renderSurfaceOnAccess();
 
-    fireEvent.click(await screen.findByRole('button', { name: /App A/ }));
-    fireEvent.click(await screen.findByRole('button', { name: /App B/ }));
+    fireEvent.click(screen.getByTestId('studio-back-to-app'));
 
     expect(confirmSpy).not.toHaveBeenCalled();
-    await waitFor(() =>
-      expect(screen.getByTestId('studio-pkg-chip')).toHaveTextContent('App B'),
-    );
+    expect(await screen.findByTestId('left-studio')).toBeInTheDocument();
   });
 });
 

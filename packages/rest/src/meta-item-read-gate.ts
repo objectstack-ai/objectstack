@@ -66,7 +66,7 @@
  */
 
 import type { AudienceCaller, Book, ResolvedBook, ResolverDoc } from '@objectstack/spec/system';
-import { preferredLocaleFromHeader, renderOperationMessage } from '@objectstack/spec/system';
+import { preferredLocaleFromHeader, renderOperationMessage, resolveBundleLocale } from '@objectstack/spec/system';
 import { apiExposureDenialReason } from '@objectstack/spec/data';
 import { resolveObjectSortability } from '@objectstack/spec/api';
 import { canonicalMetaUrlType, pluralToSingular, unrecognisedMetaTypeRefusal } from '@objectstack/spec/shared';
@@ -3306,6 +3306,14 @@ export function translationBundleOf(i18n: unknown, reportFault?: (warning: strin
  * layer threads a declaration, it never invents one.
  * `RestServer.translateOptionsFor`, whose docblock carries the history,
  * delegates here.
+ *
+ * [#36466] `locale` is the request's tag NEGOTIATED against the locales the
+ * service holds ({@link negotiatedTranslationLocale}), the tag the server-side
+ * readers hand the same translators (objectql's `negotiatedMessageLocale`,
+ * plugin-approvals' `negotiatedReaderLocale`). Handed the raw tag, an `en-US`
+ * request in a deployment authored in `en` that holds an `en` pack was not the
+ * authored language, walked the chain to the default locale and read `客户`
+ * where those readers name the same object `Account`.
  */
 export function metaTranslateOptions(
     i18n: unknown,
@@ -3317,10 +3325,43 @@ export function metaTranslateOptions(
     const def = typeof source === 'string' && source.length > 0
         ? source
         : service && typeof service.getDefaultLocale === 'function' ? service.getDefaultLocale() : undefined;
-    const opts: { locale: string; fallbackChain?: string[]; defaultLocale?: string } = { locale };
+    const opts: { locale: string; fallbackChain?: string[]; defaultLocale?: string } = {
+        locale: negotiatedTranslationLocale(service, locale),
+    };
     if (typeof fallback === 'string' && fallback.length > 0) opts.fallbackChain = [fallback];
     if (typeof def === 'string' && def.length > 0) opts.defaultLocale = def;
     return opts;
+}
+
+/**
+ * [#36466] The locale `service` can ANSWER in, for the tag the request asked
+ * for: `resolveBundleLocale` (`@objectstack/spec/system`, the platform's one
+ * locale ladder) over what `getLocales()` reports — the question objectql's
+ * `negotiatedMessageLocale` and plugin-approvals' `negotiatedReaderLocale` ask,
+ * over the same set. ⛔ No rule of its own: neither of those is reachable from
+ * this package without a new export, so only the offered-set plumbing is
+ * repeated here.
+ *
+ * The requested tag passes through untouched when there is nothing to
+ * negotiate against (no service, no `getLocales`, a throwing, empty or
+ * non-array answer, or no match), so a request for a locale the deployment
+ * holds no pack for still walks the declared chain to the default locale.
+ */
+function negotiatedTranslationLocale(service: any, requested: string): string {
+    if (!service || typeof service.getLocales !== 'function') return requested;
+    let available: unknown;
+    try {
+        available = service.getLocales();
+    } catch {
+        // `translationBundleOf` reports the same fault; the request's tag stands.
+        return requested;
+    }
+    if (!Array.isArray(available) || available.length === 0) return requested;
+    const offered: Record<string, true> = {};
+    for (const code of available) {
+        if (typeof code === 'string' && code.length > 0) offered[code] = true;
+    }
+    return resolveBundleLocale(offered, requested) ?? requested;
 }
 
 /**

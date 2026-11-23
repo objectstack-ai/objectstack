@@ -141,9 +141,10 @@ function cellTypeOf(type: unknown): string {
   switch (type) {
     case 'number':
     case 'percent':
-    case 'rating':
     case 'slider':
       return 'number';
+    case 'rating':
+      return 'rating';
     case 'currency':
       return 'currency';
     case 'date':
@@ -155,12 +156,20 @@ function cellTypeOf(type: unknown): string {
     case 'select':
     case 'picklist':
     case 'radio':
+      return 'select';
     case 'boolean':
     case 'toggle':
-      return 'select';
+      return 'boolean';
+    case 'multiselect':
+    case 'checkboxes':
+      return 'multiselect';
+    case 'tags':
+      return 'tags';
     case 'lookup':
     case 'master_detail':
       return 'lookup';
+    case 'user':
+      return 'user';
     case 'file':
     case 'image':
     case 'avatar':
@@ -170,16 +179,26 @@ function cellTypeOf(type: unknown): string {
   }
 }
 
-/** Lower is kept first when filling the visible budget; a cell type absent here sorts last (5). */
+/**
+ * Lower is kept first when filling the visible budget; a cell type absent here
+ * sorts last (5). The five cell types #36043 added keep the priority their
+ * field types had before it (a check cell was a select, a rating a number, the
+ * other three plain text), so which derived columns are visible is unchanged.
+ */
 const CELL_FILL_PRIORITY: Readonly<Record<string, number>> = {
   select: 0,
+  boolean: 0,
   currency: 1,
   number: 1,
+  rating: 1,
   lookup: 2,
   date: 3,
   datetime: 3,
   time: 3,
   text: 4,
+  user: 4,
+  multiselect: 4,
+  tags: 4,
 };
 
 /** A field's own key, read the way the renderer reads `def?.key` off an untyped bag. */

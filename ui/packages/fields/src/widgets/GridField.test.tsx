@@ -1,11 +1,12 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within, act } from '@testing-library/react';
 import React from 'react';
 import { UploadProvider } from './UploadProvider';
 import { Dialog, DialogContent, DialogTitle } from '@object-ui/components';
 import { formatDate, formatDateTime } from '@object-ui/core';
 import { I18nProvider } from '@object-ui/i18n';
 import { en, zh } from '@object-ui/i18n/locales';
+import { SchemaRendererContext } from '@object-ui/react';
 import { GridFieldWidget as GridField } from './grid-field/GridFieldWidget';
 import { GridField as GridFieldFace, LineItemsField, sumColumn, lookupAutofillPatch, UNTOUCHED_NEW_ROW, isUntouchedNewRow, columnHelpByField } from './GridField';
 
@@ -1348,6 +1349,196 @@ describe('cell faces that open under the cell (objectstack#36023)', () => {
   });
 });
 
+describe('the cells that edit as in the main list: people, multi-select, tags, check, rating (objectstack#36043)', () => {
+  const COLORS = [
+    { label: 'Red', value: 'red' },
+    { label: 'Green', value: 'green' },
+    { label: 'Blue', value: 'blue' },
+  ];
+  const cols = {
+    columns: [
+      { name: 'description', label: 'Description', type: 'text' as const },
+      { name: 'colors', label: 'Colors', type: 'multiselect' as const, options: COLORS },
+      { name: 'labels', label: 'Labels', type: 'tags' as const },
+      { name: 'done', label: 'Done', type: 'boolean' as const },
+      { name: 'score', label: 'Score', type: 'rating' as const },
+      { name: 'owner', label: 'Owner', type: 'user' as const },
+    ],
+  } as any;
+
+  function Stateful({ initial, onChange, field = cols }: { initial: any[]; onChange?: (v: any[]) => void; field?: any }) {
+    const [rows, setRows] = React.useState(initial);
+    return (
+      <GridField
+        value={rows}
+        onChange={(v: any[]) => {
+          setRows(v);
+          onChange?.(v);
+        }}
+        field={field}
+      />
+    );
+  }
+
+  describe('a multi-select cell', () => {
+    // A click outside writes too (the popover's own dismiss); this harness's
+    // pointer events do not reach that dismiss, so the pin leaves through Tab.
+    it('reads its option labels; the list opens under the cell, holds several picks, and leaving it writes them', async () => {
+      const onChange = vi.fn();
+      render(<Stateful initial={[{ description: 'A', colors: ['red'] }]} onChange={onChange} />);
+      const cell = screen.getByRole('button', { name: 'Colors' });
+      expect(cell.textContent).toBe('Red');
+      fireEvent.click(cell);
+      const panel = await screen.findByTestId('line-items-multiselect-panel');
+      fireEvent.click(within(panel).getByRole('option', { name: /Green/ }));
+      fireEvent.click(within(panel).getByRole('option', { name: /Blue/ }));
+      // Still open, and nothing written while the list is open.
+      expect(screen.getByTestId('line-items-multiselect-panel')).toBeTruthy();
+      expect(onChange).not.toHaveBeenCalled();
+      fireEvent.keyDown(panel.querySelector('input')!, { key: 'Tab' });
+      await waitFor(() => expect(screen.queryByTestId('line-items-multiselect-panel')).toBeNull());
+      expect(onChange.mock.calls.at(-1)![0][0].colors).toEqual(['red', 'green', 'blue']);
+      expect(screen.getByRole('button', { name: 'Colors' }).textContent).toBe('Red, Green, Blue');
+    });
+
+    it('Esc closes the list and writes nothing', async () => {
+      const onChange = vi.fn();
+      render(<Stateful initial={[{ colors: ['red'] }]} onChange={onChange} />);
+      fireEvent.click(screen.getByRole('button', { name: 'Colors' }));
+      const panel = await screen.findByTestId('line-items-multiselect-panel');
+      fireEvent.click(within(panel).getByRole('option', { name: /Green/ }));
+      fireEvent.keyDown(panel.querySelector('input')!, { key: 'Escape' });
+      await waitFor(() => expect(screen.queryByTestId('line-items-multiselect-panel')).toBeNull());
+      expect(onChange).not.toHaveBeenCalled();
+      expect(screen.getByRole('button', { name: 'Colors' }).textContent).toBe('Red');
+    });
+
+    // A cleared multi-value field stores `null`, and the save path counts only
+    // `null` / `''` as blank: a `[]` would send a line the user emptied.
+    it('emptied, it writes null rather than an empty list', async () => {
+      const onChange = vi.fn();
+      render(<Stateful initial={[{ colors: ['red'] }]} onChange={onChange} />);
+      fireEvent.click(screen.getByRole('button', { name: 'Colors' }));
+      const panel = await screen.findByTestId('line-items-multiselect-panel');
+      fireEvent.click(within(panel).getByRole('option', { name: /Red/ }));
+      fireEvent.keyDown(panel.querySelector('input')!, { key: 'Tab' });
+      await waitFor(() => expect(screen.queryByTestId('line-items-multiselect-panel')).toBeNull());
+      expect(onChange.mock.calls.at(-1)![0][0].colors).toBeNull();
+    });
+
+    it('a required multi-select holding no option reads invalid', () => {
+      const field = { columns: [{ name: 'colors', label: 'Colors', type: 'multiselect', options: COLORS, required: true }] };
+      render(<GridField value={[{ id: 'r1', colors: [] }]} onChange={() => {}} field={field as any} />);
+      expect(screen.getByTestId('line-items-invalid-0-colors')).toBeTruthy();
+    });
+  });
+
+  describe('a tags cell', () => {
+    it('reads its tags; a new tag is added from the list, and Tab writes and moves on', async () => {
+      const onChange = vi.fn();
+      render(<Stateful initial={[{ labels: ['urgent'] }]} onChange={onChange} />);
+      const cell = screen.getByRole('button', { name: 'Labels' });
+      expect(cell.textContent).toBe('urgent');
+      fireEvent.click(cell);
+      const panel = await screen.findByTestId('line-items-tags-panel');
+      const search = panel.querySelector('input') as HTMLInputElement;
+      fireEvent.change(search, { target: { value: 'export' } });
+      fireEvent.keyDown(search, { key: 'Enter' });
+      fireEvent.keyDown(search, { key: 'Tab' });
+      await waitFor(() => expect(screen.queryByTestId('line-items-tags-panel')).toBeNull());
+      expect(onChange.mock.calls.at(-1)![0][0].labels).toEqual(['urgent', 'export']);
+      expect(document.activeElement).toBe(screen.getByRole('checkbox', { name: 'Done' }));
+    });
+
+    it('emptied, it writes null rather than an empty list', async () => {
+      const onChange = vi.fn();
+      render(<Stateful initial={[{ labels: ['urgent'] }]} onChange={onChange} />);
+      fireEvent.click(screen.getByRole('button', { name: 'Labels' }));
+      const panel = await screen.findByTestId('line-items-tags-panel');
+      fireEvent.click(within(panel).getByRole('option', { name: /urgent/ }));
+      fireEvent.keyDown(panel.querySelector('input')!, { key: 'Tab' });
+      await waitFor(() => expect(screen.queryByTestId('line-items-tags-panel')).toBeNull());
+      expect(onChange.mock.calls.at(-1)![0][0].labels).toBeNull();
+      // It reads as an empty cell, as an emptied multi-select does.
+      expect(screen.getByRole('button', { name: 'Labels' }).textContent).toBe('—');
+    });
+  });
+
+  describe('a check cell', () => {
+    it('is a checkbox over the stored value; a click writes a boolean', () => {
+      const onChange = vi.fn();
+      render(<Stateful initial={[{ done: true }, { done: 'false' }]} onChange={onChange} />);
+      const [first, second] = screen.getAllByRole('checkbox', { name: 'Done' });
+      expect(first.getAttribute('aria-checked')).toBe('true');
+      expect(second.getAttribute('aria-checked')).toBe('false');
+      fireEvent.click(second);
+      expect(onChange.mock.calls.at(-1)![0][1].done).toBe(true);
+      fireEvent.click(first);
+      expect(onChange.mock.calls.at(-1)![0][0].done).toBe(false);
+    });
+
+    it('read-only, it reads as its option word', () => {
+      const field = {
+        columns: [{ name: 'done', label: 'Done', type: 'boolean', options: [{ label: 'WORD-ON', value: 'true' }, { label: 'WORD-OFF', value: 'false' }] }],
+      };
+      render(<GridField value={[{ done: true }, { done: false }]} onChange={() => {}} readonly field={field as any} />);
+      const table = screen.getByTestId('line-items-readonly');
+      expect(table.textContent).toContain('WORD-ON');
+      expect(table.textContent).toContain('WORD-OFF');
+      expect(screen.queryByRole('checkbox')).toBeNull();
+    });
+  });
+
+  describe('a rating cell', () => {
+    const filled = (cell: Element) =>
+      Array.from(cell.querySelectorAll('button svg')).filter((svg) => (svg.getAttribute('class') ?? '').includes('fill-yellow-400')).length;
+    const ratingCell = () => document.querySelector('[data-grid-cell="0:score"] [data-cell]') as HTMLElement;
+
+    it('draws five stars by default with the value filled; a click on a star sets it', () => {
+      const onChange = vi.fn();
+      render(<Stateful initial={[{ score: 3 }]} onChange={onChange} />);
+      const cell = ratingCell();
+      expect(cell.querySelectorAll('button')).toHaveLength(5);
+      expect(filled(cell)).toBe(3);
+      fireEvent.click(cell.querySelectorAll('button')[3]);
+      expect(onChange.mock.calls.at(-1)![0][0].score).toBe(4);
+    });
+
+    it('a digit key on the cell sets that many stars; 0 clears', () => {
+      const onChange = vi.fn();
+      render(<Stateful initial={[{ score: 3 }]} onChange={onChange} />);
+      fireEvent.keyDown(ratingCell(), { key: '2' });
+      expect(onChange.mock.calls.at(-1)![0][0].score).toBe(2);
+      fireEvent.keyDown(ratingCell(), { key: '0' });
+      expect(onChange.mock.calls.at(-1)![0][0].score).toBeNull();
+      // A digit above the column's stars sets nothing.
+      onChange.mockClear();
+      fireEvent.keyDown(ratingCell(), { key: '7' });
+      expect(onChange).not.toHaveBeenCalled();
+    });
+
+    it("draws the column's `max` stars", () => {
+      const field = { columns: [{ name: 'score', label: 'Score', type: 'rating', max: 10 }] };
+      render(<GridField value={[{ score: 8 }]} onChange={() => {}} field={field as any} />);
+      expect(ratingCell().querySelectorAll('button')).toHaveLength(10);
+      expect(filled(ratingCell())).toBe(8);
+    });
+  });
+
+  describe('a people cell', () => {
+    it("opens the main list's person picker under the cell; its Clear writes and closes at once", async () => {
+      const onChange = vi.fn();
+      render(<Stateful initial={[{ owner: 'u1' }]} onChange={onChange} />);
+      fireEvent.click(screen.getByRole('button', { name: 'Owner' }));
+      const panel = await screen.findByTestId('line-items-user-panel');
+      expect(within(panel).getByTestId('lookup-in-cell')).toBeTruthy();
+      fireEvent.click(within(panel).getByTestId('lookup-in-cell-clear'));
+      await waitFor(() => expect(screen.queryByTestId('line-items-user-panel')).toBeNull());
+      expect(onChange.mock.calls.at(-1)![0][0].owner).toBeNull();
+    });
+  });
+});
+
 /**
  * objectstack#36102 — `@object-ui/fields` exports a lazy face for the grid
  * (`./GridField.ts`); the body (`./grid-field/GridFieldWidget.tsx`) loads
@@ -1384,5 +1575,248 @@ describe('GridField — the lazy face the package exports (objectstack#36102)', 
     expect(screen.queryByTestId('grid-field-loading')).toBeNull();
     const cell = screen.getByTestId('line-items').querySelector('input[aria-label="Description"]') as HTMLInputElement;
     expect(cell.value).toBe('Widget');
+  });
+
+  // objectstack#36451 — a host that renders the grid without preloading it,
+  // whose first request for the body fails once (a network blip, a deploy that
+  // swapped chunk names), must not keep that failure for the whole session.
+  describe('after one failed load of the body', () => {
+    class Boundary extends React.Component<{ children: React.ReactNode }, { failed: boolean }> {
+      state = { failed: false };
+      static getDerivedStateFromError() {
+        return { failed: true };
+      }
+      render() {
+        return this.state.failed ? <div data-testid="grid-load-failed" /> : this.props.children;
+      }
+    }
+
+    /** Fail the next load of the body once, then let it through; restored by the returned call. */
+    function failTheNextBodyLoad(): () => void {
+      vi.resetModules();
+      let failNextLoad = true;
+      vi.doMock('./grid-field/GridFieldWidget', async (importOriginal) => {
+        if (failNextLoad) {
+          failNextLoad = false;
+          throw new Error('Failed to fetch dynamically imported module: fields-grid');
+        }
+        return importOriginal();
+      });
+      const quiet = vi.spyOn(console, 'error').mockImplementation(() => {});
+      return () => {
+        quiet.mockRestore();
+        vi.doUnmock('./grid-field/GridFieldWidget');
+      };
+    }
+
+    async function expectFailedThenRecovered(Grid: React.ComponentType<React.ComponentProps<typeof GridFieldFace>>): Promise<void> {
+      const first = render(<Boundary><React.Suspense fallback={null}><Grid value={lines} onChange={() => {}} field={field} /></React.Suspense></Boundary>);
+      await screen.findByTestId('grid-load-failed');
+      first.unmount();
+
+      render(<Boundary><React.Suspense fallback={null}><Grid value={lines} onChange={() => {}} field={field} /></React.Suspense></Boundary>);
+      const cell = (await screen.findByTestId('line-items')).querySelector('input[aria-label="Description"]') as HTMLInputElement;
+      expect(cell.value).toBe('Widget');
+      expect(screen.queryByTestId('grid-load-failed')).toBeNull();
+    }
+
+    it('a later mount of GridField renders the grid once the body is reachable, with no reload', async () => {
+      const restore = failTheNextBodyLoad();
+      try {
+        const face = await import('./GridField');
+        await expectFailedThenRecovered(face.GridField);
+      } finally {
+        restore();
+      }
+    });
+
+    it('a later mount of the grid form-field widget renders the grid too', async () => {
+      const restore = failTheNextBodyLoad();
+      try {
+        const fields = await import('../index');
+        await expectFailedThenRecovered(fields.getLazyFieldWidget('grid'));
+      } finally {
+        restore();
+      }
+    });
+  });
+});
+
+/**
+ * objectstack#36552 — the line-item grid's follow-ups to objectstack#36043:
+ *
+ *  - every emptied multi-value cell writes `null`: the multi-record lookup
+ *    cell (it wrote `[]`) and the multi-person cell (right by reading, unpinned);
+ *  - a people or lookup column draws its names with one read per referenced
+ *    object, not one `findOne` per line;
+ *  - in list mode a stored empty list reads as the muted em dash.
+ */
+describe('line-item grid follow-ups: null on an emptied multi-value cell, one name read per object, a muted empty list (objectstack#36552)', () => {
+  const PRODUCTS = [
+    { id: 'p1', name: 'Widget' },
+    { id: 'p2', name: 'Gadget' },
+  ];
+  const USERS = Array.from({ length: 20 }, (_, i) => ({ id: `u${i + 1}`, name: `Person ${i + 1}` }));
+
+  function makeSource() {
+    const tables: Record<string, Record<string, unknown>[]> = { product: PRODUCTS, sys_user: USERS };
+    return {
+      find: vi.fn(async (object: string, params?: { $filter?: Record<string, any> }) => {
+        const rows = tables[object] ?? [];
+        const wanted = params?.$filter?.id?.$in as unknown[] | undefined;
+        const picked = wanted ? rows.filter((r) => wanted.includes(r.id)) : rows;
+        return { data: picked.map((r) => ({ ...r })), total: picked.length };
+      }),
+      findOne: vi.fn(async (object: string, id: string) => {
+        const row = (tables[object] ?? []).find((r) => r.id === id);
+        return row ? { ...row } : null;
+      }),
+    };
+  }
+  type Source = ReturnType<typeof makeSource>;
+
+  function Host({
+    ds,
+    initial,
+    columns,
+    onChange,
+    displayMode,
+    readonly,
+  }: {
+    ds?: Source;
+    initial: any[];
+    columns: any[];
+    onChange?: (v: any[]) => void;
+    displayMode?: 'list';
+    readonly?: boolean;
+  }) {
+    const [rows, setRows] = React.useState(initial);
+    const grid = (
+      <GridField
+        value={rows}
+        onChange={(v: any[]) => {
+          setRows(v);
+          onChange?.(v);
+        }}
+        field={{ columns } as never}
+        displayMode={displayMode}
+        readonly={readonly}
+      />
+    );
+    return ds ? <SchemaRendererContext.Provider value={{ dataSource: ds } as never}>{grid}</SchemaRendererContext.Provider> : grid;
+  }
+
+  /** The reads of `object` that reached the page's data source. */
+  const readsOf = (ds: Source, object: string) => ({
+    findOne: ds.findOne.mock.calls.filter((c) => c[0] === object).length,
+    find: ds.find.mock.calls.filter((c) => c[0] === object),
+  });
+
+  describe('an emptied multi-value cell writes null (objectstack#36552)', () => {
+    it('a multi-record lookup cell: un-picking its last record writes null, not []', async () => {
+      const onChange = vi.fn();
+      render(
+        <Host
+          ds={makeSource()}
+          initial={[{ products: ['p1'] }]}
+          columns={[{ name: 'products', label: 'Products', type: 'lookup', reference: 'product', multiple: true }]}
+          onChange={onChange}
+        />,
+      );
+      await act(async () => {
+        fireEvent.click(screen.getAllByTestId('lookup-trigger')[0]);
+      });
+      const option = await waitFor(() => {
+        const el = screen.getAllByRole('option').find((o) => (o.textContent ?? '').includes('Widget'));
+        if (!el) throw new Error('Widget not offered');
+        return el;
+      });
+      await act(async () => {
+        fireEvent.click(option);
+      });
+      expect(onChange).toHaveBeenCalled();
+      expect(onChange.mock.calls.at(-1)![0][0].products).toBeNull();
+    });
+
+    it("a multi-person cell: the picker's Clear writes null, not []", async () => {
+      const onChange = vi.fn();
+      render(
+        <Host
+          initial={[{ owners: ['u1', 'u2'] }]}
+          columns={[{ name: 'owners', label: 'Owners', type: 'user', multiple: true }]}
+          onChange={onChange}
+        />,
+      );
+      fireEvent.click(screen.getByRole('button', { name: 'Owners' }));
+      const panel = await screen.findByTestId('line-items-user-panel');
+      fireEvent.click(within(panel).getByTestId('lookup-in-cell-clear'));
+      await waitFor(() => expect(screen.queryByTestId('line-items-user-panel')).toBeNull());
+      expect(onChange).toHaveBeenCalled();
+      expect(onChange.mock.calls.at(-1)![0][0].owners).toBeNull();
+    });
+  });
+
+  describe('a people or lookup column reads its names once, not once per line (objectstack#36552)', () => {
+    const columns = [
+      { name: 'owner', label: 'Owner', type: 'user' },
+      { name: 'product', label: 'Product', type: 'lookup', reference: 'product' },
+    ];
+    // Twenty lines: twenty people, and two products named ten times each.
+    const lines = USERS.map((u, i) => ({ owner: u.id, product: PRODUCTS[i % 2].id }));
+
+    for (const mode of ['editable', 'read-only', 'list'] as const) {
+      it(`${mode}: one $in read of sys_user and one of the product, no read per line, every name drawn`, async () => {
+        const ds = makeSource();
+        render(
+          <Host ds={ds} initial={lines} columns={columns} readonly={mode === 'read-only'} displayMode={mode === 'list' ? 'list' : undefined} />,
+        );
+        for (const u of USERS) expect(await screen.findByText(u.name)).toBeTruthy();
+        await waitFor(() => expect(screen.getAllByText('Gadget')).toHaveLength(10));
+        expect(screen.getAllByText('Widget')).toHaveLength(10);
+
+        const people = readsOf(ds, 'sys_user');
+        expect(people.findOne).toBe(0);
+        expect(people.find).toHaveLength(1);
+        expect(people.find[0][1]).toMatchObject({ $filter: { id: { $in: USERS.map((u) => u.id) } } });
+
+        const products = readsOf(ds, 'product');
+        expect(products.findOne).toBe(0);
+        expect(products.find).toHaveLength(1);
+        expect(products.find[0][1]).toMatchObject({ $filter: { id: { $in: ['p1', 'p2'] } } });
+      });
+    }
+
+    it('a backend that answers with `_id` only: each line still draws its name from the one read', async () => {
+      const ds = makeSource();
+      ds.find.mockImplementation(async (object: string, params?: { $filter?: Record<string, any> }) => {
+        const wanted = (params?.$filter?.id?.$in ?? []) as unknown[];
+        const rows = object === 'product' ? PRODUCTS.filter((r) => wanted.includes(r.id)) : [];
+        return { data: rows.map(({ id, ...rest }) => ({ _id: id, ...rest })), total: rows.length };
+      });
+      render(<Host ds={ds} initial={lines.slice(0, 4).map(({ product }) => ({ product }))} columns={[columns[1]]} readonly />);
+      await waitFor(() => expect(screen.getAllByText('Widget')).toHaveLength(2));
+      expect(screen.getAllByText('Gadget')).toHaveLength(2);
+      expect(readsOf(ds, 'product').findOne).toBe(0);
+      expect(readsOf(ds, 'product').find).toHaveLength(1);
+    });
+  });
+
+  describe('list mode: a stored empty list reads as the muted em dash (objectstack#36552)', () => {
+    it('a multi-select and a tags cell holding [] draw — in the muted colour, as null does', () => {
+      render(
+        <Host
+          displayMode="list"
+          initial={[{ colors: [], labels: [], note: null }]}
+          columns={[
+            { name: 'colors', label: 'Colors', type: 'multiselect', options: [{ label: 'Red', value: 'red' }] },
+            { name: 'labels', label: 'Labels', type: 'tags' },
+            { name: 'note', label: 'Note', type: 'text' },
+          ]}
+        />,
+      );
+      const dashes = screen.getAllByText('—');
+      expect(dashes).toHaveLength(3);
+      for (const dash of dashes) expect(dash.className).toContain('text-muted-foreground');
+    });
   });
 });

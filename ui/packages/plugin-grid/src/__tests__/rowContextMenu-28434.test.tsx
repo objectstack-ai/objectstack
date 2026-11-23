@@ -322,10 +322,13 @@ describe('objectstack#28434 · the browser keeps its own menu where it is the us
     renderGrid({ schema: { editable: true } });
     await settle();
     const cell = plainCellOf('Acme');
+    // objectstack#36270 — an editable grid selects a cell first: a click
+    // selects it, and a double-click opens its editor.
     await userEvent.dblClick(cell);
-    await userEvent.click(cell);
     const input = await waitFor(() => {
-      const el = cell.querySelector('input, textarea');
+      const el = cell.hasAttribute('data-editing-cell')
+        ? cell.querySelector('input:not([data-slot="cell-type-catcher"]), textarea')
+        : null;
       expect(el).not.toBeNull();
       return el as HTMLElement;
     });

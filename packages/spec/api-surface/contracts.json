@@ -175,6 +175,7 @@
     "ICacheService (interface)",
     "ICloudBindingService (interface)",
     "IClusterService (interface)",
+    "ICommentDoorsService (interface)",
     "ICounter (interface)",
     "ICryptoProvider (interface)",
     "IDataDriver (interface)",

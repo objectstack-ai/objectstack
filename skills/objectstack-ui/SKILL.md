@@ -41,10 +41,10 @@ metadata:
 
 Two more: [List Views](#list-views), [Actions](#actions).
 
-1. **A long form stays `simple`**: collapse what is rarely filled and size it
-   with `columns` and `modalSize`. `tabbed` flags a required field only on its
-   own tab and overflows on a phone
-   ([Form Views](./rules/list-views.md#form-views)).
+1. **New and Edit are the object's fields and `fieldGroups`, never a form
+   view**: they load no `form` or `formViews.create`, which parse.
+   `showOnCreate: false` keeps a field off every create surface (refused
+   beside `required: true`): [Form Views](./rules/list-views.md#form-views).
 2. **A record entered with its line items is a parent field group naming the
    child** (`fieldGroups: [{ key: 'lines', label: 'Lines', relatedList:
    'invoice_line' }]`), before any custom page; without it nothing changes:
@@ -74,7 +74,7 @@ Two more: [List Views](#list-views), [Actions](#actions).
 | Authoring | In | Open first |
 |:--|:--|:--|
 | A list, board, calendar, gallery or gantt: columns, `filter`, quick filters, toolbar search, sorting, grouping | `src/views/*.view.ts` | [List Views](./rules/list-views.md) |
-| A form (`simple` / `tabbed` / `wizard`): width, columns and `sections`; master-detail (a parent with line items), a public form, field conditional rules | `src/views/*.view.ts` | [Form Views](./rules/list-views.md#form-views) |
+| New / Edit form (field groups, `showOnCreate`, line items, field rules); a named or public form | the object; `src/views/*.view.ts` | [Form Views](./rules/list-views.md#form-views) |
 | An app and its navigation; who sees or opens it; object nav, a `filters` slice or an interface page | `src/apps/*.app.ts` | [Navigation](./rules/navigation.md) |
 | What a record page shows: related lists, a slotted or full page; how a record opens | the object | [Record Page](./rules/record-page.md) |
 | A button or operation: `locations`, visibility, dialog and toast copy, params, new tab, the body's `ctx`, refusing by code (`refusals`) | `src/actions/*.action.ts`, `*.actions.ts` | [Actions](./rules/actions.md) |

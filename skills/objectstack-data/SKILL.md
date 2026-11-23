@@ -36,7 +36,7 @@ metadata:
 - **[Relationships](./rules/relationships.md)** — lookup vs master_detail, junction patterns, delete behaviors
 - **[Validation Rules](./rules/validation.md)** — All validation types, script inversion, severity levels
 - **[Index Strategy](./rules/indexing.md)** — btree/gin/gist/fulltext, composite indexes, partial indexes
-- **[Data Lifecycle & Retention](./rules/lifecycle.md)** — `lifecycle` classes (record/audit/telemetry/transient/event), retention/TTL/rotation/archive policies; ❗ append-only objects must declare one (distinct from lifecycle *hooks* below); plus the **save notice** a hook hands the saver (`ctx.notice`)
+- **[Data Lifecycle & Retention](./rules/lifecycle.md)** — `lifecycle` classes (record/audit/telemetry/transient/event), retention/TTL/rotation/archive policies (distinct from lifecycle *hooks* below); plus the **save notice** a hook hands the saver (`ctx.notice`)
 - **[Lifecycle Hooks](./references/data-hooks.md)** — the lifecycle events, the sandboxed `body` (ctx + capability contract; the inline `handler` is deprecated), registration, canonical patterns
 - **[Datasources & Federation](./rules/datasources.md)** — `defineDatasource`, external/federated objects (`remoteName`/`columnMap`), auto-connect gating, credentials; ❌ no `field.columnName` on external objects
 - **[Security & Access Control](./rules/security.md)** — permission sets, assignment rows, RLS policies, `secret` / `requiredPermissions`, `tenancy`, platform-global posture
@@ -51,8 +51,7 @@ metadata:
 
 ### Object Definition
 
-An **Object** is the fundamental data entity in ObjectStack. It maps to a
-database table and exposes automatic CRUD APIs. As JSON (in TypeScript the
+An **Object** maps to a database table and exposes automatic CRUD APIs. As JSON (in TypeScript the
 same literal goes inside `ObjectSchema.create({...})`):
 
 ```json
@@ -69,8 +68,7 @@ same literal goes inside `ObjectSchema.create({...})`):
 | `fields` | map    | keys in `snake_case` | Field definitions |
 | `sharingModel` | enum | one of the four below | Org-wide default record visibility (OWD). Zod marks it optional, but **a publish with no authored `sharingModel` is refused** with the 422 lint envelope `security-owd-unset` — absence is not a decision. Author it on every object |
 
-**`sharingModel` — the four canonical values** (ADR-0090 D4; legacy aliases
-removed):
+**`sharingModel` — the four canonical values:**
 
 | Value | Who can read / write |
 |:--|:--|
@@ -83,8 +81,8 @@ Choose the posture from the request, not by habit: a business object a team
 shares is `public_read_write` (`private` would hide every colleague's records
 from everyone else); `private` fits personal or sensitive data only its owner
 should see (HR reviews, pay, personal notes); `public_read` fits reference data
-everyone reads and the owner maintains (price lists, policies, notices). This
-axis is distinct from `ownership`, which decides whether `owner_id` exists at
+everyone reads and the owner maintains (price lists, policies, notices).
+`ownership` is a separate axis: whether `owner_id` exists at
 all (Relationship Patterns below).
 
 **Important optional properties:**
@@ -92,8 +90,8 @@ all (Relationship Patterns below).
 | Property | Default | Description |
 |:---------|:--------|:------------|
 | `label` | Auto from `name` | Human-readable singular label |
-| `pluralLabel` | — | Plural form (e.g., "Accounts") — on 31/31 objects in the reference apps; author it alongside `label` |
-| `icon` | — | Icon name for nav, list headers and lookup pickers — on 31/31 objects in the reference apps |
+| `pluralLabel` | — | Plural form; author it alongside `label` |
+| `icon` | — | Icon for nav, list headers and lookup pickers; give every object one |
 | `color` | `gray` | Tile colour, one of `gray` `blue` `teal` `green` `amber` `orange` `red` `pink` `purple` (no hex); the console draws `icon` white on it. Give every object one; avoid repeats in one app |
 | `highlightFields` | derived | Ordered field keys used as a record's compact face: the columns a **related list** renders on the parent's detail page, and what a lookup picker shows. Declare it on the CHILD object (see [Relationships](./rules/relationships.md)) |
 | `namespace` | — | **Not a schema key** — an unknown key is refused, so authoring it is a build error. Embed the prefix directly in `name` instead |
@@ -274,12 +272,11 @@ column by declaring `storage: { notNull: true }`. CLI details: see
 ### Naming Rules Summary
 
 `snake_case` object names and field keys, `camelCase` schema properties,
-lowercase option values — incorrect/correct examples: [rules/naming.md](./rules/naming.md).
+lowercase option values — examples: [rules/naming.md](./rules/naming.md).
 
 ### Field Type Selection
 
-The full table, per-type config and traps: [rules/field-types.md](./rules/field-types.md).
-From here, three to get right: credentials are `secret` (**encrypted-at-rest**, ADR-0100) —
+Three to get right here (the rest: [rules/field-types.md](./rules/field-types.md)): credentials are `secret` (**encrypted-at-rest**, ADR-0100) —
 never `password`, which on a generic object is **plaintext at rest**; `user` is the person
 picker; `formula` takes CEL in `expression` (a `{ dialect: 'cel', source }` envelope —
 `F\`...\`` in TypeScript; see **objectstack-formula**).
@@ -312,17 +309,12 @@ picker; `formula` takes CEL in `expression` (a `{ dialect: 'cel', source }` enve
 | Approval, review, routing, audit trail | not objects: an approval is a flow node (**objectstack-automation**) and its trail is platform history; model only the people it references (approver, reviewer), as `user` fields beside the owner |
 | Record owner | the platform's `owner_id` (`ownership: 'user'`, the default), also when the request says assignee, 负责人 or 处理人 — never a hand-added owner field, a second owner that owner-scoped visibility and "My records" views never read. A handler the request names apart from the owner is a `user` field that grants no access, with a label no other visible field carries, injected ones included: `owner_id` (Owner, 负责人), `created_by` (创建人), `updated_by` (更新人), `created_at` (创建时间), `updated_at` (更新时间). `ownership: 'none'` only for a shared catalog or a pure junction table |
 
-> **`multiple: true` lookup ≠ junction object.** A multi-value lookup is stored
-> and read as an **array of ids** on the record — reference elements positionally
-> (`{record.tags.0}` in flow values).
+> **`multiple: true` lookup ≠ junction object.** Its value is an **array of ids**:
+> reference elements positionally (`{record.tags.0}` in flow values).
 
 ### Validation Patterns
 
 **⚠️ Script validation is inverted:** Validation **fails** when expression is `true`.
-
-> On **insert**, an optional field omitted from the payload reads as `null` in a
-> validation predicate — so `record.due_date == null` matches an omitted field the
-> same as an explicit `null`. (On update, the prior record supplies it.)
 
 The **complete** set of types (`ValidationRuleSchema` discriminators): `script`,
 `state_machine`, `format`, `cross_field`, `json_schema`, `conditional`.
@@ -338,8 +330,7 @@ keys and values are option `value`s, never labels.
 
 ### Index Patterns
 
-**The whole declaration surface is `fields` / `unique` / `name`.** `unique`
-defaults to `false`; omit it when that is what you mean.
+**The whole declaration surface is `fields` / `unique` / `name`.**
 
 ```typescript
 indexes: [
@@ -359,12 +350,15 @@ database layer.
 ## Object Extension Model
 
 To add fields/validations/indexes to an object you do not own, author
-`defineObjectExtension({ extend, fields, fieldPatches, priority })` and register it on
+`defineObjectExtension({ extend, fields, fieldPatches, place, priority })` and register it on
 `defineStack({ objectExtensions: [...] })`. `priority` sets merge order (default
-`200`, range `0–999`); an extension can add but never remove, except that a new
-`label` without `pluralLabel` clears the base plural unless a tenant authored it (set both). ⛔ Not the same key
-as object-level `ownership` (the record-ownership enum
-`'user' | 'business_unit' | 'org' | 'none'`).
+`200`, `0–999`); an extension adds, never removes, except that a new
+`label` without `pluralLabel` clears the base plural unless a tenant authored it (set both). ⛔ `extend`
+is not object-level `ownership` (`'user' | 'business_unit' | 'org' | 'none'`).
+
+`place: [{ field: 'tax_id', group: 'basic', after: 'industry' }, { list: 'acme_contract', after: 'crm_opportunity' }]`
+puts the extension's own fields, groups (`{ group: { key, label }, after }`) and child lists
+after (or `before`) a named item, where the target declares `fieldGroups` / `relatedLists`.
 
 **Relabel a field the owner declares with `fieldPatches` — never by redeclaring
 it in `fields`**, which takes the field over whole and cuts it off from the
@@ -389,6 +383,11 @@ declaration. Every field the pair adds ends in `__c` (`region__c`). The suffix i
 reserved to the pair, so a `__c` field in any other package, or an unsuffixed
 field in a `.custom` extension, is refused at save, publish and install and by
 `os validate` / `os build`.
+Only the pair's extension may also write `fieldGroups` and `relatedLists`, shaped
+as on an object. A written key replaces that arrangement whole (the owner's and
+every `place`): an unlisted field shows after the last group, an unnamed tab
+still shows after the listed ones, and `{ list: 'crm_note', hidden: true }` hides
+a tab. Outside a `.custom` package both keys are refused at those doors: use `place`.
 Studio's **Add field** on a base object writes the same extension, as an
 `object_extension` item of the pair.
 

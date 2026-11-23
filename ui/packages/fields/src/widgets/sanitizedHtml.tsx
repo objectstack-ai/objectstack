@@ -47,7 +47,7 @@ import React from 'react';
 import { Fragment, jsx, jsxs } from 'react/jsx-runtime';
 import rehypeSanitize, { defaultSchema, type Options as Schema } from 'rehype-sanitize';
 import { h } from 'hastscript';
-import { toJsxRuntime } from 'hast-util-to-jsx-runtime';
+import { toJsxRuntime, type Components } from 'hast-util-to-jsx-runtime';
 
 type HastRoot = Parameters<ReturnType<typeof rehypeSanitize>>[0];
 type HastChild = HastRoot['children'][number];
@@ -149,13 +149,18 @@ function childrenOf(parent: ParentNode): HastChild[] {
  * as a plain string: React renders it as text, so the markup shows as source
  * but nothing in it is interpreted. A browser render always takes the
  * sanitizing path.
+ *
+ * `components` maps element names to the components the SANITIZED tree is
+ * drawn with — the grid cell face draws headings as bold lines with it. It is
+ * applied after the sanitiser has run, so it changes how a kept element is
+ * drawn and never what is kept.
  */
-export function renderSanitizedHtml(html: string): React.ReactNode {
+export function renderSanitizedHtml(html: string, components?: Partial<Components>): React.ReactNode {
   if (typeof DOMParser === 'undefined') return html;
   const parsed = new DOMParser().parseFromString(html, 'text/html');
   const tree = sanitizeTree({ type: 'root', children: childrenOf(parsed.body) });
   // `tableCellAlignToStyle: false` keeps a cell's `align` as the attribute
   // it was stored as, rather than rewriting it into a `style` the schema
   // would otherwise never let through.
-  return toJsxRuntime(tree, { Fragment, jsx, jsxs, tableCellAlignToStyle: false });
+  return toJsxRuntime(tree, { Fragment, jsx, jsxs, components, tableCellAlignToStyle: false });
 }

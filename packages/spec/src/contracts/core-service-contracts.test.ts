@@ -21,6 +21,7 @@ import type { ISecurityService } from './security-service';
 import type { IShareLinkService } from './share-link-service';
 import type { IWebhookService } from './webhook-service';
 import type { ITriggerApiService } from './trigger-api-service';
+import type { ICommentDoorsService } from './comment-doors-service';
 
 /** Compile-time assertion helper: fails to typecheck unless `T` is exactly `true`. */
 type Expect<T extends true> = T;
@@ -128,6 +129,10 @@ describe('slot → contract ledger beyond the enum', () => {
         expectTypeOf(getService('trigger-api')).toEqualTypeOf<ITriggerApiService | undefined>();
         expectTypeOf(getService('trigger-api')?.handleInboundHook)
             .toEqualTypeOf<ITriggerApiService['handleInboundHook']>();
+        // [#36469] The comment doors' slot, probed for its one member.
+        expectTypeOf(getService('comments')).toEqualTypeOf<ICommentDoorsService | undefined>();
+        expectTypeOf(getService('comments')?.handleCommentDoor)
+            .toEqualTypeOf<ICommentDoorsService['handleCommentDoor']>();
 
         // CONTROL: the same lookup resolves the slots that were already
         // mapped exactly as before.
@@ -139,7 +144,7 @@ describe('slot → contract ledger beyond the enum', () => {
 
     it('holds exactly the non-core slots whose contract is written', () => {
         const extra = [
-            'security', 'shareLinks', 'objectql', 'http.server', 'http-server', 'webhooks', 'trigger-api',
+            'security', 'shareLinks', 'objectql', 'http.server', 'http-server', 'webhooks', 'trigger-api', 'comments',
         ] as const;
         // Exact, not merely a subset: a key added to or dropped from the
         // non-core ledger without this list changing is a type error here.
@@ -152,7 +157,7 @@ describe('slot → contract ledger beyond the enum', () => {
             // into `CoreServiceContracts` and this assertion is what catches it.
             expect(slots.has(key), `'${key}' is a CoreServiceName — move its entry into CoreServiceContracts`).toBe(false);
         }
-        expect(extra).toHaveLength(7);
+        expect(extra).toHaveLength(8);
     });
 
     it('still resolves a slot with no written contract to unknown', () => {

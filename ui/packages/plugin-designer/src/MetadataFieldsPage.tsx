@@ -72,6 +72,8 @@ interface ServerFieldSchema {
   group?: string;
   externalId?: boolean;
   trackHistory?: boolean;
+  /** objectstack#36290 — the field's own old → new values switch; absent follows the platform. */
+  fieldHistory?: boolean;
   /**
    * Relationship target object name. The spec spells it `reference`
    * (objectui#6041) — `referenceTo` is refused BY NAME by `FieldSchema`, so
@@ -252,6 +254,7 @@ function toDesignerField(name: string, raw: ServerFieldSchema): DesignerFieldDef
     isSystem: raw.system,
     externalId: raw.externalId,
     trackHistory: raw.trackHistory,
+    fieldHistory: raw.fieldHistory,
     referenceTo: storedRelationshipTarget(raw),
   };
 }
@@ -467,6 +470,7 @@ function fromDesignerField(
     group: designed.group,
     externalId: designed.externalId,
     trackHistory: designed.trackHistory,
+    fieldHistory: designed.fieldHistory,
     reference: designed.referenceTo,
   };
 }

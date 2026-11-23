@@ -47,7 +47,9 @@ import { useObjectTranslation, useDisplayLocale } from '@object-ui/i18n';
 import type { ActivityFeedReading, PendingApprovalRequest } from '../hooks/sharedUserFeeds.js';
 import { useNavigationContext } from '../context/NavigationContext.js';
 import { useMetadata } from '../providers/MetadataProvider.js';
-import { resolveHostAppSegment } from '../utils/appRoute.js';
+import { isApprovalsInboxLink, resolveApprovalsHostSegment, resolveHostAppSegment } from '../utils/appRoute.js';
+import { useLastApp } from '../context/LastAppProvider.js';
+import { approvalQueueState } from '../views/approval-decision/approvalQueueAdvance.js';
 import { timeAgo } from '../utils/relativeTime.js';
 import { groupNotifications } from './inboxGrouping.js';
 import type { InboxNotification, NotificationGroup } from './inboxGrouping.js';
@@ -341,21 +343,43 @@ export function InboxPopover({
    */
   const hostAppSegment = resolveHostAppSegment(apps, currentAppName ?? params.appName);
 
+  /**
+   * The app the approvals drills and an approval notice open in
+   * (objectstack#35505): the current app, then the last used one
+   * (`LastAppProvider`), then the first — the same answer Home gives. Inside an
+   * app it is that app; the request page still prefers the app that lists the
+   * request's record.
+   */
+  const { lastApp } = useLastApp();
+  const approvalsHostSegment = resolveApprovalsHostSegment(apps, currentAppName ?? params.appName, lastApp);
+  const approvalsInboxPath = `/apps/${approvalsHostSegment}/system/approvals`;
+
   // Every drill below leaves the page from a popover button, which no page's
   // link guard sees, so it asks first while the page holds unsaved edits
   // (objectui#13253). The popover closes either way; Cancel keeps the page.
-  const leaveTo = (to: string) => confirmUnsavedLeave(() => navigate(to));
+  const leaveTo = (to: string, options?: { state?: unknown }) =>
+    confirmUnsavedLeave(() => (options ? navigate(to, options) : navigate(to)));
 
   const goToApprovals = () => {
     setOpen(false);
-    leaveTo(`/apps/${hostAppSegment}/system/approvals`);
+    leaveTo(approvalsInboxPath);
   };
 
   // One request in the Approvals inbox — the target Home's "My work" approvals
   // row opens. The panel stays open beside the page, as for a notification.
+  // It hands the page the pending queue the panel lists (objectstack#35505),
+  // so 「处理后打开下一条」 moves on through it.
   const openApproval = (r: PendingApprovalRequest) => {
     if (isMobile) setOpen(false);
-    leaveTo(`/apps/${hostAppSegment}/system/approvals?request=${encodeURIComponent(r.id)}`);
+    leaveTo(`${approvalsInboxPath}?request=${encodeURIComponent(r.id)}`, {
+      state: approvalQueueState(
+        {
+          pathname: approvalsInboxPath,
+          label: t('approvalsInbox.title', { defaultValue: 'Approvals Inbox' }),
+        },
+        shownApprovals.map((row) => row.id),
+      ),
+    });
   };
 
   const handleApprovalDecided = (r: PendingApprovalRequest) => {
@@ -413,14 +437,18 @@ export function InboxPopover({
   // lands in the page beside it and the next notification is one click away.
   // On a phone the panel covers the page, so it closes there.
   const handleNotificationClick = (n: InboxNotification) =>
-    openInboxNotification({ id: n.id, actionUrl: n.action_url }, hostAppSegment, {
-      markRead: onMarkRead,
-      goTo: leaveTo,
-      openInbox: goToAllNotifications,
-      beforeFollow: () => {
-        if (isMobile) setOpen(false);
+    openInboxNotification(
+      { id: n.id, actionUrl: n.action_url },
+      isApprovalsInboxLink(n.action_url) ? approvalsHostSegment : hostAppSegment,
+      {
+        markRead: onMarkRead,
+        goTo: leaveTo,
+        openInbox: goToAllNotifications,
+        beforeFollow: () => {
+          if (isMobile) setOpen(false);
+        },
       },
-    });
+    );
 
   const toggleGroup = (key: string) => {
     setExpandedGroups((prev) => {

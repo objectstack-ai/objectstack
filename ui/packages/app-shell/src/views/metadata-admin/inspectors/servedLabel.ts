@@ -33,8 +33,26 @@
  *    package ships for that language still answers ahead of it;
  *  - an item with no packaged base: the bundle answers ahead of the entry, so
  *    where the bundle has a translation for this language the box shows that
- *    translation again after save. The panel does not say so yet — an owed
- *    follow-up (L2 7078881267 S2), not a rule.
+ *    translation again after save.
+ *
+ * Neither order is changed here (ruling record 6631250894). The panel SAYS so
+ * instead, under the box ({@link servedLabelNote}, objectstack#36481), from
+ * the same two readings and nothing else:
+ *
+ *  - `kept`: the published label has its own entry for this language and the
+ *    server serves another text, so a translation answers ahead of any entry
+ *    written here. Certain, and shown before an edit too: it is why the box
+ *    reads that translation over the saved entry.
+ *  - `ifKept`: the published label has no entry for this language, the server
+ *    serves a translation of it, and the box holds an edit. Whether that
+ *    translation answers ahead of the edit depends on where it is kept (the
+ *    package's own bundle: no; the deployment's translations, or the paired
+ *    `.custom` package's: yes), which these two readings cannot tell apart, so
+ *    the note says it conditionally.
+ *
+ * ⛔ No second reading: the console cannot see which translation row answers
+ * (the server merges every bundle before it translates), so a Save writes no
+ * translation row; the note names where that translation is changed.
  *
  * ⛔ The served text is never written back as the source: an untouched box
  * commits nothing, and an edit lands in its own language's entry.
@@ -119,4 +137,41 @@ export function writtenLabel(
     return setLocalized({ default: current }, language, next) as I18nLabel;
   }
   return setLocalized(current, language, next) as I18nLabel;
+}
+
+/**
+ * Why the box's text is not what readers in this language are served — the
+ * note under the name or title box (objectstack#36481). See the header for the
+ * two kinds.
+ */
+export interface ServedLabelNote {
+  kind: 'kept' | 'ifKept';
+  /** The translation readers in this language are served now. */
+  served: string;
+}
+
+/** Whether `label` is a map carrying its own entry for `language` (the entry an edit replaces). */
+function hasOwnEntry(label: I18nLabel | undefined, language: string): boolean {
+  return !!label && typeof label === 'object' && clearLocalized(label, language) !== label;
+}
+
+/**
+ * The note the box owes in `language`, or `null` when what it holds is what
+ * readers there are served (or no served text is paired). Judged on the pair
+ * alone: the served text in this language against the published label's.
+ */
+export function servedLabelNote(
+  current: unknown,
+  pair: ServedLabelPair | null | undefined,
+  language: string,
+): ServedLabelNote | null {
+  if (!pair || pair.served === undefined) return null;
+  const served = pickLocalized(pair.served, language);
+  if (!served || served === pickLocalized(pair.authored, language)) return null;
+  if (pickLocalized(current, language) === served) return null;
+  if (hasOwnEntry(pair.authored, language)) return { kind: 'kept', served };
+  // A translation of a source with no entry here: worth saying only once the
+  // box holds an edit, the moment a Save could be lost behind it.
+  if (sameLabel(asLabel(current), pair.authored)) return null;
+  return { kind: 'ifKept', served };
 }

@@ -364,7 +364,9 @@ const COVERAGE_SOURCE: Record<ExpectedEntry['source'], CoverageIssue['source']> 
   // toasts (`flows.<f>.successMessage` / `.errorMessage`, #22507) and a refused
   // `end` node's message (`flows.<f>.refusals.<n>.message`, #22450), and an
   // approval flow's label with each `approval` node's step label
-  // (`flows.<f>.approvals.<n>.label`, #24916) — the author's own text, so
+  // (`flows.<f>.approvals.<n>.label`, #24916), and every other step a docs
+  // flow embed draws (`flows.<f>.nodes.<n>.label`, ruling 7076440876) — the
+  // author's own text, so
   // it keeps its own bucket and reports as `i18n/missing-flow` rather than
   // folding away with `--include-platform`. Until this bucket existed the
   // family could not report a screen-flow gap at all: HotCRM measured
@@ -461,7 +463,7 @@ const SOURCE_SURFACE: Record<CoverageIssue['source'], string> = {
   report: 'reports',
   picklist: 'picklists',
   page: 'pages',
-  flow: 'flow screens, approval steps, toasts and refusals',
+  flow: 'flow screens, steps, approval steps, toasts and refusals',
   hook: 'hook refusals',
   position: 'positions',
   permission: 'permission sets',

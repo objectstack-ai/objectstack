@@ -43,6 +43,7 @@ import type { IHttpServer } from './http-server';
 import type { IObjectQLEngine } from './objectql-engine';
 import type { IWebhookService } from './webhook-service';
 import type { ITriggerApiService } from './trigger-api-service';
+import type { ICommentDoorsService } from './comment-doors-service';
 
 /**
  * The evidenced slot → contract bindings.
@@ -197,6 +198,16 @@ export interface ServiceSlotContracts extends CoreServiceContracts {
      * leaving the slot `unknown`.
      */
     'trigger-api': ITriggerApiService;
+    /**
+     * {@link ICommentDoorsService}, registered by `@objectstack/plugin-audit`:
+     * `AuditPlugin` registers its comment doors under `comments`, typed as
+     * this contract, so the runtime dispatcher's `/comments` domain reaches
+     * them on a kernel with no `http.server` (#36469).
+     *
+     * Every member is optional, so a reader still probes for the one it calls
+     * (`handleCommentDoor`).
+     */
+    comments: ICommentDoorsService;
 }
 
 /**

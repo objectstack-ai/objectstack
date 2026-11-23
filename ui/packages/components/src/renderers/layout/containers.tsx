@@ -1921,13 +1921,34 @@ function recordPictureUrl(value: unknown): string | undefined {
 }
 
 /**
- * The buttons a phone's bottom action bar holds before its `⋯`
- * (objectstack#27058): on an editable record, Edit and the primary action
- * (objectstack#34595); else the primary action and one more. The record page v4
- * header row's cap is the primary, two more and the `⋯`; at 390 px the second
- * of those folds into the `⋯`.
+ * The buttons a phone's bottom action bar holds (objectstack#27058): the
+ * primary action and one more. A host button the record page puts in the bar
+ * (the edit state's Cancel and Save, a queue's Claim) takes a slot like any
+ * other; the record page's Edit is not one of them on a phone, it sits in the
+ * `⋯` (objectstack#36151; before, it took the first slot, objectstack#34595).
  */
 const PHONE_ACTION_BAR_BUTTONS = 2;
+
+/**
+ * The room a side preview keeps for the record's name before any button
+ * (objectstack#36201): sixteen characters, measured in the name's own `em`.
+ */
+const PREVIEW_NAME_MIN_EM = 16;
+
+/**
+ * Whether the record's name in the bar around `row` is cut short of the
+ * room a side preview keeps for it (objectstack#36201): it does not show in
+ * full, and it shows less than {@link PREVIEW_NAME_MIN_EM} characters' width.
+ */
+function previewNameSqueezed(row: HTMLElement): boolean {
+  const bar = row.closest('[data-record-top-bar]');
+  const name = bar?.querySelector<HTMLElement>('[data-record-header-title] h1');
+  if (!name) return false;
+  const shown = name.clientWidth;
+  if (name.scrollWidth <= shown + 1) return false;
+  const em = Number.parseFloat(getComputedStyle(name).fontSize) || 16;
+  return shown < PREVIEW_NAME_MIN_EM * em;
+}
 
 /**
  * The props of {@link PageHeaderActions}.
@@ -1947,14 +1968,15 @@ export interface PageHeaderActionsProps {
   placedActions?: unknown;
   /** The inline-button budget on desktop, as `page:header`'s `maxVisible`; an out-of-contract value falls back to the unset default, 3 on every header. In a record page's header bar (`fitWidth`) the number is an upper bound: what does not fit the bar's width folds as well. */
   maxVisible?: unknown;
-  /** The inline-button budget on mobile, as `page:header`'s `mobileMaxVisible`; an out-of-contract value falls back to the unset default: 2 in a record page's phone bottom bar (`face: 'bar'`, the host's Edit included), 1 on any other header. */
+  /** The inline-button budget on mobile, as `page:header`'s `mobileMaxVisible`; an out-of-contract value falls back to the unset default: 2 in a record page's phone bottom bar (`face: 'bar'`), 1 on any other header. */
   mobileMaxVisible?: unknown;
   /** Drawn in place of the action row when no action survives the gates. */
   emptySlot?: React.ReactNode;
   /**
    * The host's manual refresh (`RecordContext.refresh`), drawn as the first
    * item of the `⋯` menu (objectstack#27055, the v3 header: 「1 主 + 2 次 + ⋯
-   * （刷新收进 ⋯）」). With a refresh and no action, the row is the `⋯` alone.
+   * （刷新收进 ⋯）」), after only a host entry that declares `leadsMenu: true`
+   * (objectstack#36499). With a refresh and no action, the row is the `⋯` alone.
    */
   refresh?: PageHeaderRefreshItem;
   /**
@@ -1968,10 +1990,11 @@ export interface PageHeaderActionsProps {
    * Where the row is drawn (objectstack#27058). `row` (the default) is the
    * header's own action row. `bar` is a phone's bottom action bar: the primary
    * action, one more and the `⋯`, each button sharing the bar's width. In the
-   * bar the host's Edit takes a slot like any other button, but the first
-   * one (objectstack#34595): on an editable record the bar is Edit, the
-   * primary action, then the `⋯` holding the rest. The page's
-   * `mobileMaxVisible` still sets the budget when it declares one.
+   * bar a host button (the edit state's Cancel and Save) takes a slot like any
+   * other, ahead of the page's actions. The page's `mobileMaxVisible` still
+   * sets the budget when it declares one. When the phone host hands a top-bar
+   * slot (`PageHeaderPhoneContext.more`, objectstack#36151) the `⋯` is drawn
+   * there and the bar holds the buttons alone, nothing when there are none.
    */
   face?: 'row' | 'bar';
   /**
@@ -1991,6 +2014,17 @@ export interface PageHeaderActionsProps {
    * action set (objectstack#35997). The host's buttons (Edit) still never fold.
    */
   fitWidth?: boolean;
+  /**
+   * The row is a side preview's (objectstack#36149, objectstack#36201;
+   * `RecordHeaderBar.preview`): on the desktop it draws ONE labelled action,
+   * the page's primary, and every other button folds into the `⋯` in its
+   * band and order — the host's buttons too (Edit), except the buttons of the
+   * host's edit state (Cancel, Save), which are that state's. With
+   * {@link fitWidth} that one action folds as well while the record's name in
+   * the bar is cut below sixteen characters' width. No effect on a phone or
+   * in the bottom bar.
+   */
+  preview?: boolean;
 }
 
 /** The refresh entry of the header's `⋯` menu — see {@link PageHeaderActionsProps.refresh}. */
@@ -2025,6 +2059,7 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
   face = 'row',
   defaultMaxVisible,
   fitWidth = false,
+  preview = false,
 }) => {
   const ctx = useRecordContext();
   // objectstack#35853 — the width fold ({@link PageHeaderActionsProps.fitWidth}):
@@ -2037,10 +2072,11 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
   React.useLayoutEffect(() => {
     if (!fitWidth || !fitRow) return;
     const items = Array.from(fitRow.children) as HTMLElement[];
-    if (items.length < 2) return;
-    const wrapped = items[items.length - 1].offsetTop > items[0].offsetTop + 1;
+    const wrapped = items.length >= 2 && items[items.length - 1].offsetTop > items[0].offsetTop + 1;
+    // objectstack#36201 — a side preview's buttons give way to the name first.
+    const squeezed = preview && previewNameSqueezed(fitRow);
     const { inline, floor, key } = fitDrawn.current;
-    if (wrapped && inline > floor) setWidthCap({ key, cap: inline - 1 });
+    if ((wrapped || squeezed) && inline > floor) setWidthCap({ key, cap: inline - 1 });
   });
   React.useEffect(() => {
     if (!fitWidth || !fitRow || typeof ResizeObserver === 'undefined') return;
@@ -2060,6 +2096,9 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
   // the row is what that group draws — the record's row unchanged, or the
   // state's own levers with the record's actions in their `⋯`.
   const stateGroup = React.useContext(RecordHeaderStateContext)?.group;
+  // objectstack#36151 — the phone host's top-bar slot for the `⋯`: handed, the
+  // bottom bar keeps the action buttons alone. `undefined` = no such slot.
+  const phoneMoreSlot = React.useContext(PageHeaderPhoneContext)?.more;
   // Record-level inline-edit session (objectui#2572 item 4): while a shared
   // inline draft is active, header actions flagged `disableDuringInlineEdit`
   // (the host's Edit CTA) grey out so the classic form-edit surface can't be
@@ -2568,12 +2607,13 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
   // what draws the face.
   const pendingActionKeysRef = React.useRef<Set<string>>(new Set());
   const [pendingActionKeys, setPendingActionKeys] = React.useState<ReadonlySet<string>>(() => new Set());
-  const runHeaderAction = React.useCallback((action: any, key: string) => {
-    if (pendingActionKeysRef.current.has(key)) return;
+  /** Runs a header action; answers whether it is still running (a promise it returned is pending). */
+  const runHeaderAction = React.useCallback((action: any, key: string): boolean => {
+    if (pendingActionKeysRef.current.has(key)) return true;
     const outcome: unknown = typeof action.onClick === 'function'
       ? action.onClick()
       : dispatchHeaderAction(action);
-    if (!outcome || typeof (outcome as PromiseLike<unknown>).then !== 'function') return;
+    if (!outcome || typeof (outcome as PromiseLike<unknown>).then !== 'function') return false;
     pendingActionKeysRef.current.add(key);
     setPendingActionKeys(new Set(pendingActionKeysRef.current));
     const settle = () => {
@@ -2585,6 +2625,7 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
       // A failed click stays loud: the button is the promise's last holder.
       console.error(`[page:header] action "${String(action?.name ?? action?.id ?? key)}" failed`, err);
     });
+    return true;
   }, [dispatchHeaderAction]);
 
   const hasTrailing = trailing !== null && trailing !== undefined && trailing !== false;
@@ -2713,10 +2754,10 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
     // The phone's bottom bar (objectstack#27058) has room for its budget and
     // no more, so there every button queues for the same slots and what does
     // not fit folds into the `⋯`. The queue is the bar's order
-    // (objectstack#34595): the host's buttons first — on an editable record
-    // that is its Edit, the record's base action, which the row never folds
-    // either — then the primary, then the page's other actions. So the
-    // default budget of two draws [Edit][primary][⋯] however many actions
+    // (objectstack#34595): the host's buttons first — the edit state's Cancel
+    // and Save — then the primary, then the page's other actions. The record
+    // page hands its Edit to the `⋯` on a phone (objectstack#36151), so the
+    // default budget of two draws [primary][next action] however many actions
     // the page declares. A destructive host action is not a host button (see
     // `isHostButton`): it still always folds.
     const authoredButtons = ranked.filter((a) => !isHostAction(a));
@@ -2730,39 +2771,67 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
     // record (objectstack#35997) draws the full budget and the next layout
     // measures again. A string key, so an equal set never re-arms the fold.
     const fitsWidth = fitWidth && !barFace && !isMobile;
+    // objectstack#36201 — a side preview's row: one labelled action, the
+    // page's own primary (never a host button, never a destructive one), and
+    // only the host's edit state keeps its buttons (Cancel, Save) in the row.
+    // Its width fold goes down to none: the name keeps its room first.
+    const previewRow = preview && !barFace && !isMobile;
+    const previewPick: unknown[] = !previewRow || hostPrimary
+      ? []
+      : [
+          primaryCandidates.find((a) => !isHostAction(a) && a?.variant === 'primary')
+            ?? primaryCandidates.find((a) => !isHostAction(a)),
+        ].filter((a) => a !== undefined);
+    const rowButtons = previewRow ? previewPick : authoredButtons;
+    const rowMax = previewRow ? 1 : maxVisible;
     const fitKey = JSON.stringify([ctx?.recordId, authoredButtons.map((a: any) => a?.name || a?.id)]);
     const rowCap = widthCap?.key === fitKey ? widthCap.cap : null;
-    const rowBudget = fitsWidth && rowCap != null ? Math.min(maxVisible, rowCap) : maxVisible;
+    const rowBudget = fitsWidth && rowCap != null ? Math.min(rowMax, rowCap) : rowMax;
     if (fitsWidth) {
-      fitDrawn.current = { inline: Math.min(rowBudget, authoredButtons.length), floor: authoredButtons.length > 0 ? 1 : 0, key: fitKey };
+      fitDrawn.current = {
+        inline: Math.min(rowBudget, rowButtons.length),
+        floor: !previewRow && rowButtons.length > 0 ? 1 : 0,
+        key: fitKey,
+      };
     }
-    const inlineAuthored = new Set<unknown>(authoredButtons.slice(0, rowBudget));
+    const inlineAuthored = new Set<unknown>(rowButtons.slice(0, rowBudget));
+    // The host's buttons that keep the row: all of them on a page; in a side
+    // preview only those of the host's edit state.
+    const hostKeepsRow = (a: unknown): boolean => isHostButton(a) && (!previewRow || !!hostPrimary);
     const inlineActions = barFace
       ? barQueue.slice(0, maxVisible)
-      : ranked.filter((a) => isHostButton(a) || inlineAuthored.has(a));
+      : ranked.filter((a) => hostKeepsRow(a) || inlineAuthored.has(a));
     const foldedButtons = barFace
       ? [
           ...barQueue.slice(maxVisible),
           ...ranked.filter((a) => isHostAction(a) && !isHostButton(a)),
         ]
       : [
-          ...authoredButtons.slice(rowBudget),
-          ...ranked.filter((a) => isHostAction(a) && !isHostButton(a)),
+          ...ranked.filter((a) => !isHostAction(a) && !inlineAuthored.has(a)),
+          ...ranked.filter((a) => isHostAction(a) && !hostKeepsRow(a)),
         ];
     // The overflow reads as one list in three bands (objectui#12529): the
     // authored actions first, then the host's menu chrome (favorites /
     // Share), then every destructive entry last, set apart by a separator.
     // Each band keeps the `order` sort the memo above gave it.
+    //
+    // A host entry declaring `leadsMenu: true` opens the menu instead, ahead
+    // of the host's refresh (objectstack#36499: the record page's 「Configure
+    // tabs」 is the first item of its `⋯`). Only the host's own entries lead:
+    // an authored action's key is never a host key, so metadata cannot claim
+    // the place.
+    const leadsMenu = (a: any): boolean => isHostAction(a) && !isDestructiveAction(a) && a?.leadsMenu === true;
     const overflowPool = [...foldedButtons, ...menuOnly, ...moreOnlyActions];
+    const leadingActions = overflowPool.filter(leadsMenu);
     const overflowActions = [
       ...overflowPool.filter((a) => !isDestructiveAction(a) && !isHostAction(a)),
-      ...overflowPool.filter((a) => !isDestructiveAction(a) && isHostAction(a)),
+      ...overflowPool.filter((a) => !isDestructiveAction(a) && isHostAction(a) && !leadsMenu(a)),
       ...overflowPool.filter(isDestructiveAction),
     ];
     // The first destructive entry gets a separator above it, unless it opens
     // the menu (a separator under nothing sets nothing apart).
     const firstDestructiveIdx = overflowActions.findIndex(isDestructiveAction);
-    const useOverflow = overflowActions.length > 0 || !!refresh;
+    const useOverflow = overflowActions.length > 0 || leadingActions.length > 0 || !!refresh;
     // The trailing segment (objectstack#27241): the host's chrome after the
     // actions, a hairline between the two so the switches do not read as one
     // more action. `ml-auto`: when the row wraps (a narrow header), the
@@ -2856,13 +2925,13 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
       // record's name, though the record's fields edit in place. It now
       // draws outline there too; the page's own actions keep their pick and
       // their faces, and a host button DECLARING `variant: 'primary'` (the
-      // edit state's Save, objectstack#35816) stays filled. The phone's
-      // bottom bar keeps its filled Edit: there it is the bar's one big
-      // target.
+      // edit state's Save, objectstack#35816) stays filled. In the phone's
+      // bottom bar a host button that is the pick keeps the filled face.
       const hostEditPick =
         action === primaryAction && !barFace && isHostAction(action) && action?.variant !== 'primary';
+      // A side preview's one action is its row's primary (objectstack#36201).
       const variant =
-        action === primaryAction && !hostEditPick
+        (action === primaryAction && !hostEditPick) || previewPick.includes(action)
           ? 'default'
           : isDestructiveAction(action) ? 'destructive' : 'outline';
       const size = action.size || 'sm';
@@ -2967,8 +3036,11 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
           aria-labelledby={disabledReason ? labelId : undefined}
           aria-describedby={disabledReason ? reasonId : undefined}
           onSelect={(e) => {
-            e.preventDefault();
-            runHeaderAction(action, itemKey);
+            // A running entry keeps the menu open, its row busy, until it
+            // settles. One that finished on the click (an in-place change
+            // of the page, objectstack#36499) closes the menu, as Refresh
+            // does: kept open, it stayed over the page it had just changed.
+            if (runHeaderAction(action, itemKey)) e.preventDefault();
           }}
           className={cn(
             'gap-2',
@@ -2997,22 +3069,28 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
         <span>{refresh.label}</span>
       </DropdownMenuItem>
     ) : null;
-    const recordRowItems = (
-      <>
-        {inlineActions.map(renderButton)}
-        {useOverflow && (
+    // objectstack#36151 — with the host's top-bar slot the bar's `⋯` is drawn
+    // there, a ghost icon like the top bar's other controls, at touch size;
+    // the bar holds the buttons alone.
+    const moreInTopBar = barFace && phoneMoreSlot !== undefined;
+    const overflowMenu = useOverflow ? (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button
-                variant="outline"
+                variant={moreInTopBar ? 'ghost' : 'outline'}
                 size="sm"
-                className={barFace ? 'h-11 w-11 shrink-0 px-0' : 'gap-1 px-2 sm:h-7'}
+                className={moreInTopBar
+                  ? 'h-11 w-11 shrink-0 px-0 text-muted-foreground'
+                  : barFace ? 'h-11 w-11 shrink-0 px-0' : 'gap-1 px-2 sm:h-7'}
                 aria-label={tt('detail.moreActions', 'More actions')}
+                data-page-header-more={moreInTopBar ? 'top-bar' : undefined}
               >
                 <MoreHorizontal className="h-4 w-4" />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-44">
+              {leadingActions.map((action, idx) => renderMenuItem(action, idx, 'lead', -1))}
+              {leadingActions.length > 0 && (refreshItem || overflowActions.length > 0) && <DropdownMenuSeparator />}
               {refreshItem && (
                 <>
                   {refreshItem}
@@ -3022,7 +3100,13 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
               {overflowActions.map((action, idx) => renderMenuItem(action, idx, 'more', firstDestructiveIdx))}
             </DropdownMenuContent>
           </DropdownMenu>
-        )}
+    ) : null;
+    const recordRowItems = (
+      <>
+        {inlineActions.map(renderButton)}
+        {moreInTopBar
+          ? overflowMenu && phoneMoreSlot ? createPortal(overflowMenu, phoneMoreSlot) : null
+          : overflowMenu}
       </>
     );
     // A state group (objectstack#35593) takes the record's actions as `⋯`
@@ -3033,19 +3117,22 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
           const pool = [...ranked, ...menuOnly, ...moreOnlyActions];
           return [
             ...pool.filter((a) => !isDestructiveAction(a) && !isHostAction(a)),
-            ...pool.filter((a) => !isDestructiveAction(a) && isHostAction(a)),
+            ...pool.filter((a) => !isDestructiveAction(a) && isHostAction(a) && !leadsMenu(a)),
             ...pool.filter(isDestructiveAction),
           ];
         })()
       : [];
     const stateFirstDestructiveIdx = stateMenuActions.findIndex(isDestructiveAction);
+    const stateLeading = stateGroup ? [...ranked, ...menuOnly, ...moreOnlyActions].filter(leadsMenu) : [];
     const toolbarItems = (
       <>
         {stateGroup
           ? stateGroup({
               recordRow: recordRowItems,
-              recordMenuItems: stateMenuActions.length > 0 || refreshItem ? (
+              recordMenuItems: stateMenuActions.length > 0 || stateLeading.length > 0 || refreshItem ? (
                 <>
+                  {stateLeading.map((action, idx) => renderMenuItem(action, idx, 'state-lead', -1))}
+                  {stateLeading.length > 0 && (refreshItem || stateMenuActions.length > 0) && <DropdownMenuSeparator />}
                   {refreshItem}
                   {refreshItem && stateMenuActions.length > 0 && <DropdownMenuSeparator />}
                   {stateMenuActions.map((action, idx) => renderMenuItem(action, idx, 'state', stateFirstDestructiveIdx))}
@@ -3074,6 +3161,12 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
           {toolbarItems}
         </div>
       );
+    }
+    // objectstack#36151 — a bar whose `⋯` is in the top bar and that has no
+    // button to draw draws nothing, so the host's bar stays empty (and the
+    // host leaves it out); the `⋯` is still drawn in its slot.
+    if (moreInTopBar && !stateGroup && inlineActions.length === 0 && !hasTrailing) {
+      return recordRowItems;
     }
     return (
       <div
@@ -3250,6 +3343,8 @@ const PageHeaderRenderer: React.FC<any> = ({ schema, className, ...props }) => {
         // objectstack#35853 — the bar's budget is 3, as anywhere else, and
         // what does not fit the bar's width folds into the `⋯`.
         fitWidth={inBar}
+        // objectstack#36201 — a side preview's bar: one labelled action.
+        preview={inBar && !!headerBar?.preview}
       />
     );
     if (!phoneFace) return row;
@@ -3569,11 +3664,17 @@ const PageHeaderRenderer: React.FC<any> = ({ schema, className, ...props }) => {
     // (`text-base`). The navigation row names the object or the list, so the
     // chip does not repeat it. Nothing is drawn until the host's slots exist.
     if (drawsInBar && headerBar) {
+      // objectstack#36149 / objectstack#36201 — a side preview's name: no
+      // copy-id icon after it (the host's `⋯` offers the copy), and its full
+      // text as its tooltip, since the preview's width can cut it.
+      const preview = !!headerBar.preview;
       const title = headerBar.titleSlot ? createPortal(
         <span className="flex min-w-0 items-center gap-2" data-record-header-title="" {...headerAria}>
           <RecordTitleChip
             title={chipTitle}
-            titleNode={chipTitleNode}
+            titleNode={preview
+              ? <span title={chipTitle} data-record-header-name="">{chipTitleNode ?? chipTitle}</span>
+              : chipTitleNode}
             icon={recordPicture}
             // The bar's crumb names the object; a host note on it (how a
             // Setup record's object is managed) keeps its label beside the
@@ -3581,7 +3682,7 @@ const PageHeaderRenderer: React.FC<any> = ({ schema, className, ...props }) => {
             objectLabel={ctx?.objectLabelNote ? objectLabel : undefined}
             objectLabelNote={ctx?.objectLabelNote}
             resourceId={data?.id ? String(data.id) : undefined}
-            showCopyId={showCopyId}
+            showCopyId={showCopyId && !preview}
             isFavorite={ctx?.isFavorite}
             onToggleFavorite={
               ctx?.onToggleFavorite
@@ -3740,7 +3841,7 @@ ComponentRegistry.register('header', PageHeaderRenderer, {
     // `description` stays the only authoring-time expression of it, and spec
     // stays the sole judge of values.)
     { name: 'maxVisible', type: 'number', description: 'How many header actions render as inline buttons on desktop before the rest fold into the overflow menu. A positive integer, defaulting to 3 — the contract rejects 0 and fractional values. In a record page\'s header bar, actions that do not fit its width fold too, so a narrow drawer shows fewer. Two kinds of action are routed to the overflow menu regardless of this budget and never occupy an inline slot: an action whose locations declare record_more without record_header, and any action with component action:menu. The host\'s own buttons (the record page\'s Edit) take no slot and never fold. The first inline action, or the one declaring variant primary, is the one filled primary button; the others are outline buttons. The host\'s Edit is always an outline button: on a record with no header action of its own the row has no filled button. An action declaring variant danger is never the primary: inline it is a destructive button, and in the overflow menu it is a red row below a separator.' },
-    { name: 'mobileMaxVisible', type: 'number', description: 'The same inline-button budget on mobile viewports, where horizontal room is scarce. A positive integer, defaulting to 1, or 2 in a record page\'s bottom action bar on a phone, where the host\'s Edit counts as one; the desktop half is Max Inline Actions, and the overflow routing rules stated there apply unchanged.' },
+    { name: 'mobileMaxVisible', type: 'number', description: 'The same inline-button budget on mobile viewports, where horizontal room is scarce. A positive integer, defaulting to 1, or 2 in a record page\'s bottom action bar on a phone, which holds the page\'s actions (the record\'s Edit is in the top bar\'s overflow menu there); the desktop half is Max Inline Actions, and the overflow routing rules stated there apply unchanged.' },
   ],
 });
 

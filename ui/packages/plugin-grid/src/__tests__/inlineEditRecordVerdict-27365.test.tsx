@@ -131,7 +131,6 @@ function renderGrid(c: Case = {}) {
     type: 'object-grid',
     objectName: OBJECT,
     editable: true,
-    singleClickEdit: true,
     columns: [{ field: 'name', label: 'Name', type: 'text' }],
     data: { provider: 'value', items: [OWN_ROW, OTHER_ROW] },
     pageSize: 50,
@@ -140,6 +139,7 @@ function renderGrid(c: Case = {}) {
     <ActionProvider>
       <SchemaRendererProvider dataSource={dataSource} apiFetch={apiFetch}>
         <ObjectGrid
+          cellSelection={false}
           schema={schema}
           dataSource={dataSource}
           {...(kebab ? { onEdit: () => {}, onDelete: () => {} } : {})}

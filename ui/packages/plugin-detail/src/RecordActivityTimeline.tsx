@@ -29,7 +29,7 @@ import {
   AlertTriangle,
   RefreshCw,
 } from 'lucide-react';
-import type { FeedItem, FeedItemType, RecordActivityComponentProps, RecordSubscription } from '@object-ui/types';
+import type { FeedItem, FeedItemType, FieldChangeEntry, RecordActivityComponentProps, RecordSubscription } from '@object-ui/types';
 import type { FeedFilterMode } from '@objectstack/spec/data';
 import { ReactionPicker } from './ReactionPicker';
 import { ThreadedReplies } from './ThreadedReplies';
@@ -41,10 +41,12 @@ import { useDisplayLocale } from '@object-ui/i18n';
 import { useRecordContext, useSafeFieldLabel } from '@object-ui/react';
 import { useDetailTranslation } from './useDetailTranslation';
 import { CommentAuthorAvatar } from './CommentAuthorAvatar';
+import { FieldChangeItem } from './FieldChangeItem';
 import {
   foldFeedItems,
   readerRecordNameOf,
   withReaderRecordName,
+  type ActivityFieldChange,
   type ActivityTimelineEntry,
 } from './renderers/recordActivityFeed';
 import {
@@ -294,6 +296,25 @@ function streamChangedFieldsOf(item: FeedItem): string[] {
   if (item.changedFields && item.changedFields.length > 0) return item.changedFields;
   const changes = fieldHistoryOf(item)?.fieldChanges ?? item.fieldChanges ?? [];
   return changes.map((change) => change.field);
+}
+
+/**
+ * The changed fields an entry draws one line each for, under its row
+ * (objectstack#36290): its own changes (an activity row's served change code,
+ * or an audit entry's), else those of the audit entry paired onto it. `null`
+ * for an entry with none, and for the record's creation, which stays one row
+ * with its values beside the summary. Only what the server served is here:
+ * a field the reader may not read has no change in the list, so it draws no
+ * line.
+ */
+export function fieldChangeLinesOf(item: FeedItem): readonly FieldChangeEntry[] | null {
+  if (isRecordCreationEntry(item)) return null;
+  if (item.fieldChanges && item.fieldChanges.length > 0) return item.fieldChanges;
+  const paired = fieldHistoryOf(item);
+  if (paired && !isRecordCreationEntry(paired) && paired.fieldChanges && paired.fieldChanges.length > 0) {
+    return paired.fieldChanges;
+  }
+  return null;
 }
 
 /**
@@ -635,7 +656,7 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
   // A changed field's label: the object's field label where the page has the
   // object schema (`RecordContextProvider`), through the same translated
   // `fieldLabel` the record's own sections use; the machine name otherwise.
-  const { fieldLabel } = useSafeFieldLabel();
+  const { fieldLabel, fieldOptionLabel } = useSafeFieldLabel();
   const labelOfField = React.useCallback(
     (name: string): string => {
       const objectName = recordContext?.objectName;
@@ -645,6 +666,34 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
       return objectName ? fieldLabel(objectName, name, authored) : authored;
     },
     [recordContext?.objectName, recordContext?.objectSchema, fieldLabel],
+  );
+
+  // A changed field's side as this reader reads it, `null` when it is empty: an
+  // option by the field's option label in the reader's language (the served
+  // text, the label the writer read, when the field declares none for it), a
+  // yes/no by the pack's word, anything else by its served text.
+  const changeSideText = React.useCallback(
+    (change: FieldChangeEntry, side: 'old' | 'new'): string | null => {
+      const facts = change as ActivityFieldChange;
+      const option = side === 'old' ? facts.oldOption : facts.newOption;
+      const value = side === 'old' ? change.oldValue : change.newValue;
+      const display = side === 'old' ? change.oldDisplayValue : change.newDisplayValue;
+      if (option !== undefined) {
+        const objectName = recordContext?.objectName;
+        const options = (recordContext?.objectSchema as
+          | { fields?: Record<string, { options?: Array<{ value?: unknown; label?: unknown }> }> }
+          | undefined)?.fields?.[change.field]?.options;
+        const declared = Array.isArray(options) ? options.find((o) => String(o?.value) === option) : undefined;
+        const authored = typeof declared?.label === 'string' && declared.label ? declared.label : (display ?? option);
+        return objectName ? fieldOptionLabel(objectName, change.field, option, authored) : authored;
+      }
+      if (display !== undefined && display !== '') return display;
+      if (typeof value === 'boolean') {
+        return value ? t('common.yes', { defaultValue: 'Yes' }) : t('common.no', { defaultValue: 'No' });
+      }
+      return value === null || value === undefined || value === '' ? null : String(value);
+    },
+    [recordContext?.objectName, recordContext?.objectSchema, fieldOptionLabel, t],
   );
 
   const handleFilterChange = React.useCallback(
@@ -715,13 +764,14 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
   // same function when expanded (objectstack#25959).
   // objectstack#27055 — a system entry of the stream: ONE muted line, the
   // change itself, then who and when. 「状态 新建 → 已联系 · Dev Admin · 昨天」.
+  // Each change reads as its line under a row does (objectstack#36290): the
+  // same label, the same sides, the same word for empty.
   const changesText = (item: FeedItem): string =>
     (item.fieldChanges ?? [])
       .map((change) => {
-        const label = change.fieldLabel || labelOfField(change.field);
-        const from = change.oldDisplayValue ?? (change.oldValue == null ? '' : String(change.oldValue));
-        const to = change.newDisplayValue ?? (change.newValue == null ? '' : String(change.newValue));
-        return `${label} ${from || '—'} → ${to || '—'}`;
+        const label = t('detail.fieldChangeLabel', { field: change.fieldLabel || labelOfField(change.field) });
+        const empty = t('detail.fieldChangeEmpty');
+        return `${label} ${changeSideText(change, 'old') ?? empty} → ${changeSideText(change, 'new') ?? empty}`;
       })
       .join('; ');
   // An activity row paired with its audit entry (objectstack#30122) reads as
@@ -749,15 +799,15 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
     whatTitle: string,
     extra?: React.ReactNode,
     rowProps?: Record<string, string>,
+    below?: React.ReactNode,
   ): React.ReactNode => {
     const when = formatTimestamp(item.createdAt, t, displayLocale);
-    return (
+    const line = (
       <div
         key={item.id}
         className="flex min-h-[30px] items-center gap-2 text-sm leading-[18px]"
         title={`${item.actor} · ${whatTitle} · ${when}`}
-        data-stream-row=""
-        {...rowProps}
+        {...(below ? { 'data-stream-line': '' } : { 'data-stream-row': '', ...rowProps })}
       >
         <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
         <span className="max-w-[40%] shrink-0 truncate font-medium text-foreground" data-stream-actor="">
@@ -775,9 +825,62 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
         </span>
       </div>
     );
+    if (!below) return line;
+    // The row is its line and what sits under it: the row's markers go on the
+    // whole, so a reader of the row reads both.
+    return (
+      <div key={item.id} data-stream-row="" {...rowProps}>
+        {line}
+        {below}
+      </div>
+    );
   };
+  // One line per changed field under the entry's row (objectstack#36290):
+  // `Label: old → new`, an empty side as the pack's word for empty, each side
+  // cut to the line with a control that shows it in full. Indented to the
+  // row's text, past its icon.
+  const renderFieldChangeLines = (changes: readonly FieldChangeEntry[]): React.ReactNode => (
+    <ul className="flex flex-col gap-0.5 pb-1 pl-[22px]" data-stream-field-changes="">
+      {changes.map((change, index) => (
+        <li key={`${change.field}:${index}`} className="min-w-0" data-stream-field-change="">
+          <FieldChangeItem
+            change={change}
+            label={t('detail.fieldChangeLabel', { field: change.fieldLabel || labelOfField(change.field) })}
+            oldText={changeSideText(change, 'old')}
+            newText={changeSideText(change, 'new')}
+            emptyLabel={t('detail.fieldChangeEmpty')}
+            expandLabel={t('detail.fieldChangeExpand')}
+            collapseLabel={t('detail.fieldChangeCollapse')}
+          />
+        </li>
+      ))}
+    </ul>
+  );
   const renderSystemLine = (item: FeedItem): React.ReactNode => {
     const Icon = FEED_TYPE_ICONS[item.type] || Zap;
+    const lines = fieldChangeLinesOf(item);
+    if (lines) {
+      // The values are the lines under the row. An entry whose own changes
+      // they are names the fields it changed (its stored summary would say the
+      // lines again); an activity row carrying its paired audit entry keeps its
+      // own summary.
+      const what = lines === item.fieldChanges
+        ? t('detail.foldedUpdates', {
+            fields: Array.from(new Set(lines.map((change) => change.fieldLabel || labelOfField(change.field)))).join(
+              t('validation.formInvalidJoiner'),
+            ),
+          })
+        : systemLineText(item);
+      return streamRow(
+        item,
+        Icon,
+        <span className="text-foreground/80" data-stream-change="">{what}</span>,
+        what,
+        undefined,
+        { 'data-stream-system-row': '' },
+        renderFieldChangeLines(lines),
+      );
+    }
     const what = systemLineText(item);
     const paired = fieldHistoryOf(item);
     const diff = paired ? changesText(paired) : '';

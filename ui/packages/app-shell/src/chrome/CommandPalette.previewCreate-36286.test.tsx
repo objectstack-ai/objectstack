@@ -58,6 +58,12 @@ import { CommandPalette } from './CommandPalette';
 import { CommandPaletteProvider } from '../context/CommandPaletteProvider';
 import { paletteEnterAction } from './PaletteEnterHint';
 import { paletteCreateTargets, palettePrefillField, routeObjectName } from './paletteCreate';
+import { paletteCurrentPage } from './PaletteCurrentPage';
+import { FavoritesProvider, recordFavoriteItem, type FavoriteItem } from '../context/FavoritesProvider';
+import { RecentItemsProvider, useRecentItems } from '../context/RecentItemsProvider';
+import { useFavorites } from '../hooks/useFavorites';
+import { scopedKey } from '../context/UserStateAdapters';
+import { useObjectListFavorite } from '../layout/SidebarItemMenu';
 
 const CUSTOMER = 'customer_36286';
 const CONTACT = 'contact_36286';
@@ -329,5 +335,149 @@ describe('objectstack#36286 — which objects a create row offers', () => {
     expect(routeObjectName(`/apps/crm/${CUSTOMER}/record/C1`, names)).toBe(CUSTOMER);
     expect(routeObjectName('/apps/crm/dashboard/sales', names)).toBeUndefined();
     expect(routeObjectName('/apps/crm', names)).toBeUndefined();
+  });
+});
+
+describe('objectstack#36286 — the empty palette leads with the current page\'s entries', () => {
+  /** The list's own favorites entry, as `ObjectView`'s ⋮ More reads it. */
+  let listFavorite: { isFavorite: boolean } | null = null;
+  let favorites: FavoriteItem[] = [];
+  function PageProbe({ objectName }: { objectName?: string }) {
+    const list = useObjectListFavorite({ appSegment: 'crm', objectName, label: 'Customers' });
+    const stored = useFavorites().favorites;
+    React.useEffect(() => {
+      listFavorite = list;
+      favorites = stored;
+    });
+    return null;
+  }
+  /** The visit the record page records once its title is known. */
+  function SeedVisit({ recordId, title }: { recordId: string; title: string }) {
+    const { addRecentItem } = useRecentItems();
+    React.useEffect(() => {
+      addRecentItem({ id: `record:${CUSTOMER}:${recordId}`, label: title, href: `/apps/crm/${CUSTOMER}/record/${recordId}`, type: 'record' });
+    }, [addRecentItem, recordId, title]);
+    return null;
+  }
+
+  function mountPage(path: string, { visit, listObject }: { visit?: { recordId: string; title: string }; listObject?: string } = {}) {
+    const metadata = { ...metadataValue(), apps: [CRM] };
+    const ds = { find: vi.fn(async () => ({ data: [] })), findOne: vi.fn(async () => null) };
+    const view = render(
+      <MetadataCtx.Provider value={metadata as never}>
+        <FavoritesProvider>
+          <RecentItemsProvider>
+            <MemoryRouter initialEntries={[`${path}?palette=1`]}>
+              <CommandPaletteProvider>
+                <Probe />
+                <PageProbe objectName={listObject} />
+                {visit && <SeedVisit {...visit} />}
+                <CommandPalette apps={[CRM, SALES]} activeApp={CRM} objects={OBJECTS} onAppChange={() => {}} dataSource={ds} />
+              </CommandPaletteProvider>
+            </MemoryRouter>
+          </RecentItemsProvider>
+        </FavoritesProvider>
+      </MetadataCtx.Provider>,
+    );
+    return view;
+  }
+  const input = () => document.querySelector('[cmdk-input]') as HTMLInputElement | null;
+  const heading = () => document.querySelector('[cmdk-group-heading]')?.textContent;
+  const row = () => screen.queryByTestId('palette-current-page-favorite');
+
+  afterEach(() => {
+    localStorage.clear();
+    listFavorite = null;
+    favorites = [];
+  });
+
+  it('on an object\'s list: first, selected, and Enter runs the list\'s own favorites entry', async () => {
+    mountPage(`/apps/crm/${CUSTOMER}`, { listObject: CUSTOMER });
+    await waitFor(() => expect(row()).not.toBeNull());
+    expect(heading()).toBe('Current page');
+    expect(row()).toHaveTextContent('Add to favorites');
+    await waitFor(() => expect(selected()).toBe(`favorite-add current page list ${CUSTOMER}`));
+    expect(hint()).toBe('addFavorite');
+    expect(screen.getByTestId('palette-enter-hint')).toHaveTextContent('Add to favorites');
+    expect(listFavorite?.isFavorite).toBe(false);
+
+    press(input()!, 'Enter');
+    // The page's own entry turned on: the app lists the object, so its navigation entry is pinned.
+    await waitFor(() => expect(listFavorite?.isFavorite).toBe(true));
+    expect(favorites.map((f) => f.id)).toEqual(['nav:n_customer']);
+    expect(location()).toBe(`/apps/crm/${CUSTOMER}`);
+    expect(input()).toBeNull();
+  });
+
+  it('a named view of the list is the list too', async () => {
+    mountPage(`/apps/crm/${CUSTOMER}/view/all`);
+    await waitFor(() => expect(row()).not.toBeNull());
+    expect(row()?.getAttribute('data-value')).toBe(`favorite-add current page list ${CUSTOMER}`);
+  });
+
+  it('on a record page: Enter stars the record, named by the title it was visited under', async () => {
+    mountPage(`/apps/crm/${CUSTOMER}/record/C1`, { visit: { recordId: 'C1', title: 'Qingdao Haichen Foods' } });
+    await waitFor(() => expect(row()).not.toBeNull());
+    expect(heading()).toBe('Current page');
+    await waitFor(() => expect(selected()).toBe(`favorite-add current page record ${CUSTOMER}`));
+
+    press(input()!, 'Enter');
+    await waitFor(() => expect(favorites).toHaveLength(1));
+    // The very entry the record page's star toggles.
+    expect(favorites[0]).toMatchObject(recordFavoriteItem('crm', CUSTOMER, 'C1', 'Qingdao Haichen Foods'));
+  });
+
+  it('a record already starred offers to take the star off', async () => {
+    const starred = { ...recordFavoriteItem('crm', CUSTOMER, 'C1', 'Qingdao Haichen Foods'), favoritedAt: '2026-11-22T00:00:00.000Z' };
+    localStorage.setItem(scopedKey('objectui-favorites', 'u1'), JSON.stringify([starred]));
+    mountPage(`/apps/crm/${CUSTOMER}/record/C1`);
+    await waitFor(() => expect(row()).toHaveTextContent('Remove from favorites'));
+    await waitFor(() => expect(hint()).toBe('removeFavorite'));
+    press(input()!, 'Enter');
+    await waitFor(() => expect(favorites).toEqual([]));
+  });
+
+  it('typing takes the group away; clearing brings it back', async () => {
+    mountPage(`/apps/crm/${CUSTOMER}`);
+    await waitFor(() => expect(row()).not.toBeNull());
+    type(input()!, 'zhang');
+    await waitFor(() => expect(row()).toBeNull());
+    type(input()!, '');
+    await waitFor(() => expect(row()).not.toBeNull());
+  });
+
+  it.each([
+    ['the app\'s landing', '/apps/crm'],
+    ['a dashboard', '/apps/crm/dashboard/sales'],
+    ['the full search page', '/apps/crm/search'],
+    ['a create form', `/apps/crm/${CUSTOMER}/new`],
+    ['an object the console does not serve', '/apps/crm/no_such_object'],
+  ])('CONTROL: no group on %s', async (_name, path) => {
+    mountPage(path);
+    await waitFor(() => expect(input()).not.toBeNull());
+    await act(async () => {});
+    expect(row()).toBeNull();
+    expect(screen.queryByText('Current page')).toBeNull();
+  });
+
+  it('reads the page off the address, by the console\'s own route table', () => {
+    const served = (name: string) => name === CUSTOMER;
+    expect(paletteCurrentPage(`/apps/crm/${CUSTOMER}`, served)).toEqual({ kind: 'list', appSegment: 'crm', objectName: CUSTOMER });
+    expect(paletteCurrentPage(`/apps/crm/${CUSTOMER}/view/all`, served)?.kind).toBe('list');
+    expect(paletteCurrentPage(`/apps/crm/${CUSTOMER}/record/C1/page/print`, served)).toEqual({
+      kind: 'record',
+      appSegment: 'crm',
+      objectName: CUSTOMER,
+      recordId: 'C1',
+    });
+    expect(paletteCurrentPage(`/apps/crm/${CUSTOMER}/record/C1/edit`, served)).toBeNull();
+    expect(paletteCurrentPage(`/apps/crm/${CUSTOMER}/data`, served)).toBeNull();
+    expect(paletteCurrentPage('/apps/crm/reports', served)).toBeNull();
+    expect(paletteCurrentPage('/home', served)).toBeNull();
+  });
+
+  it('the footer reads the favorites rows\' kind', () => {
+    expect(paletteEnterAction(`favorite-add current page list ${CUSTOMER}`)).toBe('addFavorite');
+    expect(paletteEnterAction(`favorite-remove current page record ${CUSTOMER}`)).toBe('removeFavorite');
   });
 });

@@ -1120,6 +1120,12 @@ const DISPATCHER_DOMAINS = {
   // ADR-0131 D6), split out of `security.ts` beside the gate it calls. Every
   // answer it gives goes through `deps.success` / `deps.error`.
   'catalog-activation.ts': { handBuilt: 0 },
+  // [#36469] The `/comments` bridge: the comments member's own JSON `Response`
+  // is handed back as `result` (the `/webhooks/redeliver` shape), and every
+  // answer the domain makes itself — the ordinary miss for a shape it does not
+  // serve, the two 501s, the sanitised 500s — goes through `deps.routeNotFound`
+  // / `deps.error`.
+  'comments.ts': { handBuilt: 0 },
   'data.ts': { handBuilt: 0 },
   // [#25785] Was 0. Kind 1: the translation bundle is the one `/i18n` face a
   // browser revalidates. Its `200` must carry `ETag` and `Cache-Control` and

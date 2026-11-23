@@ -129,7 +129,8 @@ describe('objectui#12480 — a rich-content cell keeps the one-line row', () => 
     const rowClamps = Array.from(row9.querySelectorAll<HTMLElement>('[data-testid="grid-rich-text-one-line"]'));
     expect(rowClamps).toHaveLength(3);
     await waitFor(() => expect(rowClamps[0].querySelector('ul')).not.toBeNull());
-    expect(rowClamps[1].querySelector('h2')).not.toBeNull();
+    // The html cell draws its heading in the cell face (objectstack#36452).
+    expect(rowClamps[1].querySelector('[data-html-heading]')).toHaveTextContent('Title');
     expect(rowClamps[2].querySelector('strong')).not.toBeNull();
 
     // Over-correction control: the plain text column is not clamped this way.
@@ -187,6 +188,36 @@ describe('objectstack#36344 — a markdown heading in a grid cell does not draw 
     expect(face).toHaveAttribute('data-markdown-face', 'cell');
     expect(face).toHaveClass('text-[length:inherit]', 'leading-[inherit]');
     expect(face.querySelector('[data-markdown-heading]')).toHaveTextContent('Heading');
+    expect(document.querySelector('tbody h1, tbody h2, tbody h3, tbody h4, tbody h5, tbody h6')).toBeNull();
+  });
+});
+
+/**
+ * objectstack#36452 — the same face for an `html` and a `richtext` cell. Both
+ * read through the html renderer, which drew a stored `<h1>` as a heading
+ * element, so the row grew to the heading's line height. jsdom does no layout;
+ * the pixel readings are in the PR.
+ */
+describe('objectstack#36452 — an html or richtext heading in a grid cell does not draw at heading size', () => {
+  it('html and richtext cells whose value starts with a heading draw no heading element in the body', async () => {
+    desktop();
+    const rows = [
+      { id: 'r1', name: 'Account 1', notes_html: '<h1>Heading</h1><p>Body</p>' },
+      { id: 'r2', name: 'Account 2', notes_rich: '<h1>Heading</h1><p>Body</p>' },
+      { id: 'r3', name: 'Account 3' },
+    ];
+    renderGrid(rows, [
+      { field: 'name', label: 'Name' },
+      { field: 'notes_html', label: 'Html' },
+      { field: 'notes_rich', label: 'Rich' },
+    ]);
+    await waitFor(() => expect(screen.getByText('Account 3')).toBeInTheDocument());
+    for (const row of bodyRows().slice(0, 2) as HTMLElement[]) {
+      const face = row.querySelector<HTMLElement>('[data-testid="grid-rich-text-one-line"] [data-html-face]');
+      expect(face).toHaveAttribute('data-html-face', 'cell');
+      expect(face).toHaveClass('text-[length:inherit]', 'leading-[inherit]');
+      expect(face?.querySelector('[data-html-heading]')).toHaveTextContent('Heading');
+    }
     expect(document.querySelector('tbody h1, tbody h2, tbody h3, tbody h4, tbody h5, tbody h6')).toBeNull();
   });
 });

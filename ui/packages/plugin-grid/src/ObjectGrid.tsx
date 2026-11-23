@@ -267,6 +267,14 @@ export interface ObjectGridComponentProps extends ObjectGridExternalPaginationPr
    */
   residentSummaryRow?: boolean;
   /**
+   * [objectstack#36149] Draw the phone's card rows (the record's title, one
+   * summary line and its status chip) at any window width: a host whose box
+   * is a phone's width on a desktop window, the side preview's child tab.
+   * Absent: card rows below the 768 px app breakpoint only, as before. A HOST
+   * prop, never authored metadata.
+   */
+  cardFace?: boolean;
+  /**
    * [objectstack#35702] The host's own wording of the record count that leads
    * the footer row (the list's 「42 records」, plural forms included). Absent ⇒
    * the grid's 「Count 42」.
@@ -393,8 +401,10 @@ export interface ObjectGridComponentProps extends ObjectGridExternalPaginationPr
    * cell and never edits it or opens the record; double-click, Enter, F2 or
    * typing edits (Space included); each committed cell saves at once and
    * updates its own row (objectstack#35685); a cell that opens no editor says
-   * why (`describeCell`, `./objectGridCellFacts`). Absent ⇒ the table keeps
-   * its click-to-edit / click-to-open behaviour, as before this prop existed.
+   * why (`describeCell`, `./objectGridCellFacts`). `false` ⇒ the table keeps
+   * its staged click-to-edit / click-to-open behaviour. Absent ⇒ the model
+   * follows whether the grid renders editable (objectstack#36270): an editable
+   * grid is select-first, a read-only one keeps click-to-open.
    *
    * A RUNTIME prop, never authored metadata: the host decides it, and no node
    * key reaches it.
@@ -489,6 +499,18 @@ export interface ObjectGridComponentProps extends ObjectGridExternalPaginationPr
   bulkChangeOwnerOffered?: boolean;
   onCellChange?: (rowIndex: number, columnKey: string, newValue: any, row: any) => void;
   onRowSave?: (rowIndex: number, changes: Record<string, any>, row: any) => void | Promise<void>;
+  /**
+   * Called by "Save All" with every staged row — the staged model only.
+   *
+   * @deprecated objectstack#36270 — a grid that renders editable is
+   * select-first by default, and there each edited cell saves on its own
+   * through {@link ObjectGridComponentProps.onRowSave} (or, when the host
+   * passes none, the grid's own write through `dataSource.update`). No
+   * "Save All" is drawn, so this handler is never called and no runtime
+   * notice says so.
+   * Pass `onRowSave` to own the write per cell, or pass `cellSelection={false}`
+   * to keep the staged model, where this handler is still called.
+   */
   onBatchSave?: (changes: Array<{ rowIndex: number; changes: Record<string, any>; row: any }>) => void | Promise<void>;
   onRowSelect?: (selectedRows: any[]) => void;
   onAddRecord?: () => void;
@@ -619,7 +641,9 @@ function getDataConfig(schema: ObjectGridSchema): ViewData | null {
  *   - the card's speculative list (`pagination`, `manualPagination`, `rowCount`,
  *     `frozenColumns`, `singleClickEdit`, `selectionResetKey`,
  *     `disableInnerScroll`, `borderless`) was already declared then, and is
- *     still declared now;
+ *     still declared now (`singleClickEdit` here is the TABLE's own key, which
+ *     `ObjectGrid` now always passes as `true`; the `object-grid` key of that
+ *     name is retired, objectstack#36270);
  *   - the two keys that survived that diff, `renderCellEditor` and
  *     `cellClassName`, were DECLARED by `bf97b98c8` (maintainer ruling
  *     2026-08-30) on three surfaces:
@@ -887,7 +911,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   rowAdornment,
   recordLinkAdornment,
   rowOpensRecord,
-  cellSelection: hostCellSelection,
+  cellSelection: cellSelectionProp,
   headerMenu: hostHeaderMenu,
   onColumnHide: hostOnColumnHide,
   openReferencedRecord,
@@ -926,6 +950,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   showRowNumbers: hostShowRowNumbers,
   onColumnSummaryChange,
   residentSummaryRow,
+  cardFace: hostCardFace,
   summaryRowLead,
   onColumnSummaryPick,
   summaryPickFields,
@@ -952,7 +977,10 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   // `error`). Read only by the undeclared-name warning's readiness below, so a
   // failed read reports the names instead of dropping them silently.
   const [objectSchemaReadFailed, setObjectSchemaReadFailed] = useState(false);
-  const [useCardView, setUseCardView] = useState(false);
+  const [windowCardView, setUseCardView] = useState(false);
+  // The card rows: a phone's window, or a host that asks for them
+  // (`cardFace`, objectstack#36149).
+  const useCardView = windowCardView || !!hostCardFace;
   // objectstack#28434 — the record URL a row links to, for its context menu's
   // "Open in new tab": the host's own builder, the one `LinkCell` draws the
   // row's anchor from.
@@ -1262,6 +1290,16 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   // ListView's — verified rather than assumed, since "it's already gated
   // upstream" is exactly the reasoning that left this door open to begin with.
   const inlineEditable = (schema.editable ?? false) && objectInlineEditable;
+
+  // objectstack#36270 — the select-first cell model is how a grid that renders
+  // editable edits, wherever it is drawn: a click selects a cell, double-click,
+  // Enter or typing opens its editor, and each committed cell saves on its own,
+  // with no pending-changes bar and no "Save All" (the model `ListView` and the
+  // related tab ask for by name, objectstack#35684). A grid that renders
+  // read-only keeps click-to-open. A host's own `cellSelection` wins either
+  // way: `true` asks for the model on a read-only grid too (`ListView`), and
+  // `false` keeps the staged click-to-edit on an editable one.
+  const hostCellSelection = cellSelectionProp ?? inlineEditable;
 
   // When the consumer wired onEdit/onDelete callbacks but the view schema
   // omits an explicit `operations` block, default to allowing those actions.
@@ -3828,7 +3866,11 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
           );
         }
       : undefined,
-    singleClickEdit: schema.singleClickEdit ?? true,
+    // objectstack#36270 — the authored `singleClickEdit` is retired: a grid
+    // that renders editable is select-first, where a click selects. A host
+    // that keeps the staged model (`cellSelection={false}`) edits on a single
+    // click, the retired key's default.
+    singleClickEdit: true,
     // objectui#11068 — arrow-key cell navigation on the WAI-ARIA grid pattern:
     // the data cells become ONE roving Tab stop that the arrows move (the
     // behaviour is `data-table`'s, documented on `DataTableSchema`). The
@@ -3836,8 +3878,11 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     // is the one this grid renders — `inlineEditable`, the authored key AND the
     // viewer's write verdict (#5143), the same value handed down above. So a
     // grid that renders read-only keeps every cell its own Tab stop unless the
-    // author writes `true`, and an explicit `false` turns it off on an editable
-    // grid. Not an alias fallback: the right side is the key's own default.
+    // author writes `true`. On an editable grid the select-first model is the
+    // default (objectstack#36270) and data-table keeps navigation on under it
+    // (`keyboardNavigationProp || selectFirst`), so an explicit `false` only
+    // turns it off where the host keeps the staged model (`cellSelection={false}`).
+    // Not an alias fallback: the right side is the key's own default.
     keyboardNavigation: schema.keyboardNavigation ?? inlineEditable,
     // The save bar sits on the grid's own inset, as its cells do (`px-3`),
     // never flush against the view's edge (objectstack-ai/objectstack#27520).

@@ -77,9 +77,14 @@ describe('editFormLockedByState (objectstack#32756)', () => {
     warn.mockRestore();
   });
 
-  it('is false when the edit form view declares an inline child collection', () => {
-    const withSubforms = { ...locked, form: { subforms: [{ object: 'claim_line' }] } };
+  it('is false when the field groups place an inline child collection (objectstack-ai/objectstack#36425)', () => {
+    const withSubforms = { ...locked, groupSubforms: [{ childObject: 'claim_line' }] };
     expect(editFormLockedByState(withSubforms, APPROVED)).toBe(false);
+  });
+
+  it('CONTROL: an internal form view\'s subforms are not read', () => {
+    const withFormSubforms = { ...locked, form: { subforms: [{ childObject: 'claim_line' }] } } as any;
+    expect(editFormLockedByState(withFormSubforms, APPROVED)).toBe(true);
   });
 
   it('is false with no object definition or no record', () => {

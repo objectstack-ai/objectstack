@@ -130,12 +130,16 @@ describe('ObjectExtensionSchema.place — the guide\'s example', () => {
   });
 });
 
-describe('ObjectExtensionSchema — the owner\'s arrangement keys point to place', () => {
+describe('ObjectExtensionSchema — the arrangement keys are the paired `.custom` package\'s', () => {
+  // [ADR-0146 D10] `fieldGroups` and `relatedLists` are keys of the shape, written by the
+  // paired `.custom` package's extension (`object-extension-arrangement.test.ts`). Which
+  // package an extension belongs to is not in its body, so this parse cannot refuse another
+  // writer: the server does, prescribing `place` (`judgeExtensionArrangement`,
+  // `@objectstack/metadata-protocol`), at publish, `os validate` / `os build` and install.
   it.each([
     ['fieldGroups', [{ key: 'tax', label: 'Tax' }]],
     ['relatedLists', ['contract']],
-  ])('refuses `%s` with a prescription naming `place`', (key, value) => {
-    const messages = issuesAt(extension({ [key]: value }), '');
-    expect(messages.join('\n')).toContain('`place`');
+  ])('`%s` parses: the shape carries it, the server judges who wrote it', (key, value) => {
+    expect(ObjectExtensionSchema.safeParse(extension({ [key]: value })).success).toBe(true);
   });
 });

@@ -634,16 +634,24 @@ describe("runAs:'user' resolves the triggering user's grants at run setup (#3356
     }
   });
 
-  it("does NOT resolve for runAs:'system' (explicit elevation wins)", async () => {
+  it("runAs:'system' takes no grants (explicit elevation wins): run setup asks only the user's membership set and rung, once", async () => {
     const engine = new AutomationEngine(makeLogger());
     const { data, calls } = fakeData();
     registerCrudNodes(engine, ctxWith(data));
     engine.registerFlow('sys', allOpsFlow('sys', 'system'));
     let called = 0;
-    engine.setUserGrantsResolver(() => { called++; return { positions: [], permissions: [] }; });
+    engine.setUserGrantsResolver(() => {
+      called++;
+      return { positions: ['org_member'], permissions: ['member_default'], accessible_org_ids: ['org_1'], posture: 'MEMBER' };
+    });
     await engine.execute('sys', { userId: 'u1' });
-    expect(called).toBe(0);
-    for (const c of calls) expect(c.ctx.isSystem).toBe(true);
+    expect(called).toBe(1);
+    for (const c of calls) {
+      expect(c.ctx.isSystem).toBe(true);
+      expect(c.ctx.permissions).toBeUndefined();
+      expect(c.ctx.positions).toBeUndefined();
+      expect(c.ctx.accessible_org_ids).toEqual(['org_1']);
+    }
   });
 
   it('does NOT resolve when there is no trigger user — the run is refused instead (#3760)', async () => {

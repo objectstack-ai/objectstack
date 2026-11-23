@@ -1084,6 +1084,8 @@ describe('the ledger-sourced population and its baseline bite', () => {
       // [#22576] classified by `approval-action-token`.
       'dispatcher-domain:route-ledger.ts:/approvals/act',
       'dispatcher-domain:route-ledger.ts:/automation',
+      // [#36469] classified by `comment-doors-session`.
+      'dispatcher-domain:route-ledger.ts:/comments',
       // [ADR-0138 D2, second slice] classified by `anonymous-deny-data`.
       'dispatcher-domain:route-ledger.ts:/data',
       // [#22432] classified by `anonymous-deny-i18n`.

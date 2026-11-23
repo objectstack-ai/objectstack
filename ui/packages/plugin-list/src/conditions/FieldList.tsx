@@ -103,6 +103,12 @@ export interface FieldListProps {
   testId?: string;
   className?: string;
   autoFocus?: boolean;
+  /**
+   * objectstack#36370 — a list of things that are not fields (a board's
+   * lanes): its own heading over the hidden rows, and no field-type icon.
+   */
+  hiddenTitle?: string;
+  typeIcons?: boolean;
 }
 
 const TYPE_ICONS: Readonly<Record<string, LucideIcon>> = {
@@ -213,6 +219,8 @@ export function FieldList({
   testId = 'field-list',
   className,
   autoFocus = true,
+  hiddenTitle,
+  typeIcons = true,
 }: FieldListProps) {
   const { t } = useListConditionTranslation();
   const [query, setQuery] = React.useState('');
@@ -296,7 +304,7 @@ export function FieldList({
     const neighbour = (step: -1 | 1) => sections.shown[sections.shown.findIndex((f) => f.value === field.value) + step];
     const body = (
       <>
-        <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" data-testid={`${testId}-icon`} />
+        {typeIcons && <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" data-testid={`${testId}-icon`} />}
         <span className="truncate">{label}</span>
         {managing && section === 'hidden' && onShow && (
           <EyeOff className="ml-auto h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
@@ -464,7 +472,7 @@ export function FieldList({
       )}
       <div id={`${testId}-options`} role={managing ? undefined : 'listbox'} className="max-h-72 overflow-y-auto p-1">
         {section(shownMatches, t('listConditions.fieldList.shown'), 'shown')}
-        {section(hiddenMatches, t('listConditions.fieldList.hidden'), 'hidden')}
+        {section(hiddenMatches, hiddenTitle ?? t('listConditions.fieldList.hidden'), 'hidden')}
         {section(addableMatches, t('listConditions.fieldList.addable'), 'addable')}
         {empty && (
           <p className="px-2 py-3 text-center text-xs text-muted-foreground" data-testid={`${testId}-empty`}>

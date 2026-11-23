@@ -25,6 +25,7 @@ import {
   FILTER_SELECT_LIKE_TYPES,
 } from '@object-ui/types';
 import { jsonColumnFilterOperators } from '@object-ui/components';
+import { isPlainRecord } from '@objectstack/spec/data';
 import type { FilterBuilderRow, FilterBuilderRowGroup, SortItem } from '@object-ui/components';
 
 /** One field the condition controls can name: the shape the list's field lists already carry. */
@@ -174,6 +175,11 @@ export function sortWording(type: string | undefined): SortWording {
 /** One condition of the view's own filter, read for a locked chip. */
 export interface ViewConditionChip {
   key: string;
+  /**
+   * The field the condition compares. A condition on a related record's field
+   * (the nested-relation form) names it as a path, `<lookup>.<field>`; see
+   * {@link relationPathOf}.
+   */
   field?: string;
   operator?: string;
   value?: unknown;
@@ -186,15 +192,23 @@ export interface ViewConditionChip {
  *
  * A rule `{ field, operator, value }` and a triple `[field, op, value]` are
  * one chip each; an any-of group `{ or: [...] }` is one chip of its members.
- * Any other shape (a MongoDB-style object, an `and` / `or` AST node) is one
- * chip with no field, which the row names as the view's condition: what the
- * view filters is still shown to be there, and nothing is guessed about it.
+ *
+ * A condition on one field of a related record, the nested-relation form
+ * `{ <lookup>: { <field>: V } }`, is one chip on the path `<lookup>.<field>`
+ * that equals `V`. It reaches the list either as written, or lowered to the
+ * triple `[<lookup>, '=', { <field>: V }]` (`toFilterNode` lowers the nested
+ * form to that equality, and a drill's base filter arrives that way).
+ *
+ * Any other shape (a MongoDB-style object, an `and` / `or` AST node, a nested
+ * condition on more than one field or with an operator) is one chip with no
+ * field, which the row names as the view's condition: what the view filters
+ * is still shown to be there, and nothing is guessed about it.
  */
 export function readViewConditions(filter: unknown): ViewConditionChip[] {
   if (filter === null || filter === undefined) return [];
   if (!Array.isArray(filter)) {
     if (typeof filter === 'object' && Object.keys(filter as object).length === 0) return [];
-    return [{ key: 'view-0' }];
+    return [nestedRelationChip(filter, 'view-0') ?? { key: 'view-0' }];
   }
   if (filter.length === 0) return [];
   // A single triple at the top: `['status', '=', 'open']`.
@@ -216,19 +230,61 @@ function isTriple(value: unknown): value is [string, string, unknown] {
 }
 
 function tripleChip(triple: [string, string, unknown], key: string): ViewConditionChip {
+  // A record in the value slot is a condition on the related record, never a
+  // value to print: the nested-relation equality, or a field-less chip.
+  if (isPlainRecord(triple[2])) {
+    return (triple[1] === '=' ? relationChip(triple[0], triple[2], key) : undefined) ?? { key };
+  }
   return { key, field: triple[0], operator: triple[1], value: triple[2] };
 }
 
 function readElement(element: unknown, key: string): ViewConditionChip {
   if (isTriple(element)) return tripleChip(element, key);
-  if (element && typeof element === 'object' && !Array.isArray(element)) {
-    const record = element as Record<string, unknown>;
+  if (isPlainRecord(element)) {
+    const record = element;
     if (Array.isArray(record.or)) {
       return { key, anyOf: record.or.map((member, i) => readElement(member, `${key}-${i}`)) };
     }
     if (typeof record.field === 'string' && typeof record.operator === 'string') {
       return { key, field: record.field, operator: record.operator, value: record.value };
     }
+    const nested = nestedRelationChip(record, key);
+    if (nested) return nested;
   }
   return { key };
+}
+
+/** The nested-relation form as written, `{ <lookup>: { <field>: V } }`, as a path chip. */
+function nestedRelationChip(filter: unknown, key: string): ViewConditionChip | undefined {
+  if (!isPlainRecord(filter)) return undefined;
+  const entries = Object.entries(filter);
+  if (entries.length !== 1) return undefined;
+  const [lookup, condition] = entries[0];
+  return isPlainRecord(condition) ? relationChip(lookup, condition, key) : undefined;
+}
+
+/**
+ * One related field equal to one value, `{ <field>: V }` under `<lookup>`, as
+ * the chip on `<lookup>.<field>`. Anything else (several fields, an operator
+ * map, a deeper relation, a `$` key) is not read: `undefined`.
+ */
+function relationChip(lookup: string, condition: Record<string, unknown>, key: string): ViewConditionChip | undefined {
+  if (lookup.startsWith('$') || lookup.includes('.')) return undefined;
+  const entries = Object.entries(condition);
+  if (entries.length !== 1) return undefined;
+  const [field, value] = entries[0];
+  if (field.startsWith('$') || field.includes('.')) return undefined;
+  if (typeof value !== 'string' && typeof value !== 'number' && typeof value !== 'boolean') return undefined;
+  return { key, field: `${lookup}.${field}`, operator: 'equals', value };
+}
+
+/**
+ * A chip field that names a related record's field, `<lookup>.<field>`, split
+ * into its two names; `undefined` for a field of the list's own object.
+ */
+export function relationPathOf(field: string | undefined): { lookup: string; field: string } | undefined {
+  if (!field) return undefined;
+  const at = field.indexOf('.');
+  if (at <= 0 || at === field.length - 1 || field.indexOf('.', at + 1) !== -1) return undefined;
+  return { lookup: field.slice(0, at), field: field.slice(at + 1) };
 }

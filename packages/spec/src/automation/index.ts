@@ -6,6 +6,16 @@ export * from './flow.zod';
 // registration refusal reads the same table the flow parse refuses with.
 export { FLOW_RESERVED_NODE_TYPES, reservedFlowNodeTypeRefusal } from './flow-reserved-node-types';
 export * from './region-slots';
+// [ADR-0051 §3.4] The node types a business-altitude flow drawing folds away,
+// read by the docs viewer and by the i18n walk that demands the drawn labels;
+// and which out-edges of a decision that viewer lists as its branches.
+export {
+  FLOW_TECHNICAL_NODE_TYPES,
+  isFlowTechnicalNodeType,
+  FLOW_DECISION_DEFAULT_BRANCH_LABEL,
+  flowDecisionEdgeBranch,
+  type FlowDecisionEdgeBranch,
+} from './flow-altitude';
 export * from './control-flow.zod';
 export * from './io-node-config.zod';
 export * from './builtin-node-config.zod';

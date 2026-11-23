@@ -61,7 +61,7 @@ function RegionNode({
 }) {
   const tone = nodeTone(node.type);
   const interactive = !!onSelect;
-  // An approval step's label in the viewer's language, where the package translates it.
+  // The step's label in the viewer's language, where the package translates it (`stepLabel`, any node type).
   const labelTranslations = useFlowLabelTranslationsContext();
   return (
     <div

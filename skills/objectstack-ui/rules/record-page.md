@@ -20,8 +20,8 @@ every related list is a tab, then `sys_attachment` (with `enable.files`),
 lists show, in order (unlisted approvals and the stream still follow): "tasks
 first" lists every tab to keep, `'task'` first; leaving out `'sys_attachment'`
 drops attachments. `{ list, label, columns }` (child field names) titles one list;
-a built-in is a bare name. A child list another package adds is hidden by a
-`relatedLists` that does not name it (no package places its own list yet). On the
+a built-in is a bare name. A child list another package adds still shows, after
+the named lists or where its extension's `place` puts it (objectstack-data). On the
 CHILD's reference field `relatedList: false` hides the list and
 `relatedListFilter` (Query-DSL) is AND-composed with the parent condition;
 rows follow the child's default list view `sort`. Only when asked for a child

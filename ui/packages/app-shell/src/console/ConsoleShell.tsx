@@ -581,6 +581,10 @@ export function AuthenticatedRoute({
 /**
  * SystemRedirect — forwards legacy /system/* URLs to the canonical
  * /apps/setup/system/* location so bookmarks keep working. Suffix is preserved.
+ * The approvals inbox does not stay there: `AppContent` moves
+ * `/apps/setup/system/approvals` on to the reader's own app
+ * (`setupAliasApprovals.ts`, objectstack#35505), so the server's approval
+ * links land in an app rather than in Setup.
  *
  * #3611 — the bare `/system` bookmark used to land on the bare `/apps/setup`,
  * which on a zero-app deployment is the "No Apps Configured" empty state's own

@@ -50,7 +50,9 @@
  * else `defaultLocale`), and every label is read off that definition. So a
  * reader in a deployment's declared `sourceLocale` reads the labels as
  * authored, never the `defaultLocale` row `t()` falls back to; `t()` carries
- * the `messages.*` templates.
+ * the `messages.*` templates. The object's packaged base rides along as
+ * `packagedBase`, as `/meta` hands it, so a renamed packaged object is named
+ * by its rename, never by the bundle's translation of its old label.
  *
  * The writer composes the stored sentence through the SAME function
  * ({@link composeActivitySummary}), bound to the write locale, with the English
@@ -382,12 +384,16 @@ function negotiatedLocale(service: ActivitySummaryI18n, requested: string): stri
  * [#35384] Its `getObjectDef` answers the definition `translateObject` put in
  * the reader's language ({@link labelTranslationOf}), built once per object
  * for the read; the authored definition when there is nothing to translate
- * with, or the translator throws.
+ * with, or the translator throws. `getPackagedObjectBase` answers the object's
+ * packaged base, handed to the translator as `packagedBase`, as `/meta` hands
+ * it ({@link packagedObjectBaseReader}); absent, or answering nothing, no
+ * baseline is known and the catalog applies.
  */
 export function readerSummaryLocale(
   service: ActivitySummaryI18n | undefined,
   requested: unknown,
   getObjectDef: (objectName: string) => any,
+  getPackagedObjectBase?: (objectName: string) => unknown,
 ): ActivitySummaryLocale | undefined {
   if (typeof requested !== 'string' || requested.length === 0) return undefined;
   if (!service || typeof service.t !== 'function') return undefined;
@@ -402,7 +408,11 @@ export function readerSummaryLocale(
       try {
         translation ??= { value: labelTranslationOf(service, locale) };
         if (translation.value) {
-          served = translateObject({ ...def, name: objectName }, translation.value.bundle, translation.value.options);
+          const packagedBase = getPackagedObjectBase?.(objectName);
+          served = translateObject({ ...def, name: objectName }, translation.value.bundle, {
+            ...translation.value.options,
+            ...(packagedBase && typeof packagedBase === 'object' ? { packagedBase } : {}),
+          });
         }
       } catch {
         // A misbehaving i18n service must not fail the read: the authored labels stand.
@@ -488,6 +498,28 @@ export interface ActivitySummaryEngine {
     options?: { object?: string },
   ): void;
   getSchema?(objectName: string): unknown;
+  /** [#35384] The schema registry, read for an object's packaged base ({@link packagedObjectBaseReader}). */
+  registry?: unknown;
+}
+
+/**
+ * [#35384] An object's packaged (code-layer) declaration, off `engine`'s
+ * schema registry (`registry.getPackagedObjectBase(name)`): the body the
+ * metadata protocol's `getPackagedObjectBase` reads (`engine.registry`), the
+ * accessor `/meta` hands `translateObject` as `packagedBase` through
+ * (`packagedObjectBaseOf` in rest). `undefined` — no baseline known — for a
+ * registry without the accessor, or one that throws.
+ */
+function packagedObjectBaseReader(engine: ActivitySummaryEngine): (objectName: string) => unknown {
+  return (objectName) => {
+    const registry = engine.registry as { getPackagedObjectBase?: (name: string) => unknown } | undefined;
+    if (!registry || typeof registry.getPackagedObjectBase !== 'function') return undefined;
+    try {
+      return registry.getPackagedObjectBase(objectName);
+    } catch {
+      return undefined;
+    }
+  };
 }
 
 /**
@@ -511,13 +543,14 @@ export function installActivitySummaryLocale(
       return null;
     }
   };
+  const getPackagedObjectBase = packagedObjectBaseReader(engine);
   engine.registerMiddleware(
     async (ctx, next) => {
       if (ctx.operation !== 'find' && ctx.operation !== 'findOne') return next();
       const added = ensureJudgedColumnsProjected(ctx.ast, ['summary'], ['metadata']);
       await next();
       const list = (Array.isArray(ctx.result) ? ctx.result : ctx.result ? [ctx.result] : []) as unknown[];
-      const locale = readerSummaryLocale(getI18n(), ctx.context?.locale, getObjectDef);
+      const locale = readerSummaryLocale(getI18n(), ctx.context?.locale, getObjectDef, getPackagedObjectBase);
       const stripCode = !!ctx.context && !ctx.context.isSystem;
       for (const row of list) {
         if (!isRecord(row)) continue;

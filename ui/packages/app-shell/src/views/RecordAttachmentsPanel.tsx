@@ -46,6 +46,7 @@ import { createAuthenticatedFetch, useAuth } from '@object-ui/auth';
 import { useDisplayLocale } from '@object-ui/i18n';
 import { useObjectTranslation, isPermissionError, classifyLoadError } from '@object-ui/react';
 import { usePermissions } from '@object-ui/permissions';
+import { FilePreviewDialog, type FilePreviewItem } from '@object-ui/fields';
 import { resolveAffordance, type ConfirmationHandler } from '@object-ui/core';
 import {
   NATIVE_FILE_MAX_BYTES,
@@ -77,13 +78,18 @@ import { RECORD_PAGE_ATTACHMENT_ROWS, recordAttachmentsCountField } from './reco
  * Downloads fetch a short-lived signed URL from `/storage/files/:fileId/url`
  * with the console's Bearer token (the endpoint requires an authenticated
  * session for attachments-scope files, objectstack-ai/objectstack#2970), then open it.
+ * A row's NAME opens the file in the page (`FilePreviewDialog`, objectstack#36442),
+ * which mints its link through that same door, so a reader the download refuses
+ * is refused the same way; the download itself stays in the row's ⋮ menu.
  *
  * The list read expands `uploaded_by` (the record page payload's attachments
  * part does the same), so the uploader column names whoever uploaded a row
  * when the reader may read that user; a reader who may not gets the bare id
  * back and the column stays blank, never showing the id. A row's Rename sends
  * the new name to the attachment rename door, `PATCH /api/v1/attachments/:id`
- * (service-storage), which renames by the attachment delete rule.
+ * (service-storage), which renames by the attachment delete rule. The caller's
+ * own upload is deleted through the removal door at the same path
+ * (`DELETE /api/v1/attachments/:id`); anyone else's through the data door.
  */
 
 interface AttachmentRow {
@@ -97,14 +103,23 @@ interface AttachmentRow {
   uploaded_by?: string | { id?: string; name?: string | null } | null;
 }
 
+/** The uploader's user id of `row`, whether the read expanded `uploaded_by` or not. */
+function uploaderIdOf(row: AttachmentRow): string | null | undefined {
+  const by = row.uploaded_by;
+  return by && typeof by === 'object' ? by.id : by;
+}
+
 export interface RecordAttachmentsPanelProps {
   objectName: string;
   recordId: string;
-  /** ObjectUI DataSource (the list read and the delete go through the generic data path; the attach does not). */
+  /**
+   * ObjectUI DataSource (the list read and the delete of another user's upload go through the generic data
+   * path; the attach, the caller's own delete and every rename do not).
+   */
   dataSource: any;
   /**
    * Current user id. The server stamps `uploaded_by` from the session; the panel no longer sends it.
-   * It names the caller's own rows for Rename when no auth provider supplies the user.
+   * It names the caller's own rows for Delete and Rename when no auth provider supplies the user.
    */
   currentUserId?: string | null;
   className?: string;
@@ -276,13 +291,18 @@ export const RecordAttachmentsPanel: React.FC<RecordAttachmentsPanelProps> = ({
    * pending, and its retention reclaims it); hiding Upload spares the user
    * that round trip.
    *
-   * Delete needs `delete`, and being the uploader does not change that. The
-   * server asks the object grant first (plugin-security's CRUD check wraps the
-   * engine's `beforeDelete` hooks), and only a caller who passes it reaches
-   * service-storage's uploader-or-parent-editor rule. So `uploaded_by` cannot
-   * open a delete the grant withholds, and it cannot close one the grant
-   * allows either: the parent-editor half of that rule is not visible here.
-   * No row's `uploaded_by` enters this verdict for that reason.
+   * Delete has two doors, and the row's `uploaded_by` picks one. The caller's
+   * OWN upload goes through the storage service's removal door
+   * (`DELETE /api/v1/attachments/:id`), which reads the row as the caller and
+   * admits exactly the row whose `uploaded_by` names them, with no delete
+   * grant (the member grant carries read and create only). Anyone else's row
+   * goes through the data door, where the object grant is asked first
+   * (plugin-security's CRUD check wraps the engine's `beforeDelete` hooks) and
+   * only a caller who passes it reaches service-storage's
+   * uploader-or-parent-editor rule; the removal door refuses such a row even
+   * to a holder of the delete grant. So a row offers Delete when the caller
+   * uploaded it, or when the caller holds `delete` — the parent-editor half of
+   * the data door's rule is not visible here, and its refusal is mapped below.
    *
    * No flash while permissions load: the console's `MePermissionsProvider`
    * renders none of its children until it holds an answer, and a refetch keeps
@@ -299,25 +319,21 @@ export const RecordAttachmentsPanel: React.FC<RecordAttachmentsPanelProps> = ({
   const canUpload = resolveAffordance('attachmentUpload', { objectName: 'sys_attachment', perms }).allowed;
   const canDelete = resolveAffordance('attachmentDelete', { objectName: 'sys_attachment', perms }).allowed;
   /**
-   * Rename follows the rename door's two limbs, behind the delete grant. The
-   * door renames the caller's OWN upload with no edit grant (written on their
-   * behalf, as the removal door removes), and writes anyone else's rename
-   * through the engine as the caller, which needs the edit grant on
-   * `sys_attachment`. So a row offers Rename to a reader who may delete and
-   * either uploaded it or holds the edit grant; offering it elsewhere would
-   * offer a door the server refuses. The edit-grant half is the map's
-   * `attachmentRename` row; with no provider mounted it reads open, and the
-   * server remains the gate.
+   * Rename follows the rename door's two limbs. The door renames the caller's
+   * OWN upload with no grant beyond read (written on their behalf, as the
+   * removal door removes), and writes anyone else's rename through the engine
+   * as the caller, which needs the edit grant on `sys_attachment`. So a row
+   * offers Rename when the caller uploaded it, or when the caller holds the
+   * edit grant; offering it elsewhere would offer a door the server refuses.
+   * The edit-grant half is the map's `attachmentRename` row; with no provider
+   * mounted it reads open, and the server remains the gate.
    */
   const canEditAttachments = resolveAffordance('attachmentRename', { objectName: 'sys_attachment', perms }).allowed;
   const callerId = user?.id ?? currentUserId ?? null;
-  const canRename = (row: AttachmentRow): boolean => {
-    if (!canDelete) return false;
-    if (canEditAttachments) return true;
-    const by = row.uploaded_by;
-    const uploaderId = by && typeof by === 'object' ? by.id : by;
-    return !!callerId && uploaderId === callerId;
-  };
+  /** Whether the caller uploaded `row`: the comparison both storage doors make on `uploaded_by`. */
+  const isOwnUpload = (row: AttachmentRow): boolean => !!callerId && uploaderIdOf(row) === callerId;
+  const canDeleteRow = (row: AttachmentRow): boolean => isOwnUpload(row) || canDelete;
+  const canRename = (row: AttachmentRow): boolean => isOwnUpload(row) || canEditAttachments;
 
   // Same base-URL convention as RecordDetailView's raw API fetches: the
   // Vite dev console proxies same-origin `/api` unless VITE_SERVER_URL
@@ -515,6 +531,30 @@ export const RecordAttachmentsPanel: React.FC<RecordAttachmentsPanelProps> = ({
     [],
   );
 
+  /**
+   * One call to the storage service's attachment doors at
+   * `/api/v1/attachments/:id` (the removal door's `DELETE`, the rename door's
+   * `PATCH`): answers the response body's `data`, or throws the door's refusal
+   * as an error carrying its `code`, for `friendlyError` to name.
+   */
+  const callAttachmentDoor = React.useCallback(
+    async (rowId: string, init: RequestInit, failure: string): Promise<Record<string, unknown> | undefined> => {
+      const res = await authFetch(`${baseUrl}/api/v1/attachments/${encodeURIComponent(rowId)}`, init);
+      let body: { data?: Record<string, unknown>; error?: { code?: string; message?: string } } | null = null;
+      try {
+        body = await res.json();
+      } catch {
+        /* non-JSON body */
+      }
+      if (!res.ok) {
+        const code = body?.error?.code;
+        throw Object.assign(new Error(body?.error?.message ?? `${failure} (${res.status})`), { code });
+      }
+      return body?.data;
+    },
+    [authFetch, baseUrl],
+  );
+
   const handleDelete = React.useCallback(
     async (row: AttachmentRow) => {
       if (!dataSource) return;
@@ -532,7 +572,12 @@ export const RecordAttachmentsPanel: React.FC<RecordAttachmentsPanelProps> = ({
       if (!confirmed) return;
       setError(null);
       try {
-        await dataSource.delete('sys_attachment', row.id);
+        if (callerId && uploaderIdOf(row) === callerId) {
+          // The caller's own upload: the removal door, which needs no delete grant.
+          await callAttachmentDoor(row.id, { method: 'DELETE' }, 'Delete failed');
+        } else {
+          await dataSource.delete('sys_attachment', row.id);
+        }
         setRows((prev) => prev.filter((r) => r.id !== row.id));
       } catch (err: any) {
         // With the `delete` grant, the button renders for every row: the
@@ -543,37 +588,31 @@ export const RecordAttachmentsPanel: React.FC<RecordAttachmentsPanelProps> = ({
         setError(friendlyError(err));
       }
     },
-    [dataSource, friendlyError, confirmDelete, t],
+    [dataSource, callerId, callAttachmentDoor, friendlyError, confirmDelete, t],
   );
 
   /**
-   * Rename: offered beside Delete, to a reader who may delete and either
-   * uploaded the row or holds the edit grant (`canRename`), because the server
-   * renames by the attachment delete rule — the uploader, or an editor of the
-   * record — and writes an editor's rename as the caller. The dialog closes on a stored name and
-   * stays open on a refusal, which the panel's error line names.
+   * Rename: offered to the row's uploader, and to a reader who holds the edit
+   * grant (`canRename`), because the server renames by the attachment delete
+   * rule — the uploader, or an editor of the record — and writes an editor's
+   * rename as the caller. The dialog closes on a stored name and stays open on
+   * a refusal, which the panel's error line names.
    */
   const [renaming, setRenaming] = React.useState<AttachmentRow | null>(null);
   const handleRename = React.useCallback(
     async (row: AttachmentRow, fileName: string): Promise<boolean> => {
       setError(null);
       try {
-        const res = await authFetch(`${baseUrl}/api/v1/attachments/${encodeURIComponent(row.id)}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ file_name: fileName }),
-        });
-        let body: { data?: { file_name?: string }; error?: { code?: string; message?: string } } | null = null;
-        try {
-          body = await res.json();
-        } catch {
-          /* non-JSON body */
-        }
-        if (!res.ok) {
-          const code = body?.error?.code;
-          throw Object.assign(new Error(body?.error?.message ?? `Rename failed (${res.status})`), { code });
-        }
-        const stored = body?.data?.file_name;
+        const data = await callAttachmentDoor(
+          row.id,
+          {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ file_name: fileName }),
+          },
+          'Rename failed',
+        );
+        const stored = data?.file_name;
         if (typeof stored !== 'string') throw new Error('The server renamed the attachment but did not answer its stored name');
         setRows((prev) => prev.map((r) => (r.id === row.id ? { ...r, file_name: stored } : r)));
         return true;
@@ -588,54 +627,88 @@ export const RecordAttachmentsPanel: React.FC<RecordAttachmentsPanelProps> = ({
         return false;
       }
     },
-    [authFetch, baseUrl, friendlyError, t],
+    [callAttachmentDoor, friendlyError, t],
+  );
+
+  /**
+   * The signed link for a row: the one door both the download and the preview
+   * read through. Throws the server's code on a refusal.
+   */
+  const signedUrlFor = React.useCallback(
+    async (row: AttachmentRow): Promise<string> => {
+      // The stable `/files/:fileId` endpoint now requires an authenticated
+      // session for attachments-scope files (objectstack-ai/objectstack#2970) — an <a href> can't
+      // carry the Bearer token. Fetch a short-lived signed URL with auth,
+      // then open it (the signed URL itself needs no credentials).
+      const res = await authFetch(
+        `${baseUrl}/api/v1/storage/files/${encodeURIComponent(row.file_id)}/url`,
+      );
+      if (!res.ok) {
+        let code: string | undefined;
+        try {
+          // Read BOTH error dialects, the same way the success branch below
+          // reads both `url` shapes. The storage service moved its error
+          // code from a sibling of `error` into the declared
+          // `{ success: false, error: { code, message } }` envelope
+          // (objectstack#3675); a console build is deployed independently of
+          // the server it talks to, so it has to keep understanding the
+          // older top-level `code` too. Without the nested branch the 401/403
+          // downgrade silently to "Download failed (403)" and the friendly
+          // copy below never fires.
+          const body = (await res.json()) as { code?: string; error?: { code?: string } } | null;
+          code = body?.error?.code ?? body?.code;
+        } catch {
+          /* non-JSON body */
+        }
+        throw Object.assign(new Error(code ?? `Download failed (${res.status})`), { code });
+      }
+      const body = await res.json();
+      // Both URL dialects, for the same independent-deploy reason as the
+      // error branch above: the route answered a bare `{ url }` until
+      // objectstack#3689 moved it into the declared
+      // `{ success: true, data: { url } }` envelope.
+      const url: string | undefined = body?.url ?? body?.data?.url;
+      if (!url) throw new Error('Download URL missing from response');
+      return /^https?:/i.test(url) ? url : `${baseUrl}${url}`;
+    },
+    [authFetch, baseUrl],
   );
 
   const handleDownload = React.useCallback(
     async (row: AttachmentRow) => {
       setError(null);
       try {
-        // The stable `/files/:fileId` endpoint now requires an authenticated
-        // session for attachments-scope files (objectstack-ai/objectstack#2970) — an <a href> can't
-        // carry the Bearer token. Fetch a short-lived signed URL with auth,
-        // then open it (the signed URL itself needs no credentials).
-        const res = await authFetch(
-          `${baseUrl}/api/v1/storage/files/${encodeURIComponent(row.file_id)}/url`,
-        );
-        if (!res.ok) {
-          let code: string | undefined;
-          try {
-            // Read BOTH error dialects, the same way the success branch below
-            // reads both `url` shapes. The storage service moved its error
-            // code from a sibling of `error` into the declared
-            // `{ success: false, error: { code, message } }` envelope
-            // (objectstack#3675); a console build is deployed independently of
-            // the server it talks to, so it has to keep understanding the
-            // older top-level `code` too. Without the nested branch the 401/403
-            // downgrade silently to "Download failed (403)" and the friendly
-            // copy below never fires.
-            const body = (await res.json()) as { code?: string; error?: { code?: string } } | null;
-            code = body?.error?.code ?? body?.code;
-          } catch {
-            /* non-JSON body */
-          }
-          throw Object.assign(new Error(code ?? `Download failed (${res.status})`), { code });
-        }
-        const body = await res.json();
-        // Both URL dialects, for the same independent-deploy reason as the
-        // error branch above: the route answered a bare `{ url }` until
-        // objectstack#3689 moved it into the declared
-        // `{ success: true, data: { url } }` envelope.
-        const url: string | undefined = body?.url ?? body?.data?.url;
-        if (!url) throw new Error('Download URL missing from response');
-        const target = /^https?:/i.test(url) ? url : `${baseUrl}${url}`;
+        const target = await signedUrlFor(row);
         if (await openInNativeShell(target, row)) return;
         window.open(target, '_blank', 'noopener,noreferrer');
       } catch (err: any) {
         setError(friendlyError(err));
       }
     },
-    [authFetch, baseUrl, friendlyError],
+    [signedUrlFor, friendlyError],
+  );
+
+  // The in-page preview (objectstack#36442): the row whose name was clicked,
+  // and the rows as the dialog's set, so previous / next walk the list.
+  const [previewIndex, setPreviewIndex] = React.useState<number | null>(null);
+  const previewFiles: FilePreviewItem[] = rows.map((row) => ({
+    id: row.file_id,
+    name: row.file_name || row.file_id,
+    mimeType: row.mime_type ?? undefined,
+    size: row.size ?? undefined,
+  }));
+  const previewSignedUrl = React.useCallback(
+    async (file: FilePreviewItem): Promise<string> => {
+      const row = rows.find((r) => r.file_id === file.id);
+      if (!row) throw new Error(t('fields.filePreview.loadFailed', { defaultValue: 'The preview could not be loaded.' }));
+      try {
+        return await signedUrlFor(row);
+      } catch (err) {
+        // The download's own copy for the download's own refusal.
+        throw Object.assign(new Error(friendlyError(err)), { cause: err });
+      }
+    },
+    [rows, signedUrlFor, friendlyError, t],
   );
 
   // Upload is offered (the header's 「+ 上传」, the empty line's 「选择文件」 and
@@ -835,7 +908,7 @@ export const RecordAttachmentsPanel: React.FC<RecordAttachmentsPanelProps> = ({
         </div>
       ) : (
         <ul className="divide-y border-t">
-          {rows.map((row) => {
+          {rows.map((row, index) => {
             const TypeIcon = fileTypeIcon(row.mime_type);
             const name = row.file_name || row.file_id;
             const uploader = uploaderOf(row);
@@ -844,7 +917,15 @@ export const RecordAttachmentsPanel: React.FC<RecordAttachmentsPanelProps> = ({
               // and uploader step aside in a narrow container (a drawer).
               <li key={row.id} className="flex h-[33px] items-center gap-2 px-1 text-sm" data-attachment-row="">
                 <TypeIcon className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-                <span className="min-w-0 flex-1 truncate" title={name}>{name}</span>
+                <button
+                  type="button"
+                  className="min-w-0 flex-1 truncate text-left hover:underline focus-visible:underline focus-visible:outline-none"
+                  title={name}
+                  onClick={() => setPreviewIndex(index)}
+                  data-attachment-preview=""
+                >
+                  {name}
+                </button>
                 <span className="hidden w-16 shrink-0 text-right text-xs text-muted-foreground tabular-nums @md:inline">
                   {formatSize(row.size)}
                 </span>
@@ -886,7 +967,7 @@ export const RecordAttachmentsPanel: React.FC<RecordAttachmentsPanelProps> = ({
                         {t('detail.renameAttachment', { defaultValue: 'Rename' })}
                       </DropdownMenuItem>
                     )}
-                    {canDelete && (
+                    {canDeleteRow(row) && (
                       <DropdownMenuItem
                         className="text-destructive focus:text-destructive"
                         onSelect={() => void handleDelete(row)}
@@ -908,6 +989,20 @@ export const RecordAttachmentsPanel: React.FC<RecordAttachmentsPanelProps> = ({
           if (!open) setConfirmState((s) => ({ ...s, open: false }));
         }}
       />
+      {previewIndex !== null && previewIndex < rows.length && (
+        <FilePreviewDialog
+          files={previewFiles}
+          index={previewIndex}
+          open
+          onOpenChange={(open) => !open && setPreviewIndex(null)}
+          onIndexChange={setPreviewIndex}
+          resolveUrl={previewSignedUrl}
+          onDownload={(_file, index) => {
+            const row = rows[index];
+            if (row) void handleDownload(row);
+          }}
+        />
+      )}
       <AttachmentRenameDialog
         row={renaming}
         onOpenChange={(open) => {

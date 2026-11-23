@@ -20,7 +20,7 @@
  * `getMetadataDefaultInspector` reads the registry as it is at the moment of the
  * call, for non-render code.
  */
-import type { ComponentType } from 'react';
+import type { ComponentType, ReactNode } from 'react';
 import type { SupportedLocale } from './i18n.js';
 import { createObservableTypeRegistry, type MetadataSelection } from './preview-registry.js';
 import type { SchemaFormIssue } from './SchemaForm.js';
@@ -90,6 +90,16 @@ export interface MetadataDefaultInspectorProps {
    * segment-wise prefix of it (objectstack#27865).
    */
   onInlineIssueFieldsChange?: (prefixes: ReadonlySet<string>) => void;
+  /**
+   * Draw one half of the panel, for a host that lays the two halves out apart
+   * (objectstack#36512: the object Settings tab puts the rows a developer
+   * reads — internal name, access — in a section of their own, below the
+   * business rows). `renderKey` draws, beside a row's title, the metadata key
+   * that row writes. Omitted: the whole panel, as every other host gets it.
+   * Only an inspector that splits reads it (today: `object`); one that does
+   * not draws its whole panel on each mount.
+   */
+  split?: { part: 'business' | 'developer'; renderKey?: (key: string) => ReactNode };
 }
 
 export type MetadataDefaultInspector = ComponentType<MetadataDefaultInspectorProps>;

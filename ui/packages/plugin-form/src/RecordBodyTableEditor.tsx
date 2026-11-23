@@ -44,12 +44,14 @@ import { usePermissions } from '@object-ui/permissions';
 import {
   extractFieldErrors,
   extractWriteErrorMessage,
+  useInlineEdit,
   useRecordContext,
 } from '@object-ui/react';
 import { buildMasterDetailEditBatch, idOf, isBlankRow, type ChildSchema } from './masterDetailTx';
 import { applyColumnPermissions } from './fieldWriteGate';
 import { deriveDetail } from './deriveMasterDetail';
 import { schemaDefaultValues } from './schemaDefaults';
+import { currencyFieldDefsOf, followedColumnCurrencies, parentCurrencyFieldsOf } from './parentCurrencyColumns';
 import { useFormChromeTranslation } from './formChrome';
 
 /** One reason the server gave about one line of a body table. */
@@ -290,6 +292,37 @@ export const RecordBodyTableEditor: React.FC<RecordBodyTableEditorProps> = ({ ob
     [childSchema, perms.userId, homeCurrency, homeTimeZone],
   );
 
+  // objectstack#36249 — the currency of each money column, as the record form
+  // and the other line hosts hand it to the grid: a line amount that follows
+  // this record through `relationshipField` is in this record's code
+  // (`columnCurrencies`), and any other money column is in its own field's
+  // currency (`columnFields`). A pick copies an amount only into a column in
+  // the same currency.
+  //
+  // The record is read as the user has it in the open edit, not as stored:
+  // the edit state saves a code change on the record and its new lines in one
+  // batch, so a code staged in the inline draft is the code the lines are
+  // saved under. A live value is `{ ...data, ...draft }` (InlineEditContext).
+  const inline = useInlineEdit();
+  const savedRow = record?.data as Record<string, unknown> | undefined;
+  const draftRow = inline?.draft;
+  const headerRow = useMemo<Record<string, unknown> | undefined>(
+    () => (draftRow && Object.keys(draftRow).length > 0 ? { ...(savedRow ?? {}), ...draftRow } : savedRow),
+    [savedRow, draftRow],
+  );
+  const lineColumnCurrencies = useMemo(
+    () => followedColumnCurrencies(
+      parentCurrencyFieldsOf(childSchema?.fields as Record<string, unknown> | undefined, relationshipField),
+      headerRow,
+      homeCurrency,
+    ),
+    [childSchema, relationshipField, headerRow, homeCurrency],
+  );
+  const lineCurrencyFields = useMemo(
+    () => currencyFieldDefsOf(childSchema?.fields as Record<string, unknown> | undefined),
+    [childSchema],
+  );
+
   const snapshotRef = useRef<BodyTableSnapshot | null>(null);
   snapshotRef.current = rows && derived
     ? { childObject: objectName, relationshipField, rows, original, childSchema }
@@ -341,6 +374,8 @@ export const RecordBodyTableEditor: React.FC<RecordBodyTableEditorProps> = ({ ob
           disabled={session.saving}
           contextRecord={record?.data as Record<string, unknown> | undefined}
           lookupAutofill={lookupAutofillByField(childSchema?.fields as Record<string, unknown> | undefined)}
+          columnCurrencies={lineColumnCurrencies}
+          columnFields={lineCurrencyFields}
           // Each child field's help, on its column header (objectstack#35804).
           columnHelp={columnHelpByField(childSchema?.fields as Record<string, unknown> | undefined)}
           newRowValues={newRowValues}

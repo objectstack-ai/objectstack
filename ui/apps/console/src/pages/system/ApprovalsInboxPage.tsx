@@ -732,14 +732,13 @@ function InlineActions({
  * `sys_approval_request`, where `RecordDetailView` mounts the page objectstack
  * serves for it (`sys_approval_request_detail`).
  *
- * The app segment is the app that owns the request's RECORD
- * (`objectHostAppSegment`, objectstack#32667): the app it is asked from when
- * that app lists the record's object, else the first app that does, else
- * Setup. A request opened under an app whose navigation never names the
- * record's object drew that app's sidebar around it, and its record card could
- * not reach the record. Only when the reader can open no such app, nor Setup,
- * does the request stay in the app it was asked from (or `setup` outside one,
- * as the row's record link falls back).
+ * The app segment is the app that owns the request's RECORD when one does: the
+ * app it is asked from when that app lists the record's object, else the first
+ * app that does (`objectHostAppSegment` without its Setup step). When no app
+ * lists the object the request stays in the app it is asked from, which for an
+ * open with no source app is the current, last used or first app
+ * (`resolveApprovalsHostSegment`, objectstack#35505): Setup only when it is
+ * that app. An inbox with no app segment (the zero-app route set) keeps `setup`.
  */
 function requestPagePath(
   apps: readonly Record<string, unknown>[] | undefined,
@@ -747,8 +746,31 @@ function requestPagePath(
   appName: string | undefined,
   requestId: string,
 ): string {
-  const segment = objectHostAppSegment(apps, objectName, appName) ?? (appName || 'setup');
-  return `/apps/${segment}/${APPROVAL_REQUEST_OBJECT}/record/${encodeURIComponent(requestId)}`;
+  return `/apps/${requestPageSegment(apps, objectName, appName)}/${APPROVAL_REQUEST_OBJECT}/record/${encodeURIComponent(requestId)}`;
+}
+
+function requestPageSegment(
+  apps: readonly Record<string, unknown>[] | undefined,
+  objectName: string | null | undefined,
+  appName: string | undefined,
+): string {
+  return objectHostAppSegment(apps, objectName, appName, { orSetup: false }) ?? (appName || 'setup');
+}
+
+/**
+ * The history state a deep link opens the request page with: the way back is
+ * the approvals inbox of the app the page opens in, never the object's raw
+ * `sys_approval_request` list (objectstack#35505). The page's ✕ and the phone's
+ * ‹ follow `from.pathname`. A queue handed in by the opener (Home's 我的工作,
+ * the bell: `approvalQueueState`) rides along, so 「处理后打开下一条」 moves on
+ * through it; an open that hands none (a notification, the e-mail link) carries
+ * the way back alone.
+ */
+function deepLinkRequestState(incoming: unknown, inboxPath: string, inboxLabel: string): Record<string, unknown> {
+  const base = incoming && typeof incoming === 'object' ? (incoming as Record<string, unknown>) : {};
+  const from = base.from && typeof base.from === 'object' ? (base.from as Record<string, unknown>) : {};
+  const label = typeof from.label === 'string' && from.label ? from.label : inboxLabel;
+  return { ...base, from: { ...from, pathname: inboxPath, label } };
 }
 
 /**
@@ -776,6 +798,8 @@ export function ApprovalsInboxPage() {
  */
 function RequestDeepLink({ requestId }: { requestId: string }) {
   const { appName } = useParams<{ appName?: string }>();
+  const location = useLocation();
+  const { t } = useObjectTranslation();
   const { apps, loading } = useMetadata();
   const catalog = Array.isArray(apps) ? (apps as Record<string, unknown>[]) : undefined;
   const choose = !loading && !!catalog && catalog.length > 0;
@@ -800,9 +824,15 @@ function RequestDeepLink({ requestId }: { requestId: string }) {
   }, [choose, requestId]);
 
   if (loading) return null;
-  if (!choose) return <Navigate to={requestPagePath(catalog, null, appName, requestId)} replace />;
-  if (answer?.requestId !== requestId) return null;
-  return <Navigate to={requestPagePath(catalog, answer.objectName, appName, requestId)} replace />;
+  if (choose && answer?.requestId !== requestId) return null;
+  const objectName = choose ? (answer?.objectName ?? null) : null;
+  const segment = requestPageSegment(catalog, objectName, appName);
+  const state = deepLinkRequestState(
+    location.state,
+    `/apps/${segment}/system/approvals`,
+    String(t('approvalsInbox.title', { defaultValue: 'Approvals Inbox' })),
+  );
+  return <Navigate to={requestPagePath(catalog, objectName, appName, requestId)} replace state={state} />;
 }
 
 function ApprovalsQueue() {

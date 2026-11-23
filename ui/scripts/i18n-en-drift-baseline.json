@@ -41,7 +41,6 @@
     "word the landing, the ledger switch and the Setup page already used. zh already read 已停用 /",
     "已启用 for every one of them, so there was nothing for it to follow."
   ],
-
   "waivers": {
     "search.placeholder": {
       "en": "Search objects, dashboards, pages, reports…",
@@ -79,7 +78,6 @@
       "issue": "objectstack#34725"
     }
   },
-
   "designerWaivers": {
     "ENGINE_STRINGS.engine.studio.auto.on": {
       "en": "Switched on",
@@ -104,16 +102,6 @@
     "ENGINE_STRINGS.engine.studio.auto.disabled": {
       "en": "Switched off",
       "reason": "One word per state in Studio (objectstack#29729): en now says the landing's and the ledger switch's word. zh already read ‘已停用’ here, so it had nothing to follow.",
-      "issue": "objectstack#29729"
-    },
-    "ENGINE_STRINGS.engine.studio.auto.enabledToast": {
-      "en": "Switched on — publish to apply",
-      "reason": "One word per state in Studio (objectstack#29729): en now says the landing's and the ledger switch's word. zh already read ‘已设为启用 — 发布后生效’ here, so it had nothing to follow.",
-      "issue": "objectstack#29729"
-    },
-    "ENGINE_STRINGS.engine.studio.auto.disabledToast": {
-      "en": "Switched off — publish to apply",
-      "reason": "One word per state in Studio (objectstack#29729): en now says the landing's and the ledger switch's word. zh already read ‘已设为停用 — 发布后生效’ here, so it had nothing to follow.",
       "issue": "objectstack#29729"
     }
   }

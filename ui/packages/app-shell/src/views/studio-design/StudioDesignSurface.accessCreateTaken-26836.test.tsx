@@ -95,10 +95,19 @@ function makeClient(seed: { published?: Record<string, Row>; drafts?: Record<str
     delete drafts[name];
     return {};
   });
+  // objectstack#36511 — the single-item publish: the pending draft becomes the live row.
+  const publish = vi.fn(async (_type: string, name: string) => {
+    if (drafts[name]) {
+      published[name] = drafts[name];
+      delete drafts[name];
+    }
+    return { success: true };
+  });
   return {
     published,
     drafts,
     save,
+    publish,
     reset,
     // objectstack#26840 — the Access matrix reads its objects through the draft-overlaid door.
     withPreviewDrafts() { return this; },
@@ -159,7 +168,7 @@ async function openCreate(label: string, name?: string) {
   if (name) {
     fireEvent.change(within(dialog).getByLabelText(en('engine.studio.access.idLabel')), { target: { value: name } });
   }
-  fireEvent.click(within(dialog).getByRole('button', { name: en('engine.studio.createDraft') }));
+  fireEvent.click(within(dialog).getByRole('button', { name: en('engine.studio.createLive') }));
   return dialog;
 }
 
@@ -247,7 +256,7 @@ describe('objectstack#26836 — "+ New" over a taken identifier', () => {
     ).toBeNull();
   });
 
-  it('a fresh identifier: created as a draft, as before, and opened', async () => {
+  it('a fresh identifier: created as a draft, then published at once (objectstack#36511), and opened', async () => {
     clientImpl = makeClient({ published: { project_editor: { pkg: PKG, body: EDITOR } } });
     renderAccess();
     await screen.findByText('1 object granted · 0 field overrides', undefined, { timeout: 8000 });
@@ -256,6 +265,7 @@ describe('objectstack#26836 — "+ New" over a taken identifier', () => {
     const [type, name, , opts] = clientImpl.save.mock.calls[0];
     expect([type, name]).toEqual(['permission', 'project_viewer']);
     expect(opts).toMatchObject({ mode: 'draft', packageId: PKG, ifNoneMatch: '*', surface: 'studio' });
+    await waitFor(() => expect(clientImpl.publish).toHaveBeenCalledWith('permission', 'project_viewer', { packageId: PKG }));
     expect(toast.success).toHaveBeenCalledWith(tFormat('engine.studio.access.created', 'en', { label: 'Project Viewer' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     expect(await rail().findByTitle('project_viewer')).toBeInTheDocument();

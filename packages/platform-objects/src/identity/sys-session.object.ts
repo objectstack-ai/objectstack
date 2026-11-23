@@ -19,6 +19,7 @@ export const SysSession = ObjectSchema.create({
   label: 'Session',
   pluralLabel: 'Sessions',
   icon: 'key',
+  color: 'purple',
   isSystem: true,
   managedBy: 'better-auth',
 

@@ -24,8 +24,8 @@
  *  - a listed manifest that states no version: Customize disabled, saying so;
  *  - a walled admin (a group posture, not the platform operator) sees
  *    Customize disabled, and the platform operator does not;
- *  - CONTROL: a base with no pair keeps the read-only Publish and reviews
- *    the base, as before;
+ *  - CONTROL: a base with no pair reviews the base, as before, and with
+ *    nothing pending draws no Publish (objectstack#36511);
  *  - objectstack#29691: reviewing the pair, the panel is handed the base's
  *    label for its "saved to" sentence, and nothing without a pair;
  *  - objectstack#29691: after Customize, the item header says the same
@@ -285,11 +285,11 @@ describe('a read-only base with its pair listed: Pending, the panel and Publish 
     await waitFor(() => expect(srv.publishes).toEqual([PAIR]));
   });
 
-  it('CONTROL: a base with no pair keeps the read-only Publish, and the panel reviews the base', async () => {
+  it('CONTROL: a base with no pair and nothing pending draws no Publish, and the panel reviews the base', async () => {
     renderWorkbench();
-    await waitFor(() => expect(publishButton().parentElement).toHaveAttribute('data-disabled-reason'), { timeout: 8000 });
-    expect(publishButton()).toBeDisabled();
-    expect(panelPackage()).toBe(BASE);
+    // objectstack#36511 — Publish is drawn only while drafts are pending.
+    await waitFor(() => expect(panelPackage()).toBe(BASE), { timeout: 8000 });
+    expect(screen.queryByRole('button', { name: /^Publish/ })).toBeNull();
     expect(panelCustomizationOf()).toBe('');
     expect(screen.queryByTestId('publish-all-drafts')).toBeNull();
   });

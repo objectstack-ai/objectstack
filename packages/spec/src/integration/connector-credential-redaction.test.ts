@@ -338,7 +338,12 @@ describe('the connector redactor — top-level keys the entry does not declare',
   });
 
   it('the read decorations are the response\'s and are left alone', () => {
-    const item = { ...base, _draft: true, _withheldFields: { crm_project: { packageId: 'com.vendor.projects' } } };
+    const item = {
+      ...base,
+      _draft: true,
+      _withheldFields: { crm_project: { packageId: 'com.vendor.projects' } },
+      _relatedListsArrangement: { packageId: 'com.vendor.custom', hidden: [], unlisted: 'hidden' },
+    };
     for (const key of METADATA_READ_DECORATIONS) expect(item).toHaveProperty(key);
     expect(redactConnectorItem(item)).toEqual({ item, redactedKeys: [] });
   });

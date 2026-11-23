@@ -36,6 +36,7 @@ export const SysUserPosition = ObjectSchema.create({
   label: 'User Position',
   pluralLabel: 'User Positions',
   icon: 'user-cog',
+  color: 'purple',
   isSystem: true,
   // [ADR-0103, #3355] Admin/user-writable DATA on a platform-defined schema:
   // delegated "add position" writes this under the caller's context. The bucket

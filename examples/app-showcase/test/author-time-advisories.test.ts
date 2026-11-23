@@ -71,6 +71,12 @@ const CONTRIBUTOR_TOTALS =
   'A contributor sees only its own tasks (task_own_rows), and the project roll-ups count every task: the size '
   + "of the project, not other people's task rows.";
 
+const INERT_INTERNAL_FORM =
+  'Since #36425 the Console create and edit surfaces lay this object out by its fieldGroups and no longer load '
+  + 'this form, so it is inert and the warning is true. It stays as authored because more than the view reads '
+  + "it: the form-view layout coverage (coverage.ts formViewTypes), the section translations under the object's "
+  + '`_sections` in system/translations/index.ts, and for showcase_contact the section pins in test/seed.test.ts. '
+  + 'Moving it into fieldGroups and showOnCreate touches those too, so it is left to a follow-up.';
 const NESTED_FAN_OUT =
   'showcase_nested_fan_out_reminders is the loop { parallel } fixture automation.flow-run-step-nesting scores, '
   + 'pinned by test/nested-fan-out-region-indices.test.ts. Wrapping the notify step in a try_catch puts a region '
@@ -123,6 +129,13 @@ export const ALLOWED_ADVISORIES: readonly Allowed[] = [
     reason: 'Members file inquiries and read back their own; reading every inquiry is the triage personas\' '
       + "org-scoped grant (showcase_ops and the other sets that carry readScope: 'org').",
   },
+
+  // ── Internal create / edit forms the Console no longer loads (warning) ────
+  { rule: 'form-view-internal-not-loaded', where: 'view "showcase_task" · form', reason: INERT_INTERNAL_FORM },
+  { rule: 'form-view-internal-not-loaded', where: 'view "showcase_project" · form', reason: INERT_INTERNAL_FORM },
+  { rule: 'form-view-internal-not-loaded', where: 'view "showcase_business_unit" · form', reason: INERT_INTERNAL_FORM },
+  { rule: 'form-view-internal-not-loaded', where: 'view "showcase_contact" · form', reason: INERT_INTERNAL_FORM },
+  { rule: 'form-view-internal-not-loaded', where: 'view "showcase_contact" · formViews.create', reason: INERT_INTERNAL_FORM },
 
   // ── Fixtures ─────────────────────────────────────────────────────────────
   { rule: 'flow-loop-body-uncontained', where: "flow 'showcase_nested_fan_out_reminders' · loop 'each_task' body → parallel 'fan_out_audiences' branch 0 · node 'notify_owner' (notify)", reason: NESTED_FAN_OUT },

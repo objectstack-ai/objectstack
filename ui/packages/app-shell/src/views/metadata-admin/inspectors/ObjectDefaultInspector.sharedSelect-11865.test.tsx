@@ -34,6 +34,11 @@
  */
 
 import '@testing-library/jest-dom/vitest';
+// The inspector reaches the console's dynamic `@objectstack/formula` and
+// `@objectstack/lint` imports (CEL authoring); their first load is paid here,
+// at collection, never inside a case's clock (`check:test-source-alias`).
+import '@objectstack/formula';
+import '@objectstack/lint';
 import { afterEach, describe, expect, it } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
@@ -41,8 +46,8 @@ import { ObjectDefaultInspector } from './ObjectDefaultInspector';
 
 afterEach(() => cleanup());
 
-const PUBLIC = 'Public — covered by wildcard grants (default)';
-const PRIVATE = 'Private — needs an explicit grant';
+const PUBLIC = 'Standard — anyone with access to all objects (default)';
+const PRIVATE = 'Restricted — only people granted this object by name';
 
 /** A patch as text, with a key that holds `undefined` named rather than dropped. */
 const asText = (patch: unknown) => JSON.stringify(patch, (_k, v) => (v === undefined ? '(undefined)' : v));

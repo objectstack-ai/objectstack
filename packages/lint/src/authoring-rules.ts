@@ -131,6 +131,7 @@ import { validateRecordPageHeader } from './validate-record-page-header.js';
 import { validateFieldConsumers } from './validate-field-consumers.js';
 import { validateSemanticRoles } from './validate-semantic-roles.js';
 import { validateFormLayout } from './validate-form-layout.js';
+import { validateInternalFormViews } from './validate-internal-form-views.js';
 import { validatePublicFormFileFields } from './validate-public-form-file-fields.js';
 import { validateThankYouRecordFields } from './validate-thank-you-record-fields.js';
 import { validateAssignmentRules } from './validate-assignment-rules.js';
@@ -1822,6 +1823,24 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     surfaces: CLI_AND_RUNTIME,
     runtimeTypes: ['view'],
     run: (stack) => validateFormLayout(stack),
+  },
+  // #36425 — an internal create / edit form view the app still declares: the
+  // Console's create and edit surfaces no longer load one (they lay out by the
+  // object's field groups), so it installs, runs and steers nothing. Advisory,
+  // once per form. `normalized`: it reads only the authored `views[]` shapes,
+  // so `os lint`, which never parses, runs it too.
+  {
+    name: 'validateInternalFormViews',
+    tier: 'advisory',
+    input: 'normalized',
+    commands: ALL,
+    source: 'packages/lint/src/validate-internal-form-views.ts',
+    surfaces: CLI_ONLY,
+    surfaceReason:
+      'Advisory-tier retirement notice for the app author at the check tools (`os lint`, `os validate`, ' +
+      '`os build`): an internal form view still installs and runs, inert, so the runtime door has nothing ' +
+      'to refuse, and the Studio no longer offers internal form views to save.',
+    run: (stack) => validateInternalFormViews(stack),
   },
   // Ruling C on #25572 (#25650) — a form open to anonymous intake that
   // declares a file field (a `FILE_REFERENCE_TYPES` type on the bound object)

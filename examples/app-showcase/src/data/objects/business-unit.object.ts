@@ -17,6 +17,7 @@ export const BusinessUnit = ObjectSchema.create({
   label: 'Business Unit',
   pluralLabel: 'Business Units',
   icon: 'network',
+  color: 'blue',
   description: 'Org-chart hierarchy — demonstrates the tree / tree-grid view over a self-referencing object.',
 
   fields: {

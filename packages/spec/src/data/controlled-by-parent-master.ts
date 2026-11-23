@@ -98,6 +98,41 @@ export type ControlledByParentMasterShape =
   | 'no-master'
   | 'master-not-writable';
 
+/**
+ * The machine-readable code of a `controlled_by_parent` master refusal, so a
+ * reader can tell the refusal apart without reading its English `message`.
+ *
+ * Stamped on the parse issue by both raise sites — `ObjectSchema`'s refinement
+ * (`refuseControlledByParentWithoutOneMaster`, `object.zod.ts`) and the
+ * extension-merge gate (`applyControlledByParentExtensionGate`,
+ * `stack.zod.ts`) — as zod's slot for custom-issue metadata:
+ * `params: { code: CONTROLLED_BY_PARENT_MASTER_INVALID, shape }`, where
+ * `shape` is the refusal's {@link ControlledByParentMasterShape}. One code for
+ * every shape; the shape says which fix applies. A surface that shows the
+ * refusal in the author's own language (the Studio object settings tab) keys
+ * its wording on the shape and keeps the `message` as the fallback.
+ *
+ * Registered in `ERROR_CODE_LEDGER` under `@objectstack/spec` (ADR-0112: a code
+ * that ships in `dist` is the published face, door or no door). It has no
+ * `status` of its own, and it is NOT in the `message`. Where a reader can see
+ * it: on the zod issue itself (any `ObjectSchema` / `ObjectStackDefinitionSchema`
+ * `safeParse`, which is the Studio tab's path), and on `defineStack`'s
+ * `STACK_SCHEMA_INVALID` refusal, whose `issues` are the raw zod issues. Where
+ * it is not: the metadata save door's `422 INVALID_METADATA` — its `issues[]`
+ * entries (`zodIssuesToMetadataIssues`, `@objectstack/metadata-protocol`) carry
+ * `path`, `message` and zod's own issue `code` (`'custom'`), never `params`.
+ */
+export const CONTROLLED_BY_PARENT_MASTER_INVALID = 'CONTROLLED_BY_PARENT_MASTER_INVALID' as const;
+
+/**
+ * The `params` a `controlled_by_parent` master refusal carries on its parse
+ * issue — see {@link CONTROLLED_BY_PARENT_MASTER_INVALID}.
+ */
+export interface ControlledByParentMasterIssueParams {
+  readonly code: typeof CONTROLLED_BY_PARENT_MASTER_INVALID;
+  readonly shape: ControlledByParentMasterShape;
+}
+
 /** Why an object fails the one-required-master rule — see {@link controlledByParentMasterRefusal}. */
 export interface ControlledByParentMasterRefusal {
   /**
@@ -228,7 +263,7 @@ export function controlledByParentMasterRefusal(
       requiredLookups,
       message:
         `Object '${name}' declares sharingModel 'controlled_by_parent' with its ${which}, `
-        + `\`${master.field}\`, marked ${flags.map((f) => `\`${f}: true\``).join(' and ')}. ADR-0055 §1: since `
+        + `\`${master.field}\`, marked ${flags.map((f) => `\`${f}: true\``).join(' and ')}. Since `
         + '@objectstack/spec 18, a controlled-by-parent object derives its master from exactly one '
         + '`master_detail` field that every write of a detail supplies, and a field marked `readonly` or '
         + '`system` is not one an author\'s write supplies, so this reference cannot be that master. '
@@ -245,7 +280,7 @@ export function controlledByParentMasterRefusal(
       requiredLookups,
       message:
         `Object '${name}' declares sharingModel 'controlled_by_parent' with ${masters.length} required `
-        + `\`master_detail\` fields (${masters.map((m) => `\`${m}\``).join(', ')}). ADR-0055 §1: since `
+        + `\`master_detail\` fields (${masters.map((m) => `\`${m}\``).join(', ')}). Since `
         + '@objectstack/spec 18, a controlled-by-parent object derives its master from exactly one required `master_detail` field, so '
         + 'with two the declaration does not say which master governs its rows, and the platform derives none '
         + '(every read is denied, every write refused). Keep `master_detail` on the one master, and declare '
@@ -285,7 +320,7 @@ export function controlledByParentMasterRefusal(
     message:
       `Object '${name}' declares sharingModel 'controlled_by_parent' but no required \`master_detail\` field, `
       + 'nor a single `master_detail` declared `required: false`. '
-      + 'ADR-0055 §1: since @objectstack/spec 18, a controlled-by-parent object derives its master from exactly '
+      + 'Since @objectstack/spec 18, a controlled-by-parent object derives its master from exactly '
       + 'one `master_detail` field declared `required: true`, or, with none, from its only `master_detail` '
       + 'declared `required: false` (an optional master: a row that names none is readable only by its owner '
       + 'and by View All on the object), and from nothing else, so as declared the platform derives no master '

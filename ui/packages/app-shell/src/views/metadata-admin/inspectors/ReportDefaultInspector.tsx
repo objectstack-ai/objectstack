@@ -56,13 +56,13 @@ import {
 import { useStudioDatasetAuthoring } from '../../studio-design/datasetCreate.js';
 import { getReportForm, getReportSchema } from '../report-schema.js';
 import { mergeServerFields } from '../mergeServerFields.js';
-import { t } from '../i18n.js';
+import { t, tFormat } from '../i18n.js';
 import { mapLoaded } from '../loadState.js';
 import type { WidgetContext } from '../widgets.js';
 import { datasetPickerOptions, datasetLabelOptions } from './dataset-picker-options.js';
 import { pickLocalized, setLocalized, clearLocalized } from '@object-ui/i18n';
 import { WIDGET_TYPE_META } from '../previews/widget-types.js';
-import { shownLabel, writtenLabel, useLabelLanguage } from './servedLabel.js';
+import { shownLabel, writtenLabel, servedLabelNote, useLabelLanguage } from './servedLabel.js';
 import { useServedReportText } from '../../studio-design/servedReportText.js';
 
 /**
@@ -394,6 +394,9 @@ export function ReportDefaultInspector({
   // The Name box shows the current language's text: the served translation
   // while the buffer still holds the authored source (`servedLabel.ts`).
   const labelValue = shownLabel(draft.label, servedText?.label, language);
+  // objectstack#36481 — when readers in this language are served a
+  // translation instead of the name saved here, the box says so before Save.
+  const labelNote = servedLabelNote(draft.label, servedText?.label, language);
   // objectui#12680 — whether the author has edited the name is read off the
   // DRAFT, not kept in this component: the name still follows the label while
   // it is empty or equals the identifier the label as it stands derives. A ref
@@ -588,34 +591,50 @@ export function ReportDefaultInspector({
           mono
         />
       )}
-      <InspectorTextField
-        label={tr('engine.inspector.report.label')}
-        value={labelValue}
-        onCommit={(v) => {
-          // Same `I18nLabel` union, same inspector, same destructive shape as
-          // the chart title (objectui#9274) — and `label` is REQUIRED on every
-          // report, so it is the more reachable of the two. A required key
-          // spells "empty" as `''`, not as an absent key, so the clear arm's
-          // `undefined` (nothing localized left) is mapped back onto it.
-          // objectstack#36373 — the edit lands in the session language's
-          // entry; a plain-string source the box showed translated becomes
-          // `{ default: SOURCE, LANG: EDIT }` (`servedLabel.ts`).
-          const patch: Record<string, unknown> = {
-            label: writtenLabel(draft.label, servedText?.label, language, v, ''),
-          };
-          // Live-derive the snake_case name from the label until the author
-          // edits the Name field directly (create mode only). `v` is the plain
-          // string the author just typed, which is what the slug must read.
-          // objectui#12789 — a Label that yields no machine name (a non-Latin
-          // script, or a cleared Label) leaves the Name empty, as the object
-          // designer does, so the save path asks the author for one; it never
-          // writes the `field` placeholder.
-          if (nameFollowsLabel) patch.name = toFieldNameOrEmpty(romanizeHan(v));
-          onPatch(patch);
-        }}
-        placeholder={tr('engine.inspector.report.labelPlaceholder')}
-        disabled={readOnly}
-      />
+      <div className="space-y-1">
+        <InspectorTextField
+          label={tr('engine.inspector.report.label')}
+          value={labelValue}
+          onCommit={(v) => {
+            // Same `I18nLabel` union, same inspector, same destructive shape as
+            // the chart title (objectui#9274) — and `label` is REQUIRED on every
+            // report, so it is the more reachable of the two. A required key
+            // spells "empty" as `''`, not as an absent key, so the clear arm's
+            // `undefined` (nothing localized left) is mapped back onto it.
+            // objectstack#36373 — the edit lands in the session language's
+            // entry; a plain-string source the box showed translated becomes
+            // `{ default: SOURCE, LANG: EDIT }` (`servedLabel.ts`).
+            const patch: Record<string, unknown> = {
+              label: writtenLabel(draft.label, servedText?.label, language, v, ''),
+            };
+            // Live-derive the snake_case name from the label until the author
+            // edits the Name field directly (create mode only). `v` is the plain
+            // string the author just typed, which is what the slug must read.
+            // objectui#12789 — a Label that yields no machine name (a non-Latin
+            // script, or a cleared Label) leaves the Name empty, as the object
+            // designer does, so the save path asks the author for one; it never
+            // writes the `field` placeholder.
+            if (nameFollowsLabel) patch.name = toFieldNameOrEmpty(romanizeHan(v));
+            onPatch(patch);
+          }}
+          placeholder={tr('engine.inspector.report.labelPlaceholder')}
+          disabled={readOnly}
+        />
+        {labelNote && (
+          <p
+            role="note"
+            data-testid="report-label-served-note"
+            data-note-kind={labelNote.kind}
+            className="text-[11px] leading-snug text-muted-foreground"
+          >
+            {tFormat(
+              labelNote.kind === 'kept' ? 'engine.inspector.servedLabel.kept' : 'engine.inspector.servedLabel.ifKept',
+              locale,
+              { served: labelNote.served },
+            )}
+          </p>
+        )}
+      </div>
       <InspectorSelectField
         label={tr('engine.inspector.report.type')}
         value={reportType}
