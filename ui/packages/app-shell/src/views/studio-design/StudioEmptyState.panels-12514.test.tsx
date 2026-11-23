@@ -46,6 +46,8 @@ import { ObjectValidationsPanel } from './ObjectValidationsPanel';
 import { ObjectActionsPanel } from './ObjectActionsPanel';
 import { HooksPanelHost } from './__tests__/hooksPanelHost';
 import { pressStudioSave } from './__tests__/studioSaveHarness';
+// The source reaches a dynamic `import('@objectstack/lint')`: its first load is paid at collection (`check:test-source-alias`).
+import '@objectstack/lint';
 import { registerBuiltinInspectors } from '../metadata-admin/inspectors';
 import { t } from '../metadata-admin/i18n';
 

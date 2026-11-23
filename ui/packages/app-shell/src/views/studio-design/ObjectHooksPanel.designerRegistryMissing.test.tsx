@@ -52,6 +52,8 @@ vi.mock('../metadata-admin/useMetadata', async (importOriginal) => {
   return { ...mod, useMetadataClient: () => mockClient };
 });
 
+// The source reaches a dynamic `import('@objectstack/lint')`: its first load is paid at collection (`check:test-source-alias`).
+import '@objectstack/lint';
 import { HooksPanelHost } from './__tests__/hooksPanelHost';
 import { pressStudioSave } from './__tests__/studioSaveHarness';
 import { listMetadataPreviewTypes } from '../metadata-admin/preview-registry';
