@@ -32,6 +32,7 @@ import { createHash } from 'node:crypto';
 
 import {
   isAppResolvedDefaultToken,
+  isRuntimeDefaultToken as isRuntimeDefaultValue,
   isUniqueDeclared,
   STRUCTURED_JSON_TYPES,
   FILE_REFERENCE_TYPES,
@@ -149,18 +150,36 @@ export type DriftOp =
   | { type: 'narrow_varchar'; table: string; column: string; to: number; from?: number }
   | { type: 'drop_column'; table: string; column: string }
   /**
-   * Strip a column DEFAULT metadata never asked for (#4560).
+   * Strip a column DEFAULT the metadata does not declare.
    *
-   * Today's only source is a `defaultValue` runtime token that a pre-fix build
-   * emitted as a literal (`DEFAULT 'current_user'`), so every insert that
-   * omitted the field got the token's own spelling instead of the engine's
-   * deliberate "leave it unset". Dropping it cannot fail and cannot lose data —
-   * stored rows keep whatever they hold; only FUTURE omitted inserts change,
-   * from a bogus literal to NULL. Rows already carrying the bogus value are NOT
-   * rewritten: they stay visible to the dangling-reference audit (#4551), whose
-   * standing rule is report, never rewrite.
+   * Two sources. (1) A `defaultValue` runtime token that a pre-fix build
+   * emitted as a literal (`DEFAULT 'current_user'`, #4560), so every insert
+   * that omitted the field got the token's own spelling instead of the
+   * engine's deliberate "leave it unset". (2) [#36245] A literal `defaultValue`
+   * the field no longer declares: the table was created while it did, so the
+   * column still carries it, and every insert that omits the field keeps
+   * storing the old default where a fresh database stores NULL.
+   *
+   * Dropping it cannot fail and cannot lose data — stored rows keep whatever
+   * they hold; only FUTURE omitted inserts change, to NULL. Rows already
+   * carrying the old value are NOT rewritten: for (1) they stay visible to the
+   * dangling-reference audit (#4551), whose standing rule is report, never
+   * rewrite; for (2) a stored value is indistinguishable from one a writer
+   * chose, and converting it is the owning object's call.
    */
   | { type: 'drop_column_default'; table: string; column: string }
+  /**
+   * [#36245] Restate a column DEFAULT whose declared literal changed: the
+   * column carries the literal an earlier declaration gave it, so every insert
+   * that omits the field stores the OLD value where a fresh database stores
+   * the new one. The value is the declaration's (`defaultValue`, read when the
+   * op is applied), emitted as `createColumn` emits it.
+   *
+   * `safe` for the reason `drop_column_default` is: the statement cannot fail
+   * on existing rows and rewrites none of them; only FUTURE omitted inserts
+   * change.
+   */
+  | { type: 'set_column_default'; table: string; column: string }
   /**
    * REPORT ONLY (#11535). The column's base type diverges from the one the
    * declaration materialises, and **the platform deliberately does not change
@@ -509,14 +528,15 @@ const DESTRUCTIVE_COLUMN_REMEDY = {
 
 /**
  * The remedy sentence each `safe` COLUMN entry of a declared field
- * (`widen_date_to_datetime`, `widen_varchar`, `drop_column_default`) ends
+ * (`widen_date_to_datetime`, `widen_varchar`, `drop_column_default`,
+ * `set_column_default`) ends
  * with, naming the act per object kind as the `relax_not_null` message does.
  * A publish applies these entries (`applyPublishedColumnChanges`) only for an
  * object authored in this environment: a publish of a package object is
  * refused (`NOT_OVERRIDABLE`), and a managed install of the package has no
  * door for them (`relaxDeclaredNotNull` applies the declared NOT NULL relax
  * only). So for a package object the sentence names `os migrate apply` alone.
- * Spelled once, here, so the three messages cannot drift apart.
+ * Spelled once, here, so the messages cannot drift apart.
  */
 const SAFE_COLUMN_REMEDY =
   'For an object authored in this environment, publishing the object applies it; for an object a package ' +
@@ -845,13 +865,109 @@ export interface FieldDef {
   /** ADR-0113: the explicit physical constraint — nullability drift reads THIS, not `required`. */
   storage?: { notNull?: boolean };
   /**
-   * The declared default. Only consulted for the runtime-token dimension
+   * The declared default, read on two dimensions. (1) The runtime-token one
    * (#4560): a token is an instruction, so it must never appear as a physical
-   * column DEFAULT. Literal defaults are deliberately NOT diffed — a hand-edited
-   * DEFAULT on a column is a DBA's business, and reporting every one of them
-   * would drown the plan the same way undeclared indexes would.
+   * column DEFAULT. (2) [#36245] The literal one: the column's literal DEFAULT
+   * follows the declaration — dropped when the field declares none, restated
+   * when the declared literal differs — so a fresh database and one an earlier
+   * release created store the same thing for an insert that omits the field
+   * ({@link physicalDefaultLiteral} says which physical DEFAULTs are literals;
+   * an expression such as a `NOW()` default is never touched).
    */
   defaultValue?: unknown;
+}
+
+/**
+ * [#36245] What a physical column DEFAULT is, read from the raw,
+ * dialect-decorated text `columnInfo()` reports. MEASURED spellings
+ * (SQLite / Postgres 16 / MariaDB 10.11, on columns `createColumn` built):
+ *
+ *   - a string `'none'` · `'none'::character varying` · `'none'` (MySQL 8
+ *     reports it bare, `none`); an embedded quote is doubled (`'it''s'`);
+ *   - a number `'42'` · `'42'::numeric` or a bare `5` · `42.000…` (decimal);
+ *   - a boolean `'1'` / `'0'` · `true` / `false` · `1` / `0`;
+ *   - an expression `strftime(…)` · `CURRENT_TIMESTAMP` · `current_timestamp(3)`.
+ *
+ * `{ kind: 'literal', text }` carries the literal with its quoting and cast
+ * removed; `none` is no DEFAULT (or an explicit NULL); `expression` is
+ * anything else — a function call, a keyword, a cast over something that is
+ * not a quoted literal — and is never acted on: this module cannot tell a
+ * platform `NOW()` default from a DBA's sequence.
+ */
+export type PhysicalDefault =
+  | { kind: 'none' }
+  | { kind: 'literal'; text: string }
+  | { kind: 'expression' };
+
+const BARE_NUMBER = /^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$/;
+const EXPRESSION_KEYWORD = /^(current_timestamp|current_date|current_time|localtimestamp|localtime|now|sysdate|uuid|gen_random_uuid|nextval)\b/i;
+const TRAILING_CAST = /^::\s*[A-Za-z_][\w\s"]*(\(\s*\d+(\s*,\s*\d+)?\s*\))?(\[\])?$/;
+
+/** See {@link PhysicalDefault}. */
+export function physicalDefaultLiteral(raw: unknown): PhysicalDefault {
+  if (raw === null || raw === undefined) return { kind: 'none' };
+  if (typeof raw === 'number' || typeof raw === 'bigint') return { kind: 'literal', text: String(raw) };
+  if (typeof raw === 'boolean') return { kind: 'literal', text: raw ? 'true' : 'false' };
+  if (typeof raw !== 'string') return { kind: 'expression' };
+  let s = raw.trim();
+  // Postgres spells a negative number `(-5)` or `'-5'::integer`.
+  const paren = /^\(\s*([+-]?[\d.eE+-]+)\s*\)$/.exec(s);
+  if (paren && BARE_NUMBER.test(paren[1])) s = paren[1];
+  if (s === '') return { kind: 'expression' };
+  if (/^null(\s*::.*)?$/i.test(s)) return { kind: 'none' };
+  if (s.startsWith("'")) {
+    // One quoted literal, `''` an embedded quote, then nothing or one cast.
+    let i = 1;
+    let text = '';
+    for (;;) {
+      if (i >= s.length) return { kind: 'expression' };
+      const ch = s[i];
+      if (ch === "'") {
+        if (s[i + 1] === "'") { text += "'"; i += 2; continue; }
+        break;
+      }
+      text += ch;
+      i += 1;
+    }
+    const rest = s.slice(i + 1).trim();
+    if (rest === '' || TRAILING_CAST.test(rest)) return { kind: 'literal', text };
+    return { kind: 'expression' };
+  }
+  if (BARE_NUMBER.test(s)) return { kind: 'literal', text: s };
+  if (/^(true|false)$/i.test(s)) return { kind: 'literal', text: s.toLowerCase() };
+  if (s.includes('(') || EXPRESSION_KEYWORD.test(s)) return { kind: 'expression' };
+  // MySQL 8 reports a string literal bare; anything else bare is a keyword
+  // this module does not know, which is not worth guessing at.
+  return /\s/.test(s) || /^[A-Z_]+$/.test(s) ? { kind: 'expression' } : { kind: 'literal', text: s };
+}
+
+/**
+ * [#36245] Does a physical literal DEFAULT already say what `declared` says?
+ * Answers `true` / `false`, or `null` when this module cannot judge the pair
+ * (a temporal literal, whose physical spelling is the dialect's own rendering
+ * of the instant) — and an unjudgeable pair is never reported.
+ *
+ * Numbers compare by value (`'42'`, `42`, `42.000…` are one default), booleans
+ * by truth (`'1'`, `true`, `1`), everything else as text.
+ */
+export function physicalLiteralMatches(text: string, declared: string | number | boolean, fieldType: string | undefined): boolean | null {
+  if (typeof declared === 'boolean') {
+    const t = text.toLowerCase();
+    if (t === '1' || t === 'true' || t === 't') return declared === true;
+    if (t === '0' || t === 'false' || t === 'f') return declared === false;
+    return false;
+  }
+  if (text === String(declared)) return true;
+  const type = String(fieldType ?? '');
+  if (type === 'date' || type === 'datetime' || type === 'time') return null;
+  const asNumber = typeof declared === 'number' ? declared : (BARE_NUMBER.test(declared.trim()) ? Number(declared) : NaN);
+  if (Number.isFinite(asNumber) && BARE_NUMBER.test(text)) return Number(text) === asNumber;
+  return false;
+}
+
+/** A literal DEFAULT as the drift message shows it: single-quoted, an embedded quote doubled. */
+function quoteDefaultForMessage(text: string): string {
+  return `'${text.replace(/'/g, "''")}'`;
 }
 
 /**
@@ -1352,6 +1468,67 @@ export function diffManagedTable(args: {
           `Dropping the default is non-destructive. ${SAFE_COLUMN_REMEDY} Rows already holding ` +
           `'${field.defaultValue}' are NOT rewritten — the dangling-reference audit reports them.`,
       });
+    }
+
+    // ── literal column DEFAULT (#36245) ──────────
+    // The column's literal DEFAULT follows the declaration. A table an earlier
+    // release created keeps the DEFAULT that release's declaration gave it —
+    // the additive sync never revisits an existing column — so an insert that
+    // omits the field stores the OLD default on that database and the declared
+    // one (or NULL) on a fresh one, and nothing said so. Two arms: the field
+    // declares no default any more (drop it), or a different literal (restate
+    // it). Detected here rather than fixed inline so it travels the same
+    // plan/apply road as every other divergence; `safe`, as the token arm above
+    // is: the statement cannot fail on existing rows and rewrites none.
+    //
+    // Judged only where `createColumn` would have emitted a literal itself: a
+    // token (`NOW()` has its own expression, the app-resolved ones the arm
+    // above), an object, a multi-value column (no scalar DEFAULT at all) and a
+    // physical EXPRESSION are left alone, and so is a column with no DEFAULT
+    // under a declared one (on MySQL a TEXT column cannot carry the literal).
+    {
+      const dv = field.defaultValue;
+      const physical = physicalDefaultLiteral(col.defaultValue);
+      const multiValue = isMultiValueField({ type: String(field.type ?? ''), multiple: field.multiple === true });
+      if (physical.kind === 'literal' && !multiValue) {
+        if (dv === undefined || dv === null) {
+          out.push({
+            kind: 'default_mismatch',
+            remoteName: table,
+            table,
+            column: fieldName,
+            expected: '(no column default)',
+            actual: `DEFAULT ${quoteDefaultForMessage(physical.text)}`,
+            severity: 'warning',
+            category: 'safe',
+            op: { type: 'drop_column_default', table, column: fieldName },
+            message:
+              `${table}.${fieldName}: the column carries DEFAULT ${quoteDefaultForMessage(physical.text)}, but the field ` +
+              `declares no default — every insert that omits the field stores that value here, where a new ` +
+              `database stores nothing. Dropping the default is non-destructive and rewrites no stored row. ` +
+              SAFE_COLUMN_REMEDY,
+          });
+        } else if ((typeof dv === 'string' || typeof dv === 'number' || typeof dv === 'boolean') && !isRuntimeDefaultValue(dv)) {
+          if (physicalLiteralMatches(physical.text, dv, field.type) === false) {
+            out.push({
+              kind: 'default_mismatch',
+              remoteName: table,
+              table,
+              column: fieldName,
+              expected: `DEFAULT ${quoteDefaultForMessage(String(dv))}`,
+              actual: `DEFAULT ${quoteDefaultForMessage(physical.text)}`,
+              severity: 'warning',
+              category: 'safe',
+              op: { type: 'set_column_default', table, column: fieldName },
+              message:
+                `${table}.${fieldName}: the column carries DEFAULT ${quoteDefaultForMessage(physical.text)}, but the field ` +
+                `declares ${quoteDefaultForMessage(String(dv))} — every insert that omits the field stores the old value ` +
+                `here, where a new database stores the declared one. Restating the default is non-destructive and ` +
+                `rewrites no stored row. ${SAFE_COLUMN_REMEDY}`,
+            });
+          }
+        }
+      }
     }
 
     // ── base type: a multi-value field over a stale textual column (#11535) ──
