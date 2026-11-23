@@ -3427,6 +3427,9 @@ importers:
       '@objectstack/platform-objects':
         specifier: workspace:*
         version: link:../../platform-objects
+      '@objectstack/plugin-hono-server':
+        specifier: workspace:*
+        version: link:../../plugins/plugin-hono-server
       '@objectstack/service-cluster':
         specifier: workspace:*
         version: link:../service-cluster
