@@ -14,7 +14,6 @@ import {
   RELATED_LIST_COLUMN_UNKNOWN,
   RELATED_LIST_GROUP_NOT_BODY,
   RELATED_LIST_REF_UNKNOWN,
-  RELATED_LIST_STREAM_OFF,
   RELATED_LIST_STREAM_PART,
   validateRelatedListRefs,
 } from './validate-related-list-refs.js';
@@ -164,25 +163,6 @@ describe('validateRelatedListRefs — built-in tabs and an entry\'s columns', ()
       ['warning', RELATED_LIST_ATTACHMENTS_OFF, 'objects[0].relatedLists[1]'],
     ]);
     expect(findings(stackOf(lead({ enable: { files: true }, relatedLists: ['rlo_task', 'sys_attachment'] })))).toEqual([]);
-  });
-
-  it("[#36693] warns on 'sys_activity' when all three stream sources are off; any one source on is the control", () => {
-    const allOff = { feeds: false, activities: false };
-    expect(findings(stackOf(lead({ enable: allOff, relatedLists: ['rlo_task', 'sys_activity'] })))).toEqual([
-      ['warning', RELATED_LIST_STREAM_OFF, 'objects[0].relatedLists[1]'],
-    ]);
-    // `trackHistory: false` written out reads the same as absent.
-    expect(findings(stackOf(lead({ enable: { ...allOff, trackHistory: false }, relatedLists: ['sys_activity'] })))).toEqual([
-      ['warning', RELATED_LIST_STREAM_OFF, 'objects[0].relatedLists[0]'],
-    ]);
-    for (const on of [{ feeds: true }, { activities: true }, { trackHistory: true }]) {
-      expect(findings(stackOf(lead({ enable: { ...allOff, ...on }, relatedLists: ['sys_activity'] })))).toEqual([]);
-    }
-    // `feeds` / `activities` are opt-out: absent is on.
-    expect(findings(stackOf(lead({ enable: { feeds: false }, relatedLists: ['sys_activity'] })))).toEqual([]);
-    expect(findings(stackOf(lead({ relatedLists: ['sys_activity'] })))).toEqual([]);
-    const [finding] = validateRelatedListRefs(stackOf(lead({ enable: allOff, relatedLists: ['sys_activity'] })));
-    expect(finding.hint).toContain("'sys_activity'");
   });
 
   it("warns on a part of the activity stream and prescribes 'sys_activity', in place of the unknown-name error", () => {

@@ -1206,9 +1206,8 @@ export function buildDefaultDiscussion(): any {
  * three off the 动态 tab would be empty, so the synthesizer leaves it out, the
  * way the Attachments tab follows `enable.files`. A `relatedLists` entry
  * `'sys_activity'` does not bring it back (`arrangeDeclaredTabs` only places
- * tabs that were built); `os validate` warns on that entry
- * (`related-list-stream-off`). An authored page, or an authored `discussion`
- * slot, draws what its author placed.
+ * tabs that were built). An authored page, or an authored `discussion` slot,
+ * draws what its author placed.
  */
 function streamHasSource(def: ObjectDefLike | undefined): boolean {
   const enable = def?.enable;

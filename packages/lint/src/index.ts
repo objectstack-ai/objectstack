@@ -687,15 +687,13 @@ export type {
 // `relatedLists` object entry's columns must be child fields
 // (`related-list-column-unknown`, error), and since #35901 an object
 // extension's list placement's columns too; a built-in tab entry that draws
-// nothing warns (`related-list-attachments-off`, `related-list-stream-part`,
-// and since #36693 `related-list-stream-off`).
+// nothing warns (`related-list-attachments-off`, `related-list-stream-part`).
 export {
   validateRelatedListRefs,
   RELATED_LIST_REF_UNKNOWN,
   RELATED_LIST_GROUP_NOT_BODY,
   RELATED_LIST_COLUMN_UNKNOWN,
   RELATED_LIST_ATTACHMENTS_OFF,
-  RELATED_LIST_STREAM_OFF,
   RELATED_LIST_STREAM_PART,
 } from './validate-related-list-refs.js';
 

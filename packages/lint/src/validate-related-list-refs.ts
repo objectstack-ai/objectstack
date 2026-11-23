@@ -74,10 +74,6 @@
  *    `sys_attachment` on an object that does not enable files draws nothing:
  *    `related-list-attachments-off` at `warning`, since turning files on
  *    later makes the entry live, and the entry is not wrong in itself.
- *    `sys_activity` on an object whose activity stream has no source
- *    (`enable.feeds: false`, `enable.activities: false`, and `trackHistory`
- *    not `true`) draws nothing either (#36693): `related-list-stream-off` at
- *    `warning`, for the same reason.
  *  - `sys_comment` and `sys_audit_log` are parts of the activity stream
  *    (`RELATED_LIST_BUILTIN_PART_OF`), not tabs: `related-list-stream-part`
  *    at `warning`, prescribing `sys_activity`, in place of the unknown-name
@@ -129,9 +125,6 @@ export const RELATED_LIST_COLUMN_UNKNOWN = 'related-list-column-unknown';
 /** `relatedLists` names `sys_attachment` on an object that does not enable files. */
 export const RELATED_LIST_ATTACHMENTS_OFF = 'related-list-attachments-off';
 
-/** `relatedLists` names `sys_activity` on an object whose activity stream has no source switched on. */
-export const RELATED_LIST_STREAM_OFF = 'related-list-stream-off';
-
 /** `relatedLists` names a part of the activity stream (`sys_comment`, `sys_audit_log`) as a tab. */
 export const RELATED_LIST_STREAM_PART = 'related-list-stream-part';
 
@@ -140,7 +133,7 @@ export interface RelatedListRefFinding {
    * `error` for a name or column that places nothing (the verdict `defineStack`
    * gives for a name); `warning` for a built-in tab entry that draws nothing
    * on this object today (`related-list-attachments-off`,
-   * `related-list-stream-off`, `related-list-stream-part`).
+   * `related-list-stream-part`).
    */
   severity: 'error' | 'warning';
   /** Diagnostic rule id. */
@@ -319,20 +312,6 @@ export function validateRelatedListRefs(stack: AnyRec, options?: RelatedListRefO
                 `Object '${parentName}' relatedLists[${i}] 'sys_attachment' places the attachments tab, but ` +
                 `'${parentName}' does not enable files (enable.files), so the record page draws no attachments tab.`,
               hint: "Set enable: { files: true } on the object to show attachments, or remove 'sys_attachment'.",
-            });
-          }
-          if (name === 'sys_activity' && enable?.feeds === false && enable?.activities === false && enable?.trackHistory !== true) {
-            findings.push({
-              severity: 'warning',
-              rule: RELATED_LIST_STREAM_OFF,
-              where: `object "${parentName}" › relatedLists`,
-              path,
-              message:
-                `Object '${parentName}' relatedLists[${i}] 'sys_activity' places the activity stream tab, but ` +
-                `'${parentName}' switches off all three of the stream's sources (enable.feeds and enable.activities ` +
-                `are false, enable.trackHistory is not true), so the record page draws no activity stream tab.`,
-              hint:
-                "Turn on enable.feeds, enable.activities or enable.trackHistory to show the stream, or remove 'sys_activity'.",
             });
           }
           return;
