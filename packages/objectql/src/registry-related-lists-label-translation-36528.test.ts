@@ -5,16 +5,19 @@
  * extension brings, read through the `/meta` read's real options: the SERVED
  * object (the registry fold has spliced an extension's list placement and the
  * paired `.custom` package's arrangement into `relatedLists`) translated
- * against `packagedBase: getPackagedObjectBase(name)`, as
- * `packagedObjectBaseOf` in `@objectstack/rest` hands it. A code extender's
- * placed entry is part of that base (#36528), so its title reads the
- * deployment catalog; a `.custom` title diverges from the base and reads the
- * pair's translations (`pairBundle`).
+ * against the packaged base the REST read hands `translateMetadataDocument`
+ * (`packagedObjectBaseOf(protocol, 'object', name)` in `@objectstack/rest`,
+ * which asks `ObjectStackProtocolImplementation#getPackagedObjectBase`, which
+ * asks the engine's registry). A code extender's placed entry is part of that
+ * base (#36528), so its title reads the deployment catalog; a `.custom` title
+ * diverges from the base and reads the pair's translations (`pairBundle`).
  */
 
 import { describe, it, expect } from 'vitest';
 import { translateMetadataDocument, type TranslationBundle } from '@objectstack/spec/system';
-import { SchemaRegistry } from './registry.js';
+import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
+import { ObjectQL } from './index.js';
+import type { SchemaRegistry } from './registry.js';
 
 const BASE = 'com.vendor.crm';
 const PAIR = 'com.vendor.crm.custom';
@@ -27,8 +30,13 @@ const child = (name: string, label: string) => ({
   fields: { lead_id: { name: 'lead_id', type: 'lookup', label: 'Lead', reference: OBJ } },
 });
 
+/** The engine's registry, and the protocol the REST read asks for the packaged base. */
+let protocol: ObjectStackProtocolImplementation;
+
 function withBase(): SchemaRegistry {
-  const reg = new SchemaRegistry({ multiTenant: false, searchCompanion: false } as never);
+  const engine = new ObjectQL();
+  protocol = new ObjectStackProtocolImplementation(engine as never);
+  const reg = engine.registry;
   reg.logLevel = 'silent';
   reg.registerObject({
     name: OBJ,
@@ -69,6 +77,9 @@ const read = (served: unknown, packagedBase: unknown, pairBundle?: TranslationBu
     ...(pairBundle !== undefined ? { pairBundle } : {}),
   } as never);
 
+/** `packagedObjectBaseOf(protocol, 'object', OBJ)`: the object accessor of the REST read. */
+const packagedBaseOf = (name: string) => protocol.getPackagedObjectBase(name);
+
 const titles = (body: unknown) =>
   ((body as { relatedLists: unknown[] }).relatedLists).map((e) => (typeof e === 'string' ? e : (e as { label?: string }).label));
 
@@ -82,7 +93,7 @@ describe('_relatedLists over the served (folded) parent', () => {
     );
     const served = reg.getObject(OBJ);
     expect(titles(served)).toEqual(['Tasks', 'Audit trail', 'crm_note']);
-    const packagedBase = reg.getPackagedObjectBase(OBJ);
+    const packagedBase = packagedBaseOf(OBJ);
     expect(titles(packagedBase)).toEqual(['Tasks', 'Audit trail', 'crm_note']);
     expect(titles(read(served, packagedBase))).toEqual(['任务', '审计', 'crm_note']);
   });
@@ -97,7 +108,7 @@ describe('_relatedLists over the served (folded) parent', () => {
     const served = reg.getObject(OBJ) as { relatedLists: unknown[] };
     const renamed = { ...served, relatedLists: served.relatedLists.map((e) =>
       (typeof e === 'object' && (e as { list?: string }).list === 'acme_audit' ? { ...(e as object), label: 'Audit log' } : e)) };
-    expect(titles(read(renamed, reg.getPackagedObjectBase(OBJ)))).toEqual(['任务', 'Audit log', 'crm_note']);
+    expect(titles(read(renamed, packagedBaseOf(OBJ)))).toEqual(['任务', 'Audit log', 'crm_note']);
   });
 
   it('translates the title the paired `.custom` arrangement gives a list', () => {
@@ -108,7 +119,7 @@ describe('_relatedLists over the served (folded) parent', () => {
     );
     const served = reg.getObject(OBJ);
     expect(titles(served)).toEqual(['Notes', 'crm_task']);
-    const packagedBase = reg.getPackagedObjectBase(OBJ);
+    const packagedBase = packagedBaseOf(OBJ);
     // The arrangement is the customization layer: never part of the packaged base.
     expect(titles(packagedBase)).toEqual(['Tasks', 'crm_note']);
     expect(titles(read(served, packagedBase, PAIR_BUNDLE))).toEqual(['笔记', 'crm_task']);

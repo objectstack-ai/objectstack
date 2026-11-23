@@ -1159,8 +1159,9 @@ function contributedNavItemsByApp(stack: AnyRec): Map<string, unknown[]> {
  * (`fieldGroups[].key` is the section anchor, ADR-0085), and
  * `objects.<obj>._relatedLists.*` for a labelled tab entry it brings: an
  * object-form entry of a `.custom` arrangement's `relatedLists` that is not
- * `hidden`, or a list placement in `place` (spliced into the packaged base
- * the read compares with too, `getPackagedObjectBase`), each titling a tab of
+ * `hidden`, or a list placement in `place` (spliced, where the target declares
+ * `relatedLists`, into the served target and into the packaged base the read
+ * compares with, `getPackagedObjectBase`), each titling a tab of
  * the served target by its `list`. `indexes` is not translatable; `label` / `pluralLabel` /
  * `description` are leaf copy on an object that already resolved, and this
  * rule checks no leaf. ⛔ Do not grow this fold to `_views` / `_tabs` /
@@ -1419,10 +1420,13 @@ function buildUniverse(stack: AnyRec): Universe {
       // `_relatedLists.<list>` is keyed by a labelled entry's `list`: a
       // `.custom` arrangement's `relatedLists` entry (ADR-0146 D10) and a
       // list placement's `place` entry each title a tab of the target, and
-      // the served target carries that entry, which `translateObject`
-      // translates as it does the target's own (a placed entry is part of
-      // the packaged base it is compared with, `getPackagedObjectBase`). An
-      // arrangement entry with `hidden: true` titles no tab.
+      // where the target declares `relatedLists` the served target carries
+      // that entry, which `translateObject` translates as it does the
+      // target's own (a placed entry is part of the packaged base it is
+      // compared with, `getPackagedObjectBase`). A placement on a target
+      // that declares none is not applied, and its key is accepted here all
+      // the same: this fold does not read whether the target declares the
+      // list. An arrangement entry with `hidden: true` titles no tab.
       for (const entry of extension.relatedListEntries) {
         const list = strName(entry.list);
         if (!list) continue;
