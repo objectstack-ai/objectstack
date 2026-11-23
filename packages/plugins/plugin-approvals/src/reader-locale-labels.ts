@@ -29,8 +29,8 @@
  *  - the text is `II18nService.t(key, locale)`; a miss is the key echoed back,
  *    and then the authored text stands.
  *
- * [#35384] Except a METADATA label: the object's, the flow's and the
- * position's. Each is resolved by the spec translator of its type
+ * [#35384] Except a METADATA label: the object's, the flow's, the approval
+ * step's and the position's. Each is resolved by the spec translator of its type
  * (`@objectstack/spec/system`) over every locale the service holds, with the
  * metadata route's `ResolveOptions` ({@link metaLabelTranslation}: the
  * reader's locale, the DECLARED fallback chain, and the authored language,
@@ -44,13 +44,14 @@
  *  - the flow's by `translateFlow`, the translator the flow runner names a
  *    flow by. `/meta` serves a flow document untranslated (`translateFlow` is
  *    deliberately not in `translateMetadataDocument`'s table), so this is the
- *    spec's one reading of `flows.<flow>.label`.
+ *    spec's one reading of `flows.<flow>.label`;
+ *  - the approval step's by `resolveFlowApprovalStepLabel`, the spec's one
+ *    reading of `flows.<flow>.approvals.<node_id>.label`, over the flow's name
+ *    and the node's id the stored row carries (no flow document is read).
  *
  * So a reader in a deployment's declared `sourceLocale` reads these labels as
  * authored, never the `defaultLocale` row `t()` falls back to. `t()` carries
- * the catalog sentences, and still the approval STEP's label: no spec
- * translator reads `flows.<flow>.approvals.<node_id>.label` yet, and a second
- * walk of the locale chain here would be a second resolver.
+ * the catalog sentences only.
  *
  * objectql names a refused write's object this way (`objectDisplayLabel`,
  * through `objectLabelKey`), the REST door names a NOT NULL field this way
@@ -70,9 +71,10 @@
  *    own `label` (`translation.zod.ts`, `positions`), which `translatePosition`
  *    overlays on every served `position` document.
  *
- * [#35384] Only the step's key is asked of `t()`. The flow and position keys
- * are still spelled here, for the contract pin and for the readers that name
- * them; `translateFlow` and `translatePosition` read the same addresses.
+ * [#35384] No key is asked of `t()`. The flow, step and position keys are
+ * still spelled here, for the contract pin and for the readers that name
+ * them; `translateFlow`, `resolveFlowApprovalStepLabel` and
+ * `translatePosition` read the same addresses.
  *
  * `<flow>` is the request's `process_name` without its `flow:` prefix, the
  * `Flow.name` the engine hands the node (`$flowName`), and `<node_id>` is its
@@ -100,6 +102,7 @@
 import type { II18nService } from '@objectstack/spec/contracts';
 import {
   resolveBundleLocale,
+  resolveFlowApprovalStepLabel,
   translateFlow,
   translateObject,
   translatePosition,
@@ -338,8 +341,6 @@ export function readerLabelsFor(
     seen.set(key, value);
     return value;
   };
-  const picked = new Map<string, string | undefined>();
-  const pick = (key: string): string | undefined => memo(picked, key, () => render(key));
   // [#35384] Built on the first metadata label this read asks, once.
   let translation: { value: MetaLabelTranslation | undefined } | undefined;
   /** One metadata label through its spec translator; `undefined` on any miss or throw. */
@@ -359,6 +360,12 @@ export function readerLabelsFor(
         const doc: FlowLike = { name: flowName };
         return translateFlow(doc, bundle, options).label;
       }));
+  // [#35384] The step's label, as the spec reads `flows.<flow>.approvals.<node_id>.label`;
+  // no literal, so a miss picks nothing and the stored snapshot stands.
+  const stepLabels = new Map<string, string | undefined>();
+  const stepLabel = (flowName: string, nodeId: string): string | undefined =>
+    memo(stepLabels, approvalStepLabelKey(flowName, nodeId), () =>
+      translated(({ bundle, options }) => resolveFlowApprovalStepLabel(bundle, flowName, nodeId, undefined, options)));
   const positionLabels = new Map<string, string | undefined>();
   const positionLabel = (positionName: string): string | undefined =>
     memo(positionLabels, positionName, () =>
@@ -377,7 +384,7 @@ export function readerLabelsFor(
       }));
   return {
     flowLabel,
-    stepLabel: (flowName, nodeId) => pick(approvalStepLabelKey(flowName, nodeId)),
+    stepLabel,
     objectLabel,
     positionLabel,
     sentence: (key, params) => render(key, params),

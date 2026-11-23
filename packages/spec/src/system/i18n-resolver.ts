@@ -6797,6 +6797,50 @@ export function resolveFlowScreenTitle(
 }
 
 /**
+ * [#35384] Resolve an approval step's label against
+ * `flows.<flow_name>.approvals.<node_id>.label` — the `approvals` group's one
+ * key, which overlays the `approval` node's own `FlowNode.label` (the step
+ * name an approval request snapshots as `current_step_label`) — falling back
+ * to `literal`, and to `undefined` when none is given: the same
+ * bundle-then-literal order {@link resolveFlowScreenTitle} follows, across the
+ * same locale chain ({@link ResolveOptions}: the requested locale, then the
+ * DECLARED fallback chain, unless the requested locale is the authored one).
+ *
+ * Takes the flow's name and the node's id, not a flow document, because its
+ * reader holds no document: an approval request row carries the flow's name
+ * (`process_name` without its `flow:` prefix) and the node's id
+ * (`current_step`), and a list read must not read a flow per row. A caller
+ * holding a document passes the node's authored `label` as `literal`.
+ *
+ * Every depth: the key is addressed by `FlowNode.id` alone, so an approval
+ * node inside an ADR-0031 region resolves like a top-level one.
+ *
+ * ⛔ Not folded into {@link translateFlow}: that translator leaves every
+ * node's `label` alone (the Studio canvas draws it), and its document readers
+ * hand it a name-and-label stub, so a node overlay there would reach no
+ * reader of this key.
+ */
+export function resolveFlowApprovalStepLabel(
+  bundle: TranslationBundle | undefined,
+  flowName: string,
+  nodeId: string,
+  literal?: string,
+  opts?: ResolveOptions,
+): string | undefined {
+  if (!bundle || !flowName || typeof nodeId !== 'string' || nodeId.length === 0) return literal;
+  for (const code of localeChain(opts)) {
+    const entry = pickData(bundle, code)?.flows?.[flowName]?.approvals;
+    if (!entry || typeof entry !== 'object') continue;
+    // Own keys only: a node id that reads as `toString` must not resolve to
+    // the map's prototype member.
+    if (!Object.prototype.hasOwnProperty.call(entry, nodeId)) continue;
+    const candidate = (entry as Record<string, { label?: unknown } | undefined>)[nodeId]?.label;
+    if (typeof candidate === 'string' && candidate.length > 0) return candidate;
+  }
+  return literal;
+}
+
+/**
  * Apply the active locale to a flow metadata document (#7646's recommendation
  * B, the resolver half #11287): translates the flow's own `label` against
  * `flows.<name>.label`, its terminal toasts against

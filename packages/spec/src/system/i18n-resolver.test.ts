@@ -6845,3 +6845,66 @@ describe('bundle locale keys are the bundle\'s OWN keys — an Object.prototype 
     expect(resolveBundleLocale(bare, 'toString')).toBeUndefined();
   });
 });
+
+// ════════════════════════════════════════════════════════════════════════════
+// #35384 — an approval step's label, `flows.<flow>.approvals.<node_id>.label`
+// ════════════════════════════════════════════════════════════════════════════
+
+import { resolveFlowApprovalStepLabel } from './i18n-resolver';
+
+describe('resolveFlowApprovalStepLabel — an approval step label from the `flows` bundle group (#35384)', () => {
+  const bundle: FlowTestBundle = {
+    en: { flows: { expense_approval: { approvals: { manager_review: { label: 'Manager review (en pack)' } } } } },
+    'zh-CN': { flows: { expense_approval: { approvals: { manager_review: { label: '经理审批' } } } } },
+  };
+
+  it('resolves flows.<flow>.approvals.<node_id>.label in the requested locale', () => {
+    expect(resolveFlowApprovalStepLabel(bundle, 'expense_approval', 'manager_review', 'Manager review', { locale: 'zh-CN' }))
+      .toBe('经理审批');
+    // The BCP-47 ladder the rest of the surface uses: a bare `zh` reaches the zh-CN pack.
+    expect(resolveFlowApprovalStepLabel(bundle, 'expense_approval', 'manager_review', undefined, { locale: 'zh' }))
+      .toBe('经理审批');
+  });
+
+  it('walks the DECLARED fallback chain for a non-authored locale, and nothing undeclared', () => {
+    expect(resolveFlowApprovalStepLabel(bundle, 'expense_approval', 'manager_review', 'Manager review', {
+      locale: 'ja-JP', fallbackChain: ['zh-CN'], defaultLocale: 'en',
+    })).toBe('经理审批');
+    expect(resolveFlowApprovalStepLabel(bundle, 'expense_approval', 'manager_review', 'Manager review', { locale: 'ja-JP' }))
+      .toBe('Manager review');
+  });
+
+  it('an authored-locale reader (sourceLocale en, defaultLocale zh-CN) never reaches the zh-CN row', () => {
+    const authoredOnly: FlowTestBundle = {
+      'zh-CN': { flows: { expense_approval: { approvals: { manager_review: { label: '经理审批' } } } } },
+    };
+    // The serving layer hands `defaultLocale` the declared sourceLocale (en),
+    // and the declared fallback chain (zh-CN, the defaultLocale collapse).
+    const opts = { locale: 'en', fallbackChain: ['zh-CN'], defaultLocale: 'en' };
+    expect(resolveFlowApprovalStepLabel(authoredOnly, 'expense_approval', 'manager_review', 'Manager review', opts))
+      .toBe('Manager review');
+    expect(resolveFlowApprovalStepLabel(authoredOnly, 'expense_approval', 'manager_review', undefined, opts))
+      .toBeUndefined();
+    // A shipped bundle entry for the authored locale still wins.
+    expect(resolveFlowApprovalStepLabel(bundle, 'expense_approval', 'manager_review', 'Manager review', opts))
+      .toBe('Manager review (en pack)');
+  });
+
+  it('falls back to the literal, then undefined: no bundle, an empty bundle, an unknown flow or node', () => {
+    expect(resolveFlowApprovalStepLabel(undefined, 'expense_approval', 'manager_review', 'Manager review', { locale: 'zh-CN' }))
+      .toBe('Manager review');
+    expect(resolveFlowApprovalStepLabel({}, 'expense_approval', 'manager_review', undefined, { locale: 'zh-CN' }))
+      .toBeUndefined();
+    expect(resolveFlowApprovalStepLabel(bundle, 'other_flow', 'manager_review', 'Step', { locale: 'zh-CN' }))
+      .toBe('Step');
+    expect(resolveFlowApprovalStepLabel(bundle, 'expense_approval', 'director_review', undefined, { locale: 'zh-CN' }))
+      .toBeUndefined();
+    expect(resolveFlowApprovalStepLabel(bundle, 'expense_approval', '', 'Step', { locale: 'zh-CN' }))
+      .toBe('Step');
+  });
+
+  it('reads own node ids only, never a prototype member', () => {
+    expect(resolveFlowApprovalStepLabel(bundle, 'expense_approval', 'toString', undefined, { locale: 'zh-CN' }))
+      .toBeUndefined();
+  });
+});
