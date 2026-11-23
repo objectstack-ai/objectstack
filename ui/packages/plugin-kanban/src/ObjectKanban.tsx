@@ -67,7 +67,9 @@ import { KANBAN_UNCOLUMNED_ID } from './index';
 import { KanbanBoardCore } from './KanbanBoardCore';
 import type { KanbanBoardProps, KanbanLaneRows } from './KanbanImpl';
 import { KanbanRecordsSettledContext } from './KanbanRecordsSettled';
-import { KanbanColumnSummaryContext, type KanbanColumnSummary } from './KanbanColumnSummary';
+import { KanbanColumnSummaryContext, type KanbanColumnSummary, type KanbanLaneStatisticType } from './KanbanColumnSummary';
+import { KanbanCardDisplayContext } from './KanbanCardDisplay';
+import { KanbanLaneMenuContext, type KanbanLaneMenu, type KanbanLaneMenuRequest } from './KanbanLaneMenu';
 import {
   KANBAN_LANE_PAGE_SIZE,
   KanbanLanePagingContext,
@@ -478,6 +480,16 @@ export interface ObjectKanbanComponentProps {
    * this board guesses no field name.
    */
   ownerField?: string;
+  /**
+   * objectstack#36370 — the lane header's 「+」 and 「⋯」 (collapse, hide), as
+   * the host that keeps the view's lanes and its create form asks for them
+   * (`ListView` passes it on its board). See `KanbanLaneMenu.ts`. Absent ⇒
+   * every lane header is drawn as before.
+   *
+   * A RUNTIME prop, never authored metadata: the host decides it, and no node
+   * key reaches it.
+   */
+  laneMenu?: KanbanLaneMenuRequest;
 }
 
 /**
@@ -511,6 +523,14 @@ type GateBoundKanbanSchema = ObjectKanbanSchema & {
   sort?: SortConfig[];
   /** The view's `KanbanConfig.summarizeField`, relayed by `ListView` (objectui#11629). */
   summarizeField?: string;
+  /**
+   * objectstack#36370 — the view's `KanbanConfig.summary` (the lane
+   * statistic at each lane's foot), `showFieldLabels` and `hideEmptyFields`,
+   * relayed by `ListView` the way `summarizeField` is.
+   */
+  summary?: { type?: string; field?: string };
+  showFieldLabels?: boolean;
+  hideEmptyFields?: boolean;
 };
 
 export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
@@ -525,6 +545,7 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
   lanePaging,
   ownerField,
   onRowGroupsChange,
+  laneMenu,
   ..._props
 }) => {
   void _props;
@@ -1332,7 +1353,20 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
           // one step later. That guard STAYS: it also answers every non-array
           // value that resolves to nothing, which the floor says nothing about.
           // ⛔ Do NOT trim — `'   '` is deliberately a value on this surface.
-          if (isEmptyValue(raw)) continue;
+          //
+          // objectstack#36370 — unless the view keeps empty fields
+          // (`kanban.hideEmptyFields: false`): the field keeps its line with
+          // an empty value, so the cards of a lane line up.
+          if (isEmptyValue(raw)) {
+            if (schema.hideEmptyFields === false) {
+              cardFieldCells.push({
+                field: f,
+                label: fieldLabel(objectDef?.name || schema.objectName || '', f, def?.label || f),
+                node: <span className="text-muted-foreground/60" data-kanban-card-field-empty="">—</span>,
+              });
+            }
+            continue;
+          }
           const isPicklist =
             def?.type === 'picklist' ||
             def?.type === 'multipicklist' ||
@@ -1576,7 +1610,50 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
     typeof schema.summarizeField === 'string' && schema.summarizeField !== ''
       ? schema.summarizeField
       : undefined;
+  // objectstack#36370 — the view's lane statistic (`kanban.summary`), drawn at
+  // each lane's foot; it takes the place of the `summarizeField` total, and
+  // `{ type: 'none' }` draws neither. The spec publishes only what the board
+  // computes (`KanbanLaneSummarySchema`: none, count, sum); a type outside it
+  // (an older draft) draws no statistic and keeps the `summarizeField` total. Read as primitives, so a host's new object of equal content
+  // builds nothing anew.
+  const statisticType = typeof schema.summary?.type === 'string' ? schema.summary.type : undefined;
+  const statisticField = typeof schema.summary?.field === 'string' && schema.summary.field !== '' ? schema.summary.field : undefined;
   const columnSummary = useMemo<KanbanColumnSummary | null>(() => {
+    const words: Record<KanbanLaneStatisticType, string> = {
+      count: tt('grid.summary.count', 'Count'),
+      sum: tt('grid.summary.sum', 'Sum'),
+    };
+    if (statisticType === 'none') return null;
+    if (statisticType === 'count' || statisticType === 'sum') {
+      const type = statisticType as KanbanLaneStatisticType;
+      if (type === 'count') {
+        return {
+          field: '',
+          label: words.count,
+          typeLabel: words.count,
+          type,
+          placement: 'foot',
+          renderTotal: (total: number) => <>{total}</>,
+        };
+      }
+      if (!statisticField || !objectDefReady) return null;
+      const def = objectDef?.fields?.[statisticField];
+      if (objectDef?.fields && !def) return null;
+      if (def && perms?.isLoaded && schema.objectName && !perms.checkField(schema.objectName, statisticField, 'read')) {
+        return null;
+      }
+      const fieldType = resolveCellRendererType(def ?? { type: 'number' });
+      const CellRenderer = getCellRenderer(fieldType);
+      const fieldForCell = def ?? { name: statisticField, type: fieldType };
+      return {
+        field: statisticField,
+        label: fieldLabel(objectDef?.name || schema.objectName || '', statisticField, def?.label || statisticField),
+        typeLabel: words[type],
+        type,
+        placement: 'foot',
+        renderTotal: (total: number) => <CellRenderer value={total} field={fieldForCell} />,
+      };
+    }
     // Until the definition settles the board does not yet know how the cards
     // format the field, or whether the object has it; it paints no total
     // rather than one it would repaint (a currency total first read as a bare
@@ -1600,7 +1677,10 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
       label: fieldLabel(objectDef?.name || schema.objectName || '', summarizeField, def?.label || summarizeField),
       renderTotal: (total: number) => <CellRenderer value={total} field={fieldForCell} />,
     };
-  }, [summarizeField, objectDefReady, objectDef, schema.objectName, perms, fieldLabel]);
+  }, [statisticType, statisticField, summarizeField, objectDefReady, objectDef, schema.objectName, perms, fieldLabel, tt]);
+  // objectstack#36370 — how a card draws its fields (`kanban.showFieldLabels`).
+  const showFieldLabels = schema.showFieldLabels !== false;
+  const cardDisplay = useMemo(() => ({ showFieldLabels }), [showFieldLabels]);
 
   // Clone schema to inject data and className
   // Use grouping.fields[0].field as swimlaneField fallback when no explicit swimlaneField
@@ -1990,6 +2070,25 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
     };
   })();
 
+  // objectstack#36370 — the host's lane menu, with the lanes that take its
+  // hide and create actions: every lane but `Uncategorized`, which holds the
+  // records whose value names no lane.
+  const laneMenuCollapseKey = laneMenu?.collapseKey;
+  const laneMenuHide = laneMenu?.onHideLane;
+  const laneMenuCreate = laneMenu?.onCreateInLane;
+  const laneMenuChannel = React.useMemo<KanbanLaneMenu | null>(
+    () => (laneMenu
+      ? {
+          collapseKey: laneMenuCollapseKey,
+          onHideLane: laneMenuHide,
+          onCreateInLane: laneMenuCreate,
+          laneTakesActions: (laneId: string) => laneId !== KANBAN_UNCOLUMNED_ID,
+        }
+      : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the request's parts, not its identity
+    [!!laneMenu, laneMenuCollapseKey, laneMenuHide, laneMenuCreate],
+  );
+
   // Error branch renders only after every hook above has run, so hook order
   // stays stable across renders (no early return before the hooks).
   // A refused read (403 / PERMISSION_DENIED, by the shared `classifyLoadError`
@@ -2108,6 +2207,11 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
           same kind of private channel. `null` (one query) leaves every lane
           as it was. See `KanbanLanePaging.ts`. */}
       <KanbanLanePagingContext.Provider value={lanePagingChannel}>
+      {/* objectstack#36370 — the lane header's 「+」 and 「⋯」, on the same
+          kind of private channel. `null` (no `laneMenu`) leaves every header
+          as it was. See `KanbanLaneMenu.ts`. */}
+      <KanbanLaneMenuContext.Provider value={laneMenuChannel}>
+      <KanbanCardDisplayContext.Provider value={cardDisplay}>
       {/* objectui#11234 — the internal board, not the exported
           `KanbanRenderer`. It takes the Quick Add pair only as explicit props,
           and this call passes neither, so the object-bound board draws no
@@ -2174,6 +2278,8 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
           },
         }}
       />
+      </KanbanCardDisplayContext.Provider>
+      </KanbanLaneMenuContext.Provider>
       </KanbanLanePagingContext.Provider>
       </KanbanColumnSummaryContext.Provider>
       </KanbanRecordsSettledContext.Provider>

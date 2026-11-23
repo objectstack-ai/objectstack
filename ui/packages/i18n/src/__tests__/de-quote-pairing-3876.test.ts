@@ -465,10 +465,13 @@ describe('objectui#3876 — de pack closes „ with “ and not with a straight 
     // 125 once objectstack-ai/objectstack#36363 added `designMode.menu.iconHint`,
     // the menu editor's icon field naming an example icon („briefcase“) — one
     // literal span.
-    // 126 once objectstack-ai/objectstack#36364 added `designMode.menu.newItemLeft`,
+    // 127 once objectstack-ai/objectstack#36370 added `kanban.laneMenu.hideHint`
+    // and `list.optionsMenu.kanbanHiddenLanesHint`, the board's two lines naming
+    // the lane hidden cards land in („Nicht kategorisiert“) — two literal spans.
+    // 128 once objectstack-ai/objectstack#36364 added `designMode.menu.newItemLeft`,
     // the design mode naming a new dashboard it could not remove („{{name}}“)
     // — one interpolated span, the name the reader gave it.
-    expect(okSpans, 'correctly paired spans').toBe(126);
+    expect(okSpans, 'correctly paired spans').toBe(128);
   });
 
   it('keeps the count identity that replaces the card’s count(„) === count(“)', () => {
@@ -594,9 +597,12 @@ describe('objectui#3876 — de pack closes „ with “ and not with a straight 
     // `console.commandPalette.createAs`, one more matched pair.
     // 125 / 125 / 0 after objectstack-ai/objectstack#36363 added
     // `designMode.menu.iconHint`, one more matched pair.
-    // 126 / 126 / 0 after objectstack-ai/objectstack#36364 added
+    // 127 / 127 / 0 after objectstack-ai/objectstack#36370 added
+    // `kanban.laneMenu.hideHint` and `list.optionsMenu.kanbanHiddenLanesHint`,
+    // two more matched pairs.
+    // 128 / 128 / 0 after objectstack-ai/objectstack#36364 added
     // `designMode.menu.newItemLeft`, one more matched pair.
-    expect({ open, close, rdq }).toEqual({ open: 126, close: 126, rdq: 0 });
+    expect({ open, close, rdq }).toEqual({ open: 128, close: 128, rdq: 0 });
     // The durable shape: every „ closed by a “, every surplus “ an English
     // opener answered by a ”. Survived translating the two English values.
     expect(close).toBe(open + rdq);

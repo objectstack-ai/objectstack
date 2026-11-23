@@ -1788,7 +1788,7 @@ const appTranslationDataShape = () => ({
    *   flows.<flow_name>.screens.<node_id>.fields.<field_name>.options.<value>   (#22507)
    *   flows.<flow_name>.refusals.<node_id>.message   (a refused `end` node, #22450)
    *   flows.<flow_name>.approvals.<node_id>.label    (an `approval` node's step label)
-   *   flows.<flow_name>.nodes.<node_id>.label        (any other node's display label, ruling 7076440876)
+   *   flows.<flow_name>.nodes.<node_id>.label        (any other node's display label, a titled screen's included, ruling 7076440876)
    *   flows.<flow_name>.records.<node_id>.fields.<field_name>   (text a record write keeps)
    *
    * Every user-read string slot of the flow schemas is either one of these
@@ -1930,13 +1930,16 @@ const appTranslationDataShape = () => ({
    * - **Grouped by what it overlays, not by node type.** Every other group
    *   addresses one node type; this one addresses the node label of every
    *   node whose label has no key of its own, at any depth (an ADR-0031 region
-   *   included). That excludes two types, each of which has a key of its
-   *   own, so one string keeps one key: an `approval` (`approvals.<node_id>.label`)
-   *   and a `screen`, whose `screens.<node_id>.title` covers
-   *   `config.title ?? node.label`. A screen that authors its own `config.title`
-   *   is titled apart from its label, so its canvas label has no key; a drawing
-   *   names such a screen by its heading instead. `objectstack validate`
-   *   points a `nodes` key over either type at its own key.
+   *   included). That excludes an `approval` (`approvals.<node_id>.label`)
+   *   and an untitled `screen`, whose `screens.<node_id>.title` covers
+   *   `config.title ?? node.label`, so one string keeps one key.
+   *   `objectstack validate` points a `nodes` key over either at its own key.
+   * - **A titled screen's label is keyed here.** A screen that authors its
+   *   own non-empty `config.title` is titled apart from its label, so its
+   *   label has no other key: the Studio canvas draws it, and the docs embed
+   *   draws it where the heading holds a `{{ }}` hole a drawing cannot fill
+   *   (elsewhere the embed names the screen by its heading). Its heading
+   *   stays `screens.<node_id>.title`.
    * - **Start and end nodes included.** Their labels are the author's words
    *   like any other step's, and often name an outcome or a trigger
    *   ("Approved", "On Task Created"), so a viewer does not substitute words of
@@ -2187,8 +2190,10 @@ const appTranslationDataShape = () => ({
     // [ruling 7076440876] Any other node's display label, the step name a
     // drawing of the flow shows (the docs viewer's `type: flow` embed and the
     // Studio designer). Grouped by what it overlays, `FlowNode.label`, not by
-    // node type: a screen's heading and an approval step's label already have
-    // their own keys, so `objectstack validate` points a key over either at it.
+    // node type: an untitled screen's heading and an approval step's label
+    // already have their own keys, so `objectstack validate` points a key over
+    // either at it; a screen that authors its own `config.title` has its label
+    // keyed here.
     nodes: z.record(z.string(), strictObject({
       surface: 'this flow node translation',
       history: TRANSLATION_HISTORY,
@@ -2206,11 +2211,12 @@ const appTranslationDataShape = () => ({
     }, {
       label: z.string().optional().describe(
         "Translated node label — overlays the node's own `label` (`FlowNode.label`), the step name a drawing of the "
-        + 'flow shows; for any node but a `screen` (keyed `screens.<node_id>.title`) and an `approval` (keyed '
-        + '`approvals.<node_id>.label`)',
+        + 'flow shows; for any node but an untitled `screen` (keyed `screens.<node_id>.title`) and an `approval` '
+        + '(keyed `approvals.<node_id>.label`). A screen that authors its own `config.title` has its label keyed here',
       ),
     })).optional().describe(
-      'Node-label translations keyed by node id (`FlowNode.id`) — every node other than a `screen` or an `approval`',
+      'Node-label translations keyed by node id (`FlowNode.id`) — every node other than an untitled `screen` or an '
+      + '`approval`',
     ),
     // [#28251] A `save_notice` node's message, picked by the ENGINE in the
     // triggering writer's locale before its holes are filled — the `refusals`

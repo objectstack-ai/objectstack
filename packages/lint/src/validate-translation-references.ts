@@ -509,6 +509,13 @@ interface ScreenFacts {
    * screen without one resolves nothing.
    */
   hasDescription: boolean;
+  /**
+   * Whether the screen AUTHORS its own heading (`config.title`, a non-empty
+   * string). Such a screen is titled apart from its label, so its label has a
+   * key of its own, `…nodes.<node_id>.label`; an untitled screen's label IS
+   * its heading, keyed `…screens.<node_id>.title`.
+   */
+  titled: boolean;
 }
 
 /** Everything a `flows.<name>.…` key may legally name under one flow. */
@@ -1704,6 +1711,7 @@ function buildUniverse(stack: AnyRec): Universe {
         fieldOptions,
         objectName: strName(config?.objectName),
         hasDescription: typeof config?.description === 'string' && config.description.length > 0,
+        titled: typeof config?.title === 'string' && config.title.length > 0,
       });
     }
     flows.set(flowName, { screens, refusals, notices, records, approvals, messages, otherNodes });
@@ -2585,10 +2593,13 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
           );
         }
         // ── flows.<name>.nodes.<node_id> (ruling 7076440876) ──────────────
-        // Any node but a `screen` or an `approval`, at any depth: those two
-        // carry their label under a key of their own, so a `nodes` key over
-        // one is pointed there rather than accepted as a second key.
+        // Any node but an `approval` or an untitled `screen`, at any depth:
+        // those two carry their label under a key of their own, so a `nodes`
+        // key over one is pointed there rather than accepted as a second key.
+        // A screen that authors its own `config.title` is titled apart from
+        // its label, so its label is keyed here.
         for (const nodeId of Object.keys(asRecord(rawFlow.nodes))) {
+          if (flow.screens.get(nodeId)?.titled) continue;
           const nodeType = flow.screens.has(nodeId) ? SCREEN_NODE_TYPE : flow.otherNodes.get(nodeId);
           if (nodeType && nodeType !== SCREEN_NODE_TYPE && nodeType !== APPROVAL_NODE_TYPE) continue;
           orphan(
@@ -2596,15 +2607,16 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
             `${flowPath}.nodes.${nodeId}`,
             nodeType === SCREEN_NODE_TYPE
               ? `Translations are keyed to node "${nodeId}", which flow "${flowName}" declares as a ` +
-                `\`screen\` node; its heading is keyed \`screens.${nodeId}.title\`.`
+                `\`screen\` node with no \`config.title\` of its own, so its label is its heading, keyed ` +
+                `\`screens.${nodeId}.title\`.`
               : nodeType === APPROVAL_NODE_TYPE
                 ? approvalRedirect('node', nodeId, flowName)
                 : `Translations are keyed to node "${nodeId}", which flow "${flowName}" does not declare, so ` +
                   `its drawn step keeps its authored label.` +
-                  suggest(
-                    nodeId,
-                    [...flow.otherNodes].filter(([, type]) => type !== APPROVAL_NODE_TYPE).map(([id]) => id),
-                  ),
+                  suggest(nodeId, [
+                    ...[...flow.otherNodes].filter(([, type]) => type !== APPROVAL_NODE_TYPE).map(([id]) => id),
+                    ...[...flow.screens].filter(([, screen]) => screen.titled).map(([id]) => id),
+                  ]),
             `Node-label translations are keyed by a node's \`id\`, not its \`label\`.`,
           );
         }

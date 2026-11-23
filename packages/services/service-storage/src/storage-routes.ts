@@ -58,7 +58,7 @@ import {
 // arrives through `opts.resolveFileHolder`, which the plugin binds to the reap
 // guard's own `findFileHolder`.
 import type { FileHolder } from './attachment-lifecycle.js';
-import { contentDispositionValue } from './content-disposition.js';
+import { servedBytesHeaders } from './served-bytes-policy.js';
 import { buildKey } from './storage-key.js';
 // [#23306] Re-exported so the server-side attach verbs, which import it from
 // here, lay their keys out exactly as the upload doors do.
@@ -2182,13 +2182,15 @@ export function registerStorageFamily(
         throw readErr;
       }
 
-      res.header('content-type', payload.ct ?? 'application/octet-stream');
-      res.header('content-length', String(data.byteLength));
-      // When the token carries the original filename, advertise it so the
-      // browser saves the file under its real name (not the opaque URL token).
-      if (payload.n) {
-        res.header('content-disposition', contentDispositionValue(payload.n, payload.d ?? 'inline'));
+      // The stored-bytes rule (`served-bytes-policy.ts`): inline only for the
+      // allow-list, `nosniff` and the sandbox CSP on every answer. The token's
+      // filename, when it carries one, names the browser's saved copy.
+      for (const [name, value] of Object.entries(
+        servedBytesHeaders({ contentType: payload.ct, filename: payload.n, disposition: payload.d }),
+      )) {
+        res.header(name, value);
       }
+      res.header('content-length', String(data.byteLength));
       res.send(data);
     } catch (err: any) {
       sendRawByteRouteFailure(res, err, 'Download failed', { method: 'GET', path: `${basePath}/_local/raw/:token` });

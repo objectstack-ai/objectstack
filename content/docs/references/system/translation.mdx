@@ -297,7 +297,7 @@ Translation data for a single object
 | **screens** | `Record<string, { title?: string; description?: string; fields?: Record<string, object> }>` | optional | Screen translations keyed by screen node id (`FlowNode.id`, the client's `ScreenSpec.nodeId`) |
 | **refusals** | `Record<string, { message?: string }>` | optional | Refusal translations keyed by the node id (`FlowNode.id`) of an `end` node declaring `outcome: 'refused'` |
 | **approvals** | `Record<string, { label?: string }>` | optional | Approval-step translations keyed by the node id (`FlowNode.id`) of an `approval` node |
-| **nodes** | `Record<string, { label?: string }>` | optional | Node-label translations keyed by node id (`FlowNode.id`) — every node other than a `screen` or an `approval` |
+| **nodes** | `Record<string, { label?: string }>` | optional | Node-label translations keyed by node id (`FlowNode.id`) — every node other than an untitled `screen` or an `approval` |
 | **notices** | `Record<string, { message?: string }>` | optional | Save-notice translations keyed by the node id (`FlowNode.id`) of a `save_notice` node |
 | **records** | `Record<string, { fields?: Record<string, string> }>` | optional | Record-write text translations keyed by the node id (`FlowNode.id`) of a `create_record` / `update_record` node |
 
@@ -487,7 +487,7 @@ Translation data for a single object
 | **screens** | `Record<string, { title?: string; description?: string; fields?: Record<string, object> }>` | optional | Screen translations keyed by screen node id (`FlowNode.id`, the client's `ScreenSpec.nodeId`) |
 | **refusals** | `Record<string, { message?: string }>` | optional | Refusal translations keyed by the node id (`FlowNode.id`) of an `end` node declaring `outcome: 'refused'` |
 | **approvals** | `Record<string, { label?: string }>` | optional | Approval-step translations keyed by the node id (`FlowNode.id`) of an `approval` node |
-| **nodes** | `Record<string, { label?: string }>` | optional | Node-label translations keyed by node id (`FlowNode.id`) — every node other than a `screen` or an `approval` |
+| **nodes** | `Record<string, { label?: string }>` | optional | Node-label translations keyed by node id (`FlowNode.id`) — every node other than an untitled `screen` or an `approval` |
 | **notices** | `Record<string, { message?: string }>` | optional | Save-notice translations keyed by the node id (`FlowNode.id`) of a `save_notice` node |
 | **records** | `Record<string, { fields?: Record<string, string> }>` | optional | Record-write text translations keyed by the node id (`FlowNode.id`) of a `create_record` / `update_record` node |
 
@@ -740,7 +740,7 @@ Translation data for a single object
 | **screens** | `Record<string, { title?: string; description?: string; fields?: Record<string, object> }>` | optional | Screen translations keyed by screen node id (`FlowNode.id`, the client's `ScreenSpec.nodeId`) |
 | **refusals** | `Record<string, { message?: string }>` | optional | Refusal translations keyed by the node id (`FlowNode.id`) of an `end` node declaring `outcome: 'refused'` |
 | **approvals** | `Record<string, { label?: string }>` | optional | Approval-step translations keyed by the node id (`FlowNode.id`) of an `approval` node |
-| **nodes** | `Record<string, { label?: string }>` | optional | Node-label translations keyed by node id (`FlowNode.id`) — every node other than a `screen` or an `approval` |
+| **nodes** | `Record<string, { label?: string }>` | optional | Node-label translations keyed by node id (`FlowNode.id`) — every node other than an untitled `screen` or an `approval` |
 | **notices** | `Record<string, { message?: string }>` | optional | Save-notice translations keyed by the node id (`FlowNode.id`) of a `save_notice` node |
 | **records** | `Record<string, { fields?: Record<string, string> }>` | optional | Record-write text translations keyed by the node id (`FlowNode.id`) of a `create_record` / `update_record` node |
 
@@ -962,7 +962,7 @@ Translation data for a single object
 | **screens** | `Record<string, { title?: string; description?: string; fields?: Record<string, object> }>` | optional | Screen translations keyed by screen node id (`FlowNode.id`, the client's `ScreenSpec.nodeId`) |
 | **refusals** | `Record<string, { message?: string }>` | optional | Refusal translations keyed by the node id (`FlowNode.id`) of an `end` node declaring `outcome: 'refused'` |
 | **approvals** | `Record<string, { label?: string }>` | optional | Approval-step translations keyed by the node id (`FlowNode.id`) of an `approval` node |
-| **nodes** | `Record<string, { label?: string }>` | optional | Node-label translations keyed by node id (`FlowNode.id`) — every node other than a `screen` or an `approval` |
+| **nodes** | `Record<string, { label?: string }>` | optional | Node-label translations keyed by node id (`FlowNode.id`) — every node other than an untitled `screen` or an `approval` |
 | **notices** | `Record<string, { message?: string }>` | optional | Save-notice translations keyed by the node id (`FlowNode.id`) of a `save_notice` node |
 | **records** | `Record<string, { fields?: Record<string, string> }>` | optional | Record-write text translations keyed by the node id (`FlowNode.id`) of a `create_record` / `update_record` node |
 
