@@ -5917,6 +5917,8 @@ const zhHant = {
     sourceDefault: "組織預設",
     sourceBuiltin: "預設",
     sourceMandatory: "必收",
+    followOrganization: "跟隨組織設定",
+    followOrganizationFor: "{{setting}}：跟隨組織設定",
   },
   slackLink: {
     title: "Slack 私信",

@@ -6016,6 +6016,8 @@ const fr = {
     sourceDefault: "Par défaut de l'organisation",
     sourceBuiltin: "Par défaut",
     sourceMandatory: "Obligatoire",
+    followOrganization: "Suivre le réglage de l'organisation",
+    followOrganizationFor: "{{setting}} : suivre le réglage de l'organisation",
   },
   slackLink: {
     title: "Messages directs Slack",

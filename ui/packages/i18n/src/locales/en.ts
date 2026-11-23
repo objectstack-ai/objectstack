@@ -6794,6 +6794,8 @@ const en = {
     sourceDefault: "Organization default",
     sourceBuiltin: "Default",
     sourceMandatory: "Required",
+    followOrganization: "Follow organization setting",
+    followOrganizationFor: "Follow organization setting for {{setting}}",
   },
   slackLink: {
     title: "Slack direct messages",

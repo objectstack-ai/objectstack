@@ -6509,6 +6509,8 @@ const ar = {
     sourceDefault: "افتراضي المؤسسة",
     sourceBuiltin: "افتراضي",
     sourceMandatory: "إلزامي",
+    followOrganization: "اتباع إعداد المؤسسة",
+    followOrganizationFor: "{{setting}}: اتباع إعداد المؤسسة",
   },
   slackLink: {
     title: "رسائل Slack المباشرة",

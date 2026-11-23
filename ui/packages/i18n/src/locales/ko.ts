@@ -5856,6 +5856,8 @@ const ko = {
     sourceDefault: "조직 기본값",
     sourceBuiltin: "기본값",
     sourceMandatory: "필수",
+    followOrganization: "조직 설정 따르기",
+    followOrganizationFor: "{{setting}}: 조직 설정 따르기",
   },
   slackLink: {
     title: "Slack 다이렉트 메시지",

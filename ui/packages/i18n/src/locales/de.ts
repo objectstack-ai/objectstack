@@ -5858,6 +5858,8 @@ const de = {
     sourceDefault: "Standard der Organisation",
     sourceBuiltin: "Standard",
     sourceMandatory: "Erforderlich",
+    followOrganization: "Einstellung der Organisation übernehmen",
+    followOrganizationFor: "{{setting}}: Einstellung der Organisation übernehmen",
   },
   slackLink: {
     title: "Slack-Direktnachrichten",

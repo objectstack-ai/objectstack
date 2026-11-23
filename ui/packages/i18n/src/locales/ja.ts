@@ -5859,6 +5859,8 @@ const ja = {
     sourceDefault: "組織の既定値",
     sourceBuiltin: "既定",
     sourceMandatory: "必須",
+    followOrganization: "組織の設定に従う",
+    followOrganizationFor: "{{setting}}：組織の設定に従う",
   },
   slackLink: {
     title: "Slack のダイレクトメッセージ",
