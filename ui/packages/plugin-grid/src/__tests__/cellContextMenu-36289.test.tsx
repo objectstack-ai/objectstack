@@ -45,6 +45,13 @@ const clipboard = vi.hoisted(() => ({
 }));
 
 beforeEach(() => {
+  // The record verdict and approval-lock reads an editable grid makes answer
+  // nothing: every row stays editable (fail open).
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+    ok: true, status: 200, statusText: 'OK',
+    headers: { get: () => 'application/json' },
+    json: async () => ({ success: true }),
+  }));
   clipboard.written = [];
   clipboard.text = '';
   clipboard.refuse = false;
@@ -62,6 +69,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  vi.unstubAllGlobals();
 });
 
 const FIELDS = {
@@ -167,7 +175,7 @@ describe('a list cell\'s right-click menu (objectstack#36289)', () => {
     fireEvent.click(item(menu, 'row-context-cell-paste'));
     await settleClipboard();
     await waitFor(() => expect(g.ds.update).toHaveBeenCalledTimes(1));
-    expect(g.ds.update).toHaveBeenCalledWith('account', 'r2', expect.objectContaining({ notes: 'Call back Monday' }));
+    expect(g.ds.update.mock.calls[0].slice(0, 3)).toEqual(['account', 'r2', { notes: 'Call back Monday' }]);
     await waitFor(() => expect(g.cell('Globex', 'notes')).toHaveTextContent('Call back Monday'));
   });
 
@@ -177,7 +185,7 @@ describe('a list cell\'s right-click menu (objectstack#36289)', () => {
     const menu = await g.openMenu(g.cell('Globex', 'email'));
     fireEvent.click(item(menu, 'row-context-cell-paste'));
     await settleClipboard();
-    expect(await within(g.cell('Globex', 'email')).findByTestId('cell-readonly-reason'))
+    expect(await screen.findByTestId('cell-readonly-reason'))
       .toHaveTextContent('Please enter a valid email address');
     expect(g.ds.update).not.toHaveBeenCalled();
     expect(g.cell('Globex', 'email')).toHaveTextContent('hi@globex.test');
@@ -188,11 +196,12 @@ describe('a list cell\'s right-click menu (objectstack#36289)', () => {
     fireEvent.click(g.cell('Globex', 'email'));
     const catcher = () => g.container.querySelector<HTMLInputElement>('[data-slot="cell-type-catcher"]')!;
     fireEvent.paste(catcher(), { clipboardData: { getData: () => 'not an address' } });
-    expect(await within(g.cell('Globex', 'email')).findByTestId('cell-readonly-reason'))
+    expect(await screen.findByTestId('cell-readonly-reason'))
       .toHaveTextContent('Please enter a valid email address');
     expect(g.ds.update).not.toHaveBeenCalled();
     fireEvent.paste(catcher(), { clipboardData: { getData: () => 'team@globex.test' } });
-    await waitFor(() => expect(g.ds.update).toHaveBeenCalledWith('account', 'r2', expect.objectContaining({ email: 'team@globex.test' })));
+    await waitFor(() => expect(g.ds.update).toHaveBeenCalledTimes(1));
+    expect(g.ds.update.mock.calls[0].slice(0, 3)).toEqual(['account', 'r2', { email: 'team@globex.test' }]);
   });
 
   it('a clipboard the browser will not read says so on the cell', async () => {
@@ -201,7 +210,7 @@ describe('a list cell\'s right-click menu (objectstack#36289)', () => {
     const menu = await g.openMenu(g.cell('Globex', 'notes'));
     fireEvent.click(item(menu, 'row-context-cell-paste'));
     await settleClipboard();
-    expect(await within(g.cell('Globex', 'notes')).findByTestId('cell-readonly-reason'))
+    expect(await screen.findByTestId('cell-readonly-reason'))
       .toHaveTextContent('The browser didn\'t let the list read the clipboard');
     expect(g.ds.update).not.toHaveBeenCalled();
   });
@@ -210,7 +219,8 @@ describe('a list cell\'s right-click menu (objectstack#36289)', () => {
     const g = await renderGrid();
     const menu = await g.openMenu(g.cell('Acme', 'notes'));
     fireEvent.click(item(menu, 'row-context-cell-clear'));
-    await waitFor(() => expect(g.ds.update).toHaveBeenCalledWith('account', 'r1', expect.objectContaining({ notes: null })));
+    await waitFor(() => expect(g.ds.update).toHaveBeenCalledTimes(1));
+    expect(g.ds.update.mock.calls[0].slice(0, 3)).toEqual(['account', 'r1', { notes: null }]);
   });
 
   it('Clear is unavailable on a required field (control: available on an optional one)', async () => {

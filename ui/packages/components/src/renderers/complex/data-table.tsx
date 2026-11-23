@@ -2249,6 +2249,15 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
   // Set when the menu closes because the pointer went elsewhere: focus then
   // stays where that press put it instead of jumping back to the row.
   const rowContextMenuClosedOutsideRef = useRef(false);
+  // objectstack#36289 — while the menu is open or closing, what a cell item
+  // chose waits here and runs once focus has gone back: a note it puts on the
+  // cell would otherwise be dismissed by that very focus move.
+  const rowContextMenuShownRef = useRef(false);
+  const afterRowContextMenuRef = useRef<Array<() => void>>([]);
+  const whenRowContextMenuClosed = (run: () => void) => {
+    if (rowContextMenuShownRef.current) afterRowContextMenuRef.current.push(run);
+    else run();
+  };
   // The built-in row menu's verdicts are asked at open time, so the open
   // decision and the items it opens read one answer (see `rowContextMenuItems`).
   const rowMenuScope = usePredicateScope();
@@ -4041,16 +4050,18 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     };
     const clipboard = typeof navigator !== 'undefined' ? navigator.clipboard : undefined;
     if (typeof clipboard?.readText !== 'function') {
-      sayUnavailable();
+      whenRowContextMenuClosed(sayUnavailable);
       return;
     }
+    // Asked at once, inside the click that chose Paste (a browser may grant the
+    // read only then); written once the menu has closed.
     clipboard.readText().then(
-      (text) => {
+      (text) => whenRowContextMenuClosed(() => {
         // Read where the cell is once the text arrives: the rows may have moved.
         const at = cellIndexOf(rowKey, columnKey);
         if (at && text !== '') pasteIntoCell(at.rowIndex, at.colIndex, text);
-      },
-      sayUnavailable,
+      }),
+      () => whenRowContextMenuClosed(sayUnavailable),
     );
   };
 
@@ -4496,10 +4507,10 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
       ...(writable ? { paste: () => pasteClipboardInto(row, columnKey) } : {}),
       ...(clearable
         ? {
-            clear: () => {
+            clear: () => whenRowContextMenuClosed(() => {
               const at = cellIndexOf(rowKey, columnKey);
               if (at) clearCell(at.rowIndex, at.colIndex);
-            },
+            }),
           }
         : {}),
     };
@@ -4584,6 +4595,8 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     const focusable = fromKeyboard ? target : target.closest<HTMLElement>('[tabindex]');
     rowContextMenuReturnFocusRef.current = focusable && rowEl.contains(focusable) ? focusable : null;
     rowContextMenuClosedOutsideRef.current = false;
+    rowContextMenuShownRef.current = true;
+    afterRowContextMenuRef.current = [];
     setRowContextMenu({ row, selected, column, x, y });
   };
   // The open menu's items, re-asked each render so they follow the row.
@@ -6167,6 +6180,10 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
               e.preventDefault();
               if (!rowContextMenuClosedOutsideRef.current) rowContextMenuReturnFocusRef.current?.focus();
               rowContextMenuClosedOutsideRef.current = false;
+              rowContextMenuShownRef.current = false;
+              const after = afterRowContextMenuRef.current;
+              afterRowContextMenuRef.current = [];
+              for (const run of after) run();
             }}
           >
             {openRowContextMenuItems}
