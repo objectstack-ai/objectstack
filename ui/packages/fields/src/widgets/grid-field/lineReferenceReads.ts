@@ -83,8 +83,12 @@ export function lineReferenceSource(source: unknown): unknown {
         .find(object, { $filter: { id: { $in: chunk } }, $top: chunk.length })
         .then((result) => {
           const byId = new Map<string, unknown>();
+          // Keyed by `id`, else `_id`, as `LookupField` keys the rows of its
+          // own `$in` read (`recordValue`): a backend that answers with `_id`
+          // only still names the record each by-id read asked for.
           for (const row of extractRecords(result)) {
-            if (row && typeof row === 'object' && row.id != null) byId.set(String(row.id), row);
+            const key = row && typeof row === 'object' ? (row.id ?? row._id) : undefined;
+            if (key != null) byId.set(String(key), row);
           }
           // `findOne`'s own answer for a record it cannot find: `null`.
           for (const w of mine) w.resolve(byId.get(String(w.id)) ?? null);
