@@ -393,7 +393,7 @@ describe('[#36264] svc.query and svc.generateSql refuse it too, on a named diale
 
   for (const door of ['query', 'generateSql'] as const) {
     it(`${door}: a timeDimensions dateRange on such a member → 400 INVALID_FILTER; CONTROL: on a scalar time column it answers`, async () => {
-      const window = (dimension: string) => ({ timeDimensions: [{ dimension, dateRange: ['2026-01-01', '2026-02-01'] }] });
+      const window = (dimension: string): Partial<AnalyticsQuery> => ({ timeDimensions: [{ dimension, dateRange: ['2026-01-01', '2026-02-01'] }] });
       const err = await refusalOf(ask(door, window('seen')));
       expect(err.code, err.message).toBe('INVALID_FILTER');
       expect(err.status).toBe(400);
