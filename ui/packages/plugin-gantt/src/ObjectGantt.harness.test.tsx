@@ -51,6 +51,7 @@ import { I18nProvider } from '@object-ui/i18n';
 import type { DataSource, DeclaredNode, ObjectGanttBlockNode } from '@object-ui/types';
 import { safeValidateSchema } from '@object-ui/types/zod';
 import { ObjectGantt } from './ObjectGantt';
+import { GANTT_FETCH_STEP } from './ganttRowWalk';
 // Module scope, not a hook: this import IS the registration (AGENTS.md
 // test-discipline section).
 import './index';
@@ -322,14 +323,25 @@ describe('ObjectGantt.rowCeiling-7210', () => {
 
   let calls: Array<Record<string, any>> = [];
 
-  /** An adapter that HONOURS `$top`, the way a real one does. */
-  function makeDataSource(storeSize: number) {
+  /**
+   * An adapter that HONOURS `$top` and `$skip`, the way a real one does. With
+   * `maxPageSize` it also refuses a `$top` over it, before reading anything,
+   * the way a host with `OS_DATA_MAX_PAGE_SIZE` set does (hosted: 5,000).
+   */
+  function makeDataSource(storeSize: number, maxPageSize?: number) {
     const store = makeRows(storeSize);
     return {
       find: vi.fn(async (_resource: string, params: any) => {
         calls.push({ ...(params ?? {}) });
         const top = typeof params?.$top === 'number' ? params.$top : store.length;
-        return { data: store.slice(0, top), total: store.length };
+        if (maxPageSize !== undefined && top > maxPageSize) {
+          throw new Error(
+            `Query parameter 'top' asks for ${top} rows; this deployment's maximum page size is ${maxPageSize}. `
+            + `The query was not run. Ask for at most ${maxPageSize} rows and page with offset.`,
+          );
+        }
+        const skip = typeof params?.$skip === 'number' ? params.$skip : 0;
+        return { data: store.slice(skip, skip + top), total: store.length };
       }),
       findOne: vi.fn(),
       create: vi.fn(),
@@ -374,12 +386,17 @@ describe('ObjectGantt.rowCeiling-7210', () => {
         ),
       );
 
-      // The fetch asked for one probe row past the ceiling — that is what makes
-      // the cut a fact about the rows in hand rather than a guess.
-      expect(calls.length).toBeGreaterThan(0);
-      for (const params of calls) {
-        expect(params.$top).toBe(nonGridRowCeilingQuery(GANTT_ROW_CEILING).$top);
-      }
+      // The walk read one probe row past the ceiling — that is what makes the
+      // cut a fact about the rows in hand rather than a guess — and asked no
+      // single read for more than one step (objectstack: a hosted maximum page
+      // size refuses a `$top` of 10,001).
+      const wanted = nonGridRowCeilingQuery(GANTT_ROW_CEILING).$top;
+      const tops = calls.map((params) => params.$top);
+      expect(tops.reduce((sum, top) => sum + top, 0)).toBe(wanted);
+      for (const top of tops) expect(top).toBeLessThanOrEqual(GANTT_FETCH_STEP);
+      expect(calls.map((params) => params.$skip ?? 0)).toEqual(
+        tops.map((_, i) => tops.slice(0, i).reduce((sum, top) => sum + top, 0)),
+      );
 
       // ⭐ The half the ruling cares about: the truncation is NOT silent.
       const note = await screen.findByRole('note');
@@ -410,9 +427,58 @@ describe('ObjectGantt.rowCeiling-7210', () => {
       );
       expect(calls.length).toBeGreaterThan(0);
       for (const params of calls) {
-        expect(params.$top).toBe(GANTT_ROW_CEILING + 1);
+        expect(params.$top).toBe(GANTT_FETCH_STEP);
       }
       expect(screen.queryByRole('note')).toBeNull();
+    });
+
+    /**
+     * objectstack — the hosted refusal. A host with a maximum page size (the
+     * hosted plane sets `OS_DATA_MAX_PAGE_SIZE` to 5,000) refuses a `$top`
+     * over it before running the query, so a single read of the ceiling plus
+     * its probe row (10,001) put the refusal in place of the chart, on an
+     * EMPTY object as on a full one.
+     *
+     * REVERSE VERIFICATION: sending `...nonGridRowCeilingQuery(GANTT_ROW_CEILING)`
+     * as one read again turns all three of these red at the drawn count, with
+     * the refusal on screen.
+     */
+    describe('a host with a maximum page size of 5,000', () => {
+      const HOSTED_MAX_PAGE_SIZE = 5000;
+
+      it('draws an empty object instead of the refusal', async () => {
+        render(<ObjectGantt schema={schema} dataSource={makeDataSource(0, HOSTED_MAX_PAGE_SIZE)} />);
+
+        await waitFor(() =>
+          expect(screen.getByTestId('gantt-view').getAttribute('data-task-count')).toBe('0'),
+        );
+        expect(screen.queryByText(/maximum page size/)).toBeNull();
+        expect(calls).toHaveLength(1);
+      });
+
+      it('draws a set larger than one host page, every row', async () => {
+        const rows = HOSTED_MAX_PAGE_SIZE + 1234;
+        render(<ObjectGantt schema={schema} dataSource={makeDataSource(rows, HOSTED_MAX_PAGE_SIZE)} />);
+
+        await waitFor(() =>
+          expect(screen.getByTestId('gantt-view').getAttribute('data-task-count')).toBe(String(rows)),
+        );
+        expect(screen.queryByRole('note')).toBeNull();
+        for (const params of calls) expect(params.$top).toBeLessThanOrEqual(HOSTED_MAX_PAGE_SIZE);
+      });
+
+      it('past the gantt ceiling: draws the ceiling and still says so', async () => {
+        render(<ObjectGantt schema={schema} dataSource={makeDataSource(TOTAL_ROWS, HOSTED_MAX_PAGE_SIZE)} />);
+
+        await waitFor(() =>
+          expect(screen.getByTestId('gantt-view').getAttribute('data-task-count')).toBe(
+            String(GANTT_ROW_CEILING),
+          ),
+        );
+        const note = await screen.findByRole('note');
+        expect(note.textContent).toContain(String(GANTT_ROW_CEILING));
+        expect(note.textContent).toContain(String(TOTAL_ROWS));
+      });
     });
 
     /**
@@ -432,7 +498,7 @@ describe('ObjectGantt.rowCeiling-7210', () => {
           expect(screen.getByTestId('gantt-view').getAttribute('data-task-count')).toBe('4999'),
         );
         for (const params of calls) {
-          expect(params.$top).toBe(GANTT_ROW_CEILING + 1);
+          expect(params.$top).toBe(GANTT_FETCH_STEP);
         }
         expect(screen.queryByRole('note')).toBeNull();
         unmount();
@@ -641,10 +707,11 @@ describe('ObjectGantt.hostDataProp-7210', () => {
       await waitFor(() => expect(calls.length).toBeGreaterThan(0));
 
       for (const params of calls) {
-        // Not `pagination.pageSize` (2), and not absent either: the platform
-        // ceiling, one probe row wide so the cut is detectable.
+        // Not `pagination.pageSize` (2), and not absent either: the walk's
+        // first step toward the platform ceiling. Five rows answer it short,
+        // so it is the only read.
         expect(params.$top).not.toBe(2);
-        expect(params.$top).toBe(nonGridRowCeilingQuery(GANTT_ROW_CEILING).$top);
+        expect(params.$top).toBe(GANTT_FETCH_STEP);
         expect(params.$skip).toBeUndefined();
       }
     });
