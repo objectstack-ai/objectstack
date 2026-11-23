@@ -32,6 +32,9 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+// The first load of the engine is paid at collection, not inside a test's clock:
+// the server under test reaches it through dynamic imports.
+import '@objectstack/objectql';
 import { RestServer } from './rest-server';
 import { GetMetaItemLayeredResponseSchema, GetMetaItemResponseSchema } from '@objectstack/spec/api';
 
