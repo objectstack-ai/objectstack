@@ -52,7 +52,8 @@ import {
 import { SchemaRenderer, useMetadata } from '@object-ui/react';
 import { useObjectLabel, useObjectTranslation } from '@object-ui/i18n';
 import { LazyModalForm } from '../views/lazyFormSurfaces.js';
-import { resolveFormViewLayout } from '../utils/recordFormNavigation.js';
+import { recordFormSubforms } from '../utils/recordFormNavigation.js';
+import { recordFormFieldNames } from '../utils/recordFormFields.js';
 import { modalTargetRefusalMessage } from '../utils/modalTargetDiagnostics.js';
 
 type Placement = 'center' | 'side' | 'bottom' | 'fullscreen';
@@ -160,8 +161,9 @@ export function normalizeModalSchema(schema: any): ModalDescriptor {
 export function useActionModal(dataSource?: any) {
   const [state, setState] = useState<{ d: ModalDescriptor; resolve: (r: ActionResult) => void } | null>(null);
   // Object metadata — degrades to an empty list outside a MetadataProvider
-  // (see useMetadata). Used to resolve the object's default form view so the
-  // create/edit modal honors its curated sections + field selection/order.
+  // (see useMetadata). Used to lay the create/edit modal out the way the
+  // console's New/Edit dialog does: the object's field groups, its listed
+  // fields, and the child collections its field groups place.
   // `getItem` fetches ONE named item on demand, so resolving a modal target
   // never drags in the whole (lazily loaded) page or object list — this hook is
   // mounted at the console root, where an eager list read would cost every page.
@@ -169,7 +171,7 @@ export function useActionModal(dataSource?: any) {
   // objectui#12811 — the same holds for `objects`, which the hook read on every
   // render and so loaded the whole registry on every console open. It is read
   // now only while an object's form modal is open, and the open waits for it
-  // (`ensureType('object')` below): the form view's subforms are derived from
+  // (`ensureType('object')` below): the field groups' subforms are derived from
   // every object (`attachInlineSubforms`), so the whole list is the read this
   // layout needs, and an action is when it is needed.
   const metadata = useMetadata();
@@ -271,18 +273,22 @@ export function useActionModal(dataSource?: any) {
     };
 
     if (d.objectName && !d.content) {
-      // Honor the object's default FORM VIEW (curated sections + field
-      // selection/order + master-detail subforms) unless the action descriptor
-      // passed an explicit field list. Without this the modal falls back to the
-      // raw object schema — every field, in schema order. Mirrors the global
-      // New/Edit modal in AppContent so action-opened forms stay consistent:
-      // a create uses the object's `create` form view when it declares one
-      // (objectui#13099), read from the same mode the form below opens in.
+      // objectstack-ai/objectstack#36425 — unless the action descriptor passed
+      // its own field list, the modal is laid out as the global New/Edit
+      // dialog in AppContent lays it out, so an action-opened form matches:
+      // the object's listed fields (a create leaves out a `showOnCreate:
+      // false` field), arranged by its field groups, with the child
+      // collections its field groups place. No internal form view is read.
       const formMode = (d.mode as 'create' | 'view' | 'edit') || 'create';
       const objectDef = metadata.objects.find((o: any) => o?.name === d.objectName);
-      const viewLayout = (d.fields || (d as any).sections)
+      const flow = formMode === 'create' ? 'create' : 'edit';
+      const subforms = recordFormSubforms(objectDef);
+      const viewLayout = (d.fields || (d as any).sections || !objectDef)
         ? {}
-        : resolveFormViewLayout(objectDef, formMode === 'create' ? 'create' : 'edit');
+        : {
+          fields: recordFormFieldNames(objectDef.fields, flow),
+          ...(subforms ? { subforms } : {}),
+        };
       // A create form is titled by its object, the way the console's own
       // New dialog is (`form.createTitle`). The lookup field's inline "create
       // the referenced record" hands a descriptor with no title, and its

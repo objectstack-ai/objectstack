@@ -59,6 +59,9 @@ import {
   matchAppBySegment,
   resolveHostAppSegment,
 } from '../../utils/index.js';
+import { isApprovalsInboxLink, resolveApprovalsHostSegment } from '../../utils/appRoute.js';
+import { useLastApp } from '../../context/LastAppProvider.js';
+import { approvalQueueState } from '../../views/approval-decision/approvalQueueAdvance.js';
 import { useInboxBell } from '../../hooks/useInboxBell.js';
 import { openInboxNotification } from '../../layout/openInboxNotification.js';
 import { resolveSetupAppPath } from '../ConsoleShell.js';
@@ -494,6 +497,16 @@ export function HomePage({ checklist }: HomePageProps = {}) {
    * renders no action center, so these producers never run there.
    */
   const hostAppSegment = resolveHostAppSegment(activeApps, currentAppName);
+
+  /**
+   * The app an approval opened from Home stays in (objectstack#35505): the
+   * current app, then the last used one (`LastAppProvider`), then the first.
+   * The request page then prefers the app that lists the request's record
+   * (`ApprovalsInboxPage`'s deep link), and Setup is never the default.
+   */
+  const { lastApp } = useLastApp();
+  const approvalsHostSegment = resolveApprovalsHostSegment(activeApps, currentAppName, lastApp);
+  const approvalsInboxPath = `/apps/${approvalsHostSegment}/system/approvals`;
 
   /**
    * Setup leaves the tile row (objectui#12601): it administers the workspace
@@ -960,11 +973,18 @@ export function HomePage({ checklist }: HomePageProps = {}) {
             notificationsStatus={notificationsStatus}
             notificationsReadable={notificationsReadable}
             draftsRow={draftsRow}
-            onOpenApprovals={() => navigate(`/apps/${hostAppSegment}/system/approvals`)}
-            /* The Approvals inbox opens a request's drawer from `?request=`
-               (#2678), the link its notifications already carry. */
+            onOpenApprovals={() => navigate(approvalsInboxPath)}
+            /* The Approvals inbox opens a request's page from `?request=`
+               (#2678), the link its notifications already carry. It is handed
+               the reader's pending queue (objectstack#35505), so the request
+               page counts through it and 「处理后打开下一条」 moves on. */
             onOpenApproval={(r) =>
-              navigate(`/apps/${hostAppSegment}/system/approvals?request=${encodeURIComponent(r.id)}`)
+              navigate(`${approvalsInboxPath}?request=${encodeURIComponent(r.id)}`, {
+                state: approvalQueueState(
+                  { pathname: approvalsInboxPath, label: t('approvalsInbox.title', { defaultValue: 'Approvals Inbox' }) },
+                  pendingApprovals.map((p) => p.id),
+                ),
+              })
             }
             /* The bell's own "view all" target (`InboxPopover`): `?view=mine`
                selects the user-scoped view, so the full page matches what the
@@ -982,7 +1002,7 @@ export function HomePage({ checklist }: HomePageProps = {}) {
                badged on the bell), then follows the resolved link — or, when
                the notification carries no link at all, opens the inbox. */
             onOpenNotification={(n) =>
-              openInboxNotification(n, hostAppSegment, {
+              openInboxNotification(n, isApprovalsInboxLink(n.actionUrl) ? approvalsHostSegment : hostAppSegment, {
                 markRead: markNotificationRead,
                 goTo: (path) => navigate(path),
                 openInbox: () => navigate(`/apps/${hostAppSegment}/sys_inbox_message?view=mine`),
