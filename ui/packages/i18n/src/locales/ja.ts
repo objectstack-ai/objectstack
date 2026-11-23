@@ -1610,6 +1610,8 @@ const ja = {
     fieldChangeEmpty: "空",
     fieldChangeExpand: "すべて表示",
     fieldChangeCollapse: "折りたたむ",
+    fieldHistory: "変更履歴",
+    fieldHistoryNone: "変更の記録はありません",
     replyCount: "{{count}} 件の返信",
     replyCount_one: "{{count}} 件の返信",
     replyCount_other: "{{count}} 件の返信",

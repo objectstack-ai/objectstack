@@ -1571,6 +1571,8 @@ const es = {
     fieldChangeEmpty: "Vacío",
     fieldChangeExpand: "Ver todo",
     fieldChangeCollapse: "Ver menos",
+    fieldHistory: "Historial de cambios",
+    fieldHistoryNone: "No hay cambios registrados",
     replyCount: "{{count}} respuesta",
     replyCount_one: "{{count}} respuesta",
     replyCount_many: "{{count}} de respuestas",

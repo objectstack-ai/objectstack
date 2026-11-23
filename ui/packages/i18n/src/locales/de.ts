@@ -1526,6 +1526,8 @@ const de = {
     fieldChangeEmpty: "Leer",
     fieldChangeExpand: "Alles anzeigen",
     fieldChangeCollapse: "Weniger anzeigen",
+    fieldHistory: "Änderungsverlauf",
+    fieldHistoryNone: "Keine Änderungen erfasst",
     replyCount: "{{count}} Antwort",
     replyCount_one: "{{count}} Antwort",
     replyCount_other: "{{count}} Antworten",

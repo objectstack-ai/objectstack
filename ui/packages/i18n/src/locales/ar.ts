@@ -1707,6 +1707,8 @@ const ar = {
     fieldChangeEmpty: "فارغ",
     fieldChangeExpand: "عرض الكل",
     fieldChangeCollapse: "عرض أقل",
+    fieldHistory: "سجل التغييرات",
+    fieldHistoryNone: "لا توجد تغييرات مسجلة",
     replyCount: "{{count}} رد",
     replyCount_zero: "{{count}} رد",
     replyCount_one: "{{count}} رد",

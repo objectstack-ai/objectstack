@@ -1575,6 +1575,8 @@ const fr = {
     fieldChangeEmpty: "Vide",
     fieldChangeExpand: "Tout afficher",
     fieldChangeCollapse: "Afficher moins",
+    fieldHistory: "Historique des modifications",
+    fieldHistoryNone: "Aucune modification enregistrée",
     replyCount: "{{count}} réponse",
     replyCount_one: "{{count}} réponse",
     replyCount_many: "{{count}} de réponses",

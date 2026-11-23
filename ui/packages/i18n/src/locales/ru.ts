@@ -1722,6 +1722,8 @@ const ru = {
     fieldChangeEmpty: "Пусто",
     fieldChangeExpand: "Показать полностью",
     fieldChangeCollapse: "Свернуть",
+    fieldHistory: "История изменений",
+    fieldHistoryNone: "Изменений не зафиксировано",
     replyCount: "{{count}} ответ",
     replyCount_one: "{{count}} ответ",
     replyCount_few: "{{count}} ответа",

@@ -2068,6 +2068,10 @@ const en = {
     fieldChangeEmpty: 'Empty',
     fieldChangeExpand: 'Show all',
     fieldChangeCollapse: 'Show less',
+    // objectstack#36290 — one field's change-history card: its entry point's
+    // name and what it says for a field never changed.
+    fieldHistory: 'Change history',
+    fieldHistoryNone: 'No changes recorded',
     // Replies
     replyCount: '{{count}} reply',
     replyCount_one: '{{count}} reply',
