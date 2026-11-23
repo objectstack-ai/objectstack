@@ -1,7 +1,7 @@
 ---
 title: Create form vs edit form — the differences
 navTitle: Create form ≠ edit form
-description: Derive a short create form and a full sectioned edit form from one flat field set, and hand-shape the create form only when its layout truly differs.
+description: One flat, grouped field set gives both the create form and the edit form. Leave a field out of create with its showOnCreate switch; there is no second form to maintain.
 ---
 
 ## Scenario
@@ -10,111 +10,75 @@ description: Derive a short create form and a full sectioned edit form from one 
 
 ## Recommended solution
 
-**Do not author two forms. Author one field set with enough intent that both forms derive from it — then override only when you must.**
+**Author one field set on the object. Group it with `fieldGroups`, and mark the fields a create should not ask for with `showOnCreate: false`.** The Console's create and edit forms both come from that one set. They do not load an internal form view (`form`, `formViews.default` or `formViews.create`); an app that still declares one installs and runs, the form changes nothing, and `os validate` reports it as `form-view-internal-not-loaded`.
 
 ### 1. Put the intent on the fields
 
-The create-form subset is not an arbitrary pick; it is *derivable* from signals that already live on each field:
+The create form is the edit form minus the fields a create should not ask for, and those are named by signals that already live on each field:
 
 | Field signal | Effect on the create form |
 |---|---|
-| `required: true` | **must** appear on create |
+| `required: true` | **must** appear on create; `showOnCreate: false` beside it is refused at parse |
+| `showOnCreate: false` | **left out** of create; still on edit, the record page and lists |
 | `readonly` / formula / rollup / autonumber / system-stamped | **never** on create (you can't set it) |
-| `defaultValue` present | **can be omitted** from create (it self-fills) |
+| `defaultValue` present | self-fills, so it is a good candidate for `showOnCreate: false` |
 | `hidden` | off everywhere by default |
-| `group` | which section the field belongs to (semantic, travels with the model — and only once that group is **declared** in `fieldGroups`; see §2) |
+| `visibleWhen` / `readonlyWhen` / `requiredWhen` | evaluated on create and edit alike |
+| `group` | which section the field belongs to (only once that group is **declared** in `fieldGroups`; see §2) |
 | *declaration order* | the order you write fields in **is** the default order everywhere — there is no `field.order` |
 
-So a sensible create form is: *editable, required-or-core fields, in declaration order* — and it **falls out** of the object. This is ADR-0047's guardrail: **omission is correct** — emit nothing extra and you still get a complete, correct form.
-
-### 2. The default (edit) form derives from `field.group` — as authorized by `fieldGroups`
+### 2. Sections come from `field.group`, as authorized by `fieldGroups`
 
 `field.group` on its own does not create a section. The **authorization source is the object's `fieldGroups` declaration**: `deriveFieldGroupLayout` (ADR-0085 §5) — the single derivation every renderer and the i18n walker consume — sections only those fields whose `group` matches a declared `fieldGroups[].key`.
 
 - An **undeclared** `group` renders **exactly like no `group` at all**: the field drops into the trailing bucket of ungrouped fields, which the form and the record page draw under their own **Other** heading (translated per locale) after the declared groups.
 - Declare **no** `fieldGroups` at all and grouping does not apply — the derivation yields nothing and you get a flat form.
 - Either way, `os lint` (and `os build` / `os validate`) reports every unmatched reference as **`field-group-undeclared`**.
+- A master-detail sub-table is a group's `relatedList`: it is drawn in that group's place on create and edit.
 
-So tag the fields **and** declare the groups — [`contact.object.ts`](#runnable-example) does both. With both halves present, the full edit form materialises each declared group into a section, and you can omit the `form` view entirely and let the platform derive the grouped form. Two ways the derived form still differs from the hand-written one below:
-
-- fields the platform injects and you never grouped (`owner_id`, under `sharingModel: 'private'`) surface in that trailing **Other** section;
-- `columns` is a **form-view** knob, and the group declaration has no column count to give — a derived section carries only `key` / `label` / `icon` / `description` / `collapse` and its member fields — so a hand-written `columns: 2` is not part of what derivation gives back.
-
-When you do write the form, list fields as **bare strings** so each one inherits its type / validation / FLS / default from the object — the form carries layout only, never data semantics.
-
-### 3. Hand-shape the create form *only when layout or flow diverges*
-
-The escape hatch is a **named form view** bound to the create entry point. Author it as a **sparse override** — mostly a list of field names — not a from-scratch restatement:
+### 3. Leave a field out of create
 
 {/* os:check */}
-```ts
-import { defineView } from '@objectstack/spec';
+```typescript
+import { ObjectSchema, Field } from '@objectstack/spec/data';
 
-const data = { provider: 'object' as const, object: 'showcase_contact' };
-
-export const ContactViews = defineView({
-  list: {
-    type: 'grid', data,
-    columns: [{ field: 'name' }, { field: 'email' }, { field: 'company' }, { field: 'stage' }],
-    // The "+ Add record" button opens the create form — `formViews.create` below:
-    addRecord: { enabled: true },
+export const Contact = ObjectSchema.create({
+  name: 'showcase_contact',
+  label: 'Contact',
+  sharingModel: 'private',
+  fields: {
+    name: Field.text({ label: 'Full name', required: true, group: 'contact' }),
+    email: Field.email({ label: 'Email', required: true, group: 'contact' }),
+    phone: Field.text({ label: 'Phone', group: 'contact' }),
+    company: Field.text({ label: 'Company', group: 'work' }),
+    // Edit-time only: the create form does not ask for it.
+    notes: Field.text({ label: 'Notes', maxLength: 4000, group: 'notes', showOnCreate: false }),
   },
-
-  // Full edit form — one section per group DECLARED in the object's
-  // `fieldGroups`; bare strings inherit field defs.
-  form: {
-    type: 'simple', data,
-    sections: [
-      { name: 'contact', label: 'Contact', columns: 2, fields: ['name', 'email', 'phone'] },
-      { name: 'work',    label: 'Work',    columns: 2, fields: ['company', 'title'] },
-      { name: 'status',  label: 'Status',  columns: 2, fields: ['stage', 'lead_score'] },
-      { name: 'notes',   label: 'Notes',   columns: 1, fields: ['notes'] },
-    ],
-  },
-
-  formViews: {
-    // Sparse create override: only the core fields, one section. Omits
-    // lead_score (readonly), stage (defaulted), notes (edit-time only).
-    create: {
-      type: 'simple', data, title: 'New contact',
-      sections: [
-        { name: 'who', label: 'Who is this?', columns: 1, fields: ['name', 'email', 'phone', 'company'] },
-      ],
-    },
-  },
+  fieldGroups: [
+    { key: 'contact', label: 'Contact' },
+    { key: 'work', label: 'Work' },
+    { key: 'notes', label: 'Notes' },
+  ],
 });
 ```
 
-The create form is chosen by convention, and nothing on the list names it: every create entry — the list's Add button ([`AddRecordConfigSchema`](/docs/references/ui/view) says only whether it shows and where) and the object's New — opens `formViews.create` when the container declares it, else `form` (or `formViews.default`). No `formViews.create` → the create entry uses the default form. Present → it wins for create.
+New draws the Contact and Work sections; Edit draws all three. In Studio, the field's **Show on create** switch writes the same key; it stays on, and locked, for a required field.
+
+Every create entry reads this: the list's Add button ([`AddRecordConfigSchema`](/docs/references/ui/view) says only whether it shows and where), the object's New, the full-page create and a create an action opens.
 
 ## Why
 
-Three layers, each *derive + only store differences* — never "re-list all 40 fields":
+Two independent full forms are the **Salesforce page-layout tax**: add a required field, forget the create form → runtime "missing required field" on create; rename a field → silent drift. With one field set, the create form can only differ from the edit form by the fields marked `showOnCreate: false`, and a required field can never be one of them.
 
-```
-1. Derived default   derive(object, 'create' | 'edit')      ← free, no authoring
-2. Author override   formViews.create  (sparse patch)       ← this recipe; only on real divergence
-3. Runtime override  environment overlay (ADR-0005)        ← an admin edits it in Studio; per-org overlays retired (ADR-0131 D6)
-```
+The create fields are a **subset of the edit fields in the same order and groups**, so "quick-create a few fields → save → land on the full record" stays visually continuous.
 
-Welding two independent full forms is the **Salesforce page-layout tax**: add a required field, forget the create form → runtime "missing required field" on create; rename a field → silent drift. Keeping data semantics on the object (never on the form) means a form can only ever drift on *which fields appear* — a flat name list that **reference-integrity diagnostics catch as a hard failure** in the AI loop (ADR-0047 §3.5, ADR-0033). That guardrail is what makes the escape hatch safe to hand to an AI author.
+## What about a form view?
 
-The create fields are a **prefix/subset of the edit fields in the same order and groups**, so "quick-create 4 fields → save → land on the full record" stays visually continuous. Derivation preserves that for free; two hand-authored forms break it.
-
-## When to actually reach for the override
-
-| Your real need | Use |
-|---|---|
-| Create asks fewer fields (required + a few core) | **Pure derivation** — don't hand-write |
-| Create groups differently but is just a smaller subset | Usually still derivation (a 5-field form needs no sections) |
-| Create is a **wizard / multi-step**, has create-only copy, conditional reveal, bespoke layout | **Hand-write `formViews.create`** |
-
-Rule of thumb: **"different field subset" → derive. "different layout or flow" → override.** Writing a full create form just to drop a few fields walks straight back into the two-artifact drift trap.
+A **public form** (`sharing.enabled: true`) keeps loading at its own link by its own definition, and a **named form** an action of type `form` opens keeps loading by its name. Those are the places a hand-written form view still belongs. The object's own create and edit forms are not: their sections come from the object's `fieldGroups`, and their fields, rules and defaults from the fields themselves.
 
 ## Runnable example
 
-- Object: [`examples/app-showcase/src/data/objects/contact.object.ts`](https://github.com/objectstack-ai/objectstack/blob/main/examples/app-showcase/src/data/objects/contact.object.ts) — flat, intent-tagged field set, with the four `fieldGroups` its `group` tags point at.
-- Views: [`examples/app-showcase/src/ui/views/contact.view.ts`](https://github.com/objectstack-ai/objectstack/blob/main/examples/app-showcase/src/ui/views/contact.view.ts) — full edit form + sparse `formViews.create` + the list's Add button (`addRecord: { enabled: true }`), which opens it by convention.
+- Object: [`examples/app-showcase/src/data/objects/contact.object.ts`](https://github.com/objectstack-ai/objectstack/blob/main/examples/app-showcase/src/data/objects/contact.object.ts) — a flat, intent-tagged field set with the four `fieldGroups` its `group` tags point at.
 
 ## Modal or page: `editMode`
 
@@ -138,7 +102,7 @@ export const Account = ObjectSchema.create({
 - **`page`** gives the form its own route under the active app,
   `/apps/:appName/:objectName/new` and `/apps/:appName/:objectName/record/:recordId/edit`: a
   URL that can be bookmarked and shared, survives a refresh (the form re-reads the record from
-  the URL) and closes with Back. It suits long, tabbed or wizard forms.
+  the URL) and closes with Back. It suits long forms.
 
 Both render the same form, so sections, validation and visibility rules behave identically.
 The change is additive: the existing Create and Edit entry points, the list's per-row Edit
@@ -164,11 +128,11 @@ active object is already known and `params` can be omitted.
 ## Anti-patterns
 
 - **Two full hand-authored field lists** (`contact_create_form` + `contact_edit_form`). Guaranteed drift; the create form silently misses new required fields.
-- **Restating field type / validation / options on the form.** Data semantics live on the object only; the form chooses *which fields and where*.
-- **Reaching for `formViews.create` to drop fields.** That's derivation's job — reserve the override for genuine layout/flow divergence.
+- **Writing `form` or `formViews.create` to shape create or edit.** Neither is loaded; group the fields and use `showOnCreate` instead.
+- **Restating field type / validation / options on a form.** Data semantics live on the object only.
 
 ## See also
 
-- Decision record: **ADR-0047** (object UI run modes — derive-default + override).
+- Decision record: **ADR-0047** (object UI run modes).
 - [Field grouping & order](/docs/ui/field-grouping-and-order) — the three different meanings of "group".
 - Reference: [View / FormView schema](/docs/references/ui/view), [Field schema](/docs/references/data/field).

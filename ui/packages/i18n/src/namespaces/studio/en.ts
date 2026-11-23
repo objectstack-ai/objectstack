@@ -394,6 +394,8 @@ const STUDIO_EN: Record<string, string> = {
   'designer.field.readonly': 'Read-only',
   'designer.field.hidden': 'Hidden',
   'designer.field.trackHistory': 'Track history',
+  'designer.field.showOnCreate': 'Show on create',
+  'designer.field.showOnCreateRequired': 'A required field is always asked for when a record is created, so Show on create stays on.',
   'designer.field.placeholder': 'Placeholder',
   // objectstack#28575 — a read-only base's own field: only the spec's display-property whitelist is editable.
   'designer.field.basePatchOnly': 'This field belongs to the installed package: you can change only its {properties}, saved as your customization, and everything else stays as the package defines it.',
@@ -1530,6 +1532,13 @@ const STUDIO_EN: Record<string, string> = {
   'engine.inspector.report.namePlaceholder': 'e.g. pipeline_by_stage',
   'engine.inspector.report.label': 'Label',
   'engine.inspector.report.labelPlaceholder': 'e.g. Pipeline by Stage',
+  // objectstack#36481 — the note under a report's name box and a dashboard
+  // card's title box when readers in the session language are served a
+  // translation instead of the text saved there (`servedLabel.ts`).
+  'engine.inspector.servedLabel.kept':
+    'Readers in this language see “{served}”: a translation of this name comes ahead of the text saved here. To change what they see, edit that translation in Studio › All metadata › Translation.',
+  'engine.inspector.servedLabel.ifKept':
+    'Readers in this language now see the translation “{served}”. If it is kept in this environment’s own translations or in its customization package, they keep seeing it after you save. To change it, edit that translation in Studio › All metadata › Translation.',
   'engine.inspector.report.type': 'Report type',
   'engine.inspector.report.type.tabular': 'Tabular',
   'engine.inspector.report.type.summary': 'Summary',
@@ -2616,18 +2625,11 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.data.form.sourceLabel': 'Preview source',
   'engine.studio.data.form.sourceDraft': 'Draft',
   'engine.studio.data.form.sourcePublished': 'Published',
-  // objectstack#30057 — which layout the Form tab edits: the form view the
-  // app's create and edit dialogs open, or the object's field groups when it
-  // has none; and, where create and edit open different form views, which one.
-  'engine.studio.data.form.layoutSource.formView': 'Form view: {name}',
-  'engine.studio.data.form.layoutSource.formViewTitle':
-    'New and Edit in the app open this form view, so the layout here is saved to it.',
+  // objectstack-ai/objectstack#36425 — the Form tab edits the object's field
+  // groups, which the app's create and edit dialogs lay out by.
   'engine.studio.data.form.layoutSource.fieldGroups': 'Field groups',
   'engine.studio.data.form.layoutSource.fieldGroupsTitle':
-    'This object has no form view: New and Edit in the app lay out its fields by these groups.',
-  'engine.studio.data.form.flowLabel': 'Form opened by',
-  'engine.studio.data.form.flowCreate': 'New',
-  'engine.studio.data.form.flowEdit': 'Edit',
+    'New and Edit in the app lay out this object\'s fields by these groups.',
   'engine.studio.data.fieldProps': 'Field properties',
   'engine.studio.data.groupProps': 'Group properties',
   'engine.studio.data.fieldInspectorMissing':
@@ -3623,9 +3625,6 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.designer.dropHere': 'Drag fields here',
   'engine.studio.designer.relatedTable': 'Related table: {name} — this group places a related list, so it holds no fields',
   'engine.studio.designer.ungrouped': 'Ungrouped',
-  // objectstack#30057 — on a form view, the fields no section lists.
-  'engine.studio.designer.offForm': 'Not on this form',
-  'engine.studio.designer.sectionDeleteTitle': 'Delete section (its fields leave the form)',
   'engine.studio.designer.newGroup': 'New group',
   // objectui#12453 — a read-only field card's title: what a click still does.
   'engine.studio.designer.fieldTitleReadOnly': 'Click a field to view its properties',

@@ -21,9 +21,9 @@ import { mapAddRecordBlocks, stripKeys } from '../shared.js';
  * either. objectui's list Add button opens the object's create form, the one
  * the object list's New opens, whatever `mode` said (`inline`, its default,
  * was never built), and it never opened the form `formView` named. The create
- * form is chosen by convention instead — `formViews.create` when the object's
- * view container declares one, else `form` / `formViews.default` — and how it
- * opens stays the renderer's.
+ * form is the object's own instead — laid out by the object's `fieldGroups`,
+ * leaving out every field marked `showOnCreate: false` — and how it opens
+ * stays the renderer's.
  *
  * **Retired from the load path** — both keys are `retiredKey()` tombstones on
  * `AddRecordConfigSchema`, so a live author is refused at parse with the
@@ -48,8 +48,8 @@ const addRecordModeFormViewRemoved: MetadataConversion = {
   surface: 'view.list.addRecord.mode / view.list.addRecord.formView / object.listViews.*.addRecord.mode / object.listViews.*.addRecord.formView / page.interfaceConfig.addRecord.mode / page.interfaceConfig.addRecord.formView / page.component.list-view.addRecord.mode / page.component.list-view.addRecord.formView',
   summary:
     "add-record keys 'mode'/'formView' removed (ADR-0049 enforce-or-remove — parsed and stored, read by "
-    + 'no renderer: the Add button always opens the create form, chosen by convention as '
-    + '`formViews.create` when declared, else the default form)',
+    + 'no renderer: the Add button always opens the object\'s own create form, laid out by its '
+    + '`fieldGroups` and leaving out every field marked `showOnCreate: false`)',
   apply(stack, emit) {
     return mapAddRecordBlocks(stack, (block, path) => stripKeys(block, ['mode', 'formView'], emit, path));
   },

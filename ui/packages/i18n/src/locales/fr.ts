@@ -63,6 +63,9 @@ const fr = {
     loading: 'Chargement…',
     noOptions: 'Aucune option trouvée',
     noRecords: 'Aucun enregistrement trouvé',
+    autofillCurrencyDiffers: '{{field}} n’a pas été rempli : le montant choisi est de {{amount}} en {{from}}, mais ici {{field}} est en {{to}}. Saisissez-le en {{to}}.',
+    autofillSourceNoCurrency: '{{field}} n’a pas été rempli : le montant choisi {{amount}} n’indique aucune devise, mais ici {{field}} est en {{to}}. Saisissez-le en {{to}}.',
+    autofillNoCurrency: '{{field}} n’a pas été rempli : le montant choisi est de {{amount}}, mais aucune devise n’est encore choisie ici. Choisissez la devise, puis saisissez {{field}}.',
   },
   common: {
     // objectui#13461 — a disclosure toggle's name (the tree-view node toggle).

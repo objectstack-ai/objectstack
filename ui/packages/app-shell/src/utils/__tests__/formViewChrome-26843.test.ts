@@ -10,14 +10,15 @@
  * objectstack-ai/objectstack#26843 — the form view's `buttons`, `layout`,
  * `defaults`, `defaultTab` and `tabPosition` reach the console's form hosts.
  *
- * `resolveFormViewChrome` is the one place the full-page record form and the
- * New / Edit dialog read the first three from; `resolveFormViewLayout` carries
- * the tab keys beside the modal's tabbed content layout. Each block has a
- * CONTROL with the key absent, which keeps the host's own answer.
+ * `resolveFormViewChrome` reads them for a NAMED form view (the Setup preview
+ * of a form view). A record create or edit reads no form view
+ * (objectstack-ai/objectstack#36425): `resolveRecordFormChrome` gives the
+ * host's own chrome. Each block has a CONTROL with the key absent, which keeps
+ * the host's own answer.
  */
 
 import { describe, it, expect } from 'vitest';
-import { resolveFormViewChrome, resolveFormViewLayout } from '../recordFormNavigation';
+import { resolveFormViewChrome, resolveRecordFormChrome } from '../recordFormNavigation';
 
 const HOST = { language: 'en', submitText: 'Save', cancelText: 'Cancel' } as const;
 
@@ -100,23 +101,21 @@ describe('resolveFormViewChrome — defaults', () => {
   });
 });
 
-describe('resolveFormViewLayout — the tab keys ride with the tabbed content layout', () => {
-  const sections = [{ name: 'a', fields: ['x'] }, { name: 'b', fields: ['y'] }];
-
-  it('a tabbed form view carries defaultTab and tabPosition', () => {
-    expect(resolveFormViewLayout({ form: { type: 'tabbed', sections, defaultTab: 'b', tabPosition: 'left' } })).toStrictEqual({
-      sections,
-      contentLayout: 'tabbed',
-      defaultTab: 'b',
-      tabPosition: 'left',
+describe('resolveRecordFormChrome — a record create or edit (objectstack-ai/objectstack#36425)', () => {
+  it('the host\'s own buttons and labels, the vertical layout, and only the host\'s create values', () => {
+    const createValues = { account: 'a1' };
+    expect(resolveRecordFormChrome({ flow: 'create', submitText: 'Create', cancelText: 'Cancel', createValues })).toStrictEqual({
+      showSubmit: true,
+      submitText: 'Create',
+      showCancel: true,
+      cancelText: 'Cancel',
+      layout: 'vertical',
+      initialValues: createValues,
     });
   });
 
-  it('a position the spec enum refuses is not copied', () => {
-    expect(resolveFormViewLayout({ form: { type: 'tabbed', sections, tabPosition: 'middle' as any } }).tabPosition).toBeUndefined();
-  });
-
-  it('CONTROL: a stacked form view carries neither, even when it authors them', () => {
-    expect(resolveFormViewLayout({ form: { type: 'simple', sections, defaultTab: 'b', tabPosition: 'left' } })).toStrictEqual({ sections });
+  it('CONTROL: a bare create or an edit opens with no values', () => {
+    expect(resolveRecordFormChrome({ flow: 'create', submitText: 'Create', cancelText: 'Cancel' }).initialValues).toBeUndefined();
+    expect(resolveRecordFormChrome({ flow: 'edit', submitText: 'Update', cancelText: 'Cancel' }).initialValues).toBeUndefined();
   });
 });
