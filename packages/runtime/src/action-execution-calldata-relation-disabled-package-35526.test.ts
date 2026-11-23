@@ -29,16 +29,27 @@
  *     value nothing holds (the same answer both ways: no oracle), with and
  *     without a protocol service;
  *   - the query fallback on a host with no protocol refuses it the same way;
- *   - CONTROLS: the package re-enabled answers the count 1 / 0 again, and a
- *     condition into an enabled package's object is served while `dp_beta`'s
- *     package is disabled.
+ *   - CONTROLS: the package disabled and then re-enabled answers the count
+ *     1 / 0 again, and a condition into an enabled package's object is served
+ *     while `dp_beta`'s package is disabled.
  *
- * For a SYSTEM caller this file pins TODAY's answer (the count) and does not
- * judge it: whether a system context is refused too is an open point the
- * maintainer decides (an in-process caller — a hook's `ctx.api` — is a system
- * context, and in-process access is ruled served). The pin is there so a
- * change to that answer is a decision someone made, not a side effect.
- */
+ * [#36393] And, at EVERY hop the engine serves (`dp_gamma.b2_ref → dp_beta`,
+ * `dp_gamma.d_ref → dp_delta`, so `{ c_ref: { b2_ref: … } }` is two hops):
+ *
+ *   - a two-hop condition into the disabled package is refused at its full
+ *     position (`where.c_ref.b2_ref`), directly and under `$or` / `$not`;
+ *   - a two-hop condition into an object that is not exposed is refused
+ *     `404 OBJECT_API_DISABLED` for a member;
+ *   - ORDER: a target that is both (`dp_delta`: `apiEnabled: false`, package
+ *     `dp36393_d` disabled) answers the package refusal first, and the
+ *     exposure refusal once the package is re-enabled;
+ *   - SYSTEM (the #35526 ruling, 「系统身份也一律拒绝」): a system context is
+ *     refused the disabled package like a member, one hop and two, while its
+ *     exposure question stays unasked (an unexposed target is served to it);
+ *   - the ADDRESSED object of a disabled package is refused on every arm for
+ *     both callers, a host with no protocol service included (it used to
+ *     serve it there, the refusal living only in the protocol's by-name read).
+ */ */
 
 import { afterEach, describe, expect, it } from 'vitest';
 // The source under test reaches `@objectstack/metadata` through a dynamic
@@ -59,6 +70,7 @@ const SYSTEM = { isSystem: true } as any;
 const PKG_A = 'dp35526_a';
 const PKG_B = 'dp35526_b';
 const PKG_C = 'dp35526_c';
+const PKG_D = 'dp36393_d';
 const SECRET = 'BETA_SECRET';
 
 const text = (name: string) => ({ name, label: name, type: 'text' });
@@ -66,7 +78,9 @@ const lookup = (name: string, reference: string) => ({ name, label: name, type: 
 
 const ALPHA = { name: 'dp_alpha', label: 'Alpha', fields: { name: text('name'), b_ref: lookup('b_ref', 'dp_beta'), c_ref: lookup('c_ref', 'dp_gamma') } };
 const BETA = { name: 'dp_beta', label: 'Beta', fields: { name: text('name'), secret_note: text('secret_note') } };
-const GAMMA = { name: 'dp_gamma', label: 'Gamma', fields: { name: text('name'), note: text('note') } };
+const GAMMA = { name: 'dp_gamma', label: 'Gamma', fields: { name: text('name'), note: text('note'), b2_ref: lookup('b2_ref', 'dp_beta'), d_ref: lookup('d_ref', 'dp_delta') } };
+// [#36393] Not exposed (`apiEnabled: false`), in a package of its own: the exposure and the order pins.
+const DELTA = { name: 'dp_delta', label: 'Delta', fields: { name: text('name') }, enable: { apiEnabled: false } };
 
 const manifest = (id: string) => ({ id, name: id, version: '1.0.0', type: 'app' } as any);
 
@@ -82,14 +96,16 @@ async function makeHarness(opts: { withProtocol: boolean }) {
     live.push(engine);
     engine.registerDriver(new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true }) as any, true);
     await engine.init();
-    for (const id of [PKG_A, PKG_B, PKG_C]) engine.registry.installPackage(manifest(id), 'code');
+    for (const id of [PKG_A, PKG_B, PKG_C, PKG_D]) engine.registry.installPackage(manifest(id), 'code');
     engine.registry.registerObject(ALPHA as any, PKG_A, undefined, 'own');
     engine.registry.registerObject(BETA as any, PKG_B, undefined, 'own');
     engine.registry.registerObject(GAMMA as any, PKG_C, undefined, 'own');
+    engine.registry.registerObject(DELTA as any, PKG_D, undefined, 'own');
     await engine.syncSchemas();
     await installDefaultOrganization(engine);
     const beta: any = await engine.insert('dp_beta', { name: 'beta', secret_note: SECRET });
-    const gamma: any = await engine.insert('dp_gamma', { name: 'gamma', note: 'open' });
+    const delta: any = await engine.insert('dp_delta', { name: 'delta' });
+    const gamma: any = await engine.insert('dp_gamma', { name: 'gamma', note: 'open', b2_ref: beta.id, d_ref: delta.id });
     await engine.insert('dp_alpha', { name: 'alpha', b_ref: beta.id, c_ref: gamma.id });
     const services: Record<string, any> = {
         metadata: { getObject: async () => undefined },
@@ -147,13 +163,21 @@ for (const withProtocol of [true, false]) {
             expect(await aggregateCount(h.deps, { c_ref: { note: 'NOPE' } }, MEMBER)).toBe(0);
         });
 
-        // OPEN POINT, not a verdict: a system context is not asked (the
-        // exposure gate's own system bypass), so today it is answered the
-        // count. Whether the package check skips system contexts too is the
-        // maintainer's to decide; this pin moves only with that decision.
-        it('SYSTEM (today\'s answer, pinned pending the open point): the count is served', async () => {
+        // [#36393] The #35526 ruling (「系统身份也一律拒绝」): this pin answered
+        // the count until it; a system context is refused like a member.
+        it('SYSTEM: the condition into the disabled package is refused 404 like a member\'s, for the stored value and for any other', async () => {
             const h = await makeHarness({ withProtocol });
             h.engine.registry.disablePackage(PKG_B);
+            for (const value of [SECRET, 'NOPE']) {
+                const err = await refusalOf(() => aggregateCount(h.deps, { b_ref: { secret_note: value } }, SYSTEM));
+                expect(envelope(err)).toEqual(REFUSED);
+            }
+        });
+
+        it('SYSTEM CONTROL: the package re-enabled answers a system context the count again', async () => {
+            const h = await makeHarness({ withProtocol });
+            h.engine.registry.disablePackage(PKG_B);
+            h.engine.registry.enablePackage(PKG_B);
             expect(await aggregateCount(h.deps, { b_ref: { secret_note: SECRET } }, SYSTEM)).toBe(1);
             expect(await aggregateCount(h.deps, { b_ref: { secret_note: 'NOPE' } }, SYSTEM)).toBe(0);
         });
@@ -175,6 +199,8 @@ describe('[#35526] callData\'s query fallback — a host that registers no proto
 
     it('CONTROL: the package re-enabled returns the matching record again', async () => {
         const h = await makeHarness({ withProtocol: false });
+        h.engine.registry.disablePackage(PKG_B);
+        h.engine.registry.enablePackage(PKG_B);
         const res: any = await query(h.deps, { b_ref: { secret_note: SECRET } }, MEMBER);
         expect(res.records.map((r: any) => r.name)).toEqual(['alpha']);
     });
@@ -194,4 +220,124 @@ describe('[#35526] the query arm through the protocol (the data route\'s own ans
         const err = await refusalOf(() => callData(h.deps, REQ, 'query', { object: 'dp_alpha', query: { where: { b_ref: { secret_note: SECRET } } } }, undefined, undefined, MEMBER));
         expect({ code: err.code, status: err.status, object: err.object }).toEqual({ code: 'OBJECT_PACKAGE_DISABLED', status: 404, object: 'dp_beta' });
     });
+});
+
+// ── [#36393] every hop, the system caller, the addressed object ─────────────
+
+const TWO_HOPS = (value: string) => ({ c_ref: { b2_ref: { secret_note: value } } });
+const REFUSED_TWO_HOPS = { code: 'OBJECT_PACKAGE_DISABLED', status: 404, object: 'dp_beta', param: 'where.c_ref.b2_ref' };
+
+for (const withProtocol of [true, false]) {
+    const host = withProtocol ? 'a host with a protocol service' : 'a host that registers no protocol service';
+
+    describe(`[#36393] callData's aggregate arm, two hops — ${host}`, () => {
+        for (const [who, context] of [['a member', MEMBER], ['a system context', SYSTEM]] as const) {
+            it(`THE PIN: ${who}'s two-hop condition into the disabled package is refused 404 at its full position, for the stored value and for any other`, async () => {
+                const h = await makeHarness({ withProtocol });
+                h.engine.registry.disablePackage(PKG_B);
+                for (const value of [SECRET, 'NOPE']) {
+                    const err = await refusalOf(() => aggregateCount(h.deps, TWO_HOPS(value), context));
+                    expect(envelope(err)).toEqual(REFUSED_TWO_HOPS);
+                }
+            });
+
+            it(`CONTROL: ${who}, the package disabled and then re-enabled, is answered the two-hop count (1 for the stored value, 0 otherwise)`, async () => {
+                const h = await makeHarness({ withProtocol });
+                h.engine.registry.disablePackage(PKG_B);
+                h.engine.registry.enablePackage(PKG_B);
+                expect(await aggregateCount(h.deps, TWO_HOPS(SECRET), context)).toBe(1);
+                expect(await aggregateCount(h.deps, TWO_HOPS('NOPE'), context)).toBe(0);
+            });
+        }
+
+        for (const [shape, where] of [
+            ['under $or', { $or: [TWO_HOPS(SECRET), { name: 'nobody' }] }],
+            ['under $not', { $not: TWO_HOPS(SECRET) }],
+        ] as const) {
+            it(`a member's two-hop condition ${shape} is refused the same way`, async () => {
+                const h = await makeHarness({ withProtocol });
+                h.engine.registry.disablePackage(PKG_B);
+                const err = await refusalOf(() => aggregateCount(h.deps, where, MEMBER));
+                expect(envelope(err)).toEqual(REFUSED_TWO_HOPS);
+            });
+        }
+
+        it('a member\'s two-hop condition into an object that is not exposed is refused 404 OBJECT_API_DISABLED; a system context is served (its exposure question is unchanged)', async () => {
+            const h = await makeHarness({ withProtocol });
+            const err = await refusalOf(() => aggregateCount(h.deps, { c_ref: { d_ref: { name: 'delta' } } }, MEMBER));
+            expect(envelope(err)).toEqual({ code: 'OBJECT_API_DISABLED', status: 404, object: 'dp_delta', param: 'where.c_ref.d_ref' });
+            expect(await aggregateCount(h.deps, { c_ref: { d_ref: { name: 'delta' } } }, SYSTEM)).toBe(1);
+        });
+
+        it('ORDER: a target both disabled and not exposed answers the package refusal first, and the exposure refusal once re-enabled', async () => {
+            const h = await makeHarness({ withProtocol });
+            h.engine.registry.disablePackage(PKG_D);
+            const first = await refusalOf(() => aggregateCount(h.deps, { c_ref: { d_ref: { name: 'delta' } } }, MEMBER));
+            expect(envelope(first)).toEqual({ code: 'OBJECT_PACKAGE_DISABLED', status: 404, object: 'dp_delta', param: 'where.c_ref.d_ref' });
+            h.engine.registry.enablePackage(PKG_D);
+            const then = await refusalOf(() => aggregateCount(h.deps, { c_ref: { d_ref: { name: 'delta' } } }, MEMBER));
+            expect(envelope(then)).toEqual({ code: 'OBJECT_API_DISABLED', status: 404, object: 'dp_delta', param: 'where.c_ref.d_ref' });
+        });
+    });
+
+    describe(`[#36393] callData on the ADDRESSED object of a disabled package — ${host}`, () => {
+        const arms = {
+            aggregate: (deps: ActionExecutionDeps, context: unknown) =>
+                callData(deps, REQ, 'aggregate', { object: 'dp_beta', aggregations: COUNT }, undefined, undefined, context as any),
+            query: (deps: ActionExecutionDeps, context: unknown) =>
+                callData(deps, REQ, 'query', { object: 'dp_beta', query: {} }, undefined, undefined, context as any),
+        };
+        for (const [arm, run] of Object.entries(arms)) {
+            for (const [who, context] of [['a member', MEMBER], ['a system context', SYSTEM]] as const) {
+                it(`${arm}: ${who} is refused 404 OBJECT_PACKAGE_DISABLED; CONTROL re-enabled, it is served`, async () => {
+                    const h = await makeHarness({ withProtocol });
+                    h.engine.registry.disablePackage(PKG_B);
+                    const err = await refusalOf(() => run(h.deps, context));
+                    expect({ code: err.code, status: err.status, object: err.object }).toEqual({ code: 'OBJECT_PACKAGE_DISABLED', status: 404, object: 'dp_beta' });
+                    h.engine.registry.enablePackage(PKG_B);
+                    const served: any = await run(h.deps, context);
+                    if (arm === 'aggregate') expect(Number(served.rows?.[0]?.n)).toBe(1);
+                    else expect(served.records.map((r: any) => r.name)).toEqual(['beta']);
+                });
+            }
+        }
+
+        it('ORDER: an addressed object both disabled and not exposed answers the package refusal to a member', async () => {
+            const h = await makeHarness({ withProtocol });
+            h.engine.registry.disablePackage(PKG_D);
+            const err = await refusalOf(() => callData(h.deps, REQ, 'aggregate', { object: 'dp_delta', aggregations: COUNT }, undefined, undefined, MEMBER));
+            expect({ code: err.code, status: err.status, object: err.object }).toEqual({ code: 'OBJECT_PACKAGE_DISABLED', status: 404, object: 'dp_delta' });
+        });
+    });
+}
+
+describe('[#36393] callData\'s query fallback, two hops — a host that registers no protocol service', () => {
+    const query = (deps: ActionExecutionDeps, where: unknown, context: unknown) =>
+        callData(deps, REQ, 'query', { object: 'dp_alpha', query: { where } }, undefined, undefined, context as any);
+
+    for (const [who, context] of [['a member', MEMBER], ['a system context', SYSTEM]] as const) {
+        it(`THE PIN: ${who}'s two-hop condition into the disabled package is refused 404, for the stored value and for any other`, async () => {
+            const h = await makeHarness({ withProtocol: false });
+            h.engine.registry.disablePackage(PKG_B);
+            for (const value of [SECRET, 'NOPE']) {
+                const err = await refusalOf(() => query(h.deps, TWO_HOPS(value), context));
+                expect(envelope(err)).toEqual(REFUSED_TWO_HOPS);
+            }
+        });
+
+        it(`${who}'s one-hop condition into the disabled package is refused 404`, async () => {
+            const h = await makeHarness({ withProtocol: false });
+            h.engine.registry.disablePackage(PKG_B);
+            const err = await refusalOf(() => query(h.deps, { b_ref: { secret_note: SECRET } }, context));
+            expect(envelope(err)).toEqual(REFUSED);
+        });
+
+        it(`CONTROL: ${who}, the package disabled and then re-enabled, gets the matching record through two hops`, async () => {
+            const h = await makeHarness({ withProtocol: false });
+            h.engine.registry.disablePackage(PKG_B);
+            h.engine.registry.enablePackage(PKG_B);
+            const res: any = await query(h.deps, TWO_HOPS(SECRET), context);
+            expect(res.records.map((r: any) => r.name)).toEqual(['alpha']);
+        });
+    }
 });

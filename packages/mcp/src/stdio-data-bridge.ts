@@ -916,16 +916,28 @@ export async function enforceApiExposure(
  * performs — and an unserved target REFUSES the call: dropping the condition
  * would widen the result. The data door asks the same of the same sites
  * (`refuseUnservedRelationTarget`), found by the one walk both doors import
- * (`relationConditionSites`). One hop, as the engine serves one: a relation
- * beneath a condition is refused by the engine before anything is read.
+ * (`relationConditionSites`).
+ *
+ * [#36393] EVERY HOP the engine serves, not the first one only: the engine
+ * lowers a condition beneath a condition (`{ c_ref: { b_ref: { … } } }`) up to
+ * `RELATION_CONDITION_MAX_HOPS` relationships (`@objectstack/objectql`),
+ * reading each related object in turn. So each site's own condition is walked
+ * against its target's field map, and every target on the way is asked the
+ * whole of {@link enforceApiExposure} (disabled package first, then exposure)
+ * at its full position (`where.c_ref.b_ref`), the order the data door's walk
+ * asks in. A system context is asked nothing, as {@link enforceApiExposure}
+ * asks it nothing. `depth` is a backstop against a self-referential
+ * in-process `where`, never the hop limit.
  */
 async function enforceRelationTargetExposure(
   reads: StdioObjectReads,
   object: string,
   where: unknown,
   context: ExecutionContext,
+  prefix = 'where',
+  depth = 0,
 ): Promise<void> {
-  if (where == null) return;
+  if (where == null || context?.isSystem || depth > RELATION_CONDITION_WALK_DEPTH) return;
   let def: ObjectDef | null | undefined;
   try {
     // [#25138] The field map from the definition the gate judged, so a
@@ -935,9 +947,14 @@ async function enforceRelationTargetExposure(
     def = undefined; // no field map, no site: the gate above falls open the same way
   }
   for (const site of relationConditionSites(def?.fields, where)) {
-    await enforceApiExposure(reads, site.target, GATED_ACTIONS.query, context, `where.${site.field}`);
+    const position = `${prefix}.${site.field}`;
+    await enforceApiExposure(reads, site.target, GATED_ACTIONS.query, context, position);
+    await enforceRelationTargetExposure(reads, site.target, site.condition, context, position, depth + 1);
   }
 }
+
+/** [#36393] The relation walk's backstop depth, the data door's and the engine evaluate gate's. */
+const RELATION_CONDITION_WALK_DEPTH = 8;
 
 // ---------------------------------------------------------------------------
 // [#21207] The stored-metadata-body family, at this engine-only reader
