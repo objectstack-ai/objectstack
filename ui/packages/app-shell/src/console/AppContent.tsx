@@ -139,6 +139,7 @@ const DashboardView = routeChunk.lazy(() => import('../views/DashboardView.js').
 const PageView = routeChunk.lazy(() => import('../views/PageView.js').then(m => m.PageView));
 const ReportView = routeChunk.lazy(() => import('../views/ReportView.js').then(m => m.ReportView));
 const AppReportIndexView = routeChunk.lazy(() => import('../views/AppReportIndexView.js').then(m => m.AppReportIndexView));
+const ReportNewPage = routeChunk.lazy(() => import('../views/ReportNewPage.js').then(m => m.ReportNewPage));
 const SearchResultsPage = routeChunk.lazy(() => import('../views/SearchResultsPage.js').then(m => m.SearchResultsPage));
 const RecordFormPage = routeChunk.lazy(() => import('../views/RecordFormPage.js').then(m => m.RecordFormPage));
 const ComponentNavView = routeChunk.lazy(() => import('../views/ComponentNavView.js').then(m => m.ComponentNavView));
@@ -184,6 +185,7 @@ const APP_ROUTE_CHUNKS: ReadonlyArray<{ path: string; chunk: { preload: () => Pr
   { path: 'dashboard/:dashboardName', chunk: DashboardView },
   { path: 'report/:reportName', chunk: ReportView },
   { path: 'reports', chunk: AppReportIndexView },
+  { path: 'reports/new', chunk: ReportNewPage },
   { path: 'page/:pageName', chunk: PageView },
   { path: 'component/:ns/:name/*', chunk: ComponentNavView },
   { path: 'design/dashboard/:dashboardName', chunk: DashboardDesignPage },
@@ -1684,6 +1686,8 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
                 <Route path="report/:reportName" element={<ReportView dataSource={dataSource} />} />
                 {/* objectui#13020: the app's report index, linked from the sidebar. */}
                 <Route path="reports" element={<AppReportIndexView />} />
+                {/* objectstack#36374 — the report builder for a new report. */}
+                <Route path="reports/new" element={<ReportNewPage dataSource={dataSource} />} />
                 <Route path="page/:pageName" element={<PageView />} />
                 {/* objectstack ADR-0146 D11 — the retired Setup › Packaged
                     automation page (`automation:packaged`): a bookmark opens

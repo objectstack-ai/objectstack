@@ -4111,6 +4111,61 @@ const es = {
     editor: {
       panelTitle: "Editar informe",
     },
+    // objectstack#36374 — the report builder's 「Computed values」 fold under the chart.
+    computedValues: "Valores calculados",
+    // objectstack#36374 — the report builder (`ReportBuilder`, `ReportNewPage`).
+    builder: {
+      close: "Cerrar",
+      name: "Nombre del informe",
+      namePlaceholder: "Informe sin título",
+      description: "Descripción",
+      descriptionPlaceholder: "Añadir una descripción",
+      discard: "Descartar",
+      save: "Guardar",
+      settings: "Configuración del informe",
+      pendingDraft: "Este informe tiene cambios sin publicar. Publícalos o descártalos arriba y luego guarda.",
+      adminOnlyTitle: "Solo los administradores del espacio de trabajo pueden crear informes",
+      adminOnly: "Un informe se comparte con todo el espacio de trabajo, así que lo crea un administrador.",
+      type: {
+        label: "Tipo de informe",
+        snapshot: "Estado actual",
+      },
+      source: {
+        label: "Origen de datos",
+        placeholder: "Elige un origen de datos",
+        loading: "Cargando orígenes de datos…",
+        none: "Aún no hay orígenes de datos",
+      },
+      measure: {
+        label: "Medida",
+        placeholder: "Elige una medida",
+      },
+      grouping: {
+        label: "Agrupar por",
+        none: "Sin agrupar",
+        placeholder: "Elige un campo",
+        addLayer: "Añadir otro nivel",
+        removeLayer: "Quitar este nivel",
+      },
+      chart: {
+        label: "Gráfico",
+        bar: "Barras",
+        line: "Líneas",
+        donut: "Anillo",
+        metric: "Número",
+        table: "Tabla",
+        showValues: "Mostrar valores",
+        targetLine: "Línea objetivo",
+        targetLabel: "Objetivo",
+        secondLayerTableOnly: "Este gráfico dibuja la primera agrupación; la segunda está en los valores calculados.",
+      },
+      missing: {
+        source: "Elige un origen de datos",
+        noMeasures: "Este origen de datos no tiene medidas",
+        measure: "Elige una medida",
+        grouping: "Elige un campo para agrupar",
+      },
+    },
   },
   organizations: {
     create: "Crear organización",

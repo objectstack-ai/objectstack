@@ -503,7 +503,7 @@ export function ReportBuilder({
             ) : null}
             {grouping.second && !chartSplits(chartType) && chartType !== 'table' ? (
               <p className="text-xs text-muted-foreground" data-testid="report-builder-second-layer-note">
-                {tt('report.builder.chart.secondLayerTableOnly', 'This chart shows the first layer; the second layer is in the computed values.')}
+                {tt('report.builder.chart.secondLayerTableOnly', 'This chart draws the first grouping; the second is in the computed values.')}
               </p>
             ) : null}
           </Section>

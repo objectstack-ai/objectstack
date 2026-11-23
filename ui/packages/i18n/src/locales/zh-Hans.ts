@@ -1803,6 +1803,61 @@ const zh = {
     editor: {
       panelTitle: '编辑报表',
     },
+    // objectstack#36374 — the report builder's 「Computed values」 fold under the chart.
+    computedValues: '计算值',
+    // objectstack#36374 — the report builder (`ReportBuilder`, `ReportNewPage`).
+    builder: {
+      close: '关闭',
+      name: '报表名称',
+      namePlaceholder: '未命名报表',
+      description: '说明',
+      descriptionPlaceholder: '添加一句说明',
+      discard: '放弃',
+      save: '保存',
+      settings: '报表设置',
+      pendingDraft: '这张报表有一份还没发布的修改。先在上方发布或丢弃它，再保存。',
+      adminOnlyTitle: '只有系统管理员能搭建报表',
+      adminOnly: '报表对工作区里所有人生效，所以由系统管理员搭建。',
+      type: {
+        label: '报表类型',
+        snapshot: '现状分析',
+      },
+      source: {
+        label: '数据来源',
+        placeholder: '选一个数据来源',
+        loading: '正在读取数据来源…',
+        none: '还没有数据来源',
+      },
+      measure: {
+        label: '指标',
+        placeholder: '选一个指标',
+      },
+      grouping: {
+        label: '分组',
+        none: '不分组',
+        placeholder: '选一个字段',
+        addLayer: '再分一层',
+        removeLayer: '去掉这一层',
+      },
+      chart: {
+        label: '图表',
+        bar: '柱状图',
+        line: '折线图',
+        donut: '环形图',
+        metric: '数字',
+        table: '表格',
+        showValues: '显示数值',
+        targetLine: '目标线',
+        targetLabel: '目标',
+        secondLayerTableOnly: '这种图只画第一层分组，第二层在计算值里。',
+      },
+      missing: {
+        source: '选一个数据来源',
+        noMeasures: '这个数据来源没有可用的指标',
+        measure: '选一个指标',
+        grouping: '选一个分组字段',
+      },
+    },
   },
   dashboard: {
     total: '总计',

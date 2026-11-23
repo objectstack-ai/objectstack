@@ -4021,6 +4021,61 @@ const de = {
     editor: {
       panelTitle: "Bericht bearbeiten",
     },
+    // objectstack#36374 — the report builder's 「Computed values」 fold under the chart.
+    computedValues: "Berechnete Werte",
+    // objectstack#36374 — the report builder (`ReportBuilder`, `ReportNewPage`).
+    builder: {
+      close: "Schließen",
+      name: "Berichtsname",
+      namePlaceholder: "Unbenannter Bericht",
+      description: "Beschreibung",
+      descriptionPlaceholder: "Beschreibung hinzufügen",
+      discard: "Verwerfen",
+      save: "Speichern",
+      settings: "Berichtseinstellungen",
+      pendingDraft: "Dieser Bericht hat unveröffentlichte Änderungen. Veröffentlichen oder verwerfen Sie sie oben und speichern Sie dann.",
+      adminOnlyTitle: "Nur Workspace-Administratoren können Berichte erstellen",
+      adminOnly: "Ein Bericht gilt für alle im Workspace, daher erstellt ihn ein Administrator.",
+      type: {
+        label: "Berichtstyp",
+        snapshot: "Aktueller Stand",
+      },
+      source: {
+        label: "Datenquelle",
+        placeholder: "Datenquelle wählen",
+        loading: "Datenquellen werden geladen…",
+        none: "Noch keine Datenquellen",
+      },
+      measure: {
+        label: "Kennzahl",
+        placeholder: "Kennzahl wählen",
+      },
+      grouping: {
+        label: "Gruppieren nach",
+        none: "Keine Gruppierung",
+        placeholder: "Feld wählen",
+        addLayer: "Weitere Ebene hinzufügen",
+        removeLayer: "Diese Ebene entfernen",
+      },
+      chart: {
+        label: "Diagramm",
+        bar: "Balken",
+        line: "Linie",
+        donut: "Ring",
+        metric: "Zahl",
+        table: "Tabelle",
+        showValues: "Werte anzeigen",
+        targetLine: "Ziellinie",
+        targetLabel: "Ziel",
+        secondLayerTableOnly: "Dieses Diagramm zeigt die erste Gruppierung; die zweite steht in den berechneten Werten.",
+      },
+      missing: {
+        source: "Wählen Sie eine Datenquelle",
+        noMeasures: "Diese Datenquelle hat keine Kennzahlen",
+        measure: "Wählen Sie eine Kennzahl",
+        grouping: "Wählen Sie ein Feld zum Gruppieren",
+      },
+    },
   },
   organizations: {
     create: "Organisation erstellen",
