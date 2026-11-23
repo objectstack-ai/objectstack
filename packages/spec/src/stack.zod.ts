@@ -40,7 +40,11 @@ import { lintUnknownAuthoringKeys, lintUnknownStackKeys } from './kernel/metadat
 
 // Data Protocol
 import { ObjectSchema, ObjectExtensionSchema } from './data/object.zod';
-import { controlledByParentMasterRefusal } from './data/controlled-by-parent-master';
+import {
+  CONTROLLED_BY_PARENT_MASTER_INVALID,
+  controlledByParentMasterRefusal,
+  type ControlledByParentMasterIssueParams,
+} from './data/controlled-by-parent-master';
 import { recordMasterDetailRequiredOmissions } from './data/master-detail-required-omission';
 import { fieldGroupBodyTableRefusal, type NamedInboundRelationship } from './data/related-list-body-table';
 import { externalBindingDatasourceRefusal } from './data/external-binding-datasource';
@@ -518,7 +522,8 @@ interface VisibleObjectExtension {
  * target's declaration or in the merged set. That is the line that introduced
  * the second master, or that demoted the one. The message is the per-object
  * refinement's own ({@link controlledByParentMasterRefusal}), naming the
- * target and the merged fields — one rule, one wording.
+ * target and the merged fields — one rule, one wording — and so are its
+ * `params` (`{ code: CONTROLLED_BY_PARENT_MASTER_INVALID, shape }`).
  *
  * On the SCHEMA, for the reason {@link applyApiEndpointGates} gives:
  * `defineStack`, `os validate`, `os build`, the lint scorer and an artifact
@@ -616,6 +621,10 @@ function applyControlledByParentExtensionGate(
 
     const refusal = controlledByParentMasterRefusal(target, base.sharingModel, merged);
     if (refusal === undefined) continue;
+    const params: ControlledByParentMasterIssueParams = {
+      code: CONTROLLED_BY_PARENT_MASTER_INVALID,
+      shape: refusal.shape,
+    };
     const isMaster = (field: unknown): boolean => asRecord(field)?.type === 'master_detail';
     const blamed = new Set<VisibleObjectExtension>();
     for (const [key, extension] of writers) {
@@ -623,7 +632,7 @@ function applyControlledByParentExtensionGate(
     }
     for (const extension of ordered) {
       if (!blamed.has(extension)) continue;
-      ctx.addIssue({ code: 'custom', path: [...extension.path, 'fields'], message: refusal.message });
+      ctx.addIssue({ code: 'custom', path: [...extension.path, 'fields'], message: refusal.message, params });
     }
   }
 }

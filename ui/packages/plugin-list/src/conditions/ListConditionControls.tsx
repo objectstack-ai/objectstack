@@ -114,10 +114,10 @@ export function describeConditionValue(
   } else {
     text = list.map(String).join(joiner);
   }
-  // 「is any of」 is what a value list means on its own; every other operator is named.
-  return operator === 'in' || (operator === 'equals' && (family === 'option' || family === 'boolean'))
-    ? text
-    : `${opLabel} ${text}`;
+  // 「is any of」 is what a value list means on its own; every other operator is
+  // named, and with no value it is the operator alone, never one with a trailing space.
+  if (operator === 'in' || (operator === 'equals' && (family === 'option' || family === 'boolean'))) return text;
+  return text ? `${opLabel} ${text}` : opLabel;
 }
 
 function chipText(

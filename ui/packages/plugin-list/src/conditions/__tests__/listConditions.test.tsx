@@ -36,7 +36,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { operatorsForField } from '@object-ui/components';
-import { en as enPack, zh as zhPack } from '@object-ui/i18n/locales';
+import { builtInLocales, en as enPack, zh as zhPack } from '@object-ui/i18n/locales';
 import { I18nProvider } from '@object-ui/i18n';
 import { parseFilterAST } from '@objectstack/spec/data';
 import { convertFilterGroupToAST } from '../../ListView';
@@ -999,5 +999,115 @@ describe('ConditionChipRow — a view condition on a related record\'s field (ob
     expect(chip.textContent).toBe('Amount: >= 10');
     await act(async () => {});
     expect(ds.getObjectSchema).not.toHaveBeenCalled();
+  });
+});
+
+describe('ConditionChipRow — an operator only the advanced panel writes (objectstack#36462)', () => {
+  // A drill dialog's base filter carries the panel's own operators as view
+  // triples (`['amount', 'is_not_null', true]`); a reader's filter can carry
+  // them too, written by the advanced panel. Each chip names the operator in
+  // the panel's own words, never by its id.
+  const PANEL_ONLY = ['not_equals', 'greater_than', 'less_than', 'is_null', 'is_not_null', 'icontains', 'ends_with'] as const;
+  const fieldsIn = (amount: string, stage: string, name: string, lost: string): ConditionField[] => [
+    { value: 'amount', label: amount, type: 'currency' },
+    { value: 'stage', label: stage, type: 'select', options: [{ value: 'lost', label: lost }] },
+    { value: 'name', label: name, type: 'text' },
+  ];
+  const EN_FIELDS = fieldsIn('Deal Value', 'Stage', 'Name', 'Lost');
+  const ZH_FIELDS = fieldsIn('金额', '阶段', '名称', '输单');
+  const VIEW_FILTER = [
+    ['stage', 'not_equals', 'lost'],
+    ['amount', 'greater_than', 100],
+    ['amount', 'less_than', 500],
+    ['amount', 'is_null', true],
+    ['amount', 'is_not_null', true],
+    ['name', 'icontains', 'acme'],
+    ['name', 'ends_with', 'inc'],
+  ];
+
+  function Row(props: Partial<React.ComponentProps<typeof ConditionChipRow>>) {
+    return (
+      <ConditionChipRow
+        sort={[]}
+        sortFields={EN_FIELDS}
+        filters={EMPTY}
+        filterFields={EN_FIELDS}
+        onFiltersChange={() => {}}
+        renderAdvanced={() => <div />}
+        renderSortLevels={() => <div />}
+        {...props}
+      />
+    );
+  }
+  const chipTexts = () => screen.getAllByTestId('view-condition-chip').map((chip) => chip.textContent);
+
+  it('en: each chip reads the panel\'s word for its operator', () => {
+    render(<Row viewFilter={VIEW_FILTER} />);
+    expect(chipTexts()).toEqual([
+      'Stage: Does not equal Lost',
+      'Deal Value: Greater than 100',
+      'Deal Value: Less than 500',
+      'Deal Value: Is null',
+      'Deal Value: Is not null',
+      'Name: Contains (ignore case) acme',
+      'Name: Ends with inc',
+    ]);
+  });
+
+  it('zh-CN: each chip reads the panel\'s word for its operator', async () => {
+    render(
+      <I18nProvider config={{ defaultLanguage: 'zh-CN', detectBrowserLanguage: false }} persistLanguage={false}>
+        <Row viewFilter={VIEW_FILTER} filterFields={ZH_FIELDS} />
+      </I18nProvider>,
+    );
+    await screen.findAllByTestId('view-condition-chip');
+    expect(chipTexts()).toEqual([
+      '阶段：不等于 输单',
+      '金额：大于 100',
+      '金额：小于 500',
+      '金额：为 null',
+      '金额：不为 null',
+      '名称：包含（忽略大小写） acme',
+      '名称：以…结尾 inc',
+    ]);
+  });
+
+  it('the reader\'s own filter chip and its operator choice read the same words', () => {
+    const filters: FilterBuilderRowGroup = {
+      id: 'root',
+      logic: 'and',
+      conditions: [{ id: 'c1', field: 'amount', operator: 'is_not_null', value: undefined }],
+    };
+    render(<Row filters={filters} />);
+    expect(screen.getByTestId('filter-chip-open-amount').textContent).toBe('Deal Value: Is not null');
+  });
+
+  it('every pack words each of them, as the panel does, and never as the id', () => {
+    for (const [tag, pack] of Object.entries(builtInLocales)) {
+      const words = pack.filterBuilder.operators as Record<string, string>;
+      for (const op of PANEL_ONLY) {
+        expect(words[op], `${tag} ${op}`).toBeTruthy();
+        expect(words[op], `${tag} ${op}`).not.toBe(op);
+      }
+    }
+  });
+
+  it('an operator nothing words is named as a condition, never by its id, in en and zh-CN', async () => {
+    const unknown = [['amount', 'nin', [1, 2]], { field: 'amount', operator: 'exists' }];
+    const { unmount } = render(<Row viewFilter={unknown} />);
+    expect(chipTexts()).toEqual(['Deal Value: Condition 1, 2', 'Deal Value: Condition']);
+    unmount();
+    render(
+      <I18nProvider config={{ defaultLanguage: 'zh-CN', detectBrowserLanguage: false }} persistLanguage={false}>
+        <Row viewFilter={unknown} filterFields={ZH_FIELDS} />
+      </I18nProvider>,
+    );
+    await screen.findAllByTestId('view-condition-chip');
+    expect(chipTexts()).toEqual(['金额：条件 1、2', '金额：条件']);
+  });
+
+  it('CONTROL: a view triple\'s comparison symbol still reads as written', () => {
+    render(<Row viewFilter={[['amount', '>=', 10], ['amount', '!=', 0]]} />);
+    expect(chipTexts()).toEqual(['Deal Value: >= 10', 'Deal Value: != 0']);
   });
 });

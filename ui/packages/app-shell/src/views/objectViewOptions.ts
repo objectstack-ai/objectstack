@@ -341,6 +341,12 @@ export function kanbanViewOptions(viewDef: any, objectDef: any): Record<string, 
         detectStatusField(objectDef as any) ||
         undefined;
     const summarizeField = viewDef?.kanban?.summarizeField;
+    // objectstack#36370 — the lanes the view draws, in its order (objectstack#28211's
+    // `kanban.lanes`). `ListView`'s board branch has read them since that card;
+    // this relay did not carry them, so a Console board drew every option.
+    const lanes = Array.isArray(viewDef?.kanban?.lanes) && viewDef.kanban.lanes.length > 0
+        ? viewDef.kanban.lanes
+        : undefined;
     return {
         ...(lane ? { groupByField: lane } : {}),
         titleField: viewDef?.kanban?.titleField || 'name',
@@ -348,8 +354,35 @@ export function kanbanViewOptions(viewDef: any, objectDef: any): Record<string, 
         // bag refuses the legacy `cardFields` this used to write, and `ListView`
         // reads `columns` for the cards, so the board is unchanged.
         columns: viewDef?.kanban?.columns,
+        ...(lanes ? { lanes } : {}),
         ...(summarizeField ? { summarizeField } : {}),
+        // objectstack#36370 — the lane statistic and the two card toggles,
+        // each only when the view declares it (absent keeps the board as it was).
+        ...(viewDef?.kanban?.summary && typeof viewDef.kanban.summary === 'object' ? { summary: viewDef.kanban.summary } : {}),
+        ...(typeof viewDef?.kanban?.showFieldLabels === 'boolean' ? { showFieldLabels: viewDef.kanban.showFieldLabels } : {}),
+        ...(typeof viewDef?.kanban?.hideEmptyFields === 'boolean' ? { hideEmptyFields: viewDef.kanban.hideEmptyFields } : {}),
     };
+}
+
+/**
+ * objectstack#36370 — the board's draft (`listDraft.draft.kanban`) as a save
+ * lays it over the view's own `kanban` block. A view that declares no block,
+ * or a block with no `groupByField`, draws the lane field the object's
+ * lifecycle picks (`kanbanViewOptions` above); a save that kept only the
+ * changed keys would store `kanban: { showFieldLabels: false }`, a block
+ * `KanbanConfigSchema` refuses (it requires `groupByField`). So the lane the
+ * board draws goes with it, unless the draft picks one of its own.
+ */
+export function kanbanDraftToSave(
+    viewDef: any,
+    objectDef: any,
+    draft: Readonly<Record<string, unknown>> | undefined,
+): Record<string, unknown> | undefined {
+    if (!draft) return undefined;
+    const ownLane = viewDef?.kanban?.groupByField;
+    if ((typeof ownLane === 'string' && ownLane !== '') || 'groupByField' in draft) return { ...draft };
+    const lane = kanbanViewOptions(viewDef, objectDef).groupByField;
+    return typeof lane === 'string' && lane !== '' ? { groupByField: lane, ...draft } : { ...draft };
 }
 
 /**

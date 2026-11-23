@@ -2,7 +2,7 @@
   "card": "travel_expense",
   "cardSha256": "29162eefb46055941a0263686c2853246b4c408d41acb90c6abe22f68886a768",
   "build": "travel_expense.json",
-  "sha256": "5fe6f452d36fe56a0ecf0f8c782394076953baeb99ef2499763991e119a29989",
+  "sha256": "4ab7e603101e6adee0ede53563a13a9a830c8323d8e3f702222986042e726fd8",
   "runner": "ec227fc7",
   "packages": "published 18.6.0",
   "built": "2026-11-18",
@@ -18,5 +18,12 @@
     "build": "135/135",
     "seed": "757/757",
     "how": "the scratch run's dist/objectstack.json after its Build half (before the iterate turn), byte for byte as `objectstack build` wrote it; re-scored against the card, its score equals the run record's Build half"
+  },
+  "amended": {
+    "on": "2026-11-22",
+    "card": "objectstack-ai/objectstack#36534",
+    "from": "5fe6f452d36fe56a0ecf0f8c782394076953baeb99ef2499763991e119a29989",
+    "what": "`initialStates` added to the build's three active `state_machine` validations, each the state its field defaults to and the build's own create paths write: `demotravel_approval_step.step_decision` [\"pending\"], `demotravel_expense_claim.claim_lifecycle` [\"draft\"], `demotravel_trip_request.trip_lifecycle` [\"draft\"]. Nothing else changed.",
+    "why": "The publish-time rule `state-machine-no-initial-states` (an error since #34776) refuses a machine that runs on insert with no `initialStates`, so `install-local` answered 422 on the current tree. The build is no longer byte for byte the scratch run's output; its verified scores are unchanged, since no Build check reads `initialStates`."
   }
 }

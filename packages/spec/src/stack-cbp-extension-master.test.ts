@@ -17,6 +17,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { defineStack, ObjectStackDefinitionSchema } from './stack.zod';
+import { CONTROLLED_BY_PARENT_MASTER_INVALID } from './data/controlled-by-parent-master';
 
 type Issue = { code?: string; path?: PropertyKey[]; message?: string };
 type Envelope = Error & { code?: string; status?: number; issues?: Issue[] };
@@ -81,6 +82,11 @@ describe('[#23210] defineStack judges a controlled_by_parent object on its merge
     expect(result.success).toBe(false);
     const issue = result.success ? undefined : result.error.issues.find((i) => i.path.join('.') === 'objectExtensions.0.fields');
     expect(issue).toMatchObject({ code: 'custom' });
+    // The machine-readable code and shape, as the per-object refinement stamps them.
+    expect((issue as { params?: unknown } | undefined)?.params).toEqual({
+      code: CONTROLLED_BY_PARENT_MASTER_INVALID,
+      shape: 'several-required-masters',
+    });
   });
 
   it('through defineStack: STACK_SCHEMA_INVALID / 422, carrying the located issue', () => {
