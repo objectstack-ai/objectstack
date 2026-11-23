@@ -75,9 +75,9 @@ const mockClient: Record<string, unknown> = {
   // objectstack#36511 — the Save's own publish: the door refuses the guard, and
   // the draft it judged stays pending; an accepted one goes live.
   publish: vi.fn(async () => {
-    const verdict = server.draft ? verdictOf(server.draft) : { valid: true as const };
-    if ('errors' in verdict) {
-      const issues = verdict.errors.map((e) => ({ ...e, path: `objects.showcase_task.${e.path}` }));
+    const errors = server.draft ? verdictOf(server.draft).errors : undefined;
+    if (errors) {
+      const issues = errors.map((e) => ({ ...e, path: `objects.showcase_task.${e.path}` }));
       throw Object.assign(new Error(REFUSAL), { status: 422, code: 'VALIDATION_FAILED', issues });
     }
     server.draft = null;
