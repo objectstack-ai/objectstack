@@ -528,11 +528,20 @@ export function FilePreviewDialog({
   }
 
   const iconButton = 'size-11 sm:size-8';
+  // React events bubble out of a portal along the React TREE: a click in the
+  // dialog would otherwise reach the grid row or card that opened it.
+  const keepInside = (e: React.SyntheticEvent) => e.stopPropagation();
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <MobileDialogContent
-        className="flex flex-col gap-3 sm:h-[85vh] sm:max-h-[85vh] sm:max-w-5xl sm:w-[calc(100%-2rem)]"
+        // A viewport-relative cap keeps a margin at every width; the fixed cap
+        // applies only where the window is wider than it plus a gutter.
+        className="flex flex-col gap-3 sm:h-[85vh] sm:max-h-[85vh] sm:max-w-[92vw] xl:max-w-5xl"
         onKeyDown={handleKeyDown}
+        onClick={keepInside}
+        onDoubleClick={keepInside}
+        onPointerDown={keepInside}
+        onMouseDown={keepInside}
         data-testid="file-preview-dialog"
       >
         <div className="flex min-w-0 items-center gap-1 pr-10">

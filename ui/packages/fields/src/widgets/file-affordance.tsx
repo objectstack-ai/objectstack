@@ -128,8 +128,6 @@ export function RestrictedFileAffordance({
   );
 }
 
-const stop = (e: React.SyntheticEvent) => e.stopPropagation();
-
 /**
  * One file: a keyboard-reachable view/download link when it resolves, and the
  * caller's own `fallback` text when it does not.
@@ -203,17 +201,14 @@ export function FileValueAffordance({
       <span className="truncate">{name}</span>
     </a>
     {previewing && (
-      // React events bubble out of a portal along the React tree: a click in
-      // the dialog must not reach the grid row or card this link sits in,
-      // which is why the link itself stops its own click.
-      <span className="contents" onClick={stop} onDoubleClick={stop} onPointerDown={stop} onMouseDown={stop}>
-        <FilePreviewDialog
-          files={[{ id: view.id, name, url: href, mimeType: view.mimeType, size: view.size }]}
-          index={0}
-          open
-          onOpenChange={(open) => !open && setPreviewing(false)}
-        />
-      </span>
+      // The dialog keeps its own clicks from the grid row or card this link
+      // sits in (it stops them at its content), as the link stops its own.
+      <FilePreviewDialog
+        files={[{ id: view.id, name, url: href, mimeType: view.mimeType, size: view.size }]}
+        index={0}
+        open
+        onOpenChange={(open) => !open && setPreviewing(false)}
+      />
     )}
     </>
   );
