@@ -56,6 +56,7 @@ import { SqlDriver } from '@objectstack/driver-sql';
 import { hashApiKey, resolveApiKeyAdmission } from '@objectstack/core';
 import { createHash } from 'node:crypto';
 import { mcpConsentAdmits } from './mcp-token-revocation.js';
+import { readCredentialChangedAt } from './credential-change-ends-prior-access.js';
 import { endWhatTheAccountRegistered } from './password-reset-ends-added-access.js';
 import { mintScimConnectionCredential, verifyScimBearerToken } from './scim-connection-service.js';
 import { AuthManager } from './auth-manager.js';
@@ -525,8 +526,6 @@ describe('where the OAuth provider is mounted, a completed reset and a forced re
     await registerClient(s);
     await authorize(s, s.userId, 'user');
     await authorize(s, s.adminUserId, 'admin');
-    const issuedAt = Math.floor(Date.now() / 1000) + 1;
-    const grantStands = () => mcpConsentAdmits(s.auth.adapter, { clientId: CLIENT_ID, userId: s.userId }, issuedAt, s.auth.internalAdapter);
 
     const routine = await s.fire(
       '/admin/set-user-password',
@@ -534,8 +533,16 @@ describe('where the OAuth provider is mounted, a completed reset and a forced re
       s.bearer(s.adminBearer),
     );
     expect(routine.status, await routine.clone().text()).toBe(200);
+    // A token of the grant minted after the routine reset: its `iat` (no
+    // millisecond claim, so placed at `iat * 1000`) is the first whole second
+    // at or after the change that reset wrote, read back from the row, so it
+    // does not depend on how long the reset took. The change time is absent
+    // only while the row still reads as the account's first password.
+    const changedAtMs = await readCredentialChangedAt(s.auth.internalAdapter, s.userId);
+    const issuedAt = Math.ceil((changedAtMs ?? Date.now()) / 1000);
+    const grantStands = () => mcpConsentAdmits(s.auth.adapter, { clientId: CLIENT_ID, userId: s.userId }, issuedAt, s.auth.internalAdapter);
     expect(await grantsOf(s, s.userId), 'a routine reset ends nothing').toEqual(ALL);
-    expect(await grantStands()).toBe(true);
+    expect(await grantStands(), 'the MCP door admits a token of the grant minted after the routine reset').toBe(true);
 
     const forced = await s.fire(
       '/admin/set-user-password',
