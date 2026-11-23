@@ -3705,6 +3705,7 @@ const de = {
     welcomeAdminDescriptionNoAi: "Richten Sie Ihre erste Anwendung über das Verwaltungsmenü links ein.",
     noAppsTitle: "Noch keine Anwendungen",
     noAppsDescription: "Das System wird eingerichtet — Apps, die Ihr Administrator für Sie freigibt, erscheinen hier.",
+    noAppsAddDescription: "Erstellen Sie Ihre erste App, oder beginnen Sie mit einer Vorlage oder dem App-Marktplatz.",
     buildWithAI: "Mit KI erstellen",
     askAI: "KI fragen",
     recoveryReminder: {

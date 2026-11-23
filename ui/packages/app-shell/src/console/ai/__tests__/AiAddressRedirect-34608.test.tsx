@@ -15,10 +15,15 @@ import React from 'react';
 import { cleanup, render, screen } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 
-const meta = vi.hoisted(() => ({ apps: [] as Array<Record<string, unknown>> }));
+const meta = vi.hoisted(() => ({ apps: [] as Array<Record<string, unknown>>, phone: false }));
 vi.mock('../../../providers/MetadataProvider', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useMetadata: () => ({ apps: meta.apps }),
+}));
+// objectstack#36732 — the width decides where home is named from.
+vi.mock('../../../hooks/usePhoneViewport', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  usePhoneViewport: () => meta.phone,
 }));
 
 import { AiAddressRedirect } from '../AiAddressRedirect';
@@ -50,6 +55,7 @@ function visit(entry: string | { pathname: string; search?: string; state?: unkn
 afterEach(() => {
   cleanup();
   meta.apps = [];
+  meta.phone = false;
   window.sessionStorage.clear();
 });
 
@@ -76,11 +82,21 @@ describe('an old /ai address opens the drawer on what it named (objectstack#3460
     expect(readStoredDockTarget()).toBeUndefined();
   });
 
-  it('lands on the declared home when the deployment declares one', async () => {
+  it('lands on the declared home when the deployment declares one (a phone)', async () => {
+    meta.phone = true;
     meta.apps = [{ name: 'crm', isDefault: true, active: true }];
     visit('/ai/ask');
     const landing = await screen.findByTestId('landing');
     expect(landing).toHaveTextContent(/^\/apps\/crm$/);
+  });
+
+  it('on a desktop lands on /home, which resolves the app once it knows which apps a set hides (objectstack#36732)', async () => {
+    // `/ai/*` is outside the `/me/apps` provider; the desktop `/home` route is
+    // the resolver, and it carries this visit's navigation state on.
+    meta.apps = [{ name: 'crm', isDefault: true, active: true }];
+    visit('/ai/ask');
+    const landing = await screen.findByTestId('landing');
+    expect(landing).toHaveTextContent(/^\/home$/);
   });
 
   it('a Builder handoff rides navigation state to the landing, never storage (objectui#12493)', async () => {
