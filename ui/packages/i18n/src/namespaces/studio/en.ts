@@ -2615,7 +2615,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.data.readOnlyPackage': 'This package is read-only — switch to or create a writable package to add objects',
   'engine.studio.data.firstObjectTitle': 'Start with your first object',
   'engine.studio.data.firstObjectHint':
-    'Objects are your app’s data foundation (e.g. “Orders”, “Customers”). Create one below; then design its fields, forms, and automations, and publish once at the end.',
+    'Objects are your app’s data foundation (e.g. “Orders”, “Customers”). Create one below; then design its fields, forms, and automations. Each Save is live at once.',
   'engine.studio.data.tab.records': 'Records',
   'engine.studio.data.tab.form': 'Form',
   'engine.studio.data.tab.rules': 'Validations',
@@ -2745,6 +2745,8 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.auto.disableTitle': 'Disable this automation. It takes effect at once.',
   'engine.studio.auto.enabledToast': 'Switched on, live now',
   'engine.studio.auto.disabledToast': 'Switched off, live now',
+  // objectstack#36742 — a new flow is published but born switched off: the create toast says so.
+  'engine.studio.auto.createdOff': 'Created: {name} (switched off; it runs once you switch it on)',
   'engine.studio.auto.newTitle': 'New automation',
   'engine.studio.auto.none': 'No automations yet — click “+” above to create one',
   'engine.studio.auto.emptyMain': 'No automations in this package yet.',
