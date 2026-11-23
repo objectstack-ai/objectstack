@@ -50,13 +50,15 @@ const packages = vi.hoisted(() => ({
   ensure: null as null | ((base: string) => Promise<{ packageId: string; writable: boolean }>),
   ensured: [] as string[],
 }));
+/** objectstack#36364 — the navigation state the page is reached with, and its replaces. */
+const route = vi.hoisted(() => ({ state: null as unknown, navigate: null as null | ((...a: unknown[]) => void) }));
 const toasts = vi.hoisted(() => ({ success: [] as unknown[], error: [] as unknown[] }));
 
 vi.mock('../providers/MetadataProvider', () => ({ useMetadata: () => meta.value }));
 vi.mock('react-router-dom', () => ({
   useParams: () => ({ dashboardName: 'ops_board' }),
-  useNavigate: () => vi.fn(),
-  useLocation: () => ({ pathname: '/apps/crm/dashboard/ops_board', search: '' }),
+  useNavigate: () => route.navigate ?? (() => {}),
+  useLocation: () => ({ pathname: '/apps/crm/dashboard/ops_board', search: '', hash: '', key: 'landing', state: route.state }),
 }));
 vi.mock('./useOpenRecordList', () => ({
   useRecordListDrillNavigation: () => ({ openRecordList: vi.fn(), canOpenRecordList: () => true }),
@@ -181,6 +183,8 @@ beforeEach(() => {
   packages.ensured = [];
   toasts.success = [];
   toasts.error = [];
+  route.state = null;
+  route.navigate = null;
 });
 
 afterEach(() => {
@@ -341,5 +345,36 @@ describe('DashboardView in-page edit (objectstack#36372)', () => {
     expect((await screen.findAllByText('Total (served)')).length).toBeGreaterThan(0);
     expect(client.value.save).not.toHaveBeenCalled();
     expect(client.value.publish).not.toHaveBeenCalled();
+  });
+});
+
+describe('DashboardView arrival from the design mode (objectstack#36364)', () => {
+  it('a dashboard the design mode just created opens its edit state on arrival, and the landing is cleared', async () => {
+    const navigate = vi.fn();
+    route.navigate = navigate;
+    route.state = { designModeNewDashboard: 'ops_board' };
+    mount();
+    expect(await screen.findByTestId('dashboard-editing-badge')).toBeInTheDocument();
+    expect(client.value.layered).toHaveBeenCalledTimes(1);
+    expect(navigate).toHaveBeenCalledWith('/apps/crm/dashboard/ops_board', { replace: true, state: null });
+  });
+
+  it("a landing that names another dashboard opens nothing", async () => {
+    route.state = { designModeNewDashboard: 'another_board' };
+    mount();
+    await screen.findByTestId('dashboard-edit');
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    expect(screen.queryByTestId('dashboard-editing-badge')).not.toBeInTheDocument();
+    expect(client.value.layered).not.toHaveBeenCalled();
+  });
+
+  it('without the Edit button (the Studio gate keeps the principal out), the landing opens nothing', async () => {
+    gate.entry = null;
+    route.state = { designModeNewDashboard: 'ops_board' };
+    mount();
+    await screen.findAllByText('Total (served)');
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    expect(screen.queryByTestId('dashboard-editing-badge')).not.toBeInTheDocument();
+    expect(client.value.layered).not.toHaveBeenCalled();
   });
 });

@@ -33,7 +33,7 @@
 
 import { emitMetadataRefresh } from '../assistant/assistantBus.js';
 import { slugify } from '../views/metadata-admin/createDerive.js';
-import { romanizeHan } from '../views/metadata-admin/romanizeHan.js';
+import { loadHanRomanizer, romanizeHan, romanizerPending } from '../views/metadata-admin/romanizeHan.js';
 import { saveDashboardInPlace } from '../views/runtime-metadata-persistence.js';
 import type { Menu } from './designModeMenu.js';
 import {
@@ -94,7 +94,8 @@ const NAME_TRIES = 20;
  * holds, in any package: each candidate ({@link uniqueItemName}, `taken`
  * left out) is read by name, and a name the read finds is passed over. A
  * read that fails is thrown: a name that could not be checked is not used,
- * since saving over an existing item would publish over it.
+ * since saving over an existing item would publish over it. A Chinese name
+ * waits for the pinyin dictionary first, so its machine name reads as it.
  */
 export async function freeItemName(
   kind: NewMenuItemKind,
@@ -102,6 +103,7 @@ export async function freeItemName(
   taken: Iterable<string>,
   client: { get: (type: string, name: string) => Promise<unknown> },
 ): Promise<string> {
+  if (romanizerPending(label)) await loadHanRomanizer();
   const used = new Set(taken);
   for (let i = 0; i < NAME_TRIES; i += 1) {
     const candidate = uniqueItemName(kind, label, used);

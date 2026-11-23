@@ -65,6 +65,8 @@ const listed = vi.hoisted(() => ({
     { name: 'crm_lead_record', label: 'Lead record', type: 'record' },
   ],
 }) as Record<string, Array<Record<string, unknown>>>);
+/** objectstack#36364 — names the server holds (`type/name`), and a refusal of the app's save. */
+const server = vi.hoisted(() => ({ held: new Set<string>(), appSave: null as Error | null }));
 /** The app's menu as stored (`null`: as served). */
 const storedNav = vi.hoisted(() => ({ current: null as unknown[] | null, failReads: 0 }));
 const client = vi.hoisted(() => ({
@@ -77,15 +79,20 @@ const client = vi.hoisted(() => ({
     const code = { name: 'crm', label: 'CRM', navigation: storedNav.current ?? NAVIGATION };
     return { code, effective: code };
   },
+  get: async (type: string, name: string) => (server.held.has(`${type}/${name}`) ? { name } : null),
   save: async (...args: unknown[]) => {
     written.push(['save', ...args]);
+    if (args[0] === 'app' && server.appSave) throw server.appSave;
     return {};
   },
   publish: async (...args: unknown[]) => {
     written.push(['publish', ...args]);
     return {};
   },
-  reset: async () => ({}),
+  reset: async (...args: unknown[]) => {
+    written.push(['reset', ...args]);
+    return {};
+  },
 }));
 vi.mock('../../views/metadata-admin/useMetadata', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -202,6 +209,8 @@ beforeEach(() => {
   session.defaultLocale = 'en';
   storedNav.current = null;
   storedNav.failReads = 0;
+  server.held.clear();
+  server.appSave = null;
   __resetDefaultLocale();
   vi.stubGlobal(
     'fetch',
@@ -646,5 +655,119 @@ describe('the menu under the design mode (objectstack#36363)', () => {
     fireEvent.click(screen.getByText('switch to hr'));
     expect(confirmSpy).not.toHaveBeenCalled();
     expect(switchedTo).toEqual(['hr']);
+  });
+});
+
+/** objectstack#36364 — where the page went, and the navigation state it went with. */
+function Landing() {
+  const location = useLocation();
+  return <span data-testid="landing">{`${location.pathname} ${JSON.stringify(location.state)}`}</span>;
+}
+
+function startWithLanding() {
+  render(
+    <MemoryRouter initialEntries={['/apps/crm']}>
+      <Harness />
+      <Landing />
+    </MemoryRouter>,
+  );
+  fireEvent.click(screen.getByText('enter'));
+}
+
+/** 「Add menu item」 under Insights, then 「Dashboards」: the picker's dashboard list. */
+async function openDashboards() {
+  fireEvent.click(screen.getByTestId('design-menu-add-insights'));
+  const picker = await screen.findByTestId('design-menu-picker');
+  fireEvent.click(within(picker).getByRole('button', { name: 'Dashboards' }));
+  await flush();
+  return picker;
+}
+
+describe('a new dashboard from 「Add menu item」 (objectstack#36364)', () => {
+  it('「Dashboards」 lists 「New dashboard…」 first, above the dashboards not in the menu yet', async () => {
+    listed.dashboard = [{ name: 'revenue', label: 'Revenue' }];
+    try {
+      start();
+      const picker = await openDashboards();
+      const rows = within(within(picker).getByTestId('design-menu-picker-rows')).getAllByRole('button').map((b) => b.textContent);
+      expect(rows).toEqual(['New dashboard…', 'Revenue']);
+      // Another kind has no such row.
+      fireEvent.click(within(picker).getByRole('button', { name: 'Dashboards' }));
+      fireEvent.click(within(picker).getByRole('button', { name: 'Reports' }));
+      await flush();
+      expect(within(picker).queryByText('New dashboard…')).toBeNull();
+    } finally {
+      listed.dashboard = [];
+    }
+  });
+
+  it('「Cancel」 at the name writes nothing and leaves nothing in the menu', async () => {
+    start();
+    const picker = await openDashboards();
+    fireEvent.click(within(picker).getByTestId('design-menu-picker-new-dashboard'));
+    const naming = await screen.findByTestId('design-menu-new-dashboard');
+    fireEvent.change(within(naming).getByTestId('design-menu-new-name'), { target: { value: 'Payment analysis' } });
+    fireEvent.click(within(naming).getByTestId('design-menu-new-cancel'));
+    await flush();
+    expect(screen.queryByTestId('design-menu-new-dashboard')).toBeNull();
+    expect(order()).toEqual(['home', ['sales', ['leads', 'accounts']], ['insights', []]]);
+    expect(written).toEqual([]);
+    expect(screen.getByTestId('design-mode-save')).toBeDisabled();
+  });
+
+  it('「Create」: the dashboard, then the menu with its entry in the held place and every other staged edit; the mode is left and the dashboard opens for editing', async () => {
+    server.held.add('dashboard/payment_analysis'); // a dashboard of another app holds the plain name
+    startWithLanding();
+    await act_on('accounts', 'Move up'); // another staged edit, saved with it
+    const picker = await openDashboards();
+    fireEvent.click(within(picker).getByTestId('design-menu-picker-new-dashboard'));
+    const naming = await screen.findByTestId('design-menu-new-dashboard');
+    fireEvent.change(within(naming).getByTestId('design-menu-new-name'), { target: { value: 'Payment analysis' } });
+    expect(written).toEqual([]);
+    fireEvent.click(within(naming).getByTestId('design-menu-new-create'));
+    await flush();
+    await flush();
+    await flush();
+
+    expect(written.map(([verb, type, name]) => `${verb} ${type} ${name}`)).toEqual([
+      'save dashboard payment_analysis_2',
+      'publish dashboard payment_analysis_2',
+      'save app crm',
+      'publish app crm',
+    ]);
+    expect(written[0][3]).toEqual({ name: 'payment_analysis_2', label: 'Payment analysis', widgets: [] });
+    const navigation = (written[2][3] as { navigation: Array<{ id: string; children?: unknown[] }> }).navigation;
+    expect(navigation[1].children!.map((c) => (c as { id: string }).id)).toEqual(['accounts', 'leads']);
+    expect(navigation[2].children).toEqual([{ id: 'nav_item_1', type: 'dashboard', dashboardName: 'payment_analysis_2' }]);
+    expect(screen.queryByTestId('design-mode-bar')).toBeNull();
+    expect(screen.getByTestId('landing')).toHaveTextContent(
+      '/apps/crm/dashboard/payment_analysis_2 {"designModeNewDashboard":"payment_analysis_2"}',
+    );
+  });
+
+  it('a refused menu removes the new dashboard; the mode, the held place and the other staged edits stay', async () => {
+    server.appSave = new Error('the app was refused');
+    startWithLanding();
+    await act_on('accounts', 'Move up');
+    const picker = await openDashboards();
+    fireEvent.click(within(picker).getByTestId('design-menu-picker-new-dashboard'));
+    const naming = await screen.findByTestId('design-menu-new-dashboard');
+    fireEvent.change(within(naming).getByTestId('design-menu-new-name'), { target: { value: 'Payment analysis' } });
+    fireEvent.click(within(naming).getByTestId('design-menu-new-create'));
+    await flush();
+    await flush();
+    await flush();
+
+    expect(written.map(([verb, type, name, opt]) => `${verb} ${type} ${name} ${JSON.stringify(opt)}`)).toEqual([
+      'save dashboard payment_analysis {"name":"payment_analysis","label":"Payment analysis","widgets":[]}',
+      'publish dashboard payment_analysis {"packageId":"com.acme.crm"}',
+      expect.stringMatching(/^save app crm /),
+      'reset dashboard payment_analysis {"packageId":"com.acme.crm"}',
+    ]);
+    expect(toastError).toHaveBeenCalledWith('Some changes were not saved: the app was refused');
+    expect(screen.getByTestId('design-mode-bar')).toBeInTheDocument();
+    expect(screen.getByTestId('design-menu-new-dashboard')).toBeInTheDocument();
+    expect(order()).toEqual(['home', ['sales', ['accounts', 'leads']], ['insights', ['…']]]);
+    expect(screen.getByTestId('landing')).toHaveTextContent('/apps/crm null');
   });
 });
