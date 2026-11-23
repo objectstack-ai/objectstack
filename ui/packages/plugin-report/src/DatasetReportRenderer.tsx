@@ -93,7 +93,7 @@
  */
 
 import * as React from 'react';
-import { Loader2, AlertTriangle, Table2, ShieldAlert } from 'lucide-react';
+import { Loader2, AlertTriangle, Table2, ShieldAlert, ChevronDown, ChevronRight } from 'lucide-react';
 import {
   ComponentRegistry,
   formatMeasure,
@@ -280,6 +280,16 @@ export interface DatasetReportRendererProps {
    */
   onDrill?: (args: DatasetDrillArgs) => void;
   className?: string;
+  /**
+   * objectstack#36374 — fold the report's table under a 「Computed values」
+   * disclosure while a chart is drawn above it, as the report builder's
+   * preview shows it: the chart is the picture, the numbers are one click
+   * away. The table stays mounted while folded, so the export control (which
+   * writes the drawn table) keeps working. A report whose chart IS its table
+   * (`table` / `pivot`, or no chart), a cross-tab, and a joined report draw
+   * their table as always. Off by default: the report page is unchanged.
+   */
+  foldTableUnderChart?: boolean;
 }
 
 /** `true` when this report should render through the dataset path. */
@@ -2426,7 +2436,10 @@ const DatasetReportRendererBody: React.FC<DatasetReportRendererProps> = ({
   runtimeFilter,
   onDrill,
   className,
+  foldTableUnderChart,
 }) => {
+  const tt = useSafeTranslate();
+  const [tableOpen, setTableOpen] = React.useState(false);
   // objectui#5137 — `runtimeFilter` ONLY. `filter` is rejected by the strict
   // spec, so it is not read here either; it is reported instead of applied.
   const reportSite = describeReportSite(report);
@@ -2589,6 +2602,11 @@ const DatasetReportRendererBody: React.FC<DatasetReportRendererProps> = ({
     />
   );
 
+  // objectstack#36374 — fold the table only under a chart that is drawn
+  // separately from it: a series or a single number.
+  const chartPlan = chartCfg ? planReportChart(chartCfg.type).kind : undefined;
+  const foldTable = !!foldTableUnderChart && !crossTab && (chartPlan === 'series' || chartPlan === 'single_value');
+
   // A declared period whose dimension is still being resolved, or cannot be,
   // draws that state INSTEAD of the body: a table queried before the window
   // is known would show every period under a chip naming one.
@@ -2630,7 +2648,21 @@ const DatasetReportRendererBody: React.FC<DatasetReportRendererProps> = ({
       ) : (
         <>
           {crossTab ? table : chart}
-          {crossTab ? chart : table}
+          {crossTab ? chart : foldTable ? (
+            <div className="flex flex-col gap-2" data-testid="dataset-report-computed-values">
+              <button
+                type="button"
+                className="inline-flex w-fit items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground"
+                aria-expanded={tableOpen}
+                onClick={() => setTableOpen((open) => !open)}
+                data-testid="dataset-report-computed-values-toggle"
+              >
+                {tableOpen ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                {tt('report.computedValues', 'Computed values')}
+              </button>
+              <div hidden={!tableOpen}>{table}</div>
+            </div>
+          ) : table}
         </>
       )}
     </div>
