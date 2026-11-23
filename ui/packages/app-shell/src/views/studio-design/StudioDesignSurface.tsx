@@ -16,7 +16,7 @@
 
 import * as React from 'react';
 import { createPortal } from 'react-dom';
-import { useParams, useNavigate, useSearchParams, useLocation, Link, Navigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams, useLocation, useHref, Link, Navigate } from 'react-router-dom';
 import { useAdapter, SchemaRendererProvider, useMetadata } from '@object-ui/react';
 import { leadWithNameField } from '@object-ui/core';
 // The ONE draft-envelope reader (objectui#8181): unwrap AND strip the
@@ -453,6 +453,7 @@ import { StudioGridAddFieldButton, StudioGridAddFieldProvider, type StudioGridAd
 import { useDraftAutoSave, type DraftSend } from './useDraftAutoSave.js';
 import { FLOW_PRESETS, flowPresetTrigger, type FlowPreset } from './flowPresets.js';
 import { FormToolbar, ObjectFormDesigner } from './ObjectFormDesigner.js';
+import { PublicFormsDesigner } from './publicForm/PublicFormsDesigner.js';
 import { isStudioHiddenSystemField } from './studioHiddenSystemField.js';
 import { ObjectGroupInspector } from './ObjectGroupInspector.js';
 import { ObjectValidationsPanel } from './ObjectValidationsPanel.js';
@@ -5993,6 +5994,12 @@ export function DataPillar({
   // Within the Form view: Layout (WYSIWYG drag/section designer) ⇄ Preview
   // (live form).
   const [formMode, setFormMode] = React.useState<'layout' | 'preview'>('layout');
+  // objectstack#36444 — which of the object's forms the Form tab designs: the
+  // record form (the New / Edit dialogs' layout) or its public forms (forms
+  // anyone fills in without signing in), designed under the object they
+  // submit into, with no tab of their own (objectui#12450's seven tabs).
+  const [formSurface, setFormSurface] = React.useState<'record' | 'public'>('record');
+  const publicFormRoute = useHref('/f');
   // objectui#12515 — which definition Preview renders when the object has a
   // published version AND a pending change: the draft (the default) or the
   // published one. Without a published version only the draft exists.
@@ -7347,6 +7354,33 @@ export function DataPillar({
       'h-6 rounded px-2.5 text-xs transition-colors',
       active ? 'bg-background font-medium text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
     );
+  const formSurfaceControl = (
+    <div
+      role="group"
+      aria-label={t('engine.studio.data.form.surfaceLabel', locale)}
+      className="inline-flex items-center gap-0.5 rounded-md bg-muted p-0.5"
+      data-testid="data-form-surface"
+    >
+      <button
+        type="button"
+        onClick={() => setFormSurface('record')}
+        aria-pressed={formSurface === 'record'}
+        className={formModeItem(formSurface === 'record')}
+        data-testid="data-form-surface-record"
+      >
+        {t('engine.studio.data.form.surfaceRecord', locale)}
+      </button>
+      <button
+        type="button"
+        onClick={() => setFormSurface('public')}
+        aria-pressed={formSurface === 'public'}
+        className={formModeItem(formSurface === 'public')}
+        data-testid="data-form-surface-public"
+      >
+        {t('engine.studio.data.form.surfacePublic', locale)}
+      </button>
+    </div>
+  );
   const formModeControl = (
     <div className="inline-flex items-center gap-0.5 rounded-md bg-muted p-0.5">
       <button
@@ -7404,6 +7438,7 @@ export function DataPillar({
   const formToolbarLeading =
     extendsBase && canAddFields ? (
       <div className="inline-flex items-center gap-2">
+        {formSurfaceControl}
         {formModeControl}
         {formLayoutSource}
         <AddFieldPopover onCreate={addField} takenNames={addFieldTakenNames} extensionField align="start">
@@ -7418,6 +7453,7 @@ export function DataPillar({
       </div>
     ) : (
       <div className="inline-flex items-center gap-2">
+        {formSurfaceControl}
         {formModeControl}
         {formLayoutSource}
       </div>
@@ -8025,7 +8061,23 @@ export function DataPillar({
                   left of the Form tab's one toolbar row (the designer's in
                   Layout, `FormToolbar` in Preview), and the caption that used
                   to trail it is each item's title. */}
-              {formMode === 'layout' ? (
+              {formSurface === 'public' ? (
+                <PublicFormsDesigner
+                  key={current.name}
+                  objectName={current.name}
+                  objectDef={shownDraft}
+                  client={client}
+                  packageId={packageId}
+                  readOnly={readOnly}
+                  customization={customization}
+                  publishNonce={publishNonce}
+                  onDraftSaved={onDraftSaved}
+                  locale={locale}
+                  previewDataSource={previewDataSource}
+                  leading={formSurfaceControl}
+                  formRoute={publicFormRoute}
+                />
+              ) : formMode === 'layout' ? (
                 <>
                 <ObjectFormDesigner
                   draft={shownDraft}

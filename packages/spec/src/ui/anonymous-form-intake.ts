@@ -178,18 +178,22 @@ function anonymousFormExplicitWithdrawals(view: unknown): Array<{ slot: string; 
  * Does one metadata layer withdraw an open form candidate? A WITHDRAWAL IS A
  * KILL SWITCH: layering may only narrow anonymous intake, never re-open it, so
  * the anonymous form doors serve a candidate only when no layer beneath it
- * withdraws it, and the organization-scoped write door refuses a save that
- * would leave one open.
+ * withdraws it.
+ *
+ * Three callers judge by it. The anonymous form doors (`registerFormEndpoints`
+ * in `@objectstack/rest`) pass the environment's view list as the layer. The
+ * v18 organization-ownership migration (`os migrate organization-ownership
+ * --apply`, `@objectstack/cli`) passes the organization rows it carries onto
+ * the environment. The console's Setup → Public forms page passes an installed
+ * app's own document, so it never shows on, or switches on, a form the app
+ * ships withdrawn (objectstack#36444).
  *
  * Identity is the `name`: the layer withdraws the candidate only through a
- * body of the same `name` as the candidate's `view`. What that name is depends
- * on the caller. The organization-scoped write door passes the env-wide body
- * of the stored row the overlay is keyed by, so a key rename, a `form.name`,
- * a slot move or an expansion rename is still judged against the form it was.
- * The anonymous doors pass the env-wide view list and the item they serve, so
- * they judge by the served item name (a known limit: an overlay stored before
- * the withdrawal, or restored by rollback or revert, that moves its form to
- * another key or slot is not matched there). The layer withdraws the
+ * body of the same `name` as the candidate's `view`. The anonymous doors pass
+ * the env-wide view list and the item they serve, so they judge by the served
+ * item name (a known limit: an overlay stored before the withdrawal, or
+ * restored by rollback or revert, that moves its form to another key or slot
+ * is not matched there). The layer withdraws the
  * candidate when its body of that name EXPLICITLY
  * withdraws a form ({@link anonymousFormExplicitWithdrawals}) that matches the
  * candidate by slot (the same `form`, `formViews` key or `config`) OR by slug
@@ -205,8 +209,7 @@ function anonymousFormExplicitWithdrawals(view: unknown): Array<{ slot: string; 
  * limit that fails closed: it may over-close another package's form of the
  * same name). It judges only the bodies the layer holds, so a caller closes a
  * name in every package only when its layer holds every package's body of the
- * name. The organization-scoped write door anchors one body per package. The
- * env-wide view list the anonymous doors read holds one item per package of a
+ * name. The env-wide view list the anonymous doors read holds one item per package of a
  * name: a package's saved env-wide copy of a view container serves that
  * package's item of each form it expands, and a package-less copy stands in
  * for every package with no copy of its own. A layer

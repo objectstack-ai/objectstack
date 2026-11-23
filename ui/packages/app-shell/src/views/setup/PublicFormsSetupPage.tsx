@@ -277,7 +277,7 @@ function PublicFormsSetupBody() {
                       <div className="inline-flex items-center gap-2">
                         <Switch
                           checked={row.on}
-                          disabled={busy !== null || !canSwitch || !!row.shippedOff}
+                          disabled={busy !== null || !canSwitch || !!row.shippedOff || !!row.unknown}
                           onCheckedChange={(next) => void flip(row, next)}
                           aria-label={t(row.on ? 'publicFormsSetup.switchOffLabel' : 'publicFormsSetup.switchOnLabel', {
                             name: row.title,

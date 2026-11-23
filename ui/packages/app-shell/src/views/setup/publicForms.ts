@@ -77,6 +77,7 @@ import {
 } from '../runtime-metadata-persistence.js';
 import { declaredOverrideOf, overrideDraftBody } from '../studio-design/StudioCustomizeControls.js';
 import { fetchListedPackageManifests } from '../studio-design/packages-io.js';
+import { publicFormShownName } from '../studio-design/publicForm/publicFormDesign.js';
 
 type FormDoc = Record<string, any>;
 
@@ -86,7 +87,7 @@ const isDoc = (v: unknown): v is FormDoc => !!v && typeof v === 'object' && !Arr
 export interface PublicFormRow {
   /** The form view item's name: the metadata address every write names. */
   name: string;
-  /** What the page shows as its name ({@link shownName}). */
+  /** What the page shows as its name (`publicFormShownName`, Studio's designer names it the same way). */
   title: string;
   /** The object a submission creates a record of. */
   object?: string;
@@ -114,27 +115,6 @@ function withSwitch(form: FormDoc, on: boolean): FormDoc {
   return { ...form, sharing: { ...(isDoc(form.sharing) ? form.sharing : {}), enabled: on } };
 }
 
-const text = (v: unknown): string | undefined => (typeof v === 'string' && v.trim() ? v : undefined);
-
-/**
- * The name a form is shown by, in the words its author gave it: the served
- * (translated) label, else the form's title or label, else the label of its
- * first section (what the form's own page heads it with), else its name
- * without the object prefix (`crm_lead.web_to_lead` → `web_to_lead`).
- */
-function shownName(item: FormDoc): string {
-  const config: FormDoc = isDoc(item.config) ? item.config : {};
-  const first = Array.isArray(config.sections) ? config.sections.find(isDoc) : undefined;
-  const dot = item.name.lastIndexOf('.');
-  return (
-    text(item.label) ??
-    text(config.title) ??
-    text(config.label) ??
-    text(first?.label) ??
-    (dot >= 0 && dot < item.name.length - 1 ? item.name.slice(dot + 1) : item.name)
-  );
-}
-
 /**
  * The public form a served view item carries, or `null` (module header): a
  * `viewKind: 'form'` item whose `config` the rule opens once its switch is on.
@@ -149,7 +129,7 @@ export function publicFormRowOf(item: unknown): PublicFormRow | null {
   const packageId = typeof item._packageId === 'string' && item._packageId ? item._packageId : null;
   return {
     name: item.name,
-    title: shownName(item),
+    title: publicFormShownName(item),
     object: anonymousFormObjectName(item, item.config),
     slug: listed.slug,
     on,
@@ -280,11 +260,11 @@ async function readFormLayers(name: string, target: ResolvedTarget, client: Pick
  * app's form; a row whose layers cannot be read is marked `unknown` and is not
  * shown as on.
  */
-export async function markShippedOff(
-  rows: readonly PublicFormRow[],
+export async function markShippedOff<R extends Pick<PublicFormRow, 'name' | 'on' | 'packageId' | 'shippedOff' | 'unknown'>>(
+  rows: readonly R[],
   client: Pick<PublicFormSwitchClient, 'layered'>,
   doors?: Pick<DashboardSaveTargetDoors, 'listPackages'>,
-): Promise<PublicFormRow[]> {
+): Promise<R[]> {
   if (!rows.some((r) => r.packageId)) return [...rows];
   const listPackages = doors?.listPackages ?? fetchListedPackageManifests;
   let listing: ReturnType<typeof listPackages> | undefined;

@@ -170,6 +170,8 @@ describe('PublicFormsSetupPage', () => {
     await waitFor(() => expect(row).toHaveAttribute('data-unknown', 'true'));
     expect(row).toHaveAttribute('data-on', 'false');
     expect(screen.getByTestId('public-form-unknown-web_to_lead')).toHaveTextContent('«publicFormsSetup.statusUnknown»');
+    // Not knowing whether it is live, the page offers no switch: Refresh reads it again.
+    expect(screen.getByTestId('public-form-switch-web_to_lead')).toBeDisabled();
   });
 
   it('a switch over a pending draft says so and does not read as done', async () => {
