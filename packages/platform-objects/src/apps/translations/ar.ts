@@ -108,6 +108,7 @@ export const ar: TranslationData = {
         nav_settings_knowledge: { label: 'المعرفة' },
         nav_settings_lifecycle: { label: 'دورة حياة البيانات' },
         nav_recycle_bin: { label: 'سلة المحذوفات' },
+        nav_public_forms: { label: 'النماذج العامة' },
         nav_notification_preferences: { label: 'تفضيلات الإشعارات' },
         nav_notification_templates: { label: 'قوالب الإشعارات' },
 

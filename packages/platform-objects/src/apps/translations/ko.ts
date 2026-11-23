@@ -109,6 +109,7 @@ export const ko: TranslationData = {
         nav_settings_knowledge: { label: '지식' },
         nav_settings_lifecycle: { label: '데이터 수명 주기' },
         nav_recycle_bin: { label: '휴지통' },
+        nav_public_forms: { label: '공개 양식' },
         nav_notification_preferences: { label: '알림 기본 설정' },
         nav_notification_templates: { label: '알림 템플릿' },
 
