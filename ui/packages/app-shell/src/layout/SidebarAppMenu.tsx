@@ -116,7 +116,7 @@ function useAddAppEntries(): AddAppEntry[] {
  * customization), except where the customization door is walled off for this
  * caller. Not drawn where no shell holds the mode, nor while the mode is on.
  */
-function useEnterDesignMode(apps: any[], activeAppName: string): (() => void) | null {
+function useEnterDesignMode(apps: Parameters<typeof matchAppBySegment>[0], activeAppName: string): (() => void) | null {
   const entry = useStudioEntryGate(appStudioDesignPath(matchAppBySegment(apps, activeAppName), true));
   const designMode = useDesignMode();
   const posture = useTenancyPosture();
