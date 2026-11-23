@@ -1038,6 +1038,16 @@ const zh = {
     inlineEditLabel: '行内编辑记录(点击单元格进行编辑)',
     // The list's Options menu.
     optionsMenu: {
+      // objectstack#36370 — a board's own settings.
+      kanbanLaneField: "分列字段",
+      kanbanLanes: "显示哪几列",
+      kanbanCardFields: "卡片上显示的字段",
+      kanbanAddCardField: "添加字段",
+      kanbanShowFieldLabels: "显示字段名",
+      kanbanHideEmptyFields: "隐藏空字段",
+      kanbanSummary: "列底统计",
+      kanbanHiddenLanes: "隐藏的列",
+      kanbanHiddenLanesHint: "隐藏的列里的卡片会显示在「未分类」。",
       viewName: '视图名称',
       fields: '字段',
       fieldsShown: '已显示 {{count}} 个',
@@ -1081,6 +1091,19 @@ const zh = {
     },
   },
   kanban: {
+    // objectstack#36370 — the lane header's 「+」 and 「⋯」 menu, and an empty lane's create row.
+    laneMenu: {
+      actions: "{{column}} 列的操作",
+      collapse: "折叠这一列",
+      expand: "展开这一列",
+      hide: "隐藏这一列",
+      hideHint: "这一列的卡片会移到「未分类」",
+      createIn: "在「{{column}}」新建",
+      create: "新建",
+    },
+    laneStatistic: {
+      loadedOnly: "仅已加载的卡片",
+    },
     addCard: '添加卡片',
     addColumn: '添加列',
     moveCard: '移动卡片',
@@ -2888,6 +2911,7 @@ const zh = {
       },
       linkFilterRefused: '此链接的筛选条件未应用：其中包含你在此处无法筛选的字段，因此列表按视图本身显示。',
       personalizedParts: {
+        kanban: "看板设置",
         filters: '筛选',
         search: '搜索',
         sort: '排序',
@@ -3655,6 +3679,27 @@ const zh = {
       unknown: '「{{name}}」已不是这个对象的动作。请取消固定后再保存。',
       notPlaced: '「{{name}}」已不在这个页面上。请取消固定后再保存。',
       stale: '已不在这个页面上，保存时会去掉：{{names}}',
+    },
+    recordTabs: {
+      entry: '配置页签',
+      title: '配置页签',
+      leaveUnsaved: '尚未保存，确定离开？对页签的改动将丢失。',
+      saveFailed: '页签未保存：{{reason}}',
+      notListed: '此对象所在的软件包不在列表中，无法保存页签。',
+      pendingDraft: '此对象在 Studio 中有未发布的改动。请先在那里发布或丢弃，再保存。',
+      notWritable: '此对象所在的软件包不可写，无法在这里保存页签。',
+      name: '页签名称',
+      rename: '重命名{{name}}',
+      drag: '移动{{name}}',
+      hide: '隐藏{{name}}',
+      show: '显示{{name}}',
+      shown: '页签',
+      hidden: '已隐藏',
+      noneHidden: '无',
+      contributed: '此页签由另一个软件包添加，在那里摆放。',
+      renameSourceOnly: '页签名称只能在应用的源语言下修改',
+      builtinFixed: '此页签由平台绘制，固定在最后，名称不可改。',
+      adjustFieldGroups: '调整字段分组',
     },
   },
   topbar: {

@@ -1011,6 +1011,16 @@ const ja = {
     inlineEditLabel: "レコードをインラインで編集(セルをクリックして編集)",
     // The list's Options menu.
     optionsMenu: {
+      // objectstack#36370 — a board's own settings.
+      kanbanLaneField: "列の分け方",
+      kanbanLanes: "表示する列",
+      kanbanCardFields: "カードの項目",
+      kanbanAddCardField: "項目を追加",
+      kanbanShowFieldLabels: "項目名を表示",
+      kanbanHideEmptyFields: "空の項目を隠す",
+      kanbanSummary: "列の集計",
+      kanbanHiddenLanes: "非表示の列",
+      kanbanHiddenLanesHint: "非表示の列のカードは「未分類」に表示されます。",
       viewName: 'ビュー名',
       fields: 'フィールド',
       fieldsShown: '{{count}} 件表示中',
@@ -1054,6 +1064,19 @@ const ja = {
     },
   },
   kanban: {
+    // objectstack#36370 — the lane header's 「+」 and 「⋯」 menu, and an empty lane's create row.
+    laneMenu: {
+      actions: "{{column}} 列の操作",
+      collapse: "列を折りたたむ",
+      expand: "列を展開",
+      hide: "列を非表示",
+      hideHint: "カードは「未分類」に移ります",
+      createIn: "{{column}} に新規作成",
+      create: "新規",
+    },
+    laneStatistic: {
+      loadedOnly: "読み込み済みのカード",
+    },
     uncategorized: "未分類",
     loadMore: "さらに読み込む",
     columns: "カラム",
@@ -2803,6 +2826,7 @@ const ja = {
       },
       linkFilterRefused: 'このリンクのフィルターは適用されませんでした。ここでは絞り込めないフィールドが含まれているため、ビュー本来の内容を表示しています。',
       personalizedParts: {
+        kanban: "ボードの設定",
         filters: "フィルター",
         search: "検索",
         sort: "並べ替え",
@@ -3576,6 +3600,27 @@ const ja = {
       unknown: '「{{name}}」はこのオブジェクトの操作ではなくなりました。固定を外してから保存してください。',
       notPlaced: '「{{name}}」はこのページに表示されなくなりました。固定を外してから保存してください。',
       stale: 'ここには表示されなくなったため、保存時に除外されます: {{names}}',
+    },
+    recordTabs: {
+      entry: 'タブを設定',
+      title: 'タブを設定',
+      leaveUnsaved: '保存せずに移動しますか？タブの変更は失われます。',
+      saveFailed: 'タブは保存されませんでした：{{reason}}',
+      notListed: 'このオブジェクトのパッケージが一覧にないため、タブを保存できません。',
+      pendingDraft: 'このオブジェクトには Studio に未公開の変更があります。そこで公開または破棄してから、もう一度保存してください。',
+      notWritable: 'このオブジェクトのパッケージは書き込めないため、ここではタブを保存できません。',
+      name: 'タブ名',
+      rename: '{{name}} の名前を変更',
+      drag: '{{name}} を移動',
+      hide: '{{name}} を非表示',
+      show: '{{name}} を表示',
+      shown: 'タブ',
+      hidden: '非表示',
+      noneHidden: 'なし',
+      contributed: 'このタブは別のパッケージが追加しています。配置はそちらで行います。',
+      renameSourceOnly: 'タブ名はアプリのソース言語でのみ変更できます',
+      builtinFixed: 'このタブはプラットフォームが最後に固有の名前で表示します。',
+      adjustFieldGroups: 'フィールドグループを調整',
     },
   },
   topbar: {

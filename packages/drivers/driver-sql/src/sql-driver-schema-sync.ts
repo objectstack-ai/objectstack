@@ -533,6 +533,8 @@ export async function applyDriftOpInPlace(this: Pick<SchemaSyncHost, 'applyIndex
       case 'drop_column_default':
         await this.knex.raw('ALTER TABLE ?? ALTER COLUMN ?? DROP DEFAULT', [table, column]);
         return true;
+      case 'set_column_default':
+        return setDeclaredColumnDefault.call(this, table, column);
     }
   }
   if (this.isMysql) {
@@ -561,15 +563,49 @@ export async function applyDriftOpInPlace(this: Pick<SchemaSyncHost, 'applyIndex
         await this.knex.raw('ALTER TABLE ?? DROP COLUMN ??', [table, column]);
         return true;
       case 'drop_column_default':
-        // `ALTER … ALTER COLUMN … DROP DEFAULT` — the one ALTER COLUMN form
-        // MySQL accepts without restating the type, so it cannot lose a
-        // varchar length the way MODIFY can.
-        await this.knex.raw('ALTER TABLE ?? ALTER COLUMN ?? DROP DEFAULT', [table, column]);
+        // `ALTER … ALTER COLUMN …` — the one form MySQL accepts without
+        // restating the type, so it cannot lose a varchar length the way
+        // MODIFY can. [#36596] On a NULLABLE column it is `SET DEFAULT NULL`,
+        // never `DROP DEFAULT`: MySQL 8's DROP DEFAULT leaves the column with
+        // no default at all, and a strict-mode insert that omits it is then
+        // refused ("Field … doesn't have a default value", ER 1364) where
+        // Postgres and SQLite store NULL. Measured on 8.0.46. A NOT NULL
+        // column keeps DROP DEFAULT: NULL is not a default it can take.
+        if (ci?.nullable === true) {
+          await this.knex.raw('ALTER TABLE ?? ALTER COLUMN ?? SET DEFAULT NULL', [table, column]);
+        } else {
+          await this.knex.raw('ALTER TABLE ?? ALTER COLUMN ?? DROP DEFAULT', [table, column]);
+        }
         return true;
+      case 'set_column_default':
+        // `ALTER … ALTER COLUMN … SET DEFAULT` — the same MODIFY-free form.
+        return setDeclaredColumnDefault.call(this, table, column);
     }
   }
   this.logger.warn(`[schema-drift] ${op.type} on ${table}.${column} is unsupported on dialect '${this.dialectName}' — skipped`);
   return false;
+}
+
+/**
+ * [#36245] The in-place arm of `set_column_default` on Postgres and MySQL:
+ * `ALTER TABLE … ALTER COLUMN … SET DEFAULT <literal>`, the literal being the
+ * field's declared `defaultValue` read now, from the metadata the driver was
+ * given, and inlined as the client escapes it (DDL takes no bind parameters).
+ * Answers `false` (skipped) when the declaration no longer carries a literal
+ * the column could hold — the entry was planned against a different one —
+ * rather than guess at a value.
+ */
+async function setDeclaredColumnDefault(
+  this: Pick<SchemaSyncHost, 'knex' | 'managedObjectFields'>,
+  table: string,
+  column: string,
+): Promise<boolean> {
+  const dv = this.managedObjectFields.get(table)?.[column]?.defaultValue;
+  if (typeof dv !== 'string' && typeof dv !== 'number' && typeof dv !== 'boolean') return false;
+  if (isRuntimeDefaultToken(dv)) return false;
+  const literal = this.knex.raw('?', [dv]).toQuery();
+  await this.knex.raw(`ALTER TABLE ?? ALTER COLUMN ?? SET DEFAULT ${literal}`, [table, column]);
+  return true;
 }
 
 /**
@@ -699,6 +735,9 @@ export async function rebuildSqliteTablePatched(this: Pick<SchemaSyncHost, 'appl
     else if (e.op.type === 'tighten_not_null') tighten.add(e.op.column);
     else if (e.op.type === 'drop_column') drop.add(e.op.column);
     else if (e.op.type === 'drop_column_default') dropDefault.add(e.op.column);
+    // [#36245] Nothing to collect: the rebuild re-emits every column's DEFAULT
+    // from the declaration (below), which IS the restated default.
+    else if (e.op.type === 'set_column_default') { /* honoured by the rebuild itself */ }
     // Everything else is IGNORED here and must be reported as such (#11722):
     // widen/narrow varchar (SQLite ignores declared length — nothing to do),
     // `manual_column_type_change` (no reconciler arm on ANY dialect, by
@@ -1504,7 +1543,7 @@ export async function reconcileAndWarnDrift(this: Pick<SchemaSyncHost, 'applyMig
 /**
  * [#32590] Is this drift entry a column change the publish of the declaration
  * applies? Every `safe` column entry — the class that cannot lose data or fail
- * on existing rows (a wider varchar, a dropped runtime-token DEFAULT, a `date`
+ * on existing rows (a wider varchar, a dropped or restated column DEFAULT, a `date`
  * column widened to the declared `datetime`) — and the one `needs_confirm`
  * entry whose declaration says so in words: a NOT NULL column whose field
  * declares `storage: { notNull: false }`. That entry stays `needs_confirm` for
@@ -1515,7 +1554,17 @@ export async function reconcileAndWarnDrift(this: Pick<SchemaSyncHost, 'applyMig
 function isPublishedColumnChange(d: ManagedDriftEntry, fields: Record<string, any> | undefined): boolean {
   if (isIndexDriftOp(d.op)) return false;
   if (d.category === 'safe') return true;
-  return d.op.type === 'relax_not_null' && d.category === 'needs_confirm'
+  return isDeclaredRelaxPair(d, fields);
+}
+
+/**
+ * [#32590 / #36596] The `needs_confirm` entries a declared `storage: { notNull:
+ * false }` makes deliberate: the relax of the NOT NULL column, and the drop of
+ * a stale literal DEFAULT the differ pairs with that relax (never proposed
+ * without it). Applying the relax alone would keep storing the old default.
+ */
+function isDeclaredRelaxPair(d: ManagedDriftEntry, fields: Record<string, any> | undefined): boolean {
+  return (d.op.type === 'relax_not_null' || d.op.type === 'drop_column_default') && d.category === 'needs_confirm'
     && fields?.[d.op.column]?.storage?.notNull === false;
 }
 
@@ -1549,8 +1598,7 @@ export async function applyPublishedColumnChanges(this: Pick<SchemaSyncHost, 'ap
  * installing package's own declaration says so for.
  */
 function isInstallRelaxation(d: ManagedDriftEntry, fields: Record<string, any> | undefined, columns: ReadonlySet<string>): boolean {
-  return d.op.type === 'relax_not_null' && d.category === 'needs_confirm'
-    && columns.has(d.op.column) && fields?.[d.op.column]?.storage?.notNull === false;
+  return isDeclaredRelaxPair(d, fields) && columns.has(d.op.column ?? '');
 }
 
 /** The body of `SqlDriver#relaxDeclaredNotNull`; the method's docblock there is its contract. */

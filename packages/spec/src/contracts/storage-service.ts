@@ -222,7 +222,13 @@ export interface PresignedDownloadOptions {
     filename?: string;
     /** Content type → `Content-Type` (defaults to `application/octet-stream`). */
     contentType?: string;
-    /** `inline` previews in the browser (default); `attachment` forces a download. */
+    /**
+     * `inline` (the default) asks for an in-browser preview; `attachment` forces
+     * a download. `inline` is a request, not a verdict: the storage service
+     * answers it only for a type on its inline allow-list (raster images, PDF,
+     * plain text, audio and video) and answers every other type, SVG and HTML
+     * included, as an `attachment`.
+     */
     disposition?: 'inline' | 'attachment';
 }
 

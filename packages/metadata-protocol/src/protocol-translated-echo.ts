@@ -63,6 +63,10 @@
  * edit and is kept, and a field the source does not declare has nothing to
  * be compared with.
  *
+ * The slots are the ones the read translates: the object's scalars, each
+ * field's text slots and option labels, and the `label` of each object-form
+ * `relatedLists` entry (matched to its source entry by `list`).
+ *
  * The source is translated with the read's own options, the packaged base
  * included: a slot the read serves untranslated (an overlay that diverged
  * from the packaged text) is no translation's source.
@@ -164,6 +168,17 @@ function optionOf(options: unknown, key: string): Rec | undefined {
 
 function optionLabel(options: unknown, key: string): unknown {
     return optionOf(options, key)?.label;
+}
+
+/** The object-form `relatedLists` entry naming `list`, the first one. */
+function relatedListEntry(entries: unknown, list: string): Rec | undefined {
+    return Array.isArray(entries) ? (entries.find((e) => isRec(e) && e.list === list) as Rec | undefined) : undefined;
+}
+
+/** That entry's `label`; {@link NOT_DECLARED} when no entry names `list` with a string label. */
+function relatedListLabel(entries: unknown, list: string): unknown {
+    const label = relatedListEntry(entries, list)?.label;
+    return typeof label === 'string' ? label : NOT_DECLARED;
 }
 
 /**
@@ -285,6 +300,9 @@ export function restoreTranslatedEchoes<T>(
         for (const slot of OBJECT_TEXT_SLOTS) {
             if (typeof args.source[slot] === 'string') storedDoc[slot] = args.source[slot];
         }
+        // The parent's `relatedLists`: the read translates an object-form
+        // entry's `label` (`objects.NAME._relatedLists.LIST.label`).
+        if (Array.isArray(args.source.relatedLists)) storedDoc.relatedLists = args.source.relatedLists;
     }
     const injectedDoc: Rec = { name: item.name, fields: {} };
     for (const [name, def] of Object.entries(injectedSystemColumnDefs(item))) {
@@ -362,6 +380,30 @@ export function restoreTranslatedEchoes<T>(
         restored.push({ path: slot, from: item[slot] as string, to: hit.to });
         nextItem = nextItem === item ? { ...item } : nextItem;
         nextItem[slot] = hit.to;
+    }
+
+    // A `relatedLists` entry's `label`, by the entry's `list`: the read
+    // overlays `objects.NAME._relatedLists.LIST.label` onto it, so a save
+    // carrying that translation back stores the source title instead.
+    if (Array.isArray(item.relatedLists)) {
+        let entries: unknown[] | undefined;
+        item.relatedLists.forEach((entry, index) => {
+            if (!isRec(entry) || typeof entry.list !== 'string' || typeof entry.label !== 'string') return;
+            const list = entry.list;
+            const hit = sourceOf(
+                entry.label,
+                (doc) => relatedListLabel(doc.relatedLists, list),
+                () => ({ base: relatedListEntry(isRec(args.packagedBase) ? args.packagedBase.relatedLists : undefined, list), key: 'label' }),
+            );
+            if (!hit || typeof hit.to !== 'string') return;
+            restored.push({ path: `relatedLists[${list}].label`, from: entry.label, to: hit.to });
+            entries ??= [...(item.relatedLists as unknown[])];
+            entries[index] = { ...entry, label: hit.to };
+        });
+        if (entries) {
+            nextItem = nextItem === item ? { ...item } : nextItem;
+            nextItem.relatedLists = entries;
+        }
     }
 
     const nextFields = new Map<string, Rec>();

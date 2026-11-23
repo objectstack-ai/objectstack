@@ -1044,6 +1044,16 @@ const es = {
     inlineEditLabel: "Editar registros en línea (haga clic en una celda para editar)",
     // The list's Options menu.
     optionsMenu: {
+      // objectstack#36370 — a board's own settings.
+      kanbanLaneField: "Columnas por",
+      kanbanLanes: "Columnas visibles",
+      kanbanCardFields: "Campos de la tarjeta",
+      kanbanAddCardField: "Añadir campo",
+      kanbanShowFieldLabels: "Mostrar nombres de campo",
+      kanbanHideEmptyFields: "Ocultar campos vacíos",
+      kanbanSummary: "Resumen de columna",
+      kanbanHiddenLanes: "Columnas ocultas",
+      kanbanHiddenLanesHint: "Las tarjetas de una columna oculta aparecen en Sin categoría.",
       viewName: 'Nombre de la vista',
       fields: 'Campos',
       fieldsShown: 'Visibles: {{count}}',
@@ -1088,6 +1098,19 @@ const es = {
     },
   },
   kanban: {
+    // objectstack#36370 — the lane header's 「+」 and 「⋯」 menu, and an empty lane's create row.
+    laneMenu: {
+      actions: "Acciones de la columna {{column}}",
+      collapse: "Contraer columna",
+      expand: "Expandir columna",
+      hide: "Ocultar columna",
+      hideHint: "Sus tarjetas pasan a Sin categoría",
+      createIn: "Nuevo registro en {{column}}",
+      create: "Nuevo",
+    },
+    laneStatistic: {
+      loadedOnly: "tarjetas cargadas",
+    },
     uncategorized: "Sin categoría",
     loadMore: "Cargar más",
     columns: "columnas",
@@ -2877,6 +2900,7 @@ const es = {
       },
       linkFilterRefused: 'No se aplicó el filtro de este enlace. Incluye un campo por el que no puede filtrar aquí, así que la lista muestra la vista sin él.',
       personalizedParts: {
+        kanban: "Ajustes del tablero",
         filters: "Filtros",
         search: "Búsqueda",
         sort: "Ordenación",
@@ -3656,6 +3680,27 @@ const es = {
       unknown: '"{{name}}" ya no es una acción de este objeto. Desfíjala y vuelve a guardar.',
       notPlaced: '"{{name}}" ya no se ofrece en esta página. Desfíjala y vuelve a guardar.',
       stale: 'Ya no se ofrece aquí; se omite al guardar: {{names}}',
+    },
+    recordTabs: {
+      entry: 'Configurar pestañas',
+      title: 'Configurar pestañas',
+      leaveUnsaved: '¿Salir sin guardar? Se perderán los cambios en las pestañas.',
+      saveFailed: 'No se guardaron las pestañas: {{reason}}',
+      notListed: 'El paquete de este objeto no está en la lista, así que sus pestañas no se pueden guardar.',
+      pendingDraft: 'Este objeto tiene cambios sin publicar en Studio. Publícalos o descártalos allí y vuelve a guardar.',
+      notWritable: 'El paquete de este objeto no admite escritura, así que sus pestañas no se pueden guardar aquí.',
+      name: 'Nombre de la pestaña',
+      rename: 'Cambiar el nombre de {{name}}',
+      drag: 'Mover {{name}}',
+      hide: 'Ocultar {{name}}',
+      show: 'Mostrar {{name}}',
+      shown: 'Pestañas',
+      hidden: 'Ocultas',
+      noneHidden: 'Ninguna',
+      contributed: 'Otro paquete añade esta pestaña y la coloca allí.',
+      renameSourceOnly: 'Los nombres de las pestañas se cambian en el idioma de origen de la app',
+      builtinFixed: 'La plataforma muestra esta pestaña al final, con su propio nombre.',
+      adjustFieldGroups: 'Ajustar grupos de campos',
     },
   },
   topbar: {

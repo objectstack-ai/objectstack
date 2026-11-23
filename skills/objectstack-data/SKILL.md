@@ -36,7 +36,7 @@ metadata:
 - **[Relationships](./rules/relationships.md)** — lookup vs master_detail, junction patterns, delete behaviors
 - **[Validation Rules](./rules/validation.md)** — All validation types, script inversion, severity levels
 - **[Index Strategy](./rules/indexing.md)** — btree/gin/gist/fulltext, composite indexes, partial indexes
-- **[Data Lifecycle & Retention](./rules/lifecycle.md)** — `lifecycle` classes (record/audit/telemetry/transient/event), retention/TTL/rotation/archive policies; ❗ append-only objects must declare one (distinct from lifecycle *hooks* below); plus the **save notice** a hook hands the saver (`ctx.notice`)
+- **[Data Lifecycle & Retention](./rules/lifecycle.md)** — `lifecycle` classes (record/audit/telemetry/transient/event), retention/TTL/rotation/archive policies (distinct from lifecycle *hooks* below); plus the **save notice** a hook hands the saver (`ctx.notice`)
 - **[Lifecycle Hooks](./references/data-hooks.md)** — the lifecycle events, the sandboxed `body` (ctx + capability contract; the inline `handler` is deprecated), registration, canonical patterns
 - **[Datasources & Federation](./rules/datasources.md)** — `defineDatasource`, external/federated objects (`remoteName`/`columnMap`), auto-connect gating, credentials; ❌ no `field.columnName` on external objects
 - **[Security & Access Control](./rules/security.md)** — permission sets, assignment rows, RLS policies, `secret` / `requiredPermissions`, `tenancy`, platform-global posture
@@ -68,8 +68,7 @@ same literal goes inside `ObjectSchema.create({...})`):
 | `fields` | map    | keys in `snake_case` | Field definitions |
 | `sharingModel` | enum | one of the four below | Org-wide default record visibility (OWD). Zod marks it optional, but **a publish with no authored `sharingModel` is refused** with the 422 lint envelope `security-owd-unset` — absence is not a decision. Author it on every object |
 
-**`sharingModel` — the four canonical values** (ADR-0090 D4; legacy aliases
-removed):
+**`sharingModel` — the four canonical values:**
 
 | Value | Who can read / write |
 |:--|:--|
@@ -91,7 +90,7 @@ all (Relationship Patterns below).
 | Property | Default | Description |
 |:---------|:--------|:------------|
 | `label` | Auto from `name` | Human-readable singular label |
-| `pluralLabel` | — | Plural form (e.g., "Accounts"); author it alongside `label` |
+| `pluralLabel` | — | Plural form; author it alongside `label` |
 | `icon` | — | Icon for nav, list headers and lookup pickers; give every object one |
 | `color` | `gray` | Tile colour, one of `gray` `blue` `teal` `green` `amber` `orange` `red` `pink` `purple` (no hex); the console draws `icon` white on it. Give every object one; avoid repeats in one app |
 | `highlightFields` | derived | Ordered field keys used as a record's compact face: the columns a **related list** renders on the parent's detail page, and what a lookup picker shows. Declare it on the CHILD object (see [Relationships](./rules/relationships.md)) |
@@ -317,10 +316,6 @@ picker; `formula` takes CEL in `expression` (a `{ dialect: 'cel', source }` enve
 
 **⚠️ Script validation is inverted:** Validation **fails** when expression is `true`.
 
-> On **insert**, an optional field omitted from the payload reads as `null` in a
-> validation predicate — so `record.due_date == null` matches an omitted field the
-> same as an explicit `null`. (On update, the prior record supplies it.)
-
 The **complete** set of types (`ValidationRuleSchema` discriminators): `script`,
 `state_machine`, `format`, `cross_field`, `json_schema`, `conditional`.
 
@@ -335,8 +330,7 @@ keys and values are option `value`s, never labels.
 
 ### Index Patterns
 
-**The whole declaration surface is `fields` / `unique` / `name`.** `unique`
-defaults to `false`; omit it when that is what you mean.
+**The whole declaration surface is `fields` / `unique` / `name`.**
 
 ```typescript
 indexes: [
@@ -389,6 +383,11 @@ declaration. Every field the pair adds ends in `__c` (`region__c`). The suffix i
 reserved to the pair, so a `__c` field in any other package, or an unsuffixed
 field in a `.custom` extension, is refused at save, publish and install and by
 `os validate` / `os build`.
+Only the pair's extension may also write `fieldGroups` and `relatedLists`, shaped
+as on an object. A written key replaces that arrangement whole (the owner's and
+every `place`): an unlisted field shows after the last group, an unnamed tab
+still shows after the listed ones, and `{ list: 'crm_note', hidden: true }` hides
+a tab. Outside a `.custom` package both keys are refused at those doors: use `place`.
 Studio's **Add field** on a base object writes the same extension, as an
 `object_extension` item of the pair.
 

@@ -278,7 +278,7 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       },
       "fields.fieldHistory": {
         label: "欄位修改值",
-        helpText: "在記錄的活動時間軸上顯示該欄位的舊值 → 新值。未設定即為開啟，儘管開關顯示為關：只有先打開再關閉才會寫入 false，此時只寫出欄位名。打開時，媒體或 JSON 欄位也會顯示值。"
+        helpText: "在記錄的活動時間軸上顯示該欄位的舊值 → 新值。預設跟隨平台：大多數類型為開，媒體、JSON 或憑證欄位為關。關：只寫出欄位名；開：媒體或 JSON 欄位也顯示值。憑證欄位始終不顯示值；物件本身的欄位修改值設為關時，以物件為準。"
       },
       "fields.trackHistory": {
         label: "歷史追蹤",
@@ -305,7 +305,7 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       },
       "enable.fieldHistory": {
         label: "欄位修改值",
-        helpText: "在記錄的活動時間軸上顯示被修改欄位的舊值 → 新值。未設定即為開啟，儘管開關顯示為關：只有先打開再關閉才會寫入 false，此時整個物件都不顯示值。"
+        helpText: "在記錄的活動時間軸上顯示被修改欄位的舊值 → 新值。預設為開。關：整個物件都不顯示值，無論欄位如何設定。"
       },
       "enable.searchable": {
         label: "可搜尋"
@@ -923,7 +923,7 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       },
       fieldHistory: {
         label: "欄位修改值",
-        helpText: "在記錄的活動時間軸上顯示該欄位的舊值 → 新值。未設定即為開啟，儘管開關顯示為關：只有先打開再關閉才會寫入 false，此時只寫出欄位名。打開時，媒體或 JSON 欄位也會顯示值。"
+        helpText: "在記錄的活動時間軸上顯示該欄位的舊值 → 新值。預設跟隨平台：大多數類型為開，媒體、JSON 或憑證欄位為關。關：只寫出欄位名；開：媒體或 JSON 欄位也顯示值。憑證欄位始終不顯示值；物件本身的欄位修改值設為關時，以物件為準。"
       },
       trackHistory: {
         label: "記錄變更歷史",

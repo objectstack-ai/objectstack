@@ -1132,6 +1132,16 @@ const ar = {
     inlineEditLabel: "حرّر السجلات مباشرة (انقر خلية للتحرير)",
     // The list's Options menu.
     optionsMenu: {
+      // objectstack#36370 — a board's own settings.
+      kanbanLaneField: "الأعمدة حسب",
+      kanbanLanes: "الأعمدة الظاهرة",
+      kanbanCardFields: "حقول البطاقة",
+      kanbanAddCardField: "إضافة حقل",
+      kanbanShowFieldLabels: "إظهار أسماء الحقول",
+      kanbanHideEmptyFields: "إخفاء الحقول الفارغة",
+      kanbanSummary: "ملخص العمود",
+      kanbanHiddenLanes: "الأعمدة المخفية",
+      kanbanHiddenLanesHint: "تظهر بطاقات العمود المخفي ضمن «غير مصنّف».",
       viewName: 'اسم العرض',
       fields: 'الحقول',
       fieldsShown: 'الحقول المعروضة: {{count}}',
@@ -1179,6 +1189,19 @@ const ar = {
     },
   },
   kanban: {
+    // objectstack#36370 — the lane header's 「+」 and 「⋯」 menu, and an empty lane's create row.
+    laneMenu: {
+      actions: "إجراءات العمود {{column}}",
+      collapse: "طي العمود",
+      expand: "توسيع العمود",
+      hide: "إخفاء العمود",
+      hideHint: "تنتقل بطاقاته إلى «غير مصنّف»",
+      createIn: "سجل جديد في {{column}}",
+      create: "جديد",
+    },
+    laneStatistic: {
+      loadedOnly: "البطاقات المحمّلة",
+    },
     uncategorized: "غير مصنّف",
     loadMore: "تحميل المزيد",
     columns: "أعمدة",
@@ -3097,6 +3120,7 @@ const ar = {
       },
       linkFilterRefused: 'لم يُطبَّق عامل التصفية في هذا الرابط، لأنه يذكر حقلًا لا يمكنك التصفية حسبه هنا، لذا تعرض القائمة طريقة العرض دونه.',
       personalizedParts: {
+        kanban: "إعدادات اللوحة",
         filters: "عوامل التصفية",
         search: "البحث",
         sort: "الترتيب",
@@ -3897,6 +3921,27 @@ const ar = {
       unknown: 'لم يعد «{{name}}» إجراءً لهذا الكائن. ألغِ تثبيته ثم احفظ مرة أخرى.',
       notPlaced: 'لم يعد «{{name}}» معروضًا في هذه الصفحة. ألغِ تثبيته ثم احفظ مرة أخرى.',
       stale: 'لم يعد معروضًا هنا، ويُحذف عند الحفظ: {{names}}',
+    },
+    recordTabs: {
+      entry: 'تكوين علامات التبويب',
+      title: 'تكوين علامات التبويب',
+      leaveUnsaved: 'المغادرة دون حفظ؟ ستفقد تغييرات علامات التبويب.',
+      saveFailed: 'لم يتم حفظ علامات التبويب: {{reason}}',
+      notListed: 'حزمة هذا الكائن غير مدرجة، لذا لا يمكن حفظ علامات تبويبه.',
+      pendingDraft: 'لهذا الكائن تغييرات غير منشورة في Studio. انشرها أو تجاهلها هناك، ثم احفظ مرة أخرى.',
+      notWritable: 'حزمة هذا الكائن غير قابلة للكتابة، لذا لا يمكن حفظ علامات تبويبه هنا.',
+      name: 'اسم علامة التبويب',
+      rename: 'إعادة تسمية {{name}}',
+      drag: 'نقل {{name}}',
+      hide: 'إخفاء {{name}}',
+      show: 'إظهار {{name}}',
+      shown: 'علامات التبويب',
+      hidden: 'مخفية',
+      noneHidden: 'لا شيء',
+      contributed: 'تضيف حزمة أخرى علامة التبويب هذه وتضعها هناك.',
+      renameSourceOnly: 'تُغيَّر أسماء علامات التبويب بلغة المصدر للتطبيق',
+      builtinFixed: 'تعرض المنصة علامة التبويب هذه أخيرًا باسمها الخاص.',
+      adjustFieldGroups: 'ضبط مجموعات الحقول',
     },
   },
   topbar: {

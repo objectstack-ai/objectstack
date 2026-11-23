@@ -1011,6 +1011,16 @@ const de = {
     inlineEditLabel: "Datensätze inline bearbeiten (Zelle anklicken zum Bearbeiten)",
     // The list's Options menu.
     optionsMenu: {
+      // objectstack#36370 — a board's own settings.
+      kanbanLaneField: "Spalten nach",
+      kanbanLanes: "Sichtbare Spalten",
+      kanbanCardFields: "Kartenfelder",
+      kanbanAddCardField: "Feld hinzufügen",
+      kanbanShowFieldLabels: "Feldnamen anzeigen",
+      kanbanHideEmptyFields: "Leere Felder ausblenden",
+      kanbanSummary: "Spaltenauswertung",
+      kanbanHiddenLanes: "Ausgeblendete Spalten",
+      kanbanHiddenLanesHint: "Karten einer ausgeblendeten Spalte erscheinen unter „Nicht kategorisiert“.",
       viewName: 'Ansichtsname',
       fields: 'Felder',
       fieldsShown: '{{count}} angezeigt',
@@ -1054,6 +1064,19 @@ const de = {
     },
   },
   kanban: {
+    // objectstack#36370 — the lane header's 「+」 and 「⋯」 menu, and an empty lane's create row.
+    laneMenu: {
+      actions: "Aktionen für Spalte {{column}}",
+      collapse: "Spalte einklappen",
+      expand: "Spalte ausklappen",
+      hide: "Spalte ausblenden",
+      hideHint: "Die Karten wandern nach „Nicht kategorisiert“",
+      createIn: "Neuer Datensatz in {{column}}",
+      create: "Neu",
+    },
+    laneStatistic: {
+      loadedOnly: "geladene Karten",
+    },
     uncategorized: "Nicht kategorisiert",
     loadMore: "Mehr laden",
     columns: "Spalten",
@@ -2801,6 +2824,7 @@ const de = {
       },
       linkFilterRefused: 'Der Filter dieses Links wurde nicht angewendet. Er nennt ein Feld, nach dem Sie hier nicht filtern können, daher zeigt die Liste die Ansicht ohne ihn.',
       personalizedParts: {
+        kanban: "Board-Einstellungen",
         filters: "Filter",
         search: "Suche",
         sort: "Sortierung",
@@ -3574,6 +3598,27 @@ const de = {
       unknown: '„{{name}}“ ist keine Aktion dieses Objekts mehr. Lösen Sie sie und speichern Sie erneut.',
       notPlaced: '„{{name}}“ wird auf dieser Seite nicht mehr angeboten. Lösen Sie sie und speichern Sie erneut.',
       stale: 'Hier nicht mehr angeboten, beim Speichern weggelassen: {{names}}',
+    },
+    recordTabs: {
+      entry: 'Tabs konfigurieren',
+      title: 'Tabs konfigurieren',
+      leaveUnsaved: 'Ohne Speichern verlassen? Ihre Änderungen an den Tabs gehen verloren.',
+      saveFailed: 'Die Tabs wurden nicht gespeichert: {{reason}}',
+      notListed: 'Das Paket dieses Objekts ist nicht gelistet, daher können seine Tabs nicht gespeichert werden.',
+      pendingDraft: 'Dieses Objekt hat unveröffentlichte Änderungen in Studio. Veröffentlichen oder verwerfen Sie sie dort und speichern Sie dann erneut.',
+      notWritable: 'Das Paket dieses Objekts ist nicht beschreibbar, daher können seine Tabs hier nicht gespeichert werden.',
+      name: 'Tab-Name',
+      rename: '{{name}} umbenennen',
+      drag: '{{name}} verschieben',
+      hide: '{{name}} ausblenden',
+      show: '{{name}} einblenden',
+      shown: 'Tabs',
+      hidden: 'Ausgeblendet',
+      noneHidden: 'Keine',
+      contributed: 'Ein anderes Paket fügt diesen Tab hinzu und platziert ihn dort.',
+      renameSourceOnly: 'Tab-Namen werden in der Quellsprache der App geändert',
+      builtinFixed: 'Die Plattform zeigt diesen Tab zuletzt und unter eigenem Namen.',
+      adjustFieldGroups: 'Feldgruppen anpassen',
     },
   },
   topbar: {

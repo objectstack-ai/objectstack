@@ -262,6 +262,10 @@ export * from './secret-mask';
 // from it; objectui keeps its interim `MASKED_FIELD_TYPES` copy until its own
 // re-bind card lands, and derives from it after that.
 export * from './masked-field-types';
+// Whether a changed field's old → new values show on the activity timeline, and
+// the no-line types that are off by default (#36290, #36482): one predicate for
+// plugin-audit's writer and the metadata form's "follow the default" choice.
+export * from './field-history-default';
 // The unknown-authoring-key lint's CORE — comparator, finding shape, curated
 // guidance tables (#3786). Kept frontend-safe: the stack WALKER that imports
 // every schema lives in kernel/metadata-authoring-lint.ts, so this subpath's

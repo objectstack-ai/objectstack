@@ -136,6 +136,34 @@ describe('what the walker harvests for the steps a docs flow embed draws (ruling
     ).toMatchObject({ sourceValue: 'Compute Next Due Date', source: 'flow' });
   });
 
+  it('asks for a titled screen\'s label exactly where its heading holds a hole, which the embed then draws it by', () => {
+    const flow = {
+      name: 'welcome',
+      label: 'Welcome',
+      nodes: [
+        { id: 'confirm', type: 'screen', label: 'Confirm' },
+        { id: 'plain', type: 'screen', label: 'Plain step', config: { title: 'Welcome aboard' } },
+        { id: 'greet', type: 'screen', label: 'Greeting step', config: { title: 'Hello {{ vars.name }}' } },
+        {
+          id: 'each',
+          type: 'loop',
+          label: 'Each',
+          config: {
+            collection: '{rows}',
+            body: { nodes: [{ id: 'inner', type: 'screen', label: 'Inner', config: { title: 'Row {{ row.name }}' } }] },
+          },
+        },
+      ],
+      edges: [],
+    };
+    // An untitled screen is named by `screens.<id>.title`, a plain heading by that same key,
+    // and a nested screen is not drawn by the embed: only `greet` is asked.
+    expect(nodeKeys({ flows: [flow] })).toEqual(['flows.welcome.nodes.greet.label', 'flows.welcome.nodes.each.label']);
+    expect(
+      collectExpectedEntries({ flows: [flow] }).find((e) => e.path.join('.') === 'flows.welcome.nodes.greet.label'),
+    ).toMatchObject({ sourceValue: 'Greeting step', inline: 'Greeting step', source: 'flow' });
+  });
+
   it('skips a step with no id: nothing could address it', () => {
     const flow = { ...opportunityApproval, nodes: [{ type: 'decision', label: 'Anonymous' }] };
     expect(nodeKeys({ flows: [flow] })).toEqual([]);

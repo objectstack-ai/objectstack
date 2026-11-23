@@ -768,9 +768,10 @@ export function bindApprovalLockHook(
         : undefined;
       // The sentence is in the writer's locale, and so is the label it names:
       // the translated `objects.<object>.label` when the pack carries one, else
-      // the declared label. ⛔ Never the API name.
+      // the declared label. ⛔ Never the API name. [#35384] The engine hands
+      // the label its served definition and packaged base, as `/meta` reads them.
       const { locale, service, translate } = refusalLocalization(ctx, i18nService);
-      const objectLabel = readerLabelsFor(service, locale)?.objectLabel(object) ?? declaredLabel;
+      const objectLabel = readerLabelsFor(service, locale, engine)?.objectLabel(object) ?? declaredLabel;
       // `previous` is the pre-image the engine already read for THIS row; it is
       // used only when it really is the row this pending request names, so a
       // dispatch that ever carried a different row cannot title the wrong
@@ -1065,7 +1066,7 @@ export function bindDetailRowLockHook(
         ? String((schema as any).label)
         : undefined;
       const { locale, service, translate } = refusalLocalization(ctx, i18nService);
-      const masterLabel = readerLabelsFor(service, locale)?.objectLabel(master) ?? declaredLabel;
+      const masterLabel = readerLabelsFor(service, locale, engine)?.objectLabel(master) ?? declaredLabel;
       return recordLockRefusal(masterLabel, undefined, locale, translate);
     };
 

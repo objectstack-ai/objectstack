@@ -34,6 +34,7 @@
 import * as React from 'react';
 import type { I18nLabel } from '@objectstack/spec/ui';
 import { isLabel, sameLabel } from './servedNavText.js';
+import { shownLabel } from '../metadata-admin/inspectors/servedLabel.js';
 
 /** One widget title: as the published layer authors it, and as the server serves it. */
 interface ServedTitle {
@@ -85,6 +86,25 @@ export function displayWidgetTitle(
   if (!widget) return undefined;
   const text = served && typeof widget.id === 'string' ? served.widgets.get(widget.id) : undefined;
   return text && sameLabel(widget.title, text.authored) ? text.served : widget.title;
+}
+
+/**
+ * objectstack#36480 — the name the canvas selection strip gives a selected
+ * widget: the text the widget panel's Title box shows beside it
+ * (`DashboardWidgetInspector` reads `shownLabel` over this same served pair, in
+ * the language `useLabelLanguage` names), so the strip and the panel read one
+ * answer, never two. `undefined` when the draft holds no widget of that id or
+ * its title reads empty; the caller then names the selection as it did before.
+ */
+export function shownWidgetTitle(
+  draft: Record<string, unknown> | null | undefined,
+  widgetId: string,
+  served: ServedWidgetText | null,
+  language: string,
+): string | undefined {
+  const widget = draft ? widgetsOf(draft).find((w) => w.id === widgetId) : undefined;
+  if (!widget) return undefined;
+  return shownLabel(widget.title, served?.widgets.get(widgetId) ?? null, language) || undefined;
 }
 
 /**

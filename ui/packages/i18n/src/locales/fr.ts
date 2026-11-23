@@ -1039,6 +1039,16 @@ const fr = {
     inlineEditLabel: "Modifier les enregistrements en ligne (cliquez sur une cellule pour modifier)",
     // The list's Options menu.
     optionsMenu: {
+      // objectstack#36370 — a board's own settings.
+      kanbanLaneField: "Colonnes par",
+      kanbanLanes: "Colonnes visibles",
+      kanbanCardFields: "Champs de la carte",
+      kanbanAddCardField: "Ajouter un champ",
+      kanbanShowFieldLabels: "Afficher les noms des champs",
+      kanbanHideEmptyFields: "Masquer les champs vides",
+      kanbanSummary: "Synthèse de colonne",
+      kanbanHiddenLanes: "Colonnes masquées",
+      kanbanHiddenLanesHint: "Les cartes d’une colonne masquée apparaissent dans Non catégorisé.",
       viewName: 'Nom de la vue',
       fields: 'Champs',
       fieldsShown: 'Affichés : {{count}}',
@@ -1083,6 +1093,19 @@ const fr = {
     },
   },
   kanban: {
+    // objectstack#36370 — the lane header's 「+」 and 「⋯」 menu, and an empty lane's create row.
+    laneMenu: {
+      actions: "Actions de la colonne {{column}}",
+      collapse: "Réduire la colonne",
+      expand: "Développer la colonne",
+      hide: "Masquer la colonne",
+      hideHint: "Ses cartes passent dans Non catégorisé",
+      createIn: "Nouvel enregistrement dans {{column}}",
+      create: "Nouveau",
+    },
+    laneStatistic: {
+      loadedOnly: "cartes chargées",
+    },
     uncategorized: "Non catégorisé",
     loadMore: "Charger plus",
     columns: "colonnes",
@@ -2873,6 +2896,7 @@ const fr = {
       },
       linkFilterRefused: 'Le filtre de ce lien n’a pas été appliqué. Il cite un champ sur lequel vous ne pouvez pas filtrer ici, la liste affiche donc la vue sans ce filtre.',
       personalizedParts: {
+        kanban: "Réglages du tableau",
         filters: "Filtres",
         search: "Recherche",
         sort: "Tri",
@@ -3652,6 +3676,27 @@ const fr = {
       unknown: '« {{name}} » n’est plus une action de cet objet. Désépinglez-la, puis enregistrez à nouveau.',
       notPlaced: '« {{name}} » n’est plus proposée sur cette page. Désépinglez-la, puis enregistrez à nouveau.',
       stale: 'N’est plus proposé ici, omis à l’enregistrement : {{names}}',
+    },
+    recordTabs: {
+      entry: 'Configurer les onglets',
+      title: 'Configurer les onglets',
+      leaveUnsaved: 'Quitter sans enregistrer ? Vos modifications des onglets seront perdues.',
+      saveFailed: 'Les onglets n\'ont pas été enregistrés : {{reason}}',
+      notListed: 'Le package de cet objet n\'est pas répertorié : ses onglets ne peuvent pas être enregistrés.',
+      pendingDraft: 'Cet objet a des modifications non publiées dans Studio. Publiez-les ou abandonnez-les là-bas, puis enregistrez à nouveau.',
+      notWritable: 'Le package de cet objet n\'est pas modifiable : ses onglets ne peuvent pas être enregistrés ici.',
+      name: 'Nom de l\'onglet',
+      rename: 'Renommer {{name}}',
+      drag: 'Déplacer {{name}}',
+      hide: 'Masquer {{name}}',
+      show: 'Afficher {{name}}',
+      shown: 'Onglets',
+      hidden: 'Masqués',
+      noneHidden: 'Aucun',
+      contributed: 'Un autre package ajoute cet onglet et le place lui-même.',
+      renameSourceOnly: 'Les noms d\'onglet se modifient dans la langue source de l\'application',
+      builtinFixed: 'La plateforme affiche cet onglet en dernier, sous son propre nom.',
+      adjustFieldGroups: 'Ajuster les groupes de champs',
     },
   },
   topbar: {

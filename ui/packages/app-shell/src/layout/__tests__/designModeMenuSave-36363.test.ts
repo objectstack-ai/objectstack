@@ -16,7 +16,7 @@ vi.mock('../../assistant/assistantBus', async (importOriginal) => ({
   emitMetadataRefresh,
 }));
 
-import { withEntryIds, moveBy, insertEntry, patchEntry, type Menu } from '../designModeMenu';
+import { withEntryIds, moveBy, insertEntry, patchEntry, type Menu } from '../designModeMenuModel';
 import { isSameLanguage, saveAppMenu, type AppMenuSaveDoors } from '../designModeMenuSave';
 
 const TEXTS = { notListed: 'not listed', pendingDraft: 'pending draft', noVersion: 'no version', notWritable: 'not writable' };

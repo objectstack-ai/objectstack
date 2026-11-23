@@ -5764,8 +5764,8 @@ export class SqlDriver implements IDataDriver {
    * column divergence that cannot lose data and cannot fail on existing rows:
    * the `safe` column entries — a `date` column under a field now declared
    * `datetime` (`widen_date_to_datetime`), a varchar narrower than a declared
-   * `maxLength` (`widen_varchar`), a runtime-token column DEFAULT
-   * (`drop_column_default`) — and a NOT NULL column under a field that
+   * `maxLength` (`widen_varchar`), a stale column DEFAULT (`drop_column_default`,
+   * `set_column_default`) — and a NOT NULL column under a field that
    * declares `storage: { notNull: false }` in words (`relax_not_null`, which
    * stays `needs_confirm` for dev auto-reconcile, ADR-0113 D5: the publish of
    * that declaration is the deliberate relax). Index entries are left to the
@@ -5962,7 +5962,7 @@ export class SqlDriver implements IDataDriver {
    * the physical DEFAULT is what makes this safe both ways: the token default
    * the op targets is gone because metadata never declared it, and a sibling
    * `defaultValue: 'NOW()'` column keeps the default it always had instead of
-   * silently losing it to the rebuild.
+   * silently losing it to the rebuild. `set_column_default` (#36245) is that same re-emission.
    *
    * Unique field-level constraints and declared indexes are recreated from
    * metadata afterwards (the source of truth). DB-level foreign keys declared

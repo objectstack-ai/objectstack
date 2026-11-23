@@ -1039,6 +1039,16 @@ const pt = {
     inlineEditLabel: "Editar registros em linha (clique em uma célula para editar)",
     // The list's Options menu.
     optionsMenu: {
+      // objectstack#36370 — a board's own settings.
+      kanbanLaneField: "Colunas por",
+      kanbanLanes: "Colunas visíveis",
+      kanbanCardFields: "Campos do cartão",
+      kanbanAddCardField: "Adicionar campo",
+      kanbanShowFieldLabels: "Mostrar nomes dos campos",
+      kanbanHideEmptyFields: "Ocultar campos vazios",
+      kanbanSummary: "Resumo da coluna",
+      kanbanHiddenLanes: "Colunas ocultas",
+      kanbanHiddenLanesHint: "Os cartões de uma coluna oculta aparecem em Sem categoria.",
       viewName: 'Nome da visualização',
       fields: 'Campos',
       fieldsShown: 'Exibidos: {{count}}',
@@ -1083,6 +1093,19 @@ const pt = {
     },
   },
   kanban: {
+    // objectstack#36370 — the lane header's 「+」 and 「⋯」 menu, and an empty lane's create row.
+    laneMenu: {
+      actions: "Ações da coluna {{column}}",
+      collapse: "Recolher coluna",
+      expand: "Expandir coluna",
+      hide: "Ocultar coluna",
+      hideHint: "Os cartões vão para Sem categoria",
+      createIn: "Novo registro em {{column}}",
+      create: "Novo",
+    },
+    laneStatistic: {
+      loadedOnly: "cartões carregados",
+    },
     uncategorized: "Sem categoria",
     loadMore: "Carregar mais",
     columns: "colunas",
@@ -2872,6 +2895,7 @@ const pt = {
       },
       linkFilterRefused: 'O filtro deste link não foi aplicado. Ele cita um campo pelo qual você não pode filtrar aqui, então a lista mostra a visualização sem ele.',
       personalizedParts: {
+        kanban: "Configurações do quadro",
         filters: "Filtros",
         search: "Pesquisa",
         sort: "Ordenação",
@@ -3651,6 +3675,27 @@ const pt = {
       unknown: '"{{name}}" não é mais uma ação deste objeto. Desafixe-a e salve novamente.',
       notPlaced: '"{{name}}" não é mais oferecida nesta página. Desafixe-a e salve novamente.',
       stale: 'Não é mais oferecido aqui; fica de fora ao salvar: {{names}}',
+    },
+    recordTabs: {
+      entry: 'Configurar abas',
+      title: 'Configurar abas',
+      leaveUnsaved: 'Sair sem salvar? Suas alterações nas abas serão perdidas.',
+      saveFailed: 'As abas não foram salvas: {{reason}}',
+      notListed: 'O pacote deste objeto não está listado, então suas abas não podem ser salvas.',
+      pendingDraft: 'Este objeto tem alterações não publicadas no Studio. Publique-as ou descarte-as lá e salve novamente.',
+      notWritable: 'O pacote deste objeto não pode ser gravado, então suas abas não podem ser salvas aqui.',
+      name: 'Nome da aba',
+      rename: 'Renomear {{name}}',
+      drag: 'Mover {{name}}',
+      hide: 'Ocultar {{name}}',
+      show: 'Mostrar {{name}}',
+      shown: 'Abas',
+      hidden: 'Ocultas',
+      noneHidden: 'Nenhuma',
+      contributed: 'Outro pacote adiciona esta aba e a posiciona lá.',
+      renameSourceOnly: 'Os nomes das abas são alterados no idioma de origem do app',
+      builtinFixed: 'A plataforma exibe esta aba por último, com o próprio nome.',
+      adjustFieldGroups: 'Ajustar grupos de campos',
     },
   },
   topbar: {

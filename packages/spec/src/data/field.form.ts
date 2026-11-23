@@ -471,9 +471,10 @@ export const fieldForm = defineForm({
         { field: 'requiredPermissions', widget: 'string-tags', colSpan: 2, helpText: "Capabilities (permission-set systemPermissions) a caller must hold — every one listed — to read or edit this field (ADR-0066 D3). Without them the value is masked on read (partially, when a maskingRule is set) and edits are denied. Empty or unset: no capability gate." },
         { field: 'internal', colSpan: 1, helpText: "Never return this field's value on the generic data path: the engine omits the key from find/findOne results and from the create and update response bodies, on the default projection and when a client names the field in ?select=. Storage, filtering and indexing are untouched." },
         // [#36290] The off switch is `fieldHistory` (no default); `trackHistory`
-        // only opts a no-line type in. A two-state switch cannot show unset
-        // apart from false, so the help text says what unset means.
-        { field: 'fieldHistory', colSpan: 1, helpText: "Old → new values for this field on the record activity timeline. Unset means ON, though the switch shows off: only a switch turned on and then off writes false, which names the change by label only. On also shows a media or JSON field's values." },
+        // only opts a no-line type in. [#36482] `field-history` is a three-way
+        // choice, so unset is a state of its own: "Default" removes the key and
+        // names what it resolves to for this field's type (`resolveFieldHistory`).
+        { field: 'fieldHistory', widget: 'field-history', colSpan: 1, helpText: "Old → new values for this field on the record activity timeline. Default follows the platform: on for most types, off for a media, JSON or credential field. Off names the change by label only; On also shows a media or JSON field's values. A credential field never shows values, and the object's own Field History off wins." },
         { field: 'trackHistory', colSpan: 1, helpText: "Opt a media or JSON field (image, file, json, …) into old → new values on the activity timeline. Every other field shows them already, and off does not hide them: use Field History." },
         { field: 'widget', colSpan: 2, helpText: 'Form widget override — names a registered field component, looked up as `field:` plus this name, to render the field instead of the type default. An unregistered name degrades to the type renderer.' },
         { field: 'ackPlaintextMasking', label: 'Acknowledge plaintext at rest', colSpan: 2, visibleWhen: "data.type == 'password'", helpText: "Affirm that this generic password field's plaintext-at-rest, masked-on-read contract is intended, silencing the author-time warning (ADR-0100). No effect on any other type." },

@@ -465,10 +465,13 @@ describe('objectui#3876 — de pack closes „ with “ and not with a straight 
     // 125 once objectstack-ai/objectstack#36363 added `designMode.menu.iconHint`,
     // the menu editor's icon field naming an example icon („briefcase“) — one
     // literal span.
-    // 129 once objectstack-ai/objectstack#36366 added `designMode.pins`: the
+    // 127 once objectstack-ai/objectstack#36370 added `kanban.laneMenu.hideHint`
+    // and `list.optionsMenu.kanbanHiddenLanesHint`, the board's two lines naming
+    // the lane hidden cards land in („Nicht kategorisiert“) — two literal spans.
+    // 131 once objectstack-ai/objectstack#36366 added `designMode.pins`: the
     // header-buttons panel naming the 「More」 menu („Mehr“, twice) and the
     // arranged action a save refuses („{{name}}“, twice), four spans.
-    expect(okSpans, 'correctly paired spans').toBe(129);
+    expect(okSpans, 'correctly paired spans').toBe(131);
   });
 
   it('keeps the count identity that replaces the card’s count(„) === count(“)', () => {
@@ -594,9 +597,12 @@ describe('objectui#3876 — de pack closes „ with “ and not with a straight 
     // `console.commandPalette.createAs`, one more matched pair.
     // 125 / 125 / 0 after objectstack-ai/objectstack#36363 added
     // `designMode.menu.iconHint`, one more matched pair.
-    // 129 / 129 / 0 after objectstack-ai/objectstack#36366 added
+    // 127 / 127 / 0 after objectstack-ai/objectstack#36370 added
+    // `kanban.laneMenu.hideHint` and `list.optionsMenu.kanbanHiddenLanesHint`,
+    // two more matched pairs.
+    // 131 / 131 / 0 after objectstack-ai/objectstack#36366 added
     // `designMode.pins`, four more matched pairs.
-    expect({ open, close, rdq }).toEqual({ open: 129, close: 129, rdq: 0 });
+    expect({ open, close, rdq }).toEqual({ open: 131, close: 131, rdq: 0 });
     // The durable shape: every „ closed by a “, every surplus “ an English
     // opener answered by a ”. Survived translating the two English values.
     expect(close).toBe(open + rdq);
