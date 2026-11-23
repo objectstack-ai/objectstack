@@ -268,12 +268,9 @@ rows are already aggregated.
 permissions allow **export of the dataset's base object**. That is the permission-set
 `allowExport` axis the list toolbar uses (see [Permissions and protection](#permissions-and-protection)).
 
-<Callout type="warn">
-**Declared, not drawn yet.** The Console report page does not read either key yet: there is
-no period chip and no export control on it today. Until the renderer ships, `os validate`
-warns on both keys so the gap is visible. The declarations are the contract the renderer
-implements.
-</Callout>
+On the Console report page, a report that declares `dateRange` draws a period chip above the
+report, and every query the report makes runs inside the chosen window. The Export control is
+drawn once the table has rows.
 
 What is deliberately **not** offered: a `joined` report refuses both keys, because its blocks
 may bind different datasets and it draws one table per block. A report has no subscription or
