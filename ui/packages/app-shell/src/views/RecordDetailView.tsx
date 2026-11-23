@@ -5770,21 +5770,17 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       <span className="flex shrink-0 items-center gap-2 empty:hidden" data-record-page-badges="">{recordBadges}</span>
     </>
   );
-  // objectstack#35853 — ✕ at the far right of the navigation row, on every
-  // desktop face: back to the list the page came from as it was left
+  // objectstack#36557 — ✕ is the first control of the navigation row, on
+  // every desktop face: back to the list the page came from as it was left
   // (objectstack#35854), else the object's default list.
   const closePage = pageReturn.toList ?? (objectListPath ? () => navigate(objectListPath) : undefined);
-  const pageFrame = closePage || shellActions ? (
-    <>
-      {/* objectstack#36112 — the comments icon is the group's first button. */}
-      {shellActions && renderShellGroup?.({ comments: commentsButton })}
-      {closePage && (
-        <RecordTopBarButton label={t('common.close', { defaultValue: 'Close' })} onClick={closePage} data-testid="record-page-close">
-          <X className="h-3.5 w-3.5" />
-        </RecordTopBarButton>
-      )}
-    </>
+  const pageClose = closePage ? (
+    <RecordTopBarButton label={t('common.close', { defaultValue: 'Close' })} onClick={closePage} data-testid="record-page-close">
+      <X className="h-3.5 w-3.5" />
+    </RecordTopBarButton>
   ) : undefined;
+  // objectstack#36112 — the comments icon is the group's first button.
+  const pageFrame = shellActions ? renderShellGroup?.({ comments: commentsButton }) : undefined;
   // objectstack#27058, Target 8 — the path row of a page one level down
   // (「线索 Mira Costa › 任务」): the `?from=` trail, each ancestor a link, the
   // parent going back in the history when the page was pushed from it.
@@ -5841,6 +5837,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       toggles={approvalQueueSwitch || panelToggles ? <>{approvalQueueSwitch}{panelToggles}</> : undefined}
       comments={shellActions ? undefined : commentsButton}
       frame={pageFrame}
+      close={pageClose}
       record={pageRecordRow}
     />
   );

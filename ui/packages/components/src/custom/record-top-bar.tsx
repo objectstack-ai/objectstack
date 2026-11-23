@@ -14,13 +14,13 @@
  * Two rows when the host hands the record row (`record`, objectstack#35853,
  * figure 40), the page and the drawer alike:
  *
- * 1. The navigation row, 40 px (`data-record-top-bar-nav`). Left: what the
- *    host hands as `leading` (one level down in a pane 「← 路径」, or the
- *    object's name when the record came from no list), then ↑ ↓ and
+ * 1. The navigation row, 40 px (`data-record-top-bar-nav`). Left: ✕ first
+ *    (`close`, the leftmost control of the row on every two-row face), then
+ *    what the host hands as `leading` (one level down in a pane 「← 路径」, or
+ *    the object's name when the record came from no list), then ↑ ↓ and
  *    「第 N 条，共 M 条 · 视图名」 (`stepper`, a list context; the view's name
  *    returns to that list). Right: the frame controls (`frame`: ⤢ in a
- *    drawer, then ✕ — at the far right on every face). No record name, no
- *    actions.
+ *    drawer). No record name, no actions.
  * 2. The record row, 48 px (`data-record-top-bar-record`): the record's icon,
  *    name and tags (`record`, where the record header portals its title), and
  *    at the right the record's button group (`actionSlotRef`, hidden while
@@ -28,7 +28,7 @@
  *
  * Without `record` it is the one-row bar it was (objectstack#35593), 44 px —
  * the phone's: left `leading`, right the counter 「3 / 21」 and ↓ ↑, the
- * button group, the panel switches, the frame controls.
+ * button group, the panel switches, the frame controls, then `close` last.
  *
  * Pure presentation: every control's handler, and whether it applies, belong to
  * the host — `NavigationOverlay` draws it as the pane's bar, the console's
@@ -84,7 +84,7 @@ export interface RecordTopBarStepper {
 }
 
 export interface RecordTopBarProps {
-  /** The left end: the breadcrumb, or 「← 路径」. */
+  /** The left end, after `close` on the two-row bar: the breadcrumb, or 「← 路径」. */
   leading?: React.ReactNode;
   /** `data-testid` of the left end, for a host that addresses it. */
   leadingTestId?: string;
@@ -104,8 +104,14 @@ export interface RecordTopBarProps {
    * (feeds off, a page with its own discussion) draws nothing there.
    */
   comments?: React.ReactNode;
-  /** The frame controls — ⤢ (a drawer), ✕ — at the right end. */
+  /** The frame controls — ⤢ (a drawer) — at the right end. */
   frame?: React.ReactNode;
+  /**
+   * ✕, which closes the record: the first control of the two-row bar's
+   * navigation row, before `leading`; the one-row bar draws it last, after
+   * `frame`.
+   */
+  close?: React.ReactNode;
   /**
    * The record row (objectstack#35853): the record's icon, name and tags, or
    * the slot the record header portals them into. Handed, the bar is two
@@ -201,7 +207,7 @@ export function useRecordStepKeys(
  * The record's top bar (objectstack#27524, Target 7). See the module doc for
  * the anatomy; `data-record-top-bar` marks it on every face.
  */
-export function RecordTopBar({ leading, leadingTestId, stepper, actionSlotRef, toggles, comments, frame, record, className }: RecordTopBarProps) {
+export function RecordTopBar({ leading, leadingTestId, stepper, actionSlotRef, toggles, comments, frame, close, record, className }: RecordTopBarProps) {
   const { t } = useTopBarTranslation();
   const position =
     stepper?.position && stepper.position.total > 0 && stepper.position.index >= 0 && stepper.position.index < stepper.position.total
@@ -246,6 +252,11 @@ export function RecordTopBar({ leading, leadingTestId, stepper, actionSlotRef, t
           className="flex min-h-10 sm:h-10 sm:min-h-0 min-w-0 items-center justify-between gap-2 px-2 text-xs text-muted-foreground"
           data-record-top-bar-nav=""
         >
+          {close !== undefined && (
+            <div className="flex shrink-0 items-center" data-record-top-bar-close="">
+              {close}
+            </div>
+          )}
           <div className="flex min-w-0 flex-1 items-center gap-1" data-record-top-bar-leading="" data-testid={leadingTestId}>
             {leading}
             {stepper && (
@@ -342,7 +353,7 @@ export function RecordTopBar({ leading, leadingTestId, stepper, actionSlotRef, t
             )}
             {nextButton}
             {previousButton}
-            {(actionSlotRef || toggles || frame) && (
+            {(actionSlotRef || toggles || frame || close) && (
               <span aria-hidden="true" className="mx-1.5 h-4 w-px bg-border" data-record-top-bar-divider="" />
             )}
           </>
@@ -355,7 +366,7 @@ export function RecordTopBar({ leading, leadingTestId, stepper, actionSlotRef, t
               className="peer/actions flex shrink-0 items-center gap-2 text-sm text-foreground empty:hidden"
               data-record-top-bar-actions=""
             />
-            {(toggles || frame) && (
+            {(toggles || frame || close) && (
               <span
                 aria-hidden="true"
                 className="mx-1.5 h-4 w-px bg-border peer-empty/actions:hidden"
@@ -366,6 +377,7 @@ export function RecordTopBar({ leading, leadingTestId, stepper, actionSlotRef, t
         )}
         {toggles}
         {frame}
+        {close}
       </div>
     </div>
   );
