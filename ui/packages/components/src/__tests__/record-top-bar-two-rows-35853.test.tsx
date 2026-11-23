@@ -138,7 +138,7 @@ describe('the drawer draws the two-row bar', () => {
     const buttons = navButtons();
     expect(buttons[0]).toBe('Close');
     expect(buttons[buttons.length - 1]).toBe('Open as full page');
-    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    fireEvent.click(nav().querySelector('button') as HTMLElement);
     expect(onClose).toHaveBeenCalledTimes(1);
     expect(nav().querySelector('[data-record-top-bar-position]')?.textContent).toBe('1 of 3');
     expect(recordRow().contains(screen.getByTestId('record-name'))).toBe(true);
