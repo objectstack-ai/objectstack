@@ -203,14 +203,16 @@ describe.each([
     mount({ record: { pinned: ['convert'], more: ['log_call', 'share'] } }, authored);
     const { inline, menu } = await headerFaces();
     expect(inline).toEqual(['Convert']);
-    expect(menu).toEqual(['Log Call', 'Share', 'Mark Won']);
+    // The host's own 「Share」 entry follows the object's actions in the ⋯ and
+    // reads the same label as the fixture's `share`: the object's three come first.
+    expect(menu.slice(0, 3)).toEqual(['Log Call', 'Share', 'Mark Won']);
   });
 
   it('CONTROL — the same pins without `more`: the ⋯ keeps the actions\' own order', async () => {
     mount({ record: { pinned: ['convert'] } }, authored);
     const { inline, menu } = await headerFaces();
     expect(inline).toEqual(['Convert']);
-    expect(menu).toEqual(['Mark Won', 'Share', 'Log Call']);
+    expect(menu.slice(0, 3)).toEqual(['Mark Won', 'Share', 'Log Call']);
   });
 
   it('a list-page arm alone leaves the record header as it was', async () => {
