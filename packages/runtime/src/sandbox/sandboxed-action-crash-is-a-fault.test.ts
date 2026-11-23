@@ -277,3 +277,51 @@ describe('an action body that times out answers naming the action and its limit'
         expect(job.status).toBeUndefined();
     });
 });
+
+/**
+ * A hook body and a job body that do not compile answer the way an action's
+ * does: the runner names the body's owner and the compiler, says `does not
+ * compile` where a body that ran and threw says `threw`, and declares `500`.
+ * Both run in the `(ctx)` wrapper (`hookBodyFunctionExpression`); the two
+ * bodies are the ones the author-time rules `hook-body-does-not-compile` /
+ * `job-body-does-not-compile` pin, so this is also the run-time proof that
+ * QuickJS refuses them inside that wrapper. The `/data` door still answers the
+ * sanitised fault: a server-band sentence is withheld there, as before.
+ */
+describe('a hook body or a job body that does not compile answers naming it and the compile error', () => {
+    /** The two bodies `validate-hook-body-compiles.test.ts` pins: 0 parse diagnostics, refused in the `(ctx)` wrapper. */
+    const REDECLARED_CTX = 'const ctx = ctx.input || {}; return 1;';
+    const REDECLARED_LOCAL = 'let x = 1; let x = 2;';
+
+    async function failure(source: string, origin: ScriptRunOptions['origin']): Promise<SandboxError> {
+        const e = await runner
+            .runScript({ language: 'js', source, capabilities: [] }, { input: {} }, { origin })
+            .then(() => null, (err) => err as SandboxError);
+        expect(e, 'expected the body to fail, but the script resolved').toBeInstanceOf(SandboxError);
+        return e!;
+    }
+
+    it.each([
+        ['hook', 'stamp_owner', REDECLARED_CTX, 'Hook'],
+        ['hook', 'stamp_owner', REDECLARED_LOCAL, 'Hook'],
+        ['job', 'nightly_close', REDECLARED_CTX, 'Job'],
+        ['job', 'nightly_close', REDECLARED_LOCAL, 'Job'],
+    ] as const)('a %s named %s with %j: QuickJS refuses it in the (ctx) wrapper, coded', async (kind, name, source, Kind) => {
+        const err = await failure(source, { kind, name });
+        expect(err.message).toMatch(new RegExp(`^${kind} '${name}' does not compile: SyntaxError: `));
+        expect(err.message).not.toContain('threw');
+        expect(err.status).toBe(500);
+        expect(err.code).toBeUndefined();
+        expect(err.innerMessage).toContain(`${Kind} '${name}' cannot run: its body does not compile (SyntaxError: `);
+
+        const door = mapDataError(err, 'crm_invoice');
+        expect(door.status).toBe(500);
+        expect(door.body).toEqual({ error: INTERNAL_ERROR_MESSAGE, code: 'INTERNAL_ERROR' });
+    });
+
+    it('control: a hook body that throws a SyntaxError while RUNNING still reads `threw`', async () => {
+        const err = await failure("JSON.parse('{'); return 1;", { kind: 'hook', name: 'stamp_owner' });
+        expect(err.message).toContain("hook 'stamp_owner' threw:");
+        expect(err.message).not.toContain('does not compile');
+    });
+});

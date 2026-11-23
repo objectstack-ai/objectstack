@@ -27,8 +27,9 @@ export const entry: SemanticMigration = {
     + 'or give the local another name (const input = ctx.input || {} in a hook, const api = ctx.api in a job), and '
     + 'declare each name once. Fix any other compile error the finding names at the line of body.source it names. '
     + 'Refused at error as `hook-body-does-not-compile` or `job-body-does-not-compile` (422 INVALID_METADATA at the '
-    + 'hook door). A regular expression whose pattern the host engine refuses is reported at warning, never '
-    + 'refused; a literal that never closes or whose flags are not a flag set is refused.',
+    + 'hook door). A regular expression whose pattern the host engine refuses as a duplicate named capture group or '
+    + 'a modifier group is reported at warning; any other pattern failure, and a literal that never closes or whose '
+    + 'flags are not a flag set, is refused (body-regexp-pattern-refused).',
   reason:
     'The runtime never runs a hook or job body.source as a script of its own: it compiles it inside an async arrow '
     + 'function with the one parameter ctx, and a source that redeclares it, or otherwise fails to compile there, '
@@ -37,7 +38,10 @@ export const entry: SemanticMigration = {
     + 'had no check at all), so it deployed clean and then every run of the hook or job failed for as long as it '
     + 'stayed deployed. The rule compiles the source inside the expression the runtime builds, from the same '
     + 'function, with the host JavaScript engine and without running it, and reads the failure exactly as the '
-    + 'action rule does. No door publishes a job at run time, so a job body is refused by the three CLI commands. '
+    + 'action rule does. The metadata publish door takes no job (a job is not runtime-creatable), so a job body is '
+    + 'refused by the three CLI commands; the boot and os package install bring hook and job bodies in from an '
+    + 'artifact and run no author-time rule, so there a body that does not compile is answered at run time by a '
+    + 'sentence naming the hook or job and the compile error. '
     + 'Such a body never ran, so no run of it ever succeeded and no stored row changes shape. No first-party stack '
     + '(example apps, skills, docs samples) carries such a body today. There is no mechanical rewrite: renaming a '
     + 'local is a choice about which name the rest of the body reads.',

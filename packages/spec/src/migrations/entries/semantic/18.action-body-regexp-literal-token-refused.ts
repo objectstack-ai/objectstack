@@ -20,10 +20,13 @@ export const entry: SemanticMigration = {
     + 'publish) or loaded by os validate / os build / os lint: a regular-expression literal that never closes on its '
     + 'line (return /abc; or /[/), or whose flags are not a flag set (/a/gg, /a/zz, /a/uv)',
   replacement:
-    'Close the literal with /, write a / inside it as a backslash followed by /, or, when the / is a division, give it '
-    + 'a left-hand operand; write the flags as letters from dgimsuvy, each at most once, never u with v. Refused at '
-    + 'error as `action-body-does-not-compile` (422 INVALID_METADATA at the doors). A literal whose pattern the host '
-    + 'engine refuses (a duplicate named capture group, a modifier group) is still reported at warning.',
+    'Close the literal with /, write a / inside it as a backslash followed by /, keep the literal on one line (a \\n '
+    + 'written with one backslash in a quoted or JSON-carried body.source arrives as a line break, which ends the '
+    + 'literal: write it with two backslashes), or, when the / is a division, give it a left-hand operand; write the '
+    + 'flags as letters from dgimsuvy, each at most once, never u with v. Refused at error as '
+    + '`action-body-does-not-compile` (422 INVALID_METADATA at the doors). A literal whose pattern the host engine '
+    + 'refuses as a duplicate named capture group or a modifier group is still reported at warning; any other pattern '
+    + 'failure is refused (body-regexp-pattern-refused).',
   reason:
     'The rule compiles the body with the host JavaScript engine and reported every failure whose sentence opens '
     + '"Invalid regular expression" at warning, because the host\'s V8 and the runtime\'s QuickJS differ on some '

@@ -1478,12 +1478,17 @@ const ACTION_BODY_DOES_NOT_COMPILE_EXPLANATION: RuleExplanation = {
       'local another name. `var input = …` is not a redeclaration and compiles.',
     'The rule compiles the body inside the same expression the runtime builds, from the same function, ' +
       'with this host\'s JavaScript engine and without running it. The runtime\'s engine is QuickJS. ' +
-      'The two agree on redeclarations, grammar and strict-mode errors; they measurably differ inside the ' +
-      'pattern of a regular expression (duplicate named groups, modifier groups), so a pattern the host ' +
-      'refuses is reported as a warning rather than refused. A literal that never closes on its line, or ' +
-      'whose flags are not a flag set, is refused like any other compile error: QuickJS refuses it too. ' +
-      'Syntax the host accepts and QuickJS does not is not caught here; at run time such an action answers ' +
-      'a 500 that names the action and the compile error.',
+      'The two agree on redeclarations, grammar and strict-mode errors, and on almost every ' +
+      'regular-expression pattern: an unterminated group, nothing to repeat, a class range out of order, ' +
+      'a back-reference to a group the pattern does not name, an unknown Unicode property and an ' +
+      'incomplete quantifier are refused by both, so they are refused here like any other compile error. ' +
+      'Measured against Node 22\'s V8, the two differ on two pattern constructs, duplicate named capture ' +
+      'groups and modifier groups (`(?i:…)`): Node 22 refuses them and QuickJS runs them, so a pattern ' +
+      'Node 22 refuses for one of those two reasons is reported as a warning rather than refused (a later ' +
+      'Node that accepts them reports nothing). A literal that never closes on its line, or whose flags ' +
+      'are not a flag set, is refused: QuickJS refuses it too. Syntax the host accepts and QuickJS does ' +
+      'not is not caught here; at run time such an action answers a 500 that names the action and the ' +
+      'compile error.',
   ],
 };
 
@@ -1491,10 +1496,11 @@ const ACTION_BODY_DOES_NOT_COMPILE_EXPLANATION: RuleExplanation = {
 const CTX_BODY_COMPILE: readonly string[] = [
   'The rule compiles the body inside the same expression the runtime builds, from the same function, ' +
     'with this host\'s JavaScript engine and without running it, and reads the failure the way ' +
-    '`action-body-does-not-compile` does: a regular-expression pattern the host refuses is a warning, ' +
-    'because the runtime\'s QuickJS accepts some patterns the host does not; every other compile failure, ' +
-    'a literal that never closes or whose flags are not a flag set included, is refused. Syntax the host ' +
-    'accepts and QuickJS does not is not caught here.',
+    '`action-body-does-not-compile` does: a regular-expression pattern Node 22 refuses as a duplicate ' +
+    'named capture group or a modifier group is a warning, because the runtime\'s QuickJS runs both; ' +
+    'every other compile failure, every other pattern failure and a literal that never closes or whose ' +
+    'flags are not a flag set included, is refused. Syntax the host accepts and QuickJS does not is not ' +
+    'caught here; at run time such a body fails with a sentence that names it and the compile error.',
 ];
 
 const HOOK_BODY_DOES_NOT_COMPILE_EXPLANATION: RuleExplanation = {
