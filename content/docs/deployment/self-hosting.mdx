@@ -649,7 +649,8 @@ first; the refusal names that command.
 Nothing the development seed issued keeps acting once the deployment leaves
 development mode. At every boot outside development mode, before the server
 serves a request, it retires what each seeded account still on its seed
-password was issued: its sessions, its API keys, the apps authorized to it and
+password was issued: its sessions, including any it opened acting as another
+account, its API keys, the apps authorized to it and
 its device sign-ins, its outstanding password-reset links, any sign-in account
 linked to it, the OAuth applications it registered (disabled) and the SCIM
 credentials it minted (revoked). A retired session or key answers exactly as a
@@ -664,9 +665,9 @@ development mode retires nothing. There is no switch.
 If the retirement cannot complete (the database refuses a read or a write),
 the server does not start, and the error names the accounts; fix the database
 access, or run `os user set-password` on each of them, and start it again.
-`os user set-password` itself ends the same credentials when it sets the
-password, so running it on each seeded account before serving the database
-leaves nothing for the boot to retire.
+`os user set-password` itself ends the account's own sessions, keys and
+grants when it sets the password, and from then on the boot leaves that
+account alone.
 
 ### A seeded directory opens no bootstrap window
 

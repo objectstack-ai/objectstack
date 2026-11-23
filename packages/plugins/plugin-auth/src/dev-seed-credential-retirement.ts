@@ -49,6 +49,9 @@
  * - every sign-in account linked to it other than its password, every OAuth
  *   application it registered (disabled) and every SCIM credential it minted
  *   (revoked);
+ * - every live session the account opened acting as another account
+ *   (`sys_session.impersonated_by`), tombstoned the same way: it acts for the
+ *   stamped account, whoever it reads as ({@link retireSessionsOpenedAs});
  * - every outstanding password-reset token of the account
  *   (`credential-change-ends-reset-tokens.ts` {@link
  *   endOutstandingResetTokens}), rows and cache entries;
@@ -89,7 +92,12 @@ import {
   isDevSeedCredentialInForce,
   isDevelopmentMode,
 } from './dev-seed-credential.js';
-import { revokeSessionsAndApiKeys, type ForcedResetRevocationOutcome } from './forced-reset-revocation.js';
+import {
+  FORCED_RESET_REVOKE_REASON,
+  isLiveSession,
+  revokeSessionsAndApiKeys,
+  type ForcedResetRevocationOutcome,
+} from './forced-reset-revocation.js';
 import { endOutstandingResetTokens } from './credential-change-ends-reset-tokens.js';
 import type { MountedOAuthGrants } from './password-reset-ends-added-access.js';
 import type { InternalFieldResolvingEngine } from './internal-field-readback.js';
@@ -119,6 +127,7 @@ export interface DevSeedRetirementAuthContext {
 /** What the retirement ended for one account. */
 export interface RetiredDevSeedAccount {
   userId: string;
+  /** Sessions in `sys_session`: its own, and those it opened as another account. */
   sessions: number;
   /** Sessions ended in a host `secondaryStorage` that holds them. */
   cachedSessions: number;
@@ -173,6 +182,64 @@ async function stampedAccountIds(engine: DevSeedRetirementEngine): Promise<strin
     }
     if (page.length < STAMPED_PAGE) return ids;
   }
+}
+
+/** How many sessions one account opened as others a read considers. */
+const OPENED_AS_PAGE = 200;
+
+/**
+ * Every live `sys_session` row `userId` opened acting as another account
+ * (`impersonated_by`), tombstoned as {@link revokeSessionsAndApiKeys}
+ * tombstones the account's own. Such a session reads as the other account and
+ * acts for this one, so the revocation keyed on `user_id` does not reach it.
+ * Throws when a read or a write did not land.
+ */
+export async function retireSessionsOpenedAs(engine: DevSeedRetirementEngine, userId: string): Promise<number> {
+  const now = Date.now();
+  let ended = 0;
+  let failed = 0;
+  for (let offset = 0; ; offset += OPENED_AS_PAGE) {
+    let page: Array<Record<string, any>>;
+    try {
+      page = rowsOf(
+        await engine.find(
+          SystemObjectName.SESSION,
+          {
+            where: { impersonated_by: userId },
+            fields: ['id', 'expires_at', 'revoked_at'],
+            orderBy: [{ field: 'id', order: 'asc' }],
+            limit: OPENED_AS_PAGE,
+            offset,
+          },
+          { context: SYSTEM_CTX },
+        ),
+      );
+    } catch (error) {
+      if (isMissingTableError(error, SystemObjectName.SESSION)) break;
+      throw new Error(`the sessions it opened as another account could not be read (${(error as Error)?.message ?? error})`);
+    }
+    for (const row of page) {
+      if (!row?.id || !isLiveSession(row, now)) continue;
+      try {
+        await engine.update(
+          SystemObjectName.SESSION,
+          {
+            id: String(row.id),
+            expires_at: new Date(now - 1000),
+            revoked_at: new Date(now),
+            revoke_reason: FORCED_RESET_REVOKE_REASON,
+          },
+          { context: SYSTEM_CTX },
+        );
+        ended += 1;
+      } catch {
+        failed += 1;
+      }
+    }
+    if (page.length < OPENED_AS_PAGE) break;
+  }
+  if (failed > 0) throw new Error(`${failed} session(s) it opened as another account could not be ended`);
+  return ended;
 }
 
 /**
@@ -250,6 +317,12 @@ export async function retireDevSeedCredentials(host: {
     const reasons: string[] = [];
     const revocation = await revokeSessionsAndApiKeys(engine, userId, { oauth });
     if (!revocation.complete) reasons.push(incompleteRevocation(revocation));
+    let openedAs = 0;
+    try {
+      openedAs = await retireSessionsOpenedAs(engine, userId);
+    } catch (error) {
+      reasons.push(`${(error as Error)?.message ?? error}`);
+    }
     try {
       await endOutstandingResetTokens(resetTokenEngine, userId, {
         ...(authContext?.secondaryStorage ? { cache: authContext.secondaryStorage } : {}),
@@ -270,7 +343,7 @@ export async function retireDevSeedCredentials(host: {
     }
     const account: RetiredDevSeedAccount = {
       userId,
-      sessions: revocation.sessions,
+      sessions: revocation.sessions + openedAs,
       cachedSessions,
       apiKeys: revocation.apiKeys,
       signInAccounts: revocation.signInAccounts,

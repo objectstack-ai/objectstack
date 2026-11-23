@@ -271,8 +271,25 @@ const RETIRED = { session: null, key: 'API_KEY_REVOKED', resetLinks: 0 };
 
 describe('leaving development mode retires what the development seed issued', () => {
   it('a boot outside development mode retires the seed accounts\' sessions, API keys and reset links, each answering as revoked; an administrator-created account is untouched', async () => {
-    const issued = await seedInDevelopment();
+    let actingAs = '';
+    const issued = await seedInDevelopment({
+      async beforeStop(dev, ids) {
+        // The seed's admin, in development, opens a session that acts as the control account.
+        const res = await dev.manager.handleRequest(
+          new Request(`${AUTH}/admin/impersonate-user`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', origin: ORIGIN, cookie: (await dev.signIn(SEED_EMAIL, SEED_PASSWORD)) },
+            body: JSON.stringify({ userId: ids.control }),
+          }),
+        );
+        expect(res.status, await res.clone().text()).toBe(200);
+        actingAs = cookieHeader(res);
+        expect(await dev.sessionUser(actingAs)).toBe(ids.control);
+      },
+    });
     const server = await boot(PRODUCTION);
+    // A session the seed's admin opened as another account acts for the admin, so it is retired too.
+    expect(await server.sessionUser(actingAs)).toBeNull();
     for (const who of ['admin', 'staff'] as const) {
       expect({ who, ...(await answers(server, issued, who)) }).toEqual({ who, ...RETIRED });
       const sessions = await server.rows('sys_session', { user_id: issued.ids[who] });
