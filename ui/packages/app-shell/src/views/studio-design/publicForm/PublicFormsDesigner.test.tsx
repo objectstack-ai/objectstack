@@ -23,7 +23,8 @@ import { cleanup, render, screen, waitFor, within } from '@testing-library/react
 import userEvent from '@testing-library/user-event';
 import React from 'react';
 
-vi.mock('@object-ui/plugin-form', () => ({
+vi.mock('@object-ui/plugin-form', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   ObjectForm: ({ schema }: { schema: { sections: Array<{ label?: string; fields: Array<{ field: string; required?: boolean }> }> } }) => (
     <div data-testid="preview-form">
       {schema.sections.map((s, i) => (
