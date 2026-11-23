@@ -27,7 +27,7 @@
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, fireEvent, cleanup, act, within } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { MetadataClient } from '@object-ui/data-objectstack';
@@ -41,6 +41,8 @@ const objectDef = {
 const puts: unknown[] = [];
 
 const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+  // objectstack#36511 — the Save's own publish of the item, and a refused one's discard.
+  if (init?.method === 'POST' || init?.method === 'DELETE') return new Response('{"success":true}', { status: 200 });
   if (init?.method === 'PUT') {
     puts.push(JSON.parse(String(init.body)));
     return new Response(JSON.stringify({ success: true }), {
@@ -74,7 +76,10 @@ vi.mock('@object-ui/react', async (importOriginal) => {
   return { ...mod, useAdapter: () => dataSource };
 });
 
+// The source reaches a dynamic import of it: its first load is paid at collection (`check:test-source-alias`).
+import '@objectstack/lint';
 import { DataPillar } from './StudioDesignSurface';
+import { StudioSaveHarness, pressStudioSave } from './__tests__/studioSaveHarness';
 import { addFieldFromFormToolbar } from './__tests__/dataPillarAddField';
 import { createEmptyDataSource } from './__tests__/emptyDataSource';
 import { registerBuiltinInspectors } from '../metadata-admin/inspectors';
@@ -98,9 +103,9 @@ function controlUnder(label: string): HTMLElement {
 describe('Studio data page — a held Picklist reads as a sentence (objectui#11785, held since objectui#11786)', () => {
   it('names the field by its label and shows no developer text', async () => {
     render(
-      <MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
+      <StudioSaveHarness><MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
         <DataPillar packageId="com.example.showcase" />
-      </MemoryRouter>,
+      </MemoryRouter></StudioSaveHarness>,
     );
     fireEvent.click(await screen.findByRole('button', { name: 'Form' }));
     await addFieldFromFormToolbar();
@@ -112,17 +117,15 @@ describe('Studio data page — a held Picklist reads as a sentence (objectui#117
     await userEvent.click(controlUnder('Type'));
     await userEvent.click(await screen.findByRole('option', { name: /^Picklist$/ }));
 
-    // Past the autosave's 1.5 s debounce: the guard holds the save.
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 2300));
-    });
+    // Save pressed (objectstack#36511): the guard holds it.
+    await pressStudioSave();
     expect(puts, 'the guard must hold this save').toEqual([]);
 
     expect(screen.queryByTestId('studio-refusal'), 'held, not refused (objectui#11786)').toBeNull();
     const held = await screen.findByTestId('studio-held');
     const message = within(held).getByTestId('studio-held-message');
     expect(message).toHaveTextContent(
-      tFormat('engine.studio.held.line', 'en', {
+      tFormat('engine.studio.held.lineExplicit', 'en', {
         clause: tFormat('engine.studio.held.needsOptions', 'en', { field: label }),
       }),
     );
@@ -134,9 +137,9 @@ describe('Studio data page — a held Picklist reads as a sentence (objectui#117
 
   it('"Show me" opens the named field\'s inspector after it was closed', async () => {
     render(
-      <MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
+      <StudioSaveHarness><MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
         <DataPillar packageId="com.example.showcase" />
-      </MemoryRouter>,
+      </MemoryRouter></StudioSaveHarness>,
     );
     fireEvent.click(await screen.findByRole('button', { name: 'Form' }));
     await addFieldFromFormToolbar();
@@ -144,9 +147,7 @@ describe('Studio data page — a held Picklist reads as a sentence (objectui#117
     const apiName = (controlUnder('API name') as HTMLInputElement).value;
     await userEvent.click(controlUnder('Type'));
     await userEvent.click(await screen.findByRole('option', { name: /^Picklist$/ }));
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 2300));
-    });
+    await pressStudioSave();
     const strip = await screen.findByTestId('studio-held');
 
     // The rail's own header close (the field inspector inside carries another).
