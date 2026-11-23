@@ -25,8 +25,12 @@ import * as React from 'react';
 
 /** What the builder's Save and Close do while a menu place waits for the report. */
 export interface NewReportSlot {
-  /** The app whose menu holds the place. */
-  readonly appName: string;
+  /**
+   * The builder's address the place waits on (`<app base path>/reports/new`):
+   * the page there fills it. The address, not the app's name, because the
+   * console addresses an app by its route segment, which need not be its name.
+   */
+  readonly path: string;
   /**
    * Create the report `name` with `body` (its `label` the one the builder
    * shows) and save the menu with its entry. `false` when nothing was saved:
@@ -57,9 +61,14 @@ export function withdrawNewReportSlot(slot: NewReportSlot): void {
   emit();
 }
 
-/** The slot offered for `appName`, or `null`. */
-export function newReportSlotFor(appName: string | undefined): NewReportSlot | null {
-  return current && appName && current.appName === appName ? current : null;
+/** Whether the page at `pathname` is the builder `slot` waits on (a router basename in front counts). */
+function isAt(slot: NewReportSlot, pathname: string | undefined): boolean {
+  return !!pathname && (pathname === slot.path || pathname.endsWith(slot.path));
+}
+
+/** The slot the page at `pathname` fills, or `null`. */
+export function newReportSlotFor(pathname: string | undefined): NewReportSlot | null {
+  return current && isAt(current, pathname) ? current : null;
 }
 
 function subscribe(listener: () => void): () => void {
@@ -67,8 +76,8 @@ function subscribe(listener: () => void): () => void {
   return () => listeners.delete(listener);
 }
 
-/** The slot offered for `appName`, read as it changes. */
-export function useNewReportSlot(appName: string | undefined): NewReportSlot | null {
+/** The slot the page at `pathname` fills, read as it changes. */
+export function useNewReportSlot(pathname: string | undefined): NewReportSlot | null {
   const slot = React.useSyncExternalStore(subscribe, () => current, () => null);
-  return slot && appName && slot.appName === appName ? slot : null;
+  return slot && isAt(slot, pathname) ? slot : null;
 }

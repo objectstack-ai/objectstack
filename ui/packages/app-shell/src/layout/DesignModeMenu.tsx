@@ -456,6 +456,8 @@ export default function DesignModeMenu({ app, basePath, resolveTargetLabel, reso
     setBuildingReport(false);
     return true;
   };
+  // The builder's address the held place waits on.
+  const newReportPath = `${basePath}/reports/new`;
   const saveNewReportRef = React.useRef(saveNewReport);
   React.useLayoutEffect(() => {
     saveNewReportRef.current = saveNewReport;
@@ -463,7 +465,7 @@ export default function DesignModeMenu({ app, basePath, resolveTargetLabel, reso
   React.useEffect(() => {
     if (!buildingReport) return;
     const slot: NewReportSlot = {
-      appName,
+      path: newReportPath,
       save: (name, label, body) => saveNewReportRef.current(name, label, body),
       cancel: () => {
         setBuildingReport(false);
@@ -474,12 +476,11 @@ export default function DesignModeMenu({ app, basePath, resolveTargetLabel, reso
     // Withdrawn when the place is no longer held, and when the menu unmounts
     // (the design mode ended): the builder then saves on its own, off the menu.
     return () => withdrawNewReportSlot(slot);
-  }, [buildingReport, appName]);
+  }, [buildingReport, newReportPath]);
   // Leaving the builder another way than its Save or Close (a menu link, the
   // browser's Back) drops the place too, so no held row waits for a builder
   // that is gone. Read once the builder has been reached.
   const { pathname } = useLocation();
-  const newReportPath = `${basePath}/reports/new`;
   const [reachedBuilder, setReachedBuilder] = React.useState(false);
   const onBuilder = pathname === newReportPath || pathname.endsWith(newReportPath);
   if (buildingReport && onBuilder && !reachedBuilder) setReachedBuilder(true);

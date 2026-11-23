@@ -830,8 +830,8 @@ describe('a new report from 「Add menu item」 (objectstack#36364, report half)
     // The place stays held, saying what it waits for.
     expect(order()).toEqual(['home', ['sales', ['leads', 'accounts']], ['insights', ['…']]]);
     expect(screen.getByTestId('design-menu-placeholder')).toHaveTextContent('New report…');
-    expect(newReportSlotFor('crm')).not.toBeNull();
-    expect(newReportSlotFor('hr')).toBeNull();
+    expect(newReportSlotFor('/apps/crm/reports/new')).not.toBeNull();
+    expect(newReportSlotFor('/apps/hr/reports/new')).toBeNull();
     expect(written).toEqual([]);
   });
 
@@ -841,7 +841,7 @@ describe('a new report from 「Add menu item」 (objectstack#36364, report half)
     const picker = await openReports();
     fireEvent.click(within(picker).getByTestId('design-menu-picker-new-report'));
     await flush();
-    const slot = newReportSlotFor('crm')!;
+    const slot = newReportSlotFor('/apps/crm/reports/new')!;
     let saved: boolean | undefined;
     await act(async () => {
       saved = await slot.save('payment_analysis', 'Payment analysis', { ...REPORT_BODY, name: 'payment_analysis' });
@@ -861,7 +861,7 @@ describe('a new report from 「Add menu item」 (objectstack#36364, report half)
     expect(navigation[1].children!.map((c) => (c as { id: string }).id)).toEqual(['accounts', 'leads']);
     expect(navigation[2].children).toEqual([{ id: 'nav_item_1', type: 'report', reportName: 'payment_analysis' }]);
     expect(screen.queryByTestId('design-mode-bar')).toBeNull();
-    expect(newReportSlotFor('crm')).toBeNull();
+    expect(newReportSlotFor('/apps/crm/reports/new')).toBeNull();
   });
 
   it('a refused menu removes the new report; the mode, the held place and the other staged edits stay', async () => {
@@ -873,7 +873,7 @@ describe('a new report from 「Add menu item」 (objectstack#36364, report half)
     await flush();
     let saved: boolean | undefined;
     await act(async () => {
-      saved = await newReportSlotFor('crm')!.save('payment_analysis', 'Payment analysis', { ...REPORT_BODY, name: 'payment_analysis' });
+      saved = await newReportSlotFor('/apps/crm/reports/new')!.save('payment_analysis', 'Payment analysis', { ...REPORT_BODY, name: 'payment_analysis' });
     });
     await flush();
 
@@ -887,7 +887,7 @@ describe('a new report from 「Add menu item」 (objectstack#36364, report half)
     expect(toastError).toHaveBeenCalledWith('Some changes were not saved: the app was refused');
     expect(screen.getByTestId('design-mode-bar')).toBeInTheDocument();
     expect(order()).toEqual(['home', ['sales', ['accounts', 'leads']], ['insights', ['…']]]);
-    expect(newReportSlotFor('crm')).not.toBeNull();
+    expect(newReportSlotFor('/apps/crm/reports/new')).not.toBeNull();
   });
 
   it('the builder\'s Close drops the held place and writes nothing; the mode and its other edits stay', async () => {
@@ -896,10 +896,10 @@ describe('a new report from 「Add menu item」 (objectstack#36364, report half)
     const picker = await openReports();
     fireEvent.click(within(picker).getByTestId('design-menu-picker-new-report'));
     await flush();
-    act(() => newReportSlotFor('crm')!.cancel());
+    act(() => newReportSlotFor('/apps/crm/reports/new')!.cancel());
     await flush();
     expect(order()).toEqual(['home', ['sales', ['accounts', 'leads']], ['insights', []]]);
-    expect(newReportSlotFor('crm')).toBeNull();
+    expect(newReportSlotFor('/apps/crm/reports/new')).toBeNull();
     expect(written).toEqual([]);
     expect(screen.getByTestId('design-mode-save')).toBeEnabled();
   });
@@ -912,7 +912,7 @@ describe('a new report from 「Add menu item」 (objectstack#36364, report half)
     fireEvent.click(screen.getByText('go elsewhere'));
     await flush();
     expect(order()).toEqual(['home', ['sales', ['leads', 'accounts']], ['insights', []]]);
-    expect(newReportSlotFor('crm')).toBeNull();
+    expect(newReportSlotFor('/apps/crm/reports/new')).toBeNull();
     expect(written).toEqual([]);
   });
 });

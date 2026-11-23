@@ -26,7 +26,7 @@
  */
 
 import * as React from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { Loader2 } from 'lucide-react';
 import { Empty, EmptyDescription, EmptyTitle } from '@object-ui/components';
@@ -92,7 +92,7 @@ export function ReportNewPage({ dataSource }: { dataSource?: DataSource }) {
   const { reports, loading, refresh } = useMetadata();
   const { isAdmin, isResolved } = useWorkspaceAdminStatus();
   /** The menu place this report fills, when the design mode opened the page for one. */
-  const slot = useNewReportSlot(appName);
+  const slot = useNewReportSlot(useLocation().pathname);
 
   const backToReports = React.useCallback(() => {
     if (slot) {

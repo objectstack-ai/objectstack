@@ -71,9 +71,9 @@ function Where() {
   return <span data-testid="where">{useLocation().pathname}</span>;
 }
 
-function mount() {
+function mount(app = 'crm') {
   render(
-    <MemoryRouter initialEntries={['/apps/crm/object/crm_lead', '/apps/crm/reports/new']} initialIndex={1}>
+    <MemoryRouter initialEntries={[`/apps/${app}/object/crm_lead`, `/apps/${app}/reports/new`]} initialIndex={1}>
       <Routes>
         <Route path="/apps/:appName/reports/new" element={<ReportNewPage />} />
         <Route path="*" element={null} />
@@ -92,7 +92,7 @@ let slot: NewReportSlot;
 beforeEach(() => {
   saveAndPublish.mockClear();
   client.get.mockClear();
-  slot = { appName: 'crm', save: vi.fn(async () => true), cancel: vi.fn() };
+  slot = { path: '/apps/crm/reports/new', save: vi.fn(async () => true), cancel: vi.fn() };
 });
 afterEach(() => {
   withdrawNewReportSlot(slot);
@@ -137,8 +137,23 @@ describe('the new-report page for a held menu place (objectstack#36364)', () => 
     expect(screen.getByTestId('where')).toHaveTextContent('/apps/crm/object/crm_lead');
   });
 
+  it('an app addressed by a route segment other than its name finds its slot by the address', async () => {
+    // The console addresses the showcase app as `com.example.showcase` while
+    // its name is `showcase_app`: the place waits on the builder's address.
+    slot = { ...slot, path: '/apps/com.acme.crm/reports/new' };
+    offerNewReportSlot(slot);
+    mount('com.acme.crm');
+    expect(screen.getByTestId('report-new-adds-to-menu')).toBeInTheDocument();
+    fireEvent.click(screen.getByText('save'));
+    await flush();
+    await flush();
+    expect(slot.save).toHaveBeenCalled();
+    expect(saveAndPublish).not.toHaveBeenCalled();
+    expect(screen.getByTestId('where')).toHaveTextContent('/apps/com.acme.crm/report/payment_analysis');
+  });
+
   it("another app's slot is not this page's: it saves on its own", async () => {
-    slot = { ...slot, appName: 'hr' };
+    slot = { ...slot, path: '/apps/hr/reports/new' };
     offerNewReportSlot(slot);
     mount();
     expect(screen.queryByTestId('report-new-adds-to-menu')).toBeNull();
