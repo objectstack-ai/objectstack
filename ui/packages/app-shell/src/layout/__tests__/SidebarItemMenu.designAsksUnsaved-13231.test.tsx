@@ -1,8 +1,8 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * A sidebar entry's ⋯ › Design asks before leaving a page that holds unsaved
- * edits (objectui#13231).
+ * A sidebar entry's ⋯ › Object settings (Design before objectstack#36487)
+ * asks before leaving a page that holds unsaved edits (objectui#13231).
  *
  * Measured in Chromium on a dirty settings page: Design opened the entry's
  * Studio surface at once and the edit was lost, because the entry navigates
@@ -11,7 +11,8 @@
  *
  * Harness: `SidebarItemMenu-12427`'s — the real component in a real sidebar
  * row, the real Radix menu and the real router, with the two principal answers
- * as stand-ins and the entry's package served writable, so Design is offered.
+ * as stand-ins and the entry's package served writable, so Object settings
+ * is offered.
  * A page's unsaved edits are registered with the seam directly, the way a
  * page's hook does.
  */
@@ -93,7 +94,7 @@ const settle = () => act(() => new Promise<void>((resolve) => setTimeout(resolve
 async function clickDesign() {
   await settle();
   fireEvent.keyDown(screen.getByTestId('sidebar-item-menu-trigger'), { key: 'Enter' });
-  fireEvent.click(await screen.findByRole('menuitem', { name: 'Design' }));
+  fireEvent.click(await screen.findByRole('menuitem', { name: 'Object settings' }));
 }
 
 /**
@@ -130,8 +131,8 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('sidebar ⋯ › Design asks before leaving unsaved edits (objectui#13231)', () => {
-  it('with an unsaved edit on screen, Design asks; Cancel stays where it is', async () => {
+describe('sidebar ⋯ › Object settings asks before leaving unsaved edits (objectui#13231)', () => {
+  it('with an unsaved edit on screen, Object settings asks; Cancel stays where it is', async () => {
     release = registerUnsavedEdits(QUESTION);
     renderRow();
     await clickDesign();
@@ -153,7 +154,7 @@ describe('sidebar ⋯ › Design asks before leaving unsaved edits (objectui#132
     await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent(STUDIO));
   });
 
-  it('CONTROL: with nothing registered, Design opens Studio at once and asks nothing', async () => {
+  it('CONTROL: with nothing registered, Object settings opens Studio at once and asks nothing', async () => {
     renderRow();
     await clickDesign();
 

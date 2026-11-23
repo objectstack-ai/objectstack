@@ -13,8 +13,8 @@
  * Two rows on a desktop since objectstack#35853 (figure 40): the navigation
  * row over the record row.
  *
- *  - the page opened directly: the navigation row names the object (a link to
- *    the object's list) and ends in ✕, which goes there too; no counter, no
+ *  - the page opened directly: the navigation row starts with ✕ (objectstack#36557),
+ *    then names the object (a link to the object's list), where ✕ goes too; no counter, no
  *    ↑ ↓; the record row holds the header's name (its ⊟ retired with the
  *    right rail, objectstack#35890);
  *  - the page the list's record name opened (objectstack#35854): ↑ ↓ and
@@ -159,7 +159,7 @@ afterEach(() => {
 });
 
 describe('the page\'s top bar (objectstack#27524, Target 7; two rows since objectstack#35853)', () => {
-  it('opened directly: the navigation row names the object, ✕ at its right; the record row holds the name, no ⊟ (objectstack#35890)', async () => {
+  it('opened directly: ✕ first in the navigation row, then the object\'s name; the record row holds the name, no ⊟ (objectstack#35890)', async () => {
     mountPage(`/apps/${APP}/${LEAD}/record/r-1`);
     await screen.findByTestId('record-page-close', undefined, { timeout: 5000 });
     const bar = pageBar()!;
@@ -176,9 +176,13 @@ describe('the page\'s top bar (objectstack#27524, Target 7; two rows since objec
     expect(bar.querySelector('[data-record-top-bar-step]')).toBeNull();
     expect(bar.querySelector('[data-record-top-bar-position]')).toBeNull();
     expect(bar.querySelector('[data-record-bar-separator]')).toBeNull();
-    // ✕ is the navigation row's last control, and goes to the object's list.
-    const frame = nav.querySelector('[data-record-top-bar-frame]') as HTMLElement;
-    expect(frame.lastElementChild?.getAttribute('data-testid')).toBe('record-page-close');
+    // objectstack#36557 — ✕ is the navigation row's first control, before the
+    // host's left end, keeps its name, and goes to the object's list.
+    const close = screen.getByTestId('record-page-close');
+    expect(nav.querySelector('button')).toBe(close);
+    expect(nav.firstElementChild?.contains(close)).toBe(true);
+    expect(close.getAttribute('aria-label')).toBe('Close');
+    expect(nav.querySelector('[data-record-top-bar-frame]')?.contains(close)).toBe(false);
     // objectstack#35890 — the rail and its ⊟ are retired: the record row draws no 「Panels」 group.
     expect(record.querySelector('[role="group"][aria-label="Panels"]')).toBeNull();
     expect(document.querySelector('[data-record-crumb-row]')).toBeNull();
@@ -409,27 +413,29 @@ describe('the shell\'s top-right button group on the record page (objectstack#36
     );
   }
 
-  it('turned on: the group sits in the navigation row, before ✕, which stays last', async () => {
+  it('turned on: the group sits at the right of the navigation row; ✕ stays its first control', async () => {
     mountUnderShell(true);
     await screen.findByTestId('record-page-close', undefined, { timeout: 5000 });
     const nav = pageBar()!.querySelector('[data-record-top-bar-nav]') as HTMLElement;
     const frame = nav.querySelector('[data-record-top-bar-frame]') as HTMLElement;
     const group = within(frame).getByTestId('shell-page-actions');
-    expect(frame.lastElementChild?.getAttribute('data-testid')).toBe('record-page-close');
-    expect(group.nextElementSibling?.getAttribute('data-testid')).toBe('record-page-close');
+    expect(within(frame).queryByTestId('record-page-close')).toBeNull();
+    expect(nav.querySelector('button')).toBe(screen.getByTestId('record-page-close'));
     // Help is always in it; the record row carries none of it.
     expect(within(group).getByTestId('shell-page-actions-help')).toBeTruthy();
     const record = pageBar()!.querySelector('[data-record-top-bar-record]') as HTMLElement;
     expect(within(record).queryByTestId('shell-page-actions')).toBeNull();
   });
 
-  it('turned off (a shell that draws its own buttons elsewhere): no group, ✕ alone', async () => {
+  it('turned off (a shell that draws its own buttons elsewhere): no group, the right end empty, ✕ still first', async () => {
     for (const on of [false] as const) {
       mountUnderShell(on);
       await screen.findByTestId('record-page-close', undefined, { timeout: 5000 });
       const frame = pageBar()!.querySelector('[data-record-top-bar-frame]') as HTMLElement;
       expect(within(frame).queryByTestId('shell-page-actions')).toBeNull();
-      expect(frame.children).toHaveLength(1);
+      expect(frame.children).toHaveLength(0);
+      const nav = pageBar()!.querySelector('[data-record-top-bar-nav]') as HTMLElement;
+      expect(nav.querySelector('button')).toBe(screen.getByTestId('record-page-close'));
       cleanup();
     }
   });

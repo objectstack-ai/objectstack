@@ -38,6 +38,7 @@ export const SysApprovalDelegation = ObjectSchema.create({
   label: 'Approval Delegation',
   pluralLabel: 'Approval Delegations',
   icon: 'user-clock',
+  color: 'orange',
   isSystem: true,
   // [ADR-0103, #3355] Admin/user-writable DATA on a platform-defined schema: a
   // user authors their own out-of-office delegation. The bucket default is full

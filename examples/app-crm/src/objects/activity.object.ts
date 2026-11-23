@@ -13,6 +13,7 @@ export const Activity = ObjectSchema.create({
   label: 'Activity',
   pluralLabel: 'Activities',
   icon: 'calendar-check',
+  color: 'pink',
   description: 'A logged interaction (call, email, meeting, or task) related to a CRM record.',
   // The record's most important fields: the hover card, list columns and
   // the record picker read them. The stage is not here: the record header

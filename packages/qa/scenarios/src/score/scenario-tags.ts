@@ -57,7 +57,7 @@
  * Deterministic: no model call, no network (the cost ruling on cloud#3600).
  */
 
-import { buildEffectiveObjectPermissions, resolveStackCollection, superuserFieldVote } from '@objectstack/core';
+import { buildEffectiveObjectPermissions, holdsSuperuserBypass, resolveStackCollection, superuserFieldVote } from '@objectstack/core';
 import { standaloneActionOwnerKey } from '@objectstack/objectql';
 import { effectiveSharingModel } from '@objectstack/plugin-sharing';
 import {
@@ -77,6 +77,7 @@ import {
 import { objectPermissionGrants, type ObjectPermissionVerbTarget } from '@objectstack/spec/security';
 import { SystemFieldName } from '@objectstack/spec/system';
 
+import { rowOwner } from '../row-owner.js';
 import { personaPermissionSetName, ROW_SCOPE_TAG, type ScenarioCard } from '../schema.js';
 import { approverExpressionRefusal, recordExpressionRefusal, rlsPredicateEnforces } from './scenario-expressions.js';
 import { artifactToEvalGraph } from './scenario-graph.js';
@@ -106,7 +107,7 @@ const norm = (s: string): string => s.trim().toLowerCase();
  * alone ({@link gradePersonaGrants}); a pick without them derives none.
  */
 export type ScenarioArtifactCard = Pick<ScenarioCard, 'expect' | 'capabilities'> & {
-  run: Pick<ScenarioCard['run'], 'personas' | 'agentActions'> & Partial<Pick<ScenarioCard['run'], 'questions' | 'operations'>>;
+  run: Pick<ScenarioCard['run'], 'personas' | 'agentActions' | 'userHandleFields'> & Partial<Pick<ScenarioCard['run'], 'questions' | 'operations' | 'seed'>>;
 };
 
 /** A business action the card declares an agent must be able to call (`run.agentActions[]`). */
@@ -836,7 +837,7 @@ export const CAPABILITY_TAG_CHECKS: Readonly<Record<string, TagCheck>> = Object.
 
   'ai.agent-actions': {
     asserts:
-      'every business action the card declares an agent may call (`run.agentActions`) exists on its object, is opted into the AI / MCP surface (`ai.exposed`), and is confirm-gated (`ai.requiresConfirmation`) where the card says `confirm`',
+      'every business action the card declares an agent may call (`run.agentActions`) exists on its object, is opted into the AI / MCP surface (`ai.exposed`), and is confirm-gated (`ai.requiresConfirmation`) where the card says `confirm`, and only there',
     run(f, card) {
       // The checks `gradeAgentActions` runs for the card's actions, counted
       // under this tag as well — as `dashboards.widget-measures` counts the
@@ -874,7 +875,9 @@ export function gradeCapabilityTags(facts: ArtifactFacts, card: ScenarioArtifact
 
 /**
  * One check per declared fact of each action. A missing declaration fails all
- * of its checks — the agent cannot call what the build does not expose.
+ * of its checks — the agent cannot call what the build does not expose. The
+ * gate is judged both ways: `confirm-gated` where the card says `confirm`,
+ * `not-confirm-gated` where it says the agent acts at once.
  */
 export function gradeAgentActions(facts: ArtifactFacts, actions: readonly ScenarioAgentAction[]): CheckResult[] {
   const out: CheckResult[] = [];
@@ -893,6 +896,20 @@ export function gradeAgentActions(facts: ArtifactFacts, actions: readonly Scenar
         `${at}->confirm-gated`,
         ai?.requiresConfirmation === true,
         !decl ? 'not declared' : ai?.requiresConfirmation === true ? undefined : 'ai.requiresConfirmation is not true, so nothing gates the call',
+      ));
+    } else {
+      // Over-gating is a build defect too: the card has the agent act at
+      // once, and a gated action meets the door's confirmation instead
+      // (`428 no_confirmation_service` where no confirmation service runs), so
+      // the run could only mark the write not measured.
+      out.push(check(
+        `${at}->not-confirm-gated`,
+        !!decl && ai?.requiresConfirmation !== true,
+        !decl
+          ? 'not declared'
+          : ai?.requiresConfirmation === true
+            ? 'ai.requiresConfirmation is true on an action the card has the agent run without asking, so the door asks for a confirmation the card never gives'
+            : undefined,
       ));
     }
   }
@@ -1067,6 +1084,100 @@ function designedRoutes(facts: ArtifactFacts, card: ScenarioArtifactCard, n: Per
 }
 
 /**
+ * The platform's owner-only delete floor, read for each write a delete need
+ * applies or awaits ({@link PersonaGrantNeed.requiredBy}), against the row the
+ * operation deletes (`target`). Read off the platform, not guessed:
+ *
+ *  - every member resolves `member_default`, whose wildcard
+ *    `owner_only_deletes` policy (plugin-security
+ *    `platform-ownership-policies.ts`) admits a delete only of a row the caller
+ *    created. The runner loads the seed as the admin user, so no persona
+ *    created a seeded row;
+ *  - the floor comes off a row only where the sharing service's delete
+ *    verdict (`SharingService.checkDelete`, plugin-sharing) answers `allow`:
+ *    ownership (`owner_id`, the persona {@link rowOwner} loads the row as
+ *    owned by; a write depth of `org`) or Modify All (`modifyAllRecords`). An
+ *    edit share never opens a delete. That verdict abstains on an object
+ *    whose org-wide default is public (`public_read_write` opens updates
+ *    only, `owdOpenWritesCoversOperation`) or which has no `owner_id`
+ *    (`ownership` other than `user`), and an abstain leaves the floor
+ *    standing, Modify All included;
+ *  - beside the floor, an app-authored row policy for deletes (`delete` or
+ *    `all`, with a `using`) widens the rows a delete reaches (Layer 1 is an
+ *    OR of permissive policies), and a `controlled_by_parent` detail hands its
+ *    floor to the master's gate. Each depends on a row the artifact does not
+ *    carry, so the write is `open`: not measured;
+ *  - an agent action the build declares as the write's designed route (the
+ *    one the operation names, `via`, or for a write awaiting confirmation the
+ *    card's confirm-gated one, as {@link designedRoutes} reads them) runs
+ *    elevated and meets no floor: `open` too, the run's to observe.
+ *
+ * Every other write is `refused`. A write whose operation names no `target`,
+ * or whose target is not a seed row the card carries, is judged no further.
+ */
+function deleteFloorReading(
+  facts: ArtifactFacts,
+  card: ScenarioArtifactCard,
+  set: Bag,
+  n: PersonaGrantNeed,
+): { refused: Array<{ operation: string; row: string; why: string }>; open: Array<{ operation: string; row: string; why: string }> } {
+  const refused: Array<{ operation: string; row: string; why: string }> = [];
+  const open: Array<{ operation: string; row: string; why: string }> = [];
+  const schema = facts.objects.get(n.object);
+  const declared = schema?.sharingModel ?? (isBag(schema?.security) ? schema.security.sharingModel : undefined);
+  const ownerField = (schema?.ownership ?? 'user') === 'user';
+  const sharingEnforces = effectiveSharingModel(schema) !== 'public' && ownerField;
+  const objects = isBag(set.objects) ? set.objects : {};
+  const entry = objects[n.object] ?? objects['*'];
+  const orgDepth = isBag(entry) && entry.writeScope === 'org';
+  const modifyAll = holdsSuperuserBypass(set as { objects?: Record<string, unknown> }, n.object, 'modify');
+  const authored = (Array.isArray(set.rowLevelSecurity) ? set.rowLevelSecurity : []).filter(
+    (r): r is Bag =>
+      isBag(r) &&
+      r.enabled !== false &&
+      (r.object === '*' || r.object === n.object) &&
+      (r.operation === 'all' || r.operation === 'delete') &&
+      typeof r.using === 'string' &&
+      r.using.trim().length > 0 &&
+      !(Array.isArray(r.positions) && r.positions.length > 0),
+  );
+  const confirmRoutes = confirmGatedRoutes(facts, card, n.object);
+  for (const r of n.requiredBy) {
+    if (!r.startsWith('operation ')) continue;
+    const operation = r.slice('operation '.length);
+    const op = (card.run.operations ?? []).find((o) => o.id === operation);
+    const target = op?.target;
+    const row = target === undefined ? undefined : (card.run.seed?.[n.object] ?? []).find((x) => x.id === target);
+    if (target === undefined || row === undefined) continue;
+    const owner = rowOwner(card, n.object, row);
+    if (sharingEnforces && (modifyAll || orgDepth || owner === n.persona)) continue;
+    if (declared === 'controlled_by_parent') {
+      open.push({ operation, row: target, why: `${n.object} is \`controlled_by_parent\` and its master's gate decides, which depends on the master row` });
+      continue;
+    }
+    if (authored.length > 0) {
+      open.push({ operation, row: target, why: `only ${authored.map((p) => `row policy ${String(p.name)}`).join(', ')} could admit it, which depends on the row` });
+      continue;
+    }
+    const via = n.routedVia.filter((v) => v.operation === operation && buildDeclaresAction(facts, n.object, v.action)).map((v) => v.action);
+    const through = [...new Set([...via, ...(n.awaitingConfirmation.includes(operation) ? confirmRoutes : [])])];
+    if (through.length > 0) {
+      open.push({ operation, row: target, why: `the build declares ${through.join(' or ')}, a door that writes as the platform: whether the write goes through it is the run's to observe` });
+      continue;
+    }
+    const whose = owner === undefined ? 'a row the admin owns' : owner === n.persona ? `a row ${n.persona} owns` : `a row ${owner} owns`;
+    refused.push({
+      operation,
+      row: target,
+      why: sharingEnforces
+        ? `${whose}, and ${String(set.name)} holds no Modify All (\`modifyAllRecords\`) or \`writeScope: 'org'\` on ${n.object}`
+        : `${whose}, and ${n.object}'s ${ownerField ? `org-wide default (\`${String(declared ?? 'unset')}\`) is public` : 'records have no owner (`ownership` is not `user`)'}, so the sharing service abstains and nothing lifts the floor, Modify All included`,
+    });
+  }
+  return { refused, open };
+}
+
+/**
  * One Build check per persona × object × verb the card implies
  * ({@link personaGrantNeeds}), named `persona-grant:<persona>:<object>:<verb>`,
  * judged against the persona's own permission set
@@ -1092,6 +1203,11 @@ function designedRoutes(facts: ArtifactFacts, card: ScenarioArtifactCard, n: Per
  *    confirm-gated agent action on the object ({@link confirmGatedRoutes}).
  *    An operation without `via` is graded as before: an applied write stays
  *    measured whatever actions the build adds.
+ *    A delete the set grants is also read against the platform's owner-only
+ *    delete floor ({@link deleteFloorReading}): `allowDelete` without Modify
+ *    All does not pass a delete of a seeded row the persona does not own. It
+ *    fails where nothing lifts the floor on some write's row, and is not
+ *    measured where only a row-dependent rule or an elevated route could.
  *  - Refused `PERMISSION_DENIED` only: passes when the set refuses every such
  *    write — it grants no verb, or it locks a field each write names
  *    ({@link writeRefusalRoute}). When only a row rule could refuse one, the
@@ -1138,6 +1254,27 @@ export function gradePersonaGrants(facts: ArtifactFacts, card: ScenarioArtifactC
             `${setName} grants no ${n.verb} on ${n.object}, and the build declares the card's confirm-gated agent action${routed.length > 1 ? 's' : ''} ` +
             `${routed.join(', ')} there, a door that writes as the platform: whether ${n.requiredBy.join(', ')} goes through it is the run's to observe`,
         };
+      }
+      if (granted && n.verb === 'delete') {
+        const floor = deleteFloorReading(facts, card, set, n);
+        if (floor.refused.length > 0) {
+          return check(
+            name,
+            false,
+            `${setName} grants delete on ${n.object}, but the platform keeps owner-only deletes (its \`owner_only_deletes\` floor, ` +
+              '`created_by == current_user.id`) where nothing lifts it: ' +
+              floor.refused.map((r) => `operation ${r.operation} deletes ${r.row}, ${r.why}`).join('; '),
+          );
+        }
+        if (floor.open.length > 0) {
+          return {
+            check: name,
+            pass: false,
+            notMeasured:
+              `${setName} grants delete on ${n.object}; the platform's owner-only delete floor stands on ` +
+              floor.open.map((r) => `operation ${r.operation} (${r.row}), where ${r.why}`).join('; '),
+          };
+        }
       }
       return check(
         name,

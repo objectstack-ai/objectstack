@@ -122,8 +122,10 @@ A few common decision points where the right skill isn't obvious:
   (`beforeInsert`, etc.) live in **objectstack-data**; cross-record orchestration,
   approvals, and scheduled work live in **objectstack-automation**.
 - **Screen flows vs. views** — a stepped form over one object that never branches
-  is **ui** (a form view, `type: 'wizard'`); a screen flow that branches, or steps
-  across several objects, is **automation**. Static record / list / dashboard surfaces are **ui**.
+  is **ui**: a named form view (`type: 'wizard'`) that an action of `type: 'form'`
+  opens. An object's own New and Edit never step: they are built from its fields
+  and `fieldGroups`. A screen flow that branches, or steps across several
+  objects, is **automation**. Static record / list / dashboard surfaces are **ui**.
 - **Any CEL expression** — load **objectstack-formula** alongside the host
   skill (data validations, automation guards, UI visibility).
 - **Kernel / plugin events vs. data lifecycle** — `PluginContext` lifecycle and

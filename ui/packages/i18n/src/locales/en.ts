@@ -2043,6 +2043,13 @@ const en = {
     foldedMoreFields_other: '{{count}} more',
     expandFolded: 'Show each update',
     collapseFolded: 'Hide updates',
+    // objectstack#36290 — one line per changed field under an activity entry:
+    // the field's label before its values, the word for an empty side, and
+    // the control that shows a long value in full and clamps it again.
+    fieldChangeLabel: '{{field}}:',
+    fieldChangeEmpty: 'Empty',
+    fieldChangeExpand: 'Show all',
+    fieldChangeCollapse: 'Show less',
     // Replies
     replyCount: '{{count}} reply',
     replyCount_one: '{{count}} reply',
@@ -2567,7 +2574,8 @@ const en = {
       copyLink: 'Copy link',
       linkCopied: 'Link copied to clipboard',
       linkCopyFailed: 'Failed to copy link',
-      design: 'Design',
+      // objectstack#36487 — an object entry's Studio door, in this menu and first in a list's ⋮.
+      objectSettings: 'Object settings',
     },
     settingsHub: {
       title: 'Settings',

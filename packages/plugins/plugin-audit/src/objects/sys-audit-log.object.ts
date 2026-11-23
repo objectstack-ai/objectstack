@@ -81,6 +81,7 @@ export const SysAuditLog = ObjectSchema.create({
   label: 'Audit Log',
   pluralLabel: 'Audit Logs',
   icon: 'scroll-text',
+  color: 'amber',
   isSystem: true,
   managedBy: 'append-only',
   // [ADR-0131 D7] Deployment-level ledger: NO injected organization column.

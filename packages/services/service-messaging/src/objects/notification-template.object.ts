@@ -58,6 +58,7 @@ export const NotificationTemplate = ObjectSchema.create({
     label: 'Notification Template',
     pluralLabel: 'Notification Templates',
     icon: 'file-text',
+    color: 'pink',
     isSystem: true,
     // [ADR-0103, #3355] Admin-writable DATA on a platform-defined schema: authored
     // from the Setup "Notification Templates" grid. The bucket default is full

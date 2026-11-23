@@ -1,20 +1,22 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * One designer, one destination (objectui#12520): the sidebar ⋯ menu's Design
- * entry, and a favorite's, opens what the app bar's Edit app opens for that
- * item: its Studio surface, never the metadata-admin page.
+ * One destination (objectui#12520): the sidebar ⋯ menu's Object settings
+ * entry (Design before objectstack#36487), and a favorite's, opens what the app
+ * bar's Edit app opens on the object's list: the object in Studio, never the
+ * metadata-admin page. A dashboard or page entry has none since
+ * objectstack#36487: each is edited on its own page.
  *
  * Each case renders the real `AppHeader` on the route the entry itself opens
  * (the real `resolveHref` of `@object-ui/layout`, or the favorite's stored
- * `href`) and reads its Edit app button's href. The entry's Design path
+ * `href`) and reads its Edit app button's href. The entry's path
  * (`sidebarItemDesignPath` for a navigation entry, `favoriteDesignPath` for a
  * favorite) must be that same path. `SidebarItemMenu-12427` pins that the menu's
- * Design entry navigates to the path it is handed, and
+ * Object settings entry navigates to the path it is handed, and
  * `UnifiedSidebar.favoritesMenu-12427` that the sidebar hands it these.
  *
  * - An entry whose app has no owning package Studio can open answers `null`,
- *   so its Design entry hides, as the app bar's pencil does. Nothing falls back
+ *   so its Object settings entry hides, as the app bar's pencil does. Nothing falls back
  *   to the metadata-admin route.
  * - A favorite starred in another app resolves in THAT app's package, the one
  *   the app bar names once the favorite is open.
@@ -228,40 +230,32 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('a navigation entry\'s Design opens what the app bar\'s Edit app opens (objectui#12520)', () => {
+describe('a navigation entry\'s Object settings opens what the app bar\'s Edit app opens (objectui#12520)', () => {
   it('an object entry: the Data surface for the object, the bar\'s path on the object\'s list', async () => {
     const appBar = await appBarEditAppPath(entryRoute(LEADS, CRM));
     expect(appBar).toBe('/studio/com.acme.crm/data?surface=object:crm_lead');
     expect(sidebarItemDesignPath(LEADS, CRM)).toBe(appBar);
   });
 
-  it('a dashboard entry: the Interfaces surface for the dashboard, the bar\'s path on the dashboard', async () => {
-    const appBar = await appBarEditAppPath(entryRoute(OVERVIEW, CRM));
-    expect(appBar).toBe('/studio/com.acme.crm/interfaces?surface=dashboard:sales_overview');
-    expect(sidebarItemDesignPath(OVERVIEW, CRM)).toBe(appBar);
-  });
-
-  it('a page entry: whatever the bar opens on the page', async () => {
-    const appBar = await appBarEditAppPath(entryRoute(WORKBENCH, CRM));
-    expect(appBar).toBe('/studio/com.acme.crm/interfaces?surface=page:lead_workbench');
-    expect(sidebarItemDesignPath(WORKBENCH, CRM)).toBe(appBar);
+  it('a dashboard or page entry: no sidebar entry into Studio (objectstack#36487)', () => {
+    expect(sidebarItemDesignPath(OVERVIEW, CRM)).toBeNull();
+    expect(sidebarItemDesignPath(WORKBENCH, CRM)).toBeNull();
   });
 });
 
-describe('a favorite\'s Design opens what the app bar\'s Edit app opens once it is open (objectui#12520)', () => {
+describe('a favorite\'s Object settings opens what the app bar\'s Edit app opens once it is open (objectui#12520)', () => {
   const favorite = (id: string, href: string) => ({ id, href });
 
-  it('object, dashboard and page favorites match the bar on the favorite\'s own route', async () => {
-    const cases = [
-      favorite('object:crm_lead', '/apps/com.acme.crm/crm_lead'),
-      favorite('dashboard:sales_overview', '/apps/com.acme.crm/dashboard/sales_overview'),
-      favorite('page:lead_workbench', '/apps/com.acme.crm/page/lead_workbench'),
-    ];
-    for (const fav of cases) {
-      const appBar = await appBarEditAppPath(fav.href);
-      expect(appBar, fav.id).toMatch(/^\/studio\/com\.acme\.crm\//);
-      expect(favoriteDesignPath(fav, APPS), fav.id).toBe(appBar);
-    }
+  it('an object favorite matches the bar on the favorite\'s own route', async () => {
+    const fav = favorite('object:crm_lead', '/apps/com.acme.crm/crm_lead');
+    const appBar = await appBarEditAppPath(fav.href);
+    expect(appBar).toBe('/studio/com.acme.crm/data?surface=object:crm_lead');
+    expect(favoriteDesignPath(fav, APPS)).toBe(appBar);
+  });
+
+  it('dashboard and page favorites have none (objectstack#36487)', () => {
+    expect(favoriteDesignPath(favorite('dashboard:sales_overview', '/apps/com.acme.crm/dashboard/sales_overview'), APPS)).toBeNull();
+    expect(favoriteDesignPath(favorite('page:lead_workbench', '/apps/com.acme.crm/page/lead_workbench'), APPS)).toBeNull();
   });
 
   it('a favorite starred in another app resolves in that app\'s package, not the one the sidebar is in', async () => {
@@ -278,8 +272,8 @@ describe('a favorite\'s Design opens what the app bar\'s Edit app opens once it 
   });
 });
 
-describe('no Studio surface ⇒ no Design entry, and no metadata-admin fallback (objectui#12520)', () => {
-  it('an entry of an app with no owning package: the bar draws no pencil, and Design answers null', async () => {
+describe('no Studio surface ⇒ no Object settings entry, and no metadata-admin fallback (objectui#12520)', () => {
+  it('an entry of an app with no owning package: the bar draws no pencil, and the entry answers null', async () => {
     expect(await appBarEditAppPath(entryRoute(LEADS, RUNTIME))).toBeNull();
     expect(sidebarItemDesignPath(LEADS, RUNTIME)).toBeNull();
     expect(sidebarItemDesignPath(OVERVIEW, RUNTIME)).toBeNull();
