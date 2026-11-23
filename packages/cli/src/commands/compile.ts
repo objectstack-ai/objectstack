@@ -15,7 +15,7 @@ import {
   type ConversionNotice,
 } from '@objectstack/spec';
 import { loadConfig, namedExportRejectionHints } from '../utils/config.js';
-import { collectSeedFiles, placeSeedFiles } from '../utils/bundle-seed-files.js';
+import { collectSeedFiles, datasetsOf, placeSeedFiles } from '../utils/bundle-seed-files.js';
 import { collectConnectorSpecFiles, placeConnectorSpecFiles } from '../utils/bundle-connector-spec-files.js';
 import { judgeSeedRecordValues } from '../utils/seed-record-values.js';
 import { refuseUnbuiltStack } from '../utils/stack-provenance-refusal.js';
@@ -26,6 +26,8 @@ import { artifactPackages, runPerPackageAuthoringRules } from '../utils/artifact
 import { stackFilterJudge } from '../utils/authoring-filter-judge.js';
 import { buildAccessMatrix, diffAccessMatrix } from '@objectstack/lint';
 import { runAuthoringRules, splitBySeverity, authoringRulesFor } from '@objectstack/lint';
+import { judgeSeedRowRefusals, seedRowPairsNotJudged } from '@objectstack/lint';
+import { evaluateValidationRules } from '@objectstack/objectql';
 import { resolveJsxGateManifest, printJsxGateNotices } from '../utils/sdui-manifest.js';
 import {
   preflightDeclaredCapabilities,
@@ -1333,6 +1335,37 @@ export default class Compile extends Command {
         printError(`Seed record values the seed load refuses (${seedValueIssues.length} issue${seedValueIssues.length > 1 ? 's' : ''})`);
         for (const issue of seedValueIssues) console.log(chalk.red(`  ✗ ${issue.location}: ${issue.message} (${issue.code})`));
         this.exit(1);
+      }
+
+      // 4a-0-bis. [#35653] Seed RECORDS the seed load refuses — a record its
+      //     own validation rule refuses, and (#35486) a keyed record with a
+      //     blank key field — the gate `os validate` runs at its step 3d-ter,
+      //     with the write path's own evaluator. Each such record fails the
+      //     build here, naming the record and the rule, rather than being
+      //     dropped at boot.
+      const seedRowStack = authoringRuleUnionStack(finalBundle);
+      const seedRows = judgeSeedRowRefusals({
+        datasets: datasetsOf(finalBundle),
+        stack: seedRowStack,
+        evaluateValidationRules,
+      });
+      if (seedRows.refusals.length > 0) {
+        if (flags.json) {
+          await emitJson({ success: false, error: 'seed records refused', issues: seedRows.refusals, warnings: warningsSoFar(), conversions: conversionNotices }, 0, { compact: true });
+          this.exit(1);
+        }
+        const n = seedRows.refusals.length;
+        console.log('');
+        printError(`Seed records the seed load refuses (${n} record${n > 1 ? 's' : ''})`);
+        for (const refusal of seedRows.refusals) console.log(chalk.red(`  ✗ ${refusal.location}: ${refusal.message}`));
+        this.exit(1);
+      }
+      const seedPairsNotJudged = seedRowPairsNotJudged(seedRows);
+      if (seedPairsNotJudged > 0 && !flags.json) {
+        console.log(chalk.dim(
+          `  ${seedPairsNotJudged} seed record × validation rule pair(s) not judged here: the rule reads a value ` +
+            'the load decides (a reference, a default, a formula or roll-up, a hook, the stored row); the load still judges them',
+        ));
       }
 
       // 4a. [#25779] The files seed records name with `seedFile(path)`, read

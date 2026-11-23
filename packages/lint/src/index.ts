@@ -382,6 +382,23 @@ export {
 } from './validate-seed-state-machine.js';
 export type { SeedStateMachineFinding, SeedStateMachineSeverity } from './validate-seed-state-machine.js';
 
+// Seed records the seed load refuses — a record its own object's validation
+// rule refuses, and a keyed record with a blank key field — judged before the
+// load with the write path's evaluator, which the calling door injects.
+export {
+  judgeSeedRowRefusals,
+  seedRowPairsNotJudged,
+  SEED_ROW_REFUSED_BY_VALIDATION_RULE,
+  SEED_RECORD_KEY_FIELD_BLANK,
+} from './seed-row-refusals.js';
+export type {
+  SeedRowRefusal,
+  SeedRowJudgement,
+  SeedRowJudgeInput,
+  SeedRowNotJudgedReason,
+  SeedRuleObjectSchema,
+} from './seed-row-refusals.js';
+
 export {
   validateSecurityPosture,
   validateSecurityRoleWord,
