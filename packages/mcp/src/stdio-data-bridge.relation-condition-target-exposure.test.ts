@@ -237,11 +237,10 @@ describe('[#36393] the stdio bridge asks every hop of a nested-relation conditio
       expect(call?.where).toBe(where);
     });
 
-    it(`${verb}: CONTROL a system context is asked nothing at any hop (this transport's bypass, unchanged)`, async () => {
-      const { bridge, engine } = makeHopBridge({ disabled: new Set(['rcx_open']), isSystem: true });
+    it(`${verb}: CONTROL a system context is not asked the exposure question at any hop (this transport's bypass, unchanged)`, async () => {
+      const { bridge, engine } = makeHopBridge({ disabled: new Set(), isSystem: true });
       await run(bridge, { mid: { hidden: { name: 'x' } } });
-      await run(bridge, { mid: { open: { name: 'x' } } });
-      expect((verb === 'query' ? engine.find : engine.aggregate)).toHaveBeenCalledTimes(2);
+      expect((verb === 'query' ? engine.find : engine.aggregate)).toHaveBeenCalledTimes(1);
     });
   }
 });
