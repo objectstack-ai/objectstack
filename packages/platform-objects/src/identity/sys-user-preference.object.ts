@@ -21,6 +21,7 @@ export const SysUserPreference = ObjectSchema.create({
   label: 'User Preference',
   pluralLabel: 'User Preferences',
   icon: 'settings',
+  color: 'green',
   isSystem: true,
   // [ADR-0103, #3355] Admin/user-writable DATA on a platform-defined schema:
   // preferences are per-user state authored from the user's own settings page
