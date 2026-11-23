@@ -5,7 +5,7 @@
 
 fix(console): the app-name menu offers 「Design layout」 for the design mode and 「Edit app」 for Studio
 
-Clause-②: no
+Clause-②: yes (widening)
 Metadata-protocol: none
 
 The app-name menu's 「Edit app」 entered the design mode, which edits only the app's layout (its menu, header pins and page arrangement), and no desktop surface opened the app itself in Studio. The menu now has two entries under the list of apps, in one group with 「Add app」:
