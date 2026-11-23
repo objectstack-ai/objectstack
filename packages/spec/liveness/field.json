@@ -236,7 +236,10 @@
     },
     "inlineEdit": {
       "status": "live",
-      "note": "grid inline editing."
+      "verifiedAt": "2026-11-23",
+      "evidenceScope": "in-repo",
+      "evidence": "ui/packages/app-shell/src/providers/MetadataProvider.tsx#attachInlineSubforms passes 'grid' or 'form' to resolveInlineMode (ui/packages/plugin-form/src/deriveMasterDetail.ts) as the inline form factor of a child a parent field group places",
+      "note": "The form factor ('grid' | 'form') of a child that a parent field group (fieldGroups[].relatedList) places in the parent's form; the group, not this key, decides the placement (#35889). NARROWED 2026-11-23 (#35926): the boolean arm is retired — true and false both read as absent at every reader (MetadataProvider passes them as undefined, resolveInlineMode and the lint's formFactorOf take the smart default), so a boolean is refused at parse with the prescription and stripped from stored sources by the protocol-18 conversion field-inline-edit-boolean-removed. Verdict for the surviving values: LIVE."
     },
     "language": {
       "status": "live",

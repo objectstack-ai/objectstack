@@ -1647,6 +1647,39 @@ function refuseMalformedLookupFilterEntry(
   }
 }
 
+/**
+ * The prescription a boolean `inlineEdit` meets (protocol 18, ADR-0049
+ * enforce-or-remove; the field-group ruling of #35889, 「一律只看分组」).
+ *
+ * Since a field group of the PARENT decides whether the parent's form inlines
+ * a child (`ObjectFieldGroupSchema.relatedList`), the relationship's
+ * `inlineEdit` only picks the form factor of a placed child. Measured on every
+ * reader of the key — the console's `attachInlineSubforms`
+ * (`ui/packages/app-shell/src/providers/MetadataProvider.tsx`), the form
+ * plugin's `resolveInlineMode` and the `field-no-consumers` lint's
+ * `formFactorOf` — `true` and `false` both read exactly as an absent key: the
+ * form factor picked from the child's shape. A boolean therefore declared
+ * something nothing did, and the arm leaves the vocabulary; `'grid'` and
+ * `'form'` stay.
+ *
+ * Stored and built metadata never meets this refusal: the protocol-18
+ * ADR-0087 conversion `field-inline-edit-boolean-removed` deletes a boolean
+ * `inlineEdit` (lossless — absent is what it read as) on every data-at-rest
+ * seam, and is retired from the authoring funnel, so a live author is refused
+ * here and told what decides the placement instead.
+ *
+ * ⛔ Runtime text — no tracker numbers (`check:doc-authoring`).
+ */
+const INLINE_EDIT_BOOLEAN_RETIRED =
+  '`field.inlineEdit: true` and `field.inlineEdit: false` were removed in @objectstack/spec 18.7.0 '
+  + '(ADR-0049 enforce-or-remove) — neither boolean had an effect: a field group of the parent '
+  + '(`fieldGroups[].relatedList`) decides whether the parent\'s form inlines this child, and both '
+  + '`true` and `false` read as an absent key, the form factor picked from the child\'s shape. '
+  + 'Delete the key, or write `\'grid\'` (an editable line-item grid) or `\'form\'` (a list whose rows '
+  + 'open the child\'s full form) to choose the form factor; to inline the child in the parent\'s form, '
+  + 'name it in a field group of the parent (`fieldGroups[].relatedList`). '
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
+
 export const FieldSchema = lazySchema(() => {
   const base = strictObject({
   surface: 'this field',
@@ -2311,8 +2344,8 @@ export const FieldSchema = lazySchema(() => {
    * the record page and stays out of the form, whatever this key says.
    *
    * The value selects the EDITING FORM FACTOR of a placed child:
-   *   - `true` / absent → auto: the UI picks `grid` or `form` from the
-   *                child's shape (rich types / many fields → `form`, else `grid`).
+   *   - absent → auto: the UI picks `grid` or `form` from the child's shape
+   *                (rich types / many fields → `form`, else `grid`).
    *   - `'grid'` → an editable line-item grid (fast bulk entry; thin children
    *                like invoice lines / order items).
    *   - `'form'` → a compact read-only list; "Add" / per-row edit opens the
@@ -2320,8 +2353,14 @@ export const FieldSchema = lazySchema(() => {
    *                text, attachments, many fields).
    * Place true line-item/composition children with a group; leave
    * associations (comments, attachments) as tabs.
+   *
+   * The boolean arm is retired (#35926, ADR-0049): `true` and `false` both
+   * read as absent once the group decides the placement, so each is refused
+   * with {@link INLINE_EDIT_BOOLEAN_RETIRED}.
    */
-  inlineEdit: z.union([z.boolean(), z.enum(['grid', 'form'])]).optional().describe('How the parent\'s form edits these child records inline (atomic master-detail) when a field group of the parent names this child (fieldGroups[].relatedList); a child no group names is not inlined, whatever this says. true or absent = auto-pick grid/form by child shape; \'grid\' = editable line-item grid; \'form\' = list + per-row full form.'),
+  inlineEdit: z.enum(['grid', 'form'], {
+    error: (issue) => (typeof issue.input === 'boolean' ? INLINE_EDIT_BOOLEAN_RETIRED : undefined),
+  }).optional().describe('How the parent\'s form edits these child records inline (atomic master-detail) when a field group of the parent names this child (fieldGroups[].relatedList); a child no group names is not inlined, whatever this says. Absent = auto-pick grid/form by child shape; \'grid\' = editable line-item grid; \'form\' = list + per-row full form. A boolean is refused: true and false both read as absent.'),
   /** Optional section title for the inline grid (defaults to the child object label). */
   inlineTitle: z.string().optional().describe('Title for the inline master-detail grid'),
   /**
@@ -2336,7 +2375,8 @@ export const FieldSchema = lazySchema(() => {
   inlineAmountField: z.string().optional().describe('Numeric child field summed for the inline grid total'),
 
   /**
-   * Detail-page RELATED LIST — the read-side mirror of `inlineEdit`. On a
+   * Detail-page RELATED LIST — the record-page side of a child relationship,
+   * as `inlineEdit` is the form side (the form factor of a placed child). On a
    * child's `master_detail`/`lookup` field (whose `reference` is the parent),
    * this governs whether/how the child collection appears as a related list on
    * the parent's record DETAIL page. Owned children (`master_detail`) and
@@ -2389,7 +2429,7 @@ export const FieldSchema = lazySchema(() => {
    * A child object with no list-view sort emits no ordering parameter at all,
    * and rows fall back to record-id order.
    */
-  relatedList: z.union([z.boolean(), z.literal('primary')]).optional().describe('Show this child collection as a related list on the parent\'s detail page (read-side mirror of inlineEdit). true = an auxiliary panel on the record page; absent = an auxiliary panel, except that a master_detail field becomes a body table when a field group of the parent names it (fieldGroups[].relatedList); false = hidden: the child object is not shown on the parent record page; \'primary\' = a body table: part of the record\'s main content, shown as a full-width table in the record\'s detail body. Write true on a master_detail field to keep it an auxiliary panel even from a field group. \'primary\' places a list and does not order it: the parent object\'s relatedLists orders the full-width tables and the auxiliary panels. The page layout is defined by ADR-0085. A derived related list (relatedList: \'primary\') inherits its row order from the child object\'s DEFAULT list view sort — the isDefault view, or the first declared list item when none is marked default; wire spelling is sort=<field> / sort=-<field>, never $orderby. A child object with no list-view sort emits no ordering parameter, and rows fall back to record-id order.'),
+  relatedList: z.union([z.boolean(), z.literal('primary')]).optional().describe('Show this child collection as a related list on the parent\'s detail page (the record-page side; inlineEdit picks the form factor on the form side). true = an auxiliary panel on the record page; absent = an auxiliary panel, except that a master_detail field becomes a body table when a field group of the parent names it (fieldGroups[].relatedList); false = hidden: the child object is not shown on the parent record page; \'primary\' = a body table: part of the record\'s main content, shown as a full-width table in the record\'s detail body. Write true on a master_detail field to keep it an auxiliary panel even from a field group. \'primary\' places a list and does not order it: the parent object\'s relatedLists orders the full-width tables and the auxiliary panels. The page layout is defined by ADR-0085. A derived related list (relatedList: \'primary\') inherits its row order from the child object\'s DEFAULT list view sort — the isDefault view, or the first declared list item when none is marked default; wire spelling is sort=<field> / sort=-<field>, never $orderby. A child object with no list-view sort emits no ordering parameter, and rows fall back to record-id order.'),
   /** Optional section title for the detail-page related list (defaults to the child object label). */
   relatedListTitle: z.string().optional().describe('Title for the detail-page related list'),
   /**
