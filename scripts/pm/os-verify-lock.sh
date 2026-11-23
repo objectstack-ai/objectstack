@@ -4269,6 +4269,76 @@ FAKEDATE
     "$(bash "$SELF" --status 2>&1 | grep -c 'blocks nobody')" 1
   rm -rf "$sq"
 
+  # ⭐ A RESUMED SLOT IS A LIVE WAITER, AND IT IS AGED AS ONE (#36532). A place
+  # kept across turns has, by construction, an arrival older than one call —
+  # that is what keeping it means. The waiter-age bound (TICKET_MAX_AGE_S) exists
+  # to catch a call that outlived its own budget, so it must run from when THIS
+  # call took the ticket. Run from the arrival it read a resumer as over-age a
+  # few minutes into its second wait: the next scan deleted the ticket, the
+  # caller was re-minted at the back of the queue, and the call that had waited
+  # longest was the one that never acquired. The fixture's arrival is past that
+  # bound on purpose, so this pair cannot pass while the bound reads arrival.
+  mkdir -p "$sq"
+  local la_arrival la_name la_out la_n la_f
+  la_arrival=$(($(now_s) - TICKET_MAX_AGE_S - 120))
+  la_name="$(printf '%020d' $((la_arrival * 1000000000)))-slong-wait"
+  printf '0 %s %s long-wait\n' "$(now_s)" "$la_arrival" > "${sq}/${la_name}"
+  bash "$SELF" -c 'sleep 6' > /dev/null 2>&1 &
+  local laholder=$!
+  sleep 1.5
+  la_out="$(OS_VERIFY_LOCK_SLOT=long-wait OS_VERIFY_LOCK_WAIT=3 bash "$SELF" -c true 2>&1)"
+  st_case 'a slot whose arrival is older than one call still resumes it' \
+    "$(printf '%s\n' "$la_out" | grep -c "resumed slot 'long-wait' — keeping the place it took")" 1
+  st_case 'and the place it parks again is that SAME place, not a fresh one at the back' \
+    "$([[ -f "${sq}/${la_name}" ]] && echo yes || echo no)" yes
+  la_n=0
+  for la_f in "$sq"/*-slong-wait; do
+    [[ -f "$la_f" ]] && la_n=$((la_n + 1))
+  done
+  st_case 'and no second place was minted for the slot while it waited' "$la_n" 1
+  st_case 'and the resume line still reports the age of the ORIGINAL arrival' \
+    "$(printf '%s\n' "$la_out" | grep -c "keeping the place it took 9[6-9][0-9]s")" 1
+  st_case '--status reports the kept place by its arrival, not by its last resume' \
+    "$(OS_VERIFY_LOCK_FILE="$L" bash "$SELF" --status 2>&1 | grep -cE "^parked 1: slot long-wait, place kept (9[6-9][0-9]|1[0-9]{3})s")" 1
+  # The other half, in-process: the RESUMED record a live caller writes reads
+  # active. Ticket globals are this shell's, so they are restored after.
+  local la_qsave="$QUEUE_DIR" la_ssave="$SLOT_SLUG" la_tsave="$TICKET"
+  QUEUE_DIR="$sq"
+  SLOT_SLUG=long-wait
+  take_ticket in-process-resume 2> /dev/null
+  st_case 'and the resumed record reads as an ACTIVE waiter, not an over-age corpse' \
+    "$(ticket_state "$TICKET")" active
+  st_case 'and a resume keeps the filename — the place — exactly' "${TICKET##*/}" "$la_name"
+  QUEUE_DIR="$la_qsave"
+  SLOT_SLUG="$la_ssave"
+  TICKET="$la_tsave"
+  kill "$laholder" 2> /dev/null
+  wait "$laholder" 2> /dev/null
+  rm -rf "$sq"
+
+  # And the exit-99 promise is only made when it is true. A slot whose ticket
+  # is gone when the budget runs out has nothing to park, so "your place is
+  # KEPT" would send the caller back expecting a place the next call cannot
+  # find. The ticket is removed by hand here — the hostile-cleanup shape; the
+  # over-age shape above can no longer produce it.
+  mkdir -p "$sq"
+  bash "$SELF" -c 'sleep 6' > /dev/null 2>&1 &
+  local lsholder=$!
+  sleep 1.5
+  local ls_log="${tmp}/lost-slot.log"
+  OS_VERIFY_LOCK_SLOT=lost-slot OS_VERIFY_LOCK_WAIT=3 bash "$SELF" -c true > "$ls_log" 2>&1 &
+  local lswaiter=$!
+  sleep 1.2
+  rm -f "$sq"/*-slost-slot
+  wait "$lswaiter" 2> /dev/null
+  st_case 'a slot whose ticket vanished mid-wait is NOT told its place was kept' \
+    "$(grep -c 'Your place is KEPT' "$ls_log")" 0
+  st_case 'it is told the place was LOST, and that the next call starts at the back' \
+    "$(grep -c "slot 'lost-slot' was LOST" "$ls_log")" 1
+  kill "$lsholder" 2> /dev/null
+  wait "$lsholder" 2> /dev/null
+  rm -rf "$sq"
+
   # ⭐ THE ONE MEASURED EXCEPTION TO HEADSHIP (#15581) — pinned from both sides,
   # because only the pair is the claim the ordering block at the top of this
   # file now makes. That block used to say the tickets ahead of you "can only
