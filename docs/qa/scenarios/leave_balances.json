@@ -795,7 +795,7 @@
       },
       {
         "id": "sick_by_medical_note",
-        "ask": {"zh": "病假单按就诊说明分别有多少张?", "en": "How many sick-leave requests are there for each medical note?"},
+        "ask": {"zh": "病假单按就诊说明里写的内容分别有多少张?(按说明本身,不是按是否附有医疗证明)", "en": "How many sick-leave requests are there for each medical note, counted by what the note itself says (not by whether a medical certificate is attached)?"},
         "object": "leave_request",
         "truth": {
           "kind": "count",
