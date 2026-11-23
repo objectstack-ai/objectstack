@@ -196,8 +196,12 @@ function useResolver(
   // Read through a ref, so the resolver is ONE function for the dialog's life:
   // the view's effect keys on it, and a caller's fresh closure each render
   // must not re-run a read (nor, after a refusal, re-ask in a loop).
+  // Refreshed in an effect declared before the dialog's own read effect, so
+  // that read always sees this render's values.
   const latest = React.useRef({ resolveUrl, fetchImpl, t });
-  latest.current = { resolveUrl, fetchImpl, t };
+  React.useEffect(() => {
+    latest.current = { resolveUrl, fetchImpl, t };
+  });
   return React.useCallback(
     (file: FilePreviewItem, index: number): Promise<string> => {
       const { resolveUrl, fetchImpl, t } = latest.current;
