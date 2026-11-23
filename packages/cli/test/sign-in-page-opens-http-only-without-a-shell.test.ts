@@ -41,8 +41,11 @@ import AuthLogin from '../src/commands/login.js';
 import { mcpClientRunner, resolveClientExecutable } from '../src/commands/mcp/connect.js';
 
 const PLAIN = 'https://sign-in.example.test/device?user_code=ABCD-EFGH';
-/** An https address whose query and fragment hold punctuation. */
-const PUNCTUATED = 'https://sign-in.example.test/device?user_code=AB&x=a|b;c$(d)`e`^f%g!h"i\'j<k>#l m';
+/**
+ * An https address whose query and fragment hold punctuation: the delimiters
+ * an address may carry, and characters the parser percent-encodes there.
+ */
+const PUNCTUATED = 'https://sign-in.example.test/device?user_code=AB&x=a;b$c(d)!e*f+g,h=i@j~k"l<m>n o\'p#q:r/s';
 
 const realPlatform = process.platform;
 function onPlatform(platform: NodeJS.Platform): void {
@@ -128,6 +131,35 @@ describe.each(Object.entries(FLOWS))('%s: the sign-in page opens from an argv ar
     }
   }
 
+  it('a launch that fails to start says so, not that the address is not http or https', async () => {
+    onPlatform('linux');
+    cp.spawn.mockImplementation(() => { throw new Error('spawn failed'); });
+    await run(PLAIN);
+
+    expect(cp.spawn).toHaveBeenCalledTimes(1);
+    expect(logged.some((line) => line.includes('Could not start a browser'))).toBe(true);
+    expect(logged.some((line) => line.includes('not an http or https address'))).toBe(false);
+    expect(logged.some((line) => line.includes('Browser opened automatically'))).toBe(false);
+  });
+
+  for (const address of [
+    'http://sign"in.example.test/device',
+    'https://sign-in.example.test/device?user_code=AB|CD',
+    'https://sign-in.example.test/device?user_code={AB}^CD',
+  ]) {
+    it(`an http(s) address holding a character outside the plain URL set is printed, not launched: ${JSON.stringify(address)}`, async () => {
+      for (const platform of ['darwin', 'linux', 'win32'] as const) {
+        onPlatform(platform);
+        logged = [];
+        await run(address);
+
+        for (const fn of Object.values(cp)) expect(fn).not.toHaveBeenCalled();
+        expect(logged.some((line) => line.includes('Browser opened automatically'))).toBe(false);
+        expect(logged.some((line) => line.includes('not an http or https address in plain URL characters'))).toBe(true);
+      }
+    });
+  }
+
   for (const address of ['file:///etc/hosts', 'javascript:void(0)', 'ms-settings:privacy', 'sign-in.example.test/device', 'not a url']) {
     it(`an address that is not http or https is never launched, and is printed instead: ${JSON.stringify(address)}`, async () => {
       onPlatform('linux');
@@ -170,13 +202,20 @@ describe('os mcp connect starts the client from an argv array, without a shell',
     expect(resolveClientExecutable('claude')).toEqual({ kind: 'batch-shim', path: 'C:\\npm\\claude.cmd' });
   });
 
-  it('win32: the current directory and relative PATH entries are not searched', () => {
-    onPlatform('win32');
-    vi.stubEnv('PATH', '.;bin');
-    fsMock.files.add('.\\claude.exe');
-    fsMock.files.add('bin\\claude.exe');
+  it('win32: the current directory, relative PATH entries and entries rooted without a drive are not searched', () => {
+    // Every candidate is "a file", so any entry that were searched would be found.
+    const probed: string[] = [];
+    const lookup = (PATH: string) => resolveClientExecutable('claude', {
+      platform: 'win32',
+      env: { PATH },
+      isFile: (candidate) => { probed.push(candidate); return true; },
+    });
 
-    expect(resolveClientExecutable('claude')).toEqual({ kind: 'missing' });
+    expect(lookup('.;bin;..\\tools;\\rooted\\no-drive;"relative"')).toEqual({ kind: 'missing' });
+    expect(probed).toEqual([]);
+    // The same lookup does search a drive-rooted entry, so the empty answer above is the filter's.
+    expect(lookup('.;C:\\tools')).toEqual({ kind: 'found', path: 'C:\\tools\\claude.com' });
+    expect(probed).toEqual(['C:\\tools\\claude.com']);
   });
 
   it.each(['darwin', 'linux'] as const)('%s: runs `claude` by name, with no shell', (platform) => {
