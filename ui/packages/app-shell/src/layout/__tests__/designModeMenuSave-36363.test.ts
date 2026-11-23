@@ -16,7 +16,7 @@ vi.mock('../../assistant/assistantBus', async (importOriginal) => ({
   emitMetadataRefresh,
 }));
 
-import { withEntryIds, moveBy, insertEntry, patchEntry, type Menu } from '../designModeMenuModel';
+import { withEntryIds, moveBy, inShownOrder, insertEntry, patchEntry, type Menu } from '../designModeMenuModel';
 import { isSameLanguage, saveAppMenu, type AppMenuSaveDoors } from '../designModeMenuSave';
 
 const TEXTS = { notListed: 'not listed', pendingDraft: 'pending draft', noVersion: 'no version', notWritable: 'not writable' };
@@ -216,6 +216,58 @@ describe('the save writes the stored menu with the edits, never the served one (
     const edited = insertEntry(SERVED, null, 0, { id: 'blank', type: 'object' });
     await saveAppMenu({ appName: 'crm', packageId: 'com.acme.crm', served: SERVED, navigation: edited }, TEXTS, d);
     expect(savedNav(calls)).toEqual(STORED);
+  });
+});
+
+describe('the save writes the order the editor showed as `order` (objectstack#36591)', () => {
+  const object = (id: string, label: string, order?: number, extra: Record<string, unknown> = {}) => ({
+    id,
+    type: 'object',
+    objectName: `crm_${id}`,
+    label,
+    ...(order === undefined ? {} : { order }),
+    ...extra,
+  });
+  /** As stored, authored out of `order`; the sidebar reads Customers, Contacts, Opportunities. */
+  const STORED: Menu = [object('opportunity', 'Opportunities', 2), object('contact', 'Contacts', 1), object('customer', 'Customers', 0)];
+  /** The editor's seed, as `DesignModeMenu` makes it. */
+  const seed = (nav: Menu) => withEntryIds(inShownOrder(nav));
+  const written = async (stored: Menu, served: Menu, edit: (m: Menu) => Menu) => {
+    const { d, calls } = doors({ writable: true, stored });
+    await saveAppMenu({ appName: 'crm', packageId: 'com.acme.crm', served, navigation: edit(served) }, TEXTS, d);
+    return savedNav(calls).map((e) => [e.id, e.order]);
+  };
+
+  it('an entry added at the end is numbered after the rest, and each entry gets its shown place', async () => {
+    const served = seed(STORED);
+    const nav = await written(STORED, served, (m) => insertEntry(m, null, 3, { id: 'nav_item_1', type: 'object', objectName: 'crm_case' }));
+    expect(nav).toEqual([['customer', 0], ['contact', 1], ['opportunity', 2], ['nav_item_1', 3]]);
+  });
+
+  it('a move up is written as `order`; a rename beside it writes its label, and `order` is never read as an edit', async () => {
+    const served = seed(STORED);
+    const { d, calls } = doors({ writable: true, stored: STORED });
+    const navigation = patchEntry(moveBy(served, 'contact', -1), 'opportunity', { label: 'Deals' });
+    await saveAppMenu({ appName: 'crm', packageId: 'com.acme.crm', served, navigation }, TEXTS, d);
+    expect(savedNav(calls)).toEqual([
+      object('contact', 'Contacts', 0),
+      object('customer', 'Customers', 1),
+      object('opportunity', 'Deals', 2),
+    ]);
+  });
+
+  it('an entry pruned from the reader keeps its shown place among the rest', async () => {
+    const stored: Menu = [...STORED, object('payroll', 'Payroll', 1.5, { requiredPermissions: ['hr.admin'] })];
+    const served = seed(STORED);
+    const nav = await written(stored, served, (m) => moveBy(m, 'customer', 1));
+    expect(nav).toEqual([['contact', 0], ['customer', 1], ['payroll', 2], ['opportunity', 3]]);
+  });
+
+  it('CONTROL: a menu carrying no `order` is saved by array order and gains no `order` key', async () => {
+    const stored: Menu = STORED.map(({ order: _order, ...e }) => e);
+    const served = seed(stored);
+    const nav = await written(stored, served, (m) => moveBy(m, 'customer', -1));
+    expect(nav).toEqual([['opportunity', undefined], ['customer', undefined], ['contact', undefined]]);
   });
 });
 

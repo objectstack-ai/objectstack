@@ -10,6 +10,7 @@ import {
   canMoveBy,
   entryFor,
   groupsOf,
+  inShownOrder,
   insertEntry,
   menuTargets,
   moveBy,
@@ -23,6 +24,7 @@ import {
   targetKeyFor,
   targetKeyOf,
   withEntryIds,
+  withOrderRewritten,
   type Menu,
 } from '../designModeMenuModel';
 
@@ -221,5 +223,41 @@ describe('the edits replayed on the stored menu (objectstack#36363, review 70812
     expect(served[0].id).toBe('nav_item_1');
     expect(rebaseMenuEdits(served, removeEntry(served, 'nav_item_1'), stored)).toEqual([hidden]);
     expect(storedEntriesById(served, stored).get('nav_item_1')).toBe(lead);
+  });
+});
+
+describe('a level in the sidebar order, and that order written back as `order` (objectstack#36591)', () => {
+  const at = (id: string, order?: number, children?: Menu) => ({
+    id,
+    type: children ? 'group' : 'page',
+    ...(children ? { children } : { pageName: id }),
+    ...(order === undefined ? {} : { order }),
+  });
+  const orders = (menu: Menu): unknown[] =>
+    menu.map((e) => (Array.isArray(e.children) ? [e.order, orders(e.children as Menu)] : e.order));
+
+  it('each level is put in `order`, an absent one as 0, ties as authored; the group with its children', () => {
+    const menu: Menu = Object.freeze([at('c', 2), at('a'), at('g', 1, [at('y', 1), at('x', 0)]), at('b')]);
+    expect(ids(inShownOrder(menu))).toEqual(['a', 'b', ['g', ['x', 'y']], 'c']);
+  });
+
+  it('a menu with no `order` is the menu itself', () => {
+    expect(inShownOrder(MENU)).toBe(MENU);
+  });
+
+  it('a level carrying `order` is numbered 0… in array order, every entry of it, those without one included', () => {
+    const menu: Menu = Object.freeze([at('b', 5), at('a'), at('g', 9, [at('y', 1), at('x')])]);
+    const next = withOrderRewritten(menu);
+    expect(ids(next)).toEqual(['b', 'a', ['g', ['y', 'x']]]);
+    expect(orders(next)).toEqual([0, 1, [2, [0, 1]]]);
+    expect(ids(inShownOrder(next))).toEqual(ids(next));
+  });
+
+  it('a level carrying no `order` gains none, though its group, or a group in it, does', () => {
+    const menu: Menu = Object.freeze([at('a'), at('g', undefined, [at('y', 3), at('x')]), at('h', undefined, [at('z')])]);
+    const next = withOrderRewritten(menu);
+    expect(orders(next)).toEqual([undefined, [undefined, [0, 1]], [undefined, [undefined]]]);
+    expect(next[2]).toBe(menu[2]);
+    expect(withOrderRewritten(MENU)).toBe(MENU);
   });
 });
