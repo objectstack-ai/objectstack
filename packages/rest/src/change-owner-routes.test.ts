@@ -212,46 +212,6 @@ describe('[#35402] POST /data/:object/:id/change-owner', () => {
   });
 });
 
-describe('[#35402] POST /data/:object/change-owner — bulk', () => {
-  it('a mixed batch answers 200 with a per-row report, every refused row listed with the door\'s code', async () => {
-    const engine = mockEngine((id) => (id === 'l2' ? transferDenied() : undefined));
-    const { bulk } = buildServer(engine);
-    const res = mockRes();
-    await bulk!.handler(req({ object: 'lead' }, { ids: ['l1', 'l2', 'l9'], ownerId: 'u_next' }), res);
-    expect(res.statusCode).toBe(200);
-    expect(res.body.data).toMatchObject({ object: 'lead', field: 'owner_id', ownerId: 'u_next', updated: 1, failed: 2, notified: false });
-    expect(res.body.data.failures.map((f: any) => [f.id, f.code])).toEqual([['l2', 'PERMISSION_DENIED'], ['l9', 'RECORD_NOT_FOUND']]);
-    expect(engine.update.mock.calls.map((c: any[]) => c[2])).toEqual([
-      { where: { id: 'l1' }, context: CALLER, strictReadonlyWrites: true },
-      { where: { id: 'l2' }, context: CALLER, strictReadonlyWrites: true },
-      { where: { id: 'l9' }, context: CALLER, strictReadonlyWrites: true },
-    ]);
-  });
-
-  it('an object that switched the action off is refused as a whole, 403 CHANGE_OWNER_DISABLED', async () => {
-    const engine = mockEngine();
-    const { bulk } = buildServer(engine);
-    const res = mockRes();
-    await bulk!.handler(req({ object: 'pinned_lead' }, { ids: ['p1'], ownerId: 'u_next' }), res);
-    expect(res.statusCode).toBe(403);
-    expect(res.body.error.code).toBe('CHANGE_OWNER_DISABLED');
-    expect(engine.update).not.toHaveBeenCalled();
-  });
-
-  it('refuses a missing, empty, repeated or over-cap id list before any write', async () => {
-    const tooMany = Array.from({ length: 501 }, (_, i) => `l${i}`);
-    for (const ids of [undefined, 'l1', [], ['l1', 'l1'], [''], tooMany]) {
-      const engine = mockEngine();
-      const { bulk } = buildServer(engine);
-      const res = mockRes();
-      await bulk!.handler(req({ object: 'lead' }, { ids, ownerId: 'u_next' }), res);
-      expect(res.statusCode, JSON.stringify(ids)?.slice(0, 40)).toBe(400);
-      expect(res.body.error.code).toBe('VALIDATION_ERROR');
-      expect(engine.update).not.toHaveBeenCalled();
-    }
-  });
-});
-
 /**
  * A `readonlyWhen` lock on the owner column that holds for the record, over a
  * REAL `ObjectQL` + SQLite `:memory:`: the engine strips a locked key, so the
@@ -306,10 +266,8 @@ describe('POST /data/:object/(:id/)change-owner — a readonlyWhen lock on the o
     const { single } = buildServer(engine, { caller: MEMBER, messaging });
     const res = mockRes();
     await single!.handler(req({ object: OBJECT, id: 'k_closed' }, { ownerId: 'u_next', notify: true }), res);
-    expect(res.statusCode, JSON.stringify(res.body)).not.toBe(200);
-    expect(res.statusCode).toBeGreaterThanOrEqual(400);
+    expect(res.statusCode, JSON.stringify(res.body)).toBe(403);
     expect(res.body.success).toBe(false);
-    expect(res.statusCode).toBe(403);
     expect(res.body.error.code).toBe('FIELD_NOT_ACCESSIBLE');
     expect((await stored('k_closed'))?.owner_id).toBe('u_a');
     expect(messaging.emit).not.toHaveBeenCalled();
@@ -340,8 +298,7 @@ describe('POST /data/:object/(:id/)change-owner — a readonlyWhen lock on the o
     const { single, bulk } = buildServer(engine, { caller: MEMBER });
     const res = mockRes();
     await single!.handler(req({ object: OBJECT, id: 'k_closed' }, { queue: 'triage' }), res);
-    expect(res.statusCode, JSON.stringify(res.body)).not.toBe(200);
-    expect(res.statusCode).toBe(403);
+    expect(res.statusCode, JSON.stringify(res.body)).toBe(403);
     expect(res.body.error.code).toBe('FIELD_NOT_ACCESSIBLE');
     expect(await stored('k_closed')).toMatchObject({ owner_id: 'u_a', queue: null });
 
@@ -363,5 +320,45 @@ describe('POST /data/:object/(:id/)change-owner — a readonlyWhen lock on the o
     expect(res.body.data).toMatchObject({ ownerId: 'u_next', notified: false });
     expect(messaging.emit).toHaveBeenCalledTimes(1);
     expect((await stored('k_open'))?.owner_id).toBe('u_next');
+  });
+});
+
+describe('[#35402] POST /data/:object/change-owner — bulk', () => {
+  it('a mixed batch answers 200 with a per-row report, every refused row listed with the door\'s code', async () => {
+    const engine = mockEngine((id) => (id === 'l2' ? transferDenied() : undefined));
+    const { bulk } = buildServer(engine);
+    const res = mockRes();
+    await bulk!.handler(req({ object: 'lead' }, { ids: ['l1', 'l2', 'l9'], ownerId: 'u_next' }), res);
+    expect(res.statusCode).toBe(200);
+    expect(res.body.data).toMatchObject({ object: 'lead', field: 'owner_id', ownerId: 'u_next', updated: 1, failed: 2, notified: false });
+    expect(res.body.data.failures.map((f: any) => [f.id, f.code])).toEqual([['l2', 'PERMISSION_DENIED'], ['l9', 'RECORD_NOT_FOUND']]);
+    expect(engine.update.mock.calls.map((c: any[]) => c[2])).toEqual([
+      { where: { id: 'l1' }, context: CALLER, strictReadonlyWrites: true },
+      { where: { id: 'l2' }, context: CALLER, strictReadonlyWrites: true },
+      { where: { id: 'l9' }, context: CALLER, strictReadonlyWrites: true },
+    ]);
+  });
+
+  it('an object that switched the action off is refused as a whole, 403 CHANGE_OWNER_DISABLED', async () => {
+    const engine = mockEngine();
+    const { bulk } = buildServer(engine);
+    const res = mockRes();
+    await bulk!.handler(req({ object: 'pinned_lead' }, { ids: ['p1'], ownerId: 'u_next' }), res);
+    expect(res.statusCode).toBe(403);
+    expect(res.body.error.code).toBe('CHANGE_OWNER_DISABLED');
+    expect(engine.update).not.toHaveBeenCalled();
+  });
+
+  it('refuses a missing, empty, repeated or over-cap id list before any write', async () => {
+    const tooMany = Array.from({ length: 501 }, (_, i) => `l${i}`);
+    for (const ids of [undefined, 'l1', [], ['l1', 'l1'], [''], tooMany]) {
+      const engine = mockEngine();
+      const { bulk } = buildServer(engine);
+      const res = mockRes();
+      await bulk!.handler(req({ object: 'lead' }, { ids, ownerId: 'u_next' }), res);
+      expect(res.statusCode, JSON.stringify(ids)?.slice(0, 40)).toBe(400);
+      expect(res.body.error.code).toBe('VALIDATION_ERROR');
+      expect(engine.update).not.toHaveBeenCalled();
+    }
   });
 });
