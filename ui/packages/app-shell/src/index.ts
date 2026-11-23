@@ -85,6 +85,10 @@ export {
   LoadingFallback,
 } from './console/ConsoleShell.js';
 
+// objectstack#36732 — what a host draws above the Setup app's first page (the
+// console's first-run checklist, now that the desktop's home page retired).
+export { SetupFirstPageSlotProvider, type SetupFirstPageSlot } from './console/setupFirstPageSlot.js';
+
 // Host-app route policy (ADR-0048) — which app's `/apps/<segment>/…` URL a
 // framework-owned, app-INDEPENDENT page should build, and the two predicates it
 // is defined in terms of. Published from the package root (objectui#4280)
