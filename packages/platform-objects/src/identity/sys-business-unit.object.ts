@@ -26,6 +26,7 @@ export const SysBusinessUnit = ObjectSchema.create({
   label: 'Business Unit',
   pluralLabel: 'Business Units',
   icon: 'building',
+  color: 'blue',
   isSystem: true,
   managedBy: 'platform',
   // Admin-facing copy: what the records are and what an admin does here. The

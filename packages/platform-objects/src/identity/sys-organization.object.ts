@@ -18,6 +18,7 @@ export const SysOrganization = ObjectSchema.create({
   label: 'Organization',
   pluralLabel: 'Organizations',
   icon: 'building-2',
+  color: 'blue',
   isSystem: true,
   managedBy: 'better-auth',
   // [#15873 — maintainer ruling 2026-09-07, option (a), verbatim 「同意」]

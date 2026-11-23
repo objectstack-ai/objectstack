@@ -25,6 +25,7 @@ export const Task = ObjectSchema.create({
   label: 'Task',
   pluralLabel: 'Tasks',
   icon: 'check-square',
+  color: 'orange',
   description: 'A unit of work inside a project.',
 
   fields: {

@@ -30,6 +30,7 @@ export const SysNotification = ObjectSchema.create({
   label: 'Notification Event',
   pluralLabel: 'Notification Events',
   icon: 'bell',
+  color: 'pink',
   isSystem: true,
   managedBy: 'engine-owned',
   // ADR-0057: one 90d window across the whole notification pipeline

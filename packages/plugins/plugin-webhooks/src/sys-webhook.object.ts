@@ -45,6 +45,7 @@ export const SysWebhook = ObjectSchema.create({
   label: 'Webhook',
   pluralLabel: 'Webhooks',
   icon: 'webhook',
+  color: 'teal',
   isSystem: true,
   managedBy: 'config',
   // Authoring a webhook from the UI requires a structured form for the

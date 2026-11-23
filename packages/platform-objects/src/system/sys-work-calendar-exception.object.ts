@@ -35,6 +35,7 @@ export const SysWorkCalendarException = ObjectSchema.create({
   label: 'Calendar Exception',
   pluralLabel: 'Calendar Exceptions',
   icon: 'calendar-x',
+  color: 'green',
   isSystem: true,
   // Platform-defined schema, organization-administered data.
   managedBy: 'system-data',

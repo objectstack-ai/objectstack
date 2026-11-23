@@ -33,6 +33,7 @@ export const NotificationPreference = ObjectSchema.create({
     label: 'Notification Preference',
     pluralLabel: 'Notification Preferences',
     icon: 'bell-ring',
+    color: 'pink',
     isSystem: true,
     // [ADR-0103, #3355] Admin/user-writable DATA on a platform-defined schema: a
     // user authors their own mute/allow rows (and admins the empty-`user_id`

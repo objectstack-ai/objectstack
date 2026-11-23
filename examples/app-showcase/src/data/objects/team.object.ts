@@ -16,6 +16,7 @@ export const Team = ObjectSchema.create({
   label: 'Team',
   pluralLabel: 'Teams',
   icon: 'users',
+  color: 'blue',
   description: 'A delivery team that can be assigned to many projects.',
 
   fields: {
@@ -42,6 +43,7 @@ export const ProjectMembership = ObjectSchema.create({
   label: 'Project Membership',
   pluralLabel: 'Project Memberships',
   icon: 'link',
+  color: 'orange',
   description: 'Join object linking teams to projects (many-to-many).',
 
   fields: {
