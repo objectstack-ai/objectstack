@@ -17,6 +17,7 @@ vi.mock('../../assistant/assistantBus', async (importOriginal) => ({
 }));
 
 import { saveObjectPins, type ObjectPinsSaveDoors } from '../designModeHeaderPinsSave';
+import type { ObjectPins } from '../designModeHeaderPins';
 
 const TEXTS = {
   notListed: 'not listed',
@@ -79,7 +80,7 @@ function doors(opts: {
   return { d, calls };
 }
 
-const input = (pins: Record<string, string[]>) => ({ objectName: 'crm_lead', packageId: 'com.acme.crm', served: SERVED, pins });
+const input = (pins: ObjectPins) => ({ objectName: 'crm_lead', packageId: 'com.acme.crm', served: SERVED, pins });
 
 beforeEach(() => emitMetadataRefresh.mockReset());
 
