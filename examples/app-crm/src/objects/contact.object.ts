@@ -13,6 +13,7 @@ export const Contact = ObjectSchema.create({
   label: 'Contact',
   pluralLabel: 'Contacts',
   icon: 'user',
+  color: 'blue',
   description: 'A person associated with an account.',
   // The record's title is the person's full name. Without this pointer the
   // title is derived from the first name-ish field, which reads "Ada" on the

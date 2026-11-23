@@ -53,6 +53,7 @@ export const SysWorkCalendar = ObjectSchema.create({
   label: 'Working Calendar',
   pluralLabel: 'Working Calendars',
   icon: 'calendar-clock',
+  color: 'green',
   isSystem: true,
   // Platform-defined schema, organization-administered data.
   managedBy: 'system-data',

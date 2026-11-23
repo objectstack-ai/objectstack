@@ -23,6 +23,8 @@
  * - Choosing an entry navigates, folds the menu and leaves the sidebar
  *   collapsed.
  * - The edge is drawn only while the sidebar is hidden, never on a phone.
+ * - objectstack#36485 — the float carries the app-name menu, and its
+ *   「Edit app」 enters the design mode from there too.
  *
  * The test DOM computes no Tailwind and no layout, so widths are read as the
  * class that sets them; the rendered widths are measured in a browser on the
@@ -54,10 +56,12 @@ vi.mock('@object-ui/i18n', async (importOriginal) => ({
   }),
 }));
 
+/** The viewer is a workspace admin: only the objectstack#36485 pins say so. */
+let workspaceAdmin = false;
 vi.mock('@object-ui/auth', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useAuth: () => ({ user: null, activeOrganization: null }),
-  useWorkspaceAdminStatus: () => ({ isAdmin: false, isResolved: true }),
+  useWorkspaceAdminStatus: () => ({ isAdmin: workspaceAdmin, isResolved: true }),
 }));
 
 vi.mock('@object-ui/permissions', async (importOriginal) => ({
@@ -118,6 +122,7 @@ import {
   writeWideWindowOpen,
 } from '../consoleSidebarRail';
 import { readWorkspacePreference, writeWorkspacePreference } from '../../utils/workspacePreference';
+import { DesignModeProvider, useDesignModeController } from '../designMode';
 
 /**
  * Size the test window: happy-dom's own viewport, so `innerWidth`, the
@@ -679,3 +684,68 @@ function reloadDocked(width: number) {
   if (width < 1280) writeWorkspacePreference(CONSOLE_SIDEBAR_NARROW_OPEN_PREFERENCE, 'user', 'on');
   return reload(width);
 }
+
+describe('the float carries the app menu, and its 「Edit app」 enters the design mode (objectstack#36485)', () => {
+  /** The shell's hold on the mode, as `ConsoleLayout` keeps it, and whether it is on. */
+  function Shell({ children }: { children: React.ReactNode }) {
+    const mode = useDesignModeController({ appName: 'crm', appBasePath: '/apps/crm', enabled: true });
+    return (
+      <DesignModeProvider value={mode}>
+        <output data-testid="mode">{mode.active ? 'on' : 'off'}</output>
+        {children}
+      </DesignModeProvider>
+    );
+  }
+
+  afterEach(() => {
+    workspaceAdmin = false;
+    vi.unstubAllGlobals();
+  });
+
+  it('collapsed at 1024 px, pressed open from the left edge: the app menu offers 「Edit app」 to an admin who may author, and it turns the mode on', async () => {
+    workspaceAdmin = true;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: unknown) => ({
+        ok: true,
+        status: 200,
+        json: async () =>
+          String(url).endsWith('/api/v1/packages')
+            ? { data: { packages: [{ manifest: { id: 'com.acme.crm', name: 'CRM' }, writable: true }] } }
+            : { data: [] },
+      })),
+    );
+    setViewportWidth(1024);
+    metadataState = {
+      apps: [{ name: 'crm', label: 'CRM', active: true, navigation: NAVIGATION, _packageId: 'com.acme.crm' }],
+      objects: [],
+    };
+    render(
+      <MemoryRouter initialEntries={['/apps/crm']}>
+        <Shell>
+          <SidebarProvider>
+            <Fold />
+            <UnifiedSidebar activeAppName="crm" railOverlay />
+            <div data-testid="page">
+              <p>The page</p>
+            </div>
+          </SidebarProvider>
+        </Shell>
+      </MemoryRouter>,
+    );
+    // The package list's verdict settled, so an absent item is a reading.
+    await act(() => new Promise<void>((resolve) => setTimeout(resolve, 0)));
+    await act(() => new Promise<void>((resolve) => setTimeout(resolve, 0)));
+    expectHidden();
+    fireEvent.click(edge()!);
+    expectFloat();
+
+    const menuTrigger = within(panel()).getByTestId('sidebar-app-menu-trigger');
+    fireEvent.pointerDown(menuTrigger, { button: 0, ctrlKey: false, pointerType: 'mouse' });
+    const item = await screen.findByTestId('sidebar-app-menu-edit-app');
+    expect(item).toHaveTextContent('Edit app');
+    expect(screen.getByTestId('mode')).toHaveTextContent('off');
+    await act(async () => fireEvent.click(item));
+    expect(screen.getByTestId('mode')).toHaveTextContent('on');
+  });
+});

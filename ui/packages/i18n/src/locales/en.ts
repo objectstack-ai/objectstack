@@ -2592,7 +2592,8 @@ const en = {
       copyLink: 'Copy link',
       linkCopied: 'Link copied to clipboard',
       linkCopyFailed: 'Failed to copy link',
-      design: 'Design',
+      // objectstack#36487 — an object entry's Studio door, in this menu and first in a list's ⋮.
+      objectSettings: 'Object settings',
     },
     settingsHub: {
       title: 'Settings',
@@ -4309,6 +4310,11 @@ const en = {
       renameSourceOnly: 'Tab names are changed in the app\'s source language',
       builtinFixed: 'The platform draws this tab last, under its own name.',
       adjustFieldGroups: 'Adjust field groups',
+      pairNotWritable: 'This app\'s customization package cannot be written, so its tabs cannot be saved.',
+      builtinMoves: 'A built-in tab can be moved, not hidden or renamed.',
+      sourceBase: 'Original package',
+      sourcePackage: 'From {{name}}',
+      sourceEnvironment: 'This environment',
     },
   },
   topbar: {

@@ -3040,7 +3040,7 @@ const de = {
       copyLink: "Link kopieren",
       linkCopied: "Link in die Zwischenablage kopiert",
       linkCopyFailed: "Link konnte nicht kopiert werden",
-      design: "Gestalten",
+      objectSettings: "Objekteinstellungen",
     },
   },
   auth: {
@@ -3625,6 +3625,11 @@ const de = {
       renameSourceOnly: 'Tab-Namen werden in der Quellsprache der App geändert',
       builtinFixed: 'Die Plattform zeigt diesen Tab zuletzt und unter eigenem Namen.',
       adjustFieldGroups: 'Feldgruppen anpassen',
+      pairNotWritable: 'Das Anpassungspaket dieser App ist nicht beschreibbar, daher können die Tabs nicht gespeichert werden.',
+      builtinMoves: 'Ein integrierter Tab kann verschoben, aber nicht ausgeblendet oder umbenannt werden.',
+      sourceBase: 'Ursprüngliches Paket',
+      sourcePackage: 'Aus {{name}}',
+      sourceEnvironment: 'Diese Umgebung',
     },
   },
   topbar: {

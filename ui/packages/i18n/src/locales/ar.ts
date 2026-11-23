@@ -3355,7 +3355,7 @@ const ar = {
       copyLink: "نسخ الرابط",
       linkCopied: "تم نسخ الرابط إلى الحافظة",
       linkCopyFailed: "فشل نسخ الرابط",
-      design: "تصميم",
+      objectSettings: "إعدادات الكائن",
     },
   },
   auth: {
@@ -3948,6 +3948,11 @@ const ar = {
       renameSourceOnly: 'تُغيَّر أسماء علامات التبويب بلغة المصدر للتطبيق',
       builtinFixed: 'تعرض المنصة علامة التبويب هذه أخيرًا باسمها الخاص.',
       adjustFieldGroups: 'ضبط مجموعات الحقول',
+      pairNotWritable: 'لا يمكن الكتابة في حزمة التخصيص لهذا التطبيق، لذا لا يمكن حفظ علاماته.',
+      builtinMoves: 'يمكن نقل علامة التبويب المضمنة، لكن لا يمكن إخفاؤها أو إعادة تسميتها.',
+      sourceBase: 'الحزمة الأصلية',
+      sourcePackage: 'من {{name}}',
+      sourceEnvironment: 'هذه البيئة',
     },
   },
   topbar: {

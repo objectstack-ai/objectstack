@@ -30,6 +30,7 @@ export const SysSharingRule = ObjectSchema.create({
   label: 'Sharing Rule',
   pluralLabel: 'Sharing Rules',
   icon: 'shield-check',
+  color: 'purple',
   isSystem: true,
   managedBy: 'config',
   // Sharing rules can now be authored visually via the Studio criteria

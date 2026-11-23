@@ -112,6 +112,7 @@ export const SysUnit = ObjectSchema.create({
   label: 'Unit of Measure',
   pluralLabel: 'Units of Measure',
   icon: 'ruler',
+  color: 'green',
   isSystem: true,
   // Platform-defined schema, organization-administered data.
   managedBy: 'system-data',
