@@ -2,7 +2,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { mergeViewsIntoObjects } from './MetadataProvider';
-import { resolveFormViewLayout } from '../utils/recordFormNavigation';
+import { resolveRecordFormModalLayout } from '../utils/recordFormNavigation';
 
 /**
  * `mergeViewsIntoObjects` folds the `view` metadata type into object
@@ -250,21 +250,20 @@ describe('mergeViewsIntoObjects — `.form` is the served default form only (obj
     expect(inquiry.list.name).toBe('showcase_inquiry.default');
   });
 
-  it('create and edit take the no-default-form path for `showcase_inquiry`: no layout comes from the named form', () => {
+  it('create and edit take no layout from any form view of `showcase_inquiry` (objectstack-ai/objectstack#36425)', () => {
     const inquiry = byName(mergeViewsIntoObjects(objects, inquiryRows), 'showcase_inquiry');
-    // The read `RecordFormPage`, `ScreenView` and `resolveFormViewLayout` share
-    // (`.form`, then `formViews.default`) finds nothing…
     expect(inquiry.form ?? inquiry.formViews?.default).toBeUndefined();
-    // …so the New/Edit dialog (AppContent, `useActionModal`) gets no sections,
-    // the same answer as an object that declares no form view at all.
-    expect(resolveFormViewLayout(inquiry)).toEqual({});
-    expect(resolveFormViewLayout(inquiry)).toEqual(resolveFormViewLayout({ name: 'showcase_inquiry' } as any));
+    // The New/Edit dialog (AppContent, `useActionModal`) reads no form view at
+    // all: the same answer as an object that declares none.
+    expect(resolveRecordFormModalLayout(inquiry, 'auto')).toEqual({});
+    expect(resolveRecordFormModalLayout(inquiry, 'auto'))
+      .toEqual(resolveRecordFormModalLayout({ name: 'showcase_inquiry' } as any, 'auto'));
   });
 
   it('`crm_lead` keeps its default when the default arrives AFTER the named Web-to-Lead form', () => {
     const lead = byName(mergeViewsIntoObjects(objects, [leadWebToLead, leadForm]), 'crm_lead');
     expect(lead.form.name).toBe('crm_lead.form');
-    expect(resolveFormViewLayout(lead).sections?.map((s: any) => s.name)).toEqual(['lead_information']);
+    expect(lead.form.sections?.map((s: any) => s.name)).toEqual(['lead_information']);
     expect(lead.formViews['crm_lead.web_to_lead'].isDefault).toBe(false);
   });
 
@@ -318,24 +317,24 @@ describe('attachInlineSubforms — a parent field group places the child (object
     },
   ];
 
-  it('merges the children a parent group names into the parent form as subforms, inlineEdit picking the form factor', () => {
+  it('sets the children a parent group names on the parent as groupSubforms, inlineEdit picking the form factor', () => {
     const out = attachInlineSubforms(objects);
     const invoice = out.find((o) => o.name === 'invoice')!;
-    expect(invoice.form?.subforms).toHaveLength(2);
-    expect(invoice.form?.subforms?.[0]).toMatchObject({
+    expect(invoice.groupSubforms).toHaveLength(2);
+    expect(invoice.groupSubforms?.[0]).toMatchObject({
       childObject: 'invoice_line',
       relationshipField: 'invoice',
       title: 'Lines',
       inlineMode: 'grid',
     });
-    expect(invoice.form?.subforms?.[1]).toMatchObject({ childObject: 'invoice_part', relationshipField: 'invoice' });
-    expect(['grid', 'form']).toContain(invoice.form?.subforms?.[1]?.inlineMode);
+    expect(invoice.groupSubforms?.[1]).toMatchObject({ childObject: 'invoice_part', relationshipField: 'invoice' });
+    expect(['grid', 'form']).toContain(invoice.groupSubforms?.[1]?.inlineMode);
   });
 
   it('does not inline a child no parent group names, inlineEdit or not', () => {
     const out = attachInlineSubforms(objects);
     const invoice = out.find((o) => o.name === 'invoice')!;
-    const children = (invoice.form?.subforms ?? []).map((s: any) => s.childObject);
+    const children = (invoice.groupSubforms ?? []).map((s: any) => s.childObject);
     expect(children).not.toContain('comment');
     expect(children).not.toContain('invoice_note');
   });
@@ -345,21 +344,20 @@ describe('attachInlineSubforms — a parent field group places the child (object
       { name: 'order', fields: { number: { type: 'text' } }, fieldGroups: [{ key: 'lines', relatedList: 'order_line' }] },
       { name: 'order_line', fields: { order: { type: 'master_detail', reference: 'order', relatedList: true } } },
     ]);
-    expect(out.find((o) => o.name === 'order')!.form).toBeUndefined();
+    expect(out.find((o) => o.name === 'order')!.groupSubforms).toBeUndefined();
   });
 
-  it('lets an explicit form.subforms entry override the derived one', () => {
+  it('reads no internal form view: an explicit form.subforms neither overrides nor joins the derived list (objectstack-ai/objectstack#36425)', () => {
+    const explicit = [{ childObject: 'invoice_line', columns: [{ name: 'amount' }] }, { childObject: 'form_only' }];
     const withExplicit = objects.map((o) =>
-      o.name === 'invoice'
-        ? { ...o, form: { type: 'simple', subforms: [{ childObject: 'invoice_line', columns: [{ name: 'amount' }] }] } }
-        : o,
+      o.name === 'invoice' ? { ...o, form: { type: 'simple', subforms: explicit } } : o,
     );
     const out = attachInlineSubforms(withExplicit);
     const invoice = out.find((o) => o.name === 'invoice')!;
-    // single entry for invoice_line, and it's the explicit one (has columns)
-    const lineSubforms = invoice.form.subforms.filter((s: any) => s.childObject === 'invoice_line');
-    expect(lineSubforms).toHaveLength(1);
-    expect(lineSubforms[0].columns).toBeTruthy();
+    expect(invoice.groupSubforms.map((s: any) => s.childObject)).toEqual(['invoice_line', 'invoice_part']);
+    expect(invoice.groupSubforms[0].columns).toBeUndefined();
+    // The authored form view is left as it was: inert, not rewritten.
+    expect(invoice.form.subforms).toBe(explicit);
   });
 
   it('returns objects unchanged when no field group places a child', () => {
@@ -390,8 +388,8 @@ describe('attachInlineSubforms — a parent field group places the child (object
       },
     ]);
     const order = out.find((o) => o.name === 'order')!;
-    expect(order.form?.subforms).toHaveLength(1);
-    expect(order.form?.subforms?.[0]).toMatchObject({
+    expect(order.groupSubforms).toHaveLength(1);
+    expect(order.groupSubforms?.[0]).toMatchObject({
       childObject: 'order_line',
       relationshipField: 'order',
     });

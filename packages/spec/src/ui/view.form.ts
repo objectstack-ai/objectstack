@@ -260,7 +260,8 @@ export const viewForm = defineForm({
         // [#24692] Spelled out so the form offers exactly the two live keys:
         // `mode` and `formView` are `retiredKey()` tombstones on
         // `AddRecordConfigSchema` (no renderer ever read them — the Add button
-        // opens the create form, `formViews.create` when declared), and
+        // opens the object's own create form, laid out by its `fieldGroups`
+        // and leaving out every `showOnCreate: false` field), and
         // `enabled` is required, so an Add-record block always says whether it
         // is on.
         {

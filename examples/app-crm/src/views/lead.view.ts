@@ -44,9 +44,10 @@ export const LeadViews = defineView({
       },
     },
   },
-  // The default form — what the create and edit surfaces render. The public
-  // Web-to-Lead form below stays a NAMED form: it is served by its slug, never
-  // as the create or edit form.
+  // The default form. Since #36425 the Console's create and edit surfaces lay
+  // the record out by the object's fieldGroups and no longer load it, so it is
+  // inert there (lint: form-view-internal-not-loaded). The public Web-to-Lead
+  // form below stays a NAMED form: it is served by its slug and keeps loading.
   form: {
     type: 'simple',
     sections: [

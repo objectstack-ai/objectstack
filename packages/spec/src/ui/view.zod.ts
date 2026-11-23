@@ -2174,9 +2174,10 @@ const ADD_RECORD_ENABLED_REQUIRED =
 /**
  * `addRecord.mode` / `addRecord.formView` — retired (#24692, ADR-0049
  * enforce-or-remove; ruling letter B′). No renderer ever read either key:
- * every Add opens the object's create form, chosen by convention —
- * `formViews.create` when the object's view container declares one, else the
- * default form. How that form opens stays the renderer's. D2:
+ * every Add opens the object's create form, which lays out by the object's
+ * `fieldGroups` and leaves out every field marked `showOnCreate: false`
+ * (#36425: an internal `formViews.create` or default `form` is no longer
+ * loaded). How that form opens stays the renderer's. D2:
  * `add-record-mode-form-view-removed`.
  */
 const ADD_RECORD_MODE_RETIRED =
@@ -2188,9 +2189,9 @@ const ADD_RECORD_MODE_RETIRED =
 
 const ADD_RECORD_FORM_VIEW_RETIRED =
   '`addRecord.formView` was removed in @objectstack/spec 18.1.0 (ADR-0049 enforce-or-remove) — no '
-  + 'renderer ever read it: the Add button opens the create form chosen by convention, never a named '
-  + 'form. Delete the key, and to give the Add button its own form declare it as `formViews.create` '
-  + 'on the object\'s view container (without one, the default form is used). '
+  + 'renderer ever read it: the Add button opens the object\'s create form, never a named form. '
+  + 'Delete the key. The create form lays out by the object\'s `fieldGroups`; to leave a field out of '
+  + 'it, set `showOnCreate: false` on that field. '
   + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` '
   + 'applies the ones it can prove, and you apply the rest by hand.';
 
@@ -2202,8 +2203,10 @@ const ADD_RECORD_FORM_VIEW_RETIRED =
  * REQUIRED (no default — `addRecord: {}` is refused instead of drawing
  * nothing), `position` defaults to `top` (where the renderer places an absent
  * position), and `mode` / `formView`, which no renderer read, are tombstoned.
- * The create form is chosen by convention: `formViews.create` when declared,
- * else `form` / `formViews.default`. The stored-row half of `enabled` is the D2
+ * The create form is the object's own: it lays out by the object's
+ * `fieldGroups` and asks for every field not marked `showOnCreate: false`
+ * (#36425: an internal `formViews.create`, `form` or `formViews.default` is no
+ * longer loaded). The stored-row half of `enabled` is the D2
  * conversion `add-record-enabled-defaulted`, which writes the old default
  * (`true`) onto a block that omits it.
  *
@@ -5124,7 +5127,7 @@ const FORM_VIEW_TYPE_RETIRED = {
   modal:
     "'modal' was removed from the form view `type` enum in @objectstack/spec 18.3.0 (ADR-0050) — `type` is "
     + 'the form\'s layout, and where a form opens is decided by whoever opens it: the console\'s New and Edit '
-    + 'dialogs open the record form themselves (sized by the form\'s `modalSize`), and an action '
+    + 'dialogs open the record form themselves (laid out by the object\'s `fieldGroups`), and an action '
     + '`type: \'modal\'` opens the page it targets. Delete the value for the `simple` default, or write the '
     + 'layout you want: `simple`, `tabbed` or `wizard`. '
     + FORM_VIEW_TYPE_RETIRED_FIX,
@@ -5350,9 +5353,9 @@ export const FormViewSchema = lazySchema(() => strictObject({
   /** [#29012] RETIRED — {@link FORM_VIEW_DRAWER_WIDTH_RETIRED}. */
   drawerWidth: retiredKey(FORM_VIEW_DRAWER_WIDTH_RETIRED),
   /**
-   * Size bucket of the dialog a caller opens this form in. Live on every
-   * layout: the console's New / Edit dialog reads it off the form view it
-   * selects, whatever the form's `type` ([#27155] it outlived `type: 'modal'`).
+   * Size bucket of the dialog a caller opens this form in. [#36425] The
+   * console's New / Edit dialog no longer reads a form view, so it is not that
+   * caller: it sizes itself. Its liveness verdict is re-audited on #36544.
    */
   modalSize: z.enum(['sm', 'default', 'lg', 'xl', 'full']).optional().describe("Size bucket of the dialog a caller opens this form in: the console's New / Edit dialog, or the modal container of the React `ObjectForm` block (formType 'modal')"),
 
