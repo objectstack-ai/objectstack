@@ -1975,7 +1975,8 @@ export interface PageHeaderActionsProps {
   /**
    * The host's manual refresh (`RecordContext.refresh`), drawn as the first
    * item of the `⋯` menu (objectstack#27055, the v3 header: 「1 主 + 2 次 + ⋯
-   * （刷新收进 ⋯）」). With a refresh and no action, the row is the `⋯` alone.
+   * （刷新收进 ⋯）」), after only a host entry that declares `leadsMenu: true`
+   * (objectstack#36499). With a refresh and no action, the row is the `⋯` alone.
    */
   refresh?: PageHeaderRefreshItem;
   /**
@@ -2813,16 +2814,24 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
     // authored actions first, then the host's menu chrome (favorites /
     // Share), then every destructive entry last, set apart by a separator.
     // Each band keeps the `order` sort the memo above gave it.
+    //
+    // A host entry declaring `leadsMenu: true` opens the menu instead, ahead
+    // of the host's refresh (objectstack#36499: the record page's 「Configure
+    // tabs」 is the first item of its `⋯`). Only the host's own entries lead:
+    // an authored action's key is never a host key, so metadata cannot claim
+    // the place.
+    const leadsMenu = (a: any): boolean => isHostAction(a) && !isDestructiveAction(a) && a?.leadsMenu === true;
     const overflowPool = [...foldedButtons, ...menuOnly, ...moreOnlyActions];
+    const leadingActions = overflowPool.filter(leadsMenu);
     const overflowActions = [
       ...overflowPool.filter((a) => !isDestructiveAction(a) && !isHostAction(a)),
-      ...overflowPool.filter((a) => !isDestructiveAction(a) && isHostAction(a)),
+      ...overflowPool.filter((a) => !isDestructiveAction(a) && isHostAction(a) && !leadsMenu(a)),
       ...overflowPool.filter(isDestructiveAction),
     ];
     // The first destructive entry gets a separator above it, unless it opens
     // the menu (a separator under nothing sets nothing apart).
     const firstDestructiveIdx = overflowActions.findIndex(isDestructiveAction);
-    const useOverflow = overflowActions.length > 0 || !!refresh;
+    const useOverflow = overflowActions.length > 0 || leadingActions.length > 0 || !!refresh;
     // The trailing segment (objectstack#27241): the host's chrome after the
     // actions, a hairline between the two so the switches do not read as one
     // more action. `ml-auto`: when the row wraps (a narrow header), the
@@ -3080,6 +3089,8 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-44">
+              {leadingActions.map((action, idx) => renderMenuItem(action, idx, 'lead', -1))}
+              {leadingActions.length > 0 && (refreshItem || overflowActions.length > 0) && <DropdownMenuSeparator />}
               {refreshItem && (
                 <>
                   {refreshItem}
@@ -3106,19 +3117,22 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
           const pool = [...ranked, ...menuOnly, ...moreOnlyActions];
           return [
             ...pool.filter((a) => !isDestructiveAction(a) && !isHostAction(a)),
-            ...pool.filter((a) => !isDestructiveAction(a) && isHostAction(a)),
+            ...pool.filter((a) => !isDestructiveAction(a) && isHostAction(a) && !leadsMenu(a)),
             ...pool.filter(isDestructiveAction),
           ];
         })()
       : [];
     const stateFirstDestructiveIdx = stateMenuActions.findIndex(isDestructiveAction);
+    const stateLeading = stateGroup ? [...ranked, ...menuOnly, ...moreOnlyActions].filter(leadsMenu) : [];
     const toolbarItems = (
       <>
         {stateGroup
           ? stateGroup({
               recordRow: recordRowItems,
-              recordMenuItems: stateMenuActions.length > 0 || refreshItem ? (
+              recordMenuItems: stateMenuActions.length > 0 || stateLeading.length > 0 || refreshItem ? (
                 <>
+                  {stateLeading.map((action, idx) => renderMenuItem(action, idx, 'state-lead', -1))}
+                  {stateLeading.length > 0 && (refreshItem || stateMenuActions.length > 0) && <DropdownMenuSeparator />}
                   {refreshItem}
                   {refreshItem && stateMenuActions.length > 0 && <DropdownMenuSeparator />}
                   {stateMenuActions.map((action, idx) => renderMenuItem(action, idx, 'state', stateFirstDestructiveIdx))}

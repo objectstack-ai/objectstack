@@ -3684,6 +3684,11 @@ const zh = {
       renameSourceOnly: '页签名称只能在应用的源语言下修改',
       builtinFixed: '此页签由平台绘制，固定在最后，名称不可改。',
       adjustFieldGroups: '调整字段分组',
+      pairNotWritable: '这个应用的定制包不可写，页签无法保存。',
+      builtinMoves: '内置页签可以移动，不能隐藏或改名。',
+      sourceBase: '原始包',
+      sourcePackage: '来自{{name}}',
+      sourceEnvironment: '本环境',
     },
   },
   topbar: {

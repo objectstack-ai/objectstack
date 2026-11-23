@@ -32,7 +32,7 @@ function PageHeader({ schema }: { schema: any }) {
   return <Component schema={schema} />;
 }
 
-function renderHeader(actions: any[]) {
+function renderHeader(actions: any[], headerSystemActions?: any[]) {
   return render(
     <I18nProvider config={{ defaultLanguage: 'en', detectBrowserLanguage: false }}>
       <ActionProvider>
@@ -42,6 +42,7 @@ function renderHeader(actions: any[]) {
           data={{ id: 'WO-1', name: 'WO-0001' }}
           objectSchema={{ name: 'mes_work_order', label: 'Work Order' }}
           refresh={vi.fn()}
+          headerSystemActions={headerSystemActions}
         >
           <PageHeader schema={{ type: 'page:header', title: 'Work Order', actions }} />
         </RecordContextProvider>
@@ -81,5 +82,28 @@ describe('page:header — a ⋯ entry that finished on the click closes the menu
     await waitFor(() => expect(screen.getByRole('menuitem', { name: 'Recompute' })).toHaveAttribute('aria-busy', 'true'));
     await act(async () => settle());
     await waitFor(() => expect(screen.getByRole('menuitem', { name: 'Recompute' })).not.toHaveAttribute('aria-busy'));
+  });
+});
+
+describe('page:header — a host entry declaring leadsMenu opens the ⋯, ahead of Refresh (objectstack#36499)', () => {
+  const host = (name: string, label: string, extra: Record<string, unknown> = {}) => ({
+    name,
+    label,
+    locations: ['record_header'],
+    component: 'action:menu',
+    onClick: vi.fn(),
+    ...extra,
+  });
+
+  it('the host entry is the first item; Refresh and the other entries follow in their bands', async () => {
+    renderHeader([], [host('sys_share', 'Share'), host('sys_configure_tabs', 'Configure tabs', { leadsMenu: true }), host('sys_delete', 'Delete')]);
+    await openMore();
+    expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Configure tabs', 'Refresh', 'Share', 'Delete']);
+  });
+
+  it('an authored action cannot claim the place: it stays in its band, after Refresh', async () => {
+    renderHeader([{ name: 'approve', label: 'Approve', locations: ['record_more'], leadsMenu: true }], [host('sys_share', 'Share')]);
+    await openMore();
+    expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Refresh', 'Approve', 'Share']);
   });
 });

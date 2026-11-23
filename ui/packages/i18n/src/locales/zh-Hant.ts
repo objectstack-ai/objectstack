@@ -3684,6 +3684,11 @@ const zhHant = {
       renameSourceOnly: '頁簽名稱只能在應用的源語言下修改',
       builtinFixed: '此頁籤由平台繪製，固定在最後，名稱不可改。',
       adjustFieldGroups: '調整欄位分組',
+      pairNotWritable: '這個應用的定製包不可寫，頁籤無法儲存。',
+      builtinMoves: '內建頁籤可以移動，不能隱藏或改名。',
+      sourceBase: '原始包',
+      sourcePackage: '來自{{name}}',
+      sourceEnvironment: '本環境',
     },
   },
   topbar: {

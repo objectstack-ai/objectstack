@@ -19,7 +19,7 @@ const emitMetadataRefresh = vi.fn();
 import { recordTabsCatalog, type RecordTabsDraft } from '../recordTabsConfig';
 import { resolveRecordTabsSaveTarget, saveRecordTabs, type RecordTabsSaveDoors } from '../recordTabsConfigSave';
 
-const TEXTS = { notListed: 'not listed', pendingDraft: 'pending draft', notWritable: 'not writable' };
+const TEXTS = { notListed: 'not listed', pendingDraft: 'pending draft', notWritable: 'not writable', pairNotWritable: 'pair not writable' };
 const PKG = 'app.crm';
 const served = {
   name: 'account',
@@ -40,7 +40,15 @@ function doors(opts: { writable?: boolean; listed?: boolean; save?: () => Promis
   const calls: Array<[string, ...unknown[]]> = [];
   const d: RecordTabsSaveDoors = {
     listPackages: async () => (opts.listed === false ? new Map() : new Map([[PKG, { writable: opts.writable ?? true }]])),
+    ensureCustomization: async (base) => {
+      calls.push(['ensure', base]);
+      return { packageId: `${base}.custom`, writable: false };
+    },
     client: {
+      get: async (...args) => {
+        calls.push(['get', ...args]);
+        return null;
+      },
       layered: async (...args) => {
         calls.push(['layered', ...args]);
         const code = { name: 'account', label: 'Account', fields: {}, relatedLists: [{ list: 'contact', columns: ['name'] }], _packageId: PKG };
@@ -105,22 +113,17 @@ describe("saving the record page's tabs (objectstack#36499)", () => {
     expect(calls[3]).toEqual(['reset', 'object', 'account', { state: 'draft', packageId: PKG }]);
   });
 
-  it('a read-only (installed) package or an unlisted one: refused before anything is read or written', async () => {
-    for (const [opts, sentence] of [
-      [{ writable: false }, 'not writable'],
-      [{ listed: false }, 'not listed'],
-    ] as const) {
-      const { d, calls } = doors(opts);
-      await expect(saveRecordTabs({ objectName: 'account', packageId: PKG, draft: DRAFT, catalog }, TEXTS, d)).rejects.toThrow(
-        sentence,
-      );
-      expect(calls).toEqual([]);
-    }
+  it('an unlisted package: refused before anything is read or written', async () => {
+    const { d, calls } = doors({ listed: false });
+    await expect(saveRecordTabs({ objectName: 'account', packageId: PKG, draft: DRAFT, catalog }, TEXTS, d)).rejects.toThrow(
+      'not listed',
+    );
+    expect(calls).toEqual([]);
   });
 
-  it('the one seam: a writable package is the target; anything else has none yet', () => {
+  it('the one seam: a writable package is the target, a read-only one its pair, an unlisted one none', () => {
     expect(resolveRecordTabsSaveTarget(PKG, new Map([[PKG, { writable: true }]]))).toEqual({ kind: 'package', packageId: PKG });
-    expect(resolveRecordTabsSaveTarget(PKG, new Map([[PKG, { writable: false }]]))).toBeNull();
+    expect(resolveRecordTabsSaveTarget(PKG, new Map([[PKG, { writable: false }]]))).toEqual({ kind: 'pair', basePackageId: PKG });
     expect(resolveRecordTabsSaveTarget(PKG, new Map())).toBeNull();
   });
 });

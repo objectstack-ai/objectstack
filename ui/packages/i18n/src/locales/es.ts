@@ -3685,6 +3685,11 @@ const es = {
       renameSourceOnly: 'Los nombres de las pestañas se cambian en el idioma de origen de la app',
       builtinFixed: 'La plataforma muestra esta pestaña al final, con su propio nombre.',
       adjustFieldGroups: 'Ajustar grupos de campos',
+      pairNotWritable: 'No se puede escribir en el paquete de personalización de esta app, así que sus pestañas no se pueden guardar.',
+      builtinMoves: 'Una pestaña integrada se puede mover, pero no ocultar ni renombrar.',
+      sourceBase: 'Paquete original',
+      sourcePackage: 'De {{name}}',
+      sourceEnvironment: 'Este entorno',
     },
   },
   topbar: {

@@ -4284,6 +4284,11 @@ const en = {
       renameSourceOnly: 'Tab names are changed in the app\'s source language',
       builtinFixed: 'The platform draws this tab last, under its own name.',
       adjustFieldGroups: 'Adjust field groups',
+      pairNotWritable: 'This app\'s customization package cannot be written, so its tabs cannot be saved.',
+      builtinMoves: 'A built-in tab can be moved, not hidden or renamed.',
+      sourceBase: 'Original package',
+      sourcePackage: 'From {{name}}',
+      sourceEnvironment: 'This environment',
     },
   },
   topbar: {

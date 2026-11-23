@@ -3680,6 +3680,11 @@ const pt = {
       renameSourceOnly: 'Os nomes das abas são alterados no idioma de origem do app',
       builtinFixed: 'A plataforma exibe esta aba por último, com o próprio nome.',
       adjustFieldGroups: 'Ajustar grupos de campos',
+      pairNotWritable: 'O pacote de personalização deste app não pode ser gravado, então suas abas não podem ser salvas.',
+      builtinMoves: 'Uma aba integrada pode ser movida, mas não ocultada nem renomeada.',
+      sourceBase: 'Pacote original',
+      sourcePackage: 'De {{name}}',
+      sourceEnvironment: 'Este ambiente',
     },
   },
   topbar: {

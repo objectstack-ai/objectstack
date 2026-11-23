@@ -3681,6 +3681,11 @@ const fr = {
       renameSourceOnly: 'Les noms d\'onglet se modifient dans la langue source de l\'application',
       builtinFixed: 'La plateforme affiche cet onglet en dernier, sous son propre nom.',
       adjustFieldGroups: 'Ajuster les groupes de champs',
+      pairNotWritable: 'Le package de personnalisation de cette app n\'est pas modifiable : ses onglets ne peuvent pas être enregistrés.',
+      builtinMoves: 'Un onglet intégré peut être déplacé, mais pas masqué ni renommé.',
+      sourceBase: 'Package d\'origine',
+      sourcePackage: 'De {{name}}',
+      sourceEnvironment: 'Cet environnement',
     },
   },
   topbar: {

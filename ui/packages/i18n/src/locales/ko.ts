@@ -3603,6 +3603,11 @@ const ko = {
       renameSourceOnly: '탭 이름은 앱의 원본 언어에서만 변경할 수 있습니다',
       builtinFixed: '이 탭은 플랫폼이 고유한 이름으로 마지막에 표시합니다.',
       adjustFieldGroups: '필드 그룹 조정',
+      pairNotWritable: '이 앱의 사용자 지정 패키지에 쓸 수 없어 탭을 저장할 수 없습니다.',
+      builtinMoves: '기본 제공 탭은 이동할 수 있지만 숨기거나 이름을 바꿀 수 없습니다.',
+      sourceBase: '원본 패키지',
+      sourcePackage: '{{name}}에서',
+      sourceEnvironment: '이 환경',
     },
   },
   topbar: {

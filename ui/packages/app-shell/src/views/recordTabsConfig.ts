@@ -231,6 +231,22 @@ export function editRecordTabsDraft(draft: RecordTabsDraft, edit: RecordTabsEdit
 }
 
 /**
+ * The `label` a save writes for the tab `id`: the draft's name where the
+ * editor renamed it (`initial` given and the name moved), else `stored`, the
+ * label the stored entry naming the list already carries. With no `initial`,
+ * the draft's name.
+ */
+export function recordTabLabelToWrite(
+  id: RecordTabId,
+  draft: RecordTabsDraft,
+  initial: RecordTabsDraft | undefined,
+  stored: string | undefined,
+): string | undefined {
+  if (initial === undefined || draft.labels[id] !== initial.labels[id]) return draft.labels[id];
+  return stored;
+}
+
+/**
  * The object's `relatedLists` the draft makes, written over `base` (the
  * object's stored `relatedLists`): `undefined` when nothing is to be declared
  * (no tab arranged, none hidden: the automatic list).
@@ -238,7 +254,12 @@ export function editRecordTabsDraft(draft: RecordTabsDraft, edit: RecordTabsEdit
  *  - Each shown related tab the editor arranges, in its order, as Studio
  *    spells an entry (`relationshipEntry`: the child, or `child.field` where
  *    the child points here more than once), with the `columns` of the base
- *    entry that named it and the draft's name for it.
+ *    entry that named it and the draft's name for it. Given `initial` (the
+ *    draft the editor opened on), a tab the editor did not rename keeps the
+ *    base entry's own `label`: the name the editor shows is the served one,
+ *    which the read translates for the reader's language
+ *    (`objects.OBJECT._relatedLists.LIST.label`), so writing it back would
+ *    store a translation as the source.
  *  - The attachments tab where the object enables files and it is shown:
  *    at the base entry's place, else after the related tabs.
  *  - Every other base entry: the built-in 审批 / 动态 names, and an entry
@@ -254,6 +275,7 @@ export function recordTabsEntries(
   draft: RecordTabsDraft,
   base: readonly unknown[] | undefined,
   catalog: RecordTabsCatalog,
+  initial?: RecordTabsDraft,
 ): RelatedListEntryInput[] | undefined {
   const baseEntries = Array.isArray(base) ? base : [];
   const arranged = catalog.candidates.filter((c) => c.fromPackage === undefined);
@@ -278,9 +300,10 @@ export function recordTabsEntries(
     const candidate = arrangedById.get(id);
     if (!candidate) continue;
     const at = baseIndexOf(candidate.list);
-    const { columns } = entryDetails(at >= 0 ? baseEntries[at] : undefined);
+    const stored = entryDetails(at >= 0 ? baseEntries[at] : undefined);
+    const label = recordTabLabelToWrite(id, draft, initial, stored.label);
     const name = relationshipEntry(candidate.list, catalog.relationships);
-    out.push({ entry: entryWithDetails(name, { label: draft.labels[id], columns }), baseIndex: at });
+    out.push({ entry: entryWithDetails(name, { label, columns: stored.columns }), baseIndex: at });
   }
   // Each base entry kept: one past the last related entry the editor
   // arranges stays at the end; any other after the entry that followed the

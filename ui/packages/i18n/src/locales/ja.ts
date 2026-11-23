@@ -3605,6 +3605,11 @@ const ja = {
       renameSourceOnly: 'タブ名はアプリのソース言語でのみ変更できます',
       builtinFixed: 'このタブはプラットフォームが最後に固有の名前で表示します。',
       adjustFieldGroups: 'フィールドグループを調整',
+      pairNotWritable: 'このアプリのカスタマイズパッケージは書き込めないため、タブを保存できません。',
+      builtinMoves: '組み込みタブは移動できますが、非表示や名前の変更はできません。',
+      sourceBase: '元のパッケージ',
+      sourcePackage: '{{name}} から',
+      sourceEnvironment: 'この環境',
     },
   },
   topbar: {
