@@ -45,6 +45,10 @@ function shell(title: string, body: string): string {
   .ok{background:#ecfdf5;color:#047857}.warn{background:#fffbeb;color:#b45309}.err{background:#fef2f2;color:#b91c1c}
   a{color:#2563eb;text-decoration:none}
   .foot{margin-top:18px;font-size:12px;color:#94a3b8}
+  label{display:block;margin-top:18px;font-size:14px;font-weight:600}
+  textarea{display:block;box-sizing:border-box;width:100%;min-height:88px;margin-top:6px;padding:8px 10px;
+           border:1px solid #cbd5e1;border-radius:8px;font:inherit;resize:vertical}
+  .refusal{margin:14px 0 0;padding:8px 12px;border-radius:8px;background:#fef2f2;color:#b91c1c;font-size:14px}
 </style></head><body><div class="card">${body}</div></body></html>`;
 }
 
@@ -76,25 +80,52 @@ function summaryRows(req: ApprovalRequestRow): string {
   return rows.map(([k, v]) => `<div class="row"><span class="k">${esc(k)}</span><b>${esc(v)}</b></div>`).join('');
 }
 
-/** GET page: summary + a POST form. Rendering only — no mutation. */
+/**
+ * The refusal a reject link's confirm page shows when its form came back with
+ * no reason. A reject carries its reason on every door (`ApprovalService.decide`);
+ * this door asks the approver for one on the page instead of recording a fixed
+ * text, and a blank one leaves the link live so the approver can try again.
+ */
+export const REJECT_REASON_REQUIRED_COPY = 'Enter a reason to reject this request. · 驳回需填写驳回理由。';
+
+/**
+ * GET page: summary + a POST form. Rendering only — no mutation.
+ *
+ * A reject form carries a required `comment` field, the reason the decision
+ * records (`redeemActionToken`); an approve form carries none and keeps its
+ * one button. `refusal: 'reason_required'` is the same page answered again
+ * after a reject form came back with a blank reason.
+ */
 export function renderConfirmPage(input: {
   request: ApprovalRequestRow;
   action: Extract<ApprovalActionKind, 'approve' | 'reject'>;
   approverId: string;
   token: string;
   actPath: string;
+  refusal?: 'reason_required';
 }): string {
   const approving = input.action === 'approve';
   const verb = approving ? 'Approve · 通过' : 'Reject · 驳回';
+  const tokenField = `<input type="hidden" name="token" value="${esc(input.token)}">`;
+  const button = `<button type="submit" class="${approving ? 'approve' : 'reject'}">${verb}</button>`;
+  const form = approving
+    ? `<form method="post" action="${esc(input.actPath)}" class="actions">
+      ${tokenField}
+      ${button}
+    </form>`
+    : `<form method="post" action="${esc(input.actPath)}">
+      ${tokenField}
+      <label for="comment">Reason for rejecting · 驳回理由</label>
+      <textarea id="comment" name="comment" required></textarea>
+      ${input.refusal === 'reason_required' ? `<p class="refusal" role="alert">${esc(REJECT_REASON_REQUIRED_COPY)}</p>` : ''}
+      <div class="actions">${button}</div>
+    </form>`;
   return shell(`${verb} — Approval`, `
     <h1>${approving ? '✅ Approve this request?' : '⛔ Reject this request?'}</h1>
     <p class="sub">${approving ? '确认通过该审批请求？' : '确认驳回该审批请求？'}
       Acting as · 操作身份：<b>${esc(input.approverId)}</b></p>
     ${summaryRows(input.request)}
-    <form method="post" action="${esc(input.actPath)}" class="actions">
-      <input type="hidden" name="token" value="${esc(input.token)}">
-      <button type="submit" class="${approving ? 'approve' : 'reject'}">${verb}</button>
-    </form>
+    ${form}
     <p class="foot">This link is single-use and expires automatically. · 此链接一次有效，过期自动失效。</p>`);
 }
 
