@@ -2020,6 +2020,13 @@ const en = {
     foldedMoreFields_other: '{{count}} more',
     expandFolded: 'Show each update',
     collapseFolded: 'Hide updates',
+    // objectstack#36290 — one line per changed field under an activity entry:
+    // the field's label before its values, the word for an empty side, and
+    // the control that shows a long value in full and clamps it again.
+    fieldChangeLabel: '{{field}}:',
+    fieldChangeEmpty: 'Empty',
+    fieldChangeExpand: 'Show all',
+    fieldChangeCollapse: 'Show less',
     // Replies
     replyCount: '{{count}} reply',
     replyCount_one: '{{count}} reply',
