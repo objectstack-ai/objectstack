@@ -2869,35 +2869,29 @@ const ar = {
       progress: "اكتمل {{done}} من {{total}}",
       dismiss: "إخفاء القائمة",
       showDone: "عرض العناصر المكتملة ({{done}})",
-      showDoneSplit: "عرض العناصر المكتملة (إلزامية {{required}} · اختيارية {{optional}})",
       hideDone: "إخفاء العناصر المكتملة",
       optional: "اختياري",
       set: "تعيين",
       change: "تغيير",
       view: "عرض",
-      confirm: "تأكيد",
       cancel: "إلغاء",
       continue: "متابعة",
-      prefilled: "القيم التي لم تُعيَّن بعد مقترحة من متصفحك. لن يُحفظ شيء حتى تؤكد.",
-      organizationName: {
-        title: "سمِّ مؤسستك",
-        todo: "لا تزال تحمل الاسم الذي أُنشئت به: \"{{name}}\".",
-        action: "إعادة التسمية",
+      showList: "عرض القائمة",
+      // objectstack#36739 — the one required platform row: one form, one save.
+      organizationBasics: {
+        title: "البيانات الأساسية للمؤسسة",
+        todo: "الاسم واللغة والبلد الافتراضيان والمنطقة الزمنية والعملة، تُحفظ معًا.",
+        name: "اسم المؤسسة",
+        nameRequired: "أدخل اسمًا لمؤسستك.",
+        prefilled: "القيم التي لم تُعيَّن بعد مقترحة من متصفحك. لن يُحفظ شيء حتى تضغط حفظ.",
+        save: "حفظ",
+        saved: "تم حفظ البيانات الأساسية للمؤسسة",
       },
-      languageCountry: {
-        title: "اللغة والبلد الافتراضيان",
-        todo: "حاليًا {{language}} و{{country}}. أكّدهما أو اختر غيرهما.",
-        saved: "تم حفظ اللغة والبلد الافتراضيين",
-      },
-      timezone: {
-        title: "المنطقة الزمنية للنظام",
-        todo: "لا تزال المنطقة الزمنية الافتراضية للمنصة، {{current}}. وهي تحدد معنى \"اليوم\" في الصيغ وكيفية تجميع التقارير للتواريخ.",
-        saved: "تم تعيين المنطقة الزمنية للنظام إلى {{zone}}",
-      },
-      currency: {
-        title: "العملة الافتراضية",
-        todo: "لم تُعيَّن بعد، لذا تظهر المبالغ دون رمز عملة.",
-        saved: "تم تعيين العملة الافتراضية إلى {{currency}}",
+      // The sidebar's progress pill, in every app (objectstack#36739).
+      pill: {
+        label: "البدء",
+        count: "{{done}}/{{total}}",
+        aria: "البدء: تم {{done}} من {{total}}",
       },
       mail: {
         title: "إرسال البريد الإلكتروني",

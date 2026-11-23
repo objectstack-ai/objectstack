@@ -2581,35 +2581,29 @@ const ko = {
       progress: "{{total}}개 중 {{done}}개 완료",
       dismiss: "체크리스트 숨기기",
       showDone: "완료된 항목 보기({{done}})",
-      showDoneSplit: "완료된 항목 보기(필수 {{required}} · 선택 {{optional}})",
       hideDone: "완료된 항목 접기",
       optional: "선택 사항",
       set: "설정",
       change: "변경",
       view: "보기",
-      confirm: "확인",
       cancel: "취소",
       continue: "계속",
-      prefilled: "아직 설정되지 않은 값은 브라우저를 기준으로 제안되었습니다. 확인하기 전에는 아무것도 저장되지 않습니다.",
-      organizationName: {
-        title: "조직 이름 정하기",
-        todo: "아직 생성 시의 이름 \"{{name}}\"을(를) 사용하고 있습니다.",
-        action: "이름 변경",
+      showList: "목록 보기",
+      // objectstack#36739 — the one required platform row: one form, one save.
+      organizationBasics: {
+        title: "조직 기본 정보",
+        todo: "조직 이름, 기본 언어와 국가, 시간대, 통화를 한 번에 저장합니다.",
+        name: "조직 이름",
+        nameRequired: "조직 이름을 입력하세요.",
+        prefilled: "아직 설정하지 않은 항목은 브라우저 설정을 바탕으로 제안했습니다. 저장을 누르기 전에는 아무것도 저장되지 않습니다.",
+        save: "저장",
+        saved: "조직 기본 정보를 저장했습니다",
       },
-      languageCountry: {
-        title: "기본 언어 및 국가",
-        todo: "현재 {{language}}, {{country}}입니다. 확인하거나 다른 값을 선택하세요.",
-        saved: "기본 언어 및 국가를 저장했습니다",
-      },
-      timezone: {
-        title: "시스템 시간대",
-        todo: "아직 플랫폼 기본값 {{current}}입니다. 수식에서 \"오늘\"의 의미와 보고서에서 날짜를 묶는 방식을 결정합니다.",
-        saved: "시스템 시간대를 {{zone}}(으)로 설정했습니다",
-      },
-      currency: {
-        title: "기본 통화",
-        todo: "아직 설정되지 않아 금액이 통화 기호 없이 표시됩니다.",
-        saved: "기본 통화를 {{currency}}(으)로 설정했습니다",
+      // The sidebar's progress pill, in every app (objectstack#36739).
+      pill: {
+        label: "시작하기",
+        count: "{{done}}/{{total}}",
+        aria: "시작하기: {{total}}개 중 {{done}}개 완료",
       },
       mail: {
         title: "이메일 발송",
