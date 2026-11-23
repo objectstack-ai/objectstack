@@ -27,7 +27,9 @@ import {
   filterTokenContextFrom,
   resolveFilterTokens,
   type FilterTokenResolutionContext,
+  type JsonColumnFieldClass,
 } from '@objectstack/core';
+import { comparisonColumnClass } from './json-column-comparison-refusal.js';
 // [#6615] The Postgres `"x" of relation "y"` phrase, owned once. This is the
 // only reason this package depends on `@objectstack/types` — see the module's
 // docblock for why the edge is acyclic and why it was worth adding.
@@ -1345,6 +1347,19 @@ export interface AnalyticsServiceConfig {
    */
   dateBucketSql?: (object: string, field: string, granularity: string, timezone?: string) => string | undefined;
   /**
+   * [#36190] Which class of JSON column `field` on `object` is on THIS
+   * deployment, as the driver that stores it answers, or `undefined` when it
+   * is not one or the host cannot answer. See
+   * `DatasetScopedStrategyContext.jsonColumnFieldClass` (`strategies/types.ts`).
+   *
+   * Answered by the plugin from the driver that stores the object
+   * (`SqlDriver.jsonColumnFieldClass`): the one JSON column the declaration
+   * cannot name is a single-value media field inside the ADR-0104 window. The
+   * native face and the draft preview refuse a scalar comparison on it in the
+   * data door's words. A host that wires nothing keeps the behaviour it had.
+   */
+  jsonColumnFieldClass?: (object: string, field: string) => JsonColumnFieldClass | undefined;
+  /**
    * [#19995, ruling C] The data engine's judge-only `where` admission,
    * `IObjectQLEngine.judgeFilter` (#20157): would the engine admit this
    * `where` on this object, without running it? `undefined` when this host
@@ -1629,6 +1644,8 @@ export class AnalyticsService implements IAnalyticsService {
     return typeof target === 'string' ? target : target?.object;
   };
   private readonly sourceFieldMeta?: AnalyticsServiceConfig['sourceFieldMeta'];
+  /** [#36190] The storing driver's JSON-column class, read by the draft preview's comparison refusal. */
+  private readonly jsonColumnFieldClass?: AnalyticsServiceConfig['jsonColumnFieldClass'];
   /** Optional dimension display-label resolver (select options / lookup names). */
   private readonly labelResolver?: DimensionLabelDeps;
   /** ADR-0037 P3: pending-seed row resolver for draft data preview. */
@@ -1706,6 +1723,7 @@ export class AnalyticsService implements IAnalyticsService {
     this.configuredAllowedRelationships = config.getAllowedRelationships;
     this.relationshipResolver = config.relationshipResolver;
     this.sourceFieldMeta = config.sourceFieldMeta;
+    this.jsonColumnFieldClass = config.jsonColumnFieldClass;
     this.draftRowsResolver = config.draftRowsResolver;
     this.isRegisteredObject = config.isRegisteredObject;
     this.getObjectFieldNames = config.getObjectFieldNames;
@@ -1817,6 +1835,9 @@ export class AnalyticsService implements IAnalyticsService {
       // [#21441] The executing driver's own bucket expression, for the ObjectQL
       // face's echo; passed through untouched, `undefined` included.
       dateBucketSql: config.dateBucketSql,
+      // [#36190] The storing driver's JSON-column class, for the comparison
+      // refusal; passed through untouched, `undefined` included.
+      jsonColumnFieldClass: config.jsonColumnFieldClass,
       // [#19995, ruling C] The engine's own admission verdict on a read scope,
       // asked by `ObjectQLStrategy` at its engine-bound merges. The host's
       // answer is passed through untouched, `undefined` included. A host that
@@ -3324,14 +3345,23 @@ export class AnalyticsService implements IAnalyticsService {
             const whereColumns = previewWhereColumns(q, cube);
             // [#36168] …with the declared value shape, so a scalar comparison
             // on a multi-valued or JSON-stored field is refused as the live
-            // faces refuse it (`json-column-comparison-refusal.ts`).
-            const declaredShape = (field: string) => {
+            // faces refuse it (`json-column-comparison-refusal.ts`), and
+            // [#36190] the storing driver's answer, so a single-value media
+            // column it keeps as JSON is refused in the live faces' words too.
+            const jsonColumnClass = (field: string) => {
               const meta = this.sourceFieldMeta?.(dataset.object, field);
-              return typeof meta?.type === 'string' && meta.type !== ''
+              const shape = typeof meta?.type === 'string' && meta.type !== ''
                 ? { type: meta.type, multiple: meta.multiple === true }
                 : undefined;
+              let stored: unknown;
+              try {
+                stored = this.jsonColumnFieldClass?.(dataset.object, field);
+              } catch {
+                stored = undefined;
+              }
+              return comparisonColumnClass(shape, stored);
             };
-            const rowFilters = lowerPreviewRowFilters(q, previewCube, declaredType, whereColumns, declaredShape);
+            const rowFilters = lowerPreviewRowFilters(q, previewCube, declaredType, whereColumns, jsonColumnClass);
             // [#28765, #28798] …and a selection asking one column for two
             // values under one name (raw beside its own bucket, or two buckets
             // of it), with the refusal the ObjectQL strategy gives both live

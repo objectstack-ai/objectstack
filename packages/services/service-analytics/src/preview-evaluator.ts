@@ -40,6 +40,7 @@ import {
   temporalComparandKind,
   temporalStorageForm,
   type BucketGranularity,
+  type JsonColumnFieldClass,
   type TemporalComparandKind,
 } from '@objectstack/core';
 import { explicitDateRangeWindow } from './date-range-array-arm.js';
@@ -60,7 +61,7 @@ import type { DurationMeasureSpec } from './strategies/types.js';
 import { invalidFilterError, normalizeWhereComparands } from './strategies/filter-normalizer.js';
 import { refusePreviewJsonColumnComparisons } from './json-column-comparison-refusal.js';
 import type { AnalyticsQuery, AnalyticsResult } from '@objectstack/spec/contracts';
-import { emptyGroupValueFor, lowerFilterCondition, type Cube, type FilterLoweringOptions, type ValueShapeFieldDef } from '@objectstack/spec/data';
+import { emptyGroupValueFor, lowerFilterCondition, type Cube, type FilterLoweringOptions } from '@objectstack/spec/data';
 
 type Row = Record<string, unknown>;
 
@@ -794,7 +795,7 @@ export function lowerPreviewRowFilters(
   cube: Cube,
   declaredType?: (field: string) => string | undefined,
   whereColumns?: Readonly<Record<string, string>>,
-  declaredShape?: (field: string) => ValueShapeFieldDef | undefined,
+  jsonColumnClass?: (field: string) => JsonColumnFieldClass | undefined,
 ): PreviewRowFilters {
   const aliased = Object.entries(whereColumns ?? {});
   const whereType =
@@ -842,8 +843,11 @@ export function lowerPreviewRowFilters(
   // JSON-stored, refused as the live faces refuse it: a drafted row holds the
   // list, which never equals a scalar, so `$in` matched no row and `$nin`
   // matched the row it excludes. Judged once, before any row is read.
-  if (declaredShape) {
-    refusePreviewJsonColumnComparisons(lowered, declaredShape, (member) => whereColumns?.[member] ?? member);
+  // [#36190] `jsonColumnClass` also names a single-value media column the
+  // storing driver keeps as JSON, which the live faces refuse in the
+  // media-column words (`comparisonColumnClass`).
+  if (jsonColumnClass) {
+    refusePreviewJsonColumnComparisons(lowered, jsonColumnClass, (member) => whereColumns?.[member] ?? member);
   }
   // [#21505] …then each value comparison in the temporal STORAGE form, the
   // comparand here and the row value at the match (see {@link previewTemporalKind}).
