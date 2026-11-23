@@ -107,6 +107,7 @@ vi.stubGlobal(
 );
 
 import { MetadataResourceEditPage } from './ResourceEditPage';
+import { t } from './i18n';
 // The load-time registrations, exactly as the package entry runs them, so the
 // branch this file takes is the branch production takes.
 import './register-builtins';
@@ -124,33 +125,36 @@ afterEach(() => {
   window.localStorage.removeItem('metadata-admin:autosave');
 });
 
-async function openAction(): Promise<HTMLElement> {
+async function openAction(): Promise<void> {
   render(
     <MemoryRouter initialEntries={['/metadata/action/sign_contract']}>
       <MetadataResourceEditPage type="action" name="sign_contract" />
     </MemoryRouter>,
   );
   // The designer branch opens editable: its panel is the inspector itself.
-  return screen.findByTestId('action-served-rows', {}, { timeout: 8000 });
+  await screen.findByText(t('engine.inspector.moreFields', 'en'), {}, { timeout: 8000 });
+
 }
 
 describe('the action full-page editor draws refusals and texts from their served rows (objectstack#35650)', () => {
   it('draws each as the key-only record control with the served help text, and no raw JSON', async () => {
-    const rows = await openAction();
-    expect(within(rows).getByText(servedHelpText('refusals'))).toBeInTheDocument();
-    expect(within(rows).getByText(servedHelpText('texts'))).toBeInTheDocument();
-    // The key-only control draws each entry under its key.
-    expect(within(rows).getByText('SIGN_IN_REQUIRED', { selector: 'span' })).toBeInTheDocument();
-    expect(within(rows).getByText('email_subject', { selector: 'span' })).toBeInTheDocument();
-    // No editor anywhere on the page holds either record as JSON text.
+    await openAction();
+    // No editor on the panel holds either record as JSON text (the raw JSON face).
     const jsonHolders = Array.from(document.querySelectorAll('textarea')).filter(
       (el) => el.value.includes('"SIGN_IN_REQUIRED"') || el.value.includes('"email_subject"'),
     );
     expect(jsonHolders).toEqual([]);
+    // The served rows' help text, and the key-only control drawing each entry under its key.
+    expect(screen.getByText(servedHelpText('refusals'))).toBeInTheDocument();
+    expect(screen.getByText(servedHelpText('texts'))).toBeInTheDocument();
+    const rows = screen.getByTestId('action-served-rows');
+    expect(within(rows).getByText('SIGN_IN_REQUIRED', { selector: 'span' })).toBeInTheDocument();
+    expect(within(rows).getByText('email_subject', { selector: 'span' })).toBeInTheDocument();
   });
 
   it('an entry edited through the served row saves as a spec-valid action', async () => {
-    const rows = await openAction();
+    await openAction();
+    const rows = screen.getByTestId('action-served-rows');
     fireEvent.click(within(rows).getByText('email_subject', { selector: 'span' }));
     const entry = within(rows).getByText('email_subject', { selector: 'span' }).closest('.rounded-md') as HTMLElement;
     fireEvent.change(within(entry).getByDisplayValue('Contract signed'), { target: { value: 'Your contract is signed' } });
