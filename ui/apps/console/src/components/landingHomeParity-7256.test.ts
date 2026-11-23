@@ -120,6 +120,29 @@ describe('objectstack#36732 — a desktop\'s landing and its Home are one answer
     }
   });
 
+  // A permission set that hides an app (`tabPermissions: hidden`) is applied
+  // ONCE, by app-shell's `useServedApps`, before either reader is called —
+  // `RootLandingRedirect` and `useHomePath` both pass it the same list, and
+  // their own pins (`RootLandingRedirect.route.test.tsx`, `useHomePath.test.tsx`)
+  // hold that wiring. What this matrix holds is the rest: on the narrowed list
+  // the two readers still agree, and the last-used record of the hidden app
+  // never survives on either side.
+  it('a set-hidden last app: both readers skip it on the served list', () => {
+    const declared = [{ name: 'crm' }, { name: 'ops' }, SETUP];
+    const served = declared.filter((a) => a.name !== 'crm'); // crm hidden by a permission set
+    expect(resolveDesktopHomePath(served, 'crm')).toBe('/apps/ops');
+    expect(resolveDesktopLandingPath(served, 'crm')).toBe('/apps/ops');
+    // …and the narrowing is what moved them: unnarrowed, both would open crm.
+    expect(resolveDesktopHomePath(declared, 'crm')).toBe('/apps/crm');
+    expect(resolveDesktopLandingPath(declared, 'crm')).toBe('/apps/crm');
+  });
+
+  it('a set-hidden only product app: both fall back to the no-apps page', () => {
+    const served = [SETUP]; // the one product app is hidden by a permission set
+    expect(resolveDesktopHomePath(served, 'crm')).toBe(HOME_LAUNCHER_PATH);
+    expect(resolveDesktopLandingPath(served, 'crm')).toBe(HOME_LAUNCHER_PATH);
+  });
+
   it('with no product app both fall back to the no-apps page at /home', () => {
     expect(resolveDesktopHomePath([SETUP, STUDIO], null)).toBe(HOME_LAUNCHER_PATH);
     expect(resolveDesktopLandingPath([SETUP, STUDIO], null)).toBe(HOME_LAUNCHER_PATH);

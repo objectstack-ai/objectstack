@@ -74,6 +74,7 @@ function renderGuardedAi(apps?: MetadataContextValue['apps']) {
           />
           <Route path="/home" element={<div>HOME</div>} />
           <Route path="/apps/cloud_control" element={<div>DECLARED LANDING</div>} />
+          <Route path="/apps/crm" element={<div>FIRST APP</div>} />
         </Routes>,
       )}
     </MemoryRouter>,
@@ -152,16 +153,18 @@ describe('RequireAiSurface', () => {
     expect(screen.queryByText('HOME')).not.toBeInTheDocument();
   });
 
-  it('keeps the launcher for an ordinary environment that declares nothing', async () => {
-    // The status quo, stated as its own case so the two answers cannot be
-    // confused for one: an app list WITHOUT a declaration still resolves to the
-    // launcher, and so does a guard mounted outside a metadata provider (every
-    // other case in this file).
+  it('lands an ordinary desktop environment that declares nothing in its first product app', async () => {
+    // Stated as its own case so the two answers cannot be confused for one: an
+    // app list WITHOUT a declaration resolves, on a desktop, to the first
+    // product app (Setup is never that app) since the platform Home page was
+    // retired (#36732); a guard mounted outside a metadata provider still
+    // resolves to the launcher (every other case in this file).
     const user = userEvent.setup();
     mockSurface.mockReturnValue({ enabled: false, isLoading: false });
-    renderGuardedAi([{ name: 'crm', label: 'CRM' }, { name: 'setup', label: 'Setup' }]);
+    renderGuardedAi([{ name: 'setup', label: 'Setup' }, { name: 'crm', label: 'CRM' }]);
     await user.click(screen.getByTestId('ai-unavailable-home'));
-    expect(screen.getByText('HOME')).toBeInTheDocument();
+    expect(screen.getByText('FIRST APP')).toBeInTheDocument();
+    expect(screen.queryByText('HOME')).not.toBeInTheDocument();
     expect(screen.queryByText('DECLARED LANDING')).not.toBeInTheDocument();
   });
 });

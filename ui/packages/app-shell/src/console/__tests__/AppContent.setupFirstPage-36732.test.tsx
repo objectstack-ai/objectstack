@@ -25,7 +25,7 @@ import React from 'react';
 import { render, screen, act } from '@testing-library/react';
 import { MemoryRouter, Routes, Route, useLocation, useNavigate, type NavigateFunction } from 'react-router-dom';
 import { MePermissionsProvider, type MePermissionsResponse } from '@object-ui/permissions';
-import { SchemaRendererContext, type ApiFetch } from '@object-ui/react';
+import { SchemaRendererContext } from '@object-ui/react';
 
 // AGENTS.md §测试纪律 — the lazy page modules are stubbed so no unbounded
 // `import()` races a bounded `findBy` window.
@@ -139,9 +139,12 @@ const EVERYTHING_READABLE = {
 } as MePermissionsResponse;
 
 
-let navigateTo: NavigateFunction | null = null;
+const navigator: { current: NavigateFunction | null } = { current: null };
 function NavigatorProbe() {
-  navigateTo = useNavigate();
+  const navigate = useNavigate();
+  React.useEffect(() => {
+    navigator.current = navigate;
+  }, [navigate]);
   return null;
 }
 
@@ -219,7 +222,7 @@ describe('objectstack#36732 — the checklist sits on the Setup app\'s first pag
     renderConsoleAt('/apps/com.objectstack.setup/sys_user');
     const page = await screen.findByTestId('object-view');
     expect(screen.getByTestId('host-checklist')).toBeInTheDocument();
-    act(() => navigateTo!('/apps/com.objectstack.setup/sys_team'));
+    act(() => navigator.current!('/apps/com.objectstack.setup/sys_team'));
     expect(pathname()).toBe('/apps/com.objectstack.setup/sys_team');
     expect(screen.queryByTestId('host-checklist')).not.toBeInTheDocument();
     // The same element: the route below the slot was not unmounted and mounted again.
