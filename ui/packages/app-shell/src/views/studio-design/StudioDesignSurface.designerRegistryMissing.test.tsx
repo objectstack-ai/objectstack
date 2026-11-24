@@ -214,7 +214,7 @@ describe('Data pillar field rail — a field click must never be a no-op (#6795 
 
     render(
       <MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
-        <DataPillar packageId="com.example.showcase" />
+        <DataPillar objectName="showcase_task" packageId="com.example.showcase" />
       </MemoryRouter>,
     );
     fireEvent.click(await screen.findByRole('button', { name: 'Field layout' }));

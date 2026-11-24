@@ -172,7 +172,7 @@ function canvas(): HTMLElement {
 function dataTree() {
   return (
     <MemoryRouter initialEntries={['/studio/com.acme.app/data']}>
-      <DataPillar packageId="com.acme.app" />
+      <DataPillar objectName="acme_account" packageId="com.acme.app" />
     </MemoryRouter>
   );
 }

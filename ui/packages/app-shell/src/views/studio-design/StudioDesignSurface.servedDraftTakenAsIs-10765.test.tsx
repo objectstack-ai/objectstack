@@ -164,7 +164,7 @@ describe('StudioDesignSurface — every load site takes the served draft as-is, 
     render(
       <MemoryRouter initialEntries={[`/studio/${PKG}/data`]}>
         <SurfaceDeepLinkProvider>
-          <DataPillar packageId={PKG} />
+          <DataPillar objectName="crm_contact" packageId={PKG} />
         </SurfaceDeepLinkProvider>
       </MemoryRouter>,
     );

@@ -242,7 +242,7 @@ function openEditor(): HTMLElement {
   const { container } = render(
     <StudioSaveHarness>
       <MemoryRouter initialEntries={[`/studio/${PKG}/data`]}>
-        <DataPillar packageId={PKG} />
+        <DataPillar objectName="acme_task" packageId={PKG} />
       </MemoryRouter>
     </StudioSaveHarness>,
   );

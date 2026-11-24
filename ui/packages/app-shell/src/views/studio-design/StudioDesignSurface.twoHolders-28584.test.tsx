@@ -194,7 +194,7 @@ describe('Studio pillars — an item two packages hold is read at this package (
     );
     render(
       <MemoryRouter initialEntries={[`/studio/${PKG}/data`]}>
-        <DataPillar packageId={PKG} />
+        <DataPillar objectName="acme_account" packageId={PKG} />
       </MemoryRouter>,
     );
     await waitFor(() => expect(layersReads('object', 'acme_account')).toHaveLength(1));
