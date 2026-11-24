@@ -13,10 +13,12 @@
  *   <root>/_diagnostics        diagnostics
  *   <root>/:type               a type's list
  *   <root>/:type/new           create (a writable package only)
- *   <root>/:type/:name         the generic item page, the item's pillar, or
- *                              the form editor of an email template or a
+ *   <root>/:type/:name         the generic item page, the item's pillar, the
+ *                              form editor of an email template or a
  *                              translation (`StudioBundleItemEditor`, #28569),
- *                              and of a read-only package's dataset (#30064)
+ *                              and of a read-only package's dataset (#30064),
+ *                              or a permission set's full-screen matrix
+ *                              (`StudioPermissionSetPage`, #36905)
  *   <root>/:type/:name/history the item's history: its History tab
  *                              (`?tab=history`), the old address redirected;
  *                              the history page for a type with an editor of
@@ -45,12 +47,14 @@ import { t, useMetadataLocale } from '../metadata-admin/i18n.js';
 import { fetchListedPackageManifests } from './packages-io.js';
 import {
   STUDIO_ALL_PACKAGES_SEGMENT,
+  areaItemOpensDesignerPage,
   areaItemOpensFormEditor,
   areaItemPillarPath,
   areaLocationRedirect,
   studioMetadataAreaPath,
 } from './metadataArea.js';
 import { StudioBundleItemEditor } from './StudioBundleItemEditor.js';
+import { StudioPermissionSetPage } from './StudioPermissionSetPage.js';
 import { BUNDLE_MEMBER_PARAM, getMetadataResource } from '../metadata-admin/registry.js';
 import { ITEM_TOOL_TAB_PARAM } from '../item-tools/ItemToolTabs.js';
 import type { StudioBaseCustomization } from './StudioDesignSurface.js';
@@ -168,6 +172,18 @@ function AreaItemOpen({
     return { formEditor: false, pillarPath: areaItemPillarPath({ ...at, name }) };
   });
   if (opens.pillarPath) return <Navigate to={opens.pillarPath} replace />;
+  // objectstack#36905 — a permission set opens its matrix full-screen here.
+  if (host?.packageId && areaItemOpensDesignerPage({ packageId: host.packageId, type })) {
+    return (
+      <StudioPermissionSetPage
+        packageId={host.packageId}
+        name={name}
+        readOnly={host.readOnly}
+        publishNonce={editor.publishNonce}
+        onDraftSaved={editor.onDraftSaved ? () => editor.onDraftSaved?.({ type, name }) : undefined}
+      />
+    );
+  }
   if (opens.formEditor && host?.packageId) {
     return (
       <StudioBundleItemEditor
@@ -194,16 +210,19 @@ function AreaItemOpen({
  * Cut from the path as it is spelled, so an encoded name stays encoded.
  *
  * A type whose item page is an editor of its own (`registerMetadataResource`'s
- * `EditPage`: the permission set's matrix) has no tabs, and its History button
- * opens this address: it keeps the standalone history page. So does an item
- * whose address opens a pillar's designer, until the designer mounts the tabs.
+ * `EditPage`: the permission set's matrix) has no tabs on the cross-package
+ * leg, and its History button opens this address there: it keeps the
+ * standalone history page. So does an item whose address opens a pillar's
+ * designer, until the designer mounts the tabs. objectstack#36905 — on a
+ * package's leg the permission set's full-screen page has them.
  */
 function AreaHistoryRedirect(): React.ReactElement {
   const { type = '', name = '' } = useParams<{ type: string; name: string }>();
   const { pathname, search } = useLocation();
   const host = useMetadataAreaHost();
   const params = new URLSearchParams(search);
-  const ownEditor = !!getMetadataResource(type)?.EditPage;
+  const designerPage = areaItemOpensDesignerPage({ packageId: host?.packageId ?? null, type });
+  const ownEditor = !designerPage && !!getMetadataResource(type)?.EditPage;
   // An item a pillar's designer opens has no tab row yet (its tabs are the
   // designers' cards): its history keeps the standalone page too.
   const pillarItem = areaItemPillarPath({ packageId: host?.packageId ?? null, type, name, search: params }) !== null;

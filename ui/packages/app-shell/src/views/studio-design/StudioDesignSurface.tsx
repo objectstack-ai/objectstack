@@ -135,6 +135,8 @@ import {
 import { STUDIO_METADATA_AREA, isStudioAllPackagesScope } from './metadataArea.js';
 import { StudioMenu, StudioMenuProvider, StudioMenuTrigger } from './StudioMenu.js';
 import { StudioMetadataArea } from './StudioMetadataArea.js';
+import { StudioOwdOverviewPage } from './StudioOwdOverviewPage.js';
+import { accessPillarRedirect } from './accessPillarRedirect.js';
 import { useMetadataRefreshNonce } from './useMetadataRefreshNonce.js';
 import {
   type SurfaceTarget,
@@ -170,7 +172,7 @@ import {
   type DraftPublishOptions,
 } from '../../preview/DraftChangesPanel.js';
 import { toast } from 'sonner';
-import { studioPillarItemAddress, studioPillarPath } from './studioAddress.js';
+import { STUDIO_OWD_SECTION, studioPillarItemAddress, studioPillarPath } from './studioAddress.js';
 
 /** The batch door's `backfillApplied` receipt, by reference to what the client returns (objectui#12929). */
 type PublishBackfillReceipt = NonNullable<
@@ -1530,6 +1532,16 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
                 onDraftSaved={onDraftSaved}
                 publishRefusalFor={publishRefusalFor}
               />
+            ) : tab === STUDIO_OWD_SECTION ? (
+              // objectstack#36905 (decision 11) — the organization-wide default
+              // sharing overview's own route; its unsaved rows gate the header.
+              <StudioOwdOverviewPage
+                key={packageId}
+                packageId={packageId}
+                publishNonce={publishNonce}
+                readOnly={readOnly}
+                onDirtyChange={setPillarDirty}
+              />
             ) : !pillarKnown ? (
               <StudioEmptyState
                 icon={FileQuestion}
@@ -1564,21 +1576,10 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
                 onSurfaceLabelChange={setSurfaceLabel}
               />
             ) : (
-              // objectstack#28573 — keyed by package like its siblings: "New
-              // similar" opens the copy in ANOTHER package's Access pillar
-              // (the base's `.custom`), and that route keeps this element
-              // mounted. Unkeyed, the open set, the rail and the `?surface=`
-              // capture stayed the base's.
-              <AccessPillar
-                key={`${packageId}:${pillarEntry}`}
-                packageId={packageId}
-                publishNonce={publishNonce}
-                onDraftSaved={onDraftSaved}
-                readOnly={readOnly}
-                customization={customization}
-                onDirtyChange={setPillarDirty}
-                onSurfaceLabelChange={setSurfaceLabel}
-              />
+              // objectstack#36905 — the Access pillar draws no page: a set opens
+              // at its metadata address, the sharing overview on its own route,
+              // and the bare pillar on the list of sets.
+              <Navigate to={accessPillarRedirect(packageId, currentSearch)} state={landingState} replace />
             )}
             </StudioPendingDraftsContext.Provider>
           </div>
