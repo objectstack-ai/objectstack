@@ -18,6 +18,7 @@ import {
     listSlotNameOf,
 } from './protocol-object-extension-item.js';
 import { withRowBinding } from './protocol-package-bindings.js';
+import { withListedRowChangedAt } from './listed-row-changed-at.js';
 
 /**
  * One place a stored `sys_metadata` row of an item can sit, as
@@ -343,6 +344,11 @@ export function servedViewExpansion<E extends { packageId: string | undefined }>
  * merge (view-identity healing, draft tagging); `prev` is the base row it
  * shadows at the same slot (or any same-name base row), else undefined.
  *
+ * [#36894] A record's `changedAt` is the change time of the stored row its
+ * body was parsed from: the contribution enters carrying it
+ * ({@link withListedRowChangedAt}), so the item the merge serves from it
+ * answers that row's time ({@link takeListedRowChangedAt}).
+ *
  * [#7774] The bucket is per SLOT, not per name, and for a type in
  * `ITEM_KEY_DISCRIMINATORS` the slot is `(name, discriminator)`. This is the
  * half of the collapse that #7774's card predicted would need no change, and
@@ -365,7 +371,7 @@ export function servedViewExpansion<E extends { packageId: string | undefined }>
 export function mergePackageAwareOverlay(
     type: string,
     baseItems: unknown[],
-    records: Array<{ data: unknown; packageId: string | undefined; stored?: StoredRowPlace; standIn?: boolean }>,
+    records: Array<{ data: unknown; packageId: string | undefined; stored?: StoredRowPlace; standIn?: boolean; changedAt?: string }>,
     transform?: (data: any, prev: any) => any,
     unseated?: WeakSet<object>,
     options:
@@ -494,7 +500,7 @@ export function mergePackageAwareOverlay(
                 undefined, unseated?.has(item), itemName);
         }
     }
-    for (const { data, packageId, stored, standIn } of records) {
+    for (const { data, packageId, stored, standIn, changedAt } of records) {
         // [#31399] A stored body that states no name of its own (a `seed`:
         // `SeedSchema` declares none, the name lives on the row) is slotted by
         // its row's `name` column, the name the by-name read finds it under,
@@ -529,7 +535,12 @@ export function mergePackageAwareOverlay(
         // package's slot below. A record that is not a stored row (a caller's
         // item, slotted by its own `_packageId`) enters as it is.
         const bound = stored ? withRowBinding(body, packageId) : body;
-        push(slot, packageId, transform ? transform(bound, prev) : bound, stored, standIn, bodyName);
+        // [#36894] …and carrying the time of the row it was parsed from, on a
+        // copy taken after `transform`, so the body served from this
+        // contribution answers that row's time and no other
+        // ({@link withListedRowChangedAt}).
+        const merged = transform ? transform(bound, prev) : bound;
+        push(slot, packageId, withListedRowChangedAt(merged, changedAt), stored, standIn, bodyName);
     }
 
     const out: unknown[] = [];

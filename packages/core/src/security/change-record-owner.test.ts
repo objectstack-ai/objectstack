@@ -50,7 +50,7 @@ const CALLER = { userId: 'u_manager', tenantId: 'org_1' };
  * without, answering the stored row; refused before any write, as
  * `ERR_READONLY_FIELD_REJECTED`, under `strictReadonlyWrites`.
  */
-function fakeEngine(opts: { refuse?: (id: string) => unknown; hiddenUsers?: string[]; locked?: (row: Row) => string[] } = {}) {
+function fakeEngine(opts: { refuse?: (id: string) => unknown; hiddenUsers?: string[]; locked?: (row: Row) => string[]; disabledPackageObjects?: string[] } = {}) {
   /** Per update call, in order: whether it passed `strictReadonlyWrites: true`. */
   const strictWrites: boolean[] = [];
   const tables: Record<string, Row[]> = {
@@ -79,6 +79,8 @@ function fakeEngine(opts: { refuse?: (id: string) => unknown; hiddenUsers?: stri
     calls,
     strictWrites,
     getSchema: (name) => SCHEMAS[name],
+    // The engine registry's package predicate: a disabled package's object stays registered (getSchema resolves it).
+    registry: { isObjectPackageDisabled: (name: string) => (opts.disabledPackageObjects ?? []).includes(name) },
     getConfigs: () => SCHEMAS,
     async count(object, q) {
       calls.push({ op: 'count', object, where: q?.where, context: q?.context });
@@ -418,6 +420,57 @@ describe('[#35402] notify', () => {
     });
     expect(failing.notified).toBe(false);
     expect(engine.tables.lead[0]!.owner_id).toBe('u_next');
+  });
+});
+
+describe('[#36261] an object of a disabled package', () => {
+  const DISABLED = { code: 'OBJECT_PACKAGE_DISABLED', status: 404 };
+
+  it('single: refused 404 OBJECT_PACKAGE_DISABLED, nothing read, written or sent', async () => {
+    const engine = fakeEngine({ disabledPackageObjects: ['lead'] });
+    const messaging = { emit: vi.fn(async () => SENT) };
+    const err = await refusalOf(changeRecordOwner(engine, 'lead', 'l1', { ownerId: 'u_next' }, CALLER, { notify: true, messaging }));
+    expect({ code: err.code, status: err.status, object: err.object }).toEqual({ ...DISABLED, object: 'lead' });
+    expect(engine.calls).toEqual([]);
+    expect(messaging.emit).not.toHaveBeenCalled();
+    expect(engine.tables.lead[0]!.owner_id).toBe('u_a');
+  });
+
+  it('bulk: refused as a whole, 404 OBJECT_PACKAGE_DISABLED, nothing read, written or sent', async () => {
+    const engine = fakeEngine({ disabledPackageObjects: ['lead'] });
+    const messaging = { emit: vi.fn(async () => SENT) };
+    const err = await refusalOf(changeRecordsOwner(engine, 'lead', ['l1', 'l2'], { ownerId: 'u_next' }, CALLER, { notify: true, messaging }));
+    expect({ code: err.code, status: err.status, object: err.object }).toEqual({ ...DISABLED, object: 'lead' });
+    expect(engine.calls).toEqual([]);
+    expect(messaging.emit).not.toHaveBeenCalled();
+  });
+
+  it('is asked before the object\'s switch: a switched-off object of a disabled package answers the package refusal', async () => {
+    const engine = fakeEngine({ disabledPackageObjects: ['pinned_lead'] });
+    const err = await refusalOf(changeRecordOwner(engine, 'pinned_lead', 'x1', { ownerId: 'u_next' }, CALLER));
+    expect({ code: err.code, status: err.status }).toEqual(DISABLED);
+  });
+
+  it('a request naming a cascade is refused the same way, before any parent or child read or write', async () => {
+    const rel = { object: 'lead_task', field: 'lead' };
+    for (const run of [
+      (e: ReturnType<typeof fakeEngine>) => changeRecordOwner(e, 'lead', 'l1', { ownerId: 'u_next' }, CALLER, { cascade: [rel] }),
+      (e: ReturnType<typeof fakeEngine>) => changeRecordsOwner(e, 'lead', ['l1', 'l2'], { ownerId: 'u_next' }, CALLER, { cascade: [rel] }),
+    ]) {
+      const engine = fakeEngine({ disabledPackageObjects: ['lead'] });
+      const err = await refusalOf(run(engine));
+      expect({ code: err.code, status: err.status }).toEqual(DISABLED);
+      expect(engine.calls).toEqual([]);
+      expect(engine.tables.lead_task!.map((r) => r.owner_id)).toEqual(['u_a', 'u_b', 'u_a', 'u_b']);
+    }
+  });
+
+  it('control: the same object with its package enabled takes the change', async () => {
+    const engine = fakeEngine({ disabledPackageObjects: ['memo'] });
+    const result = await changeRecordOwner(engine, 'lead', 'l1', { ownerId: 'u_next' }, CALLER);
+    expect(result).toEqual({ object: 'lead', id: 'l1', ownerId: 'u_next', notified: false });
+    const report = await changeRecordsOwner(engine, 'lead', ['l2'], { ownerId: 'u_next' }, CALLER);
+    expect({ updated: report.updated, failed: report.failed }).toEqual({ updated: 1, failed: 0 });
   });
 });
 

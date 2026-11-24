@@ -84,10 +84,12 @@ describe('action-body-does-not-compile · the wrapper is the runtime\'s', () => 
     expect(validateActionBodyCompiles({ actions })).toEqual([]);
   });
 
-  it('reports a regular-expression pattern the host refuses as a warning, never a refusal', () => {
-    const [f] = validateActionBodyCompiles({ actions: [scriptAction('p', 'return /(/.test(input.s);')] });
-    expect(f.severity).toBe('warning');
-    expect(f.message).toContain('regular expression');
+  it('refuses a regular-expression pattern the runtime\'s engine refuses too, an unterminated group, at error', () => {
+    const [f, ...rest] = validateActionBodyCompiles({ actions: [scriptAction('p', 'return /(/.test(input.s);')] });
+    expect(rest).toEqual([]);
+    expect([f.rule, f.severity, f.path]).toEqual([ACTION_BODY_DOES_NOT_COMPILE, 'error', 'actions[0].body.source']);
+    expect(f.message).toContain('Unterminated group');
+    expect(f.hint).toContain('the runtime\'s engine refuses it too');
   });
 
   it('never runs the body: a source that closes the wrapper early compiles and nothing in it executes', () => {
@@ -151,7 +153,7 @@ describe('action-body-does-not-compile · the doors that run it', () => {
   });
 });
 
-describe('action-body-does-not-compile · a regular-expression literal\'s token is refused, only its pattern warns', () => {
+describe('action-body-does-not-compile · a regular-expression failure is refused, only the two dialect gaps warn', () => {
   // Measured against the runtime's QuickJS (quickjs-emscripten, the engine quickjs-runner.ts runs a body in):
   // every case refused here is refused by QuickJS too, and both warning cases compile and run there.
   const only = (source: string) => {
@@ -180,16 +182,106 @@ describe('action-body-does-not-compile · a regular-expression literal\'s token 
   });
 
   it.each([
-    ['a duplicate named capture group', 'return /(?<a>x)|(?<a>y)/.test(input.s);'],
-    ['a modifier group', 'return /(?i:a)/.test(input.s);'],
-  ])('still only warns on %s, a pattern the runtime\'s engine accepts', (_label, source) => {
+    ['a duplicate named capture group', 'return /(?<a>x)|(?<a>y)/.test(input.s);', '(?<a>x)|(?<a>y)'],
+    ['a modifier group', 'return /(?i:a)/.test(input.s);', '(?i:a)'],
+  ])('still only warns on %s, a pattern the runtime\'s engine accepts — while the host refuses it', (_label, source, pattern) => {
+    // Node 22's V8 refuses both patterns and QuickJS runs both (the module note's measurement). A later V8 that
+    // accepts the pattern leaves nothing to warn about, so the pin reads what THIS host does with the pattern
+    // first; on a Node that still refuses it (Node 22, `.nvmrc`), the warning is required.
+    const hostRefuses = (() => {
+      try {
+        new RegExp(pattern);
+        return false;
+      } catch {
+        return true;
+      }
+    })();
+    if (Number(process.versions.node.split('.')[0]) <= 22) expect(hostRefuses, `Node ${process.versions.node}`).toBe(true);
+    const findings = validateActionBodyCompiles({ actions: [scriptAction('p', source)] });
+    if (!hostRefuses) {
+      expect(findings).toEqual([]);
+      return;
+    }
+    expect(findings, source).toHaveLength(1);
+    expect([findings[0].rule, findings[0].severity]).toEqual([ACTION_BODY_DOES_NOT_COMPILE, 'warning']);
+    expect(findings[0].message).toContain('the runtime\'s engine may accept it');
+  });
+
+  // The six pattern classes the runtime's QuickJS refuses as well as the host's V8 (quickjs-emscripten 0.32.0,
+  // same wrapper text, release-sync evalCode: `expecting ')'`, `nothing to repeat`, `invalid class range`,
+  // `group name not defined`, `unknown unicode property name`, `invalid repetition count`). Each is the first
+  // reason V8 names for its pattern, and none is a measured dialect gap, so each is refused.
+  it.each([
+    ['an unterminated group', 'return /(/.test(input.s);', 'Unterminated group'],
+    ['nothing to repeat', 'return /a**/.test(input.s);', 'Nothing to repeat'],
+    ['a class range out of order', 'return /[b-a]/.test(input.s);', 'Range out of order in character class'],
+    ['a dangling named back-reference under u', 'return /\\k<x>/u.test(input.s);', 'Invalid named capture referenced'],
+    ['an unknown unicode property', 'return /\\p{Nope}/u.test(input.s);', 'Invalid property name'],
+    ['an incomplete quantifier under u', 'return /a{/u.test(input.s);', 'Incomplete quantifier'],
+  ])('refuses %s at error: the runtime\'s engine refuses the pattern too', (_label, source, reason) => {
+    // A property name is judged against this host's Unicode tables only where they are the measured ones (17.0);
+    // the `.nvmrc` Node 22 carries them, and an older host reports the unknown property as a warning.
+    const property = reason === 'Invalid property name';
+    if (property && Number(process.versions.node.split('.')[0]) === 22 && process.env.CI) {
+      expect(Number.parseFloat(String(process.versions.unicode)), 'CI host Unicode tables').toBeGreaterThanOrEqual(17);
+    }
     const f = only(source);
-    expect([f.rule, f.severity]).toEqual([ACTION_BODY_DOES_NOT_COMPILE, 'warning']);
+    const severity = property && !(Number.parseFloat(String(process.versions.unicode)) >= 17) ? 'warning' : 'error';
+    expect([f.rule, f.severity, f.path]).toEqual([ACTION_BODY_DOES_NOT_COMPILE, severity, 'actions[0].body.source']);
+    expect(f.message).toContain(reason);
+    if (severity === 'error') expect(f.hint).toContain('the runtime\'s engine refuses it too');
+  });
+
+  // A Unicode property name is judged by name: V8 resolves it against its own list and this host's Unicode tables,
+  // QuickJS against its own. Every name in quickjs-emscripten 0.32.0's tables, in every key form, under `u` and `v`,
+  // bare and in a class, was compiled in the action wrapper on both engines (Node 22.23.5, Unicode 17.0): these
+  // twelve spellings are the only ones V8 refuses and QuickJS compiles. The list was measured on Unicode 17.0
+  // tables; a host with older tables judges every refused name a warning, which this pin reads first.
+  const measuredTables = Number.parseFloat(String(process.versions.unicode)) >= 17;
+
+  it.each([
+    'IDS_Unary_Operator', 'IDSU', 'Modifier_Combining_Mark', 'MCM',
+    'sc=Katakana_Or_Hiragana', 'sc=Hrkt', 'Script=Katakana_Or_Hiragana', 'Script=Hrkt',
+    'scx=Katakana_Or_Hiragana', 'scx=Hrkt', 'Script_Extensions=Katakana_Or_Hiragana', 'Script_Extensions=Hrkt',
+  ])('only warns on the property %s, which this host refuses and the runtime\'s engine runs', (name) => {
+    const hostRefuses = (() => {
+      try {
+        new RegExp(`\\p{${name}}`, 'u');
+        return false;
+      } catch {
+        return true;
+      }
+    })();
+    if (Number(process.versions.node.split('.')[0]) <= 22) expect(hostRefuses, `Node ${process.versions.node}`).toBe(true);
+    for (const source of [`return /\\p{${name}}/u.test(input.s);`, `return /[\\P{${name}}a]/v.test(input.s);`]) {
+      const findings = validateActionBodyCompiles({ actions: [scriptAction('p', source)] });
+      if (!hostRefuses) {
+        expect(findings, source).toEqual([]);
+        continue;
+      }
+      expect(findings.map((f) => [f.rule, f.severity]), source).toEqual([[ACTION_BODY_DOES_NOT_COMPILE, 'warning']]);
+    }
+  });
+
+  it('refuses a property name neither engine knows beside one only the runtime\'s engine knows', () => {
+    const f = only('return /\\p{IDSU}\\p{Nope}/u.test(input.s);');
+    expect([f.rule, f.severity]).toEqual([ACTION_BODY_DOES_NOT_COMPILE, measuredTables ? 'error' : 'warning']);
   });
 
   it('accepts the flags both engines take', () => {
     const actions = ['return /a/dgimsuy;', 'return /[a&&b]/v;'].map((source, i) => scriptAction(`ok${i}`, source));
     expect(validateActionBodyCompiles({ actions })).toEqual([]);
+  });
+
+  it('os validate refuses a pattern QuickJS refuses too, and so does the runtime publish door', () => {
+    const body = 'return /a**/.test(input.s);';
+    const stack = { objects: [ticket()], actions: [scriptAction('p', body)] };
+    const fs = compileFindings(runAuthoringRules('validate', { normalized: stack, parsed: stack }));
+    expect(fs.map((f) => [f.severity, f.path])).toEqual([['error', 'actions[0].body.source']]);
+
+    const refused = runRuntimeAuthoringRules({ type: 'action', item: scriptAction('p', body), context: { objects: [ticket()] } });
+    expect(compileFindings(refused.errors)).toHaveLength(1);
+    expect(compileFindings(refused.advisories)).toEqual([]);
   });
 
   it('os validate refuses an unterminated literal, and so does the runtime publish door', () => {

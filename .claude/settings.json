@@ -145,6 +145,15 @@
             "command": "\"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-tree-enum.sh\""
           }
         ]
+      },
+      {
+        "matcher": "Agent|Task",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-dispatch-tier.sh\""
+          }
+        ]
       }
     ],
     "SessionStart": [
