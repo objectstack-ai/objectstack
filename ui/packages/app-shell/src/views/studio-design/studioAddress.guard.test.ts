@@ -21,7 +21,7 @@
  * `studioAddress.ts` is the one file allowed to spell the root (and the
  * mapping table beside it, which spells shapes, not links). The server's
  * two review links are held by the same kind of pin in `@objectstack/types`
- * (`studio-review-routes.callers.test.ts`), which also holds the skill evals'
+ * (`studio-review-links.callers.test.ts`), which also holds the skill evals'
  * literals equal to the builder's output.
  */
 

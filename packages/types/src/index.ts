@@ -151,7 +151,7 @@ export * from './packaged-item-turned-off.js';
 // [#36895] The Studio addresses a server hands out for a saved draft's review.
 // Its producers (cli's `os meta register`, runtime's MCP authoring tools)
 // cannot depend on the Console; both already depend on this package.
-export * from './studio-review-routes.js';
+export * from './studio-review-links.js';
 
 // Placeholder for Kernel interface to avoid circular dependency
 // The actual Kernel implementation will satisfy this interface.

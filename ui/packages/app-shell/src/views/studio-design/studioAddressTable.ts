@@ -97,13 +97,13 @@ export const STUDIO_ADDRESS_FAMILIES: readonly StudioAddressFamily[] = Object.fr
     id: 'changes-review',
     today: `/studio/<package>/${STUDIO_HOME_PILLAR}?${STUDIO_CHANGES_PARAM}=${STUDIO_CHANGES_REVIEW}`,
     builder: 'studioChangesReviewPath',
-    meaning: "A package's Changes drawer, opened from outside its Studio. The server's draft review link (studioChangesReviewRoute in @objectstack/types) spells the same address.",
+    meaning: "A package's Changes drawer, opened from outside its Studio. The server's draft review link (studioChangesReviewLink in @objectstack/types) spells the same address.",
   },
   {
     id: 'item-review',
     today: `/studio/<package>/metadata/<type>/<name>?${STUDIO_ITEM_REVIEW_PARAM}=${STUDIO_ITEM_REVIEW_VALUE}`,
     builder: 'studioItemReviewPath',
-    meaning: "An item's draft review. The server's draft review link (studioItemReviewRoute in @objectstack/types) spells the same address.",
+    meaning: "An item's draft review. The server's draft review link (studioItemReviewLink in @objectstack/types) spells the same address.",
   },
   {
     id: 'retired-interfaces',

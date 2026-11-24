@@ -32,8 +32,8 @@
  * ## The server's two addresses
  *
  * The draft door's review links (the CLI's `os meta register` and the MCP
- * authoring tools) are built by `studioChangesReviewRoute` and
- * `studioItemReviewRoute` in `@objectstack/types`, which both server packages
+ * authoring tools) are built by `studioChangesReviewLink` and
+ * `studioItemReviewLink` in `@objectstack/types`, which both server packages
  * already depend on; the Console does not depend on that package, so
  * {@link studioChangesReviewPath} and {@link studioItemReviewPath} are their
  * Console halves, pinned to the same literals.

@@ -168,7 +168,7 @@ import type { AIToolDefinition } from '@objectstack/spec/contracts';
 import type { HttpProtocolContext } from '../http-dispatcher.js';
 import type { DomainHandlerDeps } from '../domain-handler-registry.js';
 import { readEffectiveTenancyPosture } from './activation-gate.js';
-import { studioChangesReviewRoute, studioItemReviewRoute } from '@objectstack/types';
+import { studioChangesReviewLink, studioItemReviewLink } from '@objectstack/types';
 
 /** The read tools' names, in the order the registry lists them. */
 export const OPEN_AUTHORING_READ_TOOL_NAMES = ['list_metadata_items', 'get_metadata_item', 'list_drafts'] as const;
@@ -1290,8 +1290,8 @@ function verdictOf(judgement: OpenAuthoringDraftJudgement): {
  */
 function reviewRoutes(packageId: string, type: string, name: string): { changes: string; item: string; note: string } {
     return {
-        changes: studioChangesReviewRoute(packageId),
-        item: studioItemReviewRoute(packageId, type, name),
+        changes: studioChangesReviewLink(packageId),
+        item: studioItemReviewLink(packageId, type, name),
         note: 'Console routes. A person reviews and publishes the draft there; this server cannot publish.',
     };
 }

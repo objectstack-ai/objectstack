@@ -10,7 +10,7 @@
  * The Studio redesign (epic #36890) moves Studio's addresses one item type at
  * a time. A `/studio/...` string written out in a server package would keep
  * the old address after the move, and an AI handed it would send a person to
- * the wrong page. `studio-review-routes.ts` is the one place a server spells
+ * the wrong page. `studio-review-links.ts` is the one place a server spells
  * one; the Console's builder (`studioAddress.ts` in the app-shell package)
  * is held by the same kind of pin in the ui workspace.
  *
@@ -22,7 +22,7 @@
  *     in comments is free.
  *  2. The eval file of the published skill (it is governed: it is read, never
  *     edited here): every Studio address it quotes equals what
- *     `studioChangesReviewRoute` / `studioItemReviewRoute` return for the
+ *     `studioChangesReviewLink` / `studioItemReviewLink` return for the
  *     package, type and name the address names, so the two cannot drift.
  *
  * ── Controls ─────────────────────────────────────────────────────────────────
@@ -41,7 +41,7 @@ import { describe, expect, it } from 'vitest';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import ts from 'typescript';
-import { studioChangesReviewRoute, studioItemReviewRoute } from './studio-review-routes.js';
+import { studioChangesReviewLink, studioItemReviewLink } from './studio-review-links.js';
 
 /**
  * This package is CJS-typed, so `import.meta` is not available: walk up from
@@ -73,7 +73,7 @@ const SCANNED_TREE = join(REPO_ROOT, 'packages');
 const EVAL_FILE = join(REPO_ROOT, 'skills/objectstack-mcp-build/evals/draft-door-procedure.json');
 
 /** The one server file that spells a Studio address. */
-const ALLOWED = 'packages/types/src/studio-review-routes.ts';
+const ALLOWED = 'packages/types/src/studio-review-links.ts';
 
 const SKIP_DIRS = new Set(['node_modules', 'dist', 'build', 'coverage', '.turbo', '.next', '__tests__']);
 
@@ -126,10 +126,10 @@ function quotedStudioAddresses(text: string): string[] {
 /** What the builder returns for the package, type and name an address names. */
 function rebuilt(address: string): string | null {
   const changes = /^\/studio\/([^/?#]+)\/data\?changes=review$/.exec(address);
-  if (changes) return studioChangesReviewRoute(decodeURIComponent(changes[1]));
+  if (changes) return studioChangesReviewLink(decodeURIComponent(changes[1]));
   const item = /^\/studio\/([^/?#]+)\/metadata\/([^/?#]+)\/([^/?#]+)\?review=1$/.exec(address);
   if (item) {
-    return studioItemReviewRoute(decodeURIComponent(item[1]), decodeURIComponent(item[2]), decodeURIComponent(item[3]));
+    return studioItemReviewLink(decodeURIComponent(item[1]), decodeURIComponent(item[2]), decodeURIComponent(item[3]));
   }
   return null;
 }

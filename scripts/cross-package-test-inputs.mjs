@@ -406,7 +406,7 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
     // entry adds no new top-level root for `check-ci-filter-parity.mjs` to want
     // in ci.yml's `crosspkg:` filter. Its own header records that trade.
     //
-    // src/studio-review-routes.callers.test.ts (#36895) walks the same `.ts`
+    // src/studio-review-links.callers.test.ts (#36895) walks the same `.ts`
     // population for hand-built Studio addresses, and reads the one skill eval
     // that quotes the server's draft review links, to hold each quoted link
     // equal to what this package builds. That file sits under the published

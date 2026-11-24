@@ -1,4 +1,4 @@
 [
   "src/driver-error-classification.callers.test.ts",
-  "src/studio-review-routes.callers.test.ts"
+  "src/studio-review-links.callers.test.ts"
 ]

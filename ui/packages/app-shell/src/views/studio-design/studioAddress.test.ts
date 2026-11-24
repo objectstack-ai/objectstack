@@ -126,7 +126,7 @@ describe("today's addresses, byte for byte", () => {
   });
 
   it("the draft review links equal the server's, and the skill evals' literals", () => {
-    // `studioChangesReviewRoute` / `studioItemReviewRoute` in @objectstack/types
+    // `studioChangesReviewLink` / `studioItemReviewLink` in @objectstack/types
     // are pinned to these same literals, as are the objectstack-mcp-build evals.
     expect(studioChangesReviewPath('com.acme.crm')).toBe('/studio/com.acme.crm/data?changes=review');
     expect(studioItemReviewPath('com.acme.crm', 'flow', 'crm_lead_created_notify')).toBe(
