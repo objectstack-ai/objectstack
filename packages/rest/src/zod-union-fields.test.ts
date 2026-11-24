@@ -8,6 +8,9 @@ import { FieldErrorCode } from '@objectstack/spec/api';
 // `any`, and each callback over those symbols then reports TS7006 (AGENTS.md
 // §Build & Test). This is the same spelling `rest-server.ts` itself uses.
 import { zodIssuesToFields } from './rest-server.js';
+// Pays the first load of the engine `rest-server.ts` reaches through a dynamic
+// import at collection, never inside a clocked case (check:test-source-alias).
+import '@objectstack/objectql';
 
 /**
  * `invalid_union` expansion on the wire (#5014).
