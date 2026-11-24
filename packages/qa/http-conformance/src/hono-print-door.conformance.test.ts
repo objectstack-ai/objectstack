@@ -173,7 +173,7 @@ describe('[#36840] the print door answers on the hosted shape (createHonoApp, no
 
     it('both answers are byte-identical at the self-hosted mount and at the hosted door', async () => {
         for (const [label, init] of [
-            ['anonymous', (d: Door) => print(undefined)],
+            ['anonymous', (_d: Door) => print(undefined)],
             ['signed in, no engine', (d: Door) => print(d.aliceToken)],
         ] as const) {
             const viaHosted = await snapshot(await hosted.send(`${API}/print/records`, init(hosted)));
