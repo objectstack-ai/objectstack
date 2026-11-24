@@ -24,7 +24,7 @@
  * next open draws a fresh palette (objectui#13387).
  */
 
-import { useEffect, useState, useMemo, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, useMemo, type ReactNode } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
   Command,
@@ -423,6 +423,19 @@ function CommandPaletteBody(props: CommandPaletteProps & { gates: NavMemberGates
   const studioMatches = (entry: StudioPaletteEntry) => matches(entry.label, entry.name);
   const openStudio = (to: string) => (surface ? runCommand(() => surface.open(to)) : leaveTo(to));
   const [surfaceLoading, setSurfaceLoading] = useState(false);
+  // objectstack#36900 — a design page's items answer after the palette opens,
+  // often after the author has typed. cmdk selects a first row only when one
+  // mounts while it holds no value, and the value it holds is the row the
+  // query filtered away, so the rows that arrive later stayed unselected and
+  // Enter opened nothing. While no rendered row is selected, the first one is.
+  const listRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (!open || !surface) return;
+    const list = listRef.current;
+    if (!list || list.querySelector('[cmdk-item][data-selected="true"]')) return;
+    const first = list.querySelector('[cmdk-item]:not([aria-disabled="true"])')?.getAttribute('data-value');
+    if (first) setSelectedValue(first);
+  });
   const studioPackages = studio.packages.filter(studioMatches);
   const studioObjects = studio.objects.filter(studioMatches);
   const studioFlows = studio.flows.filter(studioMatches);
@@ -632,7 +645,7 @@ function CommandPaletteBody(props: CommandPaletteProps & { gates: NavMemberGates
         value={inputValue}
         onValueChange={setInputValue}
       />
-      <CommandList className="min-w-0">
+      <CommandList ref={listRef} className="min-w-0">
         <CommandEmpty>
           {isSearching || studio.loading || surfaceLoading ? (
             <span className="inline-flex items-center gap-2 text-muted-foreground">

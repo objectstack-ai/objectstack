@@ -20,7 +20,7 @@
 
 import * as React from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Database, Layers, PanelLeft, Settings, ShieldCheck, Sparkles, Workflow, type LucideIcon } from 'lucide-react';
+import { PanelLeft } from 'lucide-react';
 import {
   cn,
   Sidebar,
@@ -36,36 +36,25 @@ import {
   useSidebar,
 } from '@object-ui/components';
 import {
-  useGlobalDiagnostics,
-  useMetadataClient,
-  useMetadataTypes,
-  type RichMetadataTypeEntry,
-} from '../metadata-admin/useMetadata.js';
-import { scopeDirectoryEntries } from '../metadata-admin/directoryScope.js';
+  STUDIO_MENU_ENTRY_LABEL_KEYS,
+  STUDIO_MENU_GROUP_ICONS,
+  StudioMenuDataContext,
+  useStudioMenuData,
+  useStudioMenuTypes,
+  type StudioMenuData,
+} from './studioMenuData.js';
 import { t, tFormat, translateMetadataType } from '../metadata-admin/i18n.js';
 import { studioMenuGroupLabel } from './studioMenuGroupLabel.js';
-import { useMetadataRefreshNonce } from './useMetadataRefreshNonce.js';
 import { STUDIO_HEADER_ICON_BUTTON } from './studio-tokens.js';
 import {
   STUDIO_MENU_COOKIE,
-  STUDIO_MENU_DESIGNER_TYPES,
   buildStudioMenu,
   studioMenuCurrentKey,
   studioMenuEntryMatches,
   studioMenuScope,
   type StudioMenuEntry,
-  type StudioMenuGroup,
 } from './studioMenuModel.js';
 
-/** Each group's icon: the menu's, and the palette's for the group's items (objectstack#36900). */
-export const STUDIO_MENU_GROUP_ICONS: Readonly<Record<StudioMenuGroup, LucideIcon>> = {
-  data: Database,
-  ui: Layers,
-  automation: Workflow,
-  system: Settings,
-  security: ShieldCheck,
-  ai: Sparkles,
-};
 
 /**
  * objectui#12795 — every `SidebarGroupLabel` call site hides its label from
@@ -77,13 +66,6 @@ const HIDDEN_ICON_LABEL_NOT_FOCUSABLE =
   'group-data-[state=collapsed]:group-data-[collapsible=icon]:invisible ' +
   'group-data-[state=collapsed]:group-data-[collapsible=icon]:transition-[margin,opacity,visibility]';
 
-/** The names of the entries that are not a type; the palette names them the same way (objectstack#36900). */
-export const STUDIO_MENU_ENTRY_LABEL_KEYS: Readonly<Record<Exclude<StudioMenuEntry['kind'], 'type'>, string>> = {
-  orgFlows: 'engine.studio.menu.orgFlows',
-  owd: 'engine.studio.menu.owd',
-  diagnostics: 'engine.studio.menu.diagnostics',
-  environment: 'engine.studio.menu.environment',
-};
 
 /**
  * The provider the surface mounts around its header and body: the app
@@ -124,59 +106,6 @@ export function StudioMenuTrigger({ locale }: { locale: string }): React.ReactEl
   );
 }
 
-/** The menu's served data, for one `/studio/:segment` (see {@link useStudioMenuTypes}). */
-export interface StudioMenuData {
-  /** The segment the data was read for. */
-  segment: string;
-  /** The served type entries the directory's rule scoped to this menu, in served order. */
-  types: RichMetadataTypeEntry[];
-  /** Each type's served item count; empty when the sweep did not say. */
-  counts: Readonly<Record<string, number>>;
-  /** Both reads have answered: the registry's types and the diagnostics sweep. */
-  settled: boolean;
-}
-
-/**
- * The menu's served data: the registry's type entries, scoped by the
- * directory's rule, and each type's item count from the diagnostics sweep the
- * directory reads. Read again on the metadata-refresh pulse (a publish, a new
- * item), so the counts follow.
- */
-export function useStudioMenuTypes(segment: string): StudioMenuData {
-  const scope = studioMenuScope(segment);
-  const packageId = scope.kind === 'package' ? scope.packageId : null;
-  const client = useMetadataClient();
-  const { entries, loading: typesLoading } = useMetadataTypes(client);
-  const {
-    countsByType,
-    packagesByType,
-    loading: sweepLoading,
-    reload,
-  } = useGlobalDiagnostics(client, 'error', packageId ?? undefined);
-  const refresh = useMetadataRefreshNonce();
-  const reloadRef = React.useRef(reload);
-  React.useLayoutEffect(() => {
-    reloadRef.current = reload;
-  });
-  React.useEffect(() => {
-    if (refresh > 0) reloadRef.current();
-  }, [refresh]);
-  const types = scopeDirectoryEntries(entries, {
-    environment: scope.kind !== 'package',
-    packageId,
-    packagesByType,
-    always: STUDIO_MENU_DESIGNER_TYPES,
-  });
-  return { segment, types, counts: countsByType, settled: !typesLoading && !sweepLoading };
-}
-
-/**
- * objectstack#36900 — the menu's data, read once for a whole Studio page: the
- * surface provides it, and the menu and the command palette both draw from it,
- * so opening the palette re-reads nothing the menu already holds.
- */
-const StudioMenuDataContext = React.createContext<StudioMenuData | null>(null);
-
 /** Reads the menu's data for `segment` once and hands it to the menu and the palette below. */
 export function StudioMenuDataProvider({
   segment,
@@ -187,11 +116,6 @@ export function StudioMenuDataProvider({
 }): React.ReactElement {
   const data = useStudioMenuTypes(segment);
   return <StudioMenuDataContext.Provider value={data}>{children}</StudioMenuDataContext.Provider>;
-}
-
-/** The menu's data a {@link StudioMenuDataProvider} above holds, or `null` with none. */
-export function useStudioMenuData(): StudioMenuData | null {
-  return React.useContext(StudioMenuDataContext);
 }
 
 export interface StudioMenuProps {

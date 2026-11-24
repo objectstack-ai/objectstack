@@ -37,7 +37,7 @@ import { resolveKeyedI18nLabel } from '../../utils/index.js';
 import { t, tFormat, translateMetadataType, useMetadataLocale } from '../metadata-admin/i18n.js';
 import { resolveResourceConfig } from '../metadata-admin/registry.js';
 import { useMetadataClient, type RichMetadataTypeEntry } from '../metadata-admin/useMetadata.js';
-import { STUDIO_MENU_ENTRY_LABEL_KEYS, STUDIO_MENU_GROUP_ICONS, useStudioMenuData } from './StudioMenu.js';
+import { STUDIO_MENU_ENTRY_LABEL_KEYS, STUDIO_MENU_GROUP_ICONS, useStudioMenuData } from './studioMenuData.js';
 import { studioMenuGroupLabel } from './studioMenuGroupLabel.js';
 import { buildStudioMenu, studioMenuScope, type StudioMenuEntry } from './studioMenuModel.js';
 import {

@@ -362,6 +362,25 @@ describe("on a package, the palette lists the left menu and the package's items 
     await waitFor(() => expect(document.querySelector('[cmdk-empty]')?.textContent).toContain('No results'));
   });
 
+  it('a query typed before the lists answer: the row that arrives is selected, and Enter opens it', async () => {
+    let release = () => {};
+    reads.state.hold = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const { open } = mount(PKG);
+    await waitFor(() => expect(reads.state.calls.length).toBeGreaterThan(0));
+    // A menu entry is selected at open; the query filters it away.
+    type('pipeline');
+    expect(values('studio-item ')).toEqual([]);
+    release();
+    const row = `studio-item dashboard ${PKG} crm_pipeline`;
+    await waitFor(() =>
+      expect(document.querySelector(`[cmdk-item][data-value="${row}"]`)?.getAttribute('data-selected')).toBe('true'),
+    );
+    fireEvent.keyDown(document.querySelector('[cmdk-input]')!, { key: 'Enter' });
+    expect(open).toHaveBeenLastCalledWith('/studio/com.acme.crm/metadata/dashboard/crm_pipeline?package=com.acme.crm');
+  });
+
   it('reads nothing until the palette opens', async () => {
     const { cacheReads } = mount(PKG, { at: `/studio/${PKG}/data` });
     await new Promise((resolve) => setTimeout(resolve, 0));
