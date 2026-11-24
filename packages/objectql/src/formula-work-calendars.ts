@@ -21,6 +21,11 @@
  * system read across organizations that names none gets that refusal, never a
  * calendar of whichever organization holds one.
  *
+ * A projection never decides it: a read that names fields and a formula
+ * widens to every stored column the object declares (`planFormulaProjection`),
+ * `organization_id` included, and cuts the widening back off the answer, so a
+ * row reads the same with `fields: ['id', 'due']` as with no projection.
+ *
  * ## The cache, and a calendar edit
  *
  * The service's own (one entry per organization and code, dropped on every

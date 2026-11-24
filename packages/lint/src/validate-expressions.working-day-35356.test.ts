@@ -142,6 +142,35 @@ describe('publish lint — working-day functions anywhere else are refused (ADR-
     ]);
   });
 
+  it("refuses a field's expression `defaultValue`: the default step has no calendar and would leave every insert blank", () => {
+    const errors = errorsOf({
+      objects: [ticket({ due: { type: 'date', label: 'Due', defaultValue: { dialect: 'cel', source: 'addWorkingDays(today(), 3)' } } })],
+    });
+    expect(errors).toHaveLength(1);
+    expect(errors[0]!.where).toBe("object 'ticket_probe' · field 'due' defaultValue");
+    expect(errors[0]!.message).toContain(`${STORE_IT} addWorkingDays()`);
+  });
+
+  it('refuses a seed record\'s expression value, at any depth', () => {
+    const errors = errorsOf({
+      objects: [ticket()],
+      data: [{ object: 'ticket_probe', records: [{ name: 'a', start: { dialect: 'cel', source: 'addWorkingDays(today(), 2)' } }] }],
+    });
+    expect(errors.map((e) => e.where)).toEqual(["data[0] (object 'ticket_probe') · records[0].start"]);
+    expect(errors[0]!.message).toContain('addWorkingDays() counts with');
+  });
+
+  it('CONTROL: a bare-string `defaultValue` is a literal, and an `addDays()` default or seed value draws nothing', () => {
+    const errors = errorsOf({
+      objects: [ticket({
+        note: { type: 'text', label: 'Note', defaultValue: 'addWorkingDays(today(), 3)' },
+        due: { type: 'date', label: 'Due', defaultValue: { dialect: 'cel', source: 'addDays(today(), 3)' } },
+      })],
+      data: [{ object: 'ticket_probe', records: [{ name: 'a', start: { dialect: 'cel', source: 'daysFromNow(2)' } }] }],
+    });
+    expect(errors.filter((e) => e.message.includes('working calendar'))).toEqual([]);
+  });
+
   it('CONTROL: the same sites calling `addDays()` draw no working-day refusal', () => {
     const errors = errorsOf({
       objects: [

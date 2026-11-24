@@ -165,11 +165,11 @@ export function registerWorkingDayFunctions(env: Environment, read: () => EvalWo
   const addDays = (day: unknown, n: unknown, code?: unknown): Date => {
     const d = dayArg('addWorkingDays', 'the start day', day);
     const count = countArg('addWorkingDays', 'the number of days', n, true);
-    const cal = calendarFor('addWorkingDays', read(), code);
-    // A blank start answers blank: the unmarked invalid Date a formula field
-    // serializes to `null`, the answer `addDays()` gives one.
+    // A blank start answers blank, before any calendar is read: the unmarked
+    // invalid Date a formula field serializes to `null`, the answer `addDays()`
+    // gives one.
     if (d === undefined) return new Date(Number.NaN);
-    return dayTimestamp(addWorkingDays(cal, d, count));
+    return dayTimestamp(addWorkingDays(calendarFor('addWorkingDays', read(), code), d, count));
   };
   const between = (start: unknown, end: unknown, code?: unknown): bigint => {
     const s = dayArg('workingDaysBetween', 'the start day', start);
@@ -182,9 +182,8 @@ export function registerWorkingDayFunctions(env: Environment, read: () => EvalWo
   const addHours = (start: unknown, hours: unknown, code?: unknown): Date => {
     const t = instantArg('addWorkingHours', 'the start', start);
     const h = countArg('addWorkingHours', 'the number of hours', hours, false);
-    const cal = calendarFor('addWorkingHours', read(), code);
     if (t === undefined) return new Date(Number.NaN);
-    return new Date(addWorkingHours(cal, t, h));
+    return new Date(addWorkingHours(calendarFor('addWorkingHours', read(), code), t, h));
   };
   return env
     .registerFunction('addWorkingDays(dyn, dyn): google.protobuf.Timestamp', (d: unknown, n: unknown) => addDays(d, n))

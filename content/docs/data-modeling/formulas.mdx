@@ -619,15 +619,20 @@ Field.datetime({
 - **Where they run.** Only in a `formula` field and in a stored field's
   `expression`, evaluated on the server. No calendar arithmetic runs in SQL, so a
   filter cannot call them; neither can a validation rule, a visibility rule, a
-  flow condition or a sharing rule. `os build` refuses them there and points at
-  the stored due-time field above, which a filter compares with `now()`.
+  flow condition, a sharing rule, a field's expression `defaultValue` or a seed
+  value. `os build` refuses them there and points at the stored due-time field
+  above, which a filter compares with `{now}` and a CEL condition with `now()`.
 - **When the calendar cannot answer.** With no default calendar in the
   organization, or a count that reaches past the span the calendar is maintained
   for, the formula reads `null` (a stored field stores blank and the write goes
   through), and the server logs one line naming the object, the field and the
   reason. It never falls back to counting the weekly pattern or the wall clock.
 - **After a calendar edit.** A formula field counts again on its next read; a
-  stored due time keeps the value computed on its last write.
+  stored due time keeps the value computed on its last write. So a stored due
+  time left blank by a refusal stays blank until that record is written again,
+  and a write made while the calendar refuses blanks a value that was valid
+  before. A filter such as "due before now" never matches a blank, so keep the
+  calendar's maintained span ahead of the records it counts for.
 
 ### Financial Calculations
 

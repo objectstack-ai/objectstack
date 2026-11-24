@@ -95,8 +95,6 @@ import {
   analyzeRelationshipTraversals,
   buildScope,
   declaresOptionsOnceServed,
-  WORKING_DAY_FUNCTIONS,
-  callsWorkingDayFunction,
   computedCalendarCodeMessage,
 } from '@objectstack/formula';
 import type { ExprFaultOutcome, RelationshipTraversalAnalysis } from '@objectstack/formula';
@@ -121,6 +119,7 @@ import { bulkConfirmTemplateRoots } from '@objectstack/spec/ui';
 // is a `template` slot too, judged in its own module by the same judge.
 import { actionCopyTemplateIssues } from './validate-action-copy-templates.js';
 import { actionRefusalTemplateIssues, hookRefusalTemplateIssues } from './validate-hook-refusal-templates.js';
+import { workingDayElsewhereMessage, workingDayValueSiteIssues } from './validate-working-day-sites.js';
 // [#15137] The `value`-role half. Same two published primitives the engine
 // composes at `registerFlow` (`AutomationEngine.valueEnvelopeRefusals`), in the
 // same order: the SHAPE rule lives in the spec's `FlowValueSlotSchema` (the
@@ -892,29 +891,6 @@ function celSourceOf(raw: unknown): string | undefined {
     if (typeof rec.source === 'string') return rec.source;
   }
   return undefined;
-}
-
-/**
- * ADR-0157 D4/D6: the working-day functions (`addWorkingDays`,
- * `workingDaysBetween`, `addWorkingHours`) count with a working calendar the
- * engine loads for exactly two sites: a formula field's and a computed field's
- * `expression`, evaluated on the server ({@link judgeFieldFormula}). Every
- * other expression site — a validation rule, a sharing rule's filter, a flow
- * condition or value, a visibility rule, a hook condition — is handed no
- * calendar, so the call throws there and the site's fault outcome applies on
- * every evaluation. The refusal prescribes the D6 shape: store the due time.
- * `undefined` when `raw` calls none of the three.
- */
-function workingDayElsewhereMessage(raw: unknown): string | undefined {
-  const source = celSourceOf(raw);
-  if (!callsWorkingDayFunction(source)) return undefined;
-  const called = WORKING_DAY_FUNCTIONS.filter((fn) => new RegExp(`\\b${fn}\\s*\\(`).test(source!));
-  const names = called.map((fn) => `${fn}()`).join(', ');
-  return `${names} counts with the organization's working calendar, which the engine loads only for a ` +
-    "formula field's or a computed field's `expression`; here it has no calendar and fails on every evaluation, " +
-    'and no calendar arithmetic runs as a database filter. Store the due time instead: give the object a ' +
-    `datetime field whose \`expression\` calls ${called[0]}(), computed when the record is written, and read ` +
-    'or compare that field here, against now().';
 }
 
 /** One predicate a validation rule carries — see {@link rulePredicates}. */
@@ -2957,7 +2933,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     }
   };
 
-  /** ADR-0157 D4: a working-day call at a site the engine loads no calendar for ({@link workingDayElsewhereMessage}). */
+  /** ADR-0157 D4: a working-day call at a site the engine loads no calendar for (see `workingDayElsewhereMessage`). */
   const refuseWorkingDayElsewhere = (where: string, raw: unknown): void => {
     const message = workingDayElsewhereMessage(raw);
     if (message) issues.push({ where, message, source: celSourceOf(raw) ?? '', severity: 'error' });
@@ -4880,6 +4856,10 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
   // [#34273] An action refusal sentence over declared `params` — the hook
   // refusal's compile half, on the same collections the copy pass reads.
   issues.push(...actionRefusalTemplateIssues(stack, { actions: !objectWrite, objects: true }));
+  // [#35356] ADR-0157 D4/D6: a working-day call in a field's expression
+  // `defaultValue` (every run) or a seed record's expression value (off an
+  // object write), the two value sites the passes above do not walk.
+  issues.push(...workingDayValueSiteIssues(stack, { data: !objectWrite }));
 
   return issues;
 }

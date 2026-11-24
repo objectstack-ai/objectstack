@@ -24,7 +24,9 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { WorkCalendarService } from './work-calendar-service.js';
 import { setFormulaWorkCalendarService } from './formula-work-calendars.js';
+import { ObjectKernel } from '@objectstack/core';
 import { ObjectQL } from './engine.js';
+import { ObjectQLPlugin } from './plugin.js';
 
 type Rec = Record<string, unknown>;
 
@@ -42,6 +44,7 @@ function makeRecordingLogger() {
 function makeStubDriver() {
   const stores = new Map<string, Map<string, Rec>>();
   const finds: string[] = [];
+  const projections: Array<{ object: string; fields: string[] }> = [];
   const storeFor = (obj: string) => {
     let s = stores.get(obj);
     if (!s) { s = new Map(); stores.set(obj, s); }
@@ -60,11 +63,16 @@ function makeStubDriver() {
   const driver = {
     name: 'memory', version: '0.0.0', supports: {},
     async connect() {}, async disconnect() {}, async checkHealth() { return true; }, async execute() { return null; },
-    async find(object: string, ast: { where?: unknown; limit?: number }) {
+    // A projection is honoured as a driver honours it: only the named columns come back.
+    async find(object: string, ast: { where?: unknown; limit?: number; fields?: string[] }) {
       finds.push(object);
+      if (Array.isArray(ast?.fields)) projections.push({ object, fields: [...ast.fields] });
       const rows = Array.from(storeFor(object).values()).filter((r) => matches(r, ast?.where));
       const page = typeof ast?.limit === 'number' ? rows.slice(0, ast.limit) : rows;
-      return page.map((r) => ({ ...r }));
+      const pick = (r: Rec): Rec => Array.isArray(ast?.fields)
+        ? Object.fromEntries(ast.fields.filter((f) => f in r).map((f) => [f, r[f]]))
+        : { ...r };
+      return page.map(pick);
     },
     async findOne(object: string, ast: { where?: unknown }) {
       for (const r of storeFor(object).values()) if (matches(r, ast?.where)) return { ...r };
@@ -96,7 +104,7 @@ function makeStubDriver() {
     async commit() {},
     async rollback() {},
   };
-  return { driver, storeFor, finds };
+  return { driver, storeFor, finds, projections };
 }
 
 const text = (name: string) => ({ name, label: name, type: 'text' as const });
@@ -170,7 +178,7 @@ const iso = (v: unknown) => (v instanceof Date ? v.toISOString() : v);
 async function makeRig(options: { defaultInOrgB?: boolean } = {}) {
   const { logger, warns } = makeRecordingLogger();
   const engine = new ObjectQL({ logger });
-  const { driver, storeFor, finds } = makeStubDriver();
+  const { driver, storeFor, finds, projections } = makeStubDriver();
   engine.registerDriver(driver as never, true);
   await engine.init();
   for (const obj of [SYS_WORK_CALENDAR, SYS_WORK_CALENDAR_EXCEPTION, WD_CASE]) engine.registry.registerObject(obj as never, 'test');
@@ -201,7 +209,7 @@ async function makeRig(options: { defaultInOrgB?: boolean } = {}) {
   });
   exceptions.set('ex_10', { id: 'ex_10', organization_id: 'org_a', calendar: 'cal_cn', date: '2026-10-10', kind: 'on', periods: WEEKDAY });
   const faultLines = (field: string) => warns.filter((w) => w.meta?.object === 'wd_case' && w.meta?.field === field);
-  return { engine, service, storeFor, finds, warns, faultLines };
+  return { engine, service, storeFor, finds, projections, warns, faultLines };
 }
 
 type Rig = Awaited<ReturnType<typeof makeRig>>;
@@ -234,6 +242,21 @@ describe('ADR-0157 D4 — working-day formula fields count with the organization
     expect(iso(byId.ca!.due_day)).toBe('2026-10-10T00:00:00.000Z');
     // org_b keeps no National Day: Wednesday + 3 = Monday.
     expect(iso(byId.cb!.due_day)).toBe('2026-10-05T00:00:00.000Z');
+  });
+
+  it('a projection that leaves organization_id out still counts each row in its own organization', async () => {
+    // A read across organizations names no tenant, so the row's own column is
+    // the only organization there is: the formula projection widens to every
+    // stored column, organization_id included, and cuts it back off the answer.
+    rig.storeFor('wd_case').set('ca', { id: 'ca', organization_id: 'org_a', start: '2026-09-30' });
+    rig.storeFor('wd_case').set('cb', { id: 'cb', organization_id: 'org_b', start: '2026-09-30' });
+    const rows = await rig.engine.find('wd_case', { fields: ['id', 'due_day'] } as never) as Rec[];
+    const byId = Object.fromEntries(rows.map((r) => [r.id, r]));
+    expect(iso(byId.ca!.due_day)).toBe('2026-10-10T00:00:00.000Z');
+    expect(iso(byId.cb!.due_day)).toBe('2026-10-05T00:00:00.000Z');
+    expect(byId.ca).not.toHaveProperty('organization_id');
+    // The driver was asked for the column: the row named its organization.
+    expect(rig.projections.find((p) => p.object === 'wd_case')?.fields).toContain('organization_id');
   });
 
   it('the write response counts too', async () => {
@@ -312,5 +335,32 @@ describe('ADR-0157 D2 — the read counts through the service cache', () => {
     rig.storeFor('wd_case').set('c1', { id: 'c1', organization_id: 'org_a', start: '2026-09-30' });
     await rig.engine.find('wd_case', { fields: ['id', 'plain'] } as never);
     expect(rig.finds.filter((o) => o.startsWith('sys_work_calendar'))).toEqual([]);
+  });
+});
+
+describe('ADR-0157 D4 — booted through ObjectQLPlugin, the formula reads the kernel calendar service', () => {
+  it("the plugin installs its calendar service for the engine the formula paths reach through their host's facade", async () => {
+    const { logger } = makeRecordingLogger();
+    const engine = new ObjectQL({ logger });
+    const { driver, storeFor } = makeStubDriver();
+    engine.registerDriver(driver as never, true);
+    for (const obj of [SYS_WORK_CALENDAR, SYS_WORK_CALENDAR_EXCEPTION, WD_CASE]) engine.registry.registerObject(obj as never, 'test');
+    storeFor('sys_work_calendar').set('cal_cn', calendarRow('cal_cn', 'org_a', 'cn_mainland', true));
+    ['01', '02', '03', '04', '05', '06', '07'].forEach((d) => {
+      storeFor('sys_work_calendar_exception').set(`ex_${d}`, { id: `ex_${d}`, organization_id: 'org_a', calendar: 'cal_cn', date: `2026-10-${d}`, kind: 'off', periods: null });
+    });
+    storeFor('sys_work_calendar_exception').set('ex_10', { id: 'ex_10', organization_id: 'org_a', calendar: 'cal_cn', date: '2026-10-10', kind: 'on', periods: WEEKDAY });
+    storeFor('wd_case').set('c1', { id: 'c1', organization_id: 'org_a', start: '2026-09-30' });
+    const kernel = new ObjectKernel({ logger: { level: 'silent' }, gracefulShutdown: false });
+    try {
+      await kernel.use(new ObjectQLPlugin({ ql: engine }));
+      await kernel.bootstrap();
+      expect(kernel.getService('objectql')).toBe(engine);
+      const [row] = await engine.find('wd_case', {} as never) as Rec[];
+      // Counted on the kernel's own service: over the National Day week onto the 调休 Saturday.
+      expect(iso(row!.due_day)).toBe('2026-10-10T00:00:00.000Z');
+    } finally {
+      if (kernel.getState() === 'running') await kernel.shutdown();
+    }
   });
 });

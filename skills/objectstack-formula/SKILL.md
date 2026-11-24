@@ -187,10 +187,12 @@ tests: every entry resolves at runtime, and this table documents them all.
 | Sub-day offset | `now() + duration("3h")` |
 
 **Working days** (the organization's working calendar, holidays and make-up days included):
-`addWorkingDays(d, n[, code])` is the day `n` working days after `d`; `workingDaysBetween(a, b[, code])`
-its inverse; `addWorkingHours(t, h[, code])` the instant `h` working hours after `t`. No `code`:
-the default calendar; a `code` is a quoted literal. Formula or stored `expression` only, refused
-elsewhere: to filter, store the due time in a `datetime` field.
+`addWorkingDays(d, n[, code])` is the day `n` working days after `d` (`d` not counted);
+`workingDaysBetween(a, b[, code])` its inverse (`b` counted); `addWorkingHours(t, h[, code])` the
+instant `h` working hours after `t`. No `code`: the default calendar; a `code` is a quoted literal.
+Only in a formula or a stored field's `expression` (refused in rules, flows, defaults, seeds and
+filters): to filter, store the due time in a `datetime` field. No default calendar, or a count past
+its maintained span, reads null; a stored due time is then blank until the record's next write.
 
 **Numbers**
 
@@ -229,7 +231,8 @@ elsewhere: to filter, store the due time in a `datetime` field.
 | `label(record.f)` | string | A select value's option label in the reader's locale: `'v' + string(record.version_no) + ' · ' + label(record.kind)` reads `v2 · 清稿` (zh-CN), `v2 · Clean` (en-US). Only `record.<field>`; `''` for null or an empty selection. A multi-select (`multiple: true`) reads each selected label in stored order, joined with `, `. A stored (non-formula) field stores the declared label. Formula fields only: in a predicate (validation, visibility, hook) it faults, so compare the stored value |
 
 Plus CEL built-ins: `has(x)`, `size(x)`, `int(x)`, `string(x)`, `bool(x)`,
-`double(x)`, `timestamp(s)` (a full ISO instant only), `duration(s)`.
+`double(x)`, `timestamp(s)` (a full ISO instant only; over a `date` field write
+`isoDate(addDays(record.d, n))`, never `+ duration(…)`), `duration(s)`.
 
 > Receiver methods (`s.split(',')`,
 > `list.map(...)`) are called on a value, never bare, and are not in this table;
@@ -237,7 +240,7 @@ Plus CEL built-ins: `has(x)`, `size(x)`, `int(x)`, `string(x)`, `bool(x)`,
 > from the catalogue by an authoring decision — don't reach for them. An UNKNOWN
 > function — `PRIOR()`, a legacy `ISBLANK()`, a typo'd `isBlnk()` — **fails
 > `os build`** with a "no matching overload" type error, rather than silently
-> no-op'ing the predicate at run time (translations: table below).
+> no-op'ing the predicate at run time. Use `previous.x`, not `PRIOR()`; more in the table below.
 
 ---
 

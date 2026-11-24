@@ -78,6 +78,15 @@ describe('addWorkingDays() — a weekend, a National Day week and a 调休 make-
     expect(!half.ok && half.error.kind).toBe('runtime');
     expect(!half.ok && half.error.message).toContain('whole number');
   });
+
+  it('a blank start answers blank before any calendar is read, so a refusing calendar logs nothing for it', () => {
+    const refused = { default: new WorkCalendarUnresolvedError('no_default') };
+    for (const source of ['addWorkingDays(record.start, 1)', 'addWorkingHours(record.start, 2)']) {
+      const r = run(source, { record: { start: null }, workCalendars: refused });
+      expect(r.ok, source).toBe(true);
+      expect(r.ok && r.value instanceof Date && Number.isNaN(r.value.getTime())).toBe(true);
+    }
+  });
 });
 
 describe('workingDaysBetween()', () => {

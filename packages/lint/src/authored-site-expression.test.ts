@@ -123,6 +123,8 @@ const WALK_PUSHES: Record<string, string> = {
   hookRefusalTemplateIssues: "a hook refusal's template sentences over its declared params: no rule or field expression",
   // [#34273] The same judge over an action's refusal catalogue.
   actionRefusalTemplateIssues: "an action refusal's template sentences over its declared params: no rule or field expression",
+  // [#35356] ADR-0157 D4/D6: working-day calls at value sites the engine loads no calendar for.
+  workingDayValueSiteIssues: "a field's expression `defaultValue` and a seed record's expression values: no rule or formula `expression`",
 };
 
 /** The passes the walk pushes whole from INSIDE a site's regions: classified with that site's calls, in `SITE_CALLS`. */

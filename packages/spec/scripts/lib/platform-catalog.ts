@@ -119,7 +119,7 @@ export const APP_FACING_OBJECT_GROUPS: readonly { readonly title: string; readon
     rows: [
       { name: 'sys_exchange_rate', builds: 'an exchange-rate table', reach: '`currencyConfig.homeAmount` converts at write; Setup edits rates; data API' },
       { name: 'sys_unit', builds: 'a unit table or picklist', reach: '`unitConfig` on a `number` field (`unitMode: \'fixed\'` with `unit`, `\'record\'` with `unitField`) or a `text` field (`\'code\'`); a stored code is standard (UN/ECE Rec 20: `KGM`, `H87`) or a row added here in Setup; data API, no delete' },
-      { name: 'sys_work_calendar', builds: 'a business-hours calendar', reach: 'kept per organization in Setup; an approval\'s `escalation.clock: \'working_time\'` and `addWorkingDays()`-style formulas read it; data API' },
+      { name: 'sys_work_calendar', builds: 'a business-hours calendar', reach: 'kept per organization in Setup; an approval\'s `escalation.clock: \'working_time\'` and `addWorkingDays()`, `workingDaysBetween()`, `addWorkingHours()` read it; data API' },
       { name: 'sys_work_calendar_exception', builds: 'a holiday table', reach: 'a calendar\'s holidays and make-up workdays, kept in Setup; data API' },
       { name: 'sys_import_job', builds: 'a bulk-import job table', reach: '`POST /api/v1/data/OBJECT/import/jobs`; data API read' },
       { name: 'sys_approval_request', builds: 'an approvals table', reach: 'a flow approval node opens it; `/api/v1/approvals` routes decide; data API read' },
