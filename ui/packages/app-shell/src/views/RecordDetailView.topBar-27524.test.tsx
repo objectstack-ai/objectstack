@@ -411,11 +411,12 @@ describe('the pane\'s bar once the read settles without a record (objectstack#36
   // the page already decided) are one branch of the read; a record a write
   // deleted and the named page refused report through the same
   // `settledWithoutRecord` → `recordCrumbName` path as the cases below.
-  it.each([
+  const settledCases: ReadonlyArray<readonly [string, () => Promise<unknown>, string]> = [
     ['not found', async () => null, 'record-not-found'],
     ['forbidden', async () => { throw Object.assign(new Error('Forbidden'), { httpStatus: 403 }); }, 'record-access-denied'],
     ['failed', async () => { throw Object.assign(new Error('Boom'), { httpStatus: 500 }); }, 'record-load-failed'],
-  ] as const)('%s: the placeholder ends with the read and the row names the object, never the id', async (_name, answer, stateId) => {
+  ];
+  it.each(settledCases)('%s: the placeholder ends with the read and the row names the object, never the id', async (_name, answer, stateId) => {
     mountPane(failing(answer));
     await screen.findByTestId(stateId, undefined, { timeout: 5000 });
     await waitFor(() => expect(document.querySelector('[data-record-drawer-title-pending]')).toBeNull(), { timeout: 5000 });
