@@ -54,20 +54,31 @@ describe('#33933 — the embedder section joins the bundled ai page only', () =>
     expect(warn).not.toHaveBeenCalled();
   });
 
-  it('the bundled page served through an option source is still the bundled page', () => {
+  it('a page served through an option source is not taken as bundled: no join, and the host is told why', () => {
+    // The served copy cannot be told apart from a host page that narrowed an
+    // option table, so it is left alone (no `ai` key has a source today).
     const settings = new SettingsService({ env: {} });
     settings.registerOptionSource('ai', 'provider', () => ({ options: [{ value: 'openai', label: 'OpenAI' }], admits: () => true }) as any);
     settings.registerManifest(aiSettingsManifest);
     expect(settings.getManifest('ai')).not.toBe(aiSettingsManifest);
-    expect(isBundledAiManifest(settings.getManifest('ai'))).toBe(true);
-    const { ctx } = contextFor(settings);
-    expect(contributeKnowledgeSettings(ctx, '0.0.0').embedder).toBe(true);
-    expect(keysOf(settings)).toEqual(expect.arrayContaining(EMBEDDER_KEYS));
+    const { ctx, warn } = contextFor(settings);
+    expect(contributeKnowledgeSettings(ctx, '0.0.0').embedder).toBe(false);
+    for (const key of EMBEDDER_KEYS) expect(keysOf(settings), key).not.toContain(key);
+    expect(warn).toHaveBeenCalledTimes(1);
   });
 
   for (const [what, host] of [
     ['a different scope', { ...aiSettingsManifest, scope: 'tenant' as const }],
     ['a different read permission', { ...aiSettingsManifest, readPermission: 'host.ai.read' }],
+    [
+      'a narrowed option table on one key',
+      {
+        ...aiSettingsManifest,
+        specifiers: aiSettingsManifest.specifiers.map((s) =>
+          s.key === 'provider' ? { ...s, options: (s as { options?: unknown[] }).options?.slice(0, 2) } : s,
+        ),
+      },
+    ],
     [
       'a different default on one key',
       {

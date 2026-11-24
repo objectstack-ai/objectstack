@@ -60,34 +60,20 @@ function keysOf(manifest: { specifiers: ReadonlyArray<{ key?: string }> }): Set<
 }
 
 /**
- * Whether the served `ai` manifest IS the bundled declaration (#33933, L2 S1).
+ * Whether the served `ai` manifest IS the bundled declaration (#33933).
  *
- * Judged by identity, not by its key set: a host may register its own `ai`
+ * Judged by identity, never by its key set: a host may register its own `ai`
  * manifest with the bundled keys and a different scope, permission, default or
- * option table, and that manifest must be left as the host wrote it. The hub
- * serves the registered declaration itself, or, where an option source serves a
- * key, a shallow copy whose sourced specifiers differ only in `options`
- * (`servedManifest`); every other field and specifier is the same object.
+ * option table, and that manifest must be left as the host wrote it. With no
+ * option source on an `ai` key the hub serves the registered declaration
+ * itself, so the bundled page is that very object. A page served through an
+ * option source is a copy whose sourced specifiers carry other options, which
+ * cannot be told apart from a host page that narrowed an option table; it is
+ * therefore NOT taken as bundled, and the caller warns. No `ai` key has an
+ * option source today.
  */
 export function isBundledAiManifest(served: unknown): boolean {
-  if (served === aiSettingsManifest) return true;
-  if (!served || typeof served !== 'object') return false;
-  const m = served as Record<string, unknown> & { specifiers?: unknown };
-  const fields = new Set([...Object.keys(m), ...Object.keys(aiSettingsManifest)]);
-  for (const field of fields) {
-    if (field === 'specifiers') continue;
-    if (m[field] !== (aiSettingsManifest as unknown as Record<string, unknown>)[field]) return false;
-  }
-  const bundled = aiSettingsManifest.specifiers as ReadonlyArray<Record<string, unknown>>;
-  if (!Array.isArray(m.specifiers) || m.specifiers.length !== bundled.length) return false;
-  return (m.specifiers as Array<Record<string, unknown> | undefined>).every((spec, i) => {
-    const own = bundled[i];
-    if (spec === own) return true;
-    if (!spec || typeof spec !== 'object') return false;
-    const keys = new Set([...Object.keys(spec), ...Object.keys(own)]);
-    for (const k of keys) if (k !== 'options' && spec[k] !== own[k]) return false;
-    return true;
-  });
+  return served === aiSettingsManifest;
 }
 
 function embedderKeys(): string[] {
