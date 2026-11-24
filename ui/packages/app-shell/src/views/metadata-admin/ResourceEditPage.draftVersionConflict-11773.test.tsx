@@ -18,7 +18,11 @@
  * an `If-None-Match: *` over an existing draft is `409 METADATA_CONFLICT` with
  * `currentVersion`. Its refusals are parsed by the REAL `MetadataClient`. Only
  * the page canvas is stubbed, to hand the test a way to dirty the draft; the
- * autosave, the save door and both dialogs are shipping code.
+ * Save, the save door and both dialogs are shipping code.
+ *
+ * Since objectstack#36902 a Save publishes the item right after its draft
+ * save, and a publish drains the draft row (as the real door does): the next
+ * Save is pinned to "no draft row" again, unless another editor wrote one.
  */
 
 import '@testing-library/jest-dom/vitest';
@@ -48,6 +52,8 @@ interface SaveCall {
 
 const door = {
   draft: null as null | { body: Record<string, unknown>; version: string },
+  /** The body the last publish made live. */
+  published: null as null | Record<string, unknown>,
   seq: 0,
   saves: [] as SaveCall[],
 };
@@ -86,7 +92,11 @@ const mockClient = {
   ),
   get: vi.fn(async () => null),
   references: vi.fn(async () => []),
-  publish: vi.fn(async () => ({ success: true })),
+  publish: vi.fn(async () => {
+    door.published = door.draft?.body ?? null;
+    door.draft = null;
+    return { success: true };
+  }),
   reset: vi.fn(async () => ({})),
   save: vi.fn(async (_type: string, _name: string, item: unknown, options?: { force?: boolean; ifMatch?: string; ifNoneMatch?: string }) => {
     const body = JSON.parse(JSON.stringify(item)) as Record<string, unknown>;
@@ -128,7 +138,7 @@ vi.mock('./useMetadata', async (importOriginal) => {
 import { MetadataResourceEditPage } from './ResourceEditPage';
 import { registerMetadataPreview, getMetadataPreview } from './preview-registry';
 
-/** Canvas stand-in: its only job is to dirty the draft, which arms the real autosave. */
+/** Canvas stand-in: its only job is to dirty the draft, which arms the real Save. */
 function StubPageCanvas({ onPatch }: { onPatch?: (patch: Record<string, unknown>) => void }) {
   return (
     <>
@@ -145,6 +155,7 @@ const realPagePreview = getMetadataPreview('page');
 
 beforeEach(() => {
   door.draft = null;
+  door.published = null;
   door.seq = 0;
   door.saves.length = 0;
   for (const fn of Object.values(mockClient)) (fn as unknown as { mockClear: () => void }).mockClear();
@@ -166,35 +177,37 @@ function renderEditor() {
   );
 }
 
-/** Patch the label and wait for the autosave that carries it to be sent. */
+/** Patch the label, press Save, and wait for the draft save that carries it to be sent. */
 async function patchAndSave(label: string): Promise<SaveCall> {
   const before = door.saves.length;
   fireEvent.click(await screen.findByRole('button', { name: `label ${label}` }, { timeout: 8000 }));
+  await waitFor(() => expect(screen.getByTestId('resource-save')).toBeEnabled(), { timeout: 8000 });
+  fireEvent.click(screen.getByTestId('resource-save'));
   await waitFor(() => expect(door.saves.length).toBe(before + 1), { timeout: 8000 });
   return door.saves[door.saves.length - 1]!;
 }
 
 describe('MetadataResourceEditPage — draft saves carry their version (objectui#11773)', () => {
-  it('the first autosave is pinned to the load (no draft: If-None-Match); each later one sends the version the one before it received', async () => {
+  it('the first Save is pinned to the load (no draft: If-None-Match); after its publish drained the draft, the next one is pinned to "no draft row" again', async () => {
     renderEditor();
     const first = await patchAndSave('One');
     expect([first.ifMatch, first.ifNoneMatch]).toEqual([undefined, '*']);
-    await waitFor(() => expect(door.draft?.version).toBe('hmac-sha256:v1'), { timeout: 8000 });
-    expect((await patchAndSave('Two')).ifMatch).toBe('hmac-sha256:v1');
-    await waitFor(() => expect(door.draft?.version).toBe('hmac-sha256:v2'), { timeout: 8000 });
-    expect((await patchAndSave('Three')).ifMatch).toBe('hmac-sha256:v2');
+    await waitFor(() => expect(door.published?.label).toBe('One'), { timeout: 8000 });
+    const second = await patchAndSave('Two');
+    expect([second.ifMatch, second.ifNoneMatch]).toEqual([undefined, '*']);
+    await waitFor(() => expect(door.published?.label).toBe('Two'), { timeout: 8000 });
     expect(screen.queryByTestId('draft-conflict-dialog')).toBeNull();
   });
 
   it('a draft saved elsewhere refuses the stale save with the CONFLICT dialog, not the destructive one', async () => {
     renderEditor();
     await patchAndSave('One');
-    await waitFor(() => expect(door.draft?.version).toBe('hmac-sha256:v1'), { timeout: 8000 });
-    // Another editor's save of the same draft.
+    await waitFor(() => expect(door.published?.label).toBe('One'), { timeout: 8000 });
+    // Another editor's save of the same item's draft.
     writeDraft({ ...PAGE, label: 'Theirs' });
 
     const stale = await patchAndSave('Two');
-    expect(stale.ifMatch).toBe('hmac-sha256:v1');
+    expect([stale.ifMatch, stale.ifNoneMatch]).toEqual([undefined, '*']);
     expect(await screen.findByTestId('draft-conflict-dialog', undefined, { timeout: 8000 })).toHaveTextContent('home');
     expect(screen.queryByText('Destructive change detected')).toBeNull();
     expect(door.draft?.body.label).toBe('Theirs');
@@ -229,10 +242,10 @@ describe('MetadataResourceEditPage — draft saves carry their version (objectui
     expect(door.draft?.body).toMatchObject({ label: 'Theirs', description: 'kept' });
   });
 
-  it('"overwrite" after a 409 re-sends pinned to the refusal\'s currentVersion, and the next save to its receipt', async () => {
+  it('"overwrite" after a 409 re-sends pinned to the refusal\'s currentVersion, and its Save goes live', async () => {
     renderEditor();
     await patchAndSave('One');
-    await waitFor(() => expect(door.draft?.version).toBe('hmac-sha256:v1'), { timeout: 8000 });
+    await waitFor(() => expect(door.published?.label).toBe('One'), { timeout: 8000 });
     const theirs = writeDraft({ ...PAGE, label: 'Theirs' });
 
     await patchAndSave('Two');
@@ -243,19 +256,18 @@ describe('MetadataResourceEditPage — draft saves carry their version (objectui
     await waitFor(() => expect(door.saves.length).toBe(before + 1), { timeout: 8000 });
     const overwrite = door.saves[door.saves.length - 1]!;
     expect([overwrite.ifMatch, overwrite.ifNoneMatch, overwrite.body.label]).toEqual([theirs, undefined, 'Two']);
-    await waitFor(() => expect(door.draft?.body.label).toBe('Two'), { timeout: 8000 });
-    const overwriteReceipt = door.draft?.version;
+    await waitFor(() => expect(door.published?.label).toBe('Two'), { timeout: 8000 });
 
-    expect((await patchAndSave('Three')).ifMatch).toBe(overwriteReceipt);
+    const next = await patchAndSave('Three');
+    expect([next.ifMatch, next.ifNoneMatch]).toEqual([undefined, '*']);
   });
 
   it('control: a destructive change still opens its own confirmation, and the forced retry keeps the version', async () => {
+    const pending = writeDraft({ ...PAGE, label: 'Pending' });
     renderEditor();
-    await patchAndSave('One');
-    await waitFor(() => expect(door.draft?.version).toBe('hmac-sha256:v1'), { timeout: 8000 });
 
     const refused = await patchAndSave(DESTRUCTIVE_LABEL);
-    expect([refused.force, refused.ifMatch]).toEqual([false, 'hmac-sha256:v1']);
+    expect([refused.force, refused.ifMatch]).toEqual([false, pending]);
     expect(await screen.findByText('Destructive change detected', undefined, { timeout: 8000 })).toBeInTheDocument();
     expect(screen.queryByTestId('draft-conflict-dialog')).toBeNull();
 
@@ -263,7 +275,7 @@ describe('MetadataResourceEditPage — draft saves carry their version (objectui
     fireEvent.click(screen.getByRole('button', { name: 'Force save' }));
     await waitFor(() => expect(door.saves.length).toBe(before + 1), { timeout: 8000 });
     const forced = door.saves[door.saves.length - 1]!;
-    expect([forced.force, forced.ifMatch, forced.body.label]).toEqual([true, 'hmac-sha256:v1', DESTRUCTIVE_LABEL]);
-    await waitFor(() => expect(door.draft?.body.label).toBe(DESTRUCTIVE_LABEL), { timeout: 8000 });
+    expect([forced.force, forced.ifMatch, forced.body.label]).toEqual([true, pending, DESTRUCTIVE_LABEL]);
+    await waitFor(() => expect(door.published?.label).toBe(DESTRUCTIVE_LABEL), { timeout: 8000 });
   });
 });

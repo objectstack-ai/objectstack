@@ -382,9 +382,9 @@ describe('MetadataResourceEditPage — a draft the SERVER refused blocks Save (#
     // Touch the refused element itself — the block is keyed to that slice.
     offenderBox = await selectAndOpenCel('offender');
     fireEvent.change(offenderBox, { target: { value: 'record.amount > 22' } });
-    await pressSave();
 
     await waitFor(() => expect(saveButton()).toBeEnabled(), { timeout: 6000 });
+    await pressSave();
     await waitFor(() => expect(mockClient.save).toHaveBeenCalledTimes(2), { timeout: 6000 });
   }, 20000);
 

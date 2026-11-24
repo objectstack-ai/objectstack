@@ -194,7 +194,7 @@ registerBuiltinInspectors();
 /**
  * Canvas stand-in with two jobs: print the editor's draft (the value under
  * test — what the load / save / publish refreshes installed), and hand the
- * test a way to dirty the draft so the real autosave door fires.
+ * test a way to dirty the draft so the real Save has something to send.
  */
 function StubCanvas({
   draft,
@@ -247,16 +247,24 @@ function renderEditor(type: string, name: string) {
 /** The editor's draft, as the canvas received it. */
 const editorDraft = (): Row => JSON.parse(screen.getByTestId('editor-draft').textContent ?? '{}') as Row;
 
-const publishButton = () => screen.getAllByRole('button', { name: /^Publish$/ })[0]!;
+/** The "unpublished changes" line a pending draft gets (objectstack#36902). */
+const unpublishedLine = () => screen.queryByTestId('resource-unpublished-changes');
 
-/** Let the real autosave door fire (1500 ms debounce) and settle its refresh. */
+/** Press Save, and let its draft save, its publish and its refresh settle (Save is explicit since objectstack#36902). */
+async function saveAndAwait(n: number) {
+  await waitFor(() => expect(screen.getByTestId('resource-save')).toBeEnabled(), { timeout: 8000 });
+  fireEvent.click(screen.getByTestId('resource-save'));
+  await awaitSaveCount(n);
+}
+
+/** Wait for the n-th draft save and the refresh after it. */
 async function awaitSaveCount(n: number) {
   await waitFor(() => expect(server.saves.length).toBe(n), { timeout: 8000 });
   await waitFor(() => expect(mockClient.getDraft.mock.calls.length).toBeGreaterThanOrEqual(n + 1), { timeout: 8000 });
 }
 
 describe('MetadataResourceEditPage — a served draft is taken as-is, never spread over `effective` (objectui#10765)', () => {
-  it('THE TRIAGE PIN: a report over a bound published version, switched to `joined`, keeps the six keys cleared across the save, the refresh after it and the publish', async () => {
+  it('THE TRIAGE PIN: a report over a bound published version, switched to `joined`, keeps the six keys cleared across the save, its publish and the refresh after it', async () => {
     server.active.set(key('report', 'pipeline'), wire(PUBLISHED_BOUND_REPORT));
     renderEditor('report', 'pipeline');
 
@@ -266,15 +274,17 @@ describe('MetadataResourceEditPage — a served draft is taken as-is, never spre
     await userEvent.click(await screen.findByRole('option', { name: 'Joined' }));
 
     // ① The first draft PUT is clean — that half is objectui#10746's, pinned there; restated as the control here.
-    await awaitSaveCount(1);
+    await saveAndAwait(1);
     const firstPut = server.saves[0]!;
     expect(firstPut.opts).toMatchObject({ mode: 'draft' });
     expect(firstPut.body.type).toBe('joined');
     for (const k of JOINED_CLEARED) expect(firstPut.body, `first PUT carries no ${k}`).not.toHaveProperty(k);
 
-    // ② THE DEFECT SITE: the refresh after the save. The served draft has no
-    //    six keys; `effective` (the published, BOUND version) still has all six.
-    //    On base the editor spread the draft over `effective` and every key came back.
+    // ② The refresh after the Save, which published the draft (objectstack#36902):
+    //    the promoted body has no six keys, and neither has the editor. The
+    //    load-time half of the defect site (a served draft over a BOUND
+    //    `effective`) is pinned by GENERIC below.
+    await waitFor(() => expect(server.publishes).toEqual(['report/pipeline']), { timeout: 8000 });
     await waitFor(() => expect(editorDraft().type).toBe('joined'), { timeout: 8000 });
     const afterSave = editorDraft();
     for (const k of JOINED_CLEARED) {
@@ -284,28 +294,26 @@ describe('MetadataResourceEditPage — a served draft is taken as-is, never spre
     expect(afterSave).toMatchObject({ name: 'pipeline', label: 'Pipeline', type: 'joined' });
 
     // ③ The next save is the one the defect made send them: dirty the draft on
-    //    an unrelated key and let autosave PUT again.
+    //    an unrelated key and Save again.
     fireEvent.click(screen.getByRole('button', { name: 'patch the label' }));
-    await awaitSaveCount(2);
+    await saveAndAwait(2);
     const secondPut = server.saves[1]!;
     expect(secondPut.body).toMatchObject({ type: 'joined', label: 'Edited in the designer' });
     for (const k of JOINED_CLEARED) expect(secondPut.body, `second PUT carries no ${k}`).not.toHaveProperty(k);
 
-    // ④ Publish: the promoted body is the draft raw, and the post-publish
+    // ④ Its publish: the promoted body is the draft raw, and the post-publish
     //    refresh shows it — no six keys anywhere.
-    await waitFor(() => expect(publishButton()).toBeEnabled(), { timeout: 8000 });
-    fireEvent.click(publishButton());
-    await waitFor(() => expect(server.publishes).toEqual(['report/pipeline']), { timeout: 8000 });
+    await waitFor(() => expect(server.publishes).toEqual(['report/pipeline', 'report/pipeline']), { timeout: 8000 });
     const published = server.active.get(key('report', 'pipeline'))!;
     expect(published).toMatchObject({ type: 'joined', label: 'Edited in the designer' });
     for (const k of JOINED_CLEARED) expect(published, `published body carries no ${k}`).not.toHaveProperty(k);
-    await waitFor(() => expect(screen.queryAllByRole('button', { name: /^Publish$/ })).toHaveLength(0), { timeout: 8000 });
+    await waitFor(() => expect(unpublishedLine()).toBeNull(), { timeout: 8000 });
     const afterPublish = editorDraft();
     expect(afterPublish.type).toBe('joined');
     for (const k of JOINED_CLEARED) expect(afterPublish, `after publish the editor draft has no ${k}`).not.toHaveProperty(k);
   });
 
-  it('GENERIC: a key the pending draft deleted stays deleted on load, across the next save and its refresh, and through publish — while the untouched inherited `type` survives (CONTROL)', async () => {
+  it('GENERIC: a key the pending draft deleted stays deleted on load, across the next Save, its publish and its refresh — while the untouched inherited `type` survives (CONTROL)', async () => {
     server.active.set(key('page', 'home'), wire(PUBLISHED_PAGE));
     server.drafts.set(key('page', 'home'), wire(DRAFT_PAGE_WITHOUT_DESCRIPTION));
     renderEditor('page', 'home');
@@ -318,20 +326,15 @@ describe('MetadataResourceEditPage — a served draft is taken as-is, never spre
     expect(loaded.type).toBe('home');
     expect(loaded).toStrictEqual(wire(DRAFT_PAGE_WITHOUT_DESCRIPTION));
 
-    // SAVE + REFRESH: an unrelated edit, the real autosave, the real refresh.
+    // SAVE + PUBLISH + REFRESH: an unrelated edit, the real Save, its publish, the real refresh.
     fireEvent.click(screen.getByRole('button', { name: 'patch the label' }));
-    await awaitSaveCount(1);
+    await saveAndAwait(1);
     expect(server.saves[0]!.body).not.toHaveProperty('description');
-    await waitFor(() => expect(editorDraft().label).toBe('Edited in the designer'), { timeout: 8000 });
-    expect(editorDraft()).not.toHaveProperty('description');
-    expect(editorDraft().type).toBe('home');
-
-    // PUBLISH: the promoted body is the draft raw.
-    await waitFor(() => expect(publishButton()).toBeEnabled(), { timeout: 8000 });
-    fireEvent.click(publishButton());
+    // The promoted body is the draft raw.
     await waitFor(() => expect(server.publishes).toEqual(['page/home']), { timeout: 8000 });
     expect(server.active.get(key('page', 'home'))).not.toHaveProperty('description');
-    await waitFor(() => expect(screen.queryAllByRole('button', { name: /^Publish$/ })).toHaveLength(0), { timeout: 8000 });
+    await waitFor(() => expect(editorDraft().label).toBe('Edited in the designer'), { timeout: 8000 });
+    await waitFor(() => expect(unpublishedLine()).toBeNull(), { timeout: 8000 });
     expect(editorDraft()).not.toHaveProperty('description');
     expect(editorDraft().type).toBe('home');
   });
@@ -341,16 +344,16 @@ describe('MetadataResourceEditPage — a served draft is taken as-is, never spre
     renderEditor('page', 'home');
     await waitFor(() => expect(editorDraft().label).toBe('Home'), { timeout: 8000 });
     expect(editorDraft()).toStrictEqual(wire(PUBLISHED_PAGE));
-    expect(screen.queryAllByRole('button', { name: /^Publish$/ })).toHaveLength(0);
+    expect(unpublishedLine()).toBeNull();
   });
 
-  it('EDGE / CONTROL: the first draft save of a never-drafted item is the WHOLE edited document, and the refresh shows exactly that', async () => {
+  it('EDGE / CONTROL: the first draft save of a never-drafted item is the WHOLE edited document, and the refresh after its publish shows exactly that', async () => {
     server.active.set(key('page', 'home'), wire(PUBLISHED_PAGE));
     renderEditor('page', 'home');
     await waitFor(() => expect(editorDraft().label).toBe('Home'), { timeout: 8000 });
 
     fireEvent.click(screen.getByRole('button', { name: 'patch the label' }));
-    await awaitSaveCount(1);
+    await saveAndAwait(1);
     const firstDraft = server.saves[0]!.body;
     expect(server.saves[0]!.opts).toMatchObject({ mode: 'draft' });
     expect(firstDraft).toStrictEqual({ ...wire(PUBLISHED_PAGE), label: 'Edited in the designer' });

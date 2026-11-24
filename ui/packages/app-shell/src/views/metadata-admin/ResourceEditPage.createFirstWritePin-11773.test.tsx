@@ -30,6 +30,8 @@ import { MetadataClient } from '@object-ui/data-objectstack';
 
 const server = {
   drafts: new Map<string, { body: Record<string, unknown>; version: string }>(),
+  /** What a publish made live (objectstack#36902: a create's Save publishes it). */
+  active: new Map<string, Record<string, unknown>>(),
   puts: [] as Array<{ name: string; ifMatch: string | null; ifNoneMatch: string | null; status: number }>,
   seq: 0,
 };
@@ -48,6 +50,13 @@ async function serve(input: RequestInfo | URL, init?: RequestInit): Promise<Resp
     return json(200, { drafts: [...server.drafts.keys()].map((k) => ({ type: k.split('/')[0], name: k.split('/')[1] })) });
   }
   if (seg.length === 1) return json(200, { items: [] });
+  if (seg.length === 3 && seg[2] === 'publish' && method === 'POST') {
+    const row = server.drafts.get(key);
+    if (!row) return json(404, { error: { code: 'NO_DRAFT', message: 'absent' } });
+    server.active.set(key, row.body);
+    server.drafts.delete(key);
+    return json(200, { success: true, version: `sha256:${key}`, message: 'published' });
+  }
   if (seg.length === 3) return json(404, { error: { code: 'NOT_FOUND', message: 'absent' } });
   if (method === 'PUT') {
     const headers = new Headers(init?.headers);
@@ -115,13 +124,12 @@ afterAll(() => {
 
 beforeEach(() => {
   server.drafts.clear();
+  server.active.clear();
   server.puts = [];
   server.seq = 0;
-  window.localStorage.setItem('metadata-admin:autosave', '0');
 });
 afterEach(() => {
   cleanup();
-  window.localStorage.removeItem('metadata-admin:autosave');
 });
 
 function Where() {
@@ -161,11 +169,12 @@ async function createNewGuide() {
 }
 
 describe('MetadataResourceEditPage — a create sends If-None-Match: * (objectui#11773)', () => {
-  it('the create is sent with the first-write pin and no If-Match, and lands', async () => {
+  it('the create is sent with the first-write pin and no If-Match, and lands live', async () => {
     await createNewGuide();
     await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent('/metadata/doc/new_guide'), { timeout: 8000 });
     expect(server.puts).toEqual([{ name: 'new_guide', ifMatch: null, ifNoneMatch: '*', status: 200 }]);
-    expect(server.drafts.get('doc/new_guide')?.body).toMatchObject({ name: 'new_guide', content: '# New' });
+    expect(server.active.get('doc/new_guide')).toMatchObject({ name: 'new_guide', content: '# New' });
+    expect(server.drafts.has('doc/new_guide')).toBe(false);
   });
 
   it('a create over a name that already holds a draft is refused, and that draft is not written over', async () => {

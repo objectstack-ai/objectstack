@@ -183,6 +183,12 @@ function renderZh() {
   );
 }
 
+/** Save is explicit (objectstack#36902): wait for the unsaved edit, then press Save. */
+async function pressSave() {
+  await waitFor(() => expect(screen.getByTestId('save-status').getAttribute('data-state')).toBe('unsaved'), { timeout: 8000 });
+  fireEvent.click(screen.getByTestId('resource-save'));
+}
+
 const editorDraft = (): Row => JSON.parse(screen.getByTestId('editor-draft').textContent ?? '{}') as Row;
 
 function expectAuthored(doc: Row, severityLabel: string) {
@@ -196,7 +202,7 @@ function expectAuthored(doc: Row, severityLabel: string) {
 }
 
 describe('MetadataResourceEditPage in a zh-CN console — an object buffer is the authored document (objectstack#29793)', () => {
-  it('a pending draft: the buffer is the stored draft, one edit PUTs it in source labels with no injected column, and the publish refresh stays authored', async () => {
+  it('a pending draft: the buffer is the stored draft, one Save PUTs it in source labels with no injected column and publishes it, and the refresh stays authored', async () => {
     srv.draft = wire({ ...AUTHORED, description: 'draft only' });
     renderZh();
 
@@ -204,20 +210,14 @@ describe('MetadataResourceEditPage in a zh-CN console — an object buffer is th
     expect(editorDraft()).toStrictEqual(wire({ ...AUTHORED, description: 'draft only' }));
 
     fireEvent.click(screen.getByRole('button', { name: 'relabel severity' }));
+    await pressSave();
     await waitFor(() => expect(srv.saves.length).toBeGreaterThan(0), { timeout: 8000 });
     const { body, opts } = srv.saves.at(-1)!;
     expect(opts).toMatchObject({ mode: 'draft' });
     expectAuthored(body, 'Level');
     expect(body.description).toBe('draft only');
 
-    // The refresh after the save installs the stored draft again, not the served one.
-    await waitFor(() => expect((editorDraft().fields as Record<string, Row>).severity.label).toBe('Level'), { timeout: 8000 });
-    expectAuthored(editorDraft(), 'Level');
-
-    // Publish: the refresh installs the promoted body as authored (`overlay`).
-    const publish = await screen.findAllByRole('button', { name: new RegExp(`^${t('engine.edit.publish', 'zh-CN')}$`) }, { timeout: 8000 });
-    await waitFor(() => expect(publish[0]).toBeEnabled(), { timeout: 8000 });
-    fireEvent.click(publish[0]!);
+    // The Save publishes the item, and the refresh installs the promoted body as authored (`overlay`).
     await waitFor(() => expect(mockClient.publish).toHaveBeenCalledTimes(1), { timeout: 8000 });
     await waitFor(() => expect(srv.draft).toBeNull(), { timeout: 8000 });
     await act(async () => {
@@ -233,6 +233,7 @@ describe('MetadataResourceEditPage in a zh-CN console — an object buffer is th
     expect(editorDraft()).toStrictEqual(wire(AUTHORED));
 
     fireEvent.click(screen.getByRole('button', { name: 'relabel severity' }));
+    await pressSave();
     await waitFor(() => expect(srv.saves.length).toBeGreaterThan(0), { timeout: 8000 });
     expectAuthored(srv.saves.at(-1)!.body, 'Level');
   });
@@ -401,17 +402,19 @@ describe.each(TRANSLATED_TYPES)(
       if (realTypePreview) registerMetadataPreview(spec.type, realTypePreview);
     });
 
-    it('no pending draft: two edits in a row each PUT source text, the second after the save refresh re-read the draft', async () => {
+    it('no pending draft: two Saves in a row each PUT source text, the second after the save refresh re-read the published item', async () => {
       renderTypeZh(spec);
       await waitFor(() => expect(editorDraft().name).toBe(spec.name), { timeout: 8000 });
       expect(spec.sourceText(editorDraft())).toStrictEqual(SOURCE_TEXT[spec.type]);
 
       fireEvent.click(screen.getByRole('button', { name: 'edit once' }));
+      await pressSave();
       await waitFor(() => expect(srv.saves.length).toBe(1), { timeout: 8000 });
       expect(srv.saves[0]!.opts).toMatchObject({ mode: 'draft' });
       expect(spec.sourceText(srv.saves[0]!.body)).toStrictEqual(SOURCE_TEXT[spec.type]);
 
-      // The save refresh: the served draft is now the zh-CN one, the layers' the stored one.
+      // The Save published the draft; the refresh re-reads the stored row, in source text.
+      await waitFor(() => expect(mockClient.publish).toHaveBeenCalledTimes(1), { timeout: 8000 });
       await waitFor(() => expect(mockClient.getDraft.mock.calls.length).toBeGreaterThan(1), { timeout: 8000 });
       await act(async () => {
         await new Promise((resolve) => setTimeout(resolve, 50));
@@ -419,9 +422,11 @@ describe.each(TRANSLATED_TYPES)(
       expect(spec.sourceText(editorDraft())).toStrictEqual(SOURCE_TEXT[spec.type]);
 
       fireEvent.click(screen.getByRole('button', { name: 'edit once' }));
+      await pressSave();
       await waitFor(() => expect(srv.saves.length).toBe(2), { timeout: 8000 });
       expect(spec.sourceText(srv.saves[1]!.body)).toStrictEqual(SOURCE_TEXT[spec.type]);
-      expect(spec.sourceText(srv.draft!)).toStrictEqual(SOURCE_TEXT[spec.type]);
+      await waitFor(() => expect(mockClient.publish).toHaveBeenCalledTimes(2), { timeout: 8000 });
+      expect(spec.sourceText(srv.overlay!)).toStrictEqual(SOURCE_TEXT[spec.type]);
     });
 
     it('a pending draft: the buffer is the stored draft, and one edit PUTs it in source text', async () => {
@@ -431,6 +436,7 @@ describe.each(TRANSLATED_TYPES)(
       expect(spec.sourceText(editorDraft())).toStrictEqual(SOURCE_TEXT[spec.type]);
 
       fireEvent.click(screen.getByRole('button', { name: 'edit once' }));
+      await pressSave();
       await waitFor(() => expect(srv.saves.length).toBeGreaterThan(0), { timeout: 8000 });
       expect(spec.sourceText(srv.saves.at(-1)!.body)).toStrictEqual(SOURCE_TEXT[spec.type]);
     });

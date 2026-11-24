@@ -175,13 +175,15 @@ describe('MetadataResourceEditPage — a pending draft is judged by its own serv
     );
   });
 
-  it('the verdict follows the draft: the refresh after an autosave of a fixed draft clears it', async () => {
+  it('the verdict follows the draft: the refresh after a Save of a fixed draft clears it', async () => {
     server.active.set('page/home', PAGE);
     server.drafts.set('page/home', { ...PAGE, label: 'broken' });
     renderEditor();
     await waitFor(() => expect(canvasDiagnostics().map((d) => d.message)).toContain(REFUSAL.message), { timeout: 8000 });
 
     fireEvent.click(screen.getByRole('button', { name: 'fix the draft' }));
+    await waitFor(() => expect(screen.getByTestId('resource-save')).toBeEnabled(), { timeout: 8000 });
+    fireEvent.click(screen.getByTestId('resource-save'));
 
     await waitFor(() => expect(server.saves).toBe(1), { timeout: 8000 });
     await waitFor(() => expect(canvasDiagnostics().map((d) => d.message)).not.toContain(REFUSAL.message), { timeout: 8000 });

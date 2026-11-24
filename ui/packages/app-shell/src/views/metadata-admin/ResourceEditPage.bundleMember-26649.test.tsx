@@ -193,7 +193,7 @@ describe('MetadataResourceEditPage — ?member= opens that bundle member (object
     await screen.findByDisplayValue('逾期了，请处理', undefined, { timeout: 8000 });
     await settle();
 
-    fireEvent.click(screen.getByTitle('Publish'));
+    fireEvent.click(screen.getByTestId('resource-draft-publish'));
     await waitFor(() => expect(server.members.get('zh-CN')!.draft).toBeNull());
     await settle();
 
@@ -208,7 +208,7 @@ describe('MetadataResourceEditPage — ?member= opens that bundle member (object
     await screen.findByDisplayValue('逾期了，请处理', undefined, { timeout: 8000 });
     await settle();
 
-    fireEvent.click(screen.getAllByTitle('Discard draft')[0]!);
+    fireEvent.click(screen.getByTestId('resource-draft-discard'));
     await confirmDialog();
     await waitFor(() => expect(server.members.get('zh-CN')!.draft).toBeNull());
 

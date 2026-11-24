@@ -97,7 +97,7 @@ vi.mock('./useMetadata', async (importOriginal) => {
 import { MetadataResourceEditPage } from './ResourceEditPage';
 import { registerMetadataPreview, getMetadataPreview } from './preview-registry';
 
-/** Canvas stand-in: its only job is to dirty the buffer, which arms the real autosave. */
+/** Canvas stand-in: its only job is to dirty the buffer, which arms the real Save. */
 function StubPageCanvas({ onPatch }: { onPatch?: (patch: Record<string, unknown>) => void }) {
   return (
     <button type="button" onClick={() => onPatch?.({ label: 'Edited in the designer' })}>
@@ -132,10 +132,10 @@ function renderEditor() {
   );
 }
 
-/** Longer than the autosave's debounce, so a save that was going to leave has left. */
-async function pastTheAutosave() {
+/** Long enough that a save that was going to leave has left (Save is explicit since objectstack#36902). */
+async function pastAnySave() {
   await act(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 2500));
+    await new Promise((resolve) => setTimeout(resolve, 500));
   });
 }
 
@@ -159,7 +159,7 @@ describe('MetadataResourceEditPage — a draft the server refuses to read is not
     expect(screen.queryByRole('button', { name: 'patch the draft' })).toBeNull();
     expect(screen.queryByRole('button', { name: /^Publish$/ })).toBeNull();
 
-    await pastTheAutosave();
+    await pastAnySave();
     expect(door.saves).toEqual([]);
     expect(door.draft).toStrictEqual(GATED_DRAFT);
   });
@@ -170,7 +170,7 @@ describe('MetadataResourceEditPage — a draft the server refuses to read is not
     renderEditor();
 
     await screen.findByRole('button', { name: 'patch the draft' }, { timeout: 8000 });
-    const publish = screen.getAllByRole('button', { name: /^Publish$/ })[0]!;
+    const publish = screen.getByTestId('resource-draft-publish');
     await waitFor(() => expect(publish).toBeEnabled(), { timeout: 8000 });
     fireEvent.click(publish);
     await waitFor(() => expect(mockClient.publish).toHaveBeenCalled(), { timeout: 8000 });
@@ -180,7 +180,7 @@ describe('MetadataResourceEditPage — a draft the server refuses to read is not
     await expectRefusalStrip();
     expect(screen.queryByRole('button', { name: 'patch the draft' })).toBeNull();
 
-    await pastTheAutosave();
+    await pastAnySave();
     expect(door.saves).toEqual([]);
     expect(door.draft).toStrictEqual(GATED_DRAFT);
   });
@@ -190,6 +190,8 @@ describe('MetadataResourceEditPage — a draft the server refuses to read is not
 
     fireEvent.click(await screen.findByRole('button', { name: 'patch the draft' }, { timeout: 8000 }));
     expect(screen.queryByTestId('studio-refusal')).toBeNull();
+    await waitFor(() => expect(screen.getByTestId('resource-save')).toBeEnabled(), { timeout: 8000 });
+    fireEvent.click(screen.getByTestId('resource-save'));
     await waitFor(() => expect(door.saves).toHaveLength(1), { timeout: 8000 });
     expect(door.saves[0]).toMatchObject({ mode: 'draft', packageId: 'com.acme.app', ifNoneMatch: '*' });
     expect(door.saves[0]).not.toHaveProperty('ifMatch');

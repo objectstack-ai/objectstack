@@ -142,25 +142,23 @@ function renderAt(entry: string) {
 }
 
 /**
- * Two doors call the SAME `doPublish` — the toolbar button and the
- * "pending changes" banner button. Both are asserted present so a future
- * refactor cannot quietly leave one of them on a second publish path.
+ * Since objectstack#36902 two doors publish: the Save's own publish, right
+ * after its draft save, and the "unpublished changes" line's Publish for a
+ * draft a person left pending. Both are driven here, so neither can drift
+ * onto a publish that names a different package than the save.
  */
-function publishButtons() {
-  const all = screen.getAllByRole('button', { name: /^Publish$/ });
-  expect(all.length).toBe(2);
-  return all;
-}
-const publishButton = () => publishButtons()[0]!;
+const publishButton = () => screen.getByTestId('resource-draft-publish');
 
-/** Dirty the draft and let the real save door fire (autosave, 1500 ms). */
+/** Dirty the draft and press Save: the draft save, then the Save's own publish. */
 async function saveOnce() {
   fireEvent.click(await screen.findByRole('button', { name: 'patch the draft' }));
+  await waitFor(() => expect(screen.getByTestId('resource-save')).toBeEnabled(), { timeout: 8000 });
+  fireEvent.click(screen.getByTestId('resource-save'));
   await waitFor(() => expect(mockClient.save).toHaveBeenCalled(), { timeout: 8000 });
 }
 
 describe('MetadataResourceEditPage — save and publish state ONE package (#5420)', () => {
-  it('bound: publish states the SAME id the save states, from the same source', async () => {
+  it('bound: the Save\'s publish states the SAME id the save states, from the same source', async () => {
     renderAt(atPackageScope('?package=com.example.showcase'));
     await waitFor(() => expect(publishButton()).toBeInTheDocument(), { timeout: 8000 });
 
@@ -168,8 +166,6 @@ describe('MetadataResourceEditPage — save and publish state ONE package (#5420
     const saveOpts = mockClient.save.mock.calls[0]![3];
     expect(saveOpts).toMatchObject({ mode: 'draft', packageId: 'com.example.showcase' });
 
-    await waitFor(() => expect(publishButton()).toBeEnabled(), { timeout: 8000 });
-    fireEvent.click(publishButton());
     await waitFor(() => expect(mockClient.publish).toHaveBeenCalled(), { timeout: 8000 });
 
     const [type, name, publishOpts] = mockClient.publish.mock.calls[0]!;
@@ -179,7 +175,7 @@ describe('MetadataResourceEditPage — save and publish state ONE package (#5420
     expect(publishOpts?.packageId).toBe(saveOpts?.packageId);
   });
 
-  it('unbound: no package on the URL — the key is ABSENT on the publish, not empty', async () => {
+  it('unbound: no package on the URL — the key is ABSENT on the pending draft\'s publish, not empty', async () => {
     renderAt(atPackageScope(''));
     await waitFor(() => expect(publishButton()).toBeInTheDocument(), { timeout: 8000 });
     await waitFor(() => expect(publishButton()).toBeEnabled(), { timeout: 8000 });
@@ -204,8 +200,6 @@ describe('MetadataResourceEditPage — save and publish state ONE package (#5420
     await saveOnce();
     expect(mockClient.save.mock.calls[0]![3]).not.toHaveProperty('packageId');
 
-    await waitFor(() => expect(publishButton()).toBeEnabled(), { timeout: 8000 });
-    fireEvent.click(publishButton());
     await waitFor(() => expect(mockClient.publish).toHaveBeenCalled(), { timeout: 8000 });
 
     const publishOpts = mockClient.publish.mock.calls[0]![2];
