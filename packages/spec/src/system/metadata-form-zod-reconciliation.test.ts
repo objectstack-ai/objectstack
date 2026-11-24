@@ -704,13 +704,6 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     kind: 'omit',
     type: 'field',
     path: ROOT_PATH,
-    key: 'inlineEdit',
-    why: "no registered widget spells this union (ruling record 5861442317): `true` / `false` or `'grid'` / `'form'`, and a boolean cannot be an option value while a union renders only its first arm on create, so a control would be a switch that never reaches `'grid'` or `'form'`",
-  },
-  {
-    kind: 'omit',
-    type: 'field',
-    path: ROOT_PATH,
     key: 'relatedList',
     why: "no registered widget spells this union (ruling record 5861442317): `true` / `false` or `'primary'`, and a boolean cannot be an option value while a union renders only its first arm on create, so a control would be a switch that never places the list in the record's body (`'primary'`)",
   },
@@ -1701,7 +1694,9 @@ const RULED_ROOT_REASONS: ReadonlyArray<{ reason: string; keys: readonly string[
   },
   {
     reason: 'no registered widget spells this union',
-    keys: ['field.inlineEdit', 'field.relatedList', 'object.stageField'],
+    // `field.inlineEdit` left in the same edit that offered it on the field
+    // form (#35926: its boolean arm retired, a select spells `'grid'` / `'form'`).
+    keys: ['field.relatedList', 'object.stageField'],
   },
 ];
 
@@ -1843,7 +1838,7 @@ describe('the three ruled root reasons admit only the keys ruled into them', () 
     expect(FormSelectOptionSchema.safeParse({ label: 'probe', value: 'primary' }).success).toBe(true);
     // Lit: a `false` arm, and a boolean arm.
     expect(unspellableArmValuesOf('object', 'stageField')).toEqual([false]);
-    expect(unspellableArmValuesOf('field', 'inlineEdit')).toEqual([true, false]);
+    expect(unspellableArmValuesOf('field', 'relatedList')).toEqual([true, false]);
     // Dark: a union with no boolean or `false` arm, and a key that is no
     // union at all.
     expect(unspellableArmValuesOf('object', 'requiredPermissions')).toEqual([]);
