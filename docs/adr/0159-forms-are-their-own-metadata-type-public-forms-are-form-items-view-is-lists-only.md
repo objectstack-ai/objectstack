@@ -120,7 +120,7 @@ ADR-0088's three clauses, each on a fact measured above:
 - **Not carried over from the view item**: `viewKind`, `config`, `isDefault` (a record-form role, ruling item 3), `order` (the switcher's order) and `scope` (the registry's provenance already says package or runtime).
 - **The object binding has one rung.** A `form` item's object is its `object`. The body's `data` key is not authored on a `form` item: the schema refuses it by name with the prescription "bind the form with `object`". A form bound to a JSON Schema (`data.provider: 'schema'`) is not a `form` item — it has no consumer among the three. The four-rung resolution of `anonymousFormObjectName` survives only inside the projection of the old shapes ([D5](#d5)) and leaves with them.
 - **`object` must name an object** the package can reference, judged where a view's object is judged today (`os validate`, publish). It is not editable after the form is created: the name carries it ([D3](#d3)).
-- **Stack collection** `forms`, file patterns `**/*.form.ts`, `**/*.form.yml`, `**/*.form.json`, REST plural `/api/v1/meta/form` for items as every type has.
+- **Stack collection** `forms`; file patterns `**/*.form.ts`, `**/*.form.yml`, `**/*.form.json`; items are served at `/api/v1/meta/form`, as every type's are.
 - **Registry row**: `supportsOverlay: true`, `allowEnvironmentOverlay: false`, `allowRuntimeCreate: true`, `supportsVersioning: true`, `executionPinned: false`, `loadOrder: 50`, `domain: 'ui'` — `page`'s row. `allowEnvironmentOverlay` is `false` because a new type takes ADR-0005's default and ADR-0146 D11 retires that tier as a write door; a customization is a declared override ([D4](#d4)).
 
 ### D3 — The name space: `OBJECT.KEY`, the served name, unchanged {#d3}
