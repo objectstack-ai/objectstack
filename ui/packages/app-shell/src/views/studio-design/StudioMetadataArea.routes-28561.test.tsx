@@ -17,6 +17,7 @@ import * as React from 'react';
 import { render, screen, cleanup, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation, useSearchParams } from 'react-router-dom';
 import { useMetadataAreaHost } from '../metadata-admin/metadataAreaHost';
+import { registerMetadataResource } from '../metadata-admin/registry';
 
 function PageStub({ page }: { page: string }) {
   const host = useMetadataAreaHost();
@@ -172,6 +173,21 @@ describe('the area mounts the metadata pages (objectstack#28561)', () => {
     mount(`/studio/${WRITABLE}/metadata/_diagnostics?package=${WRITABLE}`);
     expect((await page()).page).toBe('diagnostics');
     cleanup();
+    // objectstack#36901 — history is the item page's History tab: the old
+    // address opens it there, its query kept.
+    mount(`/studio/${WRITABLE}/metadata/hook/h1/history?package=${WRITABLE}`);
+    expect((await page()).page).toBe('item');
+    expect(where()).toBe(`/studio/${WRITABLE}/metadata/hook/h1?package=${WRITABLE}&tab=history`);
+  });
+
+  it('CONTROL: a type whose item page is its own editor, or a designer\'s, keeps the standalone history page', async () => {
+    // The permission set's matrix editor links `./history`; it has no tabs.
+    registerMetadataResource({ type: 'matrix_36901', EditPage: () => null });
+    mount(`/studio/${WRITABLE}/metadata/matrix_36901/m1/history?package=${WRITABLE}`);
+    expect((await page()).page).toBe('history');
+    expect(where()).toBe(`/studio/${WRITABLE}/metadata/matrix_36901/m1/history?package=${WRITABLE}`);
+    cleanup();
+    // So does an item a pillar's designer opens (a flow), which has no tab row yet.
     mount(`/studio/${WRITABLE}/metadata/flow/f1/history?package=${WRITABLE}`);
     expect((await page()).page).toBe('history');
   });

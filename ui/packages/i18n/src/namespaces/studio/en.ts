@@ -1385,7 +1385,6 @@ const STUDIO_EN: Record<string, string> = {
   'engine.edit.detail': 'Detail',
   'engine.edit.preview': 'Preview',
   'engine.edit.designer': 'Designer',
-  'engine.edit.related': 'Related',
   'engine.edit.hideInspector': 'Hide inspector',
   'engine.edit.showInspector': 'Show inspector',
   'engine.edit.noChanges': 'No changes to save',
@@ -4863,6 +4862,14 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.detailHeader.notInList': 'Not in the current list',
   'engine.studio.detailHeader.package': 'From package {package}',
   'engine.studio.detailHeader.more': 'More',
+  // Studio item tabs: the item tools as tabs of the item page (objectstack#36901).
+  'engine.studio.itemTabs.details': 'Details',
+  'engine.studio.itemTabs.preview': 'Preview',
+  'engine.studio.itemTabs.related': 'Related',
+  'engine.studio.itemTabs.references': 'Referenced by',
+  'engine.studio.itemTabs.history': 'History',
+  'engine.studio.itemTabs.source': 'Source',
+  'engine.studio.itemTabs.versions': 'Versions',
 };
 
 export default STUDIO_EN;
