@@ -9,7 +9,7 @@ feat(kanban): a lane's sum, average, minimum and maximum cover every record of t
 
 Clause-②: yes
 Metadata-protocol: added
-Skills-docs: none — no published skill teaches `kanban.summary`
+Skills-docs: follow-up owed — skills/objectstack-ui/rules/list-views.md (the open board-settings teaching card #36422 now also owes avg / min / max)
 
 A board's lane foot statistic, `kanban.summary`, now takes `{ type: 'avg' | 'min' | 'max', field }` beside `none`, `count` and `sum`, and every one of `sum`, `avg`, `min` and `max` covers all of the lane's records:
 
