@@ -698,17 +698,37 @@ describe('the queue target offers the queues an app declares beside sys_queue (o
     { name: 'escalations', label: 'Escalations' },
   ];
 
-  /** `sys_queue` as the data API serves it, honouring `$search` and `$filter.name` (`$in`, `$nin`). */
+  /**
+   * One `$filter` node over a row: the object form (`$and`, and a `name` that
+   * is a value, `$in` or `$nin`) and the array form `mergeFilterNodes` writes
+   * for the recents rail (`['and', …]`, `['name', 'in' | 'nin' | '=', v]`).
+   */
+  function matches(row: { name: string }, filter: any): boolean {
+    if (!filter) return true;
+    if (Array.isArray(filter)) {
+      const [head, op, value] = filter;
+      if (head === 'and') return filter.slice(1).every((f: unknown) => matches(row, f));
+      if (head !== 'name') return true;
+      if (op === 'in') return value.includes(row.name);
+      if (op === 'nin') return !value.includes(row.name);
+      return op === '=' ? row.name === value : true;
+    }
+    if (Array.isArray(filter.$and) && !filter.$and.every((f: Record<string, any>) => matches(row, f))) return false;
+    const byName = filter.name;
+    if (typeof byName === 'string' && row.name !== byName) return false;
+    if (Array.isArray(byName?.$in) && !byName.$in.includes(row.name)) return false;
+    if (Array.isArray(byName?.$nin) && byName.$nin.includes(row.name)) return false;
+    return true;
+  }
+
+  /** `sys_queue` as the data API serves it, honouring `$search` and `$filter`. */
   function queueBackend() {
     return vi.fn(async (objectName: string, params: Record<string, any> = {}) => {
       if (objectName !== 'sys_queue') return { data: [], total: 0 };
       let rows = ROWS;
       const term = typeof params.$search === 'string' ? params.$search.toLowerCase() : '';
       if (term) rows = rows.filter((q) => q.label.toLowerCase().includes(term) || q.name.includes(term));
-      const byName = params.$filter?.name;
-      if (typeof byName === 'string') rows = rows.filter((q) => q.name === byName);
-      if (Array.isArray(byName?.$in)) rows = rows.filter((q) => byName.$in.includes(q.name));
-      if (Array.isArray(byName?.$nin)) rows = rows.filter((q) => !byName.$nin.includes(q.name));
+      rows = rows.filter((q) => matches(q, params.$filter));
       return { data: rows.map((q) => ({ ...q })), total: rows.length };
     });
   }
@@ -801,10 +821,12 @@ describe('the queue target offers the queues an app declares beside sys_queue (o
     await showQueueTarget();
     await screen.findByTestId('change-owner-declared-queues');
     await openLookup();
-    // The lookup asks the server to leave the declared names out, so the row is not drawn …
+    // Every read the lookup sends (its list, and the recents rail when it has
+    // any) asks the server to leave the declared names out, so the row is not drawn …
     const reads = queueReads(find);
     expect(reads.length).toBeGreaterThan(0);
-    for (const p of reads) expect(p.$filter?.name).toEqual({ $nin: ['escalations', 'support_desk'] });
+    const leftOut = /\{"name":\{"\$nin":\["escalations","support_desk"\]\}\}|\["name","nin",\["escalations","support_desk"\]\]/;
+    for (const p of reads) expect(JSON.stringify(p.$filter)).toMatch(leftOut);
     expect(screen.queryByRole('option', { name: /Support Desk \(row\)/ })).toBeNull();
     expect(screen.getByRole('option', { name: /Billing Desk/ })).toBeTruthy();
     // … and the declared queue is drawn exactly once.
@@ -816,7 +838,9 @@ describe('the queue target offers the queues an app declares beside sys_queue (o
     await showQueueTarget();
     expect(screen.queryByTestId('change-owner-declared-queues')).toBeNull();
     await openLookup();
-    for (const p of queueReads(find)) expect(p.$filter?.name).toBeUndefined();
+    const reads = queueReads(find);
+    expect(reads.length).toBeGreaterThan(0);
+    for (const p of reads) expect(JSON.stringify(p.$filter ?? {})).not.toContain('$nin');
     fireEvent.click(await screen.findByRole('option', { name: /Support Desk \(row\)/ }));
     await settle();
     fireEvent.click(screen.getByTestId('change-owner-submit'));
