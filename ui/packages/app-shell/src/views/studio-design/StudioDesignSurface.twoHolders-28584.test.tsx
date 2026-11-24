@@ -122,6 +122,9 @@ import { AutomationsPillar, DataPillar } from './StudioDesignSurface';
 import { registerMetadataPreview } from '../metadata-admin/preview-registry';
 import { DashboardPreview } from '../metadata-admin/previews/DashboardPreview';
 import { createEmptyDataSource, failOnAbsorbedFetchError } from './__tests__/emptyDataSource';
+// The source under test reaches dynamic imports of `@objectstack/lint`; their first
+// load is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@objectstack/lint';
 
 const dataSource = createEmptyDataSource();
 failOnAbsorbedFetchError();

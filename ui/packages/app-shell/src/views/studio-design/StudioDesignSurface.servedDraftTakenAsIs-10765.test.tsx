@@ -113,6 +113,9 @@ import { DataPillar, AutomationsPillar } from './StudioDesignSurface';
 import { SurfaceDeepLinkProvider } from './surfaceDeepLinkChannel';
 import { createEmptyDataSource, failOnAbsorbedFetchError } from './__tests__/emptyDataSource';
 import { registerMetadataPreview, getMetadataPreview } from '../metadata-admin/preview-registry';
+// The source under test reaches dynamic imports of `@objectstack/lint`; their first
+// load is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@objectstack/lint';
 
 const dataSource = createEmptyDataSource();
 failOnAbsorbedFetchError();

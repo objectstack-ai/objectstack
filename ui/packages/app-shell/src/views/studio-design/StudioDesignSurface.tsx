@@ -617,6 +617,7 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
     const listedIds = fetchListedPackageIds();
     listedIds.catch(() => {});
     const listedManifests = fetchListedPackageManifests();
+    listedManifests.catch(() => {});
     const settle = (entry: PkgEntry | null) => {
       setPkgWritable(entry?.writable ?? null);
       setPkgEntry(entry);

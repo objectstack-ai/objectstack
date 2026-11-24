@@ -58,6 +58,10 @@ import { buildDatasetSkeleton, datasetCandidateFields, StudioDatasetAuthoringCon
 import { DashboardWidgetInspector } from '../metadata-admin/inspectors/DashboardWidgetInspector';
 import type { ObjectFieldInfo } from '../metadata-admin/previews/useObjectFields';
 import { t } from '../metadata-admin/i18n';
+// The source under test reaches dynamic imports of `@objectstack/formula`, `@objectstack/lint`; their first
+// load is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@objectstack/formula';
+import '@objectstack/lint';
 
 const PLATFORM_DATASET = {
   name: 'sys_login_metrics',

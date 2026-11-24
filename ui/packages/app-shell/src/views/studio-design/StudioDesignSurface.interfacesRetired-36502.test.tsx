@@ -119,6 +119,9 @@ import { t } from '../metadata-admin/i18n';
 // The notice's sentence lives in `@object-ui/i18n`'s `studio` namespace, whose
 // `zh` catalogue is fetched on demand (objectstack#25922): resident before any case.
 import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
+// The source under test reaches dynamic imports of `@objectstack/lint`; their first
+// load is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@objectstack/lint';
 await loadStudioCatalogue('zh');
 
 window.matchMedia = ((query: string) => ({

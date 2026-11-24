@@ -107,6 +107,9 @@ vi.mock('@object-ui/plugin-view', async (importOriginal) => {
 import { emitMetadataRefresh } from '../../assistant/assistantBus.js';
 import { DataPillar } from './StudioDesignSurface';
 import { SurfaceDeepLinkProvider } from './surfaceDeepLinkChannel';
+// The source under test reaches dynamic imports of `@objectstack/lint`; their first
+// load is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@objectstack/lint';
 
 afterEach(() => {
   cleanup();

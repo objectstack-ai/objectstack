@@ -126,6 +126,9 @@ vi.mock('../../preview/DraftChangesPanel', () => ({ DraftChangesPanel: () => nul
 
 import { StudioDesignSurface } from './StudioDesignSurface';
 import { t } from '../metadata-admin/i18n';
+// The source under test reaches dynamic imports of `@objectstack/lint`; their first
+// load is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@objectstack/lint';
 
 window.matchMedia = ((query: string) => ({
   matches: false,

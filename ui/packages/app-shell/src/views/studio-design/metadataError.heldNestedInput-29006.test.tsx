@@ -81,6 +81,10 @@ import { registerMetadataPreview } from '../metadata-admin/preview-registry';
 import { registerMetadataDefaultInspector } from '../metadata-admin/default-inspector-registry';
 import { DashboardDefaultInspector } from '../metadata-admin/inspectors/DashboardDefaultInspector';
 import { tFormat } from '../metadata-admin/i18n';
+// The source under test reaches dynamic imports of `@objectstack/formula`, `@objectstack/lint`; their first
+// load is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@objectstack/formula';
+import '@objectstack/lint';
 
 /** The issue paths the spec's dashboard parse refuses `dashboard` at, as the door reports them. */
 function refusals(schema: typeof DashboardSchema, body: Record<string, unknown>): string[] {

@@ -89,6 +89,9 @@ import { getMetadataInspector, registerMetadataInspector } from '../metadata-adm
 import type { MetadataInspectorProps } from '../metadata-admin/inspector-registry';
 import type { MetadataPreviewProps } from '../metadata-admin/preview-registry';
 import { getStudioCanvasPreview } from './studio-canvas-preview';
+// The source under test reaches dynamic imports of `@objectstack/lint`; their first
+// load is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@objectstack/lint';
 
 const dataSource = createEmptyDataSource();
 failOnAbsorbedFetchError();

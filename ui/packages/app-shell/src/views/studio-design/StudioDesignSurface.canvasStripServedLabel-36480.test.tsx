@@ -123,6 +123,9 @@ import '@objectstack/lint';
 import { registerMetadataPreview } from '../metadata-admin/preview-registry';
 import { registerMetadataInspector } from '../metadata-admin/inspector-registry';
 import { DashboardWidgetInspector } from '../metadata-admin/inspectors/DashboardWidgetInspector';
+// The source under test reaches dynamic imports of `@objectstack/formula`; their first
+// load is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@objectstack/formula';
 
 /** Selects a widget as `DashboardPreview` does: by id, labelled with the buffer's authored title. */
 function StubDashboardPreview(props: Record<string, unknown>): React.ReactElement {

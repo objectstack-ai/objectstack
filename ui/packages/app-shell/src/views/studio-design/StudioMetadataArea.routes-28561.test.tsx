@@ -73,6 +73,9 @@ vi.mock('./packages-io.js', async (importOriginal) => ({
 }));
 
 import { StudioMetadataArea } from './StudioMetadataArea';
+// The source under test reaches dynamic imports of `@objectstack/lint`; their first
+// load is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@objectstack/lint';
 
 const WRITABLE = 'com.example.crm';
 const READ_ONLY = 'com.vendor.hr';
