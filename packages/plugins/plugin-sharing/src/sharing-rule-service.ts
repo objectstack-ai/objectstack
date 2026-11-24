@@ -1164,7 +1164,7 @@ export class SharingRuleService implements ISharingRuleService {
   }
 
   /**
-   * The objects the per-record rule hooks bind on (`bindRuleHooksForObjects`,
+   * The objects the per-record rule hooks bind on (`rebindRuleHooks` → `bindRuleHooks`,
    * `rule-hooks.ts`): every object an active `sys_sharing_rule` row names, and
    * every object an active DECLARATION names — whatever scopes it is served in
    * at this moment, and whatever the activation ledger says of it.
