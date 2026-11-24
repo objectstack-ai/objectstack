@@ -19,7 +19,7 @@
 1. 席位会话坐席:座位贴存根、自有信箱(`project-forms.md`)、租约表。
    - 信箱一步恒不省;重坐、换号或移座恒开新信箱。
 2. 每区一条项目线程,由协调者开(`coordinator.md`);L1 线程照上节。
-   - 说明逐字带:「照 `execution-duties.md`〈定档〉:认领 Container & model 行写档位与 effort,派 `os-dev` 显式传 model、effort 并贴该行」
+   - 开场消息逐字带:「照 `execution-duties.md`〈定档〉:认领 Container & model 行写档位与 effort,派 `os-dev` 显式传 model、effort 并贴该行」
 3. 维护者在每条新席线程亲写一句授权行:auto mode 只认本线程维护者原话,转述与点选不算。
    - 席线程:「审批人批准后的 Tier H PR 你可以自主落地」
    - 授权行只解 auto mode 的拦截,⛔ 不改 AGENTS.md 第 14 条的落地档;区线程无授权行。
