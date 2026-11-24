@@ -94,7 +94,8 @@ const FACES: readonly Face[] = [
     {
         face: 'the locale list',
         subPath: '/locales',
-        served: { locales: [{ code: 'en', label: 'en', isDefault: true }, { code: 'fr', label: 'fr', isDefault: false }] },
+        // The source locale is the default one here: the provider declares no `sourceLocale` (#36504).
+        served: { locales: [{ code: 'en', label: 'en', isDefault: true }, { code: 'fr', label: 'fr', isDefault: false }], sourceLocale: 'en' },
         reads: 'getLocales',
     },
     {
