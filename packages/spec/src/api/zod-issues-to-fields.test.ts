@@ -138,6 +138,7 @@ describe('zodIssuesToFields — the ambiguous and unmapped Zod codes land on cat
  * `union-branch-policy.cross-package-parity.test.ts`.
  */
 describe('zodIssuesToFields — an explained bare union head is dropped (#35433)', () => {
+    // adr0112-ok: D6 — a field-addressed FieldErrorCode in a fields[] entry
     const HEAD = { code: 'invalid_shape', message: ZOD_UNION_DEFAULT_MESSAGE };
 
     it('the compared text is zod\'s real default for a failed union', () => {
