@@ -163,6 +163,28 @@ export function addSortLevel(items: readonly SortItem[], field: string, order: '
   return [...items, { id, field, order }];
 }
 
+/**
+ * The words for one sort direction on a field of `type`: time for the date
+ * family, size for the numeric family and `boolean`, the alphabet otherwise.
+ * The phone sort sheet's levels read it. `SortBuilder` in
+ * `@object-ui/components` words its levels with the same three-way rule over
+ * the same `listConditions.sort.*` rows; it keeps its copy module-local
+ * because sharing it would add a published export to that package.
+ */
+export function sortDirectionLabel(
+  type: string | undefined,
+  order: 'asc' | 'desc',
+  t: (key: string) => string,
+): string {
+  if (type && DATE_TYPES.has(type)) {
+    return order === 'asc' ? t('listConditions.sort.time_asc') : t('listConditions.sort.time_desc');
+  }
+  if (type && (NUMBER_TYPES.has(type) || type === 'boolean')) {
+    return order === 'asc' ? t('listConditions.sort.size_asc') : t('listConditions.sort.size_desc');
+  }
+  return order === 'asc' ? t('listConditions.sort.alphabet_asc') : t('listConditions.sort.alphabet_desc');
+}
+
 /** One condition of the view's own filter, read for a locked chip. */
 export interface ViewConditionChip {
   key: string;

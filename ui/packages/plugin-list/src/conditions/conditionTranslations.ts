@@ -77,6 +77,12 @@ export const LIST_CONDITION_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'listConditions.sort.direction': 'Direction',
   'listConditions.sort.ascending': 'Ascending',
   'listConditions.sort.descending': 'Descending',
+  'listConditions.sort.time_asc': 'Oldest → Newest',
+  'listConditions.sort.time_desc': 'Newest → Oldest',
+  'listConditions.sort.size_asc': 'Low → High',
+  'listConditions.sort.size_desc': 'High → Low',
+  'listConditions.sort.alphabet_asc': 'A → Z',
+  'listConditions.sort.alphabet_desc': 'Z → A',
   'listConditions.chips.region': 'Sort and filter conditions',
   'listConditions.chips.pattern': '{{field}}: {{value}}',
   'listConditions.chips.listJoiner': ', ',
@@ -98,12 +104,9 @@ export const LIST_CONDITION_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'dashboard.filters.range.this_week': 'This week',
   'dashboard.filters.range.this_month': 'This month',
   'dashboard.filters.range.last_30_days': 'Last 30 days',
-  // The phone sort sheet's level (objectstack#35884), in SortBuilder's words.
+  // The phone sort sheet's level (objectstack#35884), in SortBuilder's words;
+  // its direction reads the `listConditions.sort.*` rows above.
   'sortBuilder.addSort': 'Add sort',
-  'sortBuilder.ascending': 'A → Z',
-  'sortBuilder.descending': 'Z → A',
-  'sortBuilder.oldestFirst': 'Oldest → Newest',
-  'sortBuilder.newestFirst': 'Newest → Oldest',
   'sortBuilder.reorder': 'Drag to reorder',
   'sortBuilder.removeSort': 'Remove sort',
   'sortBuilder.levelOptions': 'Options for {{label}}',
