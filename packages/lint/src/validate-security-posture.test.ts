@@ -34,6 +34,7 @@ import {
   SECURITY_SUPERUSER_FIELD_MASK_INERT,
   SECURITY_UPDATE_POLICY_NO_CHECK,
   SECURITY_CBP_MASTER_REFERENCE_HIDDEN,
+  SECURITY_CROSS_SET_FIELD_REOPEN,
 } from './validate-security-posture.js';
 import { lintDataModel } from './data-model-rules.js';
 import { explainRule } from './rule-explanations.js';
@@ -2286,7 +2287,9 @@ const READ_SURFACES: Array<{ receiver: string; expected: string[]; declaredBy: s
   // counts as a controlled_by_parent master (`master_detail` + `required: true`)
   // is read by the spec's exported `isControlledByParentMasterField`, which
   // `cbpMasterCandidates` calls, so this rule no longer reads it off `f`.
-  { receiver: 'f', expected: ['label', 'name', 'type'], declaredBy: 'FieldSchema', keys: () => Object.keys(FieldSchema.shape) },
+  // [Field-axis split, ruling 6912661484, step 2] `requiredPermissions`: the
+  // cross-set reopen rule skips a field gated on the field itself (ADR-0066 D3).
+  { receiver: 'f', expected: ['label', 'name', 'requiredPermissions', 'type'], declaredBy: 'FieldSchema', keys: () => Object.keys(FieldSchema.shape) },
   {
     receiver: 'p',
     expected: ['allowCreate', 'allowDelete', 'allowEdit', 'allowRead', 'modifyAllRecords', 'readScope', 'viewAllRecords'],
@@ -2295,22 +2298,25 @@ const READ_SURFACES: Array<{ receiver: string; expected: string[]; declaredBy: s
   },
   {
     receiver: 'wildcard',
-    expected: ['modifyAllRecords', 'viewAllRecords'],
+    // `viewAllFields`: the field half of the superuser wildcard (L2 record 7063858938).
+    expected: ['modifyAllRecords', 'viewAllFields', 'viewAllRecords'],
     declaredBy: 'ObjectPermissionSchema',
     keys: () => shapeKeysOf(ObjectPermissionSchema),
   },
   // [#29544] The super-user bypass mirror (`holdsSuperuserBypass`, verbatim
   // from `@objectstack/core`): the set it is asked about, and the one
-  // object-permission entry its lookup lands on.
+  // object-permission entry its lookup lands on. [Ruling 6912661484, step 2]
+  // Also the cross-set reopen rule's second set: its name, and its own field
+  // row on the field (`objectWideFieldVote`, the `viewAllFields` mirror too).
   {
     receiver: 'set',
-    expected: ['objects'],
+    expected: ['fields', 'name', 'objects'],
     declaredBy: 'PermissionSetSchema',
     keys: () => Object.keys(PermissionSetSchema.shape),
   },
   {
     receiver: 'op',
-    expected: ['modifyAllRecords', 'viewAllRecords'],
+    expected: ['modifyAllRecords', 'viewAllFields', 'viewAllRecords'],
     declaredBy: 'ObjectPermissionSchema',
     keys: () => shapeKeysOf(ObjectPermissionSchema),
   },
@@ -2487,6 +2493,11 @@ describe('validateSecurityPosture — reads only keys the spec declares (meta-te
       // #33494: the fold's `stored` parameter, the host's list of other packages' published extensions
       // (`StoredObjectExtension[]`) — `.forEach`, a JS Array method; each entry is read by `collect` as `ext`.
       'stored',
+      // Ruling 6912661484, step 2 (`pushCrossSetFieldReopen`): the capability-gated field index and one
+      // object's set of it (JS Map / Set methods), a field's `requiredPermissions` array (`.length`),
+      // `objectWideFieldVote`'s answer (`.bit` / `.via` / `.editable`, fields of that helper's own return
+      // value), and the wildcard arm's list of the bits it names (`.join`).
+      'capabilityGated', 'gated', 'required', 'vote', 'bits',
     ]);
     expect(receivers.filter((r) => !tabled.has(r) && !PLUMBING.has(r))).toEqual([]);
   });
@@ -2605,6 +2616,7 @@ const RULE_IDS: Record<string, string> = {
   SECURITY_SUPERUSER_FIELD_MASK_INERT,
   SECURITY_UPDATE_POLICY_NO_CHECK,
   SECURITY_CBP_MASTER_REFERENCE_HIDDEN,
+  SECURITY_CROSS_SET_FIELD_REOPEN,
 };
 
 const TEXT_FIELD = { a: { type: 'text', label: 'A' } } as const;
@@ -2640,6 +2652,16 @@ const REACHABILITY_CORPUS: Array<{ label: string; stack: Record<string, unknown>
         objects: { deal: { allowRead: true, allowEdit: true, modifyAllRecords: true } },
         fields: { 'deal.amount': { readable: false, editable: false } },
       }],
+    },
+  },
+  {
+    label: 'cross-set-field-reopen',
+    stack: {
+      objects: [{ name: 'deal', label: 'Deal', sharingModel: 'private', fields: { amount: { type: 'number', label: 'Amount' } } }],
+      permissions: [
+        { name: 'ps', label: 'PS', objects: { deal: { allowRead: true } }, fields: { 'deal.amount': { readable: false, editable: false } } },
+        { name: 'auditor', label: 'Auditor', objects: { deal: { allowRead: true, viewAllFields: true } } },
+      ],
     },
   },
   {
@@ -2803,7 +2825,8 @@ describe('validateSecurityPosture — every branch is reachable without an undec
     // 20 since #29544: a field mask its own set's Modify All makes inert.
     // 21: a caller-keyed update policy that declares no check (ADR-0058 D4, info).
     // 22: a set's readable: false on a controlled_by_parent detail's master reference.
-    expect(pushedRuleIds()).toHaveLength(22);
+    // 23: a field one set hides or locks, re-opened by another set's object-wide bit (ruling 6912661484, step 2).
+    expect(pushedRuleIds()).toHaveLength(23);
   });
 
   it('reaches every `findings.push` site from that corpus', () => {

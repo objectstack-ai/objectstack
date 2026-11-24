@@ -71,7 +71,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@object-ui/components';
-import { captureUpdateUndoData, resolveConditionalFormatting, declaredNameField, buildExportFileName, resolveAffordance, resolveAffordanceGrant, resolveFieldAffordance, isObjectExportOffered, type SchemaLike, isExpandableFieldType, isUnmaterializedFieldType, readObjectSortability, isPlatformSortableField, filterPlatformSortableSort, filterRefusalSubject, FilterOperatorError, resolveRecordSourceConfig, resolveRecordSourceObjectName, partitionRowsByPredicate, csvBlob, readActionPayload } from '@object-ui/core';
+import { captureUpdateUndoData, resolveConditionalFormatting, declaredNameField, collectPredicateFieldRefs, buildExportFileName, resolveAffordance, resolveAffordanceGrant, resolveFieldAffordance, isObjectExportOffered, type SchemaLike, isExpandableFieldType, isUnmaterializedFieldType, readObjectSortability, isPlatformSortableField, filterPlatformSortableSort, filterRefusalSubject, FilterOperatorError, resolveRecordSourceConfig, resolveRecordSourceObjectName, partitionRowsByPredicate, csvBlob, readActionPayload } from '@object-ui/core';
 import { usePermissions } from '@object-ui/permissions';
 import {
   RECORD_OVERLAY_DEFAULT_WIDTH,
@@ -4452,6 +4452,21 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     // that titles the card, so a first column the name field displaced (the
     // Owner above) reads as an ordinary body row.
     const bodyColumns = displayColumns.filter((c) => c !== titleCol);
+    // objectstack#37010 — a name field that is a FORMULA titles the card with
+    // the fields it reads (`case_number - subject`), and a view shows those
+    // parts as columns of their own, usually its leading ones, since a table
+    // has no use for the concatenation. So the subtitle also skips every
+    // shown column whose field the formula reads: it never repeats the
+    // title's parts and takes the next shown columns instead. The reads are
+    // the formula's `record.<field>` references as `collectPredicateFieldRefs`
+    // names them, the reader this grid's projection names a CEL expression's
+    // reads with; a read through a lookup (`record.account.name`) names the
+    // lookup, so the lookup's column is skipped too. A name field that is not
+    // a formula reads nothing here.
+    const nameFieldDef = nameFieldKey !== undefined ? objectFields?.[nameFieldKey] : undefined;
+    const titleReads = new Set<string>(
+      nameFieldDef?.type === 'formula' ? collectPredicateFieldRefs([nameFieldDef.expression]) : [],
+    );
 
     // objectui#10583 — a MASKED column (the rule that stamps `TableColumn.masked`)
     // is drawn only through its own `cell`, which draws the mask. The branches
@@ -4471,7 +4486,8 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     // read), when a column shows it, drawn through that column's own cell as
     // the desktop row draws it. The subtitle joins the first two other shown
     // columns' display values, each through its own cell, and skips a masked
-    // or empty value rather than drawing it.
+    // or empty value rather than drawing it, and a column the title's formula
+    // reads (`titleReads` above).
     const statusKey = detectStatusField(objectSchema);
     const statusCol = statusKey !== null ? bodyColumns.find((c) => c.accessorKey === statusKey) : undefined;
     // objectstack#34615 — the card's AMOUNT is the first shown body column whose
@@ -4484,7 +4500,9 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     const amountCol = bodyColumns.find(
       (c) => c !== statusCol && c.type === 'currency' && !isMaskedCardColumn(c.accessorKey),
     );
-    const subtitleColumns = bodyColumns.filter((c) => c !== statusCol && c !== amountCol).slice(0, 2);
+    const subtitleColumns = bodyColumns
+      .filter((c) => c !== statusCol && c !== amountCol && !titleReads.has(c.accessorKey))
+      .slice(0, 2);
     const isEmptyCardValue = (value: unknown) => value == null || value === '';
     const cardCell = (col: ObjectGridColumnDraft, row: any): React.ReactNode => {
       const value = row[col.accessorKey];

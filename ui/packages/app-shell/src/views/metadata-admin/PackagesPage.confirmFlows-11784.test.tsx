@@ -81,6 +81,7 @@ function respond(body: unknown, status = 200) {
   return {
     ok: status >= 200 && status < 300,
     status,
+    headers: new Headers(),
     text: async () => text,
     json: async () => JSON.parse(text),
   } as unknown as Response;

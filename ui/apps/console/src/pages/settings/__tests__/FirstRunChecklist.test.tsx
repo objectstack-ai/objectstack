@@ -158,7 +158,7 @@ let extraManifests: unknown[] = [];
 let aiPayload: Record<string, unknown> | null = null;
 
 function ok(data: unknown) {
-  return { ok: true, status: 200, statusText: 'OK', json: async () => ({ success: true, data }) } as unknown as Response;
+  return { ok: true, status: 200, statusText: 'OK', headers: new Headers(), json: async () => ({ success: true, data }) } as unknown as Response;
 }
 
 const fetchMock = vi.fn();
@@ -177,14 +177,14 @@ function routeFetch() {
     }
     if (url === '/api/settings/localization' && method === 'PUT') {
       if (putRefusal) {
-        return { ok: false, status: 400, statusText: 'Bad Request', json: async () => putRefusal } as unknown as Response;
+        return { ok: false, status: 400, statusText: 'Bad Request', headers: new Headers(), json: async () => putRefusal } as unknown as Response;
       }
       const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
       const written = Object.fromEntries(Object.entries(body).map(([k, v]) => [k, resolved(v, 'tenant')]));
       localizationValues = { ...localizationValues, ...written };
       return ok({ values: written });
     }
-    return { ok: false, status: 404, statusText: 'Not Found', json: async () => ({}) } as unknown as Response;
+    return { ok: false, status: 404, statusText: 'Not Found', headers: new Headers(), json: async () => ({}) } as unknown as Response;
   });
 }
 
