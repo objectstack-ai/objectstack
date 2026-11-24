@@ -2944,6 +2944,7 @@ const zhHant = {
       summary: '你可讀取的記錄中有 {{total}} 條在此人手上：擁有 {{owned}} 條，被指派 {{assigned}} 條。',
       row: '{{object}} · {{field}}',
       notTransferable: '該欄位可填多人，無法在此交接。',
+      ownerKept: '不會交接：該物件的記錄負責人保持不變（該物件已關閉“更改負責人”）。',
       truncated: '並非所有使用者欄位都已統計，此人手上可能還有更多記錄。',
       unreadable: '以下物件你無權讀取，未計入：{{objects}}',
       handoverTo: '交接給',
@@ -3616,7 +3617,7 @@ const zhHant = {
     },
     language: {
       title: '語言',
-      description: '傳送給您的通知和訊息所使用的語言。介面語言另行設定,在地球圖示選單中切換。',
+      description: '介面以及傳送給您的通知和訊息所使用的語言。它與地球圖示選單是同一項設定，更改其中一處，另一處也會隨之更改。',
       label: '首選語言',
       systemDefault: '使用部署預設值',
       save: '儲存',

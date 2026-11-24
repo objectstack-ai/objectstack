@@ -104,6 +104,42 @@ describe('[#35402] Change Owner doors on the showcase', () => {
     if (line) expect((await ql.findOne('showcase_invoice_line', { where: { id }, context: SYS }))?.owner_id).toBe(line.owner_id);
   });
 
+  it('a new owner the caller cannot read answers exactly as one that exists nowhere: 404 reference_not_found, and the owner stays', async () => {
+    // `assertAssignableUser`, the check this door shares with the offboarding
+    // hand-over. A user outside the caller's organization is one the member
+    // baseline does not let the caller read.
+    const stranger = 'change_owner_stranger';
+    const nobody = 'change_owner_no_such_user';
+    await ql.insert('sys_user', { id: stranger, email: 'change-owner-stranger@verify.test', name: 'Stranger', email_verified: true }, { context: SYS });
+    // Arming: the user exists, and the caller's own read door does not return it.
+    expect(await ql.findOne('sys_user', { where: { id: stranger }, context: SYS }), 'the stranger exists').toBeTruthy();
+    const seen = await stack.apiAs(aliceToken, 'GET', `/data/sys_user/${stranger}`);
+    expect(seen.status, 'the caller cannot read the stranger').toBe(404);
+
+    const note = await create(aliceToken, 'alice keeps this');
+    const answer = async (ownerId: string) => {
+      const r = await stack.apiAs(aliceToken, 'POST', `${OBJ}/${note}/change-owner`, { ownerId });
+      const body: any = await r.json();
+      return {
+        status: r.status,
+        code: body.error?.code,
+        message: String(body.error?.message ?? '').replaceAll(ownerId, 'ID'),
+        fields: (body.error?.details?.fields ?? []).map((f: any) => [f.field, f.code]),
+        raw: JSON.stringify(body),
+      };
+    };
+    const unread = await answer(stranger);
+    const missing = await answer(nobody);
+    expect(unread.status, unread.raw).toBe(404);
+    expect(unread.code).toBe('RESOURCE_NOT_FOUND');
+    expect(unread.fields).toEqual([['ownerId', 'reference_not_found']]);
+    // The one difference allowed is the id the caller itself sent.
+    const { raw: _u, ...unreadAnswer } = unread;
+    const { raw: _m, ...missingAnswer } = missing;
+    expect(unreadAnswer).toEqual(missingAnswer);
+    expect(await ownerOf(note)).toBe(aliceId);
+  });
+
   it('MEASURED: after a transfer the new owner reads and edits the record; the previous owner, still its creator, reads and edits nothing', async () => {
     const note = await create(aliceToken, 'alice hands this to bob');
     const moved = await stack.apiAs(aliceToken, 'POST', `${OBJ}/${note}/change-owner`, { ownerId: bobId });

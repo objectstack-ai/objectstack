@@ -114,7 +114,7 @@ import {
   type ServerDiagnostics,
 } from '../metadata-admin/draftVerdict.js';
 import { emitMetadataRefresh } from '../../assistant/assistantBus.js';
-import { publishSavedItem, STUDIO_SAVE_TOAST_ID, useStudioSaveEntry, type StudioSaveResult } from './studioSaveBar.js';
+import { publishSavedItem, readPublishedPin, STUDIO_SAVE_TOAST_ID, useStudioSaveEntry, type StudioSaveResult } from './studioSaveBar.js';
 import { irreversibleFieldChanges } from './objectSaveConfirm.js';
 import {
   destructiveFindings,
@@ -405,6 +405,8 @@ export function DataPillar({
   const [extHasDraft, setExtHasDraft] = React.useState(false);
   const [extReloadNonce, setExtReloadNonce] = React.useState(0);
   const extLoadedRef = React.useRef<string | null>(null);
+  // objectstack#36726 — the pair the open extension buffer was read at (`null`: none was listed).
+  const extReadAtRef = React.useRef<{ name: string; pair: string | null } | null>(null);
   const extOpen = extendsBase && ext !== null && ext.for === current?.name ? ext : null;
   // Adding a field asks the ensure door for the pair once per base: its
   // answer names every write, ⛔ never a `<base>.custom` spelled here.
@@ -733,6 +735,9 @@ export function DataPillar({
   const {
     save: saveExtDraft,
     recordRead: recordExtRead,
+    // objectstack#36726 — and the pair's published extension row, for the Save's publish.
+    recordPublished: recordExtPublished,
+    publish: publishExt,
     dialog: extConflictDialog,
   } = useDraftSaveGuard(client, reloadExt);
   // The pair a READ names is the surface's (`StudioBaseCustomization.pairId`),
@@ -1097,6 +1102,13 @@ export function DataPillar({
         let draft: ObjectExtensionBody | null = null;
         let published: ObjectExtensionBody | null = null;
         if (pair) {
+          // objectstack#36726 — the published extension's version at the pair,
+          // the address the Save's publish writes, read BEFORE the rows below
+          // (the server's own order for `/layers`): a publish landing between
+          // the reads leaves the pin older than the buffer, so the next Save
+          // is asked about, never published over it.
+          const publishedAt = await readPublishedPin(client, OBJECT_EXTENSION_TYPE, name, pair);
+          if (cancelled) return;
           const [draftRead, publishedRow] = await Promise.all([
             readDraftForSave<Record<string, unknown>>(client, OBJECT_EXTENSION_TYPE, name, pair),
             client.get<Record<string, unknown>>(OBJECT_EXTENSION_TYPE, name, { packageId: pair }),
@@ -1116,8 +1128,10 @@ export function DataPillar({
           draft = objectExtensionBodyOf(extractDraftBody(draftRead.answer), name);
           published = objectExtensionBodyOf(publishedRow, name);
           recordExtRead(OBJECT_EXTENSION_TYPE, name, pair, draftRead.pin);
+          recordExtPublished(OBJECT_EXTENSION_TYPE, name, pair, publishedAt);
         }
         if (refreshOnly) refreshInstalledRef.current = true;
+        extReadAtRef.current = { name, pair };
         setExt({ for: name, body: draft ?? published ?? { extend: name }, published: new Set(extensionFieldNames(published)) });
         setExtHasDraft(draft !== null);
       } catch (e) {
@@ -1131,7 +1145,7 @@ export function DataPillar({
       // A load cancelled before it settled takes its claim back (see the object load above).
       if (!settled) extLoadedRef.current = null;
     };
-  }, [client, current, extendsBase, publishNonce, extReloadNonce, objRefreshNonce, recordExtRead]);
+  }, [client, current, extendsBase, publishNonce, extReloadNonce, objRefreshNonce, recordExtRead, recordExtPublished]);
 
   // objectstack#32610 — a field the pulse's re-read no longer has (a discard
   // took it away) is not left selected; one it still has stays open.
@@ -1569,6 +1583,14 @@ export function DataPillar({
     const hadDraft = extHasDraft;
     try {
       const pair = await extPairFor(customization);
+      // objectstack#36726 — a buffer read before any pair was listed read no
+      // row there: its publish asserts none, so an extension another writer
+      // published at the pair meanwhile is asked about, never replaced.
+      const readAt = extReadAtRef.current;
+      if (readAt?.name === name && readAt.pair !== pair) {
+        recordExtPublished(OBJECT_EXTENSION_TYPE, name, pair, { ifNoneMatch: '*' });
+        extReadAtRef.current = { name, pair };
+      }
       const outcome = await saveExtDraft(OBJECT_EXTENSION_TYPE, name, extensionBodyForSave(body), {
         mode: 'draft',
         packageId: pair,
@@ -1577,18 +1599,29 @@ export function DataPillar({
       if (outcome === 'reloaded') return { kind: 'declined' };
       setExtHasDraft(true);
       setSaving('publish');
-      const live = await publishSavedItem(client, { type: OBJECT_EXTENSION_TYPE, name, packageId: pair }, hadDraft);
+      // objectstack#36726 — pinned to the published extension row this buffer was loaded at.
+      const live = await publishSavedItem(
+        client,
+        { type: OBJECT_EXTENSION_TYPE, name, packageId: pair },
+        hadDraft,
+        publishExt,
+      );
+      // The published row moved and the author chose to reload: the load replaces the buffer.
+      if (!live.ok && 'reloaded' in live) return { kind: 'declined' };
       if (!live.ok) {
         if (live.draftDiscarded) {
           setExtHasDraft(false);
           recordExtRead(OBJECT_EXTENSION_TYPE, name, pair, { ifNoneMatch: '*' });
         }
-        const refusal = publishRefusal(
-          publishFailureOf(OBJECT_EXTENSION_TYPE, name, live.error),
-          OBJECT_EXTENSION_TYPE,
-          extensionBodyForSave(body),
-          locale,
-        );
+        // The published row moved and the author kept editing: read as the draft conflict's "not saved".
+        const refusal = isPublishConflictKeptEditing(live.error)
+          ? plainRefusal(live.error)
+          : publishRefusal(
+              publishFailureOf(OBJECT_EXTENSION_TYPE, name, live.error),
+              OBJECT_EXTENSION_TYPE,
+              extensionBodyForSave(body),
+              locale,
+            );
         setError(refusal);
         return { kind: 'refused', reason: refusal.message };
       }
@@ -1603,7 +1636,7 @@ export function DataPillar({
     } finally {
       setSaving(false);
     }
-  }, [extOpen, customization, extPairFor, saveExtDraft, recordExtRead, client, extHasDraft, locale]);
+  }, [extOpen, customization, extPairFor, saveExtDraft, recordExtRead, recordExtPublished, publishExt, client, extHasDraft, locale]);
   // An edit of the folded object's fields, written into the extension: an
   // extension field whole, a base field's whitelisted change as its patch.
   const onExtFieldsPatch = React.useCallback(

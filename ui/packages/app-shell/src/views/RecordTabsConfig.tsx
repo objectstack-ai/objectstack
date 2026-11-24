@@ -63,7 +63,7 @@ import { registerUnsavedEdits } from '../chrome/unsavedEdits.js';
 import { useStudioDesignGate, useStudioEntryGate } from '../hooks/useStudioDesignGate.js';
 import { useCustomizeDoorWalled } from './studio-design/StudioCustomizeControls.js';
 import { relatedListEntryNames, type DerivedRelatedList } from '../utils/deriveRelatedLists.js';
-import { studioPillarItemPath } from './studio-design/metadataArea.js';
+import { studioItemPath } from './studio-design/studioAddress.js';
 import { entryDetails } from './studio-design/relatedListVocabulary.js';
 import {
   editRecordTabsDraft,
@@ -109,7 +109,7 @@ export type RecordTabsMode = 'own' | 'pair';
 export function recordTabsStudioPath(objectDef: RecordTabsObjectDef | null | undefined): string | null {
   const packageId = objectPackageId(objectDef);
   const name = objectDef?.name;
-  return packageId && typeof name === 'string' && name ? studioPillarItemPath(packageId, 'data', { type: 'object', name }) : null;
+  return packageId && typeof name === 'string' && name ? studioItemPath(packageId, 'object', name) : null;
 }
 
 interface RecordTabsSession {

@@ -2852,6 +2852,7 @@ const es = {
       summary: 'Registros que usted puede leer: {{total}}. En propiedad: {{owned}}, asignados: {{assigned}}.',
       row: '{{object}} · {{field}}',
       notTransferable: 'Admite varias personas, así que no se puede traspasar aquí.',
+      ownerKept: 'No se traspasa: este objeto conserva el propietario de cada registro («Cambiar propietario» está desactivado en él).',
       truncated: 'No se contaron todos los campos de usuario; esta persona puede tener más.',
       unreadable: 'No contados porque no puede leerlos: {{objects}}',
       handoverTo: 'Traspasar a',
@@ -3551,7 +3552,7 @@ const es = {
     },
     language: {
       title: "Idioma",
-      description: "El idioma que se usa para las notificaciones y los mensajes que se le envían. El idioma de la interfaz se elige aparte, en el menú del globo terráqueo.",
+      description: "El idioma de la interfaz y de las notificaciones y los mensajes que se le envían. Es el mismo ajuste que el del menú del globo terráqueo, así que cambiar uno cambia el otro.",
       label: "Idioma preferido",
       systemDefault: "Usar el valor predeterminado del despliegue",
       save: "Guardar",

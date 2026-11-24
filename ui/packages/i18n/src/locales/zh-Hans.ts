@@ -2944,6 +2944,7 @@ const zh = {
       summary: '你可读取的记录中有 {{total}} 条在此人手上：拥有 {{owned}} 条，被指派 {{assigned}} 条。',
       row: '{{object}} · {{field}}',
       notTransferable: '该字段可填多人，无法在此交接。',
+      ownerKept: '不会交接：该对象的记录负责人保持不变（该对象已关闭“更改负责人”）。',
       truncated: '并非所有用户字段都已统计，此人手上可能还有更多记录。',
       unreadable: '以下对象你无权读取，未计入：{{objects}}',
       handoverTo: '交接给',
@@ -3616,7 +3617,7 @@ const zh = {
     },
     language: {
       title: '语言',
-      description: '发送给您的通知和消息所使用的语言。界面语言另行设置,在地球图标菜单中切换。',
+      description: '界面以及发送给您的通知和消息所使用的语言。它与地球图标菜单是同一项设置，更改其中一处，另一处也会随之更改。',
       label: '首选语言',
       systemDefault: '使用部署默认值',
       save: '保存',

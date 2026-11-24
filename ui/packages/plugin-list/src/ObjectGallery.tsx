@@ -13,7 +13,7 @@ import { cn, Card, CardContent, NavigationOverlay } from '@object-ui/components'
 import { usePermissions } from '@object-ui/permissions';
 import type { DataSource, GalleryConfig, ObjectGallerySchema, QueryParams } from '@object-ui/types';
 import { ChevronRight, ChevronDown } from 'lucide-react';
-import { getCellRenderer, resolveCellRendererType, readFileValues } from '@object-ui/fields';
+import { getCellRenderer, resolveCellRendererType, resolveFormulaValueType, readFileValues } from '@object-ui/fields';
 import { useDisplayLocale } from '@object-ui/i18n';
 import { RecordDetailPanel } from '@object-ui/plugin-detail';
 import { ListEmptyState, hasDeclaredFilter, filterNamesCurrentUser } from './ListEmptyState';
@@ -97,6 +97,13 @@ const LOW_SEMANTIC_RENDERER_TYPES: ReadonlySet<string> = new Set([
     'integer',
     'decimal',
 ]);
+
+/**
+ * Renderer types drawn by the formula cell, whose result face is not the
+ * renderer type but the value type `resolveFormulaValueType` answers — the
+ * two types `@object-ui/fields` registers `FormulaCellRenderer` under.
+ */
+const FORMULA_FACED_RENDERER_TYPES: ReadonlySet<string> = new Set(['formula', 'summary']);
 
 /**
  * Deterministic palette for placeholder card covers (no-image fallback).
@@ -387,6 +394,15 @@ export const ObjectGallery: React.FC<ObjectGalleryProps> = (props) => {
         if (def.label) enriched.label = def.label;
         if (def.options) enriched.options = def.options;
         if (def.currency) enriched.currency = def.currency;
+        // The spec's one declaration of which currency an amount is in — a
+        // currency field's, a `returnType: 'currency'` formula's, and the ONLY
+        // thing that makes a roll-up (`summary`) money. Plus the formula's
+        // declared result type, which picks its face in the formula cell.
+        // Without the pair a money formula read `12,000` on a card beside the
+        // related-list table's `12,000.00` (objectstack#37008); same presence
+        // tests as the RelatedList builder.
+        if (def.currencyConfig) enriched.currencyConfig = def.currencyConfig;
+        if (def.returnType) enriched.returnType = def.returnType;
         if (def.precision !== undefined) enriched.precision = def.precision;
         // `scale` is the member the number and percent cell renderers pad
         // decimals to (`precision` is the TOTAL digit count, never read for
@@ -734,9 +750,19 @@ export const ObjectGallery: React.FC<ObjectGalleryProps> = (props) => {
                         (enriched as any)?.label && String((enriched as any).label).trim()
                             ? String((enriched as any).label)
                             : undefined;
+                    // A `formula` / `summary` cell draws its result through the
+                    // number, currency or percent cell when its result is one
+                    // (objectstack#37008), so the label follows the face that
+                    // cell picks, asked of the same `resolveFormulaValueType`
+                    // it draws by — a money formula read as a bare `12,000`
+                    // beside a labelled `Unit price 6,000.00`. A text result
+                    // stays unlabeled, as a text field does.
+                    const valueFace = FORMULA_FACED_RENDERER_TYPES.has(rendererType)
+                        ? resolveFormulaValueType(enriched, value)
+                        : rendererType;
                     const showLabel =
                         fieldLabel != null &&
-                        LOW_SEMANTIC_RENDERER_TYPES.has(rendererType);
+                        LOW_SEMANTIC_RENDERER_TYPES.has(valueFace);
                     return (
                         <div
                             key={field}

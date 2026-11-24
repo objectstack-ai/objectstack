@@ -27,6 +27,8 @@
  * its own params and meaning (`ResourceListPage`, `catalog-scope.ts`).
  */
 
+import { compareChangedAt } from './listChangedAt.js';
+
 /** The search text. */
 export const LIST_QUERY_PARAM = 'q';
 /** The source filter: `artifact` or `runtime`; absent = every source. */
@@ -51,12 +53,11 @@ export type ListSourceFilter = 'all' | 'artifact' | 'runtime';
 export type ListStatusFilter = 'all' | 'active' | 'inactive';
 
 /**
- * The keys the list sorts by: the item's API name (its primary key) and its
- * label. The seam for a third key — the modified time, once the list serves
- * its modified-time sibling field — is one entry here and one member on
- * {@link ListRowReader}; nothing else reads the set.
+ * The keys the list sorts by: the item's API name (its primary key), its
+ * label, and its change time (objectstack#36898, {@link ListRowReader.changedAt}
+ * — `listChangedAt.ts` holds the comparison). Nothing else reads the set.
  */
-export const LIST_SORT_KEYS = ['name', 'label'] as const;
+export const LIST_SORT_KEYS = ['name', 'label', 'changed'] as const;
 export type ListSortKey = (typeof LIST_SORT_KEYS)[number];
 
 export interface ListSort {
@@ -174,6 +175,12 @@ export interface ListRowReader<R> {
    * status.
    */
   active?: (row: R) => boolean | null;
+  /**
+   * The row's change time, an ISO-8601 instant (the list's `changedAt`
+   * sibling); `undefined` for a row with none — a code-shipped item. Absent,
+   * every row has none and the `changed` sort is by name.
+   */
+  changedAt?: (row: R) => string | undefined;
 }
 
 const COLLATORS = new Map<string, Intl.Collator>();
@@ -221,6 +228,19 @@ export function applyListState<R>(
     return true;
   });
   const sign = state.sort.dir === 'desc' ? -1 : 1;
+  if (state.sort.key === 'changed') {
+    // Rows without a time come last either way, and ties read A to Z by name.
+    const at = (row: R) => read.changedAt?.(row);
+    return kept
+      .map((row, i) => ({ row, i }))
+      .sort((a, b) => {
+        const primary = compareChangedAt(at(a.row), at(b.row), state.sort.dir);
+        if (primary !== 0) return primary;
+        const byName = collator.compare(read.name(a.row), read.name(b.row));
+        return byName !== 0 ? byName : a.i - b.i;
+      })
+      .map(({ row }) => row);
+  }
   return kept
     .map((row, at) => ({ row, at }))
     .sort((a, b) => {

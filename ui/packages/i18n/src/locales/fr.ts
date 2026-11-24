@@ -2848,6 +2848,7 @@ const fr = {
       summary: 'Enregistrements que vous pouvez lire : {{total}}. En propriété : {{owned}}, assignés : {{assigned}}.',
       row: '{{object}} · {{field}}',
       notTransferable: 'Ce champ contient plusieurs personnes et ne peut pas être transféré ici.',
+      ownerKept: 'Non transféré : cet objet conserve le propriétaire de chaque enregistrement (« Changer de propriétaire » y est désactivé).',
       truncated: 'Tous les champs utilisateur n’ont pas été comptés ; cette personne peut en détenir davantage.',
       unreadable: 'Non comptés, car vous ne pouvez pas les lire : {{objects}}',
       handoverTo: 'Transférer à',
@@ -3547,7 +3548,7 @@ const fr = {
     },
     language: {
       title: "Langue",
-      description: "La langue utilisée pour les notifications et les messages qui vous sont envoyés. La langue de l'interface se choisit séparément, dans le menu du globe.",
+      description: "La langue de l'interface et des notifications et messages qui vous sont envoyés. C'est le même réglage que le menu du globe : modifier l'un modifie l'autre.",
       label: "Langue préférée",
       systemDefault: "Utiliser la valeur par défaut du déploiement",
       save: "Enregistrer",

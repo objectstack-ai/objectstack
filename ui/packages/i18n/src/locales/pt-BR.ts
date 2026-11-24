@@ -2847,6 +2847,7 @@ const pt = {
       summary: 'Registros que você pode ler: {{total}}. Em propriedade: {{owned}}, atribuídos: {{assigned}}.',
       row: '{{object}} · {{field}}',
       notTransferable: 'Aceita várias pessoas, por isso não pode ser transferido aqui.',
+      ownerKept: 'Não é transferido: este objeto mantém o proprietário de cada registro ("Alterar proprietário" está desativado nele).',
       truncated: 'Nem todos os campos de usuário foram contados; esta pessoa pode ter mais.',
       unreadable: 'Não contados porque você não pode lê-los: {{objects}}',
       handoverTo: 'Transferir para',
@@ -3546,7 +3547,7 @@ const pt = {
     },
     language: {
       title: "Idioma",
-      description: "O idioma usado nas notificações e mensagens enviadas para você. O idioma da interface é escolhido separadamente, no menu do globo.",
+      description: "O idioma da interface e das notificações e mensagens enviadas para você. É a mesma configuração do menu do globo, então alterar um altera o outro.",
       label: "Idioma preferido",
       systemDefault: "Usar o padrão da implantação",
       save: "Salvar",

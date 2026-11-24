@@ -57,6 +57,7 @@ import { getDashboardForm } from './metadata-admin/dashboard-schema.js';
 import { useMetadataLocale, type SupportedLocale } from './metadata-admin/i18n.js';
 import type { MetadataSelection } from './metadata-admin/preview-registry.js';
 import { ServedWidgetTextContext, servedWidgetTextOf } from './studio-design/servedDashboardText.js';
+import { studioPackagePath } from './studio-design/studioAddress.js';
 
 /** Where the editor would save, as read at open (nothing is written to open). */
 export type WritableDashboardEditTarget = Exclude<DashboardEditTarget, { kind: 'refused' }>;
@@ -202,7 +203,7 @@ export function filtersSectionLabel(locale: SupportedLocale): string | null {
  * separate entries, never open together.
  */
 export function useDashboardEditOffered(ownerPackageId: string | null | undefined): boolean {
-  const path = ownerPackageId ? `/studio/${encodeURIComponent(ownerPackageId)}` : null;
+  const path = ownerPackageId ? studioPackagePath(ownerPackageId) : null;
   const gated = useStudioEntryGate(path) !== null;
   const designing = useDesignModeActive();
   return gated && !designing;

@@ -1088,15 +1088,54 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
   },
   seed: {
     label: "種子資料",
-    description: "發布時套用的預置/初始化資料"
+    description: "發布時套用的預置/初始化資料",
+    fields: {
+      object: {
+        label: "物件"
+      },
+      mode: {
+        label: "模式"
+      }
+    }
   },
   picklist: {
     label: "共用選項集",
-    description: "選擇欄位依名稱參照的共用選項清單"
+    description: "選擇欄位依名稱參照的共用選項清單",
+    fields: {
+      name: {
+        label: "名稱"
+      },
+      label: {
+        label: "顯示名稱"
+      },
+      options: {
+        label: "選項"
+      },
+      description: {
+        label: "描述"
+      }
+    }
   },
   mapping: {
     label: "匯入對應",
-    description: "可複用的匯入/匯出欄位對應（重新命名 + 轉換），在匯入時依名稱參照"
+    description: "可複用的匯入/匯出欄位對應（重新命名 + 轉換），在匯入時依名稱參照",
+    fields: {
+      name: {
+        label: "名稱"
+      },
+      label: {
+        label: "顯示名稱"
+      },
+      targetObject: {
+        label: "目標物件"
+      },
+      mode: {
+        label: "模式"
+      },
+      sourceFormat: {
+        label: "來源格式"
+      }
+    }
   },
   view: {
     label: "檢視",
@@ -1420,6 +1459,9 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       "sharing.lockedBy": {
         label: "鎖定者",
         helpText: "鎖定該檢視設定的使用者"
+      },
+      object: {
+        label: "物件"
       }
     }
   },
@@ -2576,7 +2618,24 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
     }
   },
   job: {
-    label: "背景工作"
+    label: "背景工作",
+    fields: {
+      name: {
+        label: "名稱"
+      },
+      label: {
+        label: "顯示名稱"
+      },
+      schedule: {
+        label: "排程"
+      },
+      enabled: {
+        label: "已啟用"
+      },
+      description: {
+        label: "描述"
+      }
+    }
   },
   datasource: {
     label: "資料來源"
@@ -2586,10 +2645,41 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
   },
   api: {
     label: "API 端點",
-    description: "其他系統呼叫的穩定 HTTP URL，用於執行流程或操作應用程式中的記錄"
+    description: "其他系統呼叫的穩定 HTTP URL，用於執行流程或操作應用程式中的記錄",
+    fields: {
+      name: {
+        label: "名稱"
+      },
+      method: {
+        label: "方法"
+      },
+      path: {
+        label: "路徑"
+      },
+      type: {
+        label: "類型"
+      },
+      "objectParams.object": {
+        label: "物件"
+      },
+      "objectParams.operation": {
+        label: "操作"
+      }
+    }
   },
   translation: {
-    label: "翻譯"
+    label: "翻譯",
+    fields: {
+      name: {
+        label: "名稱"
+      },
+      label: {
+        label: "顯示名稱"
+      },
+      locale: {
+        label: "地區語言"
+      }
+    }
   },
   email_template: {
     label: "郵件範本",
@@ -2666,11 +2756,45 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
   },
   doc: {
     label: "文件",
-    description: "以 Markdown 編寫的說明頁面，可由套件隨附，也可自行編寫"
+    description: "以 Markdown 編寫的說明頁面，可由套件隨附，也可自行編寫",
+    fields: {
+      name: {
+        label: "名稱"
+      },
+      label: {
+        label: "顯示名稱"
+      },
+      group: {
+        label: "分組"
+      },
+      tags: {
+        label: "標籤"
+      },
+      description: {
+        label: "描述"
+      }
+    }
   },
   book: {
     label: "文件手冊",
-    description: "將說明頁面依順序分節組織的目錄"
+    description: "將說明頁面依順序分節組織的目錄",
+    fields: {
+      name: {
+        label: "名稱"
+      },
+      label: {
+        label: "顯示名稱"
+      },
+      audience: {
+        label: "受眾"
+      },
+      groups: {
+        label: "分組"
+      },
+      description: {
+        label: "描述"
+      }
+    }
   },
   permission: {
     label: "權限集",
@@ -2774,15 +2898,66 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
   },
   sharing_rule: {
     label: "共用規則",
-    description: "套件宣告的記錄共用規則；組織在設定中編寫自己的規則"
+    description: "套件宣告的記錄共用規則；組織在設定中編寫自己的規則",
+    fields: {
+      name: {
+        label: "名稱"
+      },
+      label: {
+        label: "顯示名稱"
+      },
+      object: {
+        label: "物件"
+      },
+      sharedWith: {
+        label: "共用對象"
+      },
+      accessLevel: {
+        label: "存取層級"
+      }
+    }
   },
   queue: {
     label: "佇列",
-    description: "一組具名的人員，記錄可停留其中，直到其中一人認領；組織在設定中設定自己的佇列"
+    description: "一組具名的人員，記錄可停留其中，直到其中一人認領；組織在設定中設定自己的佇列",
+    fields: {
+      name: {
+        label: "名稱"
+      },
+      label: {
+        label: "顯示名稱"
+      },
+      members: {
+        label: "成員"
+      },
+      description: {
+        label: "描述"
+      }
+    }
   },
   assignment_rule: {
     label: "指派規則",
-    description: "套件宣告的規則，把新記錄指派到某個佇列或某個人"
+    description: "套件宣告的規則，把新記錄指派到某個佇列或某個人",
+    fields: {
+      name: {
+        label: "名稱"
+      },
+      label: {
+        label: "顯示名稱"
+      },
+      object: {
+        label: "物件"
+      },
+      entries: {
+        label: "條目"
+      },
+      active: {
+        label: "啟用"
+      },
+      description: {
+        label: "描述"
+      }
+    }
   },
   agent: {
     label: "AI 代理",
@@ -2864,6 +3039,9 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       guardrails: {
         label: "護欄",
         helpText: "安全規則與內容策略"
+      },
+      "model.model": {
+        label: "模型"
       }
     }
   },

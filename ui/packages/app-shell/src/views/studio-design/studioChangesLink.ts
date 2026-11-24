@@ -22,11 +22,18 @@
  * package's Studio home (the Data pillar) with it.
  */
 
-/** The query key the surface reads. */
-export const STUDIO_CHANGES_PARAM = 'changes';
+import {
+  STUDIO_CHANGES_PARAM,
+  STUDIO_CHANGES_REVIEW,
+  studioChangesReviewPath,
+  studioPackagePath,
+} from './studioAddress.js';
 
-/** The one value it acts on: open the drawer to review the pending drafts. */
-export const STUDIO_CHANGES_REVIEW = 'review';
+// objectstack#36895 — the param and its value are Studio address vocabulary,
+// owned by `studioAddress.ts` (the server's review link spells the same
+// address); re-exported here, where the surface reads them.
+/** The query key the surface reads, and the one value it acts on: open the drawer to review the pending drafts. */
+export { STUDIO_CHANGES_PARAM, STUDIO_CHANGES_REVIEW } from './studioAddress.js';
 
 /** Where to go, and whether the move replaces the current history entry. */
 export interface StudioChangesTarget {
@@ -47,7 +54,7 @@ export function studioChangesReviewTarget(
   packageId: string,
   current: { pathname: string; search: string; hash?: string },
 ): StudioChangesTarget {
-  const base = `/studio/${encodeURIComponent(packageId)}`;
+  const base = studioPackagePath(packageId);
   const onPillar = current.pathname.startsWith(`${base}/`) && current.pathname.length > base.length + 1;
   if (onPillar) {
     const params = new URLSearchParams(current.search);
@@ -55,7 +62,7 @@ export function studioChangesReviewTarget(
     return { to: `${current.pathname}?${params.toString()}${current.hash ?? ''}`, replace: true };
   }
   return {
-    to: `${base}/data?${STUDIO_CHANGES_PARAM}=${STUDIO_CHANGES_REVIEW}`,
+    to: studioChangesReviewPath(packageId),
     replace: false,
   };
 }

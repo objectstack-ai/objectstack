@@ -68,6 +68,7 @@ import { foldCustomizationPairs } from './StudioRailCustomizations.js';
 import { loadPackageLessSurfaces } from './packageSurfaces.js';
 import { useMetadataClient } from '../metadata-admin/useMetadata.js';
 import { newAppStep } from './newAppDoor.js';
+import { studioHomePath, studioPillarPath } from './studioAddress.js';
 
 /**
  * objectui#11808 — where a read-only package's card sends the author beyond
@@ -110,10 +111,6 @@ type CustomizationLine =
       actionObjects?: ActionObjects;
     }
   | { kind: 'failed'; message: string };
-
-/** A package's Studio address on one pillar, the way `open` below spells it. */
-const studioPillarPath = (packageId: string, pillar: 'data' | 'automations') =>
-  `/studio/${encodeURIComponent(packageId)}/${pillar}`;
 
 /** How many switched-off actions the landing line names before its "more" link (objectstack#34724). */
 const SWITCHED_OFF_ACTIONS_NAMED = 3;
@@ -169,7 +166,7 @@ export function BuilderLanding(): React.ReactElement {
     };
   }, []);
 
-  const open = (id: string) => navigate(`/studio/${encodeURIComponent(id)}/data`);
+  const open = (id: string) => navigate(studioHomePath(id));
 
   // objectstack#35196 — Manage on a card: the switcher's detail sheet, opened
   // on the package's full installed row (`fetchInstalledPackageRow`), so

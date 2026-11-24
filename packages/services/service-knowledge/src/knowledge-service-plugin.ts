@@ -9,7 +9,26 @@ import type { KnowledgeSource } from '@objectstack/spec/ai';
 import { KNOWLEDGE_SERVICE } from '@objectstack/spec/contracts';
 import { KnowledgeService } from './knowledge-service.js';
 import type { KnowledgeLogger } from './knowledge-service.js';
+import type { KnowledgeFieldSecurity } from './knowledge-source-admission.js';
 import { createKnowledgeReapGuard, guardedObjectsFor } from './knowledge-reap-guard.js';
+import { contributeKnowledgeSettings } from './knowledge-settings-contribution.js';
+
+/**
+ * Whether `err` is the kernel's refusal for a service NOTHING registered under
+ * `name` — the one miss a caller may read as absence.
+ *
+ * Both in-repo kernels answer a sync `getService` miss by throwing, and
+ * `ObjectKernel` keeps the two faults that share that branch apart on purpose,
+ * in their messages: `[Kernel] Service 'NAME' not found…` when nothing
+ * registered the name, and `Service 'NAME' is async - use await` when a
+ * factory registered it and the sync accessor cannot instantiate it
+ * (`LiteKernel` answers only the first). The first is absence; the second, and
+ * any other throw, is a service that exists and cannot be used.
+ */
+export function isServiceNotRegisteredError(err: unknown, name: string): boolean {
+  const message = err instanceof Error ? err.message : typeof err === 'string' ? err : '';
+  return message.startsWith(`[Kernel] Service '${name}' not found`);
+}
 
 /**
  * Configuration options for the `KnowledgeServicePlugin`.
@@ -69,8 +88,14 @@ export class KnowledgeServicePlugin implements Plugin {
    * order-if-present so the resolution is deterministic (ADR-0116, #4471).
    * Soft, not hard: without an engine the service degrades on purpose
    * (pure-search mode with conservative RLS).
+   *
+   * The settings plugin is ordered ahead the same way: init() contributes the
+   * knowledge settings to its `settings` service (`contributeKnowledgeSettings`),
+   * so its absence there is a fact about the composition, never a guess.
    */
-  optionalDependencies = ['com.objectstack.engine.objectql'];
+  // Literal ids: the boot-order gates read this array statically. The second
+  // is `SETTINGS_PLUGIN_ID` from `@objectstack/service-settings`.
+  optionalDependencies = ['com.objectstack.engine.objectql', 'com.objectstack.service.settings'];
 
   private service: KnowledgeService | null = null;
   private subscriptionId: string | undefined;
@@ -117,6 +142,23 @@ export class KnowledgeServicePlugin implements Plugin {
       dataEngine: engine,
       logger,
       defaultTopK: this.options.defaultTopK,
+      // The field gate's `security` service, resolved per search so plugin
+      // order is free (plugin-security registers it in its own start()).
+      // Only a GENUINE absence reads as "no security service" (the contract's
+      // fallback then applies: every field declaring a `maskingRule` is not
+      // queryable): a lookup answering nothing, or the kernel's own
+      // not-registered refusal. Any other throw — a registration that cannot
+      // be used, such as a factory the sync accessor cannot instantiate —
+      // propagates, and the service refuses the source fail-closed, as the
+      // analytics door refuses an unusable security service.
+      resolveSecurity: () => {
+        try {
+          return ctx.getService<KnowledgeFieldSecurity | undefined>('security') ?? undefined;
+        } catch (err) {
+          if (isServiceNotRegisteredError(err, 'security')) return undefined;
+          throw err;
+        }
+      },
     });
 
     for (const source of this.options.sources ?? []) {
@@ -124,6 +166,11 @@ export class KnowledgeServicePlugin implements Plugin {
     }
 
     ctx.registerService(KNOWLEDGE_SERVICE, this.service);
+
+    // The knowledge settings page, the `ai` embedder section, both test
+    // actions and the Setup entry are offered only where this service is
+    // mounted — never by default (`@objectstack/service-settings`).
+    contributeKnowledgeSettings(ctx, this.version);
     ctx.logger.info?.(
       `KnowledgeServicePlugin: registered '${KNOWLEDGE_SERVICE}' service (eventSync=${
         this.options.enableEventSync !== false
