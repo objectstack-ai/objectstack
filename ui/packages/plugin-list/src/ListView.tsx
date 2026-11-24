@@ -22,6 +22,7 @@ import {
   isGroupableField,
   type ViewSettingsField,
   type ViewSettingsKanban,
+  type ViewSettingsKanbanSummaryFields,
   PHONE_TOUCH_TARGET,
   useBelowSm,
 } from './components/ViewSettingsPopover';
@@ -1755,16 +1756,21 @@ function kanbanLaneFieldOf(schema: ListViewSchema, objectDef: unknown): string |
   return kanbanBlockOf(schema).groupByField || detectStatusField(objectDef as any) || undefined;
 }
 
+/** The lane statistics that aggregate a field (`KanbanLaneSummarySchema`). */
+const LANE_STATISTIC_AGGREGATES = ['sum', 'avg', 'min', 'max'] as const;
+
 /**
- * objectstack#36370 — may a board's lane statistic total a field of `type`?
- * The aggregate × field-type table's `sum` row, the verdict `@objectstack/lint`
- * gives `kanban.summary` (a percent does not add, a formula stores no value),
- * less the spec's boolean class (`BOOLEAN_VALUE_TYPES`, objectstack#36520): a
- * board totals numbers, not yes / no counts.
+ * objectstack#36370, objectstack#36880 — may a board's lane statistic `fn`
+ * aggregate a field of `type`? The aggregate × field-type table's row for
+ * that function, the verdict `@objectstack/lint` gives `kanban.summary` (a
+ * percent does not add, a formula stores no value; `min` / `max` also take a
+ * date, a date-time or a time), less the spec's boolean class
+ * (`BOOLEAN_VALUE_TYPES`, objectstack#36520): a board aggregates values, not
+ * yes / no counts.
  */
-function laneStatisticSums(type: unknown): boolean {
+function laneStatisticAccepts(fn: (typeof LANE_STATISTIC_AGGREGATES)[number], type: unknown): boolean {
   return typeof type === 'string' && !BOOLEAN_VALUE_TYPES.has(type)
-    && isAggregateCompatibleWithFieldType('sum', type);
+    && isAggregateCompatibleWithFieldType(fn, type);
 }
 
 /**
@@ -7454,15 +7460,23 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
       ? { type: 'sum', field: kanbanBlock.summarizeField }
       : null;
   })();
-  // The fields a lane may total: the object's number fields the
-  // caller may read.
-  const boardNumberFields: Array<{ value: string; label: string }> = kanbanBlock
-    ? Object.entries((objectDef?.fields ?? {}) as Record<string, { type?: unknown; label?: string; hidden?: unknown; multiple?: unknown } | undefined>)
-        .filter(([name, def]) =>
-          !!def && laneStatisticSums(def.type) && def.multiple !== true && def.hidden !== true
-          && canReadField(perms, schema.objectName, name))
-        .map(([name, def]) => ({ value: name, label: tFieldLabel(name, def?.label || name) }))
-    : [];
+  // The fields each lane statistic may aggregate: the object's fields the
+  // table accepts for that function (objectstack#36880) that the caller may
+  // read.
+  const boardStatisticFields: ViewSettingsKanbanSummaryFields = (() => {
+    const readable = kanbanBlock
+      ? Object.entries((objectDef?.fields ?? {}) as Record<string, { type?: unknown; label?: string; hidden?: unknown; multiple?: unknown } | undefined>)
+          .filter(([name, def]) =>
+            !!def && def.multiple !== true && def.hidden !== true && canReadField(perms, schema.objectName, name))
+      : [];
+    const out = {} as ViewSettingsKanbanSummaryFields;
+    for (const fn of LANE_STATISTIC_AGGREGATES) {
+      out[fn] = readable
+        .filter(([, def]) => laneStatisticAccepts(fn, def?.type))
+        .map(([name, def]) => ({ value: name, label: tFieldLabel(name, def?.label || name) }));
+    }
+    return out;
+  })();
   const kanbanSettings: ViewSettingsKanban | undefined = kanbanBlock
     ? {
         laneField: boardLaneField,
@@ -7506,7 +7520,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
         summary: writeKanban
           ? {
               value: boardLaneStatistic,
-              numberFields: boardNumberFields,
+              fields: boardStatisticFields,
               // 「None」 over a view that sums `summarizeField` says so
               // (`{ type: 'none' }`); over one that shows nothing, the key goes.
               onChange: (next) => writeKanban({

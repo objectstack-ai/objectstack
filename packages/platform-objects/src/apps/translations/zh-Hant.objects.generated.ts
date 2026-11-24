@@ -4627,5 +4627,90 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
         }
       }
     }
+  },
+  sys_task: {
+    label: "任務",
+    pluralLabel: "任務",
+    description: "待辦的事項，附負責人與到期時間。",
+    fields: {
+      title: {
+        label: "標題"
+      },
+      description: {
+        label: "說明"
+      },
+      status: {
+        label: "狀態",
+        options: {
+          todo: "待辦",
+          in_progress: "進行中",
+          done: "完成"
+        }
+      },
+      due_at: {
+        label: "到期時間"
+      },
+      assignee_id: {
+        label: "負責人"
+      },
+      completed_at: {
+        label: "完成時間",
+        help: "狀態變為「完成」時由平台寫入，離開「完成」時清除。"
+      },
+      owner_id: {
+        label: "擁有者"
+      }
+    },
+    _views: {
+      assigned_to_me: {
+        label: "指派給我的",
+        emptyState: {
+          title: "沒有指派給你的任務",
+          message: "指派給你的未完成任務會顯示在這裡。"
+        }
+      },
+      created_by_me: {
+        label: "我建立的",
+        emptyState: {
+          title: "尚無任務",
+          message: "你建立的任務會顯示在這裡。"
+        }
+      },
+      all: {
+        label: "全部"
+      }
+    }
+  },
+  sys_note: {
+    label: "備忘",
+    pluralLabel: "備忘",
+    description: "備忘：一個標題和一段帶格式的內文。",
+    fields: {
+      title: {
+        label: "標題"
+      },
+      body: {
+        label: "內文"
+      },
+      heading: {
+        label: "顯示標題",
+        help: "標題；標題為空時取內文第一行。由平台維護。"
+      },
+      owner_id: {
+        label: "擁有者"
+      }
+    },
+    _views: {
+      mine: {
+        label: "我的",
+        emptyState: {
+          title: "尚無備忘",
+          message: "你寫的備忘會顯示在這裡。"
+        }
+      },
+      all: {
+        label: "全部"
+      }
+    }
   }
 };

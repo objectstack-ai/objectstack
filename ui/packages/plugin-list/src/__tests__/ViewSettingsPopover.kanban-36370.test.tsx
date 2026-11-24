@@ -39,6 +39,14 @@ const FIELDS = [
   { name: 'stage', label: 'Stage' },
 ];
 
+/** `amount` under every function, as a number field is offered. */
+const AMOUNT_EVERYWHERE = {
+  sum: [{ value: 'amount', label: 'Amount' }],
+  avg: [{ value: 'amount', label: 'Amount' }],
+  min: [{ value: 'amount', label: 'Amount' }],
+  max: [{ value: 'amount', label: 'Amount' }],
+};
+
 function kanbanOf(overrides: Partial<ViewSettingsKanban> = {}): ViewSettingsKanban {
   return {
     laneField: 'stage',
@@ -62,7 +70,7 @@ function kanbanOf(overrides: Partial<ViewSettingsKanban> = {}): ViewSettingsKanb
     hideEmptyFields: { value: true, onChange: vi.fn() },
     summary: {
       value: { type: 'sum', field: 'amount' },
-      numberFields: [{ value: 'amount', label: 'Amount' }],
+      fields: AMOUNT_EVERYWHERE,
       onChange: vi.fn(),
     },
     ...overrides,
@@ -157,7 +165,7 @@ describe('视图设置 on a board (objectstack#36370)', () => {
     // The board counts today, so each pick below is a change (picking the
     // current statistic writes nothing).
     const kanban = kanbanOf({
-      summary: { value: { type: 'count' }, numberFields: [{ value: 'amount', label: 'Amount' }], onChange: vi.fn() },
+      summary: { value: { type: 'count' }, fields: AMOUNT_EVERYWHERE, onChange: vi.fn() },
     });
     openMenu({ kanban });
     fireEvent.click(screen.getByTestId('options-toggle-field-labels-switch'));
@@ -186,7 +194,7 @@ describe('视图设置 on a board (objectstack#36370)', () => {
 
 describe('the lane statistic picker names and offers avg, min and max (objectstack#36520)', () => {
   it('shows an authored average by name, with its option selected', () => {
-    openMenu({ kanban: kanbanOf({ summary: { value: { type: 'avg', field: 'amount' }, numberFields: [{ value: 'amount', label: 'Amount' }], onChange: vi.fn() } }) });
+    openMenu({ kanban: kanbanOf({ summary: { value: { type: 'avg', field: 'amount' }, fields: AMOUNT_EVERYWHERE, onChange: vi.fn() } }) });
     expect(value('options-row-lane-summary')).toBe('Average · Amount');
     fireEvent.click(screen.getByTestId('options-row-lane-summary'));
     expect(screen.getByTestId('options-lane-summary-avg:amount').getAttribute('aria-checked')).toBe('true');
@@ -194,7 +202,7 @@ describe('the lane statistic picker names and offers avg, min and max (objectsta
     expect(screen.getByTestId('options-lane-summary-sum:amount').getAttribute('aria-checked')).toBe('false');
   });
 
-  it('offers each aggregate over the same number fields, and picking min writes it', () => {
+  it('offers each aggregate over the fields offered for it, and picking min writes it', () => {
     const kanban = kanbanOf();
     openMenu({ kanban });
     fireEvent.click(screen.getByTestId('options-row-lane-summary'));
@@ -206,10 +214,40 @@ describe('the lane statistic picker names and offers avg, min and max (objectsta
   });
 
   it('names the three in the zh pack', () => {
-    openMenu({ kanban: kanbanOf({ summary: { value: { type: 'max', field: 'amount' }, numberFields: [{ value: 'amount', label: 'Amount' }], onChange: vi.fn() } }) }, 'zh');
+    openMenu({ kanban: kanbanOf({ summary: { value: { type: 'max', field: 'amount' }, fields: AMOUNT_EVERYWHERE, onChange: vi.fn() } }) }, 'zh');
     expect(value('options-row-lane-summary')).toBe('最大值 · Amount');
     fireEvent.click(screen.getByTestId('options-row-lane-summary'));
     expect(screen.getByTestId('options-lane-summary-avg:amount').textContent).toBe('平均值 · Amount');
     expect(screen.getByTestId('options-lane-summary-min:amount').textContent).toBe('最小值 · Amount');
+  });
+});
+
+/**
+ * objectstack#36880 — the statistic level offers each function over ITS
+ * fields: a date has a minimum and a maximum, never a sum or an average.
+ */
+describe('the lane statistic picker offers each function its own fields (objectstack#36880)', () => {
+  const DATED = {
+    sum: [{ value: 'amount', label: 'Amount' }],
+    avg: [{ value: 'amount', label: 'Amount' }],
+    min: [{ value: 'amount', label: 'Amount' }, { value: 'close_date', label: 'Close date' }],
+    max: [{ value: 'amount', label: 'Amount' }, { value: 'close_date', label: 'Close date' }],
+  };
+
+  it('offers a date under min and max only, and picking its max writes it', () => {
+    const kanban = kanbanOf({ summary: { value: { type: 'count' }, fields: DATED, onChange: vi.fn() } });
+    openMenu({ kanban });
+    fireEvent.click(screen.getByTestId('options-row-lane-summary'));
+    expect(screen.getByTestId('options-lane-summary-min:close_date').textContent).toBe('Minimum · Close date');
+    expect(screen.getByTestId('options-lane-summary-max:close_date').textContent).toBe('Maximum · Close date');
+    expect(screen.queryByTestId('options-lane-summary-sum:close_date')).toBeNull();
+    expect(screen.queryByTestId('options-lane-summary-avg:close_date')).toBeNull();
+    fireEvent.click(screen.getByTestId('options-lane-summary-max:close_date'));
+    expect(kanban.summary!.onChange).toHaveBeenLastCalledWith({ type: 'max', field: 'close_date' });
+  });
+
+  it('names an authored date maximum by the field\'s label', () => {
+    openMenu({ kanban: kanbanOf({ summary: { value: { type: 'max', field: 'close_date' }, fields: DATED, onChange: vi.fn() } }) });
+    expect(value('options-row-lane-summary')).toBe('Maximum · Close date');
   });
 });
