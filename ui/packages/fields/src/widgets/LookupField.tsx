@@ -1254,7 +1254,7 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
   const autofillTargets = declaredPairs?.length ? readLookupAutofillTargets(fieldMeta) : undefined;
   const autofillPairs: readonly LookupAutofillPair[] | undefined = autofillTargets ? declaredPairs : undefined;
   const refusedAutofillField = declaredPairs?.length && !autofillTargets
-    ? String(props.name || lookupField?.name || fieldMeta?.name || '')
+    ? String(props.name || lookupField?.name || '')
     : undefined;
   useEffect(() => {
     if (refusedAutofillField !== undefined) warnAutofillRefused(refusedAutofillField);
