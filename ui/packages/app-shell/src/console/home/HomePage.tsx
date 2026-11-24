@@ -89,7 +89,7 @@ import { usePublishAllDrafts } from '../../preview/usePublishAllDrafts.js';
 import { fetchPackages } from '../../views/studio-design/packages-io.js';
 import { resolveAiApiBase } from '../../hooks/useAiSurface.js';
 import { isAiStudioEnabled, isMarketplaceEnabled } from '../../runtime-config.js';
-import { STUDIO_NEW_PACKAGE_PATH } from '../../views/studio-design/studioNewPackage.js';
+import { SETUP_NEW_PACKAGE_PATH } from '../../views/metadata-admin/packageSource.js';
 import { useOpenAssistant } from '../../layout/chatDockControl.js';
 import { isProductApp } from '../../utils/homePath.js';
 import { useAddAppEntries, useMayAddApp } from '../../hooks/useAddAppEntries.js';
@@ -961,7 +961,8 @@ export function HomePage({ checklist }: HomePageProps = {}) {
                   {/* objectstack#26614 — on a deployment whose agent catalog
                     * is empty or absent, "Build an app" promises a build nothing
                     * here can start. There the chip says what it opens instead,
-                    * "New in Studio", and opens Studio's new-package flow; and
+                    * "New in Studio", and opens New Package in Setup → Packages,
+                    * which lands in Studio on the new package (objectstack#36908); and
                     * since Studio is then the ONLY way to build, a session that
                     * may not author gets no chip rather than a dimmed one (the
                     * template chip beside it still carries the reason). With
@@ -988,7 +989,7 @@ export function HomePage({ checklist }: HomePageProps = {}) {
                       icon={Hammer}
                       label={t('home.build.inStudio', { defaultValue: 'New in Studio' })}
                       tone="soft"
-                      onClick={() => navigate(STUDIO_NEW_PACKAGE_PATH)}
+                      onClick={() => navigate(SETUP_NEW_PACKAGE_PATH)}
                       disabledReason={undefined}
                       reasonId={undefined}
                       testId="home-build-in-studio"

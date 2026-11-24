@@ -3461,14 +3461,14 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.close': 'Close',
   'engine.studio.deselect': 'Clear selection',
   'engine.studio.toggleRail': 'Toggle sidebar',
-  // objectui#12513 — the header's first button and the package switcher's
-  // first row: both return to the Studio landing (`/studio`).
-  'engine.studio.landingHome': 'Studio home',
   // objectui#11795 — the one line a phone shows under the Studio header.
   'engine.studio.desktopHint': 'Studio is built for a desktop screen.',
   // objectstack#26708 — the builder's not-found states: a package id the
   // package list does not hold, and a pillar segment Studio has no pillar for.
   'engine.studio.notFound.package': 'Package not found. No package with the id "{id}" is installed here, so there is nothing to build in.',
+  // objectstack#36908 — the package-not-found state's way out: Setup → Packages,
+  // where Studio's entries that name no package land since the Studio home went.
+  'engine.studio.notFound.packageList': 'Open the package list',
   'engine.studio.notFound.pillar': 'This page does not exist. Studio has no "{pillar}" section; pick Data, Automations, Interfaces, Access or All metadata above.',
   'engine.studio.aiCopilot': 'AI Assistant',
   // objectui#12725 — the Studio right slot: properties OR the copilot.

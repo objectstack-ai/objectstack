@@ -83,6 +83,7 @@ vi.mock('./PackageFormDialog', () => ({
 import { resolveHref } from '@object-ui/layout';
 import { PackagesPage, type InstalledPackageRow } from './PackagesPage';
 import { t } from './i18n';
+import { SETUP_NEW_PACKAGE_PATH } from './packageSource';
 // The page's package form reaches the CEL authoring helpers, which load these
 // two lazily; loaded here so their first load is paid at import, not inside a
 // test's clocked window.
@@ -731,5 +732,42 @@ describe('Setup → Packages: the administration face (objectstack#36834)', () =
       expect(row(key, 'zh'), `${key}: a missing zh row echoes the key back`).not.toBe(key);
       expect(row(key, 'zh'), `${key}: the zh row must not be the English one`).not.toBe(row(key));
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// objectstack#36908 — the console's new-package doors land on this face with
+// New Package open (`SETUP_NEW_PACKAGE_PATH`), the Studio home that held that
+// dialog having been removed.
+// ---------------------------------------------------------------------------
+
+describe('Setup → Packages: the new-package deep link (objectstack#36908)', () => {
+  it('`?new=package` opens New Package on arrival and drops the param, keeping the face', async () => {
+    await serve({ packages: [CODE] });
+    renderAt(SETUP_NEW_PACKAGE_PATH);
+    expect(SETUP_NEW_PACKAGE_PATH).toBe(`${ADMIN_URL}&new=package`);
+
+    expect(await screen.findByTestId('stub-create-save')).toBeInTheDocument();
+    await waitFor(() => expect(query().has('new')).toBe(false));
+    expect(query().get('face')).toBe('admin');
+
+    // The create lands in Studio on the new package, as New Package does.
+    fireEvent.click(screen.getByTestId('stub-create-save'));
+    expect(await screen.findByTestId('where')).toHaveTextContent('/studio/app.fresh/data');
+  });
+
+  it('CONTROL: the face without the param opens no dialog', async () => {
+    await serve({ packages: [CODE] });
+    renderAt(ADMIN_URL);
+    await screen.findByTestId('pkg-row-com.acme.code');
+    expect(screen.queryByTestId('stub-create-save')).toBeNull();
+  });
+
+  it('on the development surface the param opens nothing, and is dropped', async () => {
+    await serve({ packages: [CODE] });
+    renderAt(`${STUDIO_URL}?new=package`);
+    await screen.findByTestId('pkg-row-com.acme.code');
+    await waitFor(() => expect(query().has('new')).toBe(false));
+    expect(screen.queryByTestId('stub-create-save')).toBeNull();
   });
 });

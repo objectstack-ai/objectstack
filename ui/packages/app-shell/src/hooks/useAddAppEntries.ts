@@ -16,7 +16,7 @@ import { useWorkspaceAdminStatus } from '@object-ui/auth';
 import { useCanAuthorMetadata } from './useCanAuthorMetadata.js';
 import { useAiSurfaceEnabled } from './useAiSurface.js';
 import { isAiStudioEnabled, isMarketplaceEnabled } from '../runtime-config.js';
-import { STUDIO_NEW_PACKAGE_PATH } from '../views/studio-design/studioNewPackage.js';
+import { SETUP_NEW_PACKAGE_PATH } from '../views/metadata-admin/packageSource.js';
 import { studioLandingPath } from '../views/studio-design/studioAddress.js';
 
 /** The marketplace, where templates and packages are installed from. */
@@ -57,7 +57,7 @@ export function useAddAppEntries(): AddAppEntry[] {
     entries.push(
       buildServed
         ? { key: 'build-with-ai', to: studioLandingPath(), label: t('home.buildWithAI', { defaultValue: 'Build with AI' }), icon: Hammer }
-        : { key: 'new-in-studio', to: STUDIO_NEW_PACKAGE_PATH, label: t('home.build.inStudio', { defaultValue: 'New in Studio' }), icon: Hammer },
+        : { key: 'new-in-studio', to: SETUP_NEW_PACKAGE_PATH, label: t('home.build.inStudio', { defaultValue: 'New in Studio' }), icon: Hammer },
     );
   }
   if (isMarketplaceEnabled()) {

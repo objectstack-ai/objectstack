@@ -15,7 +15,8 @@
  * reach the AI service"; only the latter offers a retry. Either way there is a
  * way home, so the route never dead-ends. Where AI is simply not enabled,
  * Studio is the other way to build, so a session that may author is offered
- * Studio's new-package flow beside it: the same entry, under the same label
+ * the new-package flow beside it (Setup → Packages with New Package open,
+ * which lands in Studio on the new package): the same entry, under the same label
  * and on the same terms, as Home's "New in Studio" chip (an admin, on a
  * runtime that offers authoring, holding the authoring capability).
  */
@@ -25,7 +26,7 @@ import { useWorkspaceAdminStatus } from '@object-ui/auth';
 import { Button, Empty, EmptyDescription, EmptyTitle } from '@object-ui/components';
 import { useCanAuthorMetadata } from '../../hooks/useCanAuthorMetadata.js';
 import { isAiStudioEnabled } from '../../runtime-config.js';
-import { STUDIO_NEW_PACKAGE_PATH } from '../../views/studio-design/studioNewPackage.js';
+import { SETUP_NEW_PACKAGE_PATH } from '../../views/metadata-admin/packageSource.js';
 
 export function AiUnavailable({
   hasError,
@@ -67,7 +68,7 @@ export function AiUnavailable({
           )}
           {offerStudio && (
             <Button variant="outline" asChild>
-              <Link to={STUDIO_NEW_PACKAGE_PATH} data-testid="ai-unavailable-studio">
+              <Link to={SETUP_NEW_PACKAGE_PATH} data-testid="ai-unavailable-studio">
                 {t('home.build.inStudio', { defaultValue: 'New in Studio' })}
               </Link>
             </Button>

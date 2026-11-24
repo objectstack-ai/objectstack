@@ -140,7 +140,7 @@ describe('HomePage — the desktop no-apps empty state (objectstack#36732)', () 
     viewer.buildServed = false;
     render(<HomePage />);
     expect(screen.queryByTestId('home-no-apps-build-with-ai')).not.toBeInTheDocument();
-    expect(screen.getByTestId('home-no-apps-new-in-studio')).toHaveAttribute('href', '/studio?new=package');
+    expect(screen.getByTestId('home-no-apps-new-in-studio')).toHaveAttribute('href', '/apps/setup/component/developer/packages?face=admin&new=package');
     expect(screen.getByTestId('home-no-apps-template')).toBeInTheDocument();
   });
 

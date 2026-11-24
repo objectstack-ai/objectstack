@@ -41,7 +41,7 @@ import {
   DESIGNER_SURFACE_VIEW_PARAM,
 } from './useSurfaceDeepLink.js';
 import { STUDIO_CHANGES_PARAM, STUDIO_CHANGES_REVIEW } from './studioChangesLink.js';
-import { STUDIO_NEW_PACKAGE_PATH } from './studioNewPackage.js';
+import { STUDIO_NEW_PACKAGE_VALUE, STUDIO_NEW_PARAM } from './studioNewPackage.js';
 import { retiredInterfacesTarget } from './studioInterfacesRetired.js';
 import { studioOrgScopePath } from './studioScope.js';
 import { AREA_PILLAR_FOR_TYPE, areaItemPillarPath, studioMetadataItemPath, studioPillarItemPath } from './metadataArea.js';
@@ -76,7 +76,8 @@ describe('studioPath — the one path builder (objectstack#36895)', () => {
 describe("today's addresses, byte for byte", () => {
   it('landing, package, pillar, home', () => {
     expect(studioLandingPath()).toBe('/studio');
-    expect(STUDIO_NEW_PACKAGE_PATH).toBe('/studio?new=package');
+    // objectstack#36908 — the retired new-package bookmark Studio's entry forwards.
+    expect(studioLandingPath({ query: `${STUDIO_NEW_PARAM}=${STUDIO_NEW_PACKAGE_VALUE}` })).toBe('/studio?new=package');
     expect(studioPackagePath('com.acme.crm')).toBe('/studio/com.acme.crm');
     expect(studioPillarPath('com.acme.crm', 'automations')).toBe('/studio/com.acme.crm/automations');
     expect(studioHomePath('com.acme.crm')).toBe('/studio/com.acme.crm/data');

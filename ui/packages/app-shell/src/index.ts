@@ -589,6 +589,10 @@ export {
 // The builder's front door: pick/create a writable package → pillar builder.
 // Standalone at `/studio` and embedded via the `studio:builder` component ref.
 export { BuilderLanding } from './views/studio-design/BuilderLanding.js';
+// objectstack#36908 — bare `/studio` draws no page: it opens the package the
+// author was last in, else the package list. A host that declares the
+// `/studio` routes mounts it as their index.
+export { StudioEntryRedirect } from './views/studio-design/StudioEntryRedirect.js';
 // The one Studio scope that is not a package (objectui#11553): the
 // organization's own package-less flows, at `/studio/~org/automations`. A host
 // that declares the `/studio` routes reads the reserved segment from here.
@@ -611,6 +615,10 @@ export { StudioMetadataArea } from './views/studio-design/StudioMetadataArea.js'
 // area (the datasource's stays in Setup). A host whose legacy aliases forward
 // onto Setup's metadata routes lands them in one hop through this.
 export { setupMetadataStudioPath } from './views/studio-design/setupMetadataRedirect.js';
+// objectstack#36908 — Setup → Packages, the package list's administration
+// face: where a host's legacy redirects that name no package land, now that
+// Studio has no home page.
+export { SETUP_PACKAGES_PATH } from './views/metadata-admin/packageSource.js';
 // objectstack#36895 — the one builder of Studio addresses. A host that
 // declares the `/studio` routes, or links into them, spells every address
 // through these, never by hand (`studioAddress.guard.test.ts`).

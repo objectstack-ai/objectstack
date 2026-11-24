@@ -11,7 +11,8 @@
  *   - with an agent in the catalog the chip is unchanged: "Build an app", to
  *     `/studio`, dimmed with its reason for a session that may not author;
  *   - with none it says what it opens, "New in Studio", and opens Studio's
- *     new-package flow (`STUDIO_NEW_PACKAGE_PATH`);
+ *     new-package flow (`SETUP_NEW_PACKAGE_PATH`, Setup → Packages with New
+ *     Package open since objectstack#36908);
  *   - with none, a session that may not author gets no build chip at all,
  *     while the template chip beside it still carries the reason;
  *   - while the catalog has not answered, neither form is drawn, so neither
@@ -154,7 +155,7 @@ vi.mock('../../deployment-notice/DeploymentNotice', () => ({ DeploymentNotice: (
 // not inside a test's clock.
 import '@objectstack/lint';
 import { HomePage } from '../HomePage';
-import { STUDIO_NEW_PACKAGE_PATH } from '../../../views/studio-design/studioNewPackage';
+import { SETUP_NEW_PACKAGE_PATH } from '../../../views/metadata-admin/packageSource';
 
 beforeEach(() => {
   navigateMock.mockReset();
@@ -201,8 +202,8 @@ describe('with no agent in the catalog (objectstack#26614)', () => {
     expect(chip).toHaveTextContent('«home.build.inStudio»');
     expect(screen.queryByTestId('home-build-app')).toBeNull();
     await user.click(chip);
-    expect(navigateMock).toHaveBeenCalledWith(STUDIO_NEW_PACKAGE_PATH);
-    expect(STUDIO_NEW_PACKAGE_PATH).toBe('/studio?new=package');
+    expect(navigateMock).toHaveBeenCalledWith(SETUP_NEW_PACKAGE_PATH);
+    expect(SETUP_NEW_PACKAGE_PATH).toBe('/apps/setup/component/developer/packages?face=admin&new=package');
   });
 
   it('a session that may not author gets no build chip; the template chip keeps the reason', async () => {
@@ -229,7 +230,7 @@ describe('without the build agent in the catalog, the chip takes its Studio form
     expect(chip).toHaveTextContent('«home.build.inStudio»');
     expect(screen.queryByTestId('home-build-app')).toBeNull();
     await user.click(chip);
-    expect(navigateMock).toHaveBeenCalledWith(STUDIO_NEW_PACKAGE_PATH);
+    expect(navigateMock).toHaveBeenCalledWith(SETUP_NEW_PACKAGE_PATH);
   });
 
   it('a session that may not author gets no build chip there', async () => {

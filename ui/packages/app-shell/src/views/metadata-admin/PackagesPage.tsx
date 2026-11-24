@@ -127,6 +127,8 @@ import {
   PACKAGE_SOURCES,
   PACKAGES_ADMIN_FACE,
   PACKAGES_FACE_PARAM,
+  PACKAGES_NEW_PACKAGE_VALUE,
+  PACKAGES_NEW_PARAM,
   PACKAGES_SOURCE_PARAM,
   PackageSourceRefusal,
   readPackagesFace,
@@ -1852,6 +1854,26 @@ export function PackagesPage() {
   // Import, the platform packages switch and the authoring actions stay on the
   // development surface Studio opens (this page with no `face`).
   const adminFace = sourceFilter.face === 'admin';
+
+  // objectstack#36908 — the console's new-package doors land here with New
+  // Package open (`SETUP_NEW_PACKAGE_PATH`, `?new=package` on this face), the
+  // way they used to land on the Studio home's create dialog. Read on arrival
+  // and dropped from the address with a replace, so a refresh or Back does not
+  // open the dialog again. The effect is keyed on the primitives it reads
+  // (ui/AGENTS.md #10).
+  const newParam = searchParams.get(PACKAGES_NEW_PARAM);
+  React.useEffect(() => {
+    if (newParam !== PACKAGES_NEW_PACKAGE_VALUE) return;
+    if (adminFace) setCreateOpen(true);
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete(PACKAGES_NEW_PARAM);
+        return next;
+      },
+      { replace: true },
+    );
+  }, [newParam, adminFace, setSearchParams]);
 
   const filtered = React.useMemo(() => {
     const q = query.trim().toLowerCase();

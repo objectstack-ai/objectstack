@@ -1,17 +1,15 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * The package helpers Studio's surface and its landing share: the
- * package-list toast id, the Studio landing path and the installed-row read.
- * The top-bar package switcher that lived here with them, since
- * objectstack#29988's move-only split, was removed by objectstack#36501: the
- * top bar's left end is 「‹ Back to app」 (`StudioBackToApp.tsx`), and a
- * package is picked in the app or on the Studio landing (`BuilderLanding`),
- * whose cards also open the management sheet.
+ * The package helpers Studio's surface shares: the package-list toast id and
+ * the installed-row read. The top-bar package switcher that lived here with
+ * them, since objectstack#29988's move-only split, was removed by
+ * objectstack#36501: the top bar's left end is 「‹ Back to app」
+ * (`StudioBackToApp.tsx`), and a package is picked in the app or in Setup →
+ * Packages (objectstack#36834, objectstack#36908).
  */
 
 import type { InstalledPackageRow } from '../metadata-admin/PackagesPage.js';
-import { STUDIO_ROOT_PATH } from './studioAddress.js';
 
 /**
  * One sonner id for EVERY `fetchPackages()` failure on this surface
@@ -24,9 +22,6 @@ import { STUDIO_ROOT_PATH } from './studioAddress.js';
  * reporting it three times is noise that would get the report muted.
  */
 export const PACKAGE_LIST_TOAST_ID = 'studio-package-list';
-
-/** objectui#12513 — the Studio landing (`BuilderLanding`). */
-export const STUDIO_LANDING_PATH = STUDIO_ROOT_PATH;
 
 /**
  * The record the standard detail/management sheet opens on: a package's full

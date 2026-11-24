@@ -251,7 +251,7 @@ describe('「Add app」 offers building with AI only where the catalog serves bu
     catalog = [{ name: 'ask' }];
     const choices = addChoices();
     expect(choices.queryByTestId('sidebar-app-menu-add-build-with-ai')).toBeNull();
-    expect(choices.getByTestId('sidebar-app-menu-add-new-in-studio')).toHaveAttribute('href', '/studio?new=package');
+    expect(choices.getByTestId('sidebar-app-menu-add-new-in-studio')).toHaveAttribute('href', '/apps/setup/component/developer/packages?face=admin&new=package');
     expect(choices.getByTestId('sidebar-app-menu-add-template')).toHaveAttribute('href', '/apps/setup/system/marketplace');
     expect(choices.getByTestId('sidebar-app-menu-add-marketplace')).toHaveAttribute('href', '/apps/setup/system/marketplace');
   });

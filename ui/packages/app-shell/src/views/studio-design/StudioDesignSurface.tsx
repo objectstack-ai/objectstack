@@ -62,7 +62,8 @@ import {
   navigationObjectOrder,
 } from './flowGrouping.js';
 import { StudioRefusalStrip } from './StudioRefusalStrip.js';
-import { PACKAGE_LIST_TOAST_ID, STUDIO_LANDING_PATH } from './PackageSwitcher.js';
+import { PACKAGE_LIST_TOAST_ID } from './PackageSwitcher.js';
+import { SETUP_PACKAGES_PATH } from '../metadata-admin/packageSource.js';
 import { StudioBackToApp, type StudioAppTarget } from './StudioBackToApp.js';
 import {
   FlowStatusDot,
@@ -1510,8 +1511,10 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
                 testId="studio-package-not-found"
                 sentence={tFormat('engine.studio.notFound.package', locale, { id: packageId })}
                 action={
-                  <Button type="button" size="sm" variant="outline" onClick={() => shellNavigate(STUDIO_LANDING_PATH)}>
-                    {t('engine.studio.landingHome', locale)}
+                  // objectstack#36908 — Setup → Packages: Studio's home, its
+                  // old way out, was removed.
+                  <Button type="button" size="sm" variant="outline" onClick={() => shellNavigate(SETUP_PACKAGES_PATH)}>
+                    {t('engine.studio.notFound.packageList', locale)}
                   </Button>
                 }
               />

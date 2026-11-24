@@ -20,7 +20,7 @@ import { LocalizationFetchProvider } from './LocalizationFetchProvider';
 import { FirstRunChecklist } from './pages/settings/FirstRunChecklist';
 import { InAppFormRoute } from './components/InternalFormRoute';
 import { APPROVAL_ACTION_OBJECT, APPROVAL_REQUEST_OBJECT, routeApprovalRecordReads } from './services/approvalRequestsDataSource';
-import { studioLandingPath } from '@object-ui/app-shell';
+import { SETUP_PACKAGES_PATH } from '@object-ui/app-shell';
 
 const AppManagementPage = lazy(() => import('./pages/system/AppManagementPage').then(m => ({ default: m.AppManagementPage })));
 const ProfilePage = lazy(() => import('./pages/system/ProfilePage').then(m => ({ default: m.ProfilePage })));
@@ -66,7 +66,8 @@ function ObjectRedirect() {
   // objectstack ADR-0146 D1 — straight to Studio's "All metadata" area, the
   // page Setup's `…/metadata/object` route opens there.
   const target = setupMetadataStudioPath(objectName ? `object/${objectName}` : 'object', location.search, location.hash);
-  return <Navigate to={target ?? studioLandingPath()} replace />;
+  // objectstack#36908 — a URL Studio has no page for lands on Setup → Packages.
+  return <Navigate to={target ?? SETUP_PACKAGES_PATH} replace />;
 }
 
 /**
@@ -176,7 +177,7 @@ function SystemObjectRedirect({ objectName }: { objectName: string }) {
 function SystemCatalogRedirect({ type }: { type: 'position' | 'permission' }) {
   // objectstack ADR-0146 D1 — the catalog is Studio's, in the "All metadata"
   // area's cross-package leg.
-  return <Navigate to={setupMetadataStudioPath(type, ENVIRONMENT_SCOPE_QUERY) ?? studioLandingPath()} replace />;
+  return <Navigate to={setupMetadataStudioPath(type, ENVIRONMENT_SCOPE_QUERY) ?? SETUP_PACKAGES_PATH} replace />;
 }
 
 /**
