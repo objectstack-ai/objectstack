@@ -79,15 +79,17 @@ export interface BulkResult {
   errors: BulkRowError[];
   /**
    * Set only when a per-record dispatch answered one or more records with a
-   * refusal: those records, in selection order, each with its own sentence.
+   * refusal: those records, each with its own sentence, in selection order,
+   * except that a failed record whose `retry()` is refused is appended last.
    * They are counted neither as succeeded nor as failed, so
-   * `succeeded + failed + refused.length === total` on a per-record run, and
-   * `errors` carries no entry for them.
+   * `succeeded + failed + refused.length + paused.length === total` on a
+   * per-record run (see `paused`), and `errors` carries no entry for them.
    */
   refused?: BulkRowRefusal[];
   /**
    * Set only when a per-record dispatch started a run that paused at a screen
-   * for one or more records: those records, in selection order. They wait for
+   * for one or more records: those records, in selection order, except that a
+   * failed record whose `retry()` pauses is appended last. They wait for
    * input, so they are counted neither as succeeded, nor as failed, nor as
    * refused: `succeeded + failed + refused.length + paused.length === total`
    * on a per-record run, and `errors` carries no entry for them.

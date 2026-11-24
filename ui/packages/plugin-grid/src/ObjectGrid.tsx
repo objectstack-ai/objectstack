@@ -2984,8 +2984,11 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     // Only reset selection when the run actually changed something. A total
     // failure (0 succeeded — e.g. a "推计划" precondition error) leaves the data
     // untouched, so we keep the selection *and* the toolbar so the user can fix
-    // it and retry the same rows.
-    if (result && result.succeeded > 0) {
+    // it and retry the same rows. A run that paused at a screen changed
+    // something too (its steps before the screen may have written), and its
+    // record must not be re-run while its screen waits, so it resets and
+    // re-reads like a success (objectstack#36931).
+    if (result && (result.succeeded > 0 || (result.paused?.length ?? 0) > 0)) {
       resetSelection();
       // Trigger refresh via the same path used by single-record mutations.
       setRefreshKey(k => k + 1);

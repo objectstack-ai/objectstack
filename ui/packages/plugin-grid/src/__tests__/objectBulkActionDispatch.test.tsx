@@ -868,7 +868,7 @@ describe('a per-record bulk flow that pauses some records at a screen (objectsta
 
   async function runOn(rows: typeof LEADS, pausing: string[]) {
     const handler = flowHandler(pausing);
-    renderGrid({
+    const ds = renderGrid({
       objectActions: [QUALIFY],
       schema: { bulkActions: ['qualify'] },
       handlers: { flow: handler },
@@ -880,7 +880,7 @@ describe('a per-record bulk flow that pauses some records at a screen (objectsta
     fireEvent.click(await screen.findByTestId('bulk-action-qualify'));
     fireEvent.click(await screen.findByRole('button', { name: 'Run' }));
     await waitFor(() => expect(handler).toHaveBeenCalledTimes(rows.length));
-    return handler;
+    return ds;
   }
 
   it("the card's repro: 1 succeeded and 2 waiting for input, each waiting record named, no Retry", async () => {
@@ -906,5 +906,26 @@ describe('a per-record bulk flow that pauses some records at a screen (objectsta
     await waitFor(() => expect(screen.getByText(/Succeeded 3 \/ 3/)).toBeInTheDocument());
     expect(screen.queryByText(/Waiting for input/)).not.toBeInTheDocument();
     expect(screen.queryByTestId('bulk-paused-records')).not.toBeInTheDocument();
+  });
+
+  // A run in which EVERY record paused succeeded nowhere, yet it changed
+  // something (the steps before each screen may have written) and its records
+  // must not be re-run while their screens wait. So closing the result clears
+  // the selection and re-reads the grid, as a run with successes does; a total
+  // failure keeps both (bulkActionRefresh.test.tsx).
+  it('closing an all-paused run clears the selection and re-reads the grid', async () => {
+    const headerChecked = () =>
+      (document.querySelector('thead [role="checkbox"]') as HTMLElement)?.getAttribute('data-state');
+    const ds = await runOn(LEADS, ['l1', 'l2', 'l3']);
+
+    await waitFor(() => expect(screen.getByText(/Succeeded 0 \/ 3/)).toBeInTheDocument());
+    expect(screen.getByText(/Waiting for input 3/)).toBeInTheDocument();
+    expect(headerChecked()).toBe('checked');
+    const before = ds.find.mock.calls.length;
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+
+    await waitFor(() => expect(ds.find.mock.calls.length).toBeGreaterThan(before));
+    await waitFor(() => expect(screen.queryByTestId('bulk-actions-bar')).not.toBeInTheDocument());
+    await waitFor(() => expect(headerChecked()).toBe('unchecked'));
   });
 });

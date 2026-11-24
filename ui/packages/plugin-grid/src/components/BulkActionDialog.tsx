@@ -388,10 +388,11 @@ export const BulkActionDialog: React.FC<BulkActionDialogProps> = ({
 
   if (!def) return null;
 
-  // A refusal is listed under the record it refused, named as the confirm
-  // step named it. An entry that is no record of the run (a missing id, a
-  // batch the server answered with a count only) keeps its own id.
-  const refusedRecordName = (id: string): string => {
+  // A listed record (refused, waiting for input, unconfirmed or failed) is
+  // named as the confirm step named it. An entry that is no record of the run
+  // (a missing id, a batch the server answered with a count only) keeps its
+  // own id.
+  const listedRecordName = (id: string): string => {
     const row = rows.find(r => r.id != null && String(r.id) === id);
     return row ? affectedRecordName(objectDef, row, id) : id;
   };
@@ -673,7 +674,7 @@ export const BulkActionDialog: React.FC<BulkActionDialogProps> = ({
                   <ul className="text-xs space-y-1">
                     {unconfirmedPreview.map(id => (
                       <li key={id} className="break-words" data-testid={`bulk-unconfirmed-record-${id}`}>
-                        • {refusedRecordName(id)}
+                        • {listedRecordName(id)}
                       </li>
                     ))}
                     {unconfirmedRest > 0 && (
@@ -700,7 +701,7 @@ export const BulkActionDialog: React.FC<BulkActionDialogProps> = ({
                       <li key={r.id} className="flex items-start gap-2" data-testid={`bulk-refused-row-${r.id}`}>
                         <Ban className="h-3 w-3 mt-0.5 shrink-0 text-amber-500" />
                         <div className="min-w-0 flex-1 break-words">
-                          <span className="text-muted-foreground">{refusedRecordName(r.id)}:</span> {r.message}
+                          <span className="text-muted-foreground">{listedRecordName(r.id)}:</span> {r.message}
                         </div>
                       </li>
                     ))}
@@ -725,7 +726,7 @@ export const BulkActionDialog: React.FC<BulkActionDialogProps> = ({
                     {pausedRows.map(p => (
                       <li key={p.id} className="flex items-start gap-2" data-testid={`bulk-paused-row-${p.id}`}>
                         <Hourglass className="h-3 w-3 mt-0.5 shrink-0 text-amber-500" />
-                        <div className="min-w-0 flex-1 break-words">{refusedRecordName(p.id)}</div>
+                        <div className="min-w-0 flex-1 break-words">{listedRecordName(p.id)}</div>
                       </li>
                     ))}
                   </ul>
@@ -745,7 +746,7 @@ export const BulkActionDialog: React.FC<BulkActionDialogProps> = ({
                         <XCircle className="h-3 w-3 mt-0.5 shrink-0 text-destructive" />
                         <div className="min-w-0 flex-1">
                           <div className="break-words">
-                            <span className="text-muted-foreground" data-testid={`bulk-error-record-${e.id}`}>{refusedRecordName(e.id)}:</span> {e.userMessage ?? e.error}
+                            <span className="text-muted-foreground" data-testid={`bulk-error-record-${e.id}`}>{listedRecordName(e.id)}:</span> {e.userMessage ?? e.error}
                           </div>
                         </div>
                         {/* A plain `custom` callout has nothing to re-run, but

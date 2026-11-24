@@ -27,7 +27,7 @@ import * as React from 'react';
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, fireEvent, cleanup, within } from '@testing-library/react';
 import '@testing-library/jest-dom';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
 const authFetchSpy = vi.fn();
 vi.mock('@object-ui/auth', async (importOriginal) => ({
@@ -85,8 +85,12 @@ function recordOf(init: RequestInit | undefined): string {
   return String(body.recordId);
 }
 
-/** The engine's answer for one record: a paused run for each id in `pausing`, a completed one otherwise. */
-function answerFor(pausing: string[]) {
+/**
+ * The engine's answer for one record: a paused run for each id in `pausing`,
+ * a completed one otherwise. Each paused screen carries `fields` (none by
+ * default).
+ */
+function answerFor(pausing: string[], fields: unknown[] = []) {
   return async (_url: string, init?: RequestInit) => {
     const id = recordOf(init);
     const data = pausing.includes(id)
@@ -95,48 +99,75 @@ function answerFor(pausing: string[]) {
         status: 'paused',
         runId: `run-${id}`,
         flowLabel: 'Qualify lead',
-        screen: { nodeId: 'confirm', title: `Confirm ${LEADS.find((l) => l.id === id)?.name}`, fields: [] },
+        screen: { nodeId: 'confirm', title: `Confirm ${LEADS.find((l) => l.id === id)?.name}`, fields },
       }
       : { success: true, status: 'completed' };
     return { ok: true, status: 200, json: async () => ({ success: true, data }) };
   };
 }
 
-function renderGridInConsole() {
+/** The record a screen's `record_link` field leads to (the #36849 path). */
+const ACCOUNT_OBJECT = 'crm_account';
+const ACCOUNT = { id: 'acc_1', name: 'Acme' };
+
+/**
+ * Mount the grid inside the console runtime. `atApp` mounts it on an app
+ * route and lets the console route to `crm_account`, so a screen's record
+ * link is drawn as a link; otherwise the console holds no object at all.
+ */
+function renderGridInConsole({ atApp = false }: { atApp?: boolean } = {}) {
   const dataSource = {
     find: vi.fn(async () => ({ data: LEADS.map((r) => ({ ...r })), total: LEADS.length, hasMore: false, pageSize: 50 })),
-    findOne: vi.fn(),
+    findOne: vi.fn(async (object: string, id: string) => (object === ACCOUNT_OBJECT && id === ACCOUNT.id ? ACCOUNT : null)),
     create: vi.fn(),
     update: vi.fn(async () => ({})),
     delete: vi.fn(),
-    getObjectSchema: vi.fn(async (name: string) => ({
-      name,
-      fields: { id: { type: 'text' }, name: { type: 'text', label: 'Name' } },
-      actions: [QUALIFY],
-    })),
+    getObjectSchema: vi.fn(async (name: string) => (name === ACCOUNT_OBJECT
+      ? { name, nameField: 'name', fields: { name: { type: 'text', label: 'Name' } } }
+      : {
+        name,
+        fields: { id: { type: 'text' }, name: { type: 'text', label: 'Name' } },
+        actions: [QUALIFY],
+      })),
   };
+  const onRefresh = vi.fn();
+  const page = (
+    /* The console holds no declared action for the grid's object, so each
+       record starts the flow on the trigger route: one request per record. */
+    <ConsoleActionRuntimeProvider
+      dataSource={dataSource}
+      objects={atApp ? [{ name: ACCOUNT_OBJECT }] : []}
+      objectName={OBJECT}
+      onRefresh={onRefresh}
+    >
+      <SchemaRendererProvider dataSource={dataSource as never}>
+        <ObjectGrid
+          schema={{
+            type: 'object-grid',
+            objectName: OBJECT,
+            columns: [{ field: 'name', label: 'Name' }],
+            pagination: { pageSize: 50 },
+            bulkActions: ['qualify'],
+          } as never}
+          dataSource={dataSource as never}
+        />
+      </SchemaRendererProvider>
+    </ConsoleActionRuntimeProvider>
+  );
   render(
     <I18nProvider config={EN} persistLanguage={false}>
-      <MemoryRouter>
-        {/* The console holds no declared action for the object, so each record
-            starts the flow on the trigger route: one request per record. */}
-        <ConsoleActionRuntimeProvider dataSource={dataSource} objects={[]} objectName={OBJECT} onRefresh={vi.fn()}>
-          <SchemaRendererProvider dataSource={dataSource as never}>
-            <ObjectGrid
-              schema={{
-                type: 'object-grid',
-                objectName: OBJECT,
-                columns: [{ field: 'name', label: 'Name' }],
-                pagination: { pageSize: 50 },
-                bulkActions: ['qualify'],
-              } as never}
-              dataSource={dataSource as never}
-            />
-          </SchemaRendererProvider>
-        </ConsoleActionRuntimeProvider>
-      </MemoryRouter>
+      {atApp ? (
+        <MemoryRouter initialEntries={[`/apps/crm/${OBJECT}`]}>
+          <Routes>
+            <Route path="/apps/:appName/*" element={page} />
+          </Routes>
+        </MemoryRouter>
+      ) : (
+        <MemoryRouter>{page}</MemoryRouter>
+      )}
     </I18nProvider>,
   );
+  return { onRefresh };
 }
 
 /** Select every row, run the bulk action, and wait for all three dispatches. */
@@ -157,11 +188,15 @@ function shownScreen(): string | null {
   return heading?.textContent ?? null;
 }
 
+/** The flow runner's dialog that shows the screen headed `title`. */
+function screenDialog(title: string): HTMLElement {
+  const heading = screen.queryAllByRole('heading', { hidden: true }).find((h) => h.textContent === title);
+  return heading?.closest('[role="dialog"]') as HTMLElement;
+}
+
 /** Close the screen the flow runner shows with its Cancel button. */
 function cancelShownScreen() {
-  const heading = screen.queryAllByRole('heading', { hidden: true }).find((h) => /^Confirm /.test(h.textContent ?? ''));
-  const dialog = heading?.closest('[role="dialog"]') as HTMLElement;
-  fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel', hidden: true }));
+  fireEvent.click(within(screenDialog(shownScreen()!)).getByRole('button', { name: 'Cancel', hidden: true }));
 }
 
 beforeEach(() => {
@@ -215,5 +250,55 @@ describe('a per-record bulk flow that pauses two of three records (objectstack#3
     await waitFor(() => expect(shownScreen()).toBe('Confirm Bea'));
     cancelShownScreen();
     await waitFor(() => expect(shownScreen()).toBeNull());
+  });
+});
+
+/**
+ * The queue settles a run BY ITS KEY, never "the head" (`useScreenFlowQueue`).
+ * A result screen's record link closes the dialog first and completes the run
+ * after it (objectstack#36849): the close shows the next queued run, and the
+ * first run's completion arrives later, from the runner that already went
+ * away. Settling the head there would drop the next run, whose screen was
+ * just shown, and its record would wait at a screen nobody could reach.
+ */
+describe('a queued run stays on screen when the run before it completes after its dialog closed (objectstack#36931)', () => {
+  const ACCOUNT_LINK = { name: 'account', label: 'Account', type: 'record_link', reference: ACCOUNT_OBJECT, defaultValue: ACCOUNT.id };
+
+  it('following the first result screen\'s record link shows the second screen, and the first run\'s late completion keeps it', async () => {
+    // The first resume (the result screen's completion) waits until released.
+    let releaseResume: (() => void) | undefined;
+    const resumed: string[] = [];
+    const trigger = answerFor(['l1', 'l3'], [ACCOUNT_LINK]);
+    authFetchSpy.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (!String(url).endsWith('/resume')) return trigger(url, init);
+      resumed.push(String(url));
+      await new Promise<void>((resolve) => { releaseResume = resolve; });
+      return { ok: true, status: 200, json: async () => ({ success: true, data: { success: true, status: 'completed' } }) };
+    });
+    const { onRefresh } = renderGridInConsole({ atApp: true });
+    await runBulkOverAll();
+
+    await waitFor(() => expect(shownScreen()).not.toBeNull());
+    const first = shownScreen()!;
+    const link = await waitFor(() => within(screenDialog(first)).getByRole('link', { name: 'Acme', hidden: true }));
+    fireEvent.click(link);
+
+    // The link closed the first dialog at once, and the next run is shown.
+    await waitFor(() => expect(shownScreen()).not.toBeNull());
+    await waitFor(() => expect(shownScreen()).not.toBe(first));
+    const second = shownScreen()!;
+    expect([first, second].sort()).toEqual(['Confirm Ann', 'Confirm Cy']);
+
+    // The first run completes behind it, as Done completes a result screen.
+    const firstRun = first === 'Confirm Ann' ? 'run-l1' : 'run-l3';
+    await waitFor(() => expect(resumed).toHaveLength(1));
+    expect(resumed[0]).toContain(`/runs/${firstRun}/resume`);
+    const refreshesBefore = onRefresh.mock.calls.length;
+    releaseResume!();
+    await waitFor(() => expect(onRefresh.mock.calls.length).toBeGreaterThan(refreshesBefore));
+
+    // Its completion settled its own run only: the second screen is still up.
+    await new Promise((r) => setTimeout(r, 50));
+    expect(shownScreen()).toBe(second);
   });
 });
