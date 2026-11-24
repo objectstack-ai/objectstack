@@ -6,10 +6,11 @@
  * `/studio/<id>` for an id the package list does not hold rendered the full
  * writable builder (New object, Create app, Publish) for a package that does
  * not exist, and every save there went to a phantom package. It now renders
- * "package not found", with no pillars and no package actions, and a way back
+ * "package not found", with no menu and no package actions, and a way back
  * to the Studio landing. And `/studio/<pkg>/<segment>` for a segment no pillar
  * has fell through to the Interfaces pillar with nothing highlighted; it now
- * renders a not-found state, the real pillars still linked above it. (The
+ * renders a not-found state, the left menu (objectstack#36899, which replaced
+ * the pillars above it) still beside it, nothing in it current. (The
  * Interfaces pillar itself retired with objectstack#36502: its old segment is
  * not "not found" but lands on the Data pillar, pinned last in this file.)
  *
@@ -50,7 +51,16 @@ vi.mock('../metadata-admin/useMetadata', async (importOriginal) => {
   return {
     ...actual,
     useMetadataClient: () => mockClient,
-    useMetadataTypes: () => ({ loading: false, error: null, entries: [] }),
+    // objectstack#36899 — the registry serves the designer types the left menu lists.
+    useMetadataTypes: () => ({
+      loading: false,
+      error: null,
+      entries: [
+        { type: 'object', domain: 'data' },
+        { type: 'flow', domain: 'automation' },
+        { type: 'permission', domain: 'security' },
+      ],
+    }),
   };
 });
 
@@ -134,15 +144,19 @@ async function listAnswered(fetchMock: ReturnType<typeof servePackages>): Promis
   });
 }
 
+const menu = () => screen.getByTestId('studio-menu');
+const menuLinks = () => within(menu()).getAllByRole('link');
+
 describe('Studio: a package id no package has renders "package not found" (objectstack#26708)', () => {
-  it.each(['data', 'automations', 'interfaces', 'access'])('%s: not found, no pillars, no package actions', async (pillar) => {
+  it.each(['data', 'automations', 'interfaces', 'access'])('%s: not found, no menu, no package actions', async (pillar) => {
     const fetchMock = servePackages();
     renderAt(`/studio/${PHANTOM}/${pillar}`);
 
     const notFound = await screen.findByTestId('studio-package-not-found');
     expect(notFound).toHaveTextContent(tFormat('engine.studio.notFound.package', 'en', { id: PHANTOM }));
     const header = screen.getByTestId('studio-shell-header');
-    expect(within(screen.getByTestId('studio-pillar-nav')).queryAllByRole('link')).toHaveLength(0);
+    expect(screen.queryByTestId('studio-menu')).toBeNull();
+    expect(within(header).queryByTestId('studio-menu-toggle')).toBeNull();
     expect(within(header).queryByRole('button', { name: new RegExp(t('engine.studio.publish', 'en')) })).toBeNull();
     expect(within(header).queryByRole('button', { name: new RegExp(t('engine.studio.changes', 'en')) })).toBeNull();
     expect(within(header).queryByTitle(t('engine.studio.app.noneTitle', 'en'))).toBeNull();
@@ -163,8 +177,10 @@ describe('Studio: a package id no package has renders "package not found" (objec
     renderAt(`/studio/${PACKAGE_ID}/data`);
     await listAnswered(fetchMock);
     expect(screen.queryByTestId('studio-package-not-found')).toBeNull();
-    // The three pillars and, objectstack#28561, the "All metadata" area.
-    expect(within(screen.getByTestId('studio-pillar-nav')).getAllByRole('link')).toHaveLength(4);
+    // objectstack#36899 — the left menu, its six groups drawn.
+    for (const group of ['data', 'ui', 'automation', 'system', 'security', 'ai']) {
+      expect(within(menu()).getByTestId(`studio-menu-group-${group}`)).toBeInTheDocument();
+    }
   });
 
   it('CONTROL — a kernel package the Studio landing hides is installed, never "not found"', async () => {
@@ -179,34 +195,28 @@ describe('Studio: a package id no package has renders "package not found" (objec
     renderAt(`/studio/${PHANTOM}/data`);
     await listAnswered(fetchMock);
     expect(screen.queryByTestId('studio-package-not-found')).toBeNull();
-    expect(within(screen.getByTestId('studio-pillar-nav')).getAllByRole('link')).toHaveLength(4);
+    expect(menuLinks().length).toBeGreaterThan(0);
   });
 });
 
 describe('Studio: a pillar segment no pillar has renders a not-found state (objectstack#26708)', () => {
-  it('names the segment, keeps the real pillars linked, and mounts no pillar', async () => {
+  it('names the segment, keeps the menu beside it with nothing current, and mounts no pillar', async () => {
     servePackages();
     renderAt(`/studio/${PACKAGE_ID}/bogus_pillar`);
 
     const notFound = await screen.findByTestId('studio-pillar-not-found');
     expect(notFound).toHaveTextContent(tFormat('engine.studio.notFound.pillar', 'en', { pillar: 'bogus_pillar' }));
-    const links = within(screen.getByTestId('studio-pillar-nav')).getAllByRole('link');
-    expect(links.map((a) => a.getAttribute('href'))).toEqual([
-      `/studio/${PACKAGE_ID}/data`,
-      `/studio/${PACKAGE_ID}/automations`,
-      `/studio/${PACKAGE_ID}/access`,
-      `/studio/${PACKAGE_ID}/metadata`,
-    ]);
+    const links = menuLinks();
+    expect(links.map((a) => a.getAttribute('href'))).toContain(`/studio/${PACKAGE_ID}/metadata/object?package=${PACKAGE_ID}`);
     for (const link of links) expect(link).not.toHaveAttribute('aria-current');
   });
 
   it('CONTROL — the retired interfaces segment is not "not found": it lands on the Data pillar (objectstack#36502)', async () => {
     servePackages();
     renderAt(`/studio/${PACKAGE_ID}/interfaces`);
-    const current = await waitFor(() =>
-      within(screen.getByTestId('studio-pillar-nav')).getByRole('link', { current: 'page' }),
-    );
-    expect(current).toHaveAttribute('href', `/studio/${PACKAGE_ID}/data`);
+    // The Data pillar's entry in the menu is its type's, Objects.
+    const current = await waitFor(() => within(menu()).getByRole('link', { current: 'page' }));
+    expect(current).toHaveAttribute('data-testid', 'studio-menu-entry-type:object');
     expect(screen.queryByTestId('studio-pillar-not-found')).toBeNull();
     expect(screen.getByTestId('studio-interfaces-retired')).toBeInTheDocument();
   });

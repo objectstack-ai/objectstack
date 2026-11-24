@@ -26,7 +26,9 @@
  * source language (`sourceLocale` on `GET /i18n/locales`) over an entry shown
  * by its stored label, the stored label; in any other language, or over a
  * translation, that language's translation of the entry, the stored label
- * kept (`saveAppMenu`). The rename says so when the name will be a
+ * kept (`saveAppMenu`). A stored label written as an inline locale map takes
+ * the name in the entry shown only, every other language kept
+ * (objectstack#36876). The rename says so when the name will be a
  * translation. A link added outside the source language takes its name the
  * same way: stored without one, translated (review N5 of objectstack#36437).
  *

@@ -2,7 +2,8 @@
 
 import { describe, it, expect } from 'vitest';
 import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
-import { AUDIT_FIELD_DEFS, OWNER_FIELD_DEF } from '@objectstack/spec/data';
+import { AUDIT_FIELD_DEFS, OWNER_FIELD_DEF, resolveUserActionTransfer } from '@objectstack/spec/data';
+import { changeOwnerOffReason } from './change-record-owner.js';
 import {
   countUserAssignedWork,
   transferUserAssignedWork,
@@ -35,10 +36,10 @@ describe('[#30205] userAssignedWorkFields', () => {
     const { fields, truncated } = userAssignedWorkFields([ticket, account, grant, managed]);
     expect(truncated).toBe(false);
     expect(fields).toEqual([
-      { object: 'ticket', field: 'owner_id', multiple: false },
-      { object: 'ticket', field: 'assignee', multiple: false },
-      { object: 'ticket', field: 'watchers', multiple: true },
-      { object: 'account', field: 'owner_id', multiple: false },
+      { object: 'ticket', field: 'owner_id', multiple: false, transferable: true },
+      { object: 'ticket', field: 'assignee', multiple: false, transferable: true },
+      { object: 'ticket', field: 'watchers', multiple: true, transferable: false, reason: 'multi_valued' },
+      { object: 'account', field: 'owner_id', multiple: false, transferable: true },
     ]);
   });
 
@@ -47,7 +48,7 @@ describe('[#30205] userAssignedWorkFields', () => {
     // (`system`) that stays assignable, so `system` alone cannot exclude it.
     expect({ system: OWNER_FIELD_DEF.system, readonly: OWNER_FIELD_DEF.readonly }).toEqual({ system: true, readonly: false });
     const { fields } = userAssignedWorkFields([{ name: 'deal', fields: { owner_id: OWNER_FIELD_DEF, ...AUDIT_FIELD_DEFS } }]);
-    expect(fields).toEqual([{ object: 'deal', field: 'owner_id', multiple: false }]);
+    expect(fields).toEqual([{ object: 'deal', field: 'owner_id', multiple: false, transferable: true }]);
   });
 
   it('[ADR-0153 D4] leaves a synced object out — a user field on a pulled row is source data, not reassignable work', () => {
@@ -138,7 +139,7 @@ describe('[#30205] countUserAssignedWork', () => {
       objects: [
         { object: 'ticket', field: 'owner_id', count: 2, transferable: true },
         { object: 'ticket', field: 'assignee', count: 2, transferable: true },
-        { object: 'ticket', field: 'watchers', count: 2, transferable: false },
+        { object: 'ticket', field: 'watchers', count: 2, transferable: false, reason: 'multi_valued' },
         { object: 'account', field: 'owner_id', count: 1, transferable: true },
       ],
       total: 7,
@@ -260,8 +261,9 @@ describe('[#30205] transferUserAssignedWork', () => {
   });
 });
 
-// A master and its `controlled_by_parent` detail. The detail's owner is the
-// person who did the work, not who holds it: its access follows the master.
+// A master and its `controlled_by_parent` detail. The detail declares no
+// `userActions.transfer`, so its Change Owner switch takes the default its
+// sharing model implies: off.
 const expenseReport = {
   name: 'expense_report',
   sharingModel: 'private',
@@ -289,34 +291,83 @@ function expenseSeed(): Record<string, Row[]> {
   };
 }
 
-describe('a controlled_by_parent detail keeps its owner in the hand-over', () => {
-  it('leaves the detail\'s owner_id out of the roster; its own user fields and the master\'s owner stay', () => {
+/** The roster's verdict on an object's `owner_id`, or `undefined` when it is not in the roster. */
+const ownerEntry = (def: unknown) =>
+  userAssignedWorkFields([def]).fields.find((f) => f.field === 'owner_id');
+
+// [#35399] The hand-over's owner column follows the object's Change Owner
+// switch. Subsumes the #35344 interim pin, which left a detail's owner out of
+// the roster: it is now counted, marked `transfer_off`, and never moved.
+describe('[#35399] owner_id follows the object\'s Change Owner switch (userActions.transfer)', () => {
+  it('derived default on a detail: its owner is counted as not transferable (transfer_off); its own user field and the master\'s owner stay transferable', () => {
     expect(userAssignedWorkFields([expenseReport, expenseLine]).fields).toEqual([
-      { object: 'expense_report', field: 'owner_id', multiple: false },
-      { object: 'expense_report', field: 'approver', multiple: false },
-      { object: 'expense_line', field: 'approver', multiple: false },
+      { object: 'expense_report', field: 'owner_id', multiple: false, transferable: true },
+      { object: 'expense_report', field: 'approver', multiple: false, transferable: true },
+      { object: 'expense_line', field: 'owner_id', multiple: false, transferable: false, reason: 'transfer_off' },
+      { object: 'expense_line', field: 'approver', multiple: false, transferable: true },
     ]);
   });
 
-  it('reads the sharing model where the access gates read it, the nested spot included', () => {
-    const nested = { name: 'expense_line', security: { sharingModel: 'controlled_by_parent' }, fields: expenseLine.fields };
-    expect(userAssignedWorkFields([nested]).fields.map((f) => f.field)).toEqual(['approver']);
-  });
-
-  it('twin: the same object under any other sharing model hands its owner over', () => {
-    for (const sharingModel of ['private', 'public_read', 'public_read_write', undefined]) {
-      const owned = { ...expenseLine, sharingModel };
-      expect(userAssignedWorkFields([owned]).fields.map((f) => f.field)).toEqual(['owner_id', 'approver']);
+  it('switch on: a detail that turns userActions.transfer on hands its owner over', () => {
+    for (const transfer of [true, { enabled: true }]) {
+      expect(ownerEntry({ ...expenseLine, userActions: { transfer } })).toEqual(
+        { object: 'expense_line', field: 'owner_id', multiple: false, transferable: true },
+      );
     }
   });
 
-  it('does not count the detail\'s owner_id', async () => {
+  it('switch off: an object that turns userActions.transfer off keeps its owner; its app-authored user field is still handed over', () => {
+    for (const transfer of [false, { enabled: false }]) {
+      const fields = userAssignedWorkFields([{ ...expenseReport, userActions: { transfer } }]).fields;
+      expect(fields).toEqual([
+        { object: 'expense_report', field: 'owner_id', multiple: false, transferable: false, reason: 'transfer_off' },
+        { object: 'expense_report', field: 'approver', multiple: false, transferable: true },
+      ]);
+    }
+  });
+
+  it('twin: the detail under any other sharing model hands its owner over', () => {
+    for (const sharingModel of ['private', 'public_read', 'public_read_write', undefined]) {
+      expect(ownerEntry({ ...expenseLine, sharingModel })?.transferable).toBe(true);
+    }
+  });
+
+  it('an owner_id the platform does not provide is app-authored work: the switch does not govern it', () => {
+    // `systemFields: false` gives the object no platform owner, so an author's
+    // own `owner_id` user field is like any other app user field.
+    const appOwner = { ...expenseLine, systemFields: false, fields: { owner_id: { type: 'user' } } };
+    expect(ownerEntry(appOwner)).toEqual({ object: 'expense_line', field: 'owner_id', multiple: false, transferable: true });
+  });
+
+  it('one rule with Change Owner: the roster\'s owner verdict is resolveUserActionTransfer\'s, and Change Owner refuses exactly what the hand-over keeps', () => {
+    const defs: Array<Record<string, unknown>> = [
+      expenseReport,
+      expenseLine,
+      { ...expenseLine, userActions: { transfer: true } },
+      { ...expenseLine, userActions: { transfer: { enabled: true, visibleWhen: 'record.status == "open"' } } },
+      { ...expenseLine, userActions: { transfer: { visibleWhen: 'true' } } },
+      { ...expenseReport, userActions: { transfer: false } },
+      { ...expenseReport, userActions: { transfer: { enabled: false } } },
+      { ...expenseReport, sharingModel: undefined },
+      // Off-spec nested spot: both doors read the switch only, so they agree here too.
+      { name: 'expense_line', security: { sharingModel: 'controlled_by_parent' }, fields: expenseLine.fields },
+    ];
+    for (const def of defs) {
+      const entry = ownerEntry(def);
+      expect(entry, JSON.stringify(def)).toBeDefined();
+      expect(entry!.transferable, JSON.stringify(def)).toBe(resolveUserActionTransfer(def).enabled);
+      expect(changeOwnerOffReason(String(def.name), def) === undefined, JSON.stringify(def)).toBe(entry!.transferable);
+    }
+  });
+
+  it('counts the switched-off owner as not transferable, beside the transferable holdings', async () => {
     const summary = await countUserAssignedWork(fakeEngine(expenseSeed(), { configs: EXPENSE_CONFIGS }), 'u_gone', CALLER);
     expect(summary.objects).toEqual([
       { object: 'expense_report', field: 'owner_id', count: 1, transferable: true },
+      { object: 'expense_line', field: 'owner_id', count: 2, transferable: false, reason: 'transfer_off' },
       { object: 'expense_line', field: 'approver', count: 1, transferable: true },
     ]);
-    expect(summary.total).toBe(2);
+    expect(summary.total).toBe(4);
   });
 
   it('moves the master\'s owner and the detail\'s approver, never the detail\'s owner', async () => {
@@ -326,12 +377,13 @@ describe('a controlled_by_parent detail keeps its owner in the hand-over', () =>
       { object: 'expense_report', field: 'owner_id', updated: 1, failed: 0, failures: [] },
       { object: 'expense_line', field: 'approver', updated: 1, failed: 0, failures: [] },
     ]);
+    // `remaining` counts only what a further call could move.
     expect(report.remaining).toBe(0);
     expect(engine.tables.get('expense_report')![0].owner_id).toBe('u_next');
     expect(engine.tables.get('expense_line')!.map((r) => [r.owner_id, r.approver])).toEqual([['u_gone', 'u_next'], ['u_gone', 'u_x']]);
-    // No write named the detail's owner column.
-    const ownerWrites = engine.calls.filter((c) => c.op === 'update' && c.object === 'expense_line');
-    expect(ownerWrites).toHaveLength(1);
+    // No read or write named the detail's owner column.
+    expect(engine.calls.some((c) => c.object === 'expense_line' && c.op !== 'count' && 'owner_id' in (c.where ?? {}))).toBe(false);
+    expect(engine.calls.filter((c) => c.op === 'update' && c.object === 'expense_line')).toHaveLength(1);
   });
 
   it('a transfer naming the detail alone moves its approver and leaves its owner', async () => {
@@ -340,5 +392,32 @@ describe('a controlled_by_parent detail keeps its owner in the hand-over', () =>
     expect(report.updated).toBe(1);
     expect(engine.tables.get('expense_line')!.map((r) => r.owner_id)).toEqual(['u_gone', 'u_gone']);
     expect(engine.calls.some((c) => c.op === 'find' && c.object === 'expense_line' && 'owner_id' in (c.where ?? {}))).toBe(false);
+  });
+
+  it('switch on: the detail\'s owner is moved like any other', async () => {
+    const opened = { ...expenseLine, userActions: { transfer: true } };
+    const engine = fakeEngine(expenseSeed(), { configs: { ...EXPENSE_CONFIGS, expenseLine: opened } });
+    const report = await transferUserAssignedWork(engine, 'u_gone', 'u_next', CALLER, { objects: ['expense_line'] });
+    expect(report.objects).toEqual([
+      { object: 'expense_line', field: 'owner_id', updated: 2, failed: 0, failures: [] },
+      { object: 'expense_line', field: 'approver', updated: 1, failed: 0, failures: [] },
+    ]);
+    expect(engine.tables.get('expense_line')!.map((r) => r.owner_id)).toEqual(['u_next', 'u_next']);
+  });
+
+  it('optional master: a row whose master reference is empty follows the object\'s switch too — counted, never moved', async () => {
+    const optional = {
+      ...expenseLine,
+      fields: { ...expenseLine.fields, report: { type: 'master_detail', reference: 'expense_report', required: false } },
+    };
+    const rows = expenseSeed();
+    rows.expense_line.push({ id: 'l3', report: null, owner_id: 'u_gone', approver: 'u_x' });
+    const configs = { ...EXPENSE_CONFIGS, expenseLine: optional };
+    const summary = await countUserAssignedWork(fakeEngine(rows, { configs }), 'u_gone', CALLER);
+    expect(summary.objects.find((o) => o.object === 'expense_line' && o.field === 'owner_id'))
+      .toEqual({ object: 'expense_line', field: 'owner_id', count: 3, transferable: false, reason: 'transfer_off' });
+    const engine = fakeEngine(rows, { configs });
+    await transferUserAssignedWork(engine, 'u_gone', 'u_next', CALLER);
+    expect(engine.tables.get('expense_line')!.find((r) => r.id === 'l3')!.owner_id).toBe('u_gone');
   });
 });

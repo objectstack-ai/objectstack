@@ -3462,6 +3462,7 @@ const en = {
       summary: 'Records you can read: {{total}}, owns {{owned}}, assigned {{assigned}}.',
       row: '{{object}} · {{field}}',
       notTransferable: 'Lists several people, so it cannot be handed over here.',
+      ownerKept: 'Not handed over: this object keeps the owner of each record (Change Owner is off for it).',
       truncated: 'Not every user field was counted; this person may hold more.',
       unreadable: 'Not counted, because you cannot read them: {{objects}}',
       handoverTo: 'Hand over to',

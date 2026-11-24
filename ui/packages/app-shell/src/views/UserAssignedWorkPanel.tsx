@@ -18,8 +18,10 @@
  * answer as it came: it computes no count of its own.
  *
  * "Owned" is the records whose `owner_id` names the user; every other user
- * field is "assigned". A multi-valued user field is counted but cannot be
- * handed over here (the server answers `transferable: false`).
+ * field is "assigned". A row the server answers `transferable: false` for is
+ * counted but not handed over here, and the panel words it by the server's
+ * `reason`: a multi-valued user field, or the owner of an object whose Change
+ * Owner switch is off (that object keeps its records' owner).
  *
  * ## Never in the ban's way
  *
@@ -239,6 +241,11 @@ export function UserAssignedWorkPanel({ userId }: UserAssignedWorkPanelProps) {
   );
 }
 
+/** The sentence a not-transferable row is worded with, chosen by why the server holds it back. */
+function notTransferableKey(reason: AssignedWorkSummary['objects'][number]['reason']): string {
+  return reason === 'transfer_off' ? 'console.assignedWork.ownerKept' : 'console.assignedWork.notTransferable';
+}
+
 function AssignedWorkSummaryView({
   summary,
   objectText,
@@ -268,7 +275,9 @@ function AssignedWorkSummaryView({
               <span className="min-w-0">
                 {t('console.assignedWork.row', { object: objectText(row.object), field: fieldText(row.object, row.field) })}
                 {!row.transferable && (
-                  <span className="block text-xs text-muted-foreground">{t('console.assignedWork.notTransferable')}</span>
+                  <span className="block text-xs text-muted-foreground" data-testid="user-assigned-work-not-transferable">
+                    {t(notTransferableKey(row.reason))}
+                  </span>
                 )}
               </span>
               <span className="shrink-0 tabular-nums font-medium">{row.count}</span>

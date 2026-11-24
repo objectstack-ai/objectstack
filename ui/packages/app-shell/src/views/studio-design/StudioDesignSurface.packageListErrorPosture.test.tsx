@@ -129,8 +129,10 @@ describe('Studio top bar — package-list fetch failure is reported, not swallow
     renderSurface();
 
     await waitFor(() => expect(toastError).toHaveBeenCalled());
-    // The rest of the header survived the failure.
-    expect(screen.getByRole('link', { name: 'Automations' })).toBeInTheDocument();
+    // The rest of the chrome survived the failure: the menu toggle and, since
+    // objectstack#36899, the left menu that replaced the pillar links.
+    expect(screen.getByTestId('studio-menu-toggle')).toBeInTheDocument();
+    expect(screen.getByRole('navigation', { name: 'Studio menu' })).toBeInTheDocument();
     // …and its way out still works (objectstack#36501): no app is known, so
     // it goes to the console's landing.
     fireEvent.click(screen.getByTestId('studio-back-to-app'));
