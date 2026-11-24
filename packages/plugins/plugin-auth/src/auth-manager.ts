@@ -5095,11 +5095,12 @@ export class AuthManager {
    * An inactive state also removes the user's local password: every
    * `sys_account` row of the user with `provider_id = 'credential'`
    * (`scim-deactivation-password-removal.ts`, the same ruling's later step). It
-   * runs on every inactive call after the suspension and before the mark, and
-   * is idempotent: nothing to remove means no write. A refused last-
-   * administrator ban throws before it, so that refusal removes nothing. A
-   * removal that does not finish never fails the deprovision (the ban already
-   * landed); it is reported once at `error`.
+   * runs on every inactive call after the suspension and the ending of the
+   * user's registrations, and before the mark; it is idempotent: nothing to
+   * remove means no write. A refused last-administrator ban throws before it,
+   * so that refusal removes nothing. A removal that does not finish never
+   * fails the deprovision (the ban already landed); it is reported once at
+   * `error`.
    *
    * A re-activation by the directory restores access through SSO only: the
    * `active: true` call that lifts the directory's own ban runs the same

@@ -66,9 +66,9 @@
  *    (`reattachInternalFieldsOnRead`), and a removal has no use for it;
  *  - the engine write carries the same system context and the same
  *    attribution (`authSystemWriteContext`: the SCIM connection as a service
- *    principal) as the deprovision's other two writers (the key revocation and
- *    the AI service account suspension) and the directory-managed mark, which
- *    all run through it on this path.
+ *    principal) as the deprovision's key revocation and AI service account
+ *    suspension and the directory-managed mark, which all run through it on
+ *    this path.
  *
  * `scim-deactivation-reconcile-user.test.ts` pins the rollback: a deactivation
  * that fails after this removal leaves the password in place.
@@ -76,7 +76,8 @@
  * ## Order, sessions and the directory-managed mark
  *
  * On a deactivation the caller runs this after the ban write, the key
- * revocation and the AI service account suspension. A ban the break-glass
+ * revocation, the AI service account suspension and the ending of the user's
+ * registrations (`removed-account-registrations.ts`). A ban the break-glass
  * last-administrator guard refuses throws before this runs, so a refused
  * deactivation removes nothing (and the vendor rolls its own write back).
  * Sessions are not this module's: the vendor deletes the user's sessions after
