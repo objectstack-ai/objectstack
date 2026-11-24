@@ -4187,3 +4187,110 @@ describe('[#32681] the plural read counts an action name\'s holders per (object,
     expect(await reads(m)).toEqual(without);
   });
 });
+
+// ---------- [#37013] the platform's record beside a package's same-named item ----------
+
+describe('[#37013] a platform-registered skill and a package\'s same-named skill keep a slot each, in memory and in sys_metadata', () => {
+  const NAME = 'data_explorer';
+  const PKG = 'com.acme.crm';
+  const platformSkill = (instructions: string) => ({ name: NAME, label: 'Data explorer', instructions });
+  const packageSkill = (instructions: string) => ({ name: NAME, label: 'CRM explorer', instructions, _packageId: PKG, _provenance: 'package' });
+
+  let driver: IDataDriver;
+  const managerOver = () => new MetadataManager({ formats: ['json'], loaders: [new DatabaseLoader({ driver })] });
+  /** A process that starts over the same rows, primed as the boot pass primes it (`MetadataPlugin`). */
+  async function booted(): Promise<MetadataManager> {
+    const manager = managerOver();
+    for (const item of await manager.loadMany<Record<string, unknown>>('skill')) {
+      await manager.register('skill', item.name as string, item, { notify: false, skipSourceLoader: true });
+    }
+    return manager;
+  }
+  const rows = async () => ((await driver.find('sys_metadata', { where: { type: 'skill', name: NAME } } as any)) as Array<Record<string, unknown>>)
+    .map((row) => ({ package_id: row.package_id ?? null, body: typeof row.metadata === 'string' ? JSON.parse(row.metadata) : row.metadata }));
+  const rowOf = async (packageId: string | null) => (await rows()).find((row) => row.package_id === packageId)?.body;
+
+  beforeEach(() => {
+    driver = createMockDriver();
+  });
+
+  /** The platform registers at boot, then a package installs a skill of the same name. */
+  async function platformThenPackage(): Promise<MetadataManager> {
+    const manager = managerOver();
+    await manager.register('skill', NAME, platformSkill('platform v1'), { notify: false, origin: 'platform' });
+    await manager.register('skill', NAME, packageSkill('package rules'), { notify: false });
+    return manager;
+  }
+
+  it('platform register, then a package write of the same name: both readable, each from its own slot (BASE: the package took over the platform\'s slot and row)', async () => {
+    const manager = await platformThenPackage();
+    expect(((await manager.getPlatformItem('skill', NAME)) as any)?.instructions).toBe('platform v1');
+    expect(((await manager.getPlatformItem('skill', NAME)) as any)?._provenance).toBe('platform');
+    expect(((await manager.get('skill', NAME, PKG)) as any)?.instructions).toBe('package rules');
+    expect(((await manager.list('skill')) as any[]).map((item) => item.instructions).sort()).toEqual(['package rules', 'platform v1']);
+    expect((await rows()).map((row) => [row.package_id, row.body.instructions]).sort()).toEqual([[null, 'platform v1'], [PKG, 'package rules']]);
+    // …and a process that starts over the rows reads both, the stored platform stamp kept as it was read.
+    const cold = managerOver();
+    expect(((await cold.getPlatformItem('skill', NAME)) as any)?.instructions).toBe('platform v1');
+    const primed = await booted();
+    expect(((await primed.getPlatformItem('skill', NAME)) as any)?.instructions).toBe('platform v1');
+    expect(((await primed.get('skill', NAME, PKG)) as any)?.instructions).toBe('package rules');
+    expect((await rows()).map((row) => [row.package_id, row.body.instructions]).sort()).toEqual([[null, 'platform v1'], [PKG, 'package rules']]);
+  });
+
+  it('the platform re-registering on the next boot leaves the package\'s slot byte-identical (BASE: folded into the package\'s row as its customization)', async () => {
+    await platformThenPackage();
+    const before = JSON.stringify(await rowOf(PKG));
+    const next = await booted();
+    await next.register('skill', NAME, platformSkill('platform v2'), { notify: false, origin: 'platform' });
+    expect(JSON.stringify(await rowOf(PKG))).toBe(before);
+    expect(((await next.get('skill', NAME, PKG)) as any)?.instructions).toBe('package rules');
+    expect((await rowOf(null))?.instructions).toBe('platform v2');
+    expect(((await next.getPlatformItem('skill', NAME)) as any)?.instructions).toBe('platform v2');
+  });
+
+  it('the platform withdrawing its record leaves the package\'s slot (BASE: a removal naming no package took every slot of a one-holder name)', async () => {
+    const manager = await platformThenPackage();
+    const before = JSON.stringify(await rowOf(PKG));
+    await manager.unregister('skill', NAME, { notify: false, origin: 'platform' });
+    expect(await manager.getPlatformItem('skill', NAME)).toBeUndefined();
+    expect(((await manager.get('skill', NAME, PKG)) as any)?.instructions).toBe('package rules');
+    expect((await rows()).map((row) => row.package_id)).toEqual([PKG]);
+    expect(JSON.stringify(await rowOf(PKG))).toBe(before);
+  });
+
+  it('the package\'s removal leaves the platform\'s slot', async () => {
+    const manager = await platformThenPackage();
+    await manager.unregister('skill', NAME, { notify: false, packageId: PKG });
+    expect(((await manager.list('skill')) as any[]).map((item) => item.instructions)).toEqual(['platform v1']);
+    expect(((await manager.getPlatformItem('skill', NAME)) as any)?.instructions).toBe('platform v1');
+    expect((await rows()).map((row) => row.package_id)).toEqual([null]);
+  });
+
+  it('a package-less environment write under a platform name does not carry the platform origin, even when its body claims it', async () => {
+    const manager = managerOver();
+    await manager.register('skill', NAME, platformSkill('platform v1'), { notify: false, origin: 'platform' });
+    await manager.register('skill', NAME, { ...platformSkill('edited in the environment'), _provenance: 'platform' }, { notify: false });
+    const stored = (await manager.get('skill', NAME)) as any;
+    expect(stored?.instructions).toBe('edited in the environment');
+    expect(stored?._provenance).toBeUndefined();
+    expect((await rowOf(null))?._provenance).toBeUndefined();
+    expect(await manager.getPlatformItem('skill', NAME), 'the environment\'s own item is not the platform\'s record').toBeUndefined();
+  });
+
+  it('a package\'s write never carries the platform origin either: its item stays the package\'s', async () => {
+    const manager = managerOver();
+    await manager.register('skill', NAME, { ...packageSkill('package rules'), _provenance: 'platform' }, { notify: false });
+    expect(((await manager.get('skill', NAME, PKG)) as any)?._provenance).toBeUndefined();
+    expect(await manager.getPlatformItem('skill', NAME)).toBeUndefined();
+  });
+
+  it('CONTROL — without the platform origin, a package-less write beside one package is still that package\'s customization (D4), and a removal naming none of a one-holder name still takes it', async () => {
+    const manager = managerOver();
+    await manager.register('skill', NAME, packageSkill('package rules'), { notify: false });
+    await manager.register('skill', NAME, platformSkill('package-less'), { notify: false });
+    expect((await rows()).map((row) => [row.package_id, row.body.instructions])).toEqual([[PKG, 'package-less']]);
+    await manager.unregister('skill', NAME, { notify: false });
+    expect(await rows()).toEqual([]);
+  });
+});
