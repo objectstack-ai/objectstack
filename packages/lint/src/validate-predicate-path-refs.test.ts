@@ -702,7 +702,10 @@ describe('#7010 corpus — shipped METADATA_FORM_REGISTRY', () => {
     // It is 93 today, an ADDITION of TWO: #35096 and #34823 offered the action
     // form's `texts` and `refusals` rows, each gated like `body` on
     // `data.type == 'script'`. They reach the literal-comparison census below.
-    expect(predicates, 'the shipped metadata forms carry no predicates at all').toBe(93);
+    // It is 94 today, an ADDITION of ONE: #35926 offered the field form's
+    // `inlineEdit` select, gated on `data.type in ['lookup','master_detail']`. It
+    // is an in-list, so it does not reach the literal-comparison census below.
+    expect(predicates, 'the shipped metadata forms carry no predicates at all').toBe(94);
 
     const findings = validatePredicatePathRefs(corrupted);
     expect(findings).toHaveLength(predicates);

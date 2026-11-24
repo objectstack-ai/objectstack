@@ -94,6 +94,8 @@ export const DEFAULT_METADATA_EVAL_CORPUS: MetadataEvalCase[] = [
               reference: 'invoice',
               required: true,
               deleteBehavior: 'cascade',
+              // The form factor of the lines the invoice's field group places.
+              inlineEdit: 'grid',
               relatedListTitle: 'Line Items',
             },
             product: { type: 'text', label: 'Product', required: true },
@@ -160,6 +162,8 @@ export const DEFAULT_METADATA_EVAL_CORPUS: MetadataEvalCase[] = [
               reference: 'project',
               required: true,
               deleteBehavior: 'cascade',
+              // The form factor of the tasks the project's field group places.
+              inlineEdit: 'grid',
             },
             status: {
               type: 'select',
@@ -251,6 +255,8 @@ export const DEFAULT_METADATA_EVAL_CORPUS: MetadataEvalCase[] = [
               reference: 'expense_report',
               required: true,
               deleteBehavior: 'cascade',
+              // The form factor of the lines the report's field group places.
+              inlineEdit: 'grid',
             },
             category: {
               type: 'select',
