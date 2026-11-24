@@ -20,7 +20,10 @@ import { z } from 'zod';
  *                     are reserved for Phase 3/2 respectively).
  *  - `_provenance`  — `'package'` for loader-introduced items,
  *                     `'org'` for tenant-authored, `'env-forced'`
- *                     reserved for emergency overrides.
+ *                     reserved for emergency overrides, `'platform'`
+ *                     for a record the platform's own code registers
+ *                     (a store-slot marker, set by the metadata service
+ *                     only).
  *  - `_packageId` / `_packageVersion` — denormalised from the
  *                     registry tag so consumers don't need a second
  *                     round-trip to inspect provenance.
@@ -56,9 +59,11 @@ export type MetadataLockSource = z.input<typeof MetadataLockSourceSchema>;
 
 /**
  * Where the metadata item originated. `'platform'` (#37013) marks a record the
- * platform's own code registers at boot (a built-in skill, agent or tool):
- * the metadata service stamps it only on such a registration, and strips it
- * from every package and environment write.
+ * platform's own code registers at boot (a built-in skill, agent or tool) and
+ * is a store-slot marker only: it keeps that record in a slot of its own
+ * beside a package's item of the same name. The metadata service sets it only
+ * on such a registration; every other door that stores or serves a body
+ * strips it, and the artifact door refuses an item that carries it.
  */
 export const MetadataProvenanceSchema = z.enum(['package', 'org', 'env-forced', 'platform']);
 export type MetadataProvenance = z.input<typeof MetadataProvenanceSchema>;
