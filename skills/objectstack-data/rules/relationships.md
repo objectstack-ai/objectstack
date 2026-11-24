@@ -27,7 +27,6 @@ export default ObjectSchema.create({
     account_id: {
       type: 'lookup',
       reference: 'account',
-      required: false,
     },
   }
 });
@@ -36,7 +35,7 @@ export default ObjectSchema.create({
 ### One-to-Many: master_detail
 
 ```typescript
-// Parent: Invoice
+// Parent
 export default ObjectSchema.create({
   name: 'invoice',
   sharingModel: 'public_read_write',
@@ -53,7 +52,7 @@ export default ObjectSchema.create({
   }
 });
 
-// Child: Line Item (owned by parent)
+// Child
 export default ObjectSchema.create({
   name: 'invoice_line_item',
   sharingModel: 'controlled_by_parent',
@@ -154,7 +153,6 @@ export default ObjectSchema.create({
     parent_category: {
       type: 'tree',
       reference: 'category',
-      required: false,
     },
   }
 });
@@ -177,6 +175,12 @@ then cascades, clears or refuses exactly as a `lookup` does; undeclared, the
 field keeps the deleted user's id. `restrict`, and `set_null` on a `required`
 field (a `multiple` one only when the removal would empty it), refuse the delete
 with `409 DELETE_RESTRICTED`.
+
+**Change Owner:** `transferBehavior: 'cascade'` (default `'none'`) on a child's `lookup` /
+`master_detail` has the parent's Change Owner dialog offer to move the child rows its
+previous owner owns too; declare it where children follow the parent's owner. Parse
+refuses the key on other types, and `cascade` on a `sys_*` reference, `multiple: true`,
+or a child not offering Change Owner itself (a `controlled_by_parent` detail).
 
 ## Roll-up Summaries
 
@@ -253,9 +257,8 @@ field group of the parent names that child** (`relatedList`): the group draws
 the child's table at its place in the record's details and in the parent's
 entry form (below the form's fields when its sections name no field group),
 and parent + children save in **one atomic transaction**. Without the group
-nothing changes: the child is a tab and the form has no lines, whatever
-`inlineEdit` says. A parent or child declaring `enable.apiMethods` must list
-`'bulk'`, or that save is refused `405 OBJECT_API_METHOD_NOT_ALLOWED`.
+nothing changes: the child is a tab and the form has no lines. A parent or child
+declaring `enable.apiMethods` must list `'bulk'`, or that save is refused `405 OBJECT_API_METHOD_NOT_ALLOWED`.
 
 ```typescript
 // PARENT `invoice`: the group places the lines and holds no fields
@@ -282,17 +285,17 @@ The rendering side: objectstack-ui → Master-Detail Forms.
 `inlineEdit` only picks how a placed child's rows are entered:
 
 ```typescript
-inlineEdit: true       // auto — pick grid/form from the child's shape (default)
+inlineEdit: true       // auto (default)
 inlineEdit: 'grid'     // editable line-item grid (fast bulk entry; thin children)
 inlineEdit: 'form'     // read-only list; "Add" / per-row edit opens the FULL form
 ```
 
 **`true`** / omitted — **smart default**: picks `form` when the child has
 rich/form-only fields (textarea, file, image, json, location…) or more than ~8
-editable fields, else `grid`. Set the string to override.
+editable fields, else `grid`.
 
 **Modeling a `'grid'` line item for the full editor.** The grid lights up extra
-behaviors purely from how you model the child + parent:
+behaviors from how you model the child + parent:
 
 ```typescript
 // Parent (a field group names invoice_line, as above)
@@ -379,24 +382,9 @@ surfaces a "children" list.
 
 ### ❌ Incorrect — Using lookup When master_detail is Needed
 
-```typescript
-export default ObjectSchema.create({
-  name: 'invoice_line_item',
-  fields: {
-    invoice_id: {
-      type: 'lookup',  // ❌ Child can exist without parent — use the master_detail pattern above
-      reference: 'invoice',
-    },
-  }
-});
-```
+A line item on a `lookup` can exist without its parent: use `master_detail`.
 
 ### ❌ Incorrect — Native Many-to-Many
 
-```typescript
-{
-  type: 'many_to_many',  // ❌ Not a valid field type — use a junction object
-  reference: 'tag',
-}
-```
+No `many_to_many` field type exists: use a junction object.
 
