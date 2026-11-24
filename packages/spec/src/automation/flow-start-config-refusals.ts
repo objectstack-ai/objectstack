@@ -90,7 +90,7 @@ export function flowStartScheduleReadsNothing(raw: unknown): boolean {
 function typedAliasHint(raw: Record<string, unknown>): string {
   const has = (k: string) => Object.prototype.hasOwnProperty.call(raw, k);
   if (raw.type === 'cron' && has('cron') && !has('expression')) {
-    return " A typed cron schedule names its cron in `expression`, not `cron`: write `{ type: 'cron', expression: '…' }`.";
+    return " A typed cron schedule names its cron in `expression`, not `cron`: write `{ type: 'cron', expression: '…', timezone: 'UTC' }`.";
   }
   if (raw.type === 'interval' && has('every') && !has('intervalMs')) {
     return " A typed interval schedule names its period in `intervalMs`, not `every`: write `{ type: 'interval', intervalMs: … }`.";
@@ -102,8 +102,8 @@ function scheduleRefusal(raw: unknown): string | undefined {
   if (raw == null || typeof raw === 'string') {
     return typeof raw === 'string' && flowStartScheduleReadsNothing(raw)
       ? 'The start node\'s `config.schedule` is an empty string, so no schedule is read from it: a schedule ' +
-          'flow stays unbound and a time-relative sweep falls back to daily 08:00 UTC. Write a cron expression ' +
-          "(e.g. '0 8 * * *') or remove the key."
+          'flow stays unbound and a time-relative sweep falls back to daily 08:00 UTC. Write ' +
+          "`{ type: 'cron', expression: '0 8 * * *', timezone: 'UTC' }` or remove the key."
       : undefined;
   }
   if (isRecord(raw) && Object.prototype.hasOwnProperty.call(raw, 'type')) {
@@ -117,7 +117,7 @@ function scheduleRefusal(raw: unknown): string | undefined {
         ' The schedule ' +
         'readers cannot use it, so a schedule flow stays unbound and a time-relative sweep falls back to daily ' +
         "08:00 UTC. Write `{ type: 'cron', expression: '0 8 * * *', timezone: 'UTC' }`, " +
-        "`{ type: 'interval', intervalMs: 60000 }` or `{ type: 'once', at: '<ISO datetime>' }`, or a bare cron string."
+        "`{ type: 'interval', intervalMs: 60000 }` or `{ type: 'once', at: '<ISO datetime>' }`."
       );
     }
   }
@@ -125,8 +125,8 @@ function scheduleRefusal(raw: unknown): string | undefined {
   return (
     'The start node\'s `config.schedule` names no schedule the readers can use (a cron `expression` as a ' +
     'string, a positive `intervalMs`, or an `at` datetime), so a schedule flow stays unbound and a ' +
-    'time-relative sweep falls back to daily 08:00 UTC. Write a cron string such as \'0 8 * * *\', or ' +
-    "`{ type: 'cron', expression: '0 8 * * *' }`, `{ type: 'interval', intervalMs: 60000 }` or " +
+    'time-relative sweep falls back to daily 08:00 UTC. Write ' +
+    "`{ type: 'cron', expression: '0 8 * * *', timezone: 'UTC' }`, `{ type: 'interval', intervalMs: 60000 }` or " +
     "`{ type: 'once', at: '<ISO datetime>' }`."
   );
 }

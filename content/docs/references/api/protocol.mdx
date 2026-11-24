@@ -1657,6 +1657,7 @@ One changed key path of the pending draft, and the last write that changed it.
 | **items** | `any[]` | ✅ | Array of metadata items |
 | **registrations** | `Record<string, { state: 'registered' } \| { state: 'refused'; reason: object } \| { state: 'unregistered' }>` | optional | The automation engine's verdict on each listed flow, keyed by the item's `name`: one entry per listed item that is not a pending draft. Present only on a `flow` list answered by a process that runs an automation service; absent otherwise, and absence means no engine judged them, never `registered`. The verdict is the answering process's engine. Beside the items, never inside one: an item's `status` stays what its author declared. |
 | **disabledActions** | `Record<string, string[]>` | optional | For each listed object, keyed by the item's `name`: the names in its `actions` that this deployment's activation ledger switches off, so a call to any of them is refused 409 `ACTION_DISABLED` (the item read's `disabledActions`). One entry per listed object that is not a pending draft, `[]` when none of its actions is switched off. Present only on an `object` list answered by a process whose data engine has an activation ledger attached; absent otherwise, and absence means no ledger answered, never that nothing is switched off. Beside the items, never inside one: each item's `actions` is served as declared. |
+| **changedAt** | `Record<string, string>` | optional | When each listed item last changed, keyed by the item's `name`: the `updated_at` of the stored row whose content the list serves for that item, an ISO-8601 instant in UTC written with `Z`. One entry per listed item served from a stored row; an item the list serves from code (a code-shipped or file-loaded definition) has no recorded change time and no entry, never a stand-in such as the read time. Where an item has several stored layers in scope (its package's own row, the package-less row, the package's declared override, environment-wide or scoped to one package), the time is the effective layer's: the row whose content is the listed item. On a `?preview=draft` list an item whose pending draft is served (`_draft: true`) has the draft row's time, since the draft is its content. Where several listed items share a name (a name two or more packages ship, the members of a bundle), the latest of their times. Only the names of items in this answer are keyed, and a door that leaves out some item of a name (the per-caller read gate, a query filter) answers no entry for that name, since the entry may be the time of the item it left out. A view a stored view container expands is not served from a row of its own name and has no entry. Absent when no listed item is served from a stored row. Beside the items, never inside one: an item's body is served as stored. |
 
 ### Nested Shape: `GetMetaItemsResponse.registrations[string][state='registered']`
 
@@ -1697,13 +1698,14 @@ One changed key path of the pending draft, and the last write that changed it.
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **types** | `string[]` | ✅ | Available metadata type names (e.g., "object", "plugin", "view") |
-| **entries** | `{ type: string; label: string; description?: string; filePatterns: string[]; … }[]` | optional | Enriched per-type registry entries (Phase 3a) |
+| **entries** | `{ type: string; schemaId: string; label: string; description?: string; … }[]` | optional | Enriched per-type registry entries (Phase 3a) |
 
 ### Nested Shape: `GetMetaTypesResponse.entries[number]`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **type** | `string` | ✅ | Singular type identifier |
+| **schemaId** | `string` | ✅ | Same value as `type`: the id the type's `schema`, `form` and `list` are bound to |
 | **label** | `string` | ✅ | Human-readable label |
 | **description** | `string` | optional | Brief description |
 | **filePatterns** | `string[]` | ✅ | Glob patterns used to discover artifacts of this type |
@@ -1716,7 +1718,10 @@ One changed key path of the pending draft, and the last write that changed it.
 | **domain** | `Enum<'data' \| 'ui' \| 'automation' \| 'system' \| 'security' \| 'ai'>` | ✅ | Protocol domain |
 | **overrideSource** | `Enum<'registry' \| 'env'>` | ✅ | Whether allowEnvironmentOverlay comes from the static registry or is elevated by the OS_METADATA_WRITABLE environment variable |
 | **createSeed** | `any` | optional | Authoritative minimal valid create seed for this type — Studio/CLI/API derive create defaults from it (single source of truth in @objectstack/spec). Absent for canvas-create types whose shape is built interactively. |
+| **schema** | `Record<string, any>` | optional | JSON Schema of the type, derived from its spec schema, for the generic metadata editor. Absent for a type with neither a spec schema nor a hand-crafted one. |
+| **form** | `{ type?: Enum<'simple' \| 'tabbed' \| 'wizard'>; layout?: Enum<'vertical' \| 'horizontal'>; columns?: integer; title?: string; … }` | optional | Form layout of the type's Studio editor, labels in the request locale. Absent for a type with no declared form, which Studio edits from `schema` alone. |
 | **list** | `{ data?: object \| object \| object; columns: object[] }` | optional | Studio list layout of this type: the columns its metadata list shows, each naming a key of the type schema, headers in the request locale. Absent for a type with no declared list, which Studio lists by name, label and description. |
+| **actions** | `{ name: string; label: string \| Record<string, string>; description?: string \| object \| string \| Record<string, string>; objectName?: string; … }[]` | optional | Type-level actions on a definition of this type (e.g. a datasource "Test connection"): the registry's declarative actions merged with plugin-registered ones. Absent when there are none. |
 
 
 ---
