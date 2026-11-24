@@ -17,7 +17,8 @@
  *                              the form editor of an email template or a
  *                              translation (`StudioBundleItemEditor`, #28569),
  *                              and of a read-only package's dataset (#30064)
- *   <root>/:type/:name/history the item's history
+ *   <root>/:type/:name/history the item's history: its History tab
+ *                              (`?tab=history`), the old address redirected
  *
  * Mirroring Setup's shapes keeps every relative link the pages emit pointing
  * where it points there. What the area adds, it hands the pages through
@@ -49,6 +50,7 @@ import {
 } from './metadataArea.js';
 import { StudioBundleItemEditor } from './StudioBundleItemEditor.js';
 import { BUNDLE_MEMBER_PARAM } from '../metadata-admin/registry.js';
+import { ITEM_TOOL_TAB_PARAM } from '../item-tools/ItemToolTabs.js';
 import type { StudioBaseCustomization } from './StudioDesignSurface.js';
 import type { StudioRefusal } from './metadataError.js';
 
@@ -68,9 +70,6 @@ const MetadataResourceListPage = React.lazy(() =>
 );
 const MetadataResourceEditPage = React.lazy(() =>
   import('../metadata-admin/index.js').then((m) => ({ default: m.MetadataResourceEditPage })),
-);
-const MetadataResourceHistoryPage = React.lazy(() =>
-  import('../metadata-admin/index.js').then((m) => ({ default: m.MetadataResourceHistoryPage })),
 );
 
 /**
@@ -178,6 +177,19 @@ function AreaItemOpen({
   return <MetadataResourceEditPage />;
 }
 
+/**
+ * `<root>/:type/:name/history`: the item's history is its page's History tab
+ * (objectstack#36901, decision 8), so the standalone address opens the item
+ * on that tab, its query kept (`?package=`, `?member=`, the list context).
+ * Cut from the path as it is spelled, so an encoded name stays encoded.
+ */
+function AreaHistoryRedirect(): React.ReactElement {
+  const { pathname, search } = useLocation();
+  const params = new URLSearchParams(search);
+  params.set(ITEM_TOOL_TAB_PARAM, 'history');
+  return <Navigate to={{ pathname: pathname.replace(/\/history\/?$/, ''), search: `?${params}` }} replace />;
+}
+
 /** `<root>/:type/new`: a read-only package takes no new item, so its create URL lands on the list. */
 function AreaCreate(): React.ReactElement {
   const { type = '' } = useParams<{ type: string }>();
@@ -251,7 +263,7 @@ export function StudioMetadataArea({
             <Route path=":type" element={<MetadataResourceListPage />} />
             <Route path=":type/new" element={<AreaCreate />} />
             <Route path=":type/:name" element={<AreaItem editor={editor} />} />
-            <Route path=":type/:name/history" element={<MetadataResourceHistoryPage />} />
+            <Route path=":type/:name/history" element={<AreaHistoryRedirect />} />
           </Routes>
         </React.Suspense>
       </div>
