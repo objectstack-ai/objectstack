@@ -836,9 +836,10 @@ const yieldToEventLoop = (): Promise<void> =>
  * row, and {@link runImport} fails every row on its `fields` for a caller that
  * reaches the runner without that door (the connector pull writes a mapping's
  * `upsertKey` straight through), before any row is read or written. The row
- * sentence is the runner's own, in the request locale and by field label
- * (`validation.field.import_multi_value_match_key`), as the other sentences of
- * the row report are. `keyedBy` names what the door read the key from.
+ * sentence is the runner's own catalog entry by field label
+ * (`validation.field.import_multi_value_match_key`), in the caller's locale
+ * when it passes one and English otherwise, as the other sentences of the row
+ * report are. `keyedBy` names what the door read the key from.
  */
 export function multiValueMatchKeyRefusal(
   matchFields: string[] | string[][],
@@ -1072,19 +1073,23 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
       ? String(context.timezone) : undefined,
   };
 
+  /** A field's LABEL, or its API name where the field has none. */
+  const fieldLabel = (f: string): string => metaMap.get(f)?.label?.trim() || f;
   /**
    * The sentence a {@link rowsSharingKey} row is refused with, in the importing
    * principal's locale through the same catalog and override hook as the cell
    * failures beside it (`validation.field.import_duplicate_match_key`). The
    * key set is named by field LABEL, the API name only where a field has none,
-   * as the cell failures name their column; the row numbers are kept.
+   * as the cell failures name their column; the row numbers are kept. The API
+   * names ride along as `{{field}}` for a deployment override that wants them;
+   * no built-in sentence prints them.
    */
-  const fieldLabel = (f: string): string => metaMap.get(f)?.label?.trim() || f;
   const duplicateMatchKeyMessage = (rowNos: readonly number[], keySet: readonly string[]): string =>
     renderValidationMessage(
       {
         messageKey: 'import_duplicate_match_key',
         label: keySet.map(fieldLabel).join(' + '),
+        field: keySet.join(' + '),
         params: { rows: rowNos.join(', ') },
       },
       { locale: coerceCtx.locale, translate: coerceCtx.translate },
@@ -1095,16 +1100,24 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
    * (`validation.field.import_blank_match_key`, the sets by label, a set's
    * fields joined with ` + ` and the sets with `; `), and a match key naming a
    * field that holds a list or a structured value
-   * (`validation.field.import_multi_value_match_key`, those fields by label).
+   * (`validation.field.import_multi_value_match_key`, those fields by label,
+   * joined with `, `). `{{field}}` carries the same names as API names. The
+   * locale and the override hook are the caller's: a caller that passes no
+   * `context.locale` reads English, and one that passes no `translate` gets no
+   * deployment override (the connector and datasource pulls pass neither).
    */
   const blankMatchKeyMessage = (sets: readonly (readonly string[])[]): string =>
     renderValidationMessage(
-      { messageKey: 'import_blank_match_key', label: sets.map((set) => set.map(fieldLabel).join(' + ')).join('; ') },
+      {
+        messageKey: 'import_blank_match_key',
+        label: sets.map((set) => set.map(fieldLabel).join(' + ')).join('; '),
+        field: sets.map((set) => set.join(' + ')).join('; '),
+      },
       { locale: coerceCtx.locale, translate: coerceCtx.translate },
     );
   const multiValueMatchKeyMessage = (fields: readonly string[]): string =>
     renderValidationMessage(
-      { messageKey: 'import_multi_value_match_key', label: fields.map(fieldLabel).join(', ') },
+      { messageKey: 'import_multi_value_match_key', label: fields.map(fieldLabel).join(', '), field: fields.join(', ') },
       { locale: coerceCtx.locale, translate: coerceCtx.translate },
     );
 
