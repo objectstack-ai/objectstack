@@ -16,6 +16,9 @@ import { translateObject, type TranslationBundle } from '@objectstack/spec/syste
 import { QUEUE_FIELD_DEF, OWNER_FIELD_DEF } from '@objectstack/spec/data';
 import { restoreTranslatedEchoes, translatedEchoLocales } from './protocol-translated-echo.js';
 import { ProtocolDiscoveryAndBasesFacet } from './protocol-discovery-and-bases.js';
+// The save door's module reaches `@objectstack/lint` through dynamic imports;
+// its first load is paid here, during collection, never inside a case's clock.
+import '@objectstack/lint';
 
 const bundle: TranslationBundle = {
     'zh-CN': {
