@@ -186,6 +186,15 @@ const SHARED_NON_REGISTRY_GATES: readonly string[] = [
   // and the walk reads every dataset where it sits, the package bodies
   // included, across the whole artifact.
   'judgeSeedRecordValues',
+  // Seed RECORDS the seed load drops: one its object's own validation rule
+  // refuses, judged by the write path's evaluator (`evaluateValidationRules`,
+  // @objectstack/objectql) one rule at a time, and a keyed record with a blank
+  // key field, in the seed loader's own sentence. Not a registry rule: the
+  // verdict is the runtime's evaluator, which `@objectstack/lint` cannot import
+  // (objectql depends on lint), so only a door that may import the runtime can
+  // inject it; and the walk reads every dataset where it sits, the package
+  // bodies included. Both doors refuse at the same point, after the seed values.
+  'judgeSeedRowRefusals',
   // [ADR-0146 D2, #28410, #28643] The override write gate: an item bearing a
   // name a package in its dependency closure ships, or an `overrides`
   // declaration the gate does not admit, judged by the publish door's own
@@ -374,6 +383,13 @@ const NOT_A_GATE: Readonly<Record<string, readonly string[]>> = {
   // `test/rls-policy-authoring-admission.test.ts`.
   'The engine judge handed to the authoring-rule registry as an input — the rule that reads it is the gate':
     ['stackFilterJudge'],
+  // The seed record walk's inputs and its count. `evaluateValidationRules` is
+  // handed to `judgeSeedRowRefusals` (SHARED_NON_REGISTRY_GATES above) as the
+  // judge, never called by either command; `datasetsOf` lists the datasets the
+  // walk reads, where each sits; `seedRowPairsNotJudged` totals the pairs the
+  // walk left to the load, for a dim note that refuses nothing.
+  'The seed record walk\'s injected evaluator, its dataset list and its not-judged count — the walk that reads them is the gate':
+    ['evaluateValidationRules', 'datasetsOf', 'seedRowPairsNotJudged'],
   // `os validate --target` only (`utils/restriction-profile.ts`): the first
   // reads and parses the target's restriction profile — the input
   // `judgeRestrictionProfile` (VALIDATE_ONLY_GATES above) judges against — and
