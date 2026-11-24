@@ -40,7 +40,7 @@ export const ar: TranslationData = {
         group_overview: { label: 'نظرة عامة' },
         group_apps: { label: 'التطبيقات' },
         nav_marketplace_browse: { label: 'تصفح السوق' },
-        nav_marketplace_installed: { label: 'التطبيقات المثبّتة' },
+        nav_packages: { label: 'الحزم' },
         nav_cloud_connection: { label: 'الاتصال السحابي' },
         group_people_org: { label: 'الأشخاص والمؤسسة' },
         group_access_control: { label: 'التحكم في الوصول' },

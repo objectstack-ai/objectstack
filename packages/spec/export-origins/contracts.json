@@ -207,6 +207,7 @@
     "IPersonalViewDoorsService": "src/contracts/personal-view-doors-service.ts#IPersonalViewDoorsService (interface)",
     "IPluginLifecycleEvents": "src/contracts/plugin-lifecycle-events.ts#IPluginLifecycleEvents (interface)",
     "IPluginValidator": "src/contracts/plugin-validator.ts#IPluginValidator (interface)",
+    "IPrintDoorService": "src/contracts/print-door-service.ts#IPrintDoorService (interface)",
     "IPubSub": "src/contracts/cluster-service.ts#IPubSub (interface)",
     "IQueueService": "src/contracts/queue-service.ts#IQueueService (interface)",
     "IRealtimeService": "src/contracts/realtime-service.ts#IRealtimeService (interface)",

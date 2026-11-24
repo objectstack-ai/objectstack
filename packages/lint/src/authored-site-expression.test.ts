@@ -195,6 +195,9 @@ const EXT = {
 
 const VALIDATOR = { kind: 'validator', why: 'the shared validator: the tool runs `validateExpression` itself' } as const;
 const HOP_FIELD: Fixture = { objects: [REQ, BAL], expression: 'record.balance.nope > 1', severity: 'error', names: 'nope' };
+// [#36237] A list-valued field on the hop target, compared with a scalar.
+const BAL_TAGS = { name: 'bal', fields: { ...BAL.fields, tags: { type: 'tags', label: 'Tags' } } };
+const HOP_LIST: Fixture = { objects: [REQ, BAL_TAGS], expression: "record.balance.tags == 'x'", severity: 'error', names: 'record.balance.tags' };
 const BODY_HOP: Fixture = { objects: [REQ, BAL], expression: "record.meta.name == 'x'", severity: 'error', names: 'sys_metadata' };
 const ANCHOR: Fixture = { objects: [EXT], expression: "record.owner_id == 'u1'", severity: 'warning', names: 'owner_id' };
 const asValue = (f: Fixture): Fixture => ({ ...f, expression: `${f.expression} ? 1 : 0` });
@@ -206,6 +209,7 @@ const SITE_CALLS: Record<ObjectSite, Record<string, Classified>> = {
     isBareReferenceToAny: { kind: 'plumbing', why: "filters the shared validator's findings on a field-rule slot" },
     refuseStoredMetadataBodyHop: { kind: 'pass', fixture: BODY_HOP },
     refuseUndeclaredHopField: { kind: 'pass', fixture: HOP_FIELD },
+    refuseHopListEquality: { kind: 'pass', fixture: HOP_LIST },
     warnUnprovisionedAnchors: { kind: 'pass', fixture: ANCHOR },
     atSlot: { kind: 'plumbing', why: "sets the judged slot's key path on the findings" },
     celSourceOf: { kind: 'plumbing', why: 'reads the CEL source off the slot' },
@@ -231,6 +235,7 @@ const SITE_CALLS: Record<ObjectSite, Record<string, Classified>> = {
     celSourceOf: { kind: 'plumbing', why: 'reads the CEL source off the field' },
     refuseStoredMetadataBodyHop: { kind: 'pass', fixture: asValue(BODY_HOP) },
     refuseUndeclaredHopField: { kind: 'pass', fixture: asValue(HOP_FIELD) },
+    refuseHopListEquality: { kind: 'pass', fixture: asValue(HOP_LIST) },
     // [#35356] ADR-0157 D4: a working-day call whose calendar code is not a quoted literal.
     computedCalendarCodeMessage: {
       kind: 'pass',
@@ -546,6 +551,11 @@ const FLOW_CALLS: Record<string, FlowClassified> = {
     kind: 'pass-silent-here',
     why: 'runs only where a relationship hop is hydrated (a rule condition, a formula); nothing hydrates one at a flow condition',
     fixture: { objects: [FLOW_OBJ, BAL], expression: 'record.balance.nope > 1' },
+  },
+  refuseHopListEquality: {
+    kind: 'pass-silent-here',
+    why: 'runs only where a relationship hop is hydrated (a rule condition, a formula); nothing hydrates one at a flow condition',
+    fixture: { objects: [FLOW_OBJ, BAL_TAGS], expression: "record.balance.tags == 'x'" },
   },
 };
 

@@ -18,7 +18,8 @@ import {
   type PrintPlacementResolution,
 } from './config.js';
 import { principalSessionMinterOf } from './principal-session.js';
-import { PRINT_RECORDS_ROUTE, registerPrintRoutes } from './print-routes.js';
+import { createPrintDoorMember } from './print-door-member.js';
+import { PRINT_RECORDS_ROUTE, registerPrintRoutes, type PrintRoutesDeps } from './print-routes.js';
 import { PrintService, type PrintEngine } from './print-service.js';
 
 /** The service-registry slot the plugin registers {@link PrintService} under. */
@@ -56,6 +57,12 @@ export type PrintServicePluginOptions = PrintPlacementOptions;
  *     configured is answered by the door as the service refuses it
  *     (`SERVICE_UNAVAILABLE` / `503`), never by an unmounted route. A kernel
  *     with no HTTP server mounts no door, and says so once.
+ *
+ * The same door is also a member of the service, `handlePrintDoor`
+ * (`IPrintDoorService`, #36840): a kernel with no `http.server` — a hosted
+ * tenant kernel — is reached through the runtime dispatcher's `/print`
+ * domain, which forwards the request to it. The member runs the very
+ * registration the mount runs, on a private table that never listens.
  */
 export class PrintServicePlugin implements Plugin {
   name = 'com.objectstack.service.print';
@@ -79,15 +86,23 @@ export class PrintServicePlugin implements Plugin {
         return undefined;
       }
     };
-    this.service = new PrintService({
+    const service: PrintService = new PrintService({
       placement,
       driver,
       getEngine: () => optional<PrintEngine>('objectql'),
       getAttachments: () => optional<IFileAttachmentService>(FILE_ATTACHMENT_SERVICE),
       getMinter: () => principalSessionMinterOf(optional<IAuthService>('auth')),
       logger: ctx.logger,
+      // [#36840] The print door for a kernel with no `http.server` (a hosted
+      // tenant kernel): the runtime dispatcher's `/print` domain forwards the
+      // request to this service's `handlePrintDoor`, which runs
+      // `registerPrintRoutes` — the mount the `http.server` branch at
+      // `kernel:ready` runs — over this kernel, on a private table that never
+      // listens, built on the first request.
+      printDoor: createPrintDoorMember((http) => registerPrintRoutes(http, printRoutesDeps(ctx, service))),
     });
-    ctx.registerService(PRINT_SERVICE, this.service);
+    this.service = service;
+    ctx.registerService(PRINT_SERVICE, service);
   }
 
   async start(ctx: PluginContext): Promise<void> {
@@ -137,24 +152,13 @@ export class PrintServicePlugin implements Plugin {
     if (!http) {
       ctx.logger.warn(
         `PrintServicePlugin: no HTTP server is registered, so the print door (POST ${PRINT_RECORDS_ROUTE}) is not ` +
-          'mounted and a console action cannot print a record. The print service is still reachable in-process ' +
-          '(kernel.getService("print")).',
+          'mounted on this kernel. A host whose runtime dispatcher serves this kernel reaches the door through ' +
+          'the print service\'s handlePrintDoor (its /print domain); otherwise a console action cannot print a ' +
+          'record. The print service is still reachable in-process (kernel.getService("print")).',
       );
       return;
     }
-    const optional = <T>(name: string): T | undefined => {
-      try {
-        return ctx.getService<T>(name) ?? undefined;
-      } catch {
-        return undefined;
-      }
-    };
-    registerPrintRoutes(http, {
-      print: service,
-      getEngine: () => optional<unknown>('objectql'),
-      getAuth: () => optional<IAuthService>('auth'),
-      resolveTenancyPosture: () => resolveAdmissionTenancyPosture(ctx),
-    });
+    registerPrintRoutes(http, printRoutesDeps(ctx, service));
     ctx.logger.info(`PrintServicePlugin: print door mounted at POST ${PRINT_RECORDS_ROUTE}`);
   }
 
@@ -162,6 +166,26 @@ export class PrintServicePlugin implements Plugin {
     this.service = undefined;
     this.placement = undefined;
   }
+}
+
+/**
+ * What the door reads, per request: the one set both faces of the door (the
+ * `http.server` mount and the `handlePrintDoor` member) are composed over.
+ */
+function printRoutesDeps(ctx: PluginContext, service: PrintService): PrintRoutesDeps {
+  const optional = <T>(name: string): T | undefined => {
+    try {
+      return ctx.getService<T>(name) ?? undefined;
+    } catch {
+      return undefined;
+    }
+  };
+  return {
+    print: service,
+    getEngine: () => optional<unknown>('objectql'),
+    getAuth: () => optional<IAuthService>('auth'),
+    resolveTenancyPosture: () => resolveAdmissionTenancyPosture(ctx),
+  };
 }
 
 /**
