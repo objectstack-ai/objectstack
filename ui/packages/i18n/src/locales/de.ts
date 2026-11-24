@@ -634,6 +634,8 @@ const de = {
       aggregateNotCompleted: "Die Aktion wurde für die ausgewählten Datensätze nicht abgeschlossen. Einige Datensätze wurden möglicherweise bereits geändert; nach dem Schließen zeigt die Liste ihre aktuellen Werte.",
       resultNotConfirmed: " · Nicht bestätigt {{count}}",
       notConfirmedRecords: "Die Aktion hat zu diesen Datensätzen nichts gemeldet. Prüfen Sie ihre aktuellen Werte:",
+      resultRefused: " · Abgelehnt {{count}}",
+      refusedRecords: "Die Aktion hat diese Datensätze abgelehnt:",
       aggregateUnreadable: "Die Aktion wurde beendet, aber ihr Ergebnis konnte nicht gelesen werden, daher ist nicht bekannt, welche Datensätze geändert wurden. Nach dem Schließen zeigt die Liste ihre aktuellen Werte.",
       retry: "Erneut versuchen",
       downloadErrorCsv: "Fehler-CSV herunterladen",

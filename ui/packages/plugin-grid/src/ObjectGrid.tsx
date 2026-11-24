@@ -100,7 +100,7 @@ import { RowActionMenu, formatActionLabel } from './components/RowActionMenu';
 import { BulkActionBar, FloatingSelectionBarAnchor } from './components/SelectionBar';
 import { RowContextMenuItems, SelectionContextMenuItems } from './components/RowContextMenu';
 import { BulkActionDialog } from './components/BulkActionDialog';
-import type { BulkResult } from './hooks/useBulkExecutor';
+import type { BulkRecordVerdict, BulkResult } from './hooks/useBulkExecutor';
 import type { BulkActionDef } from '@object-ui/types';
 import { type ObjectGridColumnDraft } from './objectGridColumns';
 import { rowRecordId } from './objectGridLinkCell';
@@ -1802,7 +1802,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   });
 
   // --- Action support for action columns ---
-  const { execute: executeAction, updateContext: updateActionContext } = useAction();
+  const { execute: executeAction, updateContext: updateActionContext, runner: actionRunner } = useAction();
 
   // Publish the checkbox selection into the shared ActionRunner context so
   // actions rendered OUTSIDE the grid but inside the same <ActionProvider>
@@ -2894,7 +2894,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     def: BulkActionDef,
     row: Record<string, unknown>,
     params: Record<string, unknown>,
-  ): Promise<void> => {
+  ): Promise<BulkRecordVerdict | void> => {
     const source = def.actionDef as Record<string, any> | undefined;
     if (!source) return;
     const {
@@ -2904,13 +2904,18 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
       resultDialog: _resultDialog,
       ...rest
     } = stripCollectedActionKeys(source);
-    const res = await executeAction({
+    // Dispatched with `reportsRefusal` for this one call (the runner's
+    // `callContext`): a handler that meets a refusal answers it on
+    // `res.refusal` and opens no notice of its own, because the result panel
+    // lists every refused record with its own sentence. One notice per record
+    // would stack N dialogs on that panel; one shared notice would name one.
+    const res = await actionRunner.execute({
       ...rest,
       // `_rowRecord` is the same row-context key the list_item path attaches,
       // so `recordIdParam` / `recordIdField` injection behaves identically.
       params: { ...params, _rowRecord: row },
       toast: { showOnSuccess: false, showOnError: false },
-    } as any);
+    } as any, { reportsRefusal: true });
     // Reject so the executor records this row under its own id in the result
     // (and the error CSV) instead of counting a failed action as succeeded.
     // The refusal's producer-marked `userMessage` rides on the rejection, as
@@ -2920,6 +2925,10 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
       const error = new Error(res?.error || `Action ${def.name} failed`);
       throw res?.userMessage ? Object.assign(error, { userMessage: res.userMessage }) : error;
     }
+    // A refused run is a successful evaluation whose answer was no: it wrote
+    // nothing, so the executor counts it as refused, never as succeeded, and
+    // lists it with this record's own sentence.
+    if (res.refusal) return { refusal: { message: res.refusal.message } };
   };
 
   // Whole-selection dispatcher for a def that opted into

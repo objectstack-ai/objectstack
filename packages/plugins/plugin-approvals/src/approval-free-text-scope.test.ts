@@ -207,10 +207,15 @@ function lastFreeTextColumns(engine: ReturnType<typeof makeEngine>): string[] {
   return lastFreeTextArms(engine).map(a => Object.keys(a)[0]).sort();
 }
 
+/**
+ * `process_label` is the served-text arm over the stored process label, which
+ * this fixture's rows serve (no reader's-locale label is picked): a column of
+ * the request itself, unrelated to the snapshot, so present in both shapes.
+ */
 const UNMASKED_COLUMNS =
-  ['object_name', 'payload_json', 'process_name', 'record_id', 'submitter_id'];
+  ['object_name', 'payload_json', 'process_label', 'process_name', 'record_id', 'submitter_id'];
 const MASKED_COLUMNS =
-  ['object_name', 'process_name', 'record_id', 'submitter_id'];
+  ['object_name', 'process_label', 'process_name', 'record_id', 'submitter_id'];
 
 describe('#11040 free-text search does not push a predicate onto a masked snapshot', () => {
   let engine: ReturnType<typeof makeEngine>;
@@ -276,13 +281,14 @@ describe('#11040 free-text search does not push a predicate onto a masked snapsh
       expect(rows.map(r => r.id)).toEqual([REQ_B]);
     });
 
-    it('the `$or` is never empty — four arms always remain', async () => {
+    it('the `$or` is never empty — the four machine arms always remain', async () => {
       await service.listRequests({ object: OBJECT, q: SPLIT_TOKEN }, asUser(APPROVER));
 
       const arms = lastFreeTextArms(engine);
       // An empty `$or: []` reads as match-none on some drivers and match-all on
-      // others; either would be a silent second defect.
-      expect(arms.length).toBe(4);
+      // others; either would be a silent second defect. The fifth is the
+      // stored process label's served-text arm.
+      expect(arms.length).toBe(5);
       expect(lastFreeTextColumns(engine)).toEqual(MASKED_COLUMNS);
       for (const arm of arms) {
         expect(Object.values(arm)[0]).toEqual({ $contains: SPLIT_TOKEN });

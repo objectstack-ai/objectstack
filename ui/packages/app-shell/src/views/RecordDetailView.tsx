@@ -91,7 +91,7 @@ import { useNavigationContext, useRecordBreadcrumbTitle } from '../context/Navig
 import { deriveRecordDetailSections } from './recordDetailSections.js';
 import type { DataSource, FeedItem, Reaction, RecordPageOperation, RecordPagePayload } from '@object-ui/types';
 import { arrangedHeaderActions, placedHeaderActions } from '@object-ui/types';
-import type { ActionDef, ActionParamDef, ActionResult, ConfirmationHandler, ParamCollectionHandler } from '@object-ui/core';
+import type { ActionContext, ActionDef, ActionParamDef, ActionResult, ConfirmationHandler, ParamCollectionHandler } from '@object-ui/core';
 import type { ConsoleActionDispatch } from '../consoleActionDispatch.js';
 import { useRecordApprovals, openApprovalOf, isSubmitterOf } from '../hooks/useRecordApprovals.js';
 import { RecordAttachmentsPanel } from './RecordAttachmentsPanel.js';
@@ -2262,7 +2262,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
    *   declared action is absent from `objects`, so it keeps that route too,
    *   as every flow click did before.
    */
-  const flowHandler = useCallback(async (action: ActionDef) => {
+  const flowHandler = useCallback(async (action: ActionDef, context?: ActionContext) => {
     const flowName = action.target || action.name;
     if (!flowName) {
       return { success: false, error: 'No flow target provided for flow action' };
@@ -2325,8 +2325,11 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         });
       }
       // Ended `refused`: the Close-only notice carries the engine's sentence,
-      // titled with the action the user clicked.
-      if (judged.followUp?.kind === 'refusal') {
+      // titled with the action the user clicked. A caller that reports the
+      // refusal itself (`reportsRefusal`, the per-record bulk fan-out of a
+      // list on this page) gets it on `judged.result.refusal` instead, as
+      // useConsoleActionRuntime's copy does, so no notice stacks on its result.
+      if (judged.followUp?.kind === 'refusal' && context?.reportsRefusal !== true) {
         setFlowRefusal({ open: true, title: action.label, message: judged.followUp.message });
       }
       if (judged.refresh) notifyViewChanged();

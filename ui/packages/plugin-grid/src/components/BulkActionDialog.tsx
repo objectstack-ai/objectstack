@@ -19,7 +19,7 @@ import {
   Progress,
   ScrollArea,
 } from '@object-ui/components';
-import { AlertTriangle, CheckCircle2, Loader2, XCircle } from 'lucide-react';
+import { AlertTriangle, Ban, CheckCircle2, Loader2, XCircle } from 'lucide-react';
 import { useObjectTranslation } from '@object-ui/react';
 import { useDisplayLocale, useLocalization } from '@object-ui/i18n';
 import { getLazyFieldWidget } from '@object-ui/fields';
@@ -405,13 +405,16 @@ export const BulkActionDialog: React.FC<BulkActionDialogProps> = ({
   // the rows left over are exactly the ones that succeeded. A failure the
   // server answered with a count only leaves the successes unknown, and the
   // result keeps to its count rather than name a record that may have failed.
-  // Rows an aggregate handler did not confirm are neither landed nor failed.
+  // Rows an aggregate handler did not confirm are neither landed nor failed,
+  // and neither are rows a per-record dispatch answered with a refusal.
   const unconfirmedIds = new Set(result?.aggregateUnconfirmed ?? []);
+  const refusedRows = result?.refused ?? [];
+  const refusedIds = new Set(refusedRows.map(r => r.id));
   const succeededRows = (() => {
     if (!result || result.succeeded === 0) return [];
     const failedIds = new Set(result.errors.map(e => e.id));
     const landed = rows.filter(r => r.id != null
-      && !failedIds.has(String(r.id)) && !unconfirmedIds.has(String(r.id)));
+      && !failedIds.has(String(r.id)) && !unconfirmedIds.has(String(r.id)) && !refusedIds.has(String(r.id)));
     return landed.length === result.succeeded ? landed : [];
   })();
   const succeededPreview = succeededRows.slice(0, 5);
@@ -556,12 +559,12 @@ export const BulkActionDialog: React.FC<BulkActionDialogProps> = ({
 
         {step === 'running' && (
           <div className="space-y-2">
-            <Progress value={progress.total ? (progress.done + progress.failed) / progress.total * 100 : 0} />
+            <Progress value={progress.total ? (progress.done + progress.failed + progress.refused) / progress.total * 100 : 0} />
             <div className="text-xs text-muted-foreground text-center">
               {t('grid.bulk.processed', {
-                count: progress.done + progress.failed,
+                count: progress.done + progress.failed + progress.refused,
                 total: progress.total,
-                defaultValue: `${progress.done + progress.failed} / ${progress.total} processed`,
+                defaultValue: `${progress.done + progress.failed + progress.refused} / ${progress.total} processed`,
               })}
               {progress.failed > 0 && t('grid.bulk.processedFailed', { count: progress.failed, defaultValue: ` · ${progress.failed} failed` })}
             </div>
@@ -614,7 +617,7 @@ export const BulkActionDialog: React.FC<BulkActionDialogProps> = ({
         {step === 'result' && result && !result.aggregateRejection && !result.aggregateUnreadable && (
           <div className="space-y-3 text-sm">
             <div className="flex items-center gap-2">
-              {result.failed === 0 && unconfirmedCount === 0 ? (
+              {result.failed === 0 && unconfirmedCount === 0 && refusedRows.length === 0 ? (
                 <CheckCircle2 className="h-5 w-5 text-emerald-500" />
               ) : (
                 <AlertTriangle className="h-5 w-5 text-amber-500" />
@@ -627,6 +630,7 @@ export const BulkActionDialog: React.FC<BulkActionDialogProps> = ({
                   defaultValue: `Succeeded ${result.succeeded} / ${result.total}`,
                 })}
                 {result.failed > 0 && t('grid.bulk.resultFailed', { count: result.failed, defaultValue: ` · Failed ${result.failed}` })}
+                {refusedRows.length > 0 && t('grid.bulk.resultRefused', { count: refusedRows.length, defaultValue: ` · Refused ${refusedRows.length}` })}
                 {unconfirmedCount > 0 && t('grid.bulk.resultNotConfirmed', { count: unconfirmedCount, defaultValue: ` · Not confirmed ${unconfirmedCount}` })}
               </span>
             </div>
@@ -672,6 +676,29 @@ export const BulkActionDialog: React.FC<BulkActionDialogProps> = ({
                         {t('grid.bulk.andMore', { count: unconfirmedRest, defaultValue: `… and ${unconfirmedRest} more` })}
                       </li>
                     )}
+                  </ul>
+                </ScrollArea>
+              </div>
+            )}
+            {refusedRows.length > 0 && (
+              /* Records the action refused (a flow run that ended `refused`):
+                 each with the sentence the engine rendered for it. A refusal
+                 is a deliberate answer, not a transient failure, so no row
+                 offers a retry, and none goes into the error CSV. */
+              <div className="space-y-1" data-testid="bulk-refused-records">
+                <p className="text-xs text-muted-foreground">
+                  {t('grid.bulk.refusedRecords', { defaultValue: 'The action refused these records:' })}
+                </p>
+                <ScrollArea className="max-h-48 rounded border bg-muted/30 p-2">
+                  <ul className="text-xs space-y-1.5">
+                    {refusedRows.map(r => (
+                      <li key={r.id} className="flex items-start gap-2" data-testid={`bulk-refused-row-${r.id}`}>
+                        <Ban className="h-3 w-3 mt-0.5 shrink-0 text-amber-500" />
+                        <div className="min-w-0 flex-1 break-words">
+                          <span className="text-muted-foreground">{refusedRecordName(r.id)}:</span> {r.message}
+                        </div>
+                      </li>
+                    ))}
                   </ul>
                 </ScrollArea>
               </div>
