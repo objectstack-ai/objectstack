@@ -45,6 +45,7 @@ import {
   storeRowKey,
   storeRowSlotKey,
   storeRowWriteKey,
+  isPlatformOrigin,
 } from '../package-slotted-store.js';
 import { LRUCache } from '../utils/lru-cache.js';
 // [commit 6a180e42d] Both predicates moved to `@objectstack/types` — see its
@@ -2084,7 +2085,10 @@ export class DatabaseLoader implements MetadataLoader {
       const key = slotOf(row);
       if (!bySlot.has(key)) bySlot.set(key, row);
     }
-    const { key, replaces } = storeRowWriteKey(bySlot, type, name, data);
+    // [#37013] A package's first row never takes over the platform's row.
+    // Read off the stored body as written: the stamp is no conversion's.
+    const platformRow = (slot: string) => isPlatformOrigin(storedRowBodyOf(bySlot.get(slot)));
+    const { key, replaces } = storeRowWriteKey(bySlot, type, name, data, platformRow);
     // [#31699 R4-A, #32422; epic ruling 6799056319] A bundled type's slot holds
     // a row per member: the write goes to the row of the member the body
     // declares (the canonical one spelled `null`, `storedBundleMemberOf`), and
@@ -2596,4 +2600,19 @@ function generateId(): string {
   }
   // Fallback for environments without crypto.randomUUID
   return `meta_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
+}
+
+/**
+ * [#37013] A row's stored body as written (`metadata`, parsed when stored as
+ * text), for reading a stamp off it; `undefined` for a missing row or a body
+ * that does not parse, which is then no platform record.
+ */
+function storedRowBodyOf(row: Record<string, unknown> | undefined): unknown {
+  const stored = row?.metadata;
+  if (typeof stored !== 'string') return stored ?? undefined;
+  try {
+    return JSON.parse(stored);
+  } catch {
+    return undefined;
+  }
 }

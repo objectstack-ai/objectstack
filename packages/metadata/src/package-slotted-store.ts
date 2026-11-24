@@ -798,6 +798,7 @@ function slottedWriteKey(
   data: unknown,
   identity: string,
   members: boolean,
+  platformSlot: (key: string) => boolean = (key) => isPlatformOrigin(store?.get(key)),
 ): { key: string; replaces: string[] } {
   if (!PACKAGE_SLOTTED_STORE_TYPES.has(type)) return { key: name, replaces: [] };
   const keyed = (slot: string): string => (members ? memberKeyOf(type, slot, data) : slot);
@@ -808,11 +809,19 @@ function slottedWriteKey(
   const holders = packageSlotsOf(store, identity);
   const packageId = storedItemPackageId(data);
   if (packageId === undefined) {
+    // [#37013] The platform's record fills the name's bare slot, whatever
+    // package holds the name: it is no package's customization (D4), and
+    // ⛔ a package's slot of the name is never written by it.
+    if (isPlatformOrigin(data)) return { key: keyed(identity), replaces: [] };
     return { key: keyed(holders.length === 1 ? slotKey(holders[0]!, identity) : identity), replaces: [] };
   }
   const others = holders.filter((holder) => holder !== packageId);
   const bare = keyed(identity);
-  return { key: keyed(slotKey(packageId, identity)), replaces: others.length === 0 && store.has(bare) ? [bare] : [] };
+  // [#37013] …and a package's first item takes over the bare slot only when
+  // the environment's item is there: ⛔ never the platform's record, which
+  // stays beside the package's.
+  const takesOver = others.length === 0 && store.has(bare) && !platformSlot(bare);
+  return { key: keyed(slotKey(packageId, identity)), replaces: takesOver ? [bare] : [] };
 }
 
 /**
@@ -840,8 +849,103 @@ export function storeRowWriteKey(
   type: string,
   name: string,
   data: unknown,
+  platformRow: (key: string) => boolean = () => false,
 ): { key: string; replaces: string[] } {
-  return slottedWriteKey(store, type, name, data, slotIdentityOf(type, name, data), false);
+  // [#37013] `store`'s values are rows, not items: `platformRow` says which
+  // row holds the platform's record, read off its body by the loader.
+  return slottedWriteKey(store, type, name, data, slotIdentityOf(type, name, data), false, platformRow);
+}
+
+/**
+ * [#37013] The `_provenance` a record the platform's own code registers
+ * carries (`MetadataProvenanceSchema`, `@objectstack/spec/kernel`): a built-in
+ * the host's code registers at boot, as cloud's AI runtime registers its
+ * skills, agents and tools. ⛔ Only {@link MetadataManager.register} called
+ * with `origin: 'platform'` stamps it, and it strips it from every other
+ * write ({@link withoutPlatformOrigin}), so no package write and no
+ * environment write carries it.
+ */
+export const PLATFORM_PROVENANCE = 'platform';
+
+/** The body a stamp of `item` lives on: its own object, or the publish envelope's body. */
+function stampHolderOf(item: unknown): Record<string, unknown> | undefined {
+  if (item === null || typeof item !== 'object' || Array.isArray(item)) return undefined;
+  const body = peelStoredEnvelope(item).body;
+  return body !== null && typeof body === 'object' && !Array.isArray(body) ? body as Record<string, unknown> : undefined;
+}
+
+/**
+ * [#37013] Whether `item` is a record the platform registered: its body
+ * carries {@link PLATFORM_PROVENANCE} and it carries no package. A positive
+ * mark, ⛔ never read off a missing package stamp: the environment's own item
+ * carries no package either. A body naming a package is that package's item,
+ * whatever `_provenance` it carries.
+ */
+export function isPlatformOrigin(item: unknown): boolean {
+  return stampHolderOf(item)?._provenance === PLATFORM_PROVENANCE && storedItemPackageId(item) === undefined;
+}
+
+/**
+ * [#37013] `item` with the platform origin stamped on its body: a copy, the
+ * caller's object untouched. Any package stamp is left as it is, and then
+ * the item is that package's ({@link isPlatformOrigin}).
+ */
+export function withPlatformOrigin(item: unknown): unknown {
+  const body = stampHolderOf(item);
+  if (!body || body._provenance === PLATFORM_PROVENANCE) return item;
+  const stamped = { ...body, _provenance: PLATFORM_PROVENANCE };
+  return peelStoredEnvelope(item).wrapped ? { ...(item as Record<string, unknown>), [STORED_BODY_KEY]: stamped } : stamped;
+}
+
+/**
+ * [#37013] `item` without the platform origin: a write that is not the
+ * platform's never stores it. A copy when there was one to remove; the same
+ * object otherwise, so an item carrying no such stamp is written as it was.
+ */
+export function withoutPlatformOrigin(item: unknown): unknown {
+  const body = stampHolderOf(item);
+  if (!body || body._provenance !== PLATFORM_PROVENANCE) return item;
+  const { _provenance: _platform, ...rest } = body;
+  return peelStoredEnvelope(item).wrapped ? { ...(item as Record<string, unknown>), [STORED_BODY_KEY]: rest } : rest;
+}
+
+/**
+ * [#37013] Of a name's slots, the platform's record: the package-less slot
+ * whose item the platform registered ({@link isPlatformOrigin}), its member
+ * written last for a bundled type. ⛔ Never a package's item, and never the
+ * environment's own: `{ found: false }` when the platform holds no slot of
+ * the name.
+ */
+export function readPlatformEntry(
+  store: ReadonlyMap<string, unknown> | undefined,
+  type: string,
+  name: string,
+): { found: true; data: unknown } | { found: false } {
+  if (!store) return { found: false };
+  if (!PACKAGE_SLOTTED_STORE_TYPES.has(type)) {
+    return store.has(name) && isPlatformOrigin(store.get(name)) ? { found: true, data: store.get(name) } : { found: false };
+  }
+  const keys = storeKeysNamed(store, type, name).filter((key) => slotPackageOf(key) === undefined && isPlatformOrigin(store.get(key)));
+  return keys.length === 0 ? { found: false } : { found: true, data: store.get(writtenLast(store, keys)) };
+}
+
+/**
+ * [#37013] What a removal the platform makes takes out of the store: the
+ * name's package-less slots — the platform's record — and ⛔ never a
+ * package's slot of the name, however many packages hold it (nothing is
+ * refused: the removal names whose item it is). `packagelessOnly` carries
+ * that scope to each loader's delete and each cluster peer, as for the
+ * environment's removal beside one package ({@link storeRemovalKeys}). A type
+ * outside {@link PACKAGE_SLOTTED_STORE_TYPES} keeps one item per name, and
+ * removes it.
+ */
+export function storePlatformRemovalKeys(
+  store: ReadonlyMap<string, unknown> | undefined,
+  type: string,
+  name: string,
+): { keys: string[]; packagelessOnly?: true } {
+  if (!PACKAGE_SLOTTED_STORE_TYPES.has(type)) return { keys: storeKeysNamed(store, type, name) };
+  return { keys: storeKeysNamed(store, type, name).filter((key) => slotPackageOf(key) === undefined), packagelessOnly: true };
 }
 
 /** Whether a package id names a caller with a package (not empty, not the provenance sentinel). */

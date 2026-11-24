@@ -108,9 +108,14 @@ import {
   storedNameOf,
   storeKeysNamed,
   storeRemovalKeys,
+  storePlatformRemovalKeys,
   storeSlotKey,
   storeWriteKey,
   environmentStoreKey,
+  readPlatformEntry,
+  isPlatformOrigin,
+  withPlatformOrigin,
+  withoutPlatformOrigin,
 } from './package-slotted-store.js';
 // [#5309] The stored ENVELOPE / authored BODY split — peeled before any spec
 // schema parses a stored row. See `stored-envelope.ts`.
@@ -139,6 +144,19 @@ export type WatchCallback = (event: MetadataWatchEvent) => void | Promise<void>;
 export interface MetadataRegisterOptions extends MetadataWriteOptions {
   /** Skip the write-through to the loader `loadMany` read this very item from. */
   skipSourceLoader?: boolean;
+  /**
+   * [#37013] `'platform'`: the platform's own code registers this item (a
+   * built-in the host registers at boot). It is stamped with the platform's
+   * provenance (`_provenance: 'platform'`, `PLATFORM_PROVENANCE`) and fills
+   * the name's bare slot of a type stored per `(package, name)`, ⛔ never a
+   * package's slot of the name; a package's item of the name stays beside it.
+   * Every write without it is stored without that stamp, so no package write
+   * and no environment write carries it — except a stored row the boot pass
+   * re-registers as it was read. Class-level, as
+   * {@link MetadataUnregisterOptions.packageId} is: the spec's
+   * `MetadataWriteOptions` is not widened.
+   */
+  origin?: 'platform';
 }
 
 /**
@@ -160,6 +178,14 @@ export interface MetadataRegisterOptions extends MetadataWriteOptions {
 export interface MetadataUnregisterOptions extends MetadataWriteOptions {
   /** The package whose item is removed; see the interface doc. */
   packageId?: string;
+  /**
+   * [#37013] `'platform'`: the platform withdraws its own record of the name
+   * — the name's package-less slot only, from the registry, every loader and
+   * every peer (`storePlatformRemovalKeys`). ⛔ A package's item of the name
+   * is never taken, and nothing is refused however many packages hold it.
+   * Ignored when `packageId` is given.
+   */
+  origin?: 'platform';
 }
 
 /**
@@ -1260,6 +1286,13 @@ export class MetadataManager implements IMetadataService {
     // because it judges the arguments, not the persistence posture.
     assertMetadataRegisterContract(type, name, data);
     type = canonicalMetadataServiceType(type);
+    // [#37013] Only the platform's own registration carries the platform's
+    // provenance: stamped here when the caller says so, and stripped from
+    // every other write — but a stored row the boot pass re-registers, which
+    // is what an earlier platform registration wrote, is kept as it was read.
+    const readFrom = data !== null && typeof data === 'object' ? this.loadedFrom.get(data) : undefined;
+    if (options?.origin === 'platform') data = withPlatformOrigin(data);
+    else if (readFrom?.contract.protocol !== 'datasource:') data = withoutPlatformOrigin(data);
 
     // Persistence write gate: when `persistence.writable` is explicitly false
     // we treat register() as read-only. Default `true` (or omitted) preserves
@@ -1557,6 +1590,27 @@ export class MetadataManager implements IMetadataService {
     // Fallback to loaders, keeping the verdict this time.
     const { data, degraded, errors } = await this.loadDiagnosed(type, name);
     return { data: data ?? undefined, degraded, errors };
+  }
+
+  /**
+   * [#37013] The platform's own record of `(type, name)`: the item the
+   * platform registered (`register(…, { origin: 'platform' })`), from the
+   * registry's package-less slot, else a loader's stored one. ⛔ Never a
+   * package's item of the name and never the environment's own: `undefined`
+   * when the platform holds no record of the name — a read naming no package
+   * ({@link get}) keeps its own rule for every other caller.
+   */
+  async getPlatformItem(type: string, name: string): Promise<unknown | undefined> {
+    type = canonicalMetadataServiceType(type);
+    const entry = readPlatformEntry(this.registry.get(type), type, name);
+    if (entry.found) return entry.data;
+    if (PACKAGE_SLOTTED_STORE_TYPES.has(type)) {
+      const { slots } = await this.loaderSlotsNamed(type, name);
+      const stored = readPlatformEntry(slotStoreOf(type, name, slots), type, name);
+      return stored.found ? stored.data : undefined;
+    }
+    const loaded = await this.load(type, name);
+    return isPlatformOrigin(loaded) ? loaded : undefined;
   }
 
   /**
@@ -2364,8 +2418,12 @@ export class MetadataManager implements IMetadataService {
   ): Promise<void> {
     // [#7378 row 2] Remove from the store `register` wrote: the canonical type.
     type = canonicalMetadataServiceType(type);
+    // [#37013] The platform's withdrawal of its own record takes the name's
+    // package-less slots only, judged with nothing to refuse.
     const judged: { keys: readonly string[]; packageId?: string; packagelessOnly?: true } =
-      removal ?? (await this.removalOf(type, name, options?.packageId));
+      removal ?? (options?.origin === 'platform' && options.packageId === undefined
+        ? storePlatformRemovalKeys(this.registry.get(type), type, name)
+        : await this.removalOf(type, name, options?.packageId));
     const { keys, packageId } = judged;
     // [#32560] How each loader's delete (and each peer's) is scoped.
     const scope: ClusterMetadataRemoval = packageId !== undefined
