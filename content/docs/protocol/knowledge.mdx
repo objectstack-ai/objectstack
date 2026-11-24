@@ -326,10 +326,13 @@ that answers neither field question, keeps the source out of that caller's
 search. The system context bypasses these gates as it bypasses the row
 re-check. A caller with no execution context, or a service with no data engine
 bound, is searched no `object` source at all; an `object` source's hit with no
-`sourceRecordId` cannot be re-checked and is dropped; and a hit is served only
-as the source it was searched for (an adapter answering another source's
-passage from a store two sources share has it dropped). A restricted caller's
-empty answer is this narrowing, not a missing index.
+`sourceRecordId` cannot be re-checked and is dropped; and the service drops a
+hit whose reported `sourceId` names another source than the one searched. That
+check sees only the `sourceId` an adapter reports: an adapter that labels
+another source's passage with the searched source's id is not caught by it, so
+two sources must not share one adapter-side store unless the adapter itself
+tells their passages apart. A restricted caller's empty answer is this
+narrowing, not a missing index.
 
 For `file` and `http` sources (no underlying ObjectQL record), the
 adapter is responsible for honouring an opaque `permissions` field on
