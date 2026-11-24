@@ -67,7 +67,7 @@ const SUMMARY = {
   objects: [
     { object: 'showcase_project', field: 'owner_id', count: 3, transferable: true },
     { object: 'showcase_field_zoo', field: 'f_user', count: 2, transferable: true },
-    { object: 'showcase_field_zoo', field: 'f_users', count: 2, transferable: false },
+    { object: 'showcase_field_zoo', field: 'f_users', count: 2, transferable: false, reason: 'multi_valued' as const },
   ],
   total: 7,
   truncated: false,
@@ -126,6 +126,37 @@ describe('the ban dialog says how many records the user holds (objectstack#30205
     expect(multi.textContent).toContain('console.assignedWork.notTransferable');
     expect(screen.getByTestId('user-assigned-work-row-showcase_field_zoo-f_user').textContent)
       .not.toContain('console.assignedWork.notTransferable');
+  });
+
+  it('objectstack#35399: an owner the object keeps (Change Owner off) is counted as owned and worded by its reason, never as a multi-valued field', async () => {
+    count = vi.fn(async () => ({
+      ...SUMMARY,
+      objects: [
+        { object: 'showcase_invoice_line', field: 'owner_id', count: 4, transferable: false, reason: 'transfer_off' as const },
+        { object: 'showcase_field_zoo', field: 'f_users', count: 2, transferable: false, reason: 'multi_valued' as const },
+      ],
+      total: 6,
+    }));
+    mount();
+    const summary = await screen.findByTestId('user-assigned-work-summary');
+    expect(within(summary).getByText('console.assignedWork.summary {"total":6,"owned":4,"assigned":2}')).toBeTruthy();
+    const kept = screen.getByTestId('user-assigned-work-row-showcase_invoice_line-owner_id');
+    expect(within(kept).getByTestId('user-assigned-work-not-transferable').textContent).toBe('console.assignedWork.ownerKept');
+    const multi = screen.getByTestId('user-assigned-work-row-showcase_field_zoo-f_users');
+    expect(within(multi).getByTestId('user-assigned-work-not-transferable').textContent).toBe('console.assignedWork.notTransferable');
+    // Nothing here can be handed over, so the hand-over is not offered.
+    expect(screen.queryByTestId('user-assigned-work-handover')).toBeNull();
+  });
+
+  it('objectstack#35399: every UI locale words the kept owner with its own sentence, apart from the multi-valued one', async () => {
+    const { builtInLocales } = await import('@object-ui/i18n/locales');
+    const locales = Object.entries(builtInLocales as Record<string, any>);
+    expect(locales.length).toBeGreaterThan(0);
+    for (const [lang, catalog] of locales) {
+      const words = catalog?.console?.assignedWork;
+      expect(typeof words?.ownerKept, lang).toBe('string');
+      expect(words.ownerKept, lang).not.toBe(words.notTransferable);
+    }
   });
 
   it('owned is the owner_id rows only; every other user field is assigned', () => {

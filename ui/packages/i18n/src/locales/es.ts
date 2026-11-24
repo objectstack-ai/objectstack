@@ -2844,6 +2844,7 @@ const es = {
       summary: 'Registros que usted puede leer: {{total}}. En propiedad: {{owned}}, asignados: {{assigned}}.',
       row: '{{object}} · {{field}}',
       notTransferable: 'Admite varias personas, así que no se puede traspasar aquí.',
+      ownerKept: 'No se traspasa: este objeto conserva el propietario de cada registro («Cambiar propietario» está desactivado en él).',
       truncated: 'No se contaron todos los campos de usuario; esta persona puede tener más.',
       unreadable: 'No contados porque no puede leerlos: {{objects}}',
       handoverTo: 'Traspasar a',

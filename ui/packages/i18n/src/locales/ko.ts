@@ -2770,6 +2770,7 @@ const ko = {
       summary: '읽을 수 있는 레코드 중 {{total}}건을 맡고 있습니다: 소유 {{owned}}건, 할당 {{assigned}}건.',
       row: '{{object}} · {{field}}',
       notTransferable: '여러 사람을 넣는 필드라 여기서 인계할 수 없습니다.',
+      ownerKept: '인계되지 않습니다. 이 개체는 각 레코드의 소유자를 그대로 유지합니다(소유자 변경이 꺼져 있음).',
       truncated: '모든 사용자 필드를 세지는 않았습니다. 더 맡고 있을 수 있습니다.',
       unreadable: '읽기 권한이 없어 세지 않았습니다: {{objects}}',
       handoverTo: '인계 대상',

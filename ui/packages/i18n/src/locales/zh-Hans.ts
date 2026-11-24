@@ -2935,6 +2935,7 @@ const zh = {
       summary: '你可读取的记录中有 {{total}} 条在此人手上：拥有 {{owned}} 条，被指派 {{assigned}} 条。',
       row: '{{object}} · {{field}}',
       notTransferable: '该字段可填多人，无法在此交接。',
+      ownerKept: '不会交接：该对象的记录负责人保持不变（该对象已关闭“更改负责人”）。',
       truncated: '并非所有用户字段都已统计，此人手上可能还有更多记录。',
       unreadable: '以下对象你无权读取，未计入：{{objects}}',
       handoverTo: '交接给',

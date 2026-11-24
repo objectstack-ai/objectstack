@@ -6541,9 +6541,12 @@ export class RestServer {
      *
      * The first answers, per object and user field, how many records hold the
      * user (the owner field and every app user field), counted as the caller
-     * can read them. The second hands up to 500 of those records to another
-     * active user per call, each as an ordinary update under the caller's
-     * context, and answers what moved, what failed and how many remain.
+     * can read them, and per row whether the second moves them and, when it
+     * does not, why (a multi-valued field, or the owner field of an object
+     * whose Change Owner switch is off). The second hands up to 500 of the
+     * transferable records to another active user per call, each as an
+     * ordinary update under the caller's context, and answers what moved, what
+     * failed and how many remain.
      * Neither touches the ban. `@objectstack/core`'s `user-assigned-work.ts`
      * holds the rules.
      */
