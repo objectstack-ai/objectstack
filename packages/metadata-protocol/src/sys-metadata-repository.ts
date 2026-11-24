@@ -1748,6 +1748,16 @@ export class SysMetadataRepository implements MetadataRepository {
        */
       expectedDraftHash?: string | null;
       /**
+       * [#36601] The stored hash of the ACTIVE row the caller means to
+       * replace, or `null` when it asserts that no active row exists at the
+       * address this promotion writes. Stated → it is the `put`'s
+       * `parentVersion`, so the store's own lock refuses the promotion with a
+       * {@link ConflictError} when the active row is another one — the check
+       * and the write are one call, not a read and a later write. Omitted →
+       * the active row read here is the parent (unpinned), as before.
+       */
+      expectedActiveHash?: string | null;
+      /**
        * [#22877] The bundle member whose draft is promoted; omitted, the
        * canonical one (see {@link get}). The draft, the active parent and the
        * drain are all read under it, and the put writes the member its body
@@ -1819,7 +1829,8 @@ export class SysMetadataRepository implements MetadataRepository {
     const promotable = historySnapshotBody(ref.type, draft.body);
     const activeBody = opts.deriveActiveBody ? opts.deriveActiveBody(promotable) : promotable;
     const result = await this.put(ref, activeBody, {
-      parentVersion: currentActive?.hash ?? null,
+      // [#36601] The caller's pin on the active row, when it states one.
+      parentVersion: opts.expectedActiveHash !== undefined ? opts.expectedActiveHash : currentActive?.hash ?? null,
       actor: opts.actor,
       source: opts.source ?? 'sys-metadata-repo.publish',
       message: opts.message ?? `publish draft (hash ${draft.hash})`,

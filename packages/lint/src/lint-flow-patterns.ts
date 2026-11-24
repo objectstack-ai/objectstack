@@ -390,6 +390,8 @@ export const FLOW_APPROVAL_DECISION_UNROUTED = 'flow-approval-decision-unrouted'
  * {@link scanHttpTimeouts}.
  */
 export const FLOW_HTTP_TIMEOUT_MISSING = 'flow-http-timeout-missing';
+/** #35143 — an after-create and an after-update flow on one object running the same steps (advisory). */
+export const FLOW_CREATE_UPDATE_PAIR = 'flow-create-update-pair';
 
 /**
  * Node types that ship in the box. `config.condition` is only ever READ on the
@@ -2771,5 +2773,83 @@ export function lintFlowPatterns(stack: AnyRec): FlowLintFinding[] {
       scanTryCatchWithoutCatch(at, graphNodes, findings);
     }
   }
+  scanCreateUpdatePairs(recordsOf(stack.flows), findings);
   return findings;
+}
+
+/**
+ * JSON with object keys sorted at every depth, so two configs that differ only
+ * in key order fingerprint alike.
+ */
+function stableJson(v: unknown): string {
+  if (Array.isArray(v)) return `[${v.map(stableJson).join(',')}]`;
+  if (v && typeof v === 'object') {
+    const r = v as AnyRec;
+    return `{${Object.keys(r)
+      .sort()
+      .map((k) => `${JSON.stringify(k)}:${stableJson(r[k])}`)
+      .join(',')}}`;
+  }
+  return JSON.stringify(v ?? null);
+}
+
+/** Node keys that name or place a node and change nothing it does. */
+const COSMETIC_NODE_KEYS: ReadonlySet<string> = new Set(['id', 'label', 'description', 'position']);
+
+/**
+ * What a flow DOES: each non-start, non-end node whole (its `config`, and
+ * every other key a node carries its work in, such as `connectorConfig`),
+ * order insensitive, with the keys that only name or place it left out.
+ * `undefined` for a flow with no such node.
+ */
+function flowActionSignature(nodes: AnyRec[]): string | undefined {
+  const actions = nodes.filter((n) => n.type !== 'start' && n.type !== 'end');
+  if (actions.length === 0) return undefined;
+  return actions
+    .map((n) => stableJson(Object.fromEntries(Object.entries(n).filter(([k]) => !COSMETIC_NODE_KEYS.has(k)))))
+    .sort()
+    .join('|');
+}
+
+/**
+ * #35143 — two record-change flows on one object, one started after create
+ * and one after update, that run the same steps. That is one rule written
+ * twice: `record-after-write` binds both events in one flow, and two copies
+ * drift the first time one is edited and the other is not. Advisory: both
+ * copies run as written. The runtime publish gate judges one flow per write,
+ * so this speaks on the CLI, where the stack holds both.
+ */
+function scanCreateUpdatePairs(flows: AnyRec[], findings: FlowLintFinding[]): void {
+  const legOf = (t: unknown): 'create' | 'update' | undefined =>
+    t === 'record-after-create' || t === 'record-after-insert' ? 'create'
+    : t === 'record-after-update' ? 'update'
+    : undefined;
+  const pairs = new Map<string, { object: string; create?: string; update?: string }>();
+  for (const flow of flows) {
+    if (typeof flow.name !== 'string' || !flow.name) continue;
+    const nodes = recordsOf(flow.nodes);
+    const cfg = (nodes.find((n) => n.type === 'start')?.config ?? {}) as AnyRec;
+    const leg = legOf(cfg.triggerType);
+    const object = typeof cfg.objectName === 'string' && cfg.objectName ? cfg.objectName : undefined;
+    const signature = flowActionSignature(nodes);
+    if (!leg || !object || !signature) continue;
+    const key = `${object}\u0000${signature}`;
+    const entry = pairs.get(key) ?? { object };
+    entry[leg] ??= flow.name;
+    pairs.set(key, entry);
+  }
+  for (const { object, create, update } of pairs.values()) {
+    if (!create || !update) continue;
+    findings.push({
+      severity: 'warning',
+      where: `flow '${create}' · flow '${update}'`,
+      message:
+        `flows '${create}' (after create) and '${update}' (after update) both watch '${object}' and run the ` +
+        `same steps: one rule written twice, and the copies drift the first time only one of them is edited.`,
+      hint:
+        `Merge them into one flow with config.triggerType 'record-after-write' and delete the other; on the ` +
+        `create run \`previous\` is null, so write the condition to allow it.`,
+      rule: FLOW_CREATE_UPDATE_PAIR,
+    });
+  }
 }

@@ -99,6 +99,7 @@ export const jaJP: TranslationData = {
         nav_settings_knowledge: { label: 'ナレッジ' },
         nav_settings_lifecycle: { label: 'データライフサイクル' },
         nav_recycle_bin: { label: 'ごみ箱' },
+        nav_public_forms: { label: '公開フォーム' },
         nav_notification_preferences: { label: '通知設定' },
         nav_notification_templates: { label: '通知テンプレート' },
 

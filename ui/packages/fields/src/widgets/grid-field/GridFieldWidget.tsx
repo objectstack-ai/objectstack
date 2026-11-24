@@ -44,6 +44,7 @@ import { isImeKey } from '../imeKey.js';
 import { GRID_FIELD_RETIRED_KEYS, type GridFieldMetadata, type GridFieldRetiredKey } from '@object-ui/types';
 import { SchemaRendererContext } from '@object-ui/react';
 import { lineReferenceSource } from './lineReferenceReads.js';
+import { useAdornmentInset } from '../adornmentInset.js';
 // The grid's pure half: the column type, the computed-cell evaluator, the
 // lookup-pick patch and the row marks. They live beside the public face in
 // `../GridField.ts`, in the eager chunk, because `@object-ui/fields` exports
@@ -285,6 +286,30 @@ function temporalText(type: string | undefined, value: any, locale: string): str
 function currencyAdornment(c: GridColumn, currency: string | undefined, locale: string): string {
   if (c.prefix) return c.prefix;
   return currency ? currencySymbol(currency, locale) : '';
+}
+
+/**
+ * A cell control with its adornment drawn over the control's start. The
+ * control's left inset follows the adornment's rendered width, so a wide
+ * symbol (`US$` under zh-CN, `CHF`) never sits on the typed amount
+ * (objectstack#36678); `$` keeps the inset it always had.
+ */
+function CellAdornment({
+  adornment,
+  children,
+}: {
+  adornment: string;
+  children: (insetClass: string) => React.ReactNode;
+}): React.ReactElement {
+  const inset = useAdornmentInset(adornment, { floor: 'pl-6', startRem: 0.5, gapRem: 0.25 });
+  return (
+    <div className="relative">
+      {adornment && (
+        <span ref={inset.ref} className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">{adornment}</span>
+      )}
+      {children(inset.insetClass)}
+    </div>
+  );
 }
 
 /**
@@ -1255,7 +1280,10 @@ function GridFieldBody({
                           value={row[c.name]}
                           onChange={() => {}}
                           readonly
-                          field={{ reference: c.reference, displayField: c.displayField, idField: c.idField } as any}
+                          // `multiple` from the column, as the editable cell passes it:
+                          // without it a multi-record cell's id list reads as one id
+                          // and draws "undefined" (objectstack#36618).
+                          field={{ reference: c.reference, displayField: c.displayField, idField: c.idField, multiple: c.multiple } as any}
                           dataSource={cellSource}
                         />
                       ) : (
@@ -1364,7 +1392,8 @@ function GridFieldBody({
       if (c.type === 'lookup' && val != null && val !== '') {
         return (
           <LookupField value={val} onChange={() => {}} readonly
-            field={{ reference: c.reference, displayField: c.displayField, idField: c.idField } as any}
+            // `multiple` from the column, as in the read-only table (objectstack#36618).
+            field={{ reference: c.reference, displayField: c.displayField, idField: c.idField, multiple: c.multiple } as any}
             dataSource={cellSource} />
         );
       }
@@ -1593,30 +1622,29 @@ function GridFieldBody({
     // than the column (objectstack#36023); numbers and times keep their box.
     const CellInput = !c.type || c.type === 'text' ? GrowingCellInput : Input;
     return (
-      <div className="relative">
-        {adornment && (
-          <span className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">{adornment}</span>
+      <CellAdornment adornment={adornment}>
+        {(insetClass) => (
+          <CellInput
+            data-cell={`${rowIdx}-${colIdx}`}
+            aria-invalid={invalid || undefined}
+            onKeyDown={(e) => onCellKeyDown(e, rowIdx, colIdx)}
+            className={cn(
+              GRID_CELL_CONTROL_CLASS,
+              PHONE_TOUCH_HEIGHT,
+              insetClass,
+              isNumeric(c.type) && 'text-right tabular-nums',
+            )}
+            type={c.type === 'time' ? 'time' : isNumeric(c.type) ? 'number' : 'text'}
+            step={isNumeric(c.type) ? c.step ?? 'any' : undefined}
+            aria-label={c.label || c.name}
+            // `time` reads and writes `HH:mm[:ss]`, the stored shape, both ways;
+            // the date types read through their adapters above (objectui#3566).
+            value={val != null ? String(val) : ''}
+            onChange={(e) => setCell(rowIdx, c, e.target.value)}
+            disabled={locked}
+          />
         )}
-        <CellInput
-          data-cell={`${rowIdx}-${colIdx}`}
-          aria-invalid={invalid || undefined}
-          onKeyDown={(e) => onCellKeyDown(e, rowIdx, colIdx)}
-          className={cn(
-            GRID_CELL_CONTROL_CLASS,
-            PHONE_TOUCH_HEIGHT,
-            adornment && 'pl-6',
-            isNumeric(c.type) && 'text-right tabular-nums',
-          )}
-          type={c.type === 'time' ? 'time' : isNumeric(c.type) ? 'number' : 'text'}
-          step={isNumeric(c.type) ? c.step ?? 'any' : undefined}
-          aria-label={c.label || c.name}
-          // `time` reads and writes `HH:mm[:ss]`, the stored shape, both ways;
-          // the date types read through their adapters above (objectui#3566).
-          value={val != null ? String(val) : ''}
-          onChange={(e) => setCell(rowIdx, c, e.target.value)}
-          disabled={locked}
-        />
-      </div>
+      </CellAdornment>
     );
   };
 

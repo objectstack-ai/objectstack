@@ -2,8 +2,9 @@
 
 /**
  * objectstack#35061 (item 2) — the Studio Objects matrix under a narrow pane:
- * below 1000 px only Create / Read / Edit / Delete stay flat; the other six
- * permissions sit behind each row's "More permissions" (which counts the ones
+ * below the fold width (1304 px of pane, the flat table's floor since
+ * objectstack#36744) only Create / Read / Edit / Delete stay flat; the other
+ * six permissions sit behind each row's "More permissions" (which counts the ones
  * on) and open in a row beneath; the bulk strip folds into one "Bulk" menu.
  *
  * jsdom applies no CSS, so both forms are in the DOM here and every control is
@@ -26,6 +27,7 @@ import {
   PERM_FLAT_ONLY_CELL,
   PERM_FLAT_ONLY_FLEX,
   PERM_FOLDED_ONLY,
+  PERM_MATRIX_FLAT_FLOOR,
   PERM_MATRIX_FLAT_KEYS,
   PERM_MATRIX_FOLD_WIDTH,
   PERM_MATRIX_TABLE_FLOOR,
@@ -114,12 +116,20 @@ describe('the fold rule (objectstack#35061)', () => {
     for (const cls of [PERM_FLAT_ONLY_CELL, PERM_FOLDED_ONLY, PERM_FLAT_ONLY_FLEX, PERM_MATRIX_TABLE_FLOOR, PERM_BULK_COLUMN_WIDTH]) {
       expect(cls).toContain(`@min-[${PERM_MATRIX_FOLD_WIDTH}px]:`);
     }
-    expect(PERM_MATRIX_FOLD_WIDTH).toBe(1000);
+    expect(PERM_MATRIX_FOLD_WIDTH).toBe(1304);
     expect([...PERM_MATRIX_FLAT_KEYS]).toEqual(['allowCreate', 'allowRead', 'allowEdit', 'allowDelete']);
+  });
+
+  // objectstack#36744 — the flat form is drawn only where it fits: a fold width
+  // under the floor left a band (1000–1304 px) where the flat table overflowed
+  // and the right-pinned bulk column covered the write-scope column.
+  it('the fold width is the flat table floor, so the flat form never overflows the pane', () => {
+    expect(PERM_MATRIX_FOLD_WIDTH).toBe(PERM_MATRIX_FLAT_FLOOR);
+    expect(PERM_MATRIX_TABLE_FLOOR).toBe(`@min-[${PERM_MATRIX_FOLD_WIDTH}px]:min-w-[${PERM_MATRIX_FLAT_FLOOR}px]`);
   });
 });
 
-describe('the Studio Objects matrix, folded under 1000 px (objectstack#35061)', () => {
+describe('the Studio Objects matrix, folded under the fold width (objectstack#35061)', () => {
   it('draws only the four CRUD columns in both forms; the other six and the More column belong to one form each', async () => {
     await renderStudio();
     const table = screen.getByTestId('perm-studio-matrix');

@@ -25,8 +25,9 @@ import { EmptyValue } from '@object-ui/components';
 import { isEmptyValue } from '@object-ui/core';
 import { coerceToSafeValue } from '../coerceToSafeValue.js';
 import type { CellRendererProps } from '../index.js';
+import { recoverableLazy } from '../recoverableLazy.js';
 
-const LazyFilterConditionField = React.lazy(() =>
+const LazyFilterConditionField = recoverableLazy(() =>
   import('./FilterConditionField.js').then((m) => ({ default: m.FilterConditionField })),
 );
 

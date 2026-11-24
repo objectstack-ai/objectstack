@@ -222,3 +222,57 @@ describe('the new dashboard’s entry in a menu that carries `order` (objectstac
     ]);
   });
 });
+
+describe('a new report from the design mode (objectstack#36364, report half)', () => {
+  const REPORT_BODY = {
+    label: '回款分析',
+    type: 'summary',
+    dataset: 'invoice_metrics',
+    values: ['invoice_count'],
+    chart: { type: 'metric', xAxis: '', yAxis: 'invoice_count' },
+  };
+  const REPORT: NewMenuItem = { kind: 'report', name: 'hui_kuan_fen_xi', label: '回款分析', body: REPORT_BODY };
+  const REPORT_ENTRY = { id: 'nav_item_1', type: 'report', reportName: 'hui_kuan_fen_xi' };
+  const reportInput = {
+    ...input,
+    navigation: [{ id: 'insights', type: 'group', label: 'Insights', children: [REPORT_ENTRY] }] as Menu,
+    item: REPORT,
+  };
+
+  it('is created as the report builder made it, under the new name', () => {
+    expect(newItemBody(REPORT)).toEqual({ ...REPORT_BODY, name: 'hui_kuan_fen_xi' });
+  });
+
+  it("is created and published in the menu's package, then the menu, in that order", async () => {
+    const { d, calls } = doors({ writable: false, version: '1.4.0' });
+    await saveAppMenuWithNewItem(reportInput, TEXTS, d);
+    expect(calls.map(([verb, type]) => `${verb} ${type ?? ''}`.trim())).toEqual([
+      'ensure com.acme.crm',
+      'save report',
+      'publish report',
+      'save app',
+      'publish app',
+    ]);
+    expect(calls[1]).toEqual([
+      'save',
+      'report',
+      'hui_kuan_fen_xi',
+      { ...REPORT_BODY, name: 'hui_kuan_fen_xi' },
+      { mode: 'draft', ifNoneMatch: '*', packageId: 'com.acme.crm.custom' },
+    ]);
+    expect(calls[2]).toEqual(['publish', 'report', 'hui_kuan_fen_xi', { packageId: 'com.acme.crm.custom' }]);
+  });
+
+  it('a refused menu removes the report it was made for', async () => {
+    const refused = new Error('the app publish was refused');
+    const { d, calls } = doors({ writable: true, refuse: ([verb, type]) => (verb === 'publish' && type === 'app' ? refused : null) });
+    await expect(saveAppMenuWithNewItem(reportInput, TEXTS, d)).rejects.toBe(refused);
+    expect(calls.at(-1)).toEqual(['reset', 'report', 'hui_kuan_fen_xi', { packageId: 'com.acme.crm' }]);
+  });
+
+  it('where the menu cannot be saved, no report is created', async () => {
+    const { d, calls } = doors({ listed: false, writable: true });
+    await expect(saveAppMenuWithNewItem(reportInput, TEXTS, d)).rejects.toThrow('not listed');
+    expect(calls).toEqual([]);
+  });
+});

@@ -180,6 +180,11 @@ export const SETUP_NAV_CONTRIBUTIONS: NavigationContribution[] = [
       // per object (`manageRecycleBin`), and the page lists only the objects
       // whose bin the caller manages.
       { id: 'nav_recycle_bin', type: 'component', label: 'Recycle Bin', componentRef: 'data:recycle-bin', icon: 'trash-2' },
+      // objectstack#36444 — every public form of the environment (a form anyone
+      // fills in without signing in): switch one on or off, copy its address,
+      // open it. Operations only; Studio designs the forms. For system
+      // administrators: the page asks the same capability.
+      { id: 'nav_public_forms', type: 'component', label: 'Public Forms', componentRef: 'forms:public-forms', icon: 'file-text', requiredPermissions: ['manage_platform_settings'] },
     ],
   },
   {

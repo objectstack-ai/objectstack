@@ -1,4 +1,4 @@
-import React, { useRef, useState, useCallback, lazy, Suspense } from 'react';
+import React, { useRef, useState, useCallback, Suspense } from 'react';
 import { Button, EmptyValue } from '@object-ui/components';
 import { useUpload } from './UploadProvider.js';
 import { useObjectTranslation } from '@object-ui/i18n';
@@ -29,10 +29,11 @@ import { fileValueForResubmit } from './file-refused.js';
 import { RestrictedFileAffordance } from './file-affordance.js';
 import { PHONE_TOUCH_HEIGHT } from './touchTarget.js';
 import { pickNativeImage, useNativeImagePickOffered } from './nativeImagePick.js';
+import { recoverableLazy } from '../recoverableLazy.js';
 
 // Lazy-load the cropper so the dialog (canvas + crop logic) is not in the initial
 // ImageField bundle. Consumers that never crop pay zero cost.
-const ImageCropperDialog = lazy(() =>
+const ImageCropperDialog = recoverableLazy(() =>
   import('./ImageCropperDialog.js').then((m) => ({ default: m.ImageCropperDialog })),
 );
 

@@ -20,9 +20,10 @@
  * no create, no bulk action, no view switch, no saved view.
  *
  * The record's name opens its full page through the host
- * (`DrillNavigationContext.openRecord`, item 6), with the rows the list shows
- * as the page's ↑ ↓ set and the count it matched; no record panel is stacked
- * over the drill. A host with no record page (a page block's metric or pivot
+ * (`DrillNavigationContext.openRecord`, item 6), with the drill's whole
+ * result as the page's ↑ ↓ set and the count it matched (`drillRecordOrigin`,
+ * objectstack-ai/objectstack#36554: the rows past the page drawn are read by
+ * the list's own query); no record panel is stacked over the drill. A host with no record page (a page block's metric or pivot
  * mounts no navigation) opens the record in a dialog showing the fields the
  * list lists: the list reads only those (`$select`), so a field it did not
  * read is not drawn as empty.
@@ -35,10 +36,12 @@ import React from 'react';
 import { PageRegionPostureReset } from '@object-ui/components';
 import { ComponentRegistry, resolveFilterPlaceholders, resolveNameField } from '@object-ui/core';
 import { SchemaRenderer, SchemaRendererContext, useDrillNavigation, useFilterScope } from '@object-ui/react';
+import type { DrillRecordOrigin } from '@object-ui/react';
 import { FILTER_DATE_LIKE_TYPES } from '@object-ui/types';
 import { Loader2 } from 'lucide-react';
 import { RecordDetailDrawer } from './RecordDetailDrawer';
 import { drillListConditions } from './drillConditions';
+import { drillRecordOrigin } from './drillRecordSteps';
 
 /** The registry key of the standard list (`@object-ui/plugin-list`). */
 export const DRILL_LIST_COMPONENT = 'list-view';
@@ -61,6 +64,11 @@ export interface DrillRecordListProps {
   dataSource?: any;
   /** Called after the host opened a record's page. */
   onNavigate?: () => void;
+  /**
+   * Whether the drill's dialog is open (default: open). A record whose step
+   * set is still being read when it closes is not opened.
+   */
+  open?: boolean;
 }
 
 type Summary = string | Record<string, unknown>;
@@ -81,6 +89,7 @@ export const DrillRecordList: React.FC<DrillRecordListProps> = ({
   maxRows,
   dataSource: ownDataSource,
   onNavigate,
+  open: dialogOpen = true,
 }) => {
   const context = React.useContext(SchemaRendererContext);
   const dataSource = ownDataSource ?? context?.dataSource;
@@ -116,7 +125,19 @@ export const DrillRecordList: React.FC<DrillRecordListProps> = ({
 
   const [added, setAdded] = React.useState<string[]>([]);
   const [summaries, setSummaries] = React.useState<Record<string, Summary>>({});
-  const shown = React.useRef<{ ids: string[]; total?: number }>({ ids: [] });
+  const shown = React.useRef<{
+    ids: string[];
+    total?: number;
+    findParams?: Readonly<Record<string, unknown>> | null;
+  }>({ ids: [] });
+  // The record a click asks for while its step set is read: the last click
+  // wins, and none opens once the drill is closed or gone (objectstack#36554).
+  const lastOpen = React.useRef(0);
+  const live = React.useRef(dialogOpen);
+  React.useLayoutEffect(() => {
+    live.current = dialogOpen;
+    return () => { live.current = false; };
+  }, [dialogOpen]);
   const [opened, setOpened] = React.useState<Record<string, unknown> | null>(null);
 
   const baseColumns = React.useMemo(() => {
@@ -173,14 +194,24 @@ export const DrillRecordList: React.FC<DrillRecordListProps> = ({
         shown.current = { ...shown.current, ids: rows.map(rowId).filter((id): id is string => !!id) };
       }}
       onTotalChange={(total: number) => { shown.current = { ...shown.current, total }; }}
+      onFindParamsChange={(findParams: Readonly<Record<string, unknown>> | null) => {
+        shown.current = { ...shown.current, findParams };
+      }}
       rowOpensRecord
       onRowClick={(record: Record<string, unknown>) => {
         if (!openRecord) return setOpened(record);
         const id = rowId(record);
         if (!id) return;
-        const { ids, total } = shown.current;
-        openRecord(objectName, id, { siblings: ids.includes(id) ? ids : [id], ...(total != null ? { total } : {}) });
-        onNavigate?.();
+        const click = ++lastOpen.current;
+        const open = (origin: DrillRecordOrigin) => {
+          if (click !== lastOpen.current || !live.current) return;
+          openRecord(objectName, id, origin);
+          onNavigate?.();
+        };
+        const { ids, total, findParams } = shown.current;
+        const origin = drillRecordOrigin({ dataSource, objectName, recordId: id, drawn: ids, total, findParams });
+        if (origin instanceof Promise) void origin.then(open);
+        else open(origin);
       }}
     />
     {!openRecord && (

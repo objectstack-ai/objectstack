@@ -469,6 +469,18 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "更改负责人",
         helpText: "更改负责人操作（单条与批量）：开启即提供，关闭即隐藏。未设置时开启，但 controlled_by_parent 明细对象默认关闭。仅在记录有可重新分配负责人的对象上提供（ownership 为 user 或未设置、无 managedBy、不是 sys_ 对象、owner_id 未设为只读，外部对象上 owner_id 已声明或已映射）；在其他对象上开启会被拒绝。它只控制该操作，不影响直接编辑 owner_id。已存储的 {enabled, visibleWhen, disabledWhen} 对象逐键编辑；在源码中写一个即可按每条记录控制该操作。"
       },
+      actionLayout: {
+        label: "动作布局",
+        helpText: "本对象动作的顺序及哪些显示为按钮，按作用域分：pinned（最多 3 个按钮，按顺序）和 more（「更多」菜单的顺序；两者都没写的动作按默认顺序排在后面）。未设置时，各处仍按动作的排序选按钮。"
+      },
+      "actionLayout.list": {
+        label: "列表",
+        helpText: "列表页工具栏，写作 {\"pinned\": [...], \"more\": [...]}：放在列表工具栏上的动作名称；$import / $export 只能放在 pinned。最多固定 3 个。未固定时，页面仍显示自己的导入 / 导出菜单。os validate 会拒绝不是本对象动作、或未放在列表工具栏上的名称；这样的名称什么也不显示。"
+      },
+      "actionLayout.record": {
+        label: "记录",
+        helpText: "记录页头（记录页、侧边预览、手机底栏），写作 {\"pinned\": [...], \"more\": [...]}：放在记录页头或其「更多」菜单中的动作名称。最多固定 3 个。os validate 会拒绝不是本对象动作、或未放在记录页上的名称；这样的名称什么也不显示。"
+      },
       editMode: {
         label: "编辑方式",
         helpText: "该对象记录的编辑交互意图。留空则由渲染端自行选择默认方式。这是跨渲染端的意图声明，不是样式。"
@@ -1387,7 +1399,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "navigation.size": {
         label: "尺寸",
-        helpText: "抽屉详情的浮层尺寸档位：'auto'（默认——渲染器按字段数与视口推导，AI 无需填写），或粗粒度覆盖 sm/md/lg/xl/full。优先使用它而非像素 `width`；page 模式会忽略它。"
+        helpText: "记录抽屉的宽度档位：'auto'（默认）沿用宿主固定的默认宽度，每个对象都一样，与字段数无关（控制台的记录侧边面板以 460px 打开）；或粗粒度覆盖 sm/md/lg/xl/full（上限分别为 480/720/960/1200/1600px，始终受视口限制）。读者拖动出的宽度优先于两者。优先使用它而非像素 `width`；记录以整页打开时它不起作用（控制台在手机上一律以整页打开记录），在手机宽度的屏幕上也不起作用，那里抽屉占满屏幕。"
       },
       "navigation.width": {
         label: "宽度",

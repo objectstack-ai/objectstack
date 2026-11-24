@@ -193,13 +193,30 @@ describe('the greeting row (objectstack#29147)', () => {
   });
 
   it('with no app yet, the empty state\'s "Ask AI" is 44 px below sm', async () => {
-    state.apps = [];
-    state.agents = [{ name: 'ask' }];
-    state.askAgent = true;
-    render(<HomePage />);
-    expectPhoneTarget(await screen.findByTestId('home-ask-ai'), ['h-10'], ['max-sm:h-11']);
+    const restoreWidth = atPhoneWidth();
+    try {
+      state.apps = [];
+      state.agents = [{ name: 'ask' }];
+      state.askAgent = true;
+      render(<HomePage />);
+      expectPhoneTarget(await screen.findByTestId('home-ask-ai'), ['h-10'], ['max-sm:h-11']);
+    } finally {
+      restoreWidth();
+    }
   });
 });
+
+
+/**
+ * objectstack#36732 — from 768 px up a viewer with no product app is drawn the
+ * no-apps empty state (`HomePage.desktopNoApps-36732.test.tsx`); the empty
+ * state these cases read is a phone's, so they render at phone width.
+ */
+function atPhoneWidth() {
+  const real = window.innerWidth;
+  Object.defineProperty(window, 'innerWidth', { value: 375, configurable: true, writable: true });
+  return () => Object.defineProperty(window, 'innerWidth', { value: real, configurable: true, writable: true });
+}
 
 describe('"Your apps" (objectstack#29147)', () => {
   it('the heading\'s links are 44 px tall below sm', () => {

@@ -188,6 +188,22 @@ export function listViewTargetOf(
 }
 
 /**
+ * objectstack#36750 — whether `target` is the fallback default view: the
+ * object's default list view (`isDefault`) whose id no view of `views` is held
+ * under. {@link listViewTargetOf} names `<object>.default` when no view is
+ * flagged default, and nothing is published under that name until the
+ * panel's first edit creates the view and a publish makes it live, so the
+ * server answers `GET …/layers` for it with a 404 (objectstack#22397). `views`
+ * is the map {@link listViewTargetOf} read: the object's merged `listViews`,
+ * which holds every view item the server serves for it under its qualified
+ * name (`mergeViewsIntoObjects`), with this package's drafted list views.
+ */
+export function isFallbackListView(target: ListViewTarget, views: Record<string, unknown>): boolean {
+  if (!target.isDefault) return false;
+  return !Object.keys(views).some((key) => qualifiedViewId(target.objectName, key) === target.viewId);
+}
+
+/**
  * A view item that does not exist yet: the record shape, bound to its object,
  * listing `columns`. Flagged default only where it is the object's default
  * list view. No `label`: the spec makes it optional, and a label invented here
@@ -352,6 +368,13 @@ export interface ObjectListViewDraft {
   views: ListViewChoice[];
   /** The autosave's `target`: the buffer key of the view ({@link listViewBufferKey}), `''` with no target. */
   targetKey: string;
+  /**
+   * objectstack#36750 — `target` is the fallback default view
+   * ({@link isFallbackListView}): no view of the object is flagged default, and
+   * no view is held under the id it falls back to. Nothing is published under
+   * it, so nothing asks its published layer.
+   */
+  targetIsFallback: boolean;
   /** The autosave's `loadedFor`: the target the buffer was loaded for. */
   loadedFor: string;
   /** The view item as the server holds it (draft, else published), with edits; `null` when it does not exist yet. */
@@ -549,9 +572,8 @@ export function useObjectListViewDraft({
   const draftViewRows = viewDraftsRead ? viewDrafts.rows : [];
   // objectstack#30177 — the entry's view among the merged views and this
   // package's drafted list views (the module docblock's "Which view").
-  const entryTarget = objectName
-    ? listViewTargetOf(objectName, landingViewName, { ...publishedViews, ...draftedListViewsOf(objectName, draftViewRows) })
-    : null;
+  const knownViews = objectName ? { ...publishedViews, ...draftedListViewsOf(objectName, draftViewRows) } : {};
+  const entryTarget = objectName ? listViewTargetOf(objectName, landingViewName, knownViews) : null;
   const entryUnsettled =
     !!entryTarget?.isDefault &&
     !viewDraftsRead &&
@@ -572,6 +594,16 @@ export function useObjectListViewDraft({
     objectName && !holding ? listViewChoicesOf(objectName, publishedViews, draftViewRows, entryTarget, target) : [];
   const viewId = target?.viewId ?? '';
   const targetKey = viewId ? listViewBufferKey(viewId) : '';
+  // objectstack#36750 — the target is the fallback default view, read only off
+  // an answer that can say so: this package's view drafts have answered, and
+  // the shell's objects are composed with the `/meta/view` list it served
+  // (`getTypeStatus('object')` is `ready` only then). While either is still
+  // loading, or refetching after a publish, the view may yet be listed, so its
+  // layer is read as before. A context that reports no status (a hand-rolled
+  // one) is no such answer either: absence from its objects proves nothing.
+  const metadataSettled = metadata.getTypeStatus?.('object') === 'ready';
+  const targetIsFallback =
+    !!target && viewDraftsRead && metadataSettled && isFallbackListView(target, knownViews);
   // objectstack#30317 — a draft-only object is absent from the merged
   // metadata, so the columns a view created here starts with are read off
   // this package's drafted definition, read with the drafts overlaid (the
@@ -714,7 +746,9 @@ export function useObjectListViewDraft({
         // already carries that layer, so it is not asked again.
         const layeredAt = { packageId };
         const draftLayers = readAt === packageId ? (authoredRead?.layers ?? null) : null;
-        const lay = objectDraftOnly
+        // objectstack#36750 — nor for the fallback default view: nothing is
+        // published under its id, so its layer would answer 404 too.
+        const lay = objectDraftOnly || (!draft && targetIsFallback)
           ? null
           : !draft
             ? await client.layered<Row>('view', viewId, layeredAt)
@@ -753,7 +787,7 @@ export function useObjectListViewDraft({
     return () => {
       cancelled = true;
     };
-  }, [client, viewId, holding, objectName, packageId, publishNonce, reloadNonce, recordRead, customizing]);
+  }, [client, viewId, holding, objectName, packageId, publishNonce, reloadNonce, recordRead, customizing, targetIsFallback]);
 
   const edit = React.useCallback((row: Row) => {
     setBuffer((b) => ({ ...b, row, dirty: true }));
@@ -865,6 +899,7 @@ export function useObjectListViewDraft({
     entryTarget: pickedViewId ? entryTarget : null,
     views,
     targetKey,
+    targetIsFallback,
     loadedFor: buffer.for,
     row: current ? row : null,
     notList: current && notList,

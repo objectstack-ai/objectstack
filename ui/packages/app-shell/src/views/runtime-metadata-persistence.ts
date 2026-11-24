@@ -721,9 +721,26 @@ export async function saveDashboardInPlace(
   ctx: RuntimePersistCtx,
 ): Promise<SaveAndPublishOutcome> {
   if (target.kind === 'unbound') return saveAndPublishRuntimeMetadata('dashboard', name, body, ctx);
-  return saveAndPublishRuntimeMetadata('dashboard', name, body, {
+  return saveAndPublishInPackage('dashboard', name, body, target.packageId, ctx);
+}
+
+/**
+ * {@link saveAndPublishRuntimeMetadata} into the package `packageId`: the
+ * draft, its publish and the discard of a refused publish all name it. Used
+ * where an item is created in a known package, such as a dashboard or report
+ * made from the design mode's 「Add menu item」 (objectstack#36364), which is
+ * saved where the menu is.
+ */
+export function saveAndPublishInPackage(
+  type: RuntimeArtifactType,
+  name: string,
+  body: Record<string, unknown>,
+  packageId: string,
+  ctx: RuntimePersistCtx,
+): Promise<SaveAndPublishOutcome> {
+  return saveAndPublishRuntimeMetadata(type, name, body, {
     ...ctx,
-    metadataClient: boundToPackage(ctx.metadataClient, target.packageId),
+    metadataClient: boundToPackage(ctx.metadataClient, packageId),
   });
 }
 

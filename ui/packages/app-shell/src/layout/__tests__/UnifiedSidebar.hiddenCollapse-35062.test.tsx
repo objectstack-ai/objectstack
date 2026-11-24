@@ -24,7 +24,7 @@
  *   collapsed.
  * - The edge is drawn only while the sidebar is hidden, never on a phone.
  * - objectstack#36485 — the float carries the app-name menu, and its
- *   「Edit app」 enters the design mode from there too.
+ *   「Design layout」 enters the design mode from there too.
  *
  * The test DOM computes no Tailwind and no layout, so widths are read as the
  * class that sets them; the rendered widths are measured in a browser on the
@@ -112,8 +112,15 @@ import { SidebarProvider, useSidebar } from '@object-ui/components';
 import { UnifiedSidebar } from '../UnifiedSidebar';
 import { useResponsiveSidebar } from '../../hooks/useResponsiveSidebar';
 import {
+  CONSOLE_EXPANDED_SIDEBAR_WIDTH,
+  CONSOLE_SIDEBAR_MAX_WIDTH,
+  CONSOLE_SIDEBAR_MIN_WIDTH,
   CONSOLE_SIDEBAR_NARROW_OPEN_PREFERENCE,
+  CONSOLE_SIDEBAR_WIDTH_PREFERENCE,
+  RAIL_HIDDEN_PANEL,
   RAIL_OVERLAY_FRAME_NO_GAP,
+  RAIL_OVERLAY_PANEL,
+  SIDEBAR_RESIZING_FRAME,
   SIDEBAR_EDGE_ZONE,
   SIDEBAR_FLOAT_CLOSE_DELAY_MS,
   SIDEBAR_FLOAT_OPEN_DELAY_MS,
@@ -685,7 +692,7 @@ function reloadDocked(width: number) {
   return reload(width);
 }
 
-describe('the float carries the app menu, and its 「Edit app」 enters the design mode (objectstack#36485)', () => {
+describe('the float carries the app menu, and its 「Design layout」 enters the design mode (objectstack#36485, objectstack#36758)', () => {
   /** The shell's hold on the mode, as `ConsoleLayout` keeps it, and whether it is on. */
   function Shell({ children }: { children: React.ReactNode }) {
     const mode = useDesignModeController({ appName: 'crm', appBasePath: '/apps/crm', enabled: true });
@@ -702,7 +709,7 @@ describe('the float carries the app menu, and its 「Edit app」 enters the desi
     vi.unstubAllGlobals();
   });
 
-  it('collapsed at 1024 px, pressed open from the left edge: the app menu offers 「Edit app」 to an admin who may author, and it turns the mode on', async () => {
+  it('collapsed at 1024 px, pressed open from the left edge: the app menu offers 「Design layout」 to an admin who may author, and it turns the mode on', async () => {
     workspaceAdmin = true;
     vi.stubGlobal(
       'fetch',
@@ -742,10 +749,208 @@ describe('the float carries the app menu, and its 「Edit app」 enters the desi
 
     const menuTrigger = within(panel()).getByTestId('sidebar-app-menu-trigger');
     fireEvent.pointerDown(menuTrigger, { button: 0, ctrlKey: false, pointerType: 'mouse' });
-    const item = await screen.findByTestId('sidebar-app-menu-edit-app');
-    expect(item).toHaveTextContent('Edit app');
+    const item = await screen.findByTestId('sidebar-app-menu-design-layout');
+    expect(item).toHaveTextContent('Design layout');
     expect(screen.getByTestId('mode')).toHaveTextContent('off');
     await act(async () => fireEvent.click(item));
     expect(screen.getByTestId('mode')).toHaveTextContent('on');
+  });
+});
+
+/** The width the frame hands the sidebar primitive (its `--sidebar-width`). */
+const frameWidth = () => frame().style.getPropertyValue('--sidebar-width');
+const resizeHandle = () => screen.queryByTestId('console-sidebar-resize');
+const keptWidth = () => readWorkspacePreference(CONSOLE_SIDEBAR_WIDTH_PREFERENCE, 'user');
+
+describe('the docked sidebar’s right edge resizes it, and the float takes the width (objectstack#36227)', () => {
+  it('at 1440 px a drag on the edge resizes it between 200 and 350; the width is kept once the drag ends, and a reload keeps it', () => {
+    renderShell(1440);
+    expectDocked();
+    expect(frameWidth()).toBe(`${CONSOLE_EXPANDED_SIDEBAR_WIDTH}px`);
+    const handle = resizeHandle()!;
+    expect(handle).toHaveAttribute('role', 'separator');
+    expect(handle).toHaveAttribute('aria-valuenow', '256');
+    expect(handle).toHaveAttribute('aria-valuemin', String(CONSOLE_SIDEBAR_MIN_WIDTH));
+    expect(handle).toHaveAttribute('aria-valuemax', String(CONSOLE_SIDEBAR_MAX_WIDTH));
+
+    // Dragged far right: held at the widest, the primitive's transition off while it follows.
+    fireEvent.pointerDown(handle, { button: 0, clientX: 256, pointerId: 1 });
+    fireEvent.pointerMove(handle, { clientX: 900, pointerId: 1 });
+    expect(frameWidth()).toBe('350px');
+    expect(tokens(frame())).toContain(SIDEBAR_RESIZING_FRAME);
+    expect(keptWidth(), 'nothing is kept mid-drag').toBeUndefined();
+    // Dragged far left: held at the narrowest.
+    fireEvent.pointerMove(handle, { clientX: 0, pointerId: 1 });
+    expect(frameWidth()).toBe('200px');
+    fireEvent.pointerMove(handle, { clientX: 300, pointerId: 1 });
+    fireEvent.pointerUp(handle, { clientX: 300, pointerId: 1 });
+    expect(frameWidth()).toBe('300px');
+    expect(tokens(frame())).toEqual(['contents']);
+    expect(keptWidth()).toBe(300);
+
+    reload(1440);
+    expectDocked();
+    expect(frameWidth()).toBe('300px');
+    expect(resizeHandle()).toHaveAttribute('aria-valuenow', '300');
+  });
+
+  it('a double-click on the edge comes back to 256; the arrow keys, Home and End move it too', () => {
+    writeWorkspacePreference(CONSOLE_SIDEBAR_WIDTH_PREFERENCE, 'user', 320);
+    renderShell(1440);
+    expect(frameWidth()).toBe('320px');
+    fireEvent.doubleClick(resizeHandle()!);
+    expect(frameWidth()).toBe('256px');
+    expect(keptWidth()).toBe(256);
+
+    fireEvent.keyDown(resizeHandle()!, { key: 'End' });
+    expect(frameWidth()).toBe('350px');
+    fireEvent.keyDown(resizeHandle()!, { key: 'ArrowRight' });
+    expect(frameWidth(), 'held at the widest').toBe('350px');
+    fireEvent.keyDown(resizeHandle()!, { key: 'ArrowLeft' });
+    expect(frameWidth()).toBe('334px');
+    fireEvent.keyDown(resizeHandle()!, { key: 'Home' });
+    expect(frameWidth()).toBe('200px');
+    expect(keptWidth()).toBe(200);
+  });
+
+  it('a kept width out of the range reads as the nearest end', () => {
+    writeWorkspacePreference(CONSOLE_SIDEBAR_WIDTH_PREFERENCE, 'user', 9000);
+    renderShell(1440);
+    expect(frameWidth()).toBe('350px');
+  });
+
+  it('collapsed, the edge is gone; the float takes the kept width, drawn as a card, and the hidden panel keeps the card parked past the edge', () => {
+    vi.useFakeTimers();
+    writeWorkspacePreference(CONSOLE_SIDEBAR_WIDTH_PREFERENCE, 'user', 300);
+    renderShell(1024);
+    expectHidden();
+    expect(resizeHandle()).toBeNull();
+    expect(frameWidth()).toBe('300px');
+    for (const token of RAIL_HIDDEN_PANEL.split(' ')) expect(tokens(panel())).toContain(token);
+
+    hoverEdge(SIDEBAR_FLOAT_OPEN_DELAY_MS);
+    expectFloat();
+    expect(resizeHandle(), 'the float is not resized').toBeNull();
+    expect(frameWidth()).toBe('300px');
+    for (const token of RAIL_OVERLAY_PANEL.split(' ')) expect(tokens(panel())).toContain(token);
+    // A card: off the window's edges, rounded, with a shadow.
+    expect(tokens(panel())).toEqual(expect.arrayContaining(['inset-y-2', 'left-2', 'rounded-lg', 'shadow-xl']));
+    expect(tokens(panel())).not.toContain('inset-y-0');
+    expect(tokens(panel())).not.toContain('left-0');
+  });
+
+  it('the edge going away mid-drag ends the drag as a cancel: the page is selectable again and the width goes back (⌘B, then a narrow window)', () => {
+    const body = document.body.style;
+    writeWorkspacePreference(CONSOLE_SIDEBAR_WIDTH_PREFERENCE, 'user', 300);
+    renderShell(1440);
+
+    // ⌘B folds the sidebar while the edge is held.
+    fireEvent.pointerDown(resizeHandle()!, { button: 0, clientX: 300, pointerId: 1 });
+    fireEvent.pointerMove(resizeHandle()!, { clientX: 340, pointerId: 1 });
+    expect(frameWidth()).toBe('340px');
+    expect(body.getPropertyValue('user-select')).toBe('none');
+    commandB();
+    expectHidden();
+    expect(resizeHandle()).toBeNull();
+    expect(body.getPropertyValue('user-select'), 'the page is selectable again').toBe('');
+    expect(body.getPropertyValue('cursor')).toBe('');
+    expect(frameWidth(), 'back to the width it had').toBe('300px');
+    expect(tokens(frame())).not.toContain(SIDEBAR_RESIZING_FRAME);
+    expect(keptWidth()).toBe(300);
+
+    // The window narrows past 768 px while the edge is held.
+    commandB();
+    expectDocked();
+    fireEvent.pointerDown(resizeHandle()!, { button: 0, clientX: 300, pointerId: 2 });
+    fireEvent.pointerMove(resizeHandle()!, { clientX: 220, pointerId: 2 });
+    expect(body.getPropertyValue('user-select')).toBe('none');
+    resizeTo(700);
+    expect(resizeHandle()).toBeNull();
+    expect(body.getPropertyValue('user-select')).toBe('');
+    expect(body.getPropertyValue('cursor')).toBe('');
+    expect(keptWidth()).toBe(300);
+    resizeTo(1440);
+    expect(frameWidth(), 'nothing of the drag is left behind').toBe('300px');
+    expect(tokens(frame())).not.toContain(SIDEBAR_RESIZING_FRAME);
+  });
+
+  it('on a phone the drawer keeps its own width and draws no edge', () => {
+    writeWorkspacePreference(CONSOLE_SIDEBAR_WIDTH_PREFERENCE, 'user', 300);
+    renderShell(700);
+    expect(resizeHandle()).toBeNull();
+    expect(frameWidth()).toBe('');
+  });
+});
+
+describe('a menu opened from the float keeps it out (objectstack#36471)', () => {
+  /** The float a resting pointer opened on a wide window, the pointer then past it on the page. */
+  function floatThenPointerAway() {
+    vi.useFakeTimers();
+    writeWideWindowOpen(false);
+    reload(1440);
+    expectHidden();
+    hoverEdge(SIDEBAR_FLOAT_OPEN_DELAY_MS);
+    expectFloat();
+    // The float still sliding in: the pointer is past its edge a moment, which starts the fold's clock.
+    fireEvent.pointerMove(screen.getByText('The page'), { pointerType: 'mouse' });
+  }
+
+  it('the app name pressed before the fold’s moment is up: the menu opens, and the float stays while it is open', () => {
+    floatThenPointerAway();
+    fireEvent.pointerDown(within(panel()).getByTestId('sidebar-app-menu-trigger'), {
+      button: 0,
+      ctrlKey: false,
+      pointerType: 'mouse',
+    });
+    expect(screen.getByTestId('sidebar-app-menu')).toBeInTheDocument();
+    act(() => {
+      vi.advanceTimersByTime(SIDEBAR_FLOAT_CLOSE_DELAY_MS * 3);
+    });
+    expectFloat();
+    expect(screen.getByTestId('sidebar-app-menu')).toBeInTheDocument();
+  });
+
+  it('a menu opened from the float with no press in it (the keyboard) holds the float when the moment is up', () => {
+    floatThenPointerAway();
+    fireEvent.keyDown(within(panel()).getByTestId('sidebar-app-menu-trigger'), { key: 'Enter' });
+    expect(screen.getByTestId('sidebar-app-menu')).toBeInTheDocument();
+    act(() => {
+      vi.advanceTimersByTime(SIDEBAR_FLOAT_CLOSE_DELAY_MS * 3);
+    });
+    expectFloat();
+  });
+
+  it('a press in the float stops the fold’s clock; a later move away starts it again', () => {
+    floatThenPointerAway();
+    fireEvent.pointerDown(within(panel()).getByRole('link', { name: 'Contacts' }), { button: 0, pointerType: 'mouse' });
+    act(() => {
+      vi.advanceTimersByTime(SIDEBAR_FLOAT_CLOSE_DELAY_MS * 3);
+    });
+    expectFloat();
+    fireEvent.pointerMove(screen.getByText('The page'), { pointerType: 'mouse' });
+    act(() => {
+      vi.advanceTimersByTime(SIDEBAR_FLOAT_CLOSE_DELAY_MS);
+    });
+    expectHidden();
+  });
+
+  it('once the menu closes, moving away folds the float as before', () => {
+    floatThenPointerAway();
+    fireEvent.pointerDown(within(panel()).getByTestId('sidebar-app-menu-trigger'), {
+      button: 0,
+      ctrlKey: false,
+      pointerType: 'mouse',
+    });
+    act(() => {
+      vi.advanceTimersByTime(SIDEBAR_FLOAT_CLOSE_DELAY_MS * 3);
+    });
+    expectFloat();
+    fireEvent.keyDown(screen.getByTestId('sidebar-app-menu'), { key: 'Escape' });
+    expect(screen.queryByTestId('sidebar-app-menu')).toBeNull();
+    fireEvent.pointerMove(screen.getByText('The page'), { pointerType: 'mouse' });
+    act(() => {
+      vi.advanceTimersByTime(SIDEBAR_FLOAT_CLOSE_DELAY_MS);
+    });
+    expectHidden();
   });
 });

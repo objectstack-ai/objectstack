@@ -41,7 +41,7 @@ import { strictObject } from '../shared/strict-object';
  *     filter: { status: 'active' },
  *   },
  *   // optional sweep cadence — defaults to daily at 08:00 UTC
- *   schedule: { type: 'cron', expression: '0 8 * * *' },
+ *   schedule: { type: 'cron', expression: '0 8 * * *', timezone: 'UTC' },
  * }
  * ```
  *

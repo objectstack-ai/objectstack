@@ -368,6 +368,9 @@ const TABLE_DEFAULT_TRANSLATIONS: Record<string, string> = {
   // objectstack#36023 — why a list cell's typed value was not saved, said under the editor.
   'table.cellNotNumber': 'Enter a number.',
   'table.cellInvalid': 'This value isn\'t valid.',
+  // objectstack#36289 — why a cell menu's Paste left the cell as it was.
+  'table.pasteNotValue': 'The copied text can\'t go in this cell.',
+  'table.pasteUnavailable': 'The browser didn\'t let the list read the clipboard. Select the cell and press Ctrl+V (⌘V) to paste.',
   'validation.email': 'Please enter a valid email address',
   'validation.url': 'Please enter a valid URL',
   // objectstack#35685 — a list cell's own save state, and the way out of a
@@ -2232,7 +2235,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
   // objectstack#28434 — the row context menu: which row it is open on, where,
   // and the element focus goes back to when it closes (the focused cell for
   // the keyboard, the cell under the pointer for a right-click).
-  const [rowContextMenu, setRowContextMenu] = useState<{ row: any; selected: boolean; x: number; y: number } | null>(null);
+  const [rowContextMenu, setRowContextMenu] = useState<{ row: any; selected: boolean; column?: string; x: number; y: number } | null>(null);
   const rowContextMenuReturnFocusRef = useRef<HTMLElement | null>(null);
   // The last pointer that pressed a row: a touch long-press raises
   // `contextmenu` too, and touch keeps the row's "⋮" instead.
@@ -2246,6 +2249,15 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
   // Set when the menu closes because the pointer went elsewhere: focus then
   // stays where that press put it instead of jumping back to the row.
   const rowContextMenuClosedOutsideRef = useRef(false);
+  // objectstack#36289 — while the menu is open or closing, what a cell item
+  // chose waits here and runs once focus has gone back: a note it puts on the
+  // cell would otherwise be dismissed by that very focus move.
+  const rowContextMenuShownRef = useRef(false);
+  const afterRowContextMenuRef = useRef<Array<() => void>>([]);
+  const whenRowContextMenuClosed = (run: () => void) => {
+    if (rowContextMenuShownRef.current) afterRowContextMenuRef.current.push(run);
+    else run();
+  };
   // The built-in row menu's verdicts are asked at open time, so the open
   // decision and the items it opens read one answer (see `rowContextMenuItems`).
   const rowMenuScope = usePredicateScope();
@@ -3998,10 +4010,60 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     }
     return null;
   });
+  /**
+   * Pasted text written into a cell: converted as the column reads text, then
+   * held to the checks the cell's editor holds a committed value to
+   * (`GridCellFacts.validate`), so a paste never saves what typing the same
+   * text would refuse (objectstack#36289). Text that stands for no value of
+   * the column, or a value the checks refuse, leaves the cell as it is and
+   * says why on it.
+   */
   const pasteIntoCell = (rowIndex: number, colIndex: number, text: string) => writeCell(rowIndex, colIndex, (row, col) => {
-    const fromText = factsOf(row, col)?.fromText;
-    return fromText ? fromText(text) : defaultValueFromText(col, text);
+    const facts = factsOf(row, col);
+    const value = facts?.fromText ? facts.fromText(text) : defaultValueFromText(col, text);
+    const refusal = value === undefined ? t('table.pasteNotValue') : facts?.validate?.(value) || null;
+    if (refusal) {
+      setCellNotice({ rowIndex, colIndex, text: refusal });
+      return undefined;
+    }
+    return value;
   });
+
+  /** Where a row and a column are drawn on this page, or `null` when either is not. */
+  const cellIndexOf = (rowKey: PendingRowKey, columnKey: string): { rowIndex: number; colIndex: number } | null => {
+    const rowIndex = paginatedData.findIndex((r) => pendingRowKeyOf(r) === rowKey);
+    const colIndex = columns.findIndex((c) => c.accessorKey === columnKey);
+    return rowIndex < 0 || colIndex < 0 ? null : { rowIndex, colIndex };
+  };
+
+  /**
+   * The clipboard's text pasted into a cell, as a paste on the selected cell
+   * is (objectstack#36289). The browser may refuse to hand the text over (no
+   * clipboard API, the reader declined, the page lacks focus); the cell then
+   * says so and names the keyboard paste, which needs no permission.
+   */
+  const pasteClipboardInto = (row: any, columnKey: string) => {
+    const rowKey = pendingRowKeyOf(row);
+    const sayUnavailable = () => {
+      const at = cellIndexOf(rowKey, columnKey);
+      if (at) setCellNotice({ ...at, text: t('table.pasteUnavailable') });
+    };
+    const clipboard = typeof navigator !== 'undefined' ? navigator.clipboard : undefined;
+    if (typeof clipboard?.readText !== 'function') {
+      whenRowContextMenuClosed(sayUnavailable);
+      return;
+    }
+    // Asked at once, inside the click that chose Paste (a browser may grant the
+    // read only then); written once the menu has closed.
+    clipboard.readText().then(
+      (text) => whenRowContextMenuClosed(() => {
+        // Read where the cell is once the text arrives: the rows may have moved.
+        const at = cellIndexOf(rowKey, columnKey);
+        if (at && text !== '') pasteIntoCell(at.rowIndex, at.colIndex, text);
+      }),
+      () => whenRowContextMenuClosed(sayUnavailable),
+    );
+  };
 
   /** Text typed or composed on the selected cell. */
   const typeIntoCell = (rowIndex: number, colIndex: number, text: string) => {
@@ -4122,6 +4184,21 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     // A printable key lands in the catcher, which reads it (`typeIntoCell`).
   };
 
+  /**
+   * A cell's value to the clipboard: Ctrl/Cmd+C on the selected cell, and the
+   * cell menu's Copy (objectstack#36289). A MASKED column copies NOTHING
+   * (objectui#10583): the producer drew a mask, so no copy hands out what the
+   * cell hides.
+   */
+  const copyCellValue = (row: any, columnKey: string) => {
+    if (columns.find((col) => col.accessorKey === columnKey)?.masked) return;
+    const value = row[columnKey];
+    const text = value != null ? String(value) : '';
+    navigator.clipboard?.writeText(text).catch(() => {
+      // Fallback for environments without clipboard API
+    });
+  };
+
   const handleCellKeyDown = (e: React.KeyboardEvent, rowIndex: number, colIndex: number, columnKey: string) => {
     if (selectFirst) {
       if (!isCommandLetter(e, 'c')) {
@@ -4161,18 +4238,11 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
       // detail page's house shape (objectui#8440, option A): no copy at all,
       // ⛔ not the bullets — which is also why `preventDefault()` above stays:
       // measured in Chromium, letting the default run copies a selected mask
-      // as `••••••`, the payload that ruling refused. Unmasked cells are
-      // untouched below.
-      if (columns.find((col) => col.accessorKey === columnKey)?.masked) return;
+      // as `••••••`, the payload that ruling refused. `copyCellValue` then
+      // copies nothing of a masked cell.
       const globalIdx = (effectivePage - 1) * pageSize + rowIndex;
       const row = sortedData[manualPagination ? rowIndex : globalIdx];
-      if (row) {
-        const value = row[columnKey];
-        const text = value != null ? String(value) : '';
-        navigator.clipboard.writeText(text).catch(() => {
-          // Fallback for environments without clipboard API
-        });
-      }
+      if (row) copyCellValue(row, columnKey);
       return;
     }
 
@@ -4417,6 +4487,36 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     && !(selectFirst && !autosaves && rowActionsColumnIsEditOnly && !hasPendingChanges);
 
   /**
+   * objectstack#36289 — what the table does with the data cell a row context
+   * menu opened on, for the host to draw as that cell's items: Copy as
+   * Ctrl/Cmd+C does, Paste as a paste on the selected cell does, Clear as
+   * Backspace does. Each is left out where the table would refuse it, so a
+   * host draws it unavailable rather than offering what does nothing.
+   */
+  const cellMenuOf = (
+    row: any,
+    columnKey: string,
+  ): { copy?: () => void; paste?: () => void; clear?: () => void } | undefined => {
+    const col = columns.find((c) => c.accessorKey === columnKey);
+    if (!col) return undefined;
+    const rowKey = pendingRowKeyOf(row);
+    const writable = readOnlyReasonOf(row, col) === null;
+    const clearable = writable && !togglesCell(row, col) && !factsOf(row, col)?.clearRefusal;
+    return {
+      ...(col.masked ? {} : { copy: () => copyCellValue(row, columnKey) }),
+      ...(writable ? { paste: () => pasteClipboardInto(row, columnKey) } : {}),
+      ...(clearable
+        ? {
+            clear: () => whenRowContextMenuClosed(() => {
+              const at = cellIndexOf(rowKey, columnKey);
+              if (at) clearCell(at.rowIndex, at.colIndex);
+            }),
+          }
+        : {}),
+    };
+  };
+
+  /**
    * objectstack#28434 — the items ONE row's context menu opens with, or `null`
    * for the browser's own menu.
    *
@@ -4426,9 +4526,10 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
    * selection of two or more — a selection is a bulk act, and this table holds
    * no bulk actions to offer it — and never on a row with nothing to offer.
    */
-  const rowContextMenuItems = (row: any, selected: boolean): React.ReactNode => {
+  const rowContextMenuItems = (row: any, selected: boolean, column?: string): React.ReactNode => {
     if (schema.renderRowContextMenu) {
-      const items = schema.renderRowContextMenu(row, { selected });
+      const cell = column !== undefined ? cellMenuOf(row, column) : undefined;
+      const items = schema.renderRowContextMenu(row, cell ? { selected, column, cell } : { selected });
       return items === false || items === undefined ? null : items;
     }
     if (!rowActions || rowActionsColumnIsEditOnly) return null;
@@ -4472,7 +4573,10 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
       if (pointerType === 'touch') return;
     }
     if (keepsBrowserContextMenu(target, rowEl)) return;
-    const items = rowContextMenuItems(row, selected);
+    // The data cell the menu opened on (objectstack#36290): its column's
+    // accessor, for the host's cell-level items.
+    const column = target.closest<HTMLElement>('[data-cell-column]')?.getAttribute('data-cell-column') ?? undefined;
+    const items = rowContextMenuItems(row, selected, column);
     if (items == null) return;
     e.preventDefault();
     const pointer = fromKeyboard ? null : (e as React.MouseEvent);
@@ -4491,11 +4595,13 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     const focusable = fromKeyboard ? target : target.closest<HTMLElement>('[tabindex]');
     rowContextMenuReturnFocusRef.current = focusable && rowEl.contains(focusable) ? focusable : null;
     rowContextMenuClosedOutsideRef.current = false;
-    setRowContextMenu({ row, selected, x, y });
+    rowContextMenuShownRef.current = true;
+    afterRowContextMenuRef.current = [];
+    setRowContextMenu({ row, selected, column, x, y });
   };
   // The open menu's items, re-asked each render so they follow the row.
   const openRowContextMenuItems = rowContextMenu
-    ? rowContextMenuItems(rowContextMenu.row, rowContextMenu.selected)
+    ? rowContextMenuItems(rowContextMenu.row, rowContextMenu.selected, rowContextMenu.column)
     : null;
   const showToolbar = searchEnabled || exportable || (showSelectionCount && selectable && selectedRowIds.size > 0) || hasPendingChanges;
 
@@ -5431,6 +5537,8 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                             // focus tracking exist only in the first case.
                             tabIndex={keyboardNavigation ? (rowIndex === rovingRowIndex && colIndex === rovingColIndex && !isSelectedCell ? 0 : -1) : 0}
                             data-grid-cell={keyboardNavigation ? `${rowIndex}:${colIndex}` : undefined}
+                            // objectstack#36290 — which column a context menu opened on.
+                            data-cell-column={col.accessorKey}
                             onFocus={keyboardNavigation ? () => rove(rowIndex, colIndex) : undefined}
                             aria-invalid={cellError !== undefined || undefined}
                             // objectstack#28434 — a cell in edit mode keeps the
@@ -6072,6 +6180,10 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
               e.preventDefault();
               if (!rowContextMenuClosedOutsideRef.current) rowContextMenuReturnFocusRef.current?.focus();
               rowContextMenuClosedOutsideRef.current = false;
+              rowContextMenuShownRef.current = false;
+              const after = afterRowContextMenuRef.current;
+              afterRowContextMenuRef.current = [];
+              for (const run of after) run();
             }}
           >
             {openRowContextMenuItems}

@@ -67,6 +67,14 @@ const server = vi.hoisted(() => ({
   drafts: new Map<string, { body: Record<string, unknown>; version: string }>(),
   saves: [] as SaveCall[],
   seq: 0,
+  // objectstack#36601 — the published row's version, served on `/layers` as
+  // `overlayVersion` only while `servesPublishedVersion` (a server from
+  // before it serves none), and pinned by the publish's `If-Match`.
+  activeVersions: new Map<string, string>(),
+  servesPublishedVersion: false,
+  publishes: [] as Array<{ name: string; ifMatch: string | undefined; ifNoneMatch: string | undefined }>,
+  // objectstack#36601 (contract review S2) — the draft discard fails.
+  resetFails: false,
 }));
 
 /**
@@ -111,7 +119,10 @@ const mockClient = vi.hoisted(() => {
       // The stored draft row, as the layered read serves it (objectstack#29793).
       const stored = server.drafts.get(k(type, name));
       const draft = stored ? JSON.parse(JSON.stringify(stored.body)) : null;
-      return { code: null, overlay: eff, overlayScope: eff ? 'env' : null, effective: eff, draft, editable: true, deletable: true, resettable: false, lock: 'none' };
+      const published = server.servesPublishedVersion
+        ? { overlayVersion: eff ? (server.activeVersions.get(k(type, name)) ?? null) : null }
+        : {};
+      return { code: null, overlay: eff, ...published, overlayScope: eff ? 'env' : null, effective: eff, draft, editable: true, deletable: true, resettable: false, lock: 'none' };
     }),
     // The draft read serves the body and its version; no draft is `null`, as
     // the real client resolves the read's 404.
@@ -134,13 +145,28 @@ const mockClient = vi.hoisted(() => {
       return { success: true, version, seq: server.seq, state: 'draft', message: `Saved ${type} '${name}' [seq=${server.seq}]` };
     }),
     // The Save's own publish (objectstack#36511): the draft goes live, and none is left.
-    publish: vi.fn(async (type: string, name: string) => {
+    // objectstack#36601 — pinned by `If-Match` / `If-None-Match: *` on the live row.
+    publish: vi.fn(async (type: string, name: string, options?: { ifMatch?: string; ifNoneMatch?: string }) => {
+      server.publishes.push({ name, ifMatch: options?.ifMatch, ifNoneMatch: options?.ifNoneMatch });
+      const live = server.active.has(k(type, name)) ? (server.activeVersions.get(k(type, name)) ?? null) : null;
+      if (options?.ifMatch !== undefined && options.ifMatch !== live) throw await conflictRefusal(type, name, live);
+      if (options?.ifNoneMatch !== undefined && live !== null) throw await conflictRefusal(type, name, live);
       const draft = server.drafts.get(k(type, name));
-      if (draft) server.active.set(k(type, name), draft.body);
+      server.seq += 1;
+      const version = `hmac-sha256:live${server.seq}`;
+      if (draft) {
+        server.active.set(k(type, name), draft.body);
+        server.activeVersions.set(k(type, name), version);
+      }
       server.drafts.delete(k(type, name));
-      return { success: true };
+      return { success: true, version };
     }),
-    reset: vi.fn(async () => ({})),
+    // The draft discard a refused Save sends (`?state=draft`).
+    reset: vi.fn(async (type: string, name: string, options?: { state?: string }) => {
+      if (server.resetFails) throw new Error('reset unavailable');
+      if (options?.state === 'draft') server.drafts.delete(k(type, name));
+      return {};
+    }),
   };
 });
 
@@ -201,6 +227,10 @@ beforeEach(() => {
   server.drafts.clear();
   server.saves.length = 0;
   server.seq = 0;
+  server.activeVersions.clear();
+  server.servesPublishedVersion = false;
+  server.publishes.length = 0;
+  server.resetFails = false;
   for (const fn of Object.values(mockClient)) (fn as unknown as { mockClear: () => void }).mockClear();
   server.active.set(`object/${OBJECT.name}`, JSON.parse(JSON.stringify(OBJECT)));
 });
@@ -370,13 +400,13 @@ describe('Data pillar — a draft saved elsewhere is not overwritten in silence 
 });
 
 describe('Data pillar — a create sends If-None-Match: * (objectui#11773)', () => {
-  it('the new object\'s skeleton is sent with the first-write pin; its first edit after the load is pinned to the read', async () => {
+  it('the new object\'s skeleton is sent with the first-write pin; it is live at once, so each Save after the load asserts no draft', async () => {
     server.active.clear();
     const a = openEditor();
     fireEvent.click(await within(a).findByTestId('empty-state-new-object', undefined, { timeout: 8000 }));
     const dialog = await screen.findByRole('dialog');
     fireEvent.change(dialog.querySelectorAll('input')[0]!, { target: { value: 'Ticket' } });
-    fireEvent.click(within(dialog).getByRole('button', { name: /save as draft/i }));
+    fireEvent.click(within(dialog).getByRole('button', { name: /^create$/i }));
     await waitFor(() => expect(server.saves).toHaveLength(1), { timeout: 8000 });
     expect([server.saves[0]!.ifMatch, server.saves[0]!.ifNoneMatch]).toEqual([undefined, '*']);
 
@@ -384,11 +414,133 @@ describe('Data pillar — a create sends If-None-Match: * (objectui#11773)', () 
     fireEvent.click(within(a).getAllByRole('button', { name: 'Form' })[0]!);
     await addFieldAndSave(a, addFieldFromFormToolbar);
     await addFieldAndSave(a, addFieldFromFormToolbar, SECOND);
-    // The skeleton's draft, then the first Save over it, which publishes it.
+    // The skeleton's draft, which the create publishes at once (objectstack#36511):
+    // no draft is left, so each Save after the load asserts none.
+    expect(mockClient.publish).toHaveBeenCalledWith('object', expect.stringMatching(/ticket$/), expect.anything());
     expect(server.saves.map((s) => [s.ifMatch, s.ifNoneMatch])).toEqual([
       [undefined, '*'],
-      ['hmac-sha256:v1', undefined],
+      [undefined, '*'],
       [undefined, '*'],
     ]);
+  });
+});
+
+describe('Data pillar — two Saves over one published object are not last-writer-wins (objectstack#36601)', () => {
+  /** The live row's version both editors open at. */
+  const LIVE = 'hmac-sha256:live0';
+
+  /**
+   * The race the draft pin cannot see: no draft is pending when A and B open
+   * the object, so each Save asserts none and passes the draft door. A's
+   * publish lands; B's, pinned to the live row it opened at, is refused.
+   */
+  async function racePublished(): Promise<{ a: HTMLElement; b: HTMLElement }> {
+    server.servesPublishedVersion = true;
+    server.activeVersions.set(`object/${OBJECT.name}`, LIVE);
+    const a = openEditor();
+    await loaded(a, '2 fields');
+    const b = openEditor();
+    await loaded(b, '2 fields');
+    fireEvent.click(await within(b).findByRole('button', { name: 'Reverse columns' }, { timeout: 8000 }));
+    await addFieldAndSave(a); // A: + new_field, live
+    expect(liveFields()).toEqual(['title', 'status', 'new_field']);
+    await saveIn(b); // B's stale copy, reordered: its draft passes, its publish is refused
+    await screen.findByTestId('draft-conflict-dialog', undefined, { timeout: 8000 });
+    return { a, b };
+  }
+
+  it('the second Save is refused at its publish, worded as a live change, and A\'s change stays live', async () => {
+    const { b } = await racePublished();
+    // Both drafts asserted "no draft"; both publishes were pinned to the row each opened at.
+    expect(server.saves.map((s) => s.ifNoneMatch)).toEqual(['*', '*']);
+    expect(server.publishes.map((p) => p.ifMatch)).toEqual([LIVE, LIVE]);
+    expect(liveFields()).toEqual(['title', 'status', 'new_field']);
+    const dialog = screen.getByTestId('draft-conflict-dialog');
+    expect(dialog).toHaveTextContent('This changed since you opened it');
+    expect(dialog).toHaveTextContent('acme_task');
+
+    fireEvent.click(screen.getByTestId('draft-conflict-cancel'));
+    await waitFor(() => expect(screen.queryByTestId('draft-conflict-dialog')).toBeNull(), { timeout: 8000 });
+    // Keep editing: nothing went live, the draft B's Save wrote is taken back,
+    // and B's edit stays on screen, unsaved, read as the draft conflict's own
+    // "not saved" line (never as a refused publish).
+    expect(await within(b).findByText(/^Not saved:/, undefined, { timeout: 8000 })).toBeInTheDocument();
+    expect(within(b).queryByText(/^Not published:/)).toBeNull();
+    expect(liveFields()).toEqual(['title', 'status', 'new_field']);
+    expect(server.drafts.size).toBe(0);
+    expect(within(b).getByTestId('studio-save')).toBeInTheDocument();
+    expect(within(b).queryByText('Unpublished draft')).toBeNull();
+  });
+
+  it('"reload" takes B\'s draft back, re-reads A\'s live object, and B\'s next Save is pinned to it', async () => {
+    const { b } = await racePublished();
+    const aLive = server.activeVersions.get(`object/${OBJECT.name}`)!;
+    expect(aLive).not.toBe(LIVE);
+    fireEvent.click(screen.getByTestId('draft-conflict-reload'));
+    await waitFor(() => expect(screen.queryByTestId('draft-conflict-dialog')).toBeNull(), { timeout: 8000 });
+    await loaded(b, '3 fields');
+    expect(server.drafts.size).toBe(0);
+
+    await addFieldAndSave(b, addFieldFromGrid, SECOND);
+    expect(server.publishes[server.publishes.length - 1]!.ifMatch).toBe(aLive);
+    expect(liveFields()).toEqual(['title', 'status', 'new_field', 'second_field']);
+  });
+
+  it('"reload" whose draft cannot be taken back does not reload: the losing draft is never installed, and the next Save is asked again (contract review S2)', async () => {
+    const { b } = await racePublished();
+    server.resetFails = true;
+    fireEvent.click(screen.getByTestId('draft-conflict-reload'));
+    await waitFor(() => expect(screen.queryByTestId('draft-conflict-dialog')).toBeNull(), { timeout: 8000 });
+    // Refused, not reloaded: B's buffer stays on the page, unsaved, and the
+    // draft that lost is still pending (listed under Changes), never re-read.
+    expect(await within(b).findByText(/^Not published:/, undefined, { timeout: 8000 })).toBeInTheDocument();
+    expect(within(b).getByTestId('studio-save')).toBeInTheDocument();
+    expect(server.drafts.size).toBe(1);
+    expect(liveFields()).toEqual(['title', 'status', 'new_field']);
+
+    // The published pin is the one the conflict was raised on: B's next Save
+    // is refused and asked about again, never published over A.
+    server.resetFails = false;
+    const publishesBefore = server.publishes.length;
+    await saveIn(b);
+    await screen.findByTestId('draft-conflict-dialog', undefined, { timeout: 8000 });
+    expect(server.publishes.slice(publishesBefore).map((p) => p.ifMatch)).toEqual([LIVE]);
+    expect(liveFields()).toEqual(['title', 'status', 'new_field']);
+  });
+
+  it('"overwrite" asks again, then re-publishes pinned to the refusal\'s currentVersion and B\'s copy goes live', async () => {
+    await racePublished();
+    const aLive = server.activeVersions.get(`object/${OBJECT.name}`)!;
+    fireEvent.click(screen.getByTestId('draft-conflict-overwrite'));
+    const publishesBefore = server.publishes.length;
+    expect(await screen.findByTestId('draft-conflict-overwrite-confirm')).toBeInTheDocument();
+    expect(screen.getByTestId('draft-conflict-dialog')).toHaveTextContent('Overwrite the saved version?');
+    expect(server.publishes.length).toBe(publishesBefore);
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('draft-conflict-overwrite-confirm'));
+    });
+    await waitFor(() => expect(liveFields()).toEqual(['status', 'title']), { timeout: 8000 });
+    expect(server.publishes[server.publishes.length - 1]!.ifMatch).toBe(aLive);
+  });
+
+  it('one editor: each Save\'s publish is pinned to the version the last publish left, so it never conflicts with itself', async () => {
+    server.servesPublishedVersion = true;
+    server.activeVersions.set(`object/${OBJECT.name}`, LIVE);
+    const a = openEditor();
+    await loaded(a, '2 fields');
+    await addFieldAndSave(a);
+    const first = server.activeVersions.get(`object/${OBJECT.name}`)!;
+    await addFieldAndSave(a, addFieldFromGrid, SECOND);
+    expect(server.publishes.map((p) => p.ifMatch)).toEqual([LIVE, first]);
+    expect(screen.queryByTestId('draft-conflict-dialog')).toBeNull();
+    expect(liveFields()).toEqual(['title', 'status', 'new_field', 'second_field']);
+  });
+
+  it('control: a server that serves no `overlayVersion` gets an unpinned publish, as before', async () => {
+    server.activeVersions.set(`object/${OBJECT.name}`, LIVE);
+    const a = openEditor();
+    await loaded(a, '2 fields');
+    await addFieldAndSave(a);
+    expect(server.publishes.map((p) => [p.ifMatch, p.ifNoneMatch])).toEqual([[undefined, undefined]]);
   });
 });
