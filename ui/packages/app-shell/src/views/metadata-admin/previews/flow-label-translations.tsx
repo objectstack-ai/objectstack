@@ -25,6 +25,7 @@ import { useObjectTranslation } from '@object-ui/react';
 import {
   activeFlowsBundle,
   flowLabelTranslations,
+  flowsResolveOptions,
   type FlowLabelTranslations,
 } from '@object-ui/i18n';
 
@@ -35,14 +36,17 @@ export { flowLabelTranslations, useFlowLabelTranslations, type FlowLabelTranslat
  * Automations rail names each row by it. Each call is
  * {@link flowLabelTranslations}' `flowLabel` in the console's active language,
  * the reading the designer header makes for the open flow, so a row and the
- * flow it opens cannot disagree. `undefined` where the bundle carries no label
+ * flow it opens cannot disagree, the server's declared fallback chain
+ * included (objectstack#36809). `undefined` where the bundle carries no label
  * for that flow, and the caller keeps the authored label. A fresh function on
  * every render: a handful of property reads that follow the live resource tree
  * and a language switch.
  */
 export function useFlowLabelOf(): (flowName: string) => string | undefined {
   const { i18n, language } = useObjectTranslation();
-  return (flowName) => flowLabelTranslations(activeFlowsBundle(i18n, language, flowName), flowName, language)?.flowLabel;
+  const declared = flowsResolveOptions(i18n, language);
+  return (flowName) =>
+    flowLabelTranslations(activeFlowsBundle(i18n, language, flowName), flowName, language, declared)?.flowLabel;
 }
 
 const FlowLabelTranslationsContext = React.createContext<FlowLabelTranslations | undefined>(undefined);

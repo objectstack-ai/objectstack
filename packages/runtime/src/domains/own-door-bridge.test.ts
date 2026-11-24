@@ -4,7 +4,8 @@
  * [#36506] The `/personal-views` and `/attachments` dispatcher domains — the
  * personal-view delete door and the attachment removal and rename doors for a
  * kernel with no `http.server` (ruling A on #22438, applied to each member of
- * the class), both through `own-door-bridge.ts`.
+ * the class) — and [#36840] the `/print` domain, the print door, all through
+ * `own-door-bridge.ts`.
  *
  * Driven through the REAL `HttpDispatcher.dispatch()` on a kernel that
  * registers no `http.server` (the hosted shape), with stub members that read
@@ -144,6 +145,27 @@ const FAMILIES: Family[] = [
         ],
         lexicalSibling: '/attachmentsx/att_1',
     },
+    {
+        // [#36840] The print door: a hosted HotCRM's 「打印报价」 answered the
+        // dispatcher's 404 here before this family existed.
+        name: 'print',
+        slot: 'print',
+        member: 'handlePrintDoor',
+        producer: '@objectstack/service-print',
+        prefix: '/print',
+        doors: [['POST', '/print/records', { app: 'sales', object: 'invoice', recordId: 'inv_1', page: 'invoice_document' }]],
+        misses: [
+            ['GET', '/print/records'],
+            ['PUT', '/print/records'],
+            ['PATCH', '/print/records'],
+            ['DELETE', '/print/records'],
+            ['POST', '/print'],
+            ['POST', '/print/'],
+            ['POST', '/print/records/x'],
+            ['POST', '/print/pages'],
+        ],
+        lexicalSibling: '/printx/records',
+    },
 ];
 
 describe.each(FAMILIES)('[#36506] $prefix forwards its doors to the $slot member on a kernel with no http.server', (family) => {
@@ -177,7 +199,7 @@ describe.each(FAMILIES)('[#36506] $prefix forwards its doors to the $slot member
             expect(envelope(result), `${method} ${path}`).toEqual({ status: 404, code: 'ROUTE_NOT_FOUND' });
         }
         // A lexical sibling is not under the segment claim at all.
-        expect((dispatcher as any).domainRegistry.resolve(family.lexicalSibling, 'DELETE')).toBeUndefined();
+        expect((dispatcher as any).domainRegistry.resolve(family.lexicalSibling, family.doors[0]![0])).toBeUndefined();
         expect(member.fn).not.toHaveBeenCalled();
     });
 

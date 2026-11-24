@@ -207,6 +207,7 @@
     "IPersonalViewDoorsService (interface)",
     "IPluginLifecycleEvents (interface)",
     "IPluginValidator (interface)",
+    "IPrintDoorService (interface)",
     "IPubSub (interface)",
     "IQueueService (interface)",
     "IRealtimeService (interface)",

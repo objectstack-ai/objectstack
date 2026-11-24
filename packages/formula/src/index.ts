@@ -183,6 +183,10 @@ export type { UnknownFunctionCall } from './unknown-function';
 // ADR-0032 — shared validator + introspection (one validator for build,
 // registration, and the agent-callable validate_expression tool).
 export { validateExpression, introspectScope, expectedDialect, inferExpressionType, nearestName, CEL_STDLIB_FUNCTIONS } from './validate';
+// [#36237] The `list-equality` refusal one relationship hop away, for the
+// caller that resolves hop targets (`@objectstack/lint`): the hint describes
+// the root object's fields only.
+export { findHopListEquality } from './validate';
 export type { FieldRole, ExprInput, ExprSchemaHint, ExprFaultOutcome, ExprValidationError, ExprValidationResult, InferredValueType } from './validate';
 // #22727 — the declaration authoring stamps onto a formula field: its
 // `returnType`, and for a provably-money result its currency, copied from the

@@ -161,7 +161,7 @@ async function openFormulaField() {
       <DataPillar packageId="com.example.showcase" />
     </MemoryRouter></StudioSaveHarness>,
   );
-  fireEvent.click(await screen.findByRole('button', { name: 'Form' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Field layout' }));
   const card = (await screen.findByText('Total')).closest('.cursor-grab') as HTMLElement;
   fireEvent.click(card);
   const label = await screen.findByText('Formula (CEL)');
