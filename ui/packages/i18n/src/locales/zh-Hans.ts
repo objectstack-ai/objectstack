@@ -52,6 +52,8 @@ const zh = {
     noRecords: '未找到记录',
     createNew: '新建',
     createNamed: '新建“{{name}}”',
+    createdOutsideFilters: '记录已创建，但不符合此字段的筛选条件，因此不能在这里选择。',
+    createdUnchecked: '记录已创建，但未能核对它是否符合此字段的筛选条件，因此没有选中。请在这里搜索它，不要重复创建。',
     showingResults: '显示 {{total}} 条结果中的 {{shown}} 条',
     showAllResults: '查看全部结果（{{count}}）',
     selectedBadge: '已选',

@@ -40,6 +40,8 @@ const ja = {
     allResults: 'すべての結果',
     createNew: '新規作成',
     createNamed: '「{{name}}」を新規作成',
+    createdOutsideFilters: 'レコードは作成されましたが、この項目の絞り込み条件に一致しないため、ここでは選択できません。',
+    createdUnchecked: 'レコードは作成されましたが、この項目の絞り込み条件に合うか確認できなかったため、選択していません。もう一度作成せず、ここで検索してください。',
     showingResults: '{{total}} 件中 {{shown}} 件を表示',
     showAllResults: 'すべての結果を表示 ({{count}})',
     selectedBadge: '選択済み',
