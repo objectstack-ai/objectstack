@@ -28,6 +28,7 @@ import path from 'path';
 import { exportListDescription } from './lib/export-list';
 import { findModuleDocBlock } from './lib/file-description';
 import { createSink, type Owns } from './lib/generated-output';
+import { PLATFORM_CATALOG_PATH, catalogProblems, renderPlatformCatalog } from './lib/platform-catalog';
 import {
   SHARED_CORE_SCHEMAS,
   TRANSITIVE_ALLOWLIST,
@@ -445,8 +446,21 @@ function main() {
     totalSkills += 1;
   }
 
+  // The platform catalog (lib/platform-catalog.ts): the one page that tells a
+  // metadata-app project what the platform already ships. Its skill,
+  // objectstack-project, has no SKILL_MAP entry (it teaches process, not a
+  // schema), so its `references/` folder is managed for this ONE file and
+  // nothing else — a hand-written note beside it is left alone, and no
+  // `_index.md` is claimed there. The names on the page come from the
+  // contract package; the hand-written rows are refused before emit when one
+  // names an object, token or domain the package does not declare.
+  const catalogProblemList = catalogProblems();
+  const catalogAbs = path.resolve(REPO_ROOT, PLATFORM_CATALOG_PATH);
+  manageDir(path.dirname(catalogAbs), (abs) => path.resolve(abs) === catalogAbs);
+  if (catalogProblemList.length === 0) emit(catalogAbs, renderPlatformCatalog());
+
   flush({
-    surface: 'skills/*/references/_index.md',
+    surface: 'skills/*/references/_index.md and the platform catalog',
     regenerate: '  pnpm --filter @objectstack/spec gen:skill-refs\n  git add skills',
     guard: () => {
       // A dangling SKILL_MAP entry drops a schema pointer from a shipped skill.
@@ -458,6 +472,14 @@ function main() {
           problems.map((p) => `  - ${p}`).join('\n') +
           `\n\n  Fix the mapping in ${path.relative(REPO_ROOT, __filename)} — point it at the\n` +
           `  schema's current path, or drop the entry if the concept is gone.`
+        );
+      }
+      if (catalogProblemList.length) {
+        return (
+          `The platform catalog's hand-written rows disagree with packages/spec/src:\n\n` +
+          catalogProblemList.map((p) => `  - ${p}`).join('\n') +
+          `\n\n  Fix the rows in packages/spec/scripts/lib/platform-catalog.ts — a row names only\n` +
+          `  what the contract package declares.`
         );
       }
       // Nothing emitted means nothing compared; "no drift" would read as green.

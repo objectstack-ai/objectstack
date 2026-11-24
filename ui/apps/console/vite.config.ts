@@ -28,39 +28,10 @@ import {
 } from '../../scripts/vite-objectstack-workspace.ts';
 import { viteDeclaredLazyViews } from '../../scripts/vite-declared-lazy-views.ts';
 import { viteTypesZodLazy } from '../../scripts/vite-types-zod-lazy.ts';
+import { eagerPreload } from '../../scripts/vite-eager-preload.ts';
 import { getServiceWorkerSource } from '../../packages/mobile/src/serviceWorkerSource.ts';
 import { compression } from 'vite-plugin-compression2';
 import { visualizer } from 'rollup-plugin-visualizer';
-
-// Critical chunks that should be preloaded for faster initial page render.
-// These are the chunks needed on every page load (framework + vendor-react).
-const CRITICAL_CHUNK_PREFIXES = ['vendor-react', 'framework', 'ui-components', 'vendor-radix'];
-
-/**
- * Vite plugin that injects <link rel="modulepreload"> hints for critical chunks
- * into the built HTML, enabling the browser to fetch them in parallel with the
- * main entry script.
- */
-function preloadCriticalChunks(): Plugin {
-  return {
-    name: 'preload-critical-chunks',
-    enforce: 'post',
-    transformIndexHtml(html, ctx) {
-      if (!ctx.bundle) return html;
-      const preloadTags: string[] = [];
-      for (const [fileName] of Object.entries(ctx.bundle)) {
-        if (
-          fileName.endsWith('.js') &&
-          CRITICAL_CHUNK_PREFIXES.some((prefix) => fileName.includes(prefix))
-        ) {
-          preloadTags.push(`<link rel="modulepreload" href="${basePath}${fileName}" />`);
-        }
-      }
-      if (preloadTags.length === 0) return html;
-      return html.replace('</head>', `    ${preloadTags.join('\n    ')}\n  </head>`);
-    },
-  };
-}
 
 /**
  * Build-time guard: `@objectstack/lint` must stay OUT of the eager closure.
@@ -584,6 +555,9 @@ function serveRuntimeAssets(): Plugin {
 // stable across HTML revisions.
 const basePath = process.env.VITE_BASE_PATH || './';
 
+// One reading of the eager closure, shared by `build.modulePreload` and its guard.
+const consolePreload = eagerPreload();
+
 // The console's build identity (objectui#12970): `VITE_APP_VERSION` from the
 // build's environment when it is set (a CI or Docker build passes the objectui
 // commit), else the short sha of `HEAD` read from git right here, so a local
@@ -653,6 +627,7 @@ const workspaceAliases: Record<string, string> = {
   // `@object-ui/types/zod` above (objectui#13410).
   '@object-ui/plugin-chatbot/core': path.resolve(import.meta.dirname, '../../packages/plugin-chatbot/src/core.ts'),
   '@object-ui/plugin-chatbot': path.resolve(import.meta.dirname, '../../packages/plugin-chatbot/src'),
+  '@object-ui/plugin-detail/core': path.resolve(import.meta.dirname, '../../packages/plugin-detail/src/core.ts'),
   '@object-ui/plugin-detail': path.resolve(import.meta.dirname, '../../packages/plugin-detail/src'),
   '@object-ui/plugin-editor': path.resolve(import.meta.dirname, '../../packages/plugin-editor/src'),
   '@object-ui/plugin-gantt': path.resolve(import.meta.dirname, '../../packages/plugin-gantt/src'),
@@ -661,6 +636,7 @@ const workspaceAliases: Record<string, string> = {
   '@object-ui/plugin-map': path.resolve(import.meta.dirname, '../../packages/plugin-map/src'),
   '@object-ui/plugin-markdown': path.resolve(import.meta.dirname, '../../packages/plugin-markdown/src'),
   '@object-ui/plugin-timeline': path.resolve(import.meta.dirname, '../../packages/plugin-timeline/src'),
+  '@object-ui/plugin-timesheet': path.resolve(import.meta.dirname, '../../packages/plugin-timesheet/src'),
   '@object-ui/plugin-tree': path.resolve(import.meta.dirname, '../../packages/plugin-tree/src'),
   '@object-ui/plugin-view/core': path.resolve(import.meta.dirname, '../../packages/plugin-view/src/core.ts'),
   '@object-ui/plugin-view': path.resolve(import.meta.dirname, '../../packages/plugin-view/src'),
@@ -824,8 +800,11 @@ export default defineConfig({
   plugins: [
     viteCryptoStub(),
     react(),
-    // Inject <link rel="modulepreload"> for critical chunks
-    preloadCriticalChunks(),
+    // Fails the build when a chunk a page load needs is found only after the
+    // chunk that imports it has arrived: an eager file without a
+    // modulepreload tag in `index.html`, or a dynamic import whose static
+    // closure is not preloaded beside it (objectstack#35455).
+    consolePreload.plugin,
     // Fails the build if the lazily-imported linter is folded back into an
     // eagerly-loaded chunk. Runs on CI/Vercel too — it costs microseconds and
     // the regression it catches is invisible in every other signal.
@@ -937,10 +916,16 @@ export default defineConfig({
     target: 'esnext',
     sourcemap: false,
     cssCodeSplit: true,
-    // Don't pre-emit `<link rel="modulepreload">` for every chunk; it
-    // negates lazy-loading by pulling all 1700+ icon chunks and heavy
-    // plugin chunks during the initial HTML parse.
-    modulePreload: false,
+    // Every chunk a load needs is requested in ONE wave (objectstack#35455):
+    // `index.html` preloads the entry's whole static closure, and an
+    // `import()` preloads the imported chunk's static closure beside it.
+    // Moves no byte — the HTML host's deps are the eager closure, which the
+    // `$initial`-tagged groups keep free of lazy-only modules, and an
+    // `import()`'s deps are files its chunk imports anyway, minus the eager
+    // ones; only WHEN they are requested changes. `polyfill: false`: without
+    // native modulepreload a browser just loads them later.
+    // `consolePreload.plugin` above enforces it.
+    modulePreload: { polyfill: false, resolveDependencies: consolePreload.resolveDependencies },
     commonjsOptions: {
       include: [/node_modules/, /packages/],
       transformMixedEsModules: true
@@ -1313,6 +1298,22 @@ export default defineConfig({
             { name: 'i18n-ns-developer-ja', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]developer[\\/]ja\.ts$/, priority: 84 },
             { name: 'i18n-ns-developer-ko', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]developer[\\/]ko\.ts$/, priority: 84 },
             //
+            // The `timesheet` namespace: `timesheet.*`, the timesheet list view's strings,
+            // never in the packs. Every catalogue is `import()`ed by
+            // `packages/i18n/src/namespaces/timesheet/index.ts` when a timesheet view
+            // mounts, one group per catalogue; the loader rides `plugin-timesheet`'s lazy chunk.
+            { name: 'i18n-ns-timesheet-en', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]timesheet[\\/]en\.ts$/, priority: 84 },
+            { name: 'i18n-ns-timesheet-zh-Hans', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]timesheet[\\/]zh-Hans\.ts$/, priority: 84 },
+            { name: 'i18n-ns-timesheet-zh-Hant', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]timesheet[\\/]zh-Hant\.ts$/, priority: 84 },
+            { name: 'i18n-ns-timesheet-es', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]timesheet[\\/]es\.ts$/, priority: 84 },
+            { name: 'i18n-ns-timesheet-ar', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]timesheet[\\/]ar\.ts$/, priority: 84 },
+            { name: 'i18n-ns-timesheet-fr', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]timesheet[\\/]fr\.ts$/, priority: 84 },
+            { name: 'i18n-ns-timesheet-pt-BR', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]timesheet[\\/]pt-BR\.ts$/, priority: 84 },
+            { name: 'i18n-ns-timesheet-ru', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]timesheet[\\/]ru\.ts$/, priority: 84 },
+            { name: 'i18n-ns-timesheet-de', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]timesheet[\\/]de\.ts$/, priority: 84 },
+            { name: 'i18n-ns-timesheet-ja', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]timesheet[\\/]ja\.ts$/, priority: 84 },
+            { name: 'i18n-ns-timesheet-ko', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]timesheet[\\/]ko\.ts$/, priority: 84 },
+            //
             // ⛔ `i18n-runtime` takes `includeDependenciesRecursively: false`
             // for the reason `data-adapter` below does (objectui#9345, read out
             // there in full): it outranks `framework` (83 over 80), and since
@@ -1506,6 +1507,30 @@ export default defineConfig({
               priority: 82,
               includeDependenciesRecursively: false,
             },
+            //
+            // ## The line-item grid leaves the eager line (objectstack#36102)
+            //
+            // The same mechanism as the date picker above, one widget over. The
+            // grid's body is `packages/fields/src/widgets/grid-field/`, and
+            // nothing reaches it but `loadGridFieldWidget`'s `import()` in
+            // `widgets/GridField.ts`: the `GridField` / `LineItemsField` the
+            // package exports by name are the small lazy face in that file, so
+            // the entry's named export no longer makes the body a static
+            // dependency of the eager graph. Without this group `ui-components`
+            // would still claim the directory by path. Its pure helpers, which
+            // the entry also exports, stay in `ui-components`. The record forms
+            // that draw line items preload it on mount.
+            // `PER_CHUNK_MEMBERSHIP_CARVE_OUTS` in
+            // `scripts/check-eager-closure-budget.mjs` holds the split to the
+            // module, and errors if this chunk ever joins the eager closure.
+            // `includeDependenciesRecursively: false` for the reason given on
+            // `fields-date-picker`.
+            {
+              name: 'fields-grid',
+              test: /[\\/]packages[\\/]fields[\\/]src[\\/]widgets[\\/]grid-field[\\/]/,
+              priority: 82,
+              includeDependenciesRecursively: false,
+            },
             { name: 'ui-components', test: /[\\/]packages[\\/](components|fields)[\\/]/, priority: 80 },
             { name: 'ui-layout', test: /[\\/]packages[\\/]layout[\\/]/, priority: 80 },
             { name: 'infrastructure', test: /[\\/]packages[\\/](auth|permissions|tenant)[\\/]/, priority: 80 },
@@ -1522,13 +1547,15 @@ export default defineConfig({
             { name: 'plugin-markdown', test: /[\\/]packages[\\/]plugin-markdown[\\/]/, priority: 70 },
             { name: 'plugin-timeline', test: /[\\/]packages[\\/]plugin-timeline[\\/]/, priority: 70 },
             { name: 'plugin-tree', test: /[\\/]packages[\\/]plugin-tree[\\/]/, priority: 70 },
+            { name: 'plugin-timesheet', test: /[\\/]packages[\\/]plugin-timesheet[\\/]/, priority: 70 },
             { name: 'plugin-calendar', test: /[\\/]packages[\\/]plugin-calendar[\\/]/, priority: 70 },
             { name: 'plugin-kanban', test: /[\\/]packages[\\/]plugin-kanban[\\/]/, priority: 70 },
             //
             // ## The form and view helpers stay out of their plugin chunks
             //
             // The console shell is eager and imports pure helpers through
-            // `@object-ui/plugin-form/core` and `@object-ui/plugin-view/core`.
+            // `@object-ui/plugin-form/core`, `@object-ui/plugin-view/core` and
+            // `@object-ui/plugin-detail/core`.
             // Left to the `plugin-form` / `plugin-view` groups above, those
             // modules would be co-tenants of the renderers and pull each whole
             // chunk back into every first load, the mechanism the chatbot group
@@ -1538,13 +1565,19 @@ export default defineConfig({
             // `core.ts` closure belongs in its list.
             {
               name: 'plugin-form-core',
-              test: /[\\/]packages[\\/]plugin-form[\\/]src[\\/](core|autoLayout|sanitize|deriveMasterDetail|schemaDefaults|sectionGroups|fieldGroups|initialFieldFocus)\.tsx?$/,
+              test: /[\\/]packages[\\/]plugin-form[\\/]src[\\/](core|autoLayout|sanitize|deriveMasterDetail|schemaDefaults|sectionGroups|fieldGroups|initialFieldFocus|formOwnerLineContext)\.tsx?$/,
               priority: 71,
               includeDependenciesRecursively: false,
             },
             {
               name: 'plugin-view-core',
               test: /[\\/]packages[\\/]plugin-view[\\/]src[\\/](core|recordSurface|config[\\/]view-config-utils)\.tsx?$/,
+              priority: 71,
+              includeDependenciesRecursively: false,
+            },
+            {
+              name: 'plugin-detail-core',
+              test: /[\\/]packages[\\/]plugin-detail[\\/]src[\\/](core|autoLayout|relatedListCompact|relatedListSort|queueClaim|ConcurrentUpdateDialog|useDetailTranslation|recordFieldAccess|useRecordEditable|useRelatedCounts|renderers[\\/]recordActivityFeed|synth[\\/](relatedListEntry|relatedArrangement|buildDefaultPageSchema))\.tsx?$/,
               priority: 71,
               includeDependenciesRecursively: false,
             },

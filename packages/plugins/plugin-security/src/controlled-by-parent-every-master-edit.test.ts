@@ -340,9 +340,14 @@ const LEGS: ReadonlyArray<{ leg: Leg; name: string; callers: readonly Caller[] }
   { leg: 'chain', name: "the master's own master", callers: ['a member', 'an org admin'] },
 ];
 
-/** The rows a write reaches: a selecting write by a floor-bound caller reaches only the rows it created. */
+/**
+ * The rows a write reaches. A selecting write the master gate admits reaches
+ * every row it selects, the rows another user created included (ADR-0055 §3 as
+ * amended 2026-11-22, ruling record 7073030861); a delegated one keeps both
+ * principals' ownership floors and reaches only the rows the member created.
+ */
 const reached = (caller: Caller, shape: ShapeName, rows: { own: string[]; all: string[] }) =>
-  shape !== 'selecting' ? [rows.own[0]] : caller === 'an org admin' ? rows.all : rows.own;
+  shape !== 'selecting' ? [rows.own[0]] : caller === 'an agent acting for a member' ? rows.own : rows.all;
 
 describe('ADR-0055 §3 — a write to a controlled_by_parent detail asks for edit access on every master it involves', () => {
   let rig: Rig;

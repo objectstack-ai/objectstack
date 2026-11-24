@@ -1,5 +1,144 @@
 # @objectstack/service-messaging
 
+## 18.6.0
+
+### Patch Changes
+
+- 0d1443d: fix(service-messaging): a GET or HEAD delivery through the HTTP outbox goes out with no body and is signed over what it sends
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A durable `http` node with `method: 'GET'` (or `'HEAD'`) never delivered through the messaging HTTP outbox. The outbox always sent a body (`'{}'` for a node with none), `fetch` refuses a GET or HEAD that carries any body, and the dispatcher retried that failure until the delivery was dead. The outbox also signed `'{}'`, bytes a receiver never saw.
+  
+  - A GET or HEAD delivery now goes out with no body and without the default `Content-Type: application/json`. Its `X-Objectstack-Signature` covers the empty string, the published scheme's bytes for a request with no body, the same signature the `http` node's inline call sends. `SqlHttpOutbox` and `MemoryHttpOutbox` sign it that way when they enqueue. Every other method is unchanged.
+  - The outbox never drops a body to make that work. A GET or HEAD enqueue whose payload is a real body is refused with an error that names the method and the fix: use POST or PUT, or drop the body. Only an absent payload, `null`, or the empty `{}` that a durable `http` node with no `body` enqueues is admitted. A durable `http` node with `method: 'GET'` and an authored `body` now fails at the node (`http (durable) failed to enqueue: …`). A GET or HEAD webhook whose event payload is sent as its body is refused the same way: the auto-enqueuer logs the lost event at `error` once per outage, and the record write that produced the event is not affected. A stored row that still holds a GET or HEAD with a real payload, such as one being redelivered, fails at send with the same message and is not retried. On 18.5.0 all of these went to `dead` after `fetch` refused them.
+  - `httpDeliveryBody(payload, method?)` (`deliveryBody`) takes the delivery's method and answers `''` for GET and HEAD. A caller that signs a body must pass the method.
+  - Type change: in the exported `FetchImpl` type, `init.body` is now optional. A custom `fetchImpl` gets no `body` for a GET or HEAD delivery. Nothing changes at runtime for POST and the other methods. An implementation that stored `init.body` as a `string` now needs to accept `undefined` there.
+  - Rows already in `sys_http_delivery` as GET or HEAD with a signing secret were signed over their payload's bytes when they were enqueued: `'{}'` for a durable `http` node with no `body`. The signature is computed once, at enqueue, and the secret is not kept. Such a row with the empty `{}` payload now goes out with no body and that old signature, so a receiver that verifies the signature refuses it. A row with any other payload fails at send, as above. None of these rows delivered before this fix either. Re-run the flow to enqueue the call again with a correct signature.
+  
+  With this fix, the 18.5.0 note that names `method: 'GET'` as the way to keep the old verb on a durable `http` node is true whether or not an outbox is wired.
+- c37e47a: feat(spec, core, service-messaging, service-automation, plugin-webhooks)!: webhook deliveries and the flow `http` node reach only public addresses unless the operator allowlists the target, and never a link-local or cloud metadata address
+  
+  Clause-②: no (narrowing) — webhook deliveries and flow `http` node requests aimed at an address that is not public (loopback, private, carrier-grade NAT, link-local, unique-local, multicast, broadcast, unspecified, documentation, benchmarking, any other special-purpose range that is not globally reachable, and any IPv6 address outside global unicast) are refused unless `OS_EGRESS_ALLOWED_TARGETS` lists the target; link-local and cloud metadata addresses are refused whatever it lists; a malformed or over-broad allowlist fails the boot.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed or renamed: a webhook row and a flow http node are authored and stored exactly as before, and nothing stored is rewritten. What moves is the deployment's outbound policy, decided by the operator's environment at boot, so no metadata migration exists to register. -->
+  
+  **BREAKING** for deployments whose webhooks or flows send requests to internal addresses. Webhook deliveries and flow `http` node requests now reach only public addresses: every address in a range that is not globally reachable is refused, and so is any IPv6 address outside global unicast. Cloud metadata addresses — every cloud's link-local endpoints, the IPv6 metadata endpoints, and the metadata and host-platform addresses outside link-local space — are never reachable. The rule applies to the address the connection is actually made to: after DNS resolution, for a literal IP in the url, for IPv6 forms that carry an IPv4 address, on the connected socket itself, and on every redirect hop. A host name with several addresses is judged on all of them and then dialled in turn, so a public target that answers on only some of its addresses is still reached.
+  
+  **Who moves.** Operators whose webhooks or flows target internal addresses (a service on `localhost`, a host on a private network, an internal DNS name that resolves to one): set `OS_EGRESS_ALLOWED_TARGETS` to the exact host names, IP addresses or CIDR blocks those requests may reach, comma-separated, and restart. Link-local and cloud metadata addresses cannot be listed. These requests connect directly to the address the guard judged, so an HTTP proxy configured through the environment is not used for them. Nothing else changes, and requests to public targets are unaffected.
+  
+  **Runtime.** `@objectstack/core/egress`, and with it `@objectstack/service-messaging`, `@objectstack/service-automation` and `@objectstack/plugin-webhooks`, now load `undici`, `node:dns` and `node:net` when they are imported, so these packages need a Node.js runtime. At install the guard proves that the requests it sends are judged by it; in a runtime where that cannot be proven (one whose fetch does not honour undici's dispatcher), the boot fails and every webhook delivery and flow `http` request is refused.
+  
+  **What a refusal looks like.** A webhook delivery whose target is refused dead-letters on its first attempt with an error starting `EGRESS_REFUSED`; it does not walk the retry schedule, since a retry cannot change the verdict. A flow `http` node whose target is refused fails with `http: EGRESS_REFUSED: …`, and a `durable: true` callout dead-letters in the outbox the same way as a webhook. The refusal text names the requested host and the rule, and reads the same for a host name that does not resolve (which is still retried); the server log adds the resolved address and its class, or the lookup failure, for the operator.
+  
+  **The boot.** One line says the guard is active and how many targets `OS_EGRESS_ALLOWED_TARGETS` lists. The webhook plugin then logs once how many stored `sys_webhook` rows target an address the guard will refuse. A malformed or over-broad allowlist (an entry with a scheme, port, path or wildcard, host bits set, a prefix under `/8` such as `0.0.0.0/0`, or a link-local or metadata address) fails the boot, naming every bad entry.
+  
+  **For hosts.** `@objectstack/core/egress` exports the policy seam (`EgressPolicy`, decided per connected address, host name, organization and source), the open-core default (`createEnvEgressPolicy`) and the guarded fetch. The error-code ledger registers `EGRESS_REFUSED` and `EGRESS_ALLOWLIST_INVALID` under `@objectstack/core`. `MessagingServicePlugin`, `AutomationServicePlugin` and `WebhookOutboxPlugin` take an `egressPolicy` option for a stricter policy.
+- Updated dependencies [e53e02e]
+- Updated dependencies [1f923d7]
+- Updated dependencies [64c4285]
+- Updated dependencies [b1efa37]
+- Updated dependencies [84e6bbb]
+- Updated dependencies [fb79d47]
+- Updated dependencies [69783b7]
+- Updated dependencies [bb17350]
+- Updated dependencies [a061708]
+- Updated dependencies [c59198f]
+- Updated dependencies [d1ab592]
+- Updated dependencies [fb3d1ff]
+- Updated dependencies [2068e03]
+- Updated dependencies [5c7e448]
+- Updated dependencies [de3538c]
+- Updated dependencies [5326028]
+- Updated dependencies [f7b2d02]
+- Updated dependencies [bb3c163]
+- Updated dependencies [d635555]
+- Updated dependencies [0ac112f]
+- Updated dependencies [c934631]
+- Updated dependencies [63e47fe]
+- Updated dependencies [b005638]
+- Updated dependencies [e5c2d76]
+- Updated dependencies [db3bbd3]
+- Updated dependencies [9f32c0f]
+- Updated dependencies [109a903]
+- Updated dependencies [2539ad9]
+- Updated dependencies [98a4449]
+- Updated dependencies [fdfccbf]
+- Updated dependencies [fa1fb6f]
+- Updated dependencies [d10f652]
+- Updated dependencies [ba03d5e]
+- Updated dependencies [3e49033]
+- Updated dependencies [6091b64]
+- Updated dependencies [021abd4]
+- Updated dependencies [61ded62]
+- Updated dependencies [75ab117]
+- Updated dependencies [071323e]
+- Updated dependencies [41ff7c3]
+- Updated dependencies [aab8b31]
+- Updated dependencies [e0670b9]
+- Updated dependencies [50d655f]
+- Updated dependencies [3a08833]
+- Updated dependencies [0e2e4f5]
+- Updated dependencies [bef80d3]
+- Updated dependencies [e0670b9]
+- Updated dependencies [9e6fee1]
+- Updated dependencies [52ec26f]
+- Updated dependencies [c2cabce]
+- Updated dependencies [6fb3d0c]
+- Updated dependencies [2c296cf]
+- Updated dependencies [fa9d695]
+- Updated dependencies [d9c4b62]
+- Updated dependencies [8c6ddc5]
+- Updated dependencies [1bf90a0]
+- Updated dependencies [27c0b20]
+- Updated dependencies [842637a]
+- Updated dependencies [227ae36]
+- Updated dependencies [1177058]
+- Updated dependencies [22bf910]
+- Updated dependencies [371e5f1]
+- Updated dependencies [11e0441]
+- Updated dependencies [f23c71e]
+- Updated dependencies [4240719]
+- Updated dependencies [6302c2c]
+- Updated dependencies [7b3e955]
+- Updated dependencies [066177b]
+- Updated dependencies [ddab49d]
+- Updated dependencies [1538596]
+- Updated dependencies [21d84a8]
+- Updated dependencies [4fb8790]
+- Updated dependencies [a1082f3]
+- Updated dependencies [f02f4f6]
+- Updated dependencies [62d9d0d]
+- Updated dependencies [e61af97]
+- Updated dependencies [758bbe7]
+- Updated dependencies [99bd220]
+- Updated dependencies [13057ce]
+- Updated dependencies [a8aa6ab]
+- Updated dependencies [9cf74ae]
+- Updated dependencies [c81f498]
+- Updated dependencies [6c1f9b3]
+- Updated dependencies [b633afe]
+- Updated dependencies [aa0fde3]
+- Updated dependencies [b85dff0]
+- Updated dependencies [743308b]
+- Updated dependencies [bb169c3]
+- Updated dependencies [2487242]
+- Updated dependencies [92a5cac]
+- Updated dependencies [2f656af]
+- Updated dependencies [d4b2a75]
+- Updated dependencies [ad9b74b]
+- Updated dependencies [e2a4c66]
+- Updated dependencies [c37e47a]
+- Updated dependencies [a6c2b83]
+- Updated dependencies [1354d2a]
+- Updated dependencies [a2bb7d5]
+  - @objectstack/platform-objects@18.6.0
+  - @objectstack/spec@18.6.0
+  - @objectstack/core@18.6.0
+  - @objectstack/types@18.6.0
+
 ## 18.5.0
 
 ### Patch Changes

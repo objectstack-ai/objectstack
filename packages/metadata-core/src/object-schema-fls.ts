@@ -49,7 +49,7 @@
  * | masking disabled (D8 escape hatch) / no `security` service / exempt caller (D4) | `passthrough` | serve unmasked, byte-identical to pre-ADR |
  * | `getReadableFields` → `undefined` (field universe unresolvable) | `undetermined` | serve unmasked + structured warn + metric + `Cache-Control: private, no-store`, **no shared ETag** |
  * | `getReadableFields` throws | throws {@link ObjectSchemaMaskEvaluationError} | the exit answers 5xx — never the unmasked body, never an empty-fields 200 |
- * | otherwise | `project` | fields ∉ readable are deleted whole, references included |
+ * | otherwise | `project` | fields ∉ readable are deleted whole, references included; a `_withheldFields` entry the caller may not read is dropped |
  * | `canReadObject` → not `true` (ruling record 6787890900) | `hidden` | left out of every list; a read answers as for a name that names no object |
  * | `canReadObject` → not `true`, the field posture is determined, and the object's declared `schemaReadDelegate` answers `true` (decision 6840464379) | the field posture | served as to a reader of the object: listed, and projected by the caller's own field security |
  * | the declared `schemaReadDelegate` throws (or its lookup does) | throws {@link ObjectSchemaMaskEvaluationError} | the exit answers 5xx — never a false "no such object" |
@@ -75,8 +75,26 @@
  * is the empty string and the ETag is byte-identical to today's; callers in one
  * permission cohort share 304s; a permission change moves the fingerprint and
  * self-invalidates the stale 304.
+ *
+ * ## A disabled package's withheld fields (#34901)
+ *
+ * A served object read names, in its `_withheldFields` read decoration, the
+ * fields a disabled package's `extend` contribution adds and the served fold
+ * leaves out. Those names are not in `fields`, so the readable projection
+ * never sees them: D1's "a field the caller cannot read does not exist for
+ * that caller" is kept by asking the security service's
+ * `getMetadataReadableWithheldFields` once per `project` posture, which judges
+ * each name against the field's STORAGE definition, and dropping every entry
+ * it does not admit. An absent member, an `undefined` answer and a throw all
+ * drop every entry (fail closed: the decoration is a client hint, never a
+ * field anyone needs). Each dropped entry folds `withheld:NAME` into the
+ * fingerprint, which no field name (snake_case) or `objectOverride` read
+ * (`object.field`) can collide with. A `passthrough` posture (D4-exempt
+ * caller, D8, no security service) and an `undetermined` one (D6 tier 2,
+ * served unmasked under `private, no-store`) keep the decoration as served.
  */
 
+import type { MetadataReadDecoration } from '@objectstack/spec/kernel';
 import { maskDeniedFieldReferences, objectOverrideReads } from './object-schema-fls-references.js';
 
 /**
@@ -231,6 +249,16 @@ export type ObjectSchemaFieldPosture =
          * nothing.
          */
         relate?: (objectName: string) => Promise<ReadonlySet<string> | undefined>;
+        /**
+         * [#34901] The names of the document's `_withheldFields` read
+         * decoration this caller may be told about — the security service's
+         * `getMetadataReadableWithheldFields` answer, asked by
+         * {@link resolveObjectSchemaMaskPosture}. An entry not in it is
+         * dropped by {@link applyObjectSchemaMask}; absent (a posture built
+         * anywhere else, or a service that could not answer) drops every
+         * entry, which fails closed.
+         */
+        withheldReadable?: ReadonlySet<string>;
     };
 
 /**
@@ -365,6 +393,14 @@ export interface ObjectSchemaMaskSecuritySurface {
      * set. Preferred when present; exits fall back to `getReadableFields`.
      */
     getMetadataReadableFields?(object: string, context?: unknown): Promise<string[] | undefined> | string[] | undefined;
+    /**
+     * [ADR-0106 D1, #34901] Which of the fields a disabled package withholds
+     * from `object` (its served read's `_withheldFields` decoration) may be
+     * disclosed to the caller, judged against the STORAGE definition. Asked
+     * once per `project` posture. Absent, `undefined` or a throw: no entry is
+     * disclosed (fail closed).
+     */
+    getMetadataReadableWithheldFields?(object: string, context?: unknown): Promise<string[] | undefined> | string[] | undefined;
     /**
      * [ADR-0106, amended by ruling record 6787890900] The object-level read
      * admission — the data plane's own answer to "may this caller read this
@@ -507,7 +543,10 @@ export async function resolveObjectSchemaMaskPosture(input: {
     const canRead = typeof security?.canReadObject === 'function'
         ? security.canReadObject.bind(security)
         : undefined;
-    const fields = await resolveFieldPosture(objectName, context, ask, telemetry);
+    const askWithheld = typeof security?.getMetadataReadableWithheldFields === 'function'
+        ? security.getMetadataReadableWithheldFields.bind(security)
+        : undefined;
+    const fields = await resolveFieldPosture(objectName, context, ask, telemetry, askWithheld);
 
     // [ruling record 6787890900] An object the caller may not read does not
     // exist for them on any schema-serving outlet. Decided HERE, once, so no
@@ -635,6 +674,7 @@ async function resolveFieldPosture(
     context: unknown,
     ask: ((object: string, context?: unknown) => Promise<string[] | undefined> | string[] | undefined) | undefined,
     telemetry: ObjectSchemaMaskTelemetry | undefined,
+    askWithheld?: (object: string, context?: unknown) => Promise<string[] | undefined> | string[] | undefined,
 ): Promise<ObjectSchemaFieldPosture> {
     // D6 tier 1 — no FLS posture in this deployment at all. The data plane does
     // not mask either, so tightening the metadata plane alone would be theater.
@@ -688,7 +728,79 @@ async function resolveFieldPosture(
         return new Set(answer);
     };
 
-    return { kind: 'project', readable: new Set(readable), relate };
+    const withheldReadable = await resolveWithheldReadable(objectName, context, askWithheld, telemetry);
+    return { kind: 'project', readable: new Set(readable), relate, withheldReadable };
+}
+
+/**
+ * [#34901] The `_withheldFields` entries a `project` caller may be told about:
+ * the security service's `getMetadataReadableWithheldFields` answer for this
+ * object. A service without the member, an answer that is not a list, and a
+ * throw all answer the empty set, so {@link applyObjectSchemaMask} drops every
+ * entry — fail closed, because the decoration is a client hint and serving it
+ * on a guess discloses a field's existence (ADR-0106 D1). Unlike the field
+ * question's D6 tiers, a fault here neither opens the document nor fails the
+ * request: nothing the caller needs depends on it. A throw is said at warn.
+ */
+async function resolveWithheldReadable(
+    objectName: string,
+    context: unknown,
+    askWithheld: ((object: string, context?: unknown) => Promise<string[] | undefined> | string[] | undefined) | undefined,
+    telemetry: ObjectSchemaMaskTelemetry | undefined,
+): Promise<ReadonlySet<string>> {
+    if (!askWithheld) return NO_WITHHELD_READABLE;
+    let answer: string[] | undefined;
+    try {
+        answer = await askWithheld(objectName, context);
+    } catch (error) {
+        telemetry?.warn?.(
+            '[ADR-0106] the fields a disabled package withholds could not be judged for this caller — '
+            + 'every `_withheldFields` entry is dropped from the served object',
+            { object: objectName, decision: 'drop-withheld-fields', error: String(error) },
+        );
+        return NO_WITHHELD_READABLE;
+    }
+    return Array.isArray(answer) ? new Set(answer.filter((name): name is string => typeof name === 'string')) : NO_WITHHELD_READABLE;
+}
+
+/** The empty `withheldReadable` answer: no `_withheldFields` entry is disclosed. */
+const NO_WITHHELD_READABLE: ReadonlySet<string> = new Set<string>();
+
+/** [#34901] The read decoration naming a disabled package's withheld fields, as `packages/spec` declares it. */
+const WITHHELD_FIELDS_DECORATION = '_withheldFields' satisfies MetadataReadDecoration;
+
+/**
+ * Qualifies a dropped `_withheldFields` entry in the D3 fingerprint. `:` occurs
+ * in no field or object machine name, so the entry can never hash equal to a
+ * field the mask removed (a bare name), an `objectOverride` read
+ * (`object.field`) or a runtime-view entry (`@runtime:NAME`).
+ */
+const WITHHELD_FINGERPRINT_QUALIFIER = 'withheld:';
+
+/**
+ * [#34901] The `_withheldFields` entries of `rec` the posture does not admit,
+ * sorted. Empty when the document carries no such decoration (the one shape
+ * `packages/spec` declares is a record keyed by field name).
+ */
+function droppedWithheldFields(rec: Record<string, unknown>, withheldReadable: ReadonlySet<string> | undefined): string[] {
+    const withheld = rec[WITHHELD_FIELDS_DECORATION];
+    if (!withheld || typeof withheld !== 'object' || Array.isArray(withheld)) return [];
+    return Object.keys(withheld).filter((name) => !withheldReadable?.has(name)).sort();
+}
+
+/**
+ * [#34901] `projected` with the `_withheldFields` entries in `dropped` removed,
+ * and the decoration removed entirely when none is left (a served read carries
+ * it only when something is withheld). Mutates `projected`, which is always a
+ * fresh copy of the served document.
+ */
+function dropWithheldFields(projected: Record<string, unknown>, dropped: readonly string[]): void {
+    if (dropped.length === 0) return;
+    const withheld = projected[WITHHELD_FIELDS_DECORATION] as Record<string, unknown>;
+    const drop = new Set(dropped);
+    const kept = Object.fromEntries(Object.entries(withheld).filter(([name]) => !drop.has(name)));
+    if (Object.keys(kept).length === 0) delete projected[WITHHELD_FIELDS_DECORATION];
+    else projected[WITHHELD_FIELDS_DECORATION] = kept;
 }
 
 /**
@@ -858,8 +970,9 @@ export interface ObjectSchemaMaskResult<T> {
     /** Field names removed, sorted. Empty for an unrestricted caller. */
     denied: readonly string[];
     /**
-     * {@link objectFieldVisibilityFingerprint} over {@link denied} and the
-     * `objectOverride` reads withheld (as `object.field`, #21884); `''` when
+     * {@link objectFieldVisibilityFingerprint} over {@link denied}, the
+     * `objectOverride` reads withheld (as `object.field`, #21884) and the
+     * `_withheldFields` entries dropped (as `withheld:NAME`, #34901); `''` when
      * nothing was removed.
      */
     fingerprint: string;
@@ -925,7 +1038,12 @@ export function applyObjectSchemaMask<T>(document: T, posture: ObjectSchemaMaskP
     const relatedDenied = [...new Set(objectOverrideReads(rec)
         .filter((read) => !posture.related?.get(read.object)?.has(read.field))
         .map((read) => `${read.object}.${read.field}`))];
-    if (denied.length === 0 && relatedDenied.length === 0) return unchanged;
+    // [#34901] The disabled-package fields the served read names and this
+    // caller may not be told about: not in `fields`, so judged apart (see the
+    // module header), and each one changes the served body as surely as a
+    // denied field does.
+    const withheldDropped = droppedWithheldFields(rec, posture.withheldReadable);
+    if (denied.length === 0 && relatedDenied.length === 0 && withheldDropped.length === 0) return unchanged;
     denied.sort();
 
     const kept: Record<string, unknown> = {};
@@ -936,17 +1054,26 @@ export function applyObjectSchemaMask<T>(document: T, posture: ObjectSchemaMaskP
     // D1's "whole" covers the field's references too: a validation rule over it,
     // a role pointer naming it, a readable field's formula reading it, … — see
     // `object-schema-fls-references.ts` for every position and its disposition.
-    const projected = maskDeniedFieldReferences(
-        { ...rec, fields: kept },
-        new Set(denied),
-        posture.related ?? new Map(),
-    );
+    const projected = denied.length === 0 && relatedDenied.length === 0
+        ? { ...rec }
+        : maskDeniedFieldReferences(
+            { ...rec, fields: kept },
+            new Set(denied),
+            posture.related ?? new Map(),
+        );
+    dropWithheldFields(projected as Record<string, unknown>, withheldDropped);
 
     return {
         document: projected as unknown as T,
         denied,
-        fingerprint: objectFieldVisibilityFingerprint([...denied, ...relatedDenied]),
-        emptied: Object.keys(kept).length === 0,
+        fingerprint: objectFieldVisibilityFingerprint([
+            ...denied,
+            ...relatedDenied,
+            ...withheldDropped.map((name) => `${WITHHELD_FINGERPRINT_QUALIFIER}${name}`),
+        ]),
+        // A copy made only to drop `_withheldFields` entries removed no field,
+        // so it cannot have emptied the schema, whatever `fields` holds.
+        emptied: (denied.length > 0 || relatedDenied.length > 0) && Object.keys(kept).length === 0,
         hidden: false,
     };
 }

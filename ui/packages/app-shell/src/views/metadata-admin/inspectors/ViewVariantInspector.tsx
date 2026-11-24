@@ -39,6 +39,7 @@ import { InspectorComboField } from './InspectorComboField.js';
 import { useObjectOptions } from './useDatasetFields.js';
 import type { MetadataDefaultInspectorProps } from '../default-inspector-registry.js';
 import { SchemaForm } from '../SchemaForm.js';
+import { IssuePrefixLines, issuesUnderPrefix, useIssuePrefixRegister, useSliceFormIssueRows } from '../issuePath.js';
 import { useObjectFields, type ObjectFieldInfo } from '../previews/useObjectFields.js';
 import { failed, loaded, type LoadState } from '../loadState.js';
 import type { ObjectFieldOption, WidgetContext } from '../widgets.js';
@@ -233,8 +234,18 @@ export function ViewVariantInspector({
   objectFieldsOverride,
   locale,
   serverSchema,
+  issues,
+  revealIssues,
+  onInlineIssueFieldsChange,
 }: ViewVariantInspectorProps) {
   const variant = (draft[variantKey] as Record<string, unknown> | undefined) ?? {};
+  // objectstack#35628 — the host's issues are drawn on the rows that edit their
+  // paths: the Label and Columns rows here, the spec form below over the
+  // variant body (its keys reported under `variantKey`). Any other path stays
+  // in the host's banner.
+  const registerIssuePrefix = useIssuePrefixRegister(onInlineIssueFieldsChange);
+  const setFormIssueRows = useSliceFormIssueRows(registerIssuePrefix, variantKey);
+  const variantIssues = React.useMemo(() => issuesUnderPrefix(issues ?? [], variantKey), [issues, variantKey]);
 
   const isFormFamily = isFormFamilyKey(familyKey ?? variantKey);
   // objectstack#30046 — a form view without a `type` is the spec's default
@@ -270,6 +281,13 @@ export function ViewVariantInspector({
   // (e.g. CelPredicateField / ConditionalFormattingEditor).
   const tLocal = React.useCallback((k: string) => t(k, locale), [locale]);
   const fieldNames = React.useMemo(() => objectFields.map((f) => f.name), [objectFields]);
+  // Each field's `type` and `multiple`, so a formatting rule that compares a
+  // list field with a scalar is refused while typing. Memoized: the CEL editor
+  // re-derives its list-valued fields only when this identity changes.
+  const celFieldDefs = React.useMemo(
+    () => objectFields.map((f) => ({ name: f.name, type: f.type, multiple: f.multiple })),
+    [objectFields],
+  );
   const cfRules = Array.isArray(variant.conditionalFormatting)
     ? (variant.conditionalFormatting as unknown[])
     : [];
@@ -351,7 +369,16 @@ export function ViewVariantInspector({
       fieldCatalog = { status: 'loading' };
     } else {
       fieldCatalog = loaded(
-        objectFields.map((f) => ({ name: f.name, label: f.label, type: f.type })),
+        // `options` ride along for the filter's picklist value picker,
+        // `multiple` for its operator set: a list-valued column is offered
+        // membership and the empty checks only.
+        objectFields.map((f) => ({
+          name: f.name,
+          label: f.label,
+          type: f.type,
+          ...(f.options ? { options: f.options } : {}),
+          ...(f.multiple ? { multiple: true } : {}),
+        })),
       );
     }
     // objectui#8167 — `none`, and the reason is recorded here rather than
@@ -441,6 +468,13 @@ export function ViewVariantInspector({
         placeholder={t('engine.inspector.view.labelPlaceholder', locale)}
         disabled={readOnly}
       />
+      <IssuePrefixLines
+        issues={issues}
+        prefix="label"
+        label={t('engine.inspector.view.label', locale)}
+        value={draft.label}
+        register={registerIssuePrefix}
+      />
       <InspectorSelectField
         label={t('engine.inspector.view.type', locale)}
         value={viewType}
@@ -503,6 +537,13 @@ export function ViewVariantInspector({
             onPatch={onPatch}
             onSelectionChange={onSelectionChange}
           />
+          <IssuePrefixLines
+            issues={issues}
+            prefix={`${variantKey}.columns`}
+            label={t('engine.fieldsListEditor.columns', locale)}
+            value={variant.columns}
+            register={registerIssuePrefix}
+          />
         </div>
       )}
 
@@ -512,6 +553,7 @@ export function ViewVariantInspector({
             rules={cfRules as any}
             objectName={binding.value || undefined}
             fieldNames={fieldNames}
+            fieldDefs={celFieldDefs}
             disabled={readOnly}
             t={tLocal}
             onChange={(rules) =>
@@ -531,6 +573,9 @@ export function ViewVariantInspector({
             hiddenFields={['type', 'object', 'label']}
             readOnly={readOnly}
             widgetContext={widgetContext}
+            issues={variantIssues}
+            revealIssues={revealIssues}
+            onInlineIssueFieldsChange={setFormIssueRows}
             onChange={writeForm}
           />
         ) : (

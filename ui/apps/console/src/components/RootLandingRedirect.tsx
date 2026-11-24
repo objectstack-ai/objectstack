@@ -27,13 +27,19 @@
  * runs — see {@link isAppListConclusive} (objectui#4233).
  *
  * NOTE: this gives `isDefault` ROUTING semantics; it was previously a
- * display-only badge. Back-compat: a deployment with no `isDefault` App and ≥2
- * visible Apps still lands on `/home`, exactly as before. (A deploy-time ops
- * override is intentionally kept server-side, not read here — the metadata
- * declaration is the source of truth.)
+ * display-only badge. (A deploy-time ops override is intentionally kept
+ * server-side, not read here — the metadata declaration is the source of
+ * truth.)
+ *
+ * Those three rules are the PHONE's, after its last app
+ * ({@link resolvePhoneLandingPath}). From 768 px up the platform home page is
+ * retired (objectstack#36732): `/` and the old `/home` address both resolve
+ * through {@link resolveDesktopLandingPath} — the last-used app, the declared
+ * default, the first product app — and only a viewer with no product app at
+ * all is left on `/home`, which then draws the no-apps empty state.
  */
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useLocation } from 'react-router-dom';
 import {
   useMetadata,
@@ -41,18 +47,25 @@ import {
   RedirectWithSplash,
   SETUP_APP_PACKAGE_ID,
   SETUP_APP_NAME,
+  isPlatformBuiltinApp,
+  useLastApp,
+  useLauncherApps,
+  usePhoneViewport,
+  useServedApps,
 } from '@object-ui/app-shell';
 import type { MetadataTypeStatus } from '@object-ui/app-shell';
 
 /** Minimal shape this resolver needs off each App metadata record. */
-interface LandingApp {
+// A type alias, not an interface: `useServedApps` takes records indexable by
+// string, which an interface never is.
+type LandingApp = {
   name?: string;
   isDefault?: boolean;
   active?: boolean;
   hidden?: boolean;
   /** ADR-0048 owning package — the canonical identity of a shipped app. */
   _packageId?: string;
-}
+};
 
 /**
  * Is this the platform's built-in Setup console (objectui#4048)?
@@ -85,8 +98,10 @@ function landingSegment(apps: readonly LandingApp[], app: LandingApp & { name: s
 }
 
 /**
- * The path `/` should redirect to, resolved purely from the App list. Extracted
- * from the component so the policy is unit-testable without a router/render.
+ * The path a phone's `/` redirects to when it knows no last app, resolved
+ * purely from the App list. Extracted from the component so the policy is
+ * unit-testable without a router/render. A desktop resolves through
+ * {@link resolveDesktopLandingPath} instead (objectstack#36732).
  */
 export function resolveLandingPath(apps: readonly LandingApp[] | null | undefined): string {
   const list = (apps ?? []).filter((a): a is LandingApp & { name: string } => Boolean(a?.name));
@@ -137,6 +152,95 @@ export function resolveLandingPath(apps: readonly LandingApp[] | null | undefine
 }
 
 /**
+ * The path `/` redirects to on a phone (objectstack#35881): the app this
+ * person last had open, when it is still an active, visible app; otherwise
+ * the three rules of {@link resolveLandingPath} (the declared default, the one
+ * app, the app list at `/home`).
+ *
+ * The order is the maintainer's ruling (record 7045309332 on #35881, Sales
+ * 2026-11-20 16:50Z, 「上次用的优先」): the last app beats a declared default,
+ * which decides only a first sign-in with no last app yet. From 768 px up `/`
+ * resolves through {@link resolveDesktopLandingPath}.
+ */
+export function resolvePhoneLandingPath(
+  apps: readonly LandingApp[] | null | undefined,
+  lastApp: string | null | undefined,
+): string {
+  return lastAppLandingPath(apps, lastApp) ?? resolveLandingPath(apps);
+}
+
+/**
+ * The last app's own address, when `lastApp` still names an active, visible
+ * app of the list; `null` otherwise (no record, or an app since removed,
+ * hidden or switched off).
+ */
+function lastAppLandingPath(
+  apps: readonly LandingApp[] | null | undefined,
+  lastApp: string | null | undefined,
+): string | null {
+  if (!lastApp) return null;
+  const list = apps ?? [];
+  const last = list.find(
+    (a): a is LandingApp & { name: string } =>
+      a?.name === lastApp && a.active !== false && a.hidden !== true,
+  );
+  return last ? `/apps/${landingSegment(list, last)}` : null;
+}
+
+/**
+ * Is this an app somebody put into the environment, rather than one the
+ * platform ships into every deployment (Setup, Studio, Account)? Setup by its
+ * own two-way test (a runtime/DB Setup carries no package id), the rest by the
+ * platform's reserved package namespace (`isPlatformBuiltinApp`, the reading
+ * the first-run checklist's "Put your first app in" row takes).
+ */
+function isProductApp(app: LandingApp): boolean {
+  return !isPlatformSetupApp(app) && !isPlatformBuiltinApp(app);
+}
+
+/**
+ * The path `/` — and the retired `/home` address — redirect to from 768 px up
+ * (objectstack#36732, the maintainer's ruling to retire the platform home
+ * page, 2026-11-23 14:30Z 「同意」).
+ *
+ *   1. the app this person last had open, while it is still an active,
+ *      visible app (the order of the #35881 ruling, 「上次用的优先」);
+ *   2. else the App the product declares `isDefault`;
+ *   3. else the first visible PRODUCT app of the list — never a platform
+ *      built-in: a viewer whose only apps are Setup or Studio has no product
+ *      app yet (objectui#4048);
+ *   4. else `/home`, which on a desktop draws only the no-apps empty state.
+ *
+ * Rule 3 is where a desktop parts from the phone: a phone with several apps
+ * and no record still opens its app list (`resolveLandingPath` rule 3).
+ *
+ * The console chrome asks the same question for its Home affordances
+ * (app-shell's `resolveDesktopHomePath`, read by `useHomePath`), and
+ * `landingHomeParity-7256.test.ts` holds the two answers equal.
+ */
+export function resolveDesktopLandingPath(
+  apps: readonly LandingApp[] | null | undefined,
+  lastApp: string | null | undefined,
+): string {
+  const last = lastAppLandingPath(apps, lastApp);
+  if (last) return last;
+  const list = (apps ?? []).filter((a): a is LandingApp & { name: string } => Boolean(a?.name));
+  const defaultApp = list.find((a) => a.isDefault === true);
+  if (defaultApp) return `/apps/${landingSegment(apps ?? [], defaultApp)}`;
+  const first = list.find((a) => a.active !== false && a.hidden !== true && isProductApp(a));
+  if (first) return `/apps/${landingSegment(apps ?? [], first)}`;
+  return '/home';
+}
+
+/**
+ * How long `/` waits for the person's last app to be read before it resolves
+ * without it (objectstack#35881, and from 768 px up objectstack#36732). The
+ * row rides the console's one preference read, which is normally in by the
+ * time the app list is.
+ */
+const LAST_APP_WAIT_MS = 2000;
+
+/**
  * Is the app list this resolver was handed an ANSWER, or an unknown standing
  * in for one? (objectui#4233)
  *
@@ -180,9 +284,35 @@ export function isAppListConclusive(status: MetadataTypeStatus | undefined): boo
  */
 const APP_LIST_RETRY_DELAY_MS = 1500;
 
-export function RootLandingRedirect() {
+export interface RootLandingRedirectProps {
+  /**
+   * What to draw when the landing resolves to `/home` itself. The `/home`
+   * route passes its no-apps page here, so the retired address redirects into
+   * an app whenever there is one and draws the empty state only when there is
+   * none (objectstack#36732). Absent on `/`, which redirects to `/home`.
+   */
+  home?: ReactNode;
+}
+
+export function RootLandingRedirect({ home }: RootLandingRedirectProps = {}) {
   const { apps, loading, getTypeStatus, refresh } = useMetadata();
   const location = useLocation();
+  // objectstack#35881 — a phone lands in the person's last app, and from
+  // 768 px up so does a desktop (objectstack#36732).
+  const phone = usePhoneViewport();
+  // objectstack#36732 — a desktop chooses only among the apps the member's
+  // permission sets show (`/me/apps`, the answer every launcher surface reads):
+  // a set-hidden app is never the landing. That answer is held under `/home`
+  // and `/apps/*`, not `/`, so a desktop `/` hands off to `/home` below.
+  const servedApps = useServedApps((apps ?? []) as LandingApp[]);
+  const { pending: servedPending } = useLauncherApps(apps as LandingApp[] | undefined);
+  const { lastApp, settled: lastAppSettled } = useLastApp();
+  const [lastAppWaitOver, setLastAppWaitOver] = useState(false);
+  useEffect(() => {
+    if (lastAppSettled) return;
+    const id = setTimeout(() => setLastAppWaitOver(true), LAST_APP_WAIT_MS);
+    return () => clearTimeout(id);
+  }, [lastAppSettled]);
 
   // "Not yet" (`loading`) and "asked and failed" (`status === 'error'`) are
   // both "no answer" — they differ only in whether waiting will help.
@@ -206,7 +336,14 @@ export function RootLandingRedirect() {
     return () => clearTimeout(id);
   }, [unresolved, refresh]);
 
+  // From 768 px up, `/` (a sign-in, the SSO callback) goes to `/home`, the one
+  // desktop resolver, which sits inside the `/me/apps` provider.
+  if (!phone && home === undefined) {
+    return <RedirectWithSplash to={`/home${location.search}${location.hash}`} replace state={location.state} />;
+  }
   if (loading || unresolved) return <LoadingFallback />;
+  if (!lastAppSettled && !lastAppWaitOver) return <LoadingFallback />;
+  if (!phone && servedPending) return <LoadingFallback />;
   // `RedirectWithSplash`, not a bare `<Navigate>` (objectui#6378). This is the
   // widest measured instance of the boot blank: the line above holds the splash
   // while the app list loads, and handing off to a null-rendering redirect left
@@ -217,6 +354,9 @@ export function RootLandingRedirect() {
   // overlays (`?palette=1`, `?recordId=`) live in the query, and the landing is
   // a bare `/apps/<segment>` or `/home`, so there is nothing to merge with. The
   // app root it lands on carries them on to the app's own landing in turn.
-  const landing = resolveLandingPath(apps as LandingApp[] | undefined);
-  return <RedirectWithSplash to={`${landing}${location.search}${location.hash}`} replace />;
+  const landing = phone
+    ? resolvePhoneLandingPath(apps as LandingApp[] | undefined, lastApp)
+    : resolveDesktopLandingPath(servedApps, lastApp);
+  if (home !== undefined && landing === '/home') return <>{home}</>;
+  return <RedirectWithSplash to={`${landing}${location.search}${location.hash}`} replace state={location.state} />;
 }

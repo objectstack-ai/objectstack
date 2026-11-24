@@ -317,13 +317,61 @@ describe('objectui#8567 — the identity and the operator path are untouched', (
     expect(convertFiltersToAST({ age: bag })).toEqual(['age', '>=', 18]);
   });
 
-  it('a CROSS-REALM plain object is still an operator map', () => {
-    // Its prototype is another realm's `Object.prototype`, so an identity test
-    // against this realm's would refuse a perfectly plain object. The gate takes
-    // the second hop instead: a plain object's prototype has a null prototype.
-    const foreign = runInNewContext('({ $gte: 18 })') as Record<string, unknown>;
-    expect(Object.getPrototypeOf(foreign)).not.toBe(Object.prototype);
-    expect(convertFiltersToAST({ age: foreign })).toEqual(['age', '>=', 18]);
+  it('a CROSS-REALM plain object is a comparand, refused as the spec refuses it', () => {
+    // Its prototype is another realm's `Object.prototype`. The spec's filter
+    // walk (`isFilterNode`) and the engine's `isNoOperatorObject` read only
+    // this realm's `Object.prototype` or `null` as filter structure, so the
+    // spec judges it as a literal comparand and refuses it; the converter's
+    // operator-map test is the same prototype test, and refuses it too.
+    for (const source of ['({ $gte: 18 })', '({ owner: "u1" })']) {
+      const foreign = runInNewContext(source) as Record<string, unknown>;
+      expect(Object.getPrototypeOf(foreign)).not.toBe(Object.prototype);
+      expect(() => normalizeFilterComparandTypes({ age: foreign })).toThrow(/which no driver can compare/);
+      const { thrown } = refusalOf(() => convertFiltersToAST({ age: foreign }));
+      expect(thrown).toBeInstanceOf(FilterOperatorError);
+      expect(thrown).toMatchObject({ ...INVALID_FILTER, field: 'age' });
+      // Its own sentence, not the exotic one: the author wrote a valid
+      // operator map in the wrong realm, and the fix is a copy.
+      expect((thrown as Error).message).toBe(
+        "[ObjectUI] The filter on field 'age' is a plain object from another realm (an iframe, a vm "
+        + 'context). Only a plain object of this realm (prototype Object.prototype or null) is read as an '
+        + "operator map or a nested condition here, as the spec's filter walk reads it; '@objectstack/spec' "
+        + 'reads this one as a comparand and answers 400 INVALID_FILTER. Rebuild the filter in this realm '
+        + 'before filtering it: { ...condition } for each operator map, or structuredClone(filter).',
+      );
+      expect((thrown as Error).message).not.toMatch(/comparand position/);
+      // The copy it names lowers.
+      expect(convertFiltersToAST({ age: { ...foreign } })).toEqual(
+        convertFiltersToAST({ age: structuredClone(foreign) }),
+      );
+    }
+    expect(convertFiltersToAST({ age: { ...(runInNewContext('({ $gte: 18 })') as object) } }))
+      .toEqual(['age', '>=', 18]);
+  });
+
+  it.each([
+    // THIS realm, constructor `Object`, but its prototype's prototype is
+    // `Object.prototype`: not a foreign plain object.
+    ['Object.create(somePlainObject)', () => Object.create({ $gte: 18 }) as object, 'a Object instance'],
+    // A prototype whose prototype is `null`, but with no `constructor`.
+    [
+      'Object.create(Object.create(null))',
+      () => Object.create(Object.create(null) as object) as object,
+      'an object of an unrecognised type',
+    ],
+  ])('%s is an exotic comparand, not a plain object from another realm', (_label, make, named) => {
+    const value = make();
+    expect(() => normalizeFilterComparandTypes({ age: value })).toThrow(/which no driver can compare/);
+    const { thrown } = refusalOf(() => convertFiltersToAST({ age: value }));
+    expect(thrown).toBeInstanceOf(FilterOperatorError);
+    expect(thrown).toMatchObject({ ...INVALID_FILTER, field: 'age' });
+    expect((thrown as Error).message).toContain(`The filter on field 'age' carries ${named} in comparand position`);
+    expect((thrown as Error).message).not.toMatch(/another realm/);
+  });
+
+  it('CONTROL: a `null`-prototype object of THIS realm is still an operator map', () => {
+    const bare = Object.assign(Object.create(null) as Record<string, unknown>, { $gte: 18 });
+    expect(convertFiltersToAST({ age: bare })).toEqual(['age', '>=', 18]);
   });
 
   it('a Date comparand still LOWERS — the other half of this arm (objectui#8555)', () => {

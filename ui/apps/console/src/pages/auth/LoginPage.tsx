@@ -519,7 +519,7 @@ export function LoginPage() {
                       ? t('auth.login.firstOwner.title', { defaultValue: 'Set up this deployment' })
                       : t('auth.login.welcomeTitle', { defaultValue: 'Welcome back' })}
                 </h1>
-                <p className="mt-1 text-[13px] text-muted-foreground">
+                <p className="mt-1 text-xs text-muted-foreground">
                   {invitationCopy
                     ? invitationCopy.description
                     : firstOwner
@@ -620,7 +620,7 @@ function DirectSignInRetry({ onRetry }: { onRetry: () => void }) {
         <h1 className="text-xl font-semibold tracking-tight text-foreground">
           {t('auth.login.welcomeTitle', { defaultValue: 'Welcome back' })}
         </h1>
-        <p className="mt-1 text-[13px] text-muted-foreground">
+        <p className="mt-1 text-xs text-muted-foreground">
           {t('auth.login.directSignIn.description', {
             defaultValue: "Sign in with your organization's single sign-on.",
           })}

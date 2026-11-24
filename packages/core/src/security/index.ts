@@ -230,6 +230,19 @@ export {
   type RequestAdmission,
 } from './request-execution-context.js';
 
+// The request's session-read carrier: the transport opens it per inbound
+// request, and every reader of that request's session (the inbound rate
+// limiter, the identity step above, REST's gate) reads through it, so one
+// request reads its session once. Request-scoped; never a cache.
+export {
+  openRequestSessionRead,
+  withRequestSessionRead,
+  withoutRequestSessionRead,
+  readRequestSession,
+  type RequestSessionRead,
+  type RequestSessionReadHandle,
+} from './request-session-read.js';
+
 // The ONE own-row delete door (`DELETE <route>` removes one row, only the
 // caller's own): read as the caller, check the owner column, remove as the
 // system attributed to the caller. Each object supplies its door descriptor.
@@ -255,6 +268,23 @@ export {
   AUTHZ_STORE_UNAVAILABLE_CODE,
   AUTHZ_STORE_UNAVAILABLE_MESSAGE,
 } from './authz-store-unavailable.js';
+
+// The ONE environment-membership judgment every door of a multi-environment
+// host asks (the runtime dispatcher and the REST server), and the one switch
+// that turns it on.
+export {
+  judgeEnvironmentMembership,
+  resolveEnvironmentMembershipEnforcement,
+  isMembershipJudgedEnvironment,
+  ENVIRONMENT_MEMBER_OBJECT,
+  ENVIRONMENT_MEMBERSHIP_REQUIRED_CODE,
+  ENVIRONMENT_MEMBERSHIP_REQUIRED_STATUS,
+} from './environment-membership.js';
+export type {
+  EnvironmentMembershipRefusal,
+  EnvironmentMembershipEngine,
+  EnvironmentMembershipInput,
+} from './environment-membership.js';
 
 export {
   resolveAuthzContext,
@@ -620,8 +650,14 @@ export {
   markAppAutomationElevation,
   appAutomationElevationOf,
   carryAppAutomationElevation,
+  withoutAppAutomationElevation,
   type AppAutomationElevation,
 } from './app-automation-elevation.js';
+
+// The mark a decided flow segment's data context carries naming the user the
+// run began for (or none). Set by service-automation, read by plugin-security's
+// organization wall.
+export { RUN_CALLER, markRunCaller, runCallerOf } from './run-caller.js';
 
 // #28881 — the mark a flow run's system elevation carries so its record writes
 // keep the write-time reference check. Set by service-automation, read by
@@ -662,7 +698,30 @@ export {
   type UserWorkTransferFailure,
   type UserWorkTransferOutcome,
   type UserWorkTransferReport,
+  assertAssignableUser,
 } from './user-assigned-work.js';
+
+// #35402 — the Change Owner action's server half (rulings 7000556646 and
+// 7000907189 on #35315): one record or a list of them handed to a person or an
+// ownership queue, as the caller, on an object that offers the action.
+export {
+  CHANGE_OWNER_DISABLED,
+  CHANGE_OWNER_NOTIFICATION_TEXT,
+  CHANGE_OWNER_NOTIFICATION_TOPIC,
+  changeOwnerOffReason,
+  changeOwnerOffRefusal,
+  changeRecordOwner,
+  changeRecordsOwner,
+  transferCascadeRelations,
+  type ChangeOwnerCascadeCandidate,
+  type ChangeOwnerCascadeOutcome,
+  type ChangeOwnerCascadeRelation,
+  type ChangeOwnerEngine,
+  type ChangeOwnerMessaging,
+  type ChangeOwnerReport,
+  type ChangeOwnerResult,
+  type ChangeOwnerTarget,
+} from './change-record-owner.js';
 
 // Ruling of record 6355206139 — the EXTERNAL rung's OWD seam: plugin-security
 // stamps whether a held grant's RLS speaks, plugin-sharing floors the OWD.

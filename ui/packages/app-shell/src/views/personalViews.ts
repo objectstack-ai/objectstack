@@ -34,11 +34,12 @@ import { createAuthenticatedFetch } from '@object-ui/auth';
 import type { FilterBuilderRowGroup } from '@object-ui/components';
 import { builderRulesOfSpecFilter } from '@object-ui/core';
 import type { usePermissions } from '@object-ui/permissions';
-import type { DataSource } from '@object-ui/types';
+import type { DataSource, ListColumn } from '@object-ui/types';
 import { foldFilterGroupToSpecRules, type FilterFoldRefusal } from './viewFilterFold.js';
 import { buildViewConfigSaveBody } from './objectViewTabs.js';
+import { columnsWithSummaries, type DraftColumnSummaries } from './columnSummaryWrite.js';
 import type { ListSortRule, ListUrlState } from './userFilterUrlState.js';
-import type { ListViewPreference } from '../context/ListPreferencesProvider.js';
+import { layKanbanDraft, type KanbanDraft, type ListViewPreference } from './listDraftStore.js';
 
 /** The object a personal view is a row of. */
 export const PERSONAL_VIEW_OBJECT = 'sys_personal_view';
@@ -163,7 +164,7 @@ export function personalViewPanelFilters(
 export interface PersonalViewListState {
   /** The toolbar state the address carries (`uf_*`); an absent part is the view's own. */
   url: Pick<ListUrlState, 'filters' | 'sort' | 'grouping'>;
-  /** The reader's stored state for the view (`ui.list.<object>`), if any. */
+  /** The list's draft with the reader's layout (`listDraftPreference`), if any. */
   preference?: ListViewPreference;
   /**
    * The open view's own conditions when the Filter panel holds them as rows
@@ -171,6 +172,25 @@ export interface PersonalViewListState {
    * the view's conditions included, and is not laid over them a second time.
    */
   panelFilters?: FilterBuilderRowGroup;
+  /**
+   * objectstack#36194 — the footer calculations the list's draft holds, laid
+   * over the saved columns ({@link columnsWithSummaries}).
+   */
+  summaries?: DraftColumnSummaries;
+  /**
+   * objectstack#35955 — the Display panel's layout and row colour the list's
+   * draft holds (`ListDraft.viewType` / `rowColor`). `viewType` retypes the
+   * body; `rowColor: null` is "none" over a view that colours its rows. An
+   * absent part is the view's own.
+   *
+   * objectstack#36370 — and a board's changed `kanban` keys
+   * (`ListDraft.kanban`), laid over the view's block.
+   */
+  display?: {
+    viewType?: string;
+    rowColor?: { field: string; colors?: Record<string, string> } | null;
+    kanban?: KanbanDraft;
+  };
 }
 
 /** The column a `columns` entry names: a bare name, or an entry's `field`. */
@@ -192,9 +212,10 @@ function columnName(column: unknown): string | undefined {
  *   the panel alone is the filter: the reader may have edited or removed one.
  * - **sort** and **grouping**: the ones the address carries; absent there,
  *   the view's own.
- * - **columns**: the view's, in the reader's dragged order, without the
- *   columns they hid (so `hiddenFields` and `fieldOrder` are applied, not
- *   carried). **rowHeight**: the reader's density, else the view's.
+ * - **columns**: the view's and the ones the reader added, in the reader's
+ *   dragged order, without the columns they hid (so `hiddenFields` and
+ *   `fieldOrder` are applied, not carried), with the footer calculations the
+ *   draft holds (objectstack#36194). **rowHeight**: the reader's density, else the view's.
  *
  * The body is narrowed to the keys spec's closed `ListViewSchema` declares and
  * bound to this object (`config.data.object`) by `buildViewConfigSaveBody`,
@@ -206,6 +227,25 @@ export function buildPersonalViewConfig(
   view: Record<string, any>,
   state: PersonalViewListState,
 ): { ok: true; config: Record<string, unknown> } | { ok: false; reason: FilterFoldRefusal } {
+  const laid = layListStateOverView(view, state);
+  if (!laid.ok) return laid;
+  return { ok: true, config: buildViewConfigSaveBody(objectName, laid.view).config };
+}
+
+/**
+ * The open view's own entry (the view tab's shape, the one the view config
+ * panel saves) with the list on screen laid over it, as
+ * {@link buildPersonalViewConfig} lays it: what 「Save to this view」 writes
+ * into a shared view (objectstack#35955), and the body a personal view's
+ * config is narrowed from. The layout and row colour of `state.display`
+ * apply too; a retype to a type whose block lists fields of its own fills
+ * that list from the columns when the block holds none, as
+ * {@link buildInPlaceViewConfig} does.
+ */
+export function layListStateOverView(
+  view: Record<string, any>,
+  state: PersonalViewListState,
+): { ok: true; view: Record<string, unknown> } | { ok: false; reason: FilterFoldRefusal } {
   const own: unknown[] = Array.isArray(view.filter) ? view.filter : [];
   let filter: unknown[];
   if (state.panelFilters && state.url.filters === undefined) {
@@ -222,6 +262,15 @@ export function buildPersonalViewConfig(
   const hidden = new Set<string>(pref?.hiddenFields ?? (Array.isArray(view.hiddenFields) ? view.hiddenFields : []));
   const order = pref?.columnState?.order ?? (Array.isArray(view.fieldOrder) ? view.fieldOrder : undefined);
   let columns: unknown[] | undefined = Array.isArray(view.columns) ? [...view.columns] : undefined;
+  // objectstack#35955 — the fields the reader added as columns (objectstack#30077)
+  // are columns of the saved view, after the view's own, in the same spelling.
+  if (columns && pref?.addedFields?.length) {
+    const names = new Set(columns.map(columnName).filter((n): n is string => !!n));
+    const asObjects = columns.some((c) => typeof c !== 'string');
+    for (const field of pref.addedFields) {
+      if (!names.has(field)) columns.push(asObjects ? { field } : field);
+    }
+  }
   if (columns) {
     if (order && order.length > 0) {
       const rank = new Map(order.map((name: string, i: number) => [name, i]));
@@ -232,6 +281,9 @@ export function buildPersonalViewConfig(
         .map(({ c }) => c);
     }
     columns = columns.filter((c) => !hidden.has(columnName(c) ?? ''));
+    // objectstack#36194 — and the footer calculations the reader picked, on
+    // the columns the body keeps.
+    columns = columnsWithSummaries(columns as Array<string | ListColumn>, state.summaries);
   }
 
   const sort: ListSortRule[] | undefined = state.url.sort ?? view.sort;
@@ -246,7 +298,22 @@ export function buildPersonalViewConfig(
     fieldOrder: undefined,
     rowHeight: pref?.rowHeight ?? view.rowHeight,
   };
-  return { ok: true, config: buildViewConfigSaveBody(objectName, draft).config };
+  const display = state.display;
+  if (display && 'rowColor' in display) draft.rowColor = display.rowColor ?? undefined;
+  if (display?.viewType && display.viewType !== view.type) {
+    draft.type = display.viewType;
+    const mirrorKey = IN_PLACE_COLUMN_MIRRORS[display.viewType];
+    const block = isRecord(view[display.viewType]) ? (view[display.viewType] as Record<string, unknown>) : undefined;
+    if (mirrorKey && block && !(Array.isArray(block[mirrorKey]) && (block[mirrorKey] as unknown[]).length > 0)) {
+      const names = (columns ?? []).map(columnName).filter((n): n is string => !!n);
+      if (names.length > 0) draft[display.viewType] = { ...block, [mirrorKey]: names };
+    }
+  }
+  if (display?.kanban) {
+    const base = isRecord(draft.kanban) ? (draft.kanban as Record<string, unknown>) : undefined;
+    draft.kanban = layKanbanDraft(base, display.kanban);
+  }
+  return { ok: true, view: draft };
 }
 
 /** The read's state: `off` (nothing read), `loading`, `ready`, or `refused`. */
@@ -403,3 +470,65 @@ export function usePersonalViews({
 
   return { status, views, save, update, rename, remove };
 }
+
+/** What a new view created in place is made of (the switcher's create card). */
+export interface InPlaceViewPicks {
+  /** The new view's type. */
+  type: string;
+  /** The type's picks, the spec block under the type's key (e.g. `{ groupByField }`). */
+  block?: Record<string, unknown>;
+}
+
+/**
+ * The `ListView` body of a view created in place from the open view: the open
+ * view's own body (its columns, filter, sort, grouping, row height) as the
+ * starting point, retyped to the chosen type with the type's picks laid over
+ * that type's block, and — when `state` is given, i.e. the reader kept 「include
+ * the current filters and sort」 — the list on screen laid over it the way Save
+ * as my view lays it ({@link buildPersonalViewConfig}). Without `state` only
+ * the reader's column layout and row height carry over; their unsaved filter,
+ * sort and grouping stay behind.
+ *
+ * One body for both scopes: it is what one of the reader's own views stores
+ * as `config`, and what the add-view door creates a shared view from. The
+ * fold refusal of Save as my view applies unchanged.
+ *
+ * A type whose block carries a field list of its own gets the body's columns
+ * there when the block holds none, as the add-view door's builder does
+ * (`buildNewViewSpec`): a kanban's `columns` (required by the spec), a
+ * gallery's `visibleFields` (its card body).
+ */
+export function buildInPlaceViewConfig(
+  objectName: string,
+  view: Record<string, any>,
+  picks: InPlaceViewPicks,
+  state: PersonalViewListState | { preference?: ListViewPreference },
+): { ok: true; config: Record<string, unknown> } | { ok: false; reason: FilterFoldRefusal } {
+  const own = isRecord(view[picks.type]) ? (view[picks.type] as Record<string, unknown>) : {};
+  const draft: Record<string, any> = {
+    ...view,
+    type: picks.type,
+    ...(picks.block && Object.keys(picks.block).length > 0 ? { [picks.type]: { ...own, ...picks.block } } : {}),
+  };
+  const listState: PersonalViewListState = 'url' in state ? state : { url: {}, preference: state.preference };
+  const built = buildPersonalViewConfig(objectName, draft, listState);
+  if (!built.ok) return built;
+  const mirrorKey = IN_PLACE_COLUMN_MIRRORS[picks.type];
+  if (mirrorKey) {
+    const block = isRecord(built.config[picks.type]) ? (built.config[picks.type] as Record<string, unknown>) : {};
+    const held = block[mirrorKey];
+    if (!Array.isArray(held) || held.length === 0) {
+      const names = (Array.isArray(built.config.columns) ? built.config.columns : [])
+        .map(columnName)
+        .filter((n): n is string => !!n);
+      built.config[picks.type] = { ...block, [mirrorKey]: names };
+    }
+  }
+  return built;
+}
+
+/** The view types whose spec block lists fields of its own, by that list's key. */
+const IN_PLACE_COLUMN_MIRRORS: Record<string, string | undefined> = {
+  kanban: 'columns',
+  gallery: 'visibleFields',
+};

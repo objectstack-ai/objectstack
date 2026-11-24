@@ -6,18 +6,20 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   resolveDashboardFilterDefs,
   dashboardFilterVariableDefs,
   buildFilterCondition,
   buildWidgetScopedFilter,
+  dashboardFiltersNotApplied,
   resetDashboardFilterWarnings,
   DATE_RANGE_FILTER_NAME,
   DATE_RANGE_PRESETS,
   type DashboardFilterDef,
 } from '../dashboard-filters';
 import { mergeFilters } from '../merge-filters';
+import { setDisplayTimeZone } from '../date-display';
 import { DashboardSchema as SpecDashboardSchema } from '@objectstack/spec/ui';
 
 const regionDef: DashboardFilterDef = {
@@ -778,5 +780,116 @@ describe('[#4356] bare-string `options` shorthand — retired: dropped, not lift
     expect(shorthandWarnings(resolveQuietly(filters).warnings)).toHaveLength(0);
     resetDashboardFilterWarnings();
     expect(shorthandWarnings(resolveQuietly(filters).warnings)).toHaveLength(1);
+  });
+});
+
+// objectstack#34938 — a text filter over an ISO week key (`cost_week:
+// '2026-W47'`) defaults to the current week. The default is resolved when the
+// defs are, so the box shows the key, never the placeholder.
+describe('a `{current_iso_week}` default seeds the filter with the resolved week key (objectstack#34938)', () => {
+  // Thu 2026-11-19 12:00 UTC: ISO week 2026-W47.
+  const NOW = new Date('2026-11-19T12:00:00Z');
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(NOW);
+  });
+
+  afterEach(() => {
+    setDisplayTimeZone(undefined);
+    vi.useRealTimers();
+  });
+
+  const defsOf = (globalFilters: unknown[]) => resolveDashboardFilterDefs({ globalFilters } as any);
+
+  it('a text filter: the def, the variable and the widget condition all carry the key', () => {
+    const [def] = defsOf([{ name: 'week', field: 'cost_week', type: 'text', defaultValue: '{current_iso_week}' }]);
+    expect(def.defaultValue).toBe('2026-W47');
+    expect(dashboardFilterVariableDefs([def])).toEqual([{ name: 'week', type: 'string', defaultValue: '2026-W47' }]);
+    // The value then filters exactly as a typed key does.
+    expect(buildWidgetScopedFilter({ id: 'w' }, [def], { week: def.defaultValue })).toEqual({
+      cost_week: { $contains: '2026-W47' },
+    });
+  });
+
+  it('the `${…}` spelling and an untyped filter (text by default) resolve too', () => {
+    expect(defsOf([{ field: 'cost_week', type: 'text', defaultValue: '${current_iso_week}' }])[0].defaultValue).toBe('2026-W47');
+    expect(defsOf([{ field: 'cost_week', defaultValue: '{current_iso_week}' }])[0].defaultValue).toBe('2026-W47');
+  });
+
+  it('the week is the workspace zone\'s: Monday in Tokyo while it is still Sunday in UTC', () => {
+    vi.setSystemTime(new Date('2026-11-22T20:00:00Z'));
+    expect(defsOf([{ field: 'cost_week', type: 'text', defaultValue: '{current_iso_week}' }])[0].defaultValue).toBe('2026-W47');
+    setDisplayTimeZone('Asia/Tokyo');
+    expect(defsOf([{ field: 'cost_week', type: 'text', defaultValue: '{current_iso_week}' }])[0].defaultValue).toBe('2026-W48');
+  });
+
+  it('a select filter over week keys preselects the current key', () => {
+    const [def] = defsOf([{
+      field: 'supply_week', type: 'select', defaultValue: '{current_iso_week}',
+      options: [{ value: '2026-W46', label: 'W46' }, { value: '2026-W47', label: 'W47' }],
+    }]);
+    expect(def.defaultValue).toBe('2026-W47');
+  });
+
+  it('a static key, another placeholder and a non-string default are left exactly as declared', () => {
+    const defs = defsOf([
+      { name: 'a', field: 'cost_week', type: 'text', defaultValue: '2026-W47' },
+      { name: 'b', field: 'cost_week', type: 'text', defaultValue: 'plan {current_iso_week}' },
+      { name: 'c', field: 'note', type: 'text', defaultValue: '{today}' },
+      { name: 'd', field: 'qty', type: 'number', defaultValue: 7 },
+    ]);
+    expect(defs.map((d) => d.defaultValue)).toEqual(['2026-W47', 'plan {current_iso_week}', '{today}', 7]);
+  });
+
+  it('a date filter never takes it for a date: left as written, then skipped with a warning', () => {
+    const [def] = defsOf([{ name: 'day', field: 'created_at', type: 'date', defaultValue: '{current_iso_week}' }]);
+    expect(def.defaultValue).toBe('{current_iso_week}');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    resetDashboardFilterWarnings();
+    try {
+      expect(buildFilterCondition(def, def.defaultValue)).toBeUndefined();
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(String(warn.mock.calls[0][0])).toContain('{current_iso_week}');
+    } finally {
+      warn.mockRestore();
+    }
+  });
+});
+
+// objectstack#36372 — the card mark that names a filter not applied to a card
+// reads `dashboardFiltersNotApplied`. A listed filter adds no condition to the
+// card's query for any value; an unlisted one adds one. The mark and the data
+// read the same binding.
+describe('dashboardFiltersNotApplied agrees with buildWidgetScopedFilter', () => {
+  const ownerDef: DashboardFilterDef = { name: 'owner', field: 'owner', type: 'text' };
+  const stageDef: DashboardFilterDef = { name: 'stage', field: 'stage', type: 'text', targetWidgets: ['w_listed'] };
+  const defs = [ownerDef, stageDef];
+  const widgets: Array<Parameters<typeof dashboardFiltersNotApplied>[0]> = [
+    { id: 'w_default' },
+    { id: 'w_opt_out', filterBindings: { owner: false } },
+    { id: 'w_rebound', filterBindings: { owner: 'account_owner' } },
+    { id: 'w_listed' },
+    { id: 'w_explicit_over_list', filterBindings: { stage: 'pipeline_stage' } },
+  ];
+
+  it('names exactly the filters that add no condition to the widget query', () => {
+    for (const widget of widgets) {
+      const notApplied = new Set(dashboardFiltersNotApplied(widget, defs).map((d) => d.name));
+      for (const def of defs) {
+        const scoped = buildWidgetScopedFilter(widget, [def], { [def.name]: 'x' });
+        expect({ widget: widget.id, filter: def.name, applied: scoped !== undefined }).toEqual({
+          widget: widget.id,
+          filter: def.name,
+          applied: !notApplied.has(def.name),
+        });
+      }
+    }
+  });
+
+  it('lists an opted-out filter and a filter whose allow-list leaves the widget out', () => {
+    expect(dashboardFiltersNotApplied({ id: 'w_opt_out', filterBindings: { owner: false } }, defs).map((d) => d.name))
+      .toEqual(['owner', 'stage']);
+    expect(dashboardFiltersNotApplied({ id: 'w_listed' }, defs)).toEqual([]);
   });
 });

@@ -51,7 +51,7 @@
  * measurement, stated as tests.
  *
  * DIRECTIONS, written before the reverse verification was run:
- *  - the zh-CN cases (cells, pivot headers, pivot totals, CSV) are RED before
+ *  - the zh-CN cases (cells, pivot headers, pivot totals) are RED before
  *    the change — they render the authored English label, which IS the bug;
  *  - the drill pin is red too, for a SEQUENCING reason rather than an assertion
  *    one: it waits for the translated cell so the click lands after the
@@ -345,42 +345,6 @@ describe('DatasetWidget table — a LOCAL select dimension is localized (objectu
       sales_channel: 'domestic',
       competitor_name: 'orion',
     });
-  });
-
-  it('exports the localized dimension cell and the RAW numeric measure', async () => {
-    // The CSV follows the table's own cells (objectui#4263's convention, which
-    // #4324's own summary restates) — so a localized cell exports localized,
-    // and the UTF-8 BOM `downloadCsv` prepends is what makes Excel read it. The
-    // measure stays a number, because a CSV is data that must round-trip.
-    const origCreate = URL.createObjectURL;
-    const origRevoke = URL.revokeObjectURL;
-    const blobs: any[] = [];
-    (URL as any).createObjectURL = (b: any) => { blobs.push(b); return 'blob:x'; };
-    (URL as any).revokeObjectURL = () => {};
-    try {
-      installMetaRouter({ crm_opportunity: OPPORTUNITY });
-      renderIn(
-        'zh',
-        <DatasetWidget
-          widget={{
-            type: 'table',
-            dataset: 'd',
-            dimensions: ['sales_channel', 'competitor_name'],
-            values: ['deals'],
-          }}
-          dataSource={serverResolvedTable()}
-        />,
-      );
-      await waitFor(() => expect(rowCells(0)[0]).toBe('国内'));
-      fireEvent.click(await screen.findByTestId('dataset-export'));
-      expect(blobs).toHaveLength(1);
-      const text: string = (await blobs[0].text()).replace(/^\uFEFF/, '');
-      const [, body] = text.split('\r\n');
-      expect(body).toBe('国内,欧励隆,7');
-    } finally {
-      (URL as any).createObjectURL = origCreate;
-      (URL as any).revokeObjectURL = origRevoke;
-    }
   });
 });
 

@@ -43,18 +43,26 @@
 
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import type { EngineAggregateOptions } from '@objectstack/spec/data';
+import type { DisplayNameObjectMeta, EngineAggregateOptions } from '@objectstack/spec/data';
 // [#28550, #28609] The engine's aggregation entry. Each `aggregate_records`
 // entry IS this node, so this door and the REST query door (which parses
 // `FindDataRequestSchema`, whose `aggregations` are this node) judge one shape
 // with one refusal.
 import { AggregationNodeSchema, SEARCH_COMPANION_FIELD } from '@objectstack/spec/data';
+// [#35138] ADR-0079's one reading of an object's name field
+// (`nameField ?? displayNameField ?? derived`), which names a lookup group.
+import { resolveDisplayField } from '@objectstack/spec/data';
+// [#36167] Which served fields hold a list, read as the publish gate reads them.
+import { isMultiValueField } from '@objectstack/spec/data';
 // [#23529] The catalogue's spelling of `PERMISSION_DENIED`, the code whose
 // `details` `errorResultFromThrown` withholds. Imported, never hand-spelled.
 import { StandardErrorCode, type ErrorCode } from '@objectstack/spec/api';
 // The repo's ONE not-found envelope, which the HTTP bridge's `get` throws:
 // `get_record` refuses a null read with it, so both doors answer one 404.
-import { recordNotFoundError } from '@objectstack/core';
+import { pickSentenceLocale, recordNotFoundError } from '@objectstack/core';
+import type { ObjectQuerySource } from '@objectstack/spec/ai';
+import { composeObjectQuerySource, servedLabelsOf, type ExecutedObjectRead } from './object-query-source.js';
+import { SystemFieldName } from '@objectstack/spec/system';
 // [#23701] The one key every door that translates the engine's unique-violation
 // envelope asks (the registered code AND the class name, never message text),
 // and the one classification whose arm states the wire code for it.
@@ -126,11 +134,43 @@ import {
 // [#30892] The file seam and what `read_file` renders from it.
 import { READ_FILE_MAX_BYTES, ReadFileExtractionBusyError, renderReadFile, type McpFileBridge } from './file-content.js';
 import { actionConfirmationElicitorFor, type McpActionCallDoor } from './action-confirmation-elicitation.js';
+import type { McpLatestPer } from './types.js';
+// [#35145] `expand` and `related`: the relation reads, judged before any read.
+import {
+  GET_RECORD_MAX_RELATED_LISTS,
+  QUERY_EXPAND_MAX_FIELDS,
+  RELATED_LIST_MAX_ROWS,
+  judgeQueryExpand,
+  judgeRelatedLists,
+  relatedListWhere,
+} from './mcp-relation-reads.js';
 
 export interface McpObjectSummary {
   name: string;
   label?: string;
+  /**
+   * [#34721] The object's authored `description`, present only where one is
+   * authored: what a client reads to pick the object for a question.
+   */
+  description?: string;
   fieldCount?: number;
+}
+
+/**
+ * [#35137] What {@link McpDataBridge.fieldVisibilityOf} answers for one
+ * object, both halves asked AS the caller:
+ *
+ * - `served` — the field names the caller's own served schema shows: the
+ *   object as `describe_object` serves it to this caller (ADR-0106 D1/D5, the
+ *   `/meta` object door's projection), so a field removed from their schema
+ *   is not in it;
+ * - `readable` — the fields the security service answers this caller may
+ *   READ on the object (`ISecurityService.getReadableFields`), the exact
+ *   complement of what the read path's field mask deletes from a row.
+ */
+export interface McpFieldVisibility {
+  served: readonly string[];
+  readable: readonly string[];
 }
 
 /**
@@ -207,7 +247,9 @@ export interface McpDataBridge {
    * that judge what a field declares (`required`, `defaultValue`, a
    * `reference`'s target, an external binding) read the definition, which
    * `describeObject`'s projection does not carry. Never rendered to the
-   * caller: only the gate's findings are.
+   * caller: only the gate's findings are. [#35138] `aggregate_records` reads
+   * two facts off it the same way, a group key's declared option order and
+   * an amount's fixed currency, and renders those alone.
    *
    * OPTIONAL, like {@link optionFieldsOf}: a bridge that omits it gets the
    * shared validator's verdict alone, exactly as before.
@@ -221,6 +263,22 @@ export interface McpDataBridge {
       limit?: number;
       offset?: number;
       orderBy?: Array<{ field: string; order: 'asc' | 'desc' }>;
+      /**
+       * [#35145] Reference fields of `object` to answer with the record each
+       * one names (`query_records`' `expand`), one level deep. The tool has
+       * judged every name and the read guard every target before it calls; the
+       * bridge resolves them through the engine's one expansion path, under
+       * each target's own permissions, row and field security.
+       */
+      expand?: string[];
+      /**
+       * One row per group (`query_records`' `latestPer`): the bridge hands it
+       * to the engine's read as the engine's own read option, never as a query
+       * key, and answers `{ object, records, hasMore }` — at most `limit`
+       * groups, `hasMore` from a read of one row more, and no `total` (a row
+       * count is no group count). A bridge that cannot serve it refuses.
+       */
+      latestPer?: McpLatestPer;
     },
   ): Promise<unknown>;
   /**
@@ -246,6 +304,21 @@ export interface McpDataBridge {
    * only where one was established.
    */
   diagnoseDelegation?(object: string): Promise<{ narrowed: boolean; statement?: string } | undefined>;
+  /**
+   * [#35137] The two framework answers `query_records` and `get_record` name
+   * the fields field-level security withholds from: both asked AS the caller,
+   * neither derived from rows ({@link McpFieldVisibility}). The tool layer
+   * names a field only when the first shows it and the second leaves it out
+   * (`withheldFieldNames`), so a field the caller's schema does not show is
+   * never named.
+   *
+   * OPTIONAL, with the graceful-degradation contract of
+   * {@link McpDataBridge.diagnoseDelegation}: a bridge that omits it, answers
+   * `undefined` (no security service, or no answer from it) or throws gets no
+   * `withheldFields`, and the tools render exactly what they rendered before.
+   * ⛔ The probe never fails the read it annotates.
+   */
+  fieldVisibilityOf?(object: string): Promise<McpFieldVisibility | undefined>;
   get(object: string, id: string): Promise<unknown>;
   create(object: string, data: Record<string, unknown>): Promise<unknown>;
   update(object: string, id: string, data: Record<string, unknown>): Promise<unknown>;
@@ -274,6 +347,51 @@ export interface McpDataBridge {
       timezone?: string;
     },
   ): Promise<unknown[]>;
+  /**
+   * `aggregate_records` with an `orderBy` or a `limit`: the groups ORDERED by
+   * an aggregated column (an aggregation alias or a group key's projected
+   * name), CUT to at most `limit`, and `totalGroups`, how many groups existed
+   * before the cut — all three computed by the driver's own statement
+   * (`@objectstack/objectql` `aggregate-order-cut.ts`, which the bridge
+   * reaches through `engine.aggregate`'s read option). The bridge runs it
+   * through every gate {@link aggregate} runs. A driver that cannot order and
+   * cut groups in its own statement refuses (`INVALID_QUERY` / 400), and the
+   * bridge throws that refusal; it never orders or cuts the groups itself.
+   *
+   * OPTIONAL, separately from {@link aggregate}: a bridge without it registers
+   * `aggregate_records` as before, and the tool refuses an `orderBy` / `limit`
+   * rather than cut an unordered list (`NOT_IMPLEMENTED` / 501).
+   */
+  aggregateGroups?(
+    object: string,
+    opts: {
+      where?: Record<string, unknown>;
+      groupBy?: NonNullable<EngineAggregateOptions['groupBy']>;
+      aggregations: NonNullable<EngineAggregateOptions['aggregations']>;
+      timezone?: string;
+      /**
+       * A key's `rank` orders a group key by its values' positions in the list
+       * (a declared option order read off the served schema), any value it
+       * does not list after every listed one — the tool's own, never a caller
+       * argument.
+       */
+      orderBy: Array<{ field: string; order: 'asc' | 'desc'; rank?: ReadonlyArray<string | number> }>;
+      limit?: number;
+    },
+  ): Promise<{ rows: unknown[]; totalGroups: number }>;
+  /**
+   * [#35138] The caller's locale ladder for a sentence the tools compose into
+   * a result (`ifNotRecorded`): the codes in order, the shared picker
+   * (`pickSentenceLocale`, `@objectstack/core`) choosing the first language
+   * the sentence is written in, `en` below all. The HTTP bridge answers
+   * `userTextLocalesOf` over the request's `ExecutionContext`, the ladder the
+   * dataset tools' `nextStep` reads on that door; the stdio bridge answers the
+   * principal's ladder, then the i18n service's default.
+   *
+   * OPTIONAL: a bridge that omits it, or whose answer throws, is written to in
+   * `en`.
+   */
+  userTextLocales?(): Promise<readonly string[]>;
   /**
    * [ADR-0149 D2] `list_datasets`: the governed datasets this caller may
    * query, each with its dimensions and measures, their business vocabulary,
@@ -305,6 +423,83 @@ export interface McpDataBridge {
    * holds no second copy of it. OPTIONAL — see {@link listDatasets}.
    */
   datasetToolDefinitions?(): ReadonlyArray<Pick<AIToolDefinition, 'name' | 'description'>>;
+  /**
+   * [#35442] `search_package_docs`: the installed apps' manual pages (their
+   * `doc` items) whose title, a heading or text contains one of
+   * `input.terms`, ranked and capped at `opts.maxResults`. Runs AS the
+   * principal: the host reads the docs through the ADR-0046 §6.7 docs-audience
+   * gate, so a page the caller may not read is never searched. On an OAuth
+   * grant the audience is the delegating person's own permission sets.
+   *
+   * OPTIONAL: a host that cannot read docs for the caller omits both doc
+   * members ({@link searchPackageDocs}, {@link readPackageDoc}) and neither
+   * doc tool registers. The pair registers only when both are present
+   * (`registerPackageDocTools`).
+   */
+  searchPackageDocs?(input: SearchPackageDocsInput, opts: { maxResults: number }): Promise<SearchPackageDocsOutput>;
+  /**
+   * [#35442] `read_package_doc`: one manual page by name, as this caller may
+   * read it, or a coded refusal (a page the caller may not read answers as
+   * not found). OPTIONAL — see {@link searchPackageDocs}.
+   */
+  readPackageDoc?(input: ReadPackageDocInput): Promise<ReadPackageDocOutput>;
+}
+
+/** [#35442] Where a manual page lives: its name, app, title, manual and the console address to cite. */
+export interface McpPackageDocAddress {
+  /** The page's name: what `read_package_doc` takes. */
+  name: string;
+  /** The app (package) that ships the page. */
+  package?: string;
+  /** The page's title, in the locale it was read or matched in. */
+  title: string;
+  /** The manual (book) the page opens in. */
+  book?: { name: string; label?: string };
+  /** The console address of the page (`/_console/apps/PACKAGE/docs/BOOK/NAME`), to cite as the source. */
+  url?: string;
+}
+
+/** [#35442] One `search_package_docs` hit. */
+export interface McpPackageDocHit extends McpPackageDocAddress {
+  /** The best place a term was found: the title, a heading, or the text. */
+  matchedOn: 'title' | 'heading' | 'text';
+  /** The terms this page contains. */
+  matchedTerms: string[];
+  /** The heading a term was found under or in, when there is one. */
+  heading?: string;
+  /** A short passage around the first match. */
+  excerpt: string;
+  /** The translation the match was found in, when it was not the page's base text. */
+  locale?: string;
+}
+
+/** [#35442] `search_package_docs` input. */
+export interface SearchPackageDocsInput {
+  terms: string[];
+  package?: string;
+}
+
+/** [#35442] `search_package_docs` answer. */
+export interface SearchPackageDocsOutput {
+  terms: string[];
+  results: McpPackageDocHit[];
+  /** More pages matched than `results` carries. */
+  truncated: boolean;
+}
+
+/** [#35442] `read_package_doc` input. */
+export interface ReadPackageDocInput {
+  name: string;
+  package?: string;
+  locale?: string;
+}
+
+/** [#35442] `read_package_doc` answer: the page's Markdown content and where it lives. */
+export interface ReadPackageDocOutput extends McpPackageDocAddress {
+  description?: string;
+  /** The translation served, when it was not the page's base text. */
+  locale?: string;
+  content: string;
 }
 
 export interface RegisterObjectToolsOptions {
@@ -542,6 +737,38 @@ export interface RegisterActionToolsOptions {
 
 const DEFAULT_MAX_LIMIT = 50;
 
+/** The most partition fields, and the most order keys, one `latestPer` may name (the engine's own bound). */
+const LATEST_PER_MAX_KEYS = 3;
+
+/**
+ * [latest per group] `query_records`' answer under `latestPer`, from the
+ * bridge's `{ object, records, hasMore }`: the records (at most `limit`
+ * groups) and `hasMore`, which {@link servedQueryPage} turns into
+ * `truncated: true` as for any capped page. No `total`: a row count is no
+ * group count. An answer that is not that shape — a bridge that served the
+ * read as an ordinary list — is no answer, and is refused.
+ */
+function latestPerAnswer(
+  objectName: string,
+  result: unknown,
+): { object: unknown; records: unknown[]; hasMore: boolean } {
+  const answer = result as { object?: unknown; records?: unknown; hasMore?: unknown; total?: unknown } | null;
+  if (!answer || !Array.isArray(answer.records) || typeof answer.hasMore !== 'boolean' || answer.total !== undefined) {
+    const err = new Error(
+      `query_records on '${objectName}' with latestPer: this host's data bridge did not serve one record per group, `
+      + 'so its rows are not the answer and none is returned.',
+    ) as Error & { code?: string; status?: number };
+    err.code = StandardErrorCode.enum.INTERNAL_ERROR;
+    err.status = 500;
+    throw err;
+  }
+  return {
+    object: answer.object ?? objectName,
+    records: answer.records,
+    hasMore: answer.hasMore,
+  };
+}
+
 /** A `sys_`-prefixed object is a system table — off-limits to external agents. */
 function isSystemObject(name: string): boolean {
   return /^sys_/i.test(name);
@@ -694,6 +921,338 @@ function textResult(value: unknown) {
 
 function errorResult(message: string) {
   return { content: [{ type: 'text' as const, text: message }], isError: true as const };
+}
+
+/**
+ * [#35138] The object `objectName` as this caller is served it
+ * ({@link McpDataBridge.servedObjectDefinitionOf}), or `undefined` when the
+ * bridge cannot say (no member, no object, or a throw). `aggregate_records`
+ * reads a group key's declared options and an amount's fixed currency off its
+ * field map ({@link fieldMapOf}), and the read tools' `source` line the labels
+ * it names fields by. A field the caller's view removed is not in it, so
+ * nothing read from it names a field the caller cannot see. ⛔ This read never
+ * fails the answer it annotates: without it the tool renders what it rendered
+ * before, and the line names the caller's own names.
+ */
+async function servedDefinitionOf(
+  bridge: McpDataBridge,
+  objectName: string,
+): Promise<Record<string, unknown> | undefined> {
+  if (typeof bridge.servedObjectDefinitionOf !== 'function') return undefined;
+  try {
+    return (await bridge.servedObjectDefinitionOf(objectName)) ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** A served definition's name-keyed field map, or `undefined` when it carries none. */
+function fieldMapOf(def: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
+  const fields = def?.fields;
+  return fields !== null && typeof fields === 'object' && !Array.isArray(fields)
+    ? (fields as Record<string, unknown>)
+    : undefined;
+}
+
+/** The served field `name`, or `undefined` when the caller's view has no such field. */
+function servedFieldOf(fields: Record<string, unknown>, name: unknown): Record<string, unknown> | undefined {
+  if (typeof name !== 'string' || !Object.prototype.hasOwnProperty.call(fields, name)) return undefined;
+  const def = fields[name];
+  return def !== null && typeof def === 'object' ? (def as Record<string, unknown>) : undefined;
+}
+
+/**
+ * [#36167] The fields of the served definition `def` that hold a list, read
+ * through `isMultiValueField` (`@objectstack/spec/data`), the predicate the
+ * publish gate reads them with, among the field names the tool judges with;
+ * `undefined` when there is no definition.
+ */
+function multiValueFieldsOfServed(
+  def: Record<string, unknown> | null,
+  judged: readonly string[],
+): string[] | undefined {
+  const map = fieldMapOf(def ?? undefined);
+  if (!map) return undefined;
+  return judged.filter((name) => {
+    const field = servedFieldOf(map, name);
+    return typeof field?.type === 'string' && isMultiValueField({ type: field.type, multiple: field.multiple === true });
+  });
+}
+
+/**
+ * [#35138] The field types whose group value is ONE declared option, so the
+ * groups have the order the author declared the options in. A `multiselect`
+ * groups by a combination of options, which has no declared order.
+ */
+const OPTION_ORDERED_GROUP_TYPES: ReadonlySet<string> = new Set(['select', 'radio']);
+
+/**
+ * Each declared option value of `def` with its position, or `undefined` when
+ * the served field is not a single-option field declaring options.
+ */
+function declaredOptionRank(def: Record<string, unknown> | undefined): Map<unknown, number> | undefined {
+  if (!def || typeof def.type !== 'string' || !OPTION_ORDERED_GROUP_TYPES.has(def.type)) return undefined;
+  if (!Array.isArray(def.options)) return undefined;
+  const rank = new Map<unknown, number>();
+  for (const option of def.options) {
+    if (option === null || typeof option !== 'object' || !('value' in option)) continue;
+    const value = (option as { value: unknown }).value;
+    if (!rank.has(value)) rank.set(value, rank.size);
+  }
+  return rank.size > 0 ? rank : undefined;
+}
+
+/**
+ * [#35138] The leading group keys whose groups follow a declared option order,
+ * each with its {@link declaredOptionRank}: read in `groupBy` order while each
+ * key is a single-option field ({@link OPTION_ORDERED_GROUP_TYPES}) the served
+ * schema declares options for; the first key that is not one ends the reading.
+ * Both paths of `aggregate_records` take the rule from here: the uncut path
+ * sorts by it ({@link inDeclaredOptionOrder}), the order-and-cut path hands it
+ * to the database ({@link declaredOptionOrderBy}).
+ */
+function declaredOptionOrderKeys(
+  groupBy: NonNullable<EngineAggregateOptions['groupBy']> | undefined,
+  fields: Record<string, unknown>,
+): Array<{ column: string; rank: Map<unknown, number> }> {
+  const keys: Array<{ column: string; rank: Map<unknown, number> }> = [];
+  for (const entry of groupBy ?? []) {
+    const item = typeof entry === 'string' ? { field: entry } : (entry as { field?: unknown; alias?: unknown; dateGranularity?: unknown });
+    // A bucketed key is a period, not a declared option.
+    if (item.dateGranularity !== undefined) break;
+    const rank = declaredOptionRank(servedFieldOf(fields, item.field));
+    if (!rank) break;
+    const column = typeof item.alias === 'string' ? item.alias : (item.field as string);
+    keys.push({ column, rank });
+  }
+  return keys;
+}
+
+/**
+ * The most values one order key's `rank` may list: `@objectstack/objectql`'s
+ * `AGGREGATE_ORDER_RANK_MAX` (a declared option list, not a data set), which
+ * this package does not import at runtime. A longer declared list ends the
+ * reading at its key rather than send a rank the engine refuses.
+ */
+const ORDER_RANK_MAX = 500;
+
+/**
+ * [aggregate order and cut] The declared option order of
+ * {@link declaredOptionOrderKeys} as the order-and-cut path's `orderBy`, for a
+ * call with a `limit` and no `orderBy` of its own: each leading option-ordered
+ * key ascending by its `rank`, so the database orders the groups, and a value
+ * no option declares (a NULL among them) after every declared one, before the
+ * cut. The engine orders the group keys after these ascending. Empty when no
+ * leading key has a declared order.
+ */
+function declaredOptionOrderBy(
+  groupBy: NonNullable<EngineAggregateOptions['groupBy']> | undefined,
+  fields: Record<string, unknown>,
+): Array<{ field: string; order: 'asc'; rank: Array<string | number> }> {
+  const orderBy: Array<{ field: string; order: 'asc'; rank: Array<string | number> }> = [];
+  for (const { column, rank } of declaredOptionOrderKeys(groupBy, fields)) {
+    const values = [...rank.keys()];
+    if (values.length > ORDER_RANK_MAX || !values.every((v) => typeof v === 'string' || typeof v === 'number')) break;
+    orderBy.push({ field: column, order: 'asc', rank: values as Array<string | number> });
+  }
+  return orderBy;
+}
+
+/**
+ * [#35138] `aggregate_records`' groups in the option order the caller's
+ * served schema declares, for a call that states no order of its own.
+ *
+ * The group keys are read in `groupBy` order while each one is a
+ * single-option field ({@link OPTION_ORDERED_GROUP_TYPES}) the served schema
+ * declares options for; the first key that is not one ends the reading, so
+ * the groups under it keep the order the driver answered. A value no option
+ * declares (a null, a value stored before an option was removed) sorts after
+ * every declared one. The sort is stable: groups the declared order does not
+ * tell apart keep the driver's order. With no such leading key, `rows` comes
+ * back as it is.
+ *
+ * Run over every group, BEFORE the tool's cap, so the groups the cap keeps
+ * are the first in the declared order. Reordering a list the driver already
+ * answered whole runs no second query.
+ */
+function inDeclaredOptionOrder(
+  rows: unknown[],
+  groupBy: NonNullable<EngineAggregateOptions['groupBy']> | undefined,
+  fields: Record<string, unknown>,
+): unknown[] {
+  const keys = declaredOptionOrderKeys(groupBy, fields);
+  if (keys.length === 0) return rows;
+  const position = (row: unknown, key: { column: string; rank: Map<unknown, number> }): number => {
+    const value = row !== null && typeof row === 'object' ? (row as Record<string, unknown>)[key.column] : undefined;
+    return key.rank.get(value) ?? key.rank.size;
+  };
+  return [...rows].sort((a, b) => {
+    for (const key of keys) {
+      const by = position(a, key) - position(b, key);
+      if (by !== 0) return by;
+    }
+    return 0;
+  });
+}
+
+/**
+ * [#35138] The field types whose group value is the id of a record of another
+ * object, the field's `reference`.
+ */
+const LOOKUP_GROUP_TYPES: ReadonlySet<string> = new Set(['lookup', 'master_detail']);
+
+/** [#35138] The member beside a lookup group key that names its record: `<key>__label`. */
+const LOOKUP_LABEL_SUFFIX = '__label';
+
+/**
+ * [#35138] `aggregate_records`' groups with each lookup key's record named
+ * beside it, in `<key>__label`, where `<key>` is the group column (the key's
+ * alias when it has one).
+ *
+ * A group key is a lookup key when the caller's served schema shows it as a
+ * `lookup` or `master_detail` field with a `reference`. The name is the
+ * referenced record's value of the referenced object's name field (ADR-0079,
+ * {@link resolveDisplayField}), read AS THE CALLER: one `bridge.query` per
+ * referenced object, for the ids of the groups served, through the same
+ * bridge and context as the aggregate. Nothing is read with other rights, so
+ * the caller's object, field and record permissions apply as to any read the
+ * caller makes.
+ *
+ * A label is set only for a key whose record that read returns with a
+ * non-blank name. Every other key carries no label, and nothing else in the
+ * answer changes, so the answer says nothing about why a key has none.
+ * No label at all is added, and the rows come back as they are, when the
+ * referenced object is not one this tool reads (`admitsRead`), when the
+ * caller is not served it or its name field, or when the read fails.
+ * ⛔ This read never fails the aggregate it annotates.
+ */
+async function withLookupGroupLabels(
+  bridge: McpDataBridge,
+  rows: unknown[],
+  groupBy: NonNullable<EngineAggregateOptions['groupBy']> | undefined,
+  fields: Record<string, unknown>,
+  admitsRead: (objectName: string) => Promise<boolean>,
+): Promise<unknown[]> {
+  const keysByTarget = new Map<string, string[]>();
+  for (const entry of groupBy ?? []) {
+    const item = typeof entry === 'string' ? { field: entry } : (entry as { field?: unknown; alias?: unknown; dateGranularity?: unknown });
+    if (item.dateGranularity !== undefined) continue;
+    const def = servedFieldOf(fields, item.field);
+    if (!def || typeof def.type !== 'string' || !LOOKUP_GROUP_TYPES.has(def.type)) continue;
+    if (typeof def.reference !== 'string' || def.reference === '') continue;
+    const column = typeof item.alias === 'string' ? item.alias : (item.field as string);
+    keysByTarget.set(def.reference, [...(keysByTarget.get(def.reference) ?? []), column]);
+  }
+  if (keysByTarget.size === 0) return rows;
+
+  const namesByColumn = new Map<string, Map<string, string>>();
+  for (const [target, columns] of keysByTarget) {
+    const ids = new Set<string>();
+    for (const row of rows) {
+      if (row === null || typeof row !== 'object') continue;
+      for (const column of columns) {
+        const id = (row as Record<string, unknown>)[column];
+        if (typeof id === 'string' && id !== '') ids.add(id);
+      }
+    }
+    if (ids.size === 0) continue;
+    const names = await recordNamesAsCaller(bridge, target, [...ids], admitsRead);
+    if (!names || names.size === 0) continue;
+    for (const column of columns) namesByColumn.set(column, names);
+  }
+  if (namesByColumn.size === 0) return rows;
+
+  return rows.map((row) => {
+    if (row === null || typeof row !== 'object' || Array.isArray(row)) return row;
+    const source = row as Record<string, unknown>;
+    const labelled: Record<string, unknown> = {};
+    for (const [member, value] of Object.entries(source)) {
+      labelled[member] = value;
+      const names = namesByColumn.get(member);
+      const name = names && typeof value === 'string' ? names.get(value) : undefined;
+      const labelMember = `${member}${LOOKUP_LABEL_SUFFIX}`;
+      // A column the aggregate itself answers under that name is never overwritten.
+      if (name !== undefined && !Object.prototype.hasOwnProperty.call(source, labelMember)) labelled[labelMember] = name;
+    }
+    return labelled;
+  });
+}
+
+/**
+ * [#35138] The name of each of `ids` in `target` that the caller's own read
+ * returns with a non-blank name, by id. `undefined` when no name can be read
+ * at all: the object is not one this tool reads, the caller is not served it
+ * or its name field, or the read fails.
+ */
+async function recordNamesAsCaller(
+  bridge: McpDataBridge,
+  target: string,
+  ids: string[],
+  admitsRead: (objectName: string) => Promise<boolean>,
+): Promise<Map<string, string> | undefined> {
+  try {
+    if (!(await admitsRead(target))) return undefined;
+    const def = await servedDefinitionOf(bridge, target);
+    const targetFields = fieldMapOf(def);
+    if (!def || !targetFields) return undefined;
+    const nameField = resolveDisplayField(def as DisplayNameObjectMeta);
+    if (!nameField || !servedFieldOf(targetFields, nameField)) return undefined;
+    const answer = await bridge.query(target, { where: { id: { $in: ids } }, fields: ['id', nameField], limit: ids.length });
+    const records = (answer as { records?: unknown } | null | undefined)?.records;
+    if (!Array.isArray(records)) return undefined;
+    const asked = new Set(ids);
+    const names = new Map<string, string>();
+    for (const record of records) {
+      if (record === null || typeof record !== 'object') continue;
+      const id = idOfRow(record as Record<string, unknown>);
+      const name = (record as Record<string, unknown>)[nameField];
+      if (id === undefined || !asked.has(id)) continue;
+      if (typeof name === 'string' && name.trim() !== '') names.set(id, name);
+      else if (typeof name === 'number' && Number.isFinite(name)) names.set(id, String(name));
+    }
+    return names;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * [#35138] The aggregate functions whose value is an amount in the field's
+ * currency: the ones that read the amount (ADR-0144 Open item 10, the set
+ * `@objectstack/objectql`'s `record-currency-aggregate-door.ts` judges).
+ * `count` reads no amount and `count_distinct` counts values, so neither
+ * answers a currency.
+ */
+const AMOUNT_AGGREGATE_FUNCTIONS: ReadonlySet<string> = new Set(['sum', 'avg', 'min', 'max']);
+
+/**
+ * [#35138] The currency of each amount column whose field has ONE currency,
+ * by the column's alias: a served field whose `currencyConfig` is
+ * `currencyMode: 'fixed'` answers its `defaultCurrency`. Empty when no
+ * column has one.
+ *
+ * The other two modes answer nothing here. A `record`-mode amount is
+ * answered by the engine only grouped by its own currency code field
+ * (`record-currency-aggregate-door.ts`, ADR-0144 D6), so each group's code is
+ * already in its row. A `dynamic`-mode amount has no currency of its own: it
+ * displays in the tenant default currency, which the served schema does not
+ * carry.
+ */
+function fixedAmountCurrencies(
+  aggregations: NonNullable<EngineAggregateOptions['aggregations']>,
+  fields: Record<string, unknown>,
+): Record<string, string> {
+  const currencies: Record<string, string> = {};
+  for (const aggregation of aggregations) {
+    if (!AMOUNT_AGGREGATE_FUNCTIONS.has(aggregation.function)) continue;
+    const config = servedFieldOf(fields, aggregation.field)?.currencyConfig;
+    if (config === null || typeof config !== 'object') continue;
+    const { currencyMode, defaultCurrency } = config as { currencyMode?: unknown; defaultCurrency?: unknown };
+    if (currencyMode === 'fixed' && typeof defaultCurrency === 'string' && defaultCurrency !== '') {
+      currencies[aggregation.alias] = defaultCurrency;
+    }
+  }
+  return currencies;
 }
 
 /**
@@ -1056,9 +1615,14 @@ function refusalAsTheDoorServesIt(envelope: ThrownRefusalEnvelope, door: DataDoo
  * code-less sentences, which the door's message heuristics would misread, so
  * it keeps {@link errorResultWithCode}.
  */
-function dataDoorErrorResult(err: unknown, tool: DataDoorTool | typeof DELETE_RECORDS_TOOL, objectName: string) {
+function dataDoorErrorResult(
+  err: unknown,
+  tool: DataDoorTool | typeof DELETE_RECORDS_TOOL,
+  objectName: string,
+  beside?: NotRecordedMembers,
+) {
   const envelope = dataDoorRefusalEnvelope(err, objectName);
-  if (envelope) return codedErrorResult({ ...envelope });
+  if (envelope) return codedErrorResult({ ...envelope }, beside);
   const door = dataDoorAnswerOf(err, objectName);
   if (isServerFault(door.status)) {
     logServerFault({
@@ -1068,7 +1632,176 @@ function dataDoorErrorResult(err: unknown, tool: DataDoorTool | typeof DELETE_RE
       request: { method: 'tools/call', path: `${tool} ${objectName}` },
     });
   }
-  return codedErrorResult(door);
+  return codedErrorResult(door, isServerFault(door.status) ? undefined : beside);
+}
+
+/**
+ * [#35138] What a record read's refusal says about data the caller's app does
+ * not record: `notRecorded` names it, as the caller sent it, and
+ * `ifNotRecorded` tells the model, in the caller's language, to say so rather
+ * than answer around a bare not-found. Rendered beside the coded refusal
+ * (`{ error, notRecorded, ifNotRecorded }`), whose `error` is unchanged.
+ *
+ * - `{ object }`: the caller's schema shows no object by the name they sent;
+ * - `{ object, fields }`: it shows the object, and not these names the call
+ *   sent (in the order first sent).
+ */
+export interface NotRecordedMembers {
+  notRecorded: { object: string; fields?: string[] };
+  ifNotRecorded: string;
+}
+
+/** The languages {@link NOT_RECORDED_SENTENCE} is written in; `en` is the floor. */
+const NOT_RECORDED_LOCALES = ['en', 'zh-Hans', 'zh-Hant', 'ja'] as const;
+
+/**
+ * [#35138, ADR-0149 M1] The `ifNotRecorded` sentence, one per language, in
+ * the executor: the spec fixes no wording. ⛔ One sentence for every case the
+ * member is served on, naming nothing: what is not recorded is the
+ * `notRecorded` member's, built from the caller's own words.
+ */
+const NOT_RECORDED_SENTENCE: Readonly<Record<(typeof NOT_RECORDED_LOCALES)[number], string>> = {
+  en:
+    'What notRecorded names is not recorded here, so nothing was read: tell the user this data is not recorded, '
+    + 'never report 0 or an empty result for it, and do not answer with another object or field in its place.',
+  'zh-Hans': 'notRecorded 所列的内容在这里没有记录，因此没有读取任何数据：请告诉用户这项数据没有记录，不要为它报告 0 或空结果，也不要用其他对象或字段代替回答。',
+  'zh-Hant': 'notRecorded 所列的內容在這裡沒有記錄，因此沒有讀取任何資料：請告訴使用者這項資料沒有記錄，不要為它回報 0 或空結果，也不要用其他物件或欄位代替回答。',
+  ja: 'notRecorded に挙げたものはここに記録されていないため、何も読み取っていません：このデータは記録されていないとユーザーに伝え、0 や空の結果を報告せず、別のオブジェクトやフィールドで代わりに答えないでください。',
+};
+
+/**
+ * The columns every object answers whatever its schema lists: the primary key
+ * and the two audit timestamps the engine's read and write doors admit on any
+ * object (`PLATFORM_PROVISIONED_COLUMNS`, `@objectstack/objectql`). A schema
+ * need not list them, so their absence there never makes them not recorded.
+ */
+const ALWAYS_ADDRESSABLE_COLUMNS: ReadonlySet<string> = new Set([
+  SystemFieldName.ID,
+  SystemFieldName.CREATED_AT,
+  SystemFieldName.UPDATED_AT,
+]);
+
+/** The logical operators whose operands are themselves conditions on the object's fields. */
+const WHERE_LOGICAL_OPERATORS: ReadonlySet<string> = new Set(['$and', '$or', '$nor', '$not']);
+
+/**
+ * The name a sent field name addresses on the object itself: its first path
+ * segment. A dotted name (`owner.name`) reaches a relation's field through its
+ * head, and the head is what the object's schema lists; the rest is the
+ * related object's business. Every channel's names are read this way.
+ */
+function sentFieldHead(name: string): string {
+  return name.split('.')[0];
+}
+
+/**
+ * The field names a `where` the caller sent addresses, in order: each
+ * condition key, through the logical operators. Other `$` keys are operators,
+ * never names.
+ */
+function whereFieldNames(where: unknown, into: string[]): string[] {
+  if (Array.isArray(where)) {
+    for (const branch of where) whereFieldNames(branch, into);
+    return into;
+  }
+  if (!where || typeof where !== 'object') return into;
+  for (const [key, value] of Object.entries(where as Record<string, unknown>)) {
+    if (key.startsWith('$')) {
+      if (WHERE_LOGICAL_OPERATORS.has(key)) whereFieldNames(value, into);
+      continue;
+    }
+    into.push(key);
+  }
+  return into;
+}
+
+/** The field names a `query_records` call sent: `where`, `fields`, `orderBy`. */
+function queryRecordsSentFields(args: {
+  where?: Record<string, unknown>;
+  fields?: string[];
+  orderBy?: Array<{ field: string }>;
+}): string[] {
+  return [
+    ...whereFieldNames(args.where, []),
+    ...(args.fields ?? []),
+    ...(args.orderBy ?? []).map((o) => o.field),
+  ];
+}
+
+/** The field names an `aggregate_records` call sent: `where`, `groupBy`, each aggregation's `field` and `filter`. */
+function aggregateRecordsSentFields(args: {
+  where?: Record<string, unknown>;
+  groupBy?: Array<string | { field: string }>;
+  aggregations: Array<{ field?: string; filter?: unknown }>;
+}): string[] {
+  const names = whereFieldNames(args.where, []);
+  for (const g of args.groupBy ?? []) names.push(typeof g === 'string' ? g : g.field);
+  for (const a of args.aggregations) {
+    if (typeof a.field === 'string' && a.field !== '') names.push(a.field);
+    whereFieldNames(a.filter, names);
+  }
+  return names;
+}
+
+/**
+ * [#35138] {@link NotRecordedMembers} for a refused record read, or
+ * `undefined`. Decided from two things only: the names the caller sent, and
+ * the object as the caller's own schema shows it (`describeObject`, the
+ * `describe_object` answer). ⛔ So an object or a field the caller's schema
+ * does not show is answered exactly as one that does not exist, whatever the
+ * refusal beside it says, and nothing the schema shows is ever named or
+ * counted. Each sent name is read by its head ({@link sentFieldHead}) on
+ * every channel, so a dotted name whose head the schema shows is never named. A schema read that throws, or one with no field list, establishes
+ * nothing: no member.
+ */
+async function notRecordedMembersOf(
+  bridge: McpDataBridge,
+  objectName: string,
+  sentFields: readonly string[],
+): Promise<NotRecordedMembers | undefined> {
+  let served: unknown;
+  try {
+    served = await bridge.describeObject(objectName);
+  } catch {
+    return undefined;
+  }
+  let notRecorded: NotRecordedMembers['notRecorded'];
+  if (served == null) {
+    notRecorded = { object: objectName };
+  } else {
+    const fields = (served as { fields?: unknown }).fields;
+    if (!Array.isArray(fields)) return undefined;
+    const shown = new Set<string>(ALWAYS_ADDRESSABLE_COLUMNS);
+    for (const f of fields) {
+      const name = (f as { name?: unknown } | null)?.name;
+      if (typeof name === 'string') shown.add(name);
+    }
+    const heads = sentFields.map(sentFieldHead).filter((head) => head !== '');
+    const absent = [...new Set(heads)].filter((name) => !shown.has(name));
+    if (absent.length === 0) return undefined;
+    notRecorded = { object: objectName, fields: absent };
+  }
+  const locales = await sentenceLocalesOf(bridge);
+  return { notRecorded, ifNotRecorded: NOT_RECORDED_SENTENCE[pickSentenceLocale(locales, NOT_RECORDED_LOCALES)] };
+}
+
+/**
+ * [#35138] A record read tool's answer to a throw ({@link dataDoorErrorResult},
+ * unchanged), with {@link NotRecordedMembers} beside the refusal where the
+ * caller's schema does not show what the call named. A server fault is not a
+ * refusal and carries none.
+ */
+async function recordReadErrorResult(
+  bridge: McpDataBridge,
+  err: unknown,
+  tool: 'query_records' | 'aggregate_records' | 'get_record',
+  objectName: string,
+  sentFields: readonly string[],
+) {
+  const refusal = dataDoorRefusalEnvelope(err, objectName) !== undefined
+    || !isServerFault(dataDoorAnswerOf(err, objectName).status);
+  const beside = refusal ? await notRecordedMembersOf(bridge, objectName, sentFields) : undefined;
+  return dataDoorErrorResult(err, tool, objectName, beside);
 }
 
 /**
@@ -1148,16 +1881,19 @@ function landedWriteResultOrError(
  * (`tool-call-interceptor.ts`), so a host's deny reaches the client in the
  * envelope the tools' own refusals use; not on the package entry.
  */
-export function codedErrorResult(error: {
-  code?: string;
-  message: string;
-  status?: number;
-  declaredCode?: string;
-  userMessage?: string;
-  details?: unknown;
-}) {
+export function codedErrorResult(
+  error: {
+    code?: string;
+    message: string;
+    status?: number;
+    declaredCode?: string;
+    userMessage?: string;
+    details?: unknown;
+  },
+  beside?: NotRecordedMembers,
+) {
   return {
-    content: [{ type: 'text' as const, text: jsonText({ error }) }],
+    content: [{ type: 'text' as const, text: jsonText(beside ? { error, ...beside } : { error }) }],
     isError: true as const,
   };
 }
@@ -1239,11 +1975,8 @@ function recordDeleteConfirmationRefusal(
  * tools' descriptions, so the one-row and many-row text cannot disagree.
  */
 const DELETE_RECYCLE_BIN_FACT =
-  'A deleted business record goes to the recycle bin, where it can be restored until the deployment\'s retention '
-  + 'ends (30 days by default) by a recycle-bin manager of the object, or by you where your permissions let you '
-  + 'restore your own deletes; a record of a platform object (sys_, cloud_, ai_), or any record on a '
-  + 'deployment with no recycle bin, is deleted permanently. No MCP tool restores: tell the human it can be '
-  + 'restored from the recycle bin (the console, or POST /api/v1/data/{objectName}/recycle-bin/{recycleBinEntryId}/restore).';
+  'A deleted business record goes to the recycle bin, which no MCP tool restores; a platform object\'s record '
+  + '(sys_, cloud_, ai_), or any record on a deployment with no recycle bin, is deleted permanently.';
 
 /**
  * When the human's request IS the approval of a `delete_record` (maintainer
@@ -1795,6 +2528,54 @@ function wireCodeOf(err: unknown, thrownCode: string): string {
 }
 
 /**
+ * [#35138] May `query_records` read one row past its page, to learn whether
+ * the page was capped?
+ *
+ * The data door's read window REFUSES, never clamps, a read asking for more
+ * rows than `OS_DATA_MAX_PAGE_SIZE` or walking past `OS_DATA_QUERY_ROW_BUDGET`
+ * (`@objectstack/types`' `query-read-limits.ts`). A probe row that crosses
+ * either would turn a page the caller may read into a refusal, so there the
+ * page is read exactly as asked and the door's counted `hasMore` decides
+ * ({@link servedQueryPage}).
+ */
+function queryPageProbeFits(page: number, offset: number | undefined): boolean {
+  const { maxPageSize, rowBudget } = resolveQueryReadLimits();
+  if (maxPageSize !== undefined && page + 1 > maxPageSize) return false;
+  if (rowBudget !== undefined && (offset ?? 0) + page + 1 > rowBudget) return false;
+  return true;
+}
+
+/**
+ * [#35138] Serve one `query_records` page, and say when it was capped.
+ *
+ * A page read with a probe (`probed`: the bridge was asked for `page + 1`
+ * rows) is capped when the probe row came back: the extra row is dropped and
+ * the answer carries `truncated: true`. A page read without one is capped
+ * when the door's own counted `hasMore` says so. `truncated` is present only
+ * when true, so an answer whose page holds every matching row (exactly
+ * `page` rows included) is unchanged. `hasMore`, where the bridge answers it,
+ * states the same fact: it was counted against the probe-widened read, so it
+ * is restated from the probe rather than left one row out.
+ *
+ * Anything that is not a `{ records: [...] }` object is served as it came —
+ * the {@link withDelegationNotice} posture: no wrapper is invented to carry a
+ * flag about a shape this tool cannot read.
+ */
+function servedQueryPage(result: unknown, page: number, probed: boolean): unknown {
+  if (result === null || typeof result !== 'object' || Array.isArray(result)) return result;
+  const answer = result as Record<string, unknown>;
+  const records = answer.records;
+  if (!Array.isArray(records)) return result;
+  const truncated = probed ? records.length > page : answer.hasMore === true;
+  return {
+    ...answer,
+    records: probed ? records.slice(0, page) : records,
+    ...(probed && typeof answer.hasMore === 'boolean' ? { hasMore: truncated } : {}),
+    ...(truncated ? { truncated: true as const } : {}),
+  };
+}
+
+/**
  * [ADR-0090 D10 — ruling 2026-09-08, consequence 2] Attach the D10 narrowing
  * notice to a query result WITHOUT reshaping it.
  *
@@ -1812,6 +2593,151 @@ function withDelegationNotice(value: unknown, statement: string): unknown {
     return { ...(value as Record<string, unknown>), ...notice };
   }
   return { result: value, ...notice };
+}
+
+/**
+ * [#35137] The sentence served beside `withheldFields`. It names no field and
+ * no value: the list beside it does the naming.
+ */
+const WITHHELD_FIELDS_NOTE =
+  'The fields in withheldFields exist on this object, but field-level security does not let you read them, '
+  + 'so they are left out of these records. Say they are not visible to you; never say they are empty or blank.';
+
+/**
+ * [#35137] The one line `query_records` and `get_record` describe the member with.
+ */
+const WITHHELD_FIELDS_DESCRIPTION =
+  'A field named in withheldFields is hidden from you, not empty.';
+
+/**
+ * [#35138] What the object read tools tell the model about the `source`
+ * block beside a successful answer ({@link composeObjectQuerySource}): it is
+ * how the figures were computed, and `source.line` is that source already
+ * written in the caller's language, to quote as the answer's source.
+ */
+const OBJECT_QUERY_SOURCE_DESCRIPTION =
+  'Quote the answer\'s source.line as the source of any figure you give from it.';
+
+/**
+ * [#35138] The caller's locale ladder for a sentence the tools compose into a
+ * result ({@link McpDataBridge.userTextLocales}): `[]`, which the shared
+ * picker writes in `en`, when the bridge has no member or its answer throws.
+ */
+async function sentenceLocalesOf(bridge: McpDataBridge): Promise<readonly string[]> {
+  try {
+    return (await bridge.userTextLocales?.()) ?? [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * [#35138] The `source` block for a read the tool executed, composed from
+ * that read, the caller's served definition (labels only) and the caller's
+ * locale ladder; `undefined` when the composer cannot state it
+ * ({@link composeObjectQuerySource}). ⛔ Its reads never fail the answer it
+ * annotates: a definition or ladder the bridge cannot give leaves machine
+ * names and `en`.
+ */
+async function objectQuerySourceOf(
+  bridge: McpDataBridge,
+  read: ExecutedObjectRead,
+  served: Record<string, unknown> | undefined,
+): Promise<ObjectQuerySource | undefined> {
+  return composeObjectQuerySource(read, servedLabelsOf(served), await sentenceLocalesOf(bridge));
+}
+
+/**
+ * [#35138] `value` with its `source` block as a top-level key, as the
+ * schema places it. Anything that is not a plain object is served as it
+ * came, the {@link withDelegationNotice} posture: no wrapper is invented to
+ * carry a block about a shape this tool cannot read.
+ */
+function withObjectQuerySource(value: unknown, source: ObjectQuerySource | undefined): unknown {
+  if (source === undefined || value === null || typeof value !== 'object' || Array.isArray(value)) return value;
+  return { ...(value as Record<string, unknown>), source };
+}
+
+/** A page answer's counted `total`, the records a page read covers; `undefined` when the door counted none. */
+function countedTotalOf(answer: unknown): number | undefined {
+  if (answer === null || typeof answer !== 'object' || Array.isArray(answer)) return undefined;
+  const total = (answer as { total?: unknown }).total;
+  return typeof total === 'number' && Number.isInteger(total) && total >= 0 ? total : undefined;
+}
+
+/**
+ * The records an uncut aggregate covers: its bare `count` (no field, no
+ * filter) summed over every group, or `undefined` when the call asked none or
+ * a group's value is not a count. Never guessed.
+ */
+function aggregateRecordsOf(
+  rows: readonly unknown[],
+  aggregations: ReadonlyArray<{ function: string; field?: string; alias: string; filter?: unknown }>,
+): number | undefined {
+  const bare = aggregations.find((a) => a.function === 'count' && (a.field === undefined || a.field === '') && a.filter === undefined);
+  if (bare === undefined) return undefined;
+  let sum = 0;
+  for (const row of rows) {
+    const value = row !== null && typeof row === 'object' ? (row as Record<string, unknown>)[bare.alias] : undefined;
+    if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) return undefined;
+    sum += value;
+  }
+  return sum;
+}
+
+/**
+ * [#35137] Which fields `query_records` / `get_record` name as withheld: of
+ * the fields the call asked for (or, asking none, every field the caller's
+ * served schema shows), those the caller's served schema shows AND the
+ * security service does not answer readable. ⛔ A field the served schema does
+ * not show is never named, whatever the readable answer says: that is the
+ * card's bound, and the `served.has` test below is what holds it.
+ */
+function withheldFieldNames(visibility: McpFieldVisibility, asked: readonly string[] | undefined): string[] {
+  const served = new Set(visibility.served);
+  const readable = new Set(visibility.readable);
+  const candidates = asked !== undefined && asked.length > 0 ? asked : visibility.served;
+  const named: string[] = [];
+  for (const name of candidates) {
+    if (!served.has(name)) continue;
+    if (readable.has(name) || named.includes(name)) continue;
+    named.push(name);
+  }
+  return named;
+}
+
+/**
+ * [#35137] The withheld names for one read, or `[]` when the bridge cannot
+ * say. ⛔ Never fails the read it annotates: no member, `undefined` and a
+ * throw all answer `[]`, which renders exactly what the tool rendered before.
+ */
+async function withheldFieldsFor(
+  bridge: McpDataBridge,
+  objectName: string,
+  asked: readonly string[] | undefined,
+): Promise<string[]> {
+  if (typeof bridge.fieldVisibilityOf !== 'function') return [];
+  try {
+    const visibility = await bridge.fieldVisibilityOf(objectName);
+    return visibility ? withheldFieldNames(visibility, asked) : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * [#35137] `value` with the withheld names and {@link WITHHELD_FIELDS_NOTE}
+ * beside it, or `value` itself when nothing is withheld, so an unrestricted
+ * caller's answer is byte-identical to before. A record's own keys cannot
+ * collide: field names are snake_case, these members camelCase.
+ */
+function withWithheldFields(value: unknown, withheld: readonly string[]): unknown {
+  if (withheld.length === 0) return value;
+  const member = { withheldFields: [...withheld], withheldFieldsNote: WITHHELD_FIELDS_NOTE };
+  if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+    return { ...(value as Record<string, unknown>), ...member };
+  }
+  return { result: value, ...member };
 }
 
 function jsonText(value: unknown): string {
@@ -1961,6 +2887,10 @@ interface GatePassContext {
  * or an object it does not serve, adds none; a target it does not serve is
  * not judged, as at the gate.
  *
+ * [#36167] The subject's definition is read once, by the handler, which also
+ * hands its list-valued fields to the shared validator; `subject` is that read
+ * (`null` when the bridge serves none).
+ *
  * [#33147] The field being authored resolves through the same served
  * definition, and nothing else: a field the caller is not served reads as
  * one the object does not declare, so the answer never says whether it
@@ -1981,11 +2911,10 @@ async function gatePassFindings(
   site: AuthoredExpressionSite,
   objectName: string,
   expression: string,
+  subject: Record<string, unknown> | null,
   context: GatePassContext,
 ): Promise<{ errors: GatePassFinding[]; warnings: GatePassFinding[] }> {
-  if (!bridge.servedObjectDefinitionOf) return NO_GATE_PASS_FINDINGS;
-  const subject = await bridge.servedObjectDefinitionOf(objectName);
-  if (!subject) return NO_GATE_PASS_FINDINGS;
+  if (!bridge.servedObjectDefinitionOf || !subject) return NO_GATE_PASS_FINDINGS;
   const { authoredExpressionHopTargets, judgeAuthoredSiteExpression } = await import('@objectstack/lint');
   const targets: Array<Record<string, unknown>> = [];
   const hops = site === 'flow_condition' ? [] : authoredExpressionHopTargets(subject, expression);
@@ -2189,9 +3118,7 @@ const RECORD_ID_ALIASES = { id: 'recordId', record_id: 'recordId' } as const;
  * and a `recordId` → `id` rename were both refused on this surface, so the
  * hand-off is stated rather than accepted under a second spelling.
  */
-const RECORD_ID_DESCRIPTION =
-  'The record id: the `id` that create_record answers and that each query_records row carries by default, '
-  + 'sent under the name recordId.';
+const RECORD_ID_DESCRIPTION = 'The record\'s `id`, as create_record and query_records answer it.';
 
 /**
  * Wire the FULL tool surface a bridge can serve onto one {@link McpServer} —
@@ -2226,6 +3153,9 @@ export function wireBridgeTools(
   // [ADR-0149 D2] `list_datasets` / `query_dataset`, only where the bridge
   // carries all three dataset members and the grant admits `data:read`.
   registered.push(...registerDatasetTools(server, bridge, options));
+  // [#35442] `search_package_docs` / `read_package_doc`, only where the bridge
+  // carries both doc members and the grant admits `data:read`.
+  registered.push(...registerPackageDocTools(server, bridge, options));
   return registered;
 }
 
@@ -2239,6 +3169,50 @@ export function hasDatasetTools(bridge: Partial<McpDataBridge>): bridge is McpDa
     && typeof bridge.queryDataset === 'function'
     && typeof bridge.datasetToolDefinitions === 'function'
   );
+}
+
+/**
+ * [ADR-0149 D2] The dataset tools {@link registerDatasetTools} registers for
+ * this bridge and grant, by name, each with the description it registers
+ * under; empty when neither registers. A bridge missing a dataset member, a
+ * grant without `data:read`, and a tool the bridge defines no description for
+ * are all absent here.
+ *
+ * [#34686] It is the one gate for the pair: `registerDatasetTools` registers
+ * from it, and `handleHttpRequest` reads it to decide whether the `initialize`
+ * instructions carry the selection rule ({@link datasetToolsServed}), so the
+ * rule is sent exactly where `tools/list` lists both tools.
+ */
+export function datasetToolDescriptions(
+  bridge: Partial<McpDataBridge>,
+  options: RegisterObjectToolsOptions = {},
+): Map<string, string> {
+  const descriptions = new Map<string, string>();
+  if (!hasDatasetTools(bridge)) return descriptions;
+  // Read family, exactly as `aggregate_records`: undefined grant (API key,
+  // session) keeps the pair, a scope list without `data:read` registers neither.
+  const scopes = options.grantedScopes;
+  if (scopes && !scopes.includes(MCP_OAUTH_SCOPE_DATA_READ)) return descriptions;
+  const definitions = bridge.datasetToolDefinitions();
+  for (const name of [LIST_DATASETS_TOOL_NAME, QUERY_DATASET_TOOL_NAME]) {
+    const description = definitions.find((d) => d.name === name)?.description;
+    if (description) descriptions.set(name, description);
+  }
+  return descriptions;
+}
+
+/**
+ * [#34686] Whether this bridge and grant register BOTH dataset tools — the
+ * condition under which the selection rule ("look for a governed metric
+ * first", ADR-0149 D3) can be followed, since it names both.
+ */
+export function datasetToolsServed(
+  bridge: Partial<McpDataBridge> | undefined,
+  options: RegisterObjectToolsOptions = {},
+): boolean {
+  if (!bridge) return false;
+  const descriptions = datasetToolDescriptions(bridge, options);
+  return descriptions.has(LIST_DATASETS_TOOL_NAME) && descriptions.has(QUERY_DATASET_TOOL_NAME);
 }
 
 /**
@@ -2275,14 +3249,10 @@ export function registerDatasetTools(
 ): string[] {
   const registered: string[] = [];
   if (!hasDatasetTools(bridge)) return registered;
-  const scopes = options.grantedScopes;
-  if (scopes && !scopes.includes(MCP_OAUTH_SCOPE_DATA_READ)) return registered;
+  const descriptions = datasetToolDescriptions(bridge, options);
   const maxRows = options.maxQueryLimit ?? DEFAULT_MAX_LIMIT;
-  const definitions = bridge.datasetToolDefinitions();
-  const descriptionOf = (name: string): string | undefined =>
-    definitions.find((d) => d.name === name)?.description;
 
-  const listDescription = descriptionOf(LIST_DATASETS_TOOL_NAME);
+  const listDescription = descriptions.get(LIST_DATASETS_TOOL_NAME);
   if (listDescription) {
     registered.push(LIST_DATASETS_TOOL_NAME);
     server.registerTool(
@@ -2302,7 +3272,7 @@ export function registerDatasetTools(
     );
   }
 
-  const queryDescription = descriptionOf(QUERY_DATASET_TOOL_NAME);
+  const queryDescription = descriptions.get(QUERY_DATASET_TOOL_NAME);
   if (queryDescription) {
     registered.push(QUERY_DATASET_TOOL_NAME);
     server.registerTool(
@@ -2323,6 +3293,154 @@ export function registerDatasetTools(
   }
 
   return registered;
+}
+
+/** [#35442] The app-docs search tool's name, the one the cloud `service-ai` registry already holds. */
+export const SEARCH_PACKAGE_DOCS_TOOL_NAME = 'search_package_docs';
+
+/** [#35442] The app-docs read tool's name, the one the cloud `service-ai` registry already holds. */
+export const READ_PACKAGE_DOC_TOOL_NAME = 'read_package_doc';
+
+/** [#35442] The most pages one `search_package_docs` answer lists; its description states it. */
+export const PACKAGE_DOC_SEARCH_MAX_RESULTS = 10;
+
+/**
+ * [#35442] The most characters of a page `read_package_doc` returns. A longer
+ * page answers its first part and says it was cut, rather than an answer no
+ * client can hold.
+ */
+export const READ_PACKAGE_DOC_MAX_CHARS = 60_000;
+
+/**
+ * [#35442] Whether this bridge and grant register BOTH doc tools: the bridge
+ * carries both doc members and the grant is the read family's
+ * (`aggregate_records`'s: an undefined grant keeps them, a scope list without
+ * `data:read` registers neither). The one gate: `registerPackageDocTools`
+ * registers from it, and `handleHttpRequest` reads it to decide whether the
+ * `initialize` instructions carry the answer-order rule, so the rule is sent
+ * exactly where `tools/list` lists both tools.
+ */
+export function packageDocToolsServed(
+  bridge: Partial<McpDataBridge> | undefined,
+  options: RegisterObjectToolsOptions = {},
+): boolean {
+  if (!bridge) return false;
+  if (typeof bridge.searchPackageDocs !== 'function' || typeof bridge.readPackageDoc !== 'function') return false;
+  const scopes = options.grantedScopes;
+  return !scopes || scopes.includes(MCP_OAUTH_SCOPE_DATA_READ);
+}
+
+/**
+ * [#35442] Register the app-docs pair over the bridge's doc members:
+ * `search_package_docs` finds the installed apps' manual pages that contain a
+ * business word, and `read_package_doc` reads one page.
+ *
+ * - **No second gate.** Neither tool judges what the caller may read: the
+ *   host's members read the `doc` items through the `/meta/doc` docs-audience
+ *   gate (ADR-0046 §6.7) as the principal, so a page the caller may not read
+ *   is neither found nor read, and reads as not found. On an OAuth grant that
+ *   reaches these tools (the gate above), the docs audience is the delegating
+ *   person's own permission sets, never wider (ADR-0090 D10); both
+ *   descriptions say so.
+ * - **The search is a substring match**, stated in the description: no
+ *   server-side doc search exists, so the honest search is a term found in a
+ *   page's title, a heading or its text (case aside). Pages that contain more
+ *   of the terms come first, then by the sum of where each is found (title
+ *   over heading over text), then by title, capped at
+ *   {@link PACKAGE_DOC_SEARCH_MAX_RESULTS}.
+ * - **An answer carries the page's console address** where the page has one
+ *   (a page with no package has none), so the client can cite a source the
+ *   user can open.
+ */
+export function registerPackageDocTools(
+  server: McpServer,
+  bridge: Partial<McpDataBridge>,
+  options: RegisterObjectToolsOptions = {},
+): string[] {
+  if (!packageDocToolsServed(bridge, options)) return [];
+  const search = bridge.searchPackageDocs!.bind(bridge);
+  const read = bridge.readPackageDoc!.bind(bridge);
+
+  server.registerTool(
+    SEARCH_PACKAGE_DOCS_TOOL_NAME,
+    {
+      description:
+        'Find pages in the manuals of the apps installed here that contain business words, before you answer what '
+        + 'a term means or how a process works. Send each term as the user wrote it, without question words '
+        + '("回款", not "什么是回款"). A page matches when its title, a heading or its text contains a term, case '
+        + 'aside. Pages that contain more of the terms come first, then pages where the terms sit higher (title, '
+        + `then heading, then text), then by title; at most ${PACKAGE_DOC_SEARCH_MAX_RESULTS}, each with an excerpt `
+        + 'and, where the page has one, the url to cite. Only pages this connection may read are searched; on an '
+        + 'OAuth connection, those the person\'s own permission sets open, never more. '
+        + `Read a page with ${READ_PACKAGE_DOC_TOOL_NAME}.`,
+      inputSchema: strictToolInput(
+        {
+          surface: `this ${SEARCH_PACKAGE_DOCS_TOOL_NAME} call`,
+          aliases: { query: 'terms', q: 'terms', keywords: 'terms', term: 'terms', packageId: 'package', app: 'package' },
+        },
+        {
+          terms: z.array(z.string().trim().min(1)).min(1).max(5)
+            .describe('One to five business words or short phrases, as the user wrote them'),
+          package: z.string().optional().describe('Only this app\'s manuals'),
+        },
+      ),
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+    },
+    async ({ terms, package: pkg }) => {
+      try {
+        return textResult(await search(
+          { terms, ...(pkg !== undefined ? { package: pkg } : {}) },
+          { maxResults: PACKAGE_DOC_SEARCH_MAX_RESULTS },
+        ));
+      } catch (err) {
+        return errorResultWithCode(err);
+      }
+    },
+  );
+
+  server.registerTool(
+    READ_PACKAGE_DOC_TOOL_NAME,
+    {
+      description:
+        'Read one page of an installed app\'s manual by its name (the name search_package_docs answers): its '
+        + 'title, its manual, its Markdown content and, where the page has one, its url to cite. Send package when '
+        + 'two apps ship a page of that name. A page this connection may not read answers as not found; on an OAuth '
+        + 'connection, the person\'s own permission sets decide, never more.',
+      inputSchema: strictToolInput(
+        {
+          surface: `this ${READ_PACKAGE_DOC_TOOL_NAME} call`,
+          aliases: { doc: 'name', docName: 'name', doc_name: 'name', packageId: 'package', app: 'package' },
+        },
+        {
+          name: z.string().trim().min(1).describe('The page\'s name'),
+          package: z.string().optional().describe('The app that ships the page, when two apps ship that name'),
+          locale: z.string().optional().describe('A translation of the page to read, e.g. zh-CN; the base text when it has none'),
+        },
+      ),
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+    },
+    async ({ name, package: pkg, locale }) => {
+      try {
+        const page = await read({
+          name,
+          ...(pkg !== undefined ? { package: pkg } : {}),
+          ...(locale !== undefined ? { locale } : {}),
+        });
+        if (typeof page?.content === 'string' && page.content.length > READ_PACKAGE_DOC_MAX_CHARS) {
+          return textResult({
+            ...page,
+            content: page.content.slice(0, READ_PACKAGE_DOC_MAX_CHARS),
+            truncated: `The page is ${page.content.length} characters; this answer carries the first ${READ_PACKAGE_DOC_MAX_CHARS}. Open its url for the rest.`,
+          });
+        }
+        return textResult(page);
+      } catch (err) {
+        return errorResultWithCode(err);
+      }
+    },
+  );
+
+  return [SEARCH_PACKAGE_DOCS_TOOL_NAME, READ_PACKAGE_DOC_TOOL_NAME];
 }
 
 /**
@@ -2524,7 +3642,8 @@ export function registerObjectTools(
       note('list_objects'),
       {
         description:
-          'List the data objects (tables) available in this app. Returns each object\'s name, label and field count.',
+          'List the data objects (tables) available in this app. Returns each object\'s name, label, description '
+          + '(where the author wrote one) and field count.',
         inputSchema: strictToolInput({ surface: 'this list_objects call' }, {}),
         annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
       },
@@ -2582,15 +3701,11 @@ export function registerObjectTools(
       note('describe_object'),
       {
         description:
-          'Get the schema of a data object as you may read it, with what a write needs. Each field: name, type, label, '
-          + 'required, readonly (a write never sets it: declared read-only, or a value the platform computes, such as a '
-          + 'formula, an autonumber or a field with an expression; leave it out of a write), system (a platform-injected '
-          + 'column), options (value + label; send the value) on a field that offers a fixed set, and defaultValue when '
-          + 'an insert applies one. A defaultValue may be a token the server resolves (NOW(), current_user) or an '
-          + 'expression object: to get it, omit the field, never copy the value. readonly is the schema\'s, not your '
-          + 'edit permission: a field you may read but not edit shows readonly false, and a write naming it is refused. '
-          + 'validations: each active rule\'s name, type, message, severity, events and the fields it names (the '
-          + 'message is what a refused write answers). Also the enabled features.',
+          'Get the schema of a data object as you may read it, with what a write needs: name, label, description; '
+          + 'each field\'s name, type, label, description (where set: the author\'s, or the platform\'s on a column '
+          + 'it injects), required, readonly (leave it out of a write), system, '
+          + 'options (send the value) and defaultValue (omit the field to get it; never copy the value); the active '
+          + 'validations; the enabled features. readonly is the schema\'s, not your edit permission.',
         inputSchema: strictToolInput(
           { surface: 'this describe_object call', aliases: { ...OBJECT_NAME_ALIASES, name: 'objectName' } },
           { objectName: z.string().describe('The object/table name, e.g. "task"') },
@@ -2619,34 +3734,13 @@ export function registerObjectTools(
       note('validate_expression'),
       {
         description:
-          'Validate a CEL expression against an object\'s schema before authoring it into metadata. Returns ' +
-          'build-time errors (bare field refs, unknown fields, unknown functions; at a `formula` or `validation` site, every ' +
-          'other refusal the publish gate gives there: a reference field read both through the relationship and as a plain ' +
-          'value, more than one hop, a hop to a field the target does not declare or into a stored-metadata table, and at a ' +
-          '`validation` site an unguarded nullable field or a read of `parent`; at a `flow_condition` of a record-triggered ' +
-          'flow, an unguarded nullable `record.`/`previous.` read) and advisory warnings ' +
-          '(text/boolean fields misused in arithmetic, an error at a `validation` site, worded for the rule\'s ' +
-          '`severity`, and at a `flow_condition` of a record-triggered or time-relative flow, where it fails the run; ' +
-          'a warning on any other flow; date-equality pitfalls; at a `formula`, `validation` or `flow_condition` site, a read ' +
-          'of an external object\'s unprovisioned system column; at a `flow_condition` given the flow\'s `variables`, a ' +
-          'bare read of a variable named like a field; at a `formula` site naming a stored (non-formula) `field`, ' +
-          'a read of another record, the clock, the user or a permission), plus the fields and stdlib ' +
-          'functions in scope so you can self-correct. A hop target follows the same system-object fence as ' +
-          '`describe_object`. `site` says where the expression will live: a `formula` ' +
-          'field, a `validation`/predicate, or a `flow_condition` (read fields as `record.<field>` there too). ' +
-          'Pass the rule\'s `severity` (validation) or the flow\'s `triggerKind` (flow_condition), so the verdict is ' +
-          'the one the publish gate gives that rule or flow. A time-relative flow\'s conditions read a row of the object ' +
-          'its sweep scans (`timeRelative.object`): pass that object as objectName. A start whose objectName names ' +
-          'another object is refused at publish (`flow-time-relative-object-mismatch`). At a `flow_condition` the verdict ' +
-          'is the runtime publish gate\'s, which a flow saved through MCP or Studio meets: `os validate` also judges a ' +
-          'bare name\'s null guard and unbound roots over the whole flow, which this tool is not handed, so write ' +
-          '`record.<field>` to be judged here. Pass the flow\'s declared `variables` (flow_condition), as the flow ' +
-          'declares them: a bare read of one is the variable, which the run binds before the record\'s fields, so it ' +
-          'is not typed as the field, and a variable named like a field of objectName gets the gate\'s shadowed-read ' +
-          'warning. Without them a bare name is typed as the field and that warning cannot be given. ' +
-          'Pass `field` (formula) to be judged as that field: its type, and the ' +
-          'formula cycle it would close; a field not yet declared is judged as a new formula, so a new stored field gets ' +
-          'its stored-expression warnings only once it is declared.',
+          'Validate a CEL expression against an object\'s schema before authoring it into metadata. Returns the ' +
+          'errors and warnings the publish gate gives the expression at its `site` (formula, validation, ' +
+          'flow_condition or template; read fields as `record.<field>`), plus the fields and stdlib functions in scope ' +
+          'so you can self-correct. Pass what the gate reads off the rule or flow so the verdict is the one it gives: ' +
+          '`severity` (validation); `triggerKind`, `startCondition` and `variables` (flow_condition); `field` ' +
+          '(formula). For a time-relative flow, objectName is the object its sweep scans. The served SKILL.md lists ' +
+          'every check by site.',
         inputSchema: strictToolInput(
           {
             surface: 'this validate_expression call',
@@ -2665,33 +3759,27 @@ export function registerObjectTools(
               .enum(['formula', 'validation', 'flow_condition', 'template'])
               .optional()
               .describe(
-                'Where the expression will live. Every site reads fields as `record.<field>`; a bare field name also resolves in a flow_condition, but this tool cannot judge its null guard there. Default: formula.',
+                'Where the expression will live. Default: formula.',
               ),
             severity: z
               .enum(VALIDATION_SEVERITIES)
               .optional()
               .describe(
-                'site validation only: the rule\'s `severity`. A `warning` / `info` rule is advisory, so a fault skips it ' +
-                'instead of refusing the write, and the verdict says so. Default: error, the rule default.',
+                'site validation only: the rule\'s `severity`; a `warning` / `info` rule is advisory. Default: error.',
               ),
             triggerKind: z
               .enum(FLOW_TRIGGER_INPUTS)
               .optional()
               .describe(
                 'site flow_condition only: how the flow is started — record_change (start triggerType record-*), ' +
-                'time_relative, schedule, api, or none (started by hand, an action or a parent flow). A type mismatch ' +
-                'is an error on a record_change or time_relative flow (its record is a row of objectName) and a warning ' +
-                'on any other. Default: record_change.',
+                'time_relative, schedule, api, or none (by hand, an action or a parent flow). Default: record_change.',
               ),
             sweepObject: z
               .string()
               .optional()
               .describe(
-                'site flow_condition with triggerKind time_relative only: the flow\'s `timeRelative.object`, the object ' +
-                'the sweep scans and whose rows it hands each run as its record. Its conditions are typed against that ' +
-                'object, so it is objectName too. A start whose objectName names another object is refused at publish ' +
-                '(`flow-time-relative-object-mismatch`); passed with another objectName, the verdict is the gate\'s ' +
-                'advisory one for such a flow, a type mismatch warning. Default: objectName.',
+                'site flow_condition with triggerKind time_relative only: the flow\'s `timeRelative.object`, which is ' +
+                'objectName too. Default: objectName.',
               ),
             // [#33147] The two facts the gate reads off the item the expression
             // sits on that `site` does not carry.
@@ -2700,27 +3788,23 @@ export function registerObjectTools(
               .optional()
               .describe(
                 'site flow_condition only: the flow\'s start condition, when the expression is an edge or `decision` ' +
-                'branch condition after it. What it proves non-null holds downstream, as at publish. Omit it when ' +
-                'the expression is the start condition itself.',
+                'branch condition after it. Omit it for the start condition itself.',
               ),
             // [#33176] The third fact the gate reads off the flow.
             variables: z
               .array(FlowVariableSchema)
               .optional()
               .describe(
-                'site flow_condition only: the flow\'s declared `variables`, as the flow declares them (each a `name` ' +
-                'and a `type` at least). A bare read of one is the variable, not the field: it is not typed as the ' +
-                'field, and one named like a field of objectName gets the gate\'s shadowed-read warning. Omitted, ' +
-                'a bare name is typed as the field and that warning cannot be given.',
+                'site flow_condition only: the flow\'s declared `variables`, as the flow declares them. A bare read ' +
+                'of one is the variable, not the field; the shadowed-read warning needs them.',
               ),
             field: z
               .string()
               .regex(/^[a-z_][a-z0-9_]*$/, 'a field name is snake_case, e.g. "due_in_days"')
               .optional()
               .describe(
-                'site formula only: the name of the field the expression is authored on. A declared field is judged ' +
-                'as it is declared: a stored (non-formula) field gets the stored-expression warnings, and a formula ' +
-                'the cycle it would close. Any other name is judged as a new formula field.',
+                'site formula only: the field the expression is authored on, judged as declared; any other name as a ' +
+                'new formula field.',
               ),
           },
         ),
@@ -2776,6 +3860,23 @@ export function registerObjectTools(
           }
           const { role, scope, slot, optionLabels, traversalHydration, gatePasses, faultOutcome: outcomeOf } =
             VALIDATE_SITE_MAP[site ?? 'formula'];
+          // The gate's envelope verdict first: `validateExpression` treats a
+          // blank source as "not authored" and answers ok, while the save gate
+          // refuses it. Each issue is the spec schema's own (code and message),
+          // so the tool and the gate cannot drift apart on this rule.
+          const slotParse = slot.safeParse(expression);
+          // [#32872, #36167] The subject as this caller is served it, read once
+          // where the gate judges the site with passes of its own: those passes
+          // read it, and so does the list-valued field set below.
+          const subject = slotParse.success && gatePasses && bridge.servedObjectDefinitionOf
+            ? await bridge.servedObjectDefinitionOf(objectName)
+            : null;
+          // [#36167] The object's list-valued fields, which the publish gate
+          // hands the shared validator (`ExprSchemaHint.multiValueFields`), so
+          // `record.<list> == <scalar>` is refused here as `list-equality` in
+          // the gate's words. `describeObject`'s projection carries no
+          // `multiple`; the served definition does. Absent, as before.
+          const multiValueFields = multiValueFieldsOfServed(subject, fields);
           const faultOutcome = outcomeOf?.({
             severity: severity ?? 'error',
             triggerKind: triggerKind ?? 'record_change',
@@ -2793,6 +3894,7 @@ export function registerObjectTools(
             fieldTypes,
             scope,
             ...(optionFields ? { optionFields } : {}),
+            ...(multiValueFields ? { multiValueFields } : {}),
             // [#32640] The gate's relationship-traversal checks, where it runs them.
             ...(traversalHydration ? { traversalHydration } : {}),
             ...(faultOutcome ? { faultOutcome } : {}),
@@ -2806,11 +3908,6 @@ export function registerObjectTools(
             // on the same flow). Absent, the hint is byte for byte as before.
             ...(variables !== undefined ? { flowVariables: variables.map((v) => v.name) } : {}),
           } as const;
-          // The gate's envelope verdict first: `validateExpression` treats a
-          // blank source as "not authored" and answers ok, while the save gate
-          // refuses it. Each issue is the spec schema's own (code and message),
-          // so the tool and the gate cannot drift apart on this rule.
-          const slotParse = slot.safeParse(expression);
           const result = slotParse.success
             ? validateExpression(role, expression, hint)
             : {
@@ -2826,7 +3923,7 @@ export function registerObjectTools(
           // flow condition, every other pass the gate runs there, in the
           // gate's own words.
           const gate = slotParse.success && gatePasses
-            ? await gatePassFindings(bridge, (name) => guard(name) === undefined, gatePasses, objectName, expression, {
+            ? await gatePassFindings(bridge, (name) => guard(name) === undefined, gatePasses, objectName, expression, subject, {
                 severity,
                 field,
                 triggerKind,
@@ -2860,21 +3957,19 @@ export function registerObjectTools(
       note('query_records'),
       {
         description:
-          'Query records from an object with optional filter, field selection, sorting and pagination. ' +
-          'Runs under the caller\'s permissions and row-level security. ' +
-          'A filter value "{current_user_id}" stands for you. ' +
-          // [#32442] The console's My Pending list, filter for filter: the
-          // participant read alone also serves requests the caller submitted
-          // or already decided, so an agent must not guess "mine" from it.
-          'For example, where the app runs approvals, the ones waiting on you: objectName "sys_approval_request", where ' +
-          '{"status":"pending","pending_approvers":{"$contains":"{current_user_id}"}}; decide one with run_action. ' +
-          // [ruling 6844187236, B] A person field (owner, approver, employee)
-          // holds a user id: the agent finds it on `sys_user`, which serves
-          // the caller the colleagues their console person picker does.
-          // Names repeat (ruling 6867150851), so the text says to tell
-          // namesakes apart by email.
-          'To fill a person field, find the colleague\'s id: objectName "sys_user", where {"email":"..."} for exactly ' +
-          'one person, or {"name":{"$contains":"..."}}; names repeat, so tell people who share a name apart by email.',
+          'Query records from an object with optional filter, field selection, sorting and pagination, under the ' +
+          'caller\'s permissions. The answer is one page of at most limit rows; "truncated": true means more ' +
+          'matched, so do not sum, count or rank the rows as if whole: read on with offset, or use aggregate_records ' +
+          'where offered. ' +
+          OBJECT_QUERY_SOURCE_DESCRIPTION + ' ' +
+          'A filter value "{current_user_id}" stands for you, e.g. approvals waiting on you: objectName ' +
+          '"sys_approval_request", where {"status":"pending","pending_approvers":{"$contains":"{current_user_id}"}}. ' +
+          // [ruling B] A person field holds a user id; names repeat, so email.
+          'A person field takes a user id: find it on objectName "sys_user", where {"email":"..."}. ' +
+          'latestPer answers one record per group (the first in its orderBy; limit then counts groups). ' +
+          `expand returns up to ${QUERY_EXPAND_MAX_FIELDS} lookup fields as the records they name, one level, under ` +
+          'your permissions; one you may not read keeps its id. ' +
+          WITHHELD_FIELDS_DESCRIPTION,
         inputSchema: strictToolInput(
           {
             surface: 'this query_records call',
@@ -2915,21 +4010,68 @@ export function registerObjectTools(
               .array(z.object({ field: z.string(), order: z.enum(['asc', 'desc']) }))
               .optional()
               .describe('Sort order'),
+            expand: z
+              .array(z.string().min(1))
+              .min(1)
+              .max(QUERY_EXPAND_MAX_FIELDS)
+              .optional()
+              .describe(
+                `Up to ${QUERY_EXPAND_MAX_FIELDS} lookup / master-detail fields of this object to return as the record `
+                  + 'each one names, one level deep, e.g. ["account","owner_id"]',
+              ),
+            latestPer: z
+              .object({
+                by: z.array(z.string().min(1)).min(1).max(LATEST_PER_MAX_KEYS)
+                  .describe('The fields that form a group, e.g. ["account"] or ["owner_id"]'),
+                orderBy: z
+                  .array(z.object({ field: z.string().min(1), order: z.enum(['asc', 'desc']) }).strict())
+                  .min(1)
+                  .max(LATEST_PER_MAX_KEYS)
+                  .describe('The order whose first record is each group\'s answer, e.g. [{"field":"close_date","order":"desc"}]'),
+              })
+              .strict()
+              .optional()
+              .describe('One record per group: each group\'s first record in orderBy, ties broken by id. limit counts groups.'),
           },
         ),
         annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
       },
-      async ({ objectName, where, fields, limit, offset, orderBy }) => {
+      async ({ objectName, where, fields, limit, offset, orderBy, latestPer, expand }) => {
         const bad = await readGuard(objectName);
         if (bad) return errorResult(bad);
         try {
-          const result = await bridge.query(objectName, {
-            where,
-            fields,
-            limit: Math.min(limit ?? maxLimit, maxLimit),
-            offset,
-            orderBy,
-          });
+          // [#35145] Every expanded field's target is judged by the read guard
+          // as `objectName` was, before anything is read; a refused one
+          // refuses the call (`judgeQueryExpand`).
+          const expanded = expand !== undefined ? await judgeQueryExpand(bridge, readGuard, objectName, expand) : undefined;
+          // [#35138] A capped page says so: one row past the page is asked
+          // for, and its coming back is the cap (`servedQueryPage`).
+          const page = Math.min(limit ?? maxLimit, maxLimit);
+          // [latest per group] One record per group: the door reads its own
+          // probe group and answers `hasMore`, so the page is served unprobed
+          // here and `truncated` is the same key, set the same way.
+          const probed = latestPer === undefined && queryPageProbeFits(page, offset);
+          const result = latestPer !== undefined
+            ? servedQueryPage(
+              latestPerAnswer(objectName, await bridge.query(objectName, {
+                where, fields, limit: page, offset, orderBy, latestPer,
+                ...(expanded !== undefined ? { expand: expanded } : {}),
+              })),
+              page,
+              false,
+            )
+            : servedQueryPage(
+              await bridge.query(objectName, {
+                where,
+                fields,
+                limit: probed ? page + 1 : page,
+                offset,
+                orderBy,
+                ...(expanded !== undefined ? { expand: expanded } : {}),
+              }),
+              page,
+              probed,
+            );
           // [ADR-0090 D10 — ruling 2026-09-08, consequence 2] A delegated read
           // the agent ceiling NARROWED is served with the narrowing stated. The
           // rows are still served — a partial answer is the most useful true
@@ -2941,10 +4083,26 @@ export function registerObjectTools(
           const diagnosed = typeof bridge.diagnoseDelegation === 'function'
             ? await bridge.diagnoseDelegation(objectName).catch(() => undefined)
             : undefined;
-          if (!diagnosed?.narrowed || !diagnosed.statement) return textResult(result);
-          return textResult(withDelegationNotice(result, diagnosed.statement));
+          // [#35137] …and the fields field-level security withheld from these
+          // rows named beside them, so a left-out field is not read as blank.
+          const withheld = withWithheldFields(result, await withheldFieldsFor(bridge, objectName, fields));
+          // [#35138] …and the source of the page, composed from the read
+          // that ran: object, filter, order, cut, expanded lookups, the
+          // one-per-group reading, and the door's counted total.
+          const answer = withObjectQuerySource(withheld, await objectQuerySourceOf(bridge, {
+            object: objectName,
+            where,
+            orderBy,
+            limit: page,
+            ...(expanded !== undefined ? { related: expanded } : {}),
+            ...(latestPer !== undefined ? { latestPer: { by: latestPer.by, orderBy: latestPer.orderBy } } : {}),
+            records: countedTotalOf(result),
+          }, await servedDefinitionOf(bridge, objectName)));
+          if (!diagnosed?.narrowed || !diagnosed.statement) return textResult(answer);
+          return textResult(withDelegationNotice(answer, diagnosed.statement));
         } catch (err) {
-          return dataDoorErrorResult(err, 'query_records', objectName);
+          // [#35138] …with what the call named that the caller's schema does not show.
+          return recordReadErrorResult(bridge, err, 'query_records', objectName, queryRecordsSentFields({ where, fields, orderBy }));
         }
       },
     );
@@ -2955,10 +4113,22 @@ export function registerObjectTools(
         note('aggregate_records'),
         {
           description:
-            'Aggregate records with GROUP BY: count/sum/avg/min/max/count_distinct over an object, ' +
-            'optionally grouped by fields (dates can be bucketed by day/week/month/quarter/year). ' +
-            'Use this instead of paging query_records when a question needs totals or breakdowns. ' +
-            'Runs under the caller\'s permissions, row-level security and field-level security.',
+            'Aggregate records with GROUP BY: count/sum/avg/min/max/count_distinct over an object, optionally grouped ' +
+            'by fields (dates bucketed by day/week/month/quarter/year). Use it instead of paging query_records for ' +
+            'totals and breakdowns. An amount whose records each carry their own currency is answered only grouped by ' +
+            'its currency code field. Name a lookup group by its <key>__label, never by the id. ' +
+            OBJECT_QUERY_SOURCE_DESCRIPTION + ' ' +
+            // [aggregate order and cut] A ranking question ("the top five
+            // customers by revenue") is answered by the database: ordered,
+            // cut, and the number of groups before the cut stated.
+            'For a ranking (top or bottom N), set orderBy to an aggregation alias or a group key and limit to N: ' +
+            'the database orders and cuts the groups, and totalGroups says how many groups existed before the cut. ' +
+            // The database ranks a per-record-currency amount by its bare
+            // numbers, whatever each group's currency; the caller keeps the
+            // ranking to one currency.
+            'Ranking an amount whose records each carry their own currency compares bare numbers across currencies: ' +
+            'rank it inside one currency by filtering where on its currency code field. ' +
+            `At most ${maxLimit} groups come back; truncated: true says more existed.`,
           inputSchema: strictToolInput(
             {
               surface: 'this aggregate_records call',
@@ -2973,6 +4143,13 @@ export function registerObjectTools(
                 aggs: 'aggregations',
                 tz: 'timezone',
                 timeZone: 'timezone',
+                sort: 'orderBy',
+                sortBy: 'orderBy',
+                order: 'orderBy',
+                order_by: 'orderBy',
+                top: 'limit',
+                take: 'limit',
+                pageSize: 'limit',
               },
             },
             {
@@ -3016,52 +4193,197 @@ export function registerObjectTools(
               .string()
               .optional()
               .describe('IANA timezone for date bucketing (defaults to UTC)'),
+            orderBy: z
+              .array(z.object({ field: z.string(), order: z.enum(['asc', 'desc']) }))
+              .max(8)
+              .optional()
+              .describe(
+                'Order of the groups, by an aggregation alias or a group key (its alias when it has one), '
+                  + 'e.g. [{"field":"total","order":"desc"}]; computed by the database',
+              ),
+            limit: z
+              .number()
+              .int()
+              .positive()
+              .max(maxLimit)
+              .optional()
+              .describe(`Most groups to return (≤ ${maxLimit}); the cut is taken by the database, after orderBy`),
             },
           ),
           annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
         },
-        async ({ objectName, aggregations, groupBy, where, timezone }) => {
+        async ({ objectName, aggregations, groupBy, where, timezone, orderBy, limit }) => {
           const bad = await readGuard(objectName);
           if (bad) return errorResult(bad);
           try {
+            // [#35138] Read off the object as the caller is served it: the
+            // declared option order of a select group key, and the one
+            // currency of a fixed-currency amount. Only when the call has a
+            // group key or an amount column to read it for.
+            // [#35138] The definition itself is read on every call, for the
+            // labels the `source` line names fields by; the facts above are
+            // still read off it only for a call with a key or an amount.
+            const readsFacts = (groupBy?.length ?? 0) > 0
+              || aggregations.some((a) => AMOUNT_AGGREGATE_FUNCTIONS.has(a.function) && typeof a.field === 'string');
+            let servedDef: Record<string, unknown> | undefined;
+            const readServedFields = async () => {
+              servedDef = await servedDefinitionOf(bridge, objectName);
+              return readsFacts ? fieldMapOf(servedDef) : undefined;
+            };
+            // [#35138] The source of the figures, composed from the aggregate
+            // that ran: object, filter, measures, grouping, the caller's own
+            // order and the cut beside it, and the records the groups cover.
+            const sourceOf = (read: Pick<ExecutedObjectRead, 'orderBy' | 'limit' | 'records'>) => objectQuerySourceOf(bridge, {
+              object: objectName,
+              where,
+              groupBy,
+              aggregations,
+              ...read,
+            }, servedDef);
+            // [#35138] Each lookup key's record named beside it, read as the
+            // caller, for the groups served only: one rule for both paths,
+            // applied after the cap or the cut.
+            const labelServed = async (served: unknown[], fields: Record<string, unknown> | undefined) => fields
+              ? withLookupGroupLabels(bridge, served, groupBy, fields, async (name) => (await readGuard(name)) === undefined)
+              : served;
+            if (orderBy !== undefined || limit !== undefined) {
+              // [aggregate order and cut] Ordered, cut and counted by the
+              // driver's own statement, through the bridge's member for it;
+              // one group past the cap is asked for, so `truncated` is a fact
+              // (the capped-list key every read tool shares), and `totalGroups`
+              // is the statement's own count of the groups before the cut.
+              // ⛔ Never sorted or sliced from an uncut list here.
+              if (typeof bridge.aggregateGroups !== 'function') {
+                return codedErrorResult({
+                  code: StandardErrorCode.enum.NOT_IMPLEMENTED,
+                  status: 501,
+                  message:
+                    `aggregate_records on '${objectName}': this server cannot order or cut groups in the database, `
+                    + 'and never orders or cuts them in the application instead. Ask without orderBy and limit.',
+                });
+              }
+              const cap = Math.min(limit ?? maxLimit, maxLimit);
+              const fields = await readServedFields();
+              const answer = await bridge.aggregateGroups(objectName, {
+                where,
+                groupBy,
+                aggregations,
+                timezone,
+                // [#35138] A call that states no order of its own gets the
+                // declared option order, taken by the database before the cut.
+                // ⛔ An `orderBy` the caller sent is never changed.
+                orderBy: orderBy ?? (fields ? declaredOptionOrderBy(groupBy, fields) : []),
+                limit: cap + 1,
+              });
+              const groups = Array.isArray(answer?.rows) ? answer.rows : [];
+              const cut = groups.length > cap;
+              const currencies = fields ? fixedAmountCurrencies(aggregations, fields) : {};
+              // The groups after the cut are not all of them, so the records
+              // they cover are not stated; the cut is, beside the caller's
+              // own order (an order the tool supplied is not the caller's).
+              const source = await sourceOf({ orderBy, limit: cap });
+              return textResult(withObjectQuerySource({
+                rows: await labelServed(cut ? groups.slice(0, cap) : groups, fields),
+                totalGroups: answer.totalGroups,
+                ...(cut ? { truncated: true } : {}),
+                ...(Object.keys(currencies).length > 0 ? { currencies } : {}),
+              }, source));
+            }
             const rows = (await aggregateFn(objectName, {
               where,
               groupBy,
               aggregations,
               timezone,
             })) ?? [];
+            const fields = await readServedFields();
+            const groups = fields ? inDeclaredOptionOrder(rows, groupBy, fields) : rows;
+            const currencies = fields ? fixedAmountCurrencies(aggregations, fields) : {};
             // Group count is unbounded (a high-cardinality groupBy can return
             // thousands of rows) — cap the tool output like query_records does.
-            const truncated = rows.length > maxLimit;
-            return textResult({
-              rows: truncated ? rows.slice(0, maxLimit) : rows,
+            const truncated = groups.length > maxLimit;
+            const servedGroups = truncated ? groups.slice(0, maxLimit) : groups;
+            // Every group came back, so a bare count summed over them is the
+            // records the figures cover, the groups past the cap included.
+            const source = await sourceOf({ records: aggregateRecordsOf(rows, aggregations) });
+            return textResult(withObjectQuerySource({
+              rows: await labelServed(servedGroups, fields),
               totalGroups: rows.length,
               ...(truncated ? { truncated: true } : {}),
-            });
+              ...(Object.keys(currencies).length > 0 ? { currencies } : {}),
+            }, source));
           } catch (err) {
-            return dataDoorErrorResult(err, 'aggregate_records', objectName);
+            // [#35138] …with what the call named that the caller's schema does not show.
+            return recordReadErrorResult(
+              bridge, err, 'aggregate_records', objectName, aggregateRecordsSentFields({ where, groupBy, aggregations }),
+            );
           }
         },
       );
     }
 
+    // [#35145] A related list's row cap: never above the door's own page cap.
+    const relatedMaxRows = Math.min(RELATED_LIST_MAX_ROWS, maxLimit);
     server.registerTool(
       note('get_record'),
       {
-        description: 'Fetch a single record by id.',
+        description:
+          'Fetch a single record by id. ' +
+          // [#35145] A parent with its children in one call.
+          `To read it with the records that point at it, pass related: up to ${GET_RECORD_MAX_RELATED_LISTS} child ` +
+          `objects, e.g. [{"object":"crm_opportunity"}], each list at most ${relatedMaxRows} rows; the answer is then ` +
+          '{ record, related: [...] }. ' +
+          WITHHELD_FIELDS_DESCRIPTION,
         inputSchema: strictToolInput(
           { surface: 'this get_record call', aliases: { ...OBJECT_NAME_ALIASES, ...RECORD_ID_ALIASES } },
           {
             objectName: z.string().describe('The object/table name'),
             recordId: z.string().describe(RECORD_ID_DESCRIPTION),
+            related: z
+              .array(
+                z
+                  .object({
+                    object: z.string().min(1).describe('A child object that points at this record'),
+                    field: z
+                      .string()
+                      .min(1)
+                      .optional()
+                      .describe('Its field that points at this record; needed only when it has several'),
+                    fields: z.array(z.string()).optional().describe('Field names to return (defaults to all)'),
+                    orderBy: z
+                      .array(z.object({ field: z.string(), order: z.enum(['asc', 'desc']) }).strict())
+                      .optional()
+                      .describe('Sort order'),
+                    limit: z
+                      .number()
+                      .int()
+                      .positive()
+                      .max(relatedMaxRows)
+                      .optional()
+                      .describe(`Max rows in this list (≤ ${relatedMaxRows}, the default)`),
+                  })
+                  .strict(),
+              )
+              .min(1)
+              .max(GET_RECORD_MAX_RELATED_LISTS)
+              .optional()
+              .describe(`Up to ${GET_RECORD_MAX_RELATED_LISTS} lists of child records that point at this record`),
           },
         ),
         annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
       },
-      async ({ objectName, recordId }) => {
+      async ({ objectName, recordId, related }) => {
         const bad = await readGuard(objectName);
         if (bad) return errorResult(bad);
+        // A related list's refusal is the whole call's, rendered against the
+        // child object it was read on.
+        let refusedOn: string | undefined;
         try {
+          // [#35145] Every related object is judged by the read guard as
+          // `objectName` was, and each link field against the child as the
+          // caller is served it, before any record is read.
+          const plans = related !== undefined
+            ? await judgeRelatedLists(bridge, readGuard, objectName, related, relatedMaxRows)
+            : undefined;
           const record = await bridge.get(objectName, recordId);
           // A bridge that answers a miss with `null` (the stdio bridge, by
           // design) is refused with the repo's ONE not-found envelope, thrown
@@ -3071,9 +4393,50 @@ export function registerObjectTools(
           // `RECORD_NOT_FOUND` / 404. A missing id and an id the caller may not
           // read reach here as the same empty read, so they answer alike.
           if (record == null) throw recordNotFoundError(objectName, recordId);
-          return textResult(record);
+          // [#35137] …with the fields field-level security withheld from it named.
+          const served = withWithheldFields(record, await withheldFieldsFor(bridge, objectName, undefined));
+          if (plans === undefined) return textResult(served);
+          // [#35145] Each list is one `query_records` read of the child as the
+          // caller, filtered by the link to the record just read (so no list
+          // is read for a record the caller cannot see), capped the way a
+          // `query_records` page is: a probe row past the cap is `truncated`.
+          const parentId = (record as { id?: unknown }).id;
+          const linkId = typeof parentId === 'string' || typeof parentId === 'number' ? String(parentId) : recordId;
+          const lists = await Promise.all(plans.map(async (plan) => {
+            const probed = queryPageProbeFits(plan.limit, undefined);
+            let read: unknown;
+            try {
+              read = await bridge.query(plan.object, {
+                where: relatedListWhere(plan, linkId),
+                ...(plan.fields !== undefined ? { fields: plan.fields } : {}),
+                ...(plan.orderBy !== undefined ? { orderBy: plan.orderBy } : {}),
+                limit: probed ? plan.limit + 1 : plan.limit,
+              });
+            } catch (err) {
+              refusedOn ??= plan.object;
+              throw err;
+            }
+            const page = servedQueryPage(read, plan.limit, probed);
+            const answer = page !== null && typeof page === 'object' && !Array.isArray(page)
+              ? (page as Record<string, unknown>)
+              : { records: page };
+            // [#35137] …each list naming the fields withheld from its own rows.
+            const list = withWithheldFields(
+              { ...answer, object: plan.object, field: plan.field },
+              await withheldFieldsFor(bridge, plan.object, plan.fields),
+            );
+            // [ADR-0090 D10] …and, as `query_records` states it, a list the
+            // agent ceiling narrowed carries the narrowing beside its `total`.
+            // ⛔ The probe never fails the list it annotates.
+            const diagnosed = typeof bridge.diagnoseDelegation === 'function'
+              ? await bridge.diagnoseDelegation(plan.object).catch(() => undefined)
+              : undefined;
+            return diagnosed?.narrowed && diagnosed.statement ? withDelegationNotice(list, diagnosed.statement) : list;
+          }));
+          return textResult({ record: served, related: lists });
         } catch (err) {
-          return dataDoorErrorResult(err, 'get_record', objectName);
+          // [#35138] …and an object the caller's schema does not show is said to be not recorded.
+          return recordReadErrorResult(bridge, err, 'get_record', refusedOn ?? objectName, []);
         }
       },
     );
@@ -3152,8 +4515,7 @@ export function registerObjectTools(
           'Delete a record by id. This is destructive. A call is REFUSED unless it also sends ' +
           'confirm: true; nothing is deleted on a refused call. ' +
           `${DELETE_NAMED_RECORD_IS_APPROVAL} ${DELETE_AMBIGUOUS_ASKS_FIRST} ` +
-          `${DELETE_RECYCLE_BIN_FACT} The answer's recycleBinEntryId names the recycle-bin entry; an answer ` +
-          'without one means this delete was permanent.',
+          `${DELETE_RECYCLE_BIN_FACT} An answer without recycleBinEntryId was a permanent delete.`,
         inputSchema: strictToolInput(
           { surface: 'this delete_record call', aliases: { ...OBJECT_NAME_ALIASES, ...RECORD_ID_ALIASES } },
           {
@@ -3223,16 +4585,12 @@ export function registerObjectTools(
         note(DELETE_RECORDS_TOOL),
         {
           description:
-            'Delete many records of ONE object in one call: those a filter (where) matches, or an id list (recordIds) — '
-            + 'instead of one delete_record per row. Destructive. A call without confirm: true deletes '
-            + 'nothing: it is REFUSED (ACTION_CONFIRMATION_REQUIRED) with a `preview` of what a confirmed call would '
-            + 'delete (how many match, sample ids). Show that to the human, and retry with confirm: true only once they '
-            + `approve. A confirmed call deletes at most ${DELETE_RECORDS_MAX_PER_CALL} records (fewer when the `
-            + 'deployment\'s read page size or row budget is smaller; the answer\'s cap says), each under your '
-            + 'permissions, row-level security and the object\'s delete rules, which no caller can bypass. Records a '
-            + 'rule refuses stay; the answer counts them grouped by reason with their ids, and says how many still match. '
-            + `${DELETE_RECYCLE_BIN_FACT} The answer's recycleBinEntries lists each deleted record the recycle bin kept `
-            + '(recordId, recycleBinEntryId); a deleted record not listed there was deleted permanently.',
+            'Delete many records of ONE object in one call: those a filter (where) matches, or an id list (recordIds). '
+            + 'Destructive. A call without confirm: true deletes nothing: it is REFUSED (ACTION_CONFIRMATION_REQUIRED) '
+            + 'with a `preview` (how many match, sample ids); show it to the human and retry with confirm: true only '
+            + `once they approve. A confirmed call deletes at most ${DELETE_RECORDS_MAX_PER_CALL} records (the answer's `
+            + 'cap says), each under your permissions and the object\'s delete rules; refused records stay. '
+            + `${DELETE_RECYCLE_BIN_FACT} A deleted record not in the answer's recycleBinEntries was deleted permanently.`,
           inputSchema: strictToolInput(
             {
               surface: 'this delete_records call',
@@ -3400,15 +4758,11 @@ export function registerActionTools(
     note('list_actions'),
     {
       description:
-        'List the business actions you can invoke in this app (e.g. "complete task", "convert lead"). ' +
-        'Returns each action\'s name, the object it operates on, a description, whether it needs a record id, ' +
-        'whether it is destructive, and its input parameters. Only actions the app author has exposed to AI ' +
-        'and that the caller\'s permissions allow are returned. Use run_action to invoke one. One name can be ' +
-        'listed on several rows, one per object it is bound to: each row carries its own face, and run_action ' +
-        'takes that face as actionName (or the row\'s name with its objectName and namespace). An action that ' +
-        'carries "unavailable" cannot be run by you as you are connected (your credential, or your role in ' +
-        'this organization): run_action would refuse it with unavailable.code, and unavailable.reason says ' +
-        'why and what would let it run, so tell the user instead of calling it.',
+        'List the business actions you can invoke (those the app author exposed to AI and your permissions ' +
+        'allow): each one\'s name, object, description, whether it needs a record id, whether it is destructive, ' +
+        'and its input parameters. A name bound to several objects is listed once per object, each row with its ' +
+        'own face, which run_action takes as actionName. An action that carries "unavailable" would be refused for ' +
+        'you: unavailable.reason says why, so tell the user instead of calling it.',
       inputSchema: strictToolInput({ surface: 'this list_actions call' }, {}),
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     },
@@ -3433,42 +4787,29 @@ export function registerActionTools(
     note('run_action'),
     {
       description:
-        'Invoke a business action by name (see list_actions). When list_actions lists a name on several rows, ' +
-        'pass the row\'s face as actionName (or the name with the row\'s objectName and namespace); the bare ' +
-        'name alone is refused as ambiguous. Runs the app\'s registered business logic — ' +
-        'this can mutate data or trigger flows. Invocation is gated (author AI opt-in + your capabilities), ' +
-        'but the action body itself runs as trusted application code with the app\'s full data authority. ' +
-        'Supply recordId for actions that operate on a specific record, and params for any declared inputs. ' +
+        'Invoke a business action by name (see list_actions); when list_actions lists the name on several rows, ' +
+        'pass the row\'s face as actionName (or the name with its objectName and namespace). Supply recordId for a ' +
+        'record-scoped action and params for its declared inputs. The action runs the app\'s business logic as ' +
+        'trusted code and can mutate data or trigger flows. ' +
         // [#33690] The amended confirmation contract: the caller's `confirm`
         // never counts on an action whose author declared
         // `ai.requiresConfirmation: true`; the person is asked in the app.
-        // [#34209] The member is retired: a call carrying it is refused.
-        'An action its author declared ai.requiresConfirmation: true never runs on this call: the call is ' +
-        'handed to the person you act for, who approves or rejects it in ' +
-        'the app, and you are answered status "pending_confirmation" with a pendingId and a message to pass on. ' +
-        'Nothing has run then; do not retry, tell the user to approve it. Where the server cannot hand it off, ' +
-        'the call is refused ACTION_CONFIRMATION_REQUIRED (details.reason "no_confirmation_service"): the user ' +
-        'performs the action in the app. ' +
-        // [#33712] Step 1: a client that supports elicitation is asked in place.
-        'When your client supports elicitation and this connection can carry it, the user is asked in your ' +
-        'client instead: accept runs the action once; decline, dismissing it or no answer in time refuses it ' +
-        '(ACTION_CONFIRMATION_REQUIRED, details.reason "declined", "cancelled" or "timed_out"); do not retry ' +
-        'unless the user asks. ' +
+        // [#33712] A client that supports elicitation is asked in place.
+        'An action its author declared ai.requiresConfirmation: true runs only once the person you act for ' +
+        'approves it: in your client where it supports elicitation (accept runs it once), or else in the app, and ' +
+        'you are answered status "pending_confirmation" with a pendingId: do not retry, tell the user to approve ' +
+        'it. A refusal ACTION_CONFIRMATION_REQUIRED (declined, cancelled, timed out, or no confirmation service) ' +
+        'means nothing ran; do not retry unless the user asks. ' +
         // [ADR-0151 D3 rule 3] An AI service account is refused, never handed off.
-        'Under an AI service account\'s own key (an agent acting for itself, for no person) the call is ' +
-        'refused whatever it sends and nothing runs: hand the action to a person, or its author declares ' +
-        'ai.requiresConfirmation: false when it is safe unattended. ' +
-        // [#32757] The read order `flowFailureRelaySentence` applies, taught
-        // to the reader as well, as the console reads it.
-        'A flow action that fails answers error.code FLOW_FAILED with a message naming the flow and node, ' +
-        'which is for diagnosis: tell the user the reason in the second text block, which is the flow\'s ' +
-        'details.errorMessage, else userMessage, else details.innerRefusal.message — never the flow and node chain.' +
+        'Under an AI service account\'s own key the call is refused whatever it sends: hand the action to a ' +
+        'person, or its author declares ai.requiresConfirmation: false when it is safe unattended. ' +
+        // [#32757] The answer's second text block carries the reason.
+        'A flow action that fails answers FLOW_FAILED: tell the user the reason in the second text block, never ' +
+        'the flow and node chain.' +
         // [#15705] Named only where `resume_run` is actually registered below,
         // so this description never points an agent at a tool it cannot call.
         (canResume
-          ? ' A flow action can answer result.status "paused" with a runId and a screen (a form to fill ' +
-            'in): the run has stopped to wait for that form, and resume_run submits its field values to ' +
-            'continue it.'
+          ? ' A result.status "paused" with a screen waits for a form: resume_run submits its values.'
           : ''),
       inputSchema: strictToolInput(
         {
@@ -3490,8 +4831,7 @@ export function registerActionTools(
         actionName: z
           .string()
           .describe(
-            'The action name from list_actions, e.g. "complete_task", or a listed row\'s face, e.g. '
-            + '"todo_task-complete_task". Pass the face when list_actions lists the name on several rows.',
+            'The action name from list_actions, or a listed row\'s face when the name is on several rows.',
           ),
         objectName: z
           .string()
@@ -3503,8 +4843,7 @@ export function registerActionTools(
           .string()
           .optional()
           .describe(
-            'The namespace of the package whose action to run, from list_actions. Optional; required only when '
-            + 'two packages hold an action of this name, which is refused without it.',
+            'The package namespace from list_actions; needed only when two packages hold an action of this name.',
           ),
         recordId: z
           .string()
@@ -3612,22 +4951,13 @@ export function registerActionTools(
       {
         description:
           'Continue a flow run that run_action (or an earlier resume_run) answered with result.status ' +
-          '"paused" and a screen: submit the screen\'s field values, keyed by each screen.fields[].name. ' +
-          'The run continues from that screen. The result has run_action\'s shape: the run completes, or ' +
-          'pauses again on its NEXT screen with a new screen to fill (call resume_run again for it). Only ' +
-          'the user whose call started the run can resume it, and it is gated exactly as run_action is ' +
-          '(author AI opt-in, your capabilities, your read access to the record). The rest of the flow runs ' +
-          'the app\'s business logic and can mutate data. When the action that started the run was declared ' +
-          'ai.requiresConfirmation: true, the run does not continue on this call: ' +
-          'it is handed to the person you act for, who approves or rejects it in the app, and you ' +
-          'are answered status "pending_confirmation" with a pendingId; the run stays paused until they ' +
-          'approve. Where the server cannot hand it off, the call is refused ACTION_CONFIRMATION_REQUIRED and ' +
-          'the run stays paused. When your client supports elicitation and this connection can carry it, the ' +
-          'user is asked in your client instead: accept continues the run; any other answer refuses the call ' +
-          'and the run stays paused. Under an AI service account\'s own key the call is refused ' +
-          'whatever it sends and the run stays paused: hand it to a person. A run that fails answers as ' +
-          'run_action does: tell the user the reason in the second text block, never the flow and node chain ' +
-          'in the error message.',
+          '"paused" and a screen: submit the screen\'s field values, keyed by each screen.fields[].name. The result ' +
+          'has run_action\'s shape: the run completes, or pauses on its next screen. Only the user whose call ' +
+          'started the run can resume it, gated as run_action is: for an action declared ' +
+          'ai.requiresConfirmation: true the person is asked (you are answered status "pending_confirmation") and ' +
+          'the run stays paused until they approve. Under an AI service account\'s own key the call is refused ' +
+          'whatever it sends and the run stays paused. A run that fails: tell the user the reason in the second ' +
+          'text block, never the flow and node chain.',
         inputSchema: strictToolInput(
           {
             surface: 'this resume_run call',
@@ -3735,14 +5065,12 @@ export function registerFileTools(
       {
         description:
           'Read a file a record carries: one held by a file field (field, plus fileId when the field holds several) ' +
-          'or one of its attachments (attachmentId). Answers the file\'s facts (name, type, size in bytes, the ' +
-          `byte cap read_file reads, ${READ_FILE_MAX_BYTES}) with a short-lived download link, then its content: the ` +
-          'text of a text file, a PDF or a Word (.docx) document, or the image itself. A larger file answers its ' +
-          'facts and the link only. ' +
+          'or one of its attachments (attachmentId). Answers the file\'s facts and a short-lived download link, then ' +
+          `the text of a text file, PDF or Word document, or the image itself, up to ${READ_FILE_MAX_BYTES} bytes. ` +
           (listFn
             ? 'Name neither field nor attachmentId to list the files on the record you can read, with their ids. '
             : '') +
-          'You can read a file only where you can read its record: a record you cannot read answers as not found.',
+          'A record you cannot read answers as not found.',
         inputSchema: strictToolInput(
           {
             surface: 'this read_file call',
@@ -3822,25 +5150,14 @@ export function registerFileTools(
         description:
           'Create a link through which the user uploads a file onto a record: into a file field (field) or ' +
           'as an attachment (attachments: true). A link for a multi-file field takes several files, up to 10, ' +
-          'picked and sent together; a single-file field or the attachments take one. Give the link to the user to ' +
-          'open in a browser where they are signed in to this deployment as themselves; it works only for them, ' +
-          'once (one send, however many files it carries), for this record and this field (or its attachments) ' +
-          'only, and expires (see expiresAt). One file the field does not take refuses the whole send, and nothing ' +
-          'is attached. The upload is stored as the user, so they ' +
-          'must be able to edit the record. A field link also needs a field they may write, and gets no link for ' +
-          'a field declared read-only (readonly), a field read-only on this record in its current state ' +
-          '(readonlyWhen), or a record a pending approval locks. An attachments link asks only what attaching ' +
-          'asks, so a record a pending approval locks still takes attachments. An upload refused when it arrives ' +
-          '(for a field link: the field became read-only, or the record was locked, after the link was made) ' +
-          'answers the reason and attaches nothing.' +
+          'picked and sent together; one file the field does not take refuses the whole send. Give the link to the ' +
+          'user to open where they are signed in to this deployment: it works only for them, once, for this record ' +
+          'and field, until expiresAt. The upload is stored as the user, so they must be able to edit the record ' +
+          '(and, for a field link, write the field).' +
           (newRecordLinkFn
-            ? ' For a record you have not created yet (a required file field), omit recordId and name the field: ' +
-              'the user must be able to create such records, and the answer carries fileIds, the id(s) the upload ' +
-              'is stored under. For several files into a multi-file field, send count (how many, up to 10): ' +
-              'fileIds then holds that many ids, and the user must pick exactly that many. Once the user has ' +
-              'uploaded, create the record with the field set to fileIds[0] (the array fileIds, for a multi-file ' +
-              'field). Each id works only for this user\'s own write into that field of that object, in one ' +
-              'record, within an hour of the upload.'
+            ? ' For a record you have not created yet, omit recordId and name the field (count for several files, ' +
+              'up to 10): once the user has uploaded, create the record within an hour with the field set to ' +
+              'fileIds[0] (the array fileIds, for a multi-file field).'
             : ''),
         inputSchema: strictToolInput(
           {

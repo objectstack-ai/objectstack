@@ -44,9 +44,10 @@
 import { isInjectedColumnDefinition, provisionPrimary, resolveInjectedSystemColumns } from '@objectstack/spec/data';
 import type { ServiceObject } from '@objectstack/spec/data';
 import { TENANT_SCOPE_FIELD_DEF, isCodeArtifactBody } from '@objectstack/metadata-core';
-import { DEFAULT_EXTENDER_PRIORITY, packagedAddedFields, stableStringify, withoutField } from './registry-top-level.js';
-import type { ObjectContributor, ObjectExtensionFoldOptions } from './registry-top-level.js';
+import { DEFAULT_EXTENDER_PRIORITY, applyFieldPatches, ownFieldNamesOf, packagedAddedFields, stableStringify, withoutField } from './registry-top-level.js';
+import type { ObjectContributor, ObjectExtensionBody, ObjectExtensionFoldOptions } from './registry-top-level.js';
 import { TENANT_SCOPE_INDEX, extendContributionRefusal, provisionTenantScopeIndex } from './registry.js';
+import { applyExtensionPlacements, fieldGroupKeysOf, placementContributorsOf } from './registry-extension-placement.js';
 import type { SchemaRegistry } from './registry.js';
 
 /**
@@ -66,6 +67,7 @@ export interface PlatformGlobalHost {
   readonly extensionSpellingWarned: SchemaRegistry['extensionSpellingWarned'];
   foldExtenders: SchemaRegistry['foldExtenders'];
   getObjectOwner: SchemaRegistry['getObjectOwner'];
+  getPackagedObjectBase: SchemaRegistry['getPackagedObjectBase'];
   getPackagedObjectOwner: SchemaRegistry['getPackagedObjectOwner'];
   invalidateAll: SchemaRegistry['invalidateAll'];
   isPackageDisabled: SchemaRegistry['isPackageDisabled'];
@@ -74,6 +76,7 @@ export interface PlatformGlobalHost {
   readonly multiTenant: SchemaRegistry['multiTenant'];
   readonly objectContributors: SchemaRegistry['objectContributors'];
   readonly objectKeysByShortName: SchemaRegistry['objectKeysByShortName'];
+  noteObjectEntry: SchemaRegistry['noteObjectEntry'];
   packagedRules: SchemaRegistry['packagedRules'];
   registerObject: SchemaRegistry['registerObject'];
   resolveObject: SchemaRegistry['resolveObject'];
@@ -518,7 +521,7 @@ export class PlatformGlobalFacet {
   }
 
   /** The body of `SchemaRegistry#getPackagedObjectBase`; the method's docblock there is its contract. */
-  static getPackagedObjectBase(this: Pick<PlatformGlobalHost, 'getPackagedObjectOwner' | 'isPackageDisabled' | 'objectContributors' | 'packagedRules' | 'resolveObjectKey'>, name: string): ServiceObject | undefined {
+  static getPackagedObjectBase(this: Pick<PlatformGlobalHost, 'getObjectOwner' | 'getPackagedObjectOwner' | 'isPackageDisabled' | 'objectContributors' | 'packagedRules' | 'resolveObjectKey'>, name: string): ServiceObject | undefined {
     const owner = this.getPackagedObjectOwner(name);
     if (!owner) return undefined;
     const fqn = this.resolveObjectKey(name);
@@ -534,14 +537,56 @@ export class PlatformGlobalFacet {
       owner.definition,
       contributors.filter((c) => !(c.ownership === 'extend' && this.isPackageDisabled(c.packageId))),
     );
-    if (!extended && addedFields === undefined) return owner.definition;
+    // [#36528] The record-page tabs a code extender's list placement (`place`)
+    // splices into the owner's `relatedLists`, as the fold splices them, with
+    // the same filter as the added fields; only the lists pass is read off.
+    const placedLists = packagedPlacedRelatedLists(
+      owner.definition,
+      contributors.filter((c) => c.ownership === 'extend' && isCodeArtifactBody(c.definition) && !this.isPackageDisabled(c.packageId)),
+      (child) => {
+        const childKey = this.resolveObjectKey(child);
+        const childOwner = childKey === undefined ? undefined : this.getObjectOwner(childKey);
+        if (childOwner === undefined) return undefined;
+        return childOwner.packageId ?? null;
+      },
+    );
+    if (!extended && addedFields === undefined && placedLists === undefined) return owner.definition;
     return {
       ...owner.definition,
       ...(extended ? { validations: (this.packagedRules(contributors) ?? []) as ServiceObject['validations'] } : {}),
       ...(addedFields !== undefined
         ? { fields: { ...owner.definition.fields, ...addedFields } as ServiceObject['fields'] }
         : {}),
+      ...(placedLists !== undefined ? { relatedLists: placedLists as ServiceObject['relatedLists'] } : {}),
     };
+  }
+
+  /** The body of `SchemaRegistry#getPackagedFieldPatchBases`; the method's docblock there is its contract. */
+  static getPackagedFieldPatchBases(this: Pick<PlatformGlobalHost, 'getPackagedObjectBase' | 'getPackagedObjectOwner' | 'isPackageDisabled' | 'objectContributors' | 'resolveObjectKey'>, name: string): Array<{ packageId: string; base: ServiceObject }> {
+    const owner = this.getPackagedObjectOwner(name);
+    if (!owner) return [];
+    const base = this.getPackagedObjectBase(name);
+    const fqn = this.resolveObjectKey(name);
+    const contributors = (fqn === undefined ? undefined : this.objectContributors.get(fqn)) ?? [];
+    if (!base || contributors.length === 0) return [];
+    // The patches reach the owner's own fields only, as the fold applies them.
+    const ownFields = ownFieldNamesOf(owner.definition);
+    const out: Array<{ packageId: string; base: ServiceObject }> = [];
+    // Highest precedence first: the fold applies contributors in ascending
+    // order, so the last one's patch is the one a slot two packages patch carries.
+    for (let index = contributors.length - 1; index >= 0; index -= 1) {
+      const contrib = contributors[index];
+      const packageId = contrib.packageId;
+      if (contrib.ownership !== 'extend' || !isCodeArtifactBody(contrib.definition) || !packageId) continue;
+      // A disabled package's extension is withheld from the served fold.
+      if (this.isPackageDisabled(packageId)) continue;
+      const patches = (contrib.definition as ObjectExtensionBody).fieldPatches;
+      if (!patches || typeof patches !== 'object') continue;
+      const fields = applyFieldPatches(base.fields, patches, undefined, ownFields);
+      if (fields === base.fields) continue;
+      out.push({ packageId, base: { ...base, fields } });
+    }
+    return out;
   }
 
   /** The body of `SchemaRegistry#extendContributionRefusal`; the method's docblock there is its contract. */
@@ -595,12 +640,15 @@ export class PlatformGlobalFacet {
   }
 
   /** The body of `SchemaRegistry#withdrawObjectExtension`; the method's docblock there is its contract. */
-  static withdrawObjectExtension(this: Pick<PlatformGlobalHost, '_objectRevision' | 'closeObjectEntry' | 'log' | 'mergedObjectCache' | 'objectContributors' | 'resolveObjectKey'>, name: string, packageId: string): boolean {
+  static withdrawObjectExtension(this: Pick<PlatformGlobalHost, '_objectRevision' | 'closeObjectEntry' | 'log' | 'mergedObjectCache' | 'noteObjectEntry' | 'objectContributors' | 'resolveObjectKey'>, name: string, packageId: string): boolean {
     const fqn = this.resolveObjectKey(name) ?? name;
     const contributors = this.objectContributors.get(fqn);
     if (!contributors) return false;
     const idx = contributors.findIndex(c => c.ownership === 'extend' && c.packageId === packageId);
     if (idx === -1) return false;
+    // [#35609] Recorded for an open registration run before the removal, so a
+    // refusal later in the run puts the layer back (no-op outside a run).
+    this.noteObjectEntry(fqn);
     contributors.splice(idx, 1);
     if (contributors.length === 0) this.closeObjectEntry(fqn);
     // The same two invalidations every other contributor mutation performs.
@@ -761,4 +809,38 @@ export class PlatformGlobalFacet {
     );
     return true;
   }
+}
+
+/**
+ * [#36528] The owner's `relatedLists` with the list placements (`place`) of
+ * `extenders` spliced in by the fold's own pass ({@link applyExtensionPlacements}),
+ * or `undefined` when none applies — an owner that declares no `relatedLists`
+ * (`PLACEMENT_ARRANGES_DECLARED_ONLY`), or no extender places a list. Only the
+ * lists pass is read off: the groups and fields the same call arranges stay
+ * the owner's in the packaged base, and its notes are the fold's to name.
+ *
+ * Why the packaged base carries them (`SchemaRegistry#getPackagedObjectBase`):
+ * the sentence that holds for a field a code extender adds holds for a
+ * record-page tab it places (`place: [{ list, label? }]`). The catalog row
+ * for the placed title (`_relatedLists.<list>.label`) can only translate what
+ * that extender ships; read off the owner alone, the placed title counted as
+ * authored after the fact and `/meta` served it untranslated. A paired
+ * `.custom` arrangement (ADR-0146 D10) is the customization layer and is
+ * never folded in: its titles diverge and read the pair's own translations.
+ */
+function packagedPlacedRelatedLists(
+  owner: ServiceObject,
+  extenders: readonly ObjectContributor[],
+  childPackageOf: (child: string) => string | null | undefined,
+): unknown[] | undefined {
+  const placing = placementContributorsOf(extenders, ownFieldNamesOf(owner));
+  if (placing.length === 0) return undefined;
+  const placed = applyExtensionPlacements(owner, placing, {
+    objectName: String(owner.name ?? ''),
+    ownerGroupKeys: fieldGroupKeysOf(owner),
+    childPackageOf,
+  });
+  const before = (owner as { relatedLists?: unknown }).relatedLists;
+  const after = (placed.object as { relatedLists?: unknown }).relatedLists;
+  return after !== before && Array.isArray(after) ? after : undefined;
 }

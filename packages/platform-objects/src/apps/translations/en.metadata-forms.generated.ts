@@ -52,6 +52,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Icon",
         helpText: "Lucide icon name (e.g. \"building\", \"users\")"
       },
+      color: {
+        label: "Color",
+        helpText: "Color of the square the icon is drawn on, from the fixed palette. Unset draws gray."
+      },
       description: {
         label: "Description",
         helpText: "Developer documentation"
@@ -70,11 +74,11 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       highlightFields: {
         label: "Highlight Fields",
-        helpText: "Field names of this object, most important first — the first entry wins where only one fits (ADR-0085). Drives the default list columns, cards, child-record previews and the detail highlight strip. A name that is not a field of this object is refused at publish."
+        helpText: "Field names of this object, most important first — the first entry wins where only one fits (ADR-0085). Drives the default list and related-list columns, cards, child-record previews, the record hover card and the record picker. A name that is not a field of this object is refused at publish."
       },
       relatedLists: {
         label: "Related Lists",
-        helpText: "Business order of this object's related lists on its record page, most important first. Each entry is a child object name (e.g. task), or object.field when that child has more than one relationship to this object. Listed lists come first; the rest follow in the derived order. A name that matches no relationship pointing at this object places nothing, so saving or validating the object refuses it."
+        helpText: "The record page tabs after the overview, in order. Each entry is a child object name (e.g. task), object.field when that child has more than one relationship to this object, a built-in tab (sys_attachment, sys_approval_request, sys_activity), or an entry with its own title and columns, set in Studio's object settings. Once anything is listed, a related list no entry names shows no tab, a list another package adds included, until this object names it; attachments show only when listed. Empty: every list shows in the default order. A name that matches no relationship pointing at this object is refused when the object is saved."
       },
       searchableFields: {
         label: "Searchable Fields",
@@ -82,15 +86,19 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       fieldGroups: {
         label: "Field Groups",
-        helpText: "Ordered sections that group this object's fields on the entry form and the record detail page (ADR-0085); array order is display order. A field joins a group by naming its key in the field's own group setting. Fields in no group follow the groups, and a group no field joins is not drawn."
+        helpText: "Ordered sections that group this object's fields on the entry form and the record detail page (ADR-0085); array order is display order. A group lists its fields, in order, in its Fields setting; a group without that list holds the fields that name its key in their own group setting. Fields in no group follow the groups, and a group no field joins is not drawn."
       },
       "fieldGroups.key": {
         label: "Key",
-        helpText: "Machine key in snake_case, unique within this object — the schema refuses anything else. Fields join the group by naming this key, so renaming it leaves them ungrouped."
+        helpText: "Machine key in snake_case, unique within this object — the schema refuses anything else. Fields the group lists in its Fields stay with it when the key is renamed; a field that joins by naming this key in its own group setting is left ungrouped."
       },
       "fieldGroups.label": {
         label: "Label",
         helpText: "Header text of the group's section."
+      },
+      "fieldGroups.fields": {
+        label: "Fields",
+        helpText: "The fields this group shows, in display order (field names). Written, it sets the order inside the group without moving any field. A field this list names may not name another group in its own group setting, and a field may be listed by one group only. Not allowed with Related List."
       },
       "fieldGroups.icon": {
         label: "Icon",
@@ -102,11 +110,11 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fieldGroups.relatedList": {
         label: "Related List",
-        helpText: "Makes this entry a related list's table instead of a section of fields: name the child object (or object.field) whose list is drawn at this position in the record's details column. Such a group holds no fields; a field that names it as its group is refused, and so is a name that matches no relationship pointing at this object. The record page does not draw this placement yet."
+        helpText: "Makes this entry a related list's table instead of a section of fields: name the child object (or object.field) whose list is drawn at this position in the record's details column. Such a group holds no fields; a field that names it as its group is refused, and so is a name that matches no relationship pointing at this object. The parent's create and edit forms inline the table too, and the record page's Edit saves the record and its rows together."
       },
       "fieldGroups.collapse": {
         label: "Collapse",
-        helpText: "Whether the section can be collapsed, on the entry form and the record detail page. Unset: none."
+        helpText: "Whether the section can be collapsed. The entry form follows it as set. The default record page lets the reader fold every titled group, so there it only sets the first state: Collapsed starts closed, the others start open. Unset: none."
       },
       "fieldGroups.visibleWhen": {
         label: "Visible When",
@@ -232,6 +240,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Delete Behavior",
         helpText: "What happens when the referenced record is deleted"
       },
+      "fields.transferBehavior": {
+        label: "Transfer Behavior",
+        helpText: "Whether Change Owner on the referenced record can also move the records that point at it through this field"
+      },
       "fields.multiple": {
         label: "Multiple",
         helpText: "Allow selecting multiple records"
@@ -268,9 +280,13 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Language",
         helpText: "Editor language (e.g. sql, javascript)"
       },
+      "fields.fieldHistory": {
+        label: "Field History",
+        helpText: "Old → new values for this field on the record activity timeline. Default follows the platform: on for most types, off for a media, JSON or credential field. Off names the change by label only; On also shows a media or JSON field's values. A credential field never shows values, and the object's own Field History off wins."
+      },
       "fields.trackHistory": {
         label: "Track History",
-        helpText: "Summarize this field on the record activity timeline"
+        helpText: "Opt a media or JSON field (image, file, json, …) into old → new values on the activity timeline. Every other field shows them already, and off does not hide them: use Field History."
       },
       "fields.visibleWhen": {
         label: "Visible When",
@@ -290,6 +306,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "enable.trackHistory": {
         label: "Track History"
+      },
+      "enable.fieldHistory": {
+        label: "Field History",
+        helpText: "Old → new values of changed fields on the record activity timeline. Default is on. Off turns values off for the whole object, whatever a field says."
       },
       "enable.searchable": {
         label: "Searchable"
@@ -427,7 +447,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       userActions: {
         label: "User Actions",
-        helpText: "Which generic entries (New, Import, Edit, Delete, Export) UI clients offer on this object's records, overriding the managedBy default one entry at a time. An unset entry keeps that default: platform offers all five; config and system-data all but Import; engine-owned, append-only and better-auth only Export. An untouched switch writes nothing, so it reads off even where the default offers the entry. On an engine-owned or append-only object, turning an entry on also lets users make that write through the data API. Users still need the matching permission."
+        helpText: "Which generic entries (New, Import, Edit, Delete, Export) UI clients offer on this object's records, overriding the managedBy default one entry at a time. An unset entry keeps that default: platform offers all five; config and system-data all but Import; engine-owned, append-only and better-auth only Export. An untouched switch writes nothing, so it reads off even where the default offers the entry. On an engine-owned or append-only object, turning an entry on also lets users make that write through the data API. Users still need the matching permission. Change Owner is not part of that matrix: its default follows the sharing model (see its entry)."
       },
       "userActions.create": {
         label: "Create",
@@ -447,7 +467,23 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "userActions.exportCsv": {
         label: "Export CSV",
-        helpText: "The CSV export entry. Unset: shown, since every managedBy bucket offers export."
+        helpText: "The Export entry that downloads this object's data (CSV, XLSX or JSON) on its grids, list views and dataset reports: on shows it, off hides it. A Gantt chart's PNG / PDF export is not covered. Unset: shown, since every managedBy bucket offers export. It is not a permission: who may export is the permission set's allowExport."
+      },
+      "userActions.transfer": {
+        label: "Change Owner",
+        helpText: "The Change Owner action, single and bulk: on offers it, off hides it. Unset: on, except off on a controlled_by_parent detail. Offered only on an object whose records have a reassignable owner (ownership user or unset, no managedBy, not a sys_ object, owner_id not readonly and, on an external object, declared or mapped); turning it on anywhere else is refused. It gates the action only, not a plain edit of owner_id. A stored {enabled, visibleWhen, disabledWhen} object is edited key by key; write one in source to gate the action on each record."
+      },
+      actionLayout: {
+        label: "Action Layout",
+        helpText: "The order of this object's actions and which are buttons, per scope: pinned (at most 3 buttons, in order) and more (the More menu's order; an action named in neither follows in its default order). Unset: each surface picks its buttons by the actions' order, as before."
+      },
+      "actionLayout.list": {
+        label: "List",
+        helpText: "The list page toolbar, as {\"pinned\": [...], \"more\": [...]}: action names placed on the list toolbar; $import / $export only in pinned. At most 3 pinned. Not pinned, the page still draws its own Import / Export menu. os validate refuses a name that is no action of this object or is not placed on the list toolbar; such a name draws nothing."
+      },
+      "actionLayout.record": {
+        label: "Record",
+        helpText: "The record header (record page, side preview, phone bar), as {\"pinned\": [...], \"more\": [...]}: action names placed in the record header or its More menu. At most 3 pinned. os validate refuses a name that is no action of this object or is not placed on the record page; such a name draws nothing."
       },
       editMode: {
         label: "Edit Mode",
@@ -737,6 +773,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Delete Behavior",
         helpText: "What happens when referenced record is deleted"
       },
+      transferBehavior: {
+        label: "Transfer Behavior",
+        helpText: "Whether Change Owner on the referenced record can also move the records that point at it through this field"
+      },
       relatedListFilter: {
         label: "Related List Filter",
         helpText: "Default filter for this relationship's related list on the parent's detail page — AND-composed with the parent-record match, and the tab badge counts the same set"
@@ -783,7 +823,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       inlineColumns: {
         label: "Inline Columns",
-        helpText: "Columns of the inline grid on the parent's form, in display order; used only when this field sets inlineEdit, which is written in source. Unset: derived from this object's editable fields, and past six the rest start in the grid's column chooser. An entry that names only a field takes its type, options and rules from that field; the other column keys, type first, are written in source."
+        helpText: "Columns of the inline grid on the parent's form, in display order; used only when a field group of the parent names this child (fieldGroups[].relatedList). Unset: derived from this object's editable fields, and past six the rest start in the grid's column chooser. An entry that names only a field takes its type, options and rules from that field; the other column keys, type first, are written in source."
       },
       "inlineColumns.name": {
         label: "Name",
@@ -811,7 +851,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       returnType: {
         label: "Return Type",
-        helpText: "Declared value type of the formula, stamped from the inferred CEL type. Consumers read it instead of re-parsing the expression. Currency: an amount of money, in the currency the Currency Config of this field declares (dynamic when unset)."
+        helpText: "Declared value type of the formula, stamped from the inferred CEL type. Consumers read it instead of re-parsing the expression. Currency: an amount of money, in the currency the Currency Config of this field declares (dynamic when unset). Percent: a ratio, shown as a percent field shows it — a fraction, so 0.25 reads 25%."
       },
       summaryOperations: {
         label: "Summary Operations",
@@ -853,6 +893,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Hidden",
         helpText: "Hide field from default UI views"
       },
+      showOnCreate: {
+        label: "Show On Create",
+        helpText: "Ask for this field when a record is created. Off: the create dialog, the full-page create and an action-opened create leave it out; editing, the record page and lists still show it. A required field is always asked for, so it cannot be turned off."
+      },
       searchable: {
         label: "Searchable",
         helpText: "Include in global search results"
@@ -885,9 +929,13 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Internal",
         helpText: "Never return this field's value on the generic data path: the engine omits the key from find/findOne results and from the create and update response bodies, on the default projection and when a client names the field in ?select=. Storage, filtering and indexing are untouched."
       },
+      fieldHistory: {
+        label: "Field History",
+        helpText: "Old → new values for this field on the record activity timeline. Default follows the platform: on for most types, off for a media, JSON or credential field. Off names the change by label only; On also shows a media or JSON field's values. A credential field never shows values, and the object's own Field History off wins."
+      },
       trackHistory: {
         label: "Track History",
-        helpText: "Render this field's value changes as entries on the record activity timeline (ADR-0052 §5b). Opt-in per field."
+        helpText: "Opt a media or JSON field (image, file, json, …) into old → new values on the activity timeline. Every other field shows them already, and off does not hide them: use Field History."
       },
       widget: {
         label: "Widget",
@@ -988,6 +1036,18 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       "refusals.params": {
         label: "Params",
         helpText: "Names the sentences may fill (e.g. state): the body throws { code, params: { state } }, and a {{ state }} hole renders it. Absent: the sentences are plain text"
+      },
+      texts: {
+        label: "Texts",
+        helpText: "Sentences the hook writes into records, keyed by the snake_case key its code asks for with ctx.text (e.g. follow_up_subject). The hook gets the declared message in the organization's language, translated, with the declared message as the fallback. For a JavaScript (L2) body or a handler; refused on an expression body"
+      },
+      "texts.message": {
+        label: "Message",
+        helpText: "The sentence the hook writes when its code asks for this key. Plain text, unless the entry declares params: then a {{ name }} hole fills a declared param"
+      },
+      "texts.params": {
+        label: "Params",
+        helpText: "Names the sentence may fill (e.g. lead): the code asks for ctx.text(key, { lead }), and a {{ lead }} hole renders it. Absent: the sentence is plain text"
       },
       handler: {
         label: "Handler",
@@ -1283,7 +1343,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "userActions.refresh": {
         label: "Refresh",
-        helpText: "Allow users to reload the view data from the backend without a full page reload"
+        helpText: "Allow users to reload the view data from the backend without a full page reload. Governs only the wide toolbar's Refresh button (`compactToolbar: false`): the default toolbar has no Refresh, so the toggle changes nothing there."
       },
       "userActions.rowHeight": {
         label: "Row Height",
@@ -1331,10 +1391,11 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       navigation: {
         label: "Navigation",
-        helpText: "Configuration for item click navigation (drawer by default, page, new_window or none)"
+        helpText: "Configuration for item click navigation: the drawer size, and `preventNavigation` for a list whose rows open nothing (`mode` is deprecated — the record name opens the page, the hover icon the side panel)"
       },
       "navigation.mode": {
-        label: "Mode"
+        label: "Mode",
+        helpText: "[DEPRECATED] On an object's list (a list view, an object's `listViews`) no longer picks how a record opens: in the console the record name opens the full page and the hover icon beside it opens the side panel, for every reader. There `drawer`, `page` and `new_window` still parse and change nothing, so omit the key; `none` still means rows open nothing — prefer `preventNavigation: true`. A page block that carries `navigation` (a list block, the timeline, an embedded view) still honours every value."
       },
       "navigation.preventNavigation": {
         label: "Prevent Navigation",
@@ -1342,11 +1403,11 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "navigation.openNewTab": {
         label: "Open New Tab",
-        helpText: "Force open in new tab (applies to page mode)"
+        helpText: "Open the record's full page in a new browser tab when it is clicked; rows that open nothing stay that way, and a phone opens the page in place"
       },
       "navigation.size": {
         label: "Size",
-        helpText: "Overlay size bucket for the drawer detail: 'auto' (default — renderer derives from field count + viewport; AI writes nothing) or a coarse override sm/md/lg/xl/full. Prefer this over the pixel `width`; page mode ignores it."
+        helpText: "Width bucket for the record drawer: 'auto' (default) keeps the host's fixed default width, the same for every object whatever its field count (the console's record side panel opens at 460px), or a coarse override sm/md/lg/xl/full (a 480/720/960/1200/1600px cap, always clamped to the viewport). A width the reader drags wins over either. Prefer this over the pixel `width`; it has no effect where the record opens as a page (in the console, every record on a phone), nor on a phone-width screen, where the drawer fills it."
       },
       "navigation.width": {
         label: "Width",
@@ -1881,6 +1942,42 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Memory Mb",
         helpText: "Per-invocation memory cap (MB, max 256)"
       },
+      refusals: {
+        label: "Refusals",
+        helpText: "Refusal catalogue, keyed by the SCREAMING_SNAKE code the action's body throws (e.g. SIGN_IN_REQUIRED). The caller reads the declared message, translated into their language, with the declared status. For a script action's JavaScript (L2) body; refused on an expression body"
+      },
+      "refusals.message": {
+        label: "Message",
+        helpText: "The sentence the user reads when the body throws this code. Plain text, unless the entry declares params: then a {{ name }} hole fills a declared param"
+      },
+      "refusals.status": {
+        label: "Status",
+        helpText: "HTTP status of the refusal (400–499). Absent: 400"
+      },
+      "refusals.reasons": {
+        label: "Reasons",
+        helpText: "Further sentences under this same code, keyed by the snake_case reason the body throws beside the code ({ code, reason }). The wire code and status stay this entry's; a reason not declared here is refused. Absent: a thrown reason is not read"
+      },
+      "refusals.reasons.message": {
+        label: "Message",
+        helpText: "The sentence the user reads when the body throws this reason under the code. Its {{ }} holes follow the entry's params"
+      },
+      "refusals.params": {
+        label: "Params",
+        helpText: "Names the sentences may fill (e.g. state): the body throws { code, params: { state } }, and a {{ state }} hole renders it. Absent: the sentences are plain text"
+      },
+      texts: {
+        label: "Texts",
+        helpText: "Sentences the action writes into records, keyed by the snake_case key its body asks for with ctx.text (e.g. email_subject). The body gets the declared message in the organization's language, translated, with the declared message as the fallback. For a script action's JavaScript (L2) body; refused on an expression body"
+      },
+      "texts.message": {
+        label: "Message",
+        helpText: "The sentence the action writes when its body asks for this key. Plain text, unless the entry declares params: then a {{ name }} hole fills a declared param"
+      },
+      "texts.params": {
+        label: "Params",
+        helpText: "Names the sentence may fill (e.g. subject): the body asks for ctx.text(key, { subject }), and a {{ subject }} hole renders it. Absent: the sentence is plain text"
+      },
       params: {
         label: "Params",
         helpText: "User input parameters (show form before executing)"
@@ -2077,15 +2174,15 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       dataset_binding: {
         label: "Dataset binding",
-        description: "The semantic-layer dataset this report renders. Values are the dataset’s measures; rows are its dimensions."
+        description: "Where the report’s numbers come from, how they are grouped and sorted, and which records open when you click a row."
       },
       joined_blocks: {
         label: "Joined blocks",
-        description: "Additional dataset-bound blocks stacked into a single report (joined reports only)."
+        description: "Other blocks stacked into the same report, each with its own data source (joined reports only)."
       },
       filter_and_chart: {
         label: "Filter & chart",
-        description: "Render-time scope filter and chart presentation."
+        description: "Filter conditions and how the chart is shown."
       },
       period_and_export: {
         label: "Period & export",
@@ -2101,45 +2198,46 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Label"
       },
       description: {
-        label: "Description"
+        label: "Description",
+        helpText: "One sentence on what this report shows, displayed under its name."
       },
       type: {
         label: "Type",
-        helpText: "Report type: tabular/summary/matrix/joined"
+        helpText: "Report type: tabular, summary, matrix or joined."
       },
       dataset: {
         label: "Dataset",
-        helpText: "Dataset to bind (measures/dimensions come from its semantic layer)"
+        helpText: "The report reads its numbers from here; everyone sees only the records they have access to."
       },
       values: {
         label: "Values",
-        helpText: "Measure names (from the dataset) to display"
+        helpText: "The metrics to total or count (from the data source)."
       },
       rows: {
         label: "Rows",
-        helpText: "Dimension names (from the dataset) to group rows by"
+        helpText: "The fields to group by (from the data source)."
       },
       columns: {
         label: "Columns",
-        helpText: "Dimension names across (matrix only)"
+        helpText: "Groups spread across the columns (matrix reports only)."
       },
       order: {
-        label: "Order",
-        helpText: "Sort keys, most significant first (a rows/columns dimension or a values measure). Time dimensions are chronological by default."
+        label: "Sort Order",
+        helpText: "What to sort by, most important first (a grouping or a metric). Time groupings sort in date order by default."
       },
       "order.by": {
-        label: "Order By"
+        label: "Sort By"
       },
       "order.direction": {
         label: "Direction"
       },
       drilldown: {
         label: "Drilldown",
-        helpText: "Click an aggregated row/cell to open the underlying records"
+        helpText: "Click a summarized row or cell to open the records behind it."
       },
       blocks: {
         label: "Blocks",
-        helpText: "Dataset-bound sub-reports (joined report only)"
+        helpText: "Sub-reports, each with its own data source (joined reports only)."
       },
       "blocks.name": {
         label: "Name"
@@ -2154,38 +2252,62 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Block Type"
       },
       "blocks.dataset": {
-        label: "Dataset"
+        label: "Data Source"
       },
       "blocks.rows": {
-        label: "Rows"
+        label: "Group By"
       },
       "blocks.columns": {
-        label: "Columns"
+        label: "Group Columns By"
       },
       "blocks.values": {
-        label: "Values"
+        label: "Metrics"
       },
       "blocks.runtimeFilter": {
         label: "Runtime Filter"
       },
       "blocks.order": {
-        label: "Order"
+        label: "Sort Order"
       },
       runtimeFilter: {
         label: "Runtime Filter",
-        helpText: "Render-time scope filter, ANDed at query time"
+        helpText: "A filter applied whenever the report is shown, on top of the data source’s own conditions."
       },
       chart: {
         label: "Chart",
-        helpText: "Chart config (type, legend, colors)"
+        helpText: "Chart type and settings."
       },
       dateRange: {
         label: "Date Range",
-        helpText: "Default period and custom-range switch. The dimension must be a date dimension of the dataset; leave it empty when the dataset has exactly one."
+        helpText: "The period the report opens with, and whether people may choose their own range."
+      },
+      "dateRange.dimension": {
+        label: "Date Field",
+        helpText: "The date grouping of the data source the period applies to. Leave it empty when the data source has only one."
+      },
+      "dateRange.defaultRange": {
+        label: "Default Period",
+        helpText: "The period the report opens with."
+      },
+      "dateRange.allowCustomRange": {
+        label: "Allow Custom Range",
+        helpText: "Let people pick their own start and end dates."
       },
       exportOptions: {
         label: "Export Options",
-        helpText: "Download formats (csv, xlsx) and file name. Who may download is the export permission on the dataset object."
+        helpText: "Download formats (csv, xlsx) and file name. Who may download is set by the export permission on the data source’s object."
+      },
+      "exportOptions.formats": {
+        label: "Formats",
+        helpText: "The download formats offered. Left unset, both csv and xlsx are offered; an empty list turns downloads off."
+      },
+      "exportOptions.includeHeaders": {
+        label: "Include Headers",
+        helpText: "Put the column names in the first row of the downloaded file."
+      },
+      "exportOptions.fileNamePrefix": {
+        label: "File Name",
+        helpText: "The start of the downloaded file’s name, used instead of the report name."
       }
     }
   },

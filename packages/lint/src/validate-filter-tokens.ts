@@ -19,10 +19,12 @@ import { recordsOf } from './object-graph.js';
  *
  *     { owner_id: '{current_user_id}', created_at: { $gte: '{week_start}' } }
  *
- * Exactly two vocabularies resolve inside a filter value: context tokens
- * (`{current_user_id}`, `{current_org_id}` — see `context-tokens.zod.ts`) and
- * date macros (`{today}`, `{30_days_ago}` — see `date-macros.zod.ts`).
- * Anything else does not resolve: the data engine refuses a query that carries
+ * Three vocabularies resolve inside a filter value: context tokens
+ * (`{current_user_id}`, `{current_org_id}` — see `context-tokens.zod.ts`),
+ * date macros (`{today}`, `{30_days_ago}` — see `date-macros.zod.ts`) and
+ * period keys (`{current_iso_week}`, `PERIOD_KEY_TOKENS` in the same file).
+ * Every one of them is known to `classifyFilterToken`, which is all this rule
+ * asks. Anything else does not resolve: the data engine refuses a query that carries
  * it (`FILTER_TOKEN_UNKNOWN`, 400 — `UnknownFilterTokenError` in
  * `@objectstack/core`'s `filter-tokens.ts`), so the surface never shows the
  * data the filter meant.
@@ -246,12 +248,12 @@ function walkFilterValues(
             `\`type: 'record'\` page, to the id of the record in view.`
           : suggestion
           ? `Did you mean "{${suggestion}}"? Context tokens are {${KNOWN_LIST}}; ` +
-            `time-based values use date macros such as {today} or {30_days_ago}.`
-          // [#22161] One remedy line; the two vocabularies in full, and why a
+            `time-based values use date macros such as {today}, or the week key {current_iso_week}.`
+          // [#22161] One remedy line; the three vocabularies in full, and why a
           // literal shaped like a placeholder cannot be filtered on, are
           // `os explain filter-token-unknown`.
-          : `Use a context token ({${KNOWN_LIST}}) or a date macro such as {today} or ` +
-            `{30_days_ago}; a literal value that looks like a placeholder must be renamed.`,
+          : `Use a context token ({${KNOWN_LIST}}), a date macro such as {today} or the week ` +
+            `key {current_iso_week}; a literal value that looks like a placeholder must be renamed.`,
       });
     }
     return;

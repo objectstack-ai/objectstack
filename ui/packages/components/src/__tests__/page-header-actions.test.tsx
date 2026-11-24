@@ -7,8 +7,8 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { useEffect } from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { useEffect, useMemo, useState } from 'react';
+import { render, screen, fireEvent, waitFor, act, within } from '@testing-library/react';
 import { ComponentRegistry } from '@object-ui/core';
 import type {
   ActionContext,
@@ -23,6 +23,15 @@ import {
   useInlineEdit,
   PredicateScopeProvider,
 } from '@object-ui/react';
+import { PageHeaderPhoneContext, type PageHeaderPhoneFace } from '../renderers/layout/page-header-phone-context';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogTitle,
+} from '../ui/alert-dialog';
 
 function PageHeader({ schema }: { schema: any }) {
   const Component = ComponentRegistry.get('page:header');
@@ -882,4 +891,221 @@ describe('PageHeaderRenderer — #2358 action visibility traps', () => {
       }
     });
   });
+});
+
+describe('PageHeaderRenderer — in-flight header action (objectstack#34933)', () => {
+  function deferred<T>() {
+    let resolve!: (v: T) => void;
+    let reject!: (e: unknown) => void;
+    const promise = new Promise<T>((res, rej) => { resolve = res; reject = rej; });
+    return { promise, resolve, reject };
+  }
+  const convert = { name: 'convert', locations: ['record_header'], label: 'Convert Lead', type: 'flow', icon: 'ArrowRightCircle' };
+  const record = { id: 'lead-1', name: 'Mira Costa' };
+
+  function renderWithFlow(flow: (action: ActionDef, ctx: ActionContext) => Promise<ActionResult>) {
+    render(
+      <ActionProvider handlers={{ flow }}>
+        <RecordContextProvider objectName="lead" recordId="lead-1" data={record} objectSchema={{ name: 'lead', label: 'Lead' }}>
+          <PageHeader schema={{ type: 'page:header', title: 'Lead', actions: [convert] }} />
+        </RecordContextProvider>
+      </ActionProvider>,
+    );
+  }
+
+  // A busy inline button stays focusable: `aria-disabled`, never native
+  // `disabled`, so a dialog its click opened can return focus to it.
+  const expectBusy = (button: HTMLElement) => {
+    expect((button as HTMLButtonElement).disabled).toBe(false);
+    expect(button.getAttribute('aria-disabled')).toBe('true');
+    expect(button.getAttribute('aria-busy')).toBe('true');
+    expect(button.querySelector('[data-header-action-pending]')).not.toBeNull();
+  };
+  const expectIdle = (button: HTMLElement) => {
+    expect((button as HTMLButtonElement).disabled).toBe(false);
+    expect(button.hasAttribute('aria-disabled')).toBe(false);
+    expect(button.hasAttribute('aria-busy')).toBe(false);
+    expect(button.querySelector('[data-header-action-pending]')).toBeNull();
+  };
+
+  it('is busy from the click until the launch resolves, and a second click does not dispatch again', async () => {
+    const launch = deferred<ActionResult>();
+    const flow = vi.fn<(action: ActionDef, ctx: ActionContext) => Promise<ActionResult>>(() => launch.promise);
+    renderWithFlow(flow);
+    const button = screen.getByRole('button', { name: /Convert Lead/i });
+    expectIdle(button);
+
+    fireEvent.click(button);
+    await waitFor(() => expect(flow).toHaveBeenCalledTimes(1));
+    expectBusy(button);
+
+    fireEvent.click(button);
+    fireEvent.click(button);
+    await act(async () => { await Promise.resolve(); });
+    expect(flow).toHaveBeenCalledTimes(1);
+
+    await act(async () => { launch.resolve({ success: true }); await launch.promise; });
+    await waitFor(() => expectIdle(button));
+
+    fireEvent.click(button);
+    await waitFor(() => expect(flow).toHaveBeenCalledTimes(2));
+  });
+
+  it('returns to normal when the launch fails', async () => {
+    const launch = deferred<ActionResult>();
+    const flow = vi.fn<(action: ActionDef, ctx: ActionContext) => Promise<ActionResult>>(() => launch.promise);
+    renderWithFlow(flow);
+    const button = screen.getByRole('button', { name: /Convert Lead/i });
+    fireEvent.click(button);
+    await waitFor(() => expectBusy(button));
+    await act(async () => { launch.reject(new Error('flow launch failed')); await launch.promise.catch(() => undefined); });
+    await waitFor(() => expectIdle(button));
+  });
+
+  it('a host action whose click rejects returns to normal and the failure is reported', async () => {
+    const run = deferred<void>();
+    const onClick = vi.fn(() => run.promise);
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      renderHeader(
+        { type: 'page:header', title: 'Lead' },
+        { record, headerSystemActions: [{ name: 'sys_delete_34933', label: 'Remove', onClick }] },
+      );
+      const button = await screen.findByRole('button', { name: /Remove/i });
+      fireEvent.click(button);
+      expectBusy(button);
+      fireEvent.click(button);
+      expect(onClick).toHaveBeenCalledTimes(1);
+      const failure = new Error('delete refused');
+      await act(async () => { run.reject(failure); await run.promise.catch(() => undefined); });
+      await waitFor(() => expectIdle(button));
+      expect(error).toHaveBeenCalledWith(expect.stringContaining('sys_delete_34933'), failure);
+    } finally {
+      error.mockRestore();
+    }
+  });
+
+  it('a host action whose click returns nothing is never busy', async () => {
+    const onClick = vi.fn(() => undefined);
+    renderHeader(
+      { type: 'page:header', title: 'Lead' },
+      { record, headerSystemActions: [{ name: 'sys_edit_34933', label: 'Edit', onClick }] },
+    );
+    const button = await screen.findByRole('button', { name: /^Edit$/i });
+    fireEvent.click(button);
+    expectIdle(button);
+    fireEvent.click(button);
+    expect(onClick).toHaveBeenCalledTimes(2);
+  });
+
+  it('the phone bar face is busy the same way and returns to normal on settle', async () => {
+    const launch = deferred<ActionResult>();
+    const flow = vi.fn<(action: ActionDef, ctx: ActionContext) => Promise<ActionResult>>(() => launch.promise);
+    function PhoneHost() {
+      const [bar, setBar] = useState<HTMLDivElement | null>(null);
+      const face = useMemo<PageHeaderPhoneFace>(() => ({ actionBar: bar }), [bar]);
+      return (
+        <ActionProvider handlers={{ flow }}>
+          <RecordContextProvider objectName="lead" recordId="lead-1" data={record} objectSchema={{ name: 'lead', label: 'Lead' }}>
+            <PageHeaderPhoneContext.Provider value={face}>
+              <PageHeader schema={{ type: 'page:header', title: 'Lead', actions: [convert] }} />
+            </PageHeaderPhoneContext.Provider>
+          </RecordContextProvider>
+          <div ref={setBar} data-testid="bar" />
+        </ActionProvider>
+      );
+    }
+    render(<PhoneHost />);
+    await waitFor(() => expect(screen.getByTestId('bar').querySelector('[data-page-header-actions-face="bar"]')).not.toBeNull());
+    const button = within(screen.getByTestId('bar')).getByRole('button', { name: /Convert Lead/i });
+    fireEvent.click(button);
+    await waitFor(() => expectBusy(button));
+    fireEvent.click(button);
+    await act(async () => { await Promise.resolve(); });
+    expect(flow).toHaveBeenCalledTimes(1);
+    await act(async () => { launch.resolve({ success: true }); await launch.promise; });
+    await waitFor(() => expectIdle(button));
+  });
+  it('the click guard holds a second click on the busy, still-focusable button', async () => {
+    const launch = deferred<ActionResult>();
+    const flow = vi.fn<(action: ActionDef, ctx: ActionContext) => Promise<ActionResult>>(() => launch.promise);
+    renderWithFlow(flow);
+    const button = screen.getByRole('button', { name: /Convert Lead/i });
+    fireEvent.click(button);
+    await waitFor(() => expectBusy(button));
+    // Not natively disabled, so the click is dispatched: only the guard stops it.
+    fireEvent.click(button);
+    fireEvent.click(button);
+    await act(async () => { await Promise.resolve(); });
+    expect(flow).toHaveBeenCalledTimes(1);
+    await act(async () => { launch.resolve({ success: true }); await launch.promise; });
+    await waitFor(() => expectIdle(button));
+  });
+
+  it('a confirmText action confirmed from the keyboard hands focus back to its trigger, busy until the run settles', async () => {
+    const run = deferred<ActionResult>();
+    const api = vi.fn<(action: ActionDef, ctx: ActionContext) => Promise<ActionResult>>(() => run.promise);
+    // The console's confirm dialog opens with no Radix Trigger, so Radix's own
+    // return-to-trigger does nothing; it returns focus to the control focused
+    // at open, as app-shell's `useActionDialogReturnFocus` does. This host
+    // does the same: focus() on a natively disabled opener is a no-op.
+    function ConfirmHost() {
+      const [ask, setAsk] = useState<{ message: string; answer: (ok: boolean) => void } | null>(null);
+      const [opener, setOpener] = useState<HTMLElement | null>(null);
+      const onConfirm = (message: string) => new Promise<boolean>((resolve) => {
+        setOpener(document.activeElement as HTMLElement | null);
+        setAsk({ message, answer: resolve });
+      });
+      const answer = (ok: boolean) => { ask?.answer(ok); setAsk(null); };
+      return (
+        <ActionProvider handlers={{ api }} onConfirm={onConfirm}>
+          <RecordContextProvider objectName="lead" recordId="lead-1" data={record} objectSchema={{ name: 'lead', label: 'Lead' }}>
+            <PageHeader
+              schema={{
+                type: 'page:header',
+                title: 'Lead',
+                actions: [{ name: 'qualify', type: 'api', target: '/api/v1/qualify', confirmText: 'Qualify this lead?', locations: ['record_header'], label: 'Qualify' }],
+              }}
+            />
+          </RecordContextProvider>
+          <AlertDialog open={ask !== null} onOpenChange={(open) => { if (!open) answer(false); }}>
+            <AlertDialogContent
+              onCloseAutoFocus={(event) => {
+                if (!opener) return;
+                event.preventDefault();
+                opener.focus();
+              }}
+            >
+              <AlertDialogTitle>Confirm</AlertDialogTitle>
+              <AlertDialogDescription>{ask?.message}</AlertDialogDescription>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction onClick={() => answer(true)}>Confirm</AlertDialogAction>
+            </AlertDialogContent>
+          </AlertDialog>
+        </ActionProvider>
+      );
+    }
+    render(<ConfirmHost />);
+    const trigger = screen.getByRole('button', { name: /Qualify/i });
+    // Keyboard activation: the trigger holds focus and Enter clicks it.
+    trigger.focus();
+    expect(document.activeElement).toBe(trigger);
+    fireEvent.click(trigger);
+    const dialog = await screen.findByRole('alertdialog');
+    // Busy is read off `aria-busy` alone here, so this case judges focus only.
+    expect(trigger.getAttribute('aria-busy')).toBe('true');
+    const confirm = within(dialog).getByRole('button', { name: 'Confirm' });
+    await waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true));
+    confirm.focus();
+    fireEvent.click(confirm);
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
+    await waitFor(() => expect(api).toHaveBeenCalledTimes(1));
+    // The run is still in flight: busy, and focus is back on the trigger.
+    expect(trigger.getAttribute('aria-busy')).toBe('true');
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
+    await act(async () => { run.resolve({ success: true }); await run.promise; });
+    await waitFor(() => expect(trigger.hasAttribute('aria-busy')).toBe(false));
+    expect(document.activeElement).toBe(trigger);
+  });
+
 });

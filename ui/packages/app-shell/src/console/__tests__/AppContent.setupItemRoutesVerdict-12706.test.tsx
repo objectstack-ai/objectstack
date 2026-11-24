@@ -24,10 +24,11 @@
  * The metadata-admin routes and Setup's root wait on the verdict for the app
  * the URL names, and draw `app-access-denied` on `denied` with nothing of the
  * page mounted. Every other verdict, and an admitted caller, render as before.
- * The approvals inbox and the record pages it links to stay reachable: a member
- * approver reaches them under the Setup segment (the server's notification
- * links are `/system/approvals?request=ID`, which forward onto
- * `/apps/setup/system/approvals`), so they are outside this gate.
+ * The approvals inbox and the record pages it links to stay reachable. The
+ * server's notification links are `/system/approvals?request=ID`, which forward
+ * onto `/apps/setup/system/approvals`; that inbox moves on to the member's own
+ * app (objectstack#35505), and an older record link under the Setup segment
+ * stays outside this gate.
  *
  * ## Why the route is stubbed at the TRANSPORT
  *
@@ -210,11 +211,32 @@ vi.mock('../../providers/MetadataProvider', async (importOriginal) => ({
   }),
 }));
 
+// objectstack#35505 — the reader's current and last used app, which the inbox
+// under the `setup` alias moves to; neither names an app unless a case says.
+let currentAppNameFixture: string | undefined;
+let lastAppFixture: string | null = null;
+vi.mock('../../context/NavigationContext', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  useNavigationContext: () => ({ currentAppName: currentAppNameFixture, setCurrentAppName: () => {}, setContext: () => {} }),
+}));
+vi.mock('../../context/LastAppProvider', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  useLastApp: () => ({ lastApp: lastAppFixture, settled: true, rememberApp: () => {} }),
+}));
+
+// The console's preview and authoring code loads `@objectstack/lint` lazily;
+// warmed here so its first load is paid at import, not inside a test's clock.
+import '@objectstack/lint';
 import { AppContent } from '../AppContent';
 
 function LocationProbe() {
   const location = useLocation();
-  return <div data-testid="pathname">{location.pathname}</div>;
+  return (
+    <>
+      <div data-testid="pathname">{location.pathname}</div>
+      <div data-testid="search">{location.search}</div>
+    </>
+  );
 }
 
 /** The host's `system/approvals` route, as `apps/console`'s `systemRoutes` mounts it. */
@@ -254,6 +276,8 @@ describe('AppContent — Setup\'s item routes wait on the app\'s access verdict 
   beforeEach(() => {
     vi.clearAllMocks();
     for (const k of Object.keys(mounts)) delete mounts[k];
+    currentAppNameFixture = undefined;
+    lastAppFixture = null;
     metadataApps = [CRM_APP];
     metaItemRequests = [];
     byName = { setup: () => json(403, deniedBody('setup')) };
@@ -332,10 +356,13 @@ describe('AppContent — Setup\'s item routes wait on the app\'s access verdict 
     expect(screen.queryByTestId('app-access-denied')).not.toBeInTheDocument();
   });
 
-  it('CONTROL — the approvals inbox stays reachable under the Setup segment for a refused caller', async () => {
+  // objectstack#35505 (ruling option A) — flipped: this pinned the inbox
+  // drawing under the Setup segment. It now moves to the member's own app.
+  it('CONTROL — the approvals inbox stays reachable for a refused caller, in the caller\'s own app', async () => {
     renderConsoleAt('/apps/setup/system/approvals');
 
     expect(await screen.findByTestId('approvals-inbox-page')).toBeInTheDocument();
+    expect(pathname()).toBe('/apps/crm/system/approvals');
     expect(screen.queryByTestId('app-access-denied')).not.toBeInTheDocument();
     expect(metaItemRequests).toEqual([]);
   });
@@ -347,5 +374,63 @@ describe('AppContent — Setup\'s item routes wait on the app\'s access verdict 
     expect(await screen.findByTestId('record-detail-view')).toHaveTextContent('crm_opportunity/opp_000001');
     expect(screen.queryByTestId('app-access-denied')).not.toBeInTheDocument();
     expect(metaItemRequests).toEqual([]);
+  });
+});
+
+/**
+ * objectstack#35505 (ruling option A, item 1) — `/apps/setup/system/approvals`,
+ * where the server's `/system/approvals?request=ID` links forward, names no
+ * source app: it moves to the current app, then the last used app, then the
+ * first, keeping the request; Setup only when it is the current or last app.
+ */
+describe('AppContent — the approvals inbox under the setup alias opens in the reader\'s app (objectstack#35505)', () => {
+  const HR_APP = { name: 'hr', label: 'HR', navigation: [{ id: 'nav_people', type: 'object', objectName: 'hr_person', label: 'People' }] };
+  const SETUP_BY_PACKAGE = { ...SETUP_APP, _packageId: 'com.objectstack.setup' };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    for (const k of Object.keys(mounts)) delete mounts[k];
+    currentAppNameFixture = undefined;
+    lastAppFixture = null;
+    metadataApps = [CRM_APP, HR_APP, SETUP_BY_PACKAGE];
+    metaItemRequests = [];
+    byName = {};
+    adapter = makeAdapter();
+  });
+
+  it('tier 4 — nothing current or last: the first app, the request kept', async () => {
+    renderConsoleAt('/apps/setup/system/approvals?request=req_1');
+    expect(await screen.findByTestId('approvals-inbox-page')).toBeInTheDocument();
+    expect(pathname()).toBe('/apps/crm/system/approvals');
+    expect(screen.getByTestId('search').textContent).toBe('?request=req_1');
+  });
+
+  it('tier 3 — the last used app, ahead of the first', async () => {
+    lastAppFixture = 'hr';
+    renderConsoleAt('/apps/setup/system/approvals?request=req_1');
+    expect(await screen.findByTestId('approvals-inbox-page')).toBeInTheDocument();
+    expect(pathname()).toBe('/apps/hr/system/approvals');
+  });
+
+  it('tier 2 — the current app, ahead of the last used app', async () => {
+    currentAppNameFixture = 'crm';
+    lastAppFixture = 'hr';
+    renderConsoleAt('/apps/setup/system/approvals');
+    expect(await screen.findByTestId('approvals-inbox-page')).toBeInTheDocument();
+    expect(pathname()).toBe('/apps/crm/system/approvals');
+  });
+
+  it('Setup as the current app keeps the inbox in Setup, at its own address (ruling item 3)', async () => {
+    currentAppNameFixture = 'setup';
+    renderConsoleAt('/apps/setup/system/approvals');
+    expect(await screen.findByTestId('approvals-inbox-page')).toBeInTheDocument();
+    expect(pathname()).toBe('/apps/com.objectstack.setup/system/approvals');
+  });
+
+  it('CONTROL — Setup\'s own address is a reader in Setup and is not moved', async () => {
+    lastAppFixture = 'hr';
+    renderConsoleAt('/apps/com.objectstack.setup/system/approvals');
+    expect(await screen.findByTestId('approvals-inbox-page')).toBeInTheDocument();
+    expect(pathname()).toBe('/apps/com.objectstack.setup/system/approvals');
   });
 });

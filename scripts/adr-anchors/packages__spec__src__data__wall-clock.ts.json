@@ -1,0 +1,5 @@
+{
+  "file": "packages/spec/src/data/wall-clock.ts",
+  "adrs": ["ADR-0053", "ADR-0157"],
+  "invariant": "The platform's one daylight-saving rule (ADR-0053): a wall clock becomes an instant only through zonedWallClockToUtcMs, and a skipped or repeated reading resolves to the earlier candidate. ADR-0157 D11 moved it below @objectstack/formula so the working-day functions read the same rule; a private copy anywhere is a second DST rule."
+}

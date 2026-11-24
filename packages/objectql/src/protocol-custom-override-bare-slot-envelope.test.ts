@@ -610,9 +610,9 @@ async function boot2(environmentId: string | undefined, type: string, name: stri
  * hydration, the pair through its ensure door, the override through Studio's
  * draft save and publish):
  *
- *  - the PACKAGED base of a page, dataset, app and book
+ *  - the PACKAGED base of a page, dataset, app, book and import mapping
  *    (`getPackagedPageBase`, `getPackagedDatasetBase`, `getPackagedAppBase`,
- *    `getPackagedBookBase`) answers the base's own item while the pair's
+ *    `getPackagedBookBase`, `getPackagedMappingBase`) answers the base's own item while the pair's
  *    override is served, at once and after a restart, with and without a
  *    metadata service — never the override it is compared against;
  *  - the served override names its base (`servedOverrideBaseOf`), the base's
@@ -624,10 +624,10 @@ async function boot2(environmentId: string | undefined, type: string, name: stri
 const PAIR_TRANSLATION = 'showcase_custom_zh_cn';
 /** The `zh-CN` text each type's catalog group carries, keyed by the item's name. */
 const zhGroup = (type: string, name: string, label: string): Record<string, unknown> => {
-    const group = ({ page: 'pages', app: 'apps', dataset: 'datasets', book: 'books' } as Record<string, string>)[type];
+    const group = ({ page: 'pages', app: 'apps', dataset: 'datasets', book: 'books', mapping: 'mappings' } as Record<string, string>)[type];
     return { [group]: { [name]: { label } } };
 };
-const LABEL_ORDER_TYPES = SEALED_TYPES.filter((t) => ['page', 'app', 'dataset', 'book'].includes(t.type));
+const LABEL_ORDER_TYPES = SEALED_TYPES.filter((t) => ['page', 'app', 'dataset', 'book', 'mapping'].includes(t.type));
 const accessorOf = (type: string): string => `getPackaged${type[0].toUpperCase()}${type.slice(1)}Base`;
 
 describe('[#30062] a declared override\'s label order: the packaged base and the pair\'s own translations, on a real boot', () => {

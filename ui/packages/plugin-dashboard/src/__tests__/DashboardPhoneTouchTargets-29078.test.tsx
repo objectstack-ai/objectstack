@@ -13,7 +13,7 @@
  * Measured on a real Console against the CRM and showcase dashboards, these
  * were 16 to 36 px tall: the filter bar's triggers and option rows, the
  * custom-range calendar's days, the dataset table's sort buttons, drillable
- * rows and pivot cells, its Export CSV button, and the drill drawer's
+ * rows and pivot cells, and the drill drawer's
  * "Open in list". jsdom has no layout, so the floor is pinned the way the
  * Console draws it: a `min-h-11` (44 px) floor below `sm`, released from `sm`
  * up so the desktop keeps its compact sizes.
@@ -144,7 +144,7 @@ describe('#29078 — the dataset table and pivot are 44 px touch targets on a ph
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ item: { name: 'crm_account', fields: {} } }) })));
   }
 
-  it('sort buttons and the cells of drillable rows carry the phone floor; Export CSV is 44 px in its own row', async () => {
+  it('sort buttons and the cells of drillable rows carry the phone floor', async () => {
     stubMeta();
     render(<DatasetWidget widget={{ type: 'table', dataset: 'by_industry', dimensions: ['industry'], values: ['account_count'] }} dataSource={drillable()} />);
     await screen.findByText('Industry');
@@ -156,12 +156,6 @@ describe('#29078 — the dataset table and pivot are 44 px touch targets on a ph
       for (const td of row.querySelectorAll('td')) expect(td.className).toContain('max-sm:h-11');
     }
 
-    const exportBtn = screen.getByTestId('dataset-export');
-    // Desktop: pinned to the corner, as before.
-    expect(exportBtn.className).toContain('absolute');
-    // Phone: out of the corner (where it would cover the last sort button) and 44 px.
-    expect(exportBtn.className).toContain('max-sm:static');
-    expect(exportBtn.className).toContain('max-sm:size-11');
   });
 
   it('a table nobody can drill does not grow its rows', async () => {

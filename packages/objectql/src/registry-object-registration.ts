@@ -46,14 +46,18 @@
  */
 
 import { BASE_FIELD_DISPLAY_WHITELIST, isInjectedColumnDefinition, materializeTreeSelfReferences, provisionPrimary, resolveInjectedSystemColumns } from '@objectstack/spec/data';
-import type { ObjectOwnership, ServiceObject } from '@objectstack/spec/data';
-import { QUEUE_FIELD_DEF, applyAuditFieldGovernance, fieldPatchTargetMisses, isCodeArtifactBody, isTenantAuthored } from '@objectstack/metadata-core';
+import type { ObjectOwnership, RelatedListsArrangement, ServiceObject } from '@objectstack/spec/data';
+import { QUEUE_FIELD_DEF, applyAuditFieldGovernance, fieldPatchTargetMisses, installedManifestsOf, isCodeArtifactBody, isTenantAuthored, pairsOf } from '@objectstack/metadata-core';
 import type { FieldPatchTargetMiss } from '@objectstack/metadata-core';
 import { scalarOverridesPackagedBase } from '@objectstack/spec/system';
 import { SEARCH_COMPANION_FIELD, provisionSearchCompanion } from './search-companion.js';
+import { applyExtensionPlacements, fieldGroupKeysOf, placementContributorsOf } from './registry-extension-placement.js';
+import type { ExtensionPlacementNote } from './registry-extension-placement.js';
+import { applyCustomArrangement, relatedListsArrangementOf, rememberRelatedListsArrangement } from './registry-custom-arrangement.js';
 import { applyProtection } from '@objectstack/spec/shared';
 import { isObjectLessActionKey, standaloneActionOwnerKey } from './action-governance.js';
 import { recordCurrencyFollowRefusal, recordCurrencySummaryRefusal } from './record-currency-aggregate-door.js';
+import { recordUnitSummaryRefusal } from './record-unit-aggregate-door.js';
 import type { RecordCurrencyFollowRefusedError } from './record-currency-aggregate-door.js';
 import {
   DEFAULT_EXTENDER_PRIORITY, DEFAULT_OVERLAY_PRIORITY, DEFAULT_OWNER_PRIORITY, NO_PACKAGE_REFERRER,
@@ -94,6 +98,7 @@ export interface ObjectRegistrationHost {
   declinedBaseLayerStamps: SchemaRegistry['declinedBaseLayerStamps'];
   readonly deploymentPlatformGlobalObjects: SchemaRegistry['deploymentPlatformGlobalObjects'];
   extensionTargetKey: SchemaRegistry['extensionTargetKey'];
+  readonly extensionPlacementNotesWarned: SchemaRegistry['extensionPlacementNotesWarned'];
   readonly fieldPatchMissesWarned: SchemaRegistry['fieldPatchMissesWarned'];
   finishServedObject: SchemaRegistry['finishServedObject'];
   foldExtenders: SchemaRegistry['foldExtenders'];
@@ -103,6 +108,7 @@ export interface ObjectRegistrationHost {
   getObject: SchemaRegistry['getObject'];
   getObjectContributors: SchemaRegistry['getObjectContributors'];
   getObjectOwner: SchemaRegistry['getObjectOwner'];
+  getPackage: SchemaRegistry['getPackage'];
   hasDisabledPackage: SchemaRegistry['hasDisabledPackage'];
   isActionWithheldByDisabledPackage: SchemaRegistry['isActionWithheldByDisabledPackage'];
   isPackageDisabled: SchemaRegistry['isPackageDisabled'];
@@ -122,6 +128,7 @@ export interface ObjectRegistrationHost {
   refusePicklistItemArrival: SchemaRegistry['refusePicklistItemArrival'];
   registerNamespace: SchemaRegistry['registerNamespace'];
   reportChangedRuleCopies: SchemaRegistry['reportChangedRuleCopies'];
+  reportExtensionPlacements: SchemaRegistry['reportExtensionPlacements'];
   reportFieldPatchMisses: SchemaRegistry['reportFieldPatchMisses'];
   reportRedeclaredFields: SchemaRegistry['reportRedeclaredFields'];
   readonly reportedRuleCopyChanges: SchemaRegistry['reportedRuleCopyChanges'];
@@ -263,6 +270,15 @@ export class ObjectRegistrationFacet {
       () => this.getAllObjects(),
     );
     if (recordCurrencySummary) return { refusal: recordCurrencySummary };
+    // [ADR-0158 U7 R1, L3] Beside it, its twin over a `record`-mode quantity:
+    // every such roll-up is refused in R1, whichever end registers second.
+    // See `record-unit-aggregate-door.ts`.
+    const recordUnitSummary = recordUnitSummaryRefusal(
+      schema,
+      (name) => this.getObject(name),
+      () => this.getAllObjects(),
+    );
+    if (recordUnitSummary) return { refusal: recordUnitSummary };
     // [ADR-0144 D2 and D6, amended] Beside it, for the same reason: a
     // following amount whose parent holds no code field under that name, and a
     // `record` roll-up over a child amount that follows nothing — the halves
@@ -770,6 +786,57 @@ export class ObjectRegistrationFacet {
   }
 
   /**
+   * [ADR-0146 D10] The body, and the contract, of
+   * `SchemaRegistry#getRelatedListsArrangement` (the facade keeps its line
+   * count, so the docblock lives here).
+   *
+   * What the served `relatedLists` of `name` cannot say about the tab list
+   * the base's paired `.custom` package declares for it: the lists it hides,
+   * and whether a list no entry names is shown after the listed tabs
+   * (`RelatedListsArrangement`, `@objectstack/spec/data`). `undefined` when
+   * no `.custom` package arranges the object's tabs: none extends it, none
+   * writes `relatedLists`, or the one that does is disabled.
+   *
+   * The served object read stamps this as its `_relatedListsArrangement` read
+   * decoration, because only the record page knows which lists exist for the
+   * reader: a served `relatedLists` names tabs and cannot hide another
+   * package's list by leaving it out. Accepts a short name or an FQN, as
+   * `getObject` does. Read off the served fold's own body
+   * ({@link resolveObject}), so this answer and the served `relatedLists`
+   * cannot disagree.
+   */
+  static getRelatedListsArrangement(this: Pick<ObjectRegistrationHost, 'resolveObject' | 'resolveObjectKey'>, name: string): RelatedListsArrangement | undefined {
+    const fqn = this.resolveObjectKey(name);
+    return fqn === undefined ? undefined : relatedListsArrangementOf(this.resolveObject(fqn));
+  }
+
+  /**
+   * [#34901] The body of `SchemaRegistry#getWithheldExtensionFields`; the
+   * method's docblock there is its contract. Read off
+   * {@link withholdDisabledExtensions}, the one reading of what a disable
+   * withholds, so this answer and the served fold cannot disagree.
+   */
+  static getWithheldExtensionFields(this: Pick<ObjectRegistrationHost, 'objectContributors' | 'resolveObjectKey' | 'withholdDisabledExtensions'>, name: string): Record<string, { packageId: string }> {
+    const fqn = this.resolveObjectKey(name);
+    const contributors = fqn === undefined ? undefined : this.objectContributors.get(fqn);
+    if (!contributors || contributors.length === 0) return {};
+    const withheld = this.withholdDisabledExtensions(contributors);
+    if (!withheld || withheld.withheldFields.size === 0) return {};
+    const out: Record<string, { packageId: string }> = {};
+    // In fold order, so a field two disabled packages both add names the
+    // first; any of them re-enabled serves it again.
+    for (const c of contributors) {
+      if (c.ownership !== 'extend' || withheld.kept.includes(c) || typeof c.packageId !== 'string') continue;
+      for (const field of fieldNamesOf(c.definition)) {
+        if (withheld.withheldFields.has(field) && !Object.prototype.hasOwnProperty.call(out, field)) {
+          out[field] = { packageId: c.packageId };
+        }
+      }
+    }
+    return out;
+  }
+
+  /**
    * [#29903, #29872, ADR-0146 D8 item 3] An object as {@link resolveObject}
    * resolves it, but with the `extend` contributions `options` names left out
    * of the fold ({@link ObjectExtensionFoldOptions}), as if those packages had
@@ -792,16 +859,19 @@ export class ObjectRegistrationFacet {
     const asEnabled = options?.asEnabled !== undefined && this.isPackageDisabled(options.asEnabled)
       ? options.asEnabled
       : undefined;
-    const contributors = leavesExtensionsOut(options) || asEnabled !== undefined ? this.objectContributors.get(fqn) : undefined;
+    // [#34901] …and `includeDisabledExtensions` folds EVERY disabled package in.
+    const includeDisabled = options?.includeDisabledExtensions === true;
+    const contributors = leavesExtensionsOut(options) || asEnabled !== undefined || includeDisabled ? this.objectContributors.get(fqn) : undefined;
     if (!contributors || !contributors.some((c) => isLeftOutExtension(c, options!)
-      || (asEnabled !== undefined && c.ownership === 'extend' && c.packageId === asEnabled))) return this.resolveObject(fqn);
+      || (asEnabled !== undefined && c.ownership === 'extend' && c.packageId === asEnabled)
+      || (includeDisabled && c.ownership === 'extend' && this.isPackageDisabled(c.packageId)))) return this.resolveObject(fqn);
     const kept = contributors.filter((c) => !isLeftOutExtension(c, options!));
     const ownerContrib = kept.find(c => c.ownership === 'own');
     if (!ownerContrib) return undefined;
     const base = kept.find(c => c.ownership === 'overlay') ?? ownerContrib;
     // …and a disabled package's, as on every served fold ({@link withholdDisabledExtensions}),
-    // except the one `asEnabled` names.
-    const withheld = this.withholdDisabledExtensions(kept, asEnabled);
+    // except the one `asEnabled` names — and none at all under `includeDisabledExtensions`.
+    const withheld = includeDisabled ? undefined : this.withholdDisabledExtensions(kept, asEnabled);
     return withheld
       ? this.foldExtendersOntoDefinition(withheld.kept, withoutWithheldMembers(base.definition, withheld))
       : this.foldExtenders(kept, base);
@@ -822,7 +892,7 @@ export class ObjectRegistrationFacet {
    * {@link foldObjectExtendersOnto} can apply it to a body that never came
    * from this registry without growing a second copy of the merge.
    */
-  static foldExtendersOntoDefinition(this: Pick<ObjectRegistrationHost, 'finishServedObject' | 'reportChangedRuleCopies' | 'reportFieldPatchMisses' | 'reportRedeclaredFields' | 'tenantAuthoredScalars' | 'tenantPatchedDisplayKeys' | 'tenantRuleSettings' | 'withPackagedOwnerRules' | 'withoutExtensionQueueField'>, contributors: ObjectContributor[], baseDefinition: ServiceObject, layer: ServedObjectLayer = 'served'): ServiceObject {
+  static foldExtendersOntoDefinition(this: Pick<ObjectRegistrationHost, 'finishServedObject' | 'getObjectOwner' | 'getPackage' | 'reportChangedRuleCopies' | 'reportExtensionPlacements' | 'reportFieldPatchMisses' | 'reportRedeclaredFields' | 'resolveObjectKey' | 'tenantAuthoredScalars' | 'tenantPatchedDisplayKeys' | 'tenantRuleSettings' | 'withPackagedOwnerRules' | 'withoutExtensionQueueField'>, contributors: ObjectContributor[], baseDefinition: ServiceObject, layer: ServedObjectLayer = 'served'): ServiceObject {
     // [ADR-0029 D9.2a] Computed ONCE, over the base the fold starts from — never
     // re-derived from the running `merged`, which would make an extender's own
     // scalar look "authored" to the next extender and silently invert
@@ -899,11 +969,43 @@ export class ObjectRegistrationFacet {
       }
     }
     this.reportRedeclaredFields(String(merged.name ?? baseDefinition.name ?? ''), contributors, ownFields, folded);
+    // [#35901] Where each extension's own fields, groups and child lists go:
+    // applied once, here, after every contributor's fields are merged, so the
+    // anchors an extension names are the object's as served.
+    const placing = placementContributorsOf(contributors, ownFields);
+    if (placing.length > 0) {
+      const placed = applyExtensionPlacements(merged, placing, {
+        objectName: String(merged.name ?? baseDefinition.name ?? ''),
+        ownerGroupKeys: fieldGroupKeysOf(owner),
+        childPackageOf: (child) => {
+          const fqn = this.resolveObjectKey(child);
+          const childOwner = fqn === undefined ? undefined : this.getObjectOwner(fqn);
+          if (childOwner === undefined) return undefined;
+          return childOwner.packageId ?? null;
+        },
+      });
+      merged = placed.object;
+      this.reportExtensionPlacements(placed.notes);
+    }
+    // [ADR-0146 D10] The third layer, last: where the base's paired `.custom`
+    // package writes `fieldGroups` or `relatedLists`, that key replaces the
+    // arrangement the owner and the placements above gave, whole. The pair is
+    // the owner's App's, asked of the one pair lookup (ADR-0146 D3).
+    const arranged = applyCustomArrangement(merged, contributors, {
+      objectName: String(merged.name ?? baseDefinition.name ?? ''),
+      customizationPairs: () => pairsOf(contributors.find((c) => c.ownership === 'own')?.packageId, installedManifestsOf(this)),
+    });
+    merged = arranged.object;
+    this.reportExtensionPlacements(arranged.notes);
     if (tenantRules) this.reportChangedRuleCopies(contributors, baseDefinition);
     // A picklist-bound field is served with its list's options resolved onto
     // it — here, in the fold every object read and the write door share, so
     // the set a client is offered and the set a write is judged by are one.
-    return this.finishServedObject(merged, layer, picklistReferrerOf(contributors));
+    const served = this.finishServedObject(merged, layer, picklistReferrerOf(contributors));
+    // …and what the `.custom` tab list says that `relatedLists` cannot travels
+    // beside the body it describes ({@link getRelatedListsArrangement}).
+    rememberRelatedListsArrangement(served, arranged.relatedLists);
+    return served;
   }
 
   /**
@@ -984,6 +1086,14 @@ export class ObjectRegistrationFacet {
    * reads*). At `warn`: the object is visibly unpatched, and nothing durable
    * is lost.
    */
+  static reportExtensionPlacements(this: Pick<ObjectRegistrationHost, 'extensionPlacementNotesWarned'>, notes: readonly ExtensionPlacementNote[]): void {
+    for (const placementNote of notes) {
+      if (this.extensionPlacementNotesWarned.has(placementNote.key)) continue;
+      this.extensionPlacementNotesWarned.add(placementNote.key);
+      console.warn(placementNote.message);
+    }
+  }
+
   static reportFieldPatchMisses(this: Pick<ObjectRegistrationHost, 'fieldPatchMissesWarned'>, misses: readonly FieldPatchTargetMiss[], packageId: string | undefined): void {
     for (const miss of misses) {
       const object = miss.object;
@@ -1473,8 +1583,9 @@ export class ObjectRegistrationFacet {
     const registered = this.objectContributors.get(fqn);
     const listed = leavesExtensionsOut(options) ? registered?.filter((c) => !isLeftOutExtension(c, options)) : registered;
     // A disabled package's `extend` contributions are withheld, and taken off
-    // a base that already carries them, as on {@link resolveObject}.
-    const withheld = listed ? this.withholdDisabledExtensions(listed) : undefined;
+    // a base that already carries them, as on {@link resolveObject} — unless
+    // [#34901] `includeDisabledExtensions` asks for the storage fold.
+    const withheld = listed && options?.includeDisabledExtensions !== true ? this.withholdDisabledExtensions(listed) : undefined;
     const contributors = withheld?.kept ?? listed;
     const served = withheld ? withoutWithheldMembers(base as unknown as ServiceObject, withheld) : base as unknown as ServiceObject;
     if (!contributors || !contributors.some((c) => c.ownership === 'extend')) {

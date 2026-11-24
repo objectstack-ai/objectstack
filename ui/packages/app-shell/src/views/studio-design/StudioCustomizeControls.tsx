@@ -152,9 +152,18 @@ export interface ServedOverride {
   declaration: OverrideDeclarationParsed | null;
   /** `draft`: the pair's pending draft declares it; `active`: the served row does. */
   state: 'draft' | 'active' | null;
+  /**
+   * objectstack#35600 (ADR-0146 D2, D11) — what the layered read at `base`
+   * served for the item: `base`, a code layer (the base ships the item, so an
+   * override of it can be declared); `environment`, no code layer but a row
+   * stored in this environment (an item no package ships: environment
+   * metadata, never an override); `none`, neither. `null` when that read was
+   * not made (the pair's draft answered first) or failed.
+   */
+  shipped: 'base' | 'environment' | 'none' | null;
 }
 
-const NO_OVERRIDE: ServedOverride = { declaration: null, state: null };
+const NO_OVERRIDE: ServedOverride = { declaration: null, state: null, shipped: null };
 
 /**
  * The override of `base` the server serves for `item`: the pair's pending
@@ -167,10 +176,18 @@ const NO_OVERRIDE: ServedOverride = { declaration: null, state: null };
  * of one locale is never read as the template's.
  *
  * A failed read is no declaration, as an absent one: no fact, no badge.
+ * The same layered read says whether the base ships the item
+ * ({@link ServedOverride.shipped}).
+ *
+ * objectstack#36750 — `item.unpublished`: the caller knows nothing is
+ * published under the item's name (a list view's fallback default id, which
+ * no view is held under). The layered read is not asked, and the answer is
+ * the one its 404 gave: no override, `shipped: 'none'`. The pair's draft is
+ * still read first: the item's first save into the pair creates it there.
  */
 export function useServedOverride(
   client: Pick<MetadataClient, 'getDraft' | 'layered'>,
-  item: { type: string; name: string; member?: string } | null,
+  item: { type: string; name: string; member?: string; unpublished?: boolean } | null,
   base: string | null,
   pair: string | null,
   nonce: string | number,
@@ -178,7 +195,8 @@ export function useServedOverride(
   const itemType = item?.type ?? '';
   const itemName = item?.name ?? '';
   const itemMember = item?.member ?? '';
-  const key = itemType && itemName && base ? JSON.stringify([itemType, itemName, itemMember, base]) : '';
+  const itemUnpublished = item?.unpublished === true;
+  const key = itemType && itemName && base ? JSON.stringify([itemType, itemName, itemMember, base, itemUnpublished]) : '';
   const [answer, setAnswer] = React.useState<{ key: string; served: ServedOverride }>({ key: '', served: NO_OVERRIDE });
   React.useEffect(() => {
     if (!key || !base) return;
@@ -191,20 +209,23 @@ export function useServedOverride(
           .getDraft(itemType, itemName, { packageId: pair, ...memberScope })
           .catch(() => null);
         const declared = declaredOverrideOf(extractDraftBody(draft), base);
-        if (declared) return { declaration: declared, state: 'draft' };
+        if (declared) return { declaration: declared, state: 'draft', shipped: null };
       }
+      if (itemUnpublished) return { declaration: null, state: null, shipped: 'none' };
       const layered = await client
         .layered(itemType, itemName, { packageId: base, ...memberScope })
         .catch(() => null);
-      const declared = declaredOverrideOf(layered?.overlay, base);
-      return declared ? { declaration: declared, state: 'active' } : NO_OVERRIDE;
+      if (!layered) return NO_OVERRIDE;
+      const shipped = layered.code != null ? 'base' : layered.overlay != null ? 'environment' : 'none';
+      const declared = declaredOverrideOf(layered.overlay, base);
+      return declared ? { declaration: declared, state: 'active', shipped } : { declaration: null, state: null, shipped };
     })().then((served) => {
       if (!cancelled) setAnswer({ key, served });
     });
     return () => {
       cancelled = true;
     };
-  }, [client, key, itemType, itemName, itemMember, base, pair, nonce]);
+  }, [client, key, itemType, itemName, itemMember, itemUnpublished, base, pair, nonce]);
   // A re-read of the same item keeps the last answer until it lands, so the
   // badge does not blink off and on after a save.
   return key && answer.key === key ? answer.served : NO_OVERRIDE;

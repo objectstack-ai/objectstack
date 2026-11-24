@@ -56,11 +56,19 @@ function makeDS(seed: any[] = []) {
     baseUrl: 'http://test.local',
     // `updateView` asks the draft home first; nothing is pending here.
     // objectstack#29550: the one-object view read answers from the same rows.
-    fetch: vi.fn(async (input: RequestInfo | URL) =>
-      (await answerObjectViewRead(input, () => ds.client.meta.getItems('view')))
-      ?? (String(input).includes('state=draft')
-        ? json({ error: 'not found' }, 404)
-        : json({ success: true, data: { capabilities: {}, routes: {} } }))),
+    // objectstack#35054: its layered read answers the stored row as the
+    // published layer, the body `updateView` merges onto.
+    fetch: vi.fn(async (input: RequestInfo | URL) => {
+      const layered = String(input).match(/\/meta\/view\/([^/?]+)\/layers/);
+      if (layered) {
+        const row = rows.get(`view::${decodeURIComponent(layered[1]!)}`) ?? null;
+        return json({ code: null, overlay: row, overlayScope: row ? 'env' : null, effective: row, draft: null });
+      }
+      return (await answerObjectViewRead(input, () => ds.client.meta.getItems('view')))
+        ?? (String(input).includes('state=draft')
+          ? json({ error: 'not found' }, 404)
+          : json({ success: true, data: { capabilities: {}, routes: {} } }));
+    }),
   });
   ds.connected = true;
   ds.connectionState = 'connected';

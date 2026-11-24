@@ -65,7 +65,31 @@ const rows: Array<{ site: string; extra: Record<string, unknown>; manifestExtra?
 describe('defineStack refuses `installModes` with `unmanaged` on a package the copy cannot write (ADR-0131 D6)', () => {
   it('the premise: the registry declares runtime-uncreatable types, `picklist` among them', () => {
     const uncreatable = DEFAULT_METADATA_TYPE_REGISTRY.filter((e) => !e.allowRuntimeCreate).map((e) => e.type);
-    expect(uncreatable).toEqual(expect.arrayContaining(['agent', 'api', 'capability', 'field', 'job', 'picklist']));
+    expect(uncreatable).toEqual(expect.arrayContaining(['agent', 'api', 'field', 'job', 'picklist']));
+  });
+
+  it('[#35157] an app that gates an action on its own capability permits `unmanaged` — the AI-built app shape', () => {
+    // The shape the authoring skills teach for a confirm-gated business
+    // action, as an AI-built gallery app wrote it: the package DECLARES the
+    // capability, a permission set GRANTS it, the action and the object
+    // REQUIRE it (ADR-0066 D1). The capability was the one thing such an app
+    // could not copy; the registry now declares `capability`
+    // runtime-creatable, so the copy writes it like any other item.
+    const gated = {
+      objects: [{ ...task, requiredPermissions: { delete: ['probe.manage_tasks'] } }],
+      capabilities: [{ name: 'probe.manage_tasks', label: 'Manage tasks', scope: 'org' }],
+      permissions: [{
+        name: 'probe_manager', label: 'Task manager',
+        objects: { probe_task: { allowRead: true, allowEdit: true, allowDelete: true } },
+        systemPermissions: ['probe.manage_tasks'],
+      }],
+      actions: [{
+        name: 'probe_close', label: 'Close', objectName: 'probe_task', type: 'script', target: 'probe_close',
+        requiredPermissions: ['probe.manage_tasks'],
+      }],
+    };
+    expect(refusal({ manifest: manifest(BOTH), ...gated })).toBeNull();
+    expect(refusal({ manifest: manifest(['unmanaged']), ...gated })).toBeNull();
   });
 
   for (const row of rows) {

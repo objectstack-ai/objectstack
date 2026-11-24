@@ -278,7 +278,9 @@ describe('objectui#11070 — a declared key is judged by its declared type on bo
     ['an adapter-shaped `dataSource`', { type: 'object-grid', properties: { objectName: 'task' }, dataSource: 'objectstack' }],
     // Round 7: the grid's columns are the spec's strict inline grid column.
     ['a grid column keyed by the retired `field` spelling', form({ type: 'grid', columns: [{ field: 'qty' }] })],
-    ['a grid column `type` outside the spec\'s nine cell controls (`boolean`)', form({ type: 'grid', columns: [{ name: 'done', type: 'boolean' }] })],
+    // `boolean` joined the cell types in objectstack#36043; `toggle` is a field
+    // type the column reads through `boolean`, never a column type of its own.
+    ['a grid column `type` outside the spec\'s fourteen cell controls (`toggle`)', form({ type: 'grid', columns: [{ name: 'done', type: 'toggle' }] })],
     ['a grid column `defaultValue` (the spec column declares none, and the grid reads none)', form({ type: 'grid', columns: [{ name: 'qty', defaultValue: 1 }] })],
     ['a `scale` on a column declaring `type: \'currency\'` (the spec refuses it there)', form({ type: 'grid', columns: [{ name: 'amount', type: 'currency', scale: 2 }] })],
     ['a bare-object `columns` (the spec types it as an array)', form({ type: 'grid', columns: { name: 'qty' } })],

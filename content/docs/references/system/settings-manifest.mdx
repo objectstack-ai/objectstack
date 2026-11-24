@@ -177,8 +177,8 @@ const result = ResolvedSettingValueSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **value** | `string \| null` | ✅ | The option in use; null exactly when source is 'none' |
-| **source** | `Enum<'settings' \| 'environment' \| 'none'>` | ✅ | Where the running system took it from: these settings, its own boot environment, or nothing in use |
+| **value** | `string \| null` | ✅ | The option in use; null when source is 'none', or when source is 'environment' and no option names what is in use. Read in-use from source, never from a null value |
+| **source** | `Enum<'settings' \| 'environment' \| 'none'>` | ✅ | Where the running system took it from: these settings, its own boot environment or host, or nothing in use |
 
 
 ---

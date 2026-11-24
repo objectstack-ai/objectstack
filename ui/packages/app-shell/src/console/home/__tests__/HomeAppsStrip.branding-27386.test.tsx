@@ -6,8 +6,9 @@
  * The 56 px icon square on Home (and the `app:launcher` block, which mounts the
  * same strip) follows the ladder `AppMark` uses in the top bar and the app
  * switcher: `branding.logo` when declared, else the app's `icon` on its
- * `branding.primaryColor` when that is a hex, else the `icon` on the name-keyed
- * gradient. A logo that fails to load falls back to the tile.
+ * `branding.primaryColor` when that is a hex, else the `icon` on the solid
+ * palette colour the app's name picks (objectstack#36157), never a gradient.
+ * A logo that fails to load falls back to the tile.
  */
 
 import '@testing-library/jest-dom/vitest';
@@ -16,8 +17,9 @@ import React from 'react';
 import { render, screen, fireEvent, cleanup } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { HomeAppsStrip } from '../HomeAppsStrip';
-import { launcherIconGradient } from '../launcherTile';
-import { appTileColors } from '../../../layout/appTileColors';
+import { OBJECT_COLOR_TILE_CLASS } from '@object-ui/components';
+import { appTileColors, autoTileColor } from '../../../layout/appTileColors';
+import { AppMark } from '../../../layout/AppMark';
 
 function renderStrip(apps: Record<string, unknown>[], favorites: { id: string }[] = []) {
   return render(
@@ -36,12 +38,13 @@ function renderStrip(apps: Record<string, unknown>[], favorites: { id: string }[
 describe('HomeAppsStrip — tile branding (objectstack#27386 row 4)', () => {
   afterEach(cleanup);
 
-  it('draws a declared hex primaryColor instead of the name-keyed gradient', () => {
+  it('draws a declared hex primaryColor instead of an automatic colour', () => {
     renderStrip([{ name: 'hotcrm', label: 'HotCRM', icon: 'Flame', branding: { primaryColor: '#ea580c' } }]);
     const icon = screen.getByTestId('app-tile-icon-hotcrm');
     expect(icon).toHaveAttribute('data-branded', 'true');
+    expect(icon).toHaveAttribute('data-app-tile', 'declared');
     expect(icon.className).not.toContain('bg-gradient-to-br');
-    for (const cls of launcherIconGradient('hotcrm').split(' ')) expect(icon.className).not.toContain(cls);
+    expect(icon.className).not.toContain('text-white');
     const colors = appTileColors('#ea580c')!;
     expect(icon.style.getPropertyValue('--os-app-tile-bg')).toBe(colors.bg);
     expect(icon.style.getPropertyValue('--os-app-tile-fg')).toBe(colors.fg);
@@ -49,7 +52,7 @@ describe('HomeAppsStrip — tile branding (objectstack#27386 row 4)', () => {
     expect(icon.style.getPropertyValue('--os-app-tile-fg-dark')).toBe(colors.fgDark);
   });
 
-  it('keeps the name-keyed gradient when no usable colour is declared', () => {
+  it('draws a solid palette colour picked by the app\'s name when no usable colour is declared, never a gradient (objectstack#36157)', () => {
     renderStrip([
       { name: 'plain', label: 'Plain', icon: 'Box' },
       // Not a hex: the spec's colour is a hex code, and `AppMark` reads only that.
@@ -57,10 +60,30 @@ describe('HomeAppsStrip — tile branding (objectstack#27386 row 4)', () => {
     ]);
     for (const name of ['plain', 'named']) {
       const icon = screen.getByTestId(`app-tile-icon-${name}`);
+      const color = autoTileColor(name);
       expect(icon).not.toHaveAttribute('data-branded');
-      expect(icon.className).toContain('bg-gradient-to-br');
-      for (const cls of launcherIconGradient(name).split(' ')) expect(icon.className).toContain(cls);
+      expect(icon).toHaveAttribute('data-app-tile', color);
+      expect(icon.className).not.toMatch(/gradient|from-|to-/);
+      for (const cls of OBJECT_COLOR_TILE_CLASS[color].split(' ')) expect(icon.className).toContain(cls);
+      expect(icon.className).toContain('text-white');
       expect(icon.getAttribute('style')).toBeNull();
+    }
+  });
+
+  it('Home\'s tile and the app\'s mark everywhere else are one colour for the same app (objectstack#36157)', () => {
+    const apps = [
+      { name: 'plain', label: 'Plain', icon: 'Box' },
+      { name: 'meeting_notes', label: 'Meeting notes', icon: 'Notebook' },
+      { name: 'hotcrm', label: 'HotCRM', icon: 'Flame', branding: { primaryColor: '#ea580c' } },
+    ];
+    renderStrip(apps);
+    for (const app of apps) {
+      const home = screen.getByTestId(`app-tile-icon-${app.name}`);
+      const { getByTestId, unmount } = render(<AppMark app={app} />);
+      const mark = getByTestId('app-mark-tile');
+      expect(mark.getAttribute('data-app-tile'), app.name).toBe(home.getAttribute('data-app-tile'));
+      expect(mark.getAttribute('style'), app.name).toBe(home.getAttribute('style'));
+      unmount();
     }
   });
 

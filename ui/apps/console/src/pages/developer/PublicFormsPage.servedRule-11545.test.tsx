@@ -55,9 +55,15 @@ import {
   expandViewContainer,
 } from '@objectstack/spec/ui';
 
-/** What `GET /meta/view` answers, set per test; and the writes the page sends. */
-const { served, saveItem, ADAPTER } = vi.hoisted(() => {
+/**
+ * What `GET /meta/view` answers, set per test; and the writes the page sends.
+ * objectstack#35054 — the writers start from the layered read
+ * (`METADATA_CLIENT.layered`), which answers `stored` for a name it holds and
+ * otherwise the served item (no translation in play).
+ */
+const { served, stored, saveItem, ADAPTER, METADATA_CLIENT } = vi.hoisted(() => {
   const served: { items: unknown[] } = { items: [] };
+  const stored = new Map<string, unknown>();
   const saveItem = vi.fn(async () => ({ ok: true }));
   // A STABLE singleton: a fresh object per render loops the page's load effect.
   const ADAPTER = {
@@ -68,12 +74,21 @@ const { served, saveItem, ADAPTER } = vi.hoisted(() => {
       },
     }),
   };
-  return { served, saveItem, ADAPTER };
+  // A STABLE singleton too: the page reads it per render.
+  const METADATA_CLIENT = {
+    layered: vi.fn(async (_type: string, name: string) => {
+      const item =
+        stored.get(name) ?? (served.items as Array<{ name?: string }>).find((i) => i?.name === name) ?? null;
+      return { code: null, overlay: item, overlayScope: item ? 'env' : null, effective: item };
+    }),
+  };
+  return { served, stored, saveItem, ADAPTER, METADATA_CLIENT };
 });
 
 vi.mock('@object-ui/app-shell', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useAdapter: () => ADAPTER,
+  useMetadataClient: () => METADATA_CLIENT,
 }));
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
@@ -150,7 +165,9 @@ const TWO_KEYS = 'showcase_inquiry.two_keys';
 
 beforeEach(() => {
   served.items = structuredClone(FIXTURE);
+  stored.clear();
   saveItem.mockClear();
+  METADATA_CLIENT.layered.mockClear();
 });
 afterEach(cleanup);
 
@@ -299,5 +316,99 @@ describe('the Publish and Edit writers write the form under config (objectui#115
     const parsed = ViewItemSchema.safeParse(body);
     expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
     expect(anonymousFormIntakeSlugs(body)).toEqual(['contact']);
+  });
+});
+
+/**
+ * objectstack#35054 (route D) — both writers start from the form as its author
+ * STORED it, never the served (translated) item.
+ *
+ * In a zh-CN session the served list translates a form view's label, its
+ * section titles and its thank-you text, and the door stores a view body
+ * verbatim. Measured live on `showcase_inquiry.qatr_contact`: the Edit dialog
+ * prefilled the thank-you title in Chinese, and Save stored label, section and
+ * thank-you text in Chinese. Here the served list carries the translated
+ * copies and the layered read the stored source.
+ *
+ * Direction, written before the run: with the served item spread into the body
+ * (the unmodified tree) the label, section and thank-you assertions go RED,
+ * and the slug control stays GREEN.
+ */
+describe('the Publish and Edit writers write the stored form (objectstack#35054)', () => {
+  /** The zh-CN served copy of a stored form view. */
+  function translated(item: any): any {
+    return {
+      ...item,
+      label: '联系我们（测试）',
+      config: {
+        ...item.config,
+        sections: item.config.sections.map((sec: any) => ({ ...sec, label: '关于你（测试）' })),
+        ...(item.config.submitBehavior
+          ? { submitBehavior: { ...item.config.submitBehavior, title: '谢谢（测试）！', message: '已收到（测试）。' } }
+          : {}),
+      },
+    };
+  }
+  function serveTranslated(...names: string[]) {
+    for (const name of names) {
+      const source = FIXTURE.find((i) => i.name === name) as any;
+      stored.set(name, structuredClone(source));
+      served.items = (served.items as any[]).map((i) => (i.name === name ? translated(i) : i));
+    }
+  }
+
+  it('a zh-CN Edit prefills and saves the stored thank-you text, label and sections; the slug changes', async () => {
+    serveTranslated(CONTACT);
+    const source = FIXTURE.find((i) => i.name === CONTACT) as any;
+    const { container } = await mount();
+    fireEvent.click(
+      within(rowOf(container, CONTACT)).getByRole('button', { name: /Edit sharing & post-submit behavior/i }),
+    );
+    const dialog = await screen.findByRole('dialog');
+
+    expect(METADATA_CLIENT.layered).toHaveBeenCalledWith('view', CONTACT);
+    expect(within(dialog).getByLabelText(/^Title$/)).toHaveValue('Thanks!');
+    fireEvent.change(within(dialog).getByLabelText('URL slug'), { target: { value: 'contact' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: /^Save$/ }));
+
+    await waitFor(() => expect(saveItem).toHaveBeenCalledTimes(1));
+    const body = (saveItem.mock.calls[0] as unknown as [string, string, any])[2];
+    expect(body.label).toBe(source.label);
+    expect(body.config.sections).toEqual(source.config.sections);
+    expect(body.config.submitBehavior).toEqual(contact.submitBehavior);
+    // Control: the edit itself is what the save carries.
+    expect(body.config.sharing.publicLink).toBe('/forms/contact');
+  });
+
+  it('a zh-CN Publish writes the stored label and sections; the sharing lands', async () => {
+    serveTranslated(WITHDRAWN);
+    const source = FIXTURE.find((i) => i.name === WITHDRAWN) as any;
+    await mount();
+    const option = (await openPublishPicker()).find((o) => o.textContent?.includes(WITHDRAWN));
+    fireEvent.click(option as HTMLElement);
+    await waitFor(() => expect(screen.queryByRole('listbox')).not.toBeInTheDocument());
+    fireEvent.change(screen.getByLabelText('URL slug'), { target: { value: 'again' } });
+    fireEvent.click(screen.getByRole('button', { name: /^Publish$/ }));
+
+    await waitFor(() => expect(saveItem).toHaveBeenCalledTimes(1));
+    const body = (saveItem.mock.calls[0] as unknown as [string, string, any])[2];
+    expect(body.label).toBe(source.label);
+    expect(body.config.sections).toEqual(source.config.sections);
+    expect(body.config.submitBehavior).toEqual(source.config.submitBehavior);
+    // Control.
+    expect(body.config.sharing).toEqual({ enabled: true, allowAnonymous: true, publicLink: '/forms/again' });
+  });
+
+  it('a form with nothing stored to read opens no editor and writes nothing', async () => {
+    const { container } = await mount();
+    METADATA_CLIENT.layered.mockResolvedValueOnce({ code: null, overlay: null, overlayScope: null, effective: null });
+    fireEvent.click(
+      within(rowOf(container, CONTACT)).getByRole('button', { name: /Edit sharing & post-submit behavior/i }),
+    );
+
+    const { toast } = await import('sonner');
+    await waitFor(() => expect(toast.error).toHaveBeenCalled());
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(saveItem).not.toHaveBeenCalled();
   });
 });

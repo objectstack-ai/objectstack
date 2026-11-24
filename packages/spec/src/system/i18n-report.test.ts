@@ -19,11 +19,14 @@ import {
 import {
   translateMetadataDocument,
   translateReport,
+  translateDashboard,
+  translateDataset,
   TRANSLATABLE_METADATA_TYPES,
 } from './i18n-resolver';
 // The fixture is PARSED by the authoring schema rather than hand-shaped, so a
 // translator reading a member the schema does not carry cannot pass here.
 import { ReportSchema } from '../ui/report.zod';
+import { resolveI18nLabel } from '../ui/i18n-label-resolver';
 
 const report = () => ReportSchema.parse({
   name: 'opps_by_stage',
@@ -176,5 +179,202 @@ describe('translateReport', () => {
       const edited = { ...report(), label: 'Pipeline by stage (ours)' };
       expect((translateReport(edited, bundle, { locale: 'zh-CN' }) as any).label).toBe('各阶段商机');
     });
+  });
+});
+
+/**
+ * objectstack#36373 — the console's report and dashboard panels edit a name or
+ * a widget title in the CURRENT language: an edit made while the box showed a
+ * bundle translation of a plain-string source stores the inline locale map
+ * `{ default: SOURCE, LANG: EDIT }`. These pins hold the precedence that makes
+ * that edit visible without moving any other locale.
+ */
+describe('an inline locale map entry for the requested locale beats the catalog (objectstack#36373)', () => {
+  const multi: TranslationBundle = {
+    'zh-CN': { reports: { opps_by_stage: { label: '各阶段商机', description: '按阶段汇总的商机' } } },
+    'ja-JP': { reports: { opps_by_stage: { label: 'ステージ別商談' } } },
+  };
+  const packagedBase = () => report();
+  // The shape the panel writes for a zh-CN edit of the plain-string source.
+  const editedInZh = () => ({
+    ...report(),
+    label: { default: 'Opportunities by Stage', 'zh-CN': '各阶段商机（本公司）' },
+  });
+
+  it('serves the zh-CN entry to a zh-CN reader, not the bundle translation', () => {
+    const out = translateReport(editedInZh(), multi, { locale: 'zh-CN', packagedBase: packagedBase() }) as any;
+    expect(out.label).toEqual({ default: 'Opportunities by Stage', 'zh-CN': '各阶段商机（本公司）' });
+    // The description, untouched by the edit, still reads its translation.
+    expect(out.description).toBe('按阶段汇总的商机');
+  });
+
+  it('keeps the English source byte-identical for a reader in the source language', () => {
+    const out = translateReport(editedInZh(), multi, { locale: 'en', packagedBase: packagedBase() }) as any;
+    expect(out.label.default).toBe(packagedBase().label);
+  });
+
+  it('a third locale still reads its own bundle translation, never the zh-CN entry or `default`', () => {
+    const out = translateReport(editedInZh(), multi, { locale: 'ja-JP', packagedBase: packagedBase() }) as any;
+    expect(out.label).toBe('ステージ別商談');
+  });
+
+  it('a base-language entry answers a regional request (`zh` for `zh-CN`)', () => {
+    const edited = { ...report(), label: { default: 'Opportunities by Stage', zh: '各阶段（本公司）' } };
+    const out = translateReport(edited, multi, { locale: 'zh-CN', packagedBase: packagedBase() }) as any;
+    expect(out.label).toEqual(edited.label);
+  });
+
+  it('control: a map equal to the package\'s own map changes nothing — the bundle still answers', () => {
+    const shipped = { default: 'Opportunities by Stage', 'zh-CN': '旧的内联译文' };
+    const base = { ...report(), label: shipped };
+    const served = { ...report(), label: { ...shipped } };
+    const out = translateReport(served, multi, { locale: 'zh-CN', packagedBase: base }) as any;
+    expect(out.label).toBe('各阶段商机');
+  });
+
+  it('control: with no packaged base the catalog answers, as the string rule does — the panel\'s edit is not served (owed: L2 7078881267 S2)', () => {
+    const out = translateReport(editedInZh(), multi, { locale: 'zh-CN' }) as any;
+    expect(out.label).toBe('各阶段商机');
+  });
+
+  it('a dashboard widget title follows the same rule', () => {
+    const bundle: TranslationBundle = {
+      'zh-CN': { dashboards: { exec: { widgets: { rev: { title: '按行业收入' } } } } },
+      'ja-JP': { dashboards: { exec: { widgets: { rev: { title: '業種別売上' } } } } },
+    };
+    const base = { name: 'exec', label: 'Executive', widgets: [{ id: 'rev', title: 'Revenue by Industry' }] };
+    const edited = {
+      ...base,
+      widgets: [{ id: 'rev', title: { default: 'Revenue by Industry', 'zh-CN': '各行业收入（本公司）' } }],
+    };
+    const zh = translateDashboard(edited as any, bundle, { locale: 'zh-CN', packagedBase: base }) as any;
+    expect(zh.widgets[0].title).toEqual(edited.widgets[0].title);
+    const ja = translateDashboard(edited as any, bundle, { locale: 'ja-JP', packagedBase: base }) as any;
+    expect(ja.widgets[0].title).toBe('業種別売上');
+    // Unedited: the bundle answers, as before.
+    const plain = translateDashboard(base as any, bundle, { locale: 'zh-CN', packagedBase: base }) as any;
+    expect(plain.widgets[0].title).toBe('按行业收入');
+  });
+
+  // ─── L2 7078881267 M1: rank 1 of ruling record 6631250894 holds ──────────
+  it('a translation the paired `.custom` package ships still answers first (ruling 6631250894 rank 1)', () => {
+    const pairBundle: TranslationBundle = { 'zh-CN': { reports: { opps_by_stage: { label: '成对包的译文' } } } };
+    const out = translateReport(editedInZh(), multi, { locale: 'zh-CN', packagedBase: packagedBase(), pairBundle }) as any;
+    expect(out.label).toBe('成对包的译文');
+  });
+
+  it('a pair with no entry for the slot leaves the map, and the base\'s translation never answers', () => {
+    const pairBundle: TranslationBundle = { 'zh-CN': { reports: { opps_by_stage: { description: '成对包的说明' } } } };
+    const out = translateReport(editedInZh(), multi, { locale: 'zh-CN', packagedBase: packagedBase(), pairBundle }) as any;
+    expect(out.label).toEqual(editedInZh().label);
+    expect(resolveI18nLabel(out.label, 'zh-CN')).toBe('各阶段商机（本公司）');
+  });
+
+  it('a widget title: the pair answers first, then the entry, never the base\'s translation', () => {
+    const bundle: TranslationBundle = { 'zh-CN': { dashboards: { exec: { widgets: { rev: { title: '按行业收入' } } } } } };
+    const base = { name: 'exec', label: 'Executive', widgets: [{ id: 'rev', title: 'Revenue by Industry' }] };
+    const edited = { ...base, widgets: [{ id: 'rev', title: { default: 'Revenue by Industry', 'zh-CN': '各行业收入（本公司）' } }] };
+    const pairBundle: TranslationBundle = { 'zh-CN': { dashboards: { exec: { widgets: { rev: { title: '成对包的标题' } } } } } };
+    const withPair = translateDashboard(edited as any, bundle, { locale: 'zh-CN', packagedBase: base, pairBundle }) as any;
+    expect(withPair.widgets[0].title).toBe('成对包的标题');
+    const emptyPair: TranslationBundle = { 'zh-CN': { dashboards: { exec: { label: '高管' } } } };
+    const noEntry = translateDashboard(edited as any, bundle, { locale: 'zh-CN', packagedBase: base, pairBundle: emptyPair }) as any;
+    expect(noEntry.widgets[0].title).toEqual(edited.widgets[0].title);
+  });
+
+  // ─── L2 7079950960 S3: the pair speaks for the requested locale only ─────
+  it('a pair translation for a fallback locale does not outrank the map\'s own entry', () => {
+    const pairBundle: TranslationBundle = { en: { reports: { opps_by_stage: { label: 'Pipeline by stage (pair)' } } } };
+    const out = translateReport(editedInZh(), multi, {
+      locale: 'zh-CN', fallbackChain: ['en'], packagedBase: packagedBase(), pairBundle,
+    }) as any;
+    expect(out.label).toEqual(editedInZh().label);
+    expect(resolveI18nLabel(out.label, 'zh-CN')).toBe('各阶段商机（本公司）');
+  });
+
+  it('a pair translation for a sibling region (zh-TW) does not answer a zh-CN request over the zh-CN entry', () => {
+    const pairBundle: TranslationBundle = { 'zh-TW': { reports: { opps_by_stage: { label: '各階段商機（成對包）' } } } };
+    const out = translateReport(editedInZh(), multi, { locale: 'zh-CN', packagedBase: packagedBase(), pairBundle }) as any;
+    expect(out.label).toEqual(editedInZh().label);
+  });
+
+  it('L2 7080413623 S4: a pair row stored under another spelling of the same language (zh-Hans) still answers a zh-CN request first', () => {
+    const pairBundle: TranslationBundle = { 'zh-Hans': { reports: { opps_by_stage: { label: '成对包的译文（zh-Hans）' } } } };
+    const out = translateReport(editedInZh(), multi, { locale: 'zh-CN', packagedBase: packagedBase(), pairBundle }) as any;
+    expect(out.label).toBe('成对包的译文（zh-Hans）');
+    // The mirror: a zh-Hans request over a row stored under zh-CN.
+    const edited = { ...report(), label: { default: 'Opportunities by Stage', 'zh-Hans': '各阶段商机（本公司）' } };
+    const mirror: TranslationBundle = { 'zh-CN': { reports: { opps_by_stage: { label: '成对包的译文（zh-CN）' } } } };
+    const back = translateReport(edited, multi, { locale: 'zh-Hans', packagedBase: packagedBase(), pairBundle: mirror }) as any;
+    expect(back.label).toBe('成对包的译文（zh-CN）');
+    // A ja-JP request over a row stored under the table tag `ja`.
+    const editedJa = { ...report(), label: { default: 'Opportunities by Stage', 'ja-JP': 'ステージ別（当社）' } };
+    const ja: TranslationBundle = { ja: { reports: { opps_by_stage: { label: 'ステージ別（ペア）' } } } };
+    const jaOut = translateReport(editedJa, multi, { locale: 'ja-JP', packagedBase: packagedBase(), pairBundle: ja }) as any;
+    expect(jaOut.label).toBe('ステージ別（ペア）');
+  });
+
+  it('a widget title: a fallback-locale pair translation leaves the zh-CN entry', () => {
+    const bundle: TranslationBundle = { 'zh-CN': { dashboards: { exec: { widgets: { rev: { title: '按行业收入' } } } } } };
+    const base = { name: 'exec', label: 'Executive', widgets: [{ id: 'rev', title: 'Revenue by Industry' }] };
+    const edited = { ...base, widgets: [{ id: 'rev', title: { default: 'Revenue by Industry', 'zh-CN': '各行业收入（本公司）' } }] };
+    const pairBundle: TranslationBundle = { en: { dashboards: { exec: { widgets: { rev: { title: 'Revenue (pair)' } } } } } };
+    const out = translateDashboard(edited as any, bundle, { locale: 'zh-CN', fallbackChain: ['en'], packagedBase: base, pairBundle }) as any;
+    expect(out.widgets[0].title).toEqual(edited.widgets[0].title);
+  });
+
+  it('control: a re-authored plain string still reads the pair along the chain, as before', () => {
+    const pairBundle: TranslationBundle = { en: { reports: { opps_by_stage: { label: 'Pipeline by stage (pair)' } } } };
+    const edited = { ...report(), label: 'Pipeline by stage (ours)' };
+    const out = translateReport(edited, multi, { locale: 'zh-CN', fallbackChain: ['en'], packagedBase: packagedBase(), pairBundle }) as any;
+    expect(out.label).toBe('Pipeline by stage (pair)');
+  });
+
+  // ─── L2 7078881267 S1: the gate picks the entry the writer and reader pick ─
+  describe('the entry for a locale is the one the panel writes and the reader shows', () => {
+    const scripts: TranslationBundle = {
+      ...multi,
+      'zh-TW': { reports: { opps_by_stage: { label: '各階段商機' } } },
+    };
+
+    it('a zh-TW request over { default, zh } reads its Traditional bundle text, never the Simplified entry', () => {
+      const edited = { ...report(), label: { default: 'Opportunities by Stage', zh: '各阶段（本公司）' } };
+      const out = translateReport(edited, scripts, { locale: 'zh-TW', packagedBase: packagedBase() }) as any;
+      expect(out.label).toBe('各階段商機');
+    });
+
+    it('a zh-TW request over { default, zh, zh-HK } gates on the zh-HK entry the reader shows', () => {
+      const edited = {
+        ...report(),
+        label: { default: 'Opportunities by Stage', zh: '各阶段（本公司）', 'zh-HK': '各階段（本公司）' },
+      };
+      const out = translateReport(edited, scripts, { locale: 'zh-TW', packagedBase: packagedBase() }) as any;
+      expect(out.label).toEqual(edited.label);
+      expect(resolveI18nLabel(out.label, 'zh-TW')).toBe('各階段（本公司）');
+      // The Simplified entry alone, equal to the base's own, is no statement about zh-TW.
+      const sameHk = { ...report(), label: { ...edited.label } };
+      const base = { ...report(), label: { ...edited.label } };
+      expect((translateReport(sameHk, scripts, { locale: 'zh-TW', packagedBase: base }) as any).label).toBe('各階段商機');
+    });
+
+    it('a bare-zh session reads the zh-CN entry its own edit replaced', () => {
+      const edited = { ...report(), label: { default: 'Opportunities by Stage', 'zh-CN': '各阶段商机（本公司）' } };
+      const out = translateReport(edited, multi, { locale: 'zh', packagedBase: packagedBase() }) as any;
+      expect(out.label).toEqual(edited.label);
+      expect(resolveI18nLabel(out.label, 'zh')).toBe('各阶段商机（本公司）');
+    });
+  });
+
+  it('scope control: a dataset member\'s inline map still loses to the bundle (ADR-0149)', () => {
+    const bundle: TranslationBundle = {
+      'zh-CN': { datasets: { pipeline: { dimensions: { stage: { label: '阶段' } } } } },
+    };
+    const base = { name: 'pipeline', object: 'opp', dimensions: [{ name: 'stage', label: 'Stage' }], measures: [] };
+    const edited = {
+      ...base,
+      dimensions: [{ name: 'stage', label: { default: 'Stage', 'zh-CN': '销售阶段（本公司）' } }],
+    };
+    const out = translateDataset(edited as any, bundle, { locale: 'zh-CN', packagedBase: base }) as any;
+    expect(out.dimensions[0].label).toBe('阶段');
   });
 });

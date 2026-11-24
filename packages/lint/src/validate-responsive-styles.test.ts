@@ -95,3 +95,21 @@ describe('validateResponsiveStyles (ADR-0065)', () => {
     expect(rules(findings)).not.toContain(STYLE_CLASSNAME_TAILWIND);
   });
 });
+
+describe('validateResponsiveStyles — the ten-token chart palette (objectstack#34902)', () => {
+  const tokenFindings = (token: string) =>
+    validateResponsiveStyles(stackWith({
+      id: 'slice', type: 'flex',
+      responsiveStyles: { large: { backgroundColor: `hsl(var(--${token}))` } },
+    })).filter((f) => f.rule === STYLE_UNKNOWN_TOKEN);
+
+  it.each(['chart-6', 'chart-7', 'chart-8', 'chart-9', 'chart-10'])('accepts `%s` as a known token', (token) => {
+    expect(tokenFindings(token)).toEqual([]);
+  });
+
+  it('CONTROL: `chart-11` is still flagged as an unknown token', () => {
+    const findings = tokenFindings('chart-11');
+    expect(findings).toHaveLength(1);
+    expect(findings[0].path).toBe('pages[0].regions[0].components[0].responsiveStyles.large.backgroundColor');
+  });
+});

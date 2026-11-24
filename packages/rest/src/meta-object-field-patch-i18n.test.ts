@@ -268,3 +268,80 @@ describe('a field a dependent package adds through objectExtensions is translate
         expect(marketOf(out).label).toBe('市场');
     });
 });
+
+describe('[#33952] a patched slot reads the patching package\'s own translations', () => {
+    // The protocol answers which code package patches what
+    // (`getPackagedFieldPatchBases`, the registry's read) and that package's
+    // own translations (`getPackageTranslationBundle`). The deployment
+    // catalog keeps the OWNER's rows under the very keys the patch's text is
+    // translated under (`BUNDLE`, merged in load order), which is why the
+    // patch above was served untranslated: measured on `origin/main`
+    // dc66d330, the item read answered `Headline` / `Patched description` /
+    // `Queued` under zh-CN with the patching package's zh-CN rows merged in.
+    const EXT_ROWS: Record<string, any> = {
+        'zh-CN': {
+            objects: {
+                [OBJ]: {
+                    fields: {
+                        title: { label: '大标题', help: '补丁说明' },
+                        status: { options: { todo: '排队中' } },
+                    },
+                },
+            },
+        },
+    };
+
+    function patchSources(reg: SchemaRegistry, locale: string, bundles: Record<string, unknown> = { [EXT_PKG]: EXT_ROWS }): MetaListTranslationSources & { asked: string[] } {
+        const asked: string[] = [];
+        const protocol = {
+            getPackagedObjectBase: (name: string) => reg.getPackagedObjectBase(name),
+            getPackagedFieldPatchBases: (name: string) => reg.getPackagedFieldPatchBases(name),
+            getPackageTranslationBundle: async (packageId: string) => {
+                asked.push(packageId);
+                return bundles[packageId];
+            },
+        };
+        return { ...sources(reg, locale), resolveProtocol: async () => protocol, asked };
+    }
+
+    it('the item read serves the patched label, help text and option label in the patching package\'s zh-CN', async () => {
+        const reg = registry(true);
+        const out: any = await translateMetaDocument(patchSources(reg, 'zh-CN'), 'object', served(reg));
+        expect([titleOf(out).label, titleOf(out).description, todoOf(out).label]).toEqual(['大标题', '补丁说明', '排队中']);
+        // The slots the patch leaves alone still read the deployment catalog.
+        expect([out.label, out.fields.status.label, doneOf(out).label]).toEqual(['任务', '状态', '已完成']);
+    });
+
+    it('the list read does too, reading each patching package\'s translations once for the page', async () => {
+        const reg = registry(true);
+        const src = patchSources(reg, 'zh-CN');
+        const out: any = await translateMetaList(src, 'object', [served(reg), served(reg)]);
+        for (const doc of out) expect([titleOf(doc).label, todoOf(doc).label]).toEqual(['大标题', '排队中']);
+        expect(src.asked).toEqual([EXT_PKG]);
+    });
+
+    it('a locale the patching package does not translate keeps the patch text, never the owner\'s translation of the replaced text', async () => {
+        const reg = registry(true);
+        for (const locale of ['en', 'zh-CN']) {
+            const bundles = locale === 'en' ? { [EXT_PKG]: EXT_ROWS } : { [EXT_PKG]: undefined };
+            const out: any = await translateMetaDocument(patchSources(reg, locale, bundles), 'object', served(reg));
+            expect([locale, titleOf(out).label, todoOf(out).label]).toEqual([locale, 'Headline', 'Queued']);
+        }
+    });
+
+    it('a tenant rename on top of the patch keeps its own text', async () => {
+        const reg = registry(true);
+        const doc = served(reg);
+        titleOf(doc).label = 'Tenant headline';
+        const out: any = await translateMetaDocument(patchSources(reg, 'zh-CN'), 'object', doc);
+        expect([titleOf(out).label, titleOf(out).description]).toEqual(['Tenant headline', '补丁说明']);
+    });
+
+    it('an object nobody patches reads no package translations', async () => {
+        const reg = registry(false);
+        const src = patchSources(reg, 'zh-CN');
+        const out: any = await translateMetaDocument(src, 'object', served(reg));
+        expect(titleOf(out).label).toBe('标题');
+        expect(src.asked).toEqual([]);
+    });
+});

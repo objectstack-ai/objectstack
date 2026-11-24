@@ -503,6 +503,24 @@ describe('date-range preset vocabulary — one source, in the spec', () => {
     expect(message).toContain('{30_days_ago}');     // the macro form
   });
 
+  it('REJECTS the period key {current_iso_week} — a week key is not a date', () => {
+    // `PERIOD_KEY_TOKENS` is its own list, never a member of `DATE_MACRO_TOKENS`,
+    // so a date filter refuses it in both wrappings.
+    expect(() => dateFilter('{current_iso_week}')).toThrow();
+    expect(() => dateFilter('${current_iso_week}')).toThrow();
+  });
+
+  it('accepts the period key {current_iso_week} as a text filter default, as written', () => {
+    // Resolved by the renderer each time the dashboard opens; the schema keeps
+    // the token. A literal week key stays a fixed default.
+    expect(GlobalFilterSchema.parse({
+      field: 'cost_week', type: 'text', defaultValue: '{current_iso_week}',
+    }).defaultValue).toBe('{current_iso_week}');
+    expect(GlobalFilterSchema.parse({
+      field: 'cost_week', type: 'text', defaultValue: '2026-W47',
+    }).defaultValue).toBe('2026-W47');
+  });
+
   it('leaves every OTHER filter type untouched', () => {
     // A `select` filter's options are the author's own vocabulary — a value that
     // happens to look like a preset name is none of this check's business.

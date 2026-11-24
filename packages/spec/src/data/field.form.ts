@@ -97,8 +97,9 @@ export const fieldForm = defineForm({
         // host, so declared = enforced = shown. A select over the schema's two
         // members with no default: an untouched row writes nothing and the
         // field keeps the renderer's default face, the bar. Gated to `percent`,
-        // the one type the key describes.
-        { field: 'percentDisplay', type: 'select', visibleWhen: "data.type == 'percent'", helpText: 'How the value is shown read-only, in list cells and on the record page. Unset: a progress bar beside the percentage. Bar: always the progress bar, for progress. Plain: the percentage alone, for a rate or a probability.', options: [
+        // the one type the key describes, and to a formula returning `percent`
+        // (#35047), which the console draws through the same percent face.
+        { field: 'percentDisplay', type: 'select', visibleWhen: "data.type == 'percent' || (data.type == 'formula' && data.returnType == 'percent')", helpText: 'How the value is shown read-only, in list cells and on the record page. Unset: a progress bar beside the percentage. Bar: always the progress bar, for progress. Plain: the percentage alone, for a rate or a probability.', options: [
           { label: 'Bar', value: 'bar' },
           { label: 'Plain', value: 'plain' },
         ] },
@@ -245,6 +246,13 @@ export const fieldForm = defineForm({
           { label: 'Cascade (delete children)', value: 'cascade' },
           { label: 'Restrict (block the delete)', value: 'restrict' },
         ] },
+        // #35315 — the Change Owner cascade (ruling 7000907189 point 4), beside
+        // `deleteBehavior`. `visibleWhen` is the key's parse gate: `FieldSchema`
+        // refuses `transferBehavior` on every type but these two.
+        { field: 'transferBehavior', type: 'select', visibleWhen: "data.type in ['lookup','master_detail']", helpText: 'Whether Change Owner on the referenced record can also move the records that point at it through this field', options: [
+          { label: 'None (stay with their owner)', value: 'none' },
+          { label: 'Cascade (offer to move with the referenced record)', value: 'cascade' },
+        ] },
         // #19085 — `relatedListFilter` gets the row its declaration always
         // implied. The served schema DECLARED the key and no form offered it,
         // so an author's only door was the Source tab's free-text JSON, where
@@ -352,7 +360,7 @@ export const fieldForm = defineForm({
           field: 'inlineColumns',
           type: 'repeater',
           visibleWhen: "data.type == 'master_detail'",
-          helpText: 'Columns of the inline grid on the parent\'s form, in display order; used only when this field sets inlineEdit, which is written in source. Unset: derived from this object\'s editable fields, and past six the rest start in the grid\'s column chooser. An entry that names only a field takes its type, options and rules from that field; the other column keys, type first, are written in source.',
+          helpText: 'Columns of the inline grid on the parent\'s form, in display order; used only when a field group of the parent names this child (fieldGroups[].relatedList). Unset: derived from this object\'s editable fields, and past six the rest start in the grid\'s column chooser. An entry that names only a field takes its type, options and rules from that field; the other column keys, type first, are written in source.',
           fields: [
             { field: 'name', label: 'Name', type: 'text', required: true, helpText: 'Field of this (the child) object that the column shows and edits (e.g. quantity). Nothing checks it when you save or publish: a name that is not a field of this object renders a plain text column.' },
             { field: 'label', label: 'Label', type: 'text', helpText: 'Column header. Unset: the field\'s own label.' },
@@ -371,16 +379,18 @@ export const fieldForm = defineForm({
       collapsed: true,
       fields: [
         { field: 'expression', widget: 'textarea', helpText: 'CEL expression the field\'s value is computed from. On a formula field: computed on read, no stored column. On any other field: computed by the engine from the row each write stores, and stored, so a client-sent value never stands.' },
-        // The five members are what FieldSchema declares — an explicit list, not
+        // The six members are what FieldSchema declares — an explicit list, not
         // the derived enum, so this row cannot pick up a member the formula
         // return type does not have. `currency` joined with #22727; its currency
         // is the `currencyConfig` row above, shown for a currency formula too.
-        { field: 'returnType', type: 'select', visibleWhen: "data.type == 'formula'", helpText: 'Declared value type of the formula, stamped from the inferred CEL type. Consumers read it instead of re-parsing the expression. Currency: an amount of money, in the currency the Currency Config of this field declares (dynamic when unset).', options: [
+        // `percent` joined with #35047; its face is the `percentDisplay` row.
+        { field: 'returnType', type: 'select', visibleWhen: "data.type == 'formula'", helpText: 'Declared value type of the formula, stamped from the inferred CEL type. Consumers read it instead of re-parsing the expression. Currency: an amount of money, in the currency the Currency Config of this field declares (dynamic when unset). Percent: a ratio, shown as a percent field shows it — a fraction, so 0.25 reads 25%.', options: [
           { label: 'Text', value: 'text' },
           { label: 'Number', value: 'number' },
           { label: 'Boolean', value: 'boolean' },
           { label: 'Date', value: 'date' },
           { label: 'Currency', value: 'currency' },
+          { label: 'Percent', value: 'percent' },
         ] },
         {
           field: 'summaryOperations',
@@ -447,6 +457,10 @@ export const fieldForm = defineForm({
         // UI & Visibility
         { field: 'readonly', colSpan: 1, helpText: 'Field is read-only in forms' },
         { field: 'hidden', colSpan: 1, helpText: 'Hide field from default UI views' },
+        // #36425 — whether a create asks for the field; read by every create
+        // surface of the Console (the create dialog, the full-page create, an
+        // action-opened create). The parse refuses it off on a required field.
+        { field: 'showOnCreate', colSpan: 1, helpText: 'Ask for this field when a record is created. Off: the create dialog, the full-page create and an action-opened create leave it out; editing, the record page and lists still show it. A required field is always asked for, so it cannot be turned off.' },
         { field: 'searchable', colSpan: 1, helpText: 'Include in global search results' },
         { field: 'sortable', colSpan: 1, helpText: 'Allow sorting lists by this field' },
         // #19332 G1b — the three field-level predicates. Same keys, same node, as
@@ -463,7 +477,12 @@ export const fieldForm = defineForm({
         // `string[]`, so the `app.form.ts` `requiredPermissions` face.
         { field: 'requiredPermissions', widget: 'string-tags', colSpan: 2, helpText: "Capabilities (permission-set systemPermissions) a caller must hold — every one listed — to read or edit this field (ADR-0066 D3). Without them the value is masked on read (partially, when a maskingRule is set) and edits are denied. Empty or unset: no capability gate." },
         { field: 'internal', colSpan: 1, helpText: "Never return this field's value on the generic data path: the engine omits the key from find/findOne results and from the create and update response bodies, on the default projection and when a client names the field in ?select=. Storage, filtering and indexing are untouched." },
-        { field: 'trackHistory', colSpan: 1, helpText: "Render this field's value changes as entries on the record activity timeline (ADR-0052 §5b). Opt-in per field." },
+        // [#36290] The off switch is `fieldHistory` (no default); `trackHistory`
+        // only opts a no-line type in. [#36482] `field-history` is a three-way
+        // choice, so unset is a state of its own: "Default" removes the key and
+        // names what it resolves to for this field's type (`resolveFieldHistory`).
+        { field: 'fieldHistory', widget: 'field-history', colSpan: 1, helpText: "Old → new values for this field on the record activity timeline. Default follows the platform: on for most types, off for a media, JSON or credential field. Off names the change by label only; On also shows a media or JSON field's values. A credential field never shows values, and the object's own Field History off wins." },
+        { field: 'trackHistory', colSpan: 1, helpText: "Opt a media or JSON field (image, file, json, …) into old → new values on the activity timeline. Every other field shows them already, and off does not hide them: use Field History." },
         { field: 'widget', colSpan: 2, helpText: 'Form widget override — names a registered field component, looked up as `field:` plus this name, to render the field instead of the type default. An unregistered name degrades to the type renderer.' },
         { field: 'ackPlaintextMasking', label: 'Acknowledge plaintext at rest', colSpan: 2, visibleWhen: "data.type == 'password'", helpText: "Affirm that this generic password field's plaintext-at-rest, masked-on-read contract is intended, silencing the author-time warning (ADR-0100). No effect on any other type." },
       ],

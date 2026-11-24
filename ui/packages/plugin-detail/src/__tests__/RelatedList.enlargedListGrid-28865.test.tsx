@@ -16,15 +16,19 @@
  * on the grid's host channel (React props on `SchemaRenderer`, the ones
  * `plugin-list`'s `ListView` hands the same grid), its own pager stays the one
  * pager, and a row action the grid dispatches goes back to the host's
- * `onRowAction`. The count shows once.
+ * `onRowAction`. The count shows once: in the tab title (objectstack#35601).
  */
 
 import { describe, it, expect, vi, afterEach, beforeAll } from 'vitest';
-import { cleanup, render, screen, waitFor, fireEvent, act } from '@testing-library/react';
+import { cleanup, render, screen, waitFor, act } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import * as React from 'react';
-import { FilterScopeProvider } from '@object-ui/react';
+import { FilterScopeProvider, RecordContextProvider, RecordPagePreferencesProvider } from '@object-ui/react';
 import { RelatedList } from '../RelatedList';
+import { resetRelatedTabConditionsForTests } from '../relatedTabConditions';
+
+// The related tab's conditions live in module memory for the visit (objectstack#35892).
+afterEach(() => resetRelatedTabConditionsForTests());
 import { RelatedListEnlargedContext } from '../relatedListCompact';
 
 /**
@@ -65,7 +69,8 @@ const FIELDS = {
   account: { type: 'lookup', reference: 'account', label: 'Account' },
   owner_id: { type: 'lookup', reference: 'sys_user', label: 'Owner' },
 };
-const TOTAL = 30;
+// More than one window of the related tab (`RELATED_TAB_WINDOW`, 50).
+const TOTAL = 80;
 const ALL_ROWS = Array.from({ length: TOTAL }, (_, i) => ({
   id: `o${i + 1}`,
   name: `Deal ${i + 1}`,
@@ -130,7 +135,7 @@ const lastFind = (find: ReturnType<typeof vi.fn>) => find.mock.calls[find.mock.c
 describe('the enlarged related tab on a desktop is the child object list face (objectstack#28865)', () => {
   it('hands object-grid the page it read, with its columns, and turns off the grid’s own pager and search', async () => {
     renderList();
-    await waitFor(() => expect(h.schema?.data?.items).toHaveLength(25));
+    await waitFor(() => expect(h.schema?.data?.items).toHaveLength(50));
     expect(h.schema.type).toBe('object-grid');
     expect(h.schema.objectName).toBe('opportunity');
     expect(h.schema.data.provider).toBe('value');
@@ -143,7 +148,9 @@ describe('the enlarged related tab on a desktop is the child object list face (o
   it('drives the grid on its host channel: this list’s window, page and sort, never node keys', async () => {
     renderList();
     await waitFor(() => expect(h.props?.rowCount).toBe(TOTAL));
-    expect(h.props).toMatchObject({ manualPagination: true, page: 1, pageSize: 25, sort: [] });
+    // objectstack#35892 — one growing window: every row loaded so far is
+    // page 1, and `rowCount` is the match total the footer leads with.
+    expect(h.props).toMatchObject({ manualPagination: true, page: 1, pageSize: 50, sort: [] });
     expect(h.props.objectFields).toEqual(FIELDS);
     for (const key of ['manualPagination', 'rowCount', 'page', 'onPageChange', 'onSortChange', 'objectFields']) {
       expect(h.schema, `${key} rides the host channel, not the node`).not.toHaveProperty(key);
@@ -159,50 +166,88 @@ describe('the enlarged related tab on a desktop is the child object list face (o
     await waitFor(() => expect(h.props.sort).toEqual([{ field: 'amount', order: 'desc' }]));
   });
 
-  it('a page from the grid is this list’s page: the next window is read from the server', async () => {
-    const { dataSource } = renderList();
-    await waitFor(() => expect(h.props?.rowCount).toBe(TOTAL));
-    act(() => h.props.onPageChange(2));
-    await waitFor(() => expect(lastFind(dataSource.find).$skip).toBe(25));
-    await waitFor(() => expect(h.schema.data.items.map((row: any) => row.id)).toEqual(['o26', 'o27', 'o28', 'o29', 'o30']));
-    expect(h.props.page).toBe(2);
-    // This list's own pager is the one pager.
-    expect(screen.getByText('Previous')).toBeInTheDocument();
+  it('rows load as the page scrolls: the end of the rows in view reads one longer window from the first row (objectstack#35892)', async () => {
+    const observers: Array<(entries: Array<{ isIntersecting: boolean }>) => void> = [];
+    const original = (globalThis as any).IntersectionObserver;
+    (globalThis as any).IntersectionObserver = class {
+      constructor(callback: (entries: Array<{ isIntersecting: boolean }>) => void) { observers.push(callback); }
+      observe() {}
+      disconnect() {}
+    };
+    try {
+      const { dataSource } = renderList();
+      await waitFor(() => expect(h.props?.rowCount).toBe(TOTAL));
+      expect(document.querySelector('[data-related-load-more]')).not.toBeNull();
+      act(() => observers[observers.length - 1]([{ isIntersecting: true }]));
+      await waitFor(() => expect(lastFind(dataSource.find)).toMatchObject({ $top: 100, $skip: 0 }));
+      await waitFor(() => expect(h.schema.data.items).toHaveLength(TOTAL));
+      expect(h.props.page).toBe(1);
+      // Every row is loaded: nothing more to ask for, and no pager at all.
+      expect(document.querySelector('[data-related-load-more]')).toBeNull();
+      expect(screen.queryByText('Previous')).toBeNull();
+    } finally {
+      (globalThis as any).IntersectionObserver = original;
+    }
   });
 
-  it('DEVIATION, pinned: while the filter box has text the grid still gets this list’s sort on the host channel', async () => {
-    // The list sorts its in-memory rows itself in this state (it read them
-    // all). Handed as a HOST sort, the grid's manual-sort rule applies: it
-    // offers no header sort on a relational column (`owner_id` here), whose
-    // stored value is an id. The data-table this face drew before sorted that
-    // column by its label in this one state.
+  // objectstack#35601 retired the tab's filter box and chips, and with them
+  // the in-memory sort state the DEVIATION pin above them described: every
+  // sort is now the server's.
+  it('no pager line under the grid: the footer row counts the matching rows, the tab title every child', async () => {
     renderList();
     await waitFor(() => expect(h.props?.rowCount).toBe(TOTAL));
-    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'Deal 1' } });
-    await waitFor(() => expect(h.props.rowCount).toBe(11));
-    expect(h.props.manualPagination).toBe(true);
-    expect(h.props.onSortChange).toEqual(expect.any(Function));
-    expect(h.schema.data.items.every((row: any) => row.name.startsWith('Deal 1'))).toBe(true);
+    expect(document.querySelector('[data-related-enlarged-status]')).toBeNull();
+    expect(h.props.residentSummaryRow).toBe(true);
+    expect(String(h.props.summaryRowLead(TOTAL))).toContain(String(TOTAL));
+    expect(document.querySelector('[data-related-chip]')).toBeNull();
+    expect(screen.queryByRole('searchbox')).toBeNull();
   });
 
-  it('the count shows once: on the 全部 chip, not again on the line under the toolbar', async () => {
-    renderList();
-    await waitFor(() => expect(document.querySelector('[data-related-chip="all"]')?.textContent).toBe(`All${TOTAL}`));
-    // The line keeps only the page; it no longer repeats the 30.
-    expect(document.querySelector('[data-related-enlarged-status]')?.textContent).toBe('Page 1 of 2');
+  it('column widths and order stay in this browser, kept by the grid under the node id; the record-page preference is neither read nor written (objectstack#35892)', async () => {
+    const stored = { order: ['amount', 'name', 'owner_id'], widths: { name: 260 } };
+    const store = {
+      get: vi.fn(() => ({ relatedLists: { 'opportunity.account': { columnState: stored } } })),
+      update: vi.fn(),
+    };
+    render(
+      <RecordPagePreferencesProvider value={store}>
+        <RecordContextProvider objectName="account" recordId="A-1">
+          <FilterScopeProvider currentUserId="u-1">
+            <RelatedListEnlargedContext.Provider value>
+              <RelatedList
+                title="Opportunities"
+                type="table"
+                api="opportunity"
+                objectName="opportunity"
+                referenceField="account"
+                parentId="A-1"
+                pageSize={25}
+                columns={[{ field: 'name', label: 'Name' }, { field: 'amount', label: 'Amount' }]}
+                dataSource={dataSourceFor() as never}
+              />
+            </RelatedListEnlargedContext.Provider>
+          </FilterScopeProvider>
+        </RecordContextProvider>
+      </RecordPagePreferencesProvider>,
+    );
+    await waitFor(() => expect(h.props?.rowCount).toBe(TOTAL));
+    expect(h.schema.id).toBe('related-opportunity.account');
+    expect(h.schema).not.toHaveProperty('columnState');
+    expect(h.props).not.toHaveProperty('onColumnStateChange');
+    expect(store.update).not.toHaveBeenCalled();
   });
 
-  it('a chip that narrows keeps its own count on the line, a different number from 全部’s', async () => {
+  it('CONTROL: with no preference store the grid gets no column state and no writer', async () => {
     renderList();
-    await waitFor(() => expect(document.querySelector('[data-related-chip="all"]')?.textContent).toBe(`All${TOTAL}`));
-    fireEvent.click(document.querySelector('[data-related-chip="mine"]')!);
-    await waitFor(() => expect(document.querySelector('[data-related-enlarged-status]')?.textContent).toMatch(/^1 row/));
+    await waitFor(() => expect(h.props?.rowCount).toBe(TOTAL));
+    expect(h.schema).not.toHaveProperty('columnState');
+    expect(h.props).not.toHaveProperty('onColumnStateChange');
   });
 
   it('row actions: the host’s defs ride to the grid, and a dispatch from the grid reaches onRowAction with the row', async () => {
     const onRowAction = vi.fn(async () => undefined);
     renderList({ onRowAction });
-    await waitFor(() => expect(h.schema?.data?.items).toHaveLength(25));
+    await waitFor(() => expect(h.schema?.data?.items).toHaveLength(50));
     expect(h.schema.rowActionDefs).toEqual(ROW_ACTIONS);
     const row = h.schema.data.items[2];
     // The grid's own dispatch shape (`objectGridActionsColumn` `onActionDef`).
@@ -215,7 +260,7 @@ describe('the enlarged related tab on a desktop is the child object list face (o
   it('CONTROL: a dispatch that is not one of this list’s row actions reaches the surrounding runner', async () => {
     const onRowAction = vi.fn(async () => undefined);
     renderList({ onRowAction });
-    await waitFor(() => expect(h.schema?.data?.items).toHaveLength(25));
+    await waitFor(() => expect(h.schema?.data?.items).toHaveLength(50));
     await h.execute!({ type: 'some_bulk_action', params: { records: [] } }).catch(() => undefined);
     await h.execute!({ name: 'not_ours', params: { _rowRecord: h.schema.data.items[0] } }).catch(() => undefined);
     expect(onRowAction).not.toHaveBeenCalled();
@@ -225,7 +270,7 @@ describe('the enlarged related tab on a desktop is the child object list face (o
     const onRowEdit = vi.fn();
     const onRowDelete = vi.fn();
     renderList({ onRowEdit, onRowDelete });
-    await waitFor(() => expect(h.schema?.data?.items).toHaveLength(25));
+    await waitFor(() => expect(h.schema?.data?.items).toHaveLength(50));
     expect(h.props.onEdit).toBe(onRowEdit);
     act(() => h.props.onDelete(h.schema.data.items[0]));
     expect(await screen.findByRole('alertdialog')).toBeInTheDocument();

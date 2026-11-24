@@ -67,7 +67,7 @@
 
 import * as React from 'react';
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
-import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, cleanup, fireEvent, waitFor, within } from '@testing-library/react';
 import { I18nProvider, en } from '@object-ui/i18n';
 import type { PendingActionRow } from '@objectstack/spec/contracts';
 import { AiPendingActionsInbox } from '../AiPendingActionsInbox';
@@ -118,6 +118,14 @@ function renderIn(language: string) {
     </I18nProvider>,
   );
 }
+
+/**
+ * The desktop face. Below `md` the same rows are also drawn as phone cards
+ * (objectstack#35449); happy-dom applies no stylesheet, so both faces are in
+ * the DOM here, and a count or a single-match lookup on a row's text reads
+ * the table it was written against.
+ */
+const tableFace = () => within(screen.getByRole('table'));
 
 /** Wait for the first fetch to settle and the table to paint. */
 async function firstRow(text: string) {
@@ -183,11 +191,11 @@ describe('AiPendingActionsInbox — relative times resolve from the packs (objec
     renderIn('zh');
     await firstRow(ZH.justNow);
 
-    expect(screen.getAllByText(ZH.justNow).length).toBe(1);
-    expect(screen.getByText(ZH.oneMinute)).toBeTruthy();
-    expect(screen.getByText(ZH.twoMinutes)).toBeTruthy();
-    expect(screen.getByText(ZH.threeHours)).toBeTruthy();
-    expect(screen.getByText(ZH.twentyDays)).toBeTruthy();
+    expect(tableFace().getAllByText(ZH.justNow).length).toBe(1);
+    expect(tableFace().getByText(ZH.oneMinute)).toBeTruthy();
+    expect(tableFace().getByText(ZH.twoMinutes)).toBeTruthy();
+    expect(tableFace().getByText(ZH.threeHours)).toBeTruthy();
+    expect(tableFace().getByText(ZH.twentyDays)).toBeTruthy();
   });
 
   it('leaves no English relative time behind in a zh session', async () => {
@@ -204,10 +212,10 @@ describe('AiPendingActionsInbox — relative times resolve from the packs (objec
     renderIn('ar');
     await firstRow(AR.justNow);
 
-    expect(screen.getByText(AR.oneMinute)).toBeTruthy();
-    expect(screen.getByText(AR.twoMinutes)).toBeTruthy();
-    expect(screen.getByText(AR.threeHours)).toBeTruthy();
-    expect(screen.getByText(AR.twentyDays)).toBeTruthy();
+    expect(tableFace().getByText(AR.oneMinute)).toBeTruthy();
+    expect(tableFace().getByText(AR.twoMinutes)).toBeTruthy();
+    expect(tableFace().getByText(AR.threeHours)).toBeTruthy();
+    expect(tableFace().getByText(AR.twentyDays)).toBeTruthy();
     expect(screen.queryByText(EN.justNow)).toBeNull();
   });
 
@@ -218,11 +226,11 @@ describe('AiPendingActionsInbox — relative times resolve from the packs (objec
     renderIn('en');
     await firstRow(EN.justNow);
 
-    expect(screen.getAllByText(EN.justNow).length).toBe(1);
-    expect(screen.getByText(EN.oneMinute)).toBeTruthy();
-    expect(screen.getByText(EN.twoMinutes)).toBeTruthy();
-    expect(screen.getByText(EN.threeHours)).toBeTruthy();
-    expect(screen.getByText(EN.twentyDays)).toBeTruthy();
+    expect(tableFace().getAllByText(EN.justNow).length).toBe(1);
+    expect(tableFace().getByText(EN.oneMinute)).toBeTruthy();
+    expect(tableFace().getByText(EN.twoMinutes)).toBeTruthy();
+    expect(tableFace().getByText(EN.threeHours)).toBeTruthy();
+    expect(tableFace().getByText(EN.twentyDays)).toBeTruthy();
   });
 
   it('falls past 30 days to a locale date, not to a relative phrase', async () => {
@@ -245,8 +253,8 @@ describe('AiPendingActionsInbox — the whole file is swept, not just the timest
     expect(screen.getByText(ZH.tabDecided)).toBeTruthy();
     expect(screen.getByText(ZH.colTool)).toBeTruthy();
     expect(screen.getByText(ZH.colDecision)).toBeTruthy();
-    expect(screen.getAllByText(ZH.view).length).toBe(5);
-    expect(screen.getAllByText(ZH.approve).length).toBe(5);
+    expect(tableFace().getAllByText(ZH.view).length).toBe(5);
+    expect(tableFace().getAllByText(ZH.approve).length).toBe(5);
   });
 
   it('leaves no English chrome behind in a zh session', async () => {
@@ -266,7 +274,7 @@ describe('AiPendingActionsInbox — the whole file is swept, not just the timest
 
     expect(screen.getByText(AR.title)).toBeTruthy();
     expect(screen.getByText(AR.colTool)).toBeTruthy();
-    expect(screen.getAllByText(AR.view).length).toBe(5);
+    expect(tableFace().getAllByText(AR.view).length).toBe(5);
     expect(screen.queryByText(EN.title)).toBeNull();
   });
 
@@ -320,7 +328,7 @@ describe('AiPendingActionsInbox — every status badge resolves from the packs',
       expect(screen.getAllByText(zh).length).toBeGreaterThan(0);
     }
     // Unknown status: verbatim, never a raw key.
-    expect(screen.getByText('archived_by_ops')).toBeTruthy();
+    expect(tableFace().getByText('archived_by_ops')).toBeTruthy();
     for (const en of ['Approved', 'Waiting for approval', 'Executed', 'Failed', 'Rejected']) {
       expect(screen.queryByText(en)).toBeNull();
     }

@@ -10,6 +10,10 @@
  * carries no dataset member); the executor is bound to the saved datasets of
  * the protocol's merged read, to the request's security probe and to the tool
  * layer's page cap; and every call runs as the request's own principal.
+ * Also pinned (its own describes below): an i18n service that resolves but
+ * whose `getLocales` / `getTranslations` throws, over the REAL executor, serves
+ * the datasets untranslated with a warning (#34993); and a `?locale=` with no
+ * `Accept-Language` answers labels and sentences in that one locale (#35083).
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -18,6 +22,7 @@ import { describe, it, expect, vi } from 'vitest';
 import '@objectstack/metadata';
 import { HttpDispatcher } from './http-dispatcher.js';
 import { buildMcpBridge, resolveMcpDatasetToolsService, type McpDatasetToolsService } from './domains/mcp.js';
+import { AnalyticsServicePlugin, type AnalyticsService } from '@objectstack/service-analytics';
 
 const EC = { userId: 'u1', tenantId: 'org_1', systemPermissions: [] };
 const SAVED = [{ name: 'sales_analysis', label: 'Sales analysis', object: 'crm_opportunity' }];
@@ -106,5 +111,143 @@ describe('[ADR-0149 D2] the MCP bridge\'s dataset members', () => {
         protocol.getMetaItems.mockRejectedValueOnce(new Error('metadata store down'));
         buildMcpBridge(deps, ctx, { datasetTools: analytics }).datasetToolDefinitions();
         await expect(bound[0].loadDatasets(EC)).rejects.toThrow('metadata store down');
+    });
+});
+
+/**
+ * [ADR-0149 D2 · #34993] The HTTP door's dataset members when the request's
+ * i18n service RESOLVES but its reads throw — a translation fault, which the
+ * shared translator (`translationBundleOf`) answers as no bundle and says. The
+ * executor is the REAL one (the analytics service `AnalyticsServicePlugin`
+ * registers, admission wired): `list_datasets` keeps the dataset, in its
+ * authored text, `partial` with the fault's warning; `query_dataset` answers.
+ *
+ * Flipped on purpose by #34993 (seat ruling B) from #34876's ruling-A pin
+ * (`datasets: []` + `partial`, and a 503), on both transports at once.
+ */
+describe('[ADR-0149 D2] the HTTP dataset tools when the i18n service resolves but its reads throw', () => {
+    const METRICS = {
+        name: 'sales_analysis',
+        label: 'Sales analysis',
+        object: 'crm_opportunity',
+        dimensions: [{ name: 'stage', label: 'Stage', field: 'stage', type: 'string' }],
+        measures: [{ name: 'revenue', label: 'Revenue', aggregate: 'sum', field: 'amount' }],
+    };
+    const ZH_CN = { datasets: { sales_analysis: { label: '销售分析' } } };
+
+    /**
+     * The analytics service AnalyticsServicePlugin registers, so the executor is
+     * the platform's own; over an open security double and an engine double
+     * that declares `crm_opportunity`, so a dataset the load hands over IS
+     * listed (the control case below), and an empty catalogue is the load's doing.
+     */
+    async function wiredAnalytics(): Promise<AnalyticsService> {
+        const fields = { id: { type: 'text' }, stage: { type: 'text' }, amount: { type: 'number' } };
+        const engine = {
+            execute: async () => ({ rows: [{ stage: 'won', total_amount: 100 }] }),
+            hasObjectMiddleware: () => false,
+            getObject: (name: string) => (name === 'crm_opportunity' ? { fields } : undefined),
+            resolveEffectiveDatasource: () => undefined,
+        };
+        const security = {
+            getReadFilter: async () => undefined,
+            canReadObject: () => true,
+            getReadableFields: async () => Object.keys(fields),
+            getQueryableFields: async () => Object.keys(fields),
+        };
+        const registered: Record<string, unknown> = { data: engine, security };
+        const pluginCtx = {
+            getService: (name: string) => registered[name],
+            registerService: (name: string, svc: unknown) => { registered[name] = svc; },
+            replaceService: (name: string, svc: unknown) => { registered[name] = svc; },
+            logger: { info() {}, warn() {}, error() {}, debug() {} },
+        };
+        await new AnalyticsServicePlugin({ queryCapabilities: () => ({ nativeSql: true, objectqlAggregate: false, inMemory: false }) }).init(pluginCtx as never);
+        const analytics = registered.analytics as AnalyticsService;
+        expect(analytics.hasPluginWiredAdmission()).toBe(true);
+        return analytics;
+    }
+
+    /** A resolved i18n service whose `read` throws `message`; the other read answers a bundle. */
+    function i18nWhoseReadThrows(read: 'getLocales' | 'getTranslations', message: string) {
+        return {
+            getLocales: () => {
+                if (read === 'getLocales') throw new Error(message);
+                return ['zh-CN', 'en'];
+            },
+            getTranslations: (locale: string) => {
+                if (read === 'getTranslations') throw new Error(message);
+                return locale === 'zh-CN' ? ZH_CN : {};
+            },
+            getDefaultLocale: () => 'zh-CN',
+        };
+    }
+
+    async function bridgeOverRealExecutor(i18n: unknown, request?: { url?: string; headers?: Record<string, string>; locale?: string }) {
+        const analytics = await wiredAnalytics();
+        const protocol = { getMetaItems: async ({ type }: { type: string }) => ({ type, items: type === 'dataset' ? [METRICS] : [] }) };
+        const { ctx, deps } = harness({ analytics, i18n, protocol });
+        if (request?.url) ctx.request.url = request.url;
+        if (request?.headers) Object.assign(ctx.request.headers, request.headers);
+        if (request?.locale) ctx.executionContext = { ...EC, locale: request.locale };
+        expect(await resolveMcpDatasetToolsService(deps, ctx)).toBe(analytics);
+        return buildMcpBridge(deps, ctx, { datasetTools: analytics });
+    }
+
+    const CASES = [
+        { read: 'getLocales' as const, message: 'locales exploded' },
+        { read: 'getTranslations' as const, message: 'bundle offline' },
+    ];
+
+    it('control: the same harness lists the dataset, in the bundle label, when the reads answer', async () => {
+        const answering = {
+            getLocales: () => ['zh-CN', 'en'],
+            getTranslations: (locale: string) => (locale === 'zh-CN' ? ZH_CN : {}),
+            getDefaultLocale: () => 'zh-CN',
+        };
+        const bridge = await bridgeOverRealExecutor(answering);
+        const answer = await bridge.listDatasets!({});
+        expect(answer.partial).toBeUndefined();
+        expect(answer.datasets.map((d: { name: string; label: string }) => [d.name, d.label])).toEqual([['sales_analysis', '销售分析']]);
+    });
+
+    it.each(CASES)('$read throwing: list_datasets keeps the dataset untranslated, partial, naming the i18n error', async ({ read, message }) => {
+        const bridge = await bridgeOverRealExecutor(i18nWhoseReadThrows(read, message));
+        const answer = await bridge.listDatasets!({});
+        expect(answer.datasets.map((d: { name: string; label: string }) => [d.name, d.label])).toEqual([['sales_analysis', 'Sales analysis']]);
+        expect(answer).toMatchObject({ partial: true, warning: expect.stringContaining(message) });
+    });
+
+    it.each(CASES)('$read throwing: query_dataset answers, in the authored labels', async ({ read, message }) => {
+        const bridge = await bridgeOverRealExecutor(i18nWhoseReadThrows(read, message));
+        const answer = await bridge.queryDataset!({ datasetName: 'sales_analysis', selection: { measures: ['revenue'] } }, { maxRows: 10 });
+        expect(answer.rowCount).toBe(1);
+        expect(answer.provenance.dataset).toEqual({ name: 'sales_analysis', label: 'Sales analysis' });
+    });
+
+    /**
+     * [#35083] `?locale=zh-CN` with no `Accept-Language`, an i18n default of
+     * `en`: the labels AND the executor's sentences (`nextStep`, `sourceLine`)
+     * answer what an `Accept-Language: zh-CN` caller is answered — one language.
+     */
+    it('a ?locale= with no Accept-Language answers labels and sentences in that one locale', async () => {
+        const enDefault = {
+            getLocales: () => ['zh-CN', 'en'],
+            getTranslations: (locale: string) => (locale === 'zh-CN' ? ZH_CN : {}),
+            getDefaultLocale: () => 'en',
+        };
+        const ask = async (bridge: any) => ({
+            list: await bridge.listDatasets({ terms: ['revenue'] }),
+            query: await bridge.queryDataset({ datasetName: 'sales_analysis', selection: { measures: ['revenue'] } }, { maxRows: 10 }),
+        });
+        const viaQuery = await ask(await bridgeOverRealExecutor(enDefault, { url: '/api/v1/mcp?locale=zh-CN' }));
+        const viaHeader = await ask(await bridgeOverRealExecutor(enDefault, { headers: { 'accept-language': 'zh-CN' }, locale: 'zh-CN' }));
+        const plain = await ask(await bridgeOverRealExecutor(enDefault));
+        expect(viaQuery.list.datasets[0].label).toBe('销售分析');
+        expect(viaQuery.list.nextStep).toEqual(viaHeader.list.nextStep);
+        expect(viaQuery.query.sourceLine).toBe(viaHeader.query.sourceLine);
+        // Control: without the parameter, the default's language, so the two above are the locale's doing.
+        expect(plain.list.datasets[0].label).toBe('Sales analysis');
+        expect(plain.query.sourceLine).not.toBe(viaHeader.query.sourceLine);
     });
 });

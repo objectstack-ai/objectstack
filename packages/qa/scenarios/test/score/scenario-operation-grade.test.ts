@@ -95,6 +95,61 @@ describe('gradeOperation — applied', () => {
   });
 });
 
+describe('gradeOperation — an aggregate post-state (`sum` / `each`) over every row its `where` matched', () => {
+  const LINES: DeclaredOutcome = {
+    kind: 'applied',
+    state: [
+      { object: 'claim_line', where: { 'claim.trip': 't121', expense_type: 'hotel' }, sum: { amount: 860 } },
+      { object: 'claim_line', where: { 'claim.trip': 't121' }, each: { over_standard: false } },
+    ],
+  };
+  const obs = (hotel: Array<Record<string, unknown>>, all: Array<Record<string, unknown>>): OperationObservation => ({
+    answer: { kind: 'applied' },
+    state: [hotel, all],
+  });
+  const night = { expense_type: 'hotel', quantity: 1, unit_amount: 430, amount: 430, over_standard: false };
+  const nights = { expense_type: 'hotel', quantity: 2, unit_amount: 430, amount: 860, over_standard: false };
+
+  it('meets one line of quantity 2 and two lines of quantity 1 alike, and says what it summed', () => {
+    expect(gradeOperation(LINES, obs([nights], [nights]))).toEqual({
+      pass: true,
+      checks: [
+        { check: 'answer:applied', pass: true, detail: 'applied' },
+        { check: 'state:claim_line[claim.trip="t121",expense_type="hotel"].sum(amount)', pass: true, detail: 'read 860 = 860 over 1 row(s), declared 860' },
+        { check: 'state:claim_line[claim.trip="t121"].each(over_standard)', pass: true, detail: '1 of 1 row(s) read false' },
+      ],
+    });
+    const perNight = gradeOperation(LINES, obs([night, night], [night, night]));
+    expect(perNight.pass).toBe(true);
+    expect(perNight.checks[1]!.detail).toBe('read 430 + 430 = 860 over 2 row(s), declared 860');
+  });
+
+  it('fails a wrong total, a line over the standard, and a row reading no number', () => {
+    expect(failed(LINES, obs([night], [night]))).toEqual(['state:claim_line[claim.trip="t121",expense_type="hotel"].sum(amount)']);
+    expect(failed(LINES, obs([nights, night], [nights, night]))).toEqual(['state:claim_line[claim.trip="t121",expense_type="hotel"].sum(amount)']);
+    const over = { ...nights, over_standard: true };
+    const g = gradeOperation(LINES, obs([over], [over]));
+    expect(g.pass).toBe(false);
+    expect(g.checks[2]).toEqual({ check: 'state:claim_line[claim.trip="t121"].each(over_standard)', pass: false, detail: '1 of 1 row(s) read otherwise (true), declared false' });
+    expect(failed(LINES, obs([night, { ...night, amount: '430' }], [night]))).toEqual(['state:claim_line[claim.trip="t121",expense_type="hotel"].sum(amount)']);
+  });
+
+  it('fails an aggregate over no row: a sum of nothing is not 0, and "every row" of none is no pass', () => {
+    const zero: DeclaredOutcome = { kind: 'applied', state: [{ object: 'claim_line', where: { 'claim.trip': 't121' }, sum: { amount: 0 }, each: { over_standard: false } }] };
+    expect(gradeOperation(zero, { answer: { kind: 'applied' }, state: [[]] }).checks[1]).toEqual({
+      check: 'state:claim_line[claim.trip="t121"]->rows',
+      pass: false,
+      detail: '0 row(s) read back, so there is nothing to aggregate',
+    });
+  });
+
+  it('sums decimals without float noise, and fails an aggregate the observation did not carry', () => {
+    const cents: DeclaredOutcome = { kind: 'applied', state: [{ object: 'claim_line', where: { expense_type: 'taxi' }, sum: { amount: 0.3 } }] };
+    expect(gradeOperation(cents, { answer: { kind: 'applied' }, state: [[{ amount: 0.1 }, { amount: 0.2 }]] }).pass).toBe(true);
+    expect(failed(LINES, { answer: { kind: 'applied' } })).toEqual(['state:claim_line[claim.trip="t121",expense_type="hotel"]', 'state:claim_line[claim.trip="t121"]']);
+  });
+});
+
 describe('gradeOperation — refused', () => {
   const REFUSED: DeclaredOutcome = { kind: 'refused', code: 'PERMISSION_DENIED' };
 
@@ -275,7 +330,7 @@ describe('gradeOperation — a write the build denies the persona (#33596)', () 
   });
 });
 
-describe('gradeOperation — pending_confirmation applied through the confirmation gate (temporary, until cloud#3826 item 6)', () => {
+describe('gradeOperation — pending_confirmation applied through the confirmation gate (the deprecated temporary rule: off, a grade opts in)', () => {
   const PENDING: DeclaredOutcome = { kind: 'pending_confirmation' };
   /** asset_lifecycle `dispose_scrapped_asset`, as the card declares it and as its ask names the target. */
   const RULE: AgentConfirmationRule = {
@@ -296,13 +351,26 @@ describe('gradeOperation — pending_confirmation applied through the confirmati
     agentSet: { disposal_request: [] },
     agentConfirmed: GATED,
   };
+  /** Opted in to the deprecated rule, which is off by default: these cases pin what it still does for a grade that asks for it. */
   const grade = (obs: OperationObservation, rule: AgentConfirmationRule = RULE, extra: { acceptAgentConfirmation?: boolean } = {}) =>
-    gradeOperation(PENDING, obs, { asOf: '2026-10-31', agentConfirmation: rule, ...extra });
+    gradeOperation(PENDING, obs, { asOf: '2026-10-31', agentConfirmation: rule, acceptAgentConfirmation: true, ...extra });
   const failing = (obs: OperationObservation, rule: AgentConfirmationRule = RULE) => grade(obs, rule).checks.filter((c) => !c.pass).map((c) => c.check);
   const gated = (patch: Partial<AgentConfirmedObservation>): OperationObservation => ({ ...APPLIED_VIA_GATE, agentConfirmed: { ...GATED, ...patch } });
 
-  it('the switch is on until real human confirmation lands', () => {
-    expect(AGENT_CONFIRMATION_MEETS_PENDING).toBe(true);
+  it('the switch is off: real human confirmation is on the platform', () => {
+    expect(AGENT_CONFIRMATION_MEETS_PENDING).toBe(false);
+  });
+
+  it('⛔ strict by default: the gallery runs\' write through the confirm-gated action, on an ask naming the target, fails pending_confirmation', () => {
+    // The card's full rule is passed (as `gradeCardOperation` passes it) and no grade opts in:
+    // the switch alone decides, and it grades the agent's own `confirm: true` as the write it is.
+    expect(gradeOperation(PENDING, APPLIED_VIA_GATE, { asOf: '2026-10-31', agentConfirmation: RULE })).toEqual({
+      pass: false,
+      checks: [
+        { check: 'answer:pending_confirmation', pass: false, detail: 'applied' },
+        { check: 'no-write', pass: false, detail: '1 record(s) written' },
+      ],
+    });
   });
 
   it('passes an applied write that meets all four conditions, and says the agent confirmed it', () => {

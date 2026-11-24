@@ -86,11 +86,44 @@ export async function readDeclaredCapabilityContext(
   ql: any,
   metadataService?: any,
 ): Promise<AnchorBindingContext | undefined> {
-  let caps: any[] = readDeclared(ql, 'capability');
-  if (caps.length === 0) {
+  // [ADR-0090 D5, #35157] Only a declaration with PACKAGE provenance is the
+  // app's own token (「带 package provenance 的应用声明 capability 令牌不计」).
+  // A capability is runtime-creatable since #35157. A save with no package
+  // registers it here with no `_packageId`, and it excuses nothing. A save
+  // into a writable package (an unmanaged copy, a duplicate, a base the
+  // environment authors) carries that package's id, and it counts: the copy's
+  // capabilities must, and a row cannot tell a copied declaration from one
+  // saved by hand into the same package. What bounds that is the save door,
+  // not this filter: a platform capability's name and a name a package
+  // already declares are refused there, and `describeHighPrivilegeBits`
+  // applies the platform floor again. A name nobody declares can be declared
+  // once, by a `manage_metadata` holder, inside a writable package.
+  // Dropping a declaration errs toward refusing a binding, never toward
+  // granting one.
+  //
+  // ⛔ The binding is `_packageId` and nothing else, on both lists. It is the
+  // row's binding as the server states it: the save door strips it from every
+  // body (`stripDerivedProvenance`) and the stored-row reads restate it from
+  // the row's `package_id` column alone (`withRowBinding`). `packageId` is an
+  // author-written key of `CapabilityDeclarationSchema`, which an environment
+  // save keeps: a body saved with no package that names any package there,
+  // existing or not, is still a save with no package. The metadata service
+  // states no package key of its own either: `register` stores the body as
+  // written and `list` serves it as stored, so its `packageId` / `package`
+  // is the same author-written key. An item that service holds for a package
+  // under `packageId` alone is therefore dropped, which refuses a binding.
+  const withPackage = (list: any[]): any[] => list.filter((c) => {
+    const pkg = c?._packageId;
+    return typeof pkg === 'string' && pkg.length > 0;
+  });
+  const registered: any[] = readDeclared(ql, 'capability');
+  let caps: any[] = withPackage(registered);
+  if (registered.length === 0) {
     try {
       const listed = metadataService?.list?.('capability');
-      caps = typeof (listed as any)?.then === 'function' ? await listed : (listed ?? []);
+      const answered = typeof (listed as any)?.then === 'function' ? await listed : (listed ?? []);
+      // The fallback is judged by the same provenance test, `_packageId` alone.
+      caps = Array.isArray(answered) ? withPackage(answered) : answered;
     } catch { caps = []; }
   }
   if (!Array.isArray(caps)) return undefined;

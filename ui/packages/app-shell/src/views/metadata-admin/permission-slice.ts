@@ -188,6 +188,16 @@ export interface FieldPerm {
    * off and never authors that shape.
    */
   when?: string;
+  /**
+   * The authoring-time acknowledgement `os lint` reads on a set's entry for a
+   * roll-up `summary` column (`FieldPermissionSchema` in `@objectstack/spec`):
+   * why holders of the set are meant to read the roll-up although they cannot
+   * read the child data it aggregates. The spec refuses it beside
+   * `readable: false` (that entry declares no read to acknowledge), so the
+   * matrix drops it in the same edit that switches Read off, and keeps it
+   * whenever Read stays on.
+   */
+  rollupSourceUnreadableReason?: string;
 }
 
 /**
@@ -259,10 +269,18 @@ export function fieldRuleSeed(entry: FieldPerm | undefined, objectPerm: ObjectPe
  * objectstack#25866 — a bulk shortcut rewrites the two booleans and keeps an
  * authored row condition, so it never silently widens a conditioned entry into
  * an unconditioned one. Clearing a condition is its own act, in the row.
+ *
+ * It keeps an authored `rollupSourceUnreadableReason` while the entry stays
+ * readable, so a shortcut never silently withdraws the acknowledgement, and
+ * drops it only when the entry goes `readable: false`, the shape the spec
+ * refuses it beside.
  */
 export function withFieldBits(cur: FieldPerm | undefined, readable: boolean, editable: boolean): FieldPerm {
   const next: FieldPerm = { readable, editable };
   if (cur?.when !== undefined) next.when = cur.when;
+  if (readable && cur?.rollupSourceUnreadableReason !== undefined) {
+    next.rollupSourceUnreadableReason = cur.rollupSourceUnreadableReason;
+  }
   return next;
 }
 

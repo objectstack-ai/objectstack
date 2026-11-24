@@ -228,3 +228,60 @@ describe('ImportWizard preselects the only applicable saved mapping (objectui#13
     expect(selectTrigger()).toHaveTextContent('— Map columns manually —');
   });
 });
+
+/**
+ * A named mapping speaks the wizard's language, and its preview follows it
+ * through a second file.
+ *
+ *   - The mapping step's read-only summary named each target by its API name
+ *     (`lead_source`) while every other wizard surface names a field by its
+ *     served label — in a zh-CN organization, the translated one.
+ *   - Back to upload and a new file kept the mapping selected (summary shown,
+ *     the import still names it) but auto-mapped the preview grid, which the
+ *     server never applies: with source headers unlike the field names the
+ *     preview had no columns at all, so its cells were blank.
+ */
+describe('a named mapping in the mapping step and the preview', () => {
+  /** Labels as the server serves them in a zh-CN organization. */
+  const ZH_FIELDS: WizardProps['fields'] = [
+    { name: 'company', label: '公司', type: 'text', required: true },
+    { name: 'lead_source', label: '线索来源', type: 'text' },
+  ];
+  /** Source headers that resemble no field name or label, so nothing auto-maps. */
+  const FEED: SavedMapping = {
+    ...LEAD_IMPORT,
+    name: 'crm_lead_feed_de',
+    fieldMapping: [
+      { source: 'Firma', target: 'company' },
+      { source: 'Kanal', target: 'lead_source' },
+    ],
+  };
+  const cellValues = () =>
+    screen.queryAllByTestId(/^import-preview-cell-/).map((el) => (el as HTMLInputElement).value);
+
+  it('the summary names each target by its served field label, not its API name', async () => {
+    render(wizard({ fields: ZH_FIELDS, savedMappings: [LEAD_IMPORT] }));
+    await toMappingStep();
+
+    const table = within(await screen.findByTestId('import-saved-mapping-summary'));
+    expect(table.getByText('公司')).toBeInTheDocument();
+    expect(table.getByText('线索来源')).toBeInTheDocument();
+    expect(table.queryByText('lead_source'), 'no API name in the summary').not.toBeInTheDocument();
+  });
+
+  it('a second file loaded under the mapping previews the mapped values', async () => {
+    render(wizard({ fields: ZH_FIELDS, savedMappings: [FEED] }));
+    pasteRows('Firma\tKanal\nAcme\tWebform');
+    await screen.findByTestId('import-saved-mapping-summary');
+
+    fireEvent.click(screen.getByRole('button', { name: /Back/ }));
+    pasteRows('Firma\tKanal\nGlobex\tPartner');
+    await screen.findByTestId('import-saved-mapping-summary');
+    const next = screen.getByTestId('import-next-btn');
+    await waitFor(() => expect(next).toBeEnabled());
+    fireEvent.click(next);
+
+    await screen.findByTestId('import-saved-mapping-preview-note');
+    await waitFor(() => expect(cellValues()).toEqual(['Globex', 'Partner']));
+  });
+});

@@ -11,7 +11,10 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   aiAddressOf,
+  ambientAppPackage,
+  dockTargetFollowsApp,
   parseAiAddress,
+  placeDockTarget,
   readBuilderHandoffState,
   readStoredDockFullWindow,
   readStoredDockTarget,
@@ -122,5 +125,52 @@ describe('sameDockTarget and readBuilderHandoffState', () => {
       parentConversationId: undefined,
     });
     expect(readBuilderHandoffState(null)).toEqual({});
+  });
+});
+
+describe('a target belongs to an app (objectstack#35014)', () => {
+  it('the ambient app is the authorable package; a built-in or no app is app-less', () => {
+    expect(ambientAppPackage('app.crm')).toBe('app.crm');
+    expect(ambientAppPackage('com.objectstack.setup')).toBeUndefined();
+    expect(ambientAppPackage(undefined)).toBeUndefined();
+  });
+
+  it('placing stamps the app in view, null outside any app, and never re-stamps', () => {
+    expect(placeDockTarget({ agent: 'build', conversationId: 'c1' }, 'app.crm')).toEqual({
+      agent: 'build',
+      conversationId: 'c1',
+      app: 'app.crm',
+    });
+    expect(placeDockTarget({ agent: 'build' }, undefined)).toEqual({ agent: 'build', app: null });
+    expect(placeDockTarget({ agent: 'build', app: 'app.crm' }, 'app.notes')).toEqual({
+      agent: 'build',
+      app: 'app.crm',
+    });
+    // A target naming nothing is the ambient thread, wherever it was opened.
+    expect(placeDockTarget({}, 'app.crm')).toBeUndefined();
+    expect(placeDockTarget({ app: 'app.crm' }, 'app.crm')).toBeUndefined();
+    expect(placeDockTarget(undefined, 'app.crm')).toBeUndefined();
+  });
+
+  it.each([
+    ['opened in the app in view', { conversationId: 'c1', app: 'app.crm' }, 'app.crm', true],
+    ['opened in another app', { conversationId: 'c1', app: 'app.crm' }, 'app.notes', false],
+    ['opened in an app, now app-less', { conversationId: 'c1', app: 'app.crm' }, undefined, false],
+    ['opened app-less, now app-less', { conversationId: 'c1', app: null }, undefined, true],
+    ['opened app-less, now in an app', { conversationId: 'c1', app: null }, 'app.crm', false],
+    ['naming the app in view, opened elsewhere', { packageId: 'app.crm', app: null }, 'app.crm', true],
+    ['naming another app, opened elsewhere', { packageId: 'app.crm', app: null }, 'app.notes', false],
+    ['not placed yet', { conversationId: 'c1' }, 'app.notes', true],
+  ] as const)('%s → %s', (_label, target, app, shown) => {
+    expect(dockTargetFollowsApp(target, app)).toBe(shown);
+  });
+
+  it('the stamp round-trips through the per-tab storage, null included', () => {
+    writeStoredDockTarget({ agent: 'build', conversationId: 'c1', app: 'app.crm' });
+    expect(readStoredDockTarget()).toEqual({ agent: 'build', conversationId: 'c1', app: 'app.crm' });
+    writeStoredDockTarget({ agent: 'build', app: null });
+    expect(readStoredDockTarget()).toEqual({ agent: 'build', app: null });
+    writeStoredDockTarget({ agent: 'build' });
+    expect(readStoredDockTarget()).toEqual({ agent: 'build' });
   });
 });

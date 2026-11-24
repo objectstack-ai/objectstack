@@ -225,6 +225,13 @@ const listView = await client.meta.getView('account', 'list');
 const view = await client.meta.getItem('view', 'crm_lead.pipeline');
 
 // Per-item draft lifecycle (ADR-0033)
+// Read a package's pending draft (?package=…&state=draft). Its item._diagnostics
+// carries the publish verdict: what publishing that draft would refuse.
+// 'active', the default, sends nothing. A caller the server does not admit to
+// drafts is answered with the published item, so compare `version` with the
+// draft save's before reading the answer as the draft.
+const draft = await client.meta.getItem('object', 'account', { packageId: 'com.acme.crm', state: 'draft' });
+console.log(draft.item._diagnostics?.valid);
 await client.meta.publishItem('object', 'account', { message: 'go live' });
 await client.meta.rollbackItem('object', 'account', 3);
 // The authoring trail, like getHistory and getAudit: without studio.access or manage_metadata → 403 FORBIDDEN (setup.access alone is refused)

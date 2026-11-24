@@ -115,6 +115,7 @@ const EXPECTED_GRANT: Record<string, Grant> = {
   relatedRowDelete: 'delete',
   attachmentUpload: 'create',
   attachmentDelete: 'delete',
+  attachmentRename: 'update',
   // The rows the write census found: affordances that read no grant at all.
   calendarQuickCreate: 'create',
   calendarReschedule: 'update',
@@ -132,6 +133,10 @@ const EXPECTED_GRANT: Record<string, Grant> = {
   // asked of `sys_comment`.
   feedCommentEdit: 'update',
   feedCommentDelete: 'delete',
+  // objectstack#36191: the same Delete through the own-comment delete door,
+  // which needs no delete grant, so it asks the grant the comment was posted
+  // under (as `feedReactionRemove` does for a reaction).
+  feedCommentDeleteOwn: 'create',
   // objectui#12982: Setup's Clone of a declared sharing rule, asked of
   // `sys_sharing_rule`: it creates an organization rule.
   declarationClone: 'create',
@@ -467,6 +472,8 @@ const RESOLVER_DIR = 'packages/permissions/src/';
 const OUT_OF_FAMILY: Record<string, string> = {
   'packages/app-shell/src/utils/managedByEmptyState.ts':
     "chooses an empty list's COPY from the object's bucket ('entries appear automatically'), principal-independent by design; it shows or hides no affordance — the page's New button is the listNew row",
+  'packages/app-shell/src/console/notification-settings/NotificationSettingsPage.tsx':
+    "gates the caller's OWN sys_notification_preference writes (a switch, the digest, quiet hours) on perms.can(sys_notification_preference, create | update) — the outOfFamily write sites myPreferences.ts :: sendPreferenceWrite below, the sys_personal_view pattern ObjectView reads; no record the caller browses is offered for writing",
 };
 
 const READS: RegExp[] = [
@@ -681,10 +688,23 @@ const WRITE_SITES: Record<string, WriteSite> = {
     outOfFamily("the language switcher changes the session's language locally and persists the caller's OWN sys_user.locale best-effort, a refusal surfacing as a toast"),
   'packages/app-shell/src/hooks/useUserLocale.ts :: saveSignInLanguagePick :: update':
     outOfFamily("the sign-in page saves the language picked on it as the caller's OWN sys_user.locale, only while that column is unset; a refusal leaves the pick on this device and does not hold the sign-in (no CRUD visibility door)"),
+  // The draft-preview record form's data source (objectstack#34807): a proxy
+  // over the adapter that forwards the create / update its form hands it,
+  // minus the draft-only field names. The affordance is the form's own write
+  // site, entered where the form calls it.
+  'packages/app-shell/src/utils/previewFormDataSource.ts :: createPreviewFormDataSource > writes > create :: create':
+    door('the draft-preview form data source: it forwards the create its form hands it, minus draft-only field names'),
+  'packages/app-shell/src/utils/previewFormDataSource.ts :: createPreviewFormDataSource > writes > update :: update':
+    door('the draft-preview form data source: it forwards the update its form hands it, minus draft-only field names'),
   // The attachments panel's upload has no data-source write site: the upload's
   // own completion attaches it (the upload adapter's `attachTo`), so the
   // `attachmentUpload` row is read where the upload is offered and no
   // `create` is called. Its delete is still a data-source write.
+  // Studio's 「新建应用」 door (objectstack#36748): the dialog's `newApp` step
+  // writes the new package's app as METADATA (a draft, then its publish), not a
+  // record through a data source; the member is named `create` like one.
+  'packages/app-shell/src/views/metadata-admin/PackageFormDialog.tsx :: PackageFormDialog > submit :: create':
+    outOfFamily("Studio's new-app door writes the new package's app metadata (draft, then publish) through the metadata client, not a record the caller browses; the Studio surface it is offered on is the author's own"),
   'packages/app-shell/src/views/RecordAttachmentsPanel.tsx :: RecordAttachmentsPanel > handleDelete :: delete':
     mapped(['attachmentDelete'], 'packages/app-shell/src/views/RecordAttachmentsPanel.tsx'),
   'packages/app-shell/src/views/RecordDetailView.tsx :: RecordDetailView > apiHandler :: update':
@@ -750,6 +770,11 @@ const WRITE_SITES: Record<string, WriteSite> = {
   // Connect an Agent's key list (objectstack-ai/objectstack#30894): Revoke marks one of the caller's own keys revoked.
   'packages/app-shell/src/console/connect/AuthorizedAccessList.tsx :: AuthorizedAccessList > revoke :: update':
     outOfFamily("the caller's OWN sys_api_key row (Revoke on Connect an Agent's key list, whose read is filtered on user_id = the caller and offers Revoke only on an active key); the write sets revoked: true and the server's CRUD step asks the grant; no record the caller browses is written"),
+  // The account app's Notification Settings page (objectstack-ai/objectstack#34728): the caller's own preference rows.
+  'packages/app-shell/src/console/notification-settings/myPreferences.ts :: sendPreferenceWrite :: create':
+    outOfFamily("the caller's OWN sys_notification_preference row (a switch, the digest or quiet hours on Notification Settings), created with user_id = the caller, offered behind perms.can(sys_notification_preference, create | update) in NotificationSettingsPage; member_default's row scope and write check (user_id == current_user.id) refuse any other row on the server; no record the caller browses is written"),
+  'packages/app-shell/src/console/notification-settings/myPreferences.ts :: sendPreferenceWrite :: update':
+    outOfFamily("the caller's OWN sys_notification_preference row, by the id the caller-scoped door GET /api/v1/messaging/me/preferences names as theirs, offered behind the same read in NotificationSettingsPage; member_default's row scope and write check (user_id == current_user.id) refuse any other row on the server; no record the caller browses is written"),
   // ── core ──
   'packages/core/src/actions/TransactionManager.ts :: TransactionManager > executeBatch :: batch':
     door('the action engine\'s transaction executor runs the operations its caller hands it'),
@@ -814,6 +839,15 @@ const WRITE_SITES: Record<string, WriteSite> = {
         "(absent from the spec's PLATFORM_OBJECTS_BY_PACKAGE and CLOUD_PROVIDED_OBJECT_NAMES, read 2026-10-11), so it fails " +
         'for every caller whatever their grant; no in-app link reaches its route either',
     ),
+  // objectstack#35599 — the record page's edit state: Edit (recordEdit, read
+  // by the page) enters it; Save writes the record alone as the plain update,
+  // or the record and its body tables as one batch, whose line add / remove
+  // read relatedNew / relatedRowDelete in the body-table editor and whose
+  // line cells are the field write gate's edit columns.
+  'packages/app-shell/src/views/recordEditState.tsx :: RecordEditStateController > save :: update':
+    mapped(['recordEdit'], RECORD_PAGE),
+  'packages/app-shell/src/views/recordEditState.tsx :: RecordEditStateController > save :: batch':
+    mapped(['recordEdit', 'relatedNew', 'relatedRowDelete', 'editFormFields'], RECORD_PAGE, 'packages/plugin-form/src/RecordBodyTableEditor.tsx', FIELD_WRITE_GATE),
   // ── plugin-detail ──
   'packages/plugin-detail/src/InlineEditSaveBar.tsx :: updateVia :: update': {
     ...mapped(['recordEdit'], RECORD_PAGE, RECORD_DETAILS, DETAIL_SECTION, HEADER_HIGHLIGHT),
@@ -824,10 +858,15 @@ const WRITE_SITES: Record<string, WriteSite> = {
   // re-parent of the picked record (without one) an update of the picked
   // object — the rows a related list's "+ New" and row Edit read.
   'packages/plugin-detail/src/queueClaim.ts :: claimQueuedRecord :: update': helper('claimQueuedRecord'),
-  'packages/plugin-detail/src/RelatedList.tsx :: RelatedList > handleAddRecords :: create':
-    mapped(['relatedNew'], RELATED_LIST),
-  'packages/plugin-detail/src/RelatedList.tsx :: RelatedList > handleAddRecords :: update':
-    mapped(['relatedRowEdit'], RELATED_LIST),
+  // One atomic batch since objectstack#35601: a junction `linkField` adds
+  // by creating junction rows (relatedNew), a plain lookup by reparenting
+  // the picked rows (relatedRowEdit).
+  'packages/plugin-detail/src/RelatedList.tsx :: RelatedList > handleAddRecords :: batch':
+    mapped(['relatedNew', 'relatedRowEdit'], RELATED_LIST),
+  // The related tab's bulk delete (objectstack#35892): one batch call to the
+  // data source, offered beside the host's row delete and read here.
+  'packages/plugin-detail/src/RelatedList.tsx :: RelatedList > handleConfirmBulkDelete :: delete':
+    mapped(['relatedRowDelete'], RELATED_LIST),
   'packages/plugin-detail/src/renderers/record-related-list.tsx :: RecordRelatedListBody :: delete': {
     ...mapped(['relatedRowDelete'], RELATED_LIST_BLOCK),
     note: "the FALLBACK remove (an `add` config, no host delete) reads the same row the host's delete reads, so it never puts back a delete the host withheld",
@@ -887,6 +926,14 @@ const WRITE_SITES: Record<string, WriteSite> = {
     mapped(['recordEdit'], RECORD_PANEL),
   'packages/plugin-kanban/src/ObjectKanban.tsx :: ObjectKanban > renderRecordOverlay > onDelete :: delete':
     mapped(['recordDelete'], DETAIL_VIEW),
+  // ── plugin-timesheet ── (#34382: typing into an empty cell creates, retyping
+  // a one-record cell updates its value field, clearing it deletes the record)
+  'packages/plugin-timesheet/src/ObjectTimesheet.tsx :: TimesheetGridView > writeCell :: create':
+    mapped(['gridAddRow'], 'packages/plugin-timesheet/src/ObjectTimesheet.tsx'),
+  'packages/plugin-timesheet/src/ObjectTimesheet.tsx :: TimesheetGridView > writeCell :: update':
+    mapped(['listInlineEdit'], 'packages/plugin-timesheet/src/ObjectTimesheet.tsx'),
+  'packages/plugin-timesheet/src/ObjectTimesheet.tsx :: TimesheetGridView > writeCell :: delete':
+    mapped(['rowDelete'], 'packages/plugin-timesheet/src/ObjectTimesheet.tsx'),
   // ── plugin-view ──
   'packages/plugin-view/src/ObjectView.tsx :: ObjectView > onClick :: delete':
     mapped(['rowDelete'], OBJECT_GRID),

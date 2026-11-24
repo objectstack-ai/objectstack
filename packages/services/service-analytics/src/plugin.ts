@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { Plugin, PluginContext } from '@objectstack/core';
-import { isFederatedObject } from '@objectstack/core';
+import { isFederatedObject, registryObjectPackageDisabled } from '@objectstack/core';
 import type { Cube, FilterCondition } from '@objectstack/spec/data';
 import { AggregationFunction, referenceCarrierOf } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
@@ -15,6 +15,8 @@ import {
   assertReadScopeAdmittedByEngine,
   assertReadScopeCannotVacate,
   assertReadScopeComparandsRunnable,
+  READ_SCOPE_FIXED_READ_LEAF_BRANDS,
+  fixedReadLeafRefusalSinkOf,
   assertReadScopePlaceholdersResolvable,
 } from './read-scope-sql.js';
 import { readScopeUnresolvedError } from './read-scope-refusal.js';
@@ -56,8 +58,9 @@ import { asAcceptedSqlDialect, type AcceptedSqlDialect } from './text-match-sql.
  * `IObjectQLEngine`, so the `Partial<>` around it is not decoration — it is
  * what keeps this seam usable against an engine that is not ObjectQL.
  * `judgeFilter` (#20157) is optional on the contract itself, by ruling, and
- * the auto-bridge probes it the same way. So is `hasObjectMiddleware`
- * (#21080), whose absence the bridge below reads as "cannot say".
+ * the auto-bridge probes it the same way. So are `hasObjectMiddleware`
+ * (#21080) and `fixedReadLeafClassOf` (ADR-0155 D4, #35946), whose absence
+ * the bridges below read as "cannot say".
  */
 /** One bridged `executeAggregate` call's input (the plugin option's own declaration). */
 type BridgedAggregateInput = Parameters<NonNullable<AnalyticsServicePluginOptions['executeAggregate']>>[1];
@@ -70,10 +73,17 @@ type BridgedAggregateInput = Parameters<NonNullable<AnalyticsServicePluginOption
  */
 const RELATION_GROUP_BY: unique symbol = Symbol.for('objectstack.objectql.relationGroupBy');
 
+/**
+ * [order and cut] The data engine's read-option key for an order-and-cut
+ * request: objectql's `AGGREGATE_ORDER_CUT` (`aggregate-order-cut.ts`), the
+ * same `Symbol.for` key, for the reason `RELATION_GROUP_BY` is spelled here.
+ */
+const AGGREGATE_ORDER_CUT: unique symbol = Symbol.for('objectstack.objectql.aggregateOrderCut');
+
 type DataEngineLike =
   Pick<IDataEngine, 'aggregate'>
   & Partial<Pick<IDataEngine, 'execute' | 'resolveEffectiveDatasource' | 'getDriverForObject'>>
-  & Partial<Pick<IObjectQLEngine, 'getObject' | 'judgeFilter' | 'hasObjectMiddleware'>>;
+  & Partial<Pick<IObjectQLEngine, 'getObject' | 'judgeFilter' | 'hasObjectMiddleware' | 'fixedReadLeafClassOf'>>;
 
 /**
  * The slice of the `IDataDriver` CONTRACT the analytics layer consumes —
@@ -381,6 +391,7 @@ export class AnalyticsServicePlugin implements Plugin {
     // without re-implementing the bridge in every app.
     let executeAggregate = this.options.executeAggregate;
     let executeRelationGroupAggregate: AnalyticsServiceConfig['executeRelationGroupAggregate'];
+    let executeOrderCutAggregate: AnalyticsServiceConfig['executeOrderCutAggregate'];
     let autoBridged = false;
     // [#19995, ruling C] The engine's judge-only `where` admission, filled below
     // ONLY when this plugin bridges `executeAggregate` itself, and then to the
@@ -517,6 +528,30 @@ export class AnalyticsServicePlugin implements Plugin {
           joined: false,
           reason: request.outcome?.reason ?? 'the "data" engine does not serve a relation group join',
         };
+      };
+      // [order and cut] …and the same aggregate ordered, cut and counted by
+      // the driver's own statement. Declinable: where the engine cannot serve
+      // the cut it reads nothing and says so, and `ObjectQLStrategy` reads
+      // every group and cuts in memory. Same engine as the executor above.
+      executeOrderCutAggregate = async (objectName, input, cut) => {
+        const request: {
+          orderBy: typeof cut.orderBy; limit: number; declinable: true;
+          outcome?: { kind?: unknown; totalGroups?: unknown };
+          declined?: { reason?: unknown };
+        } = { orderBy: cut.orderBy, limit: cut.limit, declinable: true };
+        const engine = requireDataEngine();
+        const aggregate = engine.aggregate as unknown as (
+          object: string, query: unknown, options: Record<symbol, unknown>,
+        ) => Promise<unknown>;
+        const rows = await aggregate.call(engine, objectName, engineAggregateQuery(input), {
+          [AGGREGATE_ORDER_CUT]: request,
+        });
+        const totalGroups = request.outcome?.totalGroups;
+        if (request.outcome?.kind === 'served' && typeof totalGroups === 'number') {
+          return { served: true, rows: rows as Record<string, unknown>[], totalGroups };
+        }
+        const reason = request.declined?.reason;
+        return { served: false, reason: typeof reason === 'string' ? reason : 'the "data" engine did not order and cut the groups' };
       };
       autoBridged = true;
 
@@ -1185,7 +1220,15 @@ export class AnalyticsServicePlugin implements Plugin {
         // [ADR-0139 D6] The engine's `ReadableIds` leaf admitted, as at the
         // two merges this door mirrors: the `$and` below hands the scope to
         // `executeAggregate` — the engine — whose boundary composes it.
-        if (scope) assertReadScopeComparandsRunnable(scope, targetObject, { admitReadableIds: true });
+        // [ADR-0155 D4] …and the fixed-read leaf brands, as at those merges.
+        if (scope) {
+          assertReadScopeComparandsRunnable(scope, targetObject, {
+            admitReadableIds: true,
+            admitFixedReadLeaves: READ_SCOPE_FIXED_READ_LEAF_BRANDS,
+            fixedReadLeafRefusal: fixedReadLeafRefusalSinkOf(ctx.logger),
+            object: targetObject,
+          });
+        }
         if (scope) assertReadScopePlaceholdersResolvable(scope, targetObject, context);
         if (scope) assertReadScopeAdmittedByEngine(scope, targetObject, context, { judgeFilter });
         // #3680 — the sort-key pass hands over the PRE-window id set (every
@@ -1489,6 +1532,44 @@ export class AnalyticsServicePlugin implements Plugin {
       return undefined;
     };
 
+    /**
+     * [ADR-0155 D4, plan step 5, #35946] The engine seam's recognition of D4's
+     * two classes for a fixed-read leaf a read scope carries
+     * (`IObjectQLEngine.fixedReadLeafClassOf`), resolved per call like
+     * `hasObjectMiddleware` above, and handed on as the engine gave it: a
+     * class, or `null` for neither, the one answer on which `NativeSQLStrategy`
+     * compiles the leaf.
+     *
+     * It FAILS CLOSED: no engine, a `getService` throw, or an engine without
+     * the member answers `undefined` ("cannot say"). The strategy declines
+     * every answer but `null` to the engine path, so that tier declines, as a
+     * class and a throw do, and so does a member that does not keep the
+     * contract (one answering `undefined` for neither, say). ⛔ No copy of either class here (D4: "restates none"). An engine
+     * without the member is said once, at `warn`: the rows stay correct, only
+     * the native path for a scope carrying the leaf is gone.
+     */
+    let reportedEngineWithoutLeafClassAnswer = false;
+    const fixedReadLeafClassOf: NonNullable<AnalyticsServiceConfig['fixedReadLeafClassOf']> = (leaf) => {
+      let svc: DataEngineLike | undefined;
+      try {
+        svc = ctx.getService<DataEngineLike>('data');
+      } catch {
+        return undefined;
+      }
+      if (!svc) return undefined;
+      if (typeof svc.fixedReadLeafClassOf !== 'function' && !reportedEngineWithoutLeafClassAnswer) {
+        reportedEngineWithoutLeafClassAnswer = true;
+        ctx.logger.warn(
+          '[Analytics] The "data" engine has no fixedReadLeafClassOf (IObjectQLEngine.fixedReadLeafClassOf), so ' +
+            'NativeSQLStrategy cannot ask the engine whether it may compile a SharedRecordIds leaf in a read scope. It ' +
+            'declines every query whose read scope carries one, and the ObjectQL strategy serves it through the engine; ' +
+            'a query that strategy cannot serve is refused. Register ObjectQLPlugin\'s engine as "data" to keep the ' +
+            'native path for those scopes. Reported once.',
+        );
+      }
+      return svc.fixedReadLeafClassOf?.(leaf);
+    };
+
     const config: AnalyticsServiceConfig = {
       cubes: this.options.cubes,
       logger: ctx.logger,
@@ -1555,6 +1636,7 @@ export class AnalyticsServicePlugin implements Plugin {
                 currencyField?: string;
                 homeAmount?: { field?: string };
               };
+              unitConfig?: { unitMode?: string; unitField?: string };
             }
           | undefined;
         if (!f) return undefined;
@@ -1572,6 +1654,13 @@ export class AnalyticsServicePlugin implements Plugin {
         const homeAmountField = recordCurrencyField !== undefined
           ? f.currencyConfig?.homeAmount?.field
           : undefined;
+        // [ADR-0158 U7 R1] …and a quantity's `unitField` ONLY under
+        // `unitMode: 'record'` on a `number`, the one shape the spec reads it
+        // under: the cube door's record-unit judgment groups by it.
+        const recordUnitField = f.type === 'number' && f.unitConfig?.unitMode === 'record'
+          && typeof f.unitConfig.unitField === 'string' && f.unitConfig.unitField !== ''
+          ? f.unitConfig.unitField
+          : undefined;
         return {
           type: f.type,
           multiple: f.multiple === true,
@@ -1579,6 +1668,7 @@ export class AnalyticsServicePlugin implements Plugin {
           defaultCurrency: fixedCurrency,
           currencyField: recordCurrencyField,
           homeAmountField,
+          unitField: recordUnitField,
         };
       },
       // #5033 — the datasource an object is bound to, used ONLY to name the
@@ -1608,10 +1698,16 @@ export class AnalyticsServicePlugin implements Plugin {
       // [relation group join] The executing engine's relation group join —
       // see beside the `executeAggregate` auto-bridge above.
       executeRelationGroupAggregate,
+      // [order and cut] The executing engine's order and cut — see beside
+      // the `executeAggregate` auto-bridge above.
+      executeOrderCutAggregate,
       // [#21080] The data engine's per-object middleware answer — see
       // `hasObjectMiddleware` above. Wired whoever executes raw SQL: the
       // middlewares live in the engine either way.
       hasObjectMiddleware,
+      // [ADR-0155 D4, #35946] The engine seam's class recognition for a
+      // fixed-read leaf — see `fixedReadLeafClassOf` above.
+      fixedReadLeafClassOf,
       // ADR-0062 D6 — a federated object carries an `external` block (ADR-0015).
       // Reported so NativeSQLStrategy declines it (its hand-compiled FROM would
       // hit the wrong physical table) and the driver-correct ObjectQL path runs.
@@ -1664,6 +1760,14 @@ export class AnalyticsServicePlugin implements Plugin {
         }
         return engine.getObject?.(objectName) as { enable?: unknown; fields?: unknown } | undefined;
       },
+      // [#35525] The registry's disabled-package predicate — the ONE the data
+      // route asks (`isObjectOfDisabledPackage`) before it answers `404
+      // OBJECT_PACKAGE_DISABLED` — read through core's accessor over the SAME
+      // engine's registry, per call (a disable is reversible and nothing is
+      // cached). An engine or registry that cannot answer hides nothing, as on
+      // the data route. Every object a query reads is asked, for every caller.
+      isObjectPackageDisabled: (objectName: string) =>
+        registryObjectPackageDisabled((dataEngine() as { registry?: unknown } | undefined)?.registry)(objectName),
       draftRowsResolver,
     };
 

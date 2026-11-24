@@ -45,7 +45,7 @@ import { baseAddressServesMember, readOnlyShippingPackages, shippingPackageIds }
 import { canonicalMetaType, canonicalizeMetaRequestType } from './protocol-meta-type-schema.js';
 import { boundPackageOf } from './protocol-package-bindings.js';
 import type { ShippingPackages } from './protocol-package-bindings.js';
-import { memberOption } from './protocol-bundle-members.js';
+import { bundleMemberDiscriminator, memberOption } from './protocol-bundle-members.js';
 import type { MetadataAuditEntry } from './protocol-audit-entry.js';
 import { packagedBaseRegimeRow, packagedBaseRegimeSentence } from './packaged-base-regime.js';
 import { packagelessCloseSubject } from './protocol-packageless-overlay-migration.js';
@@ -688,17 +688,22 @@ export class ProtocolWriteGatesFacet {
      * [#28802] The registry's answer `item` for a bundle member read on the
      * address of `base`, when that address serves it
      * ({@link baseServesBundleMember}); else, for a read that named no
-     * member, the base's own member its artifact answers canonical-first,
-     * and otherwise nothing. An address that ships no member of the name is
-     * no base of it: `item` as before.
+     * member, the base's own CANONICAL member, and otherwise nothing. An
+     * address that ships no member of the name is no base of it: `item` as
+     * before. [#34682] A read naming no member addresses the canonical member
+     * (the selector's contract), so a base that ships none answers it with
+     * nothing, as `?member=<canonical>` is answered; FROM (`main` d947a93cf8):
+     * the base's first shipped member (`fr-FR`).
      */
     static registryMemberServedAt(host: Pick<ProtocolHost, 'baseServesBundleMember' | 'engine' | 'shippedArtifactsOf' | 'shippingPackagesOf' | 'shipsBundleName'>, type: string, name: string, base: string, item: unknown, member: string | undefined): unknown {
         const shipping = host.shippingPackagesOf(type);
         if (!host.shipsBundleName(type, name, base, shipping)) return item;
         if (host.baseServesBundleMember(type, name, base, item, shipping)) return item;
         if (member !== undefined) return undefined;
+        const canonical = bundleMemberDiscriminator(type, undefined);
         const own = host.shippedArtifactsOf(type, name, shipping)
-            .find((artifact) => (artifact as { _packageId?: unknown } | null)?._packageId === base);
+            .find((artifact) => (artifact as { _packageId?: unknown } | null)?._packageId === base
+                && itemDiscriminator(canonicalMetaType(type), artifact) === canonical);
         if (own === undefined) return undefined;
         const candidate = host.engine.registry.getItem(type, name, base, itemDiscriminator(canonicalMetaType(type), own));
         return candidate !== undefined && host.baseServesBundleMember(type, name, base, candidate, shipping) ? candidate : undefined;

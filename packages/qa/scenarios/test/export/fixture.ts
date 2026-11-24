@@ -27,6 +27,7 @@ import { runCard, type CardRun, type ProjectOps } from '../../src/runner/orchest
 import type { PackageSource } from '../../src/runner/packages.js';
 import { runRecord } from '../../src/runner/scorecard.js';
 import type { ParsedTurn } from '../../src/runner/transcript.js';
+import { seedDoorAnswer } from '../runner/seed-door.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const CARDS_DIR = resolve(HERE, '../../../../../docs/qa/scenarios');
@@ -66,7 +67,9 @@ export function crmArtifact(iterated: boolean) {
     manifest: { id: `com.example.${NS}`, namespace: NS },
     objects,
     permissions: [
-      { name: n('sdr'), objects: { [n('account')]: { allowRead: true }, [n('contact')]: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true } }, fields: { [`${n('contact')}.email`]: { readable: false } } },
+      // `writeScope: 'org'` lifts the platform's owner-only delete floor for the sdr's
+      // card deletes of admin-owned contacts, as Modify All would without unmasking `email`.
+      { name: n('sdr'), objects: { [n('account')]: { allowRead: true }, [n('contact')]: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true, writeScope: 'org' } }, fields: { [`${n('contact')}.email`]: { readable: false } } },
       { name: n('partner_user'), objects: { [n('contact')]: { allowRead: true, allowCreate: true } } },
     ],
   };
@@ -184,6 +187,14 @@ export class FakeApp implements AppHarness {
     this.installed = manifest;
     return { ok: true, status: 200, body: {} };
   }
+  /** The managed door, which the seed loads through: a data-only package's `data[]` ({@link seedDoorAnswer}). */
+  async installManaged(manifest: Record<string, unknown>): Promise<HttpAnswer> {
+    if (!Array.isArray(manifest.data)) {
+      this.installed = manifest;
+      return { ok: true, status: 200, body: {} };
+    }
+    return seedDoorAnswer((object, row) => this.insertRow(object, row), manifest);
+  }
   async metadataAsArtifact(collections: readonly string[]) {
     const src = (this.installed ?? {}) as Record<string, unknown[]>;
     const out: Record<string, unknown[]> = {};
@@ -278,6 +289,7 @@ export async function runCrm(
     /** The prefix of every API key the booted apps issue; default `key-`. */ keyPrefix?: string;
     /** Wraps the scripted model (e.g. to send its turns through another driver); the recording records what this answers. */ wrap?: (scripted: AgentDriver) => AgentDriver;
     /** How many times each question turn is asked (`--ask-repeats`); left to the runner's default when absent. */ askRepeats?: number;
+    /** A masking-off round (`--schema-masking off`): graded under it, and the record stamps it as `env.schemaMasking`. */ schemaMasking?: 'off';
   } = {},
 ): Promise<FixtureRun> {
   const scenario = loadCrm();
@@ -302,10 +314,11 @@ export async function runCrm(
     admin: ADMIN,
     ...(opts.iterateRun === false ? { iterateRun: false } : {}),
     ...(opts.askRepeats !== undefined ? { askRepeats: opts.askRepeats } : {}),
+    ...(opts.schemaMasking ? { schemaMasking: opts.schemaMasking } : {}),
   });
   const date = opts.date ?? '2026-11-06';
   const packages = opts.packages ?? { source: 'published', versions: ['18.3.0'] };
-  const record = runRecord({ run: `${date}-scenario-${CARD_ID}`, date, framework: 'abc1234', packages, driver: driver.info(), runner: 'scenario-runner', evidenceDir: work }, cardRun);
+  const record = runRecord({ run: `${date}-scenario-${CARD_ID}`, date, framework: 'abc1234', packages, driver: driver.info(), runner: 'scenario-runner', evidenceDir: work, ...(opts.schemaMasking ? { schemaMasking: opts.schemaMasking } : {}) }, cardRun);
   return { scenario, work, cardRun, record, recording: driver.recording };
 }
 

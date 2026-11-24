@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
-import { DATE_MACRO_WRAPPED_RE, isDateMacroToken } from './date-macros.zod.js';
+import { DATE_MACRO_WRAPPED_RE, isDateMacroToken, isPeriodKeyToken, type PeriodKeyToken } from './date-macros.zod.js';
 
 /**
  * Context Tokens — the declarative placeholders that resolve against the
@@ -309,10 +309,11 @@ export const CONTEXT_TOKEN_SUGGESTIONS: Readonly<Record<string, ContextToken | R
 /**
  * Is `token` (without braces) resolvable inside a **filter value**?
  *
- * The union of the two filter vocabularies: date macros and context
- * tokens. This is the predicate a lint pass wants — anything else in a
- * filter value is passed through to the data engine verbatim and will
- * match nothing.
+ * The union of the filter vocabularies the server resolves: context tokens,
+ * date macros and period keys (`PERIOD_KEY_TOKENS` in `./date-macros.zod.ts`,
+ * `{current_iso_week}`). This is the predicate a lint pass wants — anything
+ * else in a filter value is passed through to the data engine verbatim and
+ * will match nothing.
  *
  * Note this is deliberately narrower than what navigation accepts:
  * `recordId` / `params` also resolve `AppContextSelector` ids, which are
@@ -330,7 +331,7 @@ export const CONTEXT_TOKEN_SUGGESTIONS: Readonly<Record<string, ContextToken | R
  * computes its own record's id with a CEL value envelope, `record.id`).
  */
 export function isKnownFilterToken(token: string): boolean {
-  return isContextToken(token) || isDateMacroToken(token);
+  return isContextToken(token) || isDateMacroToken(token) || isPeriodKeyToken(token);
 }
 
 /**
@@ -354,6 +355,11 @@ export function isKnownFilterToken(token: string): boolean {
  * and nowhere else (see {@link RECORD_CONTEXT_TOKENS}). A caller that has no
  * record in context refuses it by name, never as `unknown`, because the
  * spelling is right and the surface is not.
+ *
+ * `period-key` (`{current_iso_week}`, `PERIOD_KEY_TOKENS`) is its own kind
+ * rather than a `date-macro` because its value is a key such as `2026-W47`,
+ * not a day: a caller that judges what a `date-macro` resolved to as a date
+ * must not judge a period key that way.
  */
 export function classifyFilterToken(
   value: unknown,
@@ -361,6 +367,7 @@ export function classifyFilterToken(
   | { kind: 'context'; token: ContextToken }
   | { kind: 'record-context'; token: RecordContextToken }
   | { kind: 'date-macro'; token: string }
+  | { kind: 'period-key'; token: PeriodKeyToken }
   | { kind: 'unknown'; token: string; suggestion?: ContextToken | RecordContextToken }
   | null {
   if (typeof value !== 'string') return null;
@@ -370,6 +377,7 @@ export function classifyFilterToken(
   if (isContextToken(token)) return { kind: 'context', token: token as ContextToken };
   if (isRecordContextToken(token)) return { kind: 'record-context', token: token as RecordContextToken };
   if (isDateMacroToken(token)) return { kind: 'date-macro', token };
+  if (isPeriodKeyToken(token)) return { kind: 'period-key', token: token as PeriodKeyToken };
   // Own-property guard: the table is a plain object literal, so a bare index
   // resolves `Object.prototype`'s members for an off-vocabulary token —
   // `{constructor}` put the `Object` FUNCTION and `{__proto__}`

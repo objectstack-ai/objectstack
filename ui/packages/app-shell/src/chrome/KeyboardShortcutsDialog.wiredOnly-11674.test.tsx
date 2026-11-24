@@ -38,7 +38,7 @@ import '@objectstack/lint';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import React, { useState } from 'react';
 import { render, screen, fireEvent, cleanup, waitFor, act } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, useLocation } from 'react-router-dom';
 import { useSidebar } from '@object-ui/components';
 
 vi.mock('@object-ui/i18n', async (importOriginal) => ({
@@ -54,14 +54,11 @@ vi.mock('../layout/ChatDock', () => ({
     expanded: false,
     width: 420,
     dragging: false,
-    maximized: false,
     fullWindow: false,
     setFullWindow: vi.fn(),
     toggle: () => {},
     expand: () => {},
     collapse: () => {},
-    maximize: () => {},
-    restore: () => {},
     onResizePointerDown: () => {},
   }),
   ChatDockPanel: () => null,
@@ -101,9 +98,11 @@ function Probe() {
   const sidebar = useSidebar();
   const palette = useCommandPalette();
   const sidebarOpen = sidebar.isMobile ? sidebar.openMobile : sidebar.open;
+  const location = useLocation();
   return (
     <output
       data-testid="probe"
+      data-path={location.pathname}
       data-sidebar-open={String(sidebarOpen)}
       data-palette-open={String(palette.open)}
     />
@@ -181,6 +180,14 @@ const FIRES: Record<string, (event: KeyboardEventInit) => Promise<void>> = {
     expect(dialogShown()).toBe(true);
     fireEvent.keyDown(document.activeElement ?? document.body, event);
     await waitFor(() => expect(dialogShown()).toBe(false));
+  },
+  // objectstack#36112 — the app layout installs the home chord, at every
+  // width, so the dialog lists it inside an app.
+  'go-home': async (event) => {
+    mountConsole('/apps/crm');
+    expect(probe()).toHaveAttribute('data-path', '/apps/crm');
+    fireEvent.keyDown(document.body, { ...event, key: String(event.key).toUpperCase() });
+    await waitFor(() => expect(probe()).toHaveAttribute('data-path', '/home'));
   },
   'toggle-sidebar': async (event) => {
     clearSidebarCookie();

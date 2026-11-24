@@ -67,6 +67,8 @@ const PLAIN = {
 };
 
 const SCREEN = { nodeId: 'screen_1', title: 'Reason', fields: [{ name: 'reason', label: 'Reason', type: 'text', required: true }] };
+/** [#34515] The second screen of a two-screen wizard: it collects a field of the same name. */
+const SCREEN_2 = { nodeId: 'screen_2', title: 'Final sign-off', fields: [{ name: 'reason', label: 'Reason', type: 'text', required: true }] };
 
 const PERSON = { userId: 'u1', systemPermissions: [] as string[] };
 const DELEGATED = { userId: 'u1', principalKind: 'agent', onBehalfOf: { userId: 'u1', principalKind: 'human' }, systemPermissions: [] as string[] };
@@ -78,19 +80,21 @@ function makeConfirmationService() {
     return { submit: vi.fn(async (_handOff: unknown, _ec: unknown) => ({ pendingId: `pa_${++n}` })) };
 }
 
-function makeHarness(opts: { service?: unknown; audit?: unknown } = {}) {
+function makeHarness(opts: { service?: unknown; audit?: unknown; screens?: ReadonlyArray<typeof SCREEN> } = {}) {
+    // [#34515] The screens the flow walks, in order: one by default; a wizard has two.
+    const screens = opts.screens ?? [SCREEN];
     const leads = [
         { id: 'lead_1', owner: 'u1', name: 'Ada', status: 'open' },
         { id: 'lead_2', owner: 'u2', name: 'Grace', status: 'open' },
     ];
-    const runs = new Map<string, { flowName: string; userId?: string; recordId?: string; status: string }>();
+    const runs = new Map<string, { flowName: string; userId?: string; recordId?: string; status: string; screen: number }>();
     let r = 0;
     const automation = {
         getFlow: vi.fn(async (name: string) => ({ name })),
         execute: vi.fn(async (flowName: string, ctx: any) => {
             const runId = `run_${++r}`;
-            runs.set(runId, { flowName, userId: ctx?.userId, recordId: ctx?.record?.id, status: 'paused' });
-            return { success: true, status: 'paused', runId, durationMs: 1, screen: SCREEN };
+            runs.set(runId, { flowName, userId: ctx?.userId, recordId: ctx?.record?.id, status: 'paused', screen: 0 });
+            return { success: true, status: 'paused', runId, durationMs: 1, screen: screens[0] };
         }),
         getRun: vi.fn(async (runId: string) => {
             const run = runs.get(runId);
@@ -99,9 +103,18 @@ function makeHarness(opts: { service?: unknown; audit?: unknown } = {}) {
                 trigger: { type: 'manual', userId: run.userId, object: OBJECT, recordId: run.recordId }, steps: [],
             } : null;
         }),
-        getSuspendedScreen: vi.fn(async (runId: string) => (runs.get(runId)?.status === 'paused' ? SCREEN : null)),
-        resume: vi.fn(async (runId: string) => {
+        getSuspendedScreen: vi.fn(async (runId: string) => {
+            const run = runs.get(runId);
+            return run?.status === 'paused' ? screens[run.screen] : null;
+        }),
+        // A resume submits the current screen and moves the run on to the next
+        // one, still `paused` under the same run id, or completes it after the last.
+        resume: vi.fn(async (runId: string, _signal?: { variables?: Record<string, unknown> }) => {
             const run = runs.get(runId)!;
+            run.screen += 1;
+            if (run.screen < screens.length) {
+                return { success: true, status: 'paused', runId, durationMs: 1, screen: screens[run.screen] };
+            }
             run.status = 'completed';
             return { success: true, status: 'completed', output: {}, durationMs: 1 };
         }),
@@ -324,7 +337,8 @@ describe('[#33690] resume_run: a resume of a gated action is handed off carrying
         // The parked run rides the hand-off, so approving it resumes THAT run.
         expect((service.submit.mock.calls[0] as any[])[0]).toEqual({
             actionName: GATED_FLOW.name, objectName: OBJECT, recordId: 'lead_1', params: {}, door: 'mcp',
-            run: { runId, values: { reason: 'dup' } },
+            // [#34515] ...with the screen its values were given for.
+            run: { runId, values: { reason: 'dup' }, screenNodeId: SCREEN.nodeId },
         });
     });
 
@@ -714,5 +728,136 @@ describe('[#34386] dispatchActionResume: approving a handed-off resume_run resum
         const refused: any = await h.resumeAsHost({}, { runId: 'run_1', confirm: true });
         expect({ status: refused.status, code: refused.body?.error?.code }).toEqual({ status: 401, code: ANONYMOUS_DENY_CODE });
         expect(h.automation.getRun).not.toHaveBeenCalled();
+    });
+});
+
+/**
+ * [#34515] An approval is bound to the screen it was given on. A multi-screen
+ * wizard stays `paused` under the same run id as it moves from screen to
+ * screen, so without the binding a second resume of the same hand-off (a
+ * retried approval, a second `resume_run` call's item, or an item approved
+ * after the person advanced the wizard in the app) submitted the first
+ * screen's values to the next screen, as the approver. The hand-off now names
+ * the screen (`run.screenNodeId`), the host passes it back to
+ * `dispatchActionResume`, and step 5 refuses a run on another screen
+ * `409 RESOURCE_CONFLICT`, leaving it where it is.
+ */
+describe('[#34515] a resume approval is bound to the screen it was given on', () => {
+    const WIZARD = [SCREEN, SCREEN_2];
+    async function pausedWizard(h: ReturnType<typeof makeHarness>): Promise<string> {
+        const started: any = await h.automation.execute(GATED_FLOW.target, { userId: 'u1', object: OBJECT, record: { id: 'lead_1' } });
+        h.automation.execute.mockClear();
+        return started.runId;
+    }
+    async function handOffOf(h: ReturnType<typeof makeHarness>, service: ReturnType<typeof makeConfirmationService>, runId: string, reason: string) {
+        const pending = await h.bridgeAs(PERSON).resumeRun(runId, { values: { reason } });
+        expect(pending).toMatchObject({ status: 'pending_confirmation' });
+        return ((service.submit.mock.calls.at(-1) as any[])[0]).run as { runId: string; values: Record<string, unknown>; screenNodeId?: string };
+    }
+    const approve = (h: ReturnType<typeof makeHarness>, run: { runId: string; values: Record<string, unknown>; screenNodeId?: string }) =>
+        h.resumeAsHost(PERSON, { runId: run.runId, values: run.values, screenNodeId: run.screenNodeId, confirm: true }) as Promise<any>;
+    const screenOf = async (h: ReturnType<typeof makeHarness>, runId: string) => ((await h.automation.getSuspendedScreen(runId)) as any)?.nodeId ?? null;
+
+    it('the same hand-off approved twice: the first resumes its screen, the second is refused 409 and the run stays on the next screen', async () => {
+        const service = makeConfirmationService();
+        const h = makeHarness({ service, screens: WIZARD });
+        const runId = await pausedWizard(h);
+        const run = await handOffOf(h, service, runId, 'for step 1');
+        expect(run.screenNodeId).toBe(SCREEN.nodeId);
+
+        const first = await approve(h, run);
+        expect(first.status).toBe(200);
+        expect(first.body.data.result).toMatchObject({ status: 'paused', screen: { nodeId: SCREEN_2.nodeId } });
+
+        const second = await approve(h, run);
+        expect({ status: second.status, code: second.body?.error?.code }).toEqual({ status: 409, code: 'RESOURCE_CONFLICT' });
+        expect(second.body.error.message).toContain(`Run '${runId}' has moved on`);
+        // Resumed once, by the first approval: the second submitted nothing.
+        expect(h.automation.resume).toHaveBeenCalledTimes(1);
+        expect(h.runs.get(runId)?.status).toBe('paused');
+        expect(await screenOf(h, runId)).toBe(SCREEN_2.nodeId);
+    });
+
+    it('two resume_run calls, two items: approving the second after the first is refused 409', async () => {
+        const service = makeConfirmationService();
+        const h = makeHarness({ service, screens: WIZARD });
+        const runId = await pausedWizard(h);
+        const one = await handOffOf(h, service, runId, 'call 1');
+        const two = await handOffOf(h, service, runId, 'call 2');
+        expect([one.screenNodeId, two.screenNodeId]).toEqual([SCREEN.nodeId, SCREEN.nodeId]);
+
+        expect((await approve(h, one)).status).toBe(200);
+        const refused = await approve(h, two);
+
+        expect({ status: refused.status, code: refused.body?.error?.code }).toEqual({ status: 409, code: 'RESOURCE_CONFLICT' });
+        expect(h.automation.resume).toHaveBeenCalledTimes(1);
+        expect(await screenOf(h, runId)).toBe(SCREEN_2.nodeId);
+    });
+
+    it('an item approved after the person advanced the wizard in the app is refused 409, and the run is not touched', async () => {
+        const service = makeConfirmationService();
+        const h = makeHarness({ service, screens: WIZARD });
+        const runId = await pausedWizard(h);
+        const run = await handOffOf(h, service, runId, 'agent, for step 1');
+        await h.automation.resume(runId, { variables: { reason: 'typed in the app' } });
+        h.automation.resume.mockClear();
+
+        const refused = await approve(h, run);
+
+        expect({ status: refused.status, code: refused.body?.error?.code }).toEqual({ status: 409, code: 'RESOURCE_CONFLICT' });
+        expect(h.automation.resume).not.toHaveBeenCalled();
+        expect(await screenOf(h, runId)).toBe(SCREEN_2.nodeId);
+    });
+
+    it('an elicited person who accepts after the wizard moved on meanwhile: refused 409, nothing resumes', async () => {
+        const h = makeHarness({ service: makeConfirmationService(), screens: WIZARD });
+        const runId = await pausedWizard(h);
+        // While the person is being asked, the wizard is advanced in the app.
+        const elicitConfirmation = vi.fn(async () => {
+            await h.automation.resume(runId, { variables: { reason: 'typed in the app' } });
+            return 'accept' as const;
+        });
+        h.automation.resume.mockClear();
+
+        const refused = await refusalOf(h.bridgeAs(PERSON).resumeRun(runId, { values: { reason: 'agent' } }, { elicitConfirmation }));
+
+        expect({ code: refused.code, status: refused.status }).toEqual({ code: 'RESOURCE_CONFLICT', status: 409 });
+        expect(h.automation.resume).toHaveBeenCalledTimes(1); // the app's, not the agent's
+        expect(await screenOf(h, runId)).toBe(SCREEN_2.nodeId);
+    });
+
+    it('a screenNodeId that is not a non-empty string is refused 400 before anything is read', async () => {
+        const h = makeHarness({ service: makeConfirmationService(), screens: WIZARD });
+        for (const screenNodeId of ['', 7]) {
+            const refused: any = await h.resumeAsHost(PERSON, { runId: 'run_1', screenNodeId, confirm: true });
+            expect(refused.status, JSON.stringify(screenNodeId)).toBe(400);
+        }
+        expect(h.automation.getRun).not.toHaveBeenCalled();
+    });
+
+    it('CONTROL: a single-screen flow approved with its screen resumes and completes', async () => {
+        const service = makeConfirmationService();
+        const h = makeHarness({ service });
+        const runId = await pausedWizard(h);
+        const run = await handOffOf(h, service, runId, 'only screen');
+
+        const answer = await approve(h, run);
+
+        expect(answer.status).toBe(200);
+        expect(answer.body.data.result).toMatchObject({ status: 'completed' });
+        expect(h.runs.get(runId)?.status).toBe('completed');
+    });
+
+    it('CONTROL (widening): an approval that passes no screen resumes the run\'s current screen, as before', async () => {
+        const service = makeConfirmationService();
+        const h = makeHarness({ service, screens: WIZARD });
+        const runId = await pausedWizard(h);
+        const run = await handOffOf(h, service, runId, 'no binding');
+
+        const first: any = await h.resumeAsHost(PERSON, { runId, values: run.values, confirm: true });
+        const second: any = await h.resumeAsHost(PERSON, { runId, values: run.values, confirm: true });
+
+        expect([first.status, second.status]).toEqual([200, 200]);
+        expect(h.runs.get(runId)?.status).toBe('completed');
     });
 });

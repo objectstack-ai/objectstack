@@ -169,9 +169,11 @@ const TABLE_WITHHELD_KEYS: readonly string[] = Object.values(TABLE_WITHHELD_BY_R
  * refusal and its guidance onto this face too. The five the grid retired in
  * objectui#11068 are in the withheld set above instead, refused by the slot's
  * own message, and so is `resizableColumns`, which the grid retired in
- * objectui#6152 round 7.
+ * objectui#6152 round 7. `singleClickEdit` joined the kept ones when
+ * objectstack#36270 retired it on the grid: the slot relayed it until then, and
+ * the grid's own refusal says what to do on both.
  */
-const TABLE_INHERITED_TOMBSTONES = ['body', 'children', 'defaultSort'] as const;
+const TABLE_INHERITED_TOMBSTONES = ['body', 'children', 'defaultSort', 'singleClickEdit'] as const;
 
 /**
  * Members the slot carries BY REFERENCE from the spec's `object-grid` row that
@@ -398,7 +400,7 @@ describe('objectui#10976 — the table slot withholds what the view\'s grid does
     expect(TABLE_WITHHELD_KEYS.filter((k) => declared.includes(k))).toEqual([]);
   });
 
-  it('the slot keeps the three retirement tombstones `ObjectGridSchema` declares, as `never`', () => {
+  it('the slot keeps the retirement tombstones `ObjectGridSchema` declares, as `never`', () => {
     const table = slotType('table');
     for (const key of TABLE_INHERITED_TOMBSTONES) {
       const member = checker.getPropertyOfType(table, key);

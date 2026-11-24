@@ -46,7 +46,8 @@ const event = {
   },
 };
 const note = { name: 'rlo_note', label: 'Note', fields: { title: { type: 'text' as const, label: 'Title' } } };
-// [#27478] A body table: an inline-edited master_detail child with no relatedList.
+// [#27478] A body table: an inline-edited master_detail child with no relatedList
+// (#35597: a master_detail with no relatedList is one with or without inlineEdit).
 const line = {
   name: 'rlo_line',
   label: 'Line',
@@ -187,10 +188,12 @@ describe('defineStack — a field group relatedList names body tables only', () 
     fields: { lead_id: { ...line.fields.lead_id, ...keys } },
   });
 
-  it('accepts a group naming a body table: relatedList primary, or an inline-edited master_detail (controls)', () => {
+  it('accepts a group naming what it may place: relatedList primary, or a master_detail with no relatedList (controls)', () => {
     expect(() => defineStack(withChild(taskFk({ relatedList: 'primary' }), 'rlo_task'))).not.toThrow();
     expect(() => defineStack(withChild(line, 'rlo_line'))).not.toThrow();
     expect(() => defineStack(withChild(lineFk({ inlineEdit: true }), 'rlo_line.lead_id'))).not.toThrow();
+    // #35597 / #35889: a group may name a plain master_detail (no inlineEdit); the group makes it a body table.
+    expect(() => defineStack(withChild(lineFk({ inlineEdit: undefined }), 'rlo_line'))).not.toThrow();
   });
 
   it('refuses a group naming a side card, with the FK and the prescription', () => {
@@ -210,9 +213,9 @@ describe('defineStack — a field group relatedList names body tables only', () 
     expect(refusal?.issues).toEqual([expect.stringContaining("'rlo_line.lead_id' is a side card")]);
   });
 
-  it('refuses a plain master_detail (no inlineEdit) and a hidden list, naming which', () => {
-    expect(refusalOf(() => defineStack(withChild(lineFk({ inlineEdit: undefined }), 'rlo_line')))?.issues)
-      .toEqual([expect.stringContaining("'rlo_line.lead_id' is a side card")]);
+  it('refuses a hidden list and a master_detail hidden by relatedList: false, naming which', () => {
+    expect(refusalOf(() => defineStack(withChild(lineFk({ inlineEdit: undefined, relatedList: false }), 'rlo_line')))?.issues)
+      .toEqual([expect.stringContaining("'rlo_line.lead_id' is hidden (relatedList: false)")]);
     expect(refusalOf(() => defineStack(withChild(taskFk({ relatedList: false }), 'rlo_task')))?.issues)
       .toEqual([expect.stringContaining("'rlo_task.lead_id' is hidden (relatedList: false)")]);
   });
@@ -242,5 +245,73 @@ describe('defineStack — a field group relatedList names body tables only', () 
     const refusal = refusalOf(() => defineStack(stackOf(lead({ fieldGroups: groups('rlo_note') }))));
     expect(refusal?.issues).toHaveLength(1);
     expect(refusal?.issues?.[0]).toContain('matches no inbound relationship');
+  });
+});
+
+/**
+ * [#35897 · #35899] A declared `relatedLists` is the record page's tab list,
+ * and an entry may be the object form `{ list, label?, columns? }`. The three
+ * built-in tab names (`sys_attachment`, `sys_approval_request`,
+ * `sys_activity`) name the page's own tabs: bare only, and never judged as a
+ * child. Each refusal row's control differs from it by one key or one entry.
+ */
+describe('ObjectSchema.relatedLists — entries with a title and columns, and the built-in tabs', () => {
+  it('accepts bare names, object entries and the built-in tab names, mixed (control)', () => {
+    const parsed = ObjectSchema.safeParse(lead({
+      relatedLists: [
+        { list: 'rlo_line', label: 'Line items', columns: ['product', 'amount'] },
+        'rlo_task',
+        { list: 'rlo_event.related_to' },
+        'sys_attachment',
+        'sys_approval_request',
+        'sys_activity',
+      ],
+    }));
+    expect(parsed.success).toBe(true);
+    expect(parsed.data?.relatedLists?.[0]).toEqual({ list: 'rlo_line', label: 'Line items', columns: ['product', 'amount'] });
+  });
+
+  it.each(['sys_attachment', 'sys_approval_request', 'sys_activity'])(
+    "refuses the object form of the built-in tab '%s', prescribing the bare name",
+    (builtin) => {
+      const parsed = ObjectSchema.safeParse(lead({ relatedLists: [{ list: builtin, columns: ['name'] }] }));
+      expect(parsed.success).toBe(false);
+      const messages = JSON.stringify(parsed.error!.issues);
+      expect(messages).toContain('built-in record-page tabs');
+      expect(ObjectSchema.safeParse(lead({ relatedLists: [builtin] })).success).toBe(true);
+    },
+  );
+
+  it.each([
+    ['an unknown key', { list: 'rlo_task', filter: { done: false } }],
+    ['the wrong word for the title', { list: 'rlo_task', title: 'Tasks' }],
+    ['column objects', { list: 'rlo_task', columns: [{ field: 'name' }] }],
+    ['an empty column list', { list: 'rlo_task', columns: [] }],
+    ['an empty label', { list: 'rlo_task', label: '' }],
+    ['no list', { label: 'Tasks' }],
+    ['a non-snake list', { list: 'Task' }],
+  ])('refuses %s in an object entry', (_label, entry) => {
+    expect(ObjectSchema.safeParse(lead({ relatedLists: [entry] })).success).toBe(false);
+  });
+
+  it('suggests label for title', () => {
+    const parsed = ObjectSchema.safeParse(lead({ relatedLists: [{ list: 'rlo_task', title: 'Tasks' }] }));
+    expect(JSON.stringify(parsed.error!.issues)).toContain('`title` → `label`');
+  });
+});
+
+describe('defineStack — relatedLists object entries and built-in tab names', () => {
+  it('leaves the built-in tab names unjudged, and judges an object entry by its list (control)', () => {
+    expect(() => defineStack(stackOf(lead({
+      relatedLists: ['sys_attachment', { list: 'rlo_task', label: 'Tasks' }, 'sys_approval_request', 'sys_activity'],
+    })))).not.toThrow();
+  });
+
+  it("refuses an object entry whose list matches no inbound relationship, at the entry's index", () => {
+    const refusal = refusalOf(() => defineStack(stackOf(lead({ relatedLists: ['sys_activity', { list: 'rlo_note', columns: ['title'] }] }))));
+    expect(refusal?.code).toBe('STACK_CROSS_REFERENCE_INVALID');
+    expect(typeof refusal?.status).toBe('number');
+    expect(refusal?.issues).toHaveLength(1);
+    expect(refusal?.issues?.[0]).toContain("Object 'rlo_lead' relatedLists[1] 'rlo_note' matches no inbound relationship");
   });
 });

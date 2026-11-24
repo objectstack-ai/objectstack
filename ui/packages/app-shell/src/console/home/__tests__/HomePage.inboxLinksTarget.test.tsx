@@ -9,7 +9,7 @@
  * pinned next door in `HomePage.approvalsTarget.test.tsx`) and left its two
  * siblings hardcoding the same dead app:
  *
- *   - `onOpenNotification`'s FALLBACK branch → `/apps/setup/sys_inbox_message?view=mine`
+ *   - `onOpenNotification`'s FALLBACK branch → `/apps/setup/inbox`
  *   - `HomeActivity onViewAll`               → `/apps/setup/sys_activity`
  *
  * `sys_inbox_message` and `sys_activity` are framework-owned objects, reachable
@@ -256,7 +256,7 @@ describe('Home inbox/activity drills resolve the host app (objectui#4074)', () =
     it('opens the inbox inside the app the user last had open', async () => {
       // The branch neither browser verification could exercise — both seeded
       // notifications carried an `action_url`. This is its pin.
-      expect(await clickNotification()).toBe('/apps/crm/sys_inbox_message?view=mine');
+      expect(await clickNotification()).toBe('/apps/crm/inbox');
     });
 
     it('CONTROL: an explicit action_url is still followed verbatim', async () => {
@@ -272,14 +272,14 @@ describe('Home inbox/activity drills resolve the host app (objectui#4074)', () =
       appsFixture = [app('crm'), app('hr')];
       currentAppNameFixture = undefined;
       const target = await clickNotification();
-      expect(target).toBe('/apps/crm/sys_inbox_message?view=mine');
+      expect(target).toBe('/apps/crm/inbox');
       expect(target).not.toContain('/apps/setup/');
     });
 
     it('does not resurrect a remembered app that is no longer active', async () => {
       appsFixture = [app('hr')];
       currentAppNameFixture = 'crm';
-      expect(await clickNotification()).toBe('/apps/hr/sys_inbox_message?view=mine');
+      expect(await clickNotification()).toBe('/apps/hr/inbox');
     });
 
     it('CONTROL: a user whose last-open app IS setup still lands in setup', async () => {
@@ -288,7 +288,7 @@ describe('Home inbox/activity drills resolve the host app (objectui#4074)', () =
       // app is setup.
       appsFixture = [app('setup'), app('crm')];
       currentAppNameFixture = 'setup';
-      expect(await clickNotification()).toBe('/apps/setup/sys_inbox_message?view=mine');
+      expect(await clickNotification()).toBe('/apps/setup/inbox');
     });
   });
 

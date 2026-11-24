@@ -9,17 +9,21 @@
 /**
  * The object's `highlightFields` (ADR-0085) as an ORDERED pick list.
  *
- * Order is the whole meaning of the key: the spec says "first entry wins where
- * only one fits", and the record page's highlight strip draws the fields in
- * this order. So the editor is a list, not a chip cloud:
+ * Order is the whole meaning of the key. The spec: "Ordered most-important
+ * fields; first entry wins where only one fits. Drives default list and
+ * related-list columns, cards, hover cards, previews and the record picker;
+ * the default record page draws no strip from it." Each of those surfaces
+ * takes the fields in this order, as many as it has room for. So the editor
+ * is a list, not a chip cloud:
  *
  *  - each row can be dragged to a new place, or moved with the up / down
  *    buttons (the keyboard path; the drag has no keyboard equivalent) — the
  *    rows are the shared `OrderedRowList`, which `RelatedListsEditor` uses too;
  *  - fields are added at the end, from the object's visible fields not already
- *    picked, up to {@link HIGHLIGHT_FIELDS_MAX};
- *  - a preview below draws the strip in the picked order, so the order is seen
- *    as the record page will show it.
+ *    picked, up to {@link HIGHLIGHT_FIELDS_MAX}.
+ *
+ * The row order is the one rendering of the list here: no surface preview is
+ * drawn, since no single surface shows the list the way every other does.
  *
  * Removing the last field removes the key: an empty list and an absent key
  * would both read "not declared" here, and only the absent key says it.
@@ -32,8 +36,9 @@ import { OrderedRowList } from './OrderedRowList.js';
 import { t, tFormat, type SupportedLocale } from '../metadata-admin/i18n.js';
 
 /**
- * How many highlight fields the editor offers. The record-page strip shows a
- * handful of facts at a glance; six is the ruled ceiling for authoring here.
+ * How many highlight fields the editor offers. The surfaces that read the key
+ * show a handful of facts at a glance, each taking as many as fit; six is the
+ * ruled ceiling for authoring here.
  * A stored list that is already longer is shown whole and never truncated.
  */
 export const HIGHLIGHT_FIELDS_MAX = 6;
@@ -53,7 +58,7 @@ export function HighlightFieldsEditor({
 }: {
   /** The stored list, in order. */
   value: string[];
-  /** The object's fields (labels for the rows and the preview). */
+  /** The object's fields (labels for the rows). */
   fields: readonly FieldEntry[];
   /** The next list; `undefined` removes the key. */
   onChange: (next: string[] | undefined) => void;
@@ -93,22 +98,6 @@ export function HighlightFieldsEditor({
           <span className="text-[11px] text-muted-foreground">{t('engine.studio.settings.undeclared', locale)}</span>
         )}
       </div>
-      {value.length > 0 && (
-        <div className="space-y-1">
-          <span className="block text-[10px] text-muted-foreground">{t('engine.studio.settings.highlightPreview', locale)}</span>
-          <div
-            data-testid="highlight-preview"
-            className="flex gap-5 overflow-x-auto rounded-md border bg-muted/20 px-3 py-2"
-          >
-            {value.map((name) => (
-              <div key={name} className="min-w-0 shrink-0" data-testid="highlight-preview-cell">
-                <div className="text-[10px] text-muted-foreground">{labelOf(fields, name)}</div>
-                <div className="text-[13px] text-muted-foreground/70">—</div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
     </div>
   );
 }

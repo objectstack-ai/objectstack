@@ -226,7 +226,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       digest: {
         label: "Digest",
-        help: "Agrupa estas notificaciones en un único resumen en lugar de enviar cada una al llegar: daily lo envía a medianoche, weekly el lunes a medianoche y none envía cada una de inmediato. Las notificaciones críticas siempre se envían al momento. Se aplica en una preferencia cuyo canal es * (todos los canales).",
+        help: "Agrupa estas notificaciones en un único resumen en lugar de enviar cada una al llegar: daily lo envía a medianoche, weekly el lunes a medianoche y none envía cada una de inmediato. Las notificaciones críticas siempre se envían al momento. Se aplica en una preferencia cuyo canal es * (todos los canales). Si se deja vacío, decide la siguiente preferencia: la predeterminada para todos los usuarios y, después, none.",
         options: {
           none: "none",
           daily: "daily",
@@ -235,7 +235,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       quiet_hours: {
         label: "Quiet Hours",
-        help: "Una franja diaria en la que las notificaciones se retienen y se entregan al terminar, por ejemplo { \"tz\": \"Europe/Berlin\", \"start\": \"22:00\", \"end\": \"07:00\" }. Las horas son HH:MM en esa zona horaria (UTC si se omite tz) y la franja puede pasar de medianoche. Las notificaciones críticas no se retienen. Se aplica en una preferencia cuyo canal es * (todos los canales)."
+        help: "Una franja diaria en la que las notificaciones se retienen y se entregan al terminar, por ejemplo { \"tz\": \"Europe/Berlin\", \"start\": \"22:00\", \"end\": \"07:00\" }. Las horas son HH:MM en esa zona horaria (UTC si se omite tz) y la franja puede pasar de medianoche. Las notificaciones críticas no se retienen. Se aplica en una preferencia cuyo canal es * (todos los canales). { \"off\": true } significa sin horario de silencio; si se deja vacío, decide la siguiente preferencia: la predeterminada para todos los usuarios y, después, ninguno."
       },
       created_at: {
         label: "Created At"
@@ -487,6 +487,64 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       created_at: {
         label: "Creado el"
+      }
+    }
+  },
+  sys_channel_account: {
+    label: "Cuenta de canal",
+    pluralLabel: "Cuentas de canal",
+    description: "La instalación de una app de chat de una organización, como su propia app de Slack, con el token de bot que se le emitió.",
+    fields: {
+      channel_id: {
+        label: "Canal"
+      },
+      display_name: {
+        label: "Espacio de trabajo"
+      },
+      external_id: {
+        label: "ID del espacio de trabajo"
+      },
+      bot_token: {
+        label: "Token del bot"
+      },
+      status: {
+        label: "Estado",
+        options: {
+          active: "Activa",
+          revoked: "Revocada"
+        }
+      }
+    }
+  },
+  sys_channel_user_link: {
+    label: "Vínculo de usuario del canal",
+    pluralLabel: "Vínculos de usuario del canal",
+    description: "El vínculo de una persona con su propio usuario en un espacio de trabajo de chat: se propone por coincidencia de correo y entrega en cuanto la persona lo confirma.",
+    fields: {
+      account_id: {
+        label: "Cuenta"
+      },
+      user_id: {
+        label: "Usuario"
+      },
+      external_user_id: {
+        label: "ID de usuario del chat"
+      },
+      external_display_name: {
+        label: "Nombre de usuario del chat"
+      },
+      state: {
+        label: "Estado",
+        options: {
+          proposed: "Propuesto",
+          confirmed: "Confirmado"
+        }
+      },
+      confirmed_at: {
+        label: "Confirmado el"
+      },
+      proposal_email_hash: {
+        label: "Hash del correo de la propuesta"
       }
     }
   }

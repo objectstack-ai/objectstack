@@ -6,12 +6,13 @@ import { toDomProps } from './toDomProps.js';
 import { PHONE_TOUCH_HEIGHT } from './touchTarget.js';
 import { CurrencyCodeField, isCurrencyCodeField } from './CurrencyCodeField.js';
 import { ScanFieldButton, useFieldScanOffered } from './ScanFieldButton.js';
+import { InCellTextInput } from './InCellTextInput.js';
 
 /**
  * TextField - Standard single-line or multi-line text input
  * Automatically renders as a textarea when rows are configured in field metadata
  */
-export function TextField({ value, onChange, field, readonly, error, ...props }: FieldWidgetComponentProps<string>) {
+export function TextField({ value, onChange, field, readonly, error, inCell, onCommit: _onCommit, ...props }: FieldWidgetComponentProps<string>) {
   const fieldData = field;
   // Read before any early return: hooks run in the same order on every render.
   const scanOffered = useFieldScanOffered();
@@ -78,6 +79,22 @@ export function TextField({ value, onChange, field, readonly, error, ...props }:
   }
 
   const isPassword = fieldData?.type === 'password';
+
+  // objectstack#36023 — in a list cell the cell itself is the input.
+  if (inCell && !isPassword) {
+    return (
+      <InCellTextInput
+        {...domProps}
+        type="text"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={fieldData?.placeholder}
+        maxLength={maxLength}
+        disabled={domProps.disabled}
+        aria-invalid={!!error}
+      />
+    );
+  }
   const input = (
     <Input
       {...domProps}

@@ -122,10 +122,11 @@ export interface LiteralDefaultValueVerdict {
  * The rename IS the prescription. Which channel produced it depends on the
  * key, and the two cases this function is pinned against are one of each — so
  * "the curated `aliases` map is what makes the rename possible" is true of only
- * half of them. The fallback budget is `Math.max(2, Math.floor(key.length / 3))`
- * (`shared/suggestions.zod.ts`), and the lookup is
- * `aliases[aliasProbe(key)] ?? findClosestMatches(key, knownKeys, budget, 1)[0]`
- * — the table is consulted first and wins outright.
+ * half of them. The fallback is `suggestRename` (`shared/rename-guess.ts`, the
+ * package's one rename rule: budget `max(2, floor(len / 3))`, and at five
+ * characters or fewer one edit counting an adjacent swap as one), and the
+ * lookup is `aliases[aliasProbe(key)] ?? suggestRename(key, knownKeys)` — the
+ * table is consulted first and wins outright.
  *
  *  - `postal_code` -> `postalCode`, the example rendered above, is the
  *    FALLBACK's own answer: scoring folds case and separators on both sides, so

@@ -39,6 +39,9 @@ const h = vi.hoisted(() => {
 });
 vi.mock('../useMetadata', () => ({ useMetadataClient: () => h.client }));
 
+// The inspector's dynamic imports, paid at collection, not in a clocked case.
+import '@objectstack/formula';
+import '@objectstack/lint';
 import { ObjectFieldInspector } from './ObjectFieldInspector';
 import { deriveRelatedLists } from '../../../utils/deriveRelatedLists';
 import { t } from '../i18n';
@@ -60,11 +63,15 @@ const taskWith = (leadFk: Row): Row => ({
   },
 });
 
-/** An owned child of the lead: without `primary`, owned lists come first. */
+/**
+ * An owned child of the lead: without `primary`, owned lists come first. It
+ * declares `relatedList: true` to stay a side card (objectstack#35597: a
+ * `master_detail` with no `relatedList` is a body table).
+ */
 const NOTE = {
   name: 'note',
   label: 'Note',
-  fields: { body: { type: 'text' }, lead: { type: 'master_detail', reference: 'lead', label: 'Lead' } },
+  fields: { body: { type: 'text' }, lead: { type: 'master_detail', reference: 'lead', label: 'Lead', relatedList: true } },
 };
 
 function Designer({ initial, drafts }: { initial: Row; drafts: Row[] }) {
@@ -138,9 +145,9 @@ describe('ObjectFieldInspector — the related list on the parent (relatedList /
     expect(ObjectSchema.safeParse(last).success).toBe(true);
   });
 
-  it('「不显示」 writes false and drops the list; 「显示」 leaves the key absent', () => {
+  it('「不显示」 writes false and drops the list; 「显示」 leaves the key absent on a lookup', () => {
     const drafts: Row[] = [];
-    render(<Designer initial={taskWith({ type: 'master_detail', label: 'Lead', reference: 'lead', relatedList: 'primary' })} drafts={drafts} />);
+    render(<Designer initial={taskWith({ type: 'lookup', label: 'Lead', reference: 'lead', relatedList: 'primary' })} drafts={drafts} />);
     fireEvent.click(radio('hidden'));
     expect(leadFkOf(drafts.at(-1)!).relatedList).toBe(false);
     expect(relatedOrderOnLeadPage(drafts.at(-1)!)).toEqual(['note']);
@@ -152,23 +159,28 @@ describe('ObjectFieldInspector — the related list on the parent (relatedList /
     expect(ObjectSchema.safeParse(drafts.at(-1)!).success).toBe(true);
   });
 
-  it('an inline-edited master_detail with no relatedList reads as primary, and 「显示」 writes an explicit true (objectstack#27069)', () => {
-    // The record page's default: a `master_detail` FK that sets `inlineEdit`
-    // and declares no `relatedList` is primary. The control reads that default
-    // rather than "absent = shown", so "Show" must write `true` to mean it.
+  it.each([
+    ['a plain master_detail', {}],
+    ['an inline-edited master_detail', { inlineEdit: true }],
+  ])('%s with no relatedList reads as shown, and 「主要」 writes primary, 「显示」 clears it (objectstack#35889)', (_name, keys) => {
+    // The record page's default since objectstack#35889: a `master_detail` FK
+    // that declares no `relatedList` is a tab, `inlineEdit` or not; only a
+    // field group of the parent (or `'primary'`) makes it a body table.
     const drafts: Row[] = [];
-    render(<Designer initial={taskWith({ type: 'master_detail', label: 'Lead', reference: 'lead', inlineEdit: true })} drafts={drafts} />);
-    expect(radio('primary').getAttribute('aria-checked')).toBe('true');
+    render(<Designer initial={taskWith({ type: 'master_detail', label: 'Lead', reference: 'lead', ...keys })} drafts={drafts} />);
+    expect(radio('shown').getAttribute('aria-checked')).toBe('true');
+    expect(deriveRelatedLists(LEAD as any, [taskWith({ type: 'master_detail', label: 'Lead', reference: 'lead', ...keys }) as any])[0].isPrimary).toBe(false);
 
-    fireEvent.click(radio('shown'));
-    expect(leadFkOf(drafts.at(-1)!).relatedList).toBe(true);
-    expect(deriveRelatedLists(LEAD as any, [drafts.at(-1)! as any])[0].isPrimary).toBe(false);
+    fireEvent.click(radio('primary'));
+    expect(leadFkOf(drafts.at(-1)!).relatedList).toBe('primary');
+    expect(deriveRelatedLists(LEAD as any, [drafts.at(-1)! as any])[0].isPrimary).toBe(true);
     expect(ObjectSchema.safeParse(drafts.at(-1)!).success).toBe(true);
 
-    // Picking the default again clears the key rather than writing `'primary'`.
-    fireEvent.click(radio('primary'));
+    // Picking the default again clears the key rather than writing `true`, so
+    // a parent field group can still place the list.
+    fireEvent.click(radio('shown'));
     expect('relatedList' in leadFkOf(drafts.at(-1)!)).toBe(false);
-    expect(deriveRelatedLists(LEAD as any, [drafts.at(-1)! as any])[0].isPrimary).toBe(true);
+    expect(deriveRelatedLists(LEAD as any, [drafts.at(-1)! as any])[0].isPlaceable).toBe(true);
   });
 
   it('reads a stored `true` as shown, and re-picking the current state writes nothing', () => {

@@ -156,6 +156,8 @@ window.matchMedia = ((query: string) => ({
 let serverDrafts: Array<Record<string, unknown>> = [];
 /** How many `_drafts` reads the page sent. */
 let draftReads = 0;
+/** What the package's published object list answers (the Data pillar's rail). */
+let objectRows: Array<Record<string, unknown>> = [];
 
 function json(body: unknown) {
   return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
@@ -216,6 +218,7 @@ const THREAD = [
 beforeEach(() => {
   serverDrafts = [BORROWING_ROW];
   draftReads = 0;
+  objectRows = [];
   sdk.discardDrafts.mockReset();
   chat.set({ messages: uiMessagesToChatMessages(THREAD as never, { isStreaming: false }), isLoading: false });
   window.sessionStorage.clear();
@@ -227,6 +230,7 @@ beforeEach(() => {
         draftReads += 1;
         return json({ drafts: serverDrafts });
       }
+      if (url === `/api/v1/meta/object?package=${encodeURIComponent(PACKAGE_ID)}`) return json(objectRows);
       return json([]);
     }) as unknown as typeof fetch,
   );
@@ -301,6 +305,7 @@ describe('the Studio copilot\'s applied card opens the 变更 drawer in place (o
 
 describe('the Studio copilot\'s composer (objectui#12725 Target item 4)', () => {
   it('zh: the placeholder reads「问问数据，或让我改改这个应用…」, and the chip names the item in view', async () => {
+    objectRows = [{ name: 'hcpl_borrowing', label: '借阅记录' }];
     render(
       <I18nProvider config={{ defaultLanguage: 'zh', detectBrowserLanguage: false }} persistLanguage={false}>
         <MemoryRouter initialEntries={[`/studio/${PACKAGE_ID}/data?surface=object%3Ahcpl_borrowing`]}>
@@ -314,10 +319,11 @@ describe('the Studio copilot\'s composer (objectui#12725 Target item 4)', () => 
     const composer = await within(slot).findByRole('textbox');
     expect(composer).toHaveAttribute('placeholder', '问问数据，或让我改改这个应用…');
     // The chip `plugin-chatbot` declares (`surfaceContextLabel`), naming the
-    // item the URL has open.
+    // item the URL has open — objectstack#34725: 「正在看：借阅记录 · 记录」,
+    // the object's label and the view on screen, never the internal name.
     const chip = within(slot).getByTestId('surface-context-chip');
-    expect(chip).toHaveTextContent('正在讨论：');
-    expect(chip).toHaveTextContent('hcpl_borrowing');
+    await waitFor(() => expect(chip).toHaveTextContent('正在看：借阅记录 · 记录'));
+    expect(chip).not.toHaveTextContent('hcpl_borrowing');
   });
 });
 

@@ -625,6 +625,25 @@ export interface ISecurityService {
    *
    * A host that must scope repeated queries re-calls this method; it does not
    * hold the returned object.
+   *
+   * **Hand it to an engine read, in process, under the context it was asked
+   * for (ADR-0155, Consequences).** The scope can carry engine-internal leaves:
+   * a `ReadableIds` leaf (ADR-0139) today, and, from plugin-sharing's switch on
+   * (ADR-0155 plan step 6), a `SharedRecordIds` leaf composed for `context`'s
+   * user, through the sharing service's read filter. So, for every consumer:
+   *
+   *  - ⛔ never serialise it: a copy that crossed JSON, a structured clone or a
+   *    serializing wire arrives unbranded and is refused `INVALID_FILTER` /
+   *    400, ⛔ never read as an empty list;
+   *  - the engine read it is handed to runs under `context` itself, under a
+   *    context acting on behalf of `context`'s user (ADR-0090 D10), or under a
+   *    system context: the engine's seam refuses a `SharedRecordIds` leaf whose
+   *    recipient is neither the reading context's user nor its delegator, as a
+   *    composition fault (`INTERNAL_ERROR` / 500, ADR-0155 D4);
+   *  - a consumer that compiles or matches the scope itself, outside the engine
+   *    (the analytics raw-SQL path, an in-process matcher), owes each leaf an
+   *    exact evaluation or a loud refusal, ⛔ never an ordinary-comparand
+   *    reading (ADR-0155 D5).
    */
   getReadFilter(object: string, context?: SecurityContext): Promise<FilterCondition | undefined>;
 
@@ -704,6 +723,36 @@ export interface ISecurityService {
    * this method only answers the projection question when a mask applies.
    */
   getMetadataReadableFields?(object: string, context?: SecurityContext): Promise<string[] | undefined>;
+
+  /**
+   * [ADR-0106 D1/D7] The METADATA-PLANE answer for the fields of `object` that
+   * a disabled package withholds from the served schema: which of those names
+   * may be DISCLOSED to `context`. A served object read carries the names in
+   * its `_withheldFields` read decoration; a schema-serving outlet keeps an
+   * entry for a caller only when this answer names it.
+   *
+   * **Why {@link getMetadataReadableFields} cannot answer it.** That answer
+   * enumerates the live object's fields, and a withheld field is not one of
+   * them, so it names a withheld field for no caller, admitted or denied. This
+   * member judges each withheld name against the field's STORAGE definition
+   * (the definition with every `extend` contribution folded in, disabled or
+   * not): the caller's permission-set field entry, the stored field's own
+   * `requiredPermissions`, the same zero-set fallback resolution as
+   * {@link getMetadataReadableFields}, and the on-behalf-of delegator's
+   * intersection. A name it cannot judge is not admitted.
+   *
+   * **Answers:** the admitted names, a subset of the withheld ones; `[]` when
+   * nothing is withheld or nothing withheld may be disclosed; `undefined` when
+   * the withheld set or the caller's posture cannot be determined. A system
+   * context yields every withheld name.
+   *
+   * **OPTIONAL, and absence fails CLOSED.** Unlike the readable-field answers,
+   * a consumer reads absence, `undefined` and a throw alike as "no withheld
+   * name may be disclosed" and drops every entry: the decoration is a hint to
+   * a client, never a field the caller needs to read, so dropping it costs a
+   * convenience and serving it on a guess discloses a field's existence.
+   */
+  getMetadataReadableWithheldFields?(object: string, context?: SecurityContext): Promise<string[] | undefined>;
 
   /**
    * [#20935] The field names `context` may QUERY ON in `object` — filter, sort,

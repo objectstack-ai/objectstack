@@ -533,6 +533,7 @@ describe('a language is its pack plus its namespace partial packs', () => {
     expect(namespacePackPaths('zh-Hans')).toEqual([
       'packages/i18n/src/namespaces/marketplace/zh-Hans.ts',
       'packages/i18n/src/namespaces/developer/zh-Hans.ts',
+      'packages/i18n/src/namespaces/timesheet/zh-Hans.ts',
     ]);
   });
 
@@ -724,8 +725,12 @@ describe('the waiver ledger', () => {
  * "manifest ID" jargon in `en` and eight packs; zh had already dropped it in
  * objectui#10900 (标识, identifier), so zh had nothing to follow — the same
  * one-pack-already-right shape as `search.placeholder` above.
+ *
+ * 6 -> 7 (objectstack#34725). `preview.changes.draftedByCopilot` follows the
+ * panel's new name, "AI assistant", in `en` and nine packs; ar already said
+ * مساعد الذكاء الاصطناعي (AI assistant), so it had nothing to follow.
  */
-const WAIVER_CEILING = 6;
+const WAIVER_CEILING = 7;
 
 describe('the shipped ledger', () => {
   const ledger = readLedger(repoRoot);
@@ -759,9 +764,13 @@ describe('the shipped ledger', () => {
    *  0 -> 7 (objectstack#29729). Studio's flow run status moved its en words to
    *  the one the landing and the ledger switch use ("Switched on" / "Switched
    *  off"); zh already read 已启用 / 已停用 on all seven keys, so it had nothing
-   *  to follow. */
-  it('holds at most 7 designer waiver(s) — a ratchet, and this number only goes down', () => {
-    expect(Object.keys(ledger.designerWaivers)).toHaveLength(7);
+   *  to follow.
+   *
+   *  7 -> 5 (objectstack#36511). The flow switch's two toasts are live at once
+   *  now ("Switched on, live now" / "Switched off, live now"), and zh followed
+   *  them, so their two waivers went. */
+  it('holds at most 5 designer waiver(s) — a ratchet, and this number only goes down', () => {
+    expect(Object.keys(ledger.designerWaivers)).toHaveLength(5);
     for (const entry of Object.values(ledger.designerWaivers) as Array<{ issue: string }>) {
       expect(entry.issue).toMatch(ISSUE_PATTERN);
     }

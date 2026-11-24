@@ -10,6 +10,22 @@ import { assertListComparandShapes, normalizeFilterComparandTypes } from '@objec
 // the engine-bound merges ({@link assertReadScopeComparandsRunnable} with
 // `admitReadableIds`), refused at the entry of {@link compileScopedFilterToSql}.
 import { isReadableIds } from '@objectstack/spec/data';
+// [ADR-0155 D2, D4, plan step 5] The fixed-read leaf (`SharedRecordIds`): its
+// brand, its guard and its own description of the fixed inner read, which
+// {@link compileScopedFilterToSql} compiles to a subquery and the engine-bound
+// merges admit; and ADR-0139 D3's envelope, logged once per evaluator, for a
+// leaf this compiler does not compile.
+import {
+  SHARED_RECORD_IDS_BRAND,
+  fixedInnerReadOf,
+  fixedReadLeafNameOf,
+  isComposedReadableIds,
+  isFixedReadLeaf,
+  type FixedReadLeaf,
+  type FixedReadLeafBrand,
+  type FixedReadLeafName,
+} from '@objectstack/spec/data';
+import { describeFixedReadLeaf, refuseFixedReadLeafOnce, type ReadableIdsRefusalLog } from '@objectstack/core';
 // [ADR-0053 D-D1, amended 2026-09-30 — #5930 step 3] The shared lowering, run
 // at the entry of {@link compileScopedFilterToSql}, after the placeholders
 // resolve and before any clause is compiled.
@@ -671,6 +687,40 @@ import {
  * tests, `$empty` and the text arms read the column as stored, as the native
  * `where` face does. An absent member is identity, the contract's own reading
  * for a driver whose storage form is the wire form.
+ *
+ * ## The share-grant leaf compiles to its subquery (ADR-0155 D2, D4, Q2 as ruled)
+ *
+ * A read scope may carry the engine-internal fixed-read leaf
+ * (`SharedRecordIds`, `@objectstack/spec/data`'s `isFixedReadLeaf`) as the
+ * `$in` comparand of `id`: "the records of this object shared with this user".
+ * Q2 ruled what this compiler does with it: **it compiles the leaf**, as the
+ * `$in` arm's subquery, from the leaf's own description (`fixedInnerReadOf`),
+ * every value bound, ⛔ never spliced:
+ *
+ * ```sql
+ * "t"."id" IN (SELECT "record_id" FROM "sys_record_share"
+ *   WHERE "object_name" = ? AND "recipient_type" = ? AND "recipient_id" = ?
+ *     AND "record_id" IS NOT NULL AND "record_id" <> '')
+ * ```
+ *
+ * the statement `driver-sql` compiles for the same leaf (ADR-0155 plan step
+ * 3), with ⛔ no tenant scope on the inner read (① ruled A: the outer
+ * statement's wall is untouched). So the NativeSQL face runs it and the
+ * `/analytics/sql` echo prints it.
+ *
+ * Anything else is ADR-0139 D3's envelope, `INTERNAL_ERROR` / 500, logged at
+ * `error` once per evaluator ({@link ReadScopeCompileOptions.fixedReadLeafRefusal}),
+ * ⛔ never this module's `READ_SCOPE_COMPILE_FAILED` and never `INVALID_FILTER`:
+ * a leaf is never an author's, so the fault is the code that composed it. The
+ * one exception to "the only way this module refuses" below, by ADR-0155 D4's
+ * "wherever it occurs". Two shapes reach it ({@link findUnservedFixedReadLeaf}):
+ * a leaf anywhere but a field's `$in` comparand, where reading it would bind or
+ * walk it as an ordinary value; and the leaf's WRITE form, which a predicate
+ * update alone carries (③ ruled A) and the engine refuses on every read.
+ *
+ * Which objects the native path compiles it for is not this compiler's
+ * question: `NativeSQLStrategy.canHandle` asks the engine seam's recognition of
+ * D4's two classes first and declines those to the ObjectQL strategy.
  */
 
 const IDENT = /^[a-z_][a-z0-9_]*$/i;
@@ -798,6 +848,210 @@ export interface ReadScopeCompileOptions {
    * compiler's output. Absent is identity: the column reads as written.
    */
   coerceTemporalFilterColumn?: (field: string, columnSql: string) => string;
+  /**
+   * [ADR-0155 D4] Where a fixed-read leaf this compiler does not compile is
+   * logged: the evaluator's log and its once-flag. Absent, the refusal is
+   * thrown unlogged. See {@link FixedReadLeafRefusalSink}.
+   */
+  fixedReadLeafRefusal?: FixedReadLeafRefusalSink;
+  /**
+   * [ADR-0155 D1] The object this scope reads, which the alias stands for: a
+   * fixed-read leaf compiles only in the scope of the object it names. Absent
+   * (a caller that cannot name it), that half of the leaf's position is not
+   * judged here; the field half still is.
+   */
+  object?: string;
+}
+
+/**
+ * [ADR-0155 D4] One evaluator's half of ADR-0139 D3's "logged at `error` once
+ * per evaluator": the logger a refusal of a fixed-read leaf is written to, and the
+ * flag that keeps it to one line (`@objectstack/core`'s `refuseFixedReadLeafOnce`).
+ * `AnalyticsService` holds one per instance and hands it to both strategies.
+ */
+export interface FixedReadLeafRefusalSink {
+  readonly logger: ReadableIdsRefusalLog | undefined;
+  readonly state: { logged: boolean };
+}
+
+const REFUSAL_SINKS = new WeakMap<object, FixedReadLeafRefusalSink>();
+
+/**
+ * [ADR-0155 D4] The refusal sink for `logger`, one per logger object: the service's
+ * strategies and the plugin's record-label read hand the same logger and so
+ * share one flag, one line for this evaluator between them.
+ */
+export function fixedReadLeafRefusalSinkOf(logger: ReadableIdsRefusalLog): FixedReadLeafRefusalSink {
+  let sink = REFUSAL_SINKS.get(logger);
+  if (sink === undefined) REFUSAL_SINKS.set(logger, (sink = { logger, state: { logged: false } }));
+  return sink;
+}
+
+/** [ADR-0155 D4] The evaluator this module's fixed-read-leaf refusals name. */
+export const READ_SCOPE_FIXED_READ_LEAF_EVALUATOR = 'service-analytics';
+
+/**
+ * [ADR-0155 D4, Q2 as ruled] The brands this module compiles and its
+ * engine-bound merges admit: ONE list that names its brands, as the engine's
+ * door does (`ENGINE_FIXED_READ_LEAF_BRANDS`), never a flag per brand. ADR-0147's
+ * leaf joins it on the card that teaches this compiler that leaf, with its row
+ * in {@link LEAF_RULES}.
+ */
+export const READ_SCOPE_FIXED_READ_LEAF_BRANDS: readonly FixedReadLeafBrand[] = Object.freeze([SHARED_RECORD_IDS_BRAND]);
+
+/**
+ * What this compiler reads per leaf, one row per leaf name (ADR-0155 D4: an
+ * evaluator's answer to a leaf is the leaf's own). For `SharedRecordIds`, the
+ * readings the engine seam's own row gives (ADR-0155 D1, ③ ruled A):
+ *
+ *  - `position`: the leaf sits as the `$in` comparand of `id` on the object it
+ *    names. The native path runs no engine seam, so this compiler is the one
+ *    that holds a leaf to its position there.
+ *  - `readForm`: it is the read form exactly when it carries no `accessLevels`.
+ */
+const LEAF_RULES: Readonly<Record<FixedReadLeafName, {
+  readonly position: (leaf: FixedReadLeaf) => { readonly field: string; readonly object: string };
+  readonly readForm: (leaf: FixedReadLeaf) => boolean;
+}>> = Object.freeze({
+  SharedRecordIds: Object.freeze({
+    position: (leaf: FixedReadLeaf) => ({ field: 'id', object: leaf.object }),
+    readForm: (leaf: FixedReadLeaf) => leaf.accessLevels === undefined,
+  }),
+});
+
+/** A fixed-read leaf this compiler does not compile, where it sits, and why. */
+interface UnservedFixedReadLeaf {
+  readonly at: string;
+  readonly leaf: unknown;
+  readonly reason: 'misplaced' | 'write-form';
+}
+
+/** A plain object or a list: something a filter is built from and the walk below descends into. */
+function isPlainContainer(value: unknown): value is Record<string, unknown> | unknown[] {
+  if (value === null || typeof value !== 'object') return false;
+  if (Array.isArray(value)) return true;
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+
+/**
+ * [ADR-0155 D1, D4] The first fixed-read leaf in `scope` this compiler does not
+ * compile, or `null`: one anywhere but as the `$in` comparand of the field its
+ * row names, on the object it names (`misplaced`), or one there in its write
+ * form (`write-form`). `object` is the object the scope reads; absent, the
+ * object half is not judged (a caller that compiles for an alias it cannot
+ * name), and the field half still is.
+ *
+ * The walk reads roles, as `driver-sql`'s floor does: a NODE's keys are
+ * combinators and fields, an OPERATOR MAP's keys are operators, and only an
+ * operator map's `$in` holds a leaf. Everything else is walked as a value, where
+ * any leaf is misplaced (a list member, a bare field value, a `$not` operand, a
+ * node of its own). A composed `ReadableIds` scope is a node. Cycles are cut on
+ * the current path. A leaf of a brand {@link READ_SCOPE_FIXED_READ_LEAF_BRANDS}
+ * does not name is found as misplaced wherever it sits.
+ */
+function findUnservedFixedReadLeaf(scope: unknown, path: string, scopeObject: string | undefined): UnservedFixedReadLeaf | null {
+  const onPath = new Set<object>();
+  const descend = (value: object, walk: () => UnservedFixedReadLeaf | null): UnservedFixedReadLeaf | null => {
+    if (onPath.has(value)) return null;
+    onPath.add(value);
+    try {
+      return walk();
+    } finally {
+      onPath.delete(value);
+    }
+  };
+  const visitValue = (value: unknown, at: string, object: string | undefined): UnservedFixedReadLeaf | null => {
+    if (isFixedReadLeaf(value)) return { at, leaf: value, reason: 'misplaced' };
+    if (isComposedReadableIds(value)) {
+      return value.scope === undefined ? null : visitNode(value.scope, `${at}.scope`, value.object);
+    }
+    if (!isPlainContainer(value)) return null;
+    return descend(value, () => {
+      const entries: [string, unknown][] = Array.isArray(value)
+        ? value.map((item, i) => [`[${i}]`, item])
+        : Object.keys(value).map((key) => [`.${key}`, value[key]]);
+      for (const [step, item] of entries) {
+        const found = visitValue(item, `${at}${step}`, object);
+        if (found) return found;
+      }
+      return null;
+    });
+  };
+  const visitNode = (node: unknown, at: string, object: string | undefined): UnservedFixedReadLeaf | null => {
+    if (isFixedReadLeaf(node) || !isPlainContainer(node) || Array.isArray(node)) return visitValue(node, at, object);
+    return descend(node, () => {
+      for (const key of Object.keys(node)) {
+        const value = node[key];
+        const here = `${at}.${key}`;
+        let found: UnservedFixedReadLeaf | null = null;
+        if ((key === '$and' || key === '$or') && Array.isArray(value)) {
+          for (let i = 0; i < value.length && found === null; i++) found = visitNode(value[i], `${here}[${i}]`, object);
+        } else if (key === '$not') {
+          found = visitNode(value, here, object);
+        } else if (!key.startsWith('$') && !isFixedReadLeaf(value) && isPlainContainer(value) && !Array.isArray(value)) {
+          found = visitOperatorMap(value, here, key, object);
+        } else {
+          found = visitValue(value, here, object);
+        }
+        if (found) return found;
+      }
+      return null;
+    });
+  };
+  const visitOperatorMap = (
+    map: Record<string, unknown>,
+    at: string,
+    field: string,
+    object: string | undefined,
+  ): UnservedFixedReadLeaf | null =>
+    descend(map, () => {
+      for (const op of Object.keys(map)) {
+        const comparand = map[op];
+        if (op === '$in' && isFixedReadLeaf(comparand, READ_SCOPE_FIXED_READ_LEAF_BRANDS)) {
+          const rules = LEAF_RULES[fixedReadLeafNameOf(comparand)!];
+          const position = rules.position(comparand);
+          if (field !== position.field || (object !== undefined && object !== position.object)) {
+            return { at: `${at}.${op}`, leaf: comparand, reason: 'misplaced' };
+          }
+          if (!rules.readForm(comparand)) return { at: `${at}.${op}`, leaf: comparand, reason: 'write-form' };
+          continue;
+        }
+        const found = visitValue(comparand, `${at}.${op}`, object);
+        if (found) return found;
+      }
+      return null;
+    });
+  return visitNode(scope, path, scopeObject);
+}
+
+/**
+ * [ADR-0155 D4] Refuse, in ADR-0139 D3's envelope (`INTERNAL_ERROR` / 500,
+ * logged at `error` once per evaluator), the first fixed-read leaf `scope`
+ * carries that this module does not compile ({@link findUnservedFixedReadLeaf}).
+ * The message names the evaluator, the leaf (by name and table, never its
+ * inputs: a recipient is a principal's id, and the line reaches logs) and the
+ * remedy. Run at the entry of {@link compileScopedFilterToSql} and by
+ * {@link assertReadScopeComparandsRunnable} for a merge that admits the brand.
+ */
+function refuseUnservedFixedReadLeaf(
+  scope: unknown,
+  objectName: string,
+  scopeObject: string | undefined,
+  sink: FixedReadLeafRefusalSink | undefined,
+): void {
+  const found = findUnservedFixedReadLeaf(scope, 'readScope', scopeObject);
+  if (found === null) return;
+  const what = describeFixedReadLeaf(found.at, found.leaf);
+  const message = found.reason === 'write-form'
+    ? `read scope for "${objectName}": ${what} in its WRITE form, which only a predicate update carries ` +
+      '(ADR-0155 ③ ruled A) and every read refuses. The statement was NOT run. A read scope carries the read ' +
+      'form, SharedRecordIds.read(object, recipient).'
+    : `read scope for "${objectName}": ${what}, where no read-scope compiler compiles one: a fixed-read leaf ` +
+      'compiles only as the $in comparand of id on the object it names (ADR-0155 D1). The statement was NOT run, ' +
+      'rather than read the leaf as an ordinary comparand. Place it as { id: { $in: leaf } } in the scope of that object.';
+  const state = sink?.state ?? { logged: true };
+  throw refuseFixedReadLeafOnce(READ_SCOPE_FIXED_READ_LEAF_EVALUATOR, message, sink?.logger, state, objectName);
 }
 
 /** A node the compiler can walk: a plain object, not `null` and not an array. */
@@ -851,6 +1105,11 @@ export function compileScopedFilterToSql(
         'strategy; the dry-run echo cannot show a statement it would not run.',
     );
   }
+  // [ADR-0155 D4] A fixed-read leaf this compiler does not compile (out of
+  // position, or in its write form) is refused next, by name, in ADR-0139 D3's
+  // envelope, before a single clause reads it as a value. Every other leaf
+  // compiles at the `$in` arm (see the module header).
+  refuseUnservedFixedReadLeaf(filter, alias, options.object, options.fixedReadLeafRefusal);
   // [#20075] Resolve the scope's placeholders with the engine's own resolver
   // BEFORE the lowering, because the lowering binds values: what is bound, and
   // what the echo prints, is the value the ObjectQL face's engine resolves. A
@@ -893,7 +1152,14 @@ export function compileScopedFilterToSql(
   // lowering on purpose: a shape this compiler already refuses keeps its own
   // sentence, and the faces add exactly the shapes it would otherwise have
   // lowered. See the module header's #20018 section.
-  assertReadScopeComparandsRunnable(filter, alias);
+  //
+  // [ADR-0155 D4, plan step 5] It names the fixed-read leaf brands it compiles
+  // (`READ_SCOPE_FIXED_READ_LEAF_BRANDS`): what it admits, it compiled above.
+  assertReadScopeComparandsRunnable(filter, alias, {
+    admitFixedReadLeaves: READ_SCOPE_FIXED_READ_LEAF_BRANDS,
+    fixedReadLeafRefusal: options.fixedReadLeafRefusal,
+    object: options.object,
+  });
   if (unresolvable) throw unresolvable;
   return { sql, params };
 }
@@ -1034,6 +1300,19 @@ export interface ReadScopeComparandOptions {
    * by the engine-bound merges only; `compileScopedFilterToSql` never passes it.
    */
   readonly admitReadableIds?: boolean;
+  /**
+   * [ADR-0155 D4, Q2 as ruled] The fixed-read leaf brands to admit as a `$in`
+   * comparand ({@link READ_SCOPE_FIXED_READ_LEAF_BRANDS}): passed by the
+   * engine-bound merges, whose engine passes the leaf through its seam, and by
+   * {@link compileScopedFilterToSql}, which compiles it. A leaf of these brands
+   * out of position or in its write form is refused first, in ADR-0139 D3's
+   * envelope (`INTERNAL_ERROR` / 500), not this module's.
+   */
+  readonly admitFixedReadLeaves?: readonly FixedReadLeafBrand[];
+  /** [ADR-0155 D4] Where that refusal is logged, once per evaluator. */
+  readonly fixedReadLeafRefusal?: FixedReadLeafRefusalSink;
+  /** [ADR-0155 D1] The object the scope reads, when the caller can name it (see {@link ReadScopeCompileOptions.object}). */
+  readonly object?: string;
 }
 
 /**
@@ -1068,6 +1347,36 @@ export function findReadableIdsLeaf(scope: unknown): { object: string; path: str
     }
   };
   return visit(scope, '');
+}
+
+/**
+ * [ADR-0155 D4] Every fixed-read leaf `scope` carries, in walk order, wherever
+ * it sits (a composed `ReadableIds` scope included). Exported for
+ * `NativeSQLStrategy.canHandle`, which asks the engine seam's recognition of
+ * D4's two classes about each before anything compiles.
+ */
+export function fixedReadLeavesIn(scope: unknown): FixedReadLeaf[] {
+  const leaves: FixedReadLeaf[] = [];
+  const onPath = new Set<object>();
+  const visit = (value: unknown): void => {
+    if (isFixedReadLeaf(value)) {
+      leaves.push(value);
+      return;
+    }
+    if (isComposedReadableIds(value)) {
+      visit(value.scope);
+      return;
+    }
+    if (!isPlainContainer(value) || onPath.has(value)) return;
+    onPath.add(value);
+    try {
+      for (const item of Array.isArray(value) ? value : Object.values(value)) visit(item);
+    } finally {
+      onPath.delete(value);
+    }
+  };
+  visit(scope);
+  return leaves;
 }
 
 /**
@@ -1156,6 +1465,20 @@ export function findReadableIdsLeaf(scope: unknown): { object: string; path: str
  * (the brand is a symbol key no JSON carries), and the engine's door keeps
  * refusing it there as the non-list comparand it always was.
  *
+ * ## …and the fixed-read leaf (ADR-0155 D4, Q2 as ruled)
+ *
+ * The share-grant leaf (`SharedRecordIds`) is admitted under
+ * `options.admitFixedReadLeaves`, the brands its callers name
+ * ({@link READ_SCOPE_FIXED_READ_LEAF_BRANDS}). D4 names the callers of the
+ * spec face that may name a brand: the engine's door, and the analytics
+ * merges, which Q2 ruled admit it. In this package those are this function's
+ * callers: the two engine-bound merges and the record-label read, which hand
+ * the leaf to the engine's seam, and {@link compileScopedFilterToSql}, which
+ * Q2 ruled compiles the leaf and which reaches the spec face only through
+ * here. Every leaf this function admits is either handed to the engine or
+ * compiled. A leaf of those brands out of position or in its write form is
+ * refused before the faces, in ADR-0139 D3's envelope.
+ *
  * @param scope the `StrategyContext.getReadScope` output, exactly as returned
  * @param objectName the object the scope was requested for — for the operator's
  *   log only; withheld from the response by the `READ_SCOPE_COMPILE_FAILED` /
@@ -1167,8 +1490,22 @@ export function assertReadScopeComparandsRunnable(
   objectName: string,
   options?: ReadScopeComparandOptions,
 ): void {
+  // [ADR-0155 D4] A merge that admits the fixed-read leaf brands refuses, first
+  // and in ADR-0139 D3's own envelope, a leaf of them it would not hand on:
+  // the engine would refuse it too, and this module's envelope would dress a
+  // composition fault as a scope this module could not compile.
+  const admitFixedReadLeaves = options?.admitFixedReadLeaves;
+  if (admitFixedReadLeaves !== undefined && admitFixedReadLeaves.length > 0) {
+    refuseUnservedFixedReadLeaf(scope, objectName, options?.object, options?.fixedReadLeafRefusal);
+  }
+  const shapeOptions = options?.admitReadableIds === true || admitFixedReadLeaves !== undefined
+    ? {
+        ...(options?.admitReadableIds === true ? { admitReadableIds: true } : {}),
+        ...(admitFixedReadLeaves !== undefined ? { admitFixedReadLeaves } : {}),
+      }
+    : undefined;
   try {
-    assertListComparandShapes(scope, undefined, 'readScope', options?.admitReadableIds === true ? { admitReadableIds: true } : undefined);
+    assertListComparandShapes(scope, undefined, 'readScope', shapeOptions);
     normalizeFilterComparandTypes(scope, undefined, 'readScope');
   } catch (e) {
     throw readScopeCompileError(
@@ -2159,6 +2496,37 @@ function assertNoFieldReferenceComparand(field: string, spec: unknown): void {
  * #19886's ruling A, carried on that card. The other scalar operators carrying a
  * list are not this ruling's either.
  */
+/**
+ * [ADR-0155 D2, D4] The subquery a fixed-read leaf compiles to, from the leaf's
+ * own description (`fixedInnerReadOf`): ⛔ no predicate restated by hand, every
+ * value bound into `params`, the identifiers through {@link quoteIdent}.
+ *
+ *  - each `equals` entry as `"column" = ?`, each `memberOf` entry as
+ *    `"column" IN (?, …)`, ANDed, in the description's order;
+ *  - the blank-id guard, `"column" IS NOT NULL AND "column" <> ''`, so a
+ *    negation answers every row the set does not hold. (The one dialect that
+ *    stores `''` as NULL, Oracle, is not one this compiler names:
+ *    `NativeSQLStrategy` declines a leaf on a dialect it cannot name.)
+ *  - **no tenant scope** (`tenantScope: 'none'`, ADR-0155 ① ruled A). The
+ *    outer statement's wall is untouched.
+ *
+ * One statement, no `EXISTS`, no correlation, no join (ADR-0155 D1).
+ */
+function fixedReadLeafSubquerySql(leaf: FixedReadLeaf, params: unknown[]): string {
+  const read = fixedInnerReadOf(leaf);
+  // ADR-0155 ① ruled A: no tenant scope on the inner read. A widened type fails here.
+  const tenantScope: 'none' = read.tenantScope;
+  void tenantScope;
+  const column = quoteIdent(read.column, 'column');
+  const predicates: string[] = [];
+  for (const [name, value] of Object.entries(read.equals)) predicates.push(`${quoteIdent(name, 'column')} = ${bind(params, value)}`);
+  for (const [name, values] of Object.entries(read.memberOf)) {
+    predicates.push(`${quoteIdent(name, 'column')} IN (${values.map((value) => bind(params, value)).join(', ')})`);
+  }
+  predicates.push(`${column} IS NOT NULL`, `${column} <> ''`);
+  return `SELECT ${column} FROM ${quoteIdent(read.table, 'table')} WHERE ${predicates.join(' AND ')}`;
+}
+
 function assertNoListInEqualitySlot(field: string, spec: unknown): void {
   if (!isFilterNode(spec) || !Array.isArray(spec.$eq)) return;
   throw readScopeCompileError(
@@ -2195,6 +2563,9 @@ function compileOperator(
     case '$lt': return `${vcol()} < ${vbind(val)}`;
     case '$lte': return `${vcol()} <= ${vbind(val)}`;
     case '$in': {
+      // [ADR-0155 D2] The fixed-read leaf: its subquery. The entry's walk
+      // already refused every leaf this arm does not compile.
+      if (isFixedReadLeaf(val, READ_SCOPE_FIXED_READ_LEAF_BRANDS)) return `${col} IN (${fixedReadLeafSubquerySql(val, params)})`;
       if (!Array.isArray(val)) throw readScopeCompileError(`[read-scope-sql] $in for "${field}" needs an array (fail-closed).`);
       if (val.length === 0) return FALSE_CLAUSE; // IN () matches nothing — safe
       assertCompilableMembers(op, field, val);

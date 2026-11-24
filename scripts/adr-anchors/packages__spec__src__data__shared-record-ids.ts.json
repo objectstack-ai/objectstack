@@ -1,0 +1,8 @@
+{
+  "file": "packages/spec/src/data/shared-record-ids.ts",
+  "adrs": [
+    "ADR-0139",
+    "ADR-0155"
+  ],
+  "invariant": "SharedRecordIds is ADR-0155 D1's share-grant leaf, with its own brand on ADR-0139 D1's device: a Symbol.for key, defined non-enumerable, non-writable and non-configurable, on a frozen value. JSON, a structured clone, a serializing wire or an object spread therefore yield an UNBRANDED copy, which the comparand-shape door refuses as a non-list comparand (INVALID_FILTER / 400), never dropped and never read as an empty list. The value carries only the inputs of the grant read (object, recipient user id, and the levels on the write form), and its fixed inner read is sys_record_share.record_id with object_name, recipient_type = 'user' and recipient_id bound, under tenantScope 'none' (ADR-0155 ruling 1 A). Do not make the brand enumerable or a string key, do not unfreeze the value, do not add an organization or a reading context to it, do not make it a mode of ReadableIds, and do not add a filter operator that spells it."
+}

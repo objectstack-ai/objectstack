@@ -23,6 +23,12 @@ export interface UseRecordPageTierOptions {
    * measured and the answer is `null`.
    */
   enabled?: boolean;
+  /**
+   * CSS pixels of `element` the page does not get (objectstack#36075): the
+   * comment panel drawn beside the record inside the measured container. The
+   * page's tier is judged on what is left.
+   */
+  reservedWidth?: number;
 }
 
 /**
@@ -45,13 +51,13 @@ export function useRecordPageTier(
   element: Element | null,
   options: UseRecordPageTierOptions = {},
 ): RecordPageTier | null {
-  const { enabled = true } = options;
+  const { enabled = true, reservedWidth = 0 } = options;
   const [measured, setMeasured] = React.useState<{ element: Element; tier: RecordPageTier } | null>(null);
 
   useIsomorphicLayoutEffect(() => {
     if (!enabled || !element) return undefined;
     const judge = () => {
-      const tier = recordPageTierFor(element.getBoundingClientRect().width);
+      const tier = recordPageTierFor(element.getBoundingClientRect().width - reservedWidth);
       setMeasured((prev) => (prev && prev.element === element && prev.tier === tier ? prev : { element, tier }));
     };
     judge();
@@ -59,7 +65,7 @@ export function useRecordPageTier(
     const observer = new ResizeObserver(judge);
     observer.observe(element);
     return () => observer.disconnect();
-  }, [enabled, element]);
+  }, [enabled, element, reservedWidth]);
 
   if (!enabled || !element || !measured || measured.element !== element) return null;
   return measured.tier;

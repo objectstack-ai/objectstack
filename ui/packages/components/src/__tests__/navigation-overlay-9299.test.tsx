@@ -25,10 +25,10 @@
  *   `RecordDetailDrawer`'s retired `objectui.drawerWidth.OBJECT`, must carry
  *   over — ⛔ not be silently reset. The starting state of every case below is
  *   therefore an EXISTING persisted width; a case that only checked the new key
- *   would prove nothing about the migration. Since objectstack#27545 a
- *   remembered width draws inside the drag range (`min(Npx, 60vw)`), and an
- *   authored width is no longer floored at `min(60vw, 880px)`: the pane's
- *   default is 720 and the reader drags it.
+ *   would prove nothing about the migration. A remembered width draws inside
+ *   the drag range (380 to 900 px since objectstack#36149), and an authored
+ *   width is no longer floored at `min(60vw, 880px)` (objectstack#27545): the
+ *   host's default is drawn as given and the reader drags it.
  */
 
 import React from 'react';
@@ -126,7 +126,7 @@ describe('objectui#9299 item 4 — the persisted width carries over, it is not r
     expect(await screen.findByTestId('payload')).toBeInTheDocument();
     // The user's width is what renders — not the authored default — bounded
     // by the drag range (objectstack#27545).
-    expect(readWidth()).toBe('min(640px, 60vw)');
+    expect(readWidth()).toBe('640px');
     // … and it has MOVED, so this is a migration and not a permanent second
     // read: the new key holds it and the retired one is gone.
     expect(window.localStorage.getItem(KEY)).toBe('640');
@@ -142,7 +142,7 @@ describe('objectui#9299 item 4 — the persisted width carries over, it is not r
       legacyStorageKey: LEGACY,
     });
     expect(await screen.findByTestId('payload')).toBeInTheDocument();
-    expect(readWidth()).toBe('min(700px, 60vw)');
+    expect(readWidth()).toBe('700px');
   });
 
   it('CONTROL: with no persisted width at all the authored width is what applies', async () => {

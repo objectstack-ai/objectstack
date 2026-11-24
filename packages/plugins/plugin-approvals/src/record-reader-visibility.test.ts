@@ -364,7 +364,7 @@ describe('record-reader approval visibility (#8652)', () => {
       // request is not a licence to decide it.
       await expect(svc.decide(REQUEST, { decision: 'approve', actorId: LEDGER_ROLE }, ctx))
         .rejects.toThrow(/^FORBIDDEN/);
-      await expect(svc.decide(REQUEST, { decision: 'reject', actorId: LEDGER_ROLE }, ctx))
+      await expect(svc.decide(REQUEST, { decision: 'reject', comment: 'Over budget.', actorId: LEDGER_ROLE }, ctx))
         .rejects.toThrow(/^FORBIDDEN/);
       await expect(svc.reassign(REQUEST, { actorId: LEDGER_ROLE, to: LEDGER_ROLE }, ctx))
         .rejects.toThrow(/^FORBIDDEN/);
@@ -378,7 +378,7 @@ describe('record-reader approval visibility (#8652)', () => {
       const svc = service([OBJECT]);
       const row: any = await svc.getRequest(REQUEST, asUser(LEDGER_ROLE));
       // What a console ORs into the decision actions' `visible` gate.
-      expect(row.viewer).toEqual({ can_act: false, is_submitter: false, can_override: false });
+      expect(row.viewer).toEqual({ can_act: false, is_submitter: false, can_override: false, can_override_approve: false });
     });
   });
 

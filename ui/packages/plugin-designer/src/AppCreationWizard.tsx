@@ -17,7 +17,7 @@
  * 4. Branding (logo, primary color, favicon)
  */
 
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import type {
   AppWizardDraft,
   AppWizardStep,
@@ -74,7 +74,18 @@ export interface AppCreationWizardProps {
   readOnly?: boolean;
   /** CSS class */
   className?: string;
+  /**
+   * Reads an object's definition as its author stored it: the untranslated
+   * layers, never the served object, which is translated for the console's
+   * locale (objectstack#35101). The plural label of each generated object
+   * entry is decided from this answer alone. Absent, refused or empty ⇒ the
+   * entry carries no label and inherits the object's label at render time.
+   */
+  readAuthoredObject?: (objectName: string) => Promise<Record<string, unknown> | null>;
 }
+
+/** The authored text a generated entry's label is decided from, per object name. */
+type AuthoredEntryLabels = ReadonlyMap<string, string | undefined>;
 
 // ============================================================================
 // Constants
@@ -113,19 +124,31 @@ const DEFAULT_DRAFT: AppWizardDraft = {
  * `label` is the object's machine name when the object has none
  * (`CreateAppPage` / `EditAppPage`), so an unlabelled object's entry stored its
  * machine name.
+ *
+ * objectstack#35101 — the comparison and the stored text are the object's
+ * AUTHORED definition, never the served one. The served object is translated
+ * for the console's locale, so deciding from it stored a translation as the
+ * app's source text (a zh-CN session wrote '项目列表'), and whether anything
+ * was stored at all depended on the editor's language. An authored definition
+ * the host could not read decides nothing: the entry inherits.
  */
-function generatedEntryLabel(o: ObjectSelection): string | undefined {
-  const plural = o.pluralLabel?.trim().toLowerCase();
+function generatedEntryLabel(
+  objectName: string,
+  authored: Record<string, unknown> | null | undefined,
+): string | undefined {
+  const pluralLabel = authored?.pluralLabel;
+  if (typeof pluralLabel !== 'string') return undefined;
+  const plural = pluralLabel.trim().toLowerCase();
   if (!plural) return undefined;
-  const spells = (text: string | undefined) => typeof text === 'string' && text.trim().toLowerCase() === plural;
-  return spells(o.label) || spells(o.name) ? undefined : o.pluralLabel;
+  const spells = (text: unknown) => typeof text === 'string' && text.trim().toLowerCase() === plural;
+  return spells(authored?.label) || spells(objectName) ? undefined : pluralLabel;
 }
 
-function generateNavFromObjects(objects: ObjectSelection[]): NavigationItem[] {
+function generateNavFromObjects(objects: ObjectSelection[], labels: AuthoredEntryLabels): NavigationItem[] {
   return objects
     .filter((o) => o.selected)
     .map((o) => {
-      const label = generatedEntryLabel(o);
+      const label = labels.get(o.name);
       return {
         id: o.name,
         type: 'object' as const,
@@ -200,12 +223,45 @@ function dropDeselectedObjectEntries(
 function mergeNavWithObjects(
   navigation: NavigationItem[],
   objects: ObjectSelection[],
+  labels: AuthoredEntryLabels,
 ): NavigationItem[] {
   const deselected = new Set(objects.filter((o) => !o.selected).map((o) => o.name));
   const kept = dropDeselectedObjectEntries(navigation, deselected);
   const present = navObjectNames(kept);
-  const added = generateNavFromObjects(objects.filter((o) => !present.has(o.name)));
+  const added = generateNavFromObjects(objects.filter((o) => !present.has(o.name)), labels);
   return added.length === 0 ? kept : [...kept, ...added];
+}
+
+/**
+ * The selected objects {@link mergeNavWithObjects} generates an entry for: the
+ * ones with no object entry left in the tree. Only these need an authored read.
+ */
+function objectsNeedingEntries(navigation: NavigationItem[], objects: ObjectSelection[]): ObjectSelection[] {
+  const deselected = new Set(objects.filter((o) => !o.selected).map((o) => o.name));
+  const present = navObjectNames(dropDeselectedObjectEntries(navigation, deselected));
+  return objects.filter((o) => o.selected && !present.has(o.name));
+}
+
+/**
+ * The authored label of each object's generated entry (objectstack#35101).
+ * One read per object; a read that is refused or finds nothing maps to
+ * `undefined`, so that entry inherits. ⛔ Never falls back to the served
+ * object's text: that is the translation the read exists to keep out.
+ */
+async function readAuthoredEntryLabels(
+  objects: ObjectSelection[],
+  readAuthoredObject: (objectName: string) => Promise<Record<string, unknown> | null>,
+): Promise<AuthoredEntryLabels> {
+  const entries = await Promise.all(
+    objects.map(async (o): Promise<[string, string | undefined]> => {
+      try {
+        return [o.name, generatedEntryLabel(o.name, await readAuthoredObject(o.name))];
+      } catch {
+        return [o.name, undefined];
+      }
+    }),
+  );
+  return new Map(entries);
 }
 
 let navItemCounter = 0;
@@ -847,6 +903,7 @@ export function AppCreationWizard({
   onSaveDraft,
   readOnly = false,
   className,
+  readAuthoredObject,
 }: AppCreationWizardProps) {
   // ---- i18n ----
   const { t } = useDesignerTranslation();
@@ -857,6 +914,13 @@ export function AppCreationWizard({
   // ---- State ----
   const [currentStep, setCurrentStep] = useState(0);
   const [objectSearch, setObjectSearch] = useState('');
+  // objectstack#35101 — the authored reads for the generated entries are in flight.
+  const [generatingNav, setGeneratingNav] = useState(false);
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
 
   const [draft, setDraft] = useState<AppWizardDraft>(() => ({
     ...DEFAULT_DRAFT,
@@ -948,23 +1012,43 @@ export function AppCreationWizard({
     });
   }, []);
 
+  // Leaving objects → navigation: fill an empty navigation from the selected
+  // objects, or merge the selection into the one the draft holds. The new
+  // entries' labels are decided from the objects' AUTHORED definitions
+  // (objectstack#35101), so the step waits for those reads; the step buttons
+  // and the object selection are disabled meanwhile, so neither the step nor
+  // the selection can move under them.
+  const enterNavigationStep = useCallback(() => {
+    const pending = readAuthoredObject ? objectsNeedingEntries(draft.navigation, draft.objects) : [];
+    const advance = (labels: AuthoredEntryLabels) => {
+      setDraft((prev) => ({ ...prev, navigation: mergeNavWithObjects(prev.navigation, prev.objects, labels) }));
+      setCurrentStep(2);
+    };
+    if (!readAuthoredObject || pending.length === 0) {
+      advance(new Map());
+      return;
+    }
+    setGeneratingNav(true);
+    void readAuthoredEntryLabels(pending, readAuthoredObject).then((labels) => {
+      if (!mountedRef.current) return;
+      setGeneratingNav(false);
+      advance(labels);
+    });
+  }, [draft.navigation, draft.objects, readAuthoredObject]);
+
   const handleNext = useCallback(() => {
-    if (isLastStep) return;
-    // Leaving objects → navigation: fill an empty navigation from the selected
-    // objects, or merge the selection into the one the draft holds.
+    if (isLastStep || generatingNav) return;
     if (currentStep === 1) {
-      setDraft((prev) => ({
-        ...prev,
-        navigation: mergeNavWithObjects(prev.navigation, prev.objects),
-      }));
+      enterNavigationStep();
+      return;
     }
     setCurrentStep((s) => s + 1);
-  }, [currentStep, isLastStep]);
+  }, [currentStep, isLastStep, generatingNav, enterNavigationStep]);
 
   const handleBack = useCallback(() => {
-    if (isFirstStep) return;
+    if (isFirstStep || generatingNav) return;
     setCurrentStep((s) => s - 1);
-  }, [isFirstStep]);
+  }, [isFirstStep, generatingNav]);
 
   const handleComplete = useCallback(() => {
     onComplete?.(draft);
@@ -990,21 +1074,20 @@ export function AppCreationWizard({
 
   const handleStepClick = useCallback(
     (index: number) => {
+      if (generatingNav) return;
       // Only allow navigating to completed steps or the next valid step
       if (index <= currentStep) {
         setCurrentStep(index);
       } else if (index === currentStep + 1 && canProceed) {
         // Jumping objects → navigation: the same fill-or-merge as `handleNext`.
         if (currentStep === 1 && index === 2) {
-          setDraft((prev) => ({
-            ...prev,
-            navigation: mergeNavWithObjects(prev.navigation, prev.objects),
-          }));
+          enterNavigationStep();
+          return;
         }
         setCurrentStep(index);
       }
     },
-    [currentStep, canProceed]
+    [currentStep, canProceed, generatingNav, enterNavigationStep]
   );
 
   // ---- Render ----
@@ -1076,7 +1159,9 @@ export function AppCreationWizard({
         {currentStep === 1 && (
           <ObjectSelectionStep
             objects={draft.objects}
-            readOnly={readOnly}
+            // The selection is frozen while its entries' authored reads run:
+            // an object toggled mid-read would get an entry nobody read for.
+            readOnly={readOnly || generatingNav}
             onToggle={toggleObject}
             onToggleAll={toggleAllObjects}
             search={objectSearch}
@@ -1136,7 +1221,7 @@ export function AppCreationWizard({
               type="button"
               data-testid="wizard-back"
               onClick={handleBack}
-              disabled={readOnly}
+              disabled={readOnly || generatingNav}
               className="inline-flex items-center gap-1 rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <ChevronLeft className="h-4 w-4" />
@@ -1159,7 +1244,8 @@ export function AppCreationWizard({
               type="button"
               data-testid="wizard-next"
               onClick={handleNext}
-              disabled={readOnly || !canProceed}
+              disabled={readOnly || !canProceed || generatingNav}
+              aria-busy={generatingNav || undefined}
               className="inline-flex items-center gap-1 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {t('common.next')}

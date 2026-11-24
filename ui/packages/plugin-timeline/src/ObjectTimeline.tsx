@@ -8,8 +8,8 @@
 
 import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import type { DataSource, TimelineSchema, ListViewTimelineConfig, ViewNavigationConfig } from '@object-ui/types';
-import { useDataScope, useNavigationOverlay, useSafeFieldLabel, useSettledSchema, useDataInvalidation, useFilterScope, useResolvedFilter } from '@object-ui/react';
-import { NavigationOverlay } from '@object-ui/components';
+import { useDataScope, useNavigationOverlay, useSafeFieldLabel, useSettledSchema, useDataInvalidation, useFilterScope, useResolvedFilter, classifyLoadError } from '@object-ui/react';
+import { NavigationOverlay, DataEmptyState, LazyIcon } from '@object-ui/components';
 import { extractRecords, buildExpandFields, convertSortToQueryParams, createFieldColorResolver, recordDisplayValueAt, toDisplayDate } from '@object-ui/core';
 import { usePermissions } from '@object-ui/permissions';
 import { firstDayOfWeek, useDisplayLocale } from '@object-ui/i18n';
@@ -1006,6 +1006,27 @@ export const ObjectTimeline: React.FC<ObjectTimelineProps> = ({
         onItemClick?.(record);
       },
   };
+
+  // A refused read (403 / PERMISSION_DENIED, by the shared `classifyLoadError`
+  // verdict the list page, the related list and the gantt use) is not a
+  // failure of anything the reader did: they may open the page without being
+  // granted the records this timeline reads. It is drawn as the calm no-access
+  // state (`role="status"`, the shared `list.loadErrorForbidden*` sentence in
+  // the reader's language), never the server's text. Every other failure
+  // keeps the error screen below.
+  // The Lock glyph comes through the shared `LazyIcon`: this package declares
+  // no icon library of its own.
+  if (error && classifyLoadError(error) === 'forbidden') {
+      return (
+        <DataEmptyState
+          data-testid="timeline-no-access"
+          className="min-h-[200px]"
+          icon={<LazyIcon name="lock" className="size-5 text-muted-foreground" aria-hidden />}
+          title={t('list.loadErrorForbiddenTitle')}
+          description={t('list.loadErrorForbiddenMessage')}
+        />
+      );
+  }
 
   if (error) {
       return (

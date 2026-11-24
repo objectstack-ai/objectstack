@@ -63,17 +63,17 @@ const D3_ID = 'ui-form-view-type-layout-only';
 const TYPE_FIRST_SENTENCE = {
   split:
     "'split' was removed from the form view `type` enum in @objectstack/spec 18.3.0 (ADR-0050) — `type` is the "
-    + "form's layout, and a side-by-side split is not one: whether a record opens beside its list is each "
-    + "reader's own preference in the list's Display menu, not metadata.",
+    + "form's layout, and a side-by-side split is not one: a record opens from its list in the drawer or as "
+    + 'the full page, never beside the list.',
   drawer:
     "'drawer' was removed from the form view `type` enum in @objectstack/spec 18.3.0 (ADR-0050) — `type` is the "
-    + "form's layout, and where a form opens is decided by whoever opens it: a list opens a clicked record in "
-    + "the drawer (`navigation.mode`, the default), and the console's New and Edit entries open the record form "
-    + 'themselves.',
+    + "form's layout, and where a form opens is decided by whoever opens it: an object's list opens a clicked "
+    + "record's full page, or its drawer from the hover icon, and the console's New and Edit entries open the "
+    + 'record form themselves.',
   modal:
     "'modal' was removed from the form view `type` enum in @objectstack/spec 18.3.0 (ADR-0050) — `type` is the "
     + "form's layout, and where a form opens is decided by whoever opens it: the console's New and Edit dialogs "
-    + "open the record form themselves (sized by the form's `modalSize`), and an action `type: 'modal'` opens "
+    + "open the record form themselves (laid out by the object's `fieldGroups`), and an action `type: 'modal'` opens "
     + 'the page it targets.',
 } as const;
 /** Each tombstoned key → the first sentence of its prescription. */
@@ -229,7 +229,7 @@ describe('the split-only keys — `pane`, `splitSize`, `splitResizable`, `splitD
   });
 
   it('STATED BOUNDARY: `modalSize` stays declared', () => {
-    // `modalSize` is read by the console's record dialog on every layout.
+    // `modalSize` stays declared; since #36425 the console's record dialog reads no form view (its verdict: #36544).
     // [#29012] `drawerSide` / `drawerWidth` left this boundary: they are
     // tombstones now (`form-view-drawer-keys-retirement.test.ts`).
     const r = FormViewSchema.safeParse({

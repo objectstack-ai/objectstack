@@ -33,7 +33,7 @@ import { render, cleanup } from '@testing-library/react';
 import * as React from 'react';
 import { I18nProvider, LocalizationProvider } from '@object-ui/i18n';
 import { isMachineLocale, recordLocaleArguments } from '@object-ui/test-support';
-import { GridField } from './GridField';
+import { GridFieldWidget as GridField } from './grid-field/GridFieldWidget';
 
 afterEach(() => cleanup());
 

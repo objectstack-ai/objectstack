@@ -23,6 +23,11 @@ export { recoverUnencodedJsonText } from './unencoded-json-text.js';
 // face compiles SQL text with its own compiler, and must regroup by the same
 // rule the knex path does.
 export { FLAT_GROUP_MAX_MEMBERS, joinBalancedGroup } from './sql-driver-balanced-group.js';
+// [ADR-0155 D2, D4] Where a fixed-read leaf compiles and the predicates of its
+// fixed inner read. Exported because the Turso remote face compiles the leaf
+// with its own compiler, from the same walk and the same predicates.
+export { findMisplacedFixedReadLeaf, fixedInnerReadPredicates, misplacedFixedReadLeafMessage } from './fixed-read-leaf-compile.js';
+export type { FixedInnerReadPredicates, MisplacedFixedReadLeaf } from './fixed-read-leaf-compile.js';
 // [cloud#3652 D3] The declared-rename refusal the sync throws before any DDL,
 // and its renderer, so a host reporting a refused sync (the install door, `os
 // migrate apply`) reads the structured refusals rather than parsing the text;
@@ -46,6 +51,10 @@ export {
   UnsupportedDialectEmissionError,
   renderDialectEmissionRefusal,
 } from './dialect-emission-refusal.js';
+// [latest per group] The window directive `find` compiles, so a subclass that
+// answers `find` on another transport (Turso's remote face) can tell it rode in.
+export { LATEST_PER_DIRECTIVE, latestPerDirectiveOf } from './sql-driver-latest-per.js';
+export type { LatestPerDirective, LatestPerDirectiveOrder } from './sql-driver-latest-per.js';
 // [ADR-0131 D9] The autonumber counter's refusal of an organization-less row on
 // a tenant table — exported for the same reason: a caller recognises it by `code`.
 export {

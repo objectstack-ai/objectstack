@@ -28,7 +28,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { afterEach, describe, expect, it } from 'vitest';
-import { ObjectKernel } from '@objectstack/core';
+import { ObjectKernel, createSecurityCatalogReader, missingCapabilities } from '@objectstack/core';
 import { ObjectQL } from './engine.js';
 import { ObjectQLPlugin } from './plugin.js';
 
@@ -126,6 +126,7 @@ interface Fixture {
 /** The manifest collection each fixture type is declared under. */
 const COLLECTION: Record<string, string> = {
     object: 'objects', view: 'views', action: 'actions', permission: 'permissions', flow: 'flows', hook: 'hooks',
+    capability: 'capabilities',
 };
 
 interface Harness {
@@ -629,5 +630,68 @@ describe('[#30794] the duplicate battery, replayed through the unmanaged import 
             expect(again.error).toBeUndefined();
             expect(storedBody(again.h, 'hook', 'dupdst_stamp', Q).object).toEqual(['dupdst_customer']);
         });
+    });
+});
+
+// ── #35157: an app that gates an action on its own capability ──────────────
+
+const capabilityGated: Fixture[] = [
+    {
+        type: 'object', item: {
+            name: 'dupsrc_asset', label: 'Asset', sharingModel: 'private',
+            requiredPermissions: { delete: ['dupsrc.manage_assets'] },
+            fields: { title: { name: 'title', type: 'text', label: 'Title' } },
+        },
+    },
+    { type: 'capability', item: { name: 'dupsrc.manage_assets', label: 'Manage assets', scope: 'org' } },
+    {
+        type: 'permission', item: {
+            name: 'dupsrc_manager', label: 'Asset manager',
+            objects: { dupsrc_asset: { allowRead: true, allowEdit: true, allowDelete: true } },
+            systemPermissions: ['dupsrc.manage_assets'],
+        },
+    },
+    {
+        type: 'action', item: {
+            name: 'dupsrc_scrap', label: 'Scrap', type: 'url', objectName: 'dupsrc_asset', target: 'https://example.com/scrap',
+            requiredPermissions: ['dupsrc.manage_assets'],
+        },
+    },
+];
+
+describe('[#35157] an app that gates an action on its own capability installs unmanaged, and the copy keeps its gate', () => {
+    it('the capability is copied under the target namespace, and every grant and requirement of it follows', async () => {
+        const imp = await viaImport(capabilityGated);
+        expect(imp.error).toBeUndefined();
+
+        expect(storedBody(imp.h, 'capability', 'dupdst.manage_assets', Q))
+            .toMatchObject({ name: 'dupdst.manage_assets', label: 'Manage assets', scope: 'org' });
+        expect(storedBody(imp.h, 'capability', 'dupsrc.manage_assets', Q)).toBeUndefined();
+        expect(storedBody(imp.h, 'permission', 'dupdst_manager', Q).systemPermissions).toEqual(['dupdst.manage_assets']);
+        expect(storedBody(imp.h, 'action', 'dupdst_scrap', Q).requiredPermissions).toEqual(['dupdst.manage_assets']);
+        expect(storedBody(imp.h, 'object', 'dupdst_asset', Q).requiredPermissions).toEqual({ delete: ['dupdst.manage_assets'] });
+    });
+
+    it('the security catalog resolves the copied capability with its scope — the input ADR-0090 D12 (c) reads', async () => {
+        const imp = await viaImport(capabilityGated);
+        expect(imp.error).toBeUndefined();
+        // The metadata service holds no stack declaration in this kernel; the
+        // copy lives in the engine registry, which the reader asks first.
+        const metadata = { get: async () => undefined, list: async () => [] };
+        const catalog = createSecurityCatalogReader({ registry: imp.h.engine.registry as never, metadata: metadata as never });
+        const declared = await catalog.resolve('capability', 'dupdst.manage_assets');
+        expect(declared?.definition).toMatchObject({ name: 'dupdst.manage_assets', scope: 'org' });
+    });
+
+    it('the copied action admits a holder of the copied set, and refuses a non-holder and a holder of the SOURCE\'s grant', async () => {
+        const imp = await viaImport(capabilityGated);
+        expect(imp.error).toBeUndefined();
+        const required = storedBody(imp.h, 'action', 'dupdst_scrap', Q).requiredPermissions;
+        const holder = { systemPermissions: storedBody(imp.h, 'permission', 'dupdst_manager', Q).systemPermissions };
+
+        expect(missingCapabilities(required, holder)).toEqual([]);
+        expect(missingCapabilities(required, { systemPermissions: [] })).toEqual(['dupdst.manage_assets']);
+        // Two copies of one app never share a gate: the source's grant opens nothing in the copy.
+        expect(missingCapabilities(required, { systemPermissions: ['dupsrc.manage_assets'] })).toEqual(['dupdst.manage_assets']);
     });
 });

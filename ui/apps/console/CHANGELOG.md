@@ -1,5 +1,522 @@
 # @object-ui/console
 
+## 18.6.0
+
+### Minor Changes
+
+- 4240719: feat(ui): timesheet list view, an editable row × weekday entry grid
+  
+  Clause-②: yes (widening — new list view type `timesheet`, its `timesheet` block and the `VisualizationType` member; new locale keys)
+  Metadata-protocol: added
+  
+  A list view can now be `type: 'timesheet'`. It pivots detail records into rows × the seven days of one week, and every cell is editable:
+  
+  ```ts
+  type: 'timesheet',
+  timesheet: {
+    rowFields: ['project', 'task'], // 1–3 fields; one row per distinct combination
+    dateField: 'work_date',         // date or datetime
+    valueField: 'hours',            // number, currency or percent
+  }
+  ```
+  
+  - Typing into an empty cell creates a record carrying the row's field values, the day and the number. Changing a cell updates that record, and clearing it deletes the record. Each cell is one call on the record API, so hooks, validation rules and permissions judge it; a refusal stays on that cell with the server's message.
+  - A cell holding several records shows their sum and is read-only.
+  - The grid offers each write only to a caller who may make it (the affordance-to-grant map's `gridAddRow`, `listInlineEdit` with the value field's write permission, and `rowDelete`). A cell no granted write can change is read-only, and **Add row** needs the create grant. An interface page's list block relays the view's `timesheet` block.
+  - The week starts on the viewer's locale first day, with previous / this / next navigation. Row, day and week totals are always shown.
+  - **Add row** asks for the row field values first; typing a day then creates the record. The view's `filter` applies to the week's query.
+  - A `timesheet` view with an incomplete block shows "Timesheet configuration required", and `os validate` warns with `view/layout-without-binding`. `view/list-view-field-refs` checks the three field names.
+  
+  The renderer is the new lazy package `@object-ui/plugin-timesheet` (`object-timesheet`), with its own lazy locale namespace `timesheet.*`. The view switcher, the create-view dialog and the Studio list-view type section offer the new type.
+
+### Patch Changes
+
+- 121017b: fix(app-shell): Home sends the deployment notice, authorized-clients and API-key reads once per load
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  On a built Console, a cold load of Home sent `GET /api/settings/deployment/notice` twice and `GET /api/v1/auth/authorized-clients` and the `sys_api_key` list three times each. The repeats were not concurrent, so sharing an in-flight request could not remove them. Each had its own cause:
+  
+  - **Home was mounted twice.** Home waits on the launcher's `pending` flag so that it never draws an app tile that `/me/apps` then hides. The `LauncherAppsProvider` set that flag from its effect, which runs after the first commit. So the first frame had nothing pending and nothing narrowed: Home drew its page, then switched to its loading state, then drew the page again. Everything inside it mounted twice, and the deployment notice and the Connect an AI Assistant card sent their reads twice. The first read is now `pending` from the render that makes it due. Home draws its page once, after the answer, and a hidden app's tile is never drawn in that first frame.
+  - **Two readers of one answer.** Home draws the Connect an AI Assistant card and the administrator's first-run checklist together. Both read "has this person connected an assistant" through `useConnectedAccess`, and each sent its own two requests. Every reader mounted at the same time now shares one pair of reads. A change to either record re-reads it once for all of them. The shared answer is dropped with its last reader, so a page mounted later reads afresh.
+  
+  A list page load already read every URL once on a built Console, so nothing changes there.
+- bf76922: feat(console-ai): an image or PDF attached in the AI chat is uploaded as the user and sent to the agent as a file part
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The console's AI chat used to send only spreadsheet attachments (parsed in the page) and told the model that every other file "was not read". Now:
+  
+  - The composer shows its attach button and the attachment chips, so a file can be picked, pasted or dropped and seen before it is sent.
+  - An image (PNG, JPEG, GIF, WebP) or a PDF of at most 10 MiB is uploaded to storage as the signed-in user through the console's upload adapter (`POST /api/v1/storage/upload/presigned`, the bytes, then `POST /api/v1/storage/upload/complete` without `attachTo`), so it belongs to no record yet. The user turn carries one AI SDK file part per uploaded file: `{ type: 'file', mediaType, filename, url, providerMetadata: { objectstack: { fileId } } }`, where `url` is the stored file's address (`/api/v1/storage/files/{fileId}`, made absolute) and never an inline data URL, so the request and the stored conversation stay small. The turn's text names the files it sent.
+  - A file over the cap, of another type, or whose upload failed is not sent, and the turn's text names it and says why, so the user and the agent both know its content was not read. The turn still sends.
+  - A spreadsheet keeps the in-page parse, unchanged.
+  
+  `@object-ui/plugin-chatbot`: `useObjectChat().sendMessage` takes a third, optional argument, `fileParts` (the new exported `ChatFilePart` type), which the API mode sends as the turn's file parts. Its second argument, `files`, is still not sent: upload the files first and pass the result as `fileParts`. Existing two-argument calls are unchanged.
+  
+  Reading the files is the agent's side: an agent service that does not yet convert these parts for its model sees the file names in the text and the parts it does not read.
+- 3372da0: fix(plugin-auth)!: under the local sign-in path `off`, the auth settings save keeps a way to sign in, and a client the IP allow-list refuses at the direct sign-in door lands on the sign-in page
+  
+  Clause-②: yes (narrowing) — narrowed: with direct sign-in on and its local sign-in path `off` (`directSignIn.localSignIn: 'off'`, or `OS_AUTH_DIRECT_SIGN_IN_LOCAL_PATH=off`), an auth settings save (`PUT /api/settings/auth`) that turns Google off, or clears a Google client credential no environment variable backs, while Google is the last way in the sign-in page offers answers `400 SETTINGS_VALIDATION` with the new copy `googleLocalOff` and saves nothing, where it saved, even with email and password (or phone sign-in) switched on; and a `GET /api/v1/auth/sign-in/direct` from a client the IP allow-list refuses answers `302` to the Console's `/login?error=IP_NOT_ALLOWED` (keeping a same-origin `?redirect=`), where it answered the `403 IP_NOT_ALLOWED` JSON body. Widened: under `off` with nothing else in force (no Google, no identity provider row, no social or OIDC provider with credentials, no host sign-in handoff), a save of `email_password_enabled: false` answers `200` and saves, where it answered `400 SETTINGS_VALIDATION`, because the sign-in page offers no email and password there either way; module exports (not on the package entry) `DIRECT_SIGN_IN_NETWORK_REFUSED`, `isDirectSignInDoorNavigation` and `directSignInNetworkRefusal`; a `googleLocalOff` key on the sign-in floor copy, in all 11 locales; the `@object-ui/i18n` key `auth.login.errors.networkNotAllowed`, in all 11 shipped locales (no key renamed or removed); the Console sign-in page explains `?error=IP_NOT_ALLOWED`; `markSignOutRoundTrip` in `@object-ui/auth` takes the sign-in page path it records.
+  Metadata-protocol: none
+  Skills-docs: none — no skill under `skills/**` teaches direct sign-in, the auth settings save, the IP allow-list or the sign-out note; `content/docs/permissions/sso.mdx` gains the rules in this change.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed, renamed or re-shaped. The moved answers are a runtime refusal of one settings save under a deployment switch and the status of one refused auth navigation, so there is nothing stored for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for a deployment running direct sign-in with the local sign-in path `off`: saving the auth settings with Google off (or with an unbacked Google client credential cleared) while Google is the last way in the sign-in page offers is refused `400 SETTINGS_VALIDATION` and nothing is saved, unless another way in the page offers remains (another identity provider row, a social or OIDC provider with a client ID and secret, or a host sign-in handoff). Email and password and phone sign-in do not count there, because the page does not offer them; turning email and password on in the same save does not help. Before, the save went through and the sign-in page then showed "No sign-in method is available". Also **BREAKING** for anything that reads the status of `GET /api/v1/auth/sign-in/direct` from a client outside the IP allow-list: it is now `302` to `/login?error=IP_NOT_ALLOWED` with no cookie set, instead of the `403` JSON body.
+  
+  Unchanged: the local sign-in path `hidden` (the default) and direct sign-in off, where email and password and phone sign-in count as before; the IP allow-list itself, which does not exempt the door: nothing is started and no provider is read for a refused client, every other auth request from it (including a `POST` to the door and the door path with a trailing slash) is still refused `403 IP_NOT_ALLOWED`, and the refusal is still audited and logged.
+  
+  What to do: nothing, unless you turn Google off as the last way in under `off`, or switch email and password off there. Register another identity provider first, or set `OS_AUTH_DIRECT_SIGN_IN_LOCAL_PATH=hidden` (with email and password sign-in on) and restart. If email and password sign-in was switched off under `off` (that save is no longer refused), setting the local path back to `hidden` is not enough: set `OS_AUTH_EMAIL_PASSWORD_ENABLED=true` as well, then restart. A client that checked the door's `403` status should check for the `302` to `/login?error=IP_NOT_ALLOWED` instead.
+  
+  Also fixed: the `503` sentence for a provider delete whose provider list could not be read now says the sign-in page offers no email and password, which is true under both reasons the check runs; and the note a provider-logout sign-out leaves in the tab now records the sign-in page the provider returns to, and only a load of that page reads it, so a provider that never sends the browser back no longer makes the next deep link opened in that tab drop its `?redirect=`.
+- bf594eb: fix(app-shell): a list view authored `navigation.preventNavigation: true` opens no record and draws no link face
+  
+  Clause-②: no — an authored key starts being honoured; no surface added
+  Metadata-protocol: none
+  
+  The spec describes `navigation.preventNavigation` as "Disable standard navigation entirely". The Console's object list did not read it: a `drawer` view with the flag still opened the record drawer on a row click (it wrote `?recordId=`), and a ⌘, Ctrl or middle click still opened the record in a new tab. Its rows also kept their link face: the first column drew as the record link and the right-click menu offered Open and Open in new tab.
+  
+  On a desktop, the Console's object list now resolves such a view the way it resolves a view authored `navigation: { mode: 'none' }`, whatever mode the view names. A row click opens nothing, a modifier click included. The record-link column draws plain text, and the right-click menu offers no Open items. The row's actions stay. A view without the flag, or with `preventNavigation: false`, opens its records as before. On a phone the list is unchanged: a tap still opens the record's page.
+- 571cf90: perf(console): the first load stops downloading the form and view packages; `@object-ui/plugin-form/core` and `@object-ui/plugin-view/core` publish their pure helpers without registering anything
+  
+  Clause-②: yes (widening) — two new published `exports` subpaths, `@object-ui/plugin-form/core` and `@object-ui/plugin-view/core`, join what the packages accept; nothing is removed or renamed, and the package roots export the same names as before
+  Metadata-protocol: none
+  
+  `@object-ui/plugin-form` and `@object-ui/plugin-view` register their renderers with `ComponentRegistry` when their root entry is evaluated, and each root reaches every surface of its package. A host that imported one pure helper from the root therefore kept the whole package. Each package now publishes a `/core` subpath that registers nothing:
+  
+  - `@object-ui/plugin-form/core`: `filterSystemFields`, `isAutoGeneratedFieldType`, `isWideFieldType`, `inferColumns`, `containerGridColsFor`, `resolveInlineMode`, `omitServerResolvedDefaults`, `optionListDefault`, `resolveSectionGroupReferences`, `useInitialFieldFocus`, and the parameter types they take (`InlineMode`, `FieldDefaultsSchemaLike`, `OptionListFieldLike`, `ResolveSectionGroupsOptions`).
+  - `@object-ui/plugin-view/core`: `deriveRecordSurface`, `deriveRecordFlowSurface`, `overlayWidthFor`, `toFilterGroup`, `deriveFieldOptions`, `isImageLikeField`, `isGeoLikeField`, `pickPreferredField`, `KANBAN_GROUP_PREFERRED`, `PRIMARY_DATE_PREFERRED`, `END_DATE_PREFERRED`, and the types `RecordSurface`, `RecordFlowSurface`, `FieldOption`.
+  
+  The same names stay exported from each package root, unchanged; nothing to migrate. The subpath ships ESM only (`import`), as `@object-ui/plugin-chatbot/core` does.
+  
+  The console (`@object-ui/console`, and the shell it draws, `@object-ui/app-shell`) takes these helpers from the subpaths, draws the global record form, the action modal's form and a flow's object-form screen through `lazy()`, and registers the tags the two packages register (`object-form`, `view:form`, `embeddable-form`, `object-master-detail-form`, `record:line_items`, `object-view`, `view:simple`, `view-switcher`, `filter-ui`, `sort-ui`) as lazy stubs with the namespaces those registrations declare. Neither package is downloaded on the first load any more; each loads, and registers once, the first time a form or a view is drawn. What every page draws is unchanged; the first record form or action form opened in a session waits for the form chunk before it shows.
+- 5326028: feat(spec): the Studio hook form offers a refusal's `reasons` and `params`
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  The hook form (`hookForm`) lays out a refusal entry as `message`, `status`, `reasons` and `params`, so a Studio author can declare the several sentences under one code and the named params that a hook's refusal catalogue accepts. `reasons` is a record keyed by the snake_case reason the body throws beside the code, each `{ message }`; it takes the same key-only record control as the catalogue, and the reason key rule it checks is the one the served `HookSchema` declares. `params` is a name list. The entry's `message` help text now says a `{{ name }}` hole fills a declared param, where it said the sentence takes no placeholders. The three new rows and the changed help text are translated in the ten locales of the platform's metadata-form bundles (`@objectstack/platform-objects`), and the console's zh-CN form labels (`@object-ui/app-shell`, shipped in `@object-ui/console`) name the three rows for the Pending changes sheet.
+  
+  Nothing a metadata author can write changes: `reasons` and `params` were already accepted on a refusal entry; only the form now offers them. A catalogue that uses them already kept them through a Studio edit, and still does. A refusal with only `message` and `status` saves exactly as before.
+  
+  In the metadata form (`@object-ui/app-shell`), removing the last entry of an optional record row now leaves the key absent rather than writing `{}`. The two read differently, though both draw the same empty list: an entry's `reasons: {}` refuses every reason the body throws under that code, where an absent `reasons` does not read the thrown reason; and a hook's `refusals: {}` refuses every code its body throws, where an absent catalogue leaves its throws as they were. A required record row, such as an object's `fields`, keeps `{}` as before.
+- 64807a9: fix(mcp): `delete_record` / `delete_records` say the recycle bin keeps a business record
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The two MCP delete tools described every delete as permanent. Measured on a booted stack over both transports, a confirmed delete of a business record goes to the recycle bin (`sys_recycle_bin`): it is kept for the deployment's retention (30 days by default) and can be restored through the REST recycle-bin door or the console. Only a platform object's record (`sys_`, `cloud_`, `ai_`), or any record on a host with no recycle bin, is deleted for good. There is no per-object switch.
+  
+  - The tool descriptions, both confirmation refusals, the served MCP skill text and the Console's skill download (its byte-for-byte copy) now say this, instead of "permanent".
+  - `delete_record` over the stdio transport answers `recycleBinEntryId` (the `DeleteDataResponse` key), as the HTTP transport already did. The stdio bridge did not ask the engine for the entry, so its answer named none and read as a permanent delete.
+  - `delete_records` answers `recycleBinEntries`: one `{ recordId, recycleBinEntryId }` per deleted record the bin kept, on both transports. A deleted record not listed there was deleted permanently. A fault's `progress` carries it too.
+  
+  Nothing changes in what is deleted, or in the confirmation gate.
+- a78781a: feat(plugin-chatbot): an AI chat answer computed from a dataset shows which dataset and metrics it used
+  
+  Clause-②: yes (widening) — `@object-ui/plugin-chatbot` exports `detectAnswerSource`, whose return type grows from `ObjectQuerySource` to `AnswerSource` (`ObjectQuerySource | DatasetProvenance`); the exported `AnswerSource` type, which was `ObjectQuerySource`, is now that union; and a chat tool invocation's `answerSource` member widens to the same union. `AnswerSourceBlock`'s `sources` prop (package-internal) takes the union too. Code that reads an object-query member (`object`, `filter`, `scope`) off an `AnswerSource` first checks it has no `kind: 'dataset'`.
+  Metadata-protocol: none
+  
+  - **"How this was computed" now covers dataset answers.** When the AI answers a business question through `query_dataset` (ADR-0149 D3), the collapsed block under the answer lists the dataset, each metric by its label with its name beside it and its business definition when it has one, what the figures were grouped by, and the filter the question added. A filter that cannot be shown as rows is shown as sent. When the question added no filter, the block says so, because the dataset's own definition still applies.
+  - **Object-query answers draw as before.** The object, filter, grouping, aggregations, record count and "Only records visible to you" lines are unchanged, and a turn whose tools answered neither block shows no block.
+  - **The block survives a reload.** A conversation restored from the browser cache keeps the dataset block.
+  - New strings `chatbot.answerSource.dataset`, `chatbot.answerSource.metrics` and `chatbot.answerSource.noAddedFilter` ship in every locale pack.
+- 1078c73: fix(app-shell): the Studio connector action Input repeater follows the run's declared-keys rule
+  
+  Clause-②: yes (widening) — `@object-ui/i18n` gains the studio pack key `engine.inspector.flowNode.kv.undeclaredKey` (en, zh). Nothing is removed or narrowed.
+  Metadata-protocol: none
+  
+  - **The repeater offers extras only where the run accepts them.** A `connector_action` step refuses, at run time, an input key the action's input schema does not declare. Studio now reads the schema the same way: an action whose schema lists `properties` (every shipped connector) is closed, and one that carries `additionalProperties` or `unevaluatedProperties` other than `false`, a `$ref`, `allOf` / `anyOf` / `oneOf`, `patternProperties` or another key-admitting keyword, or no `properties` at all, is open. An open action keeps the key/value repeater beside its typed fields, as before. A closed action keeps it only for a key it declares that no typed field can edit, such as an OpenAPI operation's `$ref` or schemaless request `body`, or Slack's `blocks`, and suggests those keys in the key cell. When every declared key has a typed field, the repeater is gone.
+  - **Keys the run refuses are marked, not dropped.** On a closed action, a stored input key the schema does not declare (one left behind by an older flow or an action switch) stays in the repeater with a line under it saying that the run refuses it and how to fix it. A key typed into the repeater that the action does not declare gets the same line. Studio never removes such a key on its own; the author removes it.
+  - An OpenAPI operation whose only input is a schemaless body now gets the judged repeater too, where it used to get the generic one.
+- 24972aa: fix(console): a screen run finished from the Flow Runs test panel no longer reads as paused
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  On the developer Flow Runs page, a screen flow's test run that the runner drove to completion left the Test Run panel showing the trigger's paused answer: "Waiting for input", "This run is paused at screen …" and a "Continue run" button. Continuing reopened the old screen, and submitting it answered 404 `RUN_NOT_FOUND`, because the server no longer holds a suspended run. When the runner completes the run, the panel now reads the run back (`automation.getRun`) and shows it as the result, with its final status and duration, and offers no "Continue run". A run the tester dismisses while it is still paused keeps its "Continue run", as before.
+- b29f2dd: fix(console): the Settings pages ask the server in the session's language
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The Settings pages' four calls (`GET /api/settings`, `GET /api/settings/:namespace`, the `PUT` save and an action's `POST`) now send the console's UI language as `Accept-Language`, read from `<html lang>` like every metadata and data call. The server writes the copy these calls return in that language (the Localization page's currency-lock banner, save refusals, action results), so on a console switched to a language other than the browser's that copy no longer arrives in the browser's language. With no UI language set, the header is left to the browser, as before.
+- e08aad7: fix(console): four Console surfaces name things by their label, not their machine name
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  Anything shown to a person uses the label; the machine name appears at most as secondary text.
+  
+  - Studio → Access: the suggested-binding banner, its Grant and Dismiss toasts and the state line a resolved suggestion keeps name the permission set by the label the rail shows for it, not by its machine name. A set with no label is still named by its machine name.
+  - Studio → Access → Record sharing: a "Controlled by parent" row reads `By parent → ` and the master object's label: this package's own object as the table reads it, else the served object's label, else its machine name.
+  - Setup → Audit Log: the Record column names the audited record by its display name, through the same batched resolver a list grid's `referenceVia` pointer column uses. The raw id is the tooltip; a record no read answers reads as `OBJECT · record unavailable` (its object's label). `@object-ui/plugin-grid` now exports that resolver's face, `RecordPointerCell`.
+  - Studio flow editor → Entry condition: the subject list offers each field by its label, with its path (`status`, `previous.status`) beside it.
+- ea6de74: fix(console): Tab no longer gets stuck in a dialog on a control whose tooltip closes as it loses focus
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Inside a dialog, sheet or alert dialog, pressing Tab on a control that shows a tooltip while focused sent focus back to the dialog itself, and the next Tab started over at the first control. In the Manage Views dialog a keyboard user could not get past the first view's Pin button: the other views, their Set-as-default and menu buttons, and Done were unreachable. The tooltip closes as the control loses focus, and the dialog's focus trap read the closing tooltip as the focused control disappearing. The trap now pulls focus back only when the control that had focus really is gone, so Tab and Shift+Tab move on from every such control, in every dialog. The import wizard's own workaround for the same problem, which rendered its "Save current" tooltip outside the dialog, is removed: the tooltip renders inline again and Tab still moves on.
+- 1089e9e: fix(console): a user with no personal language gets their browser's language when the app ships it, and the app's default language otherwise
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Since 18.5.0 the Console stated the app's declared default (discovery `locale.default`) as the `Accept-Language` of its language reads whenever the device held no explicit choice. Discovery always serves a default, so the browser's language was never asked: a zh-CN browser on an app with `i18n: { defaultLocale: 'en', supportedLocales: ['en', 'zh-CN'] }` booted an English Console, where 18.3.0 booted Chinese.
+  
+  For a signed-in user with no `sys_user.locale`, the Console's language is now the browser's language when the app lists it in discovery `locale.supported`, else the app's declared default, else `en` (maintainer ruling, letter B). The browser's language is its top tag (`navigator.language`), and "the app lists it" is answered by the platform's one locale ladder (`resolveLocaleAmong`), the same matcher the server's `Accept-Language` rung uses: `ja` matches `ja-JP`, `zh-TW` matches `zh-Hant`, `en-US` matches `en`, `es-MX` matches `es-ES`. The Console states the app's own spelling of that entry. A browser language the app does not ship still gets the app's default, as in 18.5.0. A stored `sys_user.locale` or a language picked on the device still wins over both. No server or protocol change.
+- 39fa82b: fix(components): record page header-action predicates wait for the record instead of reporting "No such key" for fields the object has
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A record page binds its record id at once and its row only when the read answers. Until then the `page:header` actions evaluated their `visible`, `hidden`, `disabled` and `pressed` predicates against an empty record, so every `record.<field>` predicate faulted, and the console said "A conditional predicate failed to evaluate … No such key: status … Check the field names and CEL" once per action on every page load, for a field the object has. Nothing was wrong with the metadata.
+  
+  A record that is bound but not loaded is now its own state. Each predicate answers its key's safe default (hidden, not hidden, disabled, not pressed) and reports nothing; a `disabled` action does not claim it is "not available for this record" while there is no record yet. Once the record arrives the predicates run as before, and the warning still fires when a key is really missing from the loaded record. A header with no record bound at all evaluates as before.
+- 27c2f1e: fix(console): a list page with no declared primary action keeps its header actions as buttons, whatever the length of the object's description
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  On a list page the header folds its actions when they do not fit beside the title and the object's description: the primary action stays a labelled button and the others move into the `⋯` menu. The primary is declared: the page's New, else the list-toolbar action authored `variant: 'primary'`. A list with neither had nothing to keep labelled, so the folded header was the `⋯` alone, and a long description by itself moved the page's one action (for example a reader without create rights and a single `Launch Contract` toolbar action) into the menu at desktop width. Such a list is now offered no folded header: its actions stay buttons at every width and the description is truncated instead. The `/data` page follows the same rule: with no New to keep, Save as view stays a button. A list that declares a primary folds exactly as before. To keep a toolbar action labelled on a narrow header as well, author it `variant: 'primary'`.
+- b4eea88: feat(console): the docs reader lists the candidate packages when a doc name two packages ship is refused
+  
+  Clause-②: yes (widening) — widened: where a doc read that names no package answers `409 RESOURCE_CONFLICT` naming its holders (`details.candidates`), the Console docs reader (`/docs/BOOK/NAME`, reached from the flat `/docs/NAME` permalink) lists those packages, each linking to that package's address `/apps/PACKAGE/docs/NAME`, where it showed "Failed to load documentation"; a flat permalink under a package container (`/apps/PACKAGE/docs/NAME`) of a name that package ships opens the doc in that package's own book; the `@object-ui/i18n` keys `help.docConflictTitle`, `help.docConflictDescription` and `help.docConflictCandidates`, in all 11 shipped locales (no key renamed or removed). A doc one package ships, and every other failure, render as before.
+  Metadata-protocol: none
+  
+  Two enabled packages may ship one doc name. A read of it that names no package is refused with `409 RESOURCE_CONFLICT` and the holders as `details.candidates`; nothing picks one for the reader. The docs reader now shows a "Choose a package" list in place of the generic load error: each entry is the package as the portal names it (its book) with the package id beside it, and opens that package's copy, read with the package named.
+- 8436f67: fix(console): on a cloud-managed environment, Setup's File storage page and the AI provider part of the AI page say the platform manages them
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A direct route (a bookmark or a typed URL) to Setup → File storage on a cloud-managed environment used to draw the generic load error, because the server refuses that namespace there. The console now reads that refusal by its declared shape (`409 RESOURCE_CONFLICT` with `error.details.managedBy: 'platform'`) and draws "Managed by the platform" with no form and no retry. A `409` without `managedBy: 'platform'` keeps the error card.
+  
+  The AI page is served without its provider, model and credential keys on a cloud-managed environment. When the served auth config says the environment is cloud-managed (`features.cloudManaged`) and the served page carries no `provider` key, the page draws one line saying the platform manages the AI provider; the conversation-title and observability settings stay editable. A save or an action the server refuses as platform-managed (a page loaded earlier) toasts the same managed text instead of the server's sentence.
+  
+  Self-hosted environments are unchanged. Three new keys under `console.settingsView` in every `@object-ui/i18n` pack: `platformManagedTitle`, `platformManagedBody`, `aiProviderManaged`.
+- 4c0cf65: feat(plugin-auth): the environment-access refusal can carry the host's reason and sentence to the sign-in page, and the sign-in page names the application on a hand-off
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  `AuthManagerOptions.oidcAuthorizeGate` (the ADR-0069 D5.1 environment-access gate) may now answer `{ allowed: false, reason, message }` in place of `false`: a reason code from the host's own closed set and the sentence the refused person reads. The refusal then carries both:
+  
+  - the `403` envelope keeps `code: ENV_ACCESS_DENIED`, gains `reason`, and its `message` is the host's sentence;
+  - the redirect back to a registered `redirect_uri` keeps `error=access_denied`, sends the host's sentence as `error_description`, and adds `objectstack_error_reason` (RFC 6749 §8.2 asks an unregistered parameter to carry a vendor prefix);
+  - the readable refusal page shows the host's sentence, HTML-escaped, beside the signed-in account.
+  
+  Nothing the host answers is trusted as markup or as a URL fragment. A reason outside `[a-z_]{1,40}` is dropped and the refusal stands. A sentence with a control character or an angle bracket, or longer than 300 characters, is replaced by the fixed sentence. On the redirect, a sentence outside the character set RFC 6749 §4.1.2.1 allows for `error_description` (printable ASCII without `"` and `\`) is also replaced by the fixed sentence.
+  
+  On the environment, the OAuth callback for the platform identity provider keeps a valid `objectstack_error_reason` on its redirect to the Console sign-in page. The sign-in page shows its own sentence for `not_member` and `invitation_pending` (in every Console language); any other reason, or none, keeps the existing `access_denied` sentence. The organization's name is carried only inside the host's sentence.
+  
+  The sign-in page reads the client name only for the client its signed request names: on an OAuth hand-off it asks the new `GET /api/v1/auth/oauth2/client-name` and says "Sign in to continue to NAME". Any other answer keeps the host line ("Continue to HOST"). The read is rate-limited per client address (a fixed window of 10 reads per 60 seconds, counted in the kernel `cache` service when one is registered); over the limit it answers `429` `RATE_LIMIT_EXCEEDED` with `Retry-After`.
+  
+  Unchanged: a gate that answers a boolean is answered byte for byte as before on all three doors; who is admitted (an object refuses only when it says `allowed: false`; any other answer keeps the truthiness the gate was always read with); which `redirect_uri` is followed.
+  
+  Upgrade note: a host may return the refusal object only once it runs this plugin-auth release or later. An older plugin-auth reads any object as an admission.
+- 74e99c2: fix(app-shell): an object list page reads its object once per load
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  An object list page sent two reads of its object on every load: the list's own `GET data/OBJECT?top=50&…` and a `GET data/OBJECT?top=0` record-count probe, and the probe was sent again on every refresh. The probe's number fed a page-level count that nothing drew any more. The footer it once fed was retired with the split pane, and the one panel prop it still reached was never read. The record-count bar under the list and the view count in the title both take the `total` from the list's own answer, which carries the view's filters and search. The probe is gone, so a list page load sends one `data/OBJECT` read, and a refresh sends one. The numbers on the page do not change.
+- 8c6ddc5: feat(mcp,spec)!: `run_action` and `resume_run` refuse the `confirm` member — confirmation happens in the app, by the person
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none (the retired member belongs to an MCP tool's input, not to a key a metadata author writes; `ai.requiresConfirmation` keeps its meaning. The dev confirms against the diff.)
+  
+  <!-- adr-0087: not-required (already-registered action-requires-confirmation-elicited) The semantic entry for the amended confirmation contract already covers what a caller sends to run_action and resume_run; this change rewrites its wording so the same switch names the refusal of the confirm member. No authorable key is added, removed or re-shaped. -->
+  
+  **BREAKING** for an MCP client, an agent or a script that sends `confirm` to the `run_action` or `resume_run` tool. Ruled by the maintainer: the member is retired, so a stale client is refused loudly instead of silently ignored. Since the hand-off to the person in the app, the caller's `confirm: true` confirmed nothing on these two tools; now a call that carries the member at all is refused.
+  
+  - `run_action` and `resume_run` no longer declare `confirm`. A call that carries it, `true` or `false`, is refused by the tool's closed input, the same refusal any undeclared argument gets. This applies on every action, whether or not it declares `ai.requiresConfirmation`. The refusal names the member and says that confirmation happens in the app, by the person, or in the client when it supports elicitation and the connection can carry the question. Nothing is resolved or run.
+  - Unchanged: a call without the member on a declared-gated action is confirmed by the person. A client that advertised `elicitation` on a connection that can carry the question (stdio) has the person asked in the client, and `accept` runs the call. Otherwise the call is handed to the person (`status: 'pending_confirmation'`), or refused `428 ACTION_CONFIRMATION_REQUIRED` with `details.reason: 'no_confirmation_service'` on a host with no pending-confirmation service. The MCP `delete_record` and `delete_records` tools still require `confirm: true`. A host's own door (`dispatchAction`) under the `ai` posture still reads `confirm`.
+  - The served MCP skill (and the console's downloadable copy of it), the `tool.requiresConfirmation` retirement guidance in `@objectstack/spec`, and the contract prose in `@objectstack/spec/contracts` stop teaching `confirm: true` on these two tools. The upgrade-guide entry `action-requires-confirmation-elicited` now keys its switch on the hand-off rather than on elicitation, and names the refusal of the member.
+  
+  What changes for a caller:
+  
+  - FROM `run_action({ actionName, recordId, confirm: true })` (accepted, not read) TO `run_action({ actionName, recordId })`. Relay a `pending_confirmation` answer to the person and let them approve it in the app (or let them answer the question in their client, where it is asked there); do not retry.
+  - FROM `resume_run({ runId, values, confirm: true })` TO `resume_run({ runId, values })`.
+  - To fix a client: stop sending `confirm` to `run_action` and `resume_run`. Keep sending it to `delete_record` and `delete_records`.
+- 89d5a41: fix(metadata-protocol)!: an exact `?package=X` read of a doc, view or other type the exact qualifier does not judge answers X's own item, never another package's: where another package holds the name it is refused 409 `not-held-by-qualifier` naming the holders (ruling 6917064203 on #34398), and a name nothing holds stays 404; a bare doc read of a name two enabled packages ship, beside the environment's own package-less entry, serves that entry, never the package registered last (ADR-0150 D3/D5, red line 2, ruling 6893582352)
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  Skills-docs: none — no skill teaches a moved answer: `skills/**` teaches `?package=` reads of a holder or of its pair (objectstack-platform SKILL.md, "Customizing an installed package"), which do not move, and never the read of a package that holds no item of the name or the bare doc read beside a package-less entry
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export changes shape. The moved answers are by-name reads and one save's code-layer read: no stored row, registry slot or package binding changes, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for a caller that reads `?package=X` of a name X ships no item of, for the types the exact qualifier does not judge (`doc`, `view`, `translation`, `field`, `seed`, `datasource`, `external_catalog`, `object_extension`). Measured on the composed artifact rig (the `MetadataPlugin` artifact door plus `AppPlugin`), on the dispatcher and on `RestServer`, in both registration orders:
+  
+  - `GET /meta/TYPE/NAME?package=X`, where X ships no item of NAME and another package does: was 200 with that package's item (the registry's first composite, or the metadata service's copy). It is now `409 RESOURCE_CONFLICT`, reason `not-held-by-qualifier`, with `details.candidates` naming each package that holds NAME (ruling 6917064203 on #34398), the refusal the covered types already answer. X need not be an installed package: a qualifier that names none (the Console's app-name segment) gets the same answer. A name no package holds stays the read's own 404. The read gate answers before the `not-held-by-qualifier` refusal names any holder: for a `doc`, a caller the ADR-0046 §6.7 docs audience refuses is answered the gate's `401 UNAUTHENTICATED` or `403 PERMISSION_DENIED`; for a `view`, a member the list view audience (`requiredPermissions`) refuses is answered the gate's `403 PERMISSION_DENIED`, as the holder's own address answers them. A caller the gate admits is answered the 409.
+  - `GET /meta/TYPE/NAME/layers?package=X`, same address: was 200 with another package's `code` and `effective`. It is now the same 409.
+  - `GET /meta/TYPE/NAME/layers?package=X`, where X and Y ship NAME and Y registered last: was 200 with Y's `code` and `effective` (the metadata service keeps such a type by name alone). It is now X's, as the plain read answers since #34040.
+  - `GET /meta/doc/NAME` and its `/layers` and `/published`, where two enabled packages ship NAME and the registry's bare slot holds a package-less entry: was 200 with the doc of the package the metadata service registered last. It is now 200 with the environment's own item, as the registry and `MetadataFacade.get` already served it. Without such an entry the read stays refused 409 naming both (#34036). Per entry:
+    - A stamp-less runtime registration: the plain read and `/published` serve its body; `/layers` reports it as `code` and `effective`.
+    - The same registration beside a different package-less stored row: all three doors serve the registration; `/layers` reports it as `code` and `effective` and the row as `overlay`.
+    - A stored package-less row the hydrator registered before any package shipped the name (its entry is tenant-authored, `_provenance: 'org'`, so it is no code layer): the plain read and `/published` serve the row; `/layers` reports `code: null` and the row as `overlay` and `effective`.
+    - Both `/published` doors (the dispatcher's and `RestServer`'s) serve that item in place of the metadata service's package copy.
+  - The same stored row hydrated after the packages' artifacts registered wears the first registered holder's envelope (the hydrator grafts it), so no package-less entry exists: the bare doors stay refused 409 naming both, as before.
+  - A save naming package X of a `datasource` with no stored row at X (the credential carry-forward reads the code layer, `readCodeLayerForCarryForward`): carried forward the credential of the package the metadata service kept, or of the first registered holder. It now carries X's own credential, or none when X ships no datasource of the name (the incoming body is kept as sent; the carry-forward is no read answer, so it does not refuse). Of this family only `datasource` carries a credential, so no other save moves. Path: a save door naming the package (`PUT /meta/datasource/NAME?package=X`), its draft save, and any carry-forward of a body whose credentials the read redacted.
+  
+  **Console.** The doc page under an app (`/apps/X/docs/...`) and the flat permalink every cross-reference is rewritten to (`/apps/X/docs/NAME`, whose single-item read tells a refused name from an absent one) read with X as ADR-0048 prefer-local context. When that read answers the `not-held-by-qualifier` 409 (X not among the candidates) or a 404, each now reads the name again by name. A cross-reference from X's docs to another package's doc, and the app-name segment of a package that ships several apps (which names no package), keep rendering the doc's one holder, or its holder's audience refusal on the flat permalink; a name two other packages ship lists them (the 409 candidate list), where it showed one of them by registration order.
+  
+  **Not moved.**
+  - A holder's own address, a customization pair's address of its base's item, and an item bound to no package (the environment's entry).
+  - Any read naming no package other than the bare doc case above.
+  - `object`, and the covered types (`action`, `hook`, `job`, `sharing_rule`, `queue`, `assignment_rule`), whose exact qualifier already refuses 409 `not-held-by-qualifier`.
+  - The security catalog types `position` and `capability`: the registry keeps one package holder of such a name, so `?package=` of another package keeps the code layers' answer (that holder's item).
+  - One enabled holder beside a stamp-less bare entry: the bare doors serve the holder's doc while the registry and `MetadataFacade.get` serve the entry (measured, unresolved here; the entry answers first beside two or more holders only). Follow-up card #34452 carries this cell; it needs a ruling first on whether the environment's entry answers first beside one holder, before any reader moves.
+  
+  **No migration.** No schema key, stored row or registry slot changes; nothing is rewritten.
+  
+  The fix for a caller: address a package the refusal names (or its pair), or read with no package. For the bare doc read beside the environment's own entry, address a holder with `?package=` to read that holder's doc.
+- 04e7b90: fix(components): a `page:tabs` tab holding a related list bound by `parentDataSource` shows its count badge before it is opened, on an app page too
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The tab strip counts a `record:related_list` by probing it against the record the page is about. An app page has no such record, so a tab whose related list reads its parent through `parentDataSource` (a team page listing members and invitations of the current organization, say) drew no badge: the number showed only inside the opened tab. On a record page the same list was probed against the page's record, which is not its parent.
+  
+  Such a list now says how many records it holds to its tab, the same number its own header shows, and the strip keeps that tab mounted while inactive so the badge is there before the tab is opened. A create or delete on the listed object re-reads the list and moves the badge. Lists whose parent is the page's record are counted by the strip's own probe exactly as before, and an authored `count` on a tab still wins.
+- 3b1307e: feat(console): the first-run checklist takes a host profile; a managed environment adds "Put your first app in" and "Add your first record"
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The administrator's first-run checklist on Home now draws its rows from a profile, selected by the flag the server already serves (`features.cloudManaged` of `GET /api/v1/auth/config`). No new field is served, and the checklist code has no branch on the host.
+  
+  - **Self-hosted (the flag off or absent):** the checklist is exactly what it was.
+  - **Managed (`features.cloudManaged: true`):** two rows are added after the platform's rows.
+    - **Put your first app in** is done once the launcher lists an app that is not one of the platform's built-ins (`com.objectstack.*`, such as Setup and Studio). It reads the console's existing `/me/apps` answer and sends no request of its own.
+    - **Add your first record** is done once a person created a record on an object one of those apps lists. It sends one `sys_activity` read (`type` `created`, an actor set, at most one row). The activity feed keeps 14 days, so this row is optional on the managed profile: it never keeps the checklist open and is not counted in its progress.
+    - The Email delivery row is shown only once mail reads as delivering. The hosted platform mail channel cannot yet report itself as configured, so the row would otherwise say "not set up" on an environment whose mail is delivered.
+  
+  `@object-ui/app-shell` exports `isPlatformBuiltinApp`, the test that the AI chat's package switcher already used, so the checklist and the switcher apply the same test. New translation keys `console.firstRunChecklist.firstApp.*` and `console.firstRunChecklist.firstRecord.*` are in every language pack.
+- b6a22b1: fix(mcp): `delete_record` tells the agent that a request naming one matching record is the human's approval
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The MCP `delete_record` tool description and its `confirm` member now say when the human's request is already the approval. When the human names the record to delete and exactly one record matches, that request approves the delete: the agent sends `confirm: true` on that call and does not ask again. When the name matches more than one record, or the request does not identify one record, the agent deletes nothing yet: it lists the candidates, asks the human which one, and sends `confirm: true` only after the answer.
+  
+  The same server's other texts now say the same rule. The skill served at `GET /api/v1/mcp/skill` (and the Console's "Download skill" copy of it) carries the two sentences in its `delete_record` entry instead of "Ask your human first", and its destructive-action gotcha and workflow step say that a delete the user named, with exactly one record matching, is already confirmed. The refusal of a `delete_record` call without `confirm: true` now says to retry with `confirm: true` when the human's request named exactly this one record, and to ask the human first when the name matched more than one record or the request is a bulk delete; its code (`ACTION_CONFIRMATION_REQUIRED`), status (428) and `details` are unchanged.
+  
+  Before, the description said "ask the human first, then retry", and models read a request that named one record either way: some asked a second time before a delete the user had already asked for.
+  
+  The gate is unchanged. A `delete_record` call without `confirm: true` is still refused with `ACTION_CONFIRMATION_REQUIRED` (428), and nothing is deleted. A deleted business record still goes to the recycle bin. `delete_records` (bulk) is unchanged: a call without `confirm: true` is the preview, and the agent sends `confirm: true` only after the human approves it.
+- a8e794f: fix(console): the OAuth consent page stays finished after Authorize or Deny when the client's redirect is an app scheme
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Desktop and native MCP clients (such as WorkBuddy) register a redirect with their own scheme (`workbuddy://…`). After Authorize, the browser hands that address to the app but keeps the tab where it is. The consent page then put its card back with Authorize and Deny enabled again. A person could not tell that the connection had worked, and a second click sent the already-used request again and showed "Consent failed".
+  
+  Once the server answers a decision with a redirect, the page now treats the request as finished and never enables the buttons again. For an app-scheme redirect it replaces the consent card with the outcome ("Access granted" or "Access denied"). It tells the person to return to the application and that they can close the tab. It also shows an "Open" link to the same redirect, in case the browser's prompt to open the app was dismissed. An `http(s)` redirect, including a loopback one, still navigates the tab away as before. A decision the server refuses still shows the error and enables the buttons again. The new sentences are in every Console language pack.
+- e8cba8f: fix(console): the public form prints a form entry's own label as served, not the app bundle's object-field translation
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A form entry that declares its own `label` is the form's visitor-facing copy, and the form endpoint already serves it localized (from `_sections.SECTION.fields.FIELD.label` in the app's translations). The public form page then looked the field up in the app bundle as `fields.OBJECT.FIELD` first and printed that whenever the browser held the bundle, which translates the object field's label, the one agents see. So a visitor who was signed in to the same console, or any visit with the bundle loaded, read the agent-side label (for example "Submitter name" where the form says "Your name"), while a cold anonymous visit read the form's own label.
+  
+  Each row now records where its label came from. A row whose entry declared a `label` prints it as served; only a row whose label came from the object field takes the bundle translation, as before. The required-field and `visibleWhen` refusal messages name each field by the same rule, so they use the label the visitor sees.
+- 1a30a17: fix(console,plugin-hono-server): the organization's Localization language decides the Console language for a user with no personal language
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  An administrator who set the organization's language (Setup → Localization, or the first-run checklist's "Default language and country") never changed the Console language of a member with no `sys_user.locale`. The Console stated a language on every `GET /api/v1/auth/me/localization` read (the browser's language when the app ships it, else the app's declared default), so the server's request rung always answered and its deployment-default rung, the only one that reads the organization's setting, never did. That rung also answered the settings manifest's built-in `en-US` placeholder over the app's declared `i18n.defaultLocale`.
+  
+  `/auth/me/localization` now resolves `locale` in the order the maintainer ruled for a user with no personal language: the user's own `sys_user.locale`; else the request's `Accept-Language` top tag when the app lists that language (`i18n.getLocales()`, what discovery serves as `locale.supported`), answered in the app's own spelling (`en-US` → `en`, `ja` → `ja-JP`); else the organization's `localization.locale` when somebody set it (not the manifest's `en-US` placeholder); else the app's declared `i18n.defaultLocale`; else the settings cascade's answer, as before. `resolveSignedInUserLocale` answers the same. A host with no `i18n` service has no list to match against, so the request's language answers as before; a host with no `settings` service keeps the cascade's answer for the deployment default.
+  
+  The Console now states a language only when the app lists the browser's language. Otherwise the browser's own header goes out and the server's deployment default decides. A stored `sys_user.locale` or a language picked on the device still wins. No response key or discovery key is added.
+- d96a41d: fix(app-shell): a page printed in the dark theme prints on a white sheet, margins included
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  With the Console in the dark theme and "Background graphics" turned on in the print dialog, the printed sheet was dark where nothing covered it: a record print page printed a dark 12 mm frame round its white content, and a list printed its black text on a dark sheet. The theme's dark colour scheme also darkens the canvas the browser paints under the page, and on paper that canvas fills the whole sheet. On paper the Console now uses a light colour scheme, so the canvas is white. The dark theme on screen is unchanged.
+- cb8bfa6: fix(console-ai): the attachment notes added to a user's turn follow the conversation's language
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  In the console's AI chat, the lines the page adds to a user's turn about its attachments were always Chinese: the spreadsheet brief (headers and sample rows), the line naming the images and PDFs sent as files, and each "not read" line (over the 10 MB cap, type not supported, upload failed). A user chatting in English saw Chinese in their own message, and the agent received it too.
+  
+  They now follow the conversation's language, the same rule every other piece of text the console sends the agent follows: a turn written in Chinese gets Chinese notes, any other gets English ones, and a turn with files but no words takes the language the conversation is held in. A turn with no attachment is sent exactly as typed, as before. No locale-pack key is added.
+- 631d77f: fix(console-ai): a message sent while an image or PDF is still uploading no longer reaches the agent before the turn that carries it
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  In the console's AI chat, a turn with an image or PDF is sent only once its upload settles (seconds for a large photo), while a turn without an attachment is sent at once. So a second message sent during the upload used to reach the agent first, and the agent answered it without the file.
+  
+  - Turns now reach the agent in the order the user sent them: a turn sent while an earlier turn's attachments are still being read waits behind that turn.
+  - While a turn's attachments are being read, the composer reads as busy, as it does during a running reply: a message typed then queues above the composer and sends after that turn.
+  - An upload that fails releases the busy state, and the turn still sends, naming the file as not read. A turn with no attachment is sent at once, as before.
+- e2d3514: feat(console): the approvals inbox's pending queue steps from request to request, and opens the next request after a decision
+  
+  Clause-②: yes (widening) — one new export, `approvalQueueState`, from `@object-ui/app-shell` (workspace-private: `"private": true`, not published; the console is its one consumer), and two new `approvalsInbox` keys in the `@object-ui/i18n` locale packs (`openNextAfterDecision`, `queueDone`; `TranslationKeys` grows); nothing removed or renamed
+  Metadata-protocol: none
+  
+  From the Approvals Inbox's "My pending" tab, a request now opens with the queue as the list shows it, filtered and sorted:
+  
+  - The request page's top bar shows where the request sits in the queue (`1 / 3`, read out as "1 of 3 in Approvals Inbox") with the next / previous buttons and the `j` / `k` keys, and its breadcrumb leads back to the inbox. This is the counter every record page opened from a list already draws; the inbox now hands it the queue.
+  - A new "Open next after deciding" switch beside the counter, on by default and remembered per browser. When a decision takes the request out of your pending queue (approved, rejected, sent back, reassigned, or approved for your countersign slot while others still decide), the next request of the queue opens in its place and the decided one leaves the count. After the last one the page returns to the inbox and says the list is done. With the switch off the page stays on the decided request. An action that leaves the request waiting on you, such as asking for more information, does not move the page.
+  - A request opened any other way, from a notification, a direct link or the "Submitted by me" and "All" tabs, shows no counter and no switch, as before.
+  
+  No approval permission, rule or server endpoint changes. `@object-ui/i18n` adds `approvalsInbox.openNextAfterDecision` and `approvalsInbox.queueDone` in all 11 shipped locales; no key is renamed or removed.
+- ea54392: fix(console): the Approvals Inbox shows each row's Approve and Reject by default, with their words
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  On a desktop-width Approvals Inbox, the Approve and Reject buttons at the right end of each pending row appeared only while the pointer rested on that row or keyboard focus reached it, so a reviewer opening the inbox saw no way to decide from the list. They were also bare icons, named only for screen readers.
+  
+  - Both buttons are now always shown on every row the viewer can decide, each with its word ("Approve", "Reject", translated) beside its icon. The word is also the button's accessible name. The Actions column grows to fit the two labelled buttons and stays pinned to the right edge.
+  - A request whose step collects decision outputs is still decided only on its own page: both buttons stay disabled, and hovering them shows why ("This approval collects decision outputs — open it to decide."). Screen readers read that reason as the buttons' description.
+  
+  Unchanged: the confirmation dialogs, bulk approve and reject, the keyboard shortcuts (J / K to move, A to approve, R to reject, Enter to open) and the phone-width cards.
+- 4db3750: feat(console): on a phone, Home keeps its first screen for the apps, and the top bar's badge and title fit
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  **Home's setup checklist.** Below 768 px, Home draws the administrator's first-run checklist after the apps instead of above the greeting, folded to one line: its title, its progress ("2 of 5 done") and **Continue**. Continue opens the whole card in place; a fold control beside the progress closes it to one line again. A fresh visit starts folded. The rows, the progress count, the done rule and the close button are unchanged, and from 768 px up the card is drawn above the page as before. With no app yet the card stays above the empty state at every width.
+  
+  `HomePage` (`@object-ui/app-shell`) takes an optional `checklist(placement)` slot: Home calls it with `'top'` on a desktop or with no app, and with `'afterApps'` on a phone, and draws what it returns there. The console's Home route passes the first-run checklist through it. `@object-ui/i18n` adds `console.firstRunChecklist.continue` to every pack.
+  
+  **The phone top bar.** Below 768 px the bell's unread badge ("9+") sits inside the bell's 44 px target, on the glyph's corner, instead of 2 px above it, where the bar's top edge cut it. Below 640 px the bar's control groups draw no divider and no extra gap, and the page title beside the app pill takes no margin of its own, so the title keeps that width. The controls the bar shows are unchanged: search, the bell, the AI assistant (where the server serves AI) and the account menu.
+- 60552cd: fix(app-shell): the list title no longer prints a record count beside the view name
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The Console list title, which is also the view switcher, read 「VIEW ▾ · COUNT」 (for example 「Open Deals ▾ · 10」). It now reads 「VIEW ▾」 on every width. The record count is still shown in the list's footer (「10 records」), on a phone too, so the number appears once and away from the view name. The footer's count and summaries are unchanged.
+- a931063: feat(console-ai): the AI assistant is one right-side drawer, opened from the top-bar robot, with no full page
+  
+  Clause-②: yes (widening — new @object-ui/i18n locale keys only)
+  Metadata-protocol: none
+  
+  The console's AI assistant now has one container, the right-side drawer (ui ADR-0057, amended).
+  
+  - The robot in the top bar opens and closes the drawer on the page you are on. The URL does not change. The floating button in the bottom-right corner is gone. While a proposed plan waits for approval, the robot carries the marker that button used to carry.
+  - The drawer's expand button makes it fill the window in place, with the conversation history as a column beside the chat. The same button puts it back as a side panel. Moving to another page puts it back too. At side-panel width the history is behind a "History" button. On a phone the drawer is a bottom sheet with the same "History" button.
+  - Home hosts the same drawer. "Build with AI" and "Ask AI" on Home, and "Edit with AI" in app management, open the drawer instead of a page. A new build still starts unbound to any app (ADR-0057 A1).
+  - The old `/ai`, `/ai/AGENT` and `/ai/AGENT/CONVERSATION` addresses still work. That includes bookmarks, shared links, `?package=` and `?new=`. They open the drawer on the conversation they name, filling the window, over the home page. A Builder handoff still travels only as navigation state.
+  - Inside an app, a builder's empty state offers data questions as well as changes, as the composer hint already did. Its description and its first suggestions name both.
+  - The drawer's share button now opens the share dialog. Before, it did nothing in the drawer.
+  
+  `@object-ui/i18n`: new keys `console.ai.dock.history`, `console.ai.dock.backToChat`, `console.ai.dock.expand`, `console.ai.dock.restore` and `console.ai.empty.editApp.askOrChangeDescription`, in every locale pack. No key was removed or changed. The console no longer reads `console.ai.dock.maximize` or `console.ai.empty.editApp.description`. Retiring them is a separate change.
+- 14619f5: feat(console-ai): an AI build shows the app itself in the main area, with one Publish on screen
+  
+  Clause-②: yes (widening — new @object-ui/i18n locale keys, so `TranslationKeys` grows; and two additive @object-ui/plugin-chatbot changes, the optional `ChatbotEnhanced` prop `publishFromShellBar` and the optional `opts.appSegment` argument of `onBuildMaterialized`); nothing removed or renamed
+  Metadata-protocol: none
+  
+  Building with AI happens in the console's right-side drawer, and the app it builds shows in the page beside it (ui ADR-0057 Amendment A3, ADR-0037 as amended). There is no nested preview any more.
+  
+  - Changes to a published app show on the page you are on, in draft mode, with the draft bar on top. A new app shows in the main area once the build creates its package. Before that, the page stays. A new app is materialized (ADR-0045), so it shows as the real, not-yet-published app. The main area refreshes as each drafted item lands, and once more when the build's turn ends. Opening an older conversation from the history does not move the page.
+  - The screen has one Publish: the draft bar, or the "not published yet" bar for an app that has never been published. The chat's result cards and the line above the composer no longer publish. The line says where to publish, or offers "Show draft" when the page is elsewhere. After a publish from the bar, the chat shows a receipt.
+  - One count: the draft bar, its changes panel and the chat all count the current app's pending changes. An app's changes are those in its package and in its customization package (ADR-0146), where changes to an app installed from code are saved. The bar no longer counts the whole environment, and its separate "on this page" count is gone. Publishing from the draft bar publishes that app's changes and no longer reloads the page.
+  - Publishing from the "not published yet" bar works for an app opened at its package id: the app is saved under its own name. Before, that save was refused.
+  - The bar for an app that is not published yet says so. The draft bar says how many unpublished changes the app has.
+  - In Studio, the AI copilot's expand button widens the copilot beside the page instead of leaving Studio. The copilot's cards no longer draw a Preview or Publish of their own. Studio's own top bar publishes.
+  
+  `@object-ui/console`: ships the console with the changes above (it bundles `@object-ui/app-shell`).
+  
+  `@object-ui/plugin-chatbot`: `ChatbotEnhanced` takes `publishFromShellBar`. When it is set, the draft cards draw no Publish button, and the build result card no longer says to click Publish in the chat. The Published badge, auto-publish and Preview stay. `onBuildMaterialized` also receives `{ appSegment }`, the built app's package id.
+  
+  `@object-ui/i18n`: new keys `preview.draftBar.pendingInApp` (with plural forms), `preview.unpublishedBar.notPublishedYet`, and `console.ai.pendingDrafts.publishFromBar`, `showDraftToPublish` (both with plural forms), `showDraft`, `receipt` and `dismissReceipt`, in every locale pack, so the `TranslationKeys` type grows by those keys. No key was removed or changed. The console no longer reads `preview.draftBar.pendingHere`, `preview.unpublishedBar.message`, `console.ai.pendingDrafts.count`, `publish`, `published`, `failed`, `publishedWithFindings`, `console.ai.previewApp`, `console.ai.resizeSplit`, `console.ai.liveCanvas`, `console.ai.liveCanvasLive` or `console.ai.liveCanvasUnlisted`. Retiring them is a separate change.
+- c81f498: fix(app-shell,console): the invitation inbox's accept routes an unverified address to verification, and the verify screen no longer says a link was sent before it was
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Follow-ups to the rule that, while a deployment delivers mail, accepting an invitation needs a verified address (`403 EMAIL_VERIFICATION_REQUIRED_BEFORE_ACCEPTING_OR_REJECTING_INVITATION`).
+  
+  - **The invitation inbox's Accept** (`@object-ui/app-shell`). When the `sys_invitation` `accept_invitation` action is refused with that code, the console's `type: 'api'` action handlers (`useConsoleActionRuntime` and `RecordDetailView`, through the action door or the direct call alike) now open the verification-mail screen, `/verify-email-prompt`, for the account's address, with the mail's link returning to that invitation's accept page, instead of showing the vendor's sentence in a toast. Every other refusal still reads as before. The rule is keyed on the code alone; no action metadata key, spec field or server route changes.
+  - **The action's AI description** (`@objectstack/platform-objects`). `sys_invitation.accept_invitation`'s `ai.description` now states the condition: while the deployment delivers email, the caller's address must be verified, and an unverified caller is refused with that code and nothing is written. The text is the agent-facing description only; no translated bundle carries it.
+  - **The verify screen's copy** (`@object-ui/console`, `@object-ui/i18n`). `/verify-email-prompt` said "We sent a verification link" on every arrival, but only the sign-up sends a mail before arriving there. The sign-in arrival (refused `EMAIL_NOT_VERIFIED`, which sends nothing unless the deployment sets `emailVerification.sendOnSignIn`) and both accept-invitation arrivals send nothing. The sign-up arrival now marks itself with `?sent=1` and keeps its copy; every other arrival reads "Your email address has not been verified yet. Send a verification link to ADDRESS…", offers "Send verification email", and shows "Sent to:" and the spam hint only once the button has sent the mail. Two keys are added to the `auth.verifyEmail` namespace in every built-in locale: `sendDescription` and `sendButton`.
+  
+  **A host that embeds the accept page or the console action runtime declares `/verify-email-prompt`.** `DefaultAcceptInvitationPage` and the action handlers above navigate there with `email` and `redirect` query keys; `apps/console` mounts its own `VerifyEmailPromptPage` at that route, and a host without it sends the person to a route that does not exist. The `@object-ui/app-shell` README states the route and its query keys ("Hosting the invitation pages").
+- 90f2b1c: fix(console): every object route words an object you cannot open the same neutral way, and the list filter's empty state is translated
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The server answers an object you cannot read exactly like a name that does not exist, so the console never tells them apart. But the sentence it drew still said the object does not exist. That sentence was spread over two keys: one for the list and data routes, and another, longer one for the record and create routes. All four routes now draw one key, `console.objectView.objectNotFoundDescription`, and it says what is true in both cases: "The object "NAME" does not exist, or you do not have access to it." It is translated in all eleven built-in languages (zh-Hans: 对象"NAME"不存在，或者您无权访问它。). `empty.objectNotFoundDescription` is retired from every pack. The list route's hint and the disabled-package sentence are unchanged.
+  
+  A list's dropdown filter for a field with no options showed a hard-coded English "No options", even in a Chinese console. It now reads the pack's `fields.options.empty` ("No options available", 暂无可选项), the same key the form's options empty state uses.
+- 6e9d5d6: fix(console): the setup checklist reads a host's own mail transport as delivering
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `GET /api/settings/mail` states a transport that the host hands over, which no provider option names, as `live.provider = { value: null, source: 'environment' }`. The settings contract says in-use is read from `source`, never from a `null` value. The first-run checklist still required a non-empty `value`, so on a hosted environment its Email delivery row stayed not done while mail was being delivered. This included a deployment whose saved mail values would pass on their own.
+  
+  The checklist now reads in-use from `source`. `environment` with a `null` value is in use, `none` is not, and a page without the statement still falls back to the saved mail values. The built-in AI row follows the same rule. If the server ever states its provider as `environment` with a `null` value, the row is done, keeps the `environment` source and says the platform manages the provider, because there is no option name to show.
+- fff0ad0: feat(studio): the permissions page speaks business wording; the bulk buttons show on every row
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Studio's permissions page now reads in the words an app builder uses, in zh-CN and in English. It changes wording and presentation only; the permission model, the suggestion and confirmation mechanism (ADR-0090 D5/D9) and every request are the same.
+  
+  - **The default-grant banner is one sentence.** When an app's member permission set is accepted for everyone, the banner reads "所有成员默认拥有这个权限集，新加入的人也会自动拥有。" ("Every member has this permission set by default, and new members get it automatically."). Its button reads "取消默认授予" ("Stop granting by default") instead of "撤销" ("Revoke"), and it makes the same call. The pending, not-in-force, dismissed and guest lines say the same thing in the same tone. None of them names the Everyone or Guest position.
+  - **The open set's title is "app · set label".** The set's machine name moves to the title's tooltip, and the provenance, default and lock labels move to the line under the title. The rail row shows the set's label, with the machine name as its tooltip.
+  - **Plain terms.** "记录共享模型(OWD)" ("Record sharing (OWD)") is now "谁能看到哪些记录" ("Who can see which records"). The values read "只有负责人能看 / 所有人能看 / 所有人都能看和改" ("Only the owner can see / Everyone can see / Everyone can see and edit"), and "受父级控制 → {master}" reads "跟随所属的{master}" ("Follows its {master}"). The stored `sharingModel` values do not change. The tabs read "对象权限 / 系统功能 / 数据范围规则 / 菜单可见" ("Object permissions / System features / Record scope rules / Menu visibility").
+  - **The bulk buttons show on every row**, not only on the row under the pointer, as "全选 · 只读 · 清空" ("All · Read only · None"), then the CRUD set as a fourth button ("增删改查", "Read & write"). Each button writes what All / R / None / CRUD wrote before. The footnote that explained the hidden buttons is gone.
+  - **An object row shows the object's label**, in the matrix and in the package's "who can see which records" overview. Its machine name is the tooltip. The record-visibility chip stays on one line now that its labels are longer.
+  
+  The Draft Changes publish refusal now points to "Settings → Who can see which records" (all 11 language packs), since the old "Settings → Record sharing" label no longer exists.
+  
+  Setup's permission-set page reads some of the same strings, so it changes too: the bulk buttons' labels, the sharing values, and the record-scope-rules, menu-visibility and system-features headings. Its layout does not change.
+- 65ec3c5: feat(studio): flow node and list-view panels lead with labels, node delete moves to the header menu, navigation kinds read in words
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Studio's Automations and Interfaces panels name things the way the author named them and keep machine names out of the way:
+  
+  - **Flow node panel.** The first field is the node's Label. The node id moves into a "Developer info" section that starts collapsed. "Remove node" moves from the full-width footer button into the header's "···" menu; in Studio that menu sits in the automation panel's title bar. The removal itself is unchanged: neither the menu item nor the canvas Delete key asks to confirm, and both still refuse while a boundary event or an expression names the node.
+  - **Objects by label.** In the node panel, the sentences that name an object ("Targets the … record that started this flow", "Fields of …") use the object's label. The object picker shows the label and keeps the machine name on its hover title.
+  - **"Formula", not "CEL expression".** The node panel's value toggle, its placeholders and the blank-formula notice and the zh help rows of the trigger, Decision, record, loop, map, HTTP, action, screen, subflow and notify nodes say 公式 / "formula". The Update Records filter help no longer names `recordId`. The zh panel also gains the Update Records "update every matching record" row, which used to show in English.
+  - **New automation dialog.** The first field is "Automation name" (自动化名称), matching the dialog title and the Automations list.
+  - **List-view panel.** No `object.view` machine name under the title. The not-yet-created notice is one sentence: "Changes save as a draft first." Column rows show the field label, with the field name on hover. The Setup designers' column rows are unchanged.
+  - **Navigation edit mode.** Each entry's kind badge reads the kind the navigation list shows (对象 / 视图 / 仪表盘 / 页面 …). An object entry that opens a named view, such as a kanban, reads 视图. The Setup designer keeps the raw type.
+  
+  `@object-ui/i18n`: two new `studio` namespace keys (`engine.inspector.flowNode.moreActions`, `engine.inspector.flowNode.developerInfo`). Some existing `studio` values are reworded in en and zh.
+- 4443014: fix(charts): the default categorical palette has ten distinct theme colours, so a pie or donut with six to ten slices no longer repeats a colour
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The theme stylesheets (`@object-ui/components` and the Console) now define `--chart-6` to `--chart-10` beside `--chart-1` to `--chart-5`, in light and dark, with matching `--color-chart-N` aliases. The chart fallback palette (`AdvancedChartImpl`) and the dashboard relay palette (`DashboardRenderer`, `DashboardGridLayout`) read all ten. Before, they read five and cycled, so slice six took slice one's colour and the legend could not tell them apart. An authored `colors` palette still wins over the default. Apps generated by the `objectui` CLI declare the same ten tokens in their stylesheet, and the `responsiveStyles` lint (`style-unknown-token`) accepts `var(--chart-6)` to `var(--chart-10)`.
+- dcbb363: fix(app-shell): the report quick edit saves the report's own text, not the served translation
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The in-app report editor (a report page's Edit button) seeded its form from the report as the console was served it. In a non-source locale that copy is translated (the report's label, description and each block's label), and the metadata save stores a report body as sent, so saving any edit stored the translations as the report's source text: after a publish, readers in every other language were shown them. The editor now edits the report as its author stored it, read from the layered metadata read the Studio editors already use (the pending draft when there is one, else the published report), and keeps the served copy for display. If that read fails, the editor says so and does not open. The draft bar in the editor no longer resumes the served (translated) draft over it.
+- b7edbeb: fix(app-shell): Home draws the Connect an AI Assistant card after the greeting, My apps and My work, as one row on a phone
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Home used to open with the "Use this system in your AI assistant" card, above the greeting and the apps. On a 375 px phone its sentence wrapped to five lines, so the card took about a quarter of the first screen and pushed My apps below the middle.
+  
+  - **Place.** The card now comes after the greeting, My apps and My work. When there is no My work section, it follows the apps. On a workspace with no app yet, it follows the welcome instead of sitting above it.
+  - **Size on a phone.** Below the `sm` breakpoint the card is one row: icon, title on one line, Connect and close. The sentence under the title is hidden from view there but screen readers still read it. From `sm` up the card looks as it did.
+  
+  When the card shows has not changed. It still shows only to someone who has connected no assistant, and it stays away after they close it. The first-run checklist's row for the same item is untouched.
+- @objectstack/sdui-parser@18.6.0
+
 ## 18.5.0
 
 ### Minor Changes

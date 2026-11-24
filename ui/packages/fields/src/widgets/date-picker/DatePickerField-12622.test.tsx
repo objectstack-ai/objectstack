@@ -334,3 +334,122 @@ describe('DateTimePickerField — the popover picks the time (objectstack#32589)
     await waitFor(() => expect(document.body.querySelector('button[data-day]')).toBeNull());
   });
 });
+
+describe('DatePickerField — a click in the text box opens the calendar (objectstack#36457)', () => {
+  const popover = () => document.body.querySelector('[role="dialog"]') as HTMLElement | null;
+  const clickBox = (input: HTMLInputElement) => {
+    // A real click focuses the box first; fireEvent.click alone does not.
+    act(() => input.focus());
+    fireEvent.pointerDown(input);
+    fireEvent.mouseDown(input);
+    fireEvent.mouseUp(input);
+    fireEvent.click(input);
+  };
+
+  it('opens the popover, keeps the focus in the box, and names the popover on the box', async () => {
+    const { container } = render(<DatePickerField value="2026-10-16" onChange={() => {}} field={FIELD} />);
+    const input = textBox(container);
+    expect(input.getAttribute('aria-haspopup')).toBe('dialog');
+    expect(input.getAttribute('aria-expanded')).toBe('false');
+    expect(input.getAttribute('aria-controls')).toBeNull();
+    clickBox(input);
+    await waitFor(() => expect(popover()).not.toBeNull());
+    expect(popover()!.querySelector('button[data-day]')).not.toBeNull();
+    expect(document.activeElement).toBe(input);
+    expect(input.getAttribute('aria-expanded')).toBe('true');
+    expect(input.getAttribute('aria-controls')).toBe(popover()!.id);
+    expect(screen.getByTestId('date-picker-trigger').getAttribute('aria-controls')).toBe(popover()!.id);
+    expect(screen.getByTestId('date-picker-trigger').getAttribute('aria-label')).toBe('Open calendar');
+  });
+
+  it('typing keeps the popover open, and a typed date still writes; Enter commits and closes', async () => {
+    const onChange = vi.fn();
+    const { container } = render(<DatePickerField value="" onChange={onChange} field={FIELD} />);
+    const input = textBox(container);
+    clickBox(input);
+    await waitFor(() => expect(popover()).not.toBeNull());
+    fireEvent.change(input, { target: { value: '10/20/2026' } });
+    expect(popover()).not.toBeNull();
+    expect(document.activeElement).toBe(input);
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(onChange).toHaveBeenCalledWith('2026-10-20');
+    await waitFor(() => expect(popover()).toBeNull());
+    expect(document.activeElement).toBe(input);
+  });
+
+  it('a second click in the box leaves the popover open', async () => {
+    const { container } = render(<DatePickerField value="2026-10-16" onChange={() => {}} field={FIELD} />);
+    const input = textBox(container);
+    clickBox(input);
+    await waitFor(() => expect(popover()).not.toBeNull());
+    clickBox(input);
+    expect(popover()).not.toBeNull();
+  });
+
+  it('Escape closes it and leaves the focus in the box', async () => {
+    const { container } = render(<DatePickerField value="2026-10-16" onChange={() => {}} field={FIELD} />);
+    const input = textBox(container);
+    clickBox(input);
+    await waitFor(() => expect(popover()).not.toBeNull());
+    fireEvent.keyDown(input, { key: 'Escape' });
+    await waitFor(() => expect(popover()).toBeNull());
+    expect(document.activeElement).toBe(input);
+    expect(input.getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('a calendar pick after a click in the box writes the day and closes', async () => {
+    const onChange = vi.fn();
+    const { container } = render(<DatePickerField value="2026-10-16" onChange={onChange} field={FIELD} />);
+    clickBox(textBox(container));
+    const day = await waitFor(() => {
+      const el = document.body.querySelector(`button[data-day="${new Date(2026, 9, 20).toLocaleDateString()}"]`);
+      if (!el) throw new Error('calendar not open');
+      return el as HTMLButtonElement;
+    });
+    act(() => {
+      fireEvent.click(day);
+    });
+    expect(onChange).toHaveBeenCalledWith('2026-10-20');
+    await waitFor(() => expect(popover()).toBeNull());
+  });
+
+  it('focus arriving without a click (Tab) opens nothing', () => {
+    const { container } = render(<DatePickerField value="2026-10-16" onChange={() => {}} field={FIELD} />);
+    const input = textBox(container);
+    act(() => input.focus());
+    fireEvent.focus(input);
+    expect(popover()).toBeNull();
+  });
+
+  it('a disabled box opens nothing', () => {
+    const { container } = render(<DatePickerField value="" onChange={() => {}} field={FIELD} disabled />);
+    fireEvent.click(textBox(container));
+    expect(popover()).toBeNull();
+  });
+
+  it('the calendar button still opens it and moves the focus into the calendar', async () => {
+    render(<DatePickerField value="2026-10-16" onChange={() => {}} field={FIELD} />);
+    fireEvent.click(screen.getByTestId('date-picker-trigger'));
+    await waitFor(() => expect(popover()).not.toBeNull());
+    await waitFor(() => expect(popover()!.contains(document.activeElement)).toBe(true));
+  });
+
+  it('the datetime face opens the same way, with its time row', async () => {
+    const { container } = render(
+      <DateTimePickerField value={new Date(2026, 10, 12, 9, 15).toISOString()} onChange={() => {}} field={DT_FIELD} />,
+    );
+    const input = textBox(container);
+    clickBox(input);
+    expect(await screen.findByTestId('date-picker-time')).toBeTruthy();
+    expect(document.activeElement).toBe(input);
+  });
+
+  it('CONTROL: the in-cell face is unchanged — no popover relationship on its box', () => {
+    const { container } = render(<DatePickerField value="2026-10-16" onChange={() => {}} field={FIELD} inCell />);
+    const input = textBox(container);
+    expect(container.querySelector('[data-in-cell-face="panel"]')).not.toBeNull();
+    expect(input.getAttribute('aria-haspopup')).toBeNull();
+    fireEvent.click(input);
+    expect(popover()).toBeNull();
+  });
+});

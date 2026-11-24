@@ -146,6 +146,8 @@ describe('MasterDetailForm — a late header record still drives parent-scoped l
       />,
     );
     const status = await statusInput(container, '');
+    // A line (the grid draws no trailing entry row, objectstack#35507).
+    fireEvent.click(await waitFor(() => screen.getByTestId('line-items-add')));
     await waitFor(() => expect(qty().disabled).toBe(false));
     // A create form reads no record.
     expect(ds.findOne).not.toHaveBeenCalled();

@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { IDataEngine } from '@objectstack/spec/contracts';
+import { keysetWalk } from '@objectstack/types';
 import { FAN_OUT_SYSTEM_CONTEXT } from './fan-out-system-context.js';
 
 /** The object the preference matrix lives in. */
@@ -24,6 +25,26 @@ export interface PreferenceResolverOptions {
     mandatoryTopics?: readonly string[];
     /** Object name override (default {@link PREFERENCE_OBJECT}). */
     objectName?: string;
+}
+
+/**
+ * Rows per page of the preference reads {@link PreferenceResolver.filter}
+ * makes. A page size, never a cap: each read walks every page to the end.
+ */
+export const PREFERENCE_PAGE_SIZE = 1000;
+
+/** Per-resolver page sizes set by {@link setPreferencePageSizeForTests}. */
+const PAGE_SIZE_OVERRIDES = new WeakMap<PreferenceResolver, number>();
+
+/**
+ * Shrink one resolver's page size so a test can put rows past page one.
+ * ⛔ Test seam only: it is deliberately NOT re-exported from the package
+ * entry, so no published type carries a page-size option. A value that is
+ * not a positive integer is ignored (the resolver keeps
+ * {@link PREFERENCE_PAGE_SIZE}).
+ */
+export function setPreferencePageSizeForTests(resolver: PreferenceResolver, pageSize: number): void {
+    if (Number.isInteger(pageSize) && pageSize > 0) PAGE_SIZE_OVERRIDES.set(resolver, pageSize);
 }
 
 export interface PreferenceContext {
@@ -65,6 +86,55 @@ export interface QuietHours {
 
 /** Digest cadence declared on a preference row (P3b-2). `none` ⇒ no batching. */
 export type DigestCadence = 'daily' | 'weekly';
+
+/**
+ * [ruling 7073270426 on #35123] The stored `quiet_hours` value that means "no
+ * quiet hours, by this row's choice": an object whose `off` is `true`. Empty
+ * (`null`) stays "not set". See {@link parseQuietHours} for the three states.
+ *
+ * A MARKED value rather than an empty object: `{}` and `null` are what a
+ * cleared widget or an API caller writes for each other, and one written for
+ * the other would turn "off" back into "follow the next row" without anyone
+ * noticing. `{ off: true }` cannot be produced by clearing anything.
+ */
+export const QUIET_HOURS_OFF: Readonly<{ off: true }> = Object.freeze({ off: true });
+
+/** A row's quiet-hours answer: a window, or `'off'` ({@link QUIET_HOURS_OFF} as stored). */
+type QuietHoursAnswer = QuietHours | 'off';
+
+/** A row's digest answer: a cadence, or `'none'` (send each one right away). */
+type DigestAnswer = DigestCadence | 'none';
+
+/**
+ * [rulings 6968686390 and 6969143776] The context
+ * {@link PreferenceResolver.effectiveFor} reads the preference rows under: the
+ * explicit system opt-in. Kept apart from {@link FAN_OUT_SYSTEM_CONTEXT} on
+ * purpose, because what this read derives DOES reach a caller: the
+ * caller-scoped door answers a person whether each topic and channel is on
+ * and whether that comes from the organization's default — the ruled
+ * answer, which a member's own grant cannot read (the default rows are
+ * outside their row scope). The read is bounded by the `organization_id`
+ * term, never by the context; the rows themselves, and every row of another
+ * person, stay inside the method.
+ */
+export const EFFECTIVE_PREFERENCES_SYSTEM_CONTEXT = { isSystem: true } as const;
+
+/**
+ * The most rows one of {@link PreferenceResolver.effectiveFor}'s reads may
+ * answer. Each read is one person's rows, or the organization's default rows,
+ * so a real answer is far below it. A read that comes back with MORE is a
+ * fault, never a page: the rows past the cap could be the very rows that
+ * decide a cell (or the row id the page edits), and a short answer would be
+ * drawn as `default` / `builtin` and invite a duplicate row.
+ */
+export const EFFECTIVE_PREFERENCES_READ_CAP = 10000;
+
+/**
+ * The stored spellings of the admin-global default's empty `user_id` that an
+ * equality read can name — `null` and `''` (see {@link isGlobalDefaultUser};
+ * `undefined` is never stored).
+ */
+const GLOBAL_DEFAULT_USER_SPELLINGS: readonly (string | null)[] = [null, ''];
 
 /** The topic / channel wildcard. ⛔ Not a user: see {@link GLOBAL_USER}. */
 const WILDCARD = '*';
@@ -144,9 +214,10 @@ export class PreferenceResolver {
         const data = this.opts.getData();
         if (!data) return all(); // fail-open
 
+        const users = new Set(recipients);
         let rows: Record<string, unknown>[];
         try {
-            rows = await this.loadRows(data, ctx);
+            rows = await this.loadRows(data, ctx, users);
         } catch (err) {
             this.opts.logger.warn(
                 `[preferences] lookup for topic '${ctx.topic}' failed (${msg(err)}); delivering all (fail-open)`,
@@ -154,20 +225,7 @@ export class PreferenceResolver {
             return all();
         }
 
-        // Index rows by `${user}|${topic}|${channel}` → { enabled, quietHours }.
-        const recipientSet = new Set(recipients);
-        const index = new Map<string, PrefRowLite>();
-        for (const r of rows) {
-            const user = isGlobalDefaultUser(r.user_id) ? GLOBAL_USER : String(r.user_id);
-            if (user !== GLOBAL_USER && !recipientSet.has(user)) continue; // ignore unrelated users
-            const topic = String(r.topic ?? WILDCARD);
-            const channel = String(r.channel ?? WILDCARD);
-            index.set(`${user}|${topic}|${channel}`, {
-                enabled: asBool(r.enabled),
-                quietHours: parseQuietHours(r.quiet_hours),
-                digest: parseDigest(r.digest),
-            });
-        }
+        const index = indexRows(rows, users);
 
         const nowMs = ctx.now ?? Date.now();
         const critical = ctx.severity === 'critical';
@@ -185,13 +243,13 @@ export class PreferenceResolver {
             let notBefore: number | undefined;
             let digest: { window: string } | undefined;
             if (!critical) {
-                const cadence = this.resolveDigest(index, recipient, ctx.topic);
-                if (cadence) {
-                    const d = digestDeferral(cadence, nowMs, this.resolveQuietHours(index, recipient, ctx.topic)?.tz);
+                const cadence = this.resolveDigest(index, recipient, ctx.topic)?.digest;
+                const qh = windowOf(this.resolveQuietHours(index, recipient, ctx.topic));
+                if (cadence === 'daily' || cadence === 'weekly') {
+                    const d = digestDeferral(cadence, nowMs, this.resolveDigestZoneWindow(index, recipient, ctx.topic)?.tz);
                     notBefore = d.notBefore;
                     digest = { window: d.window };
                 } else {
-                    const qh = this.resolveQuietHours(index, recipient, ctx.topic);
                     notBefore = qh ? quietHoursDeferral(qh, nowMs) : undefined;
                 }
             }
@@ -203,19 +261,67 @@ export class PreferenceResolver {
         return targets;
     }
 
-    /** Load the candidate rows (topic-specific + wildcard-topic), org-scoped. */
-    private async loadRows(data: IDataEngine, ctx: PreferenceContext): Promise<Record<string, unknown>[]> {
-        // Two equality queries (topic and the '*' wildcard) avoid relying on
-        // driver-specific IN support; user filtering is done in memory.
+    /**
+     * The rows that can decide this delivery, org-scoped: the recipients' own
+     * and the organization's default (the empty `user_id`), for the event's
+     * topic and for the `*` topic.
+     *
+     * Each topic is read to the END, one page of {@link PREFERENCE_PAGE_SIZE}
+     * rows at a time, seeking past the last `id` (`keysetWalk`), so the pages
+     * partition the rows and none is left unread however many the
+     * organization holds: a recipient's own opt-out, digest or quiet hours
+     * always reaches the index. A single capped read with no order dropped an
+     * undefined subset once a topic held more rows than the cap. Rows of
+     * anyone else are dropped page by page, so what is kept is bounded by the
+     * recipients, not by the organization.
+     *
+     * Equality on `topic` plus the seek on `id`: no IN, so no driver needs it.
+     * A walk that cannot advance past a full page (a reader that did not
+     * apply the seek, a row with no `id`) REJECTS instead of answering with
+     * what it read, because a partial set delivers as though the missing rows
+     * did not exist. The rejection reaches {@link filter}'s fail-open path
+     * like any failed read.
+     */
+    private async loadRows(
+        data: IDataEngine,
+        ctx: PreferenceContext,
+        users: ReadonlySet<string>,
+    ): Promise<Record<string, unknown>[]> {
         const base: Record<string, unknown> = {};
         if (ctx.organizationId) base.organization_id = ctx.organizationId;
-        // The explicit system opt-in — see FAN_OUT_SYSTEM_CONTEXT: the rows are
-        // the recipients' preferences, read on their behalf, not the emitter's.
-        const [specific, wildcard] = await Promise.all([
-            data.find(this.objectName, { where: { ...base, topic: ctx.topic }, limit: 10000 }, { context: FAN_OUT_SYSTEM_CONTEXT }),
-            data.find(this.objectName, { where: { ...base, topic: WILDCARD }, limit: 10000 }, { context: FAN_OUT_SYSTEM_CONTEXT }),
-        ]);
-        return [...(specific ?? []), ...(wildcard ?? [])];
+        const pageSize = PAGE_SIZE_OVERRIDES.get(this) ?? PREFERENCE_PAGE_SIZE;
+        const read = async (topic: string): Promise<Record<string, unknown>[]> => {
+            const walk = keysetWalk<Record<string, unknown>>(
+                // The explicit system opt-in — see FAN_OUT_SYSTEM_CONTEXT: the rows are
+                // the recipients' preferences, read on their behalf, not the emitter's.
+                async (q) => ((await data.find(
+                    this.objectName,
+                    { ...(q.where !== undefined ? { where: q.where as Record<string, unknown> } : {}), orderBy: q.orderBy, limit: q.limit },
+                    { context: FAN_OUT_SYSTEM_CONTEXT },
+                )) ?? []) as Record<string, unknown>[],
+                { where: { ...base, topic }, pageSize },
+            );
+            const kept: Record<string, unknown>[] = [];
+            let lastPage = 0;
+            for await (const page of walk.pages()) {
+                lastPage = page.length;
+                for (const row of page) {
+                    if (isGlobalDefaultUser(row.user_id) || users.has(String(row.user_id))) kept.push(row);
+                }
+            }
+            // A SHORT last page is the whole rest of the topic, so the walk read
+            // everything even when it could not take a cursor from that page.
+            // Only a FULL page it could not move past leaves rows unread.
+            if (walk.truncated && lastPage >= pageSize) {
+                throw new Error(
+                    `${this.objectName} rows for topic '${topic}' could not be read to the end: a page did not move past ` +
+                        `the last id after ${walk.scanned} row(s); refusing to filter on a partial set.`,
+                );
+            }
+            return kept;
+        };
+        const [specific, wildcard] = await Promise.all([read(ctx.topic), read(WILDCARD)]);
+        return [...specific, ...wildcard];
     }
 
     /**
@@ -239,11 +345,32 @@ export class PreferenceResolver {
      * row (`(user, *, *)` or `(user, topic, *)`) — quiet hours are a per-person,
      * channel-agnostic setting. Most-specific user/topic wins.
      */
-    private resolveQuietHours(index: Map<string, PrefRowLite>, user: string, topic: string): QuietHours | undefined {
+    private resolveQuietHours(index: Map<string, PrefRowLite>, user: string, topic: string): PrefRowLite | undefined {
         for (const u of [user, GLOBAL_USER]) {
             for (const t of [topic, WILDCARD]) {
                 const hit = index.get(`${u}|${t}|${WILDCARD}`);
-                if (hit?.quietHours) return hit.quietHours;
+                // A row that leaves the field unset decides nothing for it
+                // (ruling 7073270426): only a window or the explicit off stops.
+                if (hit?.quietHours !== undefined) return hit;
+            }
+        }
+        return undefined;
+    }
+
+    /**
+     * The window whose `tz` a digest is batched in (ADR-0030: digest windows
+     * use `quiet_hours.tz`, else UTC). The same walk as
+     * {@link resolveQuietHours}, except that it stops only at a row that holds
+     * a WINDOW: it walks past the explicit off as well as unset. So a member's
+     * own "no quiet hours" turns quiet hours off for them and leaves their
+     * digest at midnight in the time zone of the organization's window; with
+     * no window on any row, the digest stays on UTC.
+     */
+    private resolveDigestZoneWindow(index: Map<string, PrefRowLite>, user: string, topic: string): QuietHours | undefined {
+        for (const u of [user, GLOBAL_USER]) {
+            for (const t of [topic, WILDCARD]) {
+                const window = windowOf(index.get(`${u}|${t}|${WILDCARD}`));
+                if (window) return window;
             }
         }
         return undefined;
@@ -254,40 +381,258 @@ export class PreferenceResolver {
      * channel-wildcard row (`(user, *, *)` or `(user, topic, *)`) — batching is a
      * per-person, channel-agnostic setting. Most-specific user/topic wins.
      */
-    private resolveDigest(index: Map<string, PrefRowLite>, user: string, topic: string): DigestCadence | undefined {
+    private resolveDigest(index: Map<string, PrefRowLite>, user: string, topic: string): PrefRowLite | undefined {
         for (const u of [user, GLOBAL_USER]) {
             for (const t of [topic, WILDCARD]) {
                 const hit = index.get(`${u}|${t}|${WILDCARD}`);
-                if (hit?.digest) return hit.digest;
+                // Only a cadence or the explicit `none` stops; unset walks on.
+                if (hit?.digest !== undefined) return hit;
             }
         }
         return undefined;
     }
+
+    /**
+     * [rulings 6968686390 and 6969143776] One person's EFFECTIVE preferences —
+     * what `filter` would decide for them — for every `topic` × `channel`
+     * named, with where each answer comes from. The caller-scoped door
+     * `GET /api/v1/messaging/me/preferences` answers this, so the Account
+     * page draws the same rules `emit` applies, from this one implementation.
+     *
+     * The topics and channels are the ones asked for, then any other the
+     * person's own rows name. Per cell: a mandatory topic is on (`mandatory`); otherwise the
+     * most-specific row wins exactly as in {@link filter} — the person's own
+     * (`own`), the organization's default (`default`), or none and the
+     * built-in default on (`builtin`). Digest and quiet hours are the
+     * person's general ones: the channel-wildcard lookup {@link filter} runs,
+     * for the `*` topic.
+     *
+     * ⚠️ The rows are read under the system opt-in, and only the rows the
+     * answer needs: the person's own and the organization's default, each by
+     * equality on `user_id` under the `organization_id` term (one read for
+     * `userId`, one per stored spelling of the empty default reference — the
+     * equality shape {@link loadRows} uses, so no driver needs IN). No other
+     * person's row is read. What leaves is the computed answer for `userId`,
+     * plus the ids of `userId`'s OWN rows (`ownRowId`, the rows the person
+     * edits). A read that answers more than
+     * {@link EFFECTIVE_PREFERENCES_READ_CAP} rows rejects (a fault, never a
+     * partial answer). No organization ⇒ no row is read: every stored row
+     * carries one (ADR-0131 D1), and a read without the term would cross
+     * organizations.
+     *
+     * Unlike {@link filter} this does not fail open: a read that fails
+     * rejects, and the door answers the fault — a page must never draw
+     * "everything on" because a read failed.
+     */
+    async effectiveFor(
+        userId: string,
+        organizationId: string | undefined,
+        topics: readonly string[],
+        channels: readonly string[],
+    ): Promise<EffectivePreferences> {
+        const data = this.opts.getData();
+        const rows: Record<string, unknown>[] = [];
+        if (data && organizationId) {
+            const reads = await Promise.all(
+                [userId, ...GLOBAL_DEFAULT_USER_SPELLINGS].map((user) =>
+                    data.find(
+                        this.objectName,
+                        { where: { organization_id: organizationId, user_id: user }, limit: EFFECTIVE_PREFERENCES_READ_CAP + 1 },
+                        { context: EFFECTIVE_PREFERENCES_SYSTEM_CONTEXT },
+                    ),
+                ),
+            );
+            for (const read of reads) {
+                const found = (read ?? []) as Record<string, unknown>[];
+                if (found.length > EFFECTIVE_PREFERENCES_READ_CAP) {
+                    throw new Error(
+                        `${this.objectName} answered more than ${EFFECTIVE_PREFERENCES_READ_CAP} rows for one person or for the default; ` +
+                            'refusing to compute a partial answer.',
+                    );
+                }
+                rows.push(...found);
+            }
+        }
+        const index = indexRows(rows, new Set([userId]));
+        // The person's own rows name topics and channels too: a topic only
+        // they ever muted, a channel id a plugin no longer registers. Each is
+        // listed after the ones asked for, so their own row is never hidden.
+        const ownKeys = [...index.values()].filter((row) => row.user === userId);
+        const listed = (asked: readonly string[], ownValues: string[]): string[] => {
+            const seen = new Set(asked);
+            return [...asked, ...[...new Set(ownValues)].filter((v) => !seen.has(v)).sort()];
+        };
+        const allTopics = listed(topics, ownKeys.map((row) => row.topic));
+        const allChannels = listed(channels, ownKeys.map((row) => row.channel).filter((c) => c !== WILDCARD));
+        const own = (topic: string, channel: string): { ownRowId?: string } => {
+            const id = index.get(`${userId}|${topic}|${channel}`)?.id;
+            return id ? { ownRowId: id } : {};
+        };
+        const sourceOf = (hit: PrefRowLite | undefined): EffectiveSource =>
+            !hit ? 'builtin' : hit.user === GLOBAL_USER ? 'default' : 'own';
+
+        const effectiveTopics = allTopics.map((topic): EffectiveTopic => {
+            const mandatory = this.isMandatory(topic);
+            return {
+                topic,
+                wildcard: topic === WILDCARD,
+                mandatory,
+                channels: allChannels.map((channel): EffectiveCell => {
+                    if (mandatory) return { channel, enabled: true, source: 'mandatory', ...own(topic, channel) };
+                    const hit = this.resolveRow(index, userId, topic, channel);
+                    return { channel, enabled: hit?.enabled ?? true, source: sourceOf(hit), ...own(topic, channel) };
+                }),
+            };
+        });
+
+        const general = this.resolveRow(index, userId, WILDCARD, WILDCARD);
+        const digest = this.resolveDigest(index, userId, WILDCARD);
+        const quietHours = this.resolveQuietHours(index, userId, WILDCARD);
+        return {
+            topics: effectiveTopics,
+            channels: allChannels,
+            general: {
+                ...own(WILDCARD, WILDCARD),
+                enabled: { value: general?.enabled ?? true, source: sourceOf(general) },
+                digest: { value: digest?.digest ?? 'none', source: sourceOf(digest) },
+                quietHours: { value: windowOf(quietHours) ?? null, source: sourceOf(quietHours) },
+            },
+        };
+    }
+}
+
+/** Where an effective answer comes from (see {@link PreferenceResolver.effectiveFor}). */
+export type EffectiveSource = 'own' | 'default' | 'builtin';
+
+/** One channel of one topic, as {@link PreferenceResolver.effectiveFor} answers it. */
+export interface EffectiveCell {
+    channel: string;
+    /** Whether a notification of this topic is delivered on this channel. */
+    enabled: boolean;
+    /** `mandatory` when the topic bypasses preferences; otherwise the row that decided. */
+    source: EffectiveSource | 'mandatory';
+    /** The person's own row for exactly this (topic, channel), when they have one. */
+    ownRowId?: string;
+}
+
+/** One topic's row of the effective matrix. */
+export interface EffectiveTopic {
+    topic: string;
+    /** `true` on the `*` (all topics) row alone. */
+    wildcard: boolean;
+    /** The topic bypasses preferences: every channel is on, and no row changes that. */
+    mandatory: boolean;
+    channels: EffectiveCell[];
+}
+
+/** An effective value and the row that decided it. */
+export interface EffectiveSetting<T> {
+    value: T;
+    source: EffectiveSource;
+}
+
+/** One person's effective preferences (see {@link PreferenceResolver.effectiveFor}). */
+export interface EffectivePreferences {
+    /** The topics asked for, then any other topic the person's own rows name. */
+    topics: EffectiveTopic[];
+    /** The channels asked for, then any other channel the person's own rows name; the column order of every topic. */
+    channels: string[];
+    /**
+     * The person's general settings, decided on the `(*, *)` lookup: whether
+     * notifications reach them at all where nothing more specific says, their
+     * digest cadence and their quiet hours. `ownRowId` is their own `(*, *)`
+     * row, the one a digest or quiet-hours change is written to.
+     */
+    general: {
+        ownRowId?: string;
+        enabled: EffectiveSetting<boolean>;
+        digest: EffectiveSetting<'none' | DigestCadence>;
+        quietHours: EffectiveSetting<QuietHours | null>;
+    };
 }
 
 interface PrefRowLite {
+    /** The row's id, as stored. */
+    id?: string;
+    /** The index key's parts: a user id or {@link GLOBAL_USER}, the topic and the channel. */
+    user: string;
+    topic: string;
+    channel: string;
     enabled: boolean;
-    quietHours?: QuietHours;
-    digest?: DigestCadence;
+    /** Absent ⇒ the row leaves quiet hours unset (see {@link parseQuietHours}). */
+    quietHours?: QuietHoursAnswer;
+    /** Absent ⇒ the row leaves the digest unset (see {@link parseDigest}). */
+    digest?: DigestAnswer;
+}
+
+/** The window a row's quiet-hours answer holds — none for the explicit off, or for no row. */
+function windowOf(row: PrefRowLite | undefined): QuietHours | undefined {
+    const qh = row?.quietHours;
+    return qh === undefined || qh === 'off' ? undefined : qh;
+}
+
+/**
+ * Index rows by `${user}|${topic}|${channel}`. Rows of a user outside `users`
+ * are dropped; the admin-global default's rows are always kept.
+ */
+function indexRows(rows: readonly Record<string, unknown>[], users: ReadonlySet<string>): Map<string, PrefRowLite> {
+    const index = new Map<string, PrefRowLite>();
+    for (const r of rows) {
+        const user = isGlobalDefaultUser(r.user_id) ? GLOBAL_USER : String(r.user_id);
+        if (user !== GLOBAL_USER && !users.has(user)) continue; // ignore unrelated users
+        const topic = String(r.topic ?? WILDCARD);
+        const channel = String(r.channel ?? WILDCARD);
+        index.set(`${user}|${topic}|${channel}`, {
+            ...(r.id != null ? { id: String(r.id) } : {}),
+            user,
+            topic,
+            channel,
+            enabled: asBool(r.enabled),
+            quietHours: parseQuietHours(r.quiet_hours),
+            digest: parseDigest(r.digest),
+        });
+    }
+    return index;
 }
 
 function asBool(v: unknown): boolean {
     return v === true || v === 1 || v === '1' || v === 'true';
 }
 
-function parseQuietHours(v: unknown): QuietHours | undefined {
+/**
+ * [ruling 7073270426 on #35123] Each of a row's `digest` and `quiet_hours` is
+ * one of THREE states, and the resolution rule is one sentence: the most
+ * specific row that SETS the field decides it, and a row that leaves it unset
+ * decides nothing for it, so the walk goes on (to the organization's default,
+ * then the built-in default: no digest, no quiet hours).
+ *
+ *  - not set (empty, or a value that is not one of the two below) → `undefined`;
+ *  - explicitly off: `{ off: true }` ({@link QUIET_HOURS_OFF}) → `'off'`. An
+ *    `off: true` wins over any other key the object carries;
+ *  - a window with both a `start` and an `end` → that window.
+ *
+ * So a member's own "no quiet hours" beats the organization's window, and an
+ * organization default row that is explicitly off is the same as no default.
+ */
+function parseQuietHours(v: unknown): QuietHoursAnswer | undefined {
     let o: any = v;
     if (typeof o === 'string') {
         try { o = JSON.parse(o); } catch { return undefined; }
     }
     if (!o || typeof o !== 'object') return undefined;
+    if (o.off === true) return 'off';
     if (o.start == null || o.end == null) return undefined;
     return { tz: o.tz, start: String(o.start), end: String(o.end) };
 }
 
-/** Parse the `digest` preference column; only `daily`/`weekly` enable batching. */
-function parseDigest(v: unknown): DigestCadence | undefined {
-    return v === 'daily' || v === 'weekly' ? v : undefined;
+/**
+ * Parse the `digest` preference column into its three states (see
+ * {@link parseQuietHours} for the rule): `daily` / `weekly` batch; `none` is
+ * the explicit "send each one right away" and stops the walk; empty (the field
+ * declares no default) is not set and walks on.
+ */
+function parseDigest(v: unknown): DigestAnswer | undefined {
+    return v === 'daily' || v === 'weekly' || v === 'none' ? v : undefined;
 }
 
 /**

@@ -76,15 +76,18 @@ describe('DetailSection — the frameless face (objectstack#27055)', () => {
     expect(title.parentElement!.className).toContain('border-b');
   });
 
+  // The breakpoints are the dense label-left rows' (objectstack#35602): a
+  // row needs its 112 px label beside the value, so two columns from a 36rem
+  // container and three from a 56rem one.
   it('lays five fields in two columns and six in three', () => {
     const five = render(onDefaultPage(<DetailSection section={identity} data={data} />));
-    expect(gridOf(five.container)!.className).toContain('@sm:grid-cols-2');
-    expect(gridOf(five.container)!.className).not.toContain('@lg:grid-cols-3');
+    expect(gridOf(five.container)!.className).toContain('@xl:grid-cols-2');
+    expect(gridOf(five.container)!.className).not.toContain('@4xl:grid-cols-3');
     cleanup();
     const six = section('Company', ['company', 'job', 'industry', 'site', 'revenue', 'staff']);
     const sixData = { company: 'A', job: 'B', industry: 'C', site: 'D', revenue: 1, staff: 2 };
     const { container } = render(onDefaultPage(<DetailSection section={six} data={sixData} />));
-    expect(gridOf(container)!.className).toContain('@lg:grid-cols-3');
+    expect(gridOf(container)!.className).toContain('@4xl:grid-cols-3');
   });
 
   it('collapses from its title row', () => {
@@ -96,11 +99,14 @@ describe('DetailSection — the frameless face (objectstack#27055)', () => {
     expect(gridOf(container)).toBeNull();
   });
 
-  it("a section its group declares `collapse: 'none'` keeps a plain heading, no disclosure", () => {
+  it("a section its group declares `collapse: 'none'` folds from its title too, starting open (objectstack#36269)", () => {
     const fixed = section('Address', ['street'], { collapsible: false });
     render(onDefaultPage(<DetailSection section={fixed} data={{ street: 'Main St' }} />));
-    expect(screen.queryByRole('button', { name: 'Address' })).toBeNull();
-    expect(screen.getByRole('heading', { name: 'Address' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Address' }).getAttribute('aria-expanded')).toBe('true');
+    // The toggle sits inside the group's heading: heading navigation still
+    // finds the group, and the heading holds the disclosure.
+    const heading = screen.getByRole('heading', { name: 'Address' });
+    expect(heading.querySelector('button[aria-expanded]')).toBe(screen.getByRole('button', { name: 'Address' }));
   });
 
   it('CONTROL — outside the default page the card face draws', () => {

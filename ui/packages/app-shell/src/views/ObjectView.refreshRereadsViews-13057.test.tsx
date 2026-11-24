@@ -80,9 +80,14 @@ vi.mock('./MetadataInspector', () => ({
 }));
 vi.mock('./RecordDetailView', () => ({ RecordDetailView: () => null }));
 
+// The source under test reaches `@objectstack/lint` through a dynamic import;
+// its first load is paid here, during collection, never inside a case's clocked
+// window (`check:test-source-alias`).
+import '@objectstack/lint';
 import { ObjectStackAdapter } from '@object-ui/data-objectstack';
 import { ObjectView } from './ObjectView';
 import { ExpressionProvider } from '../providers/ExpressionProvider';
+import { prefetchObjectViewRows } from '../console/appObjectScope';
 
 const OBJECT_NAME = 'duly_task';
 const VIEW_URL = '/api/v1/meta/view';
@@ -103,8 +108,10 @@ const json = (body: unknown) =>
 
 let seq = 0;
 
-function makeAdapter() {
+function makeAdapter(opts: { holdViews?: boolean } = {}) {
   const calls: string[] = [];
+  let releaseViews: () => void = () => {};
+  const viewsHeld = new Promise<void>((resolve) => { releaseViews = resolve; });
   const adapter = new ObjectStackAdapter({
     baseUrl: `http://refresh-views-${(seq += 1)}.test`,
     autoReconnect: false,
@@ -112,13 +119,16 @@ function makeAdapter() {
       const url = new URL(String(input));
       if (url.pathname.endsWith('/discovery')) return json({ success: true, data: {} });
       calls.push(url.pathname);
-      if (url.pathname === VIEW_URL) return json({ success: true, data: { type: 'view', items: structuredClone(SAVED) } });
+      if (url.pathname === VIEW_URL) {
+        if (opts.holdViews) await viewsHeld;
+        return json({ success: true, data: { type: 'view', items: structuredClone(SAVED) } });
+      }
       return json({ success: true, data: {} });
     }) as typeof fetch,
   });
   // The record rows are not under test; the page's list query is answered here.
   (adapter as unknown as { find: unknown }).find = vi.fn(async () => ({ data: [{ id: 't1', name: 'Task 1' }], total: 1 }));
-  return { adapter, viewReads: () => calls.filter((c) => c === VIEW_URL).length };
+  return { adapter, viewReads: () => calls.filter((c) => c === VIEW_URL).length, releaseViews };
 }
 
 /** A window long enough for every effect a step schedules to have fired. */
@@ -187,6 +197,39 @@ describe('a refresh of the object page re-reads its saved views (objectui#13057)
     const { adapter, viewReads } = makeAdapter();
     await mountPage(adapter);
     await settle();
+    expect(viewReads()).toBe(1);
+  });
+});
+
+/**
+ * objectstack#35535 — the route starts the list's saved-view read before the
+ * page mounts (`prefetchObjectViewRows`, `AppContent`). The page asks the same
+ * adapter for its views on mount and must join that read, not send its own:
+ * one `/meta/view` request per open, whether the early read is still on the
+ * wire when the page mounts or has already landed.
+ */
+describe('the page joins the view read its route started (objectstack#35535)', () => {
+  it('started and still on the wire: the page sends no second view read', async () => {
+    const { adapter, viewReads, releaseViews } = makeAdapter({ holdViews: true });
+    prefetchObjectViewRows(adapter, OBJECT_NAME);
+    await act(() => new Promise<void>((resolve) => setTimeout(resolve, 50)));
+    expect(viewReads()).toBe(1);
+    const listViews = vi.spyOn(adapter, 'listViews');
+    const mounted = mountPage(adapter);
+    await act(() => new Promise<void>((resolve) => setTimeout(resolve, 50)));
+    releaseViews();
+    await mounted;
+    // The page did ask (its own reader ran), and the read it joined is the one.
+    expect(listViews).toHaveBeenCalled();
+    expect(viewReads()).toBe(1);
+  });
+
+  it('started and landed: the page reads what it stored', async () => {
+    const { adapter, viewReads } = makeAdapter();
+    prefetchObjectViewRows(adapter, OBJECT_NAME);
+    await act(() => new Promise<void>((resolve) => setTimeout(resolve, 50)));
+    expect(viewReads()).toBe(1);
+    await mountPage(adapter);
     expect(viewReads()).toBe(1);
   });
 });

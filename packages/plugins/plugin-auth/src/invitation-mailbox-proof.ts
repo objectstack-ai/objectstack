@@ -117,6 +117,7 @@
  */
 
 import { isCloudManaged } from '@objectstack/core';
+import { endSessionsAfterCredentialWrite } from './credential-change-ends-prior-access.js';
 import { isMissingTableError } from '@objectstack/types';
 import { CLOUD_MANAGED_REFUSAL_CODE, CLOUD_MANAGED_REFUSAL_MESSAGES } from './cloud-managed.js';
 import { incrementFixedWindow, InProcessCounterStore, type CounterStore } from './rate-limit-storage.js';
@@ -746,6 +747,10 @@ export async function buildInvitationProofDoorPlugin(host: InvitationProofDoorHo
       }
       // ADR-0069 D1: the password-age stamp and the forced-change clear.
       await host.stampPasswordChangedAt(String(user.id));
+      // A credential change ends access issued before it: the account's
+      // sessions are ended again now that the password is written, ahead of
+      // the one this door opens (`credential-change-ends-prior-access.ts`).
+      if (existing) await endSessionsAfterCredentialWrite(internal, String(user.id));
 
       const session = await internal.createSession(user.id, false);
       if (!session) throw new APIError('INTERNAL_SERVER_ERROR', { code: 'INTERNAL_ERROR', message: 'Failed to create a session.' });

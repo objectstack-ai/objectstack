@@ -26,9 +26,14 @@
 import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import React from 'react';
-import { GridField } from '@object-ui/fields';
+import { GridField, preloadGridField } from '@object-ui/fields';
 import { deriveColumns, hydrateColumns, deriveDetail } from './deriveMasterDetail';
 import { en } from '@object-ui/i18n';
+
+// The line grid renders behind `@object-ui/fields`' lazy face (objectstack#36102);
+// load its body before the first render, as the record forms' mount-time
+// preload does in the console.
+await preloadGridField();
 
 /** The `en` session's word for a boolean value: what `useBooleanValueLabel`
  *  (`@object-ui/fields`) draws under `en`. The derive functions require one

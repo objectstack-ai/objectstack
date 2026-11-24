@@ -26,6 +26,8 @@
  */
 
 import '@testing-library/jest-dom/vitest';
+// The source under test reaches these through dynamic imports: their first load is paid at collection.
+import '@objectstack/lint';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
@@ -93,10 +95,19 @@ function makeClient(seed: { published?: Record<string, Row>; drafts?: Record<str
     delete drafts[name];
     return {};
   });
+  // objectstack#36511 — the single-item publish: the pending draft becomes the live row.
+  const publish = vi.fn(async (_type: string, name: string) => {
+    if (drafts[name]) {
+      published[name] = drafts[name];
+      delete drafts[name];
+    }
+    return { success: true };
+  });
   return {
     published,
     drafts,
     save,
+    publish,
     reset,
     // objectstack#26840 — the Access matrix reads its objects through the draft-overlaid door.
     withPreviewDrafts() { return this; },
@@ -157,7 +168,7 @@ async function openCreate(label: string, name?: string) {
   if (name) {
     fireEvent.change(within(dialog).getByLabelText(en('engine.studio.access.idLabel')), { target: { value: name } });
   }
-  fireEvent.click(within(dialog).getByRole('button', { name: en('engine.studio.createDraft') }));
+  fireEvent.click(within(dialog).getByRole('button', { name: en('engine.studio.createLive') }));
   return dialog;
 }
 
@@ -245,7 +256,7 @@ describe('objectstack#26836 — "+ New" over a taken identifier', () => {
     ).toBeNull();
   });
 
-  it('a fresh identifier: created as a draft, as before, and opened', async () => {
+  it('a fresh identifier: created as a draft, then published at once (objectstack#36511), and opened', async () => {
     clientImpl = makeClient({ published: { project_editor: { pkg: PKG, body: EDITOR } } });
     renderAccess();
     await screen.findByText('1 object granted · 0 field overrides', undefined, { timeout: 8000 });
@@ -254,10 +265,11 @@ describe('objectstack#26836 — "+ New" over a taken identifier', () => {
     const [type, name, , opts] = clientImpl.save.mock.calls[0];
     expect([type, name]).toEqual(['permission', 'project_viewer']);
     expect(opts).toMatchObject({ mode: 'draft', packageId: PKG, ifNoneMatch: '*', surface: 'studio' });
+    await waitFor(() => expect(clientImpl.publish).toHaveBeenCalledWith('permission', 'project_viewer', { packageId: PKG }));
     expect(toast.success).toHaveBeenCalledWith(tFormat('engine.studio.access.created', 'en', { label: 'Project Viewer' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-    expect(await rail().findByText('project_viewer')).toBeInTheDocument();
-    await waitFor(() => expect(header().getByText('project_viewer')).toBeInTheDocument());
+    expect(await rail().findByTitle('project_viewer')).toBeInTheDocument();
+    await waitFor(() => expect(header().getByTitle('project_viewer')).toBeInTheDocument());
   });
 });
 
@@ -281,7 +293,7 @@ describe('objectstack#26836 — discarding a set\'s pending draft', () => {
     expect(toast.success).toHaveBeenCalledWith(tFormat('engine.edit.draftDiscarded', 'en', { item: 'Project Editor' }));
 
     expect(await screen.findByText('1 object granted · 0 field overrides')).toBeInTheDocument();
-    expect(rail().getByText('project_editor')).toBeInTheDocument();
+    expect(rail().getByTitle('project_editor')).toBeInTheDocument();
     await waitFor(() => expect(screen.queryByTestId('access-discard-draft')).toBeNull());
     expect(clientImpl.save).not.toHaveBeenCalled();
   });
@@ -292,12 +304,12 @@ describe('objectstack#26836 — discarding a set\'s pending draft', () => {
       drafts: { project_viewer: { pkg: PKG, body: { name: 'project_viewer', label: 'Project Viewer', objects: {} } } },
     });
     renderAccess();
-    fireEvent.click(await rail().findByText('project_viewer', undefined, { timeout: 8000 }));
+    fireEvent.click(await rail().findByTitle('project_viewer', undefined, { timeout: 8000 }));
     fireEvent.click(await header().findByTestId('access-discard-draft'));
     expect(window.confirm).toHaveBeenCalledWith(
       tFormat('engine.studio.access.discardConfirmUnpublished', 'en', { item: 'Project Viewer' }),
     );
-    await waitFor(() => expect(rail().queryByText('project_viewer')).toBeNull());
+    await waitFor(() => expect(rail().queryByTitle('project_viewer')).toBeNull());
     expect(clientImpl.reset.mock.calls[0].slice(0, 3)).toEqual(['permission', 'project_viewer', { state: 'draft', packageId: PKG }]);
     // The rail's remaining set opens in its place.
     expect(await screen.findByText('1 object granted · 0 field overrides')).toBeInTheDocument();

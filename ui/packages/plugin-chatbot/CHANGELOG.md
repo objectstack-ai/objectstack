@@ -1,5 +1,259 @@
 # @object-ui/plugin-chatbot
 
+## 18.6.0
+
+### Patch Changes
+
+- bf76922: feat(console-ai): an image or PDF attached in the AI chat is uploaded as the user and sent to the agent as a file part
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The console's AI chat used to send only spreadsheet attachments (parsed in the page) and told the model that every other file "was not read". Now:
+  
+  - The composer shows its attach button and the attachment chips, so a file can be picked, pasted or dropped and seen before it is sent.
+  - An image (PNG, JPEG, GIF, WebP) or a PDF of at most 10 MiB is uploaded to storage as the signed-in user through the console's upload adapter (`POST /api/v1/storage/upload/presigned`, the bytes, then `POST /api/v1/storage/upload/complete` without `attachTo`), so it belongs to no record yet. The user turn carries one AI SDK file part per uploaded file: `{ type: 'file', mediaType, filename, url, providerMetadata: { objectstack: { fileId } } }`, where `url` is the stored file's address (`/api/v1/storage/files/{fileId}`, made absolute) and never an inline data URL, so the request and the stored conversation stay small. The turn's text names the files it sent.
+  - A file over the cap, of another type, or whose upload failed is not sent, and the turn's text names it and says why, so the user and the agent both know its content was not read. The turn still sends.
+  - A spreadsheet keeps the in-page parse, unchanged.
+  
+  `@object-ui/plugin-chatbot`: `useObjectChat().sendMessage` takes a third, optional argument, `fileParts` (the new exported `ChatFilePart` type), which the API mode sends as the turn's file parts. Its second argument, `files`, is still not sent: upload the files first and pass the result as `fileParts`. Existing two-argument calls are unchanged.
+  
+  Reading the files is the agent's side: an agent service that does not yet convert these parts for its model sees the file names in the text and the parts it does not read.
+- 0e2ead3: fix(console): the AI build chat's change card names drafted objects and fields by label, and the publish-health line speaks the console's language
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  Two fixes to the AI build chat:
+  
+  - **The change card names drafted objects and fields by their labels.** Before the app's first publish, an object the build drafted lives only in the draft overlay, so the change card read 「b6bl_quote_item · line_total」 where the customer named 「报价明细 · 小计」. The card now asks the draft overlay (`GET /meta/object/:name?preview=draft`) by name for any object, or field, that the published registry does not know. The answer is kept per object; when it does not name what a later card asks for (a field or object a later change drafted), the overlay is asked again once the conversation has moved on, at most once per object per message or turn. A published object still answers from the registry without a draft read. A name neither world knows yet (one the change is about to create) still shows as given. Nothing else in the console reads the draft overlay because of this change.
+  - **The publish-health line under a Published badge reads the locale pack.** Its own counts ("6 sample rows live", "2 views · 3 widgets verified") were English in every locale, with an `s` picked on `=== 1`. They are now count families under `chatbot.build.health` in every pack (zh-Hant generated from zh-Hans), so a zh console reads 「6 条示例数据已上线 · 已核对 2 个视图 · …」 and Russian agrees with its number. "seed" now reads "sample data set". The findings the line lists (`seedError`, the runtime probes' `issues[].message`) are the producer's text and pass through unchanged.
+  
+  The widening is new i18n keys only (`chatbot.build.health.*`); no key is removed or renamed.
+- ffa6db1: fix(console): the publish-health line shows a finding's customer sentence and folds the agent text under technical details
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  The line under a Published badge in the AI build chat printed each runtime finding's `message` as it arrived. That text is written for the agent that repairs the build ('Seed "x" loaded 0 rows … republish the seed'), so the customer read instructions meant for the AI. When the producer of a finding sends a customer sentence (`userMessage`; the platform's publish probes send it from objectstack#34513), the line shows it:
+  
+  - **A finding with a `userMessage` shows that sentence on the line.** `publishHealthFromResponse` reads `probes.issues[].userMessage`, and `fix`, when each is a non-empty string, onto `PublishHealth.issues[]` (both optional, new).
+  - **A finding without one shows the generic sentence the draft-issues block already says** (`chatbot.build.issuesSummary` when an error is in the set, else `chatbot.build.warningsSummary`), once for all such findings.
+  - **The agent text leaves the line.** Every finding's `message` (with its `fix`) and the seed loader's own failure text sit under a closed "Technical details" (`chatbot.build.issuesDetails`), the face the draft-issues block uses.
+  - **A failed seed says so through the locale pack.** The line reads `chatbot.build.health.seedFailed` ("Sample data failed to load.", new in every pack, zh-Hant generated from zh-Hans) instead of the loader's English. `PublishHealth.seedFailed` (optional, new) marks the failure; `seedError` now holds only the producer's own text and is absent when it sent none, where it used to hold an English sentence the reader made up. A loader finding object in `seedApplied.errors[]` gives its `message` instead of `[object Object]`.
+  - **The publish-all toast and the AI chat's pending-drafts bar still report a failed seed when the producer sent no text.** Both read the failure from `seedFailed` (as the line does), not from `seedError`; with no producer text, the detail is the line's own sentence (`chatbot.build.health.seedFailed`).
+  
+  The widening: new optional `PublishHealth` fields (`seedFailed`, `issues[].fix`, `issues[].userMessage`) and one new i18n key (`chatbot.build.health.seedFailed`); nothing is removed or renamed. One reading changes: `seedError` now holds only the producer's own text and can be absent on a failed seed; read `seedFailed` for the failure.
+- 393a576: fix(plugin-chatbot): bold next to CJK full-width punctuation renders bold in chat answers
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A `**` run with a CJK letter on one side and full-width punctuation on the other (book-title marks, corner brackets, the full-width comma, full stop, exclamation and question marks, the enumeration comma) showed as literal asterisks in chat answers and the reasoning panel: CommonMark's flanking rule reads full-width punctuation as punctuation, and a CJK sentence puts no space beside the run. Both chat markdown surfaces now render with `remark-cjk-friendly` in streamdown's `cjk` plugin slot, so such a run opens and closes. ASCII emphasis, inline code spans and backslash-escaped asterisks keep their CommonMark meaning. A caller that passes its own `plugins` to `MessageResponse` keeps the CJK rule.
+  
+  `@object-ui/plugin-chatbot` gains the dependency `remark-cjk-friendly` (MIT).
+- a78781a: feat(plugin-chatbot): an AI chat answer computed from a dataset shows which dataset and metrics it used
+  
+  Clause-②: yes (widening) — `@object-ui/plugin-chatbot` exports `detectAnswerSource`, whose return type grows from `ObjectQuerySource` to `AnswerSource` (`ObjectQuerySource | DatasetProvenance`); the exported `AnswerSource` type, which was `ObjectQuerySource`, is now that union; and a chat tool invocation's `answerSource` member widens to the same union. `AnswerSourceBlock`'s `sources` prop (package-internal) takes the union too. Code that reads an object-query member (`object`, `filter`, `scope`) off an `AnswerSource` first checks it has no `kind: 'dataset'`.
+  Metadata-protocol: none
+  
+  - **"How this was computed" now covers dataset answers.** When the AI answers a business question through `query_dataset` (ADR-0149 D3), the collapsed block under the answer lists the dataset, each metric by its label with its name beside it and its business definition when it has one, what the figures were grouped by, and the filter the question added. A filter that cannot be shown as rows is shown as sent. When the question added no filter, the block says so, because the dataset's own definition still applies.
+  - **Object-query answers draw as before.** The object, filter, grouping, aggregations, record count and "Only records visible to you" lines are unchanged, and a turn whose tools answered neither block shows no block.
+  - **The block survives a reload.** A conversation restored from the browser cache keeps the dataset block.
+  - New strings `chatbot.answerSource.dataset`, `chatbot.answerSource.metrics` and `chatbot.answerSource.noAddedFilter` ship in every locale pack.
+- 61e9ed9: fix(plugin-chatbot): the docked AI panel keeps a 16px gutter on both sides
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The plain chat surface (`surface="plain"`, used by the console's AI page, its right-docked assistant panel and the shared-record page) dropped the side padding of its message list and composer at the `sm` VIEWPORT breakpoint, so on any desktop window the text and the input touched the edges of a ~420px dock. The gutter now follows the width the chat is given: the plain root is a Tailwind size container, and the message list and the composer keep 16px on both sides until the container reaches `@3xl` (48rem), where the centred 42rem column already has room around it. Below that width an assistant turn spans the column, so its prose, tables and cards end on the same 16px line as the composer; a wide table keeps scrolling horizontally inside its own box. At full width the layout is unchanged, and the card surface is untouched.
+- 14619f5: feat(console-ai): an AI build shows the app itself in the main area, with one Publish on screen
+  
+  Clause-②: yes (widening — new @object-ui/i18n locale keys, so `TranslationKeys` grows; and two additive @object-ui/plugin-chatbot changes, the optional `ChatbotEnhanced` prop `publishFromShellBar` and the optional `opts.appSegment` argument of `onBuildMaterialized`); nothing removed or renamed
+  Metadata-protocol: none
+  
+  Building with AI happens in the console's right-side drawer, and the app it builds shows in the page beside it (ui ADR-0057 Amendment A3, ADR-0037 as amended). There is no nested preview any more.
+  
+  - Changes to a published app show on the page you are on, in draft mode, with the draft bar on top. A new app shows in the main area once the build creates its package. Before that, the page stays. A new app is materialized (ADR-0045), so it shows as the real, not-yet-published app. The main area refreshes as each drafted item lands, and once more when the build's turn ends. Opening an older conversation from the history does not move the page.
+  - The screen has one Publish: the draft bar, or the "not published yet" bar for an app that has never been published. The chat's result cards and the line above the composer no longer publish. The line says where to publish, or offers "Show draft" when the page is elsewhere. After a publish from the bar, the chat shows a receipt.
+  - One count: the draft bar, its changes panel and the chat all count the current app's pending changes. An app's changes are those in its package and in its customization package (ADR-0146), where changes to an app installed from code are saved. The bar no longer counts the whole environment, and its separate "on this page" count is gone. Publishing from the draft bar publishes that app's changes and no longer reloads the page.
+  - Publishing from the "not published yet" bar works for an app opened at its package id: the app is saved under its own name. Before, that save was refused.
+  - The bar for an app that is not published yet says so. The draft bar says how many unpublished changes the app has.
+  - In Studio, the AI copilot's expand button widens the copilot beside the page instead of leaving Studio. The copilot's cards no longer draw a Preview or Publish of their own. Studio's own top bar publishes.
+  
+  `@object-ui/console`: ships the console with the changes above (it bundles `@object-ui/app-shell`).
+  
+  `@object-ui/plugin-chatbot`: `ChatbotEnhanced` takes `publishFromShellBar`. When it is set, the draft cards draw no Publish button, and the build result card no longer says to click Publish in the chat. The Published badge, auto-publish and Preview stay. `onBuildMaterialized` also receives `{ appSegment }`, the built app's package id.
+  
+  `@object-ui/i18n`: new keys `preview.draftBar.pendingInApp` (with plural forms), `preview.unpublishedBar.notPublishedYet`, and `console.ai.pendingDrafts.publishFromBar`, `showDraftToPublish` (both with plural forms), `showDraft`, `receipt` and `dismissReceipt`, in every locale pack, so the `TranslationKeys` type grows by those keys. No key was removed or changed. The console no longer reads `preview.draftBar.pendingHere`, `preview.unpublishedBar.message`, `console.ai.pendingDrafts.count`, `publish`, `published`, `failed`, `publishedWithFindings`, `console.ai.previewApp`, `console.ai.resizeSplit`, `console.ai.liveCanvas`, `console.ai.liveCanvasLive` or `console.ai.liveCanvasUnlisted`. Retiring them is a separate change.
+- fc5913e: fix(plugin-chatbot): the AI build result card draws the checklist's verification line, and states a failed build once
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  When an AI build fails verification, the result card's `checklist` now carries a `verification` line (`{ kind: 'verification', status: 'failed', label, count }`), and its `status` and `passed/total` follow the verdict. The console dropped that line, so a failed build read "Checks passed 4/5" over four rows. The card now draws it as a red row: the producer's label, then the issue count. A failed checklist is the one place the turn states the failure: the build's draft card no longer draws its "N to fix" chip or the red "fix the problems" sentence beside it. The findings stay behind its Technical details.
+  
+  A checklist line of any other kind that carries a valid `status` and a string `line` is drawn by those two fields, so a new kind from the producer needs no console change. Lines of the existing kinds draw as before.
+- 7752cac: fix(plugin-chatbot): a reloaded answer draws a redrawn chart once, not once per draw
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  When the model redraws a chart in one answer, the live stream replaces the chart in place, so the answer shows one chart. After a reload the chat rebuilds an answer's charts from its stored `visualize_data` results, one per draw, and the replaced chart came back beside the one that replaced it.
+  
+  The history reader (`chartsFromParts` and the message mapper) now reads the `chartId` a `visualize_data` result carries at the top level of its envelope, beside `chart`. Within one message, results that share a `chartId` give one chart: the last result's chart, at the place in the text where the first one sat. A result without a `chartId` (older history, other producers) is read exactly as before, and results are never merged across messages, because a `chartId` is unique only within one request. A message that carries `data-chart` parts (the live stream) is unchanged.
+- Updated dependencies [e53e02e]
+- Updated dependencies [1f923d7]
+- Updated dependencies [64c4285]
+- Updated dependencies [0e2ead3]
+- Updated dependencies [b1efa37]
+- Updated dependencies [ffa6db1]
+- Updated dependencies [c493adb]
+- Updated dependencies [84e6bbb]
+- Updated dependencies [69783b7]
+- Updated dependencies [bb17350]
+- Updated dependencies [3372da0]
+- Updated dependencies [a061708]
+- Updated dependencies [c59198f]
+- Updated dependencies [fb3d1ff]
+- Updated dependencies [2068e03]
+- Updated dependencies [5c7e448]
+- Updated dependencies [de3538c]
+- Updated dependencies [5326028]
+- Updated dependencies [f7b2d02]
+- Updated dependencies [bb3c163]
+- Updated dependencies [d635555]
+- Updated dependencies [0ac112f]
+- Updated dependencies [c934631]
+- Updated dependencies [b019048]
+- Updated dependencies [63e47fe]
+- Updated dependencies [b005638]
+- Updated dependencies [a78781a]
+- Updated dependencies [e5c2d76]
+- Updated dependencies [db3bbd3]
+- Updated dependencies [9f32c0f]
+- Updated dependencies [109a903]
+- Updated dependencies [2539ad9]
+- Updated dependencies [98a4449]
+- Updated dependencies [fdfccbf]
+- Updated dependencies [fa1fb6f]
+- Updated dependencies [d10f652]
+- Updated dependencies [ba03d5e]
+- Updated dependencies [3e49033]
+- Updated dependencies [1078c73]
+- Updated dependencies [6091b64]
+- Updated dependencies [61ded62]
+- Updated dependencies [75ab117]
+- Updated dependencies [071323e]
+- Updated dependencies [39fa82b]
+- Updated dependencies [41ff7c3]
+- Updated dependencies [aab8b31]
+- Updated dependencies [e0670b9]
+- Updated dependencies [50d655f]
+- Updated dependencies [3a08833]
+- Updated dependencies [0e2e4f5]
+- Updated dependencies [b4eea88]
+- Updated dependencies [bef80d3]
+- Updated dependencies [e0670b9]
+- Updated dependencies [8436f67]
+- Updated dependencies [9e6fee1]
+- Updated dependencies [52ec26f]
+- Updated dependencies [c2cabce]
+- Updated dependencies [4c0cf65]
+- Updated dependencies [31eb2ae]
+- Updated dependencies [6fb3d0c]
+- Updated dependencies [2c296cf]
+- Updated dependencies [fa9d695]
+- Updated dependencies [d9c4b62]
+- Updated dependencies [8c6ddc5]
+- Updated dependencies [5a75579]
+- Updated dependencies [1bf90a0]
+- Updated dependencies [27c0b20]
+- Updated dependencies [6a7403b]
+- Updated dependencies [04e7b90]
+- Updated dependencies [3b1307e]
+- Updated dependencies [842637a]
+- Updated dependencies [227ae36]
+- Updated dependencies [1177058]
+- Updated dependencies [a8e794f]
+- Updated dependencies [d57d6ee]
+- Updated dependencies [22bf910]
+- Updated dependencies [2b267b7]
+- Updated dependencies [371e5f1]
+- Updated dependencies [11e0441]
+- Updated dependencies [f23c71e]
+- Updated dependencies [4240719]
+- Updated dependencies [6302c2c]
+- Updated dependencies [7b3e955]
+- Updated dependencies [066177b]
+- Updated dependencies [6c7d730]
+- Updated dependencies [ddab49d]
+- Updated dependencies [1538596]
+- Updated dependencies [21d84a8]
+- Updated dependencies [4fb8790]
+- Updated dependencies [b86331d]
+- Updated dependencies [a1082f3]
+- Updated dependencies [f02f4f6]
+- Updated dependencies [e2d3514]
+- Updated dependencies [e95210d]
+- Updated dependencies [26cab15]
+- Updated dependencies [e9f65a3]
+- Updated dependencies [13c62a6]
+- Updated dependencies [77b42a1]
+- Updated dependencies [4db3750]
+- Updated dependencies [2e29287]
+- Updated dependencies [e61af97]
+- Updated dependencies [b1da9f5]
+- Updated dependencies [a931063]
+- Updated dependencies [14619f5]
+- Updated dependencies [e47c1cb]
+- Updated dependencies [758bbe7]
+- Updated dependencies [99bd220]
+- Updated dependencies [13057ce]
+- Updated dependencies [a8aa6ab]
+- Updated dependencies [9cf74ae]
+- Updated dependencies [81ea504]
+- Updated dependencies [c81f498]
+- Updated dependencies [4bdbdac]
+- Updated dependencies [3bbda33]
+- Updated dependencies [d656d62]
+- Updated dependencies [6c1f9b3]
+- Updated dependencies [e05445e]
+- Updated dependencies [90f2b1c]
+- Updated dependencies [b633afe]
+- Updated dependencies [0584eb5]
+- Updated dependencies [94c9491]
+- Updated dependencies [fff0ad0]
+- Updated dependencies [65ec3c5]
+- Updated dependencies [4aeeca5]
+- Updated dependencies [aa0fde3]
+- Updated dependencies [421f180]
+- Updated dependencies [2fcc9cf]
+- Updated dependencies [7b7272f]
+- Updated dependencies [cb7d514]
+- Updated dependencies [743308b]
+- Updated dependencies [97cd541]
+- Updated dependencies [2487242]
+- Updated dependencies [4443014]
+- Updated dependencies [343c49c]
+- Updated dependencies [6d2db1d]
+- Updated dependencies [92a5cac]
+- Updated dependencies [db1a05c]
+- Updated dependencies [d4b2a75]
+- Updated dependencies [ad9b74b]
+- Updated dependencies [59defa0]
+- Updated dependencies [e2a4c66]
+- Updated dependencies [c37e47a]
+- Updated dependencies [a6c2b83]
+- Updated dependencies [1354d2a]
+- Updated dependencies [a2bb7d5]
+  - @object-ui/i18n@18.6.0
+  - @objectstack/spec@18.6.0
+  - @object-ui/core@18.6.0
+  - @object-ui/types@18.6.0
+  - @object-ui/components@18.6.0
+  - @object-ui/react@18.6.0
+
 ## 18.5.0
 
 ### Patch Changes

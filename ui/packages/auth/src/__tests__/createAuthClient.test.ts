@@ -151,9 +151,13 @@ describe('createAuthClient', () => {
 
     await client.signOut();
 
-    expect(calls).toHaveLength(1);
-    expect(calls[0].url).toContain('/api/auth/sign-out');
-    expect(calls[0].method).toBe('POST');
+    // With no config held, sign-out first reads `/config` once for the
+    // deployment's `afterSignOut`; the sign-out itself is the one POST.
+    const signOuts = calls.filter((call) => call.url.includes('/sign-out'));
+    expect(signOuts).toHaveLength(1);
+    expect(signOuts[0].url).toContain('/api/auth/sign-out');
+    expect(signOuts[0].method).toBe('POST');
+    expect(calls.filter((call) => call.url.endsWith('/config'))).toHaveLength(1);
   });
 
   it('getSession sends GET to /get-session', async () => {

@@ -41,6 +41,12 @@
  * control, shared (`ScriptCapabilitiesField`), because both bodies are the
  * spec's one `HookBodySchema`. An expression body shows none, and a switch to
  * it drops the grant with the other L2-only keys ({@link writeScriptBody}).
+ *
+ * A script action's refusal catalogue (`refusals`) and declared texts (`texts`)
+ * are drawn from their SERVED form rows (objectstack#35650), handed in as
+ * `serverForm`: the key-only record control, the entry rows and the help text
+ * the server declares. Fed the bare schema in "More fields" they read as the
+ * raw JSON editor. A host with no served form keeps them in "More fields".
  */
 
 import * as React from 'react';
@@ -59,6 +65,9 @@ import { usePermissions } from '@object-ui/permissions';
 import type { MetadataDefaultInspectorProps } from '../default-inspector-registry.js';
 import { SchemaForm } from '../SchemaForm.js';
 import { fallbackFormPatch } from './fallbackFormPatch.js';
+import { servedFormRows } from './servedFormRows.js';
+import { useIssuePrefixRegister } from '../issuePath.js';
+import type { FormViewSpec } from '../form-spec.js';
 import { t, tFormat, type SupportedLocale } from '../i18n.js';
 import {
   InspectorShell,
@@ -479,6 +488,19 @@ const CURATED_FIELDS = [
  */
 const RETIRED_FIELDS = ['bulkEnabled', 'shortcut'];
 
+/**
+ * Keys this inspector draws from their SERVED form row (objectstack#35650),
+ * beside the script body in the Behavior section: the action's refusal
+ * catalogue and its declared texts. Each is a record keyed by the code or key
+ * the body uses, and its served row declares the key-only record control, the
+ * entry's own rows and the help text; the bare schema the fallback form reads
+ * says only "a record", which is the raw JSON editor. The row's own
+ * `visibleWhen` (a `script` action) decides when it shows.
+ *
+ * A key the served form has no row for stays in the fallback form, as before.
+ */
+const SERVED_ROW_FIELDS = ['refusals', 'texts'] as const;
+
 /* ─────────────── small helpers ─────────────── */
 
 function SectionHeader({ title, hint }: { title: string; hint?: string }) {
@@ -640,6 +662,23 @@ function ParamOptionsEditor({ options, onCommit, disabled, locale }: {
 /* ─────────────── inspector ─────────────── */
 
 /**
+ * The setter a whole-draft `SchemaForm` reports its inline rows through
+ * (`onInlineIssueFieldsChange`): each row key is registered, unprefixed, for as
+ * long as the form reports it, so two such forms on one draft are heard as one
+ * union rather than the later report replacing the earlier one.
+ */
+function useWholeDraftFormIssueRows(
+  register: (prefix: string) => () => void,
+): (rows: ReadonlySet<string>) => void {
+  const [rows, setRows] = React.useState<ReadonlySet<string>>(() => new Set());
+  React.useEffect(() => {
+    const offs = [...rows].map((row) => register(row));
+    return () => offs.forEach((off) => off());
+  }, [rows, register]);
+  return setRows;
+}
+
+/**
  * The CEL editors this inspector mounts, as aggregation keys. Errors are
  * counted PER SITE rather than into one running total: the two predicate
  * editors lint independently and asynchronously, so a single shared counter
@@ -656,8 +695,18 @@ export function ActionDefaultInspector({
   locale,
   serverSchema,
   onBlockingIssuesChange,
+  issues,
+  revealIssues,
+  onInlineIssueFieldsChange,
+  serverForm,
 }: MetadataDefaultInspectorProps) {
   const tr = React.useCallback((key: string) => t(key, locale), [locale]);
+  // Two forms draw rows of this draft (the served rows below and the "More
+  // fields" fallback), so each registers the rows it draws and the host hears
+  // the union (objectstack#35628's inline register).
+  const registerIssuePrefix = useIssuePrefixRegister(onInlineIssueFieldsChange);
+  const setServedIssueRows = useWholeDraftFormIssueRows(registerIssuePrefix);
+  const setFallbackIssueRows = useWholeDraftFormIssueRows(registerIssuePrefix);
   // objectui#12510 — the Icon label names the icon picker (the shape objectui#12531
   // gave the object and app-nav icon fields): the picker is a combobox, which
   // takes no name from its content.
@@ -896,6 +945,14 @@ export function ActionDefaultInspector({
   };
 
   const fallbackSchema = serverSchema as Record<string, unknown> | undefined;
+  // objectstack#35650 — the served rows of SERVED_ROW_FIELDS, for the keys the
+  // served schema declares, as a one-section form over the same schema.
+  const servedProps = (fallbackSchema?.properties ?? {}) as Record<string, unknown>;
+  const servedRows = servedFormRows(serverForm, SERVED_ROW_FIELDS).filter((row) => row.field in servedProps);
+  const servedRowsForm: FormViewSpec | undefined =
+    serverForm && servedRows.length > 0
+      ? { ...serverForm, type: 'simple', sections: [{ fields: servedRows }], groups: undefined }
+      : undefined;
 
   return (
     <InspectorShell
@@ -1079,6 +1136,20 @@ export function ActionDefaultInspector({
               />
             )}
             <div className="text-[11px] text-muted-foreground/70">{tr('engine.inspector.action.bodyShapeHint')}</div>
+          </div>
+        )}
+        {fallbackSchema && servedRowsForm && (
+          <div data-testid="action-served-rows">
+            <SchemaForm
+              schema={fallbackSchema}
+              form={servedRowsForm}
+              value={draft}
+              readOnly={readOnly}
+              issues={issues}
+              revealIssues={revealIssues}
+              onInlineIssueFieldsChange={setServedIssueRows}
+              onChange={(next) => onPatch(fallbackFormPatch(draft, next))}
+            />
           </div>
         )}
       </div>
@@ -1269,8 +1340,11 @@ export function ActionDefaultInspector({
           <SchemaForm
             schema={fallbackSchema}
             value={draft}
-            hiddenFields={[...CURATED_FIELDS, ...RETIRED_FIELDS]}
+            hiddenFields={[...CURATED_FIELDS, ...RETIRED_FIELDS, ...(servedRowsForm ? servedRows.map((row) => row.field) : [])]}
             readOnly={readOnly}
+            issues={issues}
+            revealIssues={revealIssues}
+            onInlineIssueFieldsChange={setFallbackIssueRows}
             onChange={(next) => onPatch(fallbackFormPatch(draft, next))}
           />
         </div>

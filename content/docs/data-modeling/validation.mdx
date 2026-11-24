@@ -227,7 +227,7 @@ Enforce allowed state transitions:
 | :--- | :--- | :--- |
 | `field` | `string` | State field name |
 | `transitions` | `Record<string, string[]>` | Map of current state → allowed next states (enforced on **update**) |
-| `initialStates` | `string[]` (optional) | States a record may be **created** in. Server-rejects an insert whose state field is outside this list — without it a `select` field permits any declared option as the initial value (a record could be born already `approved`). Omit to keep the legacy behavior (no initial-state check). |
+| `initialStates` | `string[]` (optional) | States a record may be **created** in. Server-rejects an insert whose state field is outside this list — without it a `select` field permits any declared option as the initial value (a record could be born already `approved`). An active machine that runs on insert (its `events` include `insert`, the default) with no `initialStates`, or an empty list, is refused at publish and by `os validate` (`state-machine-no-initial-states`): "without `initialStates` a record can be created already `approved` or `done` and skip the whole process." Only a machine whose `events` leave out `insert` (e.g. `events: ['update']`) may omit it, "because the engine never runs it on create and would never read its `initialStates`." |
 
 `transitions` governs updates; `initialStates` governs the create. A rule may declare either or both.
 

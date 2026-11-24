@@ -10,7 +10,7 @@
  */
 
 import * as React from 'react';
-import { ChevronDown } from 'lucide-react';
+import { ChevronDown, Plus } from 'lucide-react';
 import { Button, FilterBuilder, Label, Popover, PopoverContent, PopoverTrigger } from '@object-ui/components';
 import { conditionToGroup, groupToCondition, isClearedGroup, type BuilderGroup, type FilterCondition } from './datasetFilterCondition.js';
 import { t, tFormat, type SupportedLocale } from '../i18n.js';
@@ -29,12 +29,19 @@ function withSlots(template: string, slots: Record<string, React.ReactNode>): Re
  * (nested / `$or` / multi-op) degrade to a "edit in Source" note rather than being
  * silently rewritten. See {@link conditionToGroup} / {@link groupToCondition}.
  */
-export function FilterConditionField({ label, help, value, onCommit, fields, disabled, locale, advancedNote, noFieldsNote, testId }: {
-  label: string;
+export function FilterConditionField({ label, help, value, onCommit, fields, disabled, locale, advancedNote, noFieldsNote, addLabel, testId }: {
+  /** The caption above the field; a host that captions it itself leaves it out. */
+  label?: string;
   help?: string;
   value: FilterCondition | undefined;
   onCommit: (fc: FilterCondition | undefined) => void;
-  fields: Array<{ value: string; label?: string; type?: string }>;
+  /**
+   * The columns the rows may name. `multiple` is the field's declared
+   * `multiple: true`: with the type it decides which operators a row offers
+   * (`jsonColumnFilterOperators`), and which ones a stored filter can be read
+   * back as (`conditionToGroup`).
+   */
+  fields: Array<{ value: string; label?: string; type?: string; multiple?: boolean }>;
   disabled?: boolean;
   locale: SupportedLocale;
   /**
@@ -45,6 +52,13 @@ export function FilterConditionField({ label, help, value, onCommit, fields, dis
   advancedNote?: React.ReactNode;
   /** What the popover says when there are no fields to filter on. */
   noFieldsNote?: string;
+  /**
+   * While the filter is empty, the trigger is a small 「+ {addLabel}」 link
+   * instead of the full-width "Add filter" box — the report builder's
+   * 「+ 筛选」 under its data source (objectstack#36645). A filter with rows
+   * keeps the box, which counts them.
+   */
+  addLabel?: string;
   /** `data-testid` on the field's wrapper. */
   testId?: string;
 }) {
@@ -81,7 +95,7 @@ export function FilterConditionField({ label, help, value, onCommit, fields, dis
   };
   return (
     <div className="space-y-1" data-testid={testId}>
-      <Label className="text-xs text-muted-foreground">{label}</Label>
+      {label ? <Label className="text-xs text-muted-foreground">{label}</Label> : null}
       {!representable ? (
         <p className="rounded-md border border-dashed bg-muted/30 px-2.5 py-1.5 text-[11px] text-muted-foreground">
           {advancedNote ?? withSlots(t('engine.inspector.dataset.filterAdvanced', locale), {
@@ -91,14 +105,35 @@ export function FilterConditionField({ label, help, value, onCommit, fields, dis
       ) : (
         <Popover>
           <PopoverTrigger asChild>
-            <Button type="button" variant="outline" size="sm" disabled={disabled} className="h-8 w-full justify-between text-xs font-normal">
-              <span className="truncate text-left">
-                {count
-                  ? tFormat(count === 1 ? 'engine.inspector.dataset.filterConditionsOne' : 'engine.inspector.dataset.filterConditionsOther', locale, { count })
-                  : <span className="text-muted-foreground">{t('engine.inspector.dataset.addFilter', locale)}</span>}
-              </span>
-              <ChevronDown className="h-3.5 w-3.5 opacity-60 shrink-0" />
-            </Button>
+            {addLabel && !count ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                disabled={disabled}
+                className="h-7 w-fit px-1.5 text-xs text-muted-foreground"
+                data-testid={testId ? `${testId}-add` : undefined}
+              >
+                <Plus className="mr-1 h-3.5 w-3.5" />
+                {addLabel}
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={disabled}
+                className="h-8 w-full justify-between text-xs font-normal"
+                data-testid={testId ? `${testId}-trigger` : undefined}
+              >
+                <span className="truncate text-left">
+                  {count
+                    ? tFormat(count === 1 ? 'engine.inspector.dataset.filterConditionsOne' : 'engine.inspector.dataset.filterConditionsOther', locale, { count })
+                    : <span className="text-muted-foreground">{t('engine.inspector.dataset.addFilter', locale)}</span>}
+                </span>
+                <ChevronDown className="h-3.5 w-3.5 opacity-60 shrink-0" />
+              </Button>
+            )}
           </PopoverTrigger>
           <PopoverContent align="start" className="w-[440px] max-w-[90vw] p-3">
             {fields.length === 0 ? (

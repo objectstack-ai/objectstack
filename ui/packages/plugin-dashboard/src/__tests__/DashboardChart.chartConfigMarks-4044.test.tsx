@@ -122,13 +122,14 @@ const renderWidget = async (
   surface: (typeof SURFACES)[number],
   chartConfig?: Record<string, unknown>,
   widgetType: 'bar' | 'pie' = 'bar',
+  rows: ReadonlyArray<{ status: string; total: number }> = ROWS,
 ) => {
   const widget = {
     id: 'w1',
     type: widgetType,
     title: 'Invoices',
     options: { xField: 'status', yField: 'total' },
-    data: ROWS,
+    data: rows,
     ...(chartConfig ? { chartConfig } : {}),
   };
   const view = render(
@@ -244,5 +245,28 @@ describe.each(SURFACES)('%s relay — inline chartConfig reaches the drawn marks
     cleanup();
     const { container: off } = await renderWidget(surface, { showLegend: false }, 'pie');
     expect(legendText(off)).toBeNull();
+  });
+});
+
+// Ten categories: one more than the old five-entry default palette could tell
+// apart twice over, and exactly as many as the theme now defines.
+const TEN_ROWS = Array.from({ length: 10 }, (_, i) => ({ status: `s${i + 1}`, total: 10 + i }));
+const THEME_TEN = Array.from({ length: 10 }, (_, i) => `hsl(var(--chart-${i + 1}))`);
+
+describe.each(SURFACES)('%s relay — default palette has ten distinct theme colours (objectstack#34902)', (surface) => {
+  it('draws every slice of a 6- to 10-slice pie in a distinct colour', async () => {
+    for (const n of [6, 10]) {
+      const { container } = await renderWidget(surface, undefined, 'pie', TEN_ROWS.slice(0, n));
+      const fills = sectorFills(container);
+      expect(fills).toEqual(THEME_TEN.slice(0, n));
+      expect(new Set(fills).size).toBe(n);
+      cleanup();
+    }
+  });
+
+  it('CONTROL: an authored array `colors` still wins over the ten-colour default', async () => {
+    const authored = ['#111111', '#222222', '#333333'];
+    const { container } = await renderWidget(surface, { colors: authored }, 'pie', TEN_ROWS.slice(0, 6));
+    expect(sectorFills(container)).toEqual([...authored, ...authored]);
   });
 });

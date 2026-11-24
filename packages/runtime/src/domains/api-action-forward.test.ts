@@ -51,6 +51,7 @@ import { FORWARD_CREDENTIAL_HEADER, redeemForwardCredential } from '@objectstack
 import { standardErrorCodeForHttpStatus } from '@objectstack/spec/api';
 import { ActionActivationProjection } from '@objectstack/objectql';
 import { apiKeyManagementCredentialRefusal, API_KEY_MANAGEMENT_SESSION_REQUIRED_MESSAGE } from '@objectstack/core';
+import { SysUser } from '@objectstack/platform-objects/identity';
 
 const OBJECT = 'crm_lead';
 const BAN_LEAD = {
@@ -1828,5 +1829,38 @@ describe('[#29881] a per-record api action is refused at the door with no record
             expect(refused).not.toHaveProperty('path');
         }
         expect(buildApiActionRequest(RECALC_ONE, { recordId: 'r1', params: {}, ec })).toEqual({ method: 'POST', path: '/api/v1/apps/showcase/recalc', body: { recordId: 'r1' } });
+    });
+});
+
+// [#34912] The stamp stays generic. The SSO-user doors (plugin-auth
+// `pending-sso-users.ts`) admit the `organizationId` this builder stamps on
+// every `/api/v1/auth/` target, when it equals the caller's session
+// organization; the builder is not taught which doors take it. CONTROL: the
+// declared SSO-user actions are stamped with the caller's organization, and
+// so is another identity route (Ban User), exactly as before.
+describe('[#34912] buildApiActionRequest stamps the caller organization on every identity route, the SSO-user doors included', () => {
+    const declared = (name: string) => {
+        const action = (SysUser.actions ?? []).find((a) => a.name === name);
+        if (!action) throw new Error(`sys_user declares no action named "${name}"`);
+        return action;
+    };
+    const ec = { userId: 'u_admin', tenantId: 'org_session' };
+
+    it('Import Users and Add User forward the caller organization as organizationId', () => {
+        const imported = buildApiActionRequest(declared('import_sso_users'), { params: { csv: 'email\na@example.com\n' }, ec });
+        expect(imported).toEqual({
+            method: 'POST', path: '/api/v1/auth/admin/import-sso-users',
+            body: { csv: 'email\na@example.com\n', organizationId: 'org_session' },
+        });
+        const added = buildApiActionRequest(declared('add_sso_user'), { params: { email: 'b@example.com' }, ec });
+        expect((added as any).body).toEqual({ email: 'b@example.com', organizationId: 'org_session' });
+    });
+
+    it('CONTROL: another identity route keeps the stamp, and no organization means no stamp', () => {
+        const ban = buildApiActionRequest(declared('ban_user'), { recordId: 'u_target', record: { id: 'u_target' }, params: {}, ec });
+        expect((ban as any).path).toBe('/api/v1/auth/admin/ban-user');
+        expect((ban as any).body).toMatchObject({ userId: 'u_target', organizationId: 'org_session' });
+        const none = buildApiActionRequest(declared('import_sso_users'), { params: { csv: 'x' }, ec: { userId: 'u_admin' } });
+        expect((none as any).body).toEqual({ csv: 'x' });
     });
 });

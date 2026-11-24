@@ -109,6 +109,6 @@ describe('CONTROL — a numeric formula stays `number`', () => {
 
   it('the widening adds exactly `currency` — the four earlier members are still declared', () => {
     const members = (FieldSchema.shape.returnType.unwrap().options as readonly string[]).slice().sort();
-    expect(members).toEqual(['boolean', 'currency', 'date', 'number', 'text']);
+    expect(members).toEqual(['boolean', 'currency', 'date', 'number', 'percent', 'text']);
   });
 });

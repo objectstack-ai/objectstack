@@ -361,12 +361,23 @@ describe('confirmAudienceBindingSuggestion — the acceptance takes effect', () 
   });
 
   it('accepts an isDefault set whose systemPermissions token THIS stack declares', async () => {
-    const ql = makeQl([tokenPackage('crm.export_pipeline')], [{ name: 'crm.export_pipeline', label: 'Export Pipeline' }]);
+    // The registry stamps a package's declaration with its `_packageId`; only such
+    // a declaration is the app's own token (ADR-0090 D5).
+    const ql = makeQl([tokenPackage('crm.export_pipeline')], [{ name: 'crm.export_pipeline', label: 'Export Pipeline', _packageId: 'com.example.crm' }]);
     const deps = makeDeps(ql);
     const { suggestions } = await listAudienceBindingSuggestions(deps, ADMIN_CTX, {});
     const { bindingCreated } = await confirmAudienceBindingSuggestion(deps, ADMIN_CTX, suggestions[0].id);
     expect(bindingCreated).toBe(true);
     expect(everyoneSets(ql)).toContain('crm_member_default');
+  });
+
+  it('refuses a token declared only by an environment save (no package provenance) — #35157', async () => {
+    const ql = makeQl([tokenPackage('crm.export_pipeline')], [{ name: 'crm.export_pipeline', label: 'Export Pipeline' }]);
+    const deps = makeDeps(ql);
+    const { suggestions } = await listAudienceBindingSuggestions(deps, ADMIN_CTX, {});
+    await expect(confirmAudienceBindingSuggestion(deps, ADMIN_CTX, suggestions[0].id))
+      .rejects.toThrow(/cannot be given to the 'everyone' audience anchor/);
+    expect(everyoneSets(ql)).toEqual(BASELINE);
   });
 
   it('still refuses an UNDECLARED systemPermissions token — the control for the case above', async () => {

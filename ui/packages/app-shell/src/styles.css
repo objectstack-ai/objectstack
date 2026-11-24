@@ -21,8 +21,9 @@
  *
  * The keyframe slides a 200%-wide gradient across an element's
  * background. Pair with `bg-[length:200%_100%]` and a gradient that
- * uses the design-system muted tokens, e.g.
- *   bg-[linear-gradient(90deg,var(--muted),var(--muted-foreground)/10,var(--muted))]
+ * uses the design-system muted tokens, wrapped in hsl() because the theme
+ * stores them as bare HSL triplets, e.g.
+ *   bg-[linear-gradient(90deg,hsl(var(--muted)),hsl(var(--muted-foreground)/0.1),hsl(var(--muted)))]
  *
  * Respects `prefers-reduced-motion` automatically via the
  * `motion-safe:` Tailwind variant on the consuming site.

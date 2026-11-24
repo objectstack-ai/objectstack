@@ -25,6 +25,8 @@ import {
   // objectui#11168 slice 3 — the `object-tree` element's `tree` block, by
   // reference (`ObjectTreeSchema.tree` below).
   TreeConfigSchema as SpecTreeConfigSchema,
+  // objectstack#34382 — the `object-timesheet` node's `timesheet` block.
+  TimesheetConfigSchema as SpecTimesheetConfigSchema,
   HttpMethodSubsetSchema as SpecHttpMethodSubsetSchema,
   HttpRequestSchema as SpecHttpRequestSchema,
   ViewDataSchema as SpecViewDataSchema,
@@ -86,6 +88,7 @@ import {
   // attachable there; in the authored `list-view` node's bag the kind is the
   // spec's own `type`, so `ListViewPropsBag` below attaches it.
   checkListViewChartBinding,
+  checkListViewTimesheetBinding,
 } from '@objectstack/spec/ui';
 // objectui#11266 — one inline master-detail grid column, the closed shape
 // `@objectstack/spec` 17.6.0 judges `FormViewSchema.subforms[].columns` by
@@ -326,6 +329,18 @@ const OBJECT_GRID_RESIZABLE_COLUMNS_RETIRED =
   + 'draw nothing; `@objectstack/spec` 17.7.0 refuses it by name on `object-grid` too. Rename the key to '
   + '`resizable` — on an authored node, `properties.resizable`: '
   + '`{ "type": "object-grid", "properties": { "resizable": false } }`.';
+
+/**
+ * objectstack#36270 — the same one-string shape for `singleClickEdit`, retired
+ * with the select-first editing model (the maintainer's ruling A): `ObjectGrid`
+ * no longer reads it, and `@objectstack/spec` refuses it by name on `object-grid`.
+ */
+const OBJECT_GRID_SINGLE_CLICK_EDIT_RETIRED =
+  'RETIRED (objectstack#36270, ADR-0049) — `singleClickEdit` switched between opening a cell editor on a '
+  + 'single click and on a double click. A grid that renders editable now selects a cell on a click and '
+  + 'opens its editor on double-click, Enter, F2 or typing, so `ObjectGrid` no longer reads the key and an '
+  + 'authored value would change nothing; `@objectstack/spec` refuses it by name on `object-grid` too. '
+  + 'Delete the key: `editable` (with the viewer\'s write verdict) decides whether the grid edits.';
 
 /**
  * objectui#11070 — ONE `.describe()` string for every object-bound arm that declares
@@ -801,7 +816,8 @@ export const ObjectGridSchema = BaseSchema.extend({
   // the source of the `object-view` `table` slot, so each member takes the type the
   // twin declares. Where the twin takes a spec schema by name, the member is that
   // schema BY REFERENCE (`grouping`, `navigation`, `rowColor`, `rowHeight`) or the
-  // row's own member (`reorderableColumns`, `singleClickEdit`), and
+  // row's own member (`reorderableColumns`; `singleClickEdit` was one until
+  // objectstack#36270 retired it to the tombstone below), and
   // `conditionalFormatting` is the spec list view's own rule BY REFERENCE (the shared
   // `ConditionalFormattingRuleSchema` above, objectui#11533); the rest restate the
   // twin's local shapes, except `operations`, which round 8 moved onto the row's own
@@ -817,7 +833,12 @@ export const ObjectGridSchema = BaseSchema.extend({
   reorderableColumns: stripImportedDefaults(SpecObjectGridPropsSchema).shape.reorderableColumns,
   rowColor: stripImportedDefaults(SpecRowColorConfigSchema).optional().describe('Row colour rules: the spec RowColorConfig, by reference'),
   rowHeight: stripImportedDefaults(SpecRowHeightSchema).optional().describe('Row height preset: the spec RowHeight, by reference'),
-  singleClickEdit: stripImportedDefaults(SpecObjectGridPropsSchema).shape.singleClickEdit,
+  // objectstack#36270 — RETIRED under ADR-0049, in lockstep with the `?: never`
+  // twin on the interface: the select-first editing model has no single-click
+  // entry, so `ObjectGrid` no longer reads it. A tombstone rather than a
+  // deletion, as for `resizableColumns`: `BaseSchema` is `.passthrough()`. The
+  // `object-view` `table` slot inherits it unchanged, as it does `defaultSort`.
+  singleClickEdit: retirementTombstone(OBJECT_GRID_SINGLE_CLICK_EDIT_RETIRED),
   // ⭐ `8d50bc2bf` — one key the REGISTERED `object-grid` renderer reads off
   // the authored document while this arm declared none. `BaseSchema` is
   // `.passthrough()`, so an undeclared key is NOT refused: it stops being
@@ -2873,6 +2894,21 @@ export const ObjectTreeSchema = BaseSchema.extend({
   children: retirementTombstone(OBJECT_TREE_NEITHER_CHANNEL),
 }).superRefine(...requireRecordSource('object-tree', RECORD_SOURCE_KEYS, 'node', 'not-read'));
 
+/**
+ * ObjectTimesheet Schema (objectstack#34382) — the editable row × weekday grid
+ * `ListView` composes for a `type: 'timesheet'` view. `timesheet` takes the
+ * spec's `TimesheetConfig` by reference; the renderer reads no content channel.
+ */
+export const ObjectTimesheetSchema = BaseSchema.extend({
+  type: z.literal('object-timesheet'),
+  objectName: z.string().describe('ObjectQL object name — the records the grid pivots, one per filled cell'),
+  timesheet: stripImportedDefaults(SpecTimesheetConfigSchema).optional().describe('The binding (rowFields, dateField, valueField) — the spec TimesheetConfig, by reference; incomplete, the grid shows its configuration-required screen'),
+  filter: z.union([
+    z.array(z.any()),
+    z.record(z.string(), z.any()),
+  ]).optional().describe('Base query filter, joined with the displayed week on dateField — the two arms of QueryParams[$filter]'),
+});
+
 /** objectui#9256 (E3 residual): ONE refusal string for both content channels of `ObjectGanttSchema`. */
 const OBJECT_GANTT_NEITHER_CHANNEL = neitherContentChannelGuidance(
   'object-gantt',
@@ -4344,6 +4380,7 @@ export const ObjectDataTableSchema = BaseSchema.extend({
 const ObjectQLComponentSchemaInferred = z.discriminatedUnion('type', [
   ObjectViewSchema,
   ObjectTreeSchema,
+  ObjectTimesheetSchema,
   ObjectCalendarSchema,
   ObjectKanbanSchema,
   ObjectGallerySchema,
@@ -5372,10 +5409,11 @@ function checkListViewBagDatasetChartFilter(
  *     instead: `properties.data` and `properties.type`. ⛔ No fallback
  *     acceptance and no second spelling.
  *
- * The spec's two object-level list view checks are attached, both by
+ * The spec's three object-level list view checks are attached, each by
  * reference: `checkListViewCalendarVisualization`, as on the flat mirror, and
- * `checkListViewChartBinding`, which the flat mirror cannot attach (its view
- * kind is `viewType`) and the bag can, because its `type` is the spec's. So is
+ * `checkListViewChartBinding` and `checkListViewTimesheetBinding`, which the
+ * flat mirror cannot attach (its view kind is `viewType`) and the bag can,
+ * because its `type` is the spec's. So is
  * objectui's own dataset-chart filter refusal, read in the bag
  * ({@link checkListViewBagDatasetChartFilter}).
  *
@@ -5390,7 +5428,7 @@ const ListViewPropsBag = z
   .extend({
     type: ViewKindEnum.optional().describe(
       'The list kind — `@objectstack/spec`\'s list view `type` (grid, kanban, gallery, calendar, timeline, gantt, '
-        + 'map, chart, tree), by reference. Absent, the list is a grid, or the kind of the saved view the node\'s '
+        + 'map, chart, tree, timesheet), by reference. Absent, the list is a grid, or the kind of the saved view the node\'s '
         + '`dataSource.view` names.',
     ),
     objectName: aliasKeyRefusal('objectName', 'properties.data', 'a page `list-view` node', LIST_VIEW_PAGE_OBJECT_NAME_RETIRED),
@@ -5398,6 +5436,7 @@ const ListViewPropsBag = z
   })
   .superRefine(checkListViewCalendarVisualization)
   .superRefine(checkListViewChartBinding)
+  .superRefine(checkListViewTimesheetBinding)
   .superRefine(checkListViewBagDatasetChartFilter);
 
 /**

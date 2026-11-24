@@ -293,6 +293,28 @@ invitation redirect is an
 affordance, not an authorization: the server still refuses a non-invitee's
 sign-up.
 
+### Hosting the invitation pages: declare `/verify-email-prompt`
+
+While a deployment delivers mail, the server refuses to let an account whose
+address is not verified accept an invitation
+(`EMAIL_VERIFICATION_REQUIRED_BEFORE_ACCEPTING_OR_REJECTING_INVITATION`). Two
+surfaces of this package answer that refusal by navigating to the
+verification-mail screen at `/verify-email-prompt`, a route this package does
+not mount:
+
+- `DefaultAcceptInvitationPage` (`/accept-invitation/:invitationId`), with
+  `redirect` set to the accept page itself;
+- the console's `type: 'api'` action handlers (`useConsoleActionRuntime` and
+  `RecordDetailView`), when the invitation inbox's `accept_invitation` action
+  is refused, with `redirect` set to the accept page for that invitation.
+
+A host that mounts either one declares `/verify-email-prompt` too, or the
+person is sent to a route that does not exist. The route reads two query keys,
+each absent when unknown: `email`, the account's address, and `redirect`, the
+basename-stripped router path the verification mail's link returns to. Nothing
+has been sent when either surface arrives there, so the screen offers to send
+the link. `apps/console` mounts its own `VerifyEmailPromptPage` there.
+
 ## Unsaved edits
 
 A page that keeps edits in component state registers them while it holds them,
@@ -428,7 +450,9 @@ to draw the same header. Below `sm` it draws the icon, the title and the actions
 the secondary line is hidden there.
 
 Its props are the exported `ConsolePageHeaderProps`: `title` (required),
-`subtitle`, `icon` (a rendered element, sized by the chip), `actions`,
+`subtitle`, `icon` (a rendered element, sized by the chip), `iconTile` (an
+icon that draws its own square, such as `ObjectIconTile`, drawn as given in
+place of `icon`), `actions`,
 `foldedActions`, `accentColor`, `sticky`, `className` and `data-testid`. The
 secondary line is `subtitle`; there is no `description` prop.
 
@@ -616,7 +640,25 @@ The route-type → surface-type decision lives in `appStudioRoutePath`. It is th
 reverse of the builder's "Open app" bridge (ADR-0080): the entry only renders
 for admins and only when the app has an owning package (`_packageId`), and
 package writability stays a server-side concern — a read-only package opens in
-Studio as browse-only.
+Studio as browse-only. For a read-only package the button draws an eye with the
+words "Open {app} in Studio" (ADR-0146 D5) instead of the pencil.
+From 768 px up, where no top bar is drawn, the sidebar's app menu carries the
+same entry on the same target and posture (`useAppStudioEntry`): "Edit app"
+behind a pencil, or "View in Studio" behind an eye for a read-only package.
+Beside it, "Design layout" turns on the shell's design mode, which edits the
+app's layout (its menu, header pins and page arrangement) in place; the mode's
+bar carries the same name.
+
+The way back is the 「‹ Back to app」 link at the left end of Studio's top bar
+(`StudioBackToApp`), followed by the app's name and the "Studio" mark. Entered
+from an app, it names that app and returns to the page the author left, query
+included (`utils/appReturnPage.ts`, recorded by `ConsoleLayout`, held in module
+memory only). Opened directly (a new tab, a reload), it names the package's
+first published app and lands on its home. A package with no published app (a
+draft-only app counts as none) reads 「‹ Back to app」 with no name and goes to
+the console's declared landing (`useHomePath()`). Leaving with unsaved work in a
+pillar asks first. Studio's top bar has no package switcher: another package is
+opened from its app or from the Studio landing.
 
 The sidebar's ⋯ menu offers the same bridge per entry: the **Design** entry of an
 `object`, `dashboard` or `page` navigation entry, and of the matching favorites,
@@ -1389,6 +1431,24 @@ with `variant="studio"` shows it there. Inside an app, on every route
 bar's middle zone, centered between the left group and the utility cluster. In
 the `home`, `orgs` and `studio` frames, and below `lg` (as an icon button), it
 sits at the utility cluster's left edge.
+
+Inside an app, while the query finds records, the palette shows the selected
+hit on the right, read-only: its title and the object's declared
+`highlightFields`, as the record pointer card draws them (a palette narrower
+than 45rem shows the results alone). Once something is typed, the end of the
+list offers "New OBJECT" for the app's objects the query names and "Create
+"words" as OBJECT" for up to three of them, the page's own object first; each
+opens the object's create page (`/apps/APP/OBJECT/new`), the second with the
+words in its title field. An object is offered exactly where its list offers
+New. A footer names what Enter does to the selected entry.
+
+With nothing typed, the palette leads with a "Current page" group: on an
+object's list, the list's favorites entry and "Add view"; on a record page, the
+record's star and "Edit". Each row runs the page's own control and is listed
+only while the page draws that control. "Add view" and "Edit" are published by
+the page beside the control (`usePublishPageCommand`, `chrome/paletteCommands.ts`)
+with the control's own handler and verdict, so an Edit the header draws off is
+listed off, with the header's reason.
 
 ```tsx
 import { useCommandPalette } from '@object-ui/app-shell';

@@ -289,6 +289,8 @@ describe('object-master-detail-form — dataSource: { object } (objectstack#7121
       return el;
     });
     fireEvent.change(number, { target: { value: 'INV-9' } });
+    // A line (the grid draws no trailing entry row, objectstack#35507).
+    fireEvent.click(await waitFor(() => screen.getByTestId('line-items-add')));
     const qty = await waitFor(() => screen.getAllByLabelText('Qty')[0] as HTMLInputElement);
     fireEvent.change(qty, { target: { value: '5' } });
     fireEvent.click(screen.getByRole('button', { name: /^create$/i }));

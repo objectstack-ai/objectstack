@@ -23,8 +23,10 @@
  * Only the full banner carries it, as the adjudication orders. It is not gated
  * on a plan: the guardrail's refusal envelope for the same verdict declares its
  * upgrade flag as the literal `true`, and a plan with no limit never reaches
- * `blocked`. It links to {@link cloudConsoleUrl} — the control plane's origin,
- * the most specific destination a tenant runtime is told about — and is left
+ * `blocked`. It links to the control plane's declared upgrade entry
+ * ({@link getUpgradeUrl}, objectstack#34622) when this runtime serves one: a
+ * deep address the Cloud console root's landing never redirects. Otherwise it
+ * links to {@link cloudConsoleUrl} — the control plane's origin — and is left
  * out when this runtime names no upstream cloud, the rule the AI usage
  * indicator's call to action already follows.
  *
@@ -48,7 +50,7 @@ import { useWorkspaceAdminStatus } from '@object-ui/auth';
 import { useObjectTranslation, useDisplayLocale, formatDisplayNumber } from '@object-ui/i18n';
 import { useStorageUsageReading, classifyStorageUsage } from '../hooks/useStorageUsageReading.js';
 import { cloudConsoleUrl } from '../console/marketplace/marketplaceApi.js';
-import { isStorageUsageServed } from '../runtime-config.js';
+import { getUpgradeUrl, isStorageUsageServed } from '../runtime-config.js';
 
 export interface StorageUsageBannerProps {
   /** Override the resolved tenant runtime base (e.g. `/api/v1`). */
@@ -72,7 +74,9 @@ export function StorageUsageBanner({ apiBase, className }: StorageUsageBannerPro
   const blocked = view.case === 'blocked';
   const used = formatDisplayNumber(view.usedMb, { locale, maximumFractionDigits: 1 });
   const limit = formatDisplayNumber(view.limitMb, { locale, maximumFractionDigits: 1 });
-  const upgradeUrl = blocked ? cloudConsoleUrl() : '';
+  // The declared upgrade entry when served; absent, today's origin link and
+  // its no-upstream rule (objectstack#34622).
+  const upgradeUrl = blocked ? (getUpgradeUrl() ?? cloudConsoleUrl()) : '';
 
   const title = blocked
     ? t('console.storageUsage.blockedTitle', {

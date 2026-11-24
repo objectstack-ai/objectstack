@@ -160,11 +160,11 @@ describe('SortBuilder honours `disabled` on a fields entry (objectui#11943)', ()
     expect(onChange).toHaveBeenLastCalledWith([asc('title'), asc('status')]);
     expect(fieldTriggers()[0]).toHaveTextContent('Title');
 
-    // Removed: the row's only button is its remove control.
+    // Removed: the row's remove control.
     cleanup();
     onChange = mount(FLAGGED, [asc('secret'), asc('status')]);
     const row = screen.getByText('Sort by').parentElement as HTMLElement;
-    fireEvent.click(within(row).getByRole('button'));
+    fireEvent.click(within(row).getByRole('button', { name: /remove sort/i }));
     expect(onChange).toHaveBeenLastCalledWith([asc('status')]);
   });
 

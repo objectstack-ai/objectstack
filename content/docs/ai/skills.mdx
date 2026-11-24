@@ -26,7 +26,21 @@ See [Agents](/docs/ai/agents#you-extend-the-platform-with-skills-not-agents) for
 
 ## Installing skills
 
-Skills ship as the npm package `@objectstack/skills`, released with the other `@objectstack/*` packages at one shared version. Install it at your installed `@objectstack/spec`'s version — the catalog's version is then your spec's — and copy it from `node_modules` into your agent's directory, the two steps `create-objectstack` runs when it scaffolds a project:
+Skills ship as the npm package `@objectstack/skills`, released with the other `@objectstack/*` packages at one shared version. The CLI installs the catalog at the version your server runs into your agent's skills directory, with or without a project — no `package.json` is read or written:
+
+```bash
+os skills install                                   # this CLI's version: the catalog written for it
+os skills install --target https://acme.example.com # the version a target environment runs
+os skills install --version 18.5.0                  # the version an MCP server's instructions name
+```
+
+The skills land as real files in `.claude/skills/` under the current directory (`--dir` names another agent's directory), beside a record of what was installed, `.objectstack-skills.json`. The catalog is read from the npm registry your environment configures; a version it does not publish is refused, naming it.
+
+**With no project.** If you only connected an MCP client, the server's `initialize` instructions name its version and the command, `os skills install --version <version>`. Run it in the directory your agent works in; without the CLI installed, `npx -p @objectstack/cli@<version> os skills install --version <version>` does the same.
+
+**After an upgrade.** The catalog is versioned and updated as **one unit**, with ObjectStack itself. `os skills status` reports the installed version against the expected one (the same `--version` / `--target` / CLI order), plus catalog skills that are missing or modified and skill directories of your own (`--check` exits `1` on a mismatch, for CI). `os skills update` moves the catalog to the expected version: it replaces the catalog's skills, removes those the new version dropped, and never touches a skill it did not install. Commit `.claude/skills/` with the project. See the [CLI reference](/docs/deployment/cli#skills) for every flag.
+
+A project can also depend on the package and sync it from `node_modules` with the third-party skills CLI, the two steps `create-objectstack` runs when it scaffolds a project:
 
 ```bash
 pnpm add -D "@objectstack/skills@$(node -p "require('@objectstack/spec/package.json').version")"
@@ -34,9 +48,7 @@ pnpm add -D "@objectstack/skills@$(node -p "require('@objectstack/spec/package.j
 npx skills@1.7.2 experimental_sync --agent claude-code --copy -y
 ```
 
-Add the package with the manager that installed the project: in a pnpm project, `npm install --save-dev` exits `1` with `npm error Cannot read properties of null (reading 'edgesOut')`.
-
-The skills land as real files in `.claude/skills/`; commit them with the project, and keep `--copy` — without it they are links into `node_modules`, which a clone does not have. Name your own runtime after `--agent` (`codex`, `cursor`, …). The catalog is versioned and updated as **one unit**, with ObjectStack itself: bump `@objectstack/skills` with the other `@objectstack/*` packages, then re-run the sync. The package is published from `18.0.0-next.0` on (there is no 17.x release); for what the sync writes, the versions, the one scaffolder that is an exception and the `next` channel, see the [AI Skills Reference](/docs/ai/skills-reference#installing-skills).
+Add the package with the manager that installed the project: in a pnpm project, `npm install --save-dev` exits `1` with `npm error Cannot read properties of null (reading 'edgesOut')`. Keep `--copy` — without it the skills are links into `node_modules`, which a clone does not have — and name your own runtime after `--agent` (`codex`, `cursor`, …). To move such a project to `os skills`, run `os skills install --force`: it replaces the synced directories of the same names with the catalog's and records them. The package is published from `18.0.0-next.0` on (there is no 17.x release); for what the sync writes, the versions, the one scaffolder that is an exception and the `next` channel, see the [AI Skills Reference](/docs/ai/skills-reference#installing-skills).
 
 ---
 

@@ -253,7 +253,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'diagnostics classification': 3,
   'the fixture tree': 7,
   'the ledger, both directions': 10,
-  'AGREES: the cross-format behaviour probe, both directions': 5,
+  'AGREES: the cross-format behaviour probe, both directions': 6,
   'TYPED: the #13112 class, in both directions': 9,
   'TYPED_EXEMPTIONS, both directions': 8,
   'prerequisite, never a silent green': 1,
@@ -416,7 +416,7 @@ const ROOT_DIR_WATCH_HINTS = ['packages/**/package.json', 'packages/**/tsup.conf
  * package's own unit suite still covers the FUNCTION; what needs built bytes
  * is the cross-FORMAT claim, and this is where built bytes exist.
  *
- * @type {{pkg: string, subpath: string, export: string, expect: string, why: string}[]}
+ * @type {{pkg: string, subpath: string, export: string, call?: string, expect: string, why: string}[]}
  */
 const DUAL_FORMAT_BEHAVIOUR_PROBES = [
   {
@@ -427,6 +427,18 @@ const DUAL_FORMAT_BEHAVIOUR_PROBES = [
     // than hard-coded, so the probe survives every release.
     expect: 'spec-version',
     why: "#12843's intent: the ADR-0087 forward-conversion window opens only on positive version evidence, and #12971 was a broken attempt to obtain that evidence from the CJS build. Both formats must answer the installed spec version, not `null`.",
+  },
+  {
+    pkg: '@objectstack/rest',
+    subpath: '.',
+    export: 'RestServer',
+    // `call` (optional): a function source applied to the module, which may
+    // return a promise; without it the probe calls `export` with no argument.
+    // This one serves the restriction profile through the public class and
+    // answers `versions.spec`, or the status it got instead.
+    call: "async (m) => { const f = () => Promise.resolve(); const srv = { get: f, post: f, put: f, delete: f, patch: f, use: f, listen: f, close: f }; const rest = new m.RestServer(srv, {}, { api: {} }); rest.registerRoutes(); let st = 200, b; const res = { json: (x) => { b = x; }, status: (x) => { st = x; return res; } }; await rest.getRouteManager().get('GET', '/api/v1/discovery/restriction-profile').handler({}, res); return st === 200 ? b.data.versions.spec : `status ${st}`; }",
+    expect: 'spec-version',
+    why: "#34774: the restriction profile `os validate --target` reads resolves the `@objectstack/spec` manifest via `createRequire(import.meta.url)`, which the CJS build empties without tsup's `shims` (packages/rest/tsup.config.ts), so `require('@objectstack/rest')` answered 503. Both formats must serve the installed spec version.",
   },
 ];
 
@@ -1062,9 +1074,10 @@ export async function runBehaviourProbes(root, rows, probes = DUAL_FORMAT_BEHAVI
       findings.push(`behaviour probe ${probe.pkg}#${probe.subpath}: could not read the expectation '${probe.expect}' — ⛔ NOT a pass, nothing was compared.`);
       continue;
     }
-    const call = `String(m[${JSON.stringify(probe.export)}]())`;
-    const cjs = await run(['-e', `const m = require(${JSON.stringify(row.abs)}); process.stdout.write(${call});`]);
-    const esm = await run(['--input-type=module', '-e', `const m = await import(${JSON.stringify(row.importAbs)}); process.stdout.write(${call});`]);
+    const fn = probe.call ?? `(m) => m[${JSON.stringify(probe.export)}]()`;
+    const write = `Promise.resolve((${fn})(m)).then((v) => process.stdout.write(String(v)));`;
+    const cjs = await run(['-e', `const m = require(${JSON.stringify(row.abs)}); ${write}`]);
+    const esm = await run(['--input-type=module', '-e', `const m = await import(${JSON.stringify(row.importAbs)}); ${write}`]);
     ran += 1;
     const label = `behaviour probe ${probe.pkg}#${probe.subpath} → ${probe.export}()`;
     if (cjs.code !== 0) findings.push(`${label}: the require condition threw — ${firstErrorLine(cjs.err)}. ${probe.why}`);
@@ -1341,6 +1354,8 @@ export async function selfTest() {
     t('…and the finding quotes both answers', pBad.findings.some((f) => f.includes("'from-esm'") && f.includes("'null'")));
     const pWrong = await scan(root, empty, [{ pkg: '@t/agree', subpath: '.', export: 'v', expect: 'something-else', why: 'self-test' }]);
     t('agreement on the WRONG value is still a finding', pWrong.findings.some((f) => f.includes('@t/agree') && f.includes('declared expectation')), pWrong.findings.join(' | '));
+    const pCall = await scan(root, empty, [{ pkg: '@t/disagree', subpath: '.', export: 'v', call: 'async (m) => m.v() ?? "none"', expect: 'from-esm', why: 'self-test' }]);
+    t('a `call` probe is awaited in both formats and still catches the disagreement', pCall.findings.some((f) => f.includes("'none'") && f.includes("'from-esm'")), pCall.findings.join(' | '));
     const pGone = await scan(root, empty, [{ pkg: '@t/no-such-package', subpath: '.', export: 'v', expect: 'x', why: 'self-test' }]);
     t('a probe naming a vanished entry point is a finding, not a silent skip', pGone.findings.some((f) => f.includes('no longer exists')), pGone.findings.join(' | '));
 

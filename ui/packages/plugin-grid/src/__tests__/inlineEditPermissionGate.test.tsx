@@ -153,7 +153,6 @@ function renderGrid(c: Case) {
     ...(c.noObjectName || c.objectViaDataConfig ? {} : { objectName: OBJECT }),
     ...(c.objectViaDataConfig ? { data: { provider: 'object', object: OBJECT } } : {}),
     ...(c.editable != null ? { editable: c.editable } : {}),
-    singleClickEdit: true,
     columns: [{ field: 'name', label: 'Name', type: 'text' }],
     pagination: { pageSize: 50 },
     ...(c.noObjectName ? { data: { provider: 'value', items: INLINE_ROWS } } : {}),
@@ -161,7 +160,7 @@ function renderGrid(c: Case) {
   return render(
     <ActionProvider>
       <SchemaRendererProvider dataSource={ds}>
-        <ObjectGrid schema={schema} dataSource={ds} onEdit={() => {}} onDelete={() => {}} />
+        <ObjectGrid cellSelection={false} schema={schema} dataSource={ds} onEdit={() => {}} onDelete={() => {}} />
       </SchemaRendererProvider>
     </ActionProvider>,
   );

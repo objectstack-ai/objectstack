@@ -25,6 +25,9 @@ import { ActionProvider, SchemaRenderer } from '@object-ui/react';
 // Module scope, not a hook: registers PageRenderer and `statistic`
 // (AGENTS.md §测试纪律).
 import '../renderers';
+// `react-page.tsx` (reached through `../renderers`) loads this dynamically;
+// paying its transform here keeps it out of any test's clocked window.
+import '@object-ui/react-runtime';
 
 function tile(id: string) {
   return { type: 'statistic', id, label: id, value: 1 };
@@ -163,4 +166,58 @@ describe("the retired `full-width` template no longer resolves (objectui#12476)"
       expect(refusal.textContent).toContain(`'${template}'`);
     },
   );
+});
+
+/**
+ * The region row and its rails are laid out by the layout's own width, never
+ * the viewport (objectstack#34826). A record page drawn in a 380 px drawer at
+ * a 1280 px viewport kept the viewport `md:` row and squeezed `main` to a few
+ * pixels under a 256 px rail, so the rail's cards lay over the tab row. The
+ * geometry half is `ui/e2e/page-region-row-narrow-drawer-34826.spec.ts` (jsdom
+ * has no layout engine); this pins the class shape on each template that
+ * places a rail beside `main`: the root is the named `regions` container, the
+ * row goes side by side from its `@3xl`, and each rail's fixed width and
+ * no-shrink apply only then. No viewport breakpoint is left on the row.
+ */
+describe('the region row follows the layout width, not the viewport (objectstack#34826)', () => {
+  const RAIL_LAYOUTS: Array<[label: string, page: Record<string, unknown>, rails: Array<[name: string, width: string]>]> = [
+    ['default', { template: 'default' }, [['sidebar', 'w-64'], ['aside', 'w-64']]],
+    ['three-column', { template: 'three-column' }, [['sidebar', 'w-64'], ['aside', 'w-64']]],
+    ['header-sidebar-main', { template: 'header-sidebar-main' }, [['sidebar', 'w-80']]],
+    ['a record page with no template', { pageType: 'record', kind: 'slotted' }, [['sidebar', 'w-64'], ['aside', 'w-64']]],
+  ];
+
+  it.each(RAIL_LAYOUTS)('%s: the row and its rails switch on the `regions` container', (_label, page, rails) => {
+    const { container } = renderPage({
+      type: 'page',
+      ...page,
+      regions: [region('main'), ...rails.map(([name]) => region(name))],
+    });
+    const main = container.querySelector('[data-region="main"]')!;
+    const row = main.parentElement!.parentElement!;
+    const rowClasses = Array.from(row.classList);
+    expect(rowClasses).toEqual(expect.arrayContaining(['flex', 'flex-col', '@3xl/regions:flex-row']));
+    expect(rowClasses.filter((c) => /^(sm|md|lg|xl|2xl):/.test(c)), 'a viewport breakpoint on the row').toEqual([]);
+    // The container the row is measured against is the template's own root,
+    // the row's parent (no print running regions here).
+    expect(row.parentElement!.classList.contains('@container/regions')).toBe(true);
+    for (const [name, width] of rails) {
+      const rail = container.querySelector(`[data-region="${name}"]`)!.closest('aside')!;
+      expect(rail.parentElement, `${name} is a child of the row`).toBe(row);
+      const railClasses = Array.from(rail.classList);
+      expect(railClasses).toEqual(expect.arrayContaining(['w-full', `@3xl/regions:${width}`, '@3xl/regions:shrink-0']));
+      expect(railClasses.filter((c) => /^(sm|md|lg|xl|2xl):/.test(c)), `a viewport breakpoint on ${name}`).toEqual([]);
+    }
+  });
+
+  it('an authored rail width maps to its fixed width only beside main', () => {
+    const { container } = renderPage({
+      type: 'page',
+      template: 'three-column',
+      regions: [region('main'), { ...region('sidebar'), width: 'large' }, { ...region('aside'), width: 'medium' }],
+    });
+    const railOf = (name: string) => container.querySelector(`[data-region="${name}"]`)!.closest('aside')!;
+    expect(railOf('sidebar').classList.contains('@3xl/regions:w-96')).toBe(true);
+    expect(railOf('aside').classList.contains('@3xl/regions:w-80')).toBe(true);
+  });
 });

@@ -1014,7 +1014,11 @@ describe('admin ledger rows: decisions and a reference, never a field value of t
     'revocationComplete',
     'revokeSessionsAndKeys',
     'revokedApiKeys',
+    'revokedAuthorizedApps',
+    'revokedOwnedApps',
+    'revokedScimCredentials',
     'revokedSessions',
+    'revokedSignInAccounts',
   ];
 
   /** Normalise a key so a camelCase metadata key and a snake_case field name compare equal. */
@@ -1163,7 +1167,11 @@ describe('set-user-password: the revoke-sessions-and-keys switch (#23287)', () =
           { id: 'sess_expired', expires_at: PAST() },
         ];
       }
-      if (object === 'sys_api_key') return q?.where?.revoked === false && q?.where?.user_id === 'user-9' ? [{ id: 'key_1' }, { id: 'key_2' }] : [];
+      // Every key the admission seam would admit: a `revoked` flag false or null.
+      if (object === 'sys_api_key') {
+        const live = JSON.stringify(q?.where?.$or) === JSON.stringify([{ revoked: false }, { revoked: null }]);
+        return live && q?.where?.user_id === 'user-9' ? [{ id: 'key_1' }, { id: 'key_2' }] : [];
+      }
       return [];
     });
     m.deps.getDataEngine = () => ({ update: m.engineUpdate, insert: m.engineCreate, find });
@@ -1184,7 +1192,7 @@ describe('set-user-password: the revoke-sessions-and-keys switch (#23287)', () =
     expect(res.status).toBe(200);
     const data = res.body.data as any;
     expect(data.revokeSessionsAndKeys).toBe(true);
-    expect(data.revoked).toEqual({ sessions: 2, apiKeys: 2, failed: 0, complete: true });
+    expect(data.revoked).toEqual({ sessions: 2, apiKeys: 2, signInAccounts: 0, authorizedApps: 0, ownedApps: 0, scimCredentials: 0, failed: 0, complete: true });
 
     const sessions = writesTo(m, 'sys_session');
     expect(sessions.map((d) => d.id).sort()).toEqual(['sess_live', 'sess_no_expiry']);
@@ -1233,7 +1241,7 @@ describe('set-user-password: the revoke-sessions-and-keys switch (#23287)', () =
       makeRequest({ userId: 'user-9', newPassword: 'Str0ng!Pass', revokeSessionsAndKeys: 'no' }),
       ACTOR,
     );
-    expect((res.body.data as any).revoked).toEqual({ sessions: 2, apiKeys: 2, failed: 0, complete: true });
+    expect((res.body.data as any).revoked).toEqual({ sessions: 2, apiKeys: 2, signInAccounts: 0, authorizedApps: 0, ownedApps: 0, scimCredentials: 0, failed: 0, complete: true });
   });
 
   it('a refused write is reported, never silent: complete false, the reset still succeeds', async () => {
@@ -1249,7 +1257,7 @@ describe('set-user-password: the revoke-sessions-and-keys switch (#23287)', () =
       ACTOR,
     );
     expect(res.status).toBe(200);
-    expect((res.body.data as any).revoked).toEqual({ sessions: 2, apiKeys: 1, failed: 1, complete: false });
+    expect((res.body.data as any).revoked).toEqual({ sessions: 2, apiKeys: 1, signInAccounts: 0, authorizedApps: 0, ownedApps: 0, scimCredentials: 0, failed: 1, complete: false });
     expect(m.warn.mock.calls.map((c) => String(c[0])).some((l) => l.includes('revocation INCOMPLETE'))).toBe(true);
   });
 
@@ -1260,7 +1268,7 @@ describe('set-user-password: the revoke-sessions-and-keys switch (#23287)', () =
       makeRequest({ userId: 'user-9', newPassword: 'Str0ng!Pass' }),
       ACTOR,
     );
-    expect((res.body.data as any).revoked).toEqual({ sessions: 0, apiKeys: 0, failed: 0, complete: false });
+    expect((res.body.data as any).revoked).toEqual({ sessions: 0, apiKeys: 0, signInAccounts: 0, authorizedApps: 0, ownedApps: 0, scimCredentials: 0, failed: 0, complete: false });
   });
 });
 

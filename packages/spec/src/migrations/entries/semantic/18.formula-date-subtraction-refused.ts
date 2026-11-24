@@ -9,7 +9,17 @@ export const entry: SemanticMigration = {
     + 'validation conditions, flow conditions) — a date or datetime field subtracted from another '
     + '(record.end_date - record.start_date), or arithmetic on one with a duration '
     + '(record.start_date - duration("24h")); and, as a formula value, an expression that computes a '
-    + 'duration (today() - record.start_date, now() - record.start_at)',
+    + 'duration (today() - record.start_date, now() - record.start_at)'
+    + '. The first two shapes (a field subtracted from another, a field in arithmetic with a duration; '
+    + 'not the formula-only duration value) are refused in a flow VALUE envelope too: an assignment node\'s '
+    + 'assignments value, a create_record / update_record node\'s fields.* value, reading the field '
+    + 'through record (or previous), in a record-triggered flow or a time-relative sweep of the typed '
+    + 'object that rebinds neither record nor previous itself (no assignment target, output, iterator, '
+    + 'index or error variable or node id of either name, and no declared variable named record); '
+    + 'os validate and the engine\'s registerFlow '
+    + 'refuse the same set. A stored flow carrying one fails to register at boot on an engine with the '
+    + 'object-schema resolver wired (the automation service bridged to ObjectQL) until it is rewritten '
+    + 'with the same rewrite',
   replacement:
     'daysBetween(a, b) for the span in whole days: daysBetween(record.start_date, record.end_date) for end '
     + 'minus start, daysBetween(record.start_date, today()) for the days since a date. addDays(d, n) / '
@@ -31,5 +41,11 @@ export const entry: SemanticMigration = {
   acceptanceCriteria:
     'os validate and os build report no date-text-arithmetic or date-duration-value finding; each '
     + 'rewritten formula field reads a number on GET /api/v1/data/OBJECT/ID where it read null or {} '
-    + 'before; no stored sys_metadata object row reports either finding in its _diagnostics.',
+    + 'before; no stored sys_metadata object row reports either finding in its _diagnostics.'
+    + ' For a stored flow: the boot log carries no "[Automation] failed to register flow" (or '
+    + '"cold-boot flow bind: failed to register flow") warning naming it, and POST '
+    + '/api/v1/meta/_migrate-stored on the running server lists no registerFlow TODO at its assignments '
+    + 'or fields slots. The CLI\'s os migrate meta --stored cannot show this: it boots the automation '
+    + 'plugin inert (armRuntime: false), which returns before the object-schema resolver is wired, so '
+    + 'its stored pass types no value envelope and lists no such TODO whether or not the flow carries one.',
 };

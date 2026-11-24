@@ -564,7 +564,7 @@ Parent-child relationship (cascading delete by default).
 | `reference` | `string` | **required** | Target (master) object name. A stored-metadata table is refused — see [below](#a-relationship-never-targets-a-stored-metadata-table) |
 | `referenceFilters` | `string[]` | — | **Removed** (#2377, ADR-0049) — no longer a recognized field property. `FieldSchema` is a strict object, so an unknown key is **rejected with guidance**, not silently stripped (ADR-0078): the error echoes the offending key and prescribes the replacement. Use structured `lookupFilters` + `dependsOn` instead; see [Relationships](/docs/data-modeling/relationships) |
 | `deleteBehavior` | `'restrict' \| 'cascade'` | `'cascade'` | Behavior when parent is deleted. `restrict` refuses the parent delete while children exist; `cascade` (and omitting the key) deletes the children with the parent. An explicit `set_null` is a **parse-time rejection** on this type (#9689) — a detail row cannot outlive its master; use a `lookup` if children must survive the parent |
-| `inlineEdit` | `boolean \| 'grid' \| 'form'` | — | Edit child records inline on the parent create/edit form (`true` = auto-pick, `'grid'`, or `'form'`) |
+| `inlineEdit` | `boolean \| 'grid' \| 'form'` | — | Form factor of the child rows on the parent create/edit form (`true` = auto-pick, `'grid'`, or `'form'`). The form inlines the child only where a field group of the parent names it; `inlineEdit` alone inlines nothing |
 | `inlineColumns` | `array` | — | Optional explicit inline grid columns |
 | `inlineAmountField` | `string` | — | Numeric child field used for the inline running total |
 
@@ -579,21 +579,42 @@ Parent-child relationship (cascading delete by default).
 }
 ```
 
+**Where the child list shows.** A `master_detail` child is a tab of the parent's record page, with
+its count, like any other related list. It goes into the record page's overview and the parent's
+create and edit forms only where a field group of the PARENT names it, at that group's position:
+
+```typescript
+// on the parent object
+fieldGroups: [
+  { key: 'basic', label: 'Basic information' },
+  { key: 'lines', label: 'Lines', relatedList: 'order_line' }, // or 'order_line.order' for one FK
+],
+```
+
+A placed table keeps its tab, and the record page's Edit saves the record and its rows in one
+save. `relatedList: 'primary'` on the FK puts the table in the overview with no group.
+
 **The inline grid in the Console.** With `inlineEdit: 'grid'` (or `true` resolving to the grid)
 the parent's form edits the children as rows of a table:
 
 - **Columns.** Without `inlineColumns` the columns are derived from the child object. An
   explicit column (`InlineGridColumn`) names the child field in `name` and may set `label`,
-  `width` (pixels), `required` and `type`. A column's `type` is one of nine cell controls:
-  `text`, `number`, `currency`, `date`, `datetime`, `time`, `select`, `lookup` and `file`.
-  Declaring `type` opts the column out of derivation, so supply what the control needs
-  (`options` for a select, `reference` and `displayField` for a lookup).
+  `width` (pixels), `required` and `type`. A column's `type` is one of fourteen cell controls:
+  `text`, `number`, `currency`, `date`, `datetime`, `time`, `select`, `lookup`, `file`, `user`,
+  `multiselect`, `tags`, `boolean` and `rating`. Declaring `type` opts the column out of
+  derivation, so supply what the control needs (`options` for a select or multi-select,
+  `reference` and `displayField` for a lookup, `max` for a rating).
 - **File cells.** A `file` column is an upload control in the cell, with removable chips and
   thumbnails for images; `accept` and `multiple` restrict it. Derived columns map `file`,
   `image` and `avatar` child fields to `file` cells, an image field accepting `image/*`. Shown as
   text, a file cell reads the file's name, or a count when it holds several.
-- **Booleans.** A derived `boolean` or `toggle` child field becomes a `select` cell storing
-  `'true'` / `'false'`, labelled in the session language.
+- **Booleans.** A derived `boolean` or `toggle` child field becomes a checkbox cell storing
+  `true` / `false`; read-only, it shows the session language's yes / no word. A column authored
+  as `type: 'select'` over a boolean field keeps the select.
+- **People, multi-select, tags and rating.** A derived `user` field becomes the person picker
+  (several people when the field is `multiple`), `multiselect` and `checkboxes` fields a list
+  holding several options, `tags` a free-form tag list, and `rating` a row of stars (`max`
+  from the field, default 5). Each edits as the same cell does in the list view.
 - **Currency.** A `currency` cell shows the resolved currency's symbol, and decimals of that
   currency's CLDR fraction digits; `prefix` replaces the symbol only.
 - **Order.** When the columns are derived and the child object has a field named `position`, `sort_order`, `sequence`,
@@ -687,7 +708,7 @@ Calculated field using a CEL expression (see [Expressions](/docs/data-modeling/f
 | Property | Type | Default | Description |
 |:---|:---|:---|:---|
 | `expression` | `string \| Expression` | **required** | CEL calculation expression |
-| `returnType` | `'number' \| 'text' \| 'boolean' \| 'date' \| 'currency'` | — | Declared value type of the computed result. `currency`: an amount of money, in the currency the formula's own `currencyConfig` declares (none: dynamic; over record-mode amounts, `record` with their `currencyField`) |
+| `returnType` | `'number' \| 'text' \| 'boolean' \| 'date' \| 'currency' \| 'percent'` | — | Declared value type of the computed result. `currency`: an amount of money, in the currency the formula's own `currencyConfig` declares (none: dynamic; over record-mode amounts, `record` with their `currencyField`). `percent`: a ratio, read as a `percent` field reads its stored value — a fraction (`0.25` shows `25%`, so the expression divides and does not multiply by 100) unless the formula declares a `max` above 1, then percentage points; its `scale` is the decimal places of the displayed percentage (absent: 0) and its `percentDisplay` picks the bar or the plain face. Declared, never inferred |
 
 ```typescript
 { name: 'total', label: 'Total', type: 'formula', expression: 'record.quantity * record.unit_price', returnType: 'number' }
@@ -697,7 +718,8 @@ Calculated field using a CEL expression (see [Expressions](/docs/data-modeling/f
 evaluates the expression. The form and the grid cell draw it by `returnType`: `number` is
 formatted as a number field formats it (to the field's `scale`), `boolean` as Yes / No in the
 UI language (a non-boolean reads empty), `date` as the date field's absolute face (not the
-grid's relative one), and `text` in a monospace font. With no `returnType`, a number is drawn
+grid's relative one), `percent` as a percent field draws it (its `scale`, `max` and
+`percentDisplay`), and `text` in a monospace font. With no `returnType`, a number is drawn
 as a number and anything else as text; nothing is inferred from the expression.
 
 #### `expression` on a stored field
@@ -769,7 +791,8 @@ grid cell: a number is formatted as a number field formats it, keeping its own p
 the field sets a `scale` (`15750.5` reads `15,750.5`; at `scale: 2`, `15,750.50`), and anything
 else is shown as text. A roll-up that declares its currency in `currencyConfig` is drawn as
 money instead: `fixed` in its code, `record` in the parent's code, and `dynamic`, admitted
-only on a roll-up of a stored home amount, in the organization's home currency
+only on a roll-up of an amount in the home currency (a `dynamic` `currency` field, a stored
+home amount included), in the organization's home currency
 ([Currency fields](/docs/data-modeling/currency#totals-in-the-home-currency)).
 
 ### `autonumber`
@@ -833,7 +856,7 @@ options, required flags or translations, and nothing validates or addresses a si
 **A list that needs typed columns is a child object** with a [`master_detail`](#master_detail) field
 pointing back at the parent — the shape Salesforce, Dynamics, ServiceNow and Odoo use for line items.
 The child's own fields carry the types and validation, `inlineEdit: 'grid'` edits the rows as an
-inline grid on the parent's form, and every row is a record a lookup, a roll-up or a flow can reach.
+inline grid on the parent's form (where a field group of the parent names the child), and every row is a record a lookup, a roll-up or a flow can reach.
 </Callout>
 
 ### `composite`
@@ -852,7 +875,8 @@ child object (see above).
 ```
 
 ```typescript
-// A typed list: a child object, edited inline on the parent's form
+// A typed list: a child object, edited inline on the parent's form once the
+// invoice names it in a field group: { key: 'lines', relatedList: 'invoice_line' }
 {
   name: 'invoice_line',
   fields: {
@@ -1151,7 +1175,14 @@ widgets, so the record form offers choices instead of a bare box:
 |---|---|---|---|
 | `notification-topic` | `topic` (`text`; also on `sys_notification_template`) | a pick-or-type list from `GET /api/v1/messaging/preference-options` | the topic as written, `*` for all |
 | `notification-channel` | `channel` (`text`) | the same list, marking a known channel whose service is not configured | the channel id as written, `*` for all |
-| `quiet-hours` | `quiet_hours` (`json`) | a time-zone picker and two times | `{ tz?, start: 'HH:MM', end: 'HH:MM' }` |
+| `quiet-hours` | `quiet_hours` (`json`) | a time-zone picker and two times | `{ tz?, start: 'HH:MM', end: 'HH:MM' }`, or `{ off: true }` for no quiet hours |
+
+A preference's `digest` and `quiet_hours` each have three states. Empty means not set: the next
+preference decides, which is the default for all users and then none. The explicit off is `none`
+for the digest and `{ "off": true }` for quiet hours. Otherwise the field holds a value. For each
+field, the most specific preference that sets it decides, so a person's own "no digest" or "no
+quiet hours" beats the organization's default. The `quiet-hours` widget shows a stored
+`{ "off": true }` as stored and keeps it unless it is replaced.
 
 A typed topic or channel the list does not hold is still stored. Like every `widget` value,
 a name no host registers falls back to the type's default input.

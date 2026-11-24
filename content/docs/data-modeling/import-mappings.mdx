@@ -116,7 +116,7 @@ mapping under its own name.
 | Key | Type | What it does |
 |:---|:---|:---|
 | `name` | `string` (snake_case) | The id `mappingName` resolves. Missing artifact → `404 MAPPING_NOT_FOUND`. |
-| `label` | `string` | Display text in a saved-mapping picker. Falls back to `name`. |
+| `label` | `string` | Display text in a saved-mapping picker (the import wizard). Falls back to `name`. Translated per locale at `mappings.<name>.label` in the app's translation bundle — see [Translations](/docs/ui/translations). |
 | `sourceFormat` | `'csv' \| 'json' \| 'xml' \| 'sql'` | Declared payload format, checked against what the request actually sent. Defaults to `csv`. See [the format gate](#rejections-before-any-row-is-read). |
 | `targetObject` | `string` | The object this mapping is for. Must equal the object in the URL. |
 | `fieldMapping` | `ImportFieldMapping[]` | The projection itself — one entry per target field. |

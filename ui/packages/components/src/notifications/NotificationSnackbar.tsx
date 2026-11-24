@@ -103,7 +103,7 @@ export function NotificationSnackbar({ className }: NotificationSnackbarProps) {
         <Button
           size="sm"
           variant={notificationActionVariant(action.variant)}
-          className="h-7 shrink-0 font-semibold uppercase tracking-wide"
+          className="h-7 shrink-0 font-medium uppercase tracking-wide"
           onClick={() => {
             action.onClick();
             dismiss(notification.id);

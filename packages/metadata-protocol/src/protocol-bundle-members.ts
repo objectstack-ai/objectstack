@@ -47,6 +47,13 @@ export const BUNDLE_MEMBER_MAX_LENGTH = 100;
  * well-formed member with nothing stored or shipped is not refused here: each
  * door answers it as it answers an absent item.
  *
+ * [#34682] …the canonical member included, named or not: a bundle that ships
+ * or stores no canonical member answers the read naming no member as absent,
+ * as it answers `?member=en-US` and `/published`. The registry's bare-name
+ * read still answers such a bundle with its first member; the by-name reads
+ * (`getMetaItem`, `getMetaItemLayered`) take that answer only when it is the
+ * canonical member, so it reaches no door.
+ *
  * Refuses, with a located 400 `VALIDATION_ERROR` — the code the REST door's
  * recognition refusal answers for a misspelled selector on the same routes —
  * a selector on a type whose identity is its name alone, and a value that

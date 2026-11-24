@@ -111,9 +111,12 @@ describe('[#23723] CONTROL — what was readable, and what never settles', () =>
         expect(err.code).toBe('EMAIL_TAKEN');
     });
 
-    it('a body that never settles still ends at the wall-clock ceiling, with no innerMessage', async () => {
+    it('a body that never settles still ends at the wall-clock ceiling, with the timeout sentence, not the recorded one', async () => {
         const err = await thrownBy(`await new Promise(() => {});`);
         expect(err.message).toMatch(new RegExp(`exceeded wall-clock ceiling of ${CEILING_MS}ms`));
-        expect(err.innerMessage).toBeUndefined();
+        expect(err.innerMessage).toBe(
+            `Action 'submit' timed out: it exceeded its ${CEILING_MS} ms time limit while waiting on platform calls, and was stopped.`,
+        );
+        expect(err.status).toBe(500);
     });
 });

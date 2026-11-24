@@ -19,9 +19,23 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { crc32, deflateRawSync } from 'node:zlib';
-import { MCP_OAUTH_SCOPE_DATA_READ, MCP_OAUTH_SCOPE_DATA_WRITE } from '@objectstack/spec/ai';
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import {
+  MCP_OAUTH_SCOPE_ACTIONS,
+  MCP_OAUTH_SCOPE_DATA_READ,
+  MCP_OAUTH_SCOPE_DATA_WRITE,
+  MCP_OAUTH_SCOPE_METADATA_WRITE,
+} from '@objectstack/spec/ai';
+import { MCP_DOOR_TOOL_NAMES, MCP_FILE_TOOL_NAMES, PLATFORM_PROVIDED_TOOL_NAMES } from '@objectstack/spec/system';
+import { validateAiToolReferences } from '@objectstack/lint';
 import { MCPServerRuntime } from './mcp-server-runtime.js';
-import type { McpDataBridge } from './mcp-http-tools.js';
+import {
+  registerFileTools,
+  wireBridgeTools,
+  type McpActionBridge,
+  type McpDataBridge,
+  type McpFederationBridge,
+} from './mcp-http-tools.js';
 import {
   READ_FILE_CPU_BUDGET_MS_DEFAULT,
   READ_FILE_CPU_BUDGET_MS_ENV,
@@ -285,6 +299,92 @@ describe('the file tools register where the bridge carries them, for the scope o
     const write = await toolNames(runtime, fullBridge(), [MCP_OAUTH_SCOPE_DATA_WRITE]);
     expect(write).toContain('create_upload_link');
     expect(write).not.toContain('read_file');
+  });
+});
+
+/**
+ * [#34948] The door's file tools and the names a skill may bind. A skill bound
+ * to `read_file` or `create_upload_link` is offered over MCP, and `os lint`
+ * resolves those names from `MCP_FILE_TOOL_NAMES` in `@objectstack/spec`. Held
+ * equal here, where the tools are registered, so a file tool added or renamed
+ * at the door fails this case until the list follows it — and with it the
+ * lint rule, which would otherwise report a served tool as fictional.
+ */
+describe('the file tools the door registers are the ones a skill may bind', () => {
+  it('registerFileTools registers exactly MCP_FILE_TOOL_NAMES, and the lint rule resolves each', () => {
+    const registered = registerFileTools(new McpServer({ name: 'file-tools', version: '0.0.0' }), fullBridge());
+    expect([...registered].sort()).toEqual([...MCP_FILE_TOOL_NAMES].sort());
+    expect(validateAiToolReferences({ skills: [{ name: 'receipts', tools: registered }] })).toEqual([]);
+    // The control: on a bridge with no file member the door registers nothing,
+    // so the equality above is read from the registration sites, not assumed.
+    expect(registerFileTools(new McpServer({ name: 'file-tools', version: '0.0.0' }), makeBridge(null))).toEqual([]);
+  });
+});
+
+/**
+ * [#35036] Every tool the door registers, and the names a skill may bind. The
+ * door serves its record, action, federation and dataset tools beside the file
+ * pair, and a skill offered over MCP is offered where they are listed, so
+ * `os lint` resolves every name in `MCP_DOOR_TOOL_NAMES` for such a skill.
+ * Held equal here to `wireBridgeTools`, the one composition both transports
+ * call, on a bridge carrying every optional member under a grant naming every
+ * scope: a tool added to or renamed at the door fails this case until the list
+ * follows it, and with it the lint rule.
+ */
+describe('the tools the door registers are the ones a skill offered over MCP may bind', () => {
+  const unused = async (): Promise<never> => {
+    throw new Error('not called: this pin reads the registration only');
+  };
+  /** Every optional member the door wires a tool for, on top of the file members. */
+  function everyMemberBridge(): McpDataBridge & McpActionBridge & McpFederationBridge & McpFileBridge {
+    return Object.assign(fullBridge(), {
+      aggregate: unused,
+      listActions: unused,
+      runAction: unused,
+      resumeRun: unused,
+      listRemoteTables: unused,
+      importObject: unused,
+      listDatasets: unused,
+      queryDataset: unused,
+      datasetToolDefinitions: () => [
+        { name: 'list_datasets', description: 'List the datasets.' },
+        { name: 'query_dataset', description: 'Query one metric of a dataset.' },
+      ],
+      searchPackageDocs: unused,
+      readPackageDoc: unused,
+    });
+  }
+  const everyScope = [
+    MCP_OAUTH_SCOPE_DATA_READ,
+    MCP_OAUTH_SCOPE_DATA_WRITE,
+    MCP_OAUTH_SCOPE_ACTIONS,
+    MCP_OAUTH_SCOPE_METADATA_WRITE,
+  ];
+  const door = () => new McpServer({ name: 'door-tools', version: '0.0.0' });
+
+  it('wireBridgeTools registers exactly MCP_DOOR_TOOL_NAMES, and the lint rule resolves each', () => {
+    const registered = wireBridgeTools(door(), everyMemberBridge(), { grantedScopes: everyScope });
+    expect([...registered].sort()).toEqual([...MCP_DOOR_TOOL_NAMES]);
+    expect(validateAiToolReferences({ skills: [{ name: 'ops', tools: registered }] })).toEqual([]);
+    // The control: a bridge with only the data members and a grant without
+    // the action and metadata scopes registers fewer, so the equality above is
+    // read from the registration sites, not assumed.
+    const fewer = wireBridgeTools(door(), makeBridge(null), {
+      grantedScopes: [MCP_OAUTH_SCOPE_DATA_READ, MCP_OAUTH_SCOPE_DATA_WRITE],
+    });
+    expect(fewer.length).toBeGreaterThan(0);
+    expect(fewer.length).toBeLessThan(registered.length);
+    expect(fewer).not.toContain('run_action');
+    expect(fewer).not.toContain('import_object');
+  });
+
+  it('on a skill kept out of MCP, each name only the door serves is reported as resolving over MCP only', () => {
+    const registered = wireBridgeTools(door(), everyMemberBridge(), { grantedScopes: everyScope });
+    const doorOnly = registered.filter((name) => !PLATFORM_PROVIDED_TOOL_NAMES.has(name));
+    expect(doorOnly).toEqual(expect.arrayContaining(['run_action', 'read_file', 'aggregate_records']));
+    const findings = validateAiToolReferences({ skills: [{ name: 'ops', mcpPrompt: false, tools: registered }] });
+    expect(findings.map((f) => f.path)).toEqual(doorOnly.map((name) => `skills[0].tools[${registered.indexOf(name)}]`));
+    for (const f of findings) expect(f.message, f.path).toContain('resolves only for a skill offered over MCP');
   });
 });
 
@@ -743,6 +843,31 @@ describe('read_file bounds PDF and Word extraction by the host\'s CPU budget and
     expect(textOf(result.content[1])).toBe(paragraphs.slice(0, 64).join('\n'));
   });
 
+  it('out of CPU budget after pages or paragraphs that held no text: no text, and a note that never calls the text partial', async () => {
+    configureReadFileExtraction({ cpuBudgetMs: 1, maxConcurrent: 4 });
+    steppingCpuClock(1);
+    const bridge = fullBridge();
+    const pdf = multiPagePdf(['', '', '']);
+    bridge.next = { name: 'scan.pdf', mimeType: 'application/pdf', size: pdf.length, bytes: pdf };
+    const fromPdf = await callTool(runtime, bridge, 'read_file', { objectName: 'claim', recordId: 'c1', field: 'policy' });
+    expect(factsOf(fromPdf)).toMatchObject({
+      content: 'none',
+      note: 'Reading stopped at the CPU-time budget for one file (1 ms) after page 1 of 3, and no text was found in what was read. '
+        + 'Download the file with the link instead.',
+    });
+    expect(fromPdf.content).toHaveLength(1);
+
+    const docx = zip({ 'word/document.xml': docxBody(Array.from({ length: 200 }, () => '')) });
+    bridge.next = { name: 'blank.docx', mimeType: DOCX, size: docx.length, bytes: docx };
+    const fromDocx = await callTool(runtime, bridge, 'read_file', { objectName: 'claim', recordId: 'c1', field: 'policy' });
+    expect(factsOf(fromDocx)).toMatchObject({
+      content: 'none',
+      note: 'Reading stopped at the CPU-time budget for one file (1 ms) after 64 paragraphs, and no text was found in what was read. '
+        + 'Download the file with the link instead.',
+    });
+    expect(fromDocx.content).toHaveLength(1);
+  });
+
   it('one extraction over the process-wide cap is refused at once with a retryable SERVICE_UNAVAILABLE, never queued', async () => {
     configureReadFileExtraction({ cpuBudgetMs: 3000, maxConcurrent: 2 });
     const pdf = minimalPdf('Held open');
@@ -939,33 +1064,62 @@ describe('read_file extracts PDF and Word text on a worker pool, off the request
     expect({ ticks, enough: ticks >= 20 && ticks >= wallMs / 4 }).toMatchObject({ enough: true });
   });
 
+  /**
+   * The worker started with a preload that replaces `process.threadCpuUsage`
+   * IN THE WORKER THREAD with a clock advancing `stepMs` on every read: the
+   * worker's twin of the in-process `steppingCpuClock`, which spies the
+   * request thread's `process.cpuUsage` and cannot reach a worker. "The budget
+   * is spent" is then decided by how many checkpoints the extractor reached,
+   * never by how fast, or how loaded, this machine is. The worker's own code
+   * is unchanged: it reads the clock it always reads.
+   */
+  function steppingThreadCpuWorker(stepMs: number): ExtractionWorkerEntry {
+    const clock = `let now = 0; process.threadCpuUsage = () => { now += ${stepMs * 1000}; return { user: now, system: 0 }; };`;
+    return {
+      ...SOURCE_WORKER,
+      execArgv: [...(SOURCE_WORKER.execArgv ?? []), '--import', `data:text/javascript,${encodeURIComponent(clock)}`],
+    };
+  }
+
   it('out of CPU budget on the worker: the pages read so far, truncated, with the budget note, as in-process', async () => {
-    configureReadFileExtraction({ cpuBudgetMs: 30, maxConcurrent: 4 });
+    // The budget is spent at the third checkpoint (3 x 1000 ms of the stepping
+    // clock), so the read stops after page 3, whatever the runner's load. The
+    // budget is 3000 ms, not a few tens, because the pool's wall-clock ceiling
+    // is 5 budgets of REAL time: at 30 ms that ceiling (150 ms) cut a loaded
+    // runner's read before page 1, answering "after page 0" with no text.
+    configureReadFileExtraction({ cpuBudgetMs: 3000, maxConcurrent: 4 });
+    configureExtractionWorkerEntry(steppingThreadCpuWorker(1000));
     const pdf = heavyPdf(120, () => 2250);
     const bridge = fullBridge();
-    const file = { name: 'heavy.pdf', mimeType: 'application/pdf', size: pdf.length, bytes: pdf };
-    await readFile(bridge, minimalPdfFile()); // warm, so unpdf's load is not charged here
-    const result = await readFile(bridge, file);
+    const result = await readFile(bridge, { name: 'heavy.pdf', mimeType: 'application/pdf', size: pdf.length, bytes: pdf });
     const facts = factsOf(result);
-    expect(facts).toMatchObject({ content: 'text', format: 'application/pdf', truncated: true });
-    const read = /^Reading stopped at the CPU-time budget for one file \(30 ms\) after page (\d+) of 120, so the text is partial\. Download the file with the link for the rest\.$/.exec(facts.note);
-    expect(read).not.toBeNull();
-    const pages = Number(read![1]);
-    expect(pages).toBeGreaterThanOrEqual(1);
-    expect(pages).toBeLessThan(120);
-    expect(textOf(result.content[1])).toBe(pageTexts(pages).join('\n\n'));
+    expect(facts).toMatchObject({
+      content: 'text',
+      format: 'application/pdf',
+      truncated: true,
+      note: 'Reading stopped at the CPU-time budget for one file (3000 ms) after page 3 of 120, so the text is partial. '
+        + 'Download the file with the link for the rest.',
+    });
+    expect(textOf(result.content[1])).toBe(pageTexts(3).join('\n\n'));
     expect(facts.download).toBeTruthy();
 
+    // Word: the budget is checked every 64 paragraphs. A 15 ms step spends the
+    // same 3000 ms budget at the 200th checkpoint, 12,800 paragraphs in, which
+    // is past the length cap, so the cap is what cuts the text that was read.
+    configureExtractionWorkerEntry(steppingThreadCpuWorker(15));
     const paragraphs = Array.from({ length: 60_000 }, (_, i) => `Paragraph ${i + 1}`);
     const docx = zip({ 'word/document.xml': docxBody(paragraphs) });
     const word = await readFile(bridge, { name: 'long.docx', mimeType: DOCX, size: docx.length, bytes: docx });
-    const wordFacts = factsOf(word);
-    expect(wordFacts).toMatchObject({ content: 'text', format: DOCX, truncated: true });
-    const count = Number(/after (\d+) paragraphs, so the text is partial/.exec(wordFacts.note)?.[1]);
-    expect(count % 64).toBe(0);
-    expect(count).toBeLessThan(paragraphs.length);
+    expect(factsOf(word)).toMatchObject({
+      content: 'text',
+      format: DOCX,
+      truncated: true,
+      note: 'Reading stopped at the CPU-time budget for one file (3000 ms) after 12800 paragraphs, so the text is partial. '
+        + 'Download the file with the link for the rest.',
+    });
     // The length cap still applies to what was read.
-    expect(textOf(word.content[1])).toBe(paragraphs.slice(0, count).join('\n').slice(0, 100_000));
+    expect(paragraphs.slice(0, 12_800).join('\n').length).toBeGreaterThan(100_000);
+    expect(textOf(word.content[1])).toBe(paragraphs.slice(0, 12_800).join('\n').slice(0, 100_000));
   });
 
   function minimalPdfFile(text = 'Small') {
@@ -1052,5 +1206,115 @@ describe('read_file extracts PDF and Word text on a worker pool, off the request
     // Both slots are free again, and the two workers wait in the pool.
     expect(extractionWorkerPoolStats()).toEqual({ started: 2, idle: 2 });
     await expect(extractFileContent(minimalPdf('Free'), 'application/pdf', 'd.pdf')).resolves.toMatchObject({ text: 'Free' });
+  });
+});
+
+/**
+ * [#34855] A worker stopped at its wall-clock ceiling before it sent back the
+ * first page or paragraph answers no text, with a note saying the read
+ * stopped before any was read, never one calling the text partial.
+ *
+ * The worker is a stand-in that sends back exactly the progress a test
+ * scripts and then never answers, so the ceiling is what ends every read
+ * here and how far the read got is fixed by the script, never by how fast, or
+ * how loaded, this machine is: the clock decides when the read stops, never
+ * where. The progress messages are the real extractor's
+ * (`ExtractionProgress`), and the answer is built by the pool's own overrun
+ * path, as for a real worker.
+ */
+describe('read_file: a worker stopped at its wall-clock ceiling before the first page answers no text, never partial text', { timeout: 30_000 }, () => {
+  const DEFAULTS = { cpuBudgetMs: READ_FILE_CPU_BUDGET_MS_DEFAULT, maxConcurrent: READ_FILE_MAX_CONCURRENT_DEFAULT };
+  let runtime: MCPServerRuntime;
+  beforeEach(() => {
+    runtime = new MCPServerRuntime({ name: 'file-tools', version: '0.0.0' });
+    // Ceiling = 5 x 100 ms of real time: room for the scripted progress to
+    // arrive on a loaded runner, and every read here waits it out once.
+    configureReadFileExtraction({ cpuBudgetMs: 100, maxConcurrent: 1 });
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    configureExtractionWorkerEntry(undefined);
+    configureReadFileExtraction(DEFAULTS);
+  });
+
+  /** A stand-in worker that sends `progress` back for every job, then never answers it. */
+  function stalledWorker(progress: unknown[]): ExtractionWorkerEntry {
+    const source = [
+      "import { parentPort } from 'node:worker_threads';",
+      `const progress = ${JSON.stringify(progress)};`,
+      "parentPort.on('message', () => {",
+      "  for (const p of progress) parentPort.postMessage({ type: 'progress', progress: p });",
+      '});',
+      "parentPort.postMessage({ type: 'ready' });",
+    ].join('\n');
+    return { url: new URL(`data:text/javascript,${encodeURIComponent(source)}`) };
+  }
+
+  async function readStopped(progress: unknown[], name: string, mimeType: string) {
+    configureExtractionWorkerEntry(stalledWorker(progress));
+    const bytes = new Uint8Array(Buffer.from('never read'));
+    const bridge = fullBridge();
+    bridge.next = { name, mimeType, size: bytes.length, bytes };
+    const result = await callTool(runtime, bridge, 'read_file', { objectName: 'claim', recordId: 'c1', field: 'policy' });
+    // The stalled worker is gone, not back in the pool: the ceiling ended it.
+    expect(extractionWorkerPoolStats().idle).toBe(0);
+    return result;
+  }
+
+  it('a PDF opened but stopped before page 1, and one stopped before it opened, answer no text and say so', async () => {
+    const opened = await readStopped([{ kind: 'pdf-open', numPages: 120 }], 'heavy.pdf', 'application/pdf');
+    expect(opened.isError).toBeUndefined();
+    expect(factsOf(opened)).toMatchObject({
+      content: 'none',
+      note: 'Reading stopped at the CPU-time budget for one file (100 ms) before page 1 of 120 was read, so no text came back. '
+        + 'Download the file with the link instead.',
+    });
+    expect(factsOf(opened).note).not.toContain('partial');
+    expect(opened.content).toHaveLength(1);
+
+    const unopened = await readStopped([], 'heavy.pdf', 'application/pdf');
+    expect(factsOf(unopened)).toMatchObject({
+      content: 'none',
+      note: 'Reading stopped at the CPU-time budget for one file (100 ms) before page 1 was read, so no text came back. '
+        + 'Download the file with the link instead.',
+    });
+  });
+
+  it('a Word document stopped before its first paragraphs came back answers no text and says so', async () => {
+    const result = await readStopped([], 'long.docx', DOCX);
+    expect(result.isError).toBeUndefined();
+    expect(factsOf(result)).toMatchObject({
+      content: 'none',
+      note: 'Reading stopped at the CPU-time budget for one file (100 ms) before the first paragraph was read, so no text came back. '
+        + 'Download the file with the link instead.',
+    });
+    expect(factsOf(result).note).not.toContain('partial');
+    expect(result.content).toHaveLength(1);
+  });
+
+  it('CONTROL: a stop after page 1, or after the first paragraphs, still answers that text as partial', async () => {
+    const pdf = await readStopped(
+      [{ kind: 'pdf-open', numPages: 120 }, { kind: 'pdf-page', text: 'Page 1 text' }],
+      'heavy.pdf',
+      'application/pdf',
+    );
+    expect(factsOf(pdf)).toMatchObject({
+      content: 'text',
+      format: 'application/pdf',
+      truncated: true,
+      note: 'Reading stopped at the CPU-time budget for one file (100 ms) after page 1 of 120, so the text is partial. '
+        + 'Download the file with the link for the rest.',
+    });
+    expect(textOf(pdf.content[1])).toBe('Page 1 text');
+
+    const word = await readStopped([{ kind: 'docx-paragraphs', text: 'P1\nP2\n', paragraphs: 64 }], 'long.docx', DOCX);
+    expect(factsOf(word)).toMatchObject({
+      content: 'text',
+      format: DOCX,
+      truncated: true,
+      note: 'Reading stopped at the CPU-time budget for one file (100 ms) after 64 paragraphs, so the text is partial. '
+        + 'Download the file with the link for the rest.',
+    });
+    expect(textOf(word.content[1])).toBe('P1\nP2');
   });
 });

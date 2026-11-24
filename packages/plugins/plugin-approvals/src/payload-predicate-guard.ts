@@ -65,6 +65,7 @@
  * programmatic calls are not judged, as for the redaction.
  */
 
+import { operationUserMessage, type UserMessageCaller } from '@objectstack/core';
 import { FieldReferenceSchema } from '@objectstack/spec/data';
 import { resolveReadableSnapshotFields, type FieldVisibilitySource } from './payload-redaction.js';
 import { APPROVAL_REQUEST_OBJECT, type MiddlewareEngine } from './payload-redaction-middleware.js';
@@ -245,6 +246,7 @@ export type SnapshotQueryRefusal = Error & {
   object: string;
   fields: string[];
   details: { object: string; fields: string[]; reason: string };
+  userMessage?: string;
 };
 
 const REMEDY =
@@ -253,7 +255,11 @@ const REMEDY =
   'object named by equality on object_name, or every object when it names none.';
 
 /** The refusal, in the engine's words for the role the column is named in. */
-export function snapshotQueryRefusal(operation: string, named: NamedSnapshotColumn): SnapshotQueryRefusal {
+export function snapshotQueryRefusal(
+  operation: string,
+  named: NamedSnapshotColumn,
+  caller?: UserMessageCaller | null,
+): SnapshotQueryRefusal {
   const object = APPROVAL_REQUEST_OBJECT;
   const fields = [SNAPSHOT_COLUMN];
   const message = operation === 'aggregate' && named.aggregate
@@ -269,6 +275,8 @@ export function snapshotQueryRefusal(operation: string, named: NamedSnapshotColu
   err.object = object;
   err.fields = fields;
   err.details = { object, fields: [...fields], reason: 'field_predicate_denied' };
+  // [#34699] The user's half of the predicate refusal, naming no field.
+  if (!(operation === 'aggregate' && named.aggregate)) err.userMessage = operationUserMessage('query_field_not_readable', caller);
   return err;
 }
 
@@ -303,7 +311,7 @@ export function bindSnapshotPredicateGuard(
       });
       refuse = true;
     }
-    if (refuse) throw snapshotQueryRefusal(opCtx.operation, named);
+    if (refuse) throw snapshotQueryRefusal(opCtx.operation, named, opCtx.context);
     return next();
   }, { object: APPROVAL_REQUEST_OBJECT });
 }

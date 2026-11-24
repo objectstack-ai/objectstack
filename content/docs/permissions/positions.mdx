@@ -49,6 +49,9 @@ Visibility depth comes from two dedicated structures:
 - the **manager chain** (`sys_user.manager_id`) — consumed by
   `own_and_reports`.
 
+The depth grants (`own_and_reports`, `unit`, `unit_and_below`) are enforced by
+the enterprise edition only; on the open edition they behave as owner-only.
+
 **There is no implicit "managers see subordinates' records" grant.** Upward
 visibility is always an explicit opt-in: a sharing rule targeting a position
 or BU subtree, or a scope-depth grant on the permission set. See

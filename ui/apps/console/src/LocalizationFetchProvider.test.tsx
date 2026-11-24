@@ -32,7 +32,7 @@ import { notifyDataChanged } from '@object-ui/react';
 import { resetInflightGetsForTesting } from '../../../packages/types/src/http-inflight';
 import { clearSharedDiscoveryCache } from '../../../packages/data-objectstack/src/sharedDiscovery';
 import { LocalizationFetchProvider } from './LocalizationFetchProvider';
-import { __resetPreferredLocaleForTests, loadPreferredLocale } from './languageSeed';
+import { __resetPreferredLocaleForTests, loadPreferredLocale, seedTenantLanguage } from './languageSeed';
 // Not on the `@object-ui/auth` barrel; the vitest alias maps that barrel to
 // `packages/auth/src`, so this deep path is the SAME module instance the
 // provider's `getSessionOwnerChangeCount` reads.
@@ -320,6 +320,38 @@ describe('LocalizationFetchProvider', () => {
 
       await waitFor(() => expect(screen.getByTestId('display')).toHaveTextContent('zh-CN|2026年10月11日'));
       expect(fetchMock()).toHaveBeenCalledTimes(2);
+    });
+
+    it('a boot read answered by the seed\'s hand-off still reads again after a write (objectstack#35455)', async () => {
+      authUser = { id: 'u1' };
+      window.localStorage.clear();
+      __resetPreferredLocaleForTests();
+      clearSharedDiscoveryCache();
+      fetchMock().mockImplementation(async (url: string) =>
+        String(url).endsWith('/api/v1/discovery')
+          ? fail(404)
+          : ok({ authenticated: true, currency: null, locale: 'en-US', timezone: 'UTC' }));
+      // The seed's request settles before the mount, and the boot read takes it.
+      await seedTenantLanguage('', 1_000);
+      const localizationCalls = () =>
+        fetchMock().mock.calls.filter(([url]) => !String(url).endsWith('/api/v1/discovery')).length;
+      expect(localizationCalls()).toBe(1);
+
+      renderDisplayProbe();
+      await waitFor(() => expect(screen.getByTestId('display')).toHaveTextContent('en-US|Oct 11, 2026'));
+      expect(localizationCalls()).toBe(1);
+
+      fetchMock().mockImplementation(async (url: string) =>
+        String(url).endsWith('/api/v1/discovery')
+          ? fail(404)
+          : ok({ authenticated: true, currency: null, locale: 'zh-CN', timezone: 'UTC' }));
+      write('u1');
+
+      await waitFor(() => expect(screen.getByTestId('display')).toHaveTextContent('zh-CN|2026年10月11日'));
+      expect(localizationCalls()).toBe(2);
+      window.localStorage.clear();
+      __resetPreferredLocaleForTests();
+      clearSharedDiscoveryCache();
     });
 
     it('the re-read does not join a request still in flight from before the write', async () => {

@@ -9,7 +9,7 @@
  */
 
 import { isMcpServerEnabled } from '@objectstack/types';
-import { MCP_OAUTH_SCOPES, deriveAiFaceName } from '@objectstack/spec/ai';
+import { MCP_OAUTH_SCOPES, MCP_OAUTH_SCOPE_DATA_READ, deriveAiFaceName } from '@objectstack/spec/ai';
 import type { ErrorCode, MetadataProtocol } from '@objectstack/spec/api';
 import type { ISecurityService } from '@objectstack/spec/contracts';
 // [#32442] The ONE reading of `enable.aiReadable` (ruling A, #32865).
@@ -21,7 +21,7 @@ import {
     type BuiltinMembershipRole,
     type MembershipReachEntry,
 } from '@objectstack/spec/identity';
-import type { AIActionConfirmation, IExternalDatasourceService } from '@objectstack/spec/contracts';
+import type { AIActionConfirmation, IExternalDatasourceService, ScreenSpec } from '@objectstack/spec/contracts';
 import {
     FEDERATION_READ_CAPABILITY,
     FEDERATION_WRITE_CAPABILITY,
@@ -29,11 +29,12 @@ import {
     metaRequestLocale,
     translateMetaList,
     type FederationCallKind,
+    type MetaListTranslationSources,
 } from '@objectstack/rest';
 // [ADR-0131 D3 · D12 items 7–8 · D11] The walled refusal every door that writes
 // the environment's metadata asks, read through this transport's one posture read.
 import { walledCatalogWriteVerdict } from '@objectstack/metadata-core';
-import { shouldDenyAnonymous, ANONYMOUS_DENY_STATUS, ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE } from '@objectstack/core';
+import { shouldDenyAnonymous, ANONYMOUS_DENY_STATUS, ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE, userTextLocalesOf } from '@objectstack/core';
 import { readEffectiveTenancyPosture } from './activation-gate.js';
 import { buildApiError } from '../error-envelope.js';
 import * as actionExec from '../action-execution.js';
@@ -42,9 +43,17 @@ import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatch
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
 import type { ActionDispatchAnswer, ActionResumeRequest, PlaceRequestInEnvironment } from '../action-dispatch.js';
 import { readDispatchedBody } from '../deferred-request-body.js';
+// [#34766] The open MCP draft door: its registry, behind `metadata:write` and the user's own `manage_metadata`.
+import { resolveOpenAuthoringInjection } from './mcp-authoring.js';
+// [#35442] The app-docs members (`search_package_docs` / `read_package_doc`), over the `/meta/doc` docs-audience gate.
+import { createPackageDocMembers, packageDocsReadGate, type PackageDocsProtocol } from './mcp-package-docs.js';
 // [#28715] The engine's own reading of "this field declares options" (its
 // `label()` map is built from it), never a second spelling here.
 import { declaresOptions } from '@objectstack/formula';
+// The engine's order-cut-count read option for `aggregate` (and the request it
+// carries): `aggregate_records`' ranking form rides to the engine on it.
+import { AGGREGATE_ORDER_CUT, type AggregateOrderCutRequest } from '@objectstack/objectql';
+import { LATEST_PER, type LatestPerRequest } from '@objectstack/objectql';
 import { RUNTIME_OWNED_FIELD_TYPES, SEARCH_COMPANION_FIELD, isVirtualSearchField } from '@objectstack/spec/data';
 // [#15705] The resume door's one refusal table, shared with
 // `POST /automation/:name/runs/:runId/resume` so the two doors answer one
@@ -241,7 +250,22 @@ export async function handleMcpRequest(deps: DomainHandlerDeps, body: any, conte
     // carries `list_datasets` / `query_dataset` exactly where the analytics
     // service serves its dataset executor.
     const datasetTools = await resolveMcpDatasetToolsService(deps, context);
-    const bridge = buildMcpBridge(deps, context, { recordFiles, datasetTools });
+    // [#35442] The docs seam: the bridge carries `search_package_docs` /
+    // `read_package_doc` exactly where the protocol serves the `/meta` list read
+    // and [ADR-0090 D10] the grant reaches the docs tools. The MCP runtime's
+    // `packageDocToolsServed` (`data:read`, or no grant at all) stays the
+    // authority on listing them; it is read here too so a token that cannot
+    // reach them never has the delegating person's holdings read for them.
+    const packageDocs = !grantedScopes || grantedScopes.includes(MCP_OAUTH_SCOPE_DATA_READ)
+        ? await resolveMcpPackageDocsProtocol(deps, context)
+        : undefined;
+    const bridge = buildMcpBridge(deps, context, { recordFiles, datasetTools, packageDocs });
+    // [#34766] The open draft door (design `docs/design/mcp-local-first-door.md`,
+    // Design A): resolved per request, so the user's own `manage_metadata` is
+    // read for every call. `undefined` for a grant without `metadata:write`
+    // (an API key or a session carries none) and for an envelope with no user;
+    // a user without the capability gets a registry that lists nothing.
+    const authoring = await resolveOpenAuthoringInjection(deps, context, grantedScopes);
     let webRes: Response;
     try {
         webRes = await mcp.handleHttpRequest(webRequest, {
@@ -250,6 +274,7 @@ export async function handleMcpRequest(deps: DomainHandlerDeps, body: any, conte
             // undefined = not scope-limited (API key / session); an array
             // narrows the registered tool families inside the MCP runtime.
             ...(grantedScopes ? { toolOptions: { grantedScopes } } : {}),
+            ...(authoring ? { authoring } : {}),
             // [#31605] Who this request was admitted as: the resolved
             // ExecutionContext and the environment it was dispatched for. A
             // host-installed tool-call interceptor reads every call's
@@ -699,10 +724,13 @@ function describeServedObject(def: any, declared: any): Record<string, unknown> 
     return {
         name: def.name,
         label: def.label ?? def.name,
+        // [#34721] The authored descriptions, off the same served object.
+        ...authoredDescription(def),
         fields: Object.entries(def.fields ?? {}).filter(([k]) => k !== SEARCH_COMPANION_FIELD).map(([k, f]: [string, any]) => ({
             name: k,
             type: f?.type,
             label: f?.label ?? k,
+            ...authoredDescription(f),
             required: f?.required ?? false,
             // [#32530] Judged on the DECLARED field, never the served one: the
             // caller's mask deletes a readable field's `expression` when it
@@ -717,6 +745,33 @@ function describeServedObject(def: any, declared: any): Record<string, unknown> 
         validations: describedRules(def.validations),
         enableFeatures: def.enable ?? {},
     };
+}
+
+/**
+ * [#35137] The field names a {@link describeServedObject} answer lists, in its
+ * order: the served-schema half of `fieldVisibilityOf`. The stdio twin is
+ * `describedFieldNames` in `packages/mcp/src/stdio-data-bridge.ts`.
+ */
+function describedFieldNames(described: Record<string, unknown>): string[] {
+    const fields = described.fields;
+    return Array.isArray(fields) ? fields.map((f: any) => String(f?.name ?? '')).filter(Boolean) : [];
+}
+
+/**
+ * [#34721] An object's or a field's `description` as `list_objects` and
+ * `describe_object` serve it: `{ description }` when the definition, as the
+ * caller is served it ({@link servedToCaller}), carries a non-blank string
+ * there, and nothing otherwise, so an answer for a definition that authors
+ * none keeps the shape it always had. The existing key only: the ADR-0106
+ * projection removes an unreadable field whole, its description with it, and
+ * keeps the prose of everything the caller may read, as the `/meta` object
+ * door serves it.
+ *
+ * The twin is `authoredDescription` in `packages/mcp/src/mcp-server-runtime.ts`.
+ */
+function authoredDescription(def: any): { description?: string } {
+    const text = def?.description;
+    return typeof text === 'string' && text.trim() !== '' ? { description: text } : {};
 }
 
 /**
@@ -904,7 +959,7 @@ function actionDeclarationReads(deps: DomainHandlerDeps, context: HttpProtocolCo
 export function buildMcpBridge(
     deps: DomainHandlerDeps,
     context: HttpProtocolContext,
-    seams: { recordFiles?: McpRecordFileService; datasetTools?: McpDatasetToolsService } = {},
+    seams: { recordFiles?: McpRecordFileService; datasetTools?: McpDatasetToolsService; packageDocs?: PackageDocsProtocol } = {},
 ): any {
     const ec = context.executionContext;
     const envId = context.environmentId;
@@ -1000,6 +1055,24 @@ export function buildMcpBridge(
         return { obj: projected.object ?? obj };
     };
 
+    /**
+     * [#34872] Served objects in THIS caller's locale: the `/meta` object
+     * door's translation (`translateMetaList`, the routine `GET /meta/object`
+     * and the dataset tools below run) for this request's locale
+     * ({@link metaTranslationSources}), ⛔ never a second translation routine.
+     * Handed the objects AS THIS CALLER IS SERVED THEM ({@link servedToCaller}):
+     * the translator rewrites the text of the fields it is given and adds
+     * none, so a field the mask removed stays absent, its translated label and
+     * description with it (ADR-0106 D3/D5). Computed per request (ADR-0156).
+     * No locale, or a key the bundle does not carry, leaves the authored text;
+     * names never change.
+     */
+    const inCallerLocale = async (served: readonly any[]): Promise<any[]> => {
+        if (served.length === 0) return [...served];
+        const translated = await translateMetaList(metaTranslationSources(deps, context, getProtocol), 'object', [...served]);
+        return Array.isArray(translated) ? translated : [...served];
+    };
+
     /** {@link readServedObject}, as this caller is served it ({@link servedToCaller}). */
     const readObjectForCaller = async (name: string): Promise<any> => {
         const def: any = await readServedObject(name);
@@ -1008,7 +1081,7 @@ export function buildMcpBridge(
 
     const listObjectSummaries = async (): Promise<any[]> => {
         const objs = await readServedObjects();
-        const out: any[] = [];
+        const served: any[] = [];
         // [ADR-0106 D5(2)] Every listed object as this caller is served it,
         // so `fieldCount` counts the fields that exist for them. One object
         // that cannot be projected refuses the listing, as the `/meta`
@@ -1016,14 +1089,38 @@ export function buildMcpBridge(
         for (const listed of objs) {
             const o = await servedToCaller(listed);
             // [ruling record 6787890900] An object the caller may not read is left out.
-            if (o === undefined) continue;
+            if (o !== undefined) served.push(o);
+        }
+        const out: any[] = [];
+        // [#34872] …in the caller's locale, the page translated in one call.
+        for (const o of await inCallerLocale(served)) {
             out.push({
                 name: o.name,
                 label: o.label ?? o.name,
+                // [#34721] …and its authored description, as the stdio twin serves it.
+                ...authoredDescription(o),
                 fieldCount: o.fields ? Object.keys(o.fields).length : undefined,
             });
         }
         return out;
+    };
+
+    /**
+     * `describe_object`'s answer for THIS caller: the object as they are
+     * served it ({@link readObjectForCaller}'s two steps, kept apart so the
+     * declaration it masks is in hand, [#32530] `readonly`), [#34872] in
+     * their locale, [#32435] each field and rule carrying what a write needs
+     * ({@link describeServedObject}). `null` for an object not served.
+     * [#35137] Also the served-schema half of `fieldVisibilityOf`, so the
+     * fields `withheldFields` may name are exactly the ones this answer lists.
+     */
+    const describeForCaller = async (name: string): Promise<Record<string, unknown> | null> => {
+        const declared: any = await readServedObject(name);
+        const def: any = declared ? await servedToCaller(declared) : declared;
+        if (!def) return null;
+        // `declared` is read for the `readonly` verdict alone, which no translation touches.
+        const [localized] = await inCallerLocale([def]);
+        return describeServedObject(localized, declared);
     };
 
     return {
@@ -1093,15 +1190,7 @@ export function buildMcpBridge(
                 : await ((await getMeta()) as any)?.getObject?.(name);
             return isAiReadExposed(def);
         },
-        describeObject: async (name: string) => {
-            // {@link readObjectForCaller}'s two steps, kept apart so the
-            // declaration it masks is in hand ([#32530] `readonly`).
-            const declared: any = await readServedObject(name);
-            const def: any = declared ? await servedToCaller(declared) : declared;
-            if (!def) return null;
-            // [#32435] …each field and rule carrying what a write needs.
-            return describeServedObject(def, declared);
-        },
+        describeObject: describeForCaller,
         // [#28715] The fields `validate_expression` judges a `label()` call
         // against, from the object `describeObject` reads: the served object,
         // where a picklist-bound field carries its list's resolved `options`,
@@ -1130,7 +1219,16 @@ export function buildMcpBridge(
             if (typeof o?.limit === 'number') query.limit = o.limit;
             if (typeof o?.offset === 'number') query.offset = o.offset;
             if (o?.orderBy) query.orderBy = o.orderBy;
-            return await callData('query', { object, query }, driver, envId, ec);
+            // [#35145] `query_records`' `expand`: the names, which `findData`
+            // lowers, gates (`assertExpandTargetsExist`, `servedExpand`) and
+            // the engine expands in one batched read per field, as on REST.
+            if (Array.isArray(o?.expand) && o.expand.length > 0) query.expand = o.expand;
+            if (!o?.latestPer) return await callData('query', { object, query }, driver, envId, ec);
+            // [latest per group] One row per group rides to the engine on the
+            // engine's own symbol key (never a wire key), through `findData`,
+            // which judges the query as it judges every other.
+            const latestPer: LatestPerRequest = { by: o.latestPer.by, orderBy: o.latestPer.orderBy };
+            return await callData('query', { object, query, [LATEST_PER]: latestPer }, driver, envId, ec);
         },
         /**
          * [ADR-0090 D10 — maintainer ruling 2026-09-08, #16549] The
@@ -1162,6 +1260,27 @@ export function buildMcpBridge(
                 return { narrowed: false };
             }
         },
+        /**
+         * [#35137] The two answers `query_records` and `get_record` name
+         * withheld fields from (`McpFieldVisibility`, `@objectstack/mcp`), both
+         * asked as THIS request's caller: the field names `describe_object`
+         * lists for them, read off the very answer it serves
+         * ({@link describeForCaller}, so whatever it leaves out is left out
+         * here too), and this request's security service's readable answer
+         * (`getReadableFields`). No security service, an object not served,
+         * or no readable answer: `undefined`, and nothing is named. A throw
+         * reaches the tool layer, which names nothing either.
+         */
+        fieldVisibilityOf: async (object: string) => {
+            const security = await deps.resolveService(context, 'security', envId) as
+                Partial<ISecurityService> | undefined;
+            if (typeof security?.getReadableFields !== 'function') return undefined;
+            const described = await describeForCaller(object);
+            if (!described) return undefined;
+            const readable = await security.getReadableFields(object, ec);
+            if (!Array.isArray(readable)) return undefined;
+            return { served: describedFieldNames(described), readable };
+        },
         get: async (object: string, id: string) => {
             const res: any = await callData('get', { object, id }, driver, envId, ec);
             return res?.record ?? res ?? null;
@@ -1186,6 +1305,45 @@ export function buildMcpBridge(
             );
             return res?.rows ?? [];
         },
+        /**
+         * [aggregate order and cut] `aggregate_records` with an `orderBy` /
+         * `limit`: the same engine door as `aggregate` above, with the
+         * engine's request on its own symbol key (never a wire key). `callData`
+         * reads the engine's outcome back and answers its `totalGroups`; a read
+         * the driver's statement did not serve is refused there.
+         */
+        aggregateGroups: async (object: string, o: any) => {
+            const orderCut: AggregateOrderCutRequest = {
+                orderBy: o.orderBy,
+                ...(typeof o?.limit === 'number' ? { limit: o.limit } : {}),
+            };
+            const res: any = await callData(
+                'aggregate',
+                {
+                    object,
+                    where: o?.where,
+                    groupBy: o?.groupBy,
+                    aggregations: o?.aggregations,
+                    timezone: o?.timezone,
+                    [AGGREGATE_ORDER_CUT]: orderCut,
+                },
+                undefined,
+                envId,
+                ec,
+            );
+            if (typeof res?.totalGroups !== 'number') {
+                throw {
+                    statusCode: 500,
+                    message: `The ordered and cut aggregate of '${object}' came back without its group count, so its `
+                        + 'rows are not the answer and none is returned.',
+                };
+            }
+            return { rows: res?.rows ?? [], totalGroups: res.totalGroups };
+        },
+        // [#35138] The caller's locale ladder for a sentence the record tools
+        // compose (`ifNotRecorded`): this request's, as the dataset tools'
+        // `nextStep` reads it on this door (`userTextLocalesOf`).
+        userTextLocales: async (): Promise<readonly string[]> => userTextLocalesOf(ec),
 
         // ── Skill metadata → MCP prompts (#3905) ──────────────────
         // ADR-0063 §2 names skills the only third-party extension primitive,
@@ -1450,6 +1608,25 @@ export function buildMcpBridge(
         // [ADR-0149 D2] The dataset seam (`list_datasets` / `query_dataset`),
         // carried only where the analytics service serves its executor.
         ...(seams.datasetTools ? datasetToolMembers(seams.datasetTools, getProtocol, ec, deps, context) : {}),
+        // [#35442] The docs seam (`search_package_docs` / `read_package_doc`),
+        // carried only where the protocol serves the `/meta` list read. Every
+        // page is read through the `/meta/doc` docs-audience gate AS this
+        // request's caller (`mcp-package-docs.ts`), in this request's locale;
+        // [ADR-0090 D10] on a delegated agent envelope with the delegating
+        // person's own holdings, read through this request's data engine.
+        ...(seams.packageDocs
+            ? createPackageDocMembers(async () => ({
+                protocol: seams.packageDocs!,
+                readGate: packageDocsReadGate(
+                    seams.packageDocs!,
+                    ec as Record<string, unknown> | undefined,
+                    (name) => deps.resolveService(context, name),
+                    async () => (await deps.getObjectQL(context, envId))
+                        ?? (await deps.resolveService(context, 'objectql', envId)),
+                ),
+                locale: metaRequestLocale(mcpRequestHttp(context)),
+            }))
+            : {}),
     };
 }
 
@@ -1463,7 +1640,8 @@ export function buildMcpBridge(
  */
 export interface McpDatasetToolsService {
     datasetTools(deps: {
-        loadDatasets: (context: unknown) => Promise<readonly unknown[]>;
+        loadDatasets: (context: unknown) => Promise<readonly unknown[] | { items: readonly unknown[]; warning?: string }>;
+        translationLocale?: (context: unknown) => Promise<string | undefined>;
         diagnoseDelegation?: (object: string, context: unknown) => Promise<{ narrowed: boolean; statement?: string } | undefined>;
         maxQueryLimit?: number;
     }): {
@@ -1494,6 +1672,76 @@ export async function resolveMcpDatasetToolsService(
 }
 
 /**
+ * [#35442] The protocol whose `/meta` list read the app-docs members read
+ * `doc` and `book` items through, or `undefined` when this request has none
+ * (no protocol, one without `getMetaItems`, or a lookup that throws): the doc
+ * tools are then not listed, as for {@link resolveMcpDatasetToolsService}.
+ */
+export async function resolveMcpPackageDocsProtocol(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+): Promise<PackageDocsProtocol | undefined> {
+    let protocol: Partial<PackageDocsProtocol> | undefined;
+    try {
+        protocol = (await deps.resolveService(context, 'protocol', context.environmentId)) as Partial<PackageDocsProtocol> | undefined;
+    } catch {
+        return undefined;
+    }
+    return protocol && typeof protocol.getMetaItems === 'function' ? (protocol as PackageDocsProtocol) : undefined;
+}
+
+/**
+ * [#35083] This request's two locale members, as the REST door reads them: its
+ * headers, and its query — the host's parsed `query` where the request carries
+ * one, else its URL's (a repeated `?locale=` stays an array, which the locale
+ * read sends to the i18n default).
+ */
+function mcpRequestHttp(context: HttpProtocolContext): { headers?: unknown; query?: Record<string, unknown> } {
+    const request: any = context.request;
+    if (request?.query && typeof request.query === 'object') return { headers: request.headers, query: request.query };
+    let params: URLSearchParams | undefined;
+    try {
+        params = typeof request?.url === 'string' ? new URL(request.url, 'http://localhost').searchParams : undefined;
+    } catch {
+        params = undefined;
+    }
+    const query: Record<string, unknown> = {};
+    for (const key of new Set(params?.keys() ?? [])) {
+        const values = params!.getAll(key);
+        query[key] = values.length > 1 ? values : values[0];
+    }
+    return { headers: request?.headers, query };
+}
+
+/**
+ * [ADR-0149 D2 · #34872] What the `/meta` translation reads for THIS request:
+ * the request's i18n service (a lookup that throws is none, and the text is
+ * then served untranslated), its protocol (an object's packaged base and a
+ * declared override's pair translations) and its locale — the
+ * `Accept-Language` / `?locale=` reading every `/meta` answer takes
+ * (`metaRequestLocale`), the i18n service's default last. One reading for the
+ * dataset tools and the object tools, so the two answer one caller in one
+ * locale.
+ */
+function metaTranslationSources(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+    getProtocol: () => Promise<unknown>,
+): MetaListTranslationSources {
+    return {
+        resolveI18nService: async () => {
+            try {
+                return await deps.resolveService(context, 'i18n', context.environmentId);
+            } catch {
+                return undefined;
+            }
+        },
+        resolveProtocol: getProtocol,
+        requestLocale: (i18n?: unknown) => metaRequestLocale(mcpRequestHttp(context), i18n),
+    };
+}
+
+/**
  * [ADR-0149 D2] The bridge's three dataset members over the analytics
  * service's executor, bound to THIS request's principal.
  *
@@ -1502,7 +1750,10 @@ export async function resolveMcpDatasetToolsService(
  *   localized with the `/meta` list translation for this request's locale, as
  *   the REST door localizes a saved dataset. A throwing read is left to throw:
  *   the executor answers it as a degraded read (`partial` / 503), never as an
- *   empty catalogue.
+ *   empty catalogue. [#34993] A translation fault is no failed read: the rows
+ *   are handed over untranslated, with the fault's sentence as their `warning`.
+ * - [#35083] `translationLocale` is the locale that translation read, so the
+ *   executor's labels and its sentences speak one language.
  * - The narrowing probe is the bridge's own `diagnoseDelegation` read, asked
  *   of this request's security service, so `query_dataset` states a narrowing
  *   exactly where `query_records` does.
@@ -1517,25 +1768,21 @@ function datasetToolMembers(
     context: HttpProtocolContext,
 ) {
     const envId = context.environmentId;
-    const loadDatasets = async (): Promise<readonly unknown[]> => {
+    const loadDatasets = async () => {
         const protocol = await getProtocol();
         const items = (await actionExec.readMergedItems(protocol, 'dataset')) ?? [];
+        let warning: string | undefined;
         const translated = await translateMetaList(
-            {
-                resolveI18nService: async () => {
-                    try {
-                        return await deps.resolveService(context, 'i18n', envId);
-                    } catch {
-                        return undefined;
-                    }
-                },
-                resolveProtocol: async () => protocol as any,
-                requestLocale: (i18n?: unknown) => metaRequestLocale({ headers: context.request?.headers }, i18n),
-            },
+            { ...metaTranslationSources(deps, context, async () => protocol), reportTranslationFault: (w) => { warning = w; } },
             'dataset',
             items,
         );
-        return Array.isArray(translated) ? translated : items;
+        const rows = Array.isArray(translated) ? translated : items;
+        return warning === undefined ? rows : { items: rows, warning };
+    };
+    const translationLocale = async () => {
+        const sources = metaTranslationSources(deps, context, getProtocol);
+        return sources.requestLocale(await sources.resolveI18nService());
     };
     const diagnoseDelegation = async (object: string) => {
         try {
@@ -1548,7 +1795,7 @@ function datasetToolMembers(
         }
     };
     const executor = (maxQueryLimit?: number) =>
-        service.datasetTools({ loadDatasets, diagnoseDelegation, ...(maxQueryLimit !== undefined ? { maxQueryLimit } : {}) });
+        service.datasetTools({ loadDatasets, translationLocale, diagnoseDelegation, ...(maxQueryLimit !== undefined ? { maxQueryLimit } : {}) });
     return {
         listDatasets: (input: unknown) => executor().listDatasets(input, ec),
         queryDataset: (input: unknown, opts: { maxRows: number }) => executor(opts.maxRows).queryDataset(input, ec),
@@ -1929,7 +2176,11 @@ function notResumableRunMessage(runId: string): string {
  *     the run is not resumed.
  *  5. **A screen pause only.** `getSuspendedScreen` must return a screen.
  *     The verb submits screen values. A run parked on any other node (a
- *     timer `wait`, for example) is refused 409 and left alone.
+ *     timer `wait`, for example) is refused 409 and left alone. [#34515] An
+ *     approval is bound to the screen it was given on (an approved hand-off's
+ *     `screenNodeId` at the host door, the screen an elicited person was
+ *     asked about): a run now paused on another screen is refused 409
+ *     `RESOURCE_CONFLICT` and left alone.
  *  6. **Resume.** The signal is built one field at a time and the input is
  *     never spread, as the REST door does (#3801). The engine's answer goes
  *     through {@link classifyResumeResult}, the table both doors share.
@@ -1979,8 +2230,12 @@ export async function resumeActionRun(
          * `actionConfirmationRefusal`): nothing is handed off or elicited,
          * an AI service account is refused whatever it carries, and the
          * invocation row names no MCP surface.
+         *
+         * [#34515] `screenNodeId` is the screen the approved hand-off was given
+         * on (`ActionConfirmationHandOff.run.screenNodeId`): step 5 refuses a
+         * run no longer paused on it.
          */
-        hostDoor?: { confirmation: AIActionConfirmation };
+        hostDoor?: { confirmation: AIActionConfirmation; screenNodeId?: string };
     },
 ): Promise<any> {
     const { driver, envId, ec, getMeta, readObjects, readActions, callData, hostDoor } = wiring;
@@ -2092,8 +2347,12 @@ export async function resumeActionRun(
     // instead, after the same steps: `accept` resumes the run below, as any
     // admitted resume; any other answer refuses the call and the run stays
     // parked. Nothing is handed off then.
+    // [#34515] The screen an approval is bound to: the one the host passed
+    // back for an approved hand-off, or the one an elicited person was asked
+    // about (below). Step 5 refuses a run no longer paused on it.
+    let boundScreenNodeId = hostDoor?.screenNodeId;
     if (handOff && elicitConfirmation) {
-        const subject = await refuseUnresumableAdmittedRun(deps, automation, runId, { objectName, recordId, driver, envId, ec, callData });
+        const { subject, screen } = await refuseUnresumableAdmittedRun(deps, automation, runId, { objectName, recordId, driver, envId, ec, callData });
         const elicited = await actionExec.elicitActionConfirmation(
             elicitConfirmation,
             actionExec.actionConfirmationElicitSubject(
@@ -2113,15 +2372,21 @@ export async function resumeActionRun(
         // the subject and the screen again itself (`continueAdmittedRun`).
         const regated = resumeAdmissionRefusal(deps, admitted, ec, activationEngine);
         if (regated instanceof Error) throw regated;
+        // [#34515] The person answered for the screen the run was parked on
+        // then: a run that moved on meanwhile is refused at step 5.
+        boundScreenNodeId = screenNodeIdOf(screen);
     } else if (handOff) {
-        await refuseUnresumableAdmittedRun(deps, automation, runId, { objectName, recordId, driver, envId, ec, callData });
+        // [#34515] The hand-off names the screen the values were given for,
+        // so the host can bind its approval to it (`dispatchActionResume`).
+        const { screen } = await refuseUnresumableAdmittedRun(deps, automation, runId, { objectName, recordId, driver, envId, ec, callData });
+        const screenNodeId = screenNodeIdOf(screen);
         const answer = await actionExec.handOffActionConfirmation(deps, context, envId, {
             actionName: typeof action?.name === 'string' && action.name ? action.name : String(flowName),
             ...(actionExec.isObjectLessActionKey(objectName) ? {} : { objectName }),
             ...(recordId !== undefined ? { recordId } : {}),
             params: {},
             door: 'mcp',
-            run: { runId, values: values ?? {} },
+            run: { runId, values: values ?? {}, ...(screenNodeId !== undefined ? { screenNodeId } : {}) },
         }, ec);
         if ('refused' in answer) {
             throw resumeDoorError(deps, answer.refused.message, answer.refused.status, {
@@ -2152,7 +2417,7 @@ export async function resumeActionRun(
     let answer: any;
     try {
         answer = await continueAdmittedRun(deps, automation, runId, values, {
-            action, objectName, recordId, driver, envId, ec, callData,
+            action, objectName, recordId, driver, envId, ec, callData, boundScreenNodeId,
         });
     } catch (err) {
         await recordActionInvocation(deps, context, envId, {
@@ -2187,9 +2452,14 @@ export async function resumeActionRun(
  *    the run to be paused on a screen; step 6 resumes it.
  *
  * Step 2 refuses only a run that is no longer paused: a wizard moved on to
- * its next screen is still paused under the same run id, and a second call
- * with the same hand-off resumes that screen with the values given. Deciding
- * a pending item once is the host's.
+ * its next screen is still paused under the same run id. [#34515] So the
+ * host passes back the screen the hand-off was given on
+ * (`ActionConfirmationHandOff.run.screenNodeId`, as `screenNodeId`), and
+ * step 5 refuses a run no longer paused on it, `409 RESOURCE_CONFLICT`,
+ * leaving it where it is: a second approval of the same hand-off, or one
+ * that lands after the person advanced the wizard in the app, resumes
+ * nothing. Without it, the run's current screen is resumed with the values
+ * given. Deciding a pending item once is the host's.
  *
  * Placement is the host action door's ({@link PlaceRequestInEnvironment}).
  * What stays the host's before it calls, as for `dispatchAction`: resolving
@@ -2235,6 +2505,11 @@ export async function resumeActionRunRequest(
     }
     const { getMeta, readServedObjects, readServedActions } = actionDeclarationReads(deps, context);
     const confirmation: AIActionConfirmation = request.confirm !== undefined ? { confirm: request.confirm } : {};
+    // [#34515] The screen the approved hand-off was given on, when the host passes it back.
+    const screenNodeId = request.screenNodeId;
+    if (screenNodeId !== undefined && (typeof screenNodeId !== 'string' || screenNodeId === '')) {
+        return deps.error('dispatchActionResume\'s `screenNodeId` names the screen the hand-off was given on: a non-empty string', 400) as ActionDispatchAnswer;
+    }
     try {
         const answer = await resumeActionRun(deps, context, runId, request.values !== undefined ? { values: request.values } : {}, {
             driver: (context as any).dataDriver,
@@ -2244,7 +2519,7 @@ export async function resumeActionRunRequest(
             readObjects: readServedObjects,
             readActions: readServedActions,
             callData: actionExec.callData.bind(null, deps, context),
-            hostDoor: { confirmation },
+            hostDoor: { confirmation, ...(screenNodeId !== undefined ? { screenNodeId } : {}) },
         });
         return deps.success(answer) as ActionDispatchAnswer;
     } catch (err) {
@@ -2271,6 +2546,8 @@ async function continueAdmittedRun(
         envId?: string;
         ec: any;
         callData: (action: string, params: any, dataDriver?: any, scopeId?: string, ec?: any) => Promise<any>;
+        /** [#34515] The screen the approval was given on, when it is bound to one. */
+        boundScreenNodeId?: string;
     },
 ): Promise<any> {
     const { action, objectName, recordId } = admitted;
@@ -2289,6 +2566,14 @@ async function continueAdmittedRun(
  * `resume_run` steps 4–5 for an admitted run: the subject record read again
  * as the caller, and the screen-pause check. Throws the refusal; reads
  * nothing else. Asked before a resume and before a hand-off (#33690) alike.
+ *
+ * [#34515] Step 5 also binds an approval to its screen: given
+ * `boundScreenNodeId`, a run paused on another screen is refused 409 and left
+ * where it is. A multi-screen wizard stays `paused` under the same run id as
+ * it moves from screen to screen, so step 2 alone would let an approval given
+ * for one screen (a second approval of the same hand-off, or one that lands
+ * after the person advanced the wizard in the app) submit its values to the
+ * next screen, as the approver.
  */
 async function refuseUnresumableAdmittedRun(
     deps: DomainHandlerDeps,
@@ -2301,9 +2586,10 @@ async function refuseUnresumableAdmittedRun(
         envId?: string;
         ec: any;
         callData: (action: string, params: any, dataDriver?: any, scopeId?: string, ec?: any) => Promise<any>;
+        boundScreenNodeId?: string;
     },
-): Promise<actionExec.ActionSubjectRecordLoad> {
-    const { objectName, recordId, driver, envId, ec, callData } = admitted;
+): Promise<{ subject: actionExec.ActionSubjectRecordLoad; screen: ScreenSpec }> {
+    const { objectName, recordId, driver, envId, ec, callData, boundScreenNodeId } = admitted;
 
     // ── 4. the subject record, read again in the caller's own scope ──────────
     const subject = await actionExec.loadActionSubjectRecord(objectName, recordId, () =>
@@ -2320,8 +2606,24 @@ async function refuseUnresumableAdmittedRun(
             409,
         );
     }
+    // [#34515] An approval bound to a screen resumes that screen and no other.
+    if (boundScreenNodeId !== undefined && screenNodeIdOf(screen) !== boundScreenNodeId) {
+        throw resumeDoorError(
+            deps,
+            `Run '${runId}' has moved on: this approval was given for screen '${boundScreenNodeId}', and the run is `
+                + `now paused on ${screenNodeIdOf(screen) !== undefined ? `screen '${screenNodeIdOf(screen)}'` : 'another screen'}. `
+                + 'Nothing was resumed and the run stays where it is; ask again on the screen it is on now.',
+            409,
+        );
+    }
     // [#33712] The subject as read, so an elicitation can name the record by its title.
-    return subject;
+    return { subject, screen };
+}
+
+/** [#34515] A screen's node id (`ScreenSpec.nodeId`), when the engine named one. */
+function screenNodeIdOf(screen: ScreenSpec | null | undefined): string | undefined {
+    const nodeId = (screen as { nodeId?: unknown } | null | undefined)?.nodeId;
+    return typeof nodeId === 'string' && nodeId !== '' ? nodeId : undefined;
 }
 
 /**

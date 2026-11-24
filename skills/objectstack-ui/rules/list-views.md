@@ -5,13 +5,14 @@
 - [End-User Quick Filters](#end-user-quick-filters-userfilters-adr-0047) · [Toolbar Search](#toolbar-search-searchablefields-adr-0061)
 - [Configuring Kanban Views](#configuring-kanban-views)
 - [Configuring Gantt Views](#configuring-gantt-views)
+- [Form Views](#form-views) · [Master-Detail Forms](#master-detail-forms-parent--child-line-items)
 
 ## Configuring a List View
 
 ### The `defineView` container (`*.view.ts` file shape)
 
 Views ship **inside a `defineView` container** — one per object, aggregating
-the default `list` and `form`, named `listViews`, and `formViews`. The loader
+the default `list`, named `listViews` and named `formViews`. The loader
 expands it into `<object>.<key>` view items that power the view switcher.
 
 <!-- os:check -->
@@ -22,10 +23,12 @@ const data = { provider: 'object' as const, object: 'support_case' };
 
 export const CaseViews = defineView({
   list: { label: 'All Cases', type: 'grid', data, columns: ['subject', 'status'] },
-  form: { type: 'simple', data, sections: [{ group: 'case_detail' }] },
   listViews: {
     open: { label: 'Open', type: 'grid', data, columns: ['subject', 'status'],
             filter: [{ field: 'status', operator: 'equals', value: 'open' }] },
+  },
+  formViews: {  // named: a `form` action targets `support_case.triage`
+    triage: { type: 'simple', data, sections: [{ group: 'case_detail' }] },
   },
 });
 ```
@@ -80,6 +83,9 @@ columns: [
 | `resizable` | Allow resizing |
 | `link` | Make this the primary navigation link |
 | `summary` | Footer aggregation: `count`, `sum`, `avg`, `min`, `max`, etc. |
+
+6–8 visible columns is plenty (`hidden` the rest); the name/subject column
+carries `link: true`.
 
 **Inline editing is on by default**, under the permission gate: a user who may
 `update` the object edits a cell in place. A list whose records are read-only
@@ -332,3 +338,72 @@ const timeline: ListView = {
 
 Rows with children (or `type: 'summary'`) are **summary bars**: dragged as a
 group, **no resize handles**. Leaf tasks resize unless `locked: true`.
+
+---
+
+## Form Views
+
+**An object's New and Edit forms are not form views.** The dialogs, the
+full-page form (`editMode: 'page'`) and a create or edit an action opens are
+built from the object: its fields, sectioned by `fieldGroups` in array order,
+following each field's own rules. Authored there:
+
+- `collapse: 'collapsed'` on a `fieldGroups` entry folds a rarely filled
+  section.
+- `showOnCreate: false` on a field leaves it off every create surface; edit,
+  the record page and lists keep it. Beside `required: true` it is refused,
+  whatever its `defaultValue`: keep it on create, or make it `requiredWhen`.
+- Dialog size and column count are derived, never authored:
+  [Record Presentation](./navigation.md#record-presentation--surface-width--columns-are-auto-derived).
+
+A container's `form`, `formViews.default` and `formViews.create` still parse
+and steer nothing (sections, tabs, steps, `subforms`, `defaults`, `modalSize`);
+`os validate` warns `form-view-internal-not-loaded`. Two kinds of form view
+load:
+
+**A named form** is a `formViews` entry under any other key, registered as
+`OBJECT.key`; an action of `type: 'form'` whose `target` is that name opens it
+on its own page (`/forms/:name`). Its `type` is `simple` (stacked sections, the
+default), `tabbed` (a tab per section) or `wizard` (a step per section, each
+listing `fields`, never `{ group }`). It draws no child line items.
+
+**A public form** is a form view with
+`sharing: { enabled: true, allowAnonymous: true, publicLink: 'slug' }`:
+Web-to-Lead at `GET/POST /api/v1/forms/:slug`.
+
+## Master-Detail Forms (parent + child line items)
+
+To let users enter a record **together with its child line items** (invoice +
+lines, project + tasks) and save them **atomically**, you almost never need a
+custom page. Prefer, in order:
+
+1. **A parent field group naming the child (zero view config).** In the DATA
+   MODEL, the parent declares `fieldGroups: [{ key: 'lines', label: 'Lines',
+   relatedList: 'invoice_line' }]`. Its standard New/Edit forms (modal,
+   drawer, full-page) then draw the children there and save parent + children
+   in one atomic `/api/v1/batch`. Without the group nothing changes: the child
+   is a tab and the form has no lines. A parent or child
+   declaring `enable.apiMethods` must list `'bulk'`, or that save is refused
+   `405 OBJECT_API_METHOD_NOT_ALLOWED`. `inlineEdit` only picks how rows are
+   edited, the `true` / `'grid'` / `'form'` ladder:
+   **objectstack-data → Relationships → Inline Editing**.
+
+2. **`object-master-detail-form` page block (bespoke layout).** Use a page only
+   for free-form layouts: `details: [{ childObject }]`.
+
+**Line-item grid behaviors (`grid` mode).** Every behaviour of the editable
+grid is derived from the DATA MODEL — computed columns, catalog
+typeahead auto-fill, persisted drag-reorder, and the live Subtotal → Tax → Total
+stack: **objectstack-data → Relationships → Inline Editing**. Three things are
+authored on this side: a trailing **ghost** row always exists, so never add an
+"Add line" button to the grid (typing in the ghost materialises a row; an
+untouched one is never persisted; a record-header action that inserts a priced
+line is [Actions](./actions.md)); `autofill: false` opts one column out of the typeahead copy;
+and that page block's `taxRateField` overrides which parent field drives the totals.
+
+## Field Conditional Rules in Forms
+
+Conditions that belong to a field's lifecycle — `visibleWhen`, `readonlyWhen`,
+`requiredWhen` — are declared on the **DATA MODEL field**, not in the form view;
+ObjectUI forms consume them. Their semantics and server behaviour:
+[objectstack-data → Conditional Field Rules](../../objectstack-data/SKILL.md#conditional-field-rules).

@@ -76,7 +76,7 @@ vi.mock('../../providers/AdapterProvider', async (importOriginal) => ({
 }));
 vi.mock('../AiUsageIndicator', () => ({ AiUsageIndicator: () => null }));
 vi.mock('../../console/ai/PendingDraftsBar', () => ({ PendingDraftsBar: () => null }));
-vi.mock('../../console/ai/LiveCanvas', () => ({ LiveCanvas: () => null }));
+
 vi.mock('../UnifiedSidebar', () => ({ UnifiedSidebar: () => null }));
 vi.mock('../AppHeader', () => ({ AppHeader: () => null }));
 vi.mock('../ConsoleNotificationBanners', () => ({ ConsoleNotificationBanners: () => null }));

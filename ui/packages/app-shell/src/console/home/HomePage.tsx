@@ -18,18 +18,26 @@
  * With no app yet it is drawn above the empty state at every width, and while
  * the page is loading it is not drawn, so it mounts once, where it stays.
  *
+ * From 768 px up the page is retired (objectstack#36732): the host redirects
+ * `/home` into an app whenever the viewer has a product app, so a desktop
+ * reaches this page only with none, and draws the no-apps empty state
+ * ({@link DesktopNoApps}): build with AI, start from a template, the app
+ * marketplace, for the viewers who may add an app.
+ *
  * @module
  */
 
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useMetadata } from '../../providers/MetadataProvider.js';
 import { useRecentItems, type RecentItem } from '../../hooks/useRecentItems.js';
 import { useRecentItemLabel } from '../../hooks/useRecentItemLabel.js';
 import { useNavTargetLabel, type NavTargetLabelOptions } from '../../hooks/useNavTargetLabel.js';
 import { readObjectsByName } from '../../hooks/useObjectPresence.js';
+import { readRecentObjects, type RecentObjectReading } from './readRecentObjects.js';
 import { useFavorites } from '../../hooks/useFavorites.js';
 import { useObjectTranslation } from '@object-ui/i18n';
+import { useObjectLabel } from '@object-ui/i18n';
 import { useServedAppLabel } from '../../hooks/useServedAppLabel.js';
 import { useAuth, useWorkspaceAdminStatus } from '@object-ui/auth';
 import { useAgents, isAskAgent, agentHasCapability } from '@object-ui/plugin-chatbot/core';
@@ -38,6 +46,9 @@ import { useAgents, isAskAgent, agentHasCapability } from '@object-ui/plugin-cha
 // unknown→fail-open) lives with the hook.
 import { useCanAuthorMetadata, useCanReadPendingDrafts } from '../../hooks/useCanAuthorMetadata.js';
 import { HomeAppsStrip } from './HomeAppsStrip.js';
+import { PhoneAppList } from '../../layout/PhoneAppList.js';
+import { appAddressSegment } from '../../utils/appRoute.js';
+import { inboxPagePath } from '../../views/inbox/inboxPageModel.js';
 import { appSegmentOf, lastOpenedByApp } from './appLastOpened.js';
 import { recentItemObject, recentItemTypeLabel } from './recentItemTypeLabel.js';
 import { RecoveryPasswordReminder } from './RecoveryPasswordReminder.js';
@@ -55,6 +66,9 @@ import {
   matchAppBySegment,
   resolveHostAppSegment,
 } from '../../utils/index.js';
+import { isApprovalsInboxLink, resolveApprovalsHostSegment } from '../../utils/appRoute.js';
+import { useLastApp } from '../../context/LastAppProvider.js';
+import { approvalQueueState } from '../../views/approval-decision/approvalQueueAdvance.js';
 import { useInboxBell } from '../../hooks/useInboxBell.js';
 import { openInboxNotification } from '../../layout/openInboxNotification.js';
 import { resolveSetupAppPath } from '../ConsoleShell.js';
@@ -77,6 +91,8 @@ import { resolveAiApiBase } from '../../hooks/useAiSurface.js';
 import { isAiStudioEnabled, isMarketplaceEnabled } from '../../runtime-config.js';
 import { STUDIO_NEW_PACKAGE_PATH } from '../../views/studio-design/studioNewPackage.js';
 import { useOpenAssistant } from '../../layout/chatDockControl.js';
+import { isProductApp } from '../../utils/homePath.js';
+import { useAddAppEntries, useMayAddApp } from '../../hooks/useAddAppEntries.js';
 
 /**
  * Which AI home CTAs to surface, driven by the live agent catalog (the single
@@ -159,7 +175,7 @@ function BuilderChip({
       onClick={disabled ? undefined : onClick}
       data-testid={testId}
       className={cn(
-        'inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg px-3 text-[13px] font-medium transition-colors max-sm:h-11',
+        'inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg px-3 text-sm font-medium transition-colors max-sm:h-11',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
         'disabled:pointer-events-none disabled:opacity-60',
         tone === 'outline'
@@ -191,6 +207,73 @@ function BuilderChip({
         <TooltipContent className="max-w-xs">{disabledReason}</TooltipContent>
       </Tooltip>
     </TooltipProvider>
+  );
+}
+
+/**
+ * The desktop's no-apps empty state (objectstack#36732; design board 45,
+ * picture 4): what is left of the retired platform home page. A viewer who may
+ * add an app (`useMayAddApp`, the sidebar app menu's own gate) is offered its
+ * 「Add app」 doors as buttons, the first one primary; an administrator
+ * without `manage_metadata` is told why there are none (objectstack#8270);
+ * anyone else is told their administrator shares apps with them.
+ */
+function DesktopNoApps({
+  showAuthoringGate,
+  authoringGateReason,
+  t,
+}: {
+  showAuthoringGate: boolean;
+  authoringGateReason: string;
+  t: (key: string, opts?: any) => string;
+}) {
+  const mayAddApp = useMayAddApp();
+  return (
+    <Empty data-testid="home-no-apps">
+      <EmptyTitle>{t('home.noAppsTitle', { defaultValue: 'No applications yet' })}</EmptyTitle>
+      {mayAddApp ? (
+        <EmptyDescription>
+          {t('home.noAppsAddDescription', {
+            defaultValue: 'Build your first app, or start from a template or the app marketplace.',
+          })}
+        </EmptyDescription>
+      ) : showAuthoringGate ? (
+        <EmptyDescription data-testid="home-authoring-gate-reason-empty">{authoringGateReason}</EmptyDescription>
+      ) : (
+        <EmptyDescription>
+          {t('home.noAppsDescription', {
+            defaultValue: 'The system is being set up — apps your admin shares with you will show up here.',
+          })}
+        </EmptyDescription>
+      )}
+      {mayAddApp && <NoAppsAddActions />}
+    </Empty>
+  );
+}
+
+/**
+ * The 「Add app」 doors as the empty state's buttons. Its own component so
+ * only a viewer who may add an app pays the agent-catalog read the list makes.
+ */
+function NoAppsAddActions() {
+  const entries = useAddAppEntries();
+  if (entries.length === 0) return null;
+  return (
+    <div className="mt-6 flex flex-col items-center gap-3 sm:flex-row">
+      {entries.map((entry, index) => (
+        <Button
+          key={entry.key}
+          asChild
+          variant={index === 0 ? 'default' : 'outline'}
+          className="max-sm:h-11"
+        >
+          <Link to={entry.to} data-testid={`home-no-apps-${entry.key}`}>
+            <entry.icon className="mr-2 h-4 w-4" />
+            {entry.label}
+          </Link>
+        </Button>
+      ))}
+    </div>
   );
 }
 
@@ -234,7 +317,7 @@ function HomeAiActions({
       : 'flex shrink-0 items-center gap-2';
   // In the greeting row the buttons take the builder chips' 32 px height;
   // below `sm` both layouts take the 44 px touch target.
-  const buttonClass = layout === 'stack' ? 'max-sm:h-11' : 'h-8 px-3 text-[13px] max-sm:h-11';
+  const buttonClass = layout === 'stack' ? 'max-sm:h-11' : 'h-8 px-3 text-sm max-sm:h-11';
   return (
     <div className={container}>
       {showBuild && (
@@ -372,6 +455,8 @@ export interface HomePageProps {
 /** Home's labels read each object they name by name (objectstack#29121). */
 const BY_NAME: NavTargetLabelOptions = { byName: true };
 
+export { readRecentObjects, type RecentObjectReading };
+
 export function HomePage({ checklist }: HomePageProps = {}) {
   const navigate = useNavigate();
   // objectstack#34608 — the Home AI buttons open the same right-side drawer
@@ -387,6 +472,8 @@ export function HomePage({ checklist }: HomePageProps = {}) {
   // A recent entry stores identity; the rail labels it with this, on the
   // render, in the current language (objectui#11678).
   const recentLabel = useRecentItemLabel();
+  // An `unread` recent row's text, before its object is read (objectstack#34692).
+  const { objectLabel, objectPluralLabel } = useObjectLabel();
   // A record row's trail names its object as the sidebar names an unlabelled
   // navigation entry for it, and the app as its launcher tile does
   // (objectui#12604).
@@ -488,6 +575,16 @@ export function HomePage({ checklist }: HomePageProps = {}) {
   const hostAppSegment = resolveHostAppSegment(activeApps, currentAppName);
 
   /**
+   * The app an approval opened from Home stays in (objectstack#35505): the
+   * current app, then the last used one (`LastAppProvider`), then the first.
+   * The request page then prefers the app that lists the request's record
+   * (`ApprovalsInboxPage`'s deep link), and Setup is never the default.
+   */
+  const { lastApp } = useLastApp();
+  const approvalsHostSegment = resolveApprovalsHostSegment(activeApps, currentAppName, lastApp);
+  const approvalsInboxPath = `/apps/${approvalsHostSegment}/system/approvals`;
+
+  /**
    * Setup leaves the tile row (objectui#12601): it administers the workspace
    * rather than running a business process, so it is the muted "System
    * Settings" link beside the apps heading instead of a tile counted among
@@ -508,14 +605,38 @@ export function HomePage({ checklist }: HomePageProps = {}) {
   const authoringReasonId = useId();
   const marketplaceReasonId = useId();
 
-  const recentApps = recentItems
-    .filter(item =>
-      item.type === 'object' ||
-      item.type === 'view' ||
-      item.type === 'dashboard' ||
-      item.type === 'page' ||
-      item.type === 'record')
-    .slice(0, 6);
+  const recentCandidates = recentItems.filter(item =>
+    item.type === 'object' ||
+    item.type === 'view' ||
+    item.type === 'dashboard' ||
+    item.type === 'page' ||
+    item.type === 'record');
+  // objectstack#34692 — a row whose object this environment does not register
+  // is left out before the six are taken, so it holds no place
+  // (`readRecentObjects`).
+  const recentObjectNames = [
+    ...new Set(recentCandidates.map(recentItemObject).filter((name): name is string => !!name)),
+  ].sort();
+  const recentObjectReading = readRecentObjects(metadata, recentObjectNames);
+  const readingOf = (item: RecentItem): RecentObjectReading => {
+    const objectName = recentItemObject(item);
+    return objectName ? recentObjectReading(objectName) : 'read';
+  };
+  const recentApps = recentCandidates.filter((item) => readingOf(item) !== 'absent').slice(0, 6);
+
+  /**
+   * A row whose object is still `unread` is drawn without reading it: what its
+   * label is before that read lands, its object's bundle label else its name,
+   * and a record's stored title as always.
+   */
+  const labelRecent = (item: RecentItem): string => {
+    if (readingOf(item) !== 'unread') return recentLabel(item);
+    if (item.type === 'object' || item.type === 'view') {
+      const objectName = item.type === 'view' ? item.object : item.name;
+      return objectPluralLabel({ name: objectName, label: '' }) || objectName;
+    }
+    return recentLabel(item);
+  };
 
   /**
    * What a "Recently accessed" row prints beside its title (objectui#12604):
@@ -528,12 +649,27 @@ export function HomePage({ checklist }: HomePageProps = {}) {
     const objectName = recentItemObject(item);
     const segment = appSegmentOf(item.href);
     const app = segment ? matchAppBySegment(activeApps, segment) : undefined;
-    const objectIcon =
-      item.type === 'record' && objectName
-        ? (readObjectsByName(metadata, [objectName]) as Array<{ name?: unknown; icon?: unknown } | null | undefined>).find(
+    // objectstack#34692 — an `unread` object is not asked by name: the row
+    // draws its kind's icon and the object's bundle label, else its name.
+    if (objectName && readingOf(item) === 'unread') {
+      return {
+        context:
+          item.type === 'record'
+            ? objectLabel({ name: objectName, label: '' }) || objectName
+            : recentItemTypeLabel(t, item.type),
+        app: app ? appLabel(app) : undefined,
+        icon: undefined,
+      };
+    }
+    // objectstack#36141 — an object, view or record row draws its object's
+    // tile, so all three read the object's icon and colour.
+    const objectDef =
+      objectName
+        ? (readObjectsByName(metadata, [objectName]) as Array<{ name?: unknown; icon?: unknown; color?: unknown } | null | undefined>).find(
             (o) => o?.name === objectName,
-          )?.icon
+          )
         : undefined;
+    const objectIcon = objectDef?.icon;
     return {
       context:
         item.type === 'record' && objectName
@@ -541,6 +677,8 @@ export function HomePage({ checklist }: HomePageProps = {}) {
           : recentItemTypeLabel(t, item.type),
       app: app ? appLabel(app) : undefined,
       icon: typeof objectIcon === 'string' && objectIcon !== '' ? objectIcon : undefined,
+      color: typeof objectDef?.color === 'string' ? objectDef.color : undefined,
+      object: !!objectDef,
     };
   };
 
@@ -591,7 +729,33 @@ export function HomePage({ checklist }: HomePageProps = {}) {
     );
   }
 
-  if (activeApps.length === 0) {
+  // objectstack#35881 — on a phone, Home is the list of apps and nothing else:
+  // where a first sign-in with several apps lands, to pick one. It is the
+  // list the app pill's sheet shows inside an app, drawn as the whole page.
+  // The greeting, the templates, My work (the bottom bar's Notifications and
+  // Approvals carry it inside an app), the assistant card, Continue and the
+  // activity column are a desktop's (objectstack#34596's checklist with them).
+  if (phone && launcher.apps.length > 0) {
+    return (
+      <div data-testid="home-phone-app-list" className="flex min-h-full flex-col bg-background pt-3">
+        <h1 className="px-5 pb-2 text-[17px] font-semibold">
+          {t('layout.appSwitcher.chooseApp', { defaultValue: 'Choose an app' })}
+        </h1>
+        <PhoneAppList
+          variant="page"
+          onPick={(app) => navigate(`/apps/${appAddressSegment(apps, app) ?? app.name}`)}
+        />
+      </div>
+    );
+  }
+
+  // objectstack#36732 — a desktop with no product app (none at all, or only
+  // the platform's own Setup and Studio) draws the no-apps empty state.
+  // The launcher's list (`/me/apps`): an app a permission set hides is not one
+  // of the viewer's, as the landing that sent them here reads it.
+  const desktopNoApps = !phone && !launcher.apps.some(isProductApp);
+
+  if (activeApps.length === 0 || desktopNoApps) {
     return (
       <div className="flex flex-col flex-1">
         {/* With no app yet, the drafts row is the whole of "My work": the
@@ -607,7 +771,6 @@ export function HomePage({ checklist }: HomePageProps = {}) {
         {checklist?.('top')}
         <DeploymentNotice placement="home" />
         <RecoveryPasswordReminder t={t} />
-        <ConnectAssistantCard />
         <div className="flex flex-1 items-center justify-center p-6">
         {/*
           Role-aware empty state. ADMINS get the AI-first magic moment as the
@@ -623,7 +786,13 @@ export function HomePage({ checklist }: HomePageProps = {}) {
           builder CTAs, so they get the reason instead of the instruction. AI
           "Ask" stays offered — it reads data and needs no authoring capability.
         */}
-        {isAdmin && !canAuthorMetadata ? (
+        {desktopNoApps ? (
+          <DesktopNoApps
+            showAuthoringGate={isAdmin && !canAuthorMetadata}
+            authoringGateReason={authoringGateReason}
+            t={t}
+          />
+        ) : isAdmin && !canAuthorMetadata ? (
           <Empty>
             <EmptyTitle>{t('home.noAppsTitle', { defaultValue: 'No applications yet' })}</EmptyTitle>
             <EmptyDescription data-testid="home-authoring-gate-reason-empty">
@@ -686,6 +855,12 @@ export function HomePage({ checklist }: HomePageProps = {}) {
           </Empty>
         )}
         </div>
+        {/* objectstack#30895 — connect an AI assistant: after the page's own
+            content, never above it (objectstack#35017). The frame collapses
+            (`empty:hidden`) when the card draws nothing. */}
+        <div className="px-4 pb-6 sm:px-6 lg:px-8 empty:hidden">
+          <ConnectAssistantCard className="mx-auto max-w-[1120px]" />
+        </div>
       </div>
     );
   }
@@ -697,8 +872,6 @@ export function HomePage({ checklist }: HomePageProps = {}) {
       {/* objectstack#30120 — see the empty-state branch above. */}
       <DeploymentNotice placement="home" />
       <RecoveryPasswordReminder t={t} />
-      {/* objectstack#30895 — every person: connect an AI assistant, until they have or hide it. */}
-      <ConnectAssistantCard />
 
       {/* The content column (objectui#12601): 1120 px, centred, 28 px above the
           first section and 28 px between sections. No bordered card around the
@@ -720,7 +893,7 @@ export function HomePage({ checklist }: HomePageProps = {}) {
                 {displayName && <span className="text-primary">{displayName}</span>}
                 <span className="text-foreground/40">{t('home.greetingEnd', { defaultValue: '.' })}</span>
               </h1>
-              <p className="mt-1 min-h-5 text-[13px] text-muted-foreground" data-testid="home-work-summary">
+              <p className="mt-1 min-h-5 text-xs text-muted-foreground" data-testid="home-work-summary">
                 {workSummary}
               </p>
             </div>
@@ -888,16 +1061,22 @@ export function HomePage({ checklist }: HomePageProps = {}) {
             notificationsStatus={notificationsStatus}
             notificationsReadable={notificationsReadable}
             draftsRow={draftsRow}
-            onOpenApprovals={() => navigate(`/apps/${hostAppSegment}/system/approvals`)}
-            /* The Approvals inbox opens a request's drawer from `?request=`
-               (#2678), the link its notifications already carry. */
+            onOpenApprovals={() => navigate(approvalsInboxPath)}
+            /* The Approvals inbox opens a request's page from `?request=`
+               (#2678), the link its notifications already carry. It is handed
+               the reader's pending queue (objectstack#35505), so the request
+               page counts through it and 「处理后打开下一条」 moves on. */
             onOpenApproval={(r) =>
-              navigate(`/apps/${hostAppSegment}/system/approvals?request=${encodeURIComponent(r.id)}`)
+              navigate(`${approvalsInboxPath}?request=${encodeURIComponent(r.id)}`, {
+                state: approvalQueueState(
+                  { pathname: approvalsInboxPath, label: t('approvalsInbox.title', { defaultValue: 'Approvals Inbox' }) },
+                  pendingApprovals.map((p) => p.id),
+                ),
+              })
             }
-            /* The bell's own "view all" target (`InboxPopover`): `?view=mine`
-               selects the user-scoped view, so the full page matches what the
-               column showed (objectui#4074). */
-            onOpenInbox={() => navigate(`/apps/${hostAppSegment}/sys_inbox_message?view=mine`)}
+            /* The inbox page the bell opens (objectstack#36741), which lists
+               the same signed-in user's messages the column showed. */
+            onOpenInbox={() => navigate(inboxPagePath(hostAppSegment))}
             /* `action_url` is APP-RELATIVE (`/{object}/{id}`, ADR-0030 L5),
                so it has to be hosted under an app before it is a route —
                navigating it verbatim is objectui#5179, where the console
@@ -910,14 +1089,20 @@ export function HomePage({ checklist }: HomePageProps = {}) {
                badged on the bell), then follows the resolved link — or, when
                the notification carries no link at all, opens the inbox. */
             onOpenNotification={(n) =>
-              openInboxNotification(n, hostAppSegment, {
+              openInboxNotification(n, isApprovalsInboxLink(n.actionUrl) ? approvalsHostSegment : hostAppSegment, {
                 markRead: markNotificationRead,
                 goTo: (path) => navigate(path),
-                openInbox: () => navigate(`/apps/${hostAppSegment}/sys_inbox_message?view=mine`),
+                openInbox: () => navigate(inboxPagePath(hostAppSegment)),
               })
             }
             t={t}
           />
+
+          {/* objectstack#30895 — every person: connect an AI assistant, until
+              they have or hide it. After the greeting, My apps and My work, so
+              a first screen opens on the person's own things (objectstack#35017);
+              with no My work it follows the apps. */}
+          <ConnectAssistantCard />
 
           {/* Continue where you left off + ambient activity. The activity column
               exists only for a caller who may read `sys_activity`
@@ -933,7 +1118,7 @@ export function HomePage({ checklist }: HomePageProps = {}) {
               items={recentApps}
               onOpen={(href) => navigate(href)}
               t={t}
-              labelOf={recentLabel}
+              labelOf={labelRecent}
               describe={describeRecent}
             />
             <HomeActivity activity={activity} onViewAll={() => navigate(`/apps/${hostAppSegment}/sys_activity`)} t={t} />

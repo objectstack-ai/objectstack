@@ -222,12 +222,13 @@ function headerCtaLabels(): string[] {
 }
 
 /**
- * The header path bar's current stage, as each rendering of it (wide and
- * narrow) names it to assistive tech.
+ * The stage the header's stage tag reads, as each rendering of it names it.
+ * Until objectstack#35891 this read the path bar's current step; the default
+ * page draws no path bar now, and the stage is the tag beside the name.
  */
 function currentStages(): string[] {
-  return Array.from(document.querySelectorAll('[role="listitem"][aria-current="step"]'))
-    .map((el) => el.getAttribute('aria-label') ?? '');
+  return Array.from(document.querySelectorAll('[data-record-stage-tag]'))
+    .map((el) => (el.textContent ?? '').trim());
 }
 
 function actionPosts(): string[] {
@@ -283,10 +284,10 @@ afterEach(() => {
 });
 
 describe('objectstack#29935 — a declared update action reflects its write on the record page', () => {
-  it('full page: after the 200 the page re-reads, the path bar reads Resolved and the Resolve button is gone', async () => {
+  it('full page: after the 200 the page re-reads, the stage tag reads Resolved and the Resolve button is gone', async () => {
     const dataSource = await mount([resolveTicket], 'page');
     expect(headerCtaLabels()).toContain('Resolve');
-    await waitFor(() => expect(currentStages()).toContain('Open, current stage'));
+    await waitFor(() => expect(currentStages()).toContain('Open'));
     const readsBefore = dataSource.findOne.mock.calls.length;
 
     await click('Resolve');
@@ -295,22 +296,22 @@ describe('objectstack#29935 — a declared update action reflects its write on t
     await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Ticket resolved.', expect.anything()));
     await waitFor(() => expect(dataSource.findOne.mock.calls.length).toBeGreaterThan(readsBefore));
     await waitFor(() => expect(headerCtaLabels()).not.toContain('Resolve'));
-    await waitFor(() => expect(currentStages()).toContain('Resolved, current stage'));
-    expect(currentStages()).not.toContain('Open, current stage');
+    await waitFor(() => expect(currentStages()).toContain('Resolved'));
+    expect(currentStages()).not.toContain('Open');
   });
 
   it('drawer: the same click re-reads the record and the Open list it came from drops it', async () => {
     const dataSource = await mount([resolveTicket], 'drawer');
     const openList = () => Array.from(screen.getByTestId('open-list').querySelectorAll('li')).map((li) => li.textContent);
     await waitFor(() => expect(openList()).toEqual([RECORD_ID, OTHER_ID]));
-    await waitFor(() => expect(currentStages()).toContain('Open, current stage'));
+    await waitFor(() => expect(currentStages()).toContain('Open'));
     const readsBefore = dataSource.findOne.mock.calls.length;
 
     await click('Resolve');
 
     await waitFor(() => expect(dataSource.findOne.mock.calls.length).toBeGreaterThan(readsBefore));
     await waitFor(() => expect(headerCtaLabels()).not.toContain('Resolve'));
-    await waitFor(() => expect(currentStages()).toContain('Resolved, current stage'));
+    await waitFor(() => expect(currentStages()).toContain('Resolved'));
     await waitFor(() => expect(openList()).toEqual([OTHER_ID]));
   });
 

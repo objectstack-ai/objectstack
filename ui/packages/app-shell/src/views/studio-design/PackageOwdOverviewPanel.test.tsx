@@ -22,6 +22,7 @@ vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 import { MetadataCtx, type MetadataContextValue } from '@object-ui/react';
 import { t, tFormat } from '../metadata-admin/i18n';
 import { PackageOwdOverviewPanel } from './PackageOwdOverviewPanel';
+import { StudioSaveHarness } from './__tests__/studioSaveHarness';
 
 const en = (key: string) => t(key, 'en-US');
 
@@ -56,6 +57,8 @@ function makeClient(server: Server) {
     },
     listDrafts: async () => server.draftOnly.map((name) => ({ name })),
     layered: async (_type: string, name: string) => ({ effective: server.objects[name] ?? {}, code: null }),
+    publish: async () => ({}),
+    reset: async () => ({}),
     getDraft: async () => null,
     save: async (_type: string, name: string, body: Record<string, unknown>, opts?: Record<string, unknown>) => {
       server.saved.push({ name, body, opts });
@@ -84,12 +87,12 @@ function freshServer(): Server {
 
 function renderPanel(server: Server, extra: Partial<React.ComponentProps<typeof PackageOwdOverviewPanel>> = {}) {
   return render(
-    <PackageOwdOverviewPanel
+    <StudioSaveHarness><PackageOwdOverviewPanel
       client={makeClient(server)}
       packageId="com.example.showcase"
       locale="en-US"
       {...extra}
-    />,
+    /></StudioSaveHarness>,
   );
 }
 
@@ -124,15 +127,15 @@ describe('PackageOwdOverviewPanel — edit → per-object draft', () => {
     renderPanel(server);
     await screen.findByTestId('owd-row-crm_contact');
 
-    // No changes → Save disabled.
-    expect((screen.getByTestId('owd-save') as HTMLButtonElement).disabled).toBe(true);
+    // No changes → the top bar draws no Save (objectstack#36511).
+    expect(screen.queryByTestId('studio-save')).toBeNull();
 
     // Widen crm_contact private → public_read.
     await pickOwd('owd-internal-crm_contact', OWD_LABEL.public_read);
     expect(screen.getByTestId('owd-dirty-crm_contact')).toBeTruthy();
-    expect((screen.getByTestId('owd-save') as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.getByTestId('studio-save')).toBeEnabled();
 
-    fireEvent.click(screen.getByTestId('owd-save'));
+    fireEvent.click(await screen.findByTestId('studio-save'));
     await waitFor(() => expect(server.saved.length).toBe(1));
     expect(server.saved[0].name).toBe('crm_contact');
     expect(server.saved[0].body.sharingModel).toBe('public_read');
@@ -146,7 +149,7 @@ describe('PackageOwdOverviewPanel — edit → per-object draft', () => {
     renderPanel(server);
     await screen.findByTestId('owd-row-crm_account');
     await pickOwd('owd-internal-crm_account', OWD_LABEL['']);
-    fireEvent.click(screen.getByTestId('owd-save'));
+    fireEvent.click(await screen.findByTestId('studio-save'));
     await waitFor(() => expect(server.saved.length).toBe(1));
     expect('sharingModel' in server.saved[0].body).toBe(false);
   });
@@ -198,7 +201,7 @@ describe('PackageOwdOverviewPanel — the master is named by its label (objectst
   it("a master outside this package reads as the served object's label", async () => {
     render(
       <MetadataCtx.Provider value={servedObjects([{ name: 'crm_account', label: 'Customer Account' }])}>
-        <PackageOwdOverviewPanel client={makeClient(detailOnly())} packageId="com.example.showcase" locale="en-US" />
+        <StudioSaveHarness><PackageOwdOverviewPanel client={makeClient(detailOnly())} packageId="com.example.showcase" locale="en-US" /></StudioSaveHarness>
       </MetadataCtx.Provider>,
     );
     expect(await screen.findByTestId('owd-master-crm_case')).toHaveTextContent(byParent('Customer Account'));
@@ -214,11 +217,11 @@ describe('PackageOwdOverviewPanel — read-only', () => {
   it('renders badges only, with no editing affordances', async () => {
     renderPanel(freshServer(), { readOnly: true });
     await screen.findByTestId('owd-row-crm_account');
-    expect(screen.queryByTestId('owd-save')).toBeNull();
+    expect(screen.queryByTestId('studio-save')).toBeNull();
     expect(screen.queryByTestId('owd-internal-crm_account')).toBeNull();
     // The value is still shown as text.
     const row = within(screen.getByTestId('owd-row-crm_account'));
-    expect(row.getByText(/Public read\/write/)).toBeTruthy();
+    expect(row.getByText(/Everyone can see and edit/)).toBeTruthy();
   });
 });
 
@@ -261,7 +264,7 @@ describe('PackageOwdOverviewPanel — onDirtyChange contract (objectui#2600)', (
     await pickOwd('owd-internal-crm_contact', OWD_LABEL.public_read);
     expect(onDirtyChange).toHaveBeenLastCalledWith(true);
 
-    fireEvent.click(screen.getByTestId('owd-save'));
+    fireEvent.click(await screen.findByTestId('studio-save'));
     await waitFor(() => expect(server.saved.length).toBe(1));
     await waitFor(() => expect(onDirtyChange).toHaveBeenLastCalledWith(false));
   });

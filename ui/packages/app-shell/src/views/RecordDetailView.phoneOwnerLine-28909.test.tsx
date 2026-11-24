@@ -12,15 +12,31 @@
  * harness), with `owner_id` declared 5th in `highlightFields`, behind four
  * non-text highlights (so the phone subtitle takes none of them):
  *
- *  - at 390 px the phone header draws four highlights after its subtitle, so
- *    the owner is not in the strip and the meta line names it;
- *  - at 1440 px the strip draws all five, the owner among them, and the meta
- *    line leaves it out (objectstack#28868, the owner once).
+ *  - until objectstack#35891 the phone header drew four highlights (the
+ *    owner past them, so the meta line named it) and the desktop strip all
+ *    five (the strip named the owner, the meta line did not);
+ *  - the default page draws no strip now, and the body's details sections
+ *    draw `owner_id` (here in the auto-derived section, the object declaring
+ *    no field groups).
+ *
+ * objectstack#35941 supersedes the pin this file held, "no strip, and the meta
+ * line names the owner": the maintainer's ruling (card comment 7056427422,
+ * option A, 「底部行不再显示」) is that when the body renders `owner_id` the
+ * meta line leaves the owner out, so the owner appears once, as the body
+ * field. #28909's intent is unchanged: the owner is on the page at every
+ * width, exactly once. Both halves are pinned at 390 px and at 1440 px: the
+ * body draws the owner (the meta line does not), and an object whose body
+ * draws no `owner_id` (the field is `hidden`) keeps the owner on the meta
+ * line.
+ *
+ * On the laid-out page the meta line is the details column's last group,
+ * 「系统信息」 (objectstack#36147), folded until opened: the owner and the
+ * record ID it keeps are that group's rows, read here with the group opened.
  */
 
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, cleanup, waitFor } from '@testing-library/react';
+import { render, cleanup, waitFor, fireEvent, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { MetadataCtx } from '@object-ui/react';
 import { RelatedCountStore } from '@object-ui/components';
@@ -123,14 +139,22 @@ function metadataFor(objects: unknown[]) {
   } as never;
 }
 
-function mountPage() {
+/** The same lead whose body draws no `owner_id`: the field is hidden. */
+const OBJECTS_OWNER_HIDDEN = [
+  {
+    ...OBJECTS[0],
+    fields: { ...OBJECTS[0].fields, owner_id: { ...OBJECTS[0].fields.owner_id, hidden: true } },
+  },
+];
+
+function mountPage(objects: unknown[] = OBJECTS) {
   render(
     <MemoryRouter initialEntries={[`/apps/${APP}/${LEAD}/record/r-1`]}>
-      <MetadataCtx.Provider value={metadataFor(OBJECTS)}>
+      <MetadataCtx.Provider value={metadataFor(objects)}>
         <Routes>
           <Route
             path="/apps/:appName/:objectName/record/:recordId"
-            element={<RecordDetailView dataSource={makeDataSource() as never} objects={OBJECTS} onEdit={() => {}} />}
+            element={<RecordDetailView dataSource={makeDataSource() as never} objects={objects as never} onEdit={() => {}} />}
           />
         </Routes>
       </MetadataCtx.Provider>
@@ -138,23 +162,33 @@ function mountPage() {
   );
 }
 
-/** The strip and the meta line, once both are drawn. */
-async function stripAndMetaLine(): Promise<{ strip: HTMLElement; metaLine: HTMLElement }> {
+/** The meta line, once the record has loaded. */
+async function metaLineLoaded(): Promise<HTMLElement> {
   return waitFor(
     () => {
-      const strip = document.querySelector('[data-highlights-face]') as HTMLElement | null;
       const metaLine = document.querySelector('[data-testid="record-meta-footer"]') as HTMLElement | null;
-      expect(strip).toBeTruthy();
       expect(metaLine).toBeTruthy();
-      // The record has loaded: the strip shows its values.
-      expect(strip!.textContent).toContain('mira@atlas.test');
-      return { strip: strip!, metaLine: metaLine! };
+      // The record has loaded: its values are on the page.
+      expect(document.body.textContent).toContain('mira@atlas.test');
+      return metaLine!;
     },
     { timeout: 5000 },
   );
 }
 
-const ownerEntry = (metaLine: HTMLElement) => metaLine.querySelector('[data-record-meta-owner]');
+/** Open the 「系统信息」 group the meta line is on the laid-out page (objectstack#36147). */
+function openSystemInfo(metaLine: HTMLElement) {
+  const toggle = within(metaLine).getByRole('button', { name: 'System information' });
+  if (toggle.getAttribute('aria-expanded') !== 'true') fireEvent.click(toggle);
+}
+/** The value of the system group's row labelled `label`, or `null`. */
+const systemRow = (metaLine: HTMLElement, label: string) => {
+  const el = Array.from(metaLine.querySelectorAll('[data-detail-field-label]')).find((l) => l.textContent === label);
+  return (el?.closest('[data-detail-field-row]') as HTMLElement | null) ?? null;
+};
+const ownerEntry = (metaLine: HTMLElement) => systemRow(metaLine, 'Owner');
+/** How many times the owner's name is painted on the whole page. */
+const ownerCount = () => document.body.textContent!.split('Ada Admin').length - 1;
 
 beforeEach(() => {
   cleanup();
@@ -180,25 +214,46 @@ afterEach(() => {
 });
 
 describe('the owner at every width, once (objectstack#28909)', () => {
-  it('on a phone: owner_id declared 5th is past the header\'s four, so the meta line names the owner', async () => {
+  // Until objectstack#35891 the default page drew a strip of the declared
+  // highlights: four on a phone (the owner past them, so the meta line named
+  // it) and all five on a desktop (the strip named the owner, the meta line
+  // did not). The default page draws no strip now, at any width. The body
+  // draws `owner_id`, so the owner is that field and the meta line leaves it
+  // out (objectstack#35941, ruling 7056427422).
+  it.each([
+    ['a phone', 390],
+    ['a desktop', 1440],
+  ])('on %s: no strip, the body draws the owner, and the meta line does not', async (_face, width) => {
+    setWidth(width);
     mountPage();
-    const { strip, metaLine } = await stripAndMetaLine();
-    // The phone header: four highlights, the owner not among them.
-    expect(strip.children).toHaveLength(4);
-    expect(strip.textContent).not.toContain('Ada Admin');
-    const owner = ownerEntry(metaLine);
-    expect(owner).toBeTruthy();
-    expect(owner!.textContent).toContain('Ada Admin');
+    const metaLine = await metaLineLoaded();
+    expect(document.querySelector('[data-highlights-face]')).toBeNull();
+    openSystemInfo(metaLine);
+    await waitFor(() => expect(ownerCount()).toBe(1));
+    expect(ownerEntry(metaLine)).toBeNull();
+    expect(metaLine.textContent).not.toContain('Ada Admin');
+    // The rest of the meta line is still drawn.
+    expect(systemRow(metaLine, 'Record ID')!.textContent).toContain('r-1');
   });
 
-  it('on a desktop: the strip names the owner and the meta line does not', async () => {
-    setWidth(1440);
-    mountPage();
-    const { strip, metaLine } = await stripAndMetaLine();
-    expect(strip.children).toHaveLength(5);
-    expect(strip.textContent).toContain('Ada Admin');
-    expect(ownerEntry(metaLine)).toBeNull();
+  it.each([
+    ['a phone', 390],
+    ['a desktop', 1440],
+  ])('on %s: a body that draws no owner_id keeps the owner on the meta line', async (_face, width) => {
+    setWidth(width);
+    mountPage(OBJECTS_OWNER_HIDDEN);
+    const metaLine = await metaLineLoaded();
+    expect(document.querySelector('[data-highlights-face]')).toBeNull();
+    openSystemInfo(metaLine);
+    const owner = await waitFor(() => {
+      const row = ownerEntry(metaLine);
+      expect(row?.textContent).toContain('Ada Admin');
+      return row;
+    });
+    expect(owner).toBeTruthy();
+    expect(owner!.textContent).toContain('Ada Admin');
+    expect(ownerCount()).toBe(1);
     // The rest of the meta line is still drawn.
-    expect(metaLine.querySelector('[data-record-meta-id]')!.textContent).toBe('r-1');
+    expect(systemRow(metaLine, 'Record ID')!.textContent).toContain('r-1');
   });
 });

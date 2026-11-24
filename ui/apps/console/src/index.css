@@ -127,6 +127,12 @@
   --color-secondary-foreground: hsl(var(--secondary-foreground));
   --color-destructive: hsl(var(--destructive));
   --color-destructive-foreground: hsl(var(--destructive-foreground));
+  /* Danger TEXT colour (text-destructive and its variants). Tailwind reads
+     --text-color-* before --color-* for text utilities, so this splits the
+     text colour from the fill used by bg-/border-/ring-destructive. Light and
+     dark each set --destructive-text, through --destructive-text-light /
+     -dark, which ThemeEngine derives per mode from a theme's error colour. */
+  --text-color-destructive: hsl(var(--destructive-text, var(--destructive)));
   --color-muted: hsl(var(--muted));
   --color-muted-foreground: hsl(var(--muted-foreground));
   --color-accent: hsl(var(--accent));
@@ -150,6 +156,11 @@
   --color-chart-3: hsl(var(--chart-3));
   --color-chart-4: hsl(var(--chart-4));
   --color-chart-5: hsl(var(--chart-5));
+  --color-chart-6: hsl(var(--chart-6));
+  --color-chart-7: hsl(var(--chart-7));
+  --color-chart-8: hsl(var(--chart-8));
+  --color-chart-9: hsl(var(--chart-9));
+  --color-chart-10: hsl(var(--chart-10));
 
   /* Semantic status tokens (KPI deltas, tags, alerts) */
   --color-success: hsl(var(--success));
@@ -187,6 +198,9 @@
     --accent-foreground: 222.2 47.4% 11.2%;
  
     --destructive: 0 84.2% 60.2%;
+    /* Danger text on light surfaces (red-700, #b91c1c); --destructive stays the
+       brand red for button and badge fills. */
+    --destructive-text: var(--destructive-text-light, 0 73.7% 41.8%);
     --destructive-foreground: 210 40% 98%;
 
     --border: 214.3 31.8% 91.4%;
@@ -211,6 +225,11 @@
     --chart-3: 262 83% 58%;   /* violet */
     --chart-4: 27 96% 61%;    /* orange */
     --chart-5: 340 75% 55%;   /* rose   */
+    --chart-6: 135 60% 36%;   /* green  */
+    --chart-7: 315 70% 34%;   /* plum   */
+    --chart-8: 192 80% 42%;   /* cyan   */
+    --chart-9: 0 70% 36%;     /* red    */
+    --chart-10: 215 14% 58%;  /* slate  */
 
     /* Semantic status colors */
     --success: 142 71% 45%;
@@ -272,6 +291,9 @@
     --accent-foreground: 210 40% 98%;
  
     --destructive: 0 62.8% 30.6%;
+    /* Readable red for danger text on dark surfaces; --destructive stays the
+       red-button fill (white text on it). */
+    --destructive-text: var(--destructive-text-dark, 0 91% 71%);
     --destructive-foreground: 210 40% 98%;
  
     --border: 217.2 32.6% 17.5%;
@@ -294,6 +316,11 @@
     --chart-3: 262 83% 68%;
     --chart-4: 27 96% 65%;
     --chart-5: 340 82% 65%;
+    --chart-6: 135 60% 46%;
+    --chart-7: 315 55% 48%;
+    --chart-8: 192 80% 52%;
+    --chart-9: 0 70% 48%;
+    --chart-10: 210 12% 68%;
 
     /* Semantic status colors (dark mode) */
     --success: 142 65% 50%;
@@ -375,12 +402,20 @@
  * ============================================================ */
 @layer base {
   :root {
-    /* iOS uses larger, concentric corner radii */
+    /* Large surfaces (cards, `rounded-lg`) keep the larger iOS corner. */
     --radius: 0.875rem;
 
-    /* iOS "grouped" canvas: soft system gray (≈ #F2F2F7) instead of pure
-       white, so white cards/popovers float above it with real depth. */
-    --background: 240 24% 97%;
+    /* Controls share one 8px corner: buttons, inputs, selects, toolbar
+       controls, menus and chips are `rounded-md`. What sits inside one (a tab
+       trigger in its list, a menu row) is `rounded-sm`, 6px, so the corners
+       stay concentric. Set here rather than derived from `--radius`, which
+       would move the cards with them. */
+    --radius-md: 0.5rem;
+    --radius-sm: 0.375rem;
+
+    /* The content area is white; the sidebar is the one grey surface beside
+       it (see `--sidebar` below), and cards are told apart by their border. */
+    --background: 0 0% 100%;
     --secondary: 240 18% 94%;
     --muted: 240 18% 94%;
     --accent: 240 18% 94%;
@@ -388,7 +423,8 @@
   }
 
   .dark {
-    /* iOS dark uses near-black, not blue-black; cards sit slightly above. */
+    /* iOS dark uses near-black, not blue-black; the content area is the
+       darkest step and cards and the sidebar sit one step above it. */
     --background: 240 6% 6%;
     --card: 240 6% 10%;
     --popover: 240 6% 11%;
@@ -421,8 +457,10 @@ header.sticky {
   background-color: hsl(var(--background) / 0.6) !important;
 }
 
-/* Soft, diffuse iOS elevation on floating surfaces (dialogs, menus, popovers). */
-[role="dialog"],
+/* Soft, diffuse iOS elevation on floating surfaces (drawers, menus, popovers).
+   A modal dialog draws its own two-layer card (`dialog-surface`,
+   `packages/components/src/lib/dialog-surface.ts`) and is skipped here. */
+[role="dialog"]:not(.dialog-surface),
 [role="menu"],
 [data-radix-popper-content-wrapper] > * {
   box-shadow:
@@ -461,8 +499,9 @@ header.sticky {
     --ring: 211 100% 50%;
     --sidebar-primary: 211 100% 50%;
     --sidebar-ring: 211 100% 50%;
-    /* iOS sidebar is a translucent vibrancy material → near-white base. */
-    --sidebar: 240 24% 98%;
+    /* The sidebar is a light grey beside the white content area, drawn at
+       70% over it (the frosted rule below), so it reads as ≈ #F7F7F8. */
+    --sidebar: 240 12% 96%;
   }
   .dark {
     /* iOS dark blue (#0A84FF) is a touch brighter for contrast. */
@@ -470,7 +509,8 @@ header.sticky {
     --ring: 211 100% 60%;
     --sidebar-primary: 211 100% 60%;
     --sidebar-ring: 211 100% 60%;
-    --sidebar: 240 6% 8%;
+    /* One step lighter than the content area's 6%. */
+    --sidebar: 240 6% 11%;
   }
 }
 
@@ -486,8 +526,14 @@ header.sticky {
   background-color: hsl(135 59% 49%) !important;
 }
 
-/* iOS sheet/dialog: extra-rounded corners. */
-[role="dialog"] {
+/* iOS popover / bottom drawer: extra-rounded corners on the surfaces that float
+   beside a control or rise from the bottom. Keyed on their own containers —
+   a popover inside the floating layer's wrapper, the bottom drawer by its own
+   attribute — and no longer on every `[role="dialog"]`: a modal dialog carries
+   its own corner (`dialog-surface`), and a full-height edge drawer meets the
+   viewport on three edges, so it keeps square corners. */
+[data-radix-popper-content-wrapper] > [role="dialog"],
+[data-vaul-drawer] {
   border-radius: 1.25rem !important;
 }
 
@@ -521,8 +567,10 @@ header.sticky {
  * (CSS-only overrides; shadcn ui components not edited)
  * ------------------------------------------------------------ */
 
-/* iOS "spotlight"-style backdrop: blur + lighten the dim behind any
-   dialog / sheet / command palette overlay instead of a flat 80% black. */
+/* iOS "spotlight"-style backdrop for drawers: blur + lighten the dim behind a
+   sheet or a bottom drawer instead of a flat 80% black. A modal dialog's
+   overlay no longer carries `bg-black/80` (its faint, unblurred dim is
+   `DIALOG_OVERLAY_SURFACE`), so this rule reaches drawers only. */
 .fixed.inset-0.z-50.bg-black\/80 {
   background-color: rgb(0 0 0 / 0.35) !important;
   -webkit-backdrop-filter: blur(8px) saturate(140%);

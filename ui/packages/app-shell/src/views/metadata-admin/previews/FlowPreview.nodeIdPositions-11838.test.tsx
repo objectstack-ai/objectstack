@@ -24,6 +24,8 @@
  * write that copies a node — so `WRITES` holds none.
  */
 
+// Paid at collection, not inside a clocked case (check:test-source-alias).
+import '@objectstack/lint';
 import * as React from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, cleanup, fireEvent, within } from '@testing-library/react';
@@ -162,7 +164,10 @@ function pickCreateRecord() {
 
 const alerts = () => screen.queryAllByRole('alert').map((el) => el.textContent ?? '');
 const pressDelete = () => fireEvent.keyDown(screen.getByRole('application', { name: 'Flow canvas' }), { key: 'Delete' });
-const clickRemove = () => fireEvent.click(screen.getByRole('button', { name: t('engine.inspector.flowNode.remove', 'en-US') }));
+const clickRemove = () => {
+  fireEvent.pointerDown(screen.getByRole('button', { name: t('engine.inspector.flowNode.moreActions', 'en-US') }), { button: 0, ctrlKey: false });
+  fireEvent.click(screen.getByRole('menuitem', { name: t('engine.inspector.flowNode.remove', 'en-US') }));
+};
 
 /**
  * `applied` — the write changed the draft and carried every position;

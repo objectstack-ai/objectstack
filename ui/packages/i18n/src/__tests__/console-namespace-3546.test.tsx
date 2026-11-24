@@ -151,17 +151,15 @@ const LANGS = Object.keys(builtInLocales) as LocaleCode[];
 /**
  * `lang :: key` pairs whose value is legitimately byte-identical to `en`.
  *
- * Exactly one, and for one reason: `Assistant` is spelled identically in French.
- * It is a true cognate, not an untranslated string — the same class slice two
- * pinned with 12 pairs and slice three with 18. Every other French value in this
- * slice differs from `en`, including the two that merely CONTAIN the word
- * (`dock.description`, `shortcuts.groups.aiChat`), which is what proves the
- * exemption is about this one word and not about the French pack being lazy.
+ * None. The one this slice used to carry, French `dock.title` = `Assistant`, left
+ * when the drawer title took the top-bar button's name in every pack
+ * (objectstack#34827): French now reads `Assistant IA` against English
+ * `AI Assistant`.
  *
- * Set equality, not a subset: a second identical value fails, and localising
- * this one fails too and forces the line out.
+ * Set equality, not a subset: a first identical value fails, and must be
+ * justified here the way the other slices justify their cognates.
  */
-const UNTRANSLATED_COGNATES = ['fr :: console.ai.dock.title'];
+const UNTRANSLATED_COGNATES: string[] = [];
 
 const at = (pack: unknown, path: string): unknown =>
   path.split('.').reduce<unknown>((n, k) => (n as Record<string, unknown> | undefined)?.[k], pack);
@@ -228,19 +226,14 @@ describe('objectui#3546 slice four — the console namespace', () => {
       }
     }
     expect(identical.sort()).toEqual(UNTRANSLATED_COGNATES);
-    // 1 permitted pair out of 414 — i.e. every key is translated in every pack
-    // except the French cognate. The set equality above is vacuous if the packs
-    // were empty, so pin the facts it rests on separately: the exempt value
-    // really is the cognate, and the two French neighbours that embed the same
-    // word really are NOT identical to en.
-    expect(UNTRANSLATED_COGNATES).toHaveLength(1);
-    expect(at(builtInLocales.fr, 'console.ai.dock.title')).toBe('Assistant');
-    expect(at(builtInLocales.fr, 'console.ai.dock.description')).not.toBe(
-      at(builtInLocales.en, 'console.ai.dock.description'),
-    );
-    expect(at(builtInLocales.fr, 'console.shortcuts.groups.aiChat')).not.toBe(
-      at(builtInLocales.en, 'console.shortcuts.groups.aiChat'),
-    );
+    // Every key is translated in every pack. The empty set above is vacuous if
+    // the packs were empty, so pin the facts it rests on separately: the French
+    // values that embed the word `Assistant` really are NOT identical to en.
+    expect(UNTRANSLATED_COGNATES).toHaveLength(0);
+    for (const key of ['console.ai.dock.title', 'console.ai.dock.description', 'console.shortcuts.groups.aiChat']) {
+      expect(at(builtInLocales.fr, key), key).toMatch(/assistant/i);
+      expect(at(builtInLocales.fr, key), key).not.toBe(at(builtInLocales.en, key));
+    }
   });
 
   it('no key in this slice interpolates — so no pack may invent a placeholder', () => {

@@ -358,6 +358,17 @@ export function checkFieldCompleteness(def: unknown): CompletenessFinding[] {
  *   `TreeConfigSchema` key is optional, so `tree: {}` satisfies THIS table and
  *   still renders flat — the parent pointer has its own rule,
  *   {@link VIEW_TREE_WITHOUT_PARENT_FIELD}, below.
+ * - `timesheet` → NO fallback, and no silence. `ListView.tsx`'s
+ *   `case 'timesheet'` forwards the declared block alone, and
+ *   `ObjectTimesheet`'s `resolveTimesheetConfig` returns `null` unless
+ *   `rowFields`, `dateField` and `valueField` are all present, which renders
+ *   the "Timesheet configuration required" refusal
+ *   (`data-testid="timesheet-missing-binding"`). `TimesheetConfigSchema`
+ *   requires all three keys, so a present block is a complete binding and
+ *   only an absent one can reach the refusal. The spec's list-view doors
+ *   refuse that absent block outright (`checkListViewTimesheetBinding`,
+ *   `ui/view.zod.ts`), so this row is what a stack meets before it parses
+ *   (`os validate` over source); it stays a warning like its six siblings.
  *
  * RE-MEASUREMENT HISTORY. [#17445] corrected the `calendar` row, reading
  * objectui `main` at `0cf2d6644` (2026-09-21), and found the `gantt`,
@@ -401,6 +412,7 @@ const VIEW_BINDING_BLOCKS: Readonly<Record<string, string>> = {
   timeline: 'timeline',
   map: 'map',
   tree: 'tree',
+  timesheet: 'timesheet',
 };
 
 /**
@@ -417,6 +429,7 @@ const VIEW_BINDING_FIX: Readonly<Record<string, string>> = {
   timeline: "timeline: { startDateField: '<date_field>', titleField: '<text_field>' }",
   map: "map: { locationField: '<location_field>' } — or { latitudeField: '<number_field>', longitudeField: '<number_field>' }",
   tree: "tree: { parentField: '<self_lookup_field>', labelField: '<text_field>' }",
+  timesheet: "timesheet: { rowFields: ['<field>'], dateField: '<date_field>', valueField: '<number_field>' }",
 };
 
 /**
@@ -464,6 +477,9 @@ const VIEW_BINDING_MESSAGE: Readonly<Record<string, string>> = {
   map:
     'A `map` view with no `map` block shows the "Map configuration required" screen on every '
     + 'object (`ObjectMap.tsx` — its `hasCoordinateBinding` gate fails)',
+  timesheet:
+    'A `timesheet` view with no `timesheet` block shows the "Timesheet configuration required" '
+    + 'screen on every object (`ObjectTimesheet.tsx` — `resolveTimesheetConfig` resolves `null`)',
 };
 
 /**

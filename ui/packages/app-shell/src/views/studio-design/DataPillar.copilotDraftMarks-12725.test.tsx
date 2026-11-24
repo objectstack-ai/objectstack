@@ -52,6 +52,7 @@ const minutesAgo = (n: number) => new Date(Date.now() - n * 60_000 - 5_000).toIS
 let draftEnvelope: Record<string, unknown> | null = null;
 
 const mockClient = {
+  publish: vi.fn(async () => ({})), reset: vi.fn(async () => ({})),
   save: vi.fn(async () => ({})),
   list: vi.fn(async (type: string) =>
     type === 'object'
@@ -90,6 +91,7 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 // warmed here so its first load is paid at import, not inside a test's clock.
 import '@objectstack/lint';
 import { DataPillar } from './StudioDesignSurface';
+import { StudioSaveHarness, pressStudioSave } from './__tests__/studioSaveHarness';
 import { createEmptyDataSource, failOnAbsorbedFetchError } from './__tests__/emptyDataSource';
 import { registerMetadataInspector } from '../metadata-admin/inspector-registry';
 import { ObjectFieldInspector } from '../metadata-admin/inspectors/ObjectFieldInspector';
@@ -125,9 +127,9 @@ function serveDraft(draftChanges?: unknown[]) {
 /** Render the pillar, open Form, select the field labelled `label`, and return the open rail. */
 async function openRail(label: string, name: string): Promise<HTMLElement> {
   render(
-    <MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
+    <StudioSaveHarness><MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
       <DataPillar packageId="com.example.showcase" />
-    </MemoryRouter>,
+    </MemoryRouter></StudioSaveHarness>,
   );
   fireEvent.click(await screen.findByRole('button', { name: L('engine.studio.data.tab.form') }));
   const card = (await screen.findByText(label)).closest('[role="button"]') as HTMLElement;
@@ -259,6 +261,7 @@ describe('Data pillar field properties — a copilot write while the field is op
     const label = within(rail).getByTestId('field-label-input');
     fireEvent.change(label, { target: { value: 'Renewal total' } });
     fireEvent.blur(label);
+    await pressStudioSave({ settle: false });
     await waitFor(() => expect(mockClient.save).toHaveBeenCalled(), { timeout: 8000 });
     const before = draftReadsOf('showcase_task');
 
@@ -276,10 +279,10 @@ describe('Data pillar field properties — a copilot write while the field is op
     await act(async () => {
       landSave();
     });
-    // Only the pillar's load installs the drafted field; the save's own
-    // verdict re-read (the other draft read here) installs no buffer.
+    // The pillar's load, once, installs the drafted field (objectstack#36511:
+    // the Save publishes, so no draft verdict is re-read after it).
     expect(await screen.findByText('Impact scope', undefined, { timeout: 8000 })).toBeInTheDocument();
-    expect(draftReadsOf('showcase_task')).toBe(before + 2);
+    expect(draftReadsOf('showcase_task')).toBe(before + 1);
   });
 
   it('CONTROL: a pulse re-reads the open object only, never another one in the rail', async () => {

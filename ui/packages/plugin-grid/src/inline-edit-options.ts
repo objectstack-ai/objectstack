@@ -12,7 +12,7 @@
  * is bound to reject.
  */
 
-import { isInlineExcludedFieldType } from '@object-ui/fields';
+import { isInlineExcludedFieldType, hasInCellPanelEditWidget } from '@object-ui/fields';
 import { isExpressionComputedField } from '@object-ui/core';
 
 /**
@@ -37,12 +37,35 @@ export { stateMachineNextValues } from '@object-ui/core';
  * that, a `composite` cell degraded to a plain text editor, a
  * value-corruption path.
  */
+const COMPUTED_FIELD_TYPES = new Set<string>(['formula', 'summary', 'rollup', 'autonumber', 'auto_number']);
 const NON_EDITABLE_FIELD_TYPES = new Set<string>([
   // computed / system-generated
-  'formula', 'summary', 'rollup', 'autonumber', 'auto_number',
+  ...COMPUTED_FIELD_TYPES,
   // binary / attachment
   'file', 'image', 'avatar', 'video', 'audio', 'signature',
 ]);
+
+/**
+ * Why a field is not edited in place (objectstack#35684), or `null` when it
+ * is: `readonly` (declared so), `computed` (an expression, a formula, a
+ * summary, an auto number) or `notInline` (a file, or a type the fields
+ * package keeps out of a cell). The reasons {@link isFieldInlineEditable}
+ * answers `false` for, told apart so a cell can say which.
+ */
+export function fieldInlineReadOnlyKind(
+  fieldDef: { type?: unknown; readonly?: unknown } | null | undefined,
+): 'readonly' | 'computed' | 'notInline' | null {
+  if (!fieldDef) return null;
+  if (fieldDef.readonly === true) return 'readonly';
+  if (isExpressionComputedField(fieldDef)) return 'computed';
+  if (typeof fieldDef.type !== 'string') return null;
+  if (COMPUTED_FIELD_TYPES.has(fieldDef.type)) return 'computed';
+  if (NON_EDITABLE_FIELD_TYPES.has(fieldDef.type)) return 'notInline';
+  // The rich-content types are excluded from in-place editing everywhere, and
+  // a cell still edits them, in a panel under it (objectstack#36023).
+  if (hasInCellPanelEditWidget(fieldDef.type)) return null;
+  return isInlineExcludedFieldType(fieldDef.type) ? 'notInline' : null;
+}
 
 /**
  * Whether a field may be edited in place in the grid. False for explicitly
@@ -53,15 +76,12 @@ const NON_EDITABLE_FIELD_TYPES = new Set<string>([
  * for every type the fields package
  * excludes from inline editing (`isInlineExcludedFieldType` — alias-aware,
  * so `composite` → `object`, `repeater` → `grid` are read-only cells, never
- * a plain text box). A null/unknown field is treated as editable so the
+ * a plain text box), save the rich-content types the cell edits in a panel
+ * (`hasInCellPanelEditWidget`). A null/unknown field is treated as editable so the
  * grid's own `editable` flag still governs.
  */
 export function isFieldInlineEditable(
   fieldDef: { type?: unknown; readonly?: unknown } | null | undefined,
 ): boolean {
-  if (!fieldDef) return true;
-  if (fieldDef.readonly === true) return false;
-  if (isExpressionComputedField(fieldDef)) return false;
-  if (typeof fieldDef.type !== 'string') return true;
-  return !NON_EDITABLE_FIELD_TYPES.has(fieldDef.type) && !isInlineExcludedFieldType(fieldDef.type);
+  return fieldInlineReadOnlyKind(fieldDef) === null;
 }

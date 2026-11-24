@@ -289,14 +289,23 @@ describe('[#28802] a bundle member on the base\'s address, at member grain', () 
         expect(await executing(protocol, NAME)).toEqual([BASE_EN, PAIR_FR]);
     });
 
-    it('a read naming no member of a bundle with no canonical member serves the base\'s member, not a dependent\'s canonical one', async () => {
+    // [#34682] A read naming no member addresses the canonical member, the
+    // same request as naming `en-US` (the member selector's declared
+    // contract): the base ships none, so it answers 404 at the base's address
+    // and naming no package. FROM (`main` d947a93cf8): both served the base's
+    // `fr-FR` (the registry's bare-name read of a bundle with no canonical
+    // member) while `?member=en-US` answered 404.
+    it('a read naming no member of a bundle with no canonical member answers as naming the canonical member does, never a dependent\'s canonical one', async () => {
         const { protocol } = await boot();
         await install(protocol, DEPENDENT);
         await publishInto(protocol, DEPENDENT, FR_ONLY, 'en-US', 'Dependent late EN');
 
-        expect(await byName(protocol, FR_ONLY, undefined, BASE)).toEqual(['Base late FR', 'fr-FR', BASE]);
-        expect(await byName(protocol, FR_ONLY)).toEqual(['Base late FR', 'fr-FR', BASE]);
+        expect(await byName(protocol, FR_ONLY, undefined, BASE)).toBe(404);
+        expect(await byName(protocol, FR_ONLY)).toBe(404);
         expect(await byName(protocol, FR_ONLY, 'en-US', BASE)).toBe(404);
+        expect(await byName(protocol, FR_ONLY, 'en-US')).toBe(404);
+        // The base's own member, named, is the base's.
+        expect(await byName(protocol, FR_ONLY, 'fr-FR')).toEqual(['Base late FR', 'fr-FR', BASE]);
         expect(await byName(protocol, FR_ONLY, 'en-US', DEPENDENT)).toEqual(['Dependent late EN', 'en-US', DEPENDENT]);
     });
 

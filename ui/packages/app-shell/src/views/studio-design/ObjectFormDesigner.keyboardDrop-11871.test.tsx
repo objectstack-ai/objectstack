@@ -29,6 +29,7 @@ import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { readFieldGroupMembership } from '@objectstack/spec/data';
 import { ObjectFormDesigner } from './ObjectFormDesigner';
 
 type Field = { name: string; type: string; label: string; group?: string };
@@ -115,18 +116,37 @@ beforeEach(() => {
   };
 });
 
-/** Every `fields` the designer committed, in order. */
+/** Every layout the designer committed, in order (see `resolvedLayout`). */
 let commits: Field[][] = [];
+/** The draft as the last commit left it. */
+let latest: Record<string, unknown> = {};
+
+/**
+ * objectstack#35900 — a move lands on the groups' `fields` lists, not on the
+ * fields array, so a commit is read as the layout the whole draft now
+ * resolves to: each field with the group it sits in, groups in order, then
+ * the ungrouped ones (no `group`).
+ */
+function resolvedLayout(d: Record<string, unknown>): Field[] {
+  const list = d.fields as Field[];
+  const { members, groupOf } = readFieldGroupMembership({ ...d, fields: Object.fromEntries(list.map((f) => [f.name, f])) });
+  const byName = new Map(list.map((f) => [f.name, f]));
+  const out: Field[] = [];
+  for (const [key, names] of members) for (const n of names) out.push({ ...byName.get(n)!, group: key });
+  for (const f of list) if (!groupOf.has(f.name)) out.push({ name: f.name, type: f.type, label: f.label });
+  return out;
+}
 
 function Host(): React.ReactElement {
-  const [draft, setDraft] = React.useState<Record<string, unknown>>(DRAFT);
+  const [draft, setDraft] = React.useState<Record<string, unknown>>(() => (latest = DRAFT));
   return (
     <ObjectFormDesigner
       draft={draft}
       systemFieldNames={new Set()}
       onChange={(patch) => {
-        if (patch.fields) commits.push(patch.fields as Field[]);
-        setDraft((d) => ({ ...d, ...patch }));
+        latest = { ...latest, ...patch };
+        commits.push(resolvedLayout(latest));
+        setDraft(latest);
       }}
       onSelectField={() => {}}
     />
@@ -169,10 +189,14 @@ async function keyboardMove(label: string, arrows: string[]): Promise<string[]> 
   return heard;
 }
 
-/** The last commit, as group key → field names in order (`''` = ungrouped). */
+/**
+ * The last commit, as group key → field names in order (`''` = ungrouped).
+ * A drop that changes nothing writes nothing (objectstack#35900), so with no
+ * commit this reads the draft as it stands.
+ */
 function layoutOfLastCommit(): Record<string, string[]> {
   const out: Record<string, string[]> = {};
-  for (const f of commits.at(-1) ?? []) (out[f.group ?? ''] ??= []).push(f.name);
+  for (const f of commits.at(-1) ?? resolvedLayout(latest)) (out[f.group ?? ''] ??= []).push(f.name);
   return out;
 }
 
@@ -223,6 +247,33 @@ describe('a keyboard drag in the form designer reaches a drop target (objectui#1
     await keyboardMove('Industry', ['ArrowDown', 'ArrowDown', 'ArrowDown']);
     expect(said()).toBe('Industry moved to Ungrouped, position 2 of 2.');
     expect(layoutOfLastCommit()).toEqual({ contact: ['phone', 'email'], '': ['name', 'industry'] });
+  });
+});
+
+describe('a move writes the group\'s own fields list, not the object\'s field order (objectstack#35900)', () => {
+  it('reordering inside a group changes only that group\'s fields: the fields array is untouched', async () => {
+    renderDesigner();
+    await keyboardMove('Phone', ['ArrowDown']);
+    expect(said()).toBe('Phone moved to Contact, position 2 of 2.');
+    // Same array, same order, same definitions: the list default columns and
+    // the form order read are where they were.
+    expect(latest.fields).toBe(DRAFT.fields);
+    expect(latest.fieldGroups).toEqual([
+      { key: 'contact', label: 'Contact', fields: ['email', 'phone'] },
+      { key: 'new_group', label: 'New group' },
+    ]);
+  });
+
+  it('carrying a field into another group lists it there and drops the group key that would contradict the list', async () => {
+    renderDesigner();
+    await keyboardMove('Email', ['ArrowDown']);
+    const fields = latest.fields as Field[];
+    expect(fields.map((f) => f.name)).toEqual(['name', 'industry', 'phone', 'email']);
+    expect(fields.find((f) => f.name === 'email')!.group).toBeUndefined();
+    expect(latest.fieldGroups).toEqual([
+      { key: 'contact', label: 'Contact', fields: ['phone'] },
+      { key: 'new_group', label: 'New group', fields: ['email'] },
+    ]);
   });
 });
 

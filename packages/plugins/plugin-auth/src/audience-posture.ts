@@ -59,9 +59,15 @@
  * self-serve sign-up route. So a self-serve creation holding a PENDING,
  * unexpired `sys_invitation` row is admitted under every posture (under
  * `email_domain` an explicit invitation also trumps the domain list — an
- * operator inviting an external contractor must not dead-end them). Without
- * this carve-out the posture would be "admin-create only" and the invitation
- * surface would be dead for new users — the invite dead-end class.
+ * operator inviting an external contractor must not dead-end them), except a
+ * social-provider creation whose address the provider did not verify under a
+ * posture whose admission rests on the address (below), and except a creation
+ * the posture's own rule already admits ({@link isAdmittedByPostureRule}): that
+ * one is a self-registrant, invitation or not, so it asks for the declared
+ * self-registration set and is refused with the uninvited sign-up when the set
+ * cannot be resolved — the invitation does not admit it without the grant.
+ * Without this carve-out the posture would be "admin-create only" and the
+ * invitation surface would be dead for new users — the invite dead-end class.
  *
  * What "holding" means is {@link invitationProofFor}'s answer. Under
  * `invite_only` a self-serve sign-up is admitted only by the invitation it
@@ -71,6 +77,32 @@
  * proved the mailbox (magic link, email OTP), or whose identity provider
  * verified the address, is matched by address. `open` and `email_domain`
  * match every creation by address.
+ *
+ * Admission by an invitation alone grants the account and nothing more
+ * ({@link isAdmittedByInvitationAlone}): under `invite_only`, and under
+ * `email_domain` for an address off the list, the sign-up receives no
+ * self-registration permission set, is not bound into the deployment's
+ * organization while its address is unverified, and joins by accepting the
+ * invitation. A sign-up the posture's own rule admits — any address under
+ * `open`, an address on the list under `email_domain` — is admitted by that
+ * rule, invitation or not ({@link isAdmittedByPostureRule}): it receives the
+ * declared set and binds as an uninvited one does, and the invitation still
+ * places it as the invitation names once it accepts.
+ *
+ * ## A social provider's word on the address
+ *
+ * Under a posture whose admission rests on the address — `email_domain`
+ * always, `open` while email verification is in force
+ * ({@link resolveEmailVerificationRequirement}) — a self-serve creation through
+ * a social provider is admitted only when the provider verified the address
+ * (`emailVerified` `true`). Otherwise {@link decideAudienceAdmission} refuses it
+ * `SELF_REGISTRATION_CLOSED`, as `invite_only` refuses it through the
+ * invitation proof: no account row, no session, no membership, and a pending
+ * invitation addressed to it does not admit it either. The rule is keyed on the
+ * creation class, so a social provider configured later is covered without
+ * being named; the `provider` class (an operator-registered identity
+ * authority) and the bootstrap carve-out are unaffected. Under `open` with the
+ * deployment's verification declared off, the creation is admitted as before.
  *
  * ## Pinned domain-matching rules (`email_domain`)
  *
@@ -97,7 +129,8 @@
  * ("a valid posture said no") because sending the debugger to re-read a
  * setting that looks exactly as they left it is the recorded failure mode. A
  * declared permission set that cannot be resolved refuses admission the same
- * way: admitting a self-registrant WITHOUT the declared grant would be the
+ * way, for every sign-up the posture's rule admits, invited or not: admitting
+ * a self-registrant WITHOUT the declared grant would be the
  * ADR-0078 "declared but inert" defect at runtime, and fail-open is the one
  * direction this gate must never take.
  */
@@ -222,8 +255,8 @@ export function resolveEmailVerificationRequirement(
 export const OPEN_POSTURE_VERIFICATION_OFF_WARNING =
   "[auth] audience posture 'open' is running with email verification explicitly OFF " +
   '(emailAndPassword.requireEmailVerification: false, or OS_AUTH_REQUIRE_EMAIL_VERIFICATION=false). ' +
-  'Anyone can register an address they do not control and is signed in at once, and an organization ' +
-  'invitation sent to that address can then be accepted by that account. Keep this to a deployment ' +
+  'Anyone can register an address they do not control and is signed in at once; an organization ' +
+  'invitation sent to that address still waits for the address to be verified. Keep this to a deployment ' +
   'with no mail transport that trusts its sign-ups, such as a pre-production environment; remove the ' +
   'explicit false to force verification back on.';
 
@@ -488,6 +521,47 @@ export interface AudienceAdmissionInput {
    * creation, an `oidcProviders` entry included.
    */
   ssoProvider?: { allowJit: boolean };
+  /** The vendor's `source.method` for the creation (`oauth` for a social provider). */
+  method?: unknown;
+  /**
+   * What the creation's identity provider said of the address, as the vendor
+   * hands it (`user.emailVerified`). Verified only when it is `true`.
+   */
+  emailVerified?: unknown;
+  /**
+   * The deployment's declared `emailAndPassword.requireEmailVerification`,
+   * resolved here by {@link resolveEmailVerificationRequirement}, the resolver
+   * the better-auth wiring and the public config read. Absent resolves to the
+   * posture's default, so under `open` email verification is in force unless
+   * the deployment declared an explicit `false`.
+   */
+  declaredEmailVerification?: boolean;
+}
+
+/**
+ * A self-serve creation through a social provider: `oauth` whose providerId is
+ * not an operator-registered `oidcProviders` entry ({@link classifyCreationMethod}
+ * classes those `provider`). It is told by the creation class and method, not
+ * by a list of providers, so a social provider configured later is covered
+ * without being named.
+ */
+function isSocialProviderCreation(creationClass: AudienceCreationClass, method: unknown): boolean {
+  return creationClass === 'self-serve' && method === 'oauth';
+}
+
+/**
+ * Whether a valid posture's admission of a self-serve creation rests on its
+ * address: `email_domain` always, and `open` while email verification is in
+ * force. Under either, a self-serve creation through a social provider is
+ * admitted only when the provider verified the address
+ * ({@link decideAudienceAdmission}). Under `invite_only` the invitation proof
+ * already asks it of an OAuth creation ({@link invitationProofFor}).
+ */
+function admissionRestsOnAddress(audience: ResolvedAudience, declaredEmailVerification: boolean | undefined): boolean {
+  if (audience.invalid) return false;
+  if (audience.posture === 'email_domain') return true;
+  if (audience.posture === 'open') return resolveEmailVerificationRequirement('open', declaredEmailVerification);
+  return false;
 }
 
 /**
@@ -525,16 +599,85 @@ export function invitationProofFor(input: {
   return 'address';
 }
 
+/**
+ * Whether an admitted self-serve sign-up was admitted by its invitation alone,
+ * so the membership settle does not bind it into the deployment's
+ * organization while its address is unverified (`settleMembership`,
+ * `auth-manager-membership-admission.ts`). It joins by accepting the
+ * invitation, which needs a verified address and writes the role the issuer
+ * chose. An invitation proves no mailbox: under `invite_only` its id is
+ * carried by the accept link and by a copied link, and under `email_domain`
+ * the address match reads only the address the sign-up typed.
+ *
+ * - `invite_only`: the sign-up presented the invitation, which is pending,
+ *   unexpired and addressed to it ({@link invitationProofFor} `presented`).
+ * - `email_domain`: the sign-up's address is off the allowlist, and a pending
+ *   invitation addressed to it admitted it. An address on the list is admitted
+ *   by the domain rule, invitation or not ({@link isAdmittedByPostureRule}),
+ *   binds as before and receives the declared self-registration set.
+ * - `open`, an off-vocabulary posture, and every creation that is not
+ *   self-serve: never.
+ */
+export function isAdmittedByInvitationAlone(input: {
+  audience: ResolvedAudience;
+  creationClass: AudienceCreationClass;
+  email: string | undefined;
+  proof: InvitationProof;
+  hasPendingInvitation: boolean;
+}): boolean {
+  const { audience, creationClass, email, proof, hasPendingInvitation } = input;
+  if (!hasPendingInvitation || audience.invalid || creationClass !== 'self-serve') return false;
+  // `open`, and `email_domain` on the allowlist: admitted by the posture's rule.
+  if (isAdmittedByPostureRule(audience, email)) return false;
+  if (audience.posture === 'invite_only') return proof === 'presented';
+  return audience.posture === 'email_domain';
+}
+
+/**
+ * Whether a valid posture's own rule admits a self-serve creation by its
+ * address, with no invitation: `open` admits every address, `email_domain` an
+ * address on the allowlist ({@link emailDomainAllowed}), and `invite_only`
+ * none. The one classification both readers of an invitation share: a
+ * sign-up the rule admits is admitted by that rule, invitation or not, so the
+ * admission verdict grants it the declared self-registration set
+ * ({@link decideAudienceAdmission}) and the membership settle binds it at
+ * creation ({@link isAdmittedByInvitationAlone}).
+ */
+function isAdmittedByPostureRule(audience: ResolvedAudience, email: string | undefined): boolean {
+  if (audience.invalid) return false;
+  if (audience.posture === 'open') return true;
+  if (audience.posture === 'email_domain') return emailDomainAllowed(email, audience.allowedEmailDomains);
+  return false;
+}
+
 /** The refusal message for an unknown user arriving through an SSO provider under `invite_only`. */
 const SSO_JIT_CLOSED_MESSAGE =
   'This single sign-on provider does not create accounts for people who were not invited ' +
   '(audience posture invite_only). Ask an administrator for an invitation, or ask them to turn on ' +
   'just-in-time provisioning (allowJit) for this provider.';
 
+/** The refusal message for a social-provider creation whose address the provider did not verify. */
+const socialAddressUnverifiedMessage = (posture: AudiencePosture): string =>
+  'This sign-in provider has not verified the email address, and this environment creates an account through ' +
+  `a social sign-in only for a verified address (audience posture ${posture}). ` +
+  'Verify the address with the provider and sign in again.';
+
 /**
  * THE admission decision — pure, so the posture × method matrix is a table of
  * direct calls. Order: creation-class exemptions → bootstrap → vocabulary
- * guard (fail closed) → posture semantics.
+ * guard (fail closed) → the social-provider address rule → the posture's own
+ * rule ({@link isAdmittedByPostureRule}, with the self-registration grant) →
+ * the invitation carve-out (no grant) → the posture's refusal.
+ *
+ * The social-provider address rule: under a posture whose admission rests on
+ * the address ({@link admissionRestsOnAddress}: `email_domain` always, `open`
+ * while email verification is in force), a self-serve creation through a
+ * social provider is admitted only when the provider verified the address.
+ * Otherwise it is refused `SELF_REGISTRATION_CLOSED`, as `invite_only` refuses
+ * it, and nothing is written: no account row, no session, no membership. A
+ * pending invitation does not admit it either — the invitation is matched by
+ * that same address. The `operator` and `provider` classes, and the bootstrap
+ * carve-out, stay ahead of the rule.
  */
 export function decideAudienceAdmission(input: AudienceAdmissionInput): AudienceAdmission {
   const { audience, creationClass, email, hasPendingInvitation, isBootstrap, ssoProvider } = input;
@@ -563,10 +706,27 @@ export function decideAudienceAdmission(input: AudienceAdmissionInput): Audience
         'This is a configuration error, not a policy refusal.',
     };
   }
+  if (
+    isSocialProviderCreation(creationClass, input.method) &&
+    input.emailVerified !== true &&
+    admissionRestsOnAddress(audience, input.declaredEmailVerification)
+  ) {
+    return { admit: false, code: SELF_REGISTRATION_CLOSED, message: socialAddressUnverifiedMessage(audience.posture) };
+  }
+  if (isAdmittedByPostureRule(audience, email)) {
+    // The posture's own rule first: `open`, and `email_domain` for an address
+    // on the allowlist, admit the sign-up by that rule, invitation or not, so
+    // it receives the declared self-registration set. A pending invitation
+    // still places it as the invitation names once it accepts. The membership
+    // settle reads the same classification (`isAdmittedByInvitationAlone`).
+    return { admit: true, grantPermissionSet: true };
+  }
   if (hasPendingInvitation) {
     // An explicit invitation is a stronger operator act than any posture —
     // it admits the invitee's own account creation under invite_only AND
     // trumps the email_domain allowlist (module doc: the invite dead-end).
+    // Admitted by the invitation alone, the sign-up gets the account and no
+    // self-registration grant.
     return { admit: true, grantPermissionSet: false };
   }
   switch (audience.posture) {
@@ -579,9 +739,7 @@ export function decideAudienceAdmission(input: AudienceAdmissionInput): Audience
           'Ask an administrator for an invitation.',
       };
     case 'email_domain':
-      if (emailDomainAllowed(email, audience.allowedEmailDomains)) {
-        return { admit: true, grantPermissionSet: true };
-      }
+      // An address on the allowlist was admitted by the posture's rule above.
       return {
         admit: false,
         code: EMAIL_DOMAIN_NOT_ALLOWED,
@@ -589,10 +747,9 @@ export function decideAudienceAdmission(input: AudienceAdmissionInput): Audience
           'Self-registration is limited to approved email domains, and this address ' +
           'is not on the list. Use your organization email, or ask an administrator for an invitation.',
       };
-    case 'open':
-      return { admit: true, grantPermissionSet: true };
     default: {
-      // Unreachable for a well-typed posture; keep the fail-closed floor.
+      // `open` was admitted by the posture's rule above, so this is
+      // unreachable for a well-typed posture; keep the fail-closed floor.
       return {
         admit: false,
         code: AUDIENCE_CONFIG_ERROR,

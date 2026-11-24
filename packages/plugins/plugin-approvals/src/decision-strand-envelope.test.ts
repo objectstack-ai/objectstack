@@ -254,7 +254,7 @@ describe('#13807 — a stranded decision publishes its facts, and keeps its stat
     const req = await park(automation);
 
     const out = await service.decide(
-      req.id, { decision: 'reject', actorId: 'u1' }, SYSTEM_CTX,
+      req.id, { decision: 'reject', comment: 'Over budget.', actorId: 'u1' }, SYSTEM_CTX,
     );
 
     expect(out.finalized).toBe(true);
@@ -289,7 +289,7 @@ describe('#13807 — a stranded decision publishes its facts, and keeps its stat
     };
 
     const err = await service
-      .decide(req.id, { decision: 'reject', actorId: 'u1' }, SYSTEM_CTX)
+      .decide(req.id, { decision: 'reject', comment: 'Over budget.', actorId: 'u1' }, SYSTEM_CTX)
       .then(() => null, (e: Error) => e);
 
     expect(seen.length).toBe(1);
@@ -348,7 +348,7 @@ describe('#13807 — a stranded decision publishes its facts, and keeps its stat
     const runId = req.flow_run_id;
 
     const err = await service
-      .decide(req.id, { decision: 'reject', actorId: 'u1' }, SYSTEM_CTX)
+      .decide(req.id, { decision: 'reject', comment: 'Over budget.', actorId: 'u1' }, SYSTEM_CTX)
       .then(() => null, (e: Error) => e);
 
     // The door still throws and the decision still stands — this card moves

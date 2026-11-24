@@ -1,5 +1,202 @@
 # @objectstack/formula
 
+## 18.6.0
+
+### Minor Changes
+
+- 12b69e1: feat(formula): `rmbUpper(amount)` writes an amount in Chinese capital numerals (人民币大写) for printed quotes, contracts and invoices
+  
+  Clause-②: yes (widening) — a new CEL stdlib function, `rmbUpper(dyn): string`, registered by `registerStdLib` and advertised in `CEL_STDLIB_FUNCTIONS`; an expression that calls it was refused as an unknown function before, and nothing that worked before is refused or changes value.
+  Metadata-protocol: added — a formula, predicate or flow value may now call `rmbUpper(...)`.
+  Skills-docs: updated here — `skills/objectstack-formula/SKILL.md` lists it in the stdlib Numbers table, and `content/docs/data-modeling/formulas.mdx` adds the catalog row and an "Amount in Chinese capitals" cookbook entry.
+  
+  `rmbUpper(245000)` is `贰拾肆万伍仟元整` and `rmbUpper(10500.5)` is `壹万零伍佰元伍角`. A formula field reads it as text:
+  
+  ```ts
+  Field.formula({ label: '大写金额', returnType: 'text', expression: 'rmbUpper(record.total_amount)' })
+  ```
+  
+  - The amount is rounded once to 分, half away from zero, on the exact decimal it spells, so `1.005` is `壹元零壹分` and binary floating point never decides a cent.
+  - One `零` stands for each run of zeros (`壹仟零伍元整`, `壹万零伍佰元整`, `壹亿零壹元整`), a ten is `壹拾`, the 万 and 亿 groups follow the usual rules, and the count of 亿 above 亿 is written with 万 (`壹拾万零壹亿元整`).
+  - A whole amount ends in `整`; a 分 with no 角 writes `零` for the 角 (`壹元零伍分`); an amount under one yuan is its 角 and 分 alone (`伍角`).
+  - `0` is `零元整`, a negative amount is prefixed `负`, and `null` reads `''`, so an empty total prints an empty line.
+  - A number, a currency field and decimal text (`'245000.00'`) are read. Text that spells no number, a boolean or a list, and an amount of 10^16 yuan or more, is a runtime error rather than some text.
+- d4e4dfb: fix(formula): `label()` over a multi-select reads each selected option's label, joined with `, `
+  
+  Clause-②: no
+  Metadata-protocol: semantic
+  
+  A formula `label(record.<field>)` over a `multiple: true` select used to fault on every non-empty selection, so the formula field read null in every view (the engine logged "renders ONE option value … holds a list of values"), while `os validate` and `os lint --strict` passed it.
+  
+  It now reads the label of each selected value in the reader's language, in the order the record stores the values, joined with `, `: a record holding `['no_sales_price', 'no_customer']` reads `无销售价, 无客户` to a `zh-CN` reader and `No sales price, No customer` to an `en-US` one. A one-value selection reads that one label. An empty selection or an empty field reads `''`, as before. A listed value no option declares reads as stored, as a single value does.
+  
+  This is the rule a mail template's `option` hole already prints a multi-select by; both now go through one shared helper, so the two cannot drift. A single select reads exactly as before. Nothing to migrate: a formula that read null now reads text.
+- 22bf910: fix(formula)!: the authoring gate refuses `timestamp()` over a date-only field, which faults on every row, and names the `isoDate(addDays(…))` shift
+  
+  Clause-②: yes (narrowing) — narrowed: the author-time gate (`os validate`, `os build`, `os lint`, the object save door and the flow publish door, wherever an expression is judged with the object's field types) refuses `timestamp(<date field>)`, alone or inside `+ duration(…)` arithmetic, which it accepted before. Widened: the published `ExpressionRefusalParams` type gains one optional param, `shift`, on the `date-text-call*` codes, present exactly when the message carries the new shift clause. No new refusal code.
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: registered formula-timestamp-date-only-refused -->
+  
+  **BREAKING** accept-set narrowing at the authoring type-soundness gate (`@objectstack/formula` `validateExpression`), shipped as `minor`. `timestamp(s)` is CEL's string overload, so the gate's date-text check, which declares a date field as the text the runtime holds, passed `timestamp(record.borrow_date)`. The runtime holds a `date` field as its `YYYY-MM-DD` text, and `timestamp()` parses only a full ISO-8601 instant: the evaluator answers `timestamp() requires a string in ISO 8601 format` on every record with a value (and finds no overload for `timestamp(null)` on every record without one). A formula read `null`; a flow condition failed the run; a fail-closed rule refused the write.
+  
+  - **The verdict.** The existing `date-text-call` code (and its `-run-fails`, `-run-may-fail`, `-fail-closed` and `-fail-open` arms) now names `timestamp(<date field>)`, with `date(<field>)` as the parse in place of the call and a new sentence naming the whole-day shift that keeps the result a date: `isoDate(addDays(<field>, N))`.
+  - **Not refused.** `timestamp()` over a `datetime` field, whose text is an ISO-8601 instant that `timestamp()` parses, and `timestamp()` over a literal.
+  - **Where it is judged.** Every site the gate types with the object's field types: formula fields, validation rules, field rule predicates, and flow start, edge and `decision` conditions. A flow's value envelope (`assignment` values, `create_record` / `update_record` field values) is judged without field types, as before, so this verdict does not reach it.
+  - **`@objectstack/spec`.** The upgrade guide entry `formula-timestamp-date-only-refused` (a semantic migration: the shift in days is the author's, and the refused expression never produced a value to preserve).
+  
+  ## FROM → TO
+  
+  | FROM | TO |
+  |:---|:---|
+  | `isoDate(timestamp(record.borrow_date) + duration('168h'))` | `isoDate(addDays(record.borrow_date, 7))` |
+  | `timestamp(record.borrow_date)` | `date(record.borrow_date)` |
+  
+  One-line fix: shift a date field by whole days with `isoDate(addDays(record.<date field>, N))`, never `timestamp(record.<date field>) + duration(…)`.
+- 1538596: fix(lint,service-automation): a flow value envelope is typed for the date-text verdicts, so `timestamp(record.<date field>)` in an `update_record` / `create_record` field or an `assignment` value is refused at `os validate` and at `registerFlow`
+  
+  Clause-②: yes (narrowing) — narrowed: a flow value envelope that registered and published now refuses at `os validate` and at `registerFlow`; owes the contract-review-tier review before the queue, and Tier H via the seat. Widened: the published `ExprSchemaHint` type gains one optional key, `flowValueEnvelope`.
+  Metadata-protocol: narrowed
+  Skills-docs: none — no published skill teaches a flow value envelope over a date field; `skills/objectstack-formula/SKILL.md` already states the `timestamp()` / `date-text-call` rule without naming a site, so it now holds for value envelopes as written
+  
+  <!-- adr-0087: not-required (already-registered formula-timestamp-date-only-refused, formula-date-text-call-refused, formula-date-subtraction-refused) The three semantic entries already carry these verdicts, their codes and their rewrites to the upgrade guide; this change lets the same verdicts reach one more site, a flow value envelope, with the same rewrite, and rewrites each entry's surface in this PR to name that site, its scope (a record-triggered flow or a time-relative sweep of the typed object that rebinds neither record nor previous itself) and its consequence (a stored flow carrying one fails to register at boot on an engine with the object-schema resolver wired until rewritten), and adds to each entry's acceptance criteria how an upgrading operator confirms a stored flow is clear (no failed to register flow warning at boot, and no registerFlow TODO from POST /api/v1/meta/_migrate-stored on the running server; the CLI's os migrate meta --stored boots automation inert, with no object-schema resolver, so it types no value envelope and cannot show it). No id is added, no key is added, removed or re-shaped, and nothing an author wrote is rewritten. -->
+  
+  The upgrade-guide half of the narrowing (#34661) is completed by this PR: the three ADR-0087 entries above now name the flow value envelope in their `surface`.
+  
+  **BREAKING** accept-set narrowing, shipped as `minor`. A flow's value envelope (`assignment` `assignments.*`, `create_record` / `update_record` `fields.*`) was validated without field types, so the date-text verdicts never reached it. `isoDate(timestamp(record.borrow_date) + duration('168h'))` written into an `update_record` field passed `os validate`, registered, and failed every run: the runtime holds a `date` field as its `YYYY-MM-DD` text, and `timestamp()` parses only a full ISO-8601 instant.
+  
+  - **The verdicts.** The envelope is now typed with the object the flow's run binds as `record` (the start node's `objectName`; a time-relative flow's swept object) — on a record-triggered flow, or a time-relative sweep of the typed object, that rebinds neither root the typing reads (no declared variable, node id, output / iterator / index / error variable or `assignment` target named `record`; no node id, output / iterator / index / error variable or `assignment` target named `previous` — the run's seed sets `previous` over a declared variable of that name) — for the date-text family alone: `date-text-call-run-may-fail` and `date-text-arithmetic-run-may-fail`, over `record.<field>` / `previous.<field>` reads. `timestamp(record.<date field>)`, alone or inside `+ duration(…)`, is refused with the shift `isoDate(addDays(record.<date field>, N))`; so are a `date` / `datetime` field handed straight to a timestamp-only call (`isoDate(record.picked_up_at)`) and arithmetic on its text (`record.borrow_date - duration('24h')`).
+  - **Where.** `@objectstack/lint` `validateStackExpressions` (`os validate`, `os build`, the flow publish door) reports an `error` at the slot. `@objectstack/service-automation` `registerFlow` throws it when an object-schema resolver is wired, and the stored pass (`canonicalizeStoredFlow`) lists it at the slot. The two doors judge the same set of flows. A flow stored with such an envelope stops registering at boot until it is rewritten.
+  - **Not refused.** Any envelope of a flow whose `record` is not proven to be the typed object's row: an inbound hook (`api`), a schedule, a flow with no trigger (started by hand or by a parent's `subflow` / `map`), a sweep of another object, and a record-triggered flow that declares or assigns its own `record` variable, or assigns or outputs its own `previous` — judged untyped, as before. `timestamp()` over a `datetime` field. A bare field name in an envelope, and an expression reading `input`: neither door can prove what the run binds there. Every other type verdict (`type-mismatch*`, `date-arithmetic*`, `date-duration-value`) and field existence stay out of value envelopes, as before. The run-time evaluator is unchanged.
+  - **`@objectstack/formula`.** `ExprSchemaHint` gains the optional `flowValueEnvelope` key that both doors pass.
+  - **`@objectstack/spec`.** The ADR-0087 entries `formula-timestamp-date-only-refused`, `formula-date-text-call-refused` and `formula-date-subtraction-refused` name the flow value envelope in their `surface` (for the subtraction entry, its first two shapes; the formula-only duration value stays out of envelopes). Text only: no id, key or shape changes.
+  
+  ## FROM → TO
+  
+  | FROM | TO |
+  |:---|:---|
+  | `isoDate(timestamp(record.borrow_date) + duration('168h'))` | `isoDate(addDays(record.borrow_date, 7))` |
+  | `timestamp(record.borrow_date)` | `date(record.borrow_date)` |
+  | `isoDate(record.picked_up_at)` | `isoDate(date(record.picked_up_at))` |
+  
+  One-line fix: in a flow value envelope, shift a date field by whole days with `isoDate(addDays(record.<date field>, N))`, never `timestamp(record.<date field>) + duration(…)`.
+
+### Patch Changes
+
+- b846710: perf(formula): the expression type checks build each typed check environment once per input, not once per call
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The type checks behind the authoring rules (`firstTypeMismatch`, `firstDateTextVerdict` and `firstDateTextCall`) built a new typed CEL environment on every call. Each build clones cel-js's registry and registers the whole stdlib again. The runtime authoring gate runs these checks over every expression in the stack each time a metadata item is published, so the cost grows with the size of the stack, not with the size of the item.
+  
+  Measured on the showcase: one object publish built 903 environments for 97 distinct inputs. That was about 0.5 s of the publish request on an idle machine. The publish request now takes about 1.0 to 1.3 s on an idle machine, down from 1.6 to 1.8 s.
+  
+  The environments are now kept per input (scope, date typing and field types), up to 512, least recently used first. The checks only parse and type-check against these environments, so a shared one gives the same verdicts as a fresh one. Nothing changes in what the checks report.
+- ad7331a: fix(formula): decimal text is judged against the number range before it is scaled
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `toScaledDecimal` now judges decimal text against the number range before it scales it, the way the same value is judged as a number:
+  
+  - Text whose number is not finite (`'1e400'`, `'1.8e308'`) spells no decimal and reads `undefined`, as a non-finite number already did.
+  - Text whose number is zero because it is below the smallest number (`'1e-400'`) reads as zero, as that number already did.
+  - A zero is never scaled by its exponent; one written with an exponent below the smallest number's (`'0e-325'`) reads as plain zero.
+  
+  Inside the range every digit is still kept exactly, numbers and bigints are read as before, and `divideToPlaces` and `formatScaledDecimal` are unchanged. The home-amount projection treats an amount that spells no decimal as before: it leaves the value to the record validator, which refuses a non-finite number as `invalid_number`.
+- Updated dependencies [e53e02e]
+- Updated dependencies [1f923d7]
+- Updated dependencies [64c4285]
+- Updated dependencies [b1efa37]
+- Updated dependencies [84e6bbb]
+- Updated dependencies [69783b7]
+- Updated dependencies [bb17350]
+- Updated dependencies [a061708]
+- Updated dependencies [c59198f]
+- Updated dependencies [fb3d1ff]
+- Updated dependencies [2068e03]
+- Updated dependencies [5c7e448]
+- Updated dependencies [de3538c]
+- Updated dependencies [5326028]
+- Updated dependencies [f7b2d02]
+- Updated dependencies [bb3c163]
+- Updated dependencies [d635555]
+- Updated dependencies [0ac112f]
+- Updated dependencies [c934631]
+- Updated dependencies [63e47fe]
+- Updated dependencies [b005638]
+- Updated dependencies [e5c2d76]
+- Updated dependencies [db3bbd3]
+- Updated dependencies [9f32c0f]
+- Updated dependencies [109a903]
+- Updated dependencies [2539ad9]
+- Updated dependencies [98a4449]
+- Updated dependencies [fdfccbf]
+- Updated dependencies [fa1fb6f]
+- Updated dependencies [d10f652]
+- Updated dependencies [ba03d5e]
+- Updated dependencies [3e49033]
+- Updated dependencies [6091b64]
+- Updated dependencies [61ded62]
+- Updated dependencies [75ab117]
+- Updated dependencies [071323e]
+- Updated dependencies [41ff7c3]
+- Updated dependencies [aab8b31]
+- Updated dependencies [e0670b9]
+- Updated dependencies [50d655f]
+- Updated dependencies [3a08833]
+- Updated dependencies [0e2e4f5]
+- Updated dependencies [bef80d3]
+- Updated dependencies [e0670b9]
+- Updated dependencies [9e6fee1]
+- Updated dependencies [52ec26f]
+- Updated dependencies [c2cabce]
+- Updated dependencies [6fb3d0c]
+- Updated dependencies [2c296cf]
+- Updated dependencies [fa9d695]
+- Updated dependencies [d9c4b62]
+- Updated dependencies [8c6ddc5]
+- Updated dependencies [1bf90a0]
+- Updated dependencies [27c0b20]
+- Updated dependencies [842637a]
+- Updated dependencies [227ae36]
+- Updated dependencies [1177058]
+- Updated dependencies [22bf910]
+- Updated dependencies [371e5f1]
+- Updated dependencies [11e0441]
+- Updated dependencies [f23c71e]
+- Updated dependencies [4240719]
+- Updated dependencies [6302c2c]
+- Updated dependencies [7b3e955]
+- Updated dependencies [066177b]
+- Updated dependencies [ddab49d]
+- Updated dependencies [1538596]
+- Updated dependencies [21d84a8]
+- Updated dependencies [4fb8790]
+- Updated dependencies [a1082f3]
+- Updated dependencies [f02f4f6]
+- Updated dependencies [e61af97]
+- Updated dependencies [758bbe7]
+- Updated dependencies [99bd220]
+- Updated dependencies [13057ce]
+- Updated dependencies [a8aa6ab]
+- Updated dependencies [9cf74ae]
+- Updated dependencies [6c1f9b3]
+- Updated dependencies [b633afe]
+- Updated dependencies [aa0fde3]
+- Updated dependencies [743308b]
+- Updated dependencies [2487242]
+- Updated dependencies [92a5cac]
+- Updated dependencies [d4b2a75]
+- Updated dependencies [ad9b74b]
+- Updated dependencies [e2a4c66]
+- Updated dependencies [c37e47a]
+- Updated dependencies [a6c2b83]
+- Updated dependencies [1354d2a]
+- Updated dependencies [a2bb7d5]
+  - @objectstack/spec@18.6.0
+
 ## 18.5.0
 
 ### Minor Changes

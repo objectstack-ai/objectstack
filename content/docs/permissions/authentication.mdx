@@ -123,7 +123,11 @@ OS_AUTH_SIGNUP_ENABLED=false
 OS_AUTH_GOOGLE_ENABLED=true
 
 # Optional: what a new user joins (ADR-0093 D1). `auto` (default) binds every
-# new user to the default organization; `invite-only` grants membership only
+# new user to the default organization (except a sign-up admitted by its
+# invitation alone whose address is unverified: under the `invite_only`
+# audience posture, one admitted by the invitation it presents; under
+# `email_domain`, one off the allowlist that an invitation addressed to it
+# admitted. It joins by accepting); `invite-only` grants membership only
 # through an explicit act — creating a workspace, accepting an invitation, an
 # admin adding them, or SSO just-in-time provisioning.
 # Also configurable in Setup → Authentication → Membership.
@@ -321,6 +325,193 @@ code still outstanding for that user: a completed reset, the user's own
 `POST /api/v1/auth/set-initial-password`. An ended link or code answers exactly
 what one that was never issued answers (`400 INVALID_TOKEN` at
 `reset-password`); a link or code requested after the change works as usual.
+
+A change to a user's password also ends the following, issued before it:
+
+- an email-change link, and a verification link on a deployment that signs
+  its holder in when it verifies
+  (`emailVerification.autoSignInAfterVerification: true`), answer what a link
+  that was never issued answers at `GET /api/v1/auth/verify-email`
+  (`401 INVALID_TOKEN`, or the `error=INVALID_TOKEN` redirect to its
+  callback). With auto sign-in off, a verification link signs nobody in, and
+  it still verifies the address;
+- a magic link answers what a link that was never issued answers at
+  `GET /api/v1/auth/magic-link/verify` (the `error=INVALID_TOKEN` redirect)
+  and opens no session;
+- a sign-in code texted by `POST /api/v1/auth/phone-number/send-otp` answers
+  what a code that was never sent answers at
+  `POST /api/v1/auth/phone-number/verify` (`400 OTP_NOT_FOUND`) and opens no
+  session;
+- a second-factor challenge opened by a password sign-in answers what a
+  challenge that was never opened answers;
+- an MCP access token is refused at the MCP endpoint. Where the app's
+  authorization still stands — a password change, or an administrator's
+  `set-user-password` with `revokeSessionsAndKeys: false` — the app gets a new
+  token with its refresh token, as it does when a token expires; a reset ends
+  the authorization itself (below).
+
+The person asks for a new link, code or challenge, which works as usual. A
+door that ends the account's sessions — a completed reset, `change-password`
+with `revokeOtherSessions: true` (the session it installs is kept) and the
+one-step invitation acceptance — ends every session opened before its
+password write, and a password sign-in during which the password changes is
+refused with what a wrong password answers.
+
+The change's moment is the last time the account's local password was
+written, so an administrator's `set-user-password` counts too. An account's
+first password counts when it is set onto an account that was already there:
+through either reset door, an administrator's `set-user-password`, the one-step
+invitation acceptance of an existing account, or `set-initial-password`. It
+does not count when the password is created in the same request as its
+account, as at a sign-up with a password, an administrator's create-user or a
+one-step invitation acceptance that creates the account, however long the
+steps between the two take. A password created outside such a request (written
+straight to the store), or before this release, counts as a change at its
+creation. An email-change or verification link carries its issue time in whole
+seconds, so one minted in the same second as the change is refused as well.
+An MCP access token carries its issue time in milliseconds, signed into it by
+the server, so for an app the user granted access to through the consent step,
+one minted after the change in the same second is admitted; a token without
+that value (minted before this release), or one whose value cannot be placed,
+keeps the whole-second refusal. An app admitted without a consent step keeps
+the whole-second refusal for every token.
+
+#### What a password reset ends, and what a change keeps
+
+A completed password reset — the emailed link (`POST /api/v1/auth/reset-password`)
+or the texted code (`POST /api/v1/auth/phone-number/reset-password`) — ends,
+beside the account's sessions, what the account added before it:
+
+- **API keys.** Every API key the account owns that is not revoked — its
+  `revoked` flag false or unset — is revoked, and the next call with it is
+  refused as revoked (`403 API_KEY_REVOKED`). It is revoked as one its owner
+  revoked from the API Keys list, so the owner may restore it there.
+- **Linked sign-in accounts.** Every sign-in account linked to the account
+  other than its password — a social, OAuth or single sign-on link — is
+  unlinked. The provider may be linked again the way it was linked the first
+  time.
+- **Authorized apps.** Where the OAuth provider is enabled, every app
+  authorized to the account loses its authorization: the account's consents,
+  refresh tokens and stored access tokens are deleted, so the app asks the
+  person to authorize it again. An MCP access token, which is signed rather
+  than stored, is refused on its next request, because the MCP endpoint reads
+  on every request the authorization it was issued under and when the
+  account's password last changed.
+- **Device sign-ins.** Where device authorization is enabled, a device sign-in
+  approved for the account and not yet collected by its device is ended.
+- **OAuth applications it registered.** Every OAuth application the account
+  registered (it is the application's owner) that is not disabled is
+  disabled, as a platform administrator's **Disable** action disables one: the
+  provider issues it no token, client-credentials tokens included, answers its
+  tokens inactive at introspection, and the MCP endpoint refuses every token
+  it holds, whoever authorized it. A platform administrator can enable it
+  again; its owner cannot. An application another account registered is not
+  touched.
+- **SCIM credentials it minted.** Every SCIM provisioning credential the
+  account minted that is still active is revoked, as **Revoke Credential**
+  revokes one: its bearer is refused from the next SCIM request on. A revoke
+  is one-way, so provisioning through that connection waits until a platform
+  administrator mints a new credential. Each revoke writes the
+  `sys_audit_log` row **Revoke Credential** writes, naming the account as the
+  one who revoked it. A credential another administrator minted, for the same
+  connection or another, is not touched.
+- **Passkeys.** This build offers no passkey sign-in, so there are none to end.
+
+A reset keeps the single sign-on providers the account registered and its
+two-factor enrolment. Once it has ended the rest, it sends the account's
+address `auth.password_reset_notice`: how many API keys, linked sign-in
+accounts and authorized apps it ended, each OAuth application it disabled and
+each SCIM credential it revoked by name, and the single sign-on providers and
+the second factor it kept, so the owner can check them. The notice is
+best-effort: one that cannot be sent never fails the reset. It is a built-in
+auth template, overridable like the others.
+
+A reset that does not complete ends nothing; a key minted after the reset
+works as usual. A completed reset that cannot end one of these — a record that
+cannot be read or written, a linked account a host hook keeps, an account it
+cannot name — still ends every other kind: an application that cannot be
+disabled leaves no API key, linked account or credential in place. Once it has
+tried them all it answers an error and sends no notice. The new password
+stands, and its change time and password history are recorded all the same;
+resetting again ends what remains.
+
+A password change through `POST /api/v1/auth/change-password`, which proves
+the current password, ends none of these: an authorized app keeps its
+authorization and gets a new MCP access token with its refresh token, issued
+after the change. It disables no application and revokes no SCIM credential.
+When the account still holds an API key that is neither revoked nor past its
+own expiry, a linked sign-in account, an authorized app, an OAuth application
+it registered that is not disabled or a SCIM credential it minted that is
+still active and not past its own expiry after the change, the account's
+address is sent
+`auth.password_changed_notice`, naming each one, through the email service
+every auth mail goes through. The notice is best-effort: one that cannot be
+sent never fails the change. It is a built-in auth template, overridable like
+the others.
+
+An administrator's forced reset with `revokeSessionsAndKeys` on and the
+operator's `os user set-password` end the API keys, the linked sign-in
+accounts, the authorized apps and the device sign-ins, disable the OAuth
+applications the account registered and revoke the SCIM credentials it
+minted, as [Set / Reset a Password](#set--reset-a-password) describes. The
+forced reset records each SCIM credential it revokes in `sys_audit_log`
+against the administrator who ran it; `os user set-password`, which runs as
+no signed-in user, records none. They send no notice: each tells the one who
+ran it what it ended.
+
+#### What a ban, a deactivation or a removal ends
+
+An account that is disabled or removed keeps nothing running in its name. A
+platform administrator's ban (`POST /api/v1/auth/admin/ban-user`), the identity
+provider deactivating or deleting the person through SCIM (`active: false`,
+`DELETE /Users/{id}`), and an administrator's delete
+(`POST /api/v1/auth/admin/remove-user`) each end what a password reset ends of
+the account's registrations:
+
+- **OAuth applications it registered** are disabled, as a reset disables them.
+  A platform administrator can enable one again.
+- **SCIM credentials it minted** are revoked, one-way, as a reset revokes
+  them. Each revoke writes the `sys_audit_log` row **Revoke Credential**
+  writes, naming the administrator who banned or removed the account, or, for
+  a deactivation, the directory connection (`actor` `svc:scim:CONNECTION_ID`,
+  no `user_id`).
+- **AI service accounts it is accountable for** stop: a ban suspends each one
+  with the reason `Accountable owner banned by an administrator`, a
+  deactivation with `Accountable owner deactivated by the directory`. An
+  administrator's delete of a person who is still accountable for an AI
+  service account is refused (`400 VALIDATION_FAILED`, the account needs an
+  accountable owner): name a new owner first (`set-owner`), then delete.
+
+The single sign-on providers the account registered are kept, as a reset keeps
+them. An unban or a re-activation restores none of it: a platform
+administrator enables an application again, a new credential is minted for a
+connection, and an administrator resumes an AI service account once its owner
+is active again or a new owner is named. A timed ban leaves the AI service
+accounts suspended after the ban expires.
+
+How each door answers:
+
+- **Ban.** The response's `data.revoked` reports what was ended beside the ban
+  — `{ serviceAccounts, ownedApps, scimCredentials, failed, complete }`,
+  counts only, as the forced reset reports its own — and the ban's
+  `sys_audit_log` row carries the same counts. The ban has landed by then, so a
+  step that cannot finish does not undo it: `complete` is `false`, and banning
+  the user again ends what remains.
+- **Delete.** The answer is `{ success: true, revoked: { ownedApps,
+  scimCredentials } }`. The registrations are ended inside the delete's unit of
+  work, before the user is deleted; when one cannot be ended, the delete is
+  refused with `503 SERVICE_UNAVAILABLE` and nothing is changed.
+- **Deactivation.** It never fails the SCIM request. A credential it revoked is
+  reported once in the server log at `error`, naming the credential and the
+  remedy; one it could not end is reported at `error` too, and the next SCIM
+  write that leaves the user inactive ends what remains.
+
+Known trade: a SCIM credential belongs to the administrator who minted it.
+When that administrator is banned, deactivated or removed, the credential is
+revoked and provisioning through its connection pauses until another
+administrator mints a new one. Rotate the connection's credential to another
+administrator first (see [SCIM Connection Credentials](#scim-connection-credentials))
+to avoid the pause.
 
 #### Setting a first local password
 
@@ -603,6 +794,19 @@ the callback redirects with `error=account_not_linked`. The platform identity pr
 (`objectstack-cloud`) is the one exception, and an unlinked provider never re-links
 itself. See [Linking to an existing account](/docs/permissions/sso#linking-to-an-existing-account).
 
+A sign-in that would create a new account through a social provider is judged by the
+deployment's audience posture. Under `email_domain`, and under `open` while email
+verification is in force (the default; only the deployment can declare it off), the
+account is created only when the provider reports the address verified. Otherwise the
+sign-in is refused `403 SELF_REGISTRATION_CLOSED` (the callback redirects with
+`error=SELF_REGISTRATION_CLOSED`), as it is under `invite_only`, and nothing is written:
+no account, no session, no membership. A pending invitation addressed to the person does
+not change this, because it is matched by the same address; once the provider verifies
+the address, the next sign-in is admitted. The rule covers every provider in
+`socialProviders`, a provider added later included. Identity providers an operator
+registers (`oidcProviders` entries and SSO providers) are not affected, and neither is
+the first account of a fresh install.
+
 ---
 
 ## Enterprise Authentication Hardening (ADR-0069)
@@ -675,7 +879,7 @@ often before the account-level lock engages.
 
 | Setting | Effect |
 |---|---|
-| `allowed_ip_ranges` | Restrict authenticated access to one or more CIDR ranges or exact addresses, IPv4 or IPv6 (`203.0.113.0/24`, `2001:db8::/32`, `192.0.2.7`). An entry that is neither is refused when you save it. The address judged is the one the server establishes, by the same rule as the inbound rate limiter: `X-Forwarded-For` / `X-Real-IP` only when the stack declares `server.trustProxy`, the connection's peer address otherwise. Behind a reverse proxy, declare `server.trustProxy`, or the allow-list judges the proxy's own address. A request whose address cannot be established is refused with `403 IP_NOT_ALLOWED`, like one outside the ranges. `last_login_ip` records the same address. A save that leaves out your own address is refused, and clearing the field applies at once: see [Saving, clearing and lockout recovery](#saving-clearing-and-lockout-recovery). |
+| `allowed_ip_ranges` | Restrict authenticated access to one or more CIDR ranges or exact addresses, IPv4 or IPv6 (`203.0.113.0/24`, `2001:db8::/32`, `192.0.2.7`). An entry that is neither is refused when you save it. The address judged is the one the server establishes, by the same rule as the inbound rate limiter: a forwarded header only when the stack declares `server.trustProxy` (its trusted-network form `{ networks: [...] }` believes it only from the proxies it names, read from the right past them), the connection's peer address otherwise. Behind a reverse proxy, declare `server.trustProxy`, or the allow-list judges the proxy's own address; `true` is sound only behind a proxy that overwrites `X-Forwarded-For`, never one that appends to it. A request whose address cannot be established is refused with `403 IP_NOT_ALLOWED`, like one outside the ranges. `last_login_ip` records the same address. A save that leaves out your own address is refused, and clearing the field applies at once: see [Saving, clearing and lockout recovery](#saving-clearing-and-lockout-recovery). |
 
 > **How enforcement works.** Password expiry (an administrator-forced password
 > change included) and enforced MFA share a single *session-validation gate*.
@@ -1208,8 +1412,8 @@ organization the administrator has switched to in the console. There is no
 organization choice: to add someone to another organization, switch to it
 first. An administrator with no current organization is refused with
 `400 NO_ACTIVE_ORGANIZATION` and no user is created. Under the `single` posture
-(a degraded wall included) the user joins the default organization, as every new
-user does ([Membership](/docs/deployment/tenancy-modes#membership-how-new-users-join-an-organization)).
+(a degraded wall included) the user joins the default organization, as every
+user an administrator creates does ([Membership](/docs/deployment/tenancy-modes#membership-how-new-users-join-an-organization)).
 
 The join is better-auth's `addMember`, the same act as **Add Member**, inside
 the account's transaction: an organization at its membership limit refuses the
@@ -1238,11 +1442,28 @@ same `mustChangePassword` flag. It also provisions a credential account for
 SSO-onboarded users who never had a local password.
 
 The forced reset also carries `revokeSessionsAndKeys`, **on by default**: it
-ends every session of the user and revokes every API key they own, so a
-suspected compromise leaves no live credential behind. Pass
-`revokeSessionsAndKeys: false` for a routine reset. The response reports what
-was revoked (`revoked: { sessions, apiKeys, failed, complete }`), and revoked
-keys stay revoked after the password change.
+ends every session of the user, revokes every API key they own that is not
+revoked (its `revoked` flag false or unset), unlinks
+every sign-in account linked to the user other than the password, and, where
+the OAuth provider is enabled, ends every app authorized to the user (its
+consents, refresh tokens and stored access tokens are deleted, so the app asks
+to be authorized again and an MCP access token is refused on its next request)
+and, where device authorization is enabled, every device sign-in approved for
+the user and not yet collected. It also disables every OAuth application the
+user registered and revokes every SCIM credential the user minted, as a
+self-service reset does; an application another account registered and a
+credential another administrator minted are not touched, and the user's
+single sign-on providers and two-factor enrolment are kept. A suspected
+compromise leaves no live credential behind. Pass `revokeSessionsAndKeys: false` for a routine reset,
+which ends none of these; as after any password change, an MCP access token
+issued before it is refused and the app gets a new one with its refresh token. The response reports what was ended
+(`revoked: { sessions, apiKeys, signInAccounts, authorizedApps, ownedApps, scimCredentials, failed, complete }`,
+`ownedApps` counting the applications disabled and `scimCredentials` the
+credentials revoked; the ledger row carries the same counts), and revoked keys
+stay revoked after the password change. The operator's `os user set-password`
+ends the same, reading the authorized apps, device sign-ins, registered
+applications and minted credentials the project database holds, and reports
+each count.
 
 #### Bulk Import Users
 
@@ -1300,6 +1521,19 @@ every row through better-auth so the accounts are login-capable:
   cannot assign positions during an import, or `PERMISSION_DENIED` when your
   own access cannot be resolved. A dry run never assigns positions, and
   reports `summary.positions` as zeros.
+- **Which organization the rows join** follows [Create a User Directly](#create-a-user-directly):
+  under a walled posture (`group` / `isolated`) every imported user joins your
+  **current** organization as `member`, each row in the same step as its
+  account, so the `positions` column validates against that organization. A row
+  the organization refuses (its membership limit, say) is failed on its row
+  with that refusal's code, and **that user is not created**: no account, no
+  temporary password, no invitation. The other rows still land. A row that
+  matches an existing user on `upsert` joins too; if the join is refused, the
+  row fails and its profile update is not applied. With no current
+  organization the whole import is refused with `400 NO_ACTIVE_ORGANIZATION`
+  and no user is created — a dry run included, so the preview tells you before
+  you import. Switch to the organization the people belong to first. Under the
+  `single` posture nothing changes: users join the default organization.
 - Synchronous only, at most 500 rows per request (password hashing is
   CPU-bound); split larger files into batches. Imports are not undoable.
 
@@ -1328,6 +1562,20 @@ admin plugin, and both are platform-admin gated:
   500 rows. Each row is judged and written on its own, so a bad row fails
   with its own message and the good rows land. The answer carries a
   `summary` and one result per row.
+
+Both doors, and `remove-sso-user` below, also take an optional
+`organizationId`. A console action forwarded to the auth mount carries the
+caller's active organization there, so the key is admitted only when it
+equals the organization the caller's session is working in. A different
+organization gets `400 INVALID_REQUEST` naming both organizations; a
+non-string or empty value gets `400 INVALID_REQUEST` saying the key must be
+the id of the organization you are working in (a non-string value is checked
+before the session, so this is the answer even when the session has no
+organization); a string organization from a caller whose session works in no
+organization gets `400 NO_ACTIVE_ORGANIZATION` naming the organization sent. Every refusal
+comes before anything is written or any host is told. The value never
+widens or chooses scope: the organization a person joins is always read from
+the session.
 
 The person is stored **pending** (`sys_user.source` reads `idp_pending`): no
 password, and no session until they sign in through the hosting
@@ -1397,9 +1645,10 @@ it are listed on the answer as `notApplied`; set them on the person's record.
 
 A pending person who never signs in, for example one added with a mistyped
 address, can be removed: `POST /api/v1/auth/admin/remove-sso-user` takes
-`{ userId }`, removes the person with their positions, permission sets and
-membership, and cancels their invitation at the host. The host is asked
-first, through its `userRemoved` member; a host without that member is asked
+`{ userId }` (and the optional `organizationId` described above), removes
+the person with their positions, permission sets and membership, and cancels
+their invitation at the host. The host is asked first, through its
+`userRemoved` member; a host without that member is asked
 through `userDeactivated` for the pending person instead, which means the same
 thing, but a host should implement `userRemoved`. A host's refusal leaves the
 person as they are. A host that cannot be reached refuses the removal too,
@@ -1417,8 +1666,11 @@ still points at the person through a lookup that restricts deletes refuses the
 removal with that lookup's own answer, and nothing is removed; when the host
 had already cancelled the invitation of a person who is still pending and not
 deactivated, the door sends the invitation again through `userAdded`, once,
-and the answer says whether that worked. Like the add doors, it is
-platform-admin gated and answers `409` off a managed environment.
+and the answer says whether that worked. A removal that committed writes one
+`sys_audit_log` row naming the administrator (`action: 'delete'`, `metadata`
+`{ event: 'user.admin_removed_pending', hostNotified }`); a refused one writes
+none. Like the add doors, it is platform-admin gated and answers `409` off a
+managed environment.
 
 A deactivated person is never sent an invitation: adding a deactivated pending
 person again calls no host and answers `host: { notified: false, reason:
@@ -1435,7 +1687,13 @@ administrator may have typed wrong and may type again for someone else.
 `admin/ban-user` and `admin/unban-user` work without the admin plugin: on a
 deployment without it the ban is written by the platform, and a banned user is
 refused a session with the same `403 BANNED_USER` answer the admin plugin
-gives.
+gives. A ban or an unban that committed writes one `sys_audit_log` row naming
+the administrator (`action: 'update'`, `metadata` `{ event, hostNotified }`, the
+event `user.admin_banned` or `user.admin_unbanned`); a refused one writes none.
+A ban's row also counts what it ended beside the ban (`suspendedServiceAccounts`,
+`revokedOwnedApps`, `revokedScimCredentials`, `revocationComplete`; see
+[What a ban, a deactivation or a removal ends](#what-a-ban-a-deactivation-or-a-removal-ends)).
+The reason and expiry are on the row plugin-audit records for the user's change.
 
 #### SCIM Connection Credentials
 
@@ -1481,6 +1739,20 @@ its `token_hint` tells the two rows apart: the old one is safe to revoke once
 its `last_used_at` stops advancing while the new one's does. Each mint and each revoke writes one `sys_audit_log` row naming the
 administrator and the connection, never the credential.
 
+A credential records the administrator who minted it (`user_id`). A completed
+password reset of that administrator's account, whether self-service, an
+administrator's forced reset with `revokeSessionsAndKeys` on, or
+`os user set-password`, revokes every credential the account minted that is
+still active, as this revoke does, and writes the same `sys_audit_log` row for
+each, naming the account for a self-service reset and the administrator for a
+forced one (`os user set-password` writes none) ([What a password reset ends,
+and what a change keeps](#what-a-password-reset-ends-and-what-a-change-keeps)). A ban,
+a deactivation or a removal of that administrator's account revokes them the
+same way ([What a ban, a deactivation or a removal ends](#what-a-ban-a-deactivation-or-a-removal-ends)).
+Provisioning through the connection waits until a platform administrator mints
+a new credential; another administrator's credential for the same connection
+keeps working, so a connection with two credentials is not paused.
+
 #### When the identity provider deactivates a user
 
 A SCIM `active: false`, or a SCIM `DELETE /Users/{id}`, disables the account
@@ -1515,6 +1787,11 @@ like any banned account's, with one field added:
   resume it, and `resume` refuses while the owner is still deactivated; once the
   owner is re-activated, or a new owner is named, an administrator resumes it
   (see [AI service account](/docs/ai/agents#connect-your-ai-byo-ai-over-mcp)).
+- It also disables every OAuth application the user registered and revokes
+  every SCIM credential the user minted, recorded against the connection; a
+  re-activation restores none of them, and a credential it revoked is reported
+  once in the server log at `error`
+  ([What a ban, a deactivation or a removal ends](#what-a-ban-a-deactivation-or-a-removal-ends)).
 - The cause is told only after the password verified: a wrong password is the
   ordinary `401 INVALID_EMAIL_OR_PASSWORD`, whatever the account's state. It
   names no connection, provider or other account.
@@ -1655,8 +1932,8 @@ All endpoints are available under `/api/v1/auth/*`:
 - `POST /api/v1/auth/admin/set-user-password` - Set/reset a user's password (also provisions a credential for SSO-onboarded users)
 - `POST /api/v1/auth/admin/import-users` - Bulk import users (CSV/JSON/XLSX; `auto` (default, per-row invite-or-temporary) / `invite` / `temporary` / `none` password policy; ≤500 rows, dry-run supported)
 - `POST /api/v1/auth/admin/unlock-user` - Clear a brute-force lockout early
-- `POST /api/v1/auth/admin/ban-user` - Ban a user (blocks sign-in and revokes live sessions; the user's API keys are refused at every door while the ban holds; their OAuth access tokens are refused at the MCP endpoint and read as not valid at `/oauth2/userinfo` and `/oauth2/introspect`, and the token endpoint issues them no new token; a ban with an expiry stops binding once it expires. Neither the keys nor the OAuth tokens are revoked)
-- `POST /api/v1/auth/admin/unban-user` - Lift a ban, restoring the account's ability to sign in and its API keys (each key is still judged by its own lifecycle: a key left unused past the inactivity window during the ban answers as inactive, and needs replacing)
+- `POST /api/v1/auth/admin/ban-user` - Ban a user (blocks sign-in and revokes live sessions; the user's API keys are refused at every door while the ban holds; their OAuth access tokens are refused at the MCP endpoint and read as not valid at `/oauth2/userinfo` and `/oauth2/introspect`, and the token endpoint issues them no new token; a ban with an expiry stops binding once it expires. Neither the keys nor the OAuth tokens are revoked. It also suspends every AI service account the user is accountable for, disables every OAuth application the user registered and revokes every SCIM credential the user minted, answering the counts under `data.revoked`; see [What a ban, a deactivation or a removal ends](#what-a-ban-a-deactivation-or-a-removal-ends))
+- `POST /api/v1/auth/admin/unban-user` - Lift a ban, restoring the account's ability to sign in and its API keys (each key is still judged by its own lifecycle: a key left unused past the inactivity window during the ban answers as inactive, and needs replacing). It resumes no AI service account, enables no OAuth application and restores no SCIM credential the ban ended
 - `POST /api/v1/auth/admin/add-sso-user` - Add one pending person who signs in only through the hosting organisation's identity provider (cloud-managed environments only)
 - `POST /api/v1/auth/admin/import-sso-users` - Add pending people from a CSV or JSON rows (cloud-managed environments only; ≤500 rows, per-row results)
 

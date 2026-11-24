@@ -147,6 +147,10 @@ export function armChatDockExpanded(): void {
  * prior `/ai` URL after in-page conversation switches). Written by the
  * maximize handlers at click time (the only moment the origin is known);
  * per-tab by design.
+ *
+ * objectstack#34610 — the Studio copilot's expand now widens it in place, so
+ * no surface departs for `/ai` and nothing writes the key any more; the
+ * collapse still reads it, and with nothing stored falls back to history-back.
  */
 export const DOCK_RETURN_TO_STORAGE_KEY = 'ai-chat-dock-return-to';
 

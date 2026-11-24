@@ -184,7 +184,7 @@ describe("Tier 2 (#2942): 'toggle' element and range/text controls render", () =
 
     fireEvent.click(screen.getByTestId('filter-badge-due_date'));
     expect(screen.getByTestId('filter-range-due_date')).toBeInTheDocument();
-    expect(screen.queryByText('No options')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('filter-options-empty-due_date')).not.toBeInTheDocument();
     expect(screen.getByLabelText('From')).toHaveAttribute('type', 'date');
     expect(screen.getByLabelText('To')).toHaveAttribute('type', 'date');
 
@@ -211,7 +211,7 @@ describe("Tier 2 (#2942): 'toggle' element and range/text controls render", () =
 
     fireEvent.click(screen.getByTestId('filter-badge-name'));
     const input = screen.getByTestId('filter-text-name');
-    expect(screen.queryByText('No options')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('filter-options-empty-name')).not.toBeInTheDocument();
 
     fireEvent.change(input, { target: { value: 'acme' } });
     fireEvent.keyDown(input, { key: 'Enter' });

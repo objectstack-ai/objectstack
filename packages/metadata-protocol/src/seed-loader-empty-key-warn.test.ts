@@ -2,20 +2,27 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { SeedLoaderService } from './seed-loader.js';
+import { SeedLoaderRequestSchema } from '@objectstack/spec/data';
 import type { IDataEngine, IMetadataService } from '@objectstack/spec/contracts';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 
 /**
- * [#28952] A keyed dataset whose every record keys empty.
+ * A keyed seed record that leaves a key field blank — no value, null or an
+ * empty string, in any component of a composite `externalId` or in the one
+ * field of a single-field key (`name` when the dataset names none) — keys
+ * `''`, so it can match no row a load wrote before. Measured before the
+ * refusal, three loads of one such record among keyed siblings: 2 -> 3 -> 4
+ * rows, nothing said (#34857 composite, #35336 single-field).
  *
- * The save door and the publish promotion refuse a seed whose `externalId`
- * names no field of its object (`protocol.seed-external-id-refusal.test.ts`).
- * The boot loader never refuses: a stored seed must not fail a boot. What it
- * owes instead is one `warn` per dataset when no record carries a value for
- * the key, because such a load can match no existing row. Its writes are
- * unchanged, and that is pinned here too: replayed, such a dataset inserts
- * every record again (`upsert`), which is the duplication the doors now stop
- * at authoring.
+ * The keyed modes now REFUSE such a record at load, on the key as authored —
+ * after its expressions resolve, before any reference does: it is not
+ * written, the load result carries one error naming the object, the record,
+ * the blank field(s) and the fix, and every other record loads as before. A
+ * dataset whose every record keys empty (#28952: `externalId` names a field no
+ * record carries) is the same refusal for each record; its dataset-level
+ * notice is gone, since it would report the same records twice. The save door
+ * and the publish promotion still refuse a seed whose `externalId` names no
+ * field of its object (`protocol.seed-external-id-refusal.test.ts`).
  *
  * Uses the faithful engine of `seed-loader-composite-external-id.test.ts`
  * (filters `where`, mints ids), kept local.
@@ -79,7 +86,7 @@ function createFaithfulEngine(): { engine: IDataEngine; store: Record<string, an
 
 function createMetadata(): IMetadataService {
   const objects: Record<string, any> = {
-    demo_other: { name: 'demo_other', fields: { name: { type: 'text' }, code: { type: 'text' } } },
+    demo_other: { name: 'demo_other', fields: { name: { type: 'text' }, sku: { type: 'text' } } },
   };
   return {
     getObject: vi.fn(async (name: string) => objects[name]),
@@ -103,77 +110,198 @@ const CONFIG = {
   organizationId: 'org_demo',
 } as any;
 
-const dataset = (externalId: string | string[], mode = 'upsert', records: Record<string, unknown>[] = [{ name: 'G1', code: 'g' }]) =>
+const dataset = (externalId: string | string[], mode = 'upsert', records: Record<string, unknown>[] = [{ name: 'G1', sku: 'g' }]) =>
   ({ object: 'demo_other', externalId, mode, env: ['prod', 'dev', 'test'], records });
 
-/** The loader's empty-key warnings, by their message. */
-const emptyKeyWarnings = (logger: ReturnType<typeof createLogger>) =>
-  logger.warn.mock.calls.map((c) => String(c[0])).filter((m) => m.includes('no record carries a value for it'));
+/** The loader's blank-key refusals in a load result, by their message. */
+const blankKeyRefusals = (result: any): any[] =>
+  result.errors.filter((e: any) => e.message.includes('was NOT loaded: it is keyed on externalId'));
+
+/** The blank-key refusal lines the loader logged. */
+const blankKeyLines = (logger: ReturnType<typeof createLogger>) =>
+  logger.error.mock.calls.map((c) => String(c[0])).filter((m) => m.includes('was NOT loaded: it is keyed on externalId'));
+
+/** Three loads of one stored seed, each by a fresh loader over the same store — three boots. */
+async function threeLoads(seeds: any[]) {
+  const { engine, store } = createFaithfulEngine();
+  const counts: number[] = [];
+  const results: any[] = [];
+  const loggers: Array<ReturnType<typeof createLogger>> = [];
+  for (let boot = 0; boot < 3; boot++) {
+    const logger = createLogger();
+    results.push(await new SeedLoaderService(engine, createMetadata(), logger).load({ seeds, config: CONFIG }));
+    counts.push((store.demo_other ?? []).length);
+    loggers.push(logger);
+  }
+  return { store, counts, results, loggers };
+}
+
+describe('[#34857, #35336] the boot loader refuses a keyed record that leaves a key field blank', () => {
+  for (const [label, blank] of [['empty string', ''], ['null', null], ['no value', undefined]] as const) {
+    it(`composite key, one component ${label}: the record is not written, its siblings converge`, async () => {
+      const blankRecord: Record<string, unknown> = { name: 'B' };
+      if (blank !== undefined) blankRecord.sku = blank;
+      const { store, counts, results, loggers } = await threeLoads([
+        dataset(['name', 'sku'], 'upsert', [{ name: 'A', sku: 'a' }, blankRecord, { name: 'C', sku: 'c' }]),
+      ]);
+
+      expect(counts).toEqual([2, 2, 2]);
+      expect(store.demo_other.map((r) => r.name).sort()).toEqual(['A', 'C']);
+      for (const result of results) {
+        expect(result.success).toBe(false);
+        expect(result.results[0]).toMatchObject({ object: 'demo_other', errored: 1, total: 3 });
+        const refused = blankKeyRefusals(result);
+        expect(refused).toHaveLength(1);
+        expect(refused[0]).toMatchObject({ sourceObject: 'demo_other', field: 'sku', recordIndex: 1 });
+        expect(refused[0].message).toContain(
+          "Seed record #1 of 'demo_other' was NOT loaded: it is keyed on externalId 'name+sku' and leaves 'sku' blank",
+        );
+        expect(refused[0].message).toContain("Give the record a value for 'sku'");
+      }
+      // Logged once per load, at `error`: the record is dropped.
+      for (const logger of loggers) expect(blankKeyLines(logger)).toHaveLength(1);
+    });
+  }
+
+  it('single-field key: a record with no value for it is refused; its keyed sibling converges', async () => {
+    const { counts, results } = await threeLoads([dataset('sku', 'upsert', [{ name: 'A', sku: 'a' }, { name: 'B' }])]);
+
+    expect(counts).toEqual([1, 1, 1]);
+    for (const result of results) {
+      const refused = blankKeyRefusals(result);
+      expect(refused).toHaveLength(1);
+      expect(refused[0]).toMatchObject({ sourceObject: 'demo_other', field: 'sku', recordIndex: 1 });
+      expect(refused[0].message).toContain("keyed on externalId 'sku' and leaves 'sku' blank");
+    }
+  });
+
+  it('the default key (`name`, no externalId declared), through a parsed request: a record with no name is refused, and the message says `name` is also the default key', async () => {
+    // Every production caller parses its request first, and the parse
+    // defaults `externalId` to `name`: the loader never sees "undeclared".
+    const request = SeedLoaderRequestSchema.parse({
+      seeds: [{ object: 'demo_other', mode: 'ignore', records: [{ name: 'A', sku: 'a' }, { sku: 'b' }] }],
+      config: CONFIG,
+    });
+    expect(request.seeds[0].externalId).toBe('name');
+    const { engine, store } = createFaithfulEngine();
+    const counts: number[] = [];
+    let first: any;
+    for (let boot = 0; boot < 3; boot++) {
+      const result = await new SeedLoaderService(engine, createMetadata(), createLogger()).load(request);
+      first ??= result;
+      counts.push(store.demo_other.length);
+    }
+
+    expect(counts).toEqual([1, 1, 1]);
+    const refused = blankKeyRefusals(first);
+    expect(refused).toHaveLength(1);
+    expect(refused[0]).toMatchObject({ field: 'name', recordIndex: 1 });
+    expect(refused[0].message).toContain(
+      "keyed on externalId 'name' (also the key a dataset gets when it names none) and leaves 'name' blank",
+    );
+  });
+
+  it('an authored key other than `name` carries no default-key hint', async () => {
+    const { results } = await threeLoads([dataset(['name', 'sku'], 'upsert', [{ sku: 'a' }])]);
+    const [refused] = blankKeyRefusals(results[0]);
+    expect(refused.message).toContain("keyed on externalId 'name+sku' and leaves 'name' blank");
+    expect(refused.message).not.toContain('names none');
+  });
+
+  it('an expression that evaluates empty in a key field is refused the same way (it is read after expressions resolve)', async () => {
+    // `os.user.id` is null at seed time when no identity is supplied.
+    const { counts, results } = await threeLoads([
+      dataset(['name', 'sku'], 'upsert', [{ name: 'A', sku: 'a' }, { name: 'B', sku: { dialect: 'cel', source: 'os.user.id' } }]),
+    ]);
+
+    expect(counts).toEqual([1, 1, 1]);
+    const refused = blankKeyRefusals(results[0]);
+    expect(refused).toHaveLength(1);
+    expect(refused[0]).toMatchObject({ field: 'sku', recordIndex: 1 });
+  });
+
+  it('an `update` dataset reports the record instead of skipping it in silence', async () => {
+    const { results } = await threeLoads([dataset('sku', 'update', [{ name: 'B' }])]);
+    const refused = blankKeyRefusals(results[0]);
+    expect(refused).toHaveLength(1);
+    expect(refused[0].message).toContain('so an update load can never find the row it names');
+    expect(results[0].results[0]).toMatchObject({ errored: 1, inserted: 0, updated: 0 });
+  });
+
+  it('a dry run reports the refusal and logs nothing', async () => {
+    const { engine } = createFaithfulEngine();
+    const logger = createLogger();
+    const result = await new SeedLoaderService(engine, createMetadata(), logger).load({
+      seeds: [dataset('sku', 'upsert', [{ name: 'B' }])] as any[], config: { ...CONFIG, dryRun: true },
+    });
+    expect(blankKeyRefusals(result)).toHaveLength(1);
+    expect(blankKeyLines(logger)).toEqual([]);
+  });
+
+  it('CONTROL: a fully keyed dataset converges on replay, refuses nothing and says nothing', async () => {
+    const { counts, results, loggers } = await threeLoads([
+      dataset(['name', 'sku'], 'upsert', [{ name: 'A', sku: 'a' }, { name: 'B', sku: 'b' }]),
+    ]);
+
+    expect(counts).toEqual([2, 2, 2]);
+    for (const result of results) {
+      expect(result.success).toBe(true);
+      expect(result.errors).toEqual([]);
+    }
+    for (const logger of loggers) {
+      expect(logger.error).not.toHaveBeenCalled();
+      expect(logger.warn).not.toHaveBeenCalled();
+    }
+  });
+
+  it('CONTROL: a whitespace-only key value is a value, as before (no trim)', async () => {
+    const { counts, results } = await threeLoads([dataset('sku', 'upsert', [{ name: 'A', sku: ' ' }])]);
+    expect(counts).toEqual([1, 1, 1]);
+    expect(blankKeyRefusals(results[0])).toEqual([]);
+  });
+});
 
 describe('[#28952] the boot loader — a keyed dataset whose every record keys empty', () => {
-  it('warns once per dataset, naming the object and the key, and never refuses; a replay inserts every record again', async () => {
-    const { engine, store } = createFaithfulEngine();
-    const metadata = createMetadata();
-    const seeds = [dataset('no_such_field')] as any[];
+  it('refuses every record, one error each in the result, one line logged per dataset, and never writes', async () => {
+    const { store, counts, results, loggers } = await threeLoads([
+      dataset('no_such_field', 'upsert', [{ name: 'G1', sku: 'g' }, { name: 'G2', sku: 'h' }]),
+    ]);
 
-    const logger = createLogger();
-    const first = await new SeedLoaderService(engine, metadata, logger).load({ seeds, config: CONFIG });
-    expect(first.success).toBe(true);
-    expect(first.results[0]).toMatchObject({ object: 'demo_other', inserted: 1 });
-    const warned = emptyKeyWarnings(logger);
-    expect(warned).toHaveLength(1);
-    expect(warned[0]).toContain("Seed dataset for 'demo_other' keys every record on externalId 'no_such_field'");
-
-    // The replay a boot makes of the same stored seed: unchanged writes, so
-    // the row is inserted again. The doors refuse such a seed at authoring.
-    const replayLogger = createLogger();
-    const second = await new SeedLoaderService(engine, metadata, replayLogger).load({ seeds, config: CONFIG });
-    expect(second.success).toBe(true);
-    expect(second.results[0]).toMatchObject({ inserted: 1, updated: 0 });
-    expect(store.demo_other).toHaveLength(2);
-    expect(emptyKeyWarnings(replayLogger)).toHaveLength(1);
+    expect(counts).toEqual([0, 0, 0]);
+    expect(store.demo_other).toBeUndefined();
+    for (const result of results) {
+      expect(result.results[0]).toMatchObject({ object: 'demo_other', inserted: 0, errored: 2, total: 2 });
+      const refused = blankKeyRefusals(result);
+      expect(refused.map((e) => e.recordIndex)).toEqual([0, 1]);
+      // The fix names the dataset-level remedy too: key on a field every record carries.
+      expect(refused[0].message).toContain("or key the dataset on fields every record carries: a field the object declares");
+    }
+    for (const logger of loggers) {
+      expect(blankKeyLines(logger)).toHaveLength(1);
+      // No second, dataset-level report of the same records.
+      expect(logger.warn).not.toHaveBeenCalled();
+    }
   });
 
-  it('a composite key with a member no record carries warns the same way', async () => {
+  it('a composite key with a member no record carries is refused the same way', async () => {
     const { engine } = createFaithfulEngine();
     const logger = createLogger();
-    await new SeedLoaderService(engine, createMetadata(), logger).load({
-      seeds: [dataset(['code', 'no_such_field'], 'ignore')] as any[], config: CONFIG,
+    const result = await new SeedLoaderService(engine, createMetadata(), logger).load({
+      seeds: [dataset(['sku', 'no_such_field'], 'ignore')] as any[], config: CONFIG,
     });
-    const warned = emptyKeyWarnings(logger);
-    expect(warned).toHaveLength(1);
-    expect(warned[0]).toContain("externalId 'code+no_such_field'");
+    const refused = blankKeyRefusals(result);
+    expect(refused).toHaveLength(1);
+    expect(refused[0]).toMatchObject({ field: 'no_such_field', recordIndex: 0 });
+    expect(refused[0].message).toContain("keyed on externalId 'sku+no_such_field' and leaves 'no_such_field' blank");
   });
 
-  it('control: a declared key converges on replay and warns nothing', async () => {
-    const { engine, store } = createFaithfulEngine();
-    const metadata = createMetadata();
-    const seeds = [dataset('name')] as any[];
-
-    const logger = createLogger();
-    const first = await new SeedLoaderService(engine, metadata, logger).load({ seeds, config: CONFIG });
-    expect(first.results[0]).toMatchObject({ inserted: 1 });
-    const second = await new SeedLoaderService(engine, metadata, logger).load({ seeds, config: CONFIG });
-    expect(second.results[0]).toMatchObject({ inserted: 0, updated: 0 });
-    expect(store.demo_other).toHaveLength(1);
-    expect(emptyKeyWarnings(logger)).toEqual([]);
-  });
-
-  it('control: an `insert` dataset never matches, so it is not warned about', async () => {
+  it('control: a retired `insert` dataset is refused before any key is read, so it carries no blank-key refusal (#34613)', async () => {
     const { engine } = createFaithfulEngine();
     const logger = createLogger();
-    await new SeedLoaderService(engine, createMetadata(), logger).load({
+    const result = await new SeedLoaderService(engine, createMetadata(), logger).load({
       seeds: [dataset('no_such_field', 'insert')] as any[], config: CONFIG,
     });
-    expect(emptyKeyWarnings(logger)).toEqual([]);
-  });
-
-  it('control: a dataset where some record carries the key is not warned about', async () => {
-    const { engine } = createFaithfulEngine();
-    const logger = createLogger();
-    await new SeedLoaderService(engine, createMetadata(), logger).load({
-      seeds: [dataset('code', 'upsert', [{ name: 'A', code: 'a' }, { name: 'B' }])] as any[], config: CONFIG,
-    });
-    expect(emptyKeyWarnings(logger)).toEqual([]);
+    expect(result.results[0]).toMatchObject({ inserted: 0, errored: 1 });
+    expect(blankKeyRefusals(result)).toEqual([]);
   });
 });

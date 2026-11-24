@@ -272,6 +272,31 @@ function keepsTimeOfDay(value: unknown): boolean {
   return typeof form === 'string' && /^\d{2}:\d{2}:\d{2}(\.\d{3})?$/.test(form);
 }
 
+/** A kind of filter placeholder, as the spec's `classifyFilterToken` names it. */
+type FilterPlaceholderKind = NonNullable<ReturnType<typeof classifyFilterToken>>['kind'];
+
+/**
+ * [#35394] What {@link isUninterpretableTemporalComparand} does with each kind
+ * of `{placeholder}` — one row per kind, so a kind the spec adds is a compile
+ * error here until someone decides it, never a silent step-around.
+ *
+ * - `stepped-around`: another layer has the last word, and is loud. A date
+ *   macro resolves to a day or an instant, which the door judges by its year
+ *   once resolved; an unknown or record-context token never resolves on the
+ *   server, and the resolver refuses it by name with what to write instead.
+ * - `judged-as-written`: the placeholder resolves to a value no temporal rule
+ *   reads — [#34938] a period key's week key (`2026-W47`), a context token's
+ *   user or organization id — so it takes the refusal that value's literal
+ *   takes, before any read.
+ */
+const PLACEHOLDER_AT_THE_TEMPORAL_RULE: Readonly<Record<FilterPlaceholderKind, 'stepped-around' | 'judged-as-written'>> = {
+  'date-macro': 'stepped-around',
+  unknown: 'stepped-around',
+  'record-context': 'stepped-around',
+  'period-key': 'judged-as-written',
+  context: 'judged-as-written',
+};
+
 /**
  * Is `value` a comparand that a `kind` column's storage rule cannot read?
  *
@@ -285,8 +310,8 @@ function keepsTimeOfDay(value: unknown): boolean {
  * finite number, a valid `Date` or an instant string whose UTC year has no
  * four-digit spelling ([#20480]). Everything else — any other number
  * or `Date`, `null`, a `{ $field }` reference, filter structure, the empty
- * string, a `{token}` — answers `false`, each for a reason recorded in the
- * module note or below.
+ * string, a date-macro, unknown or record-context `{token}` — answers `false`,
+ * each for a reason recorded in the module note or below.
  *
  * A `{placeholder}` is stepped around rather than judged because it is another
  * layer's vocabulary and that layer already refuses the unknown ones loudly
@@ -294,6 +319,28 @@ function keepsTimeOfDay(value: unknown): boolean {
  * that call this run BEFORE token resolution, so judging a placeholder here
  * would refuse `{30_days_ago}` — the platform's own correct spelling, and the
  * positive control this fix is pinned against.
+ *
+ * [#34938] Save a period key (`{current_iso_week}`, the spec's
+ * `PERIOD_KEY_TOKENS`), which is judged AS WRITTEN. It resolves to an ISO week
+ * key such as `2026-W47`: text, which no temporal storage rule reads — not a
+ * calendar day, not an instant, not a wall clock. Stepped around, the key
+ * reached the driver and compared as text against stored days (`$lt` answered
+ * every row, `$eq` none) where the literal `"2026-W47"` is refused. Judged as
+ * written, the placeholder is read by none of the three rules either, so it
+ * takes the literal's refusal on every kind.
+ *
+ * [#35394] Save a context token too (`{current_user_id}`, `{current_org_id}`,
+ * the spec's `CONTEXT_TOKENS`), judged AS WRITTEN for the period key's reason:
+ * it resolves to the caller's user or organization id, and an id is read by
+ * none of the three rules. Stepped around, the id reached the driver and
+ * compared as text against stored days, instants and wall clocks (`$lt`
+ * answered every row, `$eq` and `$gte` none, on SqlDriver and InMemoryDriver
+ * alike) where the literal id is refused. The step-around is now kept for
+ * exactly the three kinds whose own layer has the last word, recorded per kind
+ * in {@link PLACEHOLDER_AT_THE_TEMPORAL_RULE}: a date macro, which the door
+ * judges by its year once resolved, and an unknown or record-context token,
+ * which the resolver refuses by name (`FILTER_TOKEN_UNKNOWN` /
+ * `FILTER_TOKEN_UNRESOLVED`, 400) in words that say what to write instead.
  */
 export function isUninterpretableTemporalComparand(
   kind: TemporalComparandKind,
@@ -311,8 +358,11 @@ export function isUninterpretableTemporalComparand(
   const s = value.trim();
   // The empty-string cell is its own card — see the module note.
   if (s === '') return false;
-  // Another layer's vocabulary, and it has its own loud refusal.
-  if (classifyFilterToken(value) !== null) return false;
+  // A placeholder whose own layer has the last word is stepped around; a
+  // period key or a context token names no temporal value and falls through to
+  // the kind's rule as written (see the note above).
+  const placeholder = classifyFilterToken(value);
+  if (placeholder !== null && PLACEHOLDER_AT_THE_TEMPORAL_RULE[placeholder.kind] === 'stepped-around') return false;
   if (kind === 'datetime') return !readsAsInstant(s) || isOutsideTemporalYearRange(s, kind);
   if (kind === 'date') return !readsAsCalendarDay(s) || isOutsideTemporalYearRange(s, kind);
   return !(readsAsWallClock(s) || (readsAsInstant(s) && keepsTimeOfDay(s)));

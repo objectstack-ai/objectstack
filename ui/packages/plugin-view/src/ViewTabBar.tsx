@@ -197,6 +197,32 @@ export interface ViewTabItem {
   /** Optional tooltip shown alongside the lock icon when `readonly` is true. */
   readonlyReason?: string;
   /**
+   * The view's DEFINITION is read-only while its row state is not: e.g. a
+   * view a read-only package ships, whose label, pin and default the host
+   * still writes (into that package's customization), but whose definition
+   * cannot be saved and which cannot be deleted.
+   *
+   * When `true`, `ManageViewsDialog` hides Delete and labels the
+   * configuration entry as viewing ("View config", not "Edit view config"):
+   * the host's `onConfigView` opens the configuration with nothing to save.
+   * Rename, pin and set as default stay offered, and no lock icon is drawn
+   * (the row is not read-only). `readonly` wins when both are set. Absent ⇒
+   * the row behaves as before. `ViewTabBar` does not read it.
+   */
+  definitionReadonly?: boolean;
+  /**
+   * The view is a customization of a view a read-only package ships: the
+   * package's customization holds an override of it (a pin, a default or a
+   * name changed here), and every user of the view sees that copy instead of
+   * the package's own.
+   *
+   * When `true`, `ManageViewsDialog` draws a small "customized" mark on the
+   * row and, when the host wires `onRestoreFactory`, offers "Restore factory
+   * version", which removes that override. Ignored on a `readonly` row.
+   * Absent ⇒ no mark and no restore. `ViewTabBar` does not read it.
+   */
+  customized?: boolean;
+  /**
    * The view's description, already resolved to the viewer's language and
    * already gated by the host on the view's `appearance.showDescription`
    * (absent when that is `false`). The strip draws it on the ACTIVE tab only:

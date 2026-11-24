@@ -85,9 +85,11 @@
  *   well as whole, so a dotted path through a denied lookup (`owner.city`
  *   with `owner` denied) is a reference to it.
  * - A `fieldGroups[].key` is a group name, not a field reference — the
- *   readable fields join a group through their own `group: <key>` — so a group
- *   keyed like a denied field is served; dropping it would regroup fields the
- *   caller IS entitled to. A `listViews` key, by contrast, is the view's whole
+ *   readable fields join a group through the group's own `fields` list or
+ *   their own `group: <key>` — so a group keyed like a denied field is served;
+ *   dropping it would regroup fields the caller IS entitled to. The `fields`
+ *   list is a name list: a denied name is filtered out of it, and the readable
+ *   names keep their place and order. A `listViews` key, by contrast, is the view's whole
  *   identity and nothing else points at it, so a view keyed like a denied field
  *   is dropped.
  *
@@ -547,6 +549,8 @@ export const INLINE_COLUMN_POSITIONS: Readonly<Record<string, Scrub>> = {
     name: keep, label: keep, type: keep, options: keep, prefix: keep, step: keep,
     reference: keep, displayField: keep, idField: keep, multiple: keep, accept: keep,
     defaultHidden: keep, computed: keep, scale: keep, autofill: keep, width: keep, required: keep,
+    // A `rating` cell's star count (#36043): a number, never a field name.
+    max: keep,
     // Judged by `inlineColumn` before the table runs: a denied one drops the column.
     expr: keep,
     readonlyWhen: expression,
@@ -620,10 +624,17 @@ export const FIELD_REFERENCE_POSITIONS: Readonly<Record<string, Scrub>> = {
     storage: keep, searchable: keep, multiple: keep, unique: keep, maxLength: keep,
     minLength: keep, valueDomain: keep, rows: keep, precision: keep, scale: keep, min: keep,
     max: keep, useGrouping: keep, percentDisplay: keep, accept: keep, maxSize: keep, picklist: keep, reference: keep,
-    deleteBehavior: keep, inlineEdit: keep, inlineTitle: keep, relatedList: keep,
+    deleteBehavior: keep, transferBehavior: keep, inlineEdit: keep, inlineTitle: keep, relatedList: keep,
     relatedListTitle: keep, lookupPageSize: keep, allowCreate: keep, returnType: keep,
     language: keep, step: keep, currencyConfig: keep, dimensions: keep, trackHistory: keep,
+    // The unit of this quantity, or this field's unit-code marker (ADR-0158
+    // U4): kept as `currencyConfig` is, whose `currencyField` names a sibling
+    // the way `unitConfig.unitField` does.
+    unitConfig: keep,
     group: keep, widget: keep, hidden: keep, internal: keep, readonly: keep,
+    // A boolean facet: whether a create surface asks for this field (#36425);
+    // it names no field.
+    showOnCreate: keep,
     requiredPermissions: keep, maskingRule: keep, ackPlaintextMasking: keep, system: keep,
     sortable: keep, inlineHelpText: keep, placeholder: keep, externalId: keep,
     // A boolean facet of this date field: it declares the field a deadline
@@ -636,6 +647,9 @@ export const FIELD_REFERENCE_POSITIONS: Readonly<Record<string, Scrub>> = {
     // A boolean facet of this lookup: it declares the target's name readable
     // by every reader of this record (#29171) and names no field.
     referenceNameVisible: keep,
+    // A boolean facet: whether this field's old → new values show on the
+    // record activity timeline (#36290). It names no field.
+    fieldHistory: keep,
     // The earlier keys of THIS field (cloud#3652 ruling D3): names of columns
     // the field had in earlier package versions. The parse refuses any entry
     // that is a key another field of the object still declares, so no entry
@@ -760,7 +774,7 @@ const LIST_VIEW_NAME_LISTS: Readonly<Record<string, Scrub>> = {
  */
 export const OBJECT_REFERENCE_POSITIONS: Readonly<Record<string, Scrub>> = {
     // Identity and posture — no field names.
-    name: keep, label: keep, pluralLabel: keep, description: keep, icon: keep, isSystem: keep,
+    name: keep, label: keep, pluralLabel: keep, description: keep, icon: keep, color: keep, actionLayout: keep, isSystem: keep,
     managedBy: keep, ownership: keep, systemFields: keep, datasource: keep, access: keep,
     requiredPermissions: keep, fileAccessDelegate: keep, schemaReadDelegate: keep, editMode: keep, enable: keep,
     sharingModel: keep, externalSharingModel: keep, protection: keep,
@@ -783,7 +797,10 @@ export const OBJECT_REFERENCE_POSITIONS: Readonly<Record<string, Scrub>> = {
     // `object.field` for one of that child's FKs to this object, never a field
     // of this object, so nothing here is this object's to deny. Read as
     // unclassified it would over-mask an entry whose child shares a denied
-    // field's name.
+    // field's name. [#35899] An object entry's `columns` name fields of that
+    // CHILD, so they are kept like `lookupColumns`: the child's own projection
+    // governs them, and the list's rows are read through it. Its `label` is
+    // author text, and the built-in tab names (`sys_attachment`, …) name objects.
     relatedLists: keep,
     // Expressions.
     titleFormat: expression,
@@ -802,7 +819,9 @@ export const OBJECT_REFERENCE_POSITIONS: Readonly<Record<string, Scrub>> = {
     // when it mentions a denied field: server policy the caller cannot evaluate.
     membershipKeys: recordOf(ruleEntry),
     // Blocks.
-    userActions: block({ create: crudFlag, import: crudFlag, edit: crudFlag, delete: crudFlag, exportCsv: keep }),
+    // `transfer` (the Change Owner switch) is the same boolean-or-predicates union
+    // as the four CRUD flags, so it takes their disposition.
+    userActions: block({ create: crudFlag, import: crudFlag, edit: crudFlag, delete: crudFlag, exportCsv: keep, transfer: crudFlag }),
     external: block({
         remoteName: keep, remoteSchema: keep, writable: keep, introspectedAt: keep, ignoreColumns: keep,
         columnMap,
@@ -813,6 +832,9 @@ export const OBJECT_REFERENCE_POSITIONS: Readonly<Record<string, Scrub>> = {
         // [#27069] A child relationship (child object, or `object.field`), as a
         // `relatedLists` entry is: no field of this object.
         relatedList: keep,
+        // [#35900] The group's own member list: field names of this object, so
+        // a denied one is filtered out and the readable rest keep their order.
+        fields: names,
     })),
     tenancy: block({ enabled: keep, tenantField: pointer }),
     lifecycle: block({

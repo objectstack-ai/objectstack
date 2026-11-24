@@ -47,6 +47,7 @@ import { createSafeTranslation } from '@object-ui/i18n';
 import type { RendererHostProps } from '../../lib/renderer-host-props';
 import { currencyCodeFieldNames, useUsedCurrencyCodes, withUsedCurrencyCodes } from './usedCurrencyCodes';
 import { usePatchingUpdateActions } from './actionRequirements';
+import { declaresFieldRule, useObjectFormulaPlan, withoutUnservableVisibleWhen } from './objectFormulas';
 import { SuggestedFieldChangesContext, SuggestedFieldsContext } from './suggested-fields-context';
 import { FormSectionNavContext, type FormSectionNavItem, type FormSectionNavSink } from './section-nav-context';
 
@@ -156,7 +157,7 @@ function SectionDivider({ sectionKey, anchorId, label, description, collapsible,
   return (
     <div
       className={cn(
-        'col-span-full pt-4 pb-1 border-b border-border scroll-mt-2',
+        'col-span-full pt-4 pb-1 border-b border-border scroll-mt-2 transition-colors duration-500 data-[section-jumped]:border-primary data-[section-jumped]:bg-primary/10',
         collapsible &&
           'cursor-pointer select-none ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
         className
@@ -168,7 +169,9 @@ function SectionDivider({ sectionKey, anchorId, label, description, collapsible,
       aria-expanded={collapsible ? !collapsed : undefined}
       // objectstack#34605 — the row's stable DOM identity: `id` is the scroll
       // target the section navigation jumps to, `data-form-section` names the
-      // section. `scroll-mt-2` keeps a jumped-to heading off the scroller's edge.
+      // section. `scroll-mt-2` keeps a jumped-to heading off the scroller's edge,
+      // and `data-section-jumped`, set by the navigation for a moment after a
+      // jump, marks it (objectstack#35472).
       id={anchorId}
       data-form-section={sectionKey}
     >
@@ -179,7 +182,7 @@ function SectionDivider({ sectionKey, anchorId, label, description, collapsible,
               ? <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
               : <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
           )}
-          <span className="text-sm font-semibold text-foreground">{label}</span>
+          <span className="text-sm font-medium text-foreground">{label}</span>
         </div>
       )}
       {/* A section's authored blurb. Carried on the divider because a sectioned
@@ -1376,12 +1379,13 @@ function renderFieldDescription(
 
 /**
  * Widget keys whose DISPLAY reads a sibling field's value: a `record`-mode
- * amount (ADR-0144 D2) shows the currency its record's code field holds, and a
- * `formula` declaring `returnType: 'currency'` is drawn by the same widget.
- * They get the live record (`dependentValues`) and nothing else from the
- * data-source family — they query nothing.
+ * amount (ADR-0144 D2) shows the currency its record's code field holds, a
+ * `formula` declaring `returnType: 'currency'` is drawn by the same widget, and
+ * a roll-up `summary` declaring its currency (D6 as amended) reads the same code
+ * off the record. They get the live record (`dependentValues`) and nothing else
+ * from the data-source family — they query nothing.
  */
-const RECORD_CURRENCY_WIDGET_TYPES = new Set(['currency', 'formula']);
+const RECORD_CURRENCY_WIDGET_TYPES = new Set(['currency', 'formula', 'summary']);
 
 function stripRegisteredFieldProps(type: string, props: RenderFieldProps): RenderFieldProps {
   const {
@@ -1396,6 +1400,7 @@ function stripRegisteredFieldProps(type: string, props: RenderFieldProps): Rende
     emptyHint,
     onInvalidInputChange,
     onAutofill,
+    openingValue,
     // Renderer-only, and deliberately NOT a new key in the widget contract
     // (objectui#3393). The call site started forwarding `label` for the
     // built-in fullscreen dialog; registered widgets must keep receiving
@@ -1443,6 +1448,9 @@ function stripRegisteredFieldProps(type: string, props: RenderFieldProps): Rende
     (CREATE_AUTOFILL_WIDGET_TYPES.has(normalizedType) && onAutofill)
       ? { onAutofill }
       : {}),
+    // The opening value rides with the lookup's writer: only a lookup fills
+    // from the value a create form opened with (objectstack#35050).
+    ...(LOOKUP_AUTOFILL_WIDGET_TYPES.has(normalizedType) && openingValue !== undefined ? { openingValue } : {}),
   };
 }
 
@@ -1879,12 +1887,27 @@ ComponentRegistry.register('form',
         ),
       [rawFields],
     );
-    const fields = React.useMemo(
+    const declaredFields = React.useMemo(
       () =>
         specVocabularyFields.length === 0
           ? rawFields
           : (rawFields as any[]).filter((f) => !specVocabularyFields.includes(f)),
       [rawFields, specVocabularyFields],
+    );
+    // The object's `formula` fields, recomputed from the live inputs into
+    // `ruleRecord` below (objectstack#35033): read once per object, and only
+    // when some field declares a rule a formula could feed. A field whose
+    // `visibleWhen` reads a formula the form cannot compute loses that
+    // `visibleWhen` here — shown and still required, as the server judges it,
+    // and never a submit refusal (`objectFormulas.ts`).
+    const formulaPlan = useObjectFormulaPlan(
+      React.useContext(SchemaRendererContext)?.dataSource ?? null,
+      schema.objectName,
+      declaresFieldRule(declaredFields as unknown[]),
+    );
+    const fields = React.useMemo(
+      () => withoutUnservableVisibleWhen(declaredFields, formulaPlan) as typeof declaredFields,
+      [declaredFields, formulaPlan],
     );
     React.useEffect(() => {
       for (const f of specVocabularyFields) {
@@ -2126,9 +2149,13 @@ ComponentRegistry.register('form',
         for (const k of Object.keys(previousRecord)) out[k] = previousRecord[k];
       }
       for (const k of Object.keys(watched)) if (watched[k] !== undefined) out[k] = watched[k];
-      return out;
+      // The object's formulas over that record, each after the formulas it
+      // reads (objectstack#35033): a rule reading one is judged on the value
+      // the written record would serve, not the one last read. Rules only —
+      // the submit payload is built from the form values, never from here.
+      return formulaPlan ? formulaPlan.compute(out) : out;
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [fields, previousRecord, JSON.stringify(watched)]);
+    }, [fields, previousRecord, formulaPlan, JSON.stringify(watched)]);
 
     // Fields this form has resolved to READ-ONLY for the record as it now
     // stands — the exact set an UPDATE must not carry (objectui#3484).
@@ -2586,10 +2613,12 @@ ComponentRegistry.register('form',
         ) {
           continue;
         }
-        out.push({ label: action.label, record: { ...ruleRecord, ...action.patch } });
+        // The patch moves formula inputs too: recompute over the patched record.
+        const patched = { ...ruleRecord, ...action.patch };
+        out.push({ label: action.label, record: formulaPlan ? formulaPlan.compute(patched) : patched });
       }
       return out;
-    }, [isCreateForm, patchingActions, mayInvokeAction, ruleRecord, previousRecord, predicateScope]);
+    }, [isCreateForm, patchingActions, mayInvokeAction, ruleRecord, previousRecord, predicateScope, formulaPlan]);
 
     // Field name → label, for the "select the parent first" gate hint (#2284).
     const fieldLabelByName = React.useMemo(() => {
@@ -2608,7 +2637,7 @@ ComponentRegistry.register('form',
       const drawn = new Set<string>();
       const changeable = new Set<string>();
       for (const f of fields as FormFieldConfig[]) {
-        if (!f?.name || f.type === 'section-divider') continue;
+        if (!f?.name || f.type === 'section-divider' || f.type === 'form-slot') continue;
         drawn.add(f.name);
         if (f.hidden || (f as any).readonly === true || f.disabled === true) continue;
         changeable.add(f.name);
@@ -2729,8 +2758,16 @@ ComponentRegistry.register('form',
         const key = tabKeyByFieldName.get(name);
         if (key) out.add(key);
       }
+      // A host slot whose collection the last save was refused on
+      // (objectstack#35889's placed lines): the host owns that refusal, since
+      // no field of THIS form carries it, and says so on the slot row.
+      for (const f of fields as FormFieldConfig[]) {
+        if (f?.type !== 'form-slot' || !(f as { slotRefused?: boolean }).slotRefused) continue;
+        const key = tabKeyByFieldName.get(f.name);
+        if (key) out.add(key);
+      }
       return out;
-    }, [fieldTabs, tabKeyByFieldName, rejectedFieldNames]);
+    }, [fieldTabs, tabKeyByFieldName, rejectedFieldNames, fields]);
 
     // objectstack#34615 — below `sm` a horizontal tab strip that does not fit
     // scrolls sideways inside its own box (see the strip's classes) instead of
@@ -2739,8 +2776,16 @@ ComponentRegistry.register('form',
     // offending tab can each select a trigger scrolled out of view. Only the
     // strip's own `scrollLeft` moves, never an outer scroller, and a strip
     // that fits (every desktop strip) is left untouched.
+    //
+    // A LAYOUT effect, so the scroll lands in the same commit that marks the
+    // new trigger active. As a passive effect it ran a task later whenever the
+    // activation came from a non-discrete update — the failed-submit jump is
+    // one: react-hook-form validates asynchronously — so for that window the
+    // active tab was painted, and observable, while still scrolled out of the
+    // strip (objectstack#34782). It measures layout and writes `scrollLeft`
+    // before paint, which is what a layout effect is for.
     const fieldTabListRef = React.useRef<HTMLDivElement>(null);
-    React.useEffect(() => {
+    React.useLayoutEffect(() => {
       const list = fieldTabListRef.current;
       if (!list || activeFieldTab === undefined || list.scrollWidth <= list.clientWidth) return;
       const trigger = list.querySelector<HTMLElement>('[role="tab"][data-state="active"]');
@@ -3281,7 +3326,15 @@ ComponentRegistry.register('form',
         typeof CSS !== 'undefined' && typeof CSS.escape === 'function'
           ? CSS.escape(name)
           : name.replace(/["\\]/g, '\\$&');
-      return root.querySelector<HTMLElement>(`[data-field="${escaped}"]`);
+      // Not a field a host drew into one of THIS form's `form-slot` rows (an
+      // expanded line editor there is a form of its own, objectstack#35889);
+      // that editor, inside a slot, still finds its own fields.
+      return (
+        [...root.querySelectorAll<HTMLElement>(`[data-field="${escaped}"]`)].find((el) => {
+          const slot = el.closest('[data-form-slot]');
+          return !slot || !(root as Node).contains(slot);
+        }) ?? null
+      );
     };
     const revealField = (name: string) => {
       const target = fieldWrapper(name);
@@ -3676,6 +3729,24 @@ ComponentRegistry.register('form',
 
       // Skip hidden fields
       if (hidden) return null;
+
+      // A host slot (objectstack#35889): an empty full-width element the form's
+      // host fills through a portal (`@object-ui/plugin-form` `formSlots.ts`,
+      // a master-detail form's collection at its field group). It holds no
+      // value and registers no control; `slotRef` is the host's callback. A
+      // labelled slot is a stop of the section navigation, like a heading.
+      if (type === 'form-slot') {
+        const { slotRef } = fieldProps as { slotRef?: React.Ref<HTMLDivElement> };
+        return (
+          <div
+            key={name}
+            ref={slotRef}
+            id={label ? sectionAnchorId(formInstanceId, name) : undefined}
+            className="col-span-full min-w-0 scroll-mt-2 space-y-4"
+            data-form-slot={name}
+          />
+        );
+      }
 
       // A field claimed by a HIDDEN section is not drawn (#6236) — the same
       // `return null` a field's own false predicate takes, so the ruled
@@ -4271,17 +4342,27 @@ ComponentRegistry.register('form',
                   // error is re-validated, so a filled required field clears.
                   // A create-only writer (objectstack#32770) gets none on an
                   // edit form: see `CREATE_AUTOFILL_WIDGET_TYPES`.
+                  //
+                  // A fill made by the value a create form OPENED with
+                  // (`opening`, objectstack#35050) joins the opening values:
+                  // the dirty baseline takes it first, so a form nobody has
+                  // touched yet still closes without the discard prompt.
                   onAutofill:
                     !isCreateForm && CREATE_AUTOFILL_WIDGET_TYPES.has(normalizeFieldType(resolvedType))
                       ? undefined
-                      : (patch: Record<string, unknown>) => {
+                      : (patch: Record<string, unknown>, options?: { opening?: boolean }) => {
+                          if (options?.opening) baselineRef.current = { ...baselineRef.current, ...patch };
                           for (const [target, filled] of Object.entries(patch)) {
                             form.setValue(target, filled, {
-                              shouldDirty: true,
+                              shouldDirty: !options?.opening,
                               shouldValidate: !!form.getFieldState(target).error,
                             });
                           }
                         },
+                  // The value a create form opened with, for a lookup to fill
+                  // its declared targets from (objectstack#35050). An edit
+                  // form's value is the stored record's and fills nothing.
+                  openingValue: isCreateForm ? defaultValues?.[name] : undefined,
                   // Required is a STATE, so it travels the state channel
                   // (objectui#3290). Until now the resolved `required` (static
                   // `required` + `requiredWhen` CEL) drove exactly one thing —
@@ -4432,7 +4513,7 @@ ComponentRegistry.register('form',
         // the section navigation lists exactly these, so a section a predicate
         // hides is absent from it by the same verdict that hid its row.
         block.forEach((f, j) => {
-          if (f?.type === 'section-divider' && nodes[j] != null && f.label && typeof f.name === 'string') {
+          if ((f?.type === 'section-divider' || f?.type === 'form-slot') && nodes[j] != null && f.label && typeof f.name === 'string') {
             drawnHeadings?.push({ key: f.name, label: String(f.label) });
           }
         });

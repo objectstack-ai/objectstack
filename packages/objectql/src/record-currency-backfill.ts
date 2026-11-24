@@ -470,9 +470,10 @@ async function walkCodelessRows(
  * sanitizer (`sanitizeRowError`, `@objectstack/core`), so a driver's raw text
  * (SQL, constraint names, column lists) never reaches the report; a message
  * with no driver text reads as before. The operator's log line above keeps
- * the whole text.
+ * the whole text. The unit code backfill (`unit-code-backfill.ts`) reads its
+ * failed rows by the same rule.
  */
-function rowFailureSentence(err: unknown, object: string, message: string): string {
+export function rowFailureSentence(err: unknown, object: string, message: string): string {
   if (isSandboxOrigin(err) || isSandboxOwnFault(err)) {
     const door = mapDataError(err, object);
     if (door.status >= 500) return String(door.body.error);

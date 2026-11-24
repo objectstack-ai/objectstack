@@ -129,8 +129,10 @@ describe('ObjectSettingsPanel — relatedLists is an ordered list of the inbound
     expect(rowOrder()).toEqual(['event.related_to', 'task']);
     const after = pageOrder(lastLists(writes));
     expect(after).not.toEqual(before);
-    // The listed relationships lead, in the written order; the rest keep the derived order.
-    expect(after).toEqual(['event.related_to', 'task.lead_id', 'note.lead', 'event.who_id']);
+    // Only the listed relationships show, in the written order: an unlisted
+    // side list shows no tab (objectstack#35897), and the owned `note` is a tab
+    // too since no group of the lead places it (objectstack#35889).
+    expect(after).toEqual(['event.related_to', 'task.lead_id']);
 
     // The keyboard path writes the same kind of order.
     fireEvent.click(within(screen.getByTestId('related-lists-row-task')).getByRole('button', { name: 'Move up' }));
@@ -168,14 +170,18 @@ describe('ObjectSettingsPanel — relatedLists is an ordered list of the inbound
     expect(screen.getByTestId('related-lists-tail-row-campaign_member.lead_id')).toHaveTextContent(
       t('engine.studio.settings.relatedListsHidden', 'en-US'),
     );
-    // The record page agrees: the listed one leads, the rest trail in the derived order.
-    expect(pageOrder(['event.related_to'])).toEqual(['event.related_to', 'note.lead', 'task.lead_id', 'event.who_id']);
+    // The record page: only the listed one; an unlisted list shows no tab
+    // (objectstack#35897), and no group of the lead places `note` as a table.
+    expect(pageOrder(['event.related_to'])).toEqual(['event.related_to']);
 
-    // The add picker offers exactly the tail, spelled as entries.
+    // The add picker offers the built-in tabs not listed (no attachments: the
+    // lead does not enable files), then exactly the tail, spelled as entries.
     fireEvent.keyDown(screen.getByTestId('related-lists-add-select'), { key: 'ArrowDown' });
     const options = within(await screen.findByRole('listbox')).getAllByRole('option').map((o) => o.textContent);
     expect(options).toEqual([
       t('engine.studio.settings.relatedListsAdd', 'en-US'),
+      'Approvals (sys_approval_request)',
+      'Activity (sys_activity)',
       'Note (note)',
       'Task (task)',
       'Event · Who (event.who_id)',

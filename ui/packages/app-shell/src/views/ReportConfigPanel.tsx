@@ -141,16 +141,6 @@ export function ReportConfigPanel({
     onClose();
   }, [onSave, onClose]);
 
-  // ADR-0034 (#1515): resume a pending draft into the inspector on open
-  // (flag-ON only). The report document IS the inspector draft, so seed it
-  // directly.
-  const handleResumeDraft = useCallback((body: Record<string, unknown>) => {
-    const next = { ...body };
-    draftRef.current = next;
-    setDraft(next);
-    setDirty(false);
-  }, []);
-
   const handleDiscard = useCallback(() => {
     onClose();
   }, [onClose]);
@@ -210,7 +200,11 @@ export function ReportConfigPanel({
           name={name}
           metadataClient={metadataClient}
           dirty={dirty}
-          onResume={handleResumeDraft}
+          // objectstack#35008 — no `onResume`: the host seeds `config` with the
+          // pending draft as stored (`ReportView`, the layered read's
+          // `authoredBuffer`). The bar's resume hands over the SERVED draft,
+          // which the server translates for the console's locale, and seeding
+          // the inspector with it stored the translations on the next Save.
           onAfterChange={onAfterChange}
         />
         <Button variant="ghost" size="sm" onClick={handleDiscard} data-testid="report-config-discard">

@@ -53,6 +53,25 @@ const DATA = {
   // the timezone the render names (UTC below) so the bytes never follow the
   // machine's zone.
   expiresAt: '2031-03-04T05:06:07.000Z',
+  // What a password change leaves active (`auth.password_changed_notice`):
+  // each list arrives prepared, beside its count.
+  apiKeyCount: 2,
+  apiKeys: 'ci & <deploy>, laptop',
+  signInAccountCount: 1,
+  signInAccounts: 'github',
+  authorizedAppCount: 1,
+  authorizedApps: 'Claude <Desktop>',
+  // The OAuth applications the account registered and the SCIM credentials it
+  // minted: still active, in the change notice; disabled and revoked, in the
+  // reset notice (`auth.password_reset_notice`), which also names what the
+  // reset kept.
+  ownedAppCount: 2,
+  ownedApps: 'Desk <Assistant>, Report & Sync',
+  scimCredentialCount: 1,
+  scimCredentials: 'okta-prod (rotation & <Q3>)',
+  ssoProviderCount: 1,
+  ssoProviders: 'acme-<okta>',
+  twoFactorCount: 1,
 };
 
 /**
@@ -236,6 +255,52 @@ const RENDERED: Record<string, { subject: string; html: string; text: string }> 
     html: 'c6abe9c3fc761d1dc88b0517ee65bce3dcedb01a425e6cdd3daebdd77aff1a00',
     text: '7d65c60ed0e8b415fe7aae7aff5c544318f81e3ab6c87525067af112a30d238b',
   },
+  // `auth.password_changed_notice` has no row-path render to match: it was
+  // added after the row path was deleted, and these are its registry renders
+  // captured in the commit that last changed it (its registered-apps and SCIM
+  // credential lines), so any later byte change is seen.
+  'auth.password_changed_notice@en-US': {
+    subject: 'Your Acme & <Co> password was changed: your API keys, linked sign-ins and authorized apps stay active',
+    html: '7583cb0fa2aa6626b7e1e9653f4f13905d79f210f84676c02a95b12ca4fae380',
+    text: 'd3cf0da5bd765bc665061fc7529996038a849edbf1f33da759630c95f443b12c',
+  },
+  'auth.password_changed_notice@zh-CN': {
+    subject: '您的 Acme & <Co> 密码已修改：API 密钥、已关联的登录方式与已授权的应用仍然有效',
+    html: 'b384b7508cfc0469f7c6014bc29df1cf81a9f7c9748e20bc348fba20bd201459',
+    text: '475af699a3d1341c7cf5a5dc4ec2ba4bec8e5c1e69245801282262811095bc0c',
+  },
+  'auth.password_changed_notice@ja-JP': {
+    subject: 'Acme & <Co> のパスワードが変更されました: API キー、連携済みのサインイン、承認済みのアプリは引き続き有効です',
+    html: '4941cbaa57952927ec6dc518f37bf097bacdb1f8667a3ab2a3cb57e340ea3c29',
+    text: 'a12876a4ea9b5ac3e7e85a9039bd2f14b2b5a60f6d966414f93f2a87c4ce9e0f',
+  },
+  'auth.password_changed_notice@es-ES': {
+    subject: 'Se ha cambiado tu contraseña de Acme & <Co>: tus claves de API, inicios de sesión vinculados y aplicaciones autorizadas siguen activos',
+    html: 'e4d232511d83b7261959e37a64c684b163878c914015302896fb92682c827b13',
+    text: 'a823256ca46a6ab9382a3b28df47b9763cdbfd851cf4521563ed6cc211a58888',
+  },
+  // `auth.password_reset_notice`, the same: its registry renders captured in
+  // the commit that added it.
+  'auth.password_reset_notice@en-US': {
+    subject: 'Your Acme & <Co> password was reset',
+    html: 'cfe66a9be62c9fca2ffc6c7741bae8cdfa6370f044f53150df1e7836c595eebe',
+    text: 'fe4c7abcb04647784ef91b64d73526232cebd7820fc7f6be87e2aa021477758d',
+  },
+  'auth.password_reset_notice@zh-CN': {
+    subject: '您的 Acme & <Co> 密码已重置',
+    html: '6feda45239cff27532830c3ed00158c85c9a13c15f1b13a7af6dd73645b406fd',
+    text: '06bc6463daa3e947c2661a9aa4f0676e53359ddeb191396cc61aa3a01cc9af93',
+  },
+  'auth.password_reset_notice@ja-JP': {
+    subject: 'Acme & <Co> のパスワードがリセットされました',
+    html: '9361fa8acc8b23e4c02b85d78e152877f10e407cfb5281123f35c039de875fe9',
+    text: '70d9536271075c9009ab4c00ae705d9a3555e149f675c6b44f6a52c89631f063',
+  },
+  'auth.password_reset_notice@es-ES': {
+    subject: 'Se ha restablecido tu contraseña de Acme & <Co>',
+    html: '34e36b195961fa6f1e3763540b870ac4692a3eb29f172f520934c1854e8099a4',
+    text: '7f1e20fc6134db5a2a18647e21e0f8e1769e2380778dd9c35ce2eee962ca563b',
+  },
 };
 
 /** What the expiry instant is replaced with before a face is digested. */
@@ -297,7 +362,7 @@ describe('every built-in auth mail renders byte-identical from the registry', ()
       };
     }
 
-    expect(Object.keys(rendered)).toHaveLength(32);
+    expect(Object.keys(rendered)).toHaveLength(40);
     expect(rendered).toEqual(RENDERED);
   });
 });

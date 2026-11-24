@@ -13,12 +13,12 @@
 
 ## Summary
 
-157 records under `docs/adr/` (152 numbers), 11 under `ui/docs/adr/` (listed separately below).
+159 records under `docs/adr/` (154 numbers), 11 under `ui/docs/adr/` (listed separately below).
 
 | Status | Records |
 |---|---|
-| Accepted | 134 |
-| Proposed | 9 |
+| Accepted | 138 |
+| Proposed | 7 |
 | Superseded | 4 |
 | Draft | 3 |
 | Deferred | 2 |
@@ -26,7 +26,7 @@
 | Amended | 1 |
 | Partially implemented | 1 |
 | Revised | 1 |
-| **Total** | **157** |
+| **Total** | **159** |
 
 ## Shared numbers
 
@@ -82,7 +82,7 @@ A bare `ADR-0006` names the decision; its current text is [0006-project-environm
 | [ADR-0010-nl-to-flow-authoring](./0010-nl-to-flow-authoring.md) | Natural-Language → Flow Authoring (Platform Capability) | Draft — 2026-05-24 | 2026-05-24 | — | — |
 | [ADR-0011](./0011-actions-as-ai-tools.md) | Actions as AI Tools (Operational Parity) | Accepted — implemented (2026-06-04) | 2026-06-04 | — | — |
 | [ADR-0012](./0012-notification-platform.md) | Messaging Platform — Outbound Notifications on a Generalized Outbox | Draft — 2026-05-25 · scope-revised 2026-05-26 · Superseded by ADR-0030… | 2026-05-25 | — | ADR-0030 |
-| [ADR-0013](./0013-bidirectional-messaging.md) | Bidirectional Messaging — Conversational Channels, Slack First | Draft — 2026-05-26 | 2026-05-26 | — | — |
+| [ADR-0013](./0013-bidirectional-messaging.md) | Bidirectional Messaging — Conversational Channels, Slack First | Draft — 2026-05-26 · Amended (2026-11-19, rulings `7023437637`, `702370… | 2026-05-26 | — | — |
 | [ADR-0014](./0014-record-form-field-type.md) | `record` Form Field Type | Accepted | 2026-04-17 | — | — |
 | [ADR-0015](./0015-external-datasource-federation.md) | External Datasource Federation | Accepted — backend/REST/CLI implemented; Studio UI + extra dialect drivers… | 2026-05-29 | — | — |
 | [ADR-0016](./0016-studio-package-authoring-and-publish.md) | Studio Package Authoring & One-Click Publish | Partially implemented — revised 2026-05-30 | 2026-05-30 | — | — |
@@ -205,7 +205,7 @@ A bare `ADR-0006` names the decision; its current text is [0006-project-environm
 | [ADR-0133](./0133-org-management-open-basics.md) | Organization management — the open basics; a mirror of cloud ADR-0081 D1/D3/D4 in the repository whose code e… | Accepted — 2026-09-07 — accepted by the merge that landed it on `main` (#1… | 2026-09-07 | — | — |
 | [ADR-0134](./0134-env-side-scim-provisioning.md) | Env-side SCIM provisioning — `@better-auth/scim` is the mechanism, and this platform writes the deactivation | Proposed — 2026-09-07. This file is a MIRROR of the open, mechanism half of | 2026-09-07 | — | — |
 | [ADR-0135](./0135-identity-and-access-architecture.md) | Identity and access architecture — the open half, mirrored from cloud ADR-0024 | Accepted — The DECISION is — it is `objectstack-ai/cloud` ADR-0024, accept… | 2026-06-25 | — | — |
-| [ADR-0137](./0137-predicate-fault-semantics-are-contract.md) | A predicate's FAULT semantics are part of the protocol — loud at submit, fail-open at render, and a blank pre… | Accepted — 2026-09-18 — this record declares; it implements nothing. D1's… | 2026-09-18 | — | — |
+| [ADR-0137](./0137-predicate-fault-semantics-are-contract.md) | A predicate's FAULT semantics are part of the protocol — loud at submit, fail-open at render, and a blank pre… | Accepted — 2026-09-18; amended 2026-11-17 (a server row for a `required` f… | 2026-09-18 | — | — |
 | [ADR-0138](./0138-guest-model-anonymous-principal-doors-grants-and-organization.md) | The guest model — one anonymous principal, a closed list of doors, one grants channel, one organization rule,… | Accepted — 2026-10-13, accepted by the maintainer's approval of the pull r… | 2026-10-13 | — | — |
 | [ADR-0139](./0139-engine-internal-semi-join-leaf-readable-parent-ids.md) | One engine-internal semi-join leaf — "the ids of object X this caller may read" — pushed down by ObjectQL, ne… | Accepted — 2026-10-11, accepted by the merge that landed it on `main` | 2026-10-11 | — | — |
 | [ADR-0141](./0141-inter-app-dependency-declared-checked-before-install.md) | An app may depend on another installed app — declared in `manifest.dependencies`, checked once before install… | Proposed — 2026-10-25; first draft 2026-10-24. `docs/adr/` is Tier H (Prim… | 2026-10-25 | — | ADR-0146 |
@@ -217,13 +217,15 @@ A bare `ADR-0006` names the decision; its current text is [0006-project-environm
 | [ADR-0147](./0147-membership-scoped-rls-lowers-to-an-engine-internal-org-member-semi-join-leaf.md) | Membership-scoped RLS (`FIELD in currentuser.orguserids`) lowers to an engine-internal organization-member se… | Proposed — 2026-11-02. `docs/adr/` is Tier H (Prime Directive #14): the re… | 2026-11-02 | — | — |
 | [ADR-0148](./0148-recycle-bin-separate-store-restore-under-original-ids-retention-in-days.md) | The recycle bin is a separate store — one entry per delete operation, restore under the original ids, retenti… | Accepted — 2026-11-05, recording the maintainer's ruling of 2026-11-04 on… | 2026-11-05 | — | — |
 | [ADR-0149](./0149-ai-answers-business-questions-through-the-dataset-semantic-layer.md) | The AI answers business questions through the dataset semantic layer — synonyms and descriptions on measures… | Accepted — 2026-11-08, recording two rulings of the maintainer: the placem… | 2026-11-08 | — | — |
-| [ADR-0150](./0150-behavioural-metadata-addressed-by-package-objects-keep-the-literal-prefix.md) | Behavioural metadata is addressed by (package, name) — objects keep the literal prefix; ADR-0028 re-opened fo… | Proposed — 2026-11-08. `docs/adr/` is Tier H (Prime Directive #14): this r… | 2026-11-08 | ADR-0028 | — |
+| [ADR-0150](./0150-behavioural-metadata-addressed-by-package-objects-keep-the-literal-prefix.md) | Behavioural metadata is addressed by (package, name) — objects keep the literal prefix; ADR-0028 re-opened fo… | Accepted — 2026-11-08, merged in #31586. `docs/adr/` is Tier H (Prime Dire… | 2026-11-08 | ADR-0028 | — |
 | [ADR-0151](./0151-ai-service-account-a-headless-agent-is-a-registered-principal-of-its-own.md) | An AI service account — a headless agent is a registered principal of its own, with its own keys and its own… | Proposed — 2026-11-08 — draft. `docs/adr/` is a Tier H governed surface: t… | 2026-11-08 | — | — |
 | [ADR-0152](./0152-scim-group-grants-only-an-ordinary-permission-set-through-a-per-connection-mapping.md) | A SCIM group grants only an ordinary permission set, through a per-connection mapping row a platform administ… | Accepted — implemented, 2026-11-08, recording the maintainer's ruling of 2… | 2026-11-08 | — | — |
 | [ADR-0153](./0153-one-way-sync-in-beside-federation.md) | One-way sync-in beside federation — a connector or a federated object, a warehouse table included, fills an o… | Proposed — 2026-11-10. `docs/adr/` is Tier H (Prime Directive #14): this r… | 2026-11-10 | — | — |
 | [ADR-0154](./0154-audit-ledger-tamper-evidence-sealer-signed-checkpoints-amendments-verify.md) | The audit ledger is tamper-evident — an asynchronous sealer signs per-organization checkpoints, redaction and… | Proposed — 2026-11-10 — draft. This record declares; it implements nothing… | 2026-11-10 | — | — |
-| [ADR-0155](./0155-sharing-scope-share-grants-lower-to-an-engine-internal-semi-join-leaf.md) | The sharing scope's share-grant arm lowers to an engine-internal semi-join leaf over the record-share table,… | Proposed — 2026-11-15; questions ①–③ are open for the maintainer and are ⛔… | 2026-11-15 | — | — |
+| [ADR-0155](./0155-sharing-scope-share-grants-lower-to-an-engine-internal-semi-join-leaf.md) | The sharing scope's share-grant arm lowers to an engine-internal semi-join leaf over the record-share table,… | Accepted — 2026-11-17, recording the maintainer's answers to questions ①–③… | 2026-11-15 | — | — |
 | [ADR-0156](./0156-compiled-metadata-answer-cache-every-source-counts-its-own-changes.md) | A compiled metadata answer is cached only when every source it reads counts its own changes, and a bound cove… | Accepted — 2026-11-16 — maintainer ruling on #34206, comment 6920925378, v… | 2026-11-16 | — | — |
+| [ADR-0157](./0157-working-calendars-are-org-editable-runtime-data-resolved-by-code-or-refused.md) | Working calendars are organization-editable runtime data — a consumer names a calendar by code or takes the o… | Accepted — 2026-11-19 — maintainer ruling on #35340, comment `7000950747`,… | 2026-11-19 | — | — |
+| [ADR-0158](./0158-units-of-measure-standard-unit-table-org-units-quantity-unit-declaration-base-quantity.md) | Units of measure — a closed standard unit table in the spec, organization-owned units, a quantity field that… | Accepted — 2026-11-19, ruled on objectstack#35339 (ruling record `70011930… | 2026-11-19 | — | — |
 
 ## ObjectUI registry — `ui/docs/adr/` (`ui-` prefix)
 

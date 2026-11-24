@@ -44,6 +44,37 @@ function splitResponse(bytes: Buffer) {
   return { head, headers, body: bytes.subarray(at + 4) };
 }
 
+/**
+ * Wait until `conn` has received the head of a response (the status line and
+ * headers, through the blank line after them), or fail after `timeoutMs`. A
+ * loaded runner can take longer than any fixed sleep to deliver the response,
+ * so a case that asserts on received bytes waits for them instead.
+ */
+function waitForResponseHead(conn: Awaited<ReturnType<typeof rawConnection>>, timeoutMs = 5000): Promise<void> {
+  const complete = () => conn.received().includes('\r\n\r\n');
+  if (complete()) return Promise.resolve();
+  return new Promise<void>((resolve, reject) => {
+    const done = (err?: Error) => {
+      clearTimeout(timer);
+      conn.socket.off('data', onData);
+      conn.socket.off('close', onClose);
+      if (err) reject(err);
+      else resolve();
+    };
+    // Listeners run in registration order, so `rawConnection`'s collector has
+    // already pushed this chunk when `onData` reads `received()`.
+    const onData = () => { if (complete()) done(); };
+    const onClose = () => done(complete() ? undefined : new Error(
+      `connection closed before a response head arrived (${conn.received().length} bytes received)`,
+    ));
+    const timer = setTimeout(() => done(new Error(
+      `no response head within ${timeoutMs} ms (${conn.received().length} bytes received)`,
+    )), timeoutMs);
+    conn.socket.on('data', onData);
+    conn.socket.once('close', onClose);
+  });
+}
+
 /** Every response the adapter is still holding for its drain bookkeeping. */
 function retainedResponses(server: HonoHttpServer): number {
   const tracked = (server as unknown as { inFlightResponses: Map<unknown, Set<unknown>> }).inFlightResponses;
@@ -211,7 +242,8 @@ describe('HonoHttpServer — graceful close drains in-flight requests (P1-3)', (
     const slowReader = await rawConnection(port);
     slowReader.socket.pause(); // reads nothing until resumed below
     slowReader.socket.write('GET /big HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n');
-    await sleep(100);
+    await sleep(100); // the big response has time to call end() and fill the socket buffers
+    await waitForResponseHead(idle);
     expect(splitResponse(idle.received()).headers.connection).toBe('keep-alive');
     // The premise: the big response has called end() and is still flushing.
     expect(bigResponse?.writableEnded, 'the big response has called end()').toBe(true);
@@ -239,7 +271,7 @@ describe('HonoHttpServer — graceful close drains in-flight requests (P1-3)', (
     await server.listen(0);
     const idle = await rawConnection(server.getPort());
     idle.socket.write('GET /probe HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n');
-    await sleep(50);
+    await waitForResponseHead(idle);
     expect(splitResponse(idle.received()).headers.connection).toBe('keep-alive');
 
     const t0 = Date.now();
@@ -416,7 +448,7 @@ describe('HonoHttpServer — a request still uploading when shutdown begins is a
     await server.listen(0);
     const conn = await rawConnection(server.getPort());
     conn.socket.write('GET /events HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n');
-    await sleep(100);
+    await waitForResponseHead(conn);
     expect(splitResponse(conn.received()).head, 'the stream is open').toMatch(/^HTTP\/1\.1 200/);
 
     const t0 = Date.now();

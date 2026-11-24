@@ -54,6 +54,7 @@ const KNOWN_TOKENS = new Set<string>([
   'destructive', 'destructive-foreground', 'border', 'input', 'ring',
   'success', 'success-foreground', 'warning', 'warning-foreground',
   'chart-1', 'chart-2', 'chart-3', 'chart-4', 'chart-5',
+  'chart-6', 'chart-7', 'chart-8', 'chart-9', 'chart-10',
 ]);
 
 /** Common CSS properties (camelCase) an SDUI block realistically sets. Generous

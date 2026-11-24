@@ -34,6 +34,14 @@
  * synthesized option so a value is never silently dropped; it is flagged as not
  * published only once the catalog has answered (objectui#10585).
  *
+ * Refusals and texts (objectstack#36725). The hook's refusal catalogue
+ * (`refusals`) and declared texts (`texts`) are drawn from their SERVED form
+ * rows, handed in as `serverForm` (the helper and the shape the action
+ * inspector uses, objectstack#35650): the key-only record control, the entry
+ * rows and the help text the server declares. Fed the bare schema in "More
+ * fields" they read as the raw JSON editor. A host with no served form, or a
+ * served form without the row, keeps them in "More fields" as before.
+ *
  * Reach (objectui#11820). A hook on an object runs on that object's events
  * wherever they happen, so the picker says so where the reach widens: when a
  * host tells it which objects belong to the package the hook is authored in
@@ -64,6 +72,9 @@ import { useObjectOptions } from '../previews/useObjectOptions.js';
 import { ConditionBuilder, RECORD_CONDITION_SUBJECTS } from './ConditionBuilder.js';
 import { expressionSource, writeExpressionSource } from './expression-envelope.js';
 import { ScriptCapabilitiesField } from './ScriptCapabilitiesField.js';
+import { servedFormRows } from './servedFormRows.js';
+import { useIssuePrefixRegister } from '../issuePath.js';
+import type { FormViewSpec } from '../form-spec.js';
 
 /* ─────────────── constants ─────────────── */
 
@@ -123,7 +134,38 @@ const CURATED_FIELDS = [
   'name', 'label', 'object', 'events', 'body', 'priority', 'async', 'condition',
 ];
 
+/**
+ * Keys this inspector draws from their SERVED form row (objectstack#36725),
+ * beside the handler body in the Function section: the hook's refusal
+ * catalogue and its declared texts. Each is a record keyed by the code or key
+ * the body uses; its served row declares the key-only record control, the
+ * entry's own rows and the help text, where the bare schema the fallback form
+ * reads says only "a record", which is the raw JSON editor.
+ *
+ * A key the served form has no row for stays in the fallback form, as before.
+ */
+const SERVED_ROW_FIELDS = ['refusals', 'texts'] as const;
+
 /* ─────────────── helpers ─────────────── */
+
+/**
+ * The setter a whole-draft `SchemaForm` reports its inline rows through
+ * (`onInlineIssueFieldsChange`): each row key is registered, unprefixed, for as
+ * long as the form reports it, so the two such forms this inspector mounts on
+ * one draft (the served rows and "More fields") are heard as one union rather
+ * than the later report replacing the earlier one. The same setter the action
+ * inspector builds for its own two forms (objectstack#35650).
+ */
+function useWholeDraftFormIssueRows(
+  register: (prefix: string) => () => void,
+): (rows: ReadonlySet<string>) => void {
+  const [rows, setRows] = React.useState<ReadonlySet<string>>(() => new Set());
+  React.useEffect(() => {
+    const offs = [...rows].map((row) => register(row));
+    return () => offs.forEach((off) => off());
+  }, [rows, register]);
+  return setRows;
+}
 
 function SectionHeader({ title, hint }: { title: string; hint?: string }) {
   return (
@@ -171,8 +213,18 @@ export function HookDefaultInspector({
   locale,
   serverSchema,
   onBlockingIssuesChange,
+  issues,
+  revealIssues,
+  onInlineIssueFieldsChange,
+  serverForm,
 }: MetadataDefaultInspectorProps) {
   const tr = React.useCallback((key: string) => t(key, locale), [locale]);
+  // Two forms draw rows of this draft (the served rows and the "More fields"
+  // fallback), so each registers the rows it draws and the host hears the
+  // union (objectstack#35628's inline register).
+  const registerIssuePrefix = useIssuePrefixRegister(onInlineIssueFieldsChange);
+  const setServedIssueRows = useWholeDraftFormIssueRows(registerIssuePrefix);
+  const setFallbackIssueRows = useWholeDraftFormIssueRows(registerIssuePrefix);
 
   const str = (k: string): string => (typeof draft[k] === 'string' ? (draft[k] as string) : '');
   const body = (draft.body && typeof draft.body === 'object' ? draft.body : {}) as Record<string, unknown>;
@@ -278,6 +330,14 @@ export function HookDefaultInspector({
   const conditionObject = !allObjects && objectNames.length === 1 ? objectNames[0] : undefined;
   const language = typeof body.language === 'string' ? (body.language as string) : 'expression';
   const fallbackSchema = serverSchema as Record<string, unknown> | undefined;
+  // objectstack#36725 — the served rows of SERVED_ROW_FIELDS, for the keys the
+  // served schema declares, as a one-section form over the same schema.
+  const servedProps = (fallbackSchema?.properties ?? {}) as Record<string, unknown>;
+  const servedRows = servedFormRows(serverForm, SERVED_ROW_FIELDS).filter((row) => row.field in servedProps);
+  const servedRowsForm: FormViewSpec | undefined =
+    serverForm && servedRows.length > 0
+      ? { ...serverForm, type: 'simple', sections: [{ fields: servedRows }], groups: undefined }
+      : undefined;
 
   return (
     <InspectorShell
@@ -446,6 +506,20 @@ export function HookDefaultInspector({
             withheld={{ tokens: ['email.send'], flagKey: 'engine.inspector.hook.capabilityNotForHook' }}
           />
         )}
+        {fallbackSchema && servedRowsForm && (
+          <div data-testid="hook-served-rows">
+            <SchemaForm
+              schema={fallbackSchema}
+              form={servedRowsForm}
+              value={draft}
+              readOnly={readOnly}
+              issues={issues}
+              revealIssues={revealIssues}
+              onInlineIssueFieldsChange={setServedIssueRows}
+              onChange={(next) => onPatch(fallbackFormPatch(draft, next))}
+            />
+          </div>
+        )}
       </div>
 
       {/* 4 ─ Options */}
@@ -514,8 +588,11 @@ export function HookDefaultInspector({
           <SchemaForm
             schema={fallbackSchema}
             value={draft}
-            hiddenFields={CURATED_FIELDS}
+            hiddenFields={[...CURATED_FIELDS, ...(servedRowsForm ? servedRows.map((row) => row.field) : [])]}
             readOnly={readOnly}
+            issues={issues}
+            revealIssues={revealIssues}
+            onInlineIssueFieldsChange={setFallbackIssueRows}
             onChange={(next) => onPatch(fallbackFormPatch(draft, next))}
           />
         </div>

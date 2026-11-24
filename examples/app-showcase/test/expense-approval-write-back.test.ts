@@ -132,7 +132,8 @@ async function statusOf(booted: Booted, id: string): Promise<string> {
 }
 
 async function decide(booted: Booted, requestId: string, decision: 'approve' | 'reject', actorId: string) {
-  return booted.approvals.decide(requestId, { decision, actorId }, SYSTEM_CTX);
+  // A reject carries its reason: `decide()` refuses one without it.
+  return booted.approvals.decide(requestId, { decision, actorId, ...(decision === 'reject' ? { comment: 'Over budget.' } : {}) }, SYSTEM_CTX);
 }
 
 /** The pre-fix shape: the outcome arms go straight to bare `end` nodes. */

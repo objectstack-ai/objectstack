@@ -13,7 +13,12 @@ import {
   type ListDatasetsOutput,
   type QueryDatasetOutput,
 } from '@objectstack/spec/ai';
-import { PackageScopedNameRefusedError, packageScopedHolderSource, resolvePackageScopedHolders } from '@objectstack/core';
+import {
+  PackageScopedNameRefusedError,
+  packageScopedHolderSource,
+  resolvePackageScopedHolders,
+  userTextLocalesOf,
+} from '@objectstack/core';
 import type { AIToolDefinition, AnalyticsResult, DatasetSelection } from '@objectstack/spec/contracts';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { stripReadDecorations } from '@objectstack/spec/kernel';
@@ -28,7 +33,9 @@ import {
   undeclaredSelectionMembers,
   usableDeclaredMembers,
 } from './dataset-declared-members.js';
-import { matchDatasetTerms } from './dataset-term-matcher.js';
+import { findDatasetTermCandidates, matchDatasetTerms, type CandidateDataset } from './dataset-term-matcher.js';
+import { DATASET_NEXT_STEP_PRECEDENCE, composeDatasetNextStep, composeDatasetSourceLine } from './dataset-next-step.js';
+import type { GroupCountRequest } from './dataset-group-count.js';
 
 /**
  * The dataset AI tools — `list_datasets` and `query_dataset` — defined once,
@@ -66,6 +73,16 @@ import { matchDatasetTerms } from './dataset-term-matcher.js';
  * then judged) and its `runtimeFilter`, echoed as sent. The input is a
  * strict object, so a `provenance` (or any other key) the model puts beside
  * `datasetName` / `selection` is refused, never merged.
+ *
+ * ## The next step and the source line, as finished sentences (M1 note)
+ *
+ * [Ruling #34894 = A] `list_datasets` answers `nextStep` whenever terms were
+ * sent: the case of the D3 rule the terms are in, the terms it is about and
+ * that case in words. `query_dataset` answers `sourceLine`, `provenance` as
+ * one line to cite. Both are composed in `dataset-next-step.ts` from the
+ * answer being served and nothing else, in the caller's language; that file
+ * holds the per-term decision, the precedence among mixed cases and the
+ * partial-answer rule.
  */
 
 /** `query_dataset`'s row cap when the host sets none — `query_records`' default. */
@@ -86,14 +103,26 @@ const LIST_DATASETS_DESCRIPTION =
   'List the governed business datasets this caller may query: each dataset\'s dimensions (what an answer can be '
   + 'grouped by) and measures (the numbers it can answer), with their business definitions and synonyms. Pass '
   + '`terms` — the business words lifted from the question — and each dataset reports which of them equal a '
-  + 'member\'s name, label or synonym (`matches`). Selection rule: one match on a measure wins, so answer through '
-  + '`query_dataset` with that dataset and measure, and cite the answer\'s `provenance` as its source. Several '
-  + 'matches (two datasets or two members answer to the word): ask the user which one is meant, listing each '
-  + 'candidate\'s label, dataset label and description; never pick one. No match: fall back to the object query '
-  + 'tools and say in the answer that no governed metric was used (非指标口径); when the object you fall back to '
-  + 'is a listed dataset\'s `object`, add one line naming that dataset and its measures. A dimension match alone '
-  + 'picks a grouping, not a number: a measure must still match. `membersWithheld` means some members exist that '
-  + 'this caller may not see.';
+  + 'member\'s name, label or synonym (`matches`). Selection rule: a word for a thing measured that matches exactly '
+  + 'one measure wins, so answer through `query_dataset` with that dataset and measure, and cite the answer\'s '
+  + '`provenance` as its source; two such words are two metrics, so compute both. One word matching several '
+  + 'measures (in one dataset or two): ask the user which one is meant, listing each candidate\'s label, dataset '
+  + 'label and description; never pick one. A word that matched nothing may have `candidates`, members offered as '
+  + 'possible readings. A word with a measure among its candidates: ask the same way, listing each one\'s label, '
+  + 'dataset label and description; never pick one, and never treat a candidate as a match. A word whose candidates '
+  + 'are all dimensions is at most a possible grouping: never ask about it, and it never stops a matched measure. '
+  + 'No match and no candidates: fall back to the object query tools and '
+  + 'say in the answer that no governed metric was used (非指标口径); when the object you fall back to is a listed '
+  + 'dataset\'s `object`, add one line naming that dataset and its measures. A dimension match picks a '
+  + 'grouping, not a number: when the question has no word for a thing measured, ask which number is meant; beside '
+  + 'a word for a thing measured that falls back, ask nothing and take the fallback. `membersWithheld` means some '
+  + 'members exist that this '
+  + 'caller may not see. When `terms` were sent the answer carries `nextStep`: the case of this rule your words are '
+  + 'in (`decision`), the words it is about (`terms`) and what to do, already written (`note`); follow `note`, which '
+  + 'with one_measure also names the words left out with their candidates or possible groupings, and with '
+  + 'candidates_only names the unknown and grouping-only words left out. When '
+  + `the words are in different cases it reports the first of ${DATASET_NEXT_STEP_PRECEDENCE.join(', ')}, so a word `
+  + 'matching only a dimension never outranks a measure match.';
 
 const QUERY_DATASET_DESCRIPTION =
   'Run a selection (measures, optional dimensions, filter, time window, order, limit) against one saved business '
@@ -101,7 +130,8 @@ const QUERY_DATASET_DESCRIPTION =
   + 'member names `list_datasets` lists for that dataset; any other name (a raw field, `count`) is refused '
   + 'INVALID_FIELD, naming the members you may use. Answers the rows plus '
   + '`provenance` naming the dataset and the measures used — render the answer\'s source from `provenance` '
-  + '(e.g. 「指标：营收（数据集：销售分析）」), and explain a number with its measure\'s description. A dataset that '
+  + '(e.g. 「指标：营收（数据集：销售分析）」); `sourceLine` is that source already written in the caller\'s language, '
+  + 'so cite it as given. Explain a number with its measure\'s description. A dataset that '
   + 'does not exist and one this caller may not query both answer NOT_FOUND. Rows are capped; `truncated` says '
   + 'more existed.';
 
@@ -141,6 +171,9 @@ export function getDatasetToolDefinitions(): readonly AIToolDefinition[] {
  * The array form is a complete read. The object form carries `partial: true`
  * and a `warning` when the read was degraded (the `list_objects` shape), and
  * the tools say so instead of presenting a short list as the whole catalogue.
+ * [#34993] A `warning` without `partial` is a whole read the host says
+ * something about (a translation fault: every row, its text untranslated):
+ * `list_datasets` says it, and `query_dataset` still answers.
  */
 export type DatasetToolSource =
   | readonly unknown[]
@@ -175,6 +208,13 @@ export interface DatasetToolsDeps {
    * degraded read: `list_datasets` answers `partial`, `query_dataset` 503.
    */
   readonly loadDatasets: (context: ExecutionContext | undefined) => Promise<DatasetToolSource>;
+  /**
+   * [#35083] The locale `loadDatasets` translated the rows for. Labels are
+   * read, and sentences (`nextStep`, `sourceLine`) composed, in it first, so
+   * one answer speaks one language. Optional: absent, answering `undefined` or
+   * throwing, the caller's locale ladder alone (`userTextLocalesOf`).
+   */
+  readonly translationLocale?: (context: ExecutionContext | undefined) => Promise<string | undefined>;
   /** `query_dataset`'s row cap — the bridge's `maxQueryLimit`. Default {@link DATASET_TOOL_DEFAULT_MAX_ROWS}. */
   readonly maxQueryLimit?: number;
   /**
@@ -356,6 +396,16 @@ export function createDatasetTools(deps: DatasetToolsDeps): DatasetTools {
     ? Math.floor(deps.maxQueryLimit)
     : DATASET_TOOL_DEFAULT_MAX_ROWS;
 
+  /** [#35083] The answer's locale ({@link DatasetToolsDeps.translationLocale}), and its sentence ladder. */
+  async function answerLocales(context: ExecutionContext | undefined): Promise<{ locale?: string; sentence: string[] }> {
+    const translated = await Promise.resolve()
+      .then(() => deps.translationLocale?.(context))
+      .catch(() => undefined);
+    const ladder = sentenceLocales(context);
+    if (typeof translated !== 'string' || translated === '') return { locale: context?.locale, sentence: ladder };
+    return { locale: translated, sentence: [translated, ...ladder.filter((l) => l !== translated)] };
+  }
+
   /**
    * The saved datasets, each stripped of read decorations and parsed as the
    * REST door parses a saved dataset; one that fails the parse is left out (a
@@ -365,6 +415,7 @@ export function createDatasetTools(deps: DatasetToolsDeps): DatasetTools {
     const source = await deps.loadDatasets(context);
     const items = Array.isArray(source) ? source : (source as { items?: readonly unknown[] }).items ?? [];
     const degraded = !Array.isArray(source) && (source as { partial?: unknown }).partial === true;
+    const said = Array.isArray(source) ? undefined : (source as { warning?: unknown }).warning;
     const datasets: Dataset[] = [];
     const holdings: Array<LoadedDatasets['holdings'][number]> = [];
     for (const item of items) {
@@ -382,7 +433,7 @@ export function createDatasetTools(deps: DatasetToolsDeps): DatasetTools {
       datasets,
       holdings,
       partial: degraded,
-      ...(degraded ? { warning: String((source as { warning?: unknown }).warning ?? 'The dataset read was degraded.') } : {}),
+      ...(degraded ? { warning: String(said ?? 'The dataset read was degraded.') } : typeof said === 'string' ? { warning: said } : {}),
     };
   }
 
@@ -391,21 +442,28 @@ export function createDatasetTools(deps: DatasetToolsDeps): DatasetTools {
     const parsed = ListDatasetsInputSchema.safeParse(input ?? {});
     if (!parsed.success) throw inputRefusal(LIST_DATASETS_TOOL_NAME, parsed.error.issues, input);
     const terms = parsed.data.terms;
+    const { locale, sentence } = await answerLocales(context);
 
     let loaded: LoadedDatasets;
     try {
       loaded = await load(service, context);
     } catch (e) {
       // The #6504 shape: never a count that is not a fact.
+      const nextStep = terms !== undefined
+        ? composeDatasetNextStep({ terms, datasets: [], candidates: [], partial: true, locales: sentence })
+        : undefined;
       return {
         datasets: [],
         partial: true,
         warning: `The dataset catalogue could not be read: ${e instanceof Error ? e.message : String(e)}`,
+        ...(nextStep ? { nextStep } : {}),
       };
     }
 
-    const locale = context?.locale;
     const entries: DatasetToolCatalogEntry[] = [];
+    // The admitted members of each listed dataset, in its entry's order: the
+    // only members a candidate may name (ADR-0149 D3 amendment note).
+    const listed: CandidateDataset[] = [];
     let unresolved = false;
     for (const dataset of loaded.datasets) {
       const admission = await service.admitDatasetCatalogEntry(dataset, context);
@@ -438,16 +496,27 @@ export function createDatasetTools(deps: DatasetToolsDeps): DatasetTools {
       };
       if (terms !== undefined) entry.matches = matchDatasetTerms(terms, { dimensions, measures });
       entries.push(entry);
+      listed.push({ name: dataset.name, dimensions, measures });
     }
+    // Terms with no hit in any listed entry get the near members, or nothing:
+    // the key is absent rather than an empty list.
+    const candidates = terms !== undefined ? findDatasetTermCandidates(terms, listed) : [];
 
     const warnings: string[] = [];
-    if (loaded.partial && loaded.warning) warnings.push(loaded.warning);
+    if (loaded.warning) warnings.push(loaded.warning);
     if (unresolved) {
       warnings.push('Some datasets or members could not be checked against this caller\'s permissions and are left out.');
     }
+    // [ADR-0149 M1 note] Composed last, from this answer alone: the entries
+    // and candidates above are the admitted members, and nothing else is read.
+    const nextStep = terms !== undefined
+      ? composeDatasetNextStep({ terms, datasets: entries, candidates, partial: warnings.length > 0, locales: sentence })
+      : undefined;
     return {
       datasets: entries,
       ...(warnings.length > 0 ? { partial: true as const, warning: warnings.join(' ') } : {}),
+      ...(candidates.length > 0 ? { candidates } : {}),
+      ...(nextStep ? { nextStep } : {}),
     };
   }
 
@@ -527,7 +596,13 @@ export function createDatasetTools(deps: DatasetToolsDeps): DatasetTools {
       ? raw.selection.limit
       : maxRows;
     const selection: DatasetSelection = { ...raw.selection, limit: cap + 1 };
-    const answer: AnalyticsResult = await service.queryDataset(dataset, selection, context);
+    // [query_dataset totalGroups] The groups before the cut, counted by the
+    // statement that grouped and cut them, or as the length of a whole grid
+    // windowed in memory (`dataset-group-count.ts`); an answer neither covers
+    // leaves the slot empty and the member out.
+    const groupCount: GroupCountRequest = {};
+    const answer: AnalyticsResult = await service.queryDataset(dataset, selection, context, { groupCount });
+    const totalGroups = groupCount.outcome?.groupCount;
 
     const rows = Array.isArray(answer.rows) ? answer.rows : [];
     const truncated = rows.length > cap;
@@ -545,13 +620,18 @@ export function createDatasetTools(deps: DatasetToolsDeps): DatasetTools {
       narrowing = await deps.diagnoseDelegation(dataset.object, context).catch(() => undefined);
     }
 
+    // Composed last, so nothing the answer carries can stand in for them.
+    const { locale, sentence } = await answerLocales(context);
+    const provenance = composeProvenance(dataset, raw.selection, locale);
     return {
       ...rest,
       rows: served,
-      // Composed last, so nothing the answer carries can stand in for them.
-      provenance: composeProvenance(dataset, raw.selection, context?.locale),
+      provenance,
+      // [ADR-0149 M1 note] The same source as one line, from `provenance` alone.
+      sourceLine: composeDatasetSourceLine(provenance, sentence),
       rowCount: served.length,
       truncated,
+      ...(totalGroups !== undefined ? { totalGroups } : {}),
       ...(narrowing?.narrowed && narrowing.statement
         ? { delegationNarrowed: true as const, warning: narrowing.statement }
         : {}),
@@ -656,6 +736,16 @@ function composeProvenance(
     })),
     ...(selection.runtimeFilter !== undefined ? { runtimeFilter: selection.runtimeFilter } : {}),
   } as DatasetProvenance;
+}
+
+/**
+ * The locales a sentence the tools compose is written for: the caller's locale,
+ * then the workspace default, as the door put them on the context. The user-text
+ * ladder every platform-composed sentence reads (`userTextLocalesOf`), never a
+ * second reading; `en` below both.
+ */
+function sentenceLocales(context: ExecutionContext | undefined): string[] {
+  return userTextLocalesOf(context);
 }
 
 /** A saved item's `name` for the server log, or a placeholder. */

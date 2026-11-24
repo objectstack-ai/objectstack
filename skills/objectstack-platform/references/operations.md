@@ -134,12 +134,12 @@ Authoring stops at `kernel.use(plugin)`; these three make it distributable.
 
 ## Testing pattern
 
-Use `LiteKernel` for unit / integration tests — it skips the cloud bits and
-plugin discovery, so tests run in milliseconds. Assemble the same plugins the
+Test a plugin with `LiteKernel` — it skips the cloud bits and plugin
+discovery. An app tests itself with `bootStack` (objectstack-project). Assemble the same plugins the
 CLI would auto-register (`use()` is synchronous and chainable):
 `new ObjectQLPlugin()`, `new DriverPlugin(new InMemoryDriver())` and
-`new AppPlugin(stack)` (`AppPlugin`: `@objectstack/runtime`; `stack`: the
-config's default export). The vitest shape: [Testing Plugins](./plugin-development.md#testing-plugins);
+`new AppPlugin(stack)` (`AppPlugin`: `@objectstack/runtime`; `stack`: a fixture
+config). The vitest shape: [Testing Plugins](./plugin-development.md#testing-plugins);
 the other imports: [Using Plugins](./plugin-development.md#using-plugins).
 
 - **Reset between tests:** create a fresh `LiteKernel` per test, and there is no `reset()`.

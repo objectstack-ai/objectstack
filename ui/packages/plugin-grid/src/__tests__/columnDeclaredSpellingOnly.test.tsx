@@ -78,9 +78,9 @@ function renderGrid(columns: unknown[]) {
   );
 }
 
-/** Every rendered header, in order. `#` is the built-in row-number column. */
+/** Every rendered header, in order. No row-number column: a grid draws none unless its host opts in (objectstack#35663). */
 function headers(): string[] {
-  return screen.getAllByRole('columnheader').map((h) => (h.textContent ?? '').trim());
+  return screen.queryAllByRole('columnheader').map((h) => (h.textContent ?? '').trim());
 }
 
 describe('ObjectGrid columns — the declared spelling is the only one read (#5068)', () => {
@@ -90,7 +90,7 @@ describe('ObjectGrid columns — the declared spelling is the only one read (#50
       { field: 'amount', label: 'Amount' },
     ]);
 
-    expect(headers()).toEqual(['#', 'Name', 'Amount']);
+    expect(headers()).toEqual(['Name', 'Amount']);
     expect(screen.getByText('Ada')).toBeInTheDocument();
     expect(screen.getByText('Grace')).toBeInTheDocument();
   });
@@ -105,7 +105,7 @@ describe('ObjectGrid columns — the declared spelling is the only one read (#50
       { accessorKey: 'amount', header: 'Amount' },
     ]);
 
-    expect(headers()).toEqual(['#']);
+    expect(headers()).toEqual([]);
     expect(screen.queryByText('Ada')).not.toBeInTheDocument();
     expect(screen.queryByText('Grace')).not.toBeInTheDocument();
   });
@@ -120,7 +120,7 @@ describe('ObjectGrid columns — the declared spelling is the only one read (#50
       { field: 'name', label: 'Name' },
     ]);
 
-    expect(headers()).toEqual(['#', 'Name']);
+    expect(headers()).toEqual(['Name']);
     expect(screen.getByText('Ada')).toBeInTheDocument();
     expect(screen.queryByText('100')).not.toBeInTheDocument();
   });
@@ -131,7 +131,7 @@ describe('ObjectGrid columns — the declared spelling is the only one read (#50
       { accessorKey: 'amount', header: 'Amount' },
     ]);
 
-    expect(headers()).toEqual(['#', 'Name']);
+    expect(headers()).toEqual(['Name']);
     expect(screen.getByText('Grace')).toBeInTheDocument();
   });
 
@@ -147,7 +147,7 @@ describe('ObjectGrid columns — the declared spelling is the only one read (#50
       .filter((line) => line.startsWith('[ObjectUI] ObjectGrid columns:'));
     warn.mockRestore();
 
-    expect(headers()).toEqual(['#']);
+    expect(headers()).toEqual([]);
     expect(container.querySelector('table')).toBeInTheDocument();
     // The rejected escalation: a diagnostic, not a throw and not an in-page
     // alert. A grid that renders nothing must not become a page that renders
@@ -163,7 +163,7 @@ describe('ObjectGrid columns — the declared spelling is the only one read (#50
     // the retired branch sat between `normalizeColumns` and this arm.
     renderGrid(['name', 'amount']);
 
-    expect(headers()).toEqual(['#', 'Name', 'Amount']);
+    expect(headers()).toEqual(['Name', 'Amount']);
     expect(screen.getByText('Ada')).toBeInTheDocument();
   });
 });

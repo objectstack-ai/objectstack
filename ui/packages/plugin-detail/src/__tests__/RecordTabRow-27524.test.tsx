@@ -9,8 +9,9 @@
 /**
  * objectstack#27524, Target 8 — the record page's tab row as drawn: its
  * visible count follows its own width and is recomputed on a resize, the
- * active tab is always on it, the 「+N ▾」 dropdown lists the rest with their
+ * active tab is always on it, the 「更多 N ▾」 dropdown lists the rest with their
  * counts and the hidden panels' tabs at its end, and the row is one tab stop.
+ * (objectstack#35595 renamed the trigger 「+N ▾」 to 「更多 N ▾」.)
  *
  * jsdom has no layout engine, so the widths are given: each measured tab
  * answers its width from `WIDTHS`, the trigger `MORE`, the row `rowWidth`;
@@ -88,22 +89,22 @@ describe('RecordTabRow (objectstack#27524, Target 8)', () => {
     // Wide: every tab, no dropdown.
     expect(shownIds()).toEqual(TABS.map((tab) => tab.id));
     expect(more()).toBeNull();
-    // Medium (budget 480 - 40 - 16 = 424): Overview · Activity · Tasks · Events, then +2.
+    // Medium (budget 480 - 40 - 16 = 424): Overview · Activity · Tasks · Events, then 「更多 2」.
     resizeTo(480);
     expect(shownIds()).toEqual(['overview', 'timeline', 'task.lead_id', 'event.lead_id']);
-    expect(more()?.textContent).toBe('+2');
+    expect(more()?.textContent).toBe('More 2');
     // Narrow: Overview and one more.
     resizeTo(200);
     expect(shownIds()).toEqual(['overview', 'timeline']);
-    expect(more()?.textContent).toBe('+4');
+    expect(more()?.textContent).toBe('More 4');
   });
 
-  it('on a phone (objectstack#27058): the row a 390 px page draws (366 px inside its padding) shows Overview, Activity and at least one related tab, then 「+N ▾」', () => {
+  it('on a phone (objectstack#27058): the row a 390 px page draws (366 px inside its padding) shows Overview, Activity and at least one related tab, then 「更多 N ▾」', () => {
     rowWidth = 366;
     render(<RecordTabRow tabs={TABS} activeId={RECORD_TAB_OVERVIEW} onSelect={vi.fn()} />);
-    // Budget 366 - 40 - 16 = 310: Overview · Activity · Tasks · Events (250), then +2.
+    // Budget 366 - 40 - 16 = 310: Overview · Activity · Tasks · Events (250), then 「更多 2」.
     expect(shownIds()).toEqual(['overview', 'timeline', 'task.lead_id', 'event.lead_id']);
-    expect(more()?.textContent).toBe('+2');
+    expect(more()?.textContent).toBe('More 2');
   });
 
   it('the active tab is always on the row, in the last slot when it would have folded', () => {
@@ -126,11 +127,11 @@ describe('RecordTabRow (objectstack#27524, Target 8)', () => {
     expect(chip('x.y')).toBeNull();
   });
 
-  it('「+N ▾」 lists the folded tabs with their counts, then the hidden panels\' tabs; choosing one selects it', async () => {
+  it('「更多 N ▾」 lists the folded tabs with their counts, then the hidden panels\' tabs; choosing one selects it', async () => {
     rowWidth = 480;
     const onSelect = vi.fn();
     render(<RecordTabRow tabs={TABS} hiddenTabs={HIDDEN} activeId="overview" onSelect={onSelect} />);
-    expect(more()?.textContent).toBe('+3');
+    expect(more()?.textContent).toBe('More 3');
     const user = userEvent.setup();
     await user.click(more()!);
     const items = await screen.findAllByRole('menuitem');
@@ -139,7 +140,9 @@ describe('RecordTabRow (objectstack#27524, Target 8)', () => {
       'attendee.lead_id',
       'duplicate.lead_id',
     ]);
-    expect(items.map((item) => item.querySelector('[data-record-tab-count]')?.textContent)).toEqual(['1', '0', '0']);
+    // objectstack#35595 — an empty list draws no number, here too: it is muted.
+    expect(items.map((item) => item.querySelector('[data-record-tab-count]')?.textContent ?? null)).toEqual(['1', null, null]);
+    expect(items.map((item) => item.hasAttribute('data-record-tab-empty'))).toEqual([false, true, true]);
     expect(items[2].hasAttribute('data-record-tab-hidden')).toBe(true);
     await user.click(items[0]);
     expect(onSelect).toHaveBeenCalledWith('campaign_member.lead_id');
@@ -148,7 +151,7 @@ describe('RecordTabRow (objectstack#27524, Target 8)', () => {
   it('a hidden panel makes the dropdown even on a wide row', () => {
     render(<RecordTabRow tabs={TABS} hiddenTabs={HIDDEN} activeId="overview" onSelect={vi.fn()} />);
     expect(shownIds()).toEqual(TABS.map((tab) => tab.id));
-    expect(more()?.textContent).toBe('+1');
+    expect(more()?.textContent).toBe('More 1');
   });
 
   it('clicking a tab selects it; the active tab does nothing', () => {

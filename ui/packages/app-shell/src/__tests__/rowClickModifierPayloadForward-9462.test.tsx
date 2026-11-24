@@ -104,8 +104,13 @@ function secondArgumentOf(spy: Mock<HostRowClick>): unknown {
   return spy.mock.calls[0][1];
 }
 
-/** A grid that owns its rows inline, with a navigation config, as the card names it. */
-function renderGrid(onRowClick: Mock<HostRowClick>) {
+/**
+ * A grid that owns its rows inline, with a navigation config, as the card names it.
+ * `showRowNumbers` opts into the row-number cell, which is where the hover
+ * "open record" button lives: objectstack#35663 made the grid draw no row
+ * numbers unless its host asks.
+ */
+function renderGrid(onRowClick: Mock<HostRowClick>, { showRowNumbers = false } = {}) {
   const schema: any = {
     type: 'object-grid',
     objectName: 'test_object',
@@ -118,7 +123,7 @@ function renderGrid(onRowClick: Mock<HostRowClick>) {
   };
   return render(
     <ActionProvider>
-      <ObjectGrid schema={schema} onRowClick={onRowClick} />
+      <ObjectGrid schema={schema} onRowClick={onRowClick} showRowNumbers={showRowNumbers} />
     </ActionProvider>,
   );
 }
@@ -146,7 +151,7 @@ describe('objectui#9462 — RED 1: the data-table row click hands the host the m
 describe('objectui#9462 — RED 2: the hover "open record" button forwards the event it already bound', () => {
   it('a Ctrl-click on the row-expand button reaches the host with the event', async () => {
     const onRowClick = vi.fn<HostRowClick>();
-    renderGrid(onRowClick);
+    renderGrid(onRowClick, { showRowNumbers: true });
 
     await waitFor(() => expect(screen.getByText('Alice')).toBeInTheDocument());
     const expand = await screen.findAllByTestId('row-expand-button');

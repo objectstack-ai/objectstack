@@ -422,7 +422,10 @@ export interface ScriptContext {
   title?: (field: string | undefined, api: unknown) => Promise<string | undefined>;
   /**
    * [#34374, ruling 6913660232 parameter 7] `ctx.text(key, params?)` for the
-   * HOOK face — a sentence the hook declared under `HookSchema.texts`, answered
+   * HOOK face and (#34374 PR2) the ACTION face — a sentence the hook declared
+   * under `HookSchema.texts` (or the action under `ActionSchema.texts`, read at
+   * `objects.<object>._actions.<action>.texts.<key>.message` /
+   * `globalActions.<action>.texts.<key>.message`), answered
    * in the ORGANIZATION's language (translated `hooks.<hook>.texts.<key>.message`
    * first, the declared message on a miss, its `{{ }}` holes filled from
    * `params` after). Built per invocation by `buildHookTextSurface`

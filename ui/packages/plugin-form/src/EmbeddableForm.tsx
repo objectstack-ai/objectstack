@@ -542,7 +542,7 @@ export const EmbeddableForm: React.FC<EmbeddableFormProps> = ({
               {config.description}
             </p>
           )}
-          <p className="text-[11px] text-muted-foreground/70 mt-3" aria-hidden="true">
+          <p className="text-xs text-muted-foreground/70 mt-3" aria-hidden="true">
             {texts.requiredHint ?? '* Required field'}
           </p>
         </div>

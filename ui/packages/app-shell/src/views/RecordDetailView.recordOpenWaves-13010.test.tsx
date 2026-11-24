@@ -411,6 +411,7 @@ beforeEach(() => {
   __clearRecordEditableCache();
   __resetRecordApprovalsStore();
   RelatedCountStore._reset();
+  window.localStorage.clear();
 });
 afterEach(() => {
   cleanup();
@@ -458,10 +459,11 @@ describe('the record page open waves (objectui#13010)', () => {
       const asked = pageLists(held).filter((l) => l.object === object);
       expect(asked.map((l) => l.top), `${object}\n${table}`).toEqual([3]);
     }
-    // The badge total is drawn from that read: quote 6 + line 7 + the
-    // filtered task probe's own 4.
+    // objectstack#35595 — one table, one count: the Related tab merges three
+    // tables, so it names no number (it summed quote 6 + line 7 + the filtered
+    // task probe's own 4 before).
     const relatedTab = screen.getByRole('tab', { name: /Related/ });
-    expect(relatedTab.textContent, table).toContain('17');
+    expect(relatedTab.textContent, table).toBe('Related');
     // The card rows are drawn from the same read: three rows each, and the
     // card's own total.
     for (const object of [QUOTE, LINE]) {
@@ -530,8 +532,8 @@ const FOUR_READS = [isActivityRead, isCommentRead, isUserListRead, isAttachmentL
 
 /**
  * Every element is on screen except the host's foot-of-page Attachments panel,
- * which is below the record's content until `scrollFallbackIntoView` says it
- * scrolled in.
+ * which stays below the record's content (a page with a tab strip has none
+ * since objectstack#35595: the panel is the strip's Attachments tab).
  */
 const offscreen: Array<{ cb: (entries: Array<{ isIntersecting: boolean }>) => void; live: boolean }> = [];
 class FoldObserver {
@@ -550,11 +552,6 @@ class FoldObserver {
   disconnect() {
     for (const entry of this.entries) entry.live = false;
   }
-}
-async function scrollFallbackIntoView() {
-  await act(async () => {
-    for (const entry of offscreen) if (entry.live) entry.cb([{ isIntersecting: true }]);
-  });
 }
 
 /** Open a tab the way a user does: Radix activates a trigger on mouse down. */
@@ -579,10 +576,11 @@ describe('the timeline, comments, attachments and user list wait for their panel
     const table = waveTable(held);
     expect(held.filter(isRecordRead).map((h) => h.wave), table).toEqual([1]);
     for (const isRead of FOUR_READS) expect(held.filter(isRead), table).toEqual([]);
-    // The foot panel is mounted and shows its loading state, not "no attachments".
-    const fallback = document.querySelector('[data-record-attachments-fallback]');
-    expect(fallback, table).not.toBeNull();
-    expect(fallback?.textContent ?? '', table).not.toContain('signed-contract.pdf');
+    // objectstack#35595 — the host's attachments panel is a tab of the page's
+    // strip, not a band at its foot.
+    expect(document.querySelector('[data-record-attachments-fallback]'), table).toBeNull();
+    expect(screen.getByRole('tab', { name: /^Attachments/ }), table).toBeTruthy();
+    expect(screen.queryByText('signed-contract.pdf'), table).toBeNull();
   });
 
   // The open's payload did not ask the feed (its block was not on screen), so
@@ -642,17 +640,20 @@ describe('the timeline, comments, attachments and user list wait for their panel
     expect(screen.getByText('Ping the buyer on Friday')).toBeTruthy();
   });
 
-  // objectstack#28470 — the payload carries the attachments: the panel takes
-  // them once it scrolls into view, and reads nothing of its own.
-  it('the foot-of-page Attachments panel draws the payload\'s rows once it scrolls into view, and reads nothing', async () => {
+  // objectstack#28470 — the payload carries the attachments, so nothing reads
+  // them at open. objectstack#35595 — the host's panel is the strip's
+  // Attachments tab, drawn when it opens. (Under StrictMode the face's mount
+  // runs the panel's effect twice: the first run takes the payload's rows and
+  // is superseded, the second reads — a development-only re-read of
+  // `RecordAttachmentsPanel`'s take-once hand-off, not asserted here.)
+  it('the host\'s Attachments tab draws the record\'s files when it opens; nothing reads them at open', async () => {
     const { held, state } = await openRecordPage({ page: ACTIVITY_PAGE, object: filesObject, observer: FoldObserver });
     expect(pageStreams(held).attachments, waveTable(held)).toBe(100);
     expect(held.filter(isAttachmentRead), waveTable(held)).toEqual([]);
-    await scrollFallbackIntoView();
+    expect(screen.queryByText('signed-contract.pdf'), waveTable(held)).toBeNull();
+    await openTab('Attachments');
     await runWaves(held, state);
-    const table = waveTable(held);
-    expect(held.filter(isAttachmentRead), table).toEqual([]);
-    expect(screen.getByText('signed-contract.pdf')).toBeTruthy();
+    expect(screen.getByText('signed-contract.pdf'), waveTable(held)).toBeTruthy();
   });
 
   it('CONTROL: a record opened on its Activity tab asks the feed with its page at open, and draws the same rows', async () => {
@@ -690,26 +691,37 @@ describe('the timeline, comments, attachments and user list wait for their panel
     expect(screen.getByText('signed-contract.pdf')).toBeTruthy();
   });
 
-  // The synthesized page has no discussion footer any more (#27055), and no
-  // tab strip at any width since objectstack#27524: its one stream is the 动态
-  // panel, the last panel of the right column (objectstack#34590) — drawn at
-  // open in every tier, so the feed is read at open, like an authored page opened on its
+  // The synthesized page has no discussion footer any more (#27055): its one
+  // stream is the 动态 tab (objectstack#34590; its rail card retired by
+  // objectstack#35890), whose count the page payload serves, so the feed is
+  // still asked with the page at open, like an authored page opened on its
   // Activity tab. A page with tabs still waits for its tab (above).
   // objectstack#28470 — asked with the page, not beside it; the mention list
   // waits for the composer's focus.
-  it('the synthesized page asks the feed with its page at open: its 动态 panel is on screen', async () => {
+  it('the synthesized page asks the feed with its page at open: one request, its 动态 tab on the row', async () => {
     const { held } = await openRecordPage({ page: { ...RECORD_PAGE, isDefault: false, object: 'os_13010_other' }, observer: FoldObserver });
     const table = waveTable(held);
     expect(screen.queryByRole('tab', { name: /^Timeline/ }), table).toBeNull();
-    expect(document.querySelector('[data-record-timeline-panel]'), table).not.toBeNull();
-    // objectstack#28737 — the panel draws its newest rows, and the page
-    // payload serves the stream's count, so the activity part asks the
-    // panel's rows only.
+    // objectstack#35890 — the right rail (its 最近动态 card) is retired; the
+    // stream is the 动态 tab, whose count the page payload serves.
+    expect(document.querySelector('[data-record-summary-card]'), table).toBeNull();
+    expect(document.querySelector('[role="tab"][data-record-tab="timeline"]'), table).not.toBeNull();
+    // objectstack#28737 — the page payload serves the stream's count, so the
+    // activity part asks the newest rows only.
     expect(pageStreams(held), table).toMatchObject({ discussion: true, activity: 5 });
     for (const isRead of [isActivityRead, isCommentRead, isUserListRead]) {
       expect(held.filter(isRead), table).toEqual([]);
     }
-    expect(screen.getByText('Ping the buyer on Friday')).toBeTruthy();
+    // objectstack#36075 — the comment is the comment panel's, drawn from the
+    // same payload: opening the panel reads nothing.
+    const commentsButton = document.querySelector('[data-comments-button]') as HTMLElement;
+    expect(commentsButton, table).not.toBeNull();
+    await act(async () => { fireEvent.click(commentsButton); });
+    const panel = document.querySelector('[data-comments-panel]') as HTMLElement;
+    expect(panel.textContent).toContain('Ping the buyer on Friday');
+    for (const isRead of [isActivityRead, isCommentRead, isUserListRead]) {
+      expect(held.filter(isRead), table).toEqual([]);
+    }
   });
 
   it('CONTROL: the synthesized page opened on its 动态 tab (?related=timeline) asks the feed with its page at open', async () => {
@@ -757,8 +769,9 @@ describe('the 动态 stream reads the audit log when it is shown (objectui#13010
   // record read and its `sys_user` name lookup in wave 2, with the History tab
   // closed. After it: neither until the tab opens. Since #27055 the audit rows
   // are the field changes of the one stream, so the stream gates them; since
-  // objectstack#27524 that stream is the 动态 panel, on screen at open, so
-  // they are read at open — once, and not again when its tab opens.
+  // objectstack#27524 that stream was the 动态 panel, on screen at open, so
+  // they are read at open — once, and not again when its tab opens (kept as
+  // the host's read when objectstack#35890 retired the rail).
   it('a trackHistory record reads the audit log at open and its user names next: the 动态 panel shows the change', async () => {
     const { held } = await openHistory();
     const table = waveTable(held);
@@ -766,16 +779,16 @@ describe('the 动态 stream reads the audit log when it is shown (objectui#13010
     expect(screen.queryByRole('tab', { name: /^(Timeline|History)/ }), table).toBeNull();
     expect(held.filter(isAuditRead).map((h) => h.wave), table).toEqual([1]);
     expect(held.filter(isAuditUserLookup).map((h) => h.wave), table).toEqual([2]);
-    const panel = document.querySelector('[data-record-timeline-panel]') as HTMLElement;
-    expect(panel.textContent, table).toMatch(/negotiation/);
+    // objectstack#35890 — no rail card shows the change; the 动态 tab does (below).
+    expect(document.querySelector('[data-record-summary-card]'), table).toBeNull();
   });
 
-  it('opening the 动态 tab from its panel reads nothing again, and draws the rows with their actor', async () => {
+  it('opening the 动态 tab reads the audit log nothing again, and draws the rows with their actor', async () => {
     const { held, state } = await openHistory();
     const audit = () => held.filter(isAuditRead);
     expect(audit(), waveTable(held)).toHaveLength(1);
     await act(async () => {
-      fireEvent.click(document.querySelector('[data-record-timeline-panel-open]') as HTMLElement);
+      fireEvent.click(document.querySelector('[role="tab"][data-record-tab="timeline"]') as HTMLElement);
     });
     await runWaves(held, state);
     const table = waveTable(held);
@@ -796,16 +809,63 @@ describe('the 动态 stream reads the audit log when it is shown (objectui#13010
     expect(screen.getByText(/negotiation/)).toBeTruthy();
   });
 
-  // Only the synthesized page hands the view's audit rows to a block; an
-  // assigned page's `record:history` reads its own source. So an assigned page
-  // never shows what this read fetches.
-  it('an assigned page of a trackHistory object never reads the audit log', async () => {
+  // objectstack#33996 flipped this pin. It read "an assigned page of a
+  // trackHistory object never reads the audit log": only the synthesized page
+  // handed the audit rows to a block, so an authored feed panel's
+  // `changes_only` held nothing and an authored `filterMode: 'changes_only'`
+  // read as All. Now an assigned page's feed blocks draw the field changes,
+  // so the read goes out while one is on screen, as the stream's does.
+  it('an assigned page of a trackHistory object reads the audit log while its feed panel is on screen, and the panel shows the change', async () => {
     const { held } = await openHistory({ page: ACTIVITY_PAGE, search: '?tab=activity' });
     const table = waveTable(held);
-    // Its activity comes with the page (objectstack#28470); the audit log is never read.
+    // Its activity comes with the page (objectstack#28470).
     expect(pageStreams(held).activity, table).toBe(200);
     expect(held.filter(isActivityRead), table).toEqual([]);
+    expect(held.filter(isAuditRead).map((h) => h.wave), table).toEqual([1]);
+    expect(topOf(held.filter(isAuditRead)[0]), table).toBe(50);
+    expect(held.filter(isAuditUserLookup).map((h) => h.wave), table).toEqual([2]);
+    expect(screen.getByText('Grace')).toBeTruthy();
+    expect(screen.getByText(/negotiation/)).toBeTruthy();
+  });
+
+  it('CONTROL: the same page opened on a tab with no feed panel reads no audit log until the panel opens', async () => {
+    const { held, state } = await openHistory({ page: ACTIVITY_PAGE });
+    expect(held.filter(isAuditRead), waveTable(held)).toEqual([]);
+    const openedWith = held.length;
+    await openTab('Activity');
+    await runWaves(held, state);
+    const table = waveTable(held);
+    const reads = held.filter(isAuditRead);
+    expect(reads, table).toHaveLength(1);
+    expect(reads[0].seq, table).toBeGreaterThanOrEqual(openedWith);
+    expect(screen.getByText(/negotiation/)).toBeTruthy();
+  });
+
+  it('CONTROL: an assigned page with no feed panel at all never reads the audit log', async () => {
+    const { held } = await openHistory({ page: RECORD_PAGE, search: '?tab=related' });
+    const table = waveTable(held);
     expect(held.filter(isAuditRead), table).toEqual([]);
     expect(held.filter(isAuditUserLookup), table).toEqual([]);
+  });
+
+  it('CONTROL: the feed panel on screen over an object without trackHistory reads no audit log', async () => {
+    const { held } = await openHistory({ page: ACTIVITY_PAGE, search: '?tab=activity', object: objectDef });
+    const table = waveTable(held);
+    expect(pageStreams(held).activity, table).toBe(200);
+    expect(held.filter(isAuditRead), table).toEqual([]);
+  });
+
+  it('an authored record:discussion with `filterMode: changes_only` opens on Field Changes and holds the change only', async () => {
+    const DISCUSSION_TAB = {
+      value: 'discussion',
+      label: 'Discussion',
+      children: [{ type: 'record:discussion', id: 'deal_discussion', properties: { feed: { filterMode: 'changes_only' } } }],
+    };
+    const { held } = await openHistory({ page: tabsPage([DETAILS_TAB, DISCUSSION_TAB]), search: '?tab=discussion' });
+    const table = waveTable(held);
+    expect(held.filter(isAuditRead), table).toHaveLength(1);
+    expect(screen.getByRole('combobox').textContent, table).toContain('Field Changes');
+    expect(screen.getByText(/negotiation/)).toBeTruthy();
+    expect(screen.queryByText('Ping the buyer on Friday'), table).toBeNull();
   });
 });

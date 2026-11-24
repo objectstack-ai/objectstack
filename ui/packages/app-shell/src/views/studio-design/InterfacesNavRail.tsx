@@ -9,7 +9,7 @@
 
 import * as React from 'react';
 import { StudioRailGroup, StudioRailRow } from './StudioRail.js';
-import { Badge, Popover, PopoverContent, PopoverTrigger, Separator, cn } from '@object-ui/components';
+import { Badge, ObjectIconTile, Popover, PopoverContent, PopoverTrigger, Separator, cn } from '@object-ui/components';
 import {
   FileText,
   Database,
@@ -127,6 +127,7 @@ function NavTreeGroup({
   active,
   onPick,
   objectIcons,
+  objectColors,
   depth,
 }: {
   node: NavNode;
@@ -134,6 +135,7 @@ function NavTreeGroup({
   active: Surface | null;
   onPick: (s: Surface) => void;
   objectIcons?: Record<string, string | undefined>;
+  objectColors?: Record<string, string | undefined>;
   depth: number;
 }): React.ReactElement {
   const locale = useMetadataLocale();
@@ -167,7 +169,7 @@ function NavTreeGroup({
       ) : (
         <>
           {children.length > 0 && (
-            <NavTree nodes={children} active={active} onPick={onPick} objectIcons={objectIcons} depth={depth + 1} />
+            <NavTree nodes={children} active={active} onPick={onPick} objectIcons={objectIcons} objectColors={objectColors} depth={depth + 1} />
           )}
           {/* objectstack#29786 — what other packages add to this group, after
               the group's own entries, as the served navigation appends them. */}
@@ -276,6 +278,7 @@ export function NavTree({
   active,
   onPick,
   objectIcons,
+  objectColors,
   depth = 0,
 }: {
   nodes: NavNode[];
@@ -283,6 +286,8 @@ export function NavTree({
   onPick: (s: Surface) => void;
   /** object name → its metadata icon, so object nav items show their own glyph. */
   objectIcons?: Record<string, string | undefined>;
+  /** object name → its palette colour: an object nav item draws its object's tile (objectstack#35985). */
+  objectColors?: Record<string, string | undefined>;
   /** Nesting depth: a row under a group header is indented one step. */
   depth?: number;
 }): React.ReactElement {
@@ -323,6 +328,7 @@ export function NavTree({
               active={active}
               onPick={onPick}
               objectIcons={objectIcons}
+              objectColors={objectColors}
               depth={depth}
             />
           );
@@ -369,7 +375,15 @@ export function NavTree({
                   : rowText || undefined
             }
             className="disabled:opacity-40"
-            icon={<Icon className="h-4 w-4 shrink-0" />}
+            // objectstack#35985 — an object entry draws its object's tile: the
+            // glyph as above, the colour always the object's (as the menu).
+            icon={
+              surface?.type === 'object' ? (
+                <ObjectIconTile glyph={Icon} color={objectColors?.[surface.name]} />
+              ) : (
+                <Icon className="h-4 w-4 shrink-0" />
+              )
+            }
             trailing={
               <>
                 {/* objectui#11791 — the spec's `badge` / `badgeVariant`, drawn
@@ -462,6 +476,17 @@ export function offNavViewReachedByEntry(
   opened: ReadonlySet<string>,
 ): boolean {
   return item.viewKind === 'list' && !!item.object && !item.addedIn && opened.has(itemKeyOf('object', item.object));
+}
+
+/**
+ * objectstack-ai/objectstack#36425 — whether the 视图 group leaves `item` out
+ * as an internal create / edit form (`internalForm`: the object's default or
+ * `OBJECT.create` form, not shared publicly). The console no longer loads one,
+ * so the Studio does not list it. A public form stays listed, as do a named
+ * form an action opens and a view whose body is unknown (a draft-only row).
+ */
+export function offNavViewIsInternalForm(item: Pick<PackageSurface, 'internalForm'>): boolean {
+  return item.internalForm === true;
 }
 
 /**

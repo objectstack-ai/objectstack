@@ -16,7 +16,7 @@
 // all: `name`/`environment`/`locale` were absent (required), and `scoping` was
 // undeclared.
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
   ApiRoutesSchema,
   DiscoverySchema,
@@ -25,6 +25,12 @@ import {
 } from '@objectstack/spec/api';
 import * as specApi from '@objectstack/spec/api';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
+import { RestrictionProfileNodeType, RestrictionProfileSchema } from '@objectstack/spec/system';
+import { createRequire } from 'node:module';
+// [#36198] The real router `os serve` mounts, for the on-the-wire not-found reading.
+import { HonoHttpServer } from '@objectstack/plugin-hono-server';
+// Paid during collection (`check:test-source-alias`): `rest-server.ts` reaches it lazily.
+import '@objectstack/objectql';
 import { RestServer } from './rest-server.js';
 import { REST_ROUTE_LEDGER } from './rest-route-ledger.js';
 
@@ -413,5 +419,174 @@ describe('[#4828] the REST /discovery live shape conforms to DiscoverySchema', (
       expect(body.version).toBe(direct.version);
       expect(body.version).not.toBe('v9');
     });
+  });
+});
+
+/**
+ * [#34774] `GET {basePath}/discovery/restriction-profile`, the route
+ * `os validate --target <url>` reads: its URL reader takes a 2xx JSON body in
+ * the `{ success: true, data }` envelope, and parses `data` with
+ * `RestrictionProfileSchema`, as here.
+ */
+describe('[#34774] the open runtime serves the restriction profile the CLI reads', () => {
+  const SPEC_VERSION = (createRequire(import.meta.url)('@objectstack/spec/package.json') as { version: string }).version;
+
+  /**
+   * Drives the route, which is mounted on the unscoped base only (#36198, the
+   * suite below). `scoped` mounts the environment-scoped base beside it.
+   */
+  async function served(scoped: boolean, req: any = {}) {
+    const rest = new RestServer(createMockServer() as any, {} as any, {
+      api: { requireAuth: false, ...(scoped ? { enableProjectScoping: true, projectResolution: 'auto' } : {}) },
+    } as any);
+    rest.registerRoutes();
+    const handler = rest.getRouteManager().get('GET', '/api/v1/discovery/restriction-profile')!.handler as (req: any, res: any) => Promise<void>;
+    let body: any;
+    let status = 200;
+    const res: any = { json: (b: any) => { body = b; }, status: (s: number) => { status = s; return res; } };
+    await handler(req, res);
+    return { status, body };
+  }
+
+  it('answers { success: true, data }, with or without the scoped base mounted beside it: data a profile that restricts nothing and names the versions run', async () => {
+    for (const scoped of [false, true]) {
+      const { status, body } = await served(scoped);
+      expect(status).toBe(200);
+      expect(body.success).toBe(true);
+      const parsed = RestrictionProfileSchema.safeParse(body.data);
+      expect(parsed.success ? [] : parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`)).toEqual([]);
+      expect(body.data).toEqual({
+        allowCode: true,
+        allowSandboxedJs: true,
+        allowScheduledAutomation: true,
+        allowedFlowNodeTypes: [...RestrictionProfileNodeType.options],
+        versions: { spec: SPEC_VERSION, skills: SPEC_VERSION },
+      });
+    }
+  });
+
+  it('reads no query parameter: an unknown one is refused 400 VALIDATION_ERROR', async () => {
+    const { status, body } = await served(false, { query: { environment: 'prod' } });
+    expect(status).toBe(400);
+    expect(body.error.code).toBe('VALIDATION_ERROR');
+  });
+});
+
+/**
+ * [#36198] The restriction profile is mounted on the UNSCOPED base only. The
+ * handler reads no host input, so its environment-scoped twin answered the
+ * constant open profile for any environment id, on a host that enforces a
+ * narrower one. Nothing read the twin, so it is no longer mounted:
+ *
+ *  - NOT REGISTERED on the scoped base: not in the route table the server
+ *    reports (`getRoutes()`), not in the route manager's own lookup, and not
+ *    handed to the host's `IHttpServer`, under any verb.
+ *  - THE UNSCOPED ROUTE STAYS wherever the unscoped base is mounted; the suite
+ *    above pins what it answers there.
+ *  - `required` registers the scoped base alone, so such a server mounts no
+ *    restriction-profile route.
+ *  - ON THE WIRE, through the real `HonoHttpServer` router: a request to the
+ *    scoped path meets the host's own not-found answer and carries no profile.
+ */
+describe('[#36198] the restriction profile is mounted on the unscoped base only', () => {
+  const UNSCOPED_BASE = '/api/v1';
+  const SCOPED_BASE = '/api/v1/environments/:environmentId';
+  const PROFILE = '/discovery/restriction-profile';
+  /** Each HTTP method, with the `IHttpServer` member that mounts it. */
+  const VERBS = { GET: 'get', POST: 'post', PUT: 'put', DELETE: 'delete', PATCH: 'patch' } as const;
+  const METHODS = Object.keys(VERBS) as Array<keyof typeof VERBS>;
+  const NONE = { reported: [], managed: [], host: [] };
+  const GET_ONLY = { reported: ['GET'], managed: ['GET'], host: ['GET'] };
+
+  /** The verbs a path is registered under on a scoped server, read three ways. */
+  function registrations(projectResolution: 'auto' | 'optional' | 'required') {
+    const httpServer = createMockServer();
+    const rest = new RestServer(httpServer as any, {} as any, {
+      api: { requireAuth: false, enableProjectScoping: true, projectResolution },
+    } as any);
+    rest.registerRoutes();
+    return (path: string) => ({
+      reported: rest.getRoutes().filter((r) => r.path === path).map((r) => r.method.toUpperCase()),
+      managed: METHODS.filter((method) => rest.getRouteManager().get(method, path)),
+      host: METHODS.filter((method) => httpServer[VERBS[method]].mock.calls.some((call) => call[0] === path)),
+    });
+  }
+
+  for (const projectResolution of ['auto', 'optional'] as const) {
+    it(`${projectResolution}: the scoped base carries no restriction-profile route, and the unscoped route stays`, () => {
+      const at = registrations(projectResolution);
+      // CONTROL: the scoped base is mounted and its discovery document is on
+      // it, so the absence below is read from a populated mount.
+      expect(at(`${SCOPED_BASE}/discovery`)).toEqual(GET_ONLY);
+      expect(at(`${SCOPED_BASE}${PROFILE}`)).toEqual(NONE);
+      expect(at(`${UNSCOPED_BASE}${PROFILE}`)).toEqual(GET_ONLY);
+    });
+  }
+
+  it('required: only the scoped base is mounted, so no restriction-profile route is', () => {
+    const at = registrations('required');
+    // CONTROL: the scoped base is mounted, and the unscoped one is not.
+    expect(at(`${SCOPED_BASE}/discovery`)).toEqual(GET_ONLY);
+    expect(at(`${UNSCOPED_BASE}/discovery`)).toEqual(NONE);
+    expect(at(`${SCOPED_BASE}${PROFILE}`)).toEqual(NONE);
+    expect(at(`${UNSCOPED_BASE}${PROFILE}`)).toEqual(NONE);
+  });
+
+  it('on the wire: the scoped path meets the not-found answer, and the unscoped route answers the profile', async () => {
+    const server = new HonoHttpServer(0);
+    const protocol = {
+      getDiscovery: vi.fn().mockResolvedValue({ version: 'v0', routes: { data: '', metadata: '', ui: '', auth: '/auth' } }),
+    };
+    const rest = new RestServer(server as any, protocol as any, {
+      api: { requireAuth: false, enableProjectScoping: true, projectResolution: 'auto' },
+    } as any);
+    rest.registerRoutes();
+    const get = async (path: string) => {
+      const res: Response = await server.getRawApp().fetch(new Request(`http://local${path}`));
+      const body: any = await res.json().catch(() => undefined);
+      return { status: res.status, body };
+    };
+
+    // CONTROL: the scoped base answers on this router, so the 404 below is
+    // about the route, not about the mount.
+    expect((await get('/api/v1/environments/env_alpha/discovery')).status).toBe(200);
+
+    const twin = await get('/api/v1/environments/env_alpha/discovery/restriction-profile');
+    expect(twin.status).toBe(404);
+    expect(twin.body?.data).toBeUndefined();
+
+    const unscoped = await get('/api/v1/discovery/restriction-profile');
+    expect(unscoped.status).toBe(200);
+    expect(unscoped.body?.success).toBe(true);
+    expect(RestrictionProfileSchema.safeParse(unscoped.body?.data).success).toBe(true);
+  });
+});
+
+describe('[#34774] the restriction profile when the spec manifest is unreadable', () => {
+  afterEach(() => { vi.doUnmock('module'); vi.resetModules(); });
+
+  it('answers 503 SERVICE_UNAVAILABLE and publishes no profile', async () => {
+    vi.resetModules(); // a fresh module-level version cache
+    vi.doMock('module', async (importOriginal) => {
+      const real: any = await importOriginal();
+      const createRequire = (url: any) => {
+        const req = real.createRequire(url);
+        return Object.assign((id: string) => {
+          if (id === '@objectstack/spec/package.json') throw new Error('manifest unreadable');
+          return req(id);
+        }, req);
+      };
+      return { ...real, default: { ...real, createRequire }, createRequire };
+    });
+    const { RestServer: FreshRestServer } = await import('./rest-server.js');
+    const rest = new FreshRestServer(createMockServer() as any, {} as any, { api: {} } as any);
+    rest.registerRoutes();
+    let body: any;
+    let status = 200;
+    const res: any = { json: (b: any) => { body = b; }, status: (s: number) => { status = s; return res; } };
+    await rest.getRouteManager().get('GET', '/api/v1/discovery/restriction-profile')!.handler({} as any, res);
+    expect(status).toBe(503);
+    expect(body.code).toBe('SERVICE_UNAVAILABLE'); // `sendDeclaredFault`'s flat dialect
+    expect(body.data).toBeUndefined();
   });
 });

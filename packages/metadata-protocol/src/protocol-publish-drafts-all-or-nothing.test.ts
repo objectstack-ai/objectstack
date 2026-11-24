@@ -282,7 +282,7 @@ function cardDrafts(autonumberFormat: string): Array<[string, string, Record<str
         }],
         ['seed', 'nyd2_leave_request_sample', {
             object: OBJ,
-            mode: 'insert',
+            externalId: 'reason',
             records: [{ reason: 'Annual leave', days: 2 }],
         }],
     ];

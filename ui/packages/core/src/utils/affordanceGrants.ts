@@ -154,7 +154,11 @@ export const AFFORDANCE_GRANTS = {
   listImport: { crud: 'import', grant: 'create', field: 'create' },
   /** The import wizard's template download — its endpoint answers 403 without the create grant. */
   importTemplate: { crud: null, grant: 'create' },
-  /** A list's inline (in-cell) editing, each of whose cells asks the update question (objectui#12103). */
+  /**
+   * A list's inline (in-cell) editing, each of whose cells asks the update
+   * question (objectui#12103) — and a timesheet's retyped one-record cell,
+   * which updates that record's value field (#34382).
+   */
   listInlineEdit: { crud: 'edit', grant: 'update', field: 'write' },
   /** A list's bulk Delete. */
   listBulkDelete: { crud: 'delete', grant: 'delete' },
@@ -165,9 +169,9 @@ export const AFFORDANCE_GRANTS = {
    * and progress, its title edited in place, and its dependency links).
    */
   rowEdit: { crud: 'edit', grant: 'update' },
-  /** A grid row's Delete — and a gantt row's Delete. */
+  /** A grid row's Delete — and a gantt row's Delete, and a timesheet's cleared one-record cell (#34382). */
   rowDelete: { crud: 'delete', grant: 'delete' },
-  /** A grid's inline add-record row. */
+  /** A grid's inline add-record row — and a timesheet's empty cell typed into, and its Add row (#34382). */
   gridAddRow: { crud: 'create', grant: 'create' },
   /**
    * A related list's "+ New", asked of the CHILD object — and a line-items
@@ -193,8 +197,23 @@ export const AFFORDANCE_GRANTS = {
   lookupCreateNew: { crud: 'create', grant: 'create' },
   /** The record Attachments panel's Upload, asked of `sys_attachment` (storage route, not the data door). */
   attachmentUpload: { crud: null, grant: 'create' },
-  /** The record Attachments panel's per-row delete, asked of `sys_attachment`. */
+  /**
+   * The record Attachments panel's per-row delete of ANOTHER user's upload,
+   * asked of `sys_attachment`: that delete goes through the data door, which
+   * needs the grant. The caller's own upload is removed through the storage
+   * service's removal door (`DELETE /api/v1/attachments/:id`), which needs
+   * none, so the panel asks this row only for rows the caller did not upload.
+   */
   attachmentDelete: { crud: null, grant: 'delete' },
+  /**
+   * The same panel's per-row Rename on ANOTHER user's upload, asked of
+   * `sys_attachment` (objectstack#35724). The rename door
+   * (`PATCH /api/v1/attachments/:id`, the storage service, not the data door)
+   * writes such a rename through the engine as the caller, which needs the edit
+   * grant; the uploader's own rename needs none, so the panel asks this row
+   * only for rows the caller did not upload.
+   */
+  attachmentRename: { crud: null, grant: 'update' },
   /**
    * The record feed's comment composer and its reply composer, asked of
    * `sys_comment`: each creates a comment row.
@@ -232,6 +251,17 @@ export const AFFORDANCE_GRANTS = {
   feedCommentEdit: { crud: 'edit', grant: 'update' },
   /** The same rows' Delete, asked of `sys_comment`: it deletes that comment row. */
   feedCommentDelete: { crud: 'delete', grant: 'delete' },
+  /**
+   * The same Delete for a caller who holds no `delete` grant on `sys_comment`,
+   * asked of `sys_comment`: it removes the caller's own comment through the
+   * own-comment delete door (`DELETE /api/v1/comments/:id`), not the data
+   * door, so no CRUD bit is read. That door admits exactly the caller's own
+   * comment, and only one nobody replied under, and needs no `delete` grant,
+   * which no every-member set may carry (ADR-0090 D5), so it asks the grant
+   * the comment was posted under: whoever may comment may take their own
+   * comment back, as `feedReactionRemove` asks for a reaction.
+   */
+  feedCommentDeleteOwn: { crud: null, grant: 'create' },
   /** A calendar's quick-create: an empty-day click, or a time-range drag in the week / day grid. */
   calendarQuickCreate: { crud: 'create', grant: 'create' },
   /** A calendar's drag-to-reschedule: moving or resizing an event writes its date fields. */
@@ -308,8 +338,19 @@ export function resolveAffordance(
     if (!crud[row.crud]) return { allowed: false };
     predicates = crud[PREDICATES[row.crud]] as RowCrudPredicates | undefined;
   }
-  if (objectName && perms && !perms.can(objectName, row.grant)) return { allowed: false };
+  if (!resolveAffordanceGrant(affordance, { objectName, perms })) return { allowed: false };
   return predicates ? { allowed: true, predicates } : { allowed: true };
+}
+
+/**
+ * The grant half of {@link resolveAffordance} alone, for a surface that tells a
+ * missing grant from an object that allows no such write (objectstack#35684).
+ */
+export function resolveAffordanceGrant(
+  affordance: ConsoleAffordance,
+  { objectName, perms }: AffordanceSource = {},
+): boolean {
+  return !(objectName && perms && !perms.can(objectName, AFFORDANCE_GRANTS[affordance].grant));
 }
 
 /**

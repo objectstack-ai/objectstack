@@ -184,6 +184,18 @@ describe('CONTROL: an allowed target delivers, and redirects between allowed tar
         expect(hits).toEqual([`hooks.example:${port} /redirect?to=${to}`, `second.example:${port} /landed`]);
     });
 
+    it('a manual redirect mode answers the redirect itself and follows nothing', async () => {
+        const to = encodeURIComponent(`http://second.example:${port}/landed`);
+        const res = await guard('hooks.example,second.example').fetch(
+            `http://hooks.example:${port}/redirect?to=${to}`,
+            { redirect: 'manual' },
+            ctx,
+        );
+        expect(res.status).toBe(302);
+        expect(res.headers.get('location')).toBe(decodeURIComponent(to));
+        expect(hits).toEqual([`hooks.example:${port} /redirect?to=${to}`]);
+    });
+
     it('a policy that allows public addresses lets them through (the stand-in public host)', async () => {
         const g = createEgressGuard({
             policy: { canConnect: () => ({ allow: true }) },

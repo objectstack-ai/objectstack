@@ -619,6 +619,21 @@ describe('sign out of the company sign-in too: OIDC logout redirect', () => {
     expect(out.headers.get('location')).toBeNull();
     expect(new URL(body.url!).searchParams.get('post_logout_redirect_uri')).toBeNull();
   });
+
+  it('on: the direct sign-in door as the return (afterSignOut identity-provider) reaches the provider as an absolute address on this origin', async () => {
+    // The Console sends `{basePath}/sign-in/direct` relative; the provider
+    // needs it absolute, and only after it has ended its own session does it
+    // send the browser there.
+    const rp = await makeRp({ provider: { allowJit: true, signOutOfIdp: true } });
+    await seedAdmin(rp);
+    parkEndSession(rp);
+    const signedIn = cookiesOf(await signInThroughIdp(rp, await idToken()));
+    const out = await signOut(rp, signedIn, { callbackURL: '/api/v1/auth/sign-in/direct' });
+    const body = (await out.json()) as { url?: string; redirect?: boolean };
+    expect(body.redirect).toBe(true);
+    expect(new URL(body.url!).searchParams.get('post_logout_redirect_uri')).toBe(`${AUTH}/sign-in/direct`);
+    expect(await sessionOf(rp, signedIn)).toBeNull();
+  });
 });
 
 // ── 4. IdP group → permission set at sign-in ────────────────────────────────

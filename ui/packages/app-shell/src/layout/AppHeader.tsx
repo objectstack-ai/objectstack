@@ -37,75 +37,49 @@
  * @module
  */
 
-import { useLocation, useParams, Link, useNavigate } from 'react-router-dom';
+import { useLocation, useParams, Link } from 'react-router-dom';
 import {
   Button,
   DropdownMenu,
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuGroup,
-  Avatar,
-  AvatarImage,
-  AvatarFallback,
   cn,
 } from '@object-ui/components';
 import {
   Search,
-  HelpCircle,
-  LogOut,
-  Plus,
   Layers,
-  Bot,
-  User,
-  Building2,
-  BookOpen,
-  ExternalLink,
-  Keyboard,
   Pencil,
   Eye,
   MoreHorizontal,
-  Info,
   ChevronLeft,
 } from 'lucide-react';
 import { usePhoneViewport } from '../hooks/usePhoneViewport.js';
+import { isPhoneTabRoute } from './PhoneAppNavBar.js';
+import { PhonePageBarEnd, PhonePageBarTitle, useHasPhonePageBar } from './PhonePageBar.js';
 
-import { useState, useEffect, useLayoutEffect, useCallback, useRef, type RefObject } from 'react';
+import { useState, useLayoutEffect, useRef, type RefObject } from 'react';
 import { useOffline } from '@object-ui/react';
 import { PresenceAvatars, useTenantPresence, type PresenceUser } from '@object-ui/collaboration';
-import { ModeToggle } from './ModeToggle.js';
 import { WorkspaceSwitcher } from './WorkspaceSwitcher.js';
 import { CurrentOrganizationIndicator } from './CurrentOrganizationIndicator.js';
-import { LocaleSwitcher } from './LocaleSwitcher.js';
-import { NotificationPreferencesMenu } from './NotificationPreferencesMenu.js';
 import { ConnectionStatus } from './ConnectionStatus.js';
 import type { ActivityItem } from './ActivityFeed.js';
-import { InboxPopover } from './InboxPopover.js';
+import { InboxBell } from './InboxBell.js';
+import { AccountMenu } from './AccountMenu.js';
 import { AppSwitcher } from './AppSwitcher.js';
 import type { ConnectionState } from '@object-ui/data-objectstack';
-import { useAdapter } from '../providers/AdapterProvider.js';
 import { useObjectTranslation, useObjectLabel } from '@object-ui/i18n';
 import { useServedAppLabel } from '../hooks/useServedAppLabel.js';
 import type { BreadcrumbItem as BreadcrumbItemType } from '@object-ui/types';
-import { useAuth, getUserInitials } from '@object-ui/auth';
 import { useMetadata } from '../providers/MetadataProvider.js';
 import { useBundledReads } from '../providers/bundledReads.js';
 import { readItemPreferLocal, useReadItemsByName } from '../hooks/useObjectPresence.js';
-import { preferLocal, matchAppBySegment, appStudioRoutePath } from '../utils/index.js';
-import { appAddressSegment } from '../utils/appRoute.js';
-import { connectAssistantPath } from '../console/connect/connectAssistantPath.js';
-import { getIcon } from '../utils/getIcon.js';
+import { preferLocal, matchAppBySegment } from '../utils/index.js';
 import { useNavigationContext } from '../context/NavigationContext.js';
 import { useCommandPalette, useCommandPaletteProviderMounted } from '../context/CommandPaletteProvider.js';
-import { useUrlOverlay } from '../hooks/useUrlOverlay.js';
 import { metadataText, servedObjectPluralLabel } from '../hooks/useNavTargetLabel.js';
-import { KEYBOARD_SHORTCUTS_PARAM } from '../urlParams.js';
 import { useAiSurfaceEnabled } from '../hooks/useAiSurface.js';
-import { useStudioEntryGate } from '../hooks/useStudioDesignGate.js';
-import { useSharedActivityFeed, type ActivityFeedReading } from '../hooks/sharedUserFeeds.js';
-import { useInboxBell } from '../hooks/useInboxBell.js';
 import { useHomePath } from '../hooks/useHomePath.js';
 import { useServedViewItems } from '../hooks/useServedViewItems.js';
 import { viewTabLabel } from '../views/viewTabLabel.js';
@@ -114,9 +88,8 @@ import { getProductName, getLogoUrl } from '../runtime-config.js';
 import { LocalizedSidebarTrigger } from './LocalizedSidebarTrigger.js';
 import { PreviewBadge } from './PreviewBadge.js';
 import { AssistantTopBarButton } from './AssistantTopBarButton.js';
-import { AboutDialog } from './AboutDialog.js';
-import { getConsoleBuild } from '../buildIdentity.js';
-import { GO_HOME_SHORTCUT, useAdvertiseShortcut, type ShortcutChord } from '../chrome/advertisedShortcuts.js';
+import { HelpMenu } from './HelpMenu.js';
+import { useAppStudioEntry } from './ShellPageActions.js';
 import { confirmUnsavedLeave } from '../chrome/unsavedEdits.js';
 
 function humanizeSlug(slug: string): string {
@@ -355,62 +328,16 @@ function ProductHomeMark({ homePath, label, className }: { homePath: string; lab
   );
 }
 
-/**
- * Whether a keydown is `chord`: ⌘ or Ctrl exactly when the chord has `mod`
- * (the advertised chords accept either), Shift exactly when it has `shift`,
- * never Alt, and the key compared case-blind (Shift makes it upper case).
- */
-function matchesShortcutChord(
-  e: Pick<KeyboardEvent, 'key' | 'metaKey' | 'ctrlKey' | 'shiftKey' | 'altKey'>,
-  chord: ShortcutChord,
-): boolean {
-  if (e.altKey) return false;
-  if (Boolean(chord.mod) !== (e.metaKey || e.ctrlKey)) return false;
-  if (Boolean(chord.shift) !== e.shiftKey) return false;
-  return e.key.toLowerCase() === chord.key;
-}
-
-/**
- * A keydown aimed at something the user types into: a text field, a select,
- * a content-editable region (rich-text and code editors), or an ARIA textbox.
- * The home chord leaves those alone, so an editor that binds the same keys
- * keeps them (objectui#12605).
- */
-function isTypingTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof Element)) return false;
-  if (target instanceof HTMLElement && target.isContentEditable) return true;
-  return target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"]') !== null;
-}
-
-/**
- * `⌘⇧H` / `Ctrl+Shift+H` goes home from any app page, as a PUSH so the
- * browser's Back returns to the page (objectui#12605). Advertised beside the
- * listener, under the same gate, so the keyboard-shortcuts dialog lists it
- * exactly where it fires (objectui#11674).
- */
-function useGoHomeShortcut(enabled: boolean, homePath: string): void {
-  const navigate = useNavigate();
-  useEffect(() => {
-    if (!enabled) return undefined;
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.defaultPrevented || e.isComposing) return;
-      if (!matchesShortcutChord(e, GO_HOME_SHORTCUT.chord)) return;
-      if (isTypingTarget(e.target)) return;
-      e.preventDefault();
-      // A page holding unsaved edits is asked first (objectui#13231).
-      confirmUnsavedLeave(() => navigate(homePath));
-    };
-    document.addEventListener('keydown', onKeyDown);
-    return () => document.removeEventListener('keydown', onKeyDown);
-  }, [enabled, homePath, navigate]);
-  useAdvertiseShortcut(GO_HOME_SHORTCUT, enabled);
-}
-
 // No fake fallback presence — render nothing when the API has no data so the
 // header doesn't ship phantom collaborators in production.
 const EMPTY_PRESENCE_USERS: PresenceUser[] = [];
 
-export type AppHeaderVariant = 'app' | 'home' | 'orgs' | 'studio';
+/**
+ * `docs` is the documentation portal's bar (`/docs/*`, objectstack#35424): the
+ * home bar — the product mark and name, the search in the middle, the
+ * utilities — with a 「/ Documentation」 crumb after the product name.
+ */
+export type AppHeaderVariant = 'app' | 'home' | 'orgs' | 'studio' | 'docs';
 
 export interface AppHeaderProps {
   variant?: AppHeaderVariant;
@@ -438,19 +365,23 @@ export function AppHeader({
 
   const location = useLocation();
   const params = useParams();
-  const navigate = useNavigate();
-  // objectui#13231 — the menus below navigate from a button, which no page's
-  // link guard sees, so each departure asks first while a page holds unsaved
-  // edits (and goes at once otherwise).
-  const leaveTo = (to: string) => confirmUnsavedLeave(() => navigate(to));
   // objectui#7256 — the brand logo's target follows the product's DECLARED
   // landing, so the chrome cannot offer a second, contradicting "home".
   const homePath = useHomePath();
-  useGoHomeShortcut(isApp, homePath);
-  // objectstack#34594 — on a phone inside an app the menu is the bottom bar
-  // (its 「More」 opens the drawer), so the bar's leftmost control goes back
-  // to the environment's home instead of opening the drawer.
+  // objectstack#35881 — on a phone inside an app the menu is the app's home
+  // page. On that page and the two inbox pages the bottom bar opens
+  // (`isPhoneTabRoute`), the bar's left is the app pill with the app's name,
+  // which switches apps, and the bottom bar carries the search and the inbox,
+  // so the top bar does not repeat them. On every page below them the bar's
+  // leftmost control is 「‹」 back to the app's home.
   const phone = usePhoneViewport();
+  const phoneTab = isApp && phone && isPhoneTabRoute(location.pathname);
+  // objectstack#35883 — a page with its own phone top row (the object list:
+  // its icon and name, then its 「⋮ More」) takes the bar's middle and right:
+  // no app pill, search, bell, assistant or avatar there.
+  const hasPhonePageBar = useHasPhonePageBar();
+  const phonePageBar = isApp && phone && !phoneTab && hasPhonePageBar;
+  const phoneAppHome = `/apps/${params.appName ?? activeAppName ?? ''}`;
   const { isOnline } = useOffline();
   // Idempotent, direct open of the ⌘K command palette (ADR-0054 C1). Replaces a
   // synthetic `⌘K` KeyboardEvent re-dispatch that did nothing under automation.
@@ -462,22 +393,6 @@ export function AppHeader({
   // nothing. The `/studio` landing mounts one with the palette's `studio` scope
   // (objectui#11863), so its `studio` variant draws the trigger.
   const hasCommandPalette = useCommandPaletteProviderMounted();
-  // Click-reachable entry for the keyboard-shortcuts dialog (was `?`-key only).
-  // Shares the `?shortcuts=1` URL param with KeyboardShortcutsDialog (C2/C3).
-  const { openOverlay: openShortcuts } = useUrlOverlay(KEYBOARD_SHORTCUTS_PARAM);
-  // The help menu's About dialog (objectui#12970): ephemeral, so component
-  // state, not a URL param — nobody shares a link to it.
-  const [aboutOpen, setAboutOpen] = useState(false);
-  const {
-    user,
-    signOut,
-    isAuthEnabled,
-    organizations,
-    activeOrganization,
-    isOrganizationsLoading,
-    getAuthConfig,
-  } = useAuth();
-  const dataSource = useAdapter();
   // Runtime AI gating: hide the top-bar AI entry point when the server serves
   // no AI (Community Edition) so it can't dead-end on a chat with no agent.
   // Same signal as the FAB and the `/ai` route guard.
@@ -502,93 +417,6 @@ export function AppHeader({
   const readItemsByName = useReadItemsByName(metadata);
   const { currentAppName, recordTitle } = useNavigationContext();
 
-  /**
-   * Help menu — lazily-loaded `doc` metadata (ADR-0046) so the "?" menu can
-   * surface a contextual "This app's docs" entry. Fetched once on first menu
-   * open (names/labels only — `content` is omitted from the list response);
-   * `null` = not yet loaded, `[]` = loaded-but-empty.
-   */
-  const [helpDocs, setHelpDocs] = useState<Array<{ name: string; label?: string; _packageId?: string }> | null>(null);
-  const loadHelpDocs = useCallback(async () => {
-    if (helpDocs !== null) return; // fetch at most once per mount
-    try {
-      const client: any = dataSource?.getClient?.();
-      if (!client?.meta?.getItems) {
-        setHelpDocs([]);
-        return;
-      }
-      const result: any = await client.meta.getItems('doc');
-      // `meta.getItems` answers the `{ type, items: [...] }` envelope (or a
-      // bare array from the ADR-0037 preview path) — the two shapes
-      // `MetadataProvider`'s `extractItems` accepts. A `value` arm used to
-      // trail them; measured zero producers emit `value` at THIS seam
-      // (objectui#6917), so it is gone (AGENTS.md #0.1).
-      const items: any[] = Array.isArray(result)
-        ? result
-        : Array.isArray(result?.items)
-          ? result.items
-          : [];
-      setHelpDocs(
-        items
-          .map((it) => ({ name: it?.name, label: it?.label, _packageId: it?._packageId }))
-          .filter((d) => d.name),
-      );
-    } catch {
-      // Soft-degrade: docs are an optional feature — a failed fetch just
-      // means the menu shows the static entries (All docs / Online docs).
-      setHelpDocs([]);
-    }
-  }, [helpDocs, dataSource]);
-
-  /**
-   * Recent activity for the bell's Activity tab (#4197).
-   *
-   * Read from the shared user-scoped feed rather than a local effect: Home's
-   * activity card reads the very same `sys_activity` rows, and on `/home` the
-   * bell and the card mount in one tree — so an effect here would have made
-   * that page issue the read twice. Also NOT gated on `isApp`: the feed is
-   * tenant-scoped, not app-scoped, and gating it left this tab reading "No
-   * recent activity" on Home / Organizations / the AI screen while the card
-   * two hundred pixels below listed the rows.
-   *
-   * It carries its status and the caller's read grant (objectui#12081): a
-   * caller who may not read `sys_activity` is offered no Activity tab and
-   * issues no read, and a read that fails says so rather than reading empty.
-   *
-   * objectui#12980 — no badge reads it, so it is read when the bell is about to
-   * open (a pointer over it, focus, a click), not on every console open.
-   */
-  const [activityWanted, setActivityWanted] = useState(false);
-  const wantActivity = useCallback(() => setActivityWanted(true), []);
-  const apiActivity = useSharedActivityFeed({ enabled: activityWanted && !activities });
-  /**
-   * The bell's inbox — rows, badge addends and the three mark-read paths — now
-   * comes from `useInboxBell`, the ONE wiring of `sharedUserFeeds` onto an
-   * `InboxPopover` (#4225 / #4316). The `global:notifications` page block
-   * (`f99932a42`) mounts the SAME hook, so a bell in the header and a bell an
-   * author declared on a page cannot disagree about a row's read-state: there
-   * is no second read and no second optimistic overlay left to drift.
-   *
-   * The rows are `sys_inbox_message` (the L5 in-app materialization, `mine`
-   * scope) joined with `sys_notification_receipt` for read-state (ADR-0030) —
-   * the bell does not read the re-modeled `sys_notification` L2 event. Home's
-   * action centre cuts from the same feed. `pendingApprovalsCount` is the
-   * badge's second addend, shared with Home's To-do card (#4197).
-   *
-   * Deliberately NOT gated on `isApp` (#4110): the read is scoped to the USER,
-   * not to the app in the URL — unlike the presence avatars and the connection
-   * dot below, which are app-shell chrome and are the reason that flag exists.
-   */
-  const {
-    notifications,
-    unreadCount,
-    pendingApprovalsCount,
-    pendingApprovals,
-    refreshPendingApprovals,
-    markAllRead,
-    markRead: markNotificationRead,
-    markManyRead,
-  } = useInboxBell();
 
   /**
    * Presence is the OTHER half of what this component used to fetch here, and
@@ -603,32 +431,6 @@ export function AppHeader({
 
   const tenantPresence = useTenantPresence();
   const activeUsers = presenceUsers ?? (tenantPresence.length > 0 ? tenantPresence : EMPTY_PRESENCE_USERS);
-  // The `activities` prop still wins where a host passes one — rows a host
-  // hands over are its answer, so they arrive `ready`; otherwise the shared
-  // feed, which says for itself whether its rows are one.
-  const activeActivity: ActivityFeedReading = activities
-    ? { value: activities, status: 'ready', readable: true }
-    : apiActivity;
-  const orgList = organizations ?? [];
-  const hasOrgSection = isOrganizationsLoading || orgList.length > 0 || !!activeOrganization;
-  // Mirror the server's `beforeCreateOrganization` gate so the "Create
-  // workspace" entry only shows where multi-org self-service is enabled.
-  // Default to allowed until the config resolves (avoids hiding it on slow
-  // networks); the server still enforces.
-  const [multiOrgDisabled, setMultiOrgDisabled] = useState(false);
-  useEffect(() => {
-    let cancelled = false;
-    getAuthConfig?.()
-      .then((cfg) => {
-        if (!cancelled) setMultiOrgDisabled(cfg?.features?.multiOrgEnabled === false);
-      })
-      .catch(() => {
-        /* leave default — server still enforces */
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [getAuthConfig]);
 
   // Build path segments (only used in `app` variant)
   const pathParts = location.pathname.split('/').filter(Boolean);
@@ -637,25 +439,14 @@ export function AppHeader({
 
   const safeObjects = objects ?? [];
 
-  // Connect an AI Assistant: every signed-in person's own door to connecting an
-  // AI client, so it sits in the avatar menu beside Profile (objectstack#30895).
-  // Drawn only while the served Account app carries the page: `@objectstack/mcp`
-  // contributes that entry exactly when it registers the page, so a deployment
-  // with MCP turned off shows no dead item.
-  const connectAssistantHref = connectAssistantPath(metadataApps);
 
   // The app the route is in.
   const appNameKey = activeAppName || currentAppName || appNameFromRoute;
   // ADR-0048 (A) — appNameKey may be a package id (route segment); match by it.
   const currentApp = matchAppBySegment(metadataApps || [], appNameKey);
 
-  // Help menu — docs owned by the current app (matched by package id, the
-  // precise owner link; ADR-0048). Empty when not inside an app, the app
-  // ships no docs, or the lazy fetch hasn't run yet.
+  // The help menu's owner link for the app's docs (ADR-0048).
   const currentAppPackageId = (currentApp as any)?._packageId as string | undefined;
-  const currentAppDocs = currentAppPackageId
-    ? (helpDocs ?? []).filter((d) => d._packageId === currentAppPackageId)
-    : [];
 
   // App → Studio reverse bridge (ADR-0080): admins jump from the running app
   // to its owning package's design surface. Null when there is nothing to open
@@ -679,12 +470,18 @@ export function AppHeader({
   //
   // #27356 row 12 — a read-only package's app is not left with no way in: the
   // same gate answers it with the `view` posture, and this bar and the app
-  // switcher draw a browse entry (an eye, 「Open app in Studio」) where a
+  // switcher draw a browse entry (an eye, 「Open {app} in Studio」) where a
   // writable package's app gets the pencil. The posture is the gate's, read
   // once; the console's own apps and an unread list still draw neither.
-  const studioEntry = useStudioEntryGate(
-    isApp ? appStudioRoutePath(currentApp, true, { type: routeType, name: pathParts[3] }) : null,
-  );
+  // The derivation is `useAppStudioEntry`'s, the one the page's button group
+  // reads too (objectstack#36111), so the two open the same place.
+  const studioEntry = useAppStudioEntry(isApp, activeAppName).entry;
+  // ADR-0146 D5 — the read-only entry's words: 「Open {app} in Studio」, the
+  // app switcher's row text, named for the app the bar is in.
+  const viewInStudioText = t('topbar.openAppInStudio', {
+    defaultValue: 'Open {{app}} in Studio',
+    app: currentApp ? appLabel(currentApp) : (appName ?? ''),
+  });
 
   // The crumbs drawn after the app pill from `sm` up: a report or `system/*`
   // route's.
@@ -776,6 +573,10 @@ export function AppHeader({
             ?? reportLabel({ name: reportName, label: humanizeSlug(reportName) }),
         });
       }
+    } else if (routeType === 'docs') {
+      // objectstack#35424 — 「APP / Documentation」: the docs page names its
+      // book and article itself, above the article.
+      extraSegments.push({ label: t('help.documentation', { defaultValue: 'Documentation' }) });
     } else if (routeType === 'system') {
       extraSegments.push({ label: t('console.breadcrumb.system') });
       if (pathParts[3]) {
@@ -850,7 +651,8 @@ export function AppHeader({
   // search field and the utilities, so the field is the bar's middle, wider
   // than inside an app and named for what the palette finds. The `orgs` and
   // `studio` variants keep the search at the cluster's left edge.
-  const isHomeSearch = resolvedVariant === 'home' && hasCommandPalette;
+  // The docs portal's bar is the home bar with one crumb (objectstack#35424).
+  const isHomeSearch = (resolvedVariant === 'home' || resolvedVariant === 'docs') && hasCommandPalette;
   const centersSearch = (isApp && hasCommandPalette) || isHomeSearch;
   const searchLabel = isHomeSearch
     ? t('home.search', { defaultValue: 'Search apps, records, pages…' })
@@ -874,7 +676,7 @@ export function AppHeader({
       <span className="flex-1 truncate text-left text-xs">
         {searchLabel}
       </span>
-      <kbd className="pointer-events-none inline-flex h-5 items-center gap-0.5 rounded border bg-background px-1.5 text-[10px] font-medium text-muted-foreground">
+      <kbd className="pointer-events-none inline-flex h-5 items-center gap-0.5 rounded border bg-background px-1.5 text-xs font-medium text-muted-foreground">
         <span className="text-xs">⌘</span>K
       </kbd>
     </button>
@@ -888,24 +690,27 @@ export function AppHeader({
             collapse/expand toggle for the sidebar and its icon rail from
             768 px up. It is the bar's leftmost control inside an app, so it
             never moves when the sidebar collapses; the sidebar itself carries
-            no trigger. On a phone that slot goes back to the environment's
-            home, and the drawer opens from the bottom menu bar's 「More」
-            (objectstack#34594). */}
+            no trigger. On a phone that slot goes back to the app's home, the
+            app's menu (objectstack#35881), and on the app's home and the two
+            inbox pages it is not drawn: the app pill comes first there. */}
         {isApp && phone ? (
+          phoneTab ? null : (
           <Link
-            to={homePath}
+            to={phoneAppHome}
             data-testid="app-bar-phone-home"
-            aria-label={t('layout.appSwitcher.backToHome', { defaultValue: 'Back to home' })}
-            title={t('layout.appSwitcher.backToHome', { defaultValue: 'Back to home' })}
+            aria-label={t('layout.appSwitcher.backToAppHome', { defaultValue: 'Back to the app menu' })}
+            title={t('layout.appSwitcher.backToAppHome', { defaultValue: 'Back to the app menu' })}
             className="inline-flex size-11 shrink-0 items-center justify-center rounded-md text-foreground hover:bg-accent transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             <ChevronLeft className="h-5 w-5" aria-hidden />
           </Link>
-        ) : isApp ? (
+          )
+        ) : isApp && routeType !== 'docs' ? (
           <LocalizedSidebarTrigger className="shrink-0 mr-1 max-md:size-11 max-md:mr-0" aria-label={t('common.toggleSidebar', { defaultValue: 'Toggle sidebar' })} />
         ) : (
           // objectui#12605 — the product mark sits at the same x on every
-          // surface. Off an app there is no sidebar to toggle, so the
+          // surface. Off an app, and on an app's docs pages (objectstack#35424,
+          // which draw no app menu), there is no sidebar to toggle, so the
           // trigger's slot (its 28 px box and its gap) is held empty: the
           // mark does not jump left when the viewer goes home. Below `sm` the
           // mark is not drawn inside an app, so there is nothing to hold.
@@ -934,8 +739,8 @@ export function AppHeader({
           />
         )}
 
-        {resolvedVariant === 'home' && (
-          <span className="hidden sm:inline ml-2 text-sm font-semibold tracking-tight">
+        {(resolvedVariant === 'home' || resolvedVariant === 'docs') && (
+          <span className="hidden sm:inline ml-2 text-sm font-medium tracking-tight">
             {getProductName()}
           </span>
         )}
@@ -948,12 +753,13 @@ export function AppHeader({
             reports GA. */}
         {!isApp && <PreviewBadge className="ml-2 hidden sm:inline-flex" />}
 
-        {/* Organization context — "which org am I in", right after the brand and
-            before the app/section breadcrumb. Two mutually exclusive renderers:
-            the switcher for multi-membership users (name + switch dropdown),
-            and the read-only indicator for the single-membership case the
-            switcher declines to render, on walled deployments only
-            (objectui#5287 — the switcher's own visibility rule is unchanged). */}
+        {/* Organization context, right after the brand. The web organization
+            switcher lives in the avatar menu (objectstack-ai/objectstack#34591):
+            the left of the bar is the product mark and the app switcher. What
+            stays here: the mobile shell's own connection-switcher button
+            (renders only inside a shell that announces it), and the read-only
+            organization name on a walled deployment, at any membership count
+            (objectui#5287). */}
         <WorkspaceSwitcher />
         <CurrentOrganizationIndicator />
 
@@ -966,6 +772,19 @@ export function AppHeader({
           </>
         )}
 
+        {resolvedVariant === 'docs' && (
+          <>
+            <PathSep />
+            <Link
+              to="/docs"
+              data-testid="app-bar-docs-crumb"
+              className="text-sm font-medium text-foreground/80 px-1.5 hover:text-foreground"
+            >
+              {t('help.documentation', { defaultValue: 'Documentation' })}
+            </Link>
+          </>
+        )}
+
         {resolvedVariant === 'studio' && (
           <>
             <PathSep />
@@ -975,7 +794,8 @@ export function AppHeader({
           </>
         )}
 
-        {isApp && (
+        {phonePageBar && <PhonePageBarTitle />}
+        {isApp && !phonePageBar && (
           <>
             {/* App pill — the app's glyph and name, and its switcher, after
                 the product mark's `/` rule. At every width: below `sm` it is
@@ -995,6 +815,7 @@ export function AppHeader({
                   onAppChange={(segment) => confirmUnsavedLeave(() => onAppChange(segment))}
                   designInStudioPath={studioEntry?.path ?? null}
                   studioPosture={studioEntry?.posture}
+                  showNameOnPhone={phoneTab}
                 />
               </div>
             ) : appName ? (
@@ -1020,9 +841,11 @@ export function AppHeader({
                 (objectstack#27058), so the bar draws no view dropdown. No
                 margin of its own: the pill's padding already parts the two,
                 and the width goes to the label (objectstack#34596). */}
-            <span className="text-sm font-medium sm:hidden truncate min-w-0" data-testid="app-bar-phone-title">
-              {lastSegmentLabel}
-            </span>
+            {!phoneTab && (
+              <span className="text-sm font-medium sm:hidden truncate min-w-0" data-testid="app-bar-phone-title">
+                {lastSegmentLabel}
+              </span>
+            )}
           </>
         )}
       </div>
@@ -1068,7 +891,8 @@ export function AppHeader({
 
         {/* Group 1: Search */}
         {/* Only where a palette is mounted (objectui#11912) — see `hasCommandPalette`. */}
-        {hasCommandPalette && (
+        {phonePageBar && <PhonePageBarEnd />}
+        {hasCommandPalette && !phoneTab && !phonePageBar && (
           <div
             data-topbar-group
             data-topbar-search
@@ -1092,7 +916,7 @@ export function AppHeader({
         )}
 
         {/* Group 2: Edit app, Inbox (notifications + approvals + activity) & Help */}
-        <div data-topbar-group className="flex items-center gap-0.5 shrink-0">
+        <div data-topbar-group className={cn('flex items-center gap-0.5 shrink-0', phonePageBar && 'hidden')}>
           {/* Edit app — the app → builder reverse bridge (ADR-0080), at the
               left edge of this utility cluster (objectui#12201 item 6).
               Admins jump from the running app to its owning package's design
@@ -1123,19 +947,25 @@ export function AppHeader({
             </Button>
           )}
           {/* #27356 row 12 — a read-only package's app: the same slot, an eye
-              that opens it in Studio's browse-only posture. */}
+              that opens it in Studio's browse-only posture. ADR-0146 D5 — it
+              draws WITH its text, 「Open {app} in Studio」, so a look is not
+              mistaken for the pencil's edit. The name truncates inside a
+              capped width, and below `sm` the button is not drawn at all
+              (objectstack#29075: the app switcher's Studio row carries it). */}
           {studioEntry?.posture === 'view' && (
             <Button
               variant="ghost"
-              size="icon"
-              className="h-8 w-8 max-md:size-11 max-sm:hidden shrink-0"
+              size="sm"
+              className="h-8 max-md:h-11 max-sm:hidden shrink-0 gap-1.5 px-2 max-w-[14rem]"
               asChild
               data-testid="app-view-in-studio-button"
-              aria-label={t('topbar.openAppInStudio', { defaultValue: 'Open app in Studio' })}
-              title={t('topbar.openAppInStudio', { defaultValue: 'Open app in Studio' })}
+              title={viewInStudioText}
             >
               <Link to={studioEntry.path}>
-                <Eye className="h-4 w-4" />
+                <Eye className="h-4 w-4 shrink-0" aria-hidden="true" />
+                <span data-slot="view-in-studio-text" className="truncate text-xs font-medium">
+                  {viewInStudioText}
+                </span>
               </Link>
             </Button>
           )}
@@ -1145,279 +975,27 @@ export function AppHeader({
            * separate top-bar buttons (ActivityFeed, Approvals, Notifications).
            * Reduces visual noise and removes the duplicated "9+" badges.
            */}
-          {/* objectui#12980 — the open intent that starts the Activity read.
-              `contents` keeps the wrapper out of the bar's flex layout; the
-              events still reach it from the bell inside. */}
-          <span
-            className="contents"
-            data-testid="inbox-bell-intent"
-            onPointerEnter={wantActivity}
-            onFocus={wantActivity}
-            onClickCapture={wantActivity}
-          >
-            <InboxPopover
-              notifications={notifications}
-              unreadCount={unreadCount}
-              pendingApprovalsCount={pendingApprovalsCount}
-              activity={activeActivity}
-              onMarkAllRead={markAllRead}
-              onMarkRead={markNotificationRead}
-              onMarkManyRead={markManyRead}
-              pendingApprovals={pendingApprovals}
-              onApprovalDecided={refreshPendingApprovals}
-            />
-          </span>
+          {!phoneTab && <InboxBell activities={activities} />}
 
           {/* AI Assistant — only when the runtime serves AI (hidden on
               Community Edition so it can't dead-end on an agent-less chat).
               objectstack#34608: it opens and closes the drawer in place. */}
           {aiEnabled && <AssistantTopBarButton />}
 
-          {/* Help & Documentation — an aggregated menu rather than a bare
-              external link: contextual "This app's docs" (only when the
-              current app ships docs), the in-product docs hub, and the online
-              docs. The left-sidebar already links the hub, so this entry point
-              earns its place by being context-aware. */}
-          <DropdownMenu onOpenChange={(open) => { if (open) void loadHelpDocs(); }}>
-            <DropdownMenuTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 hidden md:flex shrink-0"
-                aria-label={t('sidebar.helpTooltip', { defaultValue: 'Help & Documentation' })}
-              >
-                <HelpCircle className="h-4 w-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="min-w-56 rounded-lg" sideOffset={4}>
-              {currentAppDocs.length > 0 && currentAppPackageId ? (
-                <DropdownMenuItem
-                  className="cursor-pointer"
-                  onClick={() =>
-                    leaveTo(
-                      currentAppDocs.length === 1
-                        ? `/apps/${currentAppPackageId}/docs/${currentAppDocs[0].name}`
-                        : `/apps/${currentAppPackageId}/docs`,
-                    )
-                  }
-                >
-                  <BookOpen className="mr-2 h-4 w-4" />
-                  {t('help.appDocs', { defaultValue: "This app's docs" })}
-                </DropdownMenuItem>
-              ) : null}
-              <DropdownMenuItem className="cursor-pointer" onClick={() => leaveTo('/docs')}>
-                <Layers className="mr-2 h-4 w-4" />
-                {t('help.allDocs', { defaultValue: 'All documentation' })}
-              </DropdownMenuItem>
-              {isApp ? (
-                <DropdownMenuItem
-                  className="cursor-pointer"
-                  data-testid="action:keyboard-shortcuts:open"
-                  onClick={openShortcuts}
-                >
-                  <Keyboard className="mr-2 h-4 w-4" />
-                  {t('help.keyboardShortcuts', { defaultValue: 'Keyboard shortcuts' })}
-                </DropdownMenuItem>
-              ) : null}
-              <DropdownMenuSeparator />
-              <DropdownMenuItem asChild className="cursor-pointer">
-                <a href="https://docs.objectstack.ai" target="_blank" rel="noopener noreferrer">
-                  <ExternalLink className="mr-2 h-4 w-4" />
-                  {t('help.onlineDocs', { defaultValue: 'Online documentation' })}
-                </a>
-              </DropdownMenuItem>
-              {/* About — names the console's own build, on every variant
-                  (objectui#12970). */}
-              <DropdownMenuItem
-                className="cursor-pointer"
-                data-testid="action:about:open"
-                onClick={() => setAboutOpen(true)}
-              >
-                <Info className="mr-2 h-4 w-4" />
-                {t('help.about', { defaultValue: 'About' })}
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-          <AboutDialog open={aboutOpen} onOpenChange={setAboutOpen} build={getConsoleBuild()} />
+          {/* Help & Documentation — the shared 「?」 menu (objectstack#36111:
+              the page's button group draws the same component). The
+              left-sidebar already links the hub, so this entry point earns
+              its place by being context-aware. */}
+          <HelpMenu
+            inApp={isApp}
+            appPackageId={currentAppPackageId}
+            triggerClassName="h-8 w-8 hidden md:flex shrink-0"
+          />
         </div>
 
         {/* Group 3: Account (theme + lang moved into avatar dropdown) */}
-        <div data-topbar-group className="flex items-center gap-0.5 shrink-0">        {/* User Profile + Organization switcher */}
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8 max-md:size-11 shrink-0 rounded-full"
-              aria-label={t('user.accountMenu', { defaultValue: 'Account menu' })}
-            >
-              <Avatar className="h-7 w-7 rounded-full">
-                <AvatarImage src={user?.image} alt={user?.name ?? 'User'} />
-                <AvatarFallback className="rounded-full bg-primary text-primary-foreground text-xs">
-                  {getUserInitials(user)}
-                </AvatarFallback>
-              </Avatar>
-            </Button>
-          </DropdownMenuTrigger>
-          {/* 44 px rows below `md`, as the app switcher's menu (objectstack#29075). */}
-          <DropdownMenuContent align="end" className="min-w-64 rounded-lg max-md:[&_[role=menuitem]]:min-h-11" sideOffset={4}>
-            {/* User identity */}
-            <DropdownMenuLabel className="p-0 font-normal">
-              <div className="flex items-center gap-2 px-2 py-2">
-                <Avatar className="h-8 w-8 rounded-lg">
-                  <AvatarImage src={user?.image} alt={user?.name ?? 'User'} />
-                  <AvatarFallback className="rounded-lg bg-primary text-primary-foreground">
-                    {getUserInitials(user)}
-                  </AvatarFallback>
-                </Avatar>
-                <div className="grid flex-1 text-left text-sm leading-tight">
-                  <span className="truncate font-semibold">{user?.name ?? 'User'}</span>
-                  <span className="truncate text-xs text-muted-foreground">{user?.email ?? ''}</span>
-                </div>
-              </div>
-            </DropdownMenuLabel>
-
-            <DropdownMenuSeparator />
-            <DropdownMenuGroup>
-              {/*
-               * Profile — land directly on the Account app's profile_card
-               * component. We link to the explicit component route rather than
-               * `/apps/account` because the bare app path does not reliably
-               * resolve to the first (component-type) nav item, leaving the
-               * avatar menu's account entry dead. Entering at the component
-               * route still mounts the Account app shell (Inbox / Security /
-               * Developer remain reachable from its sidebar).
-               */}
-              <DropdownMenuItem
-                onClick={() => leaveTo('/apps/account/component/account/profile_card')}
-                className="cursor-pointer"
-              >
-                <User className="mr-2 h-4 w-4" />
-                {t('user.profile', { defaultValue: 'Profile' })}
-              </DropdownMenuItem>
-              {connectAssistantHref && (
-                <DropdownMenuItem
-                  onClick={() => leaveTo(connectAssistantHref)}
-                  className="cursor-pointer"
-                  data-testid="header-connect-ai-assistant"
-                >
-                  <Bot className="mr-2 h-4 w-4" />
-                  {t('user.connectAiAssistant', { defaultValue: 'Connect an AI Assistant' })}
-                </DropdownMenuItem>
-              )}
-              {/*
-               * Workspace entries. The header-left WorkspaceSwitcher carries
-               * the same destinations, but it renders NOTHING below two orgs
-               * (`orgList.length <= 1` → null) — so for the single-org majority
-               * the avatar menu is the ONLY door to workspace management.
-               * Leaving just the create shortcut here is what shut every path
-               * to Members / Invitations / Organization settings for them
-               * (objectstack#8096): the picker at `/organizations` auto-skips
-               * with one org, and the switcher never appears.
-               *
-               * "My Organizations" → `?manage=1`, which OrganizationsPage reads as
-               * "the user came here to MANAGE": multi-org users get the picker,
-               * a single-org user is deep-linked straight to that org's members
-               * page (there is no choice worth showing them). Deliberately NOT
-               * gated on `multiOrgDisabled` — that flag governs CREATING orgs;
-               * where self-service creation is off this entry is the only way
-               * in, so gating it there would re-close the door.
-               */}
-              {hasOrgSection && (
-                <DropdownMenuItem
-                  onClick={() => leaveTo('/organizations?manage=1')}
-                  className="cursor-pointer"
-                  data-testid="header-my-organizations"
-                >
-                  <Building2 className="mr-2 h-4 w-4" />
-                  {t('organizations.mine', { defaultValue: 'My Organizations' })}
-                </DropdownMenuItem>
-              )}
-              {hasOrgSection && !multiOrgDisabled && (
-                <DropdownMenuItem
-                  onClick={() => leaveTo('/organizations?create=1')}
-                  className="cursor-pointer"
-                  data-testid="header-create-workspace"
-                >
-                  <Plus className="mr-2 h-4 w-4" />
-                  {t('organizations.create', { defaultValue: 'Create organization' })}
-                </DropdownMenuItem>
-              )}
-              {/*
-               * Hidden apps (App.hidden === true) surface here instead
-               * of in the App Switcher. This is the standard pattern for
-               * personal-settings-style apps that would feel out of place
-               * next to business apps — Personal Settings, etc. The `account`
-               * app is represented by the explicit Profile link above, so it
-               * is filtered out here to avoid a duplicate (dead) entry.
-               *
-               * Each entry links to the app's one address (`appAddressSegment`),
-               * never its bare package id: a hidden app that shares its package
-               * with the package's first app is reached by its name alone, and
-               * the package id would open that first app instead.
-               */}
-              {(metadataApps || [])
-                .filter((a: any) => a.active !== false && a.hidden === true && a.name !== 'account')
-                .map((app: any) => {
-                  const AppIcon = getIcon(app.icon);
-                  const label = appLabel(app);
-                  return (
-                    <DropdownMenuItem
-                      key={`hidden_app_${app.name}`}
-                      onClick={() => leaveTo(`/apps/${appAddressSegment(metadataApps, app)}`)}
-                      className="cursor-pointer"
-                    >
-                      <AppIcon className="mr-2 h-4 w-4" />
-                      {label}
-                    </DropdownMenuItem>
-                  );
-                })}
-            </DropdownMenuGroup>
-
-            {/*
-             * UX P0-2: theme + locale switchers used to be standalone
-             * top-bar buttons. They're rarely-used preferences so they live
-             * under the avatar dropdown now, freeing top-bar real estate.
-             * Each is rendered as a non-interactive label + the existing
-             * control so the dropdown handles outside-click / esc cleanly.
-             */}
-            <DropdownMenuSeparator />
-            <DropdownMenuLabel className="text-[11px] font-normal text-muted-foreground uppercase tracking-wide px-2">
-              {t('user.preferences', { defaultValue: 'Preferences' })}
-            </DropdownMenuLabel>
-            <div className="flex items-center justify-between px-2 py-1.5 text-sm">
-              <span className="text-foreground/80">
-                {t('user.theme', { defaultValue: 'Theme' })}
-              </span>
-              <ModeToggle />
-            </div>
-            <div className="flex items-center justify-between px-2 py-1.5 text-sm">
-              <span className="text-foreground/80">
-                {t('user.language', { defaultValue: 'Language' })}
-              </span>
-              <LocaleSwitcher />
-            </div>
-            {/*
-             * objectui#7011 — the two inbox announcement switches. They belong
-             * beside theme and language for the same reason those moved here:
-             * browser-local preferences a user sets once. The desktop switch is
-             * also the ONLY path to `Notification.requestPermission()` in this
-             * console, and keeping it behind a deliberate gesture is what stops
-             * a load-time prompt from spending that channel permanently.
-             */}
-            <NotificationPreferencesMenu />
-
-            {isAuthEnabled && (
-              <>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={() => confirmUnsavedLeave(() => signOut())}>
-                  <LogOut className="mr-2 h-4 w-4" />
-                  {t('user.logout', { defaultValue: 'Log out' })}
-                </DropdownMenuItem>
-              </>
-            )}
-          </DropdownMenuContent>
-        </DropdownMenu>
+        <div data-topbar-group className={cn('flex items-center gap-0.5 shrink-0', phonePageBar && 'hidden')}>
+          <AccountMenu trigger="avatar" />
         </div>
       </div>
     </div>

@@ -497,8 +497,9 @@ export const leadFollowUp = {
   the organization's choice. Catch it if the hook should write anyway.
 - **Only declared text is translated.** A string the hook builds itself is
   written as it is. A key `texts` does not declare is refused when the hook is
-  saved if the hook names it literally in `ctx.text('key')`, otherwise when the
-  hook runs, as a `500` that names the hook and the key.
+  saved if the hook names it literally in `ctx.text('key')` or
+  `ctx.text?.('key')`, otherwise when the hook runs, as a `500` that names the
+  hook and the key.
 - **It works whichever way the hook is written** — a TypeScript `handler` and a
   sandboxed `js` body get the same `ctx.text`. An `expression` body cannot ask
   for one, so `texts` is refused there.

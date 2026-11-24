@@ -52,6 +52,10 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Symbol",
         helpText: "Name des Lucide-Symbols (z. B. „building“, „users“)"
       },
+      color: {
+        label: "Farbe",
+        helpText: "Farbe des Quadrats, auf dem das Symbol gezeichnet wird, aus der festen Palette. Ohne Angabe wird Grau verwendet."
+      },
       description: {
         label: "Beschreibung",
         helpText: "Entwicklerdokumentation"
@@ -70,11 +74,11 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       highlightFields: {
         label: "Hervorgehobene Felder",
-        helpText: "Feldnamen dieses Objekts, das wichtigste zuerst – der erste Eintrag gewinnt, wo nur einer Platz hat (ADR-0085). Steuert die Standardspalten der Liste, Karten, Vorschauen untergeordneter Datensätze und die Hervorhebungsleiste der Detailansicht. Ein Name, der kein Feld dieses Objekts ist, wird bei der Veröffentlichung abgelehnt."
+        helpText: "Feldnamen dieses Objekts, das wichtigste zuerst – der erste Eintrag gewinnt, wo nur einer Platz hat (ADR-0085). Steuert die Standardspalten von Listen und Bezugslisten, Karten, Vorschauen untergeordneter Datensätze, die Hover-Karte des Datensatzes und die Datensatzauswahl. Ein Name, der kein Feld dieses Objekts ist, wird bei der Veröffentlichung abgelehnt."
       },
       relatedLists: {
-        label: "Verknüpfte Listen",
-        helpText: "Fachliche Reihenfolge der verknüpften Listen dieses Objekts auf seiner Datensatzseite, die wichtigste zuerst. Jeder Eintrag ist ein Name eines untergeordneten Objekts (z. B. task) oder object.field, wenn dieses untergeordnete Objekt mehr als eine Beziehung zu diesem Objekt hat. Aufgeführte Listen kommen zuerst; die übrigen folgen in der abgeleiteten Reihenfolge. Ein Name, der keiner auf dieses Objekt zeigenden Beziehung entspricht, platziert nichts, daher lehnt das Speichern oder Validieren des Objekts ihn ab."
+        label: "Tabs der Datensatzseite",
+        helpText: "Die Tabs der Datensatzseite nach der Übersicht, in Reihenfolge. Jeder Eintrag ist der Name eines untergeordneten Objekts (z. B. task), object.field, wenn dieses Objekt mehr als eine Beziehung zu diesem Objekt hat, ein integrierter Tab (sys_attachment, sys_approval_request, sys_activity) oder ein Eintrag mit eigenem Titel und eigenen Spalten, festgelegt in den Objekteinstellungen von Studio. Sobald etwas aufgeführt ist, zeigt eine verknüpfte Liste, die kein Eintrag nennt, keinen Tab, auch eine Liste, die ein anderes Paket hinzufügt, bis dieses Objekt sie nennt; Anhänge erscheinen nur, wenn sie aufgeführt sind. Leer: Alle Listen erscheinen in der Standardreihenfolge. Ein Name, der keiner auf dieses Objekt zeigenden Beziehung entspricht, wird beim Speichern des Objekts abgelehnt."
       },
       searchableFields: {
         label: "Durchsuchbare Felder",
@@ -86,11 +90,15 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fieldGroups.key": {
         label: "Schlüssel",
-        helpText: "Maschinenschlüssel in snake_case, eindeutig innerhalb dieses Objekts – das Schema lehnt alles andere ab. Felder treten der Gruppe bei, indem sie diesen Schlüssel nennen; eine Umbenennung lässt sie daher ohne Gruppe."
+        helpText: "Maschinenschlüssel in snake_case, eindeutig innerhalb dieses Objekts – das Schema lehnt alles andere ab. Felder, die die Gruppe in ihren Feldern aufführt, bleiben bei einer Umbenennung in der Gruppe; ein Feld, das über diesen Schlüssel in seiner eigenen Gruppeneinstellung beitritt, ist danach ohne Gruppe."
       },
       "fieldGroups.label": {
         label: "Bezeichnung",
         helpText: "Überschrift des Abschnitts der Gruppe."
+      },
+      "fieldGroups.fields": {
+        label: "Felder",
+        helpText: "Die Felder, die diese Gruppe anzeigt, in Anzeigereihenfolge (Feldnamen). Ausgefüllt legt die Liste die Reihenfolge innerhalb der Gruppe fest, ohne ein Feld zu verschieben. Ein hier genanntes Feld darf in seiner eigenen Gruppeneinstellung keine andere Gruppe nennen, und ein Feld darf nur von einer Gruppe aufgeführt werden. Nicht zulässig zusammen mit Verknüpfte Liste."
       },
       "fieldGroups.icon": {
         label: "Symbol",
@@ -102,11 +110,11 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fieldGroups.relatedList": {
         label: "Verknüpfte Liste",
-        helpText: "Macht diesen Eintrag zur Tabelle einer verknüpften Liste statt zu einem Feldabschnitt: Nennen Sie das untergeordnete Objekt (oder object.field), dessen Liste an dieser Position in der Detailspalte des Datensatzes gezeichnet wird. Eine solche Gruppe enthält keine Felder; ein Feld, das sie als seine Gruppe nennt, wird abgelehnt, ebenso ein Name, der keiner auf dieses Objekt zeigenden Beziehung entspricht. Die Datensatzseite zeichnet diese Platzierung noch nicht."
+        helpText: "Macht diesen Eintrag zur Tabelle einer verknüpften Liste statt zu einem Feldabschnitt: Nennen Sie das untergeordnete Objekt (oder object.field), dessen Liste an dieser Position in der Detailspalte des Datensatzes gezeichnet wird. Eine solche Gruppe enthält keine Felder; ein Feld, das sie als seine Gruppe nennt, wird abgelehnt, ebenso ein Name, der keiner auf dieses Objekt zeigenden Beziehung entspricht. Die Erstellungs- und Bearbeitungsformulare des übergeordneten Datensatzes betten die Tabelle ebenfalls ein, und „Bearbeiten“ auf der Datensatzseite speichert den Datensatz und seine Zeilen gemeinsam."
       },
       "fieldGroups.collapse": {
         label: "Einklappen",
-        helpText: "Ob der Abschnitt im Eingabeformular und auf der Datensatz-Detailseite eingeklappt werden kann. Nicht gesetzt: nein."
+        helpText: "Ob der Abschnitt eingeklappt werden kann. Das Eingabeformular folgt der Einstellung. Auf der Standard-Datensatzseite kann der Leser jede Gruppe mit Titel einklappen; dort legt die Einstellung nur den Anfangszustand fest: Collapsed beginnt eingeklappt, die anderen offen. Nicht gesetzt: nein."
       },
       "fieldGroups.visibleWhen": {
         label: "Sichtbar wenn",
@@ -232,6 +240,10 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Verhalten beim Löschen",
         helpText: "Was geschieht, wenn der referenzierte Datensatz gelöscht wird"
       },
+      "fields.transferBehavior": {
+        label: "Verhalten beim Inhaberwechsel",
+        helpText: "Ob „Inhaber ändern“ am referenzierten Datensatz auch die Datensätze mitnehmen kann, die über dieses Feld auf ihn verweisen"
+      },
       "fields.multiple": {
         label: "Mehrfach",
         helpText: "Auswahl mehrerer Datensätze erlauben"
@@ -268,9 +280,13 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Sprache",
         helpText: "Sprache des Editors (z. B. sql, javascript)"
       },
+      "fields.fieldHistory": {
+        label: "Feldänderungswerte",
+        helpText: "Alte → neue Werte dieses Felds in der Aktivitätszeitleiste des Datensatzes. Standard folgt der Plattform: an für die meisten Typen, aus für ein Medien-, JSON- oder Zugangsdaten-Feld. Aus nennt die Änderung nur mit dem Feldnamen; An zeigt auch die Werte eines Medien- oder JSON-Felds. Ein Zugangsdaten-Feld zeigt nie Werte, und ist die Einstellung des Objekts selbst aus, gilt diese."
+      },
       "fields.trackHistory": {
         label: "Verlauf verfolgen",
-        helpText: "Dieses Feld in der Aktivitätszeitleiste des Datensatzes zusammenfassen"
+        helpText: "Lässt ein Medien- oder JSON-Feld (Bild, Datei, json, …) alte → neue Werte in der Aktivitätszeitleiste zeigen. Alle anderen Felder zeigen sie ohnehin, und Ausschalten verbirgt sie nicht: dafür gibt es Feldänderungswerte."
       },
       "fields.visibleWhen": {
         label: "Sichtbar wenn",
@@ -290,6 +306,10 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "enable.trackHistory": {
         label: "Verlauf verfolgen"
+      },
+      "enable.fieldHistory": {
+        label: "Feldänderungswerte",
+        helpText: "Alte → neue Werte geänderter Felder in der Aktivitätszeitleiste des Datensatzes. Standard ist an. Aus schaltet die Werte für das ganze Objekt ab, gleich was ein Feld sagt."
       },
       "enable.searchable": {
         label: "Durchsuchbar"
@@ -427,7 +447,7 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       userActions: {
         label: "Benutzeraktionen",
-        helpText: "Welche allgemeinen Einträge (Neu, Importieren, Bearbeiten, Löschen, Exportieren) Oberflächen-Clients für die Datensätze dieses Objekts anbieten; überschreibt den Standard von managedBy Eintrag für Eintrag. Ein nicht gesetzter Eintrag behält diesen Standard: platform bietet alle fünf an; config und system-data alle außer Importieren; engine-owned, append-only und better-auth nur Exportieren. Ein unberührter Schalter schreibt nichts und wird daher als aus angezeigt, auch wo der Standard den Eintrag anbietet. Bei einem Objekt vom Typ engine-owned oder append-only erlaubt das Einschalten eines Eintrags Benutzern auch diesen Schreibvorgang über die Daten-API. Benutzer benötigen weiterhin die passende Berechtigung."
+        helpText: "Welche allgemeinen Einträge (Neu, Importieren, Bearbeiten, Löschen, Exportieren) Oberflächen-Clients für die Datensätze dieses Objekts anbieten; überschreibt den Standard von managedBy Eintrag für Eintrag. Ein nicht gesetzter Eintrag behält diesen Standard: platform bietet alle fünf an; config und system-data alle außer Importieren; engine-owned, append-only und better-auth nur Exportieren. Ein unberührter Schalter schreibt nichts und wird daher als aus angezeigt, auch wo der Standard den Eintrag anbietet. Bei einem Objekt vom Typ engine-owned oder append-only erlaubt das Einschalten eines Eintrags Benutzern auch diesen Schreibvorgang über die Daten-API. Benutzer benötigen weiterhin die passende Berechtigung. „Inhaber ändern“ gehört nicht zu dieser Matrix: sein Standard folgt dem Freigabemodell (siehe seinen Eintrag)."
       },
       "userActions.create": {
         label: "Anlegen",
@@ -448,6 +468,22 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       "userActions.exportCsv": {
         label: "CSV exportieren",
         helpText: "Der Eintrag für den CSV-Export. Nicht gesetzt: angezeigt, da jede managedBy-Gruppe den Export anbietet."
+      },
+      "userActions.transfer": {
+        label: "Inhaber ändern",
+        helpText: "Die Aktion „Inhaber ändern“, einzeln und als Massenaktion: ein bietet sie an, aus blendet sie aus. Nicht gesetzt: ein, außer aus auf einem controlled_by_parent-Detailobjekt. Nur auf einem Objekt angeboten, dessen Datensätze einen neu zuweisbaren Inhaber haben (ownership user oder nicht gesetzt, kein managedBy, kein sys_-Objekt, owner_id nicht schreibgeschützt und auf einem externen Objekt deklariert oder zugeordnet); das Einschalten auf jedem anderen Objekt wird abgelehnt. Es steuert nur die Aktion, nicht eine einfache Bearbeitung von owner_id. Ein gespeichertes Objekt {enabled, visibleWhen, disabledWhen} wird Schlüssel für Schlüssel bearbeitet; schreiben Sie eines im Quelltext, um die Aktion von jedem Datensatz abhängig zu machen."
+      },
+      actionLayout: {
+        label: "Aktionsanordnung",
+        helpText: "Die Reihenfolge der Aktionen dieses Objekts und welche davon Schaltflächen sind, je Bereich: pinned (höchstens 3 Schaltflächen, in Reihenfolge) und more (die Reihenfolge des Menüs „Mehr“; eine in keinem von beiden genannte Aktion folgt in ihrer Standardreihenfolge). Nicht gesetzt: Jede Oberfläche wählt ihre Schaltflächen wie bisher nach der Reihenfolge der Aktionen."
+      },
+      "actionLayout.list": {
+        label: "Liste",
+        helpText: "Die Symbolleiste der Listenseite, als {\"pinned\": [...], \"more\": [...]}: Namen von Aktionen in der Listen-Symbolleiste; $import / $export nur in pinned. Höchstens 3 angeheftet. Nicht angeheftet zeigt die Seite weiterhin ihr eigenes Import-/Export-Menü. os validate lehnt einen Namen ab, der keine Aktion dieses Objekts ist oder nicht in der Listen-Symbolleiste platziert ist; ein solcher Name zeichnet nichts."
+      },
+      "actionLayout.record": {
+        label: "Datensatz",
+        helpText: "Die Datensatzkopfzeile (Datensatzseite, Seitenvorschau, Leiste unten auf dem Telefon), als {\"pinned\": [...], \"more\": [...]}: Namen von Aktionen in der Datensatzkopfzeile oder ihrem Menü „Mehr“. Höchstens 3 angeheftet. os validate lehnt einen Namen ab, der keine Aktion dieses Objekts ist oder nicht auf der Datensatzseite platziert ist; ein solcher Name zeichnet nichts."
       },
       editMode: {
         label: "Bearbeitungsmodus",
@@ -737,6 +773,10 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Verhalten beim Löschen",
         helpText: "Was geschieht, wenn der referenzierte Datensatz gelöscht wird"
       },
+      transferBehavior: {
+        label: "Verhalten beim Inhaberwechsel",
+        helpText: "Ob „Inhaber ändern“ am referenzierten Datensatz auch die Datensätze mitnehmen kann, die über dieses Feld auf ihn verweisen"
+      },
       relatedListFilter: {
         label: "Filter der verknüpften Liste",
         helpText: "Standardfilter für die verknüpfte Liste dieser Beziehung auf der Detailseite des übergeordneten Datensatzes – mit UND an den Abgleich mit dem übergeordneten Datensatz gekoppelt, und das Registerkarten-Badge zählt dieselbe Menge"
@@ -783,7 +823,7 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       inlineColumns: {
         label: "Inline-Spalten",
-        helpText: "Spalten des Inline-Rasters im Formular des übergeordneten Datensatzes, in Anzeigereihenfolge; nur verwendet, wenn dieses Feld inlineEdit setzt, das im Quelltext geschrieben wird. Nicht gesetzt: von den bearbeitbaren Feldern dieses Objekts abgeleitet, und ab der siebten beginnen die übrigen in der Spaltenauswahl des Rasters. Ein Eintrag, der nur ein Feld nennt, übernimmt Typ, Optionen und Regeln von diesem Feld; die übrigen Spaltenschlüssel, allen voran type, werden im Quelltext geschrieben."
+        helpText: "Spalten des Inline-Rasters im Formular des übergeordneten Datensatzes, in Anzeigereihenfolge; nur verwendet, wenn eine Feldgruppe des übergeordneten Objekts dieses untergeordnete Objekt nennt (fieldGroups[].relatedList). Nicht gesetzt: von den bearbeitbaren Feldern dieses Objekts abgeleitet, und ab der siebten beginnen die übrigen in der Spaltenauswahl des Rasters. Ein Eintrag, der nur ein Feld nennt, übernimmt Typ, Optionen und Regeln von diesem Feld; die übrigen Spaltenschlüssel, allen voran type, werden im Quelltext geschrieben."
       },
       "inlineColumns.name": {
         label: "Spaltenname",
@@ -853,6 +893,10 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Ausgeblendet",
         helpText: "Feld in den Standardansichten der Oberfläche ausblenden"
       },
+      showOnCreate: {
+        label: "Beim Anlegen anzeigen",
+        helpText: "Dieses Feld beim Anlegen eines Datensatzes abfragen. Aus: Der Anlegen-Dialog, das Anlegen auf ganzer Seite und ein von einer Aktion geöffnetes Anlegen lassen es weg; Bearbeiten, die Datensatzseite und Listen zeigen es weiterhin. Ein Pflichtfeld wird immer abgefragt und kann daher nicht ausgeschaltet werden."
+      },
       searchable: {
         label: "Durchsuchbar",
         helpText: "In die Ergebnisse der globalen Suche einbeziehen"
@@ -885,9 +929,13 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Intern",
         helpText: "Den Wert dieses Felds nie über den allgemeinen Datenpfad zurückgeben: Die Engine lässt den Schlüssel in Ergebnissen von find/findOne und in den Antworttexten von create und update weg, bei der Standardprojektion und wenn ein Client das Feld in ?select= nennt. Speicherung, Filterung und Indizierung bleiben unberührt."
       },
+      fieldHistory: {
+        label: "Feldänderungswerte",
+        helpText: "Alte → neue Werte dieses Felds in der Aktivitätszeitleiste des Datensatzes. Standard folgt der Plattform: an für die meisten Typen, aus für ein Medien-, JSON- oder Zugangsdaten-Feld. Aus nennt die Änderung nur mit dem Feldnamen; An zeigt auch die Werte eines Medien- oder JSON-Felds. Ein Zugangsdaten-Feld zeigt nie Werte, und ist die Einstellung des Objekts selbst aus, gilt diese."
+      },
       trackHistory: {
         label: "Verlauf verfolgen",
-        helpText: "Wertänderungen dieses Felds als Einträge in der Aktivitätszeitleiste des Datensatzes darstellen (ADR-0052 §5b). Pro Feld einzeln zu aktivieren."
+        helpText: "Lässt ein Medien- oder JSON-Feld (Bild, Datei, json, …) alte → neue Werte in der Aktivitätszeitleiste zeigen. Alle anderen Felder zeigen sie ohnehin, und Ausschalten verbirgt sie nicht: dafür gibt es Feldänderungswerte."
       },
       widget: {
         label: "Widget",
@@ -988,6 +1036,18 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       "refusals.params": {
         label: "Parameter",
         helpText: "Namen, die die Sätze füllen dürfen (z. B. state): Der Rumpf wirft { code, params: { state } }, und ein Platzhalter {{ state }} zeigt den Wert. Fehlt er: Die Sätze sind einfacher Text"
+      },
+      texts: {
+        label: "Texte",
+        helpText: "Sätze, die der Hook in Datensätze schreibt, nach dem snake_case-Schlüssel, den sein Code mit ctx.text anfragt (z. B. follow_up_subject). Der Hook erhält die deklarierte Meldung in der Sprache der Organisation, übersetzt, mit der deklarierten Meldung als Rückfall. Für einen JavaScript-Rumpf (L2) oder einen Handler; bei einem Ausdrucksrumpf abgelehnt"
+      },
+      "texts.message": {
+        label: "Meldung",
+        helpText: "Der Satz, den der Hook schreibt, wenn sein Code diesen Schlüssel anfragt. Einfacher Text, außer der Eintrag deklariert params: dann füllt ein Platzhalter {{ name }} einen deklarierten Parameter"
+      },
+      "texts.params": {
+        label: "Parameter",
+        helpText: "Namen, die der Satz füllen darf (z. B. lead): Der Code fragt ctx.text(key, { lead }) an, und ein Platzhalter {{ lead }} zeigt den Wert. Fehlt er: Der Satz ist einfacher Text"
       },
       handler: {
         label: "Handler",
@@ -1331,10 +1391,11 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       navigation: {
         label: "Navigation",
-        helpText: "Konfiguration der Navigation beim Klick auf ein Element (standardmäßig Seitenleiste, page, new_window oder none)"
+        helpText: "Konfiguration der Navigation beim Klick auf ein Element: die Größe der Seitenleiste und `preventNavigation` für eine Liste, deren Zeilen nichts öffnen (`mode` ist veraltet – der Datensatzname öffnet die Seite, das Hover-Symbol die Seitenleiste)"
       },
       "navigation.mode": {
-        label: "Modus"
+        label: "Modus",
+        helpText: "[VERALTET] Bestimmt bei der Liste eines Objekts (einer Listenansicht, den `listViews` eines Objekts) nicht mehr, wie ein Datensatz geöffnet wird: In der Konsole öffnet der Datensatzname für jeden Leser die vollständige Seite und das Hover-Symbol daneben die Seitenleiste. Dort werden `drawer`, `page` und `new_window` weiterhin geparst und ändern nichts, lassen Sie den Schlüssel also weg; `none` bedeutet weiterhin, dass Zeilen nichts öffnen – verwenden Sie besser `preventNavigation: true`. Ein Seitenblock mit `navigation` (ein Listenblock, die Zeitleiste, eine eingebettete Ansicht) berücksichtigt weiterhin jeden Wert."
       },
       "navigation.preventNavigation": {
         label: "Navigation verhindern",
@@ -1881,6 +1942,42 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Speicher (MB)",
         helpText: "Speicherobergrenze pro Aufruf (MB, max. 256)"
       },
+      refusals: {
+        label: "Ablehnungen",
+        helpText: "Katalog der Ablehnungen, nach dem SCREAMING_SNAKE-Code, den der Rumpf der Aktion wirft (z. B. SIGN_IN_REQUIRED). Der Aufrufer liest die deklarierte Meldung, übersetzt in seine Sprache, mit dem deklarierten Status. Für den JavaScript-Rumpf (L2) einer script-Aktion; bei einem Ausdrucksrumpf abgelehnt"
+      },
+      "refusals.message": {
+        label: "Meldung",
+        helpText: "Der Satz, den der Benutzer liest, wenn der Rumpf diesen Code wirft. Einfacher Text, außer der Eintrag deklariert params: dann füllt ein Platzhalter {{ name }} einen deklarierten Parameter"
+      },
+      "refusals.status": {
+        label: "Status",
+        helpText: "HTTP-Status der Ablehnung (400–499). Fehlt er: 400"
+      },
+      "refusals.reasons": {
+        label: "Gründe",
+        helpText: "Weitere Sätze unter demselben Code, nach dem snake_case-Grund, den der Rumpf neben dem Code wirft ({ code, reason }). Gesendeter Code und Status bleiben die dieses Eintrags; ein hier nicht deklarierter Grund wird abgelehnt. Fehlt er: Ein geworfener Grund wird nicht gelesen"
+      },
+      "refusals.reasons.message": {
+        label: "Meldung",
+        helpText: "Der Satz, den der Benutzer liest, wenn der Rumpf diesen Grund unter dem Code wirft. Seine {{ }}-Platzhalter folgen den params des Eintrags"
+      },
+      "refusals.params": {
+        label: "Parameter",
+        helpText: "Namen, die die Sätze füllen dürfen (z. B. state): Der Rumpf wirft { code, params: { state } }, und ein Platzhalter {{ state }} zeigt den Wert. Fehlt er: Die Sätze sind einfacher Text"
+      },
+      texts: {
+        label: "Texte",
+        helpText: "Sätze, die die Aktion in Datensätze schreibt, nach dem snake_case-Schlüssel, den ihr Rumpf mit ctx.text anfragt (z. B. email_subject). Der Rumpf erhält die deklarierte Meldung in der Sprache der Organisation, übersetzt, mit der deklarierten Meldung als Rückfall. Für den JavaScript-Rumpf (L2) einer script-Aktion; bei einem Ausdrucksrumpf abgelehnt"
+      },
+      "texts.message": {
+        label: "Meldung",
+        helpText: "Der Satz, den die Aktion schreibt, wenn ihr Rumpf diesen Schlüssel anfragt. Einfacher Text, außer der Eintrag deklariert params: dann füllt ein Platzhalter {{ name }} einen deklarierten Parameter"
+      },
+      "texts.params": {
+        label: "Parameter",
+        helpText: "Namen, die der Satz füllen darf (z. B. subject): Der Rumpf fragt ctx.text(key, { subject }) an, und ein Platzhalter {{ subject }} zeigt den Wert. Fehlt er: Der Satz ist einfacher Text"
+      },
       params: {
         label: "Parameter",
         helpText: "Benutzereingabeparameter (Formular vor der Ausführung anzeigen)"
@@ -2101,7 +2198,8 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Bezeichnung"
       },
       description: {
-        label: "Beschreibung"
+        label: "Beschreibung",
+        helpText: "One sentence on what this report shows, displayed under its name."
       },
       type: {
         label: "Typ",
@@ -2183,9 +2281,33 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Datumsbereich",
         helpText: "Standardzeitraum und Umschalter für einen benutzerdefinierten Bereich. Die Dimension muss eine Datumsdimension des Datasets sein; leer lassen, wenn das Dataset genau eine hat."
       },
+      "dateRange.dimension": {
+        label: "Date Field",
+        helpText: "The date grouping of the data source the period applies to. Leave it empty when the data source has only one."
+      },
+      "dateRange.defaultRange": {
+        label: "Default Period",
+        helpText: "The period the report opens with."
+      },
+      "dateRange.allowCustomRange": {
+        label: "Allow Custom Range",
+        helpText: "Let people pick their own start and end dates."
+      },
       exportOptions: {
         label: "Exportoptionen",
         helpText: "Download-Formate (csv, xlsx) und Dateiname. Wer herunterladen darf, regelt die Exportberechtigung für das Dataset-Objekt."
+      },
+      "exportOptions.formats": {
+        label: "Formats",
+        helpText: "The download formats offered. Left unset, both csv and xlsx are offered; an empty list turns downloads off."
+      },
+      "exportOptions.includeHeaders": {
+        label: "Include Headers",
+        helpText: "Put the column names in the first row of the downloaded file."
+      },
+      "exportOptions.fileNamePrefix": {
+        label: "File Name",
+        helpText: "The start of the downloaded file’s name, used instead of the report name."
       }
     }
   },

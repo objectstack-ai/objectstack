@@ -6,7 +6,7 @@ import '@objectstack/formula';
 import '@objectstack/lint';
 import * as React from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup, waitFor, within } from '@testing-library/react';
+import { act, render, screen, fireEvent, cleanup, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { FieldSchema } from '@objectstack/spec/data';
 
@@ -975,5 +975,128 @@ describe('ObjectFieldInspector — stored expression editor (objectstack#32576)'
     // The stored editor is gone, so the error it reported no longer counts:
     // only the formula editor's clean verdict is left.
     await waitFor(() => expect(onBlocking).toHaveBeenLastCalledWith(0), { timeout: 3000 });
+  });
+});
+
+describe('ObjectFieldInspector — label first, API name under Developer info, delete behind ⋯ (objectstack#34794)', () => {
+  it('the label is the first input; the API name is in a Developer info section that opens collapsed', async () => {
+    renderField({ title: { type: 'text', label: 'Meeting' } }, 'title');
+    // The first input in document order, so the first one an author meets.
+    const inputs = Array.from(document.querySelectorAll('input, textarea'));
+    expect(inputs[0]).toBe(screen.getByTestId('field-label-input'));
+    expect(screen.getByTestId('field-apiname-input')).not.toBeVisible();
+    const toggle = screen.getByTestId('field-developer-toggle');
+    expect(toggle).toHaveTextContent(t('designer.field.section.developer', 'en-US'));
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await userEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByTestId('field-apiname-input')).toBeVisible();
+    expect(screen.getByTestId('field-apiname-input')).toHaveValue('title');
+  });
+
+  it('renaming from the opened section still renames, and a taken name is still refused', async () => {
+    const { onPatch } = renderField(
+      { title: { type: 'text', label: 'Meeting' }, place: { type: 'text', label: 'Place' } },
+      'title',
+    );
+    await userEvent.click(screen.getByTestId('field-developer-toggle'));
+    const box = screen.getByTestId('field-apiname-input');
+    fireEvent.change(box, { target: { value: 'meeting_name' } });
+    expect(Object.keys(onPatch.mock.calls.at(-1)![0].fields)).toEqual(['meeting_name', 'place']);
+    fireEvent.change(box, { target: { value: 'place' } });
+    expect(screen.getByTestId('field-apiname-refusal')).toBeInTheDocument();
+  });
+
+  it('no Remove button in the panel; Delete is in the header ⋯ menu and asks first — Cancel keeps the field, Delete removes it', async () => {
+    const onClearSelection = vi.fn();
+    const { onPatch } = renderField(
+      { title: { type: 'text', label: 'Meeting' }, place: { type: 'text', label: 'Place' } },
+      'place',
+      { onClearSelection },
+    );
+    const removeName = `Remove “Place”`;
+    expect(screen.queryByRole('button', { name: removeName })).not.toBeInTheDocument();
+
+    const more = screen.getByTestId('field-more-menu');
+    await userEvent.click(more);
+    await userEvent.click(await screen.findByRole('menuitem', { name: removeName }));
+    const dialog = await screen.findByRole('alertdialog');
+    expect(dialog).toHaveTextContent('Delete the field “Place”?');
+    await userEvent.click(within(dialog).getByTestId('field-remove-confirm-cancel'));
+    expect(onPatch).not.toHaveBeenCalled();
+    expect(onClearSelection).not.toHaveBeenCalled();
+
+    await userEvent.click(screen.getByTestId('field-more-menu'));
+    await userEvent.click(await screen.findByRole('menuitem', { name: removeName }));
+    await userEvent.click(within(await screen.findByRole('alertdialog')).getByTestId('field-remove-confirm-action'));
+    expect(Object.keys(onPatch.mock.calls.at(-1)![0].fields)).toEqual(['title']);
+    expect(onClearSelection).toHaveBeenCalled();
+  });
+
+  it('a read-only inspector draws the ⋯ menu disabled; an external object offers no Delete at all', () => {
+    renderField({ title: { type: 'text', label: 'Meeting' } }, 'title', { readOnly: true });
+    expect(screen.getByTestId('field-more-menu')).toBeDisabled();
+    cleanup();
+
+    render(
+      <ObjectFieldInspector
+        type="object"
+        name="remote_account"
+        draft={{ name: 'remote_account', external: {}, fields: { title: { type: 'text', label: 'Meeting' } } }}
+        selection={{ kind: 'field', id: 'title' }}
+        onPatch={vi.fn()}
+        onClearSelection={vi.fn()}
+        readOnly={false}
+        locale={'en-US'}
+      />,
+    );
+    expect(screen.getByTestId('field-label-input')).toBeInTheDocument();
+    expect(screen.queryByTestId('field-more-menu')).not.toBeInTheDocument();
+  });
+});
+
+describe('ObjectFieldInspector — the required visibleWhen formula advisory names only a formula the form cannot compute (ADR-0113 D1)', () => {
+  const ADVISORY = 'field-required-visiblewhen-formula';
+  const fields = (visibleWhen: string) => ({
+    account: { type: 'lookup', label: 'Account', reference: 'account' },
+    amount: { type: 'number', label: 'Amount' },
+    risk: { type: 'formula', label: 'Risk', expression: "record.amount > 100 ? 'high' : 'low'" },
+    tier_name: { type: 'formula', label: 'Tier', expression: 'record.account.tier' },
+    org_flag: { type: 'formula', label: 'Org', expression: "os.org.id == 'acme'" },
+    po_number: { type: 'text', label: 'PO', required: true, visibleWhen },
+  });
+  // The verdict lands from a lazily loaded parser; once it has loaded, a
+  // macrotask flushes every promise the effect chains on it.
+  const settle = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+
+  it('advises a formula the server cannot compute either, and draws nothing once the predicate reads only one the form computes', async () => {
+    const { rerender } = renderField(fields("record.tier_name == 'gold'"), 'po_number');
+    const advisory = await screen.findByTestId(ADVISORY);
+    expect(advisory.textContent).toContain('tier_name reads through a reference');
+    expect(advisory.textContent).toContain('keeps it required');
+    expect(advisory.textContent).not.toContain('The form computes the same formula');
+
+    rerender(
+      <ObjectFieldInspector
+        type="object"
+        name="account"
+        draft={{ name: 'account', fields: fields("record.risk == 'high'") }}
+        selection={{ kind: 'field', id: 'po_number' }}
+        onPatch={vi.fn()}
+        onClearSelection={vi.fn()}
+        onSelectionChange={vi.fn()}
+        readOnly={false}
+        locale={'en-US'}
+      />,
+    );
+    await settle();
+    expect(screen.queryByTestId(ADVISORY)).not.toBeInTheDocument();
+  });
+
+  it('advises a formula only the form cannot compute (it reads os): the server can waive the field', async () => {
+    renderField(fields('record.org_flag'), 'po_number');
+    const advisory = await screen.findByTestId(ADVISORY);
+    expect(advisory.textContent).toContain('org_flag reads os');
+    expect(advisory.textContent).toContain('can waive this field');
   });
 });

@@ -1,8 +1,8 @@
 {
   "examples/app-crm/objectstack.config.ts": 0,
   "examples/app-multi-package/objectstack.config.ts": 0,
-  "examples/app-showcase/objectstack.config.ts": 317,
-  "examples/app-todo/objectstack.config.ts": 106,
+  "examples/app-showcase/objectstack.config.ts": 425,
+  "examples/app-todo/objectstack.config.ts": 130,
   "packages/platform-objects/scripts/i18n-extract.config.ts": 0,
   "packages/plugins/plugin-approvals/scripts/i18n-extract.config.ts": 0,
   "packages/plugins/plugin-audit/scripts/i18n-extract.config.ts": 0,

@@ -1,5 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
-// test-budget: 20 — spawns the real producer once per single-cause fixture: a fresh real ObjectQL engine and SecurityPlugin per case across three postures, 92 cases that each write and read back the same holder's assignments, so no boot is shared across cases, save the three delegated cases split one `it` per table, whose tables run in order on one boot and write ids of their own; 17.5 s in a local run on a shared 4-core box (18.2 s before the split); slowest CI reading 10.9 s (scheduled full-battery run 41199450735, Test Core shard log) x 1.25, rounded up
+// test-budget: 20 — spawns the real producer once per single-cause fixture: a fresh real ObjectQL engine and SecurityPlugin per case across three postures, 128 cases that each write and read back the same holder's assignments, so no boot is shared across cases, save the three delegated cases split one `it` per table, whose tables run in order on one boot and write ids of their own, and the thirty-six three-officer cases (one per posture, caller and auditor variant, split from twelve so no case carries three variants' writes under vitest's 5 s per-test default), which share one boot per posture and remove every row each wrote; 17.5 s in a local run on a shared 4-core box (18.2 s before the split); slowest CI reading 10.9 s (scheduled full-battery run 41199450735, Test Core shard log) x 1.25, rounded up; the three-officer cases add 39% on one shared box (tests phase 29.0 s against 20.8 s without them), so 10.9 s projects to 15.2 s, 19.0 s with headroom
 
 /**
  * [ADR-0090 D12, amended 2026-10-17] The organization administrator's
@@ -27,14 +27,19 @@
  * organization administrator who holds one too are answered the not-found,
  * and a delegate whose read of the two tables is refused outright is answered
  * that read refusal; rows it reads keep their verdict and their guidance, in
- * every posture. Last, a refusal names a stored value only when the caller
+ * every posture. Then a refusal names a stored value only when the caller
  * reads it or wrote it, in every posture — a column a field rule hides and a
- * column a masking rule partially masks alike.
+ * column a masking rule partially masks alike. Last, the three-officer split:
+ * an auditor's set that carries a platform-scoped capability is outside the
+ * organization boundary, so only an allowlisting delegated scope (or the
+ * platform administrator) changes who holds it.
  */
 
 import { describe, it, expect, afterEach, beforeAll, beforeEach, afterAll, vi } from 'vitest';
 import { recordNotFoundError } from '@objectstack/core';
+import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { ObjectQL } from '@objectstack/objectql';
+import { defineCapability } from '@objectstack/spec/security';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { resolveThrownHttpError } from '@objectstack/types';
 import { SysUser, SysMember, SysBusinessUnit, SysBusinessUnitMember } from '@objectstack/platform-objects/identity';
@@ -105,15 +110,55 @@ const ORG_ADMIN_ORGANIZATION_HIDDEN = {
   objects: {},
   fields: { 'sys_user_position.organization_id': HIDDEN, 'sys_user_permission_set.organization_id': HIDDEN },
 };
-const PERMISSIONS = [...defaultPermissionSets, QA_IN_SET, ...DELEGATE_SETS, ORG_ADMIN_FIELDS_HIDDEN, ORG_ADMIN_ORGANIZATION_HIDDEN];
+/**
+ * The three-officer split (the describe at the foot): an auditor's set in three
+ * variants, each read-only and each carrying the org-scoped `view_all_audit_log`.
+ * `org_only` carries nothing else, so it is inside the organization boundary —
+ * the control. `setup` adds the built-in platform-scoped `setup.access`;
+ * `declared` adds a capability the app declares, whose scope `defineCapability`
+ * defaults to `platform`.
+ */
+const QA_AUDIT_OFFICER = defineCapability({ name: 'qa_audit_officer', label: 'QA audit officer' });
+const CAPABILITIES = [QA_AUDIT_OFFICER];
+const auditorSet = (variant: string, systemPermissions: string[]) => ({
+  name: `qa_auditor_${variant}`,
+  label: `QA auditor, ${variant}`,
+  objects: { sys_user: { allowRead: true } },
+  systemPermissions: ['view_all_audit_log', ...systemPermissions],
+});
+const AUDITOR_SETS = {
+  org_only: auditorSet('org_only', []),
+  setup: auditorSet('setup', ['setup.access']),
+  declared: auditorSet('declared', [QA_AUDIT_OFFICER.name]),
+} as const;
+type AuditorVariant = keyof typeof AUDITOR_SETS;
+const AUDITOR_VARIANTS = Object.keys(AUDITOR_SETS) as AuditorVariant[];
+/** The position that distributes each variant, alone. */
+const auditorPosition = (variant: AuditorVariant) => `${AUDITOR_SETS[variant].name}_pos`;
+/** A delegated scope over `a_ops` that allowlists every auditor variant — the auditor's own administrator. */
+const AUDITOR_DELEGATE = {
+  name: 'qa_auditor_delegate',
+  label: 'QA auditor delegate',
+  objects: { sys_user_position: READ_WRITE, sys_user_permission_set: READ_WRITE },
+  adminScope: { ...A_OPS_SCOPE, assignablePermissionSets: Object.values(AUDITOR_SETS).map((s) => s.name) },
+};
+const CATALOG_POSITIONS = [
+  ...POSITIONS,
+  ...AUDITOR_VARIANTS.map((v) => ({ name: auditorPosition(v), label: `Auditor, ${v}`, permissionSets: [AUDITOR_SETS[v].name] })),
+];
+
+const PERMISSIONS = [
+  ...defaultPermissionSets, QA_IN_SET, ...DELEGATE_SETS, ORG_ADMIN_FIELDS_HIDDEN, ORG_ADMIN_ORGANIZATION_HIDDEN,
+  ...Object.values(AUDITOR_SETS), AUDITOR_DELEGATE,
+];
 
 type Posture = 'single' | 'group' | 'isolated';
 const POSTURES: Posture[] = ['single', 'group', 'isolated'];
 
 /** [#29029] Every user this suite's writes name or act as: each gets a `sys_user` row. */
 const RIG_USERS = [
-  'u_delegate', 'u_holder_hidden_delegate', 'u_in_0', 'u_in_1', 'u_in_2', 'u_in_3', 'u_in_4',
-  'u_in_5', 'u_member', 'u_org_admin', 'u_org_admin_columns_hidden', 'u_org_admin_delegate',
+  'u_auditor_delegate', 'u_delegate', 'u_holder_hidden_delegate', 'u_in_0', 'u_in_1', 'u_in_2', 'u_in_3', 'u_in_4',
+  'u_in_5', 'u_member', 'u_org_admin', 'u_org_admin_auditor_delegate', 'u_org_admin_columns_hidden', 'u_org_admin_delegate',
   'u_org_admin_hiding', 'u_org_admin_nb', 'u_org_admin_organization_hidden',
   'u_org_admin_reads_masked', 'u_other_org', 'u_platform', 'u_position_hidden_delegate',
   'u_seeded', 'u_set_hidden_delegate', 'u_target', 'u_unit_hidden_delegate',
@@ -203,14 +248,16 @@ async function boot(posture: Posture, options: BootOptions = {}) {
     manifest: { register: vi.fn() },
     objectql: engine,
     // [ADR-0131 D3/D4] The catalog the rows are judged against: the shipped
-    // sets plus one in-boundary set, and the two positions.
+    // sets plus one in-boundary set, and the two positions; then the
+    // three-officer split's auditor sets, their positions and the one
+    // capability the app declares.
     metadata: {
       get: async (type: string, name: string) =>
-        (type === 'position' ? POSITIONS.find((p) => p.name === name)
+        (type === 'position' ? CATALOG_POSITIONS.find((p) => p.name === name)
           : type === 'permission' ? PERMISSIONS.find((p) => p.name === name)
-          : type === 'capability' ? undefined
+          : type === 'capability' ? CAPABILITIES.find((c) => c.name === name)
           : engine.getSchema(name)) ?? null,
-      list: async (type: string) => (type === 'position' ? POSITIONS : type === 'permission' ? PERMISSIONS : []),
+      list: async (type: string) => (type === 'position' ? CATALOG_POSITIONS : type === 'permission' ? PERMISSIONS : type === 'capability' ? CAPABILITIES : []),
     },
     ...(posture === 'single' ? {} : { 'org-scoping': { name: 'com.objectstack.org-scoping' }, tenancy: { posture } }),
   };
@@ -1036,4 +1083,140 @@ describe("[ADR-0090 D12; ruling of record 6649064874] an organization administra
       expect(await stored(h, table, { id: `in_${table}` }), `${table}: the removal landed`).toHaveLength(0);
     }
   });
+});
+
+// ── The three-officer split ─────────────────────────────────────────────────
+
+/**
+ * Who answers each auditor variant, and how. An organization administrator's
+ * right covers a set inside the organization boundary only (ADR-0090 D12,
+ * amended); the delegated branch admits what an allowlist names and refuses
+ * the rest, whichever capabilities the set carries.
+ */
+const OFFICER_CALLERS = {
+  orgAdmin: CALLERS.orgAdmin,
+  orgAdminNoBypass: CALLERS.orgAdminNoBypass,
+  // A delegated security administrator whose allowlist does not name the auditor's set.
+  delegate: DELEGATES.delegate,
+  // The same, also holding the organization administrator's set.
+  orgAdminDelegate: DELEGATES.orgAdminDelegate,
+  // The auditor's own administrator: an allowlist naming every variant.
+  auditorDelegate: delegateContext('u_auditor_delegate', [AUDITOR_DELEGATE.name]),
+  orgAdminAuditorDelegate: delegateContext('u_org_admin_auditor_delegate', ['organization_admin', AUDITOR_DELEGATE.name]),
+} as const;
+type OfficerCaller = keyof typeof OFFICER_CALLERS;
+
+type OfficerVerdict = 'admit' | 'PERMISSION_DENIED' | 'DELEGATION_SCOPE_VIOLATION';
+const OUTSIDE_REFUSED: Record<AuditorVariant, OfficerVerdict> = {
+  org_only: 'admit', setup: 'PERMISSION_DENIED', declared: 'PERMISSION_DENIED',
+};
+const OFFICER_EXPECTED: Record<OfficerCaller, Record<AuditorVariant, OfficerVerdict>> = {
+  orgAdmin: OUTSIDE_REFUSED,
+  orgAdminNoBypass: OUTSIDE_REFUSED,
+  delegate: { org_only: 'DELEGATION_SCOPE_VIOLATION', setup: 'DELEGATION_SCOPE_VIOLATION', declared: 'DELEGATION_SCOPE_VIOLATION' },
+  // Refused by the organization boundary, then judged by its scope.
+  orgAdminDelegate: { org_only: 'admit', setup: 'DELEGATION_SCOPE_VIOLATION', declared: 'DELEGATION_SCOPE_VIOLATION' },
+  auditorDelegate: { org_only: 'admit', setup: 'admit', declared: 'admit' },
+  orgAdminAuditorDelegate: { org_only: 'admit', setup: 'admit', declared: 'admit' },
+};
+
+/** The protocol's bulk delete door over the harness engine: one delete by id per row, each judged on its own. */
+interface BulkDeleteDoor {
+  deleteManyData(req: { object: string; ids: string[]; options?: { continueOnError?: boolean }; context?: unknown }):
+    Promise<{ succeeded: number; failed: number; results: Array<{ id: string; success: boolean; errors?: Array<{ code?: string }> }> }>;
+}
+const bulkDoorOver = (engine: ObjectQL): BulkDeleteDoor =>
+  new ObjectStackProtocolImplementation(engine as never, () => new Map(), undefined) as unknown as BulkDeleteDoor;
+
+/** An auditor holding of `variant` for `userId`, in organization A's `a_ops` unit, written by the system. */
+async function seedAuditorHolding(h: Harness, table: Table, id: string, userId: string, variant: AuditorVariant) {
+  const row = table === 'sys_user_position'
+    ? { id, user_id: userId, position: auditorPosition(variant), business_unit_id: 'bu_a_ops', organization_id: ORG_A }
+    : { id, user_id: userId, permission_set: AUDITOR_SETS[variant].name, organization_id: ORG_A };
+  await h.engine.insert(table, row, { context: { isSystem: true, tenantId: ORG_A } } as any);
+}
+
+describe('[ADR-0090 D12, amended 2026-10-17] the three-officer split: an auditor set carrying a platform-scoped capability is outside the organization boundary, and only an allowlisting delegated scope changes who holds it', () => {
+  for (const posture of ['single', 'isolated'] as const) {
+    describe(`posture '${posture}'`, () => {
+      // One delegation-seeded engine per posture; each case removes every row it
+      // wrote or seeded before the next one runs.
+      const harness = sharedDelegationBoot(posture);
+      beforeAll(async () => {
+        const inA = { context: { isSystem: true, tenantId: ORG_A } } as any;
+        for (const userId of ['u_auditor_delegate', 'u_org_admin_auditor_delegate']) {
+          const role = userId === 'u_org_admin_auditor_delegate' ? 'admin' : 'member';
+          await harness().engine.insert('sys_member', { id: `m_${userId}`, user_id: userId, organization_id: ORG_A, role }, inA);
+        }
+      });
+      // One case per caller and variant: each does one variant's grant insert,
+      // removal by id, bulk removal and position holding, so no single case
+      // carries three variants' writes under vitest's per-test default.
+      for (const caller of Object.keys(OFFICER_CALLERS) as OfficerCaller[]) {
+        for (const variant of AUDITOR_VARIANTS) {
+          it(`${caller} · ${variant}: adding and removing a holder — a grant, its removal by id, its bulk removal, a position holding — answers as the variant's verdict says`, async () => {
+            const h = harness();
+            const context = OFFICER_CALLERS[caller];
+            const door = bulkDoorOver(h.engine);
+            // Holders seated in `a_ops`: one receives each insert, the others hold the seeded rows.
+            const holders = IN_SCOPE_HOLDERS.slice(0, 4);
+            const [inserted, removed, bulkA, bulkB] = holders;
+            try {
+              const expected = OFFICER_EXPECTED[caller][variant];
+              const setName = AUDITOR_SETS[variant].name;
+              const cell = `${caller} · ${variant}`;
+              const answers: Array<[string, Record<string, unknown>]> = [];
+
+              for (const table of TABLE_NAMES) {
+                const holding = table === 'sys_user_position'
+                  ? { position: auditorPosition(variant), business_unit_id: 'bu_a_ops' }
+                  : { permission_set: setName };
+                // Add a holder.
+                answers.push([`${table} insert`, await answerOf(() =>
+                  h.engine.insert(table, { user_id: inserted, ...holding }, { context: structuredClone(context) } as any))]);
+                const insertedRows = await stored(h, table, { user_id: inserted, ...(table === 'sys_user_position' ? { position: holding.position } : { permission_set: setName }) });
+                expect(insertedRows, `${cell} · ${table} insert stored`).toHaveLength(expected === 'admit' ? 1 : 0);
+                // Remove a holder by id.
+                const byId = `${variant}_${table}_by_id`;
+                await seedAuditorHolding(h, table, byId, removed, variant);
+                answers.push([`${table} delete by id`, await write(h, table, 'delete', byId, structuredClone(context))]);
+                expect(await stored(h, table, { id: byId }), `${cell} · ${table} delete by id`).toHaveLength(expected === 'admit' ? 0 : 1);
+                // Remove holders through the bulk door.
+                const ids = [`${variant}_${table}_bulk_a`, `${variant}_${table}_bulk_b`];
+                await seedAuditorHolding(h, table, ids[0], bulkA, variant);
+                await seedAuditorHolding(h, table, ids[1], bulkB, variant);
+                const bulk = await door.deleteManyData({ object: table, ids, options: { continueOnError: true }, context: structuredClone(context) });
+                if (expected === 'admit') {
+                  expect([bulk.succeeded, bulk.failed], `${cell} · ${table} bulk`).toEqual([2, 0]);
+                } else {
+                  expect([bulk.succeeded, bulk.failed], `${cell} · ${table} bulk`).toEqual([0, 2]);
+                  for (const r of bulk.results) expect(r.errors?.[0]?.code, `${cell} · ${table} bulk ${r.id}`).toBe(expected);
+                }
+                expect(await stored(h, table, { id: { $in: ids } }), `${cell} · ${table} bulk rows`).toHaveLength(expected === 'admit' ? 0 : 2);
+              }
+
+              for (const [what, answer] of answers) {
+                if (expected === 'admit') {
+                  expect(answer, `${cell} · ${what}: ${answer.message}`).toEqual({ status: 200 });
+                } else {
+                  expect([answer.status, answer.code], `${cell} · ${what}: ${answer.message}`).toEqual([403, expected]);
+                }
+              }
+              if (expected === 'PERMISSION_DENIED') {
+                // The organization administrator's refusal names the set, read from the
+                // grant or from the position that distributes it.
+                for (const [what, answer] of answers) {
+                  expect((answer.details as any)?.permissionSet, `${cell} · ${what}`).toBe(setName);
+                }
+              }
+            } finally {
+              for (const table of TABLE_NAMES) {
+                await h.engine.delete(table, { where: { user_id: { $in: holders } }, multi: true, context: SYS } as any);
+              }
+            }
+          });
+        }
+      }
+    });
+  }
 });

@@ -3,17 +3,17 @@
   "evals": [
     {
       "id": 1,
-      "prompt": "Create `src/views/support-case.view.ts`: a default grid (subject linking to the record, status, priority, owner, due date), a 'My Open Cases' list, a kanban by status, and a simple edit form.",
-      "expected_output": "One `defineView({ list, form, listViews })` container — never a bare flat view object. `data: { provider: 'object', object: 'support_case' }`, `columns` with `link: true` on `subject`, the owner column is the injected `owner_id` (never an `assigned_to` field), a `listViews.my_open` entry with `filter` triples (`{ field: 'owner_id', operator: 'equals', value: '{current_user_id}' }`), a kanban entry with the required top-level `columns` plus `kanban: { groupByField: 'status' }` (no top-level `groupBy`), and `form` with `type: 'simple'` and `sections` referencing a declared field group.",
+      "prompt": "Create `src/views/support-case.view.ts`: a default grid (subject linking to the record, status, priority, owner, due date), a 'My Open Cases' list, a kanban by status, and a simple edit form with the case details in one section. None of the project's files are in this directory: write the file in your answer.",
+      "expected_output": "One `defineView({ list, listViews })` container — never a bare flat view object. `data: { provider: 'object', object: 'support_case' }`, `columns` with `link: true` on `subject`, the owner column is the injected `owner_id` (never an `assigned_to` field), a `listViews.my_open` entry with `filter` triples (`{ field: 'owner_id', operator: 'equals', value: '{current_user_id}' }`), a kanban entry with the required top-level `columns` plus `kanban: { groupByField: 'status' }` (no top-level `groupBy`). No `form` in the container: the edit form is built from the object, so the answer says its section is a `fieldGroups` entry of `support_case` (an internal `form` parses and is not loaded).",
       "files": [],
       "assertions": {
         "must_contain": ["defineView", "provider: 'object'", "listViews", "groupByField", "link: true", "{current_user_id}", "owner_id"],
-        "must_not_contain": ["groupBy:", "conditionalRequired:", "'assigned_to'"]
+        "must_not_contain": ["groupBy:", "conditionalRequired:", "'assigned_to'", "form: {"]
       }
     },
     {
       "id": 2,
-      "prompt": "Build `src/apps/crm.app.ts`: a Sales group with Leads, Opportunities, the pipeline kanban, a 'My open deals' entry and the sales dashboard; an Approvals group that only shows when approvals are installed; and a second app for the support team, who work the same objects.",
+      "prompt": "Build `src/apps/crm.app.ts`: a Sales group with Leads, Opportunities, the pipeline kanban, a 'My open deals' entry and the sales dashboard; an Approvals group that only shows when approvals are installed; and a second app for the support team, who work the same objects. None of the project's files are in this directory: write the file in your answer.",
       "expected_output": "`App.create({...})` with a `navigation` tree of `group` items: `type: 'object'` entries with `objectName`, a `viewName: 'pipeline_kanban'` shortcut, a bare `filters: { owner_id: '{current_user_id}', status: 'open' }` slice for 'My open deals' (no view authored for a one-off), `type: 'dashboard'` with `dashboardName`, and the approvals inbox as `type: 'component', componentRef: 'approvals:inbox'` gated by `requiresService: 'approvals'` (never a `requiresObject` gate on `sys_approval_request`: that object read answers 404 to an approver until a request involves them). At most one app per package, so not a second `App.create` here: the support team shares this product and its objects, so it is a `requiredPermissions`-gated group inside the app. (A support product with objects of its own would carry its app in its own `type: 'module'` package of the suite.) Registered under `defineStack({ apps })`.",
       "files": [],
       "assertions": {
@@ -24,21 +24,21 @@
     {
       "id": 3,
       "prompt": "Add a Convert action on `lead` — only for qualified, not-yet-converted leads, from the record header and each list row, launching the `crm_lead_conversion` flow — and a bulk 'Add to campaign' that asks which campaign, for the selected rows.",
-      "expected_output": "Two `defineAction` items. Convert: `type: 'flow'`, `target: 'crm_lead_conversion'`, `locations: ['record_header', 'list_item']`, `visible: P`record.status == \"qualified\" && record.is_converted == false`` (bare CEL, never brace-wrapped), `confirmText`, `successMessage`, `refreshAfter: true`. Bulk: `type: 'script'`, `locations: ['list_toolbar']`, a field-backed `params: [{ field: 'campaign_id', objectOverride: 'campaign', required: true }]`, and a `body` that reads `input.selectedIds`.",
+      "expected_output": "Two `defineAction` items. Convert: `type: 'flow'`, `target: 'crm_lead_conversion'`, `locations: ['record_header', 'list_item']`, `visible: P`record.status == \"qualified\" && record.is_converted == false`` (bare CEL, never brace-wrapped), `confirmText`, `successMessage`, `refreshAfter: true`. Bulk: `type: 'script'`, `execution: 'perRecord'`, wired by the lead list view's `bulkActions: ['<name>']`, a field-backed `params: [{ field: 'campaign_id', objectOverride: 'campaign', required: true }]`, and a `body` that runs once per ticked row and reads that row's id as `ctx.recordId`.",
       "files": [],
       "assertions": {
-        "must_contain": ["defineAction", "locations", "record_header", "list_toolbar", "visible", "successMessage", "selectedIds"],
-        "must_not_contain": ["{record."]
+        "must_contain": ["defineAction", "locations", "record_header", "bulkActions", "visible", "successMessage", "ctx.recordId"],
+        "must_not_contain": ["{record.", "input.selectedIds"]
       }
     },
     {
       "id": 4,
-      "prompt": "Design a custom lead record page: the Convert action inline in the header, a highlights strip, a stage path over `status`, and the related contacts. Also write a user guide for the `crm` package under src/docs and link it from the nav.",
+      "prompt": "Design a custom lead record page: the Convert action inline in the header, a highlights strip, a stage path over `status`, and the related contacts. Also write a user guide for the `crm` package under src/docs and link it from the nav. None of the project's files are in this directory: write the files in your answer.",
       "expected_output": "`definePage({ name, label, type: 'record', object: 'lead', template: 'three-column', regions: [...] })` with `page:header` (the declared action's id in `properties.actions`, no sibling action node), `record:highlights`, `record:path` (`statusField`, `stages`), `record:related_list`. The guide is a flat, namespace-prefixed `src/docs/crm_user_guide.md` in pure Markdown (MDX and image references are rejected at build), surfaced by a `type: 'doc'` nav item (`doc: 'crm_user_guide'`).",
       "files": [],
       "assertions": {
         "must_contain": ["definePage", "type: 'record'", "regions", "page:header", "record:path", "src/docs/", "type: 'doc'"],
-        "must_not_contain": ["record_detail", ".mdx", "type: 'url'"]
+        "must_not_contain": ["type: 'record_detail'", ".mdx", "type: 'url'"]
       }
     },
     {
@@ -48,16 +48,16 @@
       "files": [],
       "assertions": {
         "must_contain": ["definePage", "interfaceConfig", "columns", "allowedVisualizations", "summary", "dataset"],
-        "must_not_contain": ["sourceView", "type: 'chart'"]
+        "must_not_contain": ["sourceView:", "type: 'chart'"]
       }
     },
     {
       "id": 6,
       "prompt": "Invoice entry as a stepped form — header, then line items, then review — saving the invoice and its lines together.",
-      "expected_output": "A stepped form over ONE object is `formViews` with `type: 'wizard'` and `sections`, not a screen flow (nothing branches). Line items come from the DATA MODEL: `inlineEdit` on the child's `master_detail` field, which renders the editable grid and saves parent + children in one atomic `/api/v1/batch`; `subforms` only to override derived columns. No custom page, and no 'Add line' button (the ghost row exists).",
+      "expected_output": "No form view and no screen flow (nothing branches): the invoice's New form is built from the object, so header, then lines, then the rest is the order of `invoice`'s `fieldGroups`. Line items come from the DATA MODEL: a field group naming the `master_detail` child (`fieldGroups: [{ key: 'header', ... }, { key: 'lines', label: 'Lines', relatedList: 'invoice_line' }, ...]`), which draws the editable grid in the form and saves parent + children in one atomic `/api/v1/batch`; without the group the form has no lines, whatever `inlineEdit` says. The hand-over says the steps are sections of one form, not a wizard: a `formViews` wizard is not loaded by New or Edit, and a named form an action opens draws no line items. No custom page, and no 'Add line' button (the ghost row exists).",
       "files": [],
       "assertions": {
-        "must_contain": ["type: 'wizard'", "inlineEdit", "formViews", "master_detail"],
+        "must_contain": ["fieldGroups", "relatedList", "master_detail"],
         "must_not_contain": ["type: 'screen'"]
       }
     },
@@ -88,7 +88,7 @@
       "files": [],
       "assertions": {
         "must_contain": ["disabled:", "disabledReason"],
-        "must_not_contain": ["description:", "disabledMessage", "disabledTooltip", "visible:"]
+        "must_not_contain": ["description:", "disabledMessage:", "disabledTooltip:", "visible:"]
       }
     },
     {
@@ -123,7 +123,7 @@
     },
     {
       "id": 13,
-      "prompt": "`task` already ships `defineView({ list, form })`. Reps want a board: add a `priority` select (A / B / C) to the object and a kanban grouped by it — the list must stay — and tell them what they will see when they first open the board.",
+      "prompt": "`task` already ships `defineView({ list })`. Reps want a board: add a `priority` select (A / B / C) to the object and a kanban grouped by it — the list must stay — and tell them what they will see when they first open the board.",
       "expected_output": "A new `listViews.priority_kanban` entry (`type: 'kanban'`, the required top-level `columns`, `kanban: { groupByField: 'priority' }`) beside the untouched default `list`, never the list retyped into a board. The hand-over discloses the empty board: every existing task has no `priority` yet, so all of them sit in the trailing `Uncategorized` lane (scroll right on a narrow screen) under one empty lane per option; dragging a card onto a real lane writes the field, or they edit from the list; a runtime-token or CEL `defaultValue` on the new field fills no existing row, and a literal one does only on a SQL datasource, where it becomes the column DEFAULT.",
       "files": [],
       "assertions": {
@@ -157,7 +157,7 @@
       "expected_output": "One `defineAction` (`type: 'api'`, that `target` with `${ctx.recordId}`) whose `params` are `version` and `plan_token` (both `required`; `plan_token` declares no default or carry-over), beside `preflight: { read: { url: '/api/v1/packages/${ctx.recordId}/upgrade-plan?version=${param.version}' }, path: 'data', fields: [{ path: 'changes', label: 'Changes', format: 'json' }], seed: [{ param: 'plan_token', path: 'token' }] }`. The dialog sends that one same-origin GET once `version` has a value, shows `changes` above the params, and fills `plan_token` read-only, so Confirm waits for the answer. Not a script or companion action that fetches the plan by hand, not an absolute URL, credential headers or a non-GET read, and no `result` hole (there is no answer before the read); the endpoint still checks the token.",
       "files": [],
       "assertions": {
-        "must_contain": ["preflight", "read: { url: '/api/v1/packages/${ctx.recordId}/upgrade-plan?version=${param.version}' }", "seed: [{ param: 'plan_token', path: 'token' }]"],
+        "must_contain": ["preflight", "/api/v1/packages/${ctx.recordId}/upgrade-plan?version=${param.version}", "seed:", "path: 'token'"],
         "must_not_contain": ["headers:", "${result."]
       }
     },
@@ -183,12 +183,52 @@
     },
     {
       "id": 19,
-      "prompt": "Author the default form view for `opportunity`: 42 fields in six sections (Basics, Amounts, Dates, Partner, Shipping, Internal Notes). Reps fill Basics and Amounts on every create and the other four rarely. The form opens in the New dialog, mostly on wide screens.",
-      "expected_output": "One form view with `type: 'simple'`: the six sections stacked on one scrolling page, each listing its own `fields`, with `collapsed: true` on the four rarely filled ones (or `collapse: 'collapsed'` on those `fieldGroups` entries of the object). `columns: 3` uses the wide dialog and `modalSize: 'xl'` sizes it. Not tabs: a required field on another tab is flagged only on its tab, and the tab strip overflows on a phone.",
+      "prompt": "Shape the New and Edit form of `opportunity`: 42 fields in six sections (Basics, Amounts, Dates, Partner, Shipping, Internal Notes). Reps fill Basics and Amounts on every create and the other four rarely, and `loss_reason` is never known at create. The form opens in the New dialog, mostly on wide screens.",
+      "expected_output": "No form view: New and Edit are built from the object. Six `fieldGroups` entries on `opportunity` in that order, with `collapse: 'collapsed'` on the four rarely filled ones, and `showOnCreate: false` on `loss_reason`, which edit, the record page and lists still show (it must not be `required: true`: the pair is refused). Not a `form`, `formViews.default` or `formViews.create` (each parses and is not loaded), and no `modalSize` or `columns`: the dialog's size and column count are derived.",
       "files": [],
       "assertions": {
-        "must_contain": ["type: 'simple'", "modalSize"],
-        "must_not_contain": ["type: 'tabbed'"]
+        "must_contain": ["fieldGroups", "collapse: 'collapsed'", "showOnCreate: false"],
+        "must_not_contain": ["type: 'tabbed'", "modalSize:"]
+      }
+    },
+    {
+      "id": 20,
+      "prompt": "The `submit_signoff` script action on `crm_invoice` refuses a non-draft invoice with `throw new Error('Only a draft invoice can be signed off.')` in its `js` body, so zh-CN users read that English sentence in the failure toast. Make it refuse in the caller's language, with the code `NOT_DRAFT` and a 409.",
+      "expected_output": "The action declares `refusals: { NOT_DRAFT: { message: 'Only a draft invoice can be signed off.', status: 409 } }` and the body throws the code instead of the sentence: `throw { code: 'NOT_DRAFT' }`. The server answers the declared sentence on the refusal's `userMessage` with status 409, in the caller's locale once the zh-CN bundle carries `objects.crm_invoice._actions.submit_signoff.refusals.NOT_DRAFT.message`, else as declared, and the console's failure toast shows it. The action authors no failure copy of its own, which would replace that sentence in the toast. A code the body throws literally and `refusals` does not declare is refused at save. Not a locale branch in the body, and not a second sentence per language in the throw.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["refusals", "NOT_DRAFT", "409", "_actions"],
+        "must_not_contain": ["hooks.submit_signoff"]
+      }
+    },
+    {
+      "id": 21,
+      "prompt": "The `send_email` script action on `crm_contact` logs a `crm_activity` whose subject its `js` body builds as `'Email: ' + input.subject`. Our organization works in zh-CN, but every logged subject reads English. Make the subject follow the organization's language.",
+      "expected_output": "The action declares `texts: { email_subject: { message: 'Email: {{ subject }}', params: ['subject'] } }` and the body writes `const subject = await ctx.text('email_subject', { subject: input.subject });` instead of concatenating. The sentence is answered in the organization's language (the Localization setting if somebody set it, else `i18n.defaultLocale`), never the language of the person who pressed the button, and translated at `objects.crm_contact._actions.send_email.texts.email_subject.message`, the translation keeping its `{{ subject }}` hole. With no translation the declared sentence is written. A key `texts` does not declare is refused. Not a locale branch in the body, and not a `messages` lookup.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["texts", "email_subject", "ctx.text", "_actions"],
+        "must_not_contain": ["hooks.send_email"]
+      }
+    },
+    {
+      "id": 22,
+      "prompt": "The `import_contacts` api action on `crm_contact` returns `{ imported: 12, rejected: [{ email, reason }, ...] }` as its `result.data`. When it finishes, show the user how many contacts were imported and every rejected row with its email and reason. Write the part of the action that does this.",
+      "expected_output": "The action declares `resultDialog: { fields: [{ path: 'imported', label: 'Imported', format: 'text' }, { path: 'rejected', label: 'Rejected', format: 'table', columns: [{ path: 'email', label: 'Email' }, { path: 'reason', label: 'Reason' }] }] }`. `table` is a field format: one row per element of the array at `path`, one cell per `columns` entry in order, each column an object whose `path` is read inside one element. `columns` is required with `table` and never guessed from the element's keys. Not a dialog-level `format: 'table'`, not a list of column names, not a `successMessage` that spells the rows out (the dialog replaces the toast), and no promise of a copy button on a text cell.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["resultDialog", "format: 'table'", "columns", "rejected", "reason"],
+        "must_not_contain": ["columns: ['email'", "display: 'table'"]
+      }
+    },
+    {
+      "id": 23,
+      "prompt": "Our `archive_tasks` script action is wired as a `bulkActionDefs` entry with `execution: 'aggregate'`. Its body loops over the selected ids and updates each task, but some tasks are locked and their update throws, so the whole run is reported as failed even though most rows were archived. Make the result dialog say which rows were archived and why each of the others was not.",
+      "expected_output": "`archive_tasks` moves to the per-record form, the form for a body that writes each selected row: the action declares `execution: 'perRecord'`, the list view names it in `bulkActions: ['archive_tasks']` in place of the `bulkActionDefs` aggregate entry, and the body updates only the row it is handed (`ctx.recordId` / `ctx.record`), with no loop over `input._selectedIds`. Each ticked task is then its own run: a locked task's throw fails that row alone and the result dialog lists it with its message, while every other row is archived and counted. Not a `try` / `catch` loop in the aggregate body that returns per-row lists or counts of what it wrote and what refused, not `execution: 'perRecord'` added while the `bulkActionDefs` aggregate entry stays, not a `resultDialog`, and not a rethrow carrying the rows (a rejection's body is dropped).",
+      "files": [],
+      "assertions": {
+        "must_contain": ["perRecord", "bulkActions: [", "ctx.record"],
+        "must_not_contain": ["succeeded:", "{ succeeded", "{ failed"]
       }
     }
   ]

@@ -27,6 +27,12 @@ import * as React from 'react';
 import { describe, it, expect, afterEach } from 'vitest';
 import { render, cleanup, screen } from '@testing-library/react';
 import { TranslationDataSchema } from '@objectstack/spec/system';
+// `validateMetadataDraft` reaches dynamic `@objectstack/formula`, `@objectstack/lint`
+// and `@object-ui/core` imports; their first load is paid here, at collection,
+// never inside a case's clock (`check:test-source-alias`).
+import '@objectstack/formula';
+import '@objectstack/lint';
+import '@object-ui/core';
 
 import { validateMetadataDraft } from '../clientValidation';
 import { t, tFormat } from '../i18n';
@@ -79,6 +85,7 @@ const ONE_ENTRY: Record<string, { data: Record<string, unknown>; key: string; ro
     key: 'crm_manual',
     row: () => keys(2),
   },
+  mappings: { data: { lead_feed: { label: 'Import des pistes' } }, key: 'lead_feed', row: () => keys(1) },
   metadataForms: { data: { object: { label: 'Objet' } }, key: 'object', row: () => keys(1) },
   // `settingsCommon` is one strict object, not a record of author-named nodes:
   // its members (`sourceLabels`) are what the card counts and samples.

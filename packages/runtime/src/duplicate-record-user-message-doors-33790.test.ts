@@ -273,8 +273,11 @@ describe.each([
 
 describe('CONTROL', () => {
   it('a row error whose producer marked nothing carries no `userMessage`', async () => {
+    // A write naming a field the object does not declare: its producer marks
+    // nothing. (An id naming no row is no longer this population: the
+    // not-found refusal marks the end user's sentence since #34699.)
     const { body } = await call('zh-CN', 'POST', `/data/${OBJECT}/updateMany`, {
-      records: [{ id: 'no_such_record', data: { plant: 'P9' } }],
+      records: [{ id: r2, data: { no_such_field: 'x' } }],
     });
 
     const row = body.results?.[0];

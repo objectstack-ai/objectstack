@@ -113,7 +113,6 @@ vi.mock('./metadata-admin/useMetadata', async (importOriginal) => ({
 import '@objectstack/lint';
 import { ObjectView } from './ObjectView';
 import { ExpressionProvider } from '../providers/ExpressionProvider';
-import { RECORD_OPEN_PREFERENCE_KEY } from '../utils/recordOpenPreference';
 
 type Lang = 'en' | 'ru' | 'ar';
 
@@ -142,9 +141,6 @@ const OBJECTS = [
 ];
 
 beforeEach(() => {
-  // A stored `split` (objectstack#26677) is an unknown value since
-  // objectstack#28915: the record opens in the drawer over the full list.
-  window.localStorage.setItem(RECORD_OPEN_PREFERENCE_KEY, 'split');
   vi.stubGlobal(
     'fetch',
     vi.fn(async () =>
@@ -159,7 +155,6 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
-  window.localStorage.removeItem(RECORD_OPEN_PREFERENCE_KEY);
 });
 
 function boot(lang: Lang) {
@@ -197,10 +192,12 @@ async function footer(lang: Lang, count: number): Promise<string> {
     </I18nProvider>,
   );
   await screen.findByRole('dialog', undefined, { timeout: 5000 });
-  const bar = await screen.findByTestId('record-count-bar', undefined, { timeout: 5000 });
-  // The split pane's footer is gone: the bar is the one count on the page.
+  // objectstack#35702 — the grid's footer row leads with the count, the one
+  // count at the foot of the page: no split-pane footer, no count bar.
+  const lead = await screen.findByTestId('data-table-summary-lead', undefined, { timeout: 5000 });
   expect(screen.queryByTestId('record-count-footer')).toBeNull();
-  const text = bar.querySelector('span')?.textContent ?? '';
+  expect(screen.queryByTestId('record-count-bar')).toBeNull();
+  const text = lead.textContent ?? '';
   cleanup();
   return text;
 }
@@ -335,8 +332,8 @@ describe('a list page load reads its object once, and the bar counts that answer
     render(<Harness />);
     const reads = () => find.mock.calls.filter(([object]) => object === OBJECT_NAME);
     const barCount = async () =>
-      (await screen.findByTestId('record-count-bar', undefined, { timeout: 5000 })).querySelector('span')
-        ?.textContent ?? '';
+      // objectstack#35702 — the count leads the grid's footer row.
+      (await screen.findByTestId('data-table-summary-lead', undefined, { timeout: 5000 })).textContent ?? '';
     return { reads, barCount, bump: () => act(async () => { bump(); }) };
   }
 

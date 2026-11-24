@@ -25,7 +25,7 @@ import { I18nProvider } from '@object-ui/react';
 import { DropdownMenu, DropdownMenuContent } from '@object-ui/components';
 import { en, zh } from '@object-ui/i18n/locales';
 import type { BulkActionDef } from '@object-ui/types';
-import { BulkActionBar } from '../components/BulkActionBar';
+import { BulkActionBar } from '../components/SelectionBar';
 import { SelectionContextMenuItems } from '../components/RowContextMenu';
 
 afterEach(cleanup);

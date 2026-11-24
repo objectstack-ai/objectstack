@@ -297,9 +297,14 @@ describe('a member\'s agent finds a colleague through the read-only sys_user ove
     // The served directory set the PR states, read off the live row: the
     // `Admin` group is the only thing withheld.
     // Read off the declaration, never listed here: every declared field
-    // outside the group, the set the PR body and the changeset enumerate.
+    // outside the group, the set the PR body and the changeset enumerate. An
+    // `internal` field is served to nobody on the generic data path, whatever
+    // its group, so it is no part of either read.
     const served = fieldsOf(agentRows, uid.colleague);
-    const directory = Object.keys(SysUser.fields as Record<string, unknown>).filter((f) => !ADMIN_GROUP.includes(f)).sort();
+    const directory = Object.entries(SysUser.fields as Record<string, { internal?: boolean }>)
+      .filter(([f, field]) => !ADMIN_GROUP.includes(f) && field.internal !== true)
+      .map(([f]) => f)
+      .sort();
     expect(served).toEqual(directory);
     expect(served).toEqual(expect.arrayContaining(['id', 'name', 'email']));
   });

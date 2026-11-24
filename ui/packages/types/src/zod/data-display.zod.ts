@@ -496,6 +496,11 @@ export const DataTableSchema = BaseSchema.extend({
   }).optional().describe('Per-record CEL predicates for the built-in row Delete item (objectui#2614)'),
   onSelectionChange: handlerKeyRefusal('onSelectionChange', 'runtime-slot', 'Selection change handler'),
   onColumnsReorder: handlerKeyRefusal('onColumnsReorder', 'runtime-slot', 'Column reorder handler'),
+  // RUNTIME SLOT (objectstack#35955): `data-table` calls `schema.onColumnHide`
+  // with the column's key when the column menu's "Hide column" is picked; its
+  // supplier is `ObjectGrid` (`@object-ui/plugin-grid`). A function is not
+  // JSON, so authored data is refused by name.
+  onColumnHide: handlerKeyRefusal('onColumnHide', 'runtime-slot', 'Column hide handler'),
   // ⭐ `75fca9669` — seven keys the REGISTERED `data-table` renderer reads off
   // the authored document while this arm declared none of them. `BaseSchema` is
   // `.passthrough()`, so an undeclared key is NOT refused: it stops being judged
@@ -553,6 +558,17 @@ export const DataTableSchema = BaseSchema.extend({
   // is `ObjectGrid` (`@object-ui/plugin-grid`) for a grouped view. A React node
   // is no more JSON than a function is, so authored data is refused by name.
   rowGroups: handlerKeyRefusal('rowGroups', 'runtime-slot', 'Host-built group bands of a grouped grid'),
+  // RUNTIME SLOT (objectstack#35548): `data-table` reads `schema.summaryRow`
+  // and draws it as the table's last row, a host-built React node per column;
+  // its supplier is `ObjectGrid` (`@object-ui/plugin-grid`). A React node is
+  // not JSON, so authored data is refused by name.
+  summaryRow: handlerKeyRefusal('summaryRow', 'runtime-slot', 'Host-built per-column summary row'),
+  // RUNTIME SLOT (objectstack#35678): `data-table` reads `schema.floatingBar`
+  // and floats it at the bottom of its scroll box, keeping room after the last
+  // row; its supplier is `ObjectGrid` (`@object-ui/plugin-grid`), whose
+  // selection bar it is. A React node is not JSON, so authored data is refused
+  // by name.
+  floatingBar: handlerKeyRefusal('floatingBar', 'runtime-slot', 'Host-built selection bar floated over the table'),
   // RUNTIME SLOT (objectstack#27365): `data-table` reads `schema.isRowEditable`
   // and calls it per row before opening a cell editor; its supplier is
   // `ObjectGrid` (`@object-ui/plugin-grid`), answering from the server's

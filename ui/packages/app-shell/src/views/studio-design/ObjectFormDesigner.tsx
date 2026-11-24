@@ -7,20 +7,13 @@
  * dragged **across** sections, with per-field selection opening the same
  * protocol field inspector the grid uses.
  *
- * Which layout that is (objectstack#30057) is the host's to say, from the form
- * view the app's create and edit dialogs select (`selectRecordFormView`):
- *
- *  - **No such form view** — the dialogs lay out the object's own fields, so
- *    the sections are the object's `fieldGroups`: membership and in-group
- *    order persist to the object draft (`fields[].group` + `fieldGroups`) via
- *    the pillar's draft → publish, through the tested `object-fields-io`
- *    helpers (readFields/writeFields · readGroups/addGroup/renameGroup/
- *    removeGroup/moveGroup · clearFieldGroup).
- *  - **A form view** (`formView`) — the dialogs render that view's
- *    `sections`, so the designer reads and writes them (`formViewSections`):
- *    a section's `fields` in order, its heading, its own `columns`. A field
- *    the view lists in no section is not on the form, and the canvas says so
- *    in the bucket it keeps those fields in. The host saves the view's draft.
+ * The app's create and edit dialogs lay out the object's own fields by its
+ * `fieldGroups` (objectstack-ai/objectstack#36425: no internal form view is
+ * loaded), so the sections are the object's `fieldGroups`: membership and
+ * in-group order persist to the object draft (`fields[].group` +
+ * `fieldGroups`) via the pillar's draft → publish, through the tested
+ * `object-fields-io` helpers (readFields/writeFields · readGroups/addGroup/
+ * renameGroup/removeGroup/moveGroup · clearFieldGroup).
  *
  * Build boundary: this component is only the drag/section CHROME. No new
  * metadata shape.
@@ -58,8 +51,9 @@ import {
   removeGroup,
   moveGroup,
   clearFieldGroup,
+  groupMembership,
+  writeGroupLayout,
   type FieldEntry,
-  type FieldsView,
 } from '../metadata-admin/previews/object-fields-io.js';
 import { useSafeFieldLabel } from '@object-ui/i18n';
 import { t, tFormat, useMetadataLocale } from '../metadata-admin/i18n.js';
@@ -71,16 +65,8 @@ import { AddFieldPopover } from './AddFieldPopover.js';
 import type { FieldTypeId } from '../metadata-admin/previews/field-types.js';
 import { fieldTypeName } from '../metadata-admin/previews/fieldTypeName.js';
 import { ContributionMark, contributedItemTitle } from './StudioRailCustomizations.js';
+import { DraftChip } from './StudioDraftMark.js';
 import type { ContributedOnObject } from './contributionRows.js';
-import {
-  addFormSection,
-  formSectionMembers,
-  formSectionSlots,
-  moveFormSection,
-  removeFormSection,
-  renameFormSection,
-  writeFormSectionLayout,
-} from './formViewSections.js';
 
 const UNGROUPED = '__ungrouped__';
 
@@ -341,23 +327,14 @@ export interface ObjectFormDesignerProps {
    */
   contributedFields?: ReadonlyMap<string, ContributedOnObject>;
   /**
-   * objectstack#30057 — the form view the app opens for this object
-   * (`selectRecordFormView`): its `sections` are the canvas, and every layout
-   * edit is handed to `onSectionsChange`, never to `onChange`. `null` / absent:
-   * the object has none, and the canvas is its `fieldGroups`.
+   * objectstack#34725 — the fields the AI assistant (or an agent through MCP)
+   * changed in the pending draft, by name (`agentDraftMarkOf`): their cards
+   * carry the 草稿 chip the properties panel shows.
    */
-  formView?: FormViewLayout | null;
+  draftMarkedFields?: ReadonlySet<string>;
 }
 
-/** The form view layout the designer edits in place of the object's `fieldGroups`. */
-export interface FormViewLayout {
-  /** The view's sections, as its buffer holds them. */
-  sections: readonly Record<string, unknown>[];
-  /** Persist the sections a layout edit leaves. */
-  onSectionsChange: (sections: Record<string, unknown>[]) => void;
-}
-
-/** One section on the canvas: a field group, or a form view's section (objectstack#30057). */
+/** One section on the canvas: a field group. */
 interface DesignerSection {
   key: string;
   label: string;
@@ -371,6 +348,8 @@ interface DesignerSection {
 
 const NO_CONTRIBUTED_FIELDS: ReadonlyMap<string, ContributedOnObject> = new Map();
 const ContributedFieldsContext = React.createContext<ReadonlyMap<string, ContributedOnObject>>(NO_CONTRIBUTED_FIELDS);
+const NO_DRAFT_MARKED_FIELDS: ReadonlySet<string> = new Set();
+const DraftMarkedFieldsContext = React.createContext<ReadonlySet<string>>(NO_DRAFT_MARKED_FIELDS);
 
 /**
  * The Form tab's one toolbar row (objectui#12451): the host's mode control and
@@ -477,6 +456,7 @@ function SortableField({
   // objectstack#29786 — a field another package contributes reads as a
   // read-only card on any surface, and names its package.
   const contributed = React.useContext(ContributedFieldsContext).get(entry.name) ?? null;
+  const draftMarked = React.useContext(DraftMarkedFieldsContext).has(entry.name);
   const locked = readOnly || contributed !== null;
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: fid(entry.name),
@@ -546,6 +526,7 @@ function SortableField({
           <span className="truncate">{label}</span>
           {required && <span className="text-destructive">*</span>}
         </span>
+        {draftMarked && <DraftChip locale={locale} of={entry.name} testId="studio-form-field-draft-chip" />}
         {contributed && (
           <ContributionMark packageName={contributed.packageName} packageId={contributed.packageId} locale={locale} />
         )}
@@ -583,7 +564,6 @@ function Section({
   onMove,
   readOnly = false,
   relatedTable,
-  deleteTitleKey = 'engine.studio.designer.groupDeleteTitle',
 }: {
   containerId: string;
   title: string;
@@ -609,8 +589,6 @@ function Section({
    * group is such a group), and so is no drop target.
    */
   relatedTable?: string;
-  /** objectstack#30057 — what the delete button's title says becomes of the section's fields. */
-  deleteTitleKey?: string;
 }): React.ReactElement {
   const locale = useMetadataLocale();
   const { setNodeRef, isOver } = useDroppable({ id: containerId, disabled: !!relatedTable });
@@ -692,7 +670,7 @@ function Section({
                 type="button"
                 onClick={onDelete}
                 aria-label={t('engine.studio.designer.groupDelete', locale)}
-                title={t(deleteTitleKey, locale)}
+                title={t('engine.studio.designer.groupDeleteTitle', locale)}
                 className={cn(iconBtn, 'hover:bg-destructive/10 hover:text-destructive')}
               >
                 <Trash2 className="h-3.5 w-3.5" />
@@ -772,26 +750,21 @@ export function ObjectFormDesigner({
   readOnly = false,
   modeControl,
   contributedFields = NO_CONTRIBUTED_FIELDS,
-  formView = null,
+  draftMarkedFields = NO_DRAFT_MARKED_FIELDS,
 }: ObjectFormDesignerProps): React.ReactElement {
   const locale = useMetadataLocale();
   const view = React.useMemo(() => readFields(draft.fields), [draft.fields]);
   const fieldGroups = React.useMemo(() => readGroups(draft.fieldGroups), [draft.fieldGroups]);
-  // objectstack#30057 — the sections the canvas draws: the form view's when
-  // the app opens one, else the object's field groups.
-  const formSections = formView?.sections ?? null;
-  const onSectionsChange = formView?.onSectionsChange;
+  // The sections the canvas draws: the object's field groups.
   const groups = React.useMemo<DesignerSection[]>(
     () =>
-      formSections
-        ? formSectionSlots(formSections, fieldGroups)
-        : fieldGroups.map((g) => ({
-            key: g.key,
-            label: typeof g.label === 'string' ? g.label : '',
-            name: g.key,
-            relatedList: typeof g.relatedList === 'string' ? g.relatedList : undefined,
-          })),
-    [formSections, fieldGroups],
+      fieldGroups.map((g) => ({
+        key: g.key,
+        label: typeof g.label === 'string' ? g.label : '',
+        name: g.key,
+        relatedList: typeof g.relatedList === 'string' ? g.relatedList : undefined,
+      })),
+    [fieldGroups],
   );
   const entryByName = React.useMemo(() => new Map(view.entries.map((e) => [e.name, e] as const)), [view]);
 
@@ -832,9 +805,7 @@ export function ObjectFormDesigner({
     for (const g of groups) if (g.relatedList) m.set(cid(g.key), g.relatedList);
     return m;
   }, [groups]);
-  // objectstack#30057 — on a form view, a field no section lists is not on
-  // the form, and its bucket says so.
-  const ungroupedKey = formSections ? 'engine.studio.designer.offForm' : 'engine.studio.designer.ungrouped';
+  const ungroupedKey = 'engine.studio.designer.ungrouped';
   // Section order: declared groups (in order) then the ungrouped bucket.
   const sectionOrder = React.useMemo(() => [...groups.map((g) => cid(g.key)), cid(UNGROUPED)], [groups]);
   // Container order: the same, without the related-table groups.
@@ -851,9 +822,7 @@ export function ObjectFormDesigner({
 
   // objectstack#27516 — the shown fields the platform pins first in the
   // ungrouped bucket (see `settlePinned`), each by its place in the injection.
-  // A form view's sections are written as they are, so nothing moves back there.
   const pinRank = React.useMemo(() => {
-    if (formSections) return new Map<string, number>();
     const injected = injectedSystemColumnDefs(draft);
     const order = Object.keys(injected);
     const rank = new Map<string, number>();
@@ -864,7 +833,7 @@ export function ObjectFormDesigner({
       if (isInjectedColumnDefinition(ungrouped, injected[e.name])) rank.set(fid(e.name), order.indexOf(e.name));
     }
     return rank;
-  }, [draft, view.entries, systemFieldNames, formSections]);
+  }, [draft, view.entries, systemFieldNames]);
 
   // Derive container → ordered field ids from the draft (editable fields only;
   // system/audit fields are preserved on write but never shown in the layout).
@@ -873,35 +842,25 @@ export function ObjectFormDesigner({
     () => view.entries.filter((e) => !isKeptOffLayout(e, systemFieldNames)).map((e) => e.name),
     [view.entries, systemFieldNames],
   );
-  const groupOf = React.useCallback(
-    (name: string) => {
-      const g = entryByName.get(name)?.def.group;
-      return typeof g === 'string' ? g : undefined;
-    },
-    [entryByName],
-  );
+  // Membership as the record page resolves it: a group's own `fields` list,
+  // else the field's older `group` (objectstack#35900).
+  const membership = React.useMemo(() => groupMembership(view, fieldGroups), [view, fieldGroups]);
   const derived = React.useMemo(() => {
     const map: Record<string, string[]> = {};
     for (const c of containerOrder) map[c] = [];
-    if (formSections) {
-      // objectstack#30057 — each section's listed fields; the rest are off the form.
-      const members = formSectionMembers(formSections, shownFields, groupOf);
-      const placed = new Set<string>();
-      for (const [key, names] of members) {
-        map[cid(key)] = names.map(fid);
-        for (const n of names) placed.add(n);
-      }
-      map[cid(UNGROUPED)] = shownFields.filter((n) => !placed.has(n)).map(fid);
-      return map;
+    // Each group's members in display order (its `fields` list first), then
+    // the ungrouped bucket in field declaration order.
+    const shown = new Set(shownFields);
+    for (const [key, names] of membership.members) {
+      if (!map[cid(key)]) continue;
+      map[cid(key)] = names.filter((n) => shown.has(n)).map(fid);
     }
-    for (const e of view.entries) {
-      if (isKeptOffLayout(e, systemFieldNames)) continue;
-      const g = typeof e.def.group === 'string' ? e.def.group : '';
-      const target = g && map[cid(g)] ? cid(g) : cid(UNGROUPED);
-      map[target].push(fid(e.name));
-    }
+    map[cid(UNGROUPED)] = shownFields.filter((n) => {
+      const g = membership.groupOf.get(n);
+      return g === undefined || !map[cid(g)];
+    }).map(fid);
     return settlePinned(map, pinRank);
-  }, [view.entries, containerOrder, systemFieldNames, pinRank, formSections, shownFields, groupOf]);
+  }, [containerOrder, pinRank, shownFields, membership]);
 
   const [items, setItems] = React.useState<Record<string, string[]>>(derived);
   const [activeId, setActiveId] = React.useState<string | null>(null);
@@ -970,47 +929,38 @@ export function ObjectFormDesigner({
     [items],
   );
 
-  /** Flatten the container map back to `fields` (stamping group + order) and persist. */
+  /**
+   * Persist the container map. On the object's own groups the layout is
+   * written where `fieldGroups[].fields` keeps it: each changed group's list,
+   * never the object's field declaration order (objectstack#35900) —
+   * `writeGroupLayout` says exactly what moves.
+   */
   const commit = React.useCallback(
     (next: Record<string, string[]>) => {
-      if (formSections && onSectionsChange) {
-        // objectstack#30057 — the layout is the form view's: the object's
-        // fields are not touched.
-        const layout = new Map<string, string[]>();
-        for (const g of groups) layout.set(g.key, (next[cid(g.key)] ?? []).map(unFid));
-        onSectionsChange(writeFormSectionLayout(formSections, layout, shownFields, fieldGroups, groupOf));
-        return;
-      }
-      const editable: FieldEntry[] = [];
+      // Every field the canvas does not show is absent from the layout and
+      // keeps its place — the same test that kept it off the containers
+      // (objectui#11780).
+      const layout = new Map<string | null, string[]>();
       for (const c of containerOrder) {
         const groupKey = unCid(c);
-        for (const id of next[c] ?? []) {
-          const e = entryByName.get(unFid(id));
-          if (!e) continue;
-          const def = { ...e.def };
-          if (groupKey === UNGROUPED) delete def.group;
-          else def.group = groupKey;
-          editable.push({ name: e.name, def });
-        }
+        layout.set(groupKey === UNGROUPED ? null : groupKey, (next[c] ?? []).map(unFid).filter((n) => entryByName.has(n)));
       }
-      // Every field the canvas does not show rides back unchanged — the same
-      // test that kept it off the containers (objectui#11780).
-      const system = view.entries.filter((e) => isKeptOffLayout(e, systemFieldNames));
-      const finalView: FieldsView = { shape: view.shape, entries: [...system, ...editable] };
-      onChange({ fields: writeFields(finalView) });
+      // The bucket is drawn pinned-first (`settlePinned`), not in declaration
+      // order: unless the drag changed it, its order is not the author's to write.
+      const bucket = cid(UNGROUPED);
+      const was = derived[bucket] ?? [];
+      const now = next[bucket] ?? [];
+      const reorderUngrouped = was.length !== now.length || was.some((id, i) => id !== now[i]);
+      const patch = writeGroupLayout(view, fieldGroups, layout, { reorderUngrouped });
+      if (patch.fields !== undefined || patch.fieldGroups !== undefined) onChange(patch);
     },
     [
       containerOrder,
       entryByName,
       view,
-      systemFieldNames,
+      derived,
       onChange,
-      formSections,
-      onSectionsChange,
-      groups,
-      shownFields,
       fieldGroups,
-      groupOf,
     ],
   );
 
@@ -1050,27 +1000,17 @@ export function ObjectFormDesigner({
   };
 
   const newLabel = t('engine.studio.designer.newGroup', locale);
-  const addSection = () =>
-    formSections && onSectionsChange
-      ? onSectionsChange(addFormSection(formSections, newLabel))
-      : onChange({ fieldGroups: addGroup(fieldGroups, newLabel) });
-  const renameSection = (key: string, label: string) =>
-    formSections && onSectionsChange
-      ? onSectionsChange(renameFormSection(formSections, key, label))
-      : onChange({ fieldGroups: renameGroup(fieldGroups, key, label) });
-  const moveSection = (key: string, dir: -1 | 1) =>
-    formSections && onSectionsChange
-      ? onSectionsChange(moveFormSection(formSections, key, dir))
-      : onChange({ fieldGroups: moveGroup(fieldGroups, key, dir) });
+  const addSection = () => onChange({ fieldGroups: addGroup(fieldGroups, newLabel) });
+  const renameSection = (key: string, label: string) => onChange({ fieldGroups: renameGroup(fieldGroups, key, label) });
+  const moveSection = (key: string, dir: -1 | 1) => onChange({ fieldGroups: moveGroup(fieldGroups, key, dir) });
   const deleteSection = (key: string) =>
-    formSections && onSectionsChange
-      ? onSectionsChange(removeFormSection(formSections, key))
-      : onChange({ fieldGroups: removeGroup(fieldGroups, key), fields: writeFields(clearFieldGroup(view, key)) });
+    onChange({ fieldGroups: removeGroup(fieldGroups, key), fields: writeFields(clearFieldGroup(view, key)) });
 
   const activeEntry = activeId && !activeId.startsWith('g:') ? entryByName.get(unFid(activeId)) : null;
 
   return (
     <ContributedFieldsContext.Provider value={contributedFields}>
+    <DraftMarkedFieldsContext.Provider value={draftMarkedFields}>
     <div className="flex min-h-0 flex-1 flex-col">
       <FormToolbar
         leading={modeControl}
@@ -1137,15 +1077,12 @@ export function ObjectFormDesigner({
                   selectedField={selectedField}
                   onSelectField={onSelectField}
                   selected={!isUngrouped && selectedGroup === unCid(c)}
-                  // The group inspector edits a field group; a form view's
-                  // section is not one (objectstack#30057).
-                  onSelect={!isUngrouped && onSelectGroup && !formSections ? () => onSelectGroup(unCid(c)) : undefined}
+                  onSelect={!isUngrouped && onSelectGroup ? () => onSelectGroup(unCid(c)) : undefined}
                   onRename={(label) => renameSection(unCid(c), label)}
                   onDelete={() => deleteSection(unCid(c))}
                   onMove={(dir) => moveSection(unCid(c), dir)}
                   readOnly={readOnly}
                   relatedTable={tableOf.get(c)}
-                  deleteTitleKey={formSections ? 'engine.studio.designer.sectionDeleteTitle' : undefined}
                 />
               );
             })}
@@ -1172,6 +1109,7 @@ export function ObjectFormDesigner({
         </DndContext>
       </div>
     </div>
+    </DraftMarkedFieldsContext.Provider>
     </ContributedFieldsContext.Provider>
   );
 }

@@ -40,6 +40,7 @@ import {
 } from './sql-driver-top-level.js';
 import type { ReadPresentationKind } from './sql-driver-top-level.js';
 import type { SqlDriver } from './sql-driver.js';
+import { primeFixedReadLeafKeyTypes } from './fixed-read-leaf-key-type.js';
 
 /**
  * The `SqlDriver` members the bodies of {@link AggregationFacet} read — every one of
@@ -84,6 +85,10 @@ export class AggregationFacet {
     // the engine (`objectql` `relation-group-join.ts`); read once, judged
     // before anything compiles.
     const relationJoins = relationGroupJoinsOf(query);
+    // [aggregate order and cut] The order, cut and group count the engine
+    // hands (`objectql` `aggregate-order-cut.ts`); read once, judged before
+    // anything compiles.
+    const orderCut = aggregateOrderCutOf(query);
     // [#33697] The reference zone the date buckets are read in
     // (`DriverAggregateQuery.timezone`, ADR-0053 Phase 2 D2 as amended), judged
     // before anything compiles. Absent or `UTC` is the UTC bucket every dialect
@@ -104,22 +109,24 @@ export class AggregationFacet {
     const measureFilters = (query.aggregations ?? [])
       .map((agg) => agg.filter)
       .filter((filter): filter is NonNullable<typeof filter> => !!filter && Object.keys(filter).length > 0);
+    // Every condition this statement compiles, folded into one `where` for the primes below.
+    const primedWhere = measureFilters.length > 0 ? { $and: [...(query.where ? [query.where] : []), ...measureFilters] } : query.where;
     // [#31395] SQL Server: which columns are GUIDs, before a text operator compiles.
-    if (this.isMssql) {
-      await this.primeMssqlGuidColumns(
-        object,
-        measureFilters.length > 0 ? { $and: [...(query.where ? [query.where] : []), ...measureFilters] } : query.where,
-      );
-    }
+    if (this.isMssql) await this.primeMssqlGuidColumns(object, primedWhere);
     // [#31390] On Oracle a federated object's RAW(16) uuid columns are read from
     // the remote catalog before a comparand or a written value is bound.
-    if (this.isOracle) await this.primeOracleRawUuidColumns(object);
-    // …and the same two primes for each joined related object, whose scope
+    if (this.isOracle) await this.primeOracleRawUuidColumns(object, primedWhere);
+    // [ADR-0155 O2] PostgreSQL: the key type a fixed-read leaf's inner read is cast to.
+    // The measure filters compile with the same where compiler, so they are
+    // walked too, folded as the SQL Server prime folds them.
+    await primeFixedReadLeafKeyTypes(this, object, primedWhere, options);
+    // …and the same primes for each joined related object, whose scope
     // compiles against its own table.
     for (const join of relationJoins ?? []) {
       if (join.parent === null) continue;
       if (this.isMssql) await this.primeMssqlGuidColumns(join.parent.object, join.parent.scope);
-      if (this.isOracle) await this.primeOracleRawUuidColumns(join.parent.object);
+      if (this.isOracle) await this.primeOracleRawUuidColumns(join.parent.object, join.parent.scope);
+      await primeFixedReadLeafKeyTypes(this, join.parent.object, join.parent.scope, options);
     }
     const builder = this.getBuilder(object, options);
     // The column a FIELD names in this statement: its `external.columnMap`
@@ -201,6 +208,10 @@ export class AggregationFacet {
     // column name the caller will read. See {@link foldEmptyAggregateAnswers}.
     const foldedOutput = new Map<string, number>();
 
+    // [aggregate order and cut] Every column the grouped statement projects,
+    // under the name the caller reads: the only names an order key may name.
+    const projected = new Set<string>();
+
     if (query.groupBy) {
       // groupBy items may be plain strings ('region') or structured objects
       // ({ field: 'closed_at', dateGranularity: 'quarter' }). For structured
@@ -222,6 +233,7 @@ export class AggregationFacet {
           const column = columnOf(g);
           builder.groupBy(column);
           builder.select(column === g ? g : this.knex.raw(`?? as ${this.aliasIdentifierSql(g)}`, [column]));
+          projected.add(g);
           const kind = this.readPresentationKind(table, g);
           if (kind) presentedOutput.set(g, kind);
         } else if (g && typeof g === 'object' && g.field) {
@@ -237,6 +249,7 @@ export class AggregationFacet {
           // renamed, so the buckets are identical and only their column name
           // moves.
           const outKey = g.alias ?? g.field;
+          projected.add(outKey);
           if (g.dateGranularity) {
             const bucket = this.buildDateBucketExpr(g.field, g.dateGranularity, table, columnOf(g.field), bucketZone);
             if (!bucket) {
@@ -309,6 +322,8 @@ export class AggregationFacet {
     (relationJoins ?? []).forEach((join, i) => {
       const at = `__rg${i}`;
       const idColumn = `${at}_id`;
+      for (const a of join.attrs) projected.add(a.alias);
+      projected.add(join.resolvedAlias);
       if (join.parent === null) {
         for (const a of join.attrs) builder.select(this.knex.raw(`NULL as ${this.aliasIdentifierSql(a.alias)}`));
         builder.select(this.knex.raw(`0 as ${this.aliasIdentifierSql(join.resolvedAlias)}`));
@@ -418,6 +433,7 @@ export class AggregationFacet {
           ? `${lowering.sql}(CASE WHEN (${measureFilter.sql}) THEN 1 END)`
           : `${lowering.sql}(*)`;
         if (agg.alias) {
+          projected.add(agg.alias);
           if (fieldExpr === '*') {
             builder.select(this.knex.raw(`${starFunc} as ${this.aliasIdentifierSql(agg.alias)}`, filterBindings));
           } else {
@@ -522,9 +538,52 @@ export class AggregationFacet {
     // {@link unsupportedAggregationFilterError}, {@link refuseDateBucketedGroupBy}
     // — is raised while the statement is BUILT, upstream of this line, so the
     // catch-all cannot bury a precise refusal under a generic 500.
+    // [aggregate order and cut] The grouped statement becomes a derived table
+    // the cut is taken from, so every dialect orders by the row's own columns
+    // (PostgreSQL and SQL Server refuse an output alias inside an ORDER BY
+    // expression) and counts the groups it formed BEFORE the cut — a window
+    // over the derived table runs ahead of its ORDER BY and LIMIT: one
+    // statement, one round trip. A NULL ranks last in either direction; a
+    // column that folds to an identity over nothing (`sum`, the counts) ranks
+    // as that identity, the value its row is served with.
+    let statement: Knex.QueryBuilder = builder;
+    if (orderCut !== undefined) {
+      const unknown = orderCut.orderBy.find((k) => !projected.has(k.column));
+      if (unknown !== undefined) {
+        throw aggregateOrderCutFault(`it orders by '${unknown.column}', which the grouped statement does not project`);
+      }
+      if (projected.has(orderCut.totalGroupsColumn)) {
+        throw aggregateOrderCutFault(`the group count column '${orderCut.totalGroupsColumn}' is also a projected column`);
+      }
+      const groups = this.aliasIdentifierSql('__os_groups');
+      let outer = this.knex
+        .select(this.knex.raw(`${groups}.*`))
+        .select(this.knex.raw(`count(*) over () as ${this.aliasIdentifierSql(orderCut.totalGroupsColumn)}`))
+        .from(builder.as('__os_groups'));
+      if (options?.transaction) outer = outer.transacting(options.transaction as Knex.Transaction);
+      for (const key of orderCut.orderBy) {
+        const ref = `${groups}.${this.aliasIdentifierSql(key.column)}`;
+        const identity = foldedOutput.get(key.column);
+        if (key.rank !== undefined) {
+          // A declared order: each listed value ranks by its position, every
+          // other value (a NULL among them) on one rank past the listed ones;
+          // `order` runs over the ranks. The engine's trailing keys order the
+          // values that share that rank.
+          const arms = key.rank.map((_, i) => `when ? then ${i}`).join(' ');
+          outer.orderByRaw(`case ${ref} ${arms} else ${key.rank.length} end ${key.order}`, [...key.rank]);
+        } else if (identity !== undefined && Number.isFinite(identity)) {
+          outer.orderByRaw(`coalesce(${ref}, ${String(identity)}) ${key.order}`);
+        } else {
+          outer.orderByRaw(`case when ${ref} is null then 1 else 0 end, ${ref} ${key.order}`);
+        }
+      }
+      if (orderCut.limit !== undefined) outer.limit(orderCut.limit);
+      presentedOutput.set(orderCut.totalGroupsColumn, 'number');
+      statement = outer;
+    }
     let rows: unknown[];
     try {
-      rows = await builder;
+      rows = await statement;
     } catch (error) {
       // [#8931, #11541] Attribute what the caller's own query supports, then
       // fall to the terminal catch-all — see
@@ -563,6 +622,60 @@ export class AggregationFacet {
  * JSON query can carry one; set by the engine after every middleware ran.
  */
 export const RELATION_GROUP_JOINS: unique symbol = Symbol.for('objectstack.driver.aggregate.relationGroupJoins');
+
+/**
+ * [aggregate order and cut] The AST key the engine hands its order, cut and
+ * group-count request on (`objectql` `aggregate-order-cut.ts`, the same
+ * `Symbol.for` key — this package does not import the engine). A symbol, so no
+ * wire request and no JSON query can carry one; set by the engine after every
+ * middleware ran.
+ */
+export const AGGREGATE_ORDER_CUT_DIRECTIVE: unique symbol = Symbol.for('objectstack.driver.aggregate.orderCut');
+
+/** The order, cut and group-count column, as the engine hands them. */
+export interface AggregateOrderCutDirective {
+  /**
+   * The full order, every key a column the grouped statement projects. A key
+   * with a `rank` orders by each value's position in it, every value it does
+   * not list (a NULL among them) on one rank past the listed ones, and `order`
+   * runs over the ranks.
+   */
+  readonly orderBy: ReadonlyArray<{
+    readonly column: string;
+    readonly order: 'asc' | 'desc';
+    readonly rank?: ReadonlyArray<string | number>;
+  }>;
+  /** The most groups to answer; absent = every group. */
+  readonly limit?: number;
+  /** The column every row answers the pre-cut group count under. */
+  readonly totalGroupsColumn: string;
+}
+
+/** A directive the engine did not compose: refused, INTERNAL_ERROR / 500, before anything runs. */
+function aggregateOrderCutFault(detail: string): Error {
+  const err = new Error(
+    `aggregate: an order-and-cut directive the engine did not compose was refused (${detail}); the query was NOT run.`,
+  ) as Error & { code?: string; status?: number };
+  err.code = 'INTERNAL_ERROR';
+  err.status = 500;
+  return err;
+}
+
+/** The directive on `query`, or `undefined` when it carries none; a malformed one is refused. */
+export function aggregateOrderCutOf(query: DriverQuery): AggregateOrderCutDirective | undefined {
+  const directive = (query as unknown as Record<symbol, unknown>)[AGGREGATE_ORDER_CUT_DIRECTIVE];
+  if (directive === undefined) return undefined;
+  const d = directive as Partial<AggregateOrderCutDirective> | null;
+  const ok = d !== null && typeof d === 'object'
+    && Array.isArray(d.orderBy)
+    && d.orderBy.every((k) => typeof k?.column === 'string' && k.column !== '' && (k.order === 'asc' || k.order === 'desc')
+      && (k.rank === undefined || (Array.isArray(k.rank) && k.rank.length >= 1
+        && k.rank.every((v: unknown) => typeof v === 'string' || (typeof v === 'number' && Number.isFinite(v))))))
+    && (d.limit === undefined || (typeof d.limit === 'number' && Number.isInteger(d.limit) && d.limit >= 1))
+    && typeof d.totalGroupsColumn === 'string' && d.totalGroupsColumn !== '';
+  if (!ok) throw aggregateOrderCutFault('malformed');
+  return d as AggregateOrderCutDirective;
+}
 
 /** One relation join, as the engine hands it. */
 export interface RelationGroupJoin {

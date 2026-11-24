@@ -1,0 +1,7 @@
+{
+  "file": "packages/objectql/src/fixed-read-leaf-position.ts",
+  "adrs": [
+    "ADR-0155"
+  ],
+  "invariant": "collectFixedReadLeaves is the one rule for where a fixed-read leaf may sit and on which verb, asked by the comparand door before the middleware chain and by the executor seam after it (ADR-0155 D1): only as the $in comparand of id on the object it names, in that object's where or inside the composed scope of a ReadableIds leaf over it, under $and, $or and $not; the read form on find, findOne, count and aggregate and inside every composed scope, the write form only in a predicate update's where (ruling 3 A), and no leaf on delete. Every other position, a having and an aggregation's filter are refused INTERNAL_ERROR / 500 by name, before a later door reads the leaf as a value. ENGINE_FIXED_READ_LEAF_BRANDS is the one list of brands the engine's door admits (admitFixedReadLeaves). Do not admit the write form on a read verb, do not add a flag per brand, and do not admit a leaf the seam does not judge."
+}

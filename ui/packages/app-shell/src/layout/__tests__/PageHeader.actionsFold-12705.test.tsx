@@ -57,6 +57,8 @@ function installLayout() {
   };
   const rectWidth = (el: Element): number => {
     if (el.matches('[data-testid="page-header-actions"]')) return clusterWidth(el);
+    // The header's own width, read by the opt-in compact form (objectstack#35446).
+    if (el.matches('[data-testid="page-header"]')) return headerWidth;
     if (!el.closest('[data-testid="page-header"]')) return 0;
     if (el.tagName === 'H1') return (el.textContent ?? '').length * 10;
     if (el.matches('span[aria-hidden="true"]')) return 1;
@@ -166,7 +168,12 @@ function PageMenu({ children }: { children?: React.ReactNode }) {
   );
 }
 
-function mount({ appName = 'crm', fold = true, onImport = vi.fn() } = {}) {
+function mount({
+  appName = 'crm',
+  fold = true,
+  onImport = vi.fn(),
+  compactBelow,
+}: { appName?: string; fold?: boolean; onImport?: () => void; compactBelow?: number } = {}) {
   installLayout();
   render(
     <MemoryRouter initialEntries={[`/apps/${appName}/page`]}>
@@ -179,6 +186,7 @@ function mount({ appName = 'crm', fold = true, onImport = vi.fn() } = {}) {
               subtitle={DESCRIPTION}
               actions={<Actions onImport={onImport} />}
               foldedActions={fold ? <FoldedActions onImport={onImport} /> : undefined}
+              compactBelow={compactBelow}
             />
           }
         />
@@ -266,5 +274,57 @@ describe('the console page header folds its actions before its text (objectui#12
     const { cluster, labelled } = mount({ fold: false });
     expect(cluster.getAttribute('data-folded')).toBeNull();
     expect(labelled()).toEqual(['New', 'Import', 'Update Stage']);
+  });
+});
+
+/**
+ * objectstack#35446 — the opt-in compact form: below `compactBelow` px of its
+ * own width the one-row header drops its description and draws the folded
+ * actions, even where the content fold above would keep them (700 px fits all
+ * three actions beside the description in this model).
+ */
+describe('the console page header’s opt-in compact form (objectstack#35446)', () => {
+  it('a 700 px header with compactBelow 768 draws no description and folds Import into the ⋯', () => {
+    headerWidth = 700;
+    const onImport = vi.fn();
+    const { header, cluster, labelled } = mount({ compactBelow: 768, onImport });
+    expect(header.getAttribute('data-compact')).toBe('true');
+    expect(within(header).queryByText(DESCRIPTION)).toBeNull();
+    // No description to share the row with: the title is not capped to 60 % of it.
+    expect(header.querySelector('h1')!.className).not.toContain('sm:max-w-[60%]');
+    expect(cluster.getAttribute('data-folded')).toBe('true');
+    expect(labelled()).toEqual(['New']);
+    fireEvent.pointerDown(within(cluster).getByTestId('more'), { button: 0, pointerType: 'mouse' });
+    fireEvent.click(screen.getByTestId('folded-import'));
+    expect(onImport).toHaveBeenCalledTimes(1);
+  });
+
+  it('follows the header’s width both ways: the full row at 1000 px, compact again at 700 px', () => {
+    headerWidth = 700;
+    const { header, labelled } = mount({ compactBelow: 768 });
+    expect(labelled()).toEqual(['New']);
+    resizeTo(1000);
+    expect(header.getAttribute('data-compact')).toBeNull();
+    expect(within(header).getByText(DESCRIPTION)).toBeTruthy();
+    expect(labelled()).toEqual(['New', 'Import', 'Update Stage']);
+    resizeTo(700);
+    expect(within(header).queryByText(DESCRIPTION)).toBeNull();
+    expect(labelled()).toEqual(['New']);
+  });
+
+  it('CONTROL — without compactBelow a 700 px header keeps its description and all three actions', () => {
+    headerWidth = 700;
+    const { header, labelled } = mount();
+    expect(header.getAttribute('data-compact')).toBeNull();
+    expect(within(header).getByText(DESCRIPTION)).toBeTruthy();
+    expect(header.querySelector('h1')!.className).toContain('sm:max-w-[60%]');
+    expect(labelled()).toEqual(['New', 'Import', 'Update Stage']);
+  });
+
+  it('CONTROL — the Setup posture ignores compactBelow; its description is its own line', () => {
+    headerWidth = 600;
+    const { header } = mount({ appName: 'setup', compactBelow: 768 });
+    expect(header.getAttribute('data-compact')).toBeNull();
+    expect(within(header).getByTestId('page-header-description').textContent).toBe(DESCRIPTION);
   });
 });

@@ -84,6 +84,22 @@ function footer(
   return result.current.summaries.get('f')?.label;
 }
 
+
+/**
+ * A column's footer figure, read as 「HEADER: FIGURE」. Since objectstack#35548
+ * the figure is a cell of the table's own last row (`data-table-summary-*`),
+ * under its column; the header is read off the same column's `<th>`, so the
+ * pairing is the table's, not a label the footer spells.
+ */
+const footerText = (field: string) => {
+  const cell = screen.getByTestId(`data-table-summary-${field}`);
+  const index = Array.from(cell.parentElement!.children).indexOf(cell);
+  const header = cell.closest('table')!.querySelectorAll('thead tr:first-child th')[index]?.textContent?.trim() ?? '';
+  // The first column's cell also holds the row's lead (「Count N」): not its figure.
+  const lead = cell.querySelector('[data-testid="data-table-summary-lead"]')?.textContent ?? '';
+  return `${header}: ${(cell.textContent ?? '').replace(lead, '')}`;
+};
+
 describe('a column carrying a retired hint no longer changes the footer (objectui#11588)', () => {
   it('column `currency`: a code-less currency field reads the tenant $, not the column EUR', () => {
     expect(footer({ currency: 'EUR' }, { type: 'currency' }, 1234.5)).toBe('Sum: $1,234.50');
@@ -168,8 +184,8 @@ describe('through ObjectGrid, the real caller (objectui#11588)', () => {
       { field: 'amount', summary: 'sum', currency: 'EUR', defaultCurrency: 'GBP' },
       { field: 'qty', summary: 'sum', precision: 4, scale: 4 },
     ]);
-    expect(screen.getByTestId('summary-amount').textContent).toBe('Deal Amount: Sum: $1,234.50');
-    expect(screen.getByTestId('summary-qty').textContent).toBe('Quantity: Sum: 1.50');
+    expect(footerText('amount')).toBe('Deal Amount: Sum: $1,234.50');
+    expect(footerText('qty')).toBe('Quantity: Sum: 1.50');
   });
 
   it('control: the same columns without the keys read the same footer', async () => {
@@ -178,7 +194,7 @@ describe('through ObjectGrid, the real caller (objectui#11588)', () => {
       { field: 'amount', summary: 'sum' },
       { field: 'qty', summary: 'sum' },
     ]);
-    expect(screen.getByTestId('summary-amount').textContent).toBe('Deal Amount: Sum: $1,234.50');
-    expect(screen.getByTestId('summary-qty').textContent).toBe('Quantity: Sum: 1.50');
+    expect(footerText('amount')).toBe('Deal Amount: Sum: $1,234.50');
+    expect(footerText('qty')).toBe('Quantity: Sum: 1.50');
   });
 });

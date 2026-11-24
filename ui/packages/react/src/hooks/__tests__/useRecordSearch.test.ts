@@ -661,3 +661,24 @@ describe('caller-supplied getDisplayName identity (objectui#10044)', () => {
     expect(result.current.results.map((h) => h.display)).toEqual(['v2:Acme Corp']);
   });
 });
+
+describe('a hit carries its object\'s palette colour (objectstack#35985)', () => {
+  it('the object\'s `color` rides on each of its hits, and none when the object declares none', async () => {
+    const coloured = [
+      { name: 'account', label: 'Account', icon: 'building', color: 'orange' },
+      { name: 'contact', label: 'Contact' },
+    ];
+    const ds = makeDataSource({
+      account: [{ id: 'a1', name: 'Acme Corp' }],
+      contact: [{ id: 'c1', name: 'Acme Contact' }],
+    });
+    const { result } = renderHook(() =>
+      useRecordSearch({ query: 'acme', objects: coloured, dataSource: ds, debounceMs: 0 }),
+    );
+    await waitFor(() => expect(result.current.results.length).toBe(2));
+    const byObject = Object.fromEntries(result.current.results.map((h) => [h.objectName, h]));
+    expect(byObject.account.icon).toBe('building');
+    expect(byObject.account.color).toBe('orange');
+    expect(byObject.contact.color).toBeUndefined();
+  });
+});

@@ -38,6 +38,10 @@ import { callData, invokeBusinessAction } from './action-execution.js';
 import { buildEndpointExecutionContext, executeEndpointTarget } from './endpoint-executor.js';
 import { ApiEndpointSchema } from '@objectstack/spec/api';
 import type { ApiEndpointMatch } from '@objectstack/spec/contracts';
+import { BUILTIN_OPERATION_MESSAGES } from '@objectstack/spec/system';
+// Paid at collection, not inside a case's clock (check:test-source-alias):
+// the source under test loads it dynamically.
+import '@objectstack/metadata';
 
 const OBJECT = 'crm_case';
 const MEMBER = 'usr_member';
@@ -420,5 +424,50 @@ describe('the trigger route and the action door answer one refusal for one row',
 
         expect(envelopeOf(viaTrigger, UNREADABLE)).toEqual(envelopeOf(viaAction, UNREADABLE));
         expect(envelopeOf(viaTrigger, UNREADABLE)).toMatchObject({ status: 404, code: 'RECORD_NOT_FOUND' });
+    });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// 5. The refusal's end-user sentence is in the caller's language
+// ───────────────────────────────────────────────────────────────────────────
+
+/**
+ * [#34699] The not-found refusal of the action door's subject load and of the
+ * flow-start door's row admission carries `userMessage` in the CALLER's
+ * language (the request `locale`, then `workspaceLocale`, then `en`), as the
+ * data door's own miss does. Both doors hold the caller's execution context
+ * and hand it to the refusal; `code`, status and `message` do not move.
+ */
+describe('[#34699] the not-found refusal speaks the caller\'s language at the action and flow-start doors', () => {
+    const ZH = BUILTIN_OPERATION_MESSAGES['zh-CN'].record_not_found;
+    const EN = BUILTIN_OPERATION_MESSAGES.en.record_not_found;
+    const zhCaller = () => ({ ...ec(MEMBER), locale: 'zh-CN' });
+
+    it('the action door (`POST /actions`), a routed row the zh-CN caller cannot read: the zh-CN sentence', async () => {
+        const res = await boot(zhCaller()).actions(`/${OBJECT}/${FLOW_ACTION.name}/${UNREADABLE}`);
+
+        expect(statusOf(res)).toBe(404);
+        expect(errorOf(res).code).toBe('RECORD_NOT_FOUND');
+        expect(errorOf(res).userMessage).toBe(ZH);
+        // The operator half keeps its id and API name.
+        expect(errorOf(res).message).toBe(`Record ${UNREADABLE} not found in ${OBJECT}`);
+    });
+
+    it('the flow-start door (`POST /automation/:name/trigger`), a row key the zh-CN caller cannot read: the zh-CN sentence', async () => {
+        const h = boot(zhCaller());
+        const res = await h.dispatch('POST', `/automation/${ELEVATED_SCREEN}/trigger`, { recordId: UNREADABLE, objectName: OBJECT });
+
+        expect(statusOf(res)).toBe(404);
+        expect(errorOf(res).code).toBe('RECORD_NOT_FOUND');
+        expect(errorOf(res).userMessage).toBe(ZH);
+        expect(h.automation.execute).not.toHaveBeenCalled();
+    });
+
+    it('CONTROL: the same start by a caller with no locale answers the English sentence, so the language is the caller\'s', async () => {
+        expect(ZH).not.toBe(EN);
+        const res = await boot(ec(MEMBER)).dispatch('POST', `/automation/${ELEVATED_SCREEN}/trigger`, { recordId: UNREADABLE, objectName: OBJECT });
+
+        expect(statusOf(res)).toBe(404);
+        expect(errorOf(res).userMessage).toBe(EN);
     });
 });

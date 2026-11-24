@@ -188,12 +188,56 @@ async function inPopover<T>(trigger: HTMLElement, read: (content: HTMLElement) =
 
 const toolbarButton = (name: RegExp) => screen.getByRole('button', { name });
 
+/** The rows of the shared field list (objectstack#35549), in the order it draws them. */
+function fieldListLabels(scope: HTMLElement): string[] {
+  return Array.from(scope.querySelectorAll('[role="option"][data-field]')).map(text);
+}
+
+/** Step from the field list into its advanced panel (today's builder) and read its first field picker. */
+async function advancedFieldOptions(content: HTMLElement, kind: 'filter' | 'sort'): Promise<string[]> {
+  // A sort in force: the row's one sort chip opens every level, the builder,
+  // at once (objectstack#35878 on objectstack#35876).
+  const direct = kind === 'sort' ? within(content).queryByTestId('sort-chip-panel') : null;
+  if (!direct) fireEvent.click(within(content).getByTestId(`${kind}-panel-open-advanced`));
+  const advanced = direct ?? (await within(content).findByTestId(`${kind}-panel-advanced`));
+  return comboboxOptions(within(advanced).getAllByRole('combobox')[0]);
+}
+
 function checkboxLabels(scope: HTMLElement): string[] {
   // The Display panel's Edit inline entry is a `role="switch"` button since
   // objectui#12423, so every checkbox here is a field's.
   return Array.from(scope.querySelectorAll('input[type="checkbox"]'))
     .map((box) => text(box.closest('label')));
 }
+
+/** The Options menu's Fields level: the shown fields' names, then the hidden and addable ones'. */
+function fieldsLevelLabels(scope: HTMLElement): string[] {
+  const shown = Array.from(scope.querySelectorAll('[data-testid="options-fields-shown"] li')).map(text);
+  const hidden = Array.from(scope.querySelectorAll('[data-testid="options-fields-hidden"] li, [data-testid="options-fields-addable"] li')).map(text);
+  return [...shown, ...hidden];
+}
+
+/**
+ * Open one level of the Options menu, read it, and go back to the menu. The
+ * Display panel is a menu whose rows open a second level, so Group, Row
+ * color and the field list sit one click below the panel.
+ */
+/** The entry that opens a level: Fields is behind 「+ Add column」 since objectstack#35878. */
+const levelEntry = (row: string) => (row === 'fields' ? 'options-add-column' : `options-row-${row}`);
+
+async function optionsLevel<T>(content: HTMLElement, row: string, read: (level: HTMLElement) => Promise<T> | T): Promise<T> {
+  fireEvent.click(within(content).getByTestId(levelEntry(row)));
+  const level = await within(content).findByTestId(`options-page-${row}`);
+  try {
+    return await read(level);
+  } finally {
+    fireEvent.click(within(content).getByTestId('options-back'));
+    await within(content).findByTestId('options-menu');
+  }
+}
+
+/** The Options menu levels that carry a field list. */
+const FIELD_LEVELS = ['fields', 'group', 'color'] as const;
 
 /**
  * Both Row color pickers, the toolbar's and the View settings popover's, are
@@ -220,7 +264,9 @@ const FIELD_LIST_TRIGGERS: Record<'wide' | 'compact', string[]> = {
   // The compact toolbar folds Group, Row color and Hide fields into Display
   // (objectui#12423; "View settings" before it), which reads `allFields` for
   // all three.
-  compact: ['Display', 'Filter', 'Sort'],
+  // Display reads View settings since objectstack#35878 (Options since
+  // objectstack#35548); Filter and Sort are the condition row's.
+  compact: ['Filter', 'Sort', 'View settings'],
 };
 
 interface Sweep {
@@ -235,18 +281,45 @@ async function sweepToolbar(): Promise<Sweep> {
   const toolbar = cluster?.parentElement;
   if (!toolbar) throw new Error('no toolbar around the tool cluster');
   const offered = new Map<string, string[]>();
-  for (const trigger of Array.from(toolbar.querySelectorAll<HTMLElement>('[aria-haspopup]'))) {
+  // Since objectstack#35878 Filter and Sort open from the condition row under
+  // the bar: its triggers are swept too.
+  const conditionRow = document.querySelector('[data-testid="list-condition-row"]');
+  const triggers = [
+    ...Array.from(toolbar.querySelectorAll<HTMLElement>('[aria-haspopup]')),
+    ...Array.from(conditionRow?.querySelectorAll<HTMLElement>('[aria-haspopup]') ?? []),
+  ];
+  for (const trigger of triggers) {
     // Keyed by the label: a count badge's digits are dropped, and so is the
     // ", 1 active" the Filter trigger's name carries while a filter is held
     // (objectui#12500).
-    const name = (trigger.getAttribute('aria-label') ?? text(trigger)).split(',')[0].replace(/\d+/g, '').trim();
+    const name = (trigger.getAttribute('aria-label') ?? text(trigger)).split(',')[0].replace(/\d+/g, '').trim().replace(/^Add filter$/, 'Filter').replace(/^Sorted by .*$/, 'Sort');
     const content = await openPopover(trigger);
     const items = [
       ...Array.from(content.querySelectorAll('option')).map(text),
+      // The shared field list the Filter and Sort triggers open
+      // (objectstack#35549, objectstack#35550): a row per field, `role="option"`.
+      ...fieldListLabels(content),
       ...checkboxLabels(content),
     ];
     for (const combobox of Array.from(content.querySelectorAll<HTMLElement>('[role="combobox"]'))) {
       items.push(...(await comboboxOptions(combobox)));
+    }
+    // The Options menu draws its field lists one level down: walk each level.
+    if (within(content).queryByTestId('options-menu')) {
+      for (const row of FIELD_LEVELS) {
+        if (!within(content).queryByTestId(levelEntry(row))) continue;
+        items.push(...(await optionsLevel(content, row, async (level) => {
+          const found = [
+            ...Array.from(level.querySelectorAll('option')).map(text),
+            ...checkboxLabels(level),
+            ...fieldsLevelLabels(level),
+          ];
+          for (const combobox of Array.from(level.querySelectorAll<HTMLElement>('[role="combobox"]'))) {
+            found.push(...(await comboboxOptions(combobox)));
+          }
+          return found;
+        })));
+      }
     }
     offered.set(name, items);
     await closePopover(trigger);
@@ -283,7 +356,9 @@ describe('every field list ListView and its toolbar offer asks the field read (o
       const sweep = await sweepToolbar();
       expect(fieldListsOf(sweep)).toEqual(FIELD_LIST_TRIGGERS[layout]);
       for (const name of FIELD_LIST_TRIGGERS[layout]) {
-        expect(sweep.offered.get(name), name).toContain('Secret Note');
+        // The Group editor offers only fields that can group (objectstack#36204):
+        // the textarea `secret_note` is not one, the select `secret_status` is.
+        expect(sweep.offered.get(name), name).toContain(name === 'Group' ? 'Secret Status' : 'Secret Note');
       }
       expect(sweep.toolbarText).toContain('Secret Status');
     });
@@ -308,12 +383,23 @@ const POSITIONS: Position[] = [
   {
     name: 'the Filter panel (objectui#11925)',
     props: HELD_FILTER,
-    read: () => inPopover(toolbarButton(/^filter/i), (c) => comboboxOptions(within(c).getAllByRole('combobox')[0])),
+    read: () => inPopover(toolbarButton(/^(add )?filter$/i), fieldListLabels),
+  },
+  {
+    name: 'the Filter panel, advanced step',
+    props: HELD_FILTER,
+    read: () => inPopover(toolbarButton(/^(add )?filter$/i), (c) => advancedFieldOptions(c, 'filter')),
   },
   {
     name: 'the Sort picker (objectui#11943)',
+    // No sort in force: the dashed 「Sort」 opens the field list
+    // (objectstack#35878); with one, the chip opens the levels (next case).
+    read: () => inPopover(toolbarButton(/^sort/i), fieldListLabels),
+  },
+  {
+    name: 'the Sort picker, advanced step',
     schemaExtra: { sort: [{ field: 'title', order: 'asc' }] },
-    read: () => inPopover(toolbarButton(/^sort/i), (c) => comboboxOptions(within(c).getAllByRole('combobox')[0])),
+    read: () => inPopover(toolbarButton(/^sort/i), (c) => advancedFieldOptions(c, 'sort')),
   },
   {
     name: 'the hide-fields popover',
@@ -341,17 +427,17 @@ const POSITIONS: Position[] = [
   {
     name: 'View settings: the Group editor',
     schemaExtra: { compactToolbar: true, grouping: { fields: [{ field: 'status', order: 'asc', collapsed: false }] } },
-    read: () => inPopover(viewSettings(), (c) => comboboxOptions(within(c).getByTestId('grouping-field-0'))),
+    read: () => inPopover(viewSettings(), (c) => optionsLevel(c, 'group', (l) => comboboxOptions(within(l).getByTestId('grouping-field-0')))),
   },
   {
     name: 'View settings: the Row color select',
     schemaExtra: { compactToolbar: true, rowColor: { field: 'status', colors: {} } },
-    read: () => inPopover(viewSettings(), (c) => pickerLabels(within(c).getByTestId('color-field-select'))),
+    read: () => inPopover(viewSettings(), (c) => optionsLevel(c, 'color', (l) => pickerLabels(within(l).getByTestId('color-field-select')))),
   },
   {
-    name: 'View settings: the hide-fields section',
+    name: 'View settings: the Fields level',
     schemaExtra: { compactToolbar: true, hiddenFields: ['priority'] },
-    read: () => inPopover(viewSettings(), checkboxLabels),
+    read: () => inPopover(viewSettings(), (c) => optionsLevel(c, 'fields', fieldsLevelLabels)),
   },
 ];
 
@@ -416,9 +502,10 @@ describe('each field list, one pin per position (objectui#11984)', () => {
     await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
     await waitFor(async () => expect(await hideFields()).toEqual(FIELD_LABELS));
     expect(chips()).toEqual(['Status', 'Secret Status']);
-    // The level's own field is offered in its own dropdown, so all five are.
+    // The Group editor offers the select fields only (objectstack#36204), so
+    // both selects are, the unreadable one included.
     const group = await inPopover(toolbarButton(/^group/i), (c) => comboboxOptions(within(c).getByTestId('grouping-field-0')));
-    expect(group).toEqual(FIELD_LABELS);
+    expect(group).toEqual(['Status', 'Secret Status']);
   });
 });
 
@@ -436,20 +523,26 @@ describe('a stored configuration on an unreadable field is kept as stored (objec
     const content = await openPopover(toolbarButton(/^group/i));
     const level = within(content).getByTestId('grouping-field-0');
     expect(level).toHaveTextContent('secret_note');
-    expect(await comboboxOptions(level)).toEqual(['secret_note', 'Title', 'Status', 'Priority']);
+    // The Group editor offers the readable select alone (objectstack#36204).
+    expect(await comboboxOptions(level)).toEqual(['secret_note', 'Status']);
     expect(onGroupingChange).not.toHaveBeenCalled();
-    // "Add group field" seeds a readable field, and the new level does not offer it.
+    // "Add group field" opens the field dropdown (objectstack#36204), which
+    // does not offer the unreadable field; the pick is the new level.
     fireEvent.click(within(content).getByTestId('grouping-add'));
+    expect(onGroupingChange).not.toHaveBeenCalled();
+    const offered = await screen.findByRole('listbox');
+    expect(within(offered).getAllByRole('option').map(text)).toEqual(['Status']);
+    fireEvent.click(within(offered).getByRole('option', { name: 'Status' }));
     expect(onGroupingChange).toHaveBeenLastCalledWith({
       fields: [
         { field: 'secret_note', order: 'asc', collapsed: false },
-        { field: 'title', order: 'asc', collapsed: false },
+        { field: 'status', order: 'asc', collapsed: false },
       ],
     });
-    expect(await comboboxOptions(within(content).getByTestId('grouping-field-1'))).toEqual(['Title', 'Status', 'Priority']);
+    expect(await comboboxOptions(within(content).getByTestId('grouping-field-1'))).toEqual(['Status']);
     // Its own level can be removed.
     fireEvent.click(within(content).getByTestId('grouping-remove-0'));
-    expect(onGroupingChange).toHaveBeenLastCalledWith({ fields: [{ field: 'title', order: 'asc', collapsed: false }] });
+    expect(onGroupingChange).toHaveBeenLastCalledWith({ fields: [{ field: 'status', order: 'asc', collapsed: false }] });
   });
 
   it('a hidden-field entry on it is not listed, counted or cleared, and every write keeps it', async () => {
@@ -584,19 +677,14 @@ describe('both hide-fields lists offer the fields a reader may add, and only fie
     );
   }
 
-  /** The Display panel's Hide Fields section, opened when it starts closed. */
-  async function displayHideFields(read: (content: HTMLElement) => Promise<string[]> | string[] | void): Promise<unknown> {
-    return inPopover(viewSettings(), async (content) => {
-      if (content.querySelectorAll('input[type="checkbox"]').length === 0) {
-        fireEvent.click(within(content).getByRole('button', { name: /^Hide Fields/ }));
-      }
-      return read(content);
-    });
+  /** The Options menu's Fields level. */
+  async function displayHideFields(read: (level: HTMLElement) => Promise<string[]> | string[] | void): Promise<unknown> {
+    return inPopover(viewSettings(), (content) => optionsLevel(content, 'fields', read));
   }
 
   const LAYOUTS = {
     wide: { schemaExtra: {}, read: () => inPopover(toolbarButton(/^hide fields/i), checkboxLabels) },
-    compact: { schemaExtra: { compactToolbar: true }, read: () => displayHideFields(checkboxLabels) as Promise<string[]> },
+    compact: { schemaExtra: { compactToolbar: true }, read: () => displayHideFields(fieldsLevelLabels) as Promise<string[]> },
   } as const;
 
   for (const [layout, { schemaExtra, read }] of Object.entries(LAYOUTS)) {
@@ -678,9 +766,9 @@ describe('both hide-fields lists offer the fields a reader may add, and only fie
     const onAddedFieldsChange = vi.fn();
     mount(FULL_READ, { columns: TITLE_ONLY, compactToolbar: true }, { onAddedFieldsChange });
     await definitionLoaded();
-    await waitFor(async () => expect(await displayHideFields(checkboxLabels)).toContain('Priority'));
-    await displayHideFields((content) => {
-      fireEvent.click(within(content).getByRole('checkbox', { name: 'Priority' }));
+    await waitFor(async () => expect(await displayHideFields(fieldsLevelLabels)).toContain('Priority'));
+    await displayHideFields((level) => {
+      fireEvent.click(within(level).getByTestId('options-fields-item-priority'));
     });
     expect(onAddedFieldsChange).toHaveBeenLastCalledWith(['priority']);
   });

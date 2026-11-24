@@ -201,13 +201,10 @@ describe('sys_metadata_activation — the ADR-0126 §4 activation ledger', () =>
         ACCOUNT_APP,
         SETUP_NAV_CONTRIBUTIONS,
       ]);
-      // One mention is allowed, and it is not a surface: Packaged Actions'
-      // `visible` asks whether the member may READ the ledger (#33224), a
-      // permission question that no row, present or absent, changes. Nothing
-      // targets the object, and nothing else names it.
-      const audience = "current_user.can('sys_metadata_activation', 'read')";
-      expect(shippedSurfaces.split(audience)).toHaveLength(2);
-      expect(shippedSurfaces.split(audience).join('')).not.toContain('sys_metadata_activation');
+      // No mention at all. The one there was, Packaged Actions' `visible`
+      // (#33224, a read-permission question), retired with the entry
+      // (objectstack#34724): a packaged action's switch is in Studio now.
+      expect(shippedSurfaces).not.toContain('sys_metadata_activation');
     });
   });
 });

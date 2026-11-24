@@ -7,7 +7,9 @@
  * its only entry was the read-only showcase package, whose Automations rail
  * lists packaged flows and not the clone. A package-less flow matches no
  * package card, so the home carries an entry of its own for them, and it is
- * there whether or not a writable package exists.
+ * there whether or not a writable package exists. objectstack#34715: it is
+ * named "Flows in no app", carries how many there are, and is drawn only when
+ * there is at least one; a failed count still draws it, with no number.
  */
 
 import '@testing-library/jest-dom/vitest';
@@ -19,6 +21,8 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 
 const packages = vi.hoisted(() => ({ list: [] as Array<Record<string, unknown>> }));
+// The package-less flows the landing counts: an answer of N rows, or a failed read.
+const packageLess = vi.hoisted(() => ({ answer: 1 as number | 'failed' }));
 
 vi.mock('./packages-io', async (importOriginal) => {
   const mod = await importOriginal<typeof import('./packages-io')>();
@@ -35,15 +39,30 @@ vi.mock('./packages-io', async (importOriginal) => {
 vi.mock('../metadata-admin/PackageFormDialog', () => ({ PackageFormDialog: () => null }));
 // A read-only base's customization read (ADR-0146 D3) is not under test here:
 // it stays pending, so no request leaves the file.
-vi.mock('./packageCustomizations-io', () => ({
-  fetchPackageCustomizationCounts: vi.fn(() => new Promise<never>(() => {})),
+vi.mock('./packageCustomizations-io', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./packageCustomizations-io')>()),
+  fetchPackageCustomizations: vi.fn(() => new Promise<never>(() => {})),
 }));
 
+vi.mock('./packageSurfaces', async (importOriginal) => {
+  const mod = await importOriginal<typeof import('./packageSurfaces')>();
+  return {
+    ...mod,
+    loadPackageLessSurfaces: vi.fn(async () => {
+      if (packageLess.answer === 'failed') throw new Error('HTTP 503');
+      return Array.from({ length: packageLess.answer }, (_, i) => ({ type: 'flow', name: `org_flow_${i}`, label: `Org flow ${i}` }));
+    }),
+  };
+});
+
 import { BuilderLanding } from './BuilderLanding';
+import { loadPackageLessSurfaces } from './packageSurfaces';
 
 afterEach(() => {
   cleanup();
   packages.list = [];
+  packageLess.answer = 1;
+  vi.mocked(loadPackageLessSurfaces).mockClear();
 });
 
 function LocationProbe() {
@@ -64,14 +83,17 @@ function renderLanding() {
 }
 
 describe('Studio home → the package-less scope (objectui#11553)', () => {
-  it('offers the entry on the measured shape: no writable package, one read-only package', async () => {
+  it('offers the entry, with its count, on the measured shape: no writable package, one read-only package', async () => {
     packages.list = [{ id: 'com.example.showcase', name: 'Showcase', writable: false, namespace: 'showcase' }];
+    packageLess.answer = 2;
     renderLanding();
 
-    await screen.findByText('No writable packages yet — create one to start.');
-    const entry = screen.getByTestId('studio-landing-org-scope');
-    expect(entry).toHaveTextContent('Organization flows');
-    expect(screen.getByText('Not in a package')).toBeInTheDocument();
+    const entry = await screen.findByTestId('studio-landing-org-scope');
+    expect(entry).toHaveTextContent('Flows in no app');
+    expect(screen.getByTestId('studio-landing-org-scope-count')).toHaveTextContent('2');
+    expect(screen.getByText('Outside any app')).toBeInTheDocument();
+    // The count is the scope's own union: one unscoped read of flows.
+    expect(vi.mocked(loadPackageLessSurfaces)).toHaveBeenCalledWith(expect.anything(), 'flow', expect.any(String));
 
     fireEvent.click(entry);
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/studio/~org/automations'));
@@ -83,9 +105,32 @@ describe('Studio home → the package-less scope (objectui#11553)', () => {
     renderLanding();
 
     await screen.findByText('Acme');
-    expect(screen.getByTestId('studio-landing-org-scope')).toBeInTheDocument();
+    expect(await screen.findByTestId('studio-landing-org-scope')).toBeInTheDocument();
 
     fireEvent.click(screen.getByText('Acme'));
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/studio/com.acme.app/data'));
+  });
+
+  it('draws no entry when no flow belongs to no package (objectstack#34715)', async () => {
+    packages.list = [{ id: 'com.example.showcase', name: 'Showcase', writable: false, namespace: 'showcase' }];
+    packageLess.answer = 0;
+    renderLanding();
+
+    await screen.findByText('Showcase');
+    await waitFor(() => expect(vi.mocked(loadPackageLessSurfaces)).toHaveBeenCalled());
+    // CONTROL: the section the entry sits in is drawn, with its other entry.
+    expect(screen.getByTestId('studio-landing-env-catalog')).toBeInTheDocument();
+    expect(screen.queryByTestId('studio-landing-org-scope')).not.toBeInTheDocument();
+    expect(screen.queryByText('Flows in no app')).not.toBeInTheDocument();
+  });
+
+  it('a failed count still draws the entry, with no number: unknown is not zero', async () => {
+    packages.list = [];
+    packageLess.answer = 'failed';
+    renderLanding();
+
+    const entry = await screen.findByTestId('studio-landing-org-scope');
+    expect(entry).toHaveTextContent('Flows in no app');
+    expect(screen.queryByTestId('studio-landing-org-scope-count')).not.toBeInTheDocument();
   });
 });

@@ -40,6 +40,7 @@
  *   - ADR-0144 D6: a money aggregate over a `record`-mode amount is left out
  *     of the whole-set query (the double refuses it as the engine does), so
  *     the other columns keep their whole-set figures.
+ *   - ADR-0158 U7 R1: the same for a `record`-mode quantity.
  */
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
 import { render, screen, cleanup, waitFor, fireEvent } from '@testing-library/react';
@@ -74,12 +75,13 @@ afterEach(() => {
 const OBJECT = 'plan_line';
 const PAGE = 25;
 
-type Row = { id: string; name: string; stage: string; amount: number; note: string | null; closed_at: string; qty: number; currency_code: string } & Record<string, unknown>;
+type Row = { id: string; name: string; stage: string; amount: number; note: string | null; closed_at: string; qty: number; currency_code: string; unit_code: string; approved: boolean | null } & Record<string, unknown>;
 /**
  * 300 rows; every fifth `note` is empty, every third row is `won`, and
  * `closed_at` is one day later per row, so the last row is the latest.
  * `currency_code` alternates USD / EUR, for the `record`-mode amount cases
- * (ADR-0144 D6); `qty` is a plain number beside it.
+ * (ADR-0144 D6); `qty` is a plain number beside it. `unit_code` alternates
+ * KGM / LBR, for the `record`-mode quantity cases (ADR-0158 U7 R1).
  */
 const ROWS: Row[] = Array.from({ length: 300 }, (_, i) => ({
   id: `r${i}`,
@@ -90,6 +92,9 @@ const ROWS: Row[] = Array.from({ length: 300 }, (_, i) => ({
   closed_at: new Date(Date.UTC(2025, 0, 1, 9, 30) + i * 86_400_000).toISOString(),
   qty: (i % 7) + 1,
   currency_code: i % 2 === 0 ? 'USD' : 'EUR',
+  unit_code: i % 2 === 0 ? 'KGM' : 'LBR',
+  // objectstack#35702 — a boolean: every fourth unset, then true / false alternating (75 / 75 / 150).
+  approved: i % 4 === 0 ? null : i % 2 === 0,
 }));
 
 const OBJECT_FIELDS = {
@@ -160,6 +165,14 @@ const recordPointerOf = (def: unknown): string | undefined => {
   return config?.currencyMode === 'record' && typeof config.currencyField === 'string' ? config.currencyField : undefined;
 };
 
+/** A field def's `record`-mode unit pointer, as the engine's ADR-0158 U7 R1 door reads it. */
+const recordUnitOf = (def: unknown): string | undefined => {
+  const { type, unitConfig } = (def ?? {}) as { type?: unknown; unitConfig?: { unitMode?: unknown; unitField?: unknown } };
+  return type === 'number' && unitConfig?.unitMode === 'record' && typeof unitConfig.unitField === 'string' && unitConfig.unitField !== ''
+    ? unitConfig.unitField
+    : undefined;
+};
+
 function makeDataSource(opts: {
   door?: 'answers' | 'absent' | 'refuses' | 'no-row' | 'strings';
   /** The object definition's fields `getObjectSchema` answers (default `OBJECT_FIELDS`). */
@@ -193,10 +206,12 @@ function makeDataSource(opts: {
       if (door === 'refuses') throw Object.assign(new Error('refused'), { code: 'UNSUPPORTED_QUERY_PARAM' });
       const groupBy = query.groupBy ?? [];
       if (groupBy.length > 0) throw new Error('double: this suite asks no grouped query');
-      // [ADR-0144 D6] The engine refuses a raw sum / avg / min / max over a
-      // `record`-mode amount in an ungrouped query, and runs none of it.
+      // [ADR-0144 D6, ADR-0158 U7 R1] The engine refuses a raw sum / avg /
+      // min / max over a `record`-mode amount or quantity in an ungrouped
+      // query, and runs none of it.
       const raw = (query.aggregations ?? []).filter((node) => ['sum', 'avg', 'min', 'max'].includes(node.function)
-        && node.field !== undefined && recordPointerOf(fields[node.field]) !== undefined);
+        && node.field !== undefined
+        && (recordPointerOf(fields[node.field]) ?? recordUnitOf(fields[node.field])) !== undefined);
       if (raw.length > 0) {
         refusals.push(...raw.map((node) => `${node.function}(${node.field})`));
         throw Object.assign(new Error('refused: a raw aggregate across currencies'), { code: 'INVALID_FIELD', status: 400 });
@@ -263,7 +278,21 @@ function hostGrid(ds: TestDataSource, opts: {
   );
 }
 
-const footerText = (field: string) => screen.queryByTestId(`summary-${field}`)?.textContent ?? null;
+/**
+ * A column's footer figure, read as 「HEADER: FIGURE」. Since objectstack#35548
+ * the figure is a cell of the table's own last row (`data-table-summary-*`),
+ * under its column; the header is read off the same column's `<th>`, so the
+ * pairing is the table's, not a label the footer spells.
+ */
+const footerText = (field: string) => {
+  const cell = screen.queryByTestId(`data-table-summary-${field}`);
+  if (!cell) return null;
+  const index = Array.from(cell.parentElement!.children).indexOf(cell);
+  const header = cell.closest('table')!.querySelectorAll('thead tr:first-child th')[index]?.textContent?.trim() ?? '';
+  // The first column's cell also holds the row's lead (「Count N」): not its figure.
+  const lead = cell.querySelector('[data-testid="data-table-summary-lead"]')?.textContent ?? '';
+  return `${header}: ${(cell.textContent ?? '').replace(lead, '')}`;
+};
 
 describe('the footer reads the whole matched set when the grid shows one page of more (objectui#12081 item 3)', () => {
   it('(a) own fetch: 300 rows over pages of 25 — the footer sums all 300, not page 1', async () => {
@@ -375,6 +404,44 @@ describe('the footer reads the whole matched set when the grid shows one page of
     await waitFor(() => expect(footerText('amount')).toBe(`Amount: Max: ${fmt(ROWS.length * 100)}`));
     expect(footerText('name')).toBe('Name: Min: 100');
     expect(footerText('note')).toBe(`Note: Empty: ${fmt(ROWS.length - notes.length)}`);
+  });
+
+  it('objectstack#35702 — a boolean\'s yes / no counts read the whole set; an unset cell is neither, it is empty', async () => {
+    const ds = makeDataSource();
+    const count = (v: boolean | null) => ROWS.filter((r) => r.approved === v).length;
+    render(hostGrid(ds, {
+      rows: ROWS,
+      columns: [
+        { field: 'name', label: 'Name' },
+        { field: 'approved', label: 'Approved', summary: 'count_true' },
+        { field: 'id', label: 'Id', summary: { type: 'count_false', field: 'approved' } },
+        { field: 'stage', label: 'Stage', summary: { type: 'count_empty', field: 'approved' } },
+      ],
+    }));
+    await waitFor(() => expect(footerText('approved')).toBe(`Approved: Yes: ${fmt(count(true))}`));
+    expect(footerText('id')).toBe(`Id: No: ${fmt(count(false))}`);
+    expect(footerText('stage')).toBe(`Stage: Empty: ${fmt(count(null))}`);
+    expect(count(true) + count(false) + count(null)).toBe(ROWS.length);
+    // ONE `SUM(approved)` and ONE `COUNT(approved)` node, shared by the three columns.
+    expect(ds.queryGroupHeaders.mock.calls[0][1].aggregations).toEqual([
+      { function: 'count', alias: 'count' },
+      { function: 'sum', field: 'approved', alias: 'sum_approved' },
+      { function: 'count', field: 'approved', alias: 'count_approved' },
+    ]);
+  });
+
+  it('objectstack#35702 — with no whole-set answer, the yes / no counts are the page\'s, and say so', async () => {
+    const page = ROWS.slice(0, PAGE);
+    render(hostGrid(makeDataSource({ door: 'absent' }), {
+      rows: ROWS,
+      columns: [
+        { field: 'name', label: 'Name' },
+        { field: 'approved', label: 'Approved', summary: 'count_true' },
+        { field: 'id', label: 'Id', summary: { type: 'count_false', field: 'approved' } },
+      ],
+    }));
+    await waitFor(() => expect(footerText('approved')).toBe(`Approved: Yes (this page): ${page.filter((r) => r.approved === true).length}`));
+    expect(footerText('id')).toBe(`Id: No (this page): ${page.filter((r) => r.approved === false).length}`);
   });
 
   it('a currency column — the issue\'s own shape — formats the whole-set figure as its cells', async () => {
@@ -519,7 +586,7 @@ describe('a grid with no footer figure asks nothing (objectui#12081 item 3, rewo
       await waitFor(() => expect(screen.getByText('Line 0')).toBeInTheDocument());
       await settle();
       expect({ label, asked: ds.queryGroupHeaders.mock.calls.length }).toEqual({ label, asked: 0 });
-      expect(screen.queryByTestId('column-summary-footer')).toBeNull();
+      expect(screen.queryByTestId('data-table-summary-row')).toBeNull();
       cleanup();
     }
 
@@ -579,17 +646,17 @@ describe('a date-family `min` / `max` in the footer reads as its cell, never as 
     render(hostGrid(ds, { rows, columns: CLOSED_MAX }));
     await waitFor(() => expect(footerText('closed_at')).toBeTruthy());
     await waitFor(() => expect(closedAtCell('Line 9')).toBeTruthy());
-    expect(footerText('closed_at')).toBe(`Closed At: Max: ${closedAtCell('Line 9')}`);
+    expect(footerText('closed_at')).toBe(`Closed At: Latest: ${closedAtCell('Line 9')}`);
     expect(footerText('closed_at')).not.toMatch(/2,025|NaN/);
   });
 
   it('own fetch, one page of 300: the whole set\'s `max` (the server\'s stored text) reads as the last row\'s cell', async () => {
     const ds = makeDataSource();
     render(ownFetchGrid(ds, CLOSED_MAX));
-    await waitFor(() => expect(footerText('closed_at')).toMatch(/^Closed At: Max: /));
+    await waitFor(() => expect(footerText('closed_at')).toMatch(/^Closed At: Latest: /));
     const footer = footerText('closed_at');
     expect(footer).not.toMatch(/2,025|NaN|this page/);
-    expect(footer).toBe(`Closed At: Max: ${await cellOf(ROWS[299])}`);
+    expect(footer).toBe(`Closed At: Latest: ${await cellOf(ROWS[299])}`);
   });
 
   it('a `sum` / `avg` over a datetime column draws no figure; CONTROL — a `max` over a number column still reads as a number', async () => {
@@ -695,5 +762,50 @@ describe('a money aggregate over a `record`-mode amount is left out of the whole
       { function: 'count', alias: 'count' },
       { function: 'sum', field: 'amount', alias: 'sum_amount' },
     ]);
+  });
+});
+
+describe('a raw aggregate over a `record`-mode quantity is left out of the whole-set query (ADR-0158 U7 R1)', () => {
+  /** `qty` in each row's own unit, the code in the sibling `unit_code`; `amount` a plain number beside it. */
+  const recordQty = (unitConfig: Record<string, unknown>) => ({
+    ...OBJECT_FIELDS,
+    qty: { type: 'number', label: 'Qty', unitConfig },
+    unit_code: { type: 'text', label: 'Unit' },
+  });
+  const RECORD_QTY = recordQty({ unitMode: 'record', unitField: 'unit_code' });
+  const COLUMNS = [
+    { field: 'name', label: 'Name' },
+    { field: 'qty', label: 'Qty', type: 'number', summary: 'sum' },
+    { field: 'amount', label: 'Amount', type: 'number', summary: 'sum' },
+  ];
+  const amountWhole = `Amount: Sum: ${fmt(sumOf(ROWS))}`;
+  const qtyNodes = (ds: TestDataSource) => ds.queryGroupHeaders.mock.calls
+    .flatMap(([, query]) => (query as AggregateQuery).aggregations ?? [])
+    .filter((node) => node.field === 'qty');
+
+  it('the plain-number sum keeps its whole-set figure, and no refused request is sent', async () => {
+    const ds = makeDataSource({ fields: RECORD_QTY });
+    render(hostGrid(ds, { rows: ROWS, columns: COLUMNS }));
+
+    await waitFor(() => expect(footerText('amount')).toBe(amountWhole));
+    // The record-mode quantity draws nothing: no whole-set figure, and no page sum over KGM and LBR.
+    expect(footerText('qty')).toBeNull();
+    expect(ds.refusals).toEqual([]);
+    expect(qtyNodes(ds)).toEqual([]);
+    expect(ds.queryGroupHeaders).toHaveBeenCalledTimes(1);
+    expect((ds.queryGroupHeaders.mock.calls[0][1] as AggregateQuery).aggregations).toEqual([
+      { function: 'count', alias: 'count' },
+      { function: 'sum', field: 'amount', alias: 'sum_amount' },
+    ]);
+  });
+
+  it('CONTROL: a fixed-mode quantity is asked and totals over the whole set', async () => {
+    const ds = makeDataSource({ fields: recordQty({ unitMode: 'fixed', unit: 'KGM' }) });
+    render(hostGrid(ds, { rows: ROWS, columns: COLUMNS }));
+
+    await waitFor(() => expect(footerText('qty')).toBe(`Qty: Sum: ${fmt(ROWS.reduce((a, r) => a + r.qty, 0))}`));
+    expect(footerText('amount')).toBe(amountWhole);
+    expect(ds.refusals).toEqual([]);
+    expect(qtyNodes(ds)).toEqual([{ function: 'sum', field: 'qty', alias: 'sum_qty' }]);
   });
 });

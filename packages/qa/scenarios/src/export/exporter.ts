@@ -12,7 +12,10 @@
  *   2. ⛔ the run was on published packages ({@link unpublishedRunRefusal}): a
  *      `--packages workspace` run is never exported or shown;
  *   3. the record passed every half ({@link judgeRecord});
- *   4. the run's scratch project is still on disk, with its build;
+ *   4. the run's scratch project is still on disk, with its build, and its
+ *      source can be made the trial package ({@link trialPackageSource}): its
+ *      config default-exports a `defineStack({ … })` literal that declares no
+ *      `data:` of its own, and the build declares every object the card seeds;
  *   5. its transcript joins with the recording ({@link buildTranscript});
  *   6. its screenshots were taken, unless the caller turned them off.
  *
@@ -22,7 +25,9 @@
  *
  *   apps/<id>/README.md               what the app is, the driver that ran it ({@link driverText}), what its authoring cost
  *                                     ({@link authorCostText}: stated only when every authoring turn reported a cost), its scorecard, the files
- *   apps/<id>/source/…                the authored metadata source (`source.ts`)
+ *   apps/<id>/source/…                the authored metadata source (`source.ts`), as a trial package: the
+ *                                     card's listing text, facet and sample data added after scoring
+ *                                     (`trial-package.ts`)
  *   apps/<id>/run-record.json         the run record, the work directories redacted (`workDirsOf`)
  *   apps/<id>/scorecard.json|.md      the per-half scorecard
  *   apps/<id>/transcript.json|.md     the per-persona 问数 transcript
@@ -59,6 +64,7 @@ import { judgeRecord, type PassJudgement } from './pass.js';
 import { readRunRecords, redactWorkDir, unpublishedRunRefusal, type RecordFile, type ScenarioRunRecord } from './record.js';
 import type { CaptureScreenshots, PlannedShot, SkippedShot } from './screenshots.js';
 import { projectFrameworkVersion, readAuthoredSource } from './source.js';
+import { SAMPLE_DATA_FILE, trialPackageSource } from './trial-package.js';
 import { buildTranscript, mergeRecordings, renderTranscript } from './transcript.js';
 
 /** The files of one exported app, relative to `apps/<id>/` (`contract.ts`, which the check reads too). */
@@ -130,7 +136,7 @@ export function driverText(driver: ScenarioRunRecord['env']['driver']): string {
   return named(driver);
 }
 
-function appReadme(scenario: LoadedScenario, record: ScenarioRunRecord, entry: GalleryApp, judgement: PassJudgement, scorecard: CardScorecard, shots: PlannedShot[], skipped: SkippedShot[]): string {
+function appReadme(scenario: LoadedScenario, record: ScenarioRunRecord, entry: GalleryApp, judgement: PassJudgement, scorecard: CardScorecard, shots: PlannedShot[], skipped: SkippedShot[], omitted: readonly string[]): string {
   const c = scenario.card;
   const lines = [
     `# ${c.title.en}`,
@@ -144,6 +150,7 @@ function appReadme(scenario: LoadedScenario, record: ScenarioRunRecord, entry: G
     `- Driver: ${driverText(record.env.driver)}`,
     `- Author cost (as the driver reported it): ${authorCostText(scorecard.authorCost)}`,
     `- 问数: ${entry.qa.questions} questions, ${entry.qa.turns} persona turns · ${entry.operations} write operations`,
+    `- Sample data: the card's ${Object.values(c.run.seed).reduce((n, rows) => n + rows.length, 0)} seed rows in ${Object.keys(c.run.seed).length} objects${omitted.length ? `, without ${omitted.map((f) => `\`${f}\``).join(', ')} (a user handle of the run's own environment, left unset)` : ''}`,
     '',
     '## The requirement',
     '',
@@ -158,7 +165,7 @@ function appReadme(scenario: LoadedScenario, record: ScenarioRunRecord, entry: G
     '',
     '## Files',
     '',
-    `- [\`${APP_LAYOUT.source}/\`](./${APP_LAYOUT.source}/) — the app's metadata source, as the AI wrote it (after the change request)`,
+    `- [\`${APP_LAYOUT.source}/\`](./${APP_LAYOUT.source}/) — the app's metadata source, as the AI wrote it (after the change request), with the package's listing text in \`objectstack.manifest.json\` and the card's seed rows as its sample data (\`${SAMPLE_DATA_FILE}\`, read into \`data:\`), both added after scoring`,
     `- [\`${APP_LAYOUT.transcriptMd}\`](./${APP_LAYOUT.transcriptMd}) — every data question, each persona's answer and its grade ([JSON](./${APP_LAYOUT.transcriptJson}))`,
     `- [\`${APP_LAYOUT.scorecardMd}\`](./${APP_LAYOUT.scorecardMd}) — the scorecard ([JSON](./${APP_LAYOUT.scorecardJson}))`,
     `- [\`${APP_LAYOUT.runRecord}\`](./${APP_LAYOUT.runRecord}) — the full run record`,
@@ -294,7 +301,10 @@ async function exportOne(
   if (!existsSync(projectDir)) throw new Refused([`the run's scratch project is gone: ${projectDir}`]);
   const artifact = readArtifact(projectDir);
   if (artifact === undefined) throw new Refused([`${projectDir} holds no dist/objectstack.json`]);
-  const source = readAuthoredSource(projectDir);
+  const authored = readAuthoredSource(projectDir);
+  // The trial package's listing text, facet and sample data: added to the exported copy only, after scoring.
+  const builtObjects = new Set(((artifact as { objects?: Array<{ name?: unknown }> }).objects ?? []).map((o) => o?.name).filter((n): n is string => typeof n === 'string'));
+  const source = await trialPackageSource(authored.files, card, builtObjects);
   const frameworkVersion = projectFrameworkVersion(projectDir);
   const redact = <T,>(v: T): T => redactWorkDir(v, workDirsOf(record.evidenceDir, opts.workDir));
   const transcript = redact(buildTranscript(scenario, record, turns));
@@ -332,7 +342,7 @@ async function exportOne(
     [APP_LAYOUT.scorecardMd, `${renderScorecard(scorecard)}\n`],
     [APP_LAYOUT.transcriptJson, json(transcript)],
     [APP_LAYOUT.transcriptMd, renderTranscript(transcript, card.title.en)],
-    [APP_LAYOUT.readme, redact(appReadme(scenario, record, entry, judgement, scorecard, shots, skipped))],
+    [APP_LAYOUT.readme, redact(appReadme(scenario, record, entry, judgement, scorecard, shots, skipped, source.omitted))],
   ]);
   return { entry, shots, skipped };
 }

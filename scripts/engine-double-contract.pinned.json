@@ -67,6 +67,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/core/src/security/change-record-owner.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/core/src/security/resolve-user-grants-cache.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -912,6 +917,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.destructive-still-shown-by.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.diagnostics-store-outage.test.ts",
       "verb": "findOne",
       "pinned": 5
@@ -1048,6 +1058,21 @@
     },
     {
       "file": "packages/metadata-protocol/src/protocol.extension-field-suffix.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.extension-publish-follow-door-35566.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.extension-publish-follow-door-35566.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.extension-publish-follow-door-35566.test.ts",
       "verb": "update",
       "pinned": 1
     },
@@ -1614,6 +1639,11 @@
     {
       "file": "packages/metadata-protocol/src/protocol.package-publish-audit-rows.test.ts",
       "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.package-translation-bundle.test.ts",
+      "verb": "findOne",
       "pinned": 1
     },
     {
@@ -2447,6 +2477,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/seed-loader-deferred-key-reference.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/seed-loader-deferred-key-reference.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/seed-loader-deferred-key-reference.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/seed-loader-depends-on-33812.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -2638,6 +2683,21 @@
     },
     {
       "file": "packages/metadata-protocol/src/seed-loader-replay.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/seed-loader-retired-mode-34613.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/seed-loader-retired-mode-34613.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/seed-loader-retired-mode-34613.test.ts",
       "verb": "update",
       "pinned": 1
     },
@@ -3372,6 +3432,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/objectql/src/registry-field-patch-bases.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/objectql/src/registry-tenant-index-author-declared-column.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -3637,6 +3702,16 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-approvals/src/resume-failure-refusal.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-approvals/src/resume-failure-refusal.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-approvals/src/run-status-liveness.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -3695,6 +3770,11 @@
       "file": "packages/plugins/plugin-approvals/src/team-member-org-screen.test.ts",
       "verb": "update",
       "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-audit/src/comment-routes.test.ts",
+      "verb": "findOne",
+      "pinned": 2
     },
     {
       "file": "packages/plugins/plugin-audit/src/stored-metadata-body-migration.test.ts",
@@ -4004,6 +4084,11 @@
     {
       "file": "packages/plugins/plugin-auth/src/org-create-posture-gate.test.ts",
       "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/org-create-posture-gate.test.ts",
+      "verb": "update",
       "pinned": 1
     },
     {
@@ -4382,6 +4467,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-security/src/explain-fixed-read-leaf.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-security/src/explain-read-verdict-inputs.test.ts",
       "verb": "findOne",
       "pinned": 1
@@ -4420,6 +4510,11 @@
       "file": "packages/plugins/plugin-security/src/field-masking-rule.test.ts",
       "verb": "findOne",
       "pinned": 2
+    },
+    {
+      "file": "packages/plugins/plugin-security/src/get-metadata-readable-withheld-fields.test.ts",
+      "verb": "findOne",
+      "pinned": 1
     },
     {
       "file": "packages/plugins/plugin-security/src/get-queryable-fields.test.ts",
@@ -4912,6 +5007,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/rest/src/change-owner-routes.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/rest/src/email-send-display-name.test.ts",
       "verb": "update",
       "pinned": 1
@@ -4952,6 +5052,11 @@
       "pinned": 2
     },
     {
+      "file": "packages/rest/src/meta-destructive-still-shown-by-flat-issues.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/rest/src/meta-disabled-package-doors.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -4959,7 +5064,7 @@
     {
       "file": "packages/rest/src/meta-disabled-package-doors.test.ts",
       "verb": "findOne",
-      "pinned": 1
+      "pinned": 2
     },
     {
       "file": "packages/rest/src/meta-disabled-package-doors.test.ts",
@@ -5028,6 +5133,11 @@
     },
     {
       "file": "packages/rest/src/meta-view-label-not-invented.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/rest/src/public-form-pair-translation.test.ts",
       "verb": "findOne",
       "pinned": 1
     },
@@ -5129,6 +5239,11 @@
     {
       "file": "packages/rest/src/rest-server-meta-references-refusal-envelope.test.ts",
       "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/rest/src/rest-write-route-hook-refusal-sentence.ledger.test.ts",
+      "verb": "update",
       "pinned": 1
     },
     {
@@ -5252,12 +5367,42 @@
       "pinned": 2
     },
     {
+      "file": "packages/runtime/src/domains/automation-notify-slack-composition.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/domains/automation-notify-slack-composition.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/domains/automation-notify-slack-composition.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/runtime/src/domains/catalog-activation-door.test.ts",
       "verb": "update",
       "pinned": 1
     },
     {
       "file": "packages/runtime/src/domains/catalog-activation-package-scoped.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/domains/meta-disabled-package-doors.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/domains/meta-disabled-package-doors.test.ts",
+      "verb": "findOne",
+      "pinned": 2
+    },
+    {
+      "file": "packages/runtime/src/domains/meta-disabled-package-doors.test.ts",
       "verb": "update",
       "pinned": 1
     },
@@ -5877,6 +6022,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/services/service-messaging/src/preference-rows-paged-read-35136.integration.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-messaging/src/preference-rows-paged-read-35136.integration.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-messaging/src/preference-rows-paged-read-35136.integration.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/services/service-messaging/src/push-channel.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -5899,6 +6059,21 @@
     {
       "file": "packages/services/service-messaging/src/recipient-resolver.test.ts",
       "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-messaging/src/slack-channel-composition.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-messaging/src/slack-channel-composition.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-messaging/src/slack-channel-composition.test.ts",
+      "verb": "update",
       "pinned": 1
     },
     {

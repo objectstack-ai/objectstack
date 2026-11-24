@@ -49,6 +49,10 @@
  */
 
 import '@testing-library/jest-dom/vitest';
+// The source under test reaches these through dynamic imports: their first load is paid at collection.
+import '@objectstack/formula';
+import '@objectstack/lint';
+import '@objectstack/spec/identity';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
@@ -176,7 +180,7 @@ describe('PermissionMatrixEditPage — read-only package gate (host readOnly)', 
     }
     // …and so are the row bulk-set buttons.
     const row = screen.getByText('Account').closest('tr')!;
-    for (const name of ['R', 'CRUD', 'All', 'None']) {
+    for (const name of ['Read only', 'Read & write', 'All', 'None']) {
       expect(within(row).getByRole('button', { name })).toBeDisabled();
     }
 
@@ -265,7 +269,7 @@ describe('PermissionMatrixEditPage — type-level gate keeps its own wording', (
 
     // Row bulk-set buttons are live too — `writable` drives all of them.
     const row = screen.getByText('Account').closest('tr')!;
-    for (const name of ['R', 'CRUD', 'All', 'None']) {
+    for (const name of ['Read only', 'Read & write', 'All', 'None']) {
       expect(within(row).getByRole('button', { name })).toBeEnabled();
     }
 

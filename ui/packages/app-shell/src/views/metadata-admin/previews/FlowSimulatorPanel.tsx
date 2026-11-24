@@ -233,7 +233,9 @@ export function FlowSimulatorPanel({ nodes, edges, variables, locale, onRunState
 
   return (
     <div className="flex h-full flex-col text-xs">
-      <div className="flex items-center gap-1.5 border-b bg-muted/30 px-3 py-2">
+      {/* objectstack#34818 — wraps rather than clips: paused on an approval,
+          its decision buttons and the status pill outgrow a 300 px column. */}
+      <div className="flex flex-wrap items-center gap-1.5 border-b bg-muted/30 px-3 py-2">
         <Button size="sm" className="h-7 gap-1 px-2" onClick={onRun} disabled={blocked}>
           <Play className="h-3.5 w-3.5" /> {tr('engine.flowSim.run', locale)}
         </Button>

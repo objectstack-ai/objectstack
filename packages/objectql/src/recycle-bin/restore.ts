@@ -78,8 +78,8 @@ import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { Logger } from '@objectstack/core';
 import { isUniqueViolationError, keysetWalk, redactBoundStatement, uniqueViolationField } from '@objectstack/types';
 import { objectPermissionGrants, type EffectiveObjectPermission, type TenantLayer0Verdict } from '@objectstack/spec/security';
-import type { OperationContext } from '../engine-top-level.js';
-import { declaredMultiValued } from '../engine-top-level.js';
+import type { OperationContext, ReferentialClearOption } from '../engine-top-level.js';
+import { REFERENTIAL_CLEAR_OPTION, declaredMultiValued } from '../engine-top-level.js';
 import { SummaryRecomputeError, type SummaryRecomputeFailure } from '../summary-errors.js';
 import { displayLabels } from '../duplicate-record-error.js';
 import type { ValidationMessageContext } from '../validation/record-validator.js';
@@ -699,16 +699,33 @@ async function writeBack(
         const previous = live[0][ref.field];
         const next = relinkedValue(field, previous, ref.value);
         if (next === undefined) continue;
-        await this.update(ref.object, { id: ref.id, [ref.field]: next }, { context: writeContext });
-        relinked += 1;
+        // The re-link is the engine's referential write, the inverse of the
+        // delete walk's `set_null` clear, so it rides the same module-private
+        // channel (`REFERENTIAL_CLEAR_OPTION`): `update()` leaves exactly this
+        // key on this row, at the value written here, to the engine, so a
+        // `readonly` or `readonlyWhen`-locked lookup is re-linked rather than
+        // stripped as a caller forgery under the caller's context. ⛔ Not
+        // `isSystem`, and ⛔ not the `__referentialFieldClear` context marker.
+        // The undo below is the same kind of write and carries the same channel.
+        const relink: ReferentialClearOption = { object: ref.object, id: ref.id, field: ref.field };
+        await this.update(ref.object, { id: ref.id, [ref.field]: next }, { context: writeContext, [REFERENTIAL_CLEAR_OPTION]: relink });
         // Through `engine.update`, so the re-link publishes `data.record.updated`
         // when it lands, and its undo publishes one more: a restore that fails
         // after a re-link outside a transaction leaves two update events for a
         // row that ends as it began.
         done.push({
           covered: driverOptions?.transaction != null,
-          undo: async () => { await this.update(ref.object, { id: ref.id, [ref.field]: previous ?? null }, { context: writeContext }); },
+          undo: async () => { await this.update(ref.object, { id: ref.id, [ref.field]: previous ?? null }, { context: writeContext, [REFERENTIAL_CLEAR_OPTION]: relink }); },
         });
+        // `relinked` counts a re-link that LANDED, read back from the store:
+        // a write a strip or a hook took the key out of answers success too,
+        // and counting it reported a link the row does not hold.
+        const after = ((await driver.find(
+          ref.object,
+          { object: ref.object, where: { id: ref.id }, fields: ['id', ref.field], limit: 1 },
+          driverOptions,
+        )) ?? []) as Array<Record<string, unknown>>;
+        if (after.length > 0 && relinkedValue(field, after[0][ref.field], ref.value) === undefined) relinked += 1;
       }
       // The entry goes last: a restore that did not land keeps its entry.
       await binDriver.delete(RECYCLE_BIN_OBJECT, entryId, this.buildDriverOptions(RECYCLE_BIN_OBJECT, writeContext));

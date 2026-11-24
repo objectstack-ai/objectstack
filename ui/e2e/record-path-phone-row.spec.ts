@@ -50,7 +50,7 @@ function grab(re: RegExp, mustContain: string[]): string {
 }
 
 const CLS = {
-  compact: grab(/\{\/\* Mobile:[^\n]*\*\/\}\s*<div\s+className="([^"]+)"/, ['sm:hidden']),
+  compact: grab(/\{\/\* Mobile:[^\n]*\*\/\}\s*<div\s+className="([^"]+)"/, ['sm:@sm:hidden']),
   rail: grab(/const railClass = [\s\S]*?cn\(\s*'([^']+)'/, ['w-full']),
   railRow: grab(/const PHONE_RAIL_ROW_CLASS = '([^']+)'/, ['flex', 'w-full']),
   railSegment: grab(/const PHONE_RAIL_SEGMENT_CLASS = '([^']+)'/, ['flex-1', 'min-w-0']),
@@ -92,7 +92,7 @@ test.beforeAll(async () => {
     [...Object.values(CLS), 'bg-muted ml-1 shrink-0 ml-auto h-4 w-4'].join(' ').split(/\s+/).filter(Boolean),
   );
   if (!css.includes('@media')) {
-    throw new Error('Tailwind produced no media queries — `sm:hidden` would be inert.');
+    throw new Error('Tailwind produced no media queries — `sm:@sm:hidden` would be inert.');
   }
 });
 

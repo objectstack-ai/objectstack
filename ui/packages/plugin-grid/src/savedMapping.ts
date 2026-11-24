@@ -62,13 +62,18 @@ export function buildSourceRows(
  * A read-only, display-friendly view of what a mapping does — one row per
  * fieldMapping entry: `source → target (transform)`. Used to show the user the
  * chosen mapping without re-implementing any transform on the client.
+ *
+ * `fieldLabel` names a target the way the rest of the wizard does — by the
+ * field's served (already translated) label, never its API name. A target
+ * the caller has no field for keeps its name: there is no label to show.
  */
 export function summarizeSavedMapping(
   m: SavedMapping,
+  fieldLabel: (name: string) => string = (name) => name,
 ): Array<{ source: string; target: string; transform: string }> {
   return (m.fieldMapping ?? []).map((e) => ({
     source: Array.isArray(e.source) ? e.source.join(' + ') : e.source,
-    target: Array.isArray(e.target) ? e.target.join(', ') : e.target,
+    target: Array.isArray(e.target) ? e.target.map(fieldLabel).join(', ') : fieldLabel(e.target),
     transform: e.transform && e.transform !== 'none' ? e.transform : '',
   }));
 }

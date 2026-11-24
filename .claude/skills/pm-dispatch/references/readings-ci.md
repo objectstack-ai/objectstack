@@ -1,0 +1,48 @@
+# 平台读数:CI 红、必需检查与门禁读数
+
+- 红检查先读日志:自称一个都没测(基础设施失败)的红归席位清,⛔ 永不请维护者点重跑。
+- ① `rerun-failed.mjs` 重跑失败 job 一次(名单即 `RERUN_FAILED_WORKFLOWS`),先在 PR 或卡写明理由。
+- 中继重跑(`rerun-failed.mjs` → `run_rerun_failed`)复用原 run 的提交与合并 ref,不拿新 main 重算。
+- ② 被拒(如 `lint.yml`)、基缺修复或冲突 ⇒ `pr_update_branch`(齐平即空操作)或 dev 合 main。
+- `pr-automation.yml`(`Check Changeset` 取消无后继):席位改正文记下 flake 理由,其 `edited` 即重跑。
+- ⇒ 该正文改走 `seat-post-protocol.md` 的 PR 正文行。
+- ③ 测到东西的二败才是真红;⛔ 永不空提交、永不关了重开;落地记录点名所取步骤。
+- 同一 head 上轻量兄弟 workflow `success` 加重量级载体 `cancelled` 是普通取代的预期签名。
+- 同名 `failure` 也会被带另一诊断的后一次 `failure` 取代 ⇒ 任何判定前先按名取最新一次。
+- cancel-in-progress 窗口只罩得住慢载体 ⇒ 先比对 run `head_sha` 与 PR 当前 head,不开调查。
+- 本仓 CI 并发组按 PR 号不按 head:重跑过期 head 取消当前 head 的 run ⇒ 重跑是写不是读。
+- CI 红了先取完整日志归档再下结论:断言文本只在归档里,直读工具拿不到。
+- `get_check_run` 回空 `output.text`;`get_job_logs` 带 `tail_lines` 只回尾部的 service-container teardown。
+- ⇒ 改带 `return_content: true` 整份日志回包(2026-09-20 一 job)⇒ REST 腿被拒只是该腿的读数。
+- 失败 step 名免下载即得:`actions_get method=get_workflow_job`。
+- check-run annotations 端点带退出码与失败命令,是免归档的第二条便宜读。
+- 真实断言文本走 run 日志归档:`actions_get method=get_workflow_run_logs_url` 后下载解压。
+- 分步文件在 `{Job name}/{step number}_{step name}.txt`。
+- completeness check 绿只断言没有 worker 静默死,不等于测试通过。
+- 并发输出的相邻不等于因果:先查 `turbo.json` 依赖边,⛔ 不只看 tail。
+- turbo 一败多包同印 `ELIFECYCLE Command failed`:权威读数是 `Failed:` 行与该包自己的 `##[error]`。
+- 公开发出的诊断被推翻时,更正发在同样公开的位置,据它开的 PR 撤回 draft、解绑 `Fixes`。
+- required checks 的名单是每仓事实,objectstack 十一个:
+  `TypeScript Type Check` · `Lint & Repo Gates` · `Test Core` · `Build Core` · `Lint UI` · `Test UI` ·
+  `Governed Surface Queue Guard` · `Type Check UI` · `Build & E2E UI` · `Live E2E UI` · `Dogfood Regression Gate`。
+- ⭐ 本表的 `mustName` 声明 `statesTheSet` ⇒ 必须逐字等于注册表,加注册行不跟改本表即红。
+- ⇒ 门绿即名单逐字齐全的读数;⛔ 但数量词未钉:实测 七→六 照绿,只能手跟改。
+- ⛔ 聚合命令同样不作判定:`check:type-check-debt` 可在包级 typecheck 绿时红。
+- `check:i18n` 以 PREREQUISITE NOT MET(workspace CLI 未 build)退 3,不是漂移。
+- 退出码是字段字面值:判据取门禁印的判定行,⛔ 不取码 —— 同一脚本里一个码可两义。
+- `check-governed-merges` 退 3 在 `--test` 上是 GOVERNED 判定,别处是 PREREQUISITE NOT MET。
+- 计数非机理读数:由 `GET .../actions/runs?event=merge_group` 计数 0 推 required 集为空,当天被推翻。
+- 计数答至今发生过没有,不答机制在不在:零计数只作弱先验。
+- 判 required 集为空要读 ruleset 的 required 集本身,或看队列合并是否真在等检查。
+- ⛔ 别处写下的计数值一律先复测再用。
+- 租户普查 `reach: in` 只说有租户列;D9 盖章按 schema(ADR-0131 D9/D13):有租户列且非联邦才在内。
+- CI job 的失败 step 不必与 job 名一致 ⇒ ⛔ 不由 job 名推原因,先读 step 名再下结论。
+- Actions 日志保留把老 job 截到 post-job cleanup ⇒ 归档只剩清理输出时原因不可断言。
+- 无 `packageManager` 的目录里 corepack 运行时解析 registry `latest` ⇒ 同 SHA 前绿后红是 tag 移了。
+- 自测写出的 fixture `package.json` 必带根清单的 `packageManager`,否则 CI 里解析到 latest。
+- `COREPACK_DEFAULT_TO_LATEST=0` 单用修不了已记 12.x 的 store ⇒ 环境变量不是补救。
+- corepack 下载 pnpm 可在检查体开跑前崩 undici(`assert(!this.paused)`)⇒ 是基础设施红。
+- `check-governed-merges` 浅克隆上拒答而非少报,并报未审计仓数;补救 `git fetch --shallow-since=`。
+- ⛔ 不越过该拒答自行枚举:短清单读作合规;加深日期取窗口起点之前,不猜深度。
+- `check:pm-dispatch-gates` 1216–1246 秒超容器上限 ⇒ 不走锁,detach 加 `tail --pid=$!`;超时非读数。
+- `check-half-states.mjs` 连 `--help` 都跑整仓 I/O ⇒ 早读到的输出文件是空的,不是干净的。

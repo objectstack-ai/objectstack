@@ -16,6 +16,7 @@ import { useObjectTranslation } from '@object-ui/i18n';
 import { useAdapter } from '../providers/AdapterProvider.js';
 import { useMetadata } from '../providers/MetadataProvider.js';
 import { matchAppBySegment } from '../utils/appRoute.js';
+import { isPackageLessItem } from '../views/studio-design/studioScope.js';
 import { usePreviewDrafts } from '../preview/PreviewModeContext.js';
 
 // ============================================================================
@@ -274,23 +275,85 @@ export function useNavigationSync(): UseNavigationSyncReturn {
   const refreshRef = useRef(refresh);
   refreshRef.current = refresh;
 
-  /** Persist an updated app schema and refresh metadata. */
-  const saveApp = useCallback(
-    async (appName: string, schema: AppComponentSchema) => {
-      const client = adapterRef.current?.getClient();
-      if (client) {
-        await client.meta.saveItem('app', appName, schema);
-      }
-      await refreshRef.current?.();
-    },
-    [],
-  );
-
   /** Find the current app schema from metadata by name. */
   const findApp = useCallback(
     (appName: string): AppComponentSchema | undefined =>
       matchAppBySegment(apps, appName) as AppComponentSchema | undefined,
     [apps],
+  );
+
+  /**
+   * objectstack#35115 — the one address a navigation write reads the app at
+   * and saves it to: the served app's name, and the package that owns it.
+   *
+   * A packaged app is read and saved with `{ packageId }` (`?package=`), the
+   * row it is served from, the way the console's other app writers name it
+   * (App management's `saveApp`, objectui#12300). A package-less app (no
+   * `_packageId`, or the server's `sys_metadata` sentinel) keeps the
+   * package-less address. A managed package's sealed app (ADR-0131 D6) is
+   * never targeted by the all-apps writes ({@link isNavigationSyncableApp}),
+   * and the server refuses a write onto it at either address.
+   */
+  const appAddress = useCallback(
+    (appName: string): { name: string; packageId?: string } | undefined => {
+      const served = findApp(appName);
+      if (!served) return undefined;
+      const name = typeof served.name === 'string' && served.name ? served.name : appName;
+      const packageId = (served as { _packageId?: unknown })._packageId;
+      return !isPackageLessItem(served as { _packageId?: unknown }) && typeof packageId === 'string'
+        ? { name, packageId }
+        : { name };
+    },
+    [findApp],
+  );
+
+  /** Persist an updated app schema at the app's address and refresh metadata. */
+  const saveApp = useCallback(
+    async (appName: string, schema: AppComponentSchema) => {
+      const client = adapterRef.current?.getClient();
+      if (client) {
+        const address = appAddress(appName) ?? { name: appName };
+        await (address.packageId
+          ? client.meta.saveItem('app', address.name, schema, { packageId: address.packageId })
+          : client.meta.saveItem('app', address.name, schema));
+      }
+      await refreshRef.current?.();
+    },
+    [appAddress],
+  );
+
+  /**
+   * objectstack#35054 (route D) — the app as its author STORED it, the body a
+   * navigation write starts from (and its Undo puts back).
+   *
+   * The served list (`apps`) is translated for the console's locale: an app's
+   * label and every navigation label. A navigation write sends the whole app
+   * back, and the door stores a body verbatim, so writing the served copy
+   * stored the translations as source text, into every app a new page joined.
+   * The served list only finds the app here; its body comes from the
+   * untranslated layers (`getAuthoredItem`), read at the address `saveApp`
+   * writes ({@link appAddress}: its package, when it has one). An app with
+   * nothing stored to read is not written, and the failure is said once.
+   */
+  const storedApp = useCallback(
+    async (appName: string): Promise<AppComponentSchema | undefined> => {
+      const address = appAddress(appName);
+      if (!address) return undefined;
+      try {
+        const read = adapterRef.current?.getAuthoredItem;
+        const stored = read
+          ? await (address.packageId
+            ? read.call(adapterRef.current, 'app', address.name, { packageId: address.packageId })
+            : read.call(adapterRef.current, 'app', address.name))
+          : null;
+        if (stored) return stored as unknown as AppComponentSchema;
+      } catch {
+        // Said below, as an absent body is.
+      }
+      toast.error(t('navigationSync.updateFailed'));
+      return undefined;
+    },
+    [appAddress, t],
   );
 
   // ------------------------------------------------------------------
@@ -299,7 +362,7 @@ export function useNavigationSync(): UseNavigationSyncReturn {
 
   const syncPageCreated = useCallback(
     async (appName: string, pageName: string, label?: string) => {
-      const app = findApp(appName);
+      const app = await storedApp(appName);
       if (!app) return;
 
       const prev = app.navigation ?? [];
@@ -329,12 +392,12 @@ export function useNavigationSync(): UseNavigationSyncReturn {
         toast.error(t('navigationSync.updateFailed'));
       }
     },
-    [findApp, saveApp, t],
+    [storedApp, saveApp, t],
   );
 
   const syncDashboardCreated = useCallback(
     async (appName: string, dashboardName: string, label?: string) => {
-      const app = findApp(appName);
+      const app = await storedApp(appName);
       if (!app) return;
 
       const prev = app.navigation ?? [];
@@ -362,7 +425,7 @@ export function useNavigationSync(): UseNavigationSyncReturn {
         toast.error(t('navigationSync.updateFailed'));
       }
     },
-    [findApp, saveApp, t],
+    [storedApp, saveApp, t],
   );
 
   // ------------------------------------------------------------------
@@ -371,7 +434,7 @@ export function useNavigationSync(): UseNavigationSyncReturn {
 
   const syncPageDeleted = useCallback(
     async (appName: string, pageName: string) => {
-      const app = findApp(appName);
+      const app = await storedApp(appName);
       if (!app) return;
 
       const prev = app.navigation ?? [];
@@ -399,12 +462,12 @@ export function useNavigationSync(): UseNavigationSyncReturn {
         toast.error(t('navigationSync.updateFailed'));
       }
     },
-    [findApp, saveApp, t],
+    [storedApp, saveApp, t],
   );
 
   const syncDashboardDeleted = useCallback(
     async (appName: string, dashboardName: string) => {
-      const app = findApp(appName);
+      const app = await storedApp(appName);
       if (!app) return;
 
       const prev = app.navigation ?? [];
@@ -432,7 +495,7 @@ export function useNavigationSync(): UseNavigationSyncReturn {
         toast.error(t('navigationSync.updateFailed'));
       }
     },
-    [findApp, saveApp, t],
+    [storedApp, saveApp, t],
   );
 
   // ------------------------------------------------------------------
@@ -441,7 +504,7 @@ export function useNavigationSync(): UseNavigationSyncReturn {
 
   const syncPageRenamed = useCallback(
     async (appName: string, oldName: string, newName: string) => {
-      const app = findApp(appName);
+      const app = await storedApp(appName);
       if (!app) return;
 
       const prev = app.navigation ?? [];
@@ -469,12 +532,12 @@ export function useNavigationSync(): UseNavigationSyncReturn {
         toast.error(t('navigationSync.updateFailed'));
       }
     },
-    [findApp, saveApp, t],
+    [storedApp, saveApp, t],
   );
 
   const syncDashboardRenamed = useCallback(
     async (appName: string, oldName: string, newName: string) => {
-      const app = findApp(appName);
+      const app = await storedApp(appName);
       if (!app) return;
 
       const prev = app.navigation ?? [];
@@ -502,7 +565,7 @@ export function useNavigationSync(): UseNavigationSyncReturn {
         toast.error(t('navigationSync.updateFailed'));
       }
     },
-    [findApp, saveApp, t],
+    [storedApp, saveApp, t],
   );
 
   // ------------------------------------------------------------------

@@ -48,6 +48,7 @@
  */
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
+import { runInNewContext } from 'node:vm';
 import { VIEW_FILTER_OPERATORS } from '@objectstack/spec/ui';
 import {
   canonicalAstOperator,
@@ -456,5 +457,251 @@ describe('objectui#7349 — the production chain, end to end', () => {
     const filter = toFilterNode([{ field: 'role', operator: 'equals', value: 'admin' }]);
     expect(filter).toEqual([['role', 'equals', 'admin']]);
     expect(await selectedIds(filter)).toEqual(['a', 'c']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The nested-relation node is refused by name in both dialects
+// ---------------------------------------------------------------------------
+
+/**
+ * `convertFiltersToAST` lowers the nested relation condition
+ * `{ profile: { verified: true } }` to `['profile', '=', { verified: true }]`,
+ * the node a server data source serves as a subquery. This matcher does not
+ * descend into relations. The object form was already refused by name; the
+ * AST form reached the `=` arm, which compared the condition object by
+ * reference, so no row matched and nothing was logged. Both forms now give
+ * the same refusal sentence. The `=` answer was the empty set on both trees,
+ * so the discriminant there is the logged refusal; `!=` answered EVERY row
+ * before the arm existed, so its row set discriminates on its own.
+ */
+describe('the nested-relation node is refused by name in both dialects', () => {
+  const NESTED = { profile: { verified: true } };
+  const REFUSAL =
+    "filter condition on field 'profile' carries the non-operator key 'verified'; "
+    + 'the in-memory matcher does not descend into a nested relation constraint';
+
+  it('the AST form and the object form are refused alike, with one sentence', async () => {
+    const node = toFilterNode(NESTED);
+    expect(node).toEqual(['profile', '=', { verified: true }]);
+
+    const astWarn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(await selectedIds(node)).toEqual([]);
+    expect(astWarn).toHaveBeenCalledTimes(1);
+    const astLine = String(astWarn.mock.calls[0]?.[0]);
+    astWarn.mockRestore();
+
+    const objectWarn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(await selectedIds(NESTED)).toEqual([]);
+    expect(objectWarn).toHaveBeenCalledTimes(1);
+    const objectLine = String(objectWarn.mock.calls[0]?.[0]);
+
+    expect(astLine).toContain(REFUSAL);
+    expect(astLine).toBe(objectLine);
+  });
+
+  it('`!=` on the node is refused too, rather than answering every row', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(await selectedIds(['profile', '!=', { verified: true }])).toEqual([]);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0]?.[0])).toContain(REFUSAL);
+  });
+
+  /**
+   * `profile` holds text here, so the operators below answered rows of their
+   * own without the arm: `not_contains` every row, and `>` the values that sort
+   * past the text `[object Object]` (`'zeta'`, not `'Alpha'`). The empty set
+   * plus the logged sentence is the refusal.
+   */
+  const PROFILE_ROWS = [
+    { id: 'a', profile: 'zeta' },
+    { id: 'b', profile: 'Alpha' },
+  ];
+
+  it.each(['not_contains', '>'])(
+    '`%s` on the node is refused too, rather than reading the object as text',
+    async (operator) => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      expect(await selectedIds(['profile', operator, { verified: true }], PROFILE_ROWS))
+        .toEqual([]);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(String(warn.mock.calls[0]?.[0])).toContain(REFUSAL);
+    },
+  );
+
+  /**
+   * A list operator's comparand is judged member by member: a plain-object
+   * member is the same nested condition. `nin` read it by reference, so it
+   * answered every row; `in` answered the rows its other members matched (none
+   * here) and `between` read the object as the text `[object Object]`, so with
+   * `'zzz'` as the other endpoint it answered the text range between them (the
+   * `'zeta'` row here).
+   */
+  it.each(['nin', 'in', 'between'])(
+    '`%s` with a plain-object list member is refused too',
+    async (operator) => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      expect(await selectedIds(['profile', operator, [{ verified: true }, 'zzz']], PROFILE_ROWS))
+        .toEqual([]);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(String(warn.mock.calls[0]?.[0])).toContain(REFUSAL);
+    },
+  );
+
+  /**
+   * An EMPTY plain object, `{}`, has no key to name, so the same builder refuses
+   * it in a sentence of its own: whole, and as a list member.
+   */
+  const EMPTY_REFUSAL =
+    "filter comparand on field 'profile' is an empty object ({}), which is neither "
+    + 'a comparison value nor a nested relation constraint';
+
+  it.each([
+    ['!=', {}],
+    ['>', {}],
+    ['not_contains', {}],
+    ['nin', [{}]],
+    ['between', [{}, 'zzz']],
+  ] as const)(
+    '`%s` with an empty plain object as its comparand is refused in its own sentence',
+    async (operator, comparand) => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      expect(await selectedIds(['profile', operator, comparand], PROFILE_ROWS)).toEqual([]);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(String(warn.mock.calls[0]?.[0])).toContain(EMPTY_REFUSAL);
+    },
+  );
+
+  it('CONTROL: a scalar `=` still matches, with nothing logged', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(await selectedIds(['role', '=', 'admin'])).toEqual(['a', 'c']);
+    expect(await selectedIds(['role', 'nin', ['user']])).toEqual(['a', 'c']);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  /**
+   * Only a PLAIN object is a nested condition. A class instance with its own
+   * non-`$` keys is data, the way a moment or luxon date or a decimal object
+   * is: an ordering operator compares it through its `valueOf`. `Amount`
+   * stands in for that population; `age` is 30 / 25 / 20.
+   */
+  class Amount {
+    readonly units: number;
+    constructor(units: number) {
+      this.units = units;
+    }
+    valueOf(): number {
+      return this.units;
+    }
+  }
+
+  it.each([
+    ['>', 22, ['a', 'b']],
+    ['<', 26, ['b', 'c']],
+  ] as const)(
+    'CONTROL: a class instance with own keys under `%s` compares through valueOf, with nothing logged',
+    async (operator, units, expected) => {
+      const comparand = new Amount(units);
+      expect(Object.keys(comparand)).toEqual(['units']);
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      expect(await selectedIds(['age', operator, comparand])).toEqual(expected);
+      expect(warn).not.toHaveBeenCalled();
+    },
+  );
+
+  it('CONTROL: a `Date` comparand under `>` is still accepted, with nothing logged', async () => {
+    const rows = [
+      { id: 'a', created: new Date('2026-03-01T00:00:00Z') },
+      { id: 'b', created: new Date('2026-01-01T00:00:00Z') },
+    ];
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(await selectedIds(['created', '>', new Date('2026-02-01T00:00:00Z')], rows))
+      .toEqual(['a']);
+    expect(warn).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * The AST arm's null-ness operators carry no flag: direction comes from the
+ * operator NAME, and the value slot is never read. That is the spec's own
+ * reading, so this face needs no flag door of its own: `parseFilterAST`
+ * hands `['f', 'is_null', <anything>]` back as `{ f: { $null: true } }`. The
+ * flag door sits where a flag exists, on the `$` arm and in the converter,
+ * which refuses a non-boolean before it can lower one.
+ */
+describe('the AST null-ness operators read no flag, as the spec reads them', () => {
+  const ROWS = [
+    { id: 'has', ts: 't' },
+    { id: 'null', ts: null },
+    { id: 'missing' },
+  ];
+
+  it.each([['no'], [{ owner: 'u1' }], [false], [0]])(
+    '`is_null` with %j in the value slot is the spec’s `$null: true`, with nothing logged',
+    async (slot) => {
+      expect(parseFilterAST(['ts', 'is_null', slot] as never)).toEqual({ ts: { $null: true } });
+      expect(parseFilterAST(['ts', 'is_not_null', slot] as never)).toEqual({ ts: { $null: false } });
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      expect(await selectedIds(['ts', 'is_null', slot], ROWS)).toEqual(['null', 'missing']);
+      expect(await selectedIds(['ts', 'is_not_null', slot], ROWS)).toEqual(['has']);
+      expect(warn).not.toHaveBeenCalled();
+    },
+  );
+});
+
+/**
+ * The shared comparand builder on the AST arm: a `{ $now, addDays }` anchor, a
+ * `$`-keyed object that is no `{ $field }` reference and a plain object of
+ * another realm are refused under every operator that reads the slot, and a
+ * class instance under an equality, membership or text operator.
+ */
+describe('object comparands the AST arm cannot compare are refused by name', () => {
+  class Amount {
+    readonly units: number;
+    constructor(units: number) {
+      this.units = units;
+    }
+    valueOf(): number {
+      return this.units;
+    }
+  }
+
+  it.each([
+    ['<', { $now: true, addDays: 7 }, 'is a { $now, addDays } date anchor'],
+    ['=', { $now: true, addDays: 0 }, 'is a { $now, addDays } date anchor'],
+    ['!=', { $foo: 1 }, "is an object carrying the key '$foo'"],
+    ['>', runInNewContext('({ id: "u1" })'), 'is a plain object from another realm'],
+    ['!=', runInNewContext('({ id: "u1" })'), 'is a plain object from another realm'],
+    ['=', new Amount(25), 'is a Amount instance'],
+    ['!=', new Amount(25), 'is a Amount instance'],
+    ['not_contains', new Amount(25), 'is a Amount instance'],
+    ['starts_with', new Amount(25), 'is a Amount instance'],
+    // Neither is a plain object from another realm: one structural test with
+    // the converter (foreign-realm-object.ts).
+    ['>', Object.create(Object.create(null) as object) as object, 'is an object of an unrecognised type, which'],
+    ['=', Object.create({ id: 'u1' }) as object, 'is a Object instance, which'],
+  ] as const)('`%s` refuses %j', async (operator, comparand, words) => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(await selectedIds(['age', operator, comparand])).toEqual([]);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0]?.[0])).toContain(`filter comparand on field 'age' ${words}`);
+  });
+
+  it.each([
+    ['in', [new Amount(25), 30]],
+    ['nin', [new Amount(25)]],
+    ['in', [{ $now: true, addDays: 1 }]],
+    ['between', [runInNewContext('({})'), 30]],
+  ] as const)('`%s` refuses such an object as a list member', async (operator, list) => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(await selectedIds(['age', operator, list])).toEqual([]);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0]?.[0])).toContain("filter comparand on field 'age' is ");
+  });
+
+  it('CONTROL: a class instance under `between` compares through valueOf, with nothing logged', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(await selectedIds(['age', 'between', [new Amount(22), new Amount(28)]])).toEqual(['b']);
+    expect(warn).not.toHaveBeenCalled();
   });
 });

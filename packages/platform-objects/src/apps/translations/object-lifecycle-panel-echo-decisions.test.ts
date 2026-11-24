@@ -1286,7 +1286,40 @@ describe('#19403 round 10 — the verdicts, on the live bundles', () => {
       // 741 since #33657: the hook form's refusal entry offers `reasons` (with
       // its `message`) and `params` — three row labels, authored in all three
       // locales.
-      expect(translated.length, `${locale} positive control`).toBe(741);
+      // 744 since #34575: the hook form offers the `texts` record and its
+      // `message` / `params` entry fields — three row labels, authored in all
+      // three locales.
+      // 745 since the object form's `userActions` composite offers `transfer`
+      // (the Change Owner switch, ruling 7000907189 point 1) — one row label,
+      // authored in all three locales.
+      // 748 since #35096: the action form offers the `texts` record and its
+      // `message` / `params` entry fields — three row labels, authored in all
+      // three locales.
+      // 754 since #34823: the action form offers the `refusals` record and its
+      // five entry fields — six row labels, authored in all three locales.
+      // 755 since #35900: the object form's `fieldGroups` repeater offers
+      // `fields` (the group's own member list) — one row label, authored in
+      // all three locales.
+      // 756 since #35985: the object form's `basics` offers a `color` row,
+      // whose label zh-CN translates.
+      // 757 since #36290: the object form's `enable` composite offers
+      // `fieldHistory` — one row label, authored in all three locales.
+      // 759 since #36290's field off switch: the object form's `fields`
+      // repeater and the field form each offer a `fieldHistory` row — two
+      // row labels, authored in all three locales.
+      // 760 since #36425: the field form offers the `showOnCreate` row (ask
+      // for the field when a record is created) — one row label, authored in
+      // all three locales.
+      // 763 since #36366: `advanced` offers the `actionLayout` composite and
+      // its `list` / `record` rows — three row labels, authored in all three
+      // locales.
+      // 765 since #35315: the object form's `fields` repeater and the field
+      // form each offer a `transferBehavior` row — two row labels, authored in
+      // all three locales.
+      // 771 since #36447: the report form declares the `dateRange` and
+      // `exportOptions` children — six row labels, authored in all three
+      // locales.
+      expect(translated.length, `${locale} positive control`).toBe(771);
     }
     // ⭐ DARK — the blindness, executable. On a synthetic two-locale catalog the
     // all-three predicate returns 0 while the per-locale one returns 1, so the

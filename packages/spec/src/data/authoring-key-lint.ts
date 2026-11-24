@@ -43,7 +43,7 @@
  * @see ADR-0049 enforce-or-remove · ADR-0104 · #4001 (the strict tiers)
  */
 
-import { findClosestMatches } from '../shared/suggestions.zod';
+import { suggestRename } from '../shared/rename-guess';
 
 /**
  * Which authoring surface a finding came from — a metadata type machine name
@@ -79,8 +79,8 @@ export interface UnknownAuthoringKeyFinding {
 const EMBEDDED_JSON_TYPED_LIST =
   'An object-level `composite` / `repeater` stores untyped JSON — no per-column labels, types, '
   + 'options or required flags. A list that needs typed columns is a child object whose '
-  + '`master_detail` field points back at this object; `inlineEdit: \'grid\'` on that field edits '
-  + 'its rows as an inline grid on this object\'s form.';
+  + '`master_detail` field points back at this object; a field group on this object whose '
+  + '`relatedList` names that child edits its rows as an inline grid on this object\'s form.';
 
 /**
  * Semantic near-misses on `FieldSchema` — a different **word** for the same
@@ -267,7 +267,9 @@ export function lintAuthoredRecordKeys(
     // A retirement (`why`, no `to`) deliberately suppresses the edit-distance
     // fallback: there IS no successor, and the nearest declared key by spelling
     // is noise — `pii` is 3 edits from `min`, which would read as real advice.
-    const suggestion = hint?.to ?? (hint?.why ? undefined : findClosestMatches(key, candidates, 3, 1)[0]);
+    // The fallback is the package's one rename rule (`shared/rename-guess.ts`):
+    // a flat distance of 3 answered a short key with anything three edits away.
+    const suggestion = hint?.to ?? (hint?.why ? undefined : suggestRename(key, candidates));
     out.push({
       path: `${basePath}.${key}`,
       surface,

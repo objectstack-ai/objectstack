@@ -15,7 +15,7 @@
  * here; that stays with the route handlers.
  */
 
-import { validateActionParams, resolveI18nLabel, type ActionSession, type I18nLabel, type ResolvedActionParam } from '@objectstack/spec/ui';
+import { ACTION_PARAM_BUILTIN_KEYS, validateActionParams, resolveI18nLabel, type ActionSession, type I18nLabel, type ResolvedActionParam } from '@objectstack/spec/ui';
 import { templateSlotSource } from '@objectstack/spec/automation';
 // [#15124] The facade's `find` judges its own parameter against the SAME
 // declaration its type names, so the refusal and the type cannot drift apart.
@@ -44,7 +44,7 @@ import { checkApiExposure, type ApiExposureDecision, type ObjectApiDef } from '.
 // takes to find its nested-relation conditions and each one's target — the data
 // door's and the MCP stdio bridge's, imported rather than re-walked so this door
 // cannot disagree with them about which conditions a filter holds.
-import { relationConditionSites } from '@objectstack/core';
+import { registryObjectPackageDisabled, relationConditionSites } from '@objectstack/core';
 // [ADR-0090 D10 rule 5] The agent forward credential: minted here, redeemed by
 // the doors that serve forward targets (the dispatcher, the REST face, the
 // identity mount). One module in `@objectstack/rest`, which all three reach.
@@ -56,6 +56,7 @@ import { markAppAutomationElevation } from '@objectstack/core';
 // Managing API keys is a signed-in-session act: the one rule this door's
 // per-object gate asks beside the exposure decision, shared with `RestServer`.
 import { apiKeyManagementCredentialRefusal } from '@objectstack/core';
+import type { UserMessageCaller } from '@objectstack/core';
 import {
     PackageScopedNameRefusedError,
     packageScopedHolderSource,
@@ -91,17 +92,18 @@ import type { FlowFailureDetails } from '@objectstack/spec/api';
 // A pure factory — no service resolution — so importing it costs the fallback
 // nothing on an assembly where the protocol plugin is absent, which is exactly
 // when the fallback runs.
-import { recordNotFoundError, omitInternalFieldsFromWriteResponse } from '@objectstack/metadata-protocol';
+import { objectPackageDisabledError, recordNotFoundError, omitInternalFieldsFromWriteResponse } from '@objectstack/metadata-protocol';
 // [#31697] The environment store's rows are the resync's: a legacy organization's rows left out off the physical column.
 import { isTenantAuthored, readLegacyOrganizationRows } from '@objectstack/metadata-core';
-import { serveStoredMetadataRead, serveStoredMetadataReadsThrough } from './stored-metadata-reader-seam.js';
-import { actionInvocationBranch, actionInvocationFailure, actionInvocationTarget, recordActionInvocation, withActionSurface } from './action-invocation-audit.js';
+import { PLATFORM_SYSTEM_API, deriveThroughSeam, serveStoredMetadataRead, serveStoredMetadataReadsThrough } from './stored-metadata-reader-seam.js';
+import { actionInvocationBranch, actionInvocationBulkReading, actionInvocationFailure, actionInvocationTarget, recordActionInvocation, withActionSurface } from './action-invocation-audit.js';
 import type { HttpProtocolContext } from './http-dispatcher.js';
 // The ONE admitted sequence every action door shares; `invokeBusinessAction`
 // below is its MCP door (posture `ai`).
 import { addressedUnknownNameRefusal, refusalOfThrown, refuseDispatchToDisabledObject, runResolvedAction, type ActionRefusal } from './action-dispatch.js';
 import { admittingCredentialKind, type AdmittingCredentialKind } from './security/admitting-credential.js';
 import {
+    ENVIRONMENT_ACTION_COORDINATE,
     GLOBAL_ACTION_OBJECT_KEY,
     actionHandlerObjectKeys,
     actionHolderCoordinate,
@@ -112,6 +114,10 @@ import {
     servedRecordTitle,
     standaloneActionOwnerKey,
     SummaryRecomputeError,
+    AGGREGATE_ORDER_CUT,
+    type AggregateOrderCutRequest,
+    LATEST_PER,
+    type LatestPerRequest,
     type PackageScopedRefusal,
     type PackageScopedRegistry,
 } from '@objectstack/objectql';
@@ -196,6 +202,17 @@ export function systemObjectActionExposureError(_deps: ActionExecutionDeps, acti
         `Action '${action?.name ?? 'unknown'}' is on a system object ('${objectName}') and is not exposed via MCP — ` +
         `a system object's action is reachable here only when its author declares \`ai: { exposed: true, description: … }\` on it`
     );
+}
+
+/**
+ * Is `key` one leading underscore away from a built-in action param
+ * (`ACTION_PARAM_BUILTIN_KEYS`) without being one: `selectedIds`, `__selectedIds`,
+ * `_recordId`, `_objectName`? The same one-byte distance the contract's rejection message
+ * names the built-in at (`validateActionParams`).
+ */
+function isBuiltinParamNearMiss(key: string): boolean {
+    if (ACTION_PARAM_BUILTIN_KEYS.includes(key)) return false;
+    return ACTION_PARAM_BUILTIN_KEYS.includes(`_${key}`) || ACTION_PARAM_BUILTIN_KEYS.includes(key.replace(/^_/, ''));
 }
 
 /**
@@ -326,10 +343,40 @@ const RELATION_CONDITION_TARGET_OPERATION = DATA_ACTION_TO_API_OPERATION[RELATIO
  * `callData` must not give two answers depending on whether the deployment
  * registered the protocol slot (the #5138 rule this file already keeps).
  *
- * `callData` skips it for a system context on the one decision that skips the
- * addressed gate: these flags govern API exposure, not the engine's own reads. A schema
- * that cannot be resolved finds no condition (the filtered object) or serves
- * (a target), the gate's own fail-open.
+ * [#35526] A target whose owning package is DISABLED is refused first, with
+ * the data plane's own `404 OBJECT_PACKAGE_DISABLED` (the target as `object`,
+ * the condition's position as `param`), whatever it declares: the protocol's
+ * relation-condition check refuses the same condition so (#35427), and the
+ * engine would otherwise read the disabled object to lower it, answering a
+ * count of 1 for a stored value and 0 for any other. The question is the
+ * engine registry's `isObjectPackageDisabled`, the one the data plane asks,
+ * read through {@link registryObjectPackageDisabled}; the refusal is the
+ * protocol's one constructor, `objectPackageDisabledError`. ⛔ Never a second
+ * copy of either. A registry that cannot answer disables nothing, as on the
+ * data route.
+ *
+ * [#36393] EVERY HOP the engine serves, not the first one only. The engine
+ * lowers a condition beneath a condition (`{ c_ref: { b_ref: { … } } }`) up
+ * to `RELATION_CONDITION_MAX_HOPS` relationships (`@objectstack/objectql`),
+ * reading each related object in turn, so each site's own condition is
+ * walked against its target's field map and every target on the way is asked
+ * both questions, disabled package first, at its full position
+ * (`where.c_ref.b_ref`). The protocol's twin walk for an engine without an
+ * evaluate gate (`refuseUnservedRelationTargetsIn`) descends the same way, in
+ * the same order. A site the engine would refuse for depth is still asked:
+ * a refusal for a hop it would not serve costs nothing it served.
+ *
+ * WHO is asked what: the disabled-package question is asked for EVERY caller,
+ * a system context included (#35526 ruling, 「系统身份也一律拒绝」: the protocol's
+ * data plane refuses every caller, and `ctx.api` never passes `callData`).
+ * The exposure question is skipped for a system context (`exposureGated`
+ * false), on the one decision that skips the addressed gate: these flags
+ * govern API exposure, not the engine's own reads. The package predicate is
+ * the one {@link callData} read from the engine for the addressed object
+ * ({@link packageDisabledPredicate}), so the arm's own engine (a raw driver
+ * on the MCP multi-env query fallback, which carries no registry) never
+ * decides it. A schema that cannot be resolved finds no condition (the
+ * filtered object) or serves (a target), the gate's own fail-open.
  */
 async function refuseUnservedRelationTargets(
     deps: ActionExecutionDeps,
@@ -337,16 +384,60 @@ async function refuseUnservedRelationTargets(
     engine: unknown,
     object: string,
     where: unknown,
-    scopeId?: string,
+    scopeId: string | undefined,
+    asked: { isObjectPackageDisabled: (objectName: string) => boolean; exposureGated: boolean },
 ): Promise<void> {
+    const walk = async (schema: unknown, condition: unknown, prefix: string, depth: number): Promise<void> => {
+        if (condition == null || typeof condition !== 'object' || depth > RELATION_CONDITION_WALK_DEPTH) return;
+        const fields = (schema as { fields?: Record<string, any> } | undefined)?.fields;
+        for (const site of relationConditionSites(fields, condition)) {
+            const param = `${prefix}.${site.field}`;
+            if (asked.isObjectPackageDisabled(site.target)) {
+                throw Object.assign(objectPackageDisabledError(site.target), { param });
+            }
+            const target = await resolveWriteResponseSchema(deps, requestContext, engine, site.target, scopeId);
+            if (asked.exposureGated) {
+                const gate = checkApiExposure(target as ObjectApiDef | undefined, RELATION_CONDITION_TARGET_ACTION);
+                if (!gate.allowed) throw unservedRelationTargetError(site.target, param, gate);
+            }
+            await walk(target, site.condition, param, depth + 1);
+        }
+    };
     if (where == null || typeof where !== 'object') return;
-    const schema = await resolveWriteResponseSchema(deps, requestContext, engine, object, scopeId);
-    const fields = (schema as { fields?: Record<string, any> } | undefined)?.fields;
-    for (const site of relationConditionSites(fields, where)) {
-        const target = await resolveWriteResponseSchema(deps, requestContext, engine, site.target, scopeId);
-        const gate = checkApiExposure(target as ObjectApiDef | undefined, RELATION_CONDITION_TARGET_ACTION);
-        if (!gate.allowed) throw unservedRelationTargetError(site.target, `where.${site.field}`, gate);
+    await walk(await resolveWriteResponseSchema(deps, requestContext, engine, object, scopeId), where, 'where', 0);
+}
+
+/**
+ * [#36393] A backstop against a self-referential in-process `where`, never the
+ * hop limit: the engine's own `RELATION_CONDITION_MAX_HOPS` decides what it
+ * lowers, and this walk asks at least every hop it serves. The protocol's twin
+ * walk and the engine's evaluate gate stop at the same depth.
+ */
+const RELATION_CONDITION_WALK_DEPTH = 8;
+
+/**
+ * [#36393] The engine registry's `isObjectPackageDisabled`, read once per
+ * {@link callData} call through {@link registryObjectPackageDisabled}, the one
+ * reading the data plane asks before it refuses an object `404
+ * OBJECT_PACKAGE_DISABLED`. The engine is the one this door aggregates on
+ * (`getObjectQL`, then the `objectql` slot), never the raw driver an MCP
+ * multi-env caller threads through. An engine that cannot be resolved, or a
+ * registry without the member, disables nothing, as on the data route.
+ */
+async function packageDisabledPredicate(
+    deps: ActionExecutionDeps,
+    requestContext: HttpProtocolContext,
+    scopeId?: string,
+): Promise<(objectName: string) => boolean> {
+    let engine = await resolveEngineQuietly(deps, requestContext, scopeId);
+    if (engine == null) {
+        try {
+            engine = (await deps.resolveService(requestContext, 'objectql', scopeId)) ?? undefined;
+        } catch {
+            engine = undefined;
+        }
     }
+    return registryObjectPackageDisabled((engine as { registry?: unknown } | null | undefined)?.registry);
 }
 
 /**
@@ -625,9 +716,19 @@ export async function callData(deps: ActionExecutionDeps,
 ): Promise<any> {
     // The object-level API exposure gate ({@link refuseUnexposedDataAction}).
     // [#22823] Decided ONCE, here: the same bypass covers each nested-relation
-    // condition's target, asked below on the two arms that hand the engine a
-    // caller's `where` ({@link refuseUnservedRelationTargets}).
+    // condition's target's EXPOSURE question, asked below on the two arms that
+    // hand the engine a caller's `where` ({@link refuseUnservedRelationTargets});
+    // [#36393] its disabled-package question is asked of every caller.
     const exposureGated = !executionContext?.isSystem;
+    // [#36393] The disabled-package question, asked of EVERY caller (a system
+    // context included, the #35526 ruling) before any exposure verdict: of the
+    // addressed object here, and of every nested-relation condition's target
+    // below. Read from the engine's registry, so a host with no protocol
+    // service, whose by-name read below cannot refuse, refuses too.
+    const isObjectPackageDisabled = await packageDisabledPredicate(deps, requestContext, scopeId);
+    if (typeof params?.object === 'string' && isObjectPackageDisabled(params.object)) {
+        throw objectPackageDisabledError(params.object);
+    }
     // [#25120] `'refuse'`: a disabled package's object is refused here, on
     // every arm, the `aggregate` arm that never reaches the protocol included.
     await refuseUnexposedDataAction(deps, requestContext, action, params?.object, scopeId, executionContext, 'refuse');
@@ -698,7 +799,7 @@ export async function callData(deps: ActionExecutionDeps,
             // answered 200 or 404 depending only on whether the deployment
             // registered the protocol slot — a difference the caller cannot see
             // and never asked for.
-            if (!match) throw recordNotFoundError(params.object, params.id);
+            if (!match) throw recordNotFoundError(params.object, params.id, executionContext);
             return { object: params.object, id: params.id, record: match };
         }
         throw { statusCode: 503, message: 'Data service not available' };
@@ -747,7 +848,7 @@ export async function callData(deps: ActionExecutionDeps,
             // all read `.status` → `.statusCode` → 500). A caller mistake was
             // reported as an internal fault and taken to the error reporter
             // with it.
-            if (!existing) throw recordNotFoundError(params.object, params.id);
+            if (!existing) throw recordNotFoundError(params.object, params.id, executionContext);
             // [#28782] The create arm's carrier, for an update that landed.
             let stale: SummaryRecomputeRefusal | undefined;
             await ql.update(params.object, params.data, findOpts({ where: { id: params.id } }))
@@ -823,7 +924,7 @@ export async function callData(deps: ActionExecutionDeps,
             if (all && (all as any).value) all = (all as any).value;
             if (!all) all = [];
             const existing = (all as any[]).find((i: any) => i.id === params.id);
-            if (!existing) throw recordNotFoundError(params.object, params.id);
+            if (!existing) throw recordNotFoundError(params.object, params.id, executionContext);
             // [#28782] The create arm's carrier, for a delete that landed.
             let stale: SummaryRecomputeRefusal | undefined;
             await ql.delete(params.object, findOpts({ where: { id: params.id } }))
@@ -861,8 +962,35 @@ export async function callData(deps: ActionExecutionDeps,
             const { object, ...rest } = params;
             return rest;
         })();
+        // [latest per group] The engine's one-row-per-group request, when an
+        // in-process door (the MCP tools) set it on `params` under the
+        // engine's own symbol key — never a wire key. Handed to `findData` on
+        // its request under the same key, and read back: a read that comes back
+        // without the engine's outcome on it was not served as one row per
+        // group, and its rows are no answer.
+        const latestPer = (params as Record<symbol, unknown> | undefined)?.[LATEST_PER] as LatestPerRequest | undefined;
         if (protocol && typeof protocol.findData === 'function') {
-            return await protocol.findData({ object: params.object, query, context: executionContext });
+            if (latestPer === undefined) {
+                return await protocol.findData({ object: params.object, query, context: executionContext });
+            }
+            const answer = await protocol.findData({ object: params.object, query, context: executionContext, [LATEST_PER]: latestPer });
+            if (latestPer.outcome?.kind !== 'served') {
+                throw {
+                    statusCode: 500,
+                    message: `The one-row-per-group read of '${params.object}' came back without being served as one row `
+                        + 'per group, so its rows are not the answer and none is returned.',
+                };
+            }
+            return answer;
+        }
+        if (latestPer !== undefined) {
+            // The fallback below serves canonical QueryAST keys only; one row
+            // per group is the engine's window, reached through `findData`.
+            throw {
+                statusCode: 501,
+                message: `Data query fallback cannot serve one row per group of '${params.object}': the protocol service `
+                    + '(metadata-protocol plugin) is not registered, and only its findData carries that read to the engine.',
+            };
         }
         if (ql) {
             // [#4386] This fallback used to pass only `{ context }` — the
@@ -900,9 +1028,7 @@ export async function callData(deps: ActionExecutionDeps,
             // [#22823] …and each nested-relation condition's TARGET, before the
             // engine reads it — the protocol path asks the same of the same
             // sites (`refuseUnservedRelationTarget`).
-            if (exposureGated) {
-                await refuseUnservedRelationTargets(deps, requestContext, ql, params.object, bag.where, scopeId);
-            }
+            await refuseUnservedRelationTargets(deps, requestContext, ql, params.object, bag.where, scopeId, { isObjectPackageDisabled, exposureGated });
             // …and the `internal: true` evaluate refusal for every caller, as
             // the protocol path asks it inside `findData` — the engine's one
             // definition (see the `aggregate` arm). A raw driver on the MCP
@@ -939,9 +1065,7 @@ export async function callData(deps: ActionExecutionDeps,
             // is asked before the engine aggregates, as the query fallback asks
             // it (the engine lowers relation conditions in `where` only, never
             // in an aggregation's own `filter`).
-            if (exposureGated) {
-                await refuseUnservedRelationTargets(deps, requestContext, engine, params.object, params.where, scopeId);
-            }
+            await refuseUnservedRelationTargets(deps, requestContext, engine, params.object, params.where, scopeId, { isObjectPackageDisabled, exposureGated });
             // The `internal: true` evaluate refusal — a filter (`where`, an
             // aggregation's own `filter`), a group key or an aggregation operand
             // on such a field — asked of the ENGINE's one definition
@@ -959,6 +1083,13 @@ export async function callData(deps: ActionExecutionDeps,
                 groupBy: params.groupBy,
                 aggregations: params.aggregations,
             });
+            // [aggregate order and cut] The engine's order-cut-count request,
+            // when an in-process door (the MCP tools) set it on `params` under
+            // the engine's own symbol key — never a wire key. Handed to the
+            // engine as its read option and read back: a read that comes back
+            // without the engine's outcome on it was not ordered and cut in
+            // the driver's statement, and its rows are no answer.
+            const orderCut = (params as Record<symbol, unknown> | undefined)?.[AGGREGATE_ORDER_CUT] as AggregateOrderCutRequest | undefined;
             const rows = await engine.aggregate(
                 params.object,
                 {
@@ -968,8 +1099,19 @@ export async function callData(deps: ActionExecutionDeps,
                     ...(params.timezone ? { timezone: params.timezone } : {}),
                     ...(executionContext ? { context: executionContext } : {}),
                 },
+                ...(orderCut !== undefined
+                    ? [{ [AGGREGATE_ORDER_CUT]: orderCut } as Parameters<typeof engine.aggregate>[2]] as const
+                    : [] as const),
             );
-            return { object: params.object, rows: rows ?? [] };
+            if (orderCut === undefined) return { object: params.object, rows: rows ?? [] };
+            if (orderCut.outcome?.kind !== 'served') {
+                throw {
+                    statusCode: 500,
+                    message: `The ordered and cut aggregate of '${params.object}' came back without being served by the `
+                        + 'driver\'s own statement, so its rows are not the answer and none is returned.',
+                };
+            }
+            return { object: params.object, rows: rows ?? [], totalGroups: orderCut.outcome.totalGroups };
         }
         throw { statusCode: 503, message: 'Data service not available' };
     }
@@ -3026,7 +3168,10 @@ export function actionLooksDestructive(_deps: ActionExecutionDeps, action: any):
  *
  * For every other caller, a door that enforces the author's AI opt-in and
  * still reads the member: today a host's door under the `ai` posture
- * (`dispatchAction`, `action-dispatch.ts`). [#33690] The MCP `run_action`
+ * (`dispatchAction`, `action-dispatch.ts`), and the host's resume door
+ * (`dispatchActionResume`, `action-dispatch.ts`, #34386), the approval leg of
+ * a handed-off `resume_run`, which reads the person's `confirm` for the
+ * candidate action that admits the run as `dispatchAction` reads it. [#33690] The MCP `run_action`
  * ({@link invokeBusinessAction}) and `resume_run` doors no longer read it:
  * under the amended contract they hand a declared-gated call to the person
  * ({@link aiDoorConfirmation}, {@link handOffActionConfirmation}) and the
@@ -3388,15 +3533,20 @@ export async function refuseDeniedSubjectBeforeHandOff(
     deps: ActionExecutionDeps,
     requestContext: HttpProtocolContext,
     action: any,
-    wiring: { objectName: string; recordId: string | undefined; subject: ActionSubjectRecordLoad; ec: any; envId?: string },
+    wiring: {
+        objectName: string; recordId: string | undefined; subject: ActionSubjectRecordLoad; ec: any; envId?: string;
+        /** The caller-scope read of the call's selection, when it was read ({@link loadActionSelectionRecords}). */
+        selection?: ActionSelectionLoad;
+    },
 ): Promise<void> {
     const { objectName, recordId, subject, ec, envId } = wiring;
     if (isDeclarativeUpdateAction(action)) {
         if (subject.recordLoadDenied) await refuseUngrantedDeclarativeUpdate(deps, requestContext, objectName, ec, envId);
-        refuseDeniedSubjectLoad(objectName, recordId, subject);
+        refuseDeniedSubjectLoad(objectName, recordId, subject, ec);
         return;
     }
-    refuseDeniedSubjectLoadBeforeDispatch(action, objectName, recordId, subject);
+    refuseDeniedSubjectLoadBeforeDispatch(action, objectName, recordId, subject, ec);
+    refuseUndeliveredActionSelection(objectName, wiring.selection, ec);
 }
 
 export function summarizeAction(
@@ -3724,9 +3874,19 @@ export function enforceActionParams(deps: ActionExecutionDeps,
     where: { objectName?: string; actionName?: string },
 ): string | null {
     const declaresParams = Array.isArray(action?.params) && action.params.length > 0;
-    if (!declaresParams && !isDeclarativeUpdateAction(action)) return null;
-    const resolved = resolveDeclaredActionParams(deps, action, obj);
-    const issues = validateActionParams(resolved, paramBagUnderContract(action, resolved, bag));
+    let issues: ReturnType<typeof validateActionParams>;
+    if (!declaresParams && !isDeclarativeUpdateAction(action)) {
+        // A param-less handler action keeps the ADR-0104 D2 pass-through for
+        // its custom keys, except a near-miss spelling of a built-in
+        // (`selectedIds` for `_selectedIds`), refused in the contract's own
+        // words: a selection is carried only under the key the door reads.
+        const nearMisses = Object.keys(bag).filter(isBuiltinParamNearMiss);
+        if (nearMisses.length === 0) return null;
+        issues = validateActionParams([], Object.fromEntries(nearMisses.map((key) => [key, bag[key]])));
+    } else {
+        const resolved = resolveDeclaredActionParams(deps, action, obj);
+        issues = validateActionParams(resolved, paramBagUnderContract(action, resolved, bag));
+    }
     if (issues.length === 0) return null;
     const summary = issues.map((i) => i.message).join('; ');
     if (!laxActionParams()) {
@@ -3872,11 +4032,18 @@ export function buildActionExecutionContext(ec: any): Record<string, unknown> {
  * handler (`landed-write-answer.ts`), on this context and every one it
  * derives. That layer sits beneath the reader seam, so the answer is served
  * like any write's return.
+ *
+ * It is built over {@link keepActionDoorProvenance}, beneath both layers, so
+ * it and every api derived from it carry the action door's origin flag: on
+ * it, `platformSystemApi(ctx.api)` answers what `ctx.api.sudo()` answers.
  */
 export function buildActionApi(_deps: ActionExecutionDeps, ql: any, ec: any): any | undefined {
     if (!ql || typeof ql.createContext !== 'function') return undefined;
     const served = (scoped: unknown) =>
-        serveStoredMetadataReadsThrough(answerLandedWritesDespiteStaleSummary(scoped, ACTION_API_SURFACE), ql);
+        serveStoredMetadataReadsThrough(
+            answerLandedWritesDespiteStaleSummary(keepActionDoorProvenance(scoped), ACTION_API_SURFACE),
+            ql,
+        );
     try {
         return served(ql.createContext(buildActionExecutionContext(ec)));
     } catch {
@@ -3889,6 +4056,37 @@ export function buildActionApi(_deps: ActionExecutionDeps, ql: any, ec: any): an
             return undefined;
         }
     }
+}
+
+/** The action door's origin flag: `true` on the api {@link buildActionApi} builds, and on every api derived from it. */
+const ACTION_DOOR_ORIGIN = Symbol.for('objectstack.runtime.actionDoorOrigin');
+
+/** On the action door's api, the platform's own system api is answered by `sudo()`. */
+const ACTION_DOOR_ANSWERS: ReadonlyMap<PropertyKey, PropertyKey> = new Map([[PLATFORM_SYSTEM_API, 'sudo']]);
+
+/**
+ * The action door's provenance layer: `api`, and every api derived from it
+ * (the shared walk, `deriveThroughSeam`: `sudo()`, `withRunAs(...)`, a
+ * transaction's context, and the api a symbol-keyed member derives, the
+ * user-grants seed's included), carry {@link ACTION_DOOR_ORIGIN},
+ * and on each the platform's own system api (`platformSystemApi`, objectql)
+ * is the api's `sudo()`: the `'action'` mark {@link buildActionExecutionContext}
+ * sets, and any `flowRunId`, stay. So a handler handing its own `ctx.api` to
+ * `platformSystemApi` gains nothing, and its writes to the identity-assignment
+ * objects are refused as an action handler's are
+ * (`content/docs/permissions/system-context.mdx`). `platformSystemApi` takes
+ * the mark off only the api the audit writer holds, a hook api the engine
+ * builds, which this layer never wraps.
+ *
+ * A flag of the action door's own, and ⛔ not the engine's app-authored one:
+ * that one also refuses a permanent delete (ADR-0148 D3), and a host code
+ * handler keeps the engine's permanent delete. Repositories pass through
+ * unchanged. Not a security boundary: the handler's package registered
+ * through the engine it holds, whose `createContext({ isSystem: true })`
+ * already builds a system api with neither the mark nor the run.
+ */
+function keepActionDoorProvenance<T>(api: T): T {
+    return deriveThroughSeam(api, ACTION_DOOR_ORIGIN, (_name, repo) => repo, ACTION_DOOR_ANSWERS);
 }
 
 /** [#28861] The surfaces the stale-column line names, for an action handler's two data handles. */
@@ -4227,18 +4425,26 @@ export function actionRecordLoadSignal(load: ActionSubjectRecordLoad): { recordL
  * refusal that distinguished the two would make this door the existence oracle
  * every other door declines to be. #15079 argued it; this consumes the argument
  * rather than reopening it.
+ *
+ * [#34699] `caller` is whose language the envelope's `userMessage` is in (the
+ * request's `locale`, then its `workspaceLocale`, then `en`): every door that
+ * holds the caller's execution context passes it, so the action and flow-start
+ * doors answer the sentence the data door answers for the same miss. It
+ * changes the language only — the sentence is one text for a hidden row and a
+ * missing one, so no door becomes an existence oracle through it.
  */
 export function refuseDeniedSubjectLoad(
     objectName: string,
     recordId: string | undefined,
     subject: ActionSubjectRecordLoad,
+    caller?: UserMessageCaller | null,
 ): void {
     if (!subject.recordLoadDenied) return;
     // The producer never attempts a load without a `recordId`, so the verdict
     // cannot be `true` without one. The `??` names the id in the envelope; it is
     // ⛔ NOT a second condition — a guard whose extra clause can switch it off is
     // the inert-guard shape this whole seam exists to remove.
-    throw recordNotFoundError(objectName, recordId ?? '');
+    throw recordNotFoundError(objectName, recordId ?? '', caller);
 }
 
 /**
@@ -4364,9 +4570,11 @@ export function refuseDeniedSubjectLoadBeforeDispatch(
     objectName: string,
     recordId: string | undefined,
     subject: ActionSubjectRecordLoad,
+    // [#34699] The caller whose language the refusal's `userMessage` is in.
+    caller?: UserMessageCaller | null,
 ): void {
     if (subject.recordLoadDenied && forwardsOnDeniedSubjectLoad(action)) return;
-    refuseDeniedSubjectLoad(objectName, recordId, subject);
+    refuseDeniedSubjectLoad(objectName, recordId, subject, caller);
 }
 
 /**
@@ -4522,7 +4730,7 @@ export async function refuseUnreadableFlowStartRecords(
         const once = `${objectName}\u0000${recordId}`;
         if (loaded.has(once)) return;
         const subject = await loadActionSubjectRecord(objectName, recordId, () => readRecord(objectName, recordId));
-        refuseDeniedSubjectLoad(objectName, recordId, subject);
+        refuseDeniedSubjectLoad(objectName, recordId, subject, executionContext);
         loaded.add(once);
     };
     const named = start.recordKeys.filter(([, value]) => isNamedStartValue(value));
@@ -4572,6 +4780,115 @@ function recordIdListOrRefuse(key: string, value: unknown): string[] {
     }
     const message = `The record key \`${key}\` must name a list of records by their ids.`;
     throw validationFailure(message, [{ field: key, code: 'invalid_type', message }]);
+}
+
+/** The built-in params key a record-less call carries its selection under. */
+export const ACTION_SELECTION_PARAM = '_selectedIds';
+
+/**
+ * The most record ids one call's selection may name: the console's own
+ * select-all-matching cap (`BULK_SELECT_ALL_MATCHING_CAP`, `@object-ui/plugin-grid`).
+ */
+export const ACTION_SELECTION_CAP = 5000;
+
+/** How many ids of a selection are read at once. */
+const ACTION_SELECTION_READ_WINDOW = 16;
+
+/**
+ * What {@link loadActionSelectionRecords} answers: whether the caller's own
+ * scope delivered EVERY id of the selection, and the first one it did not.
+ */
+export interface ActionSelectionLoad {
+    selectionLoadDenied: boolean;
+    /** The first id the caller's scope did not deliver, named in the refusal. */
+    undelivered?: string;
+}
+
+/**
+ * Does this call carry a selection the door must read before it runs? A call
+ * that writes as the caller, or whose target authorizes the caller itself,
+ * builds nothing elevated on the ids and is not read here:
+ *
+ *  - the declarative update, which writes the caller's own edit;
+ *  - a `type: 'api'` action, forwarded with the caller's own credentials;
+ *  - the system principal, which reads every row anyway.
+ *
+ * Every other arm (a script body, a flow) is.
+ */
+export function actionSelectionIsRead(action: any, ec: any): boolean {
+    if (ec?.isSystem === true) return false;
+    if (isDeclarativeUpdateAction(action)) return false;
+    return (typeof action?.type === 'string' ? action.type : 'script') !== 'api';
+}
+
+/**
+ * The record ids a call's `params._selectedIds` names, or the `400` its shape
+ * earns: a list of non-empty ids (strings or numbers), at most
+ * {@link ACTION_SELECTION_CAP} of them. `undefined` when the call carries none (absent, `null` or `''`, as
+ * for `recordId`). A call addressed to no object (an object-less action key)
+ * names no object its ids could be read from, and is refused for carrying one.
+ */
+export function actionSelectionIdsOrRefuse(objectName: string, params: Record<string, unknown>): string[] | undefined {
+    const value = params[ACTION_SELECTION_PARAM];
+    if (value === undefined || value === null || value === '') return undefined;
+    const ids = recordIdListOrRefuse(ACTION_SELECTION_PARAM, value);
+    if (ids.some((id) => id.trim() === '')) {
+        const message = `The record key \`${ACTION_SELECTION_PARAM}\` must name each record by a non-empty id.`;
+        throw validationFailure(message, [{ field: ACTION_SELECTION_PARAM, code: 'invalid_value', message }]);
+    }
+    if (ids.length > ACTION_SELECTION_CAP) {
+        const message = `The record key \`${ACTION_SELECTION_PARAM}\` names ${ids.length} records; one call may name at most ${ACTION_SELECTION_CAP}.`;
+        throw validationFailure(message, [{ field: ACTION_SELECTION_PARAM, code: 'max_items', message }]);
+    }
+    if (ids.length > 0 && isObjectLessActionKey(objectName)) {
+        const message = `The record key \`${ACTION_SELECTION_PARAM}\` names records, so the action must be called on their object.`;
+        throw validationFailure(message, [{ field: ACTION_SELECTION_PARAM, code: 'invalid_value', message }]);
+    }
+    return ids;
+}
+
+/**
+ * Read a selection IN THE CALLER'S OWN SCOPE, with the per-record door's own
+ * read: every distinct id through {@link loadActionSubjectRecord} and
+ * `readRecord` (the door's caller-scope `get` of one row of `objectName`), a
+ * few at a time. So an id is delivered here exactly when the per-record door
+ * would deliver it as its subject: a selection is never refused where each of
+ * its rows would be read one by one, and never admitted where one would not.
+ *
+ * One id the read does not deliver denies the whole selection — ⛔ ids are
+ * never dropped. A hidden row, an id that names nothing and a read the caller
+ * is refused are one answer here, as they are at the per-record door; the
+ * verdict names the first such id in the order the call sent them.
+ */
+export async function loadActionSelectionRecords(
+    objectName: string,
+    ids: readonly string[],
+    readRecord: (recordId: string) => Promise<unknown>,
+): Promise<ActionSelectionLoad> {
+    const distinct = [...new Set(ids)];
+    for (let i = 0; i < distinct.length; i += ACTION_SELECTION_READ_WINDOW) {
+        const window = distinct.slice(i, i + ACTION_SELECTION_READ_WINDOW);
+        const loads = await Promise.all(window.map((recordId) =>
+            loadActionSubjectRecord(objectName, recordId, () => readRecord(recordId))));
+        const missing = window.find((_, at) => loads[at].recordLoadDenied);
+        if (missing !== undefined) return { selectionLoadDenied: true, undelivered: missing };
+    }
+    return { selectionLoadDenied: false };
+}
+
+/**
+ * The selection's verdict, consumed: a selection the caller's scope did not
+ * deliver whole is refused with the per-record door's own
+ * `404 RECORD_NOT_FOUND`, before anything that builds an elevated context.
+ * `undefined` (the call was not read) refuses nothing.
+ */
+export function refuseUndeliveredActionSelection(
+    objectName: string,
+    selection: ActionSelectionLoad | undefined,
+    caller?: UserMessageCaller | null,
+): void {
+    if (!selection?.selectionLoadDenied) return;
+    throw recordNotFoundError(objectName, selection.undelivered ?? '', caller);
 }
 
 /**
@@ -4801,7 +5118,7 @@ export async function executeDeclarativeUpdateAction(
     if (subject.recordLoadDenied) {
         await refuseUngrantedDeclarativeUpdate(_deps, wiring.requestContext, objectName, ec, envId);
     }
-    refuseDeniedSubjectLoad(objectName, recordId, subject);
+    refuseDeniedSubjectLoad(objectName, recordId, subject, ec);
 
     // ── contract point 2: ONE data-plane update, AS THE CALLER ───────────────
     // ⛔ `ec`, never `buildActionExecutionContext(ec)`. See the docblock — this
@@ -5065,7 +5382,11 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
     });
     const { outcome } = run;
     if (outcome.kind === 'answered') {
-        await recordActionInvocation(deps, requestContext, envId, { ...invocation, outcome: 'succeeded' });
+        // [#34292] A call that carried `_selectedIds` adds the per-row counts
+        // its resolve value reads as; the outcome stays `succeeded`.
+        await recordActionInvocation(deps, requestContext, envId, {
+            ...invocation, outcome: 'succeeded', bulk: actionInvocationBulkReading(run.admitted.params, outcome.result),
+        });
         if (action?.type === 'api' && !declarative) {
             // A credential rotation the target emitted (impersonation): the
             // bearer pair ONLY — see {@link mcpRelayableForwardHeaders} for why
@@ -5308,10 +5629,28 @@ export type EnvironmentStoredActionNames = () => Promise<{ actions: ReadonlySet<
  * no `find`. A read that throws travels to the caller: the store failing to
  * answer is never read as "no row" (ADR-0110 D3).
  */
-export function environmentStoredActionNames(ql: any): EnvironmentStoredActionNames | undefined {
+export function environmentStoredActionNames(
+    ql: any,
+    /**
+     * [ADR-0150 D4] One action name, and the object it is routed on: the
+     * action rows read are that name's (the row's `name` column), the legacy
+     * plural only when the store holds no `action` row at all (the resync's
+     * own fallback), and the object rows read are that object's. Omitted,
+     * every row is read.
+     */
+    scope?: { actionName: string; objectName?: string },
+): EnvironmentStoredActionNames | undefined {
     if (typeof ql?.find !== 'function') return undefined;
-    const read = async (type: string): Promise<any[]> =>
-        (await ql.find('sys_metadata', { where: { type, state: 'active' }, context: { isSystem: true } })) ?? [];
+    const read = async (type: string, name?: string, limit?: number): Promise<any[]> =>
+        (await ql.find('sys_metadata', {
+            where: { type, state: 'active', ...(name !== undefined ? { name } : {}) },
+            ...(limit !== undefined ? { limit } : {}),
+            context: { isSystem: true },
+        })) ?? [];
+    const readObjectRows = async (): Promise<any[]> => {
+        if (scope === undefined) return read('object');
+        return scope.objectName !== undefined && !isObjectLessActionKey(scope.objectName) ? read('object', scope.objectName) : [];
+    };
     const body = (row: any): any => {
         try {
             return typeof row?.metadata === 'string' ? JSON.parse(row.metadata) : row?.metadata;
@@ -5321,9 +5660,11 @@ export function environmentStoredActionNames(ql: any): EnvironmentStoredActionNa
     };
     const packageless = (row: any): boolean => row?.package_id === null || row?.package_id === undefined || row?.package_id === '';
     return async () => {
-        let actionRows = await read('action');
-        if (actionRows.length === 0) actionRows = await read('actions');
-        const objectRows = await read('object');
+        let actionRows = await read('action', scope?.actionName);
+        if (actionRows.length === 0 && (scope === undefined || (await read('action', undefined, 1)).length === 0)) {
+            actionRows = await read('actions', scope?.actionName);
+        }
+        const objectRows = await readObjectRows();
         const legacy = actionRows.length + objectRows.length === 0
             ? new Set<string>()
             : new Set((await readLegacyOrganizationRows(ql.getDriverForObject?.('sys_metadata'))).keys());
@@ -6094,6 +6435,219 @@ export async function actionHandlerOwnerRefusal(deps: ActionExecutionDeps,
         if (switchedOff) return switchedOff;
     }
     return undefined;
+}
+
+
+/**
+ * [ADR-0150 D4] A coordinate no handler is registered under. A dispatch naming
+ * it reaches, by the engine's package-scoped rule, the ONE shared handler held
+ * under the key — host code's or a plugin's — refuses two of them
+ * (`409 RESOURCE_CONFLICT`), and never reaches the environment's slot or a
+ * package's. It is the platform item's coordinate in a dispatch. Not a package
+ * id: a manifest id is reverse-domain and never parenthesised.
+ */
+export const PLATFORM_DISPATCH_COORDINATE = '(platform)';
+
+/** Whose handler an attributed script dispatch runs: the environment's own item's, or the platform item's. */
+export type ActionHandlerHolder = 'environment' | 'platform';
+
+/**
+ * What {@link attributeActionHandler} answers: the holder whose handler the
+ * script dispatch runs and the package coordinate the owner gate judges, or
+ * nothing (`{}`: the dispatch names what the declaration names, as before),
+ * or the metadata plane failing to answer.
+ */
+export type ActionHandlerAttribution =
+    | { holder?: ActionHandlerHolder; packageId?: string }
+    | { degraded: true; reason: string };
+
+/** One row of the engine's handler listing, keyed `OBJECT:KEY`. */
+interface ReachedHandlerRow { entry: string; package?: string; coordinate?: string }
+
+/**
+ * The script dispatch of a declaration through the engine registry: the
+ * handler ENTRY it reaches (`OBJECT:KEY`, the rotation of
+ * {@link executeRegisteredAction}) in one snapshot of
+ * `listRegisteredActions(options)`, among the rows `accept` admits, with the
+ * owner label and the package coordinate the engine reports for it.
+ * `undefined` when the engine cannot enumerate its handlers or the dispatch
+ * reaches nothing.
+ */
+function reachedHandlerRow(
+    ql: any,
+    objectName: string,
+    candidates: string[],
+    options?: { packageId: string },
+    accept: (row: Omit<ReachedHandlerRow, 'entry'>) => boolean = () => true,
+): ReachedHandlerRow | undefined {
+    if (!ql || typeof ql.listRegisteredActions !== 'function') return undefined;
+    const rows = new Map<string, Omit<ReachedHandlerRow, 'entry'>>();
+    const listing = (options === undefined ? ql.listRegisteredActions() : ql.listRegisteredActions(options)) as
+        Array<{ objectName: string; actionName: string; package?: string; coordinate?: string }> | undefined;
+    for (const row of listing ?? []) {
+        const at = { package: row.package, coordinate: row.coordinate };
+        if (accept(at)) rows.set(`${row.objectName}:${row.actionName}`, at);
+    }
+    const entry = reachedHandlerEntry(new Set(rows.keys()), objectName, candidates);
+    return entry === undefined ? undefined : { entry, ...rows.get(entry) };
+}
+
+/** A handler in the environment's own slot ({@link ENVIRONMENT_ACTION_COORDINATE}). */
+const inEnvironmentSlot = (row: { coordinate?: string }) => row.coordinate === ENVIRONMENT_ACTION_COORDINATE;
+/** A shared handler (host code or a plugin): any coordinate but the environment's. */
+const inSharedSlot = (row: { coordinate?: string }) => row.coordinate !== undefined && row.coordinate !== ENVIRONMENT_ACTION_COORDINATE;
+
+/**
+ * The entry an attributed dispatch runs, and the coordinate it names: for the
+ * environment's own item, a handler in the environment's slot, else a handler
+ * the authored-action resync bound as a declared override (the unqualified
+ * slot's entry, registered under that resync's owner label); for the platform
+ * item, the one shared handler. `undefined`: the holder has no handler here.
+ */
+function attributedHandlerEntry(
+    ql: any,
+    objectName: string,
+    candidates: string[],
+    holder: ActionHandlerHolder,
+): { entry: string; packageId?: string } | undefined {
+    if (holder === 'platform') {
+        const shared = reachedHandlerRow(ql, objectName, candidates, { packageId: PLATFORM_DISPATCH_COORDINATE }, inSharedSlot);
+        return shared === undefined ? undefined : { entry: shared.entry, packageId: PLATFORM_DISPATCH_COORDINATE };
+    }
+    const own = reachedHandlerRow(ql, objectName, candidates, { packageId: ENVIRONMENT_ACTION_COORDINATE }, inEnvironmentSlot);
+    if (own !== undefined) return { entry: own.entry, packageId: ENVIRONMENT_ACTION_COORDINATE };
+    const top = reachedHandlerRow(ql, objectName, candidates);
+    return top?.package === PLANE_AUTHORED_HANDLER_PACKAGE ? { entry: top.entry } : undefined;
+}
+
+/**
+ * [ADR-0150 D4] Run the handler of `holder` for a script dispatch: the entry
+ * is chosen and the engine's `executeAction` is called for it in ONE
+ * synchronous step, so the handler that runs is the one the choice read. The
+ * engine looks the handler up before it awaits anything. `{ dispatched: false }`
+ * when the holder has no handler here, which the doors answer as their routing
+ * miss; a handler's own failure propagates, as {@link executeRegisteredAction}'s does.
+ */
+export function executeAttributedAction(
+    ql: any,
+    objectName: string,
+    candidates: string[],
+    actionContext: any,
+    holder: ActionHandlerHolder,
+): Promise<{ dispatched: boolean; result?: any }> {
+    const picked = attributedHandlerEntry(ql, objectName, candidates, holder);
+    if (picked === undefined || !ql || typeof ql.executeAction !== 'function') return Promise.resolve({ dispatched: false });
+    const at = picked.entry.indexOf(':');
+    const [obj, key] = [picked.entry.slice(0, at), picked.entry.slice(at + 1)];
+    let run: Promise<any>;
+    try {
+        run = Promise.resolve(picked.packageId === undefined
+            ? ql.executeAction(obj, key, actionContext)
+            : ql.executeAction(obj, key, actionContext, { packageId: picked.packageId }));
+    } catch (err) {
+        return Promise.reject(err);
+    }
+    return run.then(
+        (result) => ({ dispatched: true, result }),
+        (err) => {
+            if (isActionNotRegisteredError(err)) return { dispatched: false };
+            throw err;
+        },
+    );
+}
+
+/**
+ * [ADR-0150 D4] Whose handler the script dispatch of a declaration that names
+ * no package runs, so the declaration a door gated on and the handler it runs
+ * are ONE item's.
+ *
+ * Two package-less items can hold a handler under one `OBJECT:NAME` key: the
+ * environment's own item, whose handler the authored-action resync binds in
+ * the environment's slot (or over a package's, as a declared override), and
+ * the platform's item, whose handler host code or a plugin registers in a
+ * shared slot. The registry serves one package-less item per owner key, and
+ * the dispatch follows the item the door resolved:
+ *
+ *  - the ENVIRONMENT'S OWN item — a package-less row the environment's store
+ *    holds under its owner key and name, standalone or embedded in a stored
+ *    object row ({@link environmentStoredActionNames}, the test the route's
+ *    own holder census applies) — runs the handler the resync bound for it,
+ *    whichever owner registered under its key last; when that handler is
+ *    gone by the moment it dispatches, the door answers its routing miss. One
+ *    whose handler the environment's slot does not hold — no `body` of its
+ *    own, or a `body` no handler is bound for — is dispatched as before;
+ *  - the PLATFORM'S item, beside a handler of the resync's on top of the
+ *    unqualified slot whose source neither the store nor the metadata
+ *    service's listing (the resync's two sources) still holds, runs the one
+ *    shared handler under the key ({@link PLATFORM_DISPATCH_COORDINATE}).
+ *
+ * Ownership is read from the stored rows alone. An item the metadata
+ * service serves with no stored row is the platform's in that test, and
+ * beside a shared handler under its key it is dispatched as before: the
+ * declaration a door resolves carries nothing that tells it apart from a
+ * platform item of the same owner key and name.
+ *
+ * The store is read only when the answer can change: the environment's slot
+ * holds a handler the dispatch reaches while the unqualified slot holds
+ * another owner's; or the unqualified slot holds the resync's
+ * handler while exactly one shared handler is held under the same key. The
+ * metadata service is read only in the second case. A read that throws is the
+ * metadata plane failing to answer (ADR-0110 D3): `degraded`, which the door
+ * refuses rather than run a handler it cannot attribute. An engine that
+ * registers no metadata store holds no environment row.
+ */
+export async function attributeActionHandler(
+    ql: any,
+    args: {
+        action: any;
+        objectName: string;
+        candidates: string[];
+        obj?: any;
+        /** The metadata service's `action` items (its `loadMany`), or `undefined` when the host has none. */
+        readServiceActions?: () => Promise<unknown[] | undefined>;
+    },
+): Promise<ActionHandlerAttribution> {
+    const { action, objectName, candidates, obj, readServiceActions } = args;
+    if (!dispatchesThroughHandlerRegistry(action)) return {};
+    const declaredPackage = actionDeclaringPackage(action, obj);
+    if (declaredPackage !== undefined && declaredPackage !== 'sys_metadata') return {};
+    const name: unknown = action?.name;
+    if (typeof name !== 'string' || name === '') return {};
+    const top = reachedHandlerRow(ql, objectName, candidates);
+    const topIsResync = top?.package === PLANE_AUTHORED_HANDLER_PACKAGE;
+    if (topIsResync) {
+        const shared = reachedHandlerRow(ql, objectName, candidates, { packageId: PLATFORM_DISPATCH_COORDINATE }, inSharedSlot);
+        if (shared?.entry !== top.entry) return {};
+    } else {
+        const environmentSlotHolds = reachedHandlerRow(ql, objectName, candidates, { packageId: ENVIRONMENT_ACTION_COORDINATE }, inEnvironmentSlot) !== undefined;
+        if (!environmentSlotHolds) return {};
+    }
+    const ownerKey = standaloneActionOwnerKey(action);
+    const routedKey = isObjectLessActionKey(objectName) ? GLOBAL_ACTION_OBJECT_KEY : objectName;
+    const store = environmentStoredActionNames(ql, { actionName: name, objectName });
+    let environmentOwn = false;
+    if (store !== undefined) {
+        try {
+            const stored = await store();
+            // A standalone row bound to its owner key — also when the routed
+            // object serves it inside its own `actions` by reference — or an
+            // action a stored object row embeds.
+            environmentOwn = stored.actions.has(`${ownerKey}:${name}`) || stored.embedded.has(`${routedKey}:${name}`);
+        } catch (err: any) {
+            if (!listingNotServed(err)) return { degraded: true, reason: err?.message ?? String(err) };
+        }
+    }
+    if (environmentOwn) return { holder: 'environment', packageId: ENVIRONMENT_ACTION_COORDINATE };
+    if (!topIsResync) return {};
+    let served: unknown[] | undefined;
+    try {
+        served = await readServiceActions?.();
+    } catch (err: any) {
+        return { degraded: true, reason: err?.message ?? String(err) };
+    }
+    const sourced = (served ?? []).some((item: any) =>
+        item && typeof item === 'object' && item.name === name && standaloneActionOwnerKey(item) === ownerKey);
+    return sourced ? {} : { holder: 'platform', packageId: PLATFORM_DISPATCH_COORDINATE };
 }
 
 

@@ -18,6 +18,7 @@ export const SysApiKey = ObjectSchema.create({
   label: 'API Key',
   pluralLabel: 'API Keys',
   icon: 'key-round',
+  color: 'purple',
   isSystem: true,
   managedBy: 'better-auth',
   // [ADR-0092 D4 / ADR-0103] Declares the generic EDIT affordance, which is

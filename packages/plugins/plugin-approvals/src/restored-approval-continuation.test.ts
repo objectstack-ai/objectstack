@@ -281,7 +281,7 @@ describe('#15389 — a restored approval suspension has an issuer again', () => 
 
     // ── The approvals doors: all guard on `pending`, and the row is terminal.
     const decideAgain = await service
-      .decide(req.id, { decision: 'reject', actorId: 'u1' }, SYSTEM_CTX)
+      .decide(req.id, { decision: 'reject', comment: 'Over budget.', actorId: 'u1' }, SYSTEM_CTX)
       .then(() => null, (e: Error) => e);
     expect(decideAgain?.message).toBe('INVALID_STATE: request is rejected');
 
@@ -674,7 +674,7 @@ describe('#15389 — a restored approval suspension has an issuer again', () => 
     // (a) A healthy decision. The run completed; there is nothing to continue,
     // and this must NOT re-run the branch a second time.
     const healthy = await park(automation);
-    await service.decide(healthy.id, { decision: 'reject', actorId: 'u1' }, SYSTEM_CTX);
+    await service.decide(healthy.id, { decision: 'reject', comment: 'Over budget.', actorId: 'u1' }, SYSTEM_CTX);
     expect(marks).toEqual(['mark_rejected']);
     const noPause = await service.continueRestoredRun(healthy.id).then(() => null, (e: Error) => e);
     expect(noPause?.message).toMatch(/is not suspended/);
@@ -685,7 +685,7 @@ describe('#15389 — a restored approval suspension has an issuer again', () => 
     // refusal has to name the step they missed rather than fail obscurely.
     rejectBranchThrows = DOWNSTREAM_FAILURE;
     const stranded = await park(automation);
-    await service.decide(stranded.id, { decision: 'reject', actorId: 'u1' }, SYSTEM_CTX)
+    await service.decide(stranded.id, { decision: 'reject', comment: 'Over budget.', actorId: 'u1' }, SYSTEM_CTX)
       .then(() => null, () => null);
     const notRestored = await service.continueRestoredRun(stranded.id)
       .then(() => null, (e: Error) => e);
@@ -881,7 +881,7 @@ describe('#15389 — a restored approval suspension has an issuer again', () => 
     const second = boot();
     rejectBranchThrows = DOWNSTREAM_FAILURE;
     const amb = await park(second);
-    await service.decide(amb.id, { decision: 'reject', actorId: 'u1' }, SYSTEM_CTX)
+    await service.decide(amb.id, { decision: 'reject', comment: 'Over budget.', actorId: 'u1' }, SYSTEM_CTX)
       .then(() => null, () => null);
     await second.restoreConsumedSuspension(amb.flow_run_id);
     const ambRow = await rowOf(amb.id);

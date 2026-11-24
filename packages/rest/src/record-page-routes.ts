@@ -243,7 +243,7 @@ export function registerRecordPageEndpoints(this: RecordPageRouteHost, basePath:
                     ...scope,
                 } satisfies ServerScopedDataRequest<GetDataRequest>);
                 const record = got?.record ?? got;
-                if (!record || typeof record !== 'object') throw recordNotFoundError(object, id);
+                if (!record || typeof record !== 'object') throw recordNotFoundError(object, id, context);
 
                 const answerRelated = async (entry: NonNullable<RecordPageRequest['related']>[number], index: number) => {
                     const head = { object: entry.object, field: entry.field };
@@ -344,12 +344,19 @@ export function registerRecordPageEndpoints(this: RecordPageRouteHost, basePath:
                     return 'error' in answer ? answer : { total: answer.total, records: answer.records };
                 };
 
+                // [#35724] `uploaded_by` expanded, as the activity's actor is:
+                // the expansion is a read of `sys_user` as the caller, so a
+                // reader who may read the uploader gets the user row (its name
+                // for the panel's uploader column), and one who may not keeps
+                // the stored bare id — shaped by the reader's own user-read
+                // rights, and no wider.
                 const answerAttachments = async (top: number) => {
                     const answer = await readStream(ATTACHMENT_OBJECT, {
                         where: { parent_object: object, parent_id: id },
                         orderBy: [{ field: 'created_at', order: 'desc' }],
                         limit: top,
                         count: true,
+                        expand: relationMap(['uploaded_by']),
                     });
                     return 'error' in answer ? answer : { total: answer.total, records: answer.records };
                 };
@@ -415,7 +422,7 @@ export function registerRecordPageEndpoints(this: RecordPageRouteHost, basePath:
                             return { error: { code: 'NOT_IMPLEMENTED', status: 501, message: 'The record field projection is not available on this deployment.' } };
                         }
                         const access = await security.getRecordFieldAccess(object, id, context);
-                        if (access === null) throw recordNotFoundError(object, id);
+                        if (access === null) throw recordNotFoundError(object, id, context);
                         if (access === undefined) {
                             return { error: { code: 'NOT_IMPLEMENTED', status: 501, message: `The record field projection has no answer for '${object}'.` } };
                         }

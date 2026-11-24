@@ -49,23 +49,12 @@ export function getPersonName(record: any, nameField: string | readonly string[]
 }
 
 /**
- * Up-to-2-char initials for the avatar fallback.
- * - "John Doe" → "JD"; "John" → "JO"
- * - CJK single token → trailing 1–2 chars (given name): "张三" → "张三", "王小明" → "小明"
+ * The one avatar-initials rule, letters only (objectstack#36046). It lives in
+ * `@object-ui/types`, the lowest package every face that draws initials can
+ * reach (objectstack#36346); re-exported here so field renderers keep reading
+ * it from beside the other person helpers.
  */
-export function getPersonInitials(name: string): string {
-  const trimmed = (name || '').trim();
-  if (!trimmed) return '?';
-  const parts = trimmed.split(/\s+/).filter(Boolean);
-  if (parts.length >= 2) {
-    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
-  }
-  const token = parts[0];
-  if (/[㐀-鿿]/.test(token)) {
-    return token.length <= 2 ? token : token.slice(-2);
-  }
-  return token.slice(0, 2).toUpperCase();
-}
+export { getPersonInitials } from '@object-ui/types';
 
 /** Secondary line: resolve each field path, drop empties, join with " · ". */
 export function getPersonSubtitle(record: any, fields?: string[]): string {

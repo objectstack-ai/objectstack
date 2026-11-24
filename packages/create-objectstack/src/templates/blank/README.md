@@ -98,10 +98,10 @@ for OAuth, API keys, and which objects/actions become tools.
 - `note.test.ts` — the starter test `pnpm test` runs, configured by
   `vitest.config.ts`
 
-## Connectors (default providers)
+## Connectors (add a provider when you need one)
 
-`objectstack.config.ts` wires the three **generic connector executors**, so you
-can call an external system from a flow as pure metadata — no host code:
+A **generic connector executor** lets you call an external system from a flow
+as pure metadata — no host code:
 
 | Provider | Package | Use for |
 |:---|:---|:---|
@@ -109,13 +109,19 @@ can call an external system from a flow as pure metadata — no host code:
 | `openapi` | `@objectstack/connector-openapi` | An API described by an OpenAPI document |
 | `mcp` | `@objectstack/connector-mcp` | A Model Context Protocol server |
 
-Add a `connectors:` entry that names one of these `provider`s and the
-`automation` capability materializes it into a live, dispatchable connector at
-boot — see [Automation → Connectors](https://objectstack.ai/docs/automation/connectors)
+The starter lists none of them in `plugins:`. A plugin is code, and an app
+with code in `plugins:` installs only as a managed package — never as an
+editable copy (`manifest.installModes: ['unmanaged']`, how a marketplace trial
+template is installed), because a copy is made of metadata alone. So add a
+provider when the app first needs one: install its package
+(`pnpm add @objectstack/connector-rest`), list its executor in `plugins:`
+(`new ConnectorRestPlugin()`), and add a `connectors:` entry that names its
+`provider`. The `automation` capability materializes that entry into a live,
+dispatchable connector at boot — see
+[Automation → Connectors](https://objectstack.ai/docs/automation/connectors)
 for how that materialization works; a flow's `connector_action` node then
-calls it. To add a brand connector (e.g. Slack), install its package and add
-`new ConnectorSlackPlugin()` to `plugins:`; to drop a provider, remove its
-plugin.
+calls it. A brand connector (e.g. Slack) is added the same way, with its own
+package and `new ConnectorSlackPlugin()`.
 
 > **Security — declarative MCP over stdio.** An `mcp` connector whose transport
 > spawns a local process (`stdio`) is denied by default, because the command

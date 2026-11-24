@@ -1656,9 +1656,12 @@ const SavedMappingBar: React.FC<{
 
 /** Read-only summary of the chosen server mapping — source → target (transform)
  *  per fieldMapping entry. Names the transforms without re-running them. */
-const SavedMappingSummary: React.FC<{ mapping: SavedMapping }> = ({ mapping }) => {
+const SavedMappingSummary: React.FC<{ mapping: SavedMapping; fields: ImportWizardProps['fields'] }> = ({ mapping, fields }) => {
   const { t } = useImportTranslation();
-  const rows = summarizeSavedMapping(mapping);
+  const rows = useMemo(() => {
+    const labels = new Map(fields.map((f) => [f.name, f.label]));
+    return summarizeSavedMapping(mapping, (name) => labels.get(name) || name);
+  }, [mapping, fields]);
   return (
     <div data-testid="import-saved-mapping-summary">
       <p className="mb-2 flex items-start gap-2 rounded-md border border-border bg-muted/40 p-3 text-xs text-muted-foreground">
@@ -1681,7 +1684,7 @@ const SavedMappingSummary: React.FC<{ mapping: SavedMapping }> = ({ mapping }) =
                 <TableCell>{r.target}</TableCell>
                 <TableCell className="text-center">
                   {r.transform
-                    ? <Badge variant="outline" className="text-[10px] font-normal">{r.transform}</Badge>
+                    ? <Badge variant="outline" className="text-xs font-normal">{r.transform}</Badge>
                     : <EmptyValue />}
                 </TableCell>
               </TableRow>
@@ -1748,7 +1751,7 @@ const StepMapping: React.FC<{
         writeModes={writeModes}
       />
       {activeMapping ? (
-        <SavedMappingSummary mapping={activeMapping} />
+        <SavedMappingSummary mapping={activeMapping} fields={fields} />
       ) : (
       <>
       <TemplateBar
@@ -1790,7 +1793,7 @@ const StepMapping: React.FC<{
                 <div className="flex flex-col gap-0.5">
                   <span>{header}</span>
                   {inferred !== 'text' && (
-                    <Badge variant="outline" className="w-fit text-[10px] font-normal text-muted-foreground" data-testid={`import-inferred-${idx}`}>
+                    <Badge variant="outline" className="w-fit text-xs font-normal text-muted-foreground" data-testid={`import-inferred-${idx}`}>
                       {t(`grid.import.type.${inferred}`)}
                     </Badge>
                   )}
@@ -1809,12 +1812,12 @@ const StepMapping: React.FC<{
                   </SelectContent>
                 </Select>
                 {autoMatched && (
-                  <p className={cn('mt-1 flex items-center gap-1 text-[11px]', CONFIDENCE_CLASS[autoMatched])} data-testid={`import-automatch-${idx}`}>
+                  <p className={cn('mt-1 flex items-center gap-1 text-xs', CONFIDENCE_CLASS[autoMatched])} data-testid={`import-automatch-${idx}`}>
                     <CheckCircle2 className="h-3 w-3" /> {t('grid.import.autoMatched')} · {t(`grid.import.confidence.${autoMatched}`)}
                   </p>
                 )}
                 {typeMismatch && (
-                  <p className="mt-1 flex items-center gap-1 text-[11px] text-amber-600" data-testid={`import-type-warn-${idx}`}>
+                  <p className="mt-1 flex items-center gap-1 text-xs text-amber-600" data-testid={`import-type-warn-${idx}`}>
                     <AlertCircle className="h-3 w-3" /> {t('grid.import.typeMismatch', { type: t(`grid.import.type.${inferred}`) })}
                   </p>
                 )}
@@ -2073,7 +2076,7 @@ const ImportOptions: React.FC<{
             <Label className="text-xs">{t('grid.import.matchFields')}</Label>
             <div className="flex flex-wrap gap-x-4 gap-y-1.5">
               {matchable.length === 0 && (
-                <span className="text-[11px] text-muted-foreground">{t('grid.import.matchFieldsPlaceholder')}</span>
+                <span className="text-xs text-muted-foreground">{t('grid.import.matchFieldsPlaceholder')}</span>
               )}
               {matchable.map((f) => (
                 <label key={f.name} className="flex items-center gap-1.5 text-xs" data-testid={`import-matchfield-${f.name}`}>
@@ -2085,7 +2088,7 @@ const ImportOptions: React.FC<{
                 </label>
               ))}
             </div>
-            <p className={cn('text-[11px]', matchFields.length === 0 ? 'text-destructive' : 'text-muted-foreground')}>
+            <p className={cn('text-xs', matchFields.length === 0 ? 'text-destructive' : 'text-muted-foreground')}>
               {matchFields.length === 0 ? t('grid.import.needMatchFields') : t('grid.import.matchFieldsHint')}
             </p>
           </div>
@@ -2107,7 +2110,7 @@ const ImportOptions: React.FC<{
               <Checkbox checked={backgroundImport} onCheckedChange={(v) => onBackgroundImport(v === true)} />
               <span>
                 {t('grid.import.optBackground')}
-                <span className="ml-1 text-[11px] text-muted-foreground">{t('grid.import.optBackgroundHint')}</span>
+                <span className="ml-1 text-xs text-muted-foreground">{t('grid.import.optBackgroundHint')}</span>
               </span>
             </label>
           )}
@@ -2556,10 +2559,16 @@ export const ImportWizard: React.FC<ImportWizardProps> = ({
   const missingRequiredHintId = React.useId();
   const nextHeldByRequired = !mappingName && missingRequired.length > 0;
 
+  // A file loaded while a named mapping is active (Back, then a new file)
+  // keeps that mapping: the summary still shows it and the import still names
+  // it, so the preview grid is re-derived from it for the new headers, never
+  // auto-mapped — an auto-map the server will not apply left the preview
+  // blank whenever the source headers do not resemble the field names.
   const handleFileLoaded = useCallback((h: string[], r: string[][], fromCsvFile: boolean) => {
     setHeaders(h); setRows(r); setCsvFile(fromCsvFile);
-    setMapping(autoMapColumns(h, fields, r)); setCorrections({}); setStep('mapping');
-  }, [fields]);
+    setMapping(activeMapping ? savedMappingToDisplayIndexMap(activeMapping, h) : autoMapColumns(h, fields, r));
+    setCorrections({}); setStep('mapping');
+  }, [fields, activeMapping]);
 
   // cloud#797 Excel→App: when opened with a pre-loaded file (from the AI build
   // panel's attachment), parse it once and jump straight to mapping — no

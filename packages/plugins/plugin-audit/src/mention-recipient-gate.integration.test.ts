@@ -36,6 +36,13 @@
  * - the `messaging` service, played by a recorder of `emit()` calls (the
  *   inbox materialisation is service-messaging's to pin).
  *
+ * [#34729] Each admitted recipient is emitted to twice: the inbox notice (no
+ * `channels`) and the e-mail (`channels: ['email']`), which carries the same
+ * comment preview to a mailbox outside the platform. So every helper here
+ * that reads the emits asserts the e-mail went to exactly the people the
+ * inbox notice went to (`mentionEmits`), and every pin that says nothing may
+ * be emitted reads the whole topic.
+ *
  * [#27703] The gate's verdict also reaches the AUTHOR: the users it withholds
  * are handed to the write's own `onMentionsWithheld` listener (the in-process
  * bag the data protocol's create and update pass, and answer as
@@ -165,7 +172,7 @@ describe('@mention notifications reach only mentioned users who can read the com
   const comment = async (taskId: string, mentions: unknown[]) => {
     emits.length = 0;
     await post(taskId, mentions);
-    return emits.filter((e) => e.topic === 'collab.mention');
+    return mentionEmits(emits);
   };
   /** `user`'s own read of the comment `commentId`, in the envelope the request path gives them. */
   const readCommentAs = (user: { id: string }, positions: string[], commentId: string) =>
@@ -174,6 +181,23 @@ describe('@mention notifications reach only mentioned users who can read the com
       context: { userId: user.id, tenantId: ORG_A, positions, permissions: [], accessible_org_ids: [ORG_A] },
     });
   const audiences = (events: Array<Record<string, any>>) => events.map((e) => e.audience);
+  /** Every `collab.mention` emit in `list`, whatever its channels. */
+  const allMentionEmits = (list: Array<Record<string, any>>) => list.filter((e) => e.topic === 'collab.mention');
+  /**
+   * [#34729] The inbox mention emits in `list` (no `channels`), once the
+   * e-mail emits (`channels: ['email']`) are shown to have gone to exactly
+   * the same people in the same order, and no third shape exists. The e-mail
+   * carries the comment preview outside the platform, so it is gated like
+   * the inbox notice or the pin fails.
+   */
+  const mentionEmits = (list: Array<Record<string, any>>) => {
+    const all = allMentionEmits(list);
+    const inbox = all.filter((e) => e.channels === undefined);
+    const email = all.filter((e) => Array.isArray(e.channels) && e.channels.length === 1 && e.channels[0] === 'email');
+    expect(all.length).toBe(inbox.length + email.length);
+    expect(audiences(email)).toEqual(audiences(inbox));
+    return inbox;
+  };
 
   beforeAll(async () => {
     kernel = new ObjectKernel({ logger: { level: 'silent' } });
@@ -282,6 +306,18 @@ describe('@mention notifications reach only mentioned users who can read the com
       });
     });
 
+    it('[#34729] the e-mail is gated like the inbox notice: the withheld user gets neither, the reader gets both', async () => {
+      emits.length = 0;
+      await post(openTask, [BOB.id, CAROL.id, BOB.email]);
+      const all = allMentionEmits(emits);
+      expect(all.filter((e) => e.audience.includes(BOB.id))).toEqual([]);
+      expect(all.map((e) => [e.audience, e.channels])).toEqual([
+        [[CAROL.id], undefined],
+        [[CAROL.id], ['email']],
+      ]);
+      expect(all[1]).toMatchObject({ payload: { body: `note ${seq}`, mentionUrl: `/${TASK}/${openTask}` } });
+    });
+
     it('resolves a fellow member mentioned by email to their user id', async () => {
       expect(audiences(await comment(openTask, [CAROL.email]))).toEqual([[CAROL.id]]);
     });
@@ -357,6 +393,75 @@ describe('@mention notifications reach only mentioned users who can read the com
     it('holds under the single posture as under a wall', async () => {
       tenancy.posture = 'single';
       expect(audiences(await comment(openTask, [DAVE.id, DAVE.email, CAROL.id]))).toEqual([[CAROL.id]]);
+    });
+  });
+
+  describe('[#36074] a reply notice asks the same gate of the thread\'s participants', () => {
+    /** The `collab.reply` emits in `list`, the e-mail shown to go to exactly the inbox notice's people. */
+    const replyEmits = (list: Array<Record<string, any>>) => {
+      const all = list.filter((e) => e.topic === 'collab.reply');
+      const inbox = all.filter((e) => e.channels === undefined);
+      const email = all.filter((e) => Array.isArray(e.channels) && e.channels.length === 1 && e.channels[0] === 'email');
+      expect(all.length).toBe(inbox.length + email.length);
+      expect(audiences(email)).toEqual(audiences(inbox));
+      return inbox;
+    };
+    /** A comment by `author` on `taskId`, written in system context (the author stamped as given). */
+    const by = async (author: { id: string }, taskId: string, parentId?: string): Promise<string> => {
+      seq += 1;
+      const row: any = await engine.insert(
+        'sys_comment',
+        {
+          thread_id: `${TASK}:${taskId}`,
+          body: `note ${seq}`,
+          author_id: author.id,
+          author_name: author.id,
+          organization_id: ORG_A,
+          ...(parentId ? { parent_id: parentId } : {}),
+        },
+        { context: SYS },
+      );
+      return String(row.id);
+    };
+    /** ALICE replies to `parentId` on `taskId` through the engine as herself; the reply emits it produced. */
+    const aliceReplies = async (taskId: string, parentId: string) => {
+      emits.length = 0;
+      seq += 1;
+      await engine.insert(
+        'sys_comment',
+        { thread_id: `${TASK}:${taskId}`, body: `note ${seq}`, parent_id: parentId, mentions: '[]' },
+        { context: authorContext() },
+      );
+      return replyEmits(emits);
+    };
+
+    it('notifies the participant who reads the record and the reply; withholds the other organization\'s and the one who cannot read comments', async () => {
+      const task = (await engine.insert(TASK, { name: 'reply', organization_id: ORG_A, owner_id: ALICE.id, confidential: false }, { context: SYS })).id;
+      const root = await by(CAROL, task);
+      await by(DAVE, task, root);
+      await by(BOB, task, root);
+      const events = await aliceReplies(task, root);
+      expect(audiences(events)).toEqual([[CAROL.id]]);
+      expect(events[0]).toMatchObject({ source: { object: TASK, id: task }, organizationId: ORG_A, payload: { body: `note ${seq}` } });
+    });
+
+    it('a starter who can no longer read the record is not notified', async () => {
+      const task = (await engine.insert(TASK, { name: 'reply', organization_id: ORG_A, owner_id: ALICE.id, confidential: false }, { context: SYS })).id;
+      const root = await by(CAROL, task);
+      expect(audiences(await aliceReplies(task, root))).toEqual([[CAROL.id]]);
+      await engine.update(TASK, { confidential: true }, { where: { id: task }, context: SYS } as any);
+      expect(audiences(await aliceReplies(task, root))).toEqual([]);
+    });
+
+    it('the withheld line names the reply notice', async () => {
+      const row = await post(openTask, []);
+      const warned: Array<{ message: string; meta?: Record<string, unknown> }> = [];
+      const admitted = await admitMentionRecipients(
+        { engine: engine as any, getTenancyPosture: () => 'isolated' as const, logger: { warn: (message: string, meta?: Record<string, unknown>) => warned.push({ message, meta }) } },
+        { mentions: [BOB.id, CAROL.id], threadId: `${TASK}:${openTask}`, actorId: ALICE.id, organizationId: ORG_A, commentId: String(row.id), notice: 'reply' },
+      );
+      expect(admitted).toEqual([CAROL.id]);
+      expect(warned.map((w) => w.message)).toEqual(['[audit] reply notification withheld']);
     });
   });
 
@@ -472,7 +577,7 @@ describe('@mention notifications reach only mentioned users who can read the com
         { thread_id: `${TASK}:${taskId}`, body: `note ${seq}`, mentions: JSON.stringify(mentions) },
         { context: authorContext(), onMentionsWithheld: (ids: readonly string[]) => { told.push([...ids]); } } as any,
       );
-      return { row, told, events: emits.filter((e) => e.topic === 'collab.mention') };
+      return { row, told, events: mentionEmits(emits) };
     };
     /** Edit `commentId` as ALICE with a listener on THIS write's options. */
     const editTold = async (commentId: string, data: Record<string, unknown>) => {
@@ -483,7 +588,7 @@ describe('@mention notifications reach only mentioned users who can read the com
         context: authorContext(),
         onMentionsWithheld: (ids: readonly string[]) => { told.push([...ids]); },
       } as any);
-      return { told, events: emits.filter((e) => e.topic === 'collab.mention') };
+      return { told, events: mentionEmits(emits) };
     };
 
     it('a create hands the withheld users\' ids, in the order named, to its own listener once; the reader is still notified', async () => {
@@ -536,7 +641,7 @@ describe('@mention notifications reach only mentioned users who can read the com
         onMentionsWithheld: (ids: readonly string[]) => { told.push([...ids]); },
       } as any);
       expect(nested).toBe(false); // the nested comment WAS written, and its gate DID withhold BOB …
-      expect(emits.filter((e) => e.topic === 'collab.mention')).toEqual([]);
+      expect(allMentionEmits(emits)).toEqual([]);
       expect(told).toEqual([]); // … but the outer write was told nothing.
     });
 
@@ -576,7 +681,7 @@ describe('@mention notifications reach only mentioned users who can read the com
         context: carol,
         onMentionsWithheld: (ids: readonly string[]) => { told.push([...ids]); },
       } as any);
-      const events = emits.filter((e) => e.topic === 'collab.mention');
+      const events = mentionEmits(emits);
       // ALICE, the author, is now a recipient like anyone else; CAROL, who added the mentions, is not.
       expect(audiences(events)).toEqual([[ALICE.id]]);
       expect(events[0]).toMatchObject({ actorId: CAROL.id, payload: { actorName: CAROL.id } });
@@ -592,7 +697,7 @@ describe('@mention notifications reach only mentioned users who can read the com
         { context: authorContext(), onMentionsWithheld: () => { throw new Error('listener fault'); } } as any,
       );
       expect(row.id).toBeTruthy();
-      expect(audiences(emits.filter((e) => e.topic === 'collab.mention'))).toEqual([[CAROL.id]]);
+      expect(audiences(mentionEmits(emits))).toEqual([[CAROL.id]]);
     });
   });
 });

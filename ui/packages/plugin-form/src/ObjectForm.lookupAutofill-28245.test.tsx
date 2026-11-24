@@ -22,8 +22,10 @@ import { render, waitFor, fireEvent, screen, act } from '@testing-library/react'
 import React from 'react';
 
 import { ObjectForm } from './ObjectForm';
+import { ModalForm } from './ModalForm';
 import { registerAllFields } from '@object-ui/fields';
 import { SchemaRendererContext } from '@object-ui/react';
+import { createI18n, I18nProvider, LocalizationProvider } from '@object-ui/i18n';
 
 registerAllFields();
 
@@ -197,5 +199,241 @@ describe('ObjectForm — a lookup pick fills its declared lookupAutofill targets
     expect(saved.note ?? '').toBe('');
     expect(saved.unit_price ?? null).toBe(null);
     expect((container.querySelector('input[name="note"]') as HTMLInputElement).value).toBe('');
+  });
+});
+
+/**
+ * A create form that OPENS with the lookup already holding a record — a
+ * related list's New pre-linking its parent, a URL prefill, a form view
+ * default — fills that lookup's declared targets from it, as a pick does
+ * (objectstack#35050). The record is the one the lookup reads for its label,
+ * so the fill costs no second read. Only an empty target fills: a value the
+ * form opened with is an explicit one, and `overwrite: true` does not replace
+ * it. Controls: an edit form fills nothing from the stored record; a lookup
+ * without the key fills nothing.
+ */
+describe('ObjectForm — a create form opened with a lookup value fills its declared targets (objectstack#35050)', () => {
+  function renderSeeded(initialValues: Record<string, unknown>, extra: Record<string, unknown> = {}) {
+    const ds = makeDS();
+    const view = render(
+      <SchemaRendererContext.Provider value={{ dataSource: ds } as never}>
+        <ObjectForm
+          schema={{ type: 'object-form', objectName: 'quote_line', mode: 'create', initialValues, ...extra } as any}
+          dataSource={ds as any}
+        />
+      </SchemaRendererContext.Provider>,
+    );
+    return { ds, container: view.container };
+  }
+
+  const valueOf = (c: HTMLElement, name: string) => (c.querySelector(`input[name="${name}"]`) as HTMLInputElement).value;
+
+  it('fills the empty targets from the record the lookup opened with, and saves them', async () => {
+    const { ds, container } = renderSeeded({ product: 'p1' });
+    await input(container, 'unit_price');
+
+    await waitFor(() => expect(valueOf(container, 'unit_price')).toBe('100'));
+    expect(valueOf(container, 'description')).toBe('A widget');
+
+    fireEvent.submit(container.querySelector('form') as HTMLFormElement);
+    await waitFor(() => expect(ds.create).toHaveBeenCalled());
+    expect(ds.create.mock.calls[0][1]).toMatchObject({ product: 'p1', unit_price: 100, description: 'A widget' });
+  });
+
+  it('keeps every value the form opened with, `overwrite: true` included, and fills the rest', async () => {
+    const { container } = renderSeeded({ product: 'p1', description: 'my words' });
+    await input(container, 'unit_price');
+
+    await waitFor(() => expect(valueOf(container, 'unit_price')).toBe('100'));
+    expect(valueOf(container, 'description')).toBe('my words');
+  });
+
+  it('a pick after the opening fill still follows the pick rule', async () => {
+    const { container } = renderSeeded({ product: 'p1' });
+    await input(container, 'unit_price');
+    await waitFor(() => expect(valueOf(container, 'unit_price')).toBe('100'));
+
+    await pick('product', 'Gadget');
+    await waitFor(() => expect(valueOf(container, 'unit_price')).toBe('250'));
+    expect(valueOf(container, 'description')).toBe('A gadget');
+  });
+
+  it('the opening fill is not an edit: an untouched form closes without the discard prompt, a touched one still asks', async () => {
+    const ds = makeDS();
+    const onOpenChange = vi.fn();
+    render(
+      <SchemaRendererContext.Provider value={{ dataSource: ds } as never}>
+        <ModalForm
+          schema={{ objectName: 'quote_line', mode: 'create', open: true, onOpenChange, initialValues: { product: 'p1' } } as any}
+          dataSource={ds as any}
+        />
+      </SchemaRendererContext.Provider>,
+    );
+    const price = await input(document.body, 'unit_price');
+    await waitFor(() => expect(price.value).toBe('100'));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+    expect(screen.queryByText('Discard changes?')).toBeNull();
+
+    // The guard is live in this form: the user's own edit is one.
+    onOpenChange.mockClear();
+    fireEvent.change(await input(document.body, 'note'), { target: { value: 'typed' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    expect(await screen.findByText('Discard changes?')).toBeTruthy();
+    expect(onOpenChange).not.toHaveBeenCalled();
+  });
+
+  it('control: an edit form fills nothing from the record it loaded', async () => {
+    const ds = makeDS();
+    ds.findOne.mockImplementation(async (name: string, id: string) => {
+      if (name === 'quote_line' && id === 'l9') return { id: 'l9', product: 'p1', unit_price: null, description: null };
+      const row = (ROWS[name] ?? []).find((r) => r.id === id);
+      return row ? { ...row } : null;
+    });
+    const { container } = render(
+      <SchemaRendererContext.Provider value={{ dataSource: ds } as never}>
+        <ObjectForm schema={{ type: 'object-form', objectName: 'quote_line', mode: 'edit', recordId: 'l9' } as any} dataSource={ds as any} />
+      </SchemaRendererContext.Provider>,
+    );
+    await input(container, 'unit_price');
+    // The lookup read its record for the label: the fill had what it needed.
+    await waitFor(() => expect(ds.findOne).toHaveBeenCalledWith('product', 'p1'));
+    await waitFor(() => expect(screen.getByTestId('lookup-trigger-product').textContent).toContain('Widget'));
+    for (let i = 0; i < 6; i++) {
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+    }
+    expect(valueOf(container, 'unit_price')).toBe('');
+    expect(valueOf(container, 'description')).toBe('');
+  });
+
+  it('control: a lookup without the key fills nothing from its opening value', async () => {
+    const { ds, container } = renderSeeded({ account: 'a1', product: 'p1' });
+    await input(container, 'note');
+    await waitFor(() => expect(valueOf(container, 'unit_price')).toBe('100'));
+    await waitFor(() => expect(ds.findOne).toHaveBeenCalledWith('account', 'a1'));
+    expect(valueOf(container, 'note')).toBe('');
+  });
+});
+
+describe('ObjectForm — a pick does not copy an amount into a field in another currency (objectstack#36249)', () => {
+  // A quote whose price follows its own currency code (ADR-0144 D2), and a
+  // catalog whose price is in the home currency (USD here).
+  const CURRENCY_SCHEMAS: Record<string, unknown> = {
+    fx_quote: {
+      name: 'fx_quote',
+      fields: {
+        currency_code: { type: 'text', label: 'Currency' },
+        product: {
+          type: 'lookup',
+          label: 'Product',
+          reference: 'fx_product',
+          lookupAutofill: [
+            { target: 'unit_price', source: 'list_price' },
+            { target: 'description', source: 'summary' },
+          ],
+        },
+        unit_price: {
+          type: 'currency',
+          label: 'Unit Price',
+          currencyConfig: { currencyMode: 'record', currencyField: 'currency_code' },
+        },
+        description: { type: 'text', label: 'Description' },
+      },
+    },
+    fx_product: {
+      name: 'fx_product',
+      fields: {
+        name: { type: 'text', label: 'Name' },
+        list_price: { type: 'currency', label: 'List Price' },
+        summary: { type: 'text', label: 'Summary' },
+      },
+    },
+  };
+  const CURRENCY_ROWS: Record<string, Record<string, unknown>[]> = {
+    fx_product: [{ id: 'p1', name: 'Widget', list_price: 100, summary: 'A widget' }],
+  };
+  const makeCurrencyDS = () => ({
+    getObjectSchema: vi.fn(async (name: string) => CURRENCY_SCHEMAS[name]),
+    find: vi.fn(async (name: string, params?: { $filter?: { id?: { $in?: unknown[] } } }) => {
+      const wanted = params?.$filter?.id?.$in;
+      const rows = (CURRENCY_ROWS[name] ?? []).filter((r) => !wanted || wanted.includes(r.id));
+      return { data: rows.map((r) => ({ ...r })), total: rows.length };
+    }),
+    findOne: vi.fn(async (name: string, id: string) => {
+      const row = (CURRENCY_ROWS[name] ?? []).find((r) => r.id === id);
+      return row ? { ...row } : null;
+    }),
+    create: vi.fn(async (_o: string, d: Record<string, unknown>) => ({ id: 'q1', ...d })),
+    update: vi.fn(),
+  });
+
+  function renderQuote(initialValues: Record<string, unknown>, i18n?: ReturnType<typeof createI18n>) {
+    const ds = makeCurrencyDS();
+    const form = (
+      <LocalizationProvider value={{ currency: 'USD' }}>
+        <SchemaRendererContext.Provider value={{ dataSource: ds } as never}>
+          <ObjectForm
+            schema={{ type: 'object-form', objectName: 'fx_quote', mode: 'create', initialValues } as any}
+            dataSource={ds as any}
+          />
+        </SchemaRendererContext.Provider>
+      </LocalizationProvider>
+    );
+    const view = render(i18n ? <I18nProvider instance={i18n}>{form}</I18nProvider> : form);
+    return { ds, container: view.container };
+  }
+
+  it('a EUR quote: the price stays empty and the form says why; the description still fills', async () => {
+    const { container } = renderQuote({ currency_code: 'EUR' });
+    await input(container, 'description');
+    await pick('product', 'Widget');
+
+    await waitFor(() => expect((container.querySelector('input[name="description"]') as HTMLInputElement).value).toBe('A widget'));
+    const note = await screen.findByTestId('lookup-autofill-withheld');
+    expect(note.querySelector('[data-withheld-target="unit_price"]')).not.toBeNull();
+    expect(note.textContent).toContain('$100.00');
+    expect(note.textContent).toContain('USD');
+    expect(note.textContent).toContain('EUR');
+    const price = container.querySelector('input[name="unit_price"]') as HTMLInputElement | null;
+    expect(price?.value ?? '').toBe('');
+  });
+
+  it('the note names the field as the form shows it: the translated label, not the authored one', async () => {
+    const i18n = createI18n({
+      defaultLanguage: 'zh',
+      detectBrowserLanguage: false,
+      resources: { zh: { app: { fields: { fx_quote: { unit_price: '单价' } } } } },
+    });
+    const { container } = renderQuote({ currency_code: 'EUR' }, i18n);
+    await input(container, 'description');
+    await screen.findByText('单价');
+    await pick('product', 'Widget');
+
+    const note = await screen.findByTestId('lookup-autofill-withheld');
+    const line = note.querySelector('[data-withheld-target="unit_price"]');
+    expect(line?.textContent).toContain('单价');
+    expect(line?.textContent).not.toContain('Unit Price');
+    expect(line?.textContent).not.toContain('unit_price');
+  });
+
+  it('a USD quote: the price fills as before, with no note', async () => {
+    const { container } = renderQuote({ currency_code: 'USD' });
+    await input(container, 'description');
+    await pick('product', 'Widget');
+
+    await waitFor(() => expect((container.querySelector('input[name="description"]') as HTMLInputElement).value).toBe('A widget'));
+    await waitFor(() => expect((container.querySelector('input[name="unit_price"]') as HTMLInputElement).value).toBe('100'));
+    expect(screen.queryByTestId('lookup-autofill-withheld')).toBeNull();
+  });
+
+  it('the opening fill follows the same rule: a EUR quote opened with a product fills no price', async () => {
+    const { container } = renderQuote({ currency_code: 'EUR', product: 'p1' });
+    await waitFor(() => expect((container.querySelector('input[name="description"]') as HTMLInputElement).value).toBe('A widget'));
+    await screen.findByTestId('lookup-autofill-withheld');
+    const price = container.querySelector('input[name="unit_price"]') as HTMLInputElement | null;
+    expect(price?.value ?? '').toBe('');
   });
 });

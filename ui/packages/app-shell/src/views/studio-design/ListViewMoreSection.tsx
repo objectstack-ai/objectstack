@@ -58,6 +58,7 @@ const EDITED_BY_THE_PANEL: ReadonlySet<string> = new Set([
   'gantt',
   'map',
   'tree',
+  'timesheet',
 ]);
 
 /** The fields the curated controls own, hidden from the form as the view inspector hides them. */
@@ -113,6 +114,13 @@ export function ListViewMoreSection({
   const rules = Array.isArray(body.conditionalFormatting) ? (body.conditionalFormatting as unknown[]) : [];
   const form = React.useMemo(() => panelViewForm(locale), [locale]);
   const schema = getListVariantSchema();
+  // Each field's `type` and `multiple` from the loaded catalog, so a formatting
+  // rule that compares a list field with a scalar is refused while typing. The
+  // CEL editor keys its lint on the list-valued names, not on this array.
+  const fieldDefs =
+    fieldCatalog.status === 'loaded'
+      ? fieldCatalog.data.map((f) => ({ name: f.name, type: f.type, multiple: f.multiple }))
+      : undefined;
   return (
     <div className="space-y-3 border-t pt-3" data-testid="list-view-more">
       <div data-testid="list-view-conditional-formatting">
@@ -120,6 +128,7 @@ export function ListViewMoreSection({
           rules={rules as never}
           objectName={objectName}
           fieldNames={fieldNames}
+          fieldDefs={fieldDefs}
           disabled={readOnly}
           t={tLocal}
           onChange={(next) => {

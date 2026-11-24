@@ -71,7 +71,8 @@
 
 import type { JSONWebKeySet } from 'jose';
 import { OAUTH_ORGANIZATION_CLAIM, type AuthManager } from './auth-manager.js';
-import { mcpConsentAdmits, type OAuthGrantStore } from './mcp-token-revocation.js';
+import { MCP_ISSUED_AT_MS_CLAIM, mcpConsentAdmits, type OAuthGrantStore } from './mcp-token-revocation.js';
+import type { CredentialClockReader } from './credential-change-ends-prior-access.js';
 import {
   retireHeldKeyrings,
   UNKNOWN_SIGNING_KEY_REREAD_FLOOR_MS,
@@ -118,12 +119,14 @@ type McpAccessTokenPrincipal = { userId: string; scopes: string[]; clientId?: st
  * Every check of `AuthManager#verifyMcpAccessToken` but the consent read: the
  * signature, issuer, audience and expiry, the delegated-subject rule and the
  * organization claim. Answers the principal and the token's `iat` (absent
- * when the token carries none), or `null`.
+ * when the token carries none), and the raw value of its signed
+ * `MCP_ISSUED_AT_MS_CLAIM` (absent when it carries none; judged by
+ * `mcpTokenIssuedAtMs`, never here), or `null`.
  */
 export async function verifyMcpAccessTokenClaims(
   this: McpAccessTokenClaimsHost,
   token: string,
-): Promise<{ principal: McpAccessTokenPrincipal; issuedAt?: number } | null> {
+): Promise<{ principal: McpAccessTokenPrincipal; issuedAt?: number; issuedAtMsClaim?: unknown } | null> {
   try {
     if (!token || token.split('.').length !== 3) return null; // not a JWS compact token
     if (!this.isMcpOAuthEnabled()) return null;
@@ -195,6 +198,9 @@ export async function verifyMcpAccessTokenClaims(
         ...(organizationId ? { organizationId } : {}),
       },
       ...(typeof payload.iat === 'number' ? { issuedAt: payload.iat } : {}),
+      // Read off the verified payload, the same one `iat` comes from: the
+      // sub-second issue time the authorization server signed in.
+      ...(MCP_ISSUED_AT_MS_CLAIM in payload ? { issuedAtMsClaim: (payload as Record<string, unknown>)[MCP_ISSUED_AT_MS_CLAIM] } : {}),
     };
   } catch {
     return null; // unknown/expired/wrong-audience/garbage → no principal
@@ -208,8 +214,10 @@ export async function verifyMcpAccessTokenClaims(
  * (`mcpConsentAdmits`), read through better-auth's storage adapter, the one
  * the provider writes clients and consents through.
  * The read is keyed by `azp`, the client the provider mints into every
- * access token, so a token without one is refused. A store error, or no
- * adapter at all, is a refusal: fail closed.
+ * access token, so a token without one is refused. The same read refuses a
+ * token issued before its subject's password last changed, on the clock
+ * better-auth's internal adapter answers (`findCredentialAccount`). A store
+ * error, or no adapter at all, is a refusal: fail closed.
  */
 export async function verifyMcpAccessToken(
   this: McpAccessTokenClaimsHost & Pick<McpAccessTokenHost, 'getAuthContext'>,
@@ -217,15 +225,20 @@ export async function verifyMcpAccessToken(
 ): Promise<McpAccessTokenPrincipal | null> {
   const verified = await verifyMcpAccessTokenClaims.call(this, token);
   if (!verified?.principal.clientId) return null;
-  const { principal, issuedAt } = verified;
+  const { principal, issuedAt, issuedAtMsClaim } = verified;
   try {
-    const store = ((await this.getAuthContext()) as { adapter?: OAuthGrantStore } | null | undefined)?.adapter;
+    const authContext = (await this.getAuthContext()) as
+      | { adapter?: OAuthGrantStore; internalAdapter?: CredentialClockReader }
+      | null
+      | undefined;
     const grant = {
       clientId: principal.clientId!,
       userId: principal.userId,
       ...(principal.organizationId ? { organizationId: principal.organizationId } : {}),
     };
-    return (await mcpConsentAdmits(store, grant, issuedAt)) ? principal : null;
+    return (await mcpConsentAdmits(authContext?.adapter, grant, issuedAt, authContext?.internalAdapter, issuedAtMsClaim))
+      ? principal
+      : null;
   } catch {
     return null; // the consent store could not answer → no principal (fail closed)
   }

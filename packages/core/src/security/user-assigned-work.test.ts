@@ -74,7 +74,7 @@ const match = (row: Row, where: Record<string, any>) => Object.entries(where).ev
 });
 
 /** An in-memory engine: equality and `$contains` filters, a per-object read/write refusal. */
-function fakeEngine(seed: Record<string, Row[]>, opts: { unreadable?: string[]; refuseUpdate?: (object: string, id: string) => boolean; disabled?: string[] } = {}) {
+function fakeEngine(seed: Record<string, Row[]>, opts: { unreadable?: string[]; hidden?: Record<string, string[]>; refuseUpdate?: (object: string, id: string) => boolean; disabled?: string[]; configs?: Record<string, unknown> } = {}) {
   const tables = new Map(Object.entries(seed).map(([k, rows]) => [k, rows.map((r) => ({ ...r }))]));
   const calls: Array<{ op: string; object: string; context: any; where?: any }> = [];
   const guard = (object: string, context: any) => {
@@ -84,7 +84,7 @@ function fakeEngine(seed: Record<string, Row[]>, opts: { unreadable?: string[]; 
     tables,
     calls,
     registry: { isObjectPackageDisabled: (name: string) => opts.disabled?.includes(name) ?? false },
-    getConfigs: () => ({ ticket, account, grant, user: { name: 'sys_user', fields: {} } }),
+    getConfigs: () => opts.configs ?? { ticket, account, grant, user: { name: 'sys_user', fields: {} } },
     async count(object, q) {
       calls.push({ op: 'count', object, context: q?.context, where: q?.where });
       guard(object, q?.context);
@@ -93,7 +93,9 @@ function fakeEngine(seed: Record<string, Row[]>, opts: { unreadable?: string[]; 
     async find(object, q) {
       calls.push({ op: 'find', object, context: q?.context, where: q?.where });
       guard(object, q?.context);
-      const rows = (tables.get(object) ?? []).filter((r) => match(r, q?.where ?? {}));
+      // A row the caller's read door does not return; an elevated read still finds it.
+      const visible = (r: Row) => q?.context?.isSystem || !opts.hidden?.[object]?.includes(r.id);
+      const rows = (tables.get(object) ?? []).filter((r) => visible(r) && match(r, q?.where ?? {}));
       return typeof q?.limit === 'number' ? rows.slice(0, q.limit) : rows;
     },
     async update(object, data, o) {
@@ -235,11 +237,108 @@ describe('[#30205] transferUserAssignedWork', () => {
     }
   });
 
-  it('reads the target\'s ban state elevated inside the caller\'s tenant, even when the caller cannot read users', async () => {
-    const engine = fakeEngine(seed(), { unreadable: ['sys_user'] });
+  it('reads a readable target\'s ban state elevated, inside the caller\'s tenant', async () => {
+    const engine = fakeEngine(seed());
     const err = await transferUserAssignedWork(engine, 'u_gone', 'u_also_banned', CALLER).then(() => null, (e) => e);
     expect(err?.field?.code).toBe('reference_user_banned');
-    const read = engine.calls.find((c) => c.object === 'sys_user')!;
-    expect(read.context).toEqual({ ...CALLER, isSystem: true });
+    const reads = engine.calls.filter((c) => c.object === 'sys_user');
+    expect(reads.map((c) => c.context)).toEqual([CALLER, { ...CALLER, isSystem: true }]);
+  });
+
+  it('[#29029] a user the caller cannot read answers as unknown, active or banned, and its ban is not read', async () => {
+    for (const opts of [{ unreadable: ['sys_user'] }, { hidden: { sys_user: ['u_next', 'u_also_banned'] } }]) {
+      for (const to of ['u_next', 'u_also_banned']) {
+        const engine = fakeEngine(seed(), opts);
+        const err = await transferUserAssignedWork(engine, 'u_gone', to, CALLER).then(() => null, (e) => e);
+        expect(err, `${to} ${JSON.stringify(opts)}`).toBeInstanceOf(UserWorkTransferRefusal);
+        expect({ status: err.status, code: err.code, field: err.field?.code })
+          .toEqual({ status: 404, code: 'RESOURCE_NOT_FOUND', field: 'reference_not_found' });
+        expect(engine.calls.filter((c) => c.object === 'sys_user' && c.context?.isSystem)).toHaveLength(0);
+        expect(engine.calls.filter((c) => c.op === 'update')).toHaveLength(0);
+      }
+    }
+  });
+});
+
+// A master and its `controlled_by_parent` detail. The detail's owner is the
+// person who did the work, not who holds it: its access follows the master.
+const expenseReport = {
+  name: 'expense_report',
+  sharingModel: 'private',
+  fields: { owner_id: OWNER_FIELD_DEF, approver: { type: 'user' } },
+};
+const expenseLine = {
+  name: 'expense_line',
+  sharingModel: 'controlled_by_parent',
+  fields: {
+    report: { type: 'master_detail', reference: 'expense_report', required: true },
+    owner_id: OWNER_FIELD_DEF,
+    approver: { type: 'lookup', reference: 'sys_user' },
+  },
+};
+const EXPENSE_CONFIGS = { expenseReport, expenseLine, user: { name: 'sys_user', fields: {} } };
+
+function expenseSeed(): Record<string, Row[]> {
+  return {
+    sys_user: [{ id: 'u_gone', banned: true }, { id: 'u_next', banned: false }],
+    expense_report: [{ id: 'r1', owner_id: 'u_gone', approver: 'u_x' }],
+    expense_line: [
+      { id: 'l1', report: 'r1', owner_id: 'u_gone', approver: 'u_gone' },
+      { id: 'l2', report: 'r1', owner_id: 'u_gone', approver: 'u_x' },
+    ],
+  };
+}
+
+describe('a controlled_by_parent detail keeps its owner in the hand-over', () => {
+  it('leaves the detail\'s owner_id out of the roster; its own user fields and the master\'s owner stay', () => {
+    expect(userAssignedWorkFields([expenseReport, expenseLine]).fields).toEqual([
+      { object: 'expense_report', field: 'owner_id', multiple: false },
+      { object: 'expense_report', field: 'approver', multiple: false },
+      { object: 'expense_line', field: 'approver', multiple: false },
+    ]);
+  });
+
+  it('reads the sharing model where the access gates read it, the nested spot included', () => {
+    const nested = { name: 'expense_line', security: { sharingModel: 'controlled_by_parent' }, fields: expenseLine.fields };
+    expect(userAssignedWorkFields([nested]).fields.map((f) => f.field)).toEqual(['approver']);
+  });
+
+  it('twin: the same object under any other sharing model hands its owner over', () => {
+    for (const sharingModel of ['private', 'public_read', 'public_read_write', undefined]) {
+      const owned = { ...expenseLine, sharingModel };
+      expect(userAssignedWorkFields([owned]).fields.map((f) => f.field)).toEqual(['owner_id', 'approver']);
+    }
+  });
+
+  it('does not count the detail\'s owner_id', async () => {
+    const summary = await countUserAssignedWork(fakeEngine(expenseSeed(), { configs: EXPENSE_CONFIGS }), 'u_gone', CALLER);
+    expect(summary.objects).toEqual([
+      { object: 'expense_report', field: 'owner_id', count: 1, transferable: true },
+      { object: 'expense_line', field: 'approver', count: 1, transferable: true },
+    ]);
+    expect(summary.total).toBe(2);
+  });
+
+  it('moves the master\'s owner and the detail\'s approver, never the detail\'s owner', async () => {
+    const engine = fakeEngine(expenseSeed(), { configs: EXPENSE_CONFIGS });
+    const report = await transferUserAssignedWork(engine, 'u_gone', 'u_next', CALLER);
+    expect(report.objects).toEqual([
+      { object: 'expense_report', field: 'owner_id', updated: 1, failed: 0, failures: [] },
+      { object: 'expense_line', field: 'approver', updated: 1, failed: 0, failures: [] },
+    ]);
+    expect(report.remaining).toBe(0);
+    expect(engine.tables.get('expense_report')![0].owner_id).toBe('u_next');
+    expect(engine.tables.get('expense_line')!.map((r) => [r.owner_id, r.approver])).toEqual([['u_gone', 'u_next'], ['u_gone', 'u_x']]);
+    // No write named the detail's owner column.
+    const ownerWrites = engine.calls.filter((c) => c.op === 'update' && c.object === 'expense_line');
+    expect(ownerWrites).toHaveLength(1);
+  });
+
+  it('a transfer naming the detail alone moves its approver and leaves its owner', async () => {
+    const engine = fakeEngine(expenseSeed(), { configs: EXPENSE_CONFIGS });
+    const report = await transferUserAssignedWork(engine, 'u_gone', 'u_next', CALLER, { objects: ['expense_line'] });
+    expect(report.updated).toBe(1);
+    expect(engine.tables.get('expense_line')!.map((r) => r.owner_id)).toEqual(['u_gone', 'u_gone']);
+    expect(engine.calls.some((c) => c.op === 'find' && c.object === 'expense_line' && 'owner_id' in (c.where ?? {}))).toBe(false);
   });
 });

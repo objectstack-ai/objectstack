@@ -1283,7 +1283,10 @@ describe('chunk membership (objectui#9345)', () => {
       expect(PER_CHUNK_MEMBERSHIP.framework).toContain('types');
       expect(PER_CHUNK_MEMBERSHIP_CARVE_OUTS).toEqual({
         types: [{ subtree: 'src/zod', chunk: 'types-zod' }],
-        fields: [{ subtree: 'src/widgets/date-picker', chunk: 'fields-date-picker' }],
+        fields: [
+          { subtree: 'src/widgets/date-picker', chunk: 'fields-date-picker' },
+          { subtree: 'src/widgets/grid-field', chunk: 'fields-grid' },
+        ],
       });
     });
 

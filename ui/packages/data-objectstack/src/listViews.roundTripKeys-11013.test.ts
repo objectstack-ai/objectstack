@@ -16,7 +16,8 @@
  * nothing else, so the keys the console writes at the record's TOP level —
  * `isPinned` and `sortOrder` through `updateView`, `columnState` and
  * `visibility` carried forward by the view-config save — did not come back on
- * a reload of this read. The switcher sorts saved views by the `sortOrder` it
+ * a reload of this read. (`columnState` has since retired from the spec,
+ * objectstack#36403, so the set read off it no longer carries that one.) The switcher sorts saved views by the `sortOrder` it
  * reads off this row, so a reordered record lost its place.
  *
  * Each case below is a real round trip against a stub `sys_metadata` store:
@@ -66,11 +67,19 @@ function makeDS(seed: any[]) {
     baseUrl: 'http://test.local',
     // `updateView` asks the draft home first; nothing is pending here.
     // objectstack#29550: the one-object view read answers from the same rows.
-    fetch: vi.fn(async (input: RequestInfo | URL) =>
-      (await answerObjectViewRead(input, () => ds.client.meta.getItems('view')))
-      ?? (String(input).includes('state=draft')
-        ? json({ error: 'not found' }, 404)
-        : json({ success: true, data: { capabilities: {}, routes: {} } }))),
+    // objectstack#35054: its layered read answers the stored row as the
+    // published layer, the body `updateView` merges onto.
+    fetch: vi.fn(async (input: RequestInfo | URL) => {
+      const layered = String(input).match(/\/meta\/view\/([^/?]+)\/layers/);
+      if (layered) {
+        const row = rows.get(`view::${decodeURIComponent(layered[1]!)}`) ?? null;
+        return json({ code: null, overlay: row, overlayScope: row ? 'env' : null, effective: row, draft: null });
+      }
+      return (await answerObjectViewRead(input, () => ds.client.meta.getItems('view')))
+        ?? (String(input).includes('state=draft')
+          ? json({ error: 'not found' }, 404)
+          : json({ success: true, data: { capabilities: {}, routes: {} } }));
+    }),
   });
   ds.connected = true;
   ds.connectionState = 'connected';
@@ -86,12 +95,15 @@ async function reloadRow(ds: any): Promise<Record<string, any>> {
 }
 
 describe('objectui#11013 — the carried set is the spec\'s', () => {
-  it('the ViewItem round-trip keys include the five the card names, read off the spec', () => {
+  it('the ViewItem round-trip keys include the four the card names that are still live, read off the spec', () => {
     // Membership (#26238): the set is the spec's, so a key it adds is carried
-    // too; what this card needs is that these five are among them.
-    for (const key of ['columnState', 'isDefault', 'isPinned', 'sortOrder', 'visibility']) {
+    // too; what this card needs is that these four are among them.
+    for (const key of ['isDefault', 'isPinned', 'sortOrder', 'visibility']) {
       expect(VIEW_ITEM_KEYS).toContain(key);
     }
+    // objectstack#36403: the card's fifth, `columnState`, is retired from the
+    // spec's record, so the derived set stops carrying it with no edit here.
+    expect(VIEW_ITEM_KEYS).not.toContain('columnState');
     // Control on the same record: a key declared on the list overlay only is not one of them.
     expect(VIEW_ITEM_KEYS).not.toContain('_isOverride');
     expect(Object.keys(VIEW_CONSOLE_ROUND_TRIP_KEYS)).toContain('_isOverride');
@@ -103,7 +115,6 @@ describe('objectui#11013 — the carried set is the spec\'s', () => {
       isPinned: true,
       sortOrder: 3,
       visibility: 'team',
-      columnState: { order: ['stage', 'name'], widths: { name: 240 } },
     };
     for (const key of VIEW_ITEM_KEYS) expect(stored, `no probe value for \`${key}\``).toHaveProperty(key);
     const { ds } = makeDS([{ ...RECORD, ...stored }]);
@@ -135,13 +146,6 @@ describe('objectui#11013 — a reload round trip per key', () => {
     expect(row.isPinned).toBe(true);
   });
 
-  it('`columnState`: a record-level column layout comes back', async () => {
-    const { ds } = makeDS([RECORD]);
-    const columnState = { order: ['stage', 'name'], widths: { stage: 120 } };
-    await ds.updateView(OBJECT, NAME, { columnState });
-    expect((await reloadRow(ds)).columnState).toEqual(columnState);
-  });
-
   it('`isDefault`: the set-default write comes back, and an absent flag still reads `false`', async () => {
     const { ds } = makeDS([RECORD]);
     expect((await reloadRow(ds)).isDefault).toBe(false);
@@ -169,7 +173,7 @@ describe('objectui#11013 — controls: what the flatten still does', () => {
   it('a key the record does not carry is not invented on the row', async () => {
     const { ds } = makeDS([RECORD]);
     const row = await reloadRow(ds);
-    for (const key of ['isPinned', 'sortOrder', 'visibility', 'columnState']) {
+    for (const key of ['isPinned', 'sortOrder', 'visibility']) {
       expect(row, key).not.toHaveProperty(key);
     }
   });

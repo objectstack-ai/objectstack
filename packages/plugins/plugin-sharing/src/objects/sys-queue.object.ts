@@ -27,6 +27,7 @@ export const SysQueue = ObjectSchema.create({
   label: 'Queue',
   pluralLabel: 'Queues',
   icon: 'inbox',
+  color: 'orange',
   isSystem: true,
   managedBy: 'config',
   description: 'A named group of people that unassigned records can wait in until one of them takes the record.',

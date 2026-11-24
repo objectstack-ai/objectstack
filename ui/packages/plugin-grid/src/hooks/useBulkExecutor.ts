@@ -11,6 +11,7 @@ import type { BulkActionDef, BulkWriteResult, DataSource } from '@object-ui/type
 import { RelatedCountStore } from '@object-ui/components';
 import { executeBulkBatch } from '@object-ui/core';
 import { declaredUserMessage } from '@object-ui/react';
+import { BulkActionResultSchema } from '@objectstack/spec/ui';
 import { normalizeMultiValuePatch, type MultiValueFieldDef } from './multiValueFields';
 
 export interface BulkRowError {
@@ -51,6 +52,76 @@ export interface BulkResult {
    * and `succeeded` / `failed` are not a per-row count the dialog may print.
    */
   aggregateRejection?: { message: string };
+  /**
+   * Set only when an `execution: 'aggregate'` run RESOLVED with a value that
+   * carries a `succeeded` or `failed` member but does not parse as
+   * `BulkActionResultSchema` (`@objectstack/spec/ui`). The handler finished,
+   * but its answer cannot say which rows it wrote, so the run has ONE outcome
+   * for the selection, exactly like {@link BulkResult.aggregateRejection}:
+   * `errors` carries no per-row entry and `succeeded` / `failed` are not a
+   * per-row count the dialog may print. Never reported as full success.
+   */
+  aggregateUnreadable?: true;
+  /**
+   * Set only when an `execution: 'aggregate'` run RESOLVED with a parsed
+   * `BulkActionResult` that named some selected ids in NEITHER list: those
+   * ids, in selection order. They are counted neither as succeeded nor as
+   * failed — the handler did not confirm them — so
+   * `succeeded + failed + aggregateUnconfirmed.length === total`.
+   */
+  aggregateUnconfirmed?: string[];
+}
+
+/**
+ * How an `execution: 'aggregate'` dispatch's resolve value reads, against the
+ * ids the run dispatched (`params._selectedIds`).
+ *
+ * - `none`: the value has NEITHER a `succeeded` nor a `failed` own member
+ *   (nothing, a summary, an artifact link) — the one call covered every id.
+ * - `unreadable`: it has one of them but does not parse as
+ *   `BulkActionResultSchema`.
+ * - `rows`: it parsed. Ids outside the selection are dropped; a duplicate
+ *   counts once; an id in both lists counts as failed; when one id is in
+ *   `failed` twice, the first entry's message wins; a selected id in neither
+ *   list is `unconfirmed`, never succeeded.
+ */
+export type AggregateResultReading =
+  | { kind: 'none' }
+  | { kind: 'unreadable' }
+  | {
+    kind: 'rows';
+    succeeded: string[];
+    failed: Array<{ id: string; message: string }>;
+    unconfirmed: string[];
+  };
+
+export function readAggregateResult(value: unknown, selectedIds: readonly string[]): AggregateResultReading {
+  const carriesMember = value !== null
+    && typeof value === 'object'
+    && !Array.isArray(value)
+    && (Object.prototype.hasOwnProperty.call(value, 'succeeded')
+      || Object.prototype.hasOwnProperty.call(value, 'failed'));
+  if (!carriesMember) return { kind: 'none' };
+
+  const parsed = BulkActionResultSchema.safeParse(value);
+  if (!parsed.success) return { kind: 'unreadable' };
+
+  const selected = new Set(selectedIds);
+  const failedById = new Map<string, string>();
+  for (const entry of parsed.data.failed) {
+    if (selected.has(entry.id) && !failedById.has(entry.id)) failedById.set(entry.id, entry.message);
+  }
+  const succeededIds = new Set<string>();
+  for (const id of parsed.data.succeeded) {
+    if (selected.has(id) && !failedById.has(id)) succeededIds.add(id);
+  }
+  const ordered = [...selected];
+  return {
+    kind: 'rows',
+    succeeded: ordered.filter((id) => succeededIds.has(id)),
+    failed: [...failedById].map(([id, message]) => ({ id, message })),
+    unconfirmed: ordered.filter((id) => !succeededIds.has(id) && !failedById.has(id)),
+  };
 }
 
 /**
@@ -157,12 +228,16 @@ export interface BulkExecutorOptions {
    * server can produce one aggregate artifact (zip, merged PDF…) for the
    * whole selection.
    *
-   * MUST reject on failure, like `runAction`: resolving on a failed action
-   * would report the entire selection as succeeded. A rejection is ONE
-   * outcome for the whole selection (`BulkResult.aggregateRejection`), never
-   * N row failures: the call cannot say which rows it wrote before it
-   * stopped (objectstack#34173). Reject with an error that carries the
-   * producer's `userMessage` when the failure has one — the result shows it.
+   * MUST resolve with the handler's own return value: the executor reads it
+   * per row (`readAggregateResult`). A handler that moved some rows and
+   * refused others resolves with a `BulkActionResult`
+   * (`{ succeeded, failed }`, `@objectstack/spec/ui`); a value with neither
+   * member counts as covering the whole selection. MUST reject when the
+   * handler could not produce an outcome at all. A rejection is ONE outcome
+   * for the whole selection (`BulkResult.aggregateRejection`), never N row
+   * failures: the call cannot say which rows it wrote before it stopped.
+   * Reject with an error that carries the producer's `userMessage` when the
+   * failure has one — the result shows it.
    *
    * When absent, an `execution: 'aggregate'` def FAILS LOUDLY rather than
    * quietly degrading to per-record fan-out — N dispatches against an
@@ -209,10 +284,13 @@ export interface BulkExecutorOptions {
  * A `custom` def with `execution: 'aggregate'` (objectui#3139) does not ride
  * the bulk-first decision tree: it is ONE `runAggregate` dispatch for the
  * entire selection (never chunked, never fanned out per record against a
- * single-call endpoint). It settles as a whole — resolved, every row counts as
- * covered; rejected, the result carries one `aggregateRejection` for the
- * selection instead of the same error attributed to every row, because the
- * call cannot say which rows it had already written (objectstack#34173).
+ * single-call endpoint). Rejected, the result carries one `aggregateRejection`
+ * for the selection instead of the same error attributed to every row,
+ * because the call cannot say which rows it had already written. Resolved,
+ * its value is read by `readAggregateResult`: a `BulkActionResult` reports
+ * per row (succeeded, failed with the handler's message, or not confirmed);
+ * a value that carries `succeeded` / `failed` but does not parse is one
+ * `aggregateUnreadable` outcome; any other value covers every row.
  */
 export function useBulkExecutor({ resource, dataSource, objectFields, runAction, runAggregate }: BulkExecutorOptions) {
   const [progress, setProgress] = useState<BulkProgress>({
@@ -276,6 +354,8 @@ export function useBulkExecutor({ resource, dataSource, objectFields, runAction,
       let succeeded = 0;
       let failed = 0;
       let aggregateRejection: BulkResult['aggregateRejection'];
+      let aggregateUnreadable = false;
+      let aggregateUnconfirmed: string[] = [];
 
       setResult(null);
       setProgress({ total, done: 0, failed: 0, inFlight: true });
@@ -333,17 +413,28 @@ export function useBulkExecutor({ resource, dataSource, objectFields, runAction,
           // Aggregate mode: the ONE call for the whole selection — even a
           // single selected row goes through it, because the target endpoint
           // reads `_selectedIds`, which the per-record dispatch shape never
-          // carries. It settles as a whole (objectstack#34173): resolved, it
-          // covered every id; rejected, the run has one outcome for the
-          // selection, not the same error attributed to each row — the call
-          // cannot say which rows it had written before it stopped.
+          // carries. Rejected, the run has one outcome for the selection, not
+          // the same error attributed to each row — the call cannot say which
+          // rows it had written before it stopped. Resolved, its value is read
+          // per row against the ids it was dispatched with.
           if (isAggregate) {
             try {
               if (!runAggregate) {
                 throw new Error(`Aggregate action ${def.name} has no dispatcher wired`);
               }
-              await runAggregate(def, validIds.map((id) => rowById.get(id) ?? { id }), { ...params });
-              succeeded += validIds.length;
+              const resolved = await runAggregate(def, validIds.map((id) => rowById.get(id) ?? { id }), { ...params });
+              const reading = readAggregateResult(resolved, validIds);
+              if (reading.kind === 'none') {
+                succeeded += validIds.length;
+              } else if (reading.kind === 'unreadable') {
+                failed += validIds.length;
+                aggregateUnreadable = true;
+              } else {
+                succeeded += reading.succeeded.length;
+                failed += reading.failed.length;
+                errors.push(...reading.failed.map(({ id, message }) => ({ id, error: message })));
+                aggregateUnconfirmed = reading.unconfirmed;
+              }
             } catch (e) {
               failed += validIds.length;
               aggregateRejection = {
@@ -415,6 +506,8 @@ export function useBulkExecutor({ resource, dataSource, objectFields, runAction,
         failed,
         errors,
         ...(aggregateRejection ? { aggregateRejection } : {}),
+        ...(aggregateUnreadable ? { aggregateUnreadable: true as const } : {}),
+        ...(aggregateUnconfirmed.length > 0 ? { aggregateUnconfirmed } : {}),
       };
       // Only retain the snapshot for rows that actually succeeded — there's
       // no point trying to "undo" a row whose mutation never landed.
@@ -426,9 +519,10 @@ export function useBulkExecutor({ resource, dataSource, objectFields, runAction,
       // Mutating any row in `resource` may have changed how many records
       // belong to a parent (e.g. deleting Contacts under an Account). Drop
       // every cached count for this resource so the next page render
-      // re-probes. Cheap — counts are 1-int values. A rejected aggregate run
-      // may have written rows before it stopped, so it invalidates too.
-      if (succeeded > 0 || aggregateRejection) {
+      // re-probes. Cheap — counts are 1-int values. A rejected or unreadable
+      // aggregate run, or one that left rows unconfirmed, may have written
+      // rows nobody counted, so it invalidates too.
+      if (succeeded > 0 || aggregateRejection || aggregateUnreadable || aggregateUnconfirmed.length > 0) {
         RelatedCountStore.invalidate(resource);
       }
       return finalResult;

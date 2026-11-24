@@ -29,7 +29,7 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import * as React from 'react';
 import { render, screen, cleanup, waitFor } from '@testing-library/react';
 import { I18nProvider } from '@object-ui/i18n';
-import { GridField } from './GridField';
+import { GridFieldWidget as GridField } from './grid-field/GridFieldWidget';
 
 /** The `error` each wrapped cell control was last handed, by kind. */
 const seen = vi.hoisted(() => ({ lookup: [] as unknown[], file: [] as unknown[] }));

@@ -16,6 +16,7 @@ import { useMetadata } from '@object-ui/react';
 import { useAdapter } from '@object-ui/react';
 // Declares the ObjectStackAdapter this page reads `getClient` off.
 import '../adapter-context-register';
+import { useAuthoredObjectReader } from './authoredObjectReader';
 import { toast } from 'sonner';
 
 const DRAFT_STORAGE_KEY = 'objectui-app-wizard-draft';
@@ -25,6 +26,9 @@ export function CreateAppPage() {
   const { appName } = useParams();
   const { objects, refresh } = useMetadata();
   const adapter = useAdapter();
+  // objectstack#35101 — the generated nav entries' labels come from the
+  // objects as authored, never from the served (translated) list.
+  const readAuthoredObject = useAuthoredObjectReader(adapter, objects);
 
   // Map metadata objects to ObjectSelection format
   const availableObjects: ObjectSelection[] = (objects || []).map((obj: any) => ({
@@ -96,6 +100,7 @@ export function CreateAppPage() {
         onComplete={handleComplete}
         onCancel={handleCancel}
         onSaveDraft={handleSaveDraft}
+        readAuthoredObject={readAuthoredObject}
       />
     </div>
   );

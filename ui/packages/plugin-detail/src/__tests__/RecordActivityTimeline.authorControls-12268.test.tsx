@@ -87,13 +87,20 @@ function mount(items: FeedItem[], handlers: Handlers = {}, threading = false) {
   );
 }
 
+const ROW_SELECTOR = '[data-stream-comment-row],[data-stream-row]';
+
 /** The feed row a body sits in: the keyed root element holding the row and its replies. */
 function rootRowOf(body: string): HTMLElement {
-  const rows = screen.getByText(body).closest('.space-y-4')!.children;
-  const row = Array.from(rows).find((r) => r.textContent?.includes(body));
+  const row = screen.getByText(body).closest(ROW_SELECTOR);
   if (!row) throw new Error(`no feed row holds ${JSON.stringify(body)}`);
   return row as HTMLElement;
 }
+
+/** The feed's root rows in order, across its day groups (objectstack#35602). */
+const rootRows = (): HTMLElement[] =>
+  Array.from(document.querySelectorAll<HTMLElement>(ROW_SELECTOR)).filter(
+    (el) => !el.parentElement?.closest(ROW_SELECTOR),
+  );
 
 const editButtons = () => screen.queryAllByRole('button', { name: EDIT });
 const deleteButtons = () => screen.queryAllByRole('button', { name: DELETE });
@@ -234,8 +241,7 @@ describe('a reply whose parent the feed does not hold is a row of its own, in it
 
   it('with threading on it renders as a root row, between the rows it sits between in time', () => {
     mount([OWN, orphan, OTHER], {}, true);
-    const list = screen.getByText(OWN_BODY).closest('.space-y-4')!;
-    const rows = Array.from(list.children).map((r) => r.textContent ?? '');
+    const rows = rootRows().map((r) => r.textContent ?? '');
     expect(rows).toHaveLength(3);
     expect(rows[0]).toContain(OWN_BODY);
     expect(rows[1]).toContain(ORPHAN_BODY);

@@ -215,7 +215,7 @@ describe('textOperatorDoorVerdict — a text operator over a type that never sto
 // ── The fixture ──────────────────────────────────────────────────────────────
 
 describe('the fixture', () => {
-  it('carries one field per FieldType member (f_<type>), five typed formulas and one untyped', () => {
+  it('carries one field per FieldType member (f_<type>), six typed formulas and one untyped', () => {
     const names = TEXT_OPERATOR_DOOR_FIXTURE_FIELDS.map((f) => f.name);
     expect(new Set(names).size).toBe(names.length);
     for (const t of FieldType.options) {
@@ -224,8 +224,8 @@ describe('the fixture', () => {
     }
     const formulas = TEXT_OPERATOR_DOOR_FIXTURE_FIELDS.filter((f) => f.type === 'formula');
     expect(sorted(formulas.map((f) => f.returnType ?? '(none)')))
-      .toEqual(['(none)', 'boolean', 'currency', 'date', 'number', 'text']);
-    expect(TEXT_OPERATOR_DOOR_FIXTURE_FIELDS).toHaveLength(FieldType.options.length - 1 + 6);
+      .toEqual(['(none)', 'boolean', 'currency', 'date', 'number', 'percent', 'text']);
+    expect(TEXT_OPERATOR_DOOR_FIXTURE_FIELDS).toHaveLength(FieldType.options.length - 1 + 7);
   });
 
   it('every field is a legal FieldSchema input, and the object a legal ObjectSchema input', () => {
@@ -276,8 +276,8 @@ describe('TEXT_OPERATOR_DOOR_CASES', () => {
 
   it('covers all three verdicts — a table with one answer would not need the discriminant', () => {
     const count = (v: string) => TEXT_OPERATOR_DOOR_CASES.filter((c) => c.verdict === v).length;
-    // `+ 4`: the formulas returning number, boolean, date and (#22727) currency.
-    expect(count('door-refusal')).toBe((TEXT_OPERATOR_DOOR_REFUSED_TYPES.size + 4) * TEXT_FILTER_OPERATORS.length);
+    // `+ 5`: the formulas returning number, boolean, date, (#22727) currency and (#35047) percent.
+    expect(count('door-refusal')).toBe((TEXT_OPERATOR_DOOR_REFUSED_TYPES.size + 5) * TEXT_FILTER_OPERATORS.length);
     expect(count('passes')).toBe((TEXT_OPERATOR_DOOR_PASSING_TYPES.size + 1) * TEXT_FILTER_OPERATORS.length);
     expect(count('deferred')).toBe((1 + STRUCTURED_JSON_TYPES.size) * TEXT_FILTER_OPERATORS.length);
   });

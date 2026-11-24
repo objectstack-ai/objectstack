@@ -119,3 +119,53 @@ describe('AdvancedChartImpl — semantic per-category colours', () => {
     expect(sectorFills(container)).toEqual(['#111111', '#222222', '#333333']);
   });
 });
+
+describe('AdvancedChartImpl — theme fallback palette has ten distinct colours (objectstack#34902)', () => {
+  const rows = (n: number) => Array.from({ length: n }, (_, i) => ({ stage: `s${i + 1}`, value: 10 + i }));
+  const themeSlot = (i: number) => `hsl(var(--chart-${i + 1}))`;
+
+  it.each([6, 7, 8, 9, 10])('donut with %i slices and no `colors`: every slice distinct', (n) => {
+    const { container } = render(
+      <AdvancedChartImpl
+        chartType="donut"
+        data={rows(n)}
+        xAxisKey="stage"
+        series={[{ dataKey: 'value' }]}
+        isAnimationActive={false}
+      />,
+    );
+    const fills = sectorFills(container);
+    expect(fills).toEqual(Array.from({ length: n }, (_, i) => themeSlot(i)));
+    expect(new Set(fills).size).toBe(n);
+  });
+
+  it('pie with 10 slices and no `colors`: slice 6 no longer repeats slice 1', () => {
+    const { container } = render(
+      <AdvancedChartImpl
+        chartType="pie"
+        data={rows(10)}
+        xAxisKey="stage"
+        series={[{ dataKey: 'value' }]}
+        isAnimationActive={false}
+      />,
+    );
+    const fills = sectorFills(container);
+    expect(fills).toHaveLength(10);
+    expect(fills[5]).not.toBe(fills[0]);
+    expect(new Set(fills).size).toBe(10);
+  });
+
+  it('CONTROL: an authored `colors` prop still wins over the theme palette', () => {
+    const { container } = render(
+      <AdvancedChartImpl
+        chartType="donut"
+        data={rows(6)}
+        xAxisKey="stage"
+        series={[{ dataKey: 'value' }]}
+        colors={PALETTE}
+        isAnimationActive={false}
+      />,
+    );
+    expect(sectorFills(container)).toEqual([...PALETTE, ...PALETTE]);
+  });
+});

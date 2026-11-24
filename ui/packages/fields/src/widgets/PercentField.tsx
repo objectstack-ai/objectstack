@@ -4,6 +4,7 @@ import { Input, Slider, EmptyValue, cn } from '@object-ui/components';
 import { useDisplayLocale } from '@object-ui/i18n';
 import { FieldWidgetComponentProps } from './types.js';
 import { toDomProps } from './toDomProps.js';
+import { InCellTextInput } from './InCellTextInput.js';
 import { PHONE_TOUCH_HEIGHT } from './touchTarget.js';
 import { useBadInputRefusal, BadInputMessage, BAD_INPUT_BORDER } from './numberBadInput.js';
 import { formatPercentPoints } from './number-format.js';
@@ -67,7 +68,7 @@ const storedFraction = (displayValue: number): number => {
  * Stores values as decimals (0-1) and displays as percentages (0-100%)
  * Includes a slider for interactive control.
  */
-export function PercentField({ value, onChange, field, readonly, error, className, ...props }: FieldWidgetComponentProps<number>) {
+export function PercentField({ value, onChange, field, readonly, error, className, inCell, onCommit: _onCommit, ...props }: FieldWidgetComponentProps<number>) {
   const percentField = field as any;
   /**
    * Decimal places come from `scale`, NOT `precision` (objectui#9568) — the
@@ -263,6 +264,28 @@ export function PercentField({ value, onChange, field, readonly, error, classNam
   // value the other would round away (objectui#9568 kept the two tied on
   // purpose — the decision is one member, read once).
   const sliderStep = Math.pow(10, -scale);
+
+  // objectstack#36023 — in a list cell the cell itself is the input: the
+  // percent points typed right-aligned, no slider.
+  if (inCell) {
+    return (
+      <InCellTextInput
+        {...domProps}
+        type="number"
+        align="end"
+        trailing="%"
+        // A fraction times 100 can carry binary noise (0.07 → 7.000000000000001).
+        value={value != null ? parseFloat(toDisplay(value).toPrecision(12)) : ''}
+        onChange={handleChange}
+        onBlur={handleBlur}
+        placeholder={percentField?.placeholder}
+        disabled={props.disabled}
+        step={Math.pow(10, -scale).toFixed(scale)}
+        aria-invalid={!!error || !!refusal}
+        below={refusal ? <div className="px-2.5 pb-1"><BadInputMessage refusal={refusal} /></div> : null}
+      />
+    );
+  }
 
   return (
     <div className="space-y-2">

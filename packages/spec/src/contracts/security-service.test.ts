@@ -270,6 +270,24 @@ describe('Security Service Contract', () => {
     await expect(nothingDisclosable.getMetadataReadableFields?.('deal', { userId: 'u1' })).resolves.toEqual([]);
   });
 
+  it('[ADR-0106 D1] getMetadataReadableWithheldFields is OPTIONAL, and a service without it still satisfies the contract', async () => {
+    // A security service that predates the member is still an ISecurityService;
+    // its consumers drop every withheld entry for it (fail closed), which the
+    // projection's own pins measure in metadata-core.
+    const withoutIt: ISecurityService = makeService({ getReadableFields: async () => ['id', 'name'] });
+    expect(typeof withoutIt.getMetadataReadableWithheldFields).toBe('undefined');
+    const mustNotCompileWithoutAGuard = () =>
+      // @ts-expect-error possibly undefined — a consumer must feature-detect first
+      withoutIt.getMetadataReadableWithheldFields('deal', { userId: 'u1' });
+    expect(typeof mustNotCompileWithoutAGuard).toBe('function');
+
+    const withIt = makeService({
+      getMetadataReadableWithheldFields: async (_object, context) => (context?.isSystem ? ['crm_project'] : []),
+    });
+    await expect(withIt.getMetadataReadableWithheldFields?.('deal', { isSystem: true })).resolves.toEqual(['crm_project']);
+    await expect(withIt.getMetadataReadableWithheldFields?.('deal', { userId: 'u1' })).resolves.toEqual([]);
+  });
+
   it('getWritableFields is OPTIONAL — absence degrades to getReadableFields, and the two answers differ', async () => {
     const withoutIt: ISecurityService = makeService({ getReadableFields: async () => ['id', 'name', 'locked'] });
     expect(typeof withoutIt.getWritableFields).toBe('undefined');

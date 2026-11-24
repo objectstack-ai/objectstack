@@ -26,8 +26,8 @@
  *     authoring prompt (build, iterate, template iterate) states it;
  *   - the structure the Build half checks by exact name beyond the seed
  *     ({@link structureLines}): each lookup's target, each single-choice field
- *     with its minimum option count, each dashboard and each app navigation
- *     target. Every Build check traces to text the prompt carries, so a
+ *     with its minimum option count, each dashboard, each app navigation
+ *     target, and each dataset with its members and their vocabulary. Every Build check traces to text the prompt carries, so a
  *     faithful build never fails for not guessing a name; an iterate prompt
  *     states its change's own rows the same way ({@link changeContract}).
  *
@@ -43,10 +43,14 @@
 
 import type { LoadedScenario } from '../loader.js';
 import { PERSON_USER_FIELD, scenarioNamespace, type LocalizedText, type ScenarioCard, type ScenarioExpect } from '../schema.js';
+import { personLookups, rowOwner, userHandleFields } from '../row-owner.js';
 import { permissionSetName } from './namespace.js';
 import { cycleText, referenceCycles } from './seed.js';
 
 type Card = ScenarioCard;
+
+// The seed rows' owners, read by the scorer too: kept where both reach them, re-exported here for the runner.
+export { rowOwner, userHandleFields };
 type Persona = Card['run']['personas'][number];
 
 const code = (name: string): string => `\`${name}\``;
@@ -103,7 +107,7 @@ function text(t: LocalizedText, choice: PromptChoice | undefined, field: string)
 }
 
 /** The modes a run renders prompts for, as `RunOptions.modes` names them. */
-type PromptMode = 'scratch' | 'template' | 'ask';
+type PromptMode = 'scratch' | 'template' | 'ask' | 'door';
 
 /**
  * Every card text a run in `modes` renders that the card does not carry in
@@ -112,6 +116,7 @@ type PromptMode = 'scratch' | 'template' | 'ask';
  * card order; empty when no language is chosen or nothing is missing. Scratch
  * mode renders the build prompt `choice.prompt` names (default
  * `prompt.detailed`), the iterate change, every question and every
+ * operation; door mode the build prompt, every question and every
  * operation; template mode the iterate change, every question and every
  * operation; ask mode every question and every operation.
  */
@@ -122,13 +127,14 @@ export function promptLanguageGaps(card: Card, choice: PromptChoice | undefined,
   const need = (t: LocalizedText, field: string) => {
     if (t[lang] === undefined) out.push(field);
   };
-  if (modes.includes('scratch')) {
+  if (modes.includes('scratch') || modes.includes('door')) {
     const length = choice?.prompt ?? 'detailed';
     need(card.prompt[length], `prompt.${length}`);
   }
   if (modes.includes('scratch') || modes.includes('template')) need(card.iterate.change, 'iterate.change');
   if (modes.length > 0) {
     for (const q of card.run.questions) need(q.ask, `run.questions[${q.id}].ask`);
+    for (const q of card.run.datasetQuestions ?? []) need(q.ask, `run.datasetQuestions[${q.id}].ask`);
     for (const op of card.run.operations) need(op.ask, `run.operations[${op.id}].ask`);
   }
   return out;
@@ -160,7 +166,40 @@ export function promptChoiceText(choice: PromptChoice): string {
 const SELECT_OPTIONS_TAG = 'records-forms.select-options';
 
 /** The rows of `expect` (or of an iterate's `expectDelta`) the exact-name scorer reads beyond the seed. */
-type StructureRows = Pick<ScenarioExpect, 'selectFields' | 'lookups' | 'dashboards' | 'appNavTargets'>;
+type StructureRows = Pick<ScenarioExpect, 'selectFields' | 'lookups' | 'dashboards' | 'appNavTargets'> & Partial<Pick<ScenarioExpect, 'datasets'>>;
+
+const quoted = (words: readonly string[]): string => words.map((w) => JSON.stringify(w)).join(', ');
+
+/**
+ * One line per declared dataset, then one per member: every name, label,
+ * synonym and description the Build half checks, word for word. A member's
+ * synonyms are what a person asks with, so an agent answering a question
+ * later matches them exactly as written here (ADR-0149 D1, D3).
+ */
+export function datasetLines(datasets: NonNullable<ScenarioExpect['datasets']>): string[] {
+  const out = [
+    '- Datasets (analytics datasets: a base object, its measures and dimensions), each declared with exactly the names, labels, ' +
+      'synonyms and descriptions shown. A member\'s synonyms are the words people ask with and its description says what the number means: ' +
+      'write both as given, word for word.',
+  ];
+  for (const d of datasets) {
+    out.push(`  - ${code(d.name)} on ${code(d.object)}, label ${JSON.stringify(d.label)}, description ${JSON.stringify(d.description)}:`);
+    for (const m of d.measures) {
+      const what = m.aggregate === 'count' ? 'count of rows' : `${m.aggregate} of ${code(m.field ?? '')}`;
+      out.push(
+        `    - measure ${code(m.name)} (${what}), label ${JSON.stringify(m.label)}` +
+          `${m.synonyms ? `, synonyms ${quoted(m.synonyms)}` : ''}${m.description ? `, description ${JSON.stringify(m.description)}` : ''}`,
+      );
+    }
+    for (const dim of d.dimensions ?? []) {
+      out.push(
+        `    - dimension ${code(dim.name)} (field ${code(dim.field)}), label ${JSON.stringify(dim.label)}` +
+          `${dim.synonyms ? `, synonyms ${quoted(dim.synonyms)}` : ''}${dim.description ? `, description ${JSON.stringify(dim.description)}` : ''}`,
+      );
+    }
+  }
+  return out;
+}
 
 /**
  * One line per kind of structure row the exact-name scorer (`scoreGraph`)
@@ -195,6 +234,7 @@ export function structureLines(rows: StructureRows, card: Card): string[] {
   if (rows.appNavTargets?.length) {
     out.push(`- The app's navigation has an entry for each of: ${rows.appNavTargets.map(code).join(', ')}.`);
   }
+  if (rows.datasets?.length) out.push(...datasetLines(rows.datasets));
   return out;
 }
 
@@ -244,50 +284,6 @@ export function personaRecords(card: Card): Map<string, string> {
     if (!out.has(key)) out.set(key, p.id);
   }
   return out;
-}
-
-/** The declared lookups (`expect.lookups`) that point at a person object, the object of some persona's `record` (`ticket.assignee` → `agent`). */
-function personLookups(card: Card): Array<{ object: string; field: string; to: string }> {
-  const people = new Set(card.run.personas.flatMap((p) => (p.record ? [p.record.object] : [])));
-  return (card.expect.lookups ?? []).filter((l) => people.has(l.to)).map(({ object, field, to }) => ({ object, field, to }));
-}
-
-/**
- * The persona a seed row is loaded as owned by (`owner_id`), or undefined
- * when it names no person and the inserter (the admin) keeps it. A row names a
- * persona when it IS that persona's record, when a declared direct lookup on
- * it holds that record's id (`ticket.assignee` = `a02`), or when a declared
- * user-handle field on it holds that persona's handle (`account.owner` =
- * `u_sam`). The first persona in `run.personas` order the row names owns it.
- * An option value (`ticket_comment.visibility` = `public`), a row id scope
- * (`department.id` = `dep_sales`) and a lookup to a row no persona is (a
- * department, a group) name nobody.
- */
-export function rowOwner(card: Card, object: string, row: Readonly<Record<string, unknown>>): string | undefined {
-  const lookups = personLookups(card).filter((l) => l.object === object);
-  const handles = userHandleFields(card);
-  for (const p of card.run.personas) {
-    const rec = p.record;
-    if (rec !== undefined) {
-      if (rec.object === object && row.id === rec.id) return p.id;
-      if (lookups.some((l) => l.to === rec.object && row[l.field] === rec.id)) return p.id;
-    }
-    for (const sc of p.scope ?? []) {
-      if (sc.object === object && !sc.field.includes('.') && handles.has(`${object}.${sc.field}`) && row[sc.field] === sc.value) return p.id;
-    }
-  }
-  return undefined;
-}
-
-/**
- * The seed fields whose values are user handles, `object.field`: the card's
- * declared `run.userHandleFields`, read and never inferred. In the crm card
- * that is `account.owner` (`u_sam`, `u_tia`). Every other field holds a row id
- * or an option value (`asset.custodian` = `e06`, an employee row;
- * `ticket_comment.visibility` = `public`), which the seed loads verbatim.
- */
-export function userHandleFields(card: Card): Set<string> {
-  return new Set((card.run.userHandleFields ?? []).map((h) => `${h.object}.${h.field}`));
 }
 
 /** The handles a seed row names in a {@link userHandleFields} field that no persona signs in as (`u_tia`): the seed loads each as the admin user. */
@@ -384,16 +380,60 @@ function rowOwnership(card: Card): string[] {
   return lines;
 }
 
+/**
+ * What a confirm-gated agent action's line asks of the build. The gate
+ * (`ai.requiresConfirmation`) guards the action's own door only, and it is not
+ * widened to the raw data door (`update_record`), so without a lock an agent
+ * that meets the gate can write the target state directly. The lock is the one
+ * the objectstack-ai skill teaches (pitfall "Gating the action, not the
+ * state"): the fields made not editable for the people who run the action,
+ * written elevated by the action itself.
+ *
+ * Two limits keep it from denying a card's own operations: it is scoped to the
+ * stage the action acts on (a field permission `when`), so the same people's
+ * other changes to those fields still land (a team lead's resolve, refused by
+ * validation, meets no lock before the ticket is resolved); and an action that
+ * deletes its row locks nothing, since the same people's plain deletes are
+ * applied operations on several cards.
+ */
+const CONFIRM_FIRST_LOCK =
+  'confirm first; the confirmation guards this action’s own door only, so also lock the change it makes: ' +
+  'if it changes fields of its row, make those fields not editable for each person who runs it, at the stage it acts on ' +
+  '(a field permission `when` in their permission set), and have the action write them elevated, ' +
+  'so a plain record update cannot make that change while those people’s other changes to the same fields still land; ' +
+  'an action that deletes its row locks nothing, and those people keep their delete right';
+
+/**
+ * How the runner loads the seed, as the build must expect it: through the
+ * platform's own seed path (`seedApp` in `orchestrate.ts`), not the data API a
+ * person writes through. The rows are established facts: the state machine's
+ * entry check is skipped, every other validation rule and hook judges each
+ * row, and no record-triggered flow fires on it. So a field a build derives
+ * with an after-save flow stays empty on every loaded row (asset_lifecycle's
+ * department scoping fields left a manager seeing none of the department's
+ * rows), and a rule that judges a row against a total the loaded rows already
+ * count (a payment against its invoice's balance) refuses the history.
+ */
+export const SEED_POSTURE =
+  'The rows are loaded through the platform’s seed path as established facts, not as new records entering their lifecycle: ' +
+  'each row is still judged by every validation rule and hook except the state machine’s entry check, and no record-triggered flow fires on it. ' +
+  'So a value derived from other fields or rows (a department copied from a related row to scope access, an amount, a flag) must be a formula or a field computed by an expression when written, ' +
+  'never set by a record-triggered flow, or every loaded row keeps it empty. ' +
+  'And a loaded row is already counted in the stored totals of the rows it relates to (a payment in its invoice’s balance), ' +
+  'so a validation rule must not refuse it by comparing it with such a total.';
+
 /** The runner's contract, appended to every build prompt. */
 export function dataContract(card: Card): string {
   const lines: string[] = [];
   lines.push('## What the app will be loaded with and used by');
   lines.push('');
   lines.push(
-    'After you finish, a test runner loads the rows below through the data API and signs each person in. ' +
+    'After you finish, a test runner loads the rows below and signs each person in. ' +
       'Use these object and field machine names exactly (lookup values are the `id` of the referenced row), ' +
       'and make every value shown valid for its field. The object names already carry this app’s namespace prefix.',
   );
+  lines.push('');
+  lines.push(SEED_POSTURE);
   lines.push('');
   lines.push(namingRule(card));
   lines.push('');
@@ -424,8 +464,8 @@ export function dataContract(card: Card): string {
   }
   if (card.run.agentActions?.length) {
     lines.push('');
-    lines.push('Business actions an AI agent may call (expose each to AI; ask before acting where marked):');
-    for (const a of card.run.agentActions) lines.push(`- \`${a.name}\` on \`${a.object}\`: ${a.summary}${a.confirm ? ' (confirm first)' : ''}`);
+    lines.push('Business actions an AI agent may call (expose each to AI; ask before acting where marked, and only there: an unmarked action runs at once, with no confirmation gate):');
+    for (const a of card.run.agentActions) lines.push(`- \`${a.name}\` on \`${a.object}\`: ${a.summary}${a.confirm ? ` (${CONFIRM_FIRST_LOCK})` : ''}`);
   }
   return lines.join('\n');
 }
@@ -455,6 +495,30 @@ function buildPreamble(card: Card): string {
 export function buildPrompt(card: Card, choice?: PromptChoice): string {
   const length = choice?.prompt ?? 'detailed';
   return [buildPreamble(card), '', '## The app', '', text(card.prompt[length], choice, `prompt.${length}`), '', dataContract(card)].join('\n');
+}
+
+/** What a door build is told about where it builds (`doorMode` in `orchestrate.ts`). */
+export interface DoorTarget {
+  /** The writable package the runner created for the build, which every draft is saved into. */
+  packageId: string;
+}
+
+/**
+ * Door mode's build prompt: the card's prompt and the runner's data contract,
+ * as scratch mode sends them, under a preamble that names the draft door and
+ * the package. It is the same text in every arm: whether the client was given
+ * a skill or a rule is the arm's, never the prompt's.
+ */
+export function doorBuildPrompt(card: Card, target: DoorTarget, choice?: PromptChoice): string {
+  const length = choice?.prompt ?? 'detailed';
+  const preamble =
+    'You are building an ObjectStack app in a running environment, through its MCP server (`app`), whose authoring tools ' +
+    'save metadata as DRAFTS. There is no project and there are no files to edit: you build through those tools alone. ' +
+    `Save every item you author as a draft in the package \`${target.packageId}\` (namespace \`${scenarioNamespace(card)}\`), ` +
+    'read the publish verdict each save answers, and fix every finding it reports until each draft would publish. ' +
+    'When you finish, a person publishes that package’s drafts in Studio: nothing you save is live before then. ' +
+    'Work without asking questions.';
+  return [preamble, '', '## The app', '', text(card.prompt[length], choice, `prompt.${length}`), '', dataContract(card)].join('\n');
 }
 
 export function iteratePrompt(card: Card, choice?: PromptChoice): string {
@@ -513,6 +577,18 @@ export function questionPrompt(scenario: LoadedScenario, questionId: string, cho
     `${text(q.ask, choice, `run.questions[${q.id}].ask`)}${todayOf(scenario.card)}\n\nAnswer from the app’s data using the \`app\` tools. State the figures, and end with a line ` +
     '`Source: <object>` naming the object the figures come from.'
   );
+}
+
+/**
+ * A dataset question's turn: the question and the card's "today", and no
+ * answer format. A question prompt asks for a `Source: <object>` line, which
+ * would steer an answer away from a dataset's provenance and away from asking
+ * back; a dataset question measures which route the agent takes on its own,
+ * with what the app's tools (and the skills it was given) tell it.
+ */
+export function datasetQuestionPrompt(card: Card, questionId: string, choice?: PromptChoice): string {
+  const q = (card.run.datasetQuestions ?? []).find((x) => x.id === questionId)!;
+  return `${text(q.ask, choice, `run.datasetQuestions[${q.id}].ask`)}${todayOf(card)}\n\nAnswer from the app’s data using the \`app\` tools.`;
 }
 
 export function operationPrompt(card: Card, operationId: string, choice?: PromptChoice): string {

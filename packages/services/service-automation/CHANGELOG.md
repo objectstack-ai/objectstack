@@ -1,5 +1,504 @@
 # @objectstack/service-automation
 
+## 18.6.0
+
+### Minor Changes
+
+- 61ded62: fix(service-automation)!: the connector pull door refuses an input key its read action does not declare, as the `connector_action` node does
+  
+  Clause-②: no (narrowing) — a mapping whose `connectorSource.input`, or the watermark parameter the pull adds to its `query`, carries a key the read action's `inputSchema` does not declare used to pull and send that key to the provider; the pull now fails before the call. Nothing published widens: no export, no key, no option is added. First-party mappings affected: 0 (no `connectorSource` under `examples/` or `packages/apps/`).
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: registered connector-pull-undeclared-input-key-refused -->
+  
+  **BREAKING** for a mapping pulled through `connectorSource` whose input holds a key the read action does not declare. Every door that dispatches a connector action now judges its input alike: the pull judges the input it is about to send, the watermark parameter included, by the rule the `connector_action` node has applied since 18.5.0, and refuses with `code: 'VALIDATION_ERROR'` (status 400) before the action is called, naming each undeclared key by its dotted path and the keys the action declares at that level. Nothing is pulled and nothing is written.
+  
+  A scheduled pull has no `fault` edge: a job whose `pull` names such a mapping fails every run (its `sys_sync_run` row ends `failed`, and the job's `retryPolicy` applies) until the mapping or the action's document is fixed.
+  
+  The key the pull adds itself is judged too. With `connectorSource.watermark`, the pull sends the highest stored value of the target field as `query[watermark.param]` — but only once the target holds a value, so a mapping whose first pull wrote rows fails from its second pull on. An `openapi` connector declares only the query parameters its OpenAPI document names, so an operation that does not name the watermark parameter (or names none in `query` while declaring a parameter elsewhere or a body) refuses it; the refusal names the parameter. An operation with no parameter and no body has no `inputSchema`, so nothing is judged and the watermark is sent; it starts refusing the watermark the day the document gives it its first parameter or a body, unless the watermark parameter is declared with it. A `rest` connector's `request` action declares `query` with no `properties`, which reads as open, so its query keys, the watermark included, are not refused.
+  
+  Migration, FROM → TO:
+  
+  - A stray key the author wrote: `connectorSource: { connector: 'crm_api', action: 'list_contacts', input: { query: { limit: 50, stale: 'x' } } }` → drop `stale` from `input`, or declare it in the action.
+  - The watermark parameter on an `openapi` connector: `watermark: { field: 'updated_at', param: 'since' }` over an operation whose document lists only `limit` → add `{ name: 'since', in: 'query', schema: { type: 'string' } }` to that operation's `parameters` in the OpenAPI document (its declared type must be the target field's), then let the connector re-materialize.
+  
+  `GET /api/v1/automation/connectors` lists each action's `inputSchema`, which is what the pull judges against. Which schemas declare their keys is the `connector_action` node's rule, unchanged: an object schema that lists `properties`, or says `additionalProperties: false`; one that admits more keys (`additionalProperties` true or a schema, `patternProperties`, a composition keyword, `$ref`) or lists no `properties` still sends every key, and so does an action with no `inputSchema`.
+- 0e2e4f5: feat(automation): a flow writes a field marked as text in the organization's language
+  
+  Clause-②: yes (widening) — `create_record` / `update_record` `fields` values now also take the text envelope `{ dialect: 'template', source }` (`FlowRecordFieldValueSchema`), and the translation face gains `flows.<flow>.records.<node_id>.fields.<field>`; every value accepted before is accepted and written as before
+  Metadata-protocol: added
+  Skills-docs: follow-up #34434 — skills/objectstack-automation/SKILL.md (the record write's field values: the text envelope beside the CEL envelope and the literal), skills/objectstack-i18n/SKILL.md (the `flows.<flow>.records.<node_id>.fields.<field>` key and the organization-language rule)
+  
+  A `create_record` / `update_record` field value can now be marked as text: `{ dialect: 'template', source: 'Auto-escalated: {{ record.priority }} priority' }`. The node writes that sentence in the organization's language, because everyone in the organization reads the record. It picks the translated template at `flows.<flow>.records.<node_id>.fields.<field>` first, then fills its `{{ }}` holes. The language is the Localization setting (`localization.locale`) when somebody set it, else the app's declared `i18n.defaultLocale`. It is never the language of the person who started the run, so a run started by a button writes the same text as a record-change run.
+  
+  - A missing translation, or no language to pick, writes the authored text, and the run goes on.
+  - A bare string is still a literal and is written as spelled. Only the `fields` map of these two nodes takes the text envelope; every other value slot still refuses it. The source is judged as a text slot: a single-brace `{token}` is refused with its `{{ }}` spelling.
+  - A Localization setting that cannot be read fails the node and writes nothing, so another language is never stored over a choice that may exist. A `fault` edge routes the failure. A host that registers no `localization` setting has none set, so the app's declared default answers.
+  - The Studio flow inspector judges a record node's `fields` cells by the same rule (`FlowRecordFieldValueSchema`), so a text envelope there reads as valid and a malformed value still shows the spec's refusal. Fixes #34445.
+  - `os i18n extract` scaffolds the key, and the existing coverage check reports it missing against `supportedLocales`. `objectstack validate` refuses a key over an unknown node, over a node that is not a record write, or over a field the node does not mark as text.
+  - Text is picked when it is written. Records already written are not changed.
+  
+  `@objectstack/core` exports `resolveOrganizationLocale` and `readOrganizationLocaleSetting`: one reader of the organization's language, for text the platform writes on the organization's behalf. `@objectstack/runtime`'s seed-locale resolver now reads its organization-setting rung through `readOrganizationLocaleSetting`; its answers are unchanged.
+- 1538596: fix(lint,service-automation): a flow value envelope is typed for the date-text verdicts, so `timestamp(record.<date field>)` in an `update_record` / `create_record` field or an `assignment` value is refused at `os validate` and at `registerFlow`
+  
+  Clause-②: yes (narrowing) — narrowed: a flow value envelope that registered and published now refuses at `os validate` and at `registerFlow`; owes the contract-review-tier review before the queue, and Tier H via the seat. Widened: the published `ExprSchemaHint` type gains one optional key, `flowValueEnvelope`.
+  Metadata-protocol: narrowed
+  Skills-docs: none — no published skill teaches a flow value envelope over a date field; `skills/objectstack-formula/SKILL.md` already states the `timestamp()` / `date-text-call` rule without naming a site, so it now holds for value envelopes as written
+  
+  <!-- adr-0087: not-required (already-registered formula-timestamp-date-only-refused, formula-date-text-call-refused, formula-date-subtraction-refused) The three semantic entries already carry these verdicts, their codes and their rewrites to the upgrade guide; this change lets the same verdicts reach one more site, a flow value envelope, with the same rewrite, and rewrites each entry's surface in this PR to name that site, its scope (a record-triggered flow or a time-relative sweep of the typed object that rebinds neither record nor previous itself) and its consequence (a stored flow carrying one fails to register at boot on an engine with the object-schema resolver wired until rewritten), and adds to each entry's acceptance criteria how an upgrading operator confirms a stored flow is clear (no failed to register flow warning at boot, and no registerFlow TODO from POST /api/v1/meta/_migrate-stored on the running server; the CLI's os migrate meta --stored boots automation inert, with no object-schema resolver, so it types no value envelope and cannot show it). No id is added, no key is added, removed or re-shaped, and nothing an author wrote is rewritten. -->
+  
+  The upgrade-guide half of the narrowing (#34661) is completed by this PR: the three ADR-0087 entries above now name the flow value envelope in their `surface`.
+  
+  **BREAKING** accept-set narrowing, shipped as `minor`. A flow's value envelope (`assignment` `assignments.*`, `create_record` / `update_record` `fields.*`) was validated without field types, so the date-text verdicts never reached it. `isoDate(timestamp(record.borrow_date) + duration('168h'))` written into an `update_record` field passed `os validate`, registered, and failed every run: the runtime holds a `date` field as its `YYYY-MM-DD` text, and `timestamp()` parses only a full ISO-8601 instant.
+  
+  - **The verdicts.** The envelope is now typed with the object the flow's run binds as `record` (the start node's `objectName`; a time-relative flow's swept object) — on a record-triggered flow, or a time-relative sweep of the typed object, that rebinds neither root the typing reads (no declared variable, node id, output / iterator / index / error variable or `assignment` target named `record`; no node id, output / iterator / index / error variable or `assignment` target named `previous` — the run's seed sets `previous` over a declared variable of that name) — for the date-text family alone: `date-text-call-run-may-fail` and `date-text-arithmetic-run-may-fail`, over `record.<field>` / `previous.<field>` reads. `timestamp(record.<date field>)`, alone or inside `+ duration(…)`, is refused with the shift `isoDate(addDays(record.<date field>, N))`; so are a `date` / `datetime` field handed straight to a timestamp-only call (`isoDate(record.picked_up_at)`) and arithmetic on its text (`record.borrow_date - duration('24h')`).
+  - **Where.** `@objectstack/lint` `validateStackExpressions` (`os validate`, `os build`, the flow publish door) reports an `error` at the slot. `@objectstack/service-automation` `registerFlow` throws it when an object-schema resolver is wired, and the stored pass (`canonicalizeStoredFlow`) lists it at the slot. The two doors judge the same set of flows. A flow stored with such an envelope stops registering at boot until it is rewritten.
+  - **Not refused.** Any envelope of a flow whose `record` is not proven to be the typed object's row: an inbound hook (`api`), a schedule, a flow with no trigger (started by hand or by a parent's `subflow` / `map`), a sweep of another object, and a record-triggered flow that declares or assigns its own `record` variable, or assigns or outputs its own `previous` — judged untyped, as before. `timestamp()` over a `datetime` field. A bare field name in an envelope, and an expression reading `input`: neither door can prove what the run binds there. Every other type verdict (`type-mismatch*`, `date-arithmetic*`, `date-duration-value`) and field existence stay out of value envelopes, as before. The run-time evaluator is unchanged.
+  - **`@objectstack/formula`.** `ExprSchemaHint` gains the optional `flowValueEnvelope` key that both doors pass.
+  - **`@objectstack/spec`.** The ADR-0087 entries `formula-timestamp-date-only-refused`, `formula-date-text-call-refused` and `formula-date-subtraction-refused` name the flow value envelope in their `surface` (for the subtraction entry, its first two shapes; the formula-only duration value stays out of envelopes). Text only: no id, key or shape changes.
+  
+  ## FROM → TO
+  
+  | FROM | TO |
+  |:---|:---|
+  | `isoDate(timestamp(record.borrow_date) + duration('168h'))` | `isoDate(addDays(record.borrow_date, 7))` |
+  | `timestamp(record.borrow_date)` | `date(record.borrow_date)` |
+  | `isoDate(record.picked_up_at)` | `isoDate(date(record.picked_up_at))` |
+  
+  One-line fix: in a flow value envelope, shift a date field by whole days with `isoDate(addDays(record.<date field>, N))`, never `timestamp(record.<date field>) + duration(…)`.
+- 99bd220: feat(spec, service-automation): a packaged flow can ship switched off for an administrator to turn on (`defaultActive: false`)
+  
+  Clause-②: yes (widening) — `FlowSchema` gains the optional `defaultActive` boolean. A flow that declares it was refused before as an unknown key; a packaged flow that declares it now registers. A flow authored in the environment that declares it is still refused, now with a sentence naming its `status` as its switch. Nothing that registered before is refused.
+  Metadata-protocol: added
+  Skills-docs: updated here — skills/objectstack-automation/SKILL.md (one paragraph under "A flow an installed package ships"), evals/flows-triggers-approvals.json (eval id 24)
+  
+  A package can now ship a flow switched off: declare `defaultActive: false` on the flow, beside `status: 'active'`. On an installation where no administrator has switched the flow, it is not armed and does not run, and `GET /api/v1/automation/_status` reports it `enabled: false`. An administrator turns it on with the packaged-flow switch (`POST /api/v1/automation/:name/toggle`, or the Enabled switch on a read-only package's flow in Studio), which writes an activation-ledger row (`sys_metadata_activation`). That row wins over the declared default in either state: a flow switched on stays on across a restart, an upgrade and a reinstall, and one switched off stays off. With no row the flow follows the package's own declaration for the version installed today, so an upgrade that changes it moves only installations nobody switched; a declared `.custom` override armed in the package's place does not change the default, whatever it declares. Absent or `true`, the flow ships on, as every packaged flow did before. A package that declares the key needs a platform at or above this release: an older one refuses the flow as an unknown key.
+  
+  `status` stays the author's switch: `obsolete` and `invalid` disarm the flow everywhere, and the packaged-flow switch does not override them.
+  
+  Only a flow a package ships has the packaged-flow switch, so:
+  
+  - registering a flow authored in the environment that declares `defaultActive` is refused, with a sentence saying its switch is its `status` (`'obsolete'` to keep it off, `'active'` to arm it). The automation write doors (`POST /api/v1/automation`, `PUT /api/v1/automation/:name`) answer `VALIDATION_FAILED`, 400, and store nothing; a dry run refuses the draft; the metadata door (`PUT /api/v1/meta/flow/:name`), which parses without registering, stores the row, the engine refuses to arm it, and `os migrate meta --stored` lists it at the key;
+  - `POST /api/v1/automation/:name/clone` drops `defaultActive` from the copy, which is written switched off by its own `status` as before;
+  - an unmanaged install copies `defaultActive: false` as `status: 'obsolete'` (unless the status already disarms the flow) and drops the key, so the copy arrives switched off.
+  
+  A name two packages ship is a package's flow too: each holder's body registers with the key, on every re-sync and upgrade, and the refusal above is only for a name no package ships.
+  
+  For hosts that compose the engine themselves, `AutomationEngine.setPackagedFlowDefaultSource(source)` and its `PackagedFlowDefaultSource` type are new public API. The automation plugin attaches the reader (it asks the metadata protocol for the package's own body); it is how the engine reads the package's default while a declared `.custom` override is armed in the package's place, and it is asked once per registration, not on every enablement read. `AutomationEngine.refreshPackagedFlowDefaults()` is new public API too: it asks the reader again for every armed body that is not the package's own, and re-arms or disarms each flow whose answer moved; the automation plugin calls it at every `metadata:reloaded` re-sync, so a hot upgrade that changes the declared default reaches a flow whose override body was not re-registered. A host composing the engine itself calls it after the set of installed packages changes. An engine composed without a reader reads the default only off an armed package body, so while an override is armed a flow its package ships off runs (fail-open): such an engine cannot see the package's body, and treating an unknown default as on keeps the behaviour every packaged flow had before this release instead of switching off a flow no package was seen to declare off.
+  
+  ADR-0126 §4 carries an amendment note: "absence of a row means the packaged default" now reads the default a packaged flow declares; the ledger's shape is unchanged.
+
+### Patch Changes
+
+- b820e16: fix(service-automation): a `notify` step warning carries no count, and each warning text on a run summary row is bounded
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  **The `notify` warning text is stable per cause.** A `notify` step whose deliveries failed put the per-execution count in its warning (`every delivery it attempted failed (3)`, `channel 'push' (2 deliveries): …`, `2 of 5 deliveries failed`). A `notify` in a loop whose recipient count varied raised a different text on each iteration for one refused channel, so the run summary row's distinct-text fold folded nothing and its five-entry list filled with near-duplicates. The text now names the failed channels, each failure's own reason, and whether anything got through (`notify delivered nothing: every delivery it attempted failed. channel 'push': …` or `notify: some deliveries failed while others were delivered or enqueued. channel 'push': …`), and no count. The counts stay where they were: the node's output (`failed`, `delivered`, `enqueued`) per execution. A reader that parsed the count out of the warning text reads it from the node output instead.
+  
+  **Each warning text on a run summary row is bounded.** `summary.nodes[].warnings` keeps at most five distinct texts plus one overflow entry; each text is now also cut at 300 characters, ending with ` [... cut; the step log holds the full text]`. Two long texts that agree up to the cut fold into one entry. The run's step log keeps every text whole. Before, a few nodes with long warning texts could push a run's persisted summary past its byte cap, whose fallback drops the whole node list.
+- f7b2d02: feat(automation): `IAutomationService.dryRun` runs an unpublished flow definition once, unarmed, as a named user
+  
+  Clause-②: yes (widening) — `AutomationEngine.dryRun` admits a `runAs: 'system'` self-triggered draft for the named user (ruling B); `@objectstack/core` exports the shared flow-start rules (`aiAccountElevatedStartRefusal`, `requiredPermissionsStartRefusal`, `requiredPermissionsRefusal`, `missingCapabilities`, `isAiServiceAccount`, `AI_ACCOUNT_ELEVATED_START_REFUSAL`, `FlowStartPermissionRefusal`); plugin-security's registered `security` service serves `canWriteObject`
+  Metadata-protocol: none
+  
+  The automation service now implements `dryRun(definition, { userId, record, … })`, the method the `IAutomationService` contract declares. A dry run admits the definition by the checks `registerFlow` asks, then by the rules that admit a start by name, and then runs it once against the supplied record as the named user. It registers nothing and arms no trigger, and it writes, sends and pauses nothing:
+  
+  - Record writes (`create_record`, `update_record`, `delete_record`) are simulated. The step shows the values the run would write and a placeholder id for a new record. The named user's object-level write permission is judged as allowed, refused or not judged. A later read by id in the same run sees the simulated row.
+  - Routing and computing nodes (`assignment`, `decision`, gateways, loops, parallel branches, try/catch) run on the engine's own executors. A decision step shows the branch taken and the expressions it evaluated.
+  - Outbound nodes (`http`, email and the like) are never executed. The step shows the payload they would send.
+  - The run stops at a node that pauses (`approval`, `wait`, `screen`, a subflow) and names why. A node type the dry run cannot simulate stops it as `not_simulated`.
+  
+  Under maintainer ruling B (record 6917953931), a draft declaring `runAs: 'system'` whose type starts on its own trigger is admitted to a dry run for the named user, and the run is never elevated. The contract's admission text says so. A by-name start of a published flow keeps refusing such a flow.
+  
+  The AI service account rule and the flow's own `requiredPermissions` rule now live in `@objectstack/core`. The by-name start doors and the dry run both ask that one copy. `@objectstack/runtime` re-exports every symbol under the name it had. The registered `security` service now also exposes `canWriteObject`, so a dry run can judge a write without performing it.
+- 7d42ba0: fix(service-automation)!: a trigger binding does not dispatch a slot whose package is disabled (ADR-0150 D3)
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export changes shape. The moved answer is a trigger-fired run under a reversible package state: no stored row, slot key, run key, trigger binding or dispatch key changes, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for a deployment where two packages each ship a flow of the same name and one of them is disabled at runtime: that package's flow no longer runs on its trigger (record-change, schedule, time-relative, or an api inbound hook's queued post). Before this release it kept running.
+  
+  When two packages each ship a flow of the same name, the engine holds one slot per package and arms each slot's trigger. Until now a slot whose package was disabled at runtime kept running on its trigger, because the run a trigger fires executed the armed slot without asking whether its package is still served.
+  
+  Now the engine asks when the trigger fires. While the slot's package is disabled, the run is skipped: nothing runs, no other package's flow of the name runs in its place, and no run-history row is written. The skip is logged once at `info` per slot while the package stays disabled. When the package is enabled again, the slot runs on its trigger again, with no re-arm.
+  
+  An event that fires while the package is disabled is dropped, not replayed when the package is enabled again: a one-shot schedule or time-relative fire that falls inside the disable is lost, as it is for a switched-off flow.
+  
+  Nothing durable moves: slot keys, run keys, the trigger bindings and the dispatch holder stay judged over every holder, so there is nothing to migrate. A flow name only one package ships answers as before.
+- ee90935: fix(service-automation): a catalog connector descriptor saved active through `PUT /api/v1/meta/connector/:name` now gets the inert-connector warning at once
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The warning `[Automation] N declarative connector(s) declare actions but are not registered …` used to run only at boot and on `metadata:reloaded`. A direct active save raises neither, so a descriptor with actions and no runtime connector behind it stayed unreported until a later publish or a restart. The audit now also runs after the connector reconcile that a connector metadata change queues, so the save door reports it.
+  
+  The warning is now printed when the set of inert descriptors changes, and it still names the whole set. A publish raises both the mutation signal and `metadata:reloaded`, and it still prints the warning once. A reload or save that leaves the set as it was prints nothing new. Before, every reload repeated the warning.
+- 44fc2fc: fix(service-automation): the served holder of a flow name a disabled package also ships keeps its slot key and its trigger
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  When two packages ship a flow of the same name and one of them is disabled, the engine holds the served package's flow in its own slot, filed under `PACKAGE/NAME`. Two paths lost that slot's trigger:
+  
+  - At boot, with one holder disabled, only the served holder's flow is pulled. Its slot was filed under the bare name and declined as if the other package's body had been refused, so its trigger never ran, behind a warning that named a refused body.
+  - At runtime, the re-sync that follows a disable withdraws the disabled holder's slot. The served slot was moved to the bare name and its trigger binding was stopped, and not armed again.
+  
+  Now a disable moves no key: in both cases the served holder's slot stays under `PACKAGE/NAME`, armed, and runs on its trigger; the bare name reaches it as the name's one served holder. When the other package is enabled again, its re-sync registers both packages' flows, in either order, and both slots end armed on their triggers. The warning about a refused body is said only once another package's body of the name is recorded as refused. When the other package is uninstalled, the name goes back to its bare key, as before. Before its slot is withdrawn, that happens at the withdrawal. After the withdrawal, it happens the first time the engine registers the served holder's flow again, fires its trigger or is asked for the name. Every bare entry (`execute`, `getFlow`, removal, version history, rollback, the bare inbound hook, credentials) then serves the name as one package's, and a re-sync that fails leaves no flow unreachable.
+- 0d1443d: docs(service-automation): the `http` node's comments say that the outbox sends a GET or HEAD with no body
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Comments only, no behaviour change. Two comments in the `http` node executor said the messaging HTTP outbox sends and signs `'{}'` for a node with no `body`. They now name the exception: a GET or HEAD goes out with no body and is signed over `''`. The published source maps shift by the added comment lines.
+- 44fc2fc: fix(service-automation)!: a flow whose only holder's package is disabled is not run by its trigger, and the engine's bare entries answer as for no flow (ADR-0150 D3)
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export changes shape. The moved answers are a trigger-fired run and the bare execute, getFlow and toggleFlow entries under a reversible package state: no stored row, slot key, run key, trigger binding or dispatch key changes, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for a deployment where a package that alone ships a flow name is disabled while the automation engine still holds that flow (the re-sync that follows a disable failed or did not run): the flow no longer runs, and the bare entries no longer serve it. Before this release it kept running and was served.
+  
+  What moves, for such a flow, while its package is disabled:
+  
+  - Its trigger binding (record-change, schedule, time-relative, or an api inbound hook's queued post) ran the flow. Now nothing runs and no run-history row is written; the skip is logged once at `info` per slot.
+  - `execute(name, …)`, by any caller, a `subflow` or `map` node's call included, ran the flow. It now answers `{ success: false, error: "Flow 'NAME' not found" }`, the answer for a flow the engine does not hold.
+  - `getFlow(name)` answered the flow. It now answers `null`, so the bare HTTP doors that ask it first (`GET /automation/NAME`, `POST /automation/NAME/trigger`, `POST /automation/trigger/NAME`, `POST /automation/NAME/toggle`, `POST /automation/NAME/clone`, `GET /automation/NAME/runs`) answer `404`, which is what the namespaced address `/automation/NAMESPACE/NAME…` already answered.
+  - `toggleFlow(name, …)` switched the flow. It now rejects with `Flow 'NAME' not found`.
+  
+  The HTTP write doors that ask a lasting question of the name do not move with it: the clone door's taken-name check on the new name, the definition a refused `POST /automation` or `PUT /automation/NAME` puts back, the stored credential a `PUT /automation/NAME` body, or a `POST /automation` body onto a name the engine holds, keeps when it leaves it out, and the `DELETE /automation/NAME` existence check read the flow the engine holds whatever its package's enable state. For such a flow the clone's new name is refused `409`, the held definition is put back, the credential is kept and `DELETE` answers a deletion, as before this release. A name two packages hold is read at those doors on its served holder, as the bare entries read it.
+  
+  Remedy: enable the package. Its flow runs on its trigger again with no re-arm, and the bare entries serve it again.
+  
+  An event that fires while the package is disabled is dropped, not replayed when the package is enabled again.
+  
+  Nothing durable moves: the slot key, run keys, the trigger binding, the dispatch holder, credentials and the version history stay judged over every holder. Resuming a run parked before the disable is not decided here. A flow no package ships (the environment's own, or one registered straight into the engine) answers as before.
+- 888c3e1: fix(service-automation)!: the inbound hook door refuses the address of a flow slot whose package is disabled, before anything is enqueued (ADR-0150 D5)
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export changes shape. The moved answer is the anonymous inbound hook's answer to a post under a reversible package state: no stored row, slot key, run key, trigger binding, hook secret or dispatch key changes, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for a sender that posts to the inbound hook of a flow whose package is disabled while the automation engine still holds that flow's slot (the re-sync that follows a disable failed or did not run, or the disable came with no announce). The door answered `202 Accepted` and queued the post, and the queued run was then skipped, so the event was lost while the sender was told it was accepted. It now answers the door's one refusal, `401 INVALID_SIGNATURE`.
+  
+  What moves, while the package is disabled:
+  
+  - `POST /api/v1/automation/hooks/NAMESPACE/NAME/HOOK` for a name two packages each ship, where NAMESPACE names the disabled package: the self-hosted mount and the hosted face both answer the one refusal, once the body has been read in full. Nothing is enqueued, and the other package's flow of the name is not reached in its place.
+  - For a name only the disabled package ships, both its qualified address and the bare `POST /api/v1/automation/hooks/NAME/HOOK` answer the same refusal.
+  
+  The answer is byte for byte the one the same address gets once the disable's re-sync has withdrawn the slot, and the one every unverified post gets, so it says nothing about which packages are installed or disabled. The cause is written to the server log only, at `info`, once per refused post (`cause: 'disabled-holder'`, with the flow, the package and the slot).
+  
+  Senders that retry on a non-2xx keep the event and can redeliver after a re-enable. When the package is enabled again the address answers `202` and runs the flow again, with no re-arm.
+  
+  The served package's qualified hook beside a disabled one, a flow no package ships, and a flow switched off with its slot toggle answer as before. The bare hook of a name two packages ship answers the one refusal as before.
+- 5c0b6f6: fix(service-automation): a flow under `errorHandling.strategy: 'retry'` re-evaluates its start condition on every retry attempt
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  When a flow's start-node `condition` could not be evaluated (a CEL fault against the record, for example), `execute()` handed the fault to the flow's error strategy. Under `strategy: 'retry'` every retry attempt then ran the flow's nodes without evaluating the start condition at all, so a fault on attempt 1 opened the author's gate on attempts 2 and later. Both attempt paths now call one start-condition evaluator. A condition that faults on every attempt is retried as a fault and the run ends `failed` with no node executed. A condition that faults once and then holds runs the nodes once. A condition that faults once and then does not hold skips the run with the same `condition_not_met` answer attempt 1 gives. The default strategy is unchanged.
+- 162fe54: fix(runtime): the automation write doors keep a flow whose only package is disabled, whatever that package's enable state
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  **Added:** `AutomationEngine.getHeldFlow(name)` on `@objectstack/service-automation`: the flow the engine holds under a bare name, judged over every holder (a disabled package's included, `null` for a name it does not hold or a slot-key spelling); a name two packages hold is refused `409` naming every holder. Like `getFlow`, it settles the name first, so a lone qualified slot of a name one package holds again is re-keyed to the bare name.
+  
+  Four `/automation` write doors ask a lasting question of a flow name: the clone door's taken-name check on the new name, the copy a refused definition write (`POST /`, `PUT /automation/NAME`) puts back, the credential `PUT /automation/NAME`, or `POST /automation` onto a name the engine already holds, keeps when the body leaves it out, and the `DELETE /automation/NAME` existence check. They read the engine's served view (`getFlow`), in which a flow whose one package is disabled is no flow. For a name one package holds they now read the flow the engine holds over every holder, through `getHeldFlow`, so their answers no longer depend on whether that package is enabled. For a flow whose only package is disabled while the engine still holds it:
+  
+  - Clone with this flow's name as the new name: refused `409`, the door's name-taken answer, and nothing is registered. Before, the copy was admitted and filed in the disabled package's slot.
+  - A definition write the engine accepts and the store then refuses: the flow the engine held is registered again. Before, the name was withdrawn.
+  - `PUT`, or `POST /` onto the name, with a body that leaves out a stored credential: the stored credential is kept. Before, nothing was carried forward.
+  - `DELETE`: the flow is removed and the door answers a deletion. Before, the door removed it and answered `404`.
+  
+  These are the answers the last release gave: the served view changed after it.
+  
+  A name two packages hold is read at these doors on its served holder, as before: a refused definition write puts back the served holder's body, and a `PUT`, or a `POST /` onto the name, keeps the served holder's stored credential. With one holder disabled, a package-less `PUT /automation/NAME` or `POST /automation` onto such a name is admitted into the enabled holder, with or without a metadata store (the store's save, naming no package, writes the enabled holder's row), as before. While both holders are enabled, the definition writes and `DELETE` are refused `409` (`RESOURCE_CONFLICT`) naming every holder, as before.
+  
+  The clone door's new name: a name two packages hold is taken. While one holder is disabled it gets the door's name-taken `409`, as before. While both are enabled, the engine's refusal used to leave the door thrown, naming every holder; the door now answers its own name-taken refusal, returned, with the same status and code (`409`, `RESOURCE_CONFLICT`), whose remedy is a new name. One exception, as before: a name two packages hold with both holders disabled is not taken at the clone door (no holder is served, so the door finds no flow there) and the copy is admitted.
+  
+  A flow of an enabled package, and a name the engine does not hold, answer as before. The read and run doors (`GET`, trigger, toggle, runs, the clone's source) keep the served view.
+- 11e0441: feat(hooks): a hook writes the sentences it declares in the organization's language
+  
+  Clause-②: yes (widening) — a hook may now declare `texts` and its code may call `ctx.text`; translation bundles accept `hooks.<hook>.texts.<key>.message`; `@objectstack/core` exports `readOrganizationTextLocale`. Nothing that was accepted before is refused
+  Metadata-protocol: added
+  Skills-docs: follow-up #34546
+  
+  A hook can now declare the sentences it writes into records for people to read, and ask for one by key: `texts: { follow_up_subject: { message: 'Follow up with qualified lead: {{ lead }}', params: ['lead'] } }`, then `await ctx.text('follow_up_subject', { lead })`. The answer is in the organization's language, because everyone in the organization reads the record: the Localization setting (`localization.locale`) when somebody set it, else the app's declared `i18n.defaultLocale`. It is never the language of the person whose save fired the hook. The translation `hooks.<hook>.texts.<key>.message` is picked first, then its `{{ }}` holes are filled from `params`.
+  
+  - A missing translation, or no language to pick, answers the declared sentence, and the hook goes on.
+  - A Localization setting that cannot be read rejects the call, so another language is never stored over a choice that may exist. A host that registers no `localization` setting has none set, so the app's declared default answers.
+  - Only declared text is translated: a string the hook builds itself is written as it is. A key `texts` does not declare is refused when the hook is saved if the hook asks for it literally (`ctx.text('key')`), otherwise when the hook runs, as a fault naming the hook and the key. `texts` on an `expression` body, or on a hook with neither a body nor a handler, is refused. A text with no `params` is plain text, and a `{{ }}` hole in it is refused.
+  - A text with `params` is compiled like a declared refusal's sentence: a hole over another name is refused when the hook is saved, and `objectstack validate`, `compile` and the publish gate refuse a hole holding logic, an unknown formatter, an empty hole and `{{ amount | currency }}` with no code. A translation whose holes do not render at run time is dropped for the declared sentence, filled.
+  - `ctx.text` is the same on a sandboxed `js` body and on an in-process `handler`.
+  - `os i18n extract` scaffolds the key, and the existing coverage check counts it. `objectstack validate` refuses a `hooks.<hook>.texts.<key>` translation over a key the hook does not declare.
+  - Text is picked when it is written. Records already written are not changed.
+  
+  `@objectstack/core` exports `readOrganizationTextLocale`: the one reading of the organization's language that every writer of such text shares, with an unregistered Localization setting answered as not set. The flow record write (`@objectstack/service-automation`) now reads through it; its answers are unchanged.
+- 583bbf3: fix(automation)!: switching on a packaged flow that its own status disarms is refused, and the toggle door answers the engine's state
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  Skills-docs: none — skills/objectstack-automation/SKILL.md teaches the toggle only as the off switch for an installed package's flow; nothing it says changes
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value, metadata type or stored row shape is added, removed, renamed or rewritten: what moves is the answer of one REST door (POST /automation/:name/toggle, and the IAutomationService.toggleFlow it calls) to one request, switching on a packaged flow whose own status already keeps it off. A flow definition that was valid stays valid and is armed exactly as before; nothing exists for objectstack migrate meta to rewrite. The one-line fix for a caller is in the body: publish the flow with status active, then switch it on. -->
+  
+  **BREAKING** for a caller that switches on a packaged flow whose definition's `status` is `obsolete` or `invalid`. The switch moves only the activation-ledger bit, and a status is the author's, so that request never made the flow run. It now says so instead of reporting success.
+  
+  **What changes.**
+  
+  - `POST /api/v1/automation/:name/toggle` with `{ enabled: true }` (and `IAutomationService.toggleFlow(name, true)` on the engine's service) on such a flow used to answer `200 { name, enabled: true }`. It wrote `active: true` to `sys_metadata_activation`, replacing any `active: false` row an administrator had left there, while `GET /automation/_status` read `enabled: false`. It now answers `409 RESOURCE_CONFLICT`, names the status, and writes nothing.
+    - An `active: false` row already standing for the flow stays as it is.
+    - The refusal names the step that arms the flow: publish it with status `active`, or for a read-only package, install a package version that ships it active.
+  - A second case changes. An administrator switches such a flow on while it is still `obsolete`, and the flow is later published or shipped `active`. If the ledger held an `active: false` row for it, the flow used to run as soon as it arrived `active`, because the earlier switch-on had replaced that row. Now the row is still there, so the flow stays off after it arrives `active` until it is switched on again.
+  - The door's `200` answer reads `enabled` back from `getFlowRuntimeStates`, the same reading `GET /automation/_status` serves, and no longer echoes the request. A service that does not implement `getFlowRuntimeStates` keeps the old answer, the request echoed. So does a flow name two packages hold, switched at one package's address (`/automation/:ns/:name/toggle`) or at the bare name while only one holder's package is enabled: that reading has one row per holder under the same name, so it cannot tell which row was switched, and the engine's echo is true because it refuses the one switch-on that would leave the flow off.
+  
+  **Who moves, in one line.** Publish the flow with status `active` first, then switch it on. A flow already published `active` that still reads `enabled: false` needs one more switch-on.
+  
+  **Unchanged.** Switching such a flow off is still accepted: it writes `active: false`, which keeps the flow off after a later definition ships it active. Every flow whose status is `active` or `draft` switches on and off as before. A customer-authored flow is still refused by the earlier provenance check.
+- 6c1f9b3: feat(studio): an installed app's action is switched on or off on the action itself, in Studio; Setup › Packaged Actions retires (ADR-0146 D4, amended 2026-11-17)
+  
+  Clause-②: yes (narrowing: Setup's `nav_packaged_actions` entry and its `automation:packaged-actions` console page retire, and `PackagedActionsPage` leaves the private `@object-ui/app-shell`; widening: new studio-namespace locale keys, an optional `options` argument and the exported `TurnedOffPackagedItemOptions` on `@objectstack/types`' `describeTurnedOffPackagedItem`, and `ActionActivationProjection.disabledPackageOf` plus an optional `platform` argument on `describeDisabled` in `@objectstack/objectql`)
+  Metadata-protocol: none (no spec schema changes; `platform-objects` serves one fewer Setup navigation item, and one `.describe()` sentence changes)
+  
+  **BREAKING** for an administrator who used Setup › Packaged Actions, and for a nav entry or link that names its `automation:packaged-actions` page: the Setup entry and page are gone. An installed app's action is now switched on or off on the action itself in Studio (the object's Actions view, or a standalone action's page), and an old link to the page opens Studio. A platform action (one a kernel package ships) has no switch in the console any more; it is switched through the activation door, `POST /api/v1/actions/_activation/<object>/<action>`, and the `409 ACTION_DISABLED` message for one now says so.
+  
+  Before this change, the deployment's on/off switch for an installed app's actions lived on a separate Setup page, "Packaged Actions", away from where the action is read. It now sits on the action:
+  
+  - On the object's Actions view in Studio, a read-only app package's vendor action carries a "Switched on / off for this deployment" switch, the flow switch's twin. A switched-off action is marked in the list. A refusal is the server's sentence, shown verbatim; a caller the deployment's posture walls off sees the switch disabled with the reason.
+  - A standalone `action` item's page in Studio's "All metadata" area carries the same switch.
+  - The platform's own actions (any action a kernel package ships) carry no switch anywhere. When the package list cannot be read, no switch is offered.
+  - Studio's landing leads to them: an app's "N switched off" count opens the switched-off action (one) or the action list (several), and when that does not land on an action (several, or flows among them), the line names each switched-off action as a link, three at most, then a "more" link to the list. An action its object holds opens on that object's Actions view (a new `?action=<name>` beside `?surface=object:<object>` in the Data pillar selects it), since an action declared inside its object has no page of its own; any other action opens its own page. The landing's "Customizations in this environment" panel links its switched-off action rows the same way.
+  
+  The doors are unchanged: the read is the `sys_metadata_activation` ledger, the write is `POST /api/v1/actions/_activation/:object/:action` with body `{ enabled }`.
+  
+  Setup › Packaged Actions is removed in the same change. A bookmark of `/apps/setup/component/automation/packaged-actions` redirects to Studio (to the package's Data pillar when the URL names `?package=`). The runtime's "turned off" sentence for a dispatched app action now points at the action in Studio, and the `disabledActions` description in `@objectstack/spec` says the same; no schema shape changes.
+  
+  **Platform actions already switched off.** The retired page also listed the platform's own actions (those a kernel package ships, such as `sys_user`'s Ban User), so a deployment may hold ledger rows that switch one off. Those rows stay in force: no boot or upgrade step turns them back on, and the activation door is unchanged. Because Studio has no switch for them, the `409 ACTION_DISABLED` sentence for a platform action now names the activation door instead of Studio. To find them on a deployment, as a platform operator:
+  
+  1. `GET /api/v1/data/sys_metadata_activation?top=1000` and keep the rows with `metadata_type: "action"` and `active: false`. If the response says `hasMore: true`, the list is incomplete; page through it before concluding.
+  2. `GET /api/v1/packages`: a row whose `package_id` belongs to a package with `manifest.scope` `system` or `cloud` is a switched-off platform action.
+  
+  To turn one on again: `POST /api/v1/actions/_activation/<object>/<action>` with body `{"enabled": true}` (use `global` as `<object>` for an action that belongs to no object). The `packagedAutomation.*` console locale keys the page read are no longer read and are left in place for a later sweep.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed or renamed, and nothing stored is rewritten: what retires is a Setup navigation entry, its console page and the PackagedActionsPage export of the private @object-ui/app-shell package. Ledger rows, the activation door and authored metadata are unchanged, so there is nothing for objectstack migrate meta to rewrite. -->
+- bcfc8e4: fix(service-automation): a flow node whose type no installed plugin provides now follows its `fault` edge
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A flow can name a node type that no installed plugin provides, for example an `approval` node on a deployment without `@objectstack/plugin-approvals`. Running that node fails with `NO_EXECUTOR` ("No executor registered for node type 'approval'"). Until now that failure skipped the node's `fault` edge: the run just failed, nobody was told, and the record that started it stayed where it was. An author could not declare a graceful path for it.
+  
+  That failure is now handled like any other node failure:
+  
+  - When the node declares a `fault` edge, the run follows it. The handler reads `{$error.code}` as `NO_EXECUTOR`, with the same message, and `{<nodeId>.error}` holds the message. The run log keeps the node's failed step with code `NO_EXECUTOR`, followed by the handler's steps.
+  - Inside a `try_catch` region, the catch region's bound error now carries `code: 'NO_EXECUTOR'`.
+  - With no `fault` edge, nothing changes: the same failed step, the same error text, and the run fails.
+  
+  The boot warning that names flows referencing node types no installed plugin provides is unchanged. Installing the plugin is still the fix; the `fault` edge is the author's fallback until then.
+- c37e47a: feat(spec, core, service-messaging, service-automation, plugin-webhooks)!: webhook deliveries and the flow `http` node reach only public addresses unless the operator allowlists the target, and never a link-local or cloud metadata address
+  
+  Clause-②: no (narrowing) — webhook deliveries and flow `http` node requests aimed at an address that is not public (loopback, private, carrier-grade NAT, link-local, unique-local, multicast, broadcast, unspecified, documentation, benchmarking, any other special-purpose range that is not globally reachable, and any IPv6 address outside global unicast) are refused unless `OS_EGRESS_ALLOWED_TARGETS` lists the target; link-local and cloud metadata addresses are refused whatever it lists; a malformed or over-broad allowlist fails the boot.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed or renamed: a webhook row and a flow http node are authored and stored exactly as before, and nothing stored is rewritten. What moves is the deployment's outbound policy, decided by the operator's environment at boot, so no metadata migration exists to register. -->
+  
+  **BREAKING** for deployments whose webhooks or flows send requests to internal addresses. Webhook deliveries and flow `http` node requests now reach only public addresses: every address in a range that is not globally reachable is refused, and so is any IPv6 address outside global unicast. Cloud metadata addresses — every cloud's link-local endpoints, the IPv6 metadata endpoints, and the metadata and host-platform addresses outside link-local space — are never reachable. The rule applies to the address the connection is actually made to: after DNS resolution, for a literal IP in the url, for IPv6 forms that carry an IPv4 address, on the connected socket itself, and on every redirect hop. A host name with several addresses is judged on all of them and then dialled in turn, so a public target that answers on only some of its addresses is still reached.
+  
+  **Who moves.** Operators whose webhooks or flows target internal addresses (a service on `localhost`, a host on a private network, an internal DNS name that resolves to one): set `OS_EGRESS_ALLOWED_TARGETS` to the exact host names, IP addresses or CIDR blocks those requests may reach, comma-separated, and restart. Link-local and cloud metadata addresses cannot be listed. These requests connect directly to the address the guard judged, so an HTTP proxy configured through the environment is not used for them. Nothing else changes, and requests to public targets are unaffected.
+  
+  **Runtime.** `@objectstack/core/egress`, and with it `@objectstack/service-messaging`, `@objectstack/service-automation` and `@objectstack/plugin-webhooks`, now load `undici`, `node:dns` and `node:net` when they are imported, so these packages need a Node.js runtime. At install the guard proves that the requests it sends are judged by it; in a runtime where that cannot be proven (one whose fetch does not honour undici's dispatcher), the boot fails and every webhook delivery and flow `http` request is refused.
+  
+  **What a refusal looks like.** A webhook delivery whose target is refused dead-letters on its first attempt with an error starting `EGRESS_REFUSED`; it does not walk the retry schedule, since a retry cannot change the verdict. A flow `http` node whose target is refused fails with `http: EGRESS_REFUSED: …`, and a `durable: true` callout dead-letters in the outbox the same way as a webhook. The refusal text names the requested host and the rule, and reads the same for a host name that does not resolve (which is still retried); the server log adds the resolved address and its class, or the lookup failure, for the operator.
+  
+  **The boot.** One line says the guard is active and how many targets `OS_EGRESS_ALLOWED_TARGETS` lists. The webhook plugin then logs once how many stored `sys_webhook` rows target an address the guard will refuse. A malformed or over-broad allowlist (an entry with a scheme, port, path or wildcard, host bits set, a prefix under `/8` such as `0.0.0.0/0`, or a link-local or metadata address) fails the boot, naming every bad entry.
+  
+  **For hosts.** `@objectstack/core/egress` exports the policy seam (`EgressPolicy`, decided per connected address, host name, organization and source), the open-core default (`createEnvEgressPolicy`) and the guarded fetch. The error-code ledger registers `EGRESS_REFUSED` and `EGRESS_ALLOWLIST_INVALID` under `@objectstack/core`. `MessagingServicePlugin`, `AutomationServicePlugin` and `WebhookOutboxPlugin` take an `egressPolicy` option for a stricter policy.
+- Updated dependencies [e53e02e]
+- Updated dependencies [35c9a30]
+- Updated dependencies [9404cb1]
+- Updated dependencies [d0737f6]
+- Updated dependencies [661ede2]
+- Updated dependencies [1f923d7]
+- Updated dependencies [a00b422]
+- Updated dependencies [64c4285]
+- Updated dependencies [36c0e96]
+- Updated dependencies [3cf26c1]
+- Updated dependencies [7d06248]
+- Updated dependencies [b1efa37]
+- Updated dependencies [c493adb]
+- Updated dependencies [84e6bbb]
+- Updated dependencies [fb79d47]
+- Updated dependencies [99a6ec0]
+- Updated dependencies [69783b7]
+- Updated dependencies [329f2f7]
+- Updated dependencies [5af956f]
+- Updated dependencies [bb17350]
+- Updated dependencies [3372da0]
+- Updated dependencies [66f6638]
+- Updated dependencies [a061708]
+- Updated dependencies [68e726d]
+- Updated dependencies [b109659]
+- Updated dependencies [c59198f]
+- Updated dependencies [d1ab592]
+- Updated dependencies [568f214]
+- Updated dependencies [fb3d1ff]
+- Updated dependencies [9a7f8c1]
+- Updated dependencies [2068e03]
+- Updated dependencies [5c7e448]
+- Updated dependencies [8f052e9]
+- Updated dependencies [de3538c]
+- Updated dependencies [5326028]
+- Updated dependencies [f7b2d02]
+- Updated dependencies [54f8e16]
+- Updated dependencies [bb3c163]
+- Updated dependencies [3c2fb32]
+- Updated dependencies [d635555]
+- Updated dependencies [0ac112f]
+- Updated dependencies [c934631]
+- Updated dependencies [4176c95]
+- Updated dependencies [63e47fe]
+- Updated dependencies [b005638]
+- Updated dependencies [e5c2d76]
+- Updated dependencies [db3bbd3]
+- Updated dependencies [9f32c0f]
+- Updated dependencies [109a903]
+- Updated dependencies [2539ad9]
+- Updated dependencies [ef1ebad]
+- Updated dependencies [568d416]
+- Updated dependencies [85f2ac5]
+- Updated dependencies [98a4449]
+- Updated dependencies [fdfccbf]
+- Updated dependencies [fa1fb6f]
+- Updated dependencies [d10f652]
+- Updated dependencies [ba03d5e]
+- Updated dependencies [3e49033]
+- Updated dependencies [5092581]
+- Updated dependencies [0bbb211]
+- Updated dependencies [6091b64]
+- Updated dependencies [6844e6b]
+- Updated dependencies [021abd4]
+- Updated dependencies [61ded62]
+- Updated dependencies [d3bea96]
+- Updated dependencies [18194fb]
+- Updated dependencies [75ab117]
+- Updated dependencies [6080387]
+- Updated dependencies [8fd5004]
+- Updated dependencies [071323e]
+- Updated dependencies [41ff7c3]
+- Updated dependencies [aab8b31]
+- Updated dependencies [e0670b9]
+- Updated dependencies [01598d9]
+- Updated dependencies [6cc3f97]
+- Updated dependencies [50d655f]
+- Updated dependencies [3a08833]
+- Updated dependencies [0e2e4f5]
+- Updated dependencies [d5e6b20]
+- Updated dependencies [803f909]
+- Updated dependencies [bef80d3]
+- Updated dependencies [e0670b9]
+- Updated dependencies [20bf222]
+- Updated dependencies [9e6fee1]
+- Updated dependencies [52ec26f]
+- Updated dependencies [c2cabce]
+- Updated dependencies [4c0cf65]
+- Updated dependencies [6fb3d0c]
+- Updated dependencies [2c296cf]
+- Updated dependencies [fa9d695]
+- Updated dependencies [d9c4b62]
+- Updated dependencies [1ccb445]
+- Updated dependencies [8c6ddc5]
+- Updated dependencies [1bf90a0]
+- Updated dependencies [27c0b20]
+- Updated dependencies [80cdbd4]
+- Updated dependencies [89d5a41]
+- Updated dependencies [842637a]
+- Updated dependencies [c4c0794]
+- Updated dependencies [227ae36]
+- Updated dependencies [1177058]
+- Updated dependencies [12b69e1]
+- Updated dependencies [d4e4dfb]
+- Updated dependencies [22bf910]
+- Updated dependencies [371e5f1]
+- Updated dependencies [11e0441]
+- Updated dependencies [f23c71e]
+- Updated dependencies [4240719]
+- Updated dependencies [6302c2c]
+- Updated dependencies [7b3e955]
+- Updated dependencies [066177b]
+- Updated dependencies [1e4656d]
+- Updated dependencies [a8e09bb]
+- Updated dependencies [ddab49d]
+- Updated dependencies [1538596]
+- Updated dependencies [21d84a8]
+- Updated dependencies [d0348cf]
+- Updated dependencies [b91cefa]
+- Updated dependencies [4fb8790]
+- Updated dependencies [36af6b0]
+- Updated dependencies [4ec9cc2]
+- Updated dependencies [a1082f3]
+- Updated dependencies [d9fabb2]
+- Updated dependencies [f02f4f6]
+- Updated dependencies [62d9d0d]
+- Updated dependencies [e61af97]
+- Updated dependencies [758bbe7]
+- Updated dependencies [99bd220]
+- Updated dependencies [13057ce]
+- Updated dependencies [a8aa6ab]
+- Updated dependencies [cc5472e]
+- Updated dependencies [a825152]
+- Updated dependencies [9cf74ae]
+- Updated dependencies [c81f498]
+- Updated dependencies [6c1f9b3]
+- Updated dependencies [b846710]
+- Updated dependencies [b633afe]
+- Updated dependencies [842b468]
+- Updated dependencies [aa0fde3]
+- Updated dependencies [b85dff0]
+- Updated dependencies [743308b]
+- Updated dependencies [bb169c3]
+- Updated dependencies [0465f4a]
+- Updated dependencies [2487242]
+- Updated dependencies [c0665c0]
+- Updated dependencies [3a78b89]
+- Updated dependencies [92a5cac]
+- Updated dependencies [2f656af]
+- Updated dependencies [d4b2a75]
+- Updated dependencies [ad9b74b]
+- Updated dependencies [348fbc0]
+- Updated dependencies [ea1edf9]
+- Updated dependencies [0ff3b14]
+- Updated dependencies [e2a4c66]
+- Updated dependencies [6dd5716]
+- Updated dependencies [c37e47a]
+- Updated dependencies [3f5ffe7]
+- Updated dependencies [ad7331a]
+- Updated dependencies [a6c2b83]
+- Updated dependencies [8b7c5d5]
+- Updated dependencies [6880b04]
+- Updated dependencies [d18d54b]
+- Updated dependencies [1354d2a]
+- Updated dependencies [0593356]
+- Updated dependencies [e735892]
+- Updated dependencies [a2bb7d5]
+- Updated dependencies [6aeb665]
+- Updated dependencies [6feea4e]
+- Updated dependencies [c1ec627]
+  - @objectstack/platform-objects@18.6.0
+  - @objectstack/spec@18.6.0
+  - @objectstack/plugin-auth@18.6.0
+  - @objectstack/objectql@18.6.0
+  - @objectstack/metadata-protocol@18.6.0
+  - @objectstack/core@18.6.0
+  - @objectstack/metadata-core@18.6.0
+  - @objectstack/formula@18.6.0
+  - @objectstack/types@18.6.0
+
 ## 18.5.0
 
 ### Minor Changes

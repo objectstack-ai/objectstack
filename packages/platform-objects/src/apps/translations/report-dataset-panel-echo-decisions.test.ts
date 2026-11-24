@@ -91,10 +91,10 @@ const DECISIONS: readonly Decision[] = [
     type: 'report',
     key: 'dataset',
     prop: 'helpText',
-    en: 'Dataset to bind (measures/dimensions come from its semantic layer)',
+    en: 'The report reads its numbers from here; everyone sees only the records they have access to.',
     verdict: ALL_TRANSLATE,
     reason:
-      'Prose, not a term of art, and it was a byte copy in all three locales while the sibling helpTexts on the same panel (type, columns, order, chart) were authored. A fill.',
+      'Prose, not a term of art, and it was a byte copy in all three locales while the sibling helpTexts on the same panel (type, columns, order, chart) were authored. A fill. ⚠️ #36447 reworded this `en` source into business terms (from "Dataset to bind (measures/dimensions come from its semantic layer)"); the zh-CN / ja-JP / es-ES verdicts and values above were taken against the OLD English and were not re-judged.',
   },
   {
     type: 'report',
@@ -108,10 +108,10 @@ const DECISIONS: readonly Decision[] = [
     type: 'report',
     key: 'values',
     prop: 'helpText',
-    en: 'Measure names (from the dataset) to display',
+    en: 'The metrics to total or count (from the data source).',
     verdict: ALL_TRANSLATE,
     reason:
-      'Prose. Its own sibling order.helpText names the same two vocabularies (rows/columns dimensions, values measures) in authored text in every locale, so the vocabulary existed and this leaf simply never got it.',
+      'Prose. Its own sibling order.helpText names the same two vocabularies (rows/columns dimensions, values measures) in authored text in every locale, so the vocabulary existed and this leaf simply never got it. ⚠️ #36447 reworded this `en` source into business terms (from "Measure names (from the dataset) to display"); the zh-CN / ja-JP / es-ES verdicts and values above were taken against the OLD English and were not re-judged.',
   },
   {
     type: 'report',
@@ -125,10 +125,10 @@ const DECISIONS: readonly Decision[] = [
     type: 'report',
     key: 'rows',
     prop: 'helpText',
-    en: 'Dimension names (from the dataset) to group rows by',
+    en: 'The fields to group by (from the data source).',
     verdict: ALL_TRANSLATE,
     reason:
-      'Prose, and the neighbouring columns.helpText — the same sentence for the other axis — is authored in all three locales. Nothing distinguishes the two but one having been reached.',
+      'Prose, and the neighbouring columns.helpText — the same sentence for the other axis — is authored in all three locales. Nothing distinguishes the two but one having been reached. ⚠️ #36447 reworded this `en` source into business terms (from "Dimension names (from the dataset) to group rows by"); the zh-CN / ja-JP / es-ES verdicts and values above were taken against the OLD English and were not re-judged.',
   },
   {
     type: 'dataset',

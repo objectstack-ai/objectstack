@@ -131,7 +131,7 @@ import { AutoNumberField } from '../widgets/AutoNumberField';
 import { UserField } from '../widgets/UserField';
 import { ObjectField } from '../widgets/ObjectField';
 import { VectorField } from '../widgets/VectorField';
-import { GridField } from '../widgets/GridField';
+import { GridFieldWidget as GridField } from '../widgets/grid-field/GridFieldWidget';
 import { ColorField } from '../widgets/ColorField';
 import { SliderField } from '../widgets/SliderField';
 import { RatingField } from '../widgets/RatingField';

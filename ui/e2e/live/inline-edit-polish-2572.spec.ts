@@ -56,6 +56,14 @@ const REPO_ROOT = decodeURIComponent(new URL(import.meta.url).pathname)
   .slice(0, -SELF_DEPTH_BELOW_REPO_ROOT)
   .join('/');
 
+// The shared inline-edit session this file pins is entered by a double-click
+// on a value of the record page's sectioned face, which carries this title.
+// That is the face at this config's 1280 px window, where the sidebar now
+// starts expanded (objectstack#36112). The field-list face (the pinned left
+// column on a wider page, objectstack#36147) titles a value "Click to edit",
+// and a click there edits that one field in place and saves it alone, with no
+// session and no save bar (objectstack#36475): not what this file pins
+// (objectstack#36321).
 const EDIT_HINT = 'Double-click to edit';
 
 function authToken(): string {
@@ -210,6 +218,15 @@ test('record inline-edit polish (#2572) — showcase Project end-to-end', async 
     'an unlocked approval step reads "In approval · editable"',
   ).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText('Locked for approval')).toHaveCount(0);
+  // The band's text alone no longer tells the two steps apart: once the
+  // header draws the approval tag, the band draws no lock badge on the locked
+  // step either (#35593 item 4, band → tag). The tag is what does — it names
+  // the pending request here without carrying the lock, the control for the
+  // locked reading below, which is the same tag with
+  // `data-record-approval-locked`.
+  const approvalTag = page.getByTestId('record-approval-tag');
+  await expect(approvalTag, 'the header names the pending approval').toBeVisible();
+  await expect(approvalTag, 'an unlocked approval step does not lock the tag').not.toHaveAttribute('data-record-approval-locked');
   // A double-click on the budget still opens an inline-edit session.
   await budgetGroupOnPage().locator(`[title="${EDIT_HINT}"]`).dblclick();
   await expect(saveBtn, 'inline editing stays live during an unlocked approval').toBeVisible();
@@ -246,9 +263,13 @@ test('record inline-edit polish (#2572) — showcase Project end-to-end', async 
       { timeout: 60_000, intervals: [2_000] },
     )
     .toBe(0);
-  await expect(page.getByText('Locked for approval').first()).toBeVisible();
+  // The lock reaches the reader through the record header's approval tag,
+  // which carries it (its title says why editing is locked); the band draws
+  // no second 'Locked for approval' badge beside it.
+  await expect(approvalTag, 'the header names the locking approval').toBeVisible();
+  await expect(approvalTag, 'the approval tag carries the lock').toHaveAttribute('data-record-approval-locked', '');
 
-  // …and a double-click on the (former) budget field must NOT open a session.
-  await budgetGroupOnPage().dblclick();
+  // …and a click on the (former) budget field must NOT open a session.
+  await budgetGroupOnPage().click();
   await expect(saveBtn).toBeHidden();
 });

@@ -36,6 +36,9 @@ import {
   isIndexDriftOp,
   parseIndexDdl,
   planDeclaredRenames,
+  latestPerDirectiveOf,
+  findMisplacedFixedReadLeaf,
+  misplacedFixedReadLeafMessage,
   type DeclaredRenameCarry,
   type DeclaredRenamePlan,
   type DriftOp,
@@ -55,7 +58,7 @@ import { RemoteTransport, remoteReadableIdsSemiJoin, type RemoteTenantScope } fr
 import { planRelaxedColumnDefinition } from './remote-relax-not-null.js';
 // [ADR-0139 D3] The walk, the rewrite and the refusal for a `ReadableIds` leaf —
 // shared with the local face this class inherits, `driver-memory` and `driver-mongodb`.
-import { findMisplacedReadableIds, refuseReadableIdsOnce, replaceComposedReadableIds } from '@objectstack/core';
+import { findMisplacedReadableIds, refuseFixedReadLeafOnce, refuseReadableIdsOnce, replaceComposedReadableIds } from '@objectstack/core';
 import {
   backfillRemoteCanonicalColumns,
   type RemoteBackfillClient,
@@ -677,7 +680,7 @@ export type RemoteDriftOpAnswer =
  * The `satisfies` clause is the pin, as for {@link REMOTE_FACE_ANSWERS}: an op
  * added to `DriftOp` fails this package's typecheck and build until its remote
  * answer is decided here. Of these, the SQLite differ emits `relax_not_null`,
- * `tighten_not_null`, `drop_column_default`, `drop_column` and the index ops;
+ * `tighten_not_null`, `drop_column_default`, `set_column_default`, `drop_column` and the index ops;
  * the two varchar widths and the two `manual_*` findings are PostgreSQL /
  * MySQL only, and answered here for completeness.
  */
@@ -697,6 +700,9 @@ export const REMOTE_DRIFT_OP_ANSWERS = {
   widen_varchar: 'needs-table-rebuild',
   narrow_varchar: 'needs-table-rebuild',
   drop_column_default: 'needs-table-rebuild',
+  // [#36245] A changed literal DEFAULT is restated by the same rebuild that
+  // drops one: SQLite cannot alter a column's DEFAULT in place.
+  set_column_default: 'needs-table-rebuild',
   // [#32590] Never emitted by the SQLite differ: a SQLite `date` column already
   // holds the canonical datetime text, so the widening is Postgres / MySQL
   // only. Answered as the varchar widths are, since a SQLite column's declared
@@ -1961,6 +1967,10 @@ export class TursoDriver extends SqlDriver {
       // on the engine's `find()` + in-memory path, which answers it; local and
       // embedded-replica modes run SqlDriver's own compile and inherit `true`.
       ...(this.transportMode === 'remote' ? { aggregationFilter: false } : {}),
+
+      // [ADR-0155 D4] `fixedReadLeaves` is inherited in every mode: local and
+      // embedded-replica modes run SqlDriver's compile, and remote mode's
+      // transport compiles the leaf with its own (`fixedInnerReadSQL`).
     };
   }
 
@@ -2504,6 +2514,20 @@ export class TursoDriver extends SqlDriver {
   override async find(object: string, query: DriverQuery, options?: DriverOptions): Promise<Record<string, unknown>[]> {
     this.assertRemoteTransactionUnsupported(options, 'find');
     if (this.isRemote) {
+      // [latest per group] The remote transport compiles its own reads and no
+      // window: a read handed the directive is refused before anything is
+      // read, never answered as an ordinary read. The engine refuses it first;
+      // this is the driver's own word for a caller that reaches it directly.
+      if (latestPerDirectiveOf(query) !== undefined) {
+        const err = new Error(
+          `find('${object}'): one row per group cannot run on the remote face of this driver, whose transport `
+          + 'compiles no window. The query was NOT run and nothing was read. A local or replica database serves it.',
+        ) as Error & { code?: string; status?: number; httpStatus?: number };
+        err.code = StandardErrorCode.enum.INVALID_QUERY;
+        err.status = 400;
+        err.httpStatus = 400;
+        throw err;
+      }
       const table = this.remoteTableFor(object, 'find');
       const remoteQuery = this.toRemoteReadQuery(object, query, undefined, options);
       // [#21226] The caller's tenant scope, as the local face scopes `findRows`.
@@ -3258,6 +3282,23 @@ export class TursoDriver extends SqlDriver {
   ): Promise<Record<string, unknown>[]> {
     this.assertRemoteTransactionUnsupported(options, 'aggregate');
     if (this.isRemote) {
+      // [aggregate order and cut] The remote transport compiles its own
+      // aggregates and no ordered cut: a statement handed the engine's
+      // directive (`Symbol.for` key, as `driver-sql` reads it) is refused
+      // before anything is read, never answered uncut. The engine refuses it
+      // first; this is the driver's own word for a caller that reaches it
+      // directly.
+      if ((query as unknown as Record<symbol, unknown>)[Symbol.for('objectstack.driver.aggregate.orderCut')] !== undefined) {
+        const err = new Error(
+          `aggregate('${object}'): ordered and cut groups cannot run on the remote face of this driver, whose `
+          + 'transport compiles no ordered cut. The query was NOT run and nothing was read. A local or replica '
+          + 'database serves it.',
+        ) as Error & { code?: string; status?: number; httpStatus?: number };
+        err.code = StandardErrorCode.enum.INVALID_QUERY;
+        err.status = 400;
+        err.httpStatus = 400;
+        throw err;
+      }
       const table = this.remoteTableFor(object, 'aggregate');
       // [#20424] The caller's own query is what the fault is attributed
       // against, as `SqlDriver.aggregate` does locally: its groupBy and
@@ -3474,6 +3515,14 @@ export class TursoDriver extends SqlDriver {
   private toRemoteWhere(object: string, where: unknown, options: DriverOptions | undefined): unknown {
     const misplaced = findMisplacedReadableIds(where, true);
     if (misplaced) throw refuseReadableIdsOnce(this.readableIdsDriverName, misplaced, this.logger, this.readableIdsRefusalLog);
+    // [ADR-0155 D1, D4] A fixed-read leaf anywhere but as a field's `$in`
+    // comparand, refused as the local face's `applyFilters` refuses it. One
+    // that is placed passes through by reference (`replaceComposedReadableIds`
+    // and `toRemoteFilter` copy around it), and the transport compiles it.
+    const misplacedLeaf = findMisplacedFixedReadLeaf(where);
+    if (misplacedLeaf) {
+      throw refuseFixedReadLeafOnce(this.readableIdsDriverName, misplacedFixedReadLeafMessage(misplacedLeaf), this.logger, this.fixedReadLeafRefusalLog);
+    }
     const resolved = replaceComposedReadableIds(where, (leaf) => remoteReadableIdsSemiJoin({
       object: leaf.object,
       table: this.remoteTableFor(leaf.object, 'ReadableIds'),
@@ -3826,6 +3875,11 @@ export class TursoDriver extends SqlDriver {
       // The column-map refusal runs once, before any row, as it did when the
       // batch was handed down whole.
       this.remoteTableFor(object, 'bulkCreate');
+      // Every row's storage form is checked before the first row is written,
+      // so a row `formatInput` refuses (a boolean field written as a value that
+      // spells no boolean) refuses the batch with nothing written, as the local
+      // face's single INSERT does. Each `create` below forms its row again.
+      for (const row of data) this.toRemoteWriteForms(object, row);
       // The batch is written one row at a time through this class's own
       // `create`, so each row's record number is issued on the layer that holds
       // the schema and each row's #5495 collision re-seed is its own.

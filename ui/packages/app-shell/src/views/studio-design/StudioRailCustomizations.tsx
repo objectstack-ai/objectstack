@@ -376,6 +376,7 @@ export function ContributedRailRow({
       title={title}
       onClick={onOpen}
       icon={icon}
+      name={shown ?? item.name}
       className="text-muted-foreground opacity-70"
       // Two lines, so a narrow rail keeps both the id and the package legible.
       wrap

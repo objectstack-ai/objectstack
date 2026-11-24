@@ -158,7 +158,13 @@ describe('a stored criteria still seeds the rows', () => {
   it('loads `{ name: { $icontains: "x" } }` into a row and emits nothing on its own', async () => {
     const { onChange } = renderWidget('{"name":{"$icontains":"x"}}');
 
-    const triggers = await screen.findAllByRole('combobox');
+    // The row is seeded before `getObjectSchema` resolves, and its field
+    // trigger reads the column's LABEL only once the schema answers: wait for
+    // that labelled render, never for whichever trigger is drawn first. (A
+    // combobox takes no accessible name from its content, so `findByRole` with
+    // `name` cannot spell this.)
+    await waitFor(() => expect(screen.getAllByRole('combobox')[0]).toHaveTextContent('Name'));
+    const triggers = screen.getAllByRole('combobox');
     expect(triggers).toHaveLength(2);
     expect(triggers[0]).toHaveTextContent('Name');
     expect(triggers[1]).toHaveTextContent('Contains (ignore case)');

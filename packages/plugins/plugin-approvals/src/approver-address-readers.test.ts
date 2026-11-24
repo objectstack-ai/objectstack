@@ -95,6 +95,7 @@ const READERS: ReadonlyArray<{ reader: string; method: string; reads: string }> 
   { reader: 'decision slot test — approve / reject', method: 'decideNode', reads: 'takenSlot' },
   { reader: 'decision slot test — send back', method: 'sendBack', reads: 'takenSlot' },
   { reader: 'decision slot test — reassign', method: 'reassign', reads: 'takenSlot' },
+  { reader: 'own-slot test — reassign moves only a slot the named actor holds', method: 'reassign', reads: 'actorAddresses' },
   { reader: 'decision slot test — request info', method: 'requestInfo', reads: 'takenSlot' },
   { reader: 'decision slot test — comment', method: 'comment', reads: 'takenSlot' },
 ];
@@ -124,7 +125,7 @@ const SLOT_SITES: Readonly<Record<string, { role: SiteRole; why: string }>> = {
   },
   'approval-service.ts · reassign · pending.includes(from)': {
     role: 'slot-vs-slot',
-    why: '`from` names the slot being moved (the taken slot by default); the caller is judged by takenSlot',
+    why: '`from` names the slot being moved (the taken slot by default); outside the override it must also be one of actorAddresses(the named actor), the own-slot reader in READERS',
   },
   "approval-service.ts · remind · pending.filter(a => a && !a.includes(':'))": {
     role: 'slot-vs-slot',

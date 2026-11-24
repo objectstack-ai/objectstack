@@ -99,7 +99,7 @@ function dataSource(child: ReturnType<typeof lineSchema>) {
   };
 }
 
-/** Type into the given row's cell (the trailing ghost row materializes a new line). */
+/** Type into the given row's cell. */
 function typeCell(label: string, row: number, value: string) {
   const cell = screen.getAllByLabelText(label)[row] as HTMLInputElement;
   fireEvent.change(cell, { target: { value } });
@@ -129,14 +129,16 @@ async function enterReorderAndSave(detail: Record<string, unknown>, child = line
     expect(el).not.toBeNull();
     return el!;
   });
+  // The grid draws no trailing entry row (objectstack#35507): each line is Added.
+  const add = await waitFor(() => screen.getByTestId('line-items-add'));
+  fireEvent.click(add);
   await waitFor(() => expect(screen.getAllByLabelText('Description')).toHaveLength(1));
-
   typeCell('Description', 0, 'A');
-  await waitFor(() => expect(screen.getAllByLabelText('Description')).toHaveLength(2));
   typeCell('Qty', 0, '2');
   typeCell('Unit Price', 0, '5');
+  fireEvent.click(add);
+  await waitFor(() => expect(screen.getAllByLabelText('Description')).toHaveLength(2));
   typeCell('Description', 1, 'B');
-  await waitFor(() => expect(screen.getAllByLabelText('Description')).toHaveLength(3));
   typeCell('Qty', 1, '1');
   typeCell('Unit Price', 1, '3');
 

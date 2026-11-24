@@ -273,7 +273,8 @@ const teams = defineSeed(Team, {
 });
 
 // Catalog products the invoice line's `product` lookup picks from. Selecting
-// one auto-fills the line's description + unit_price (matching field names).
+// one auto-fills the line's description, and its unit_price when the
+// currencies match (matching field names).
 const products = defineSeed(Product, {
   externalId: 'sku',
   records: [

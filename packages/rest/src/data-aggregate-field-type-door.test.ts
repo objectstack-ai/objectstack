@@ -44,7 +44,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import type { EngineAggregateOptions } from '@objectstack/spec/data';
+import { VIRTUAL_FIELD_AGGREGATE_REMEDY, type EngineAggregateOptions } from '@objectstack/spec/data';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
@@ -226,19 +226,20 @@ for (const cell of CELLS) {
         expect(reads.n - before, 'no read of the object').toBe(0);
       });
 
-      it('sum over a json, text, select, tags and formula field answers 400 INVALID_FIELD in the engine\'s words, naming the types sum accepts — no read', async () => {
+      it('sum over a json, text, select, tags and formula field answers 400 INVALID_FIELD in the engine\'s words, naming the types sum accepts — the formula the virtual-field remedy instead — no read', async () => {
         // The row one landing held for the census, released: these pairs
         // reached the driver then (0 on SQLite, a 500 on PostgreSQL; a formula
-        // the driver's own "no column" 400).
+        // the driver's own "no column" 400). A formula stores no value, so its
+        // route is the spec's remedy sentence, never the count fallback.
         const before = reads.n;
-        const cases: ReadonlyArray<readonly [string, string]> = [
-          ['meta', 'json field — a structured-JSON value'],
-          ['title', 'text field'],
-          ['status', 'select field'],
-          ['labels', 'tags field — a multi-value field'],
-          ['expected', 'formula field'],
+        const cases: ReadonlyArray<readonly [string, string, string]> = [
+          ['meta', 'json field — a structured-JSON value', SUM_ROUTE],
+          ['title', 'text field', SUM_ROUTE],
+          ['status', 'select field', SUM_ROUTE],
+          ['labels', 'tags field — a multi-value field', SUM_ROUTE],
+          ['expected', 'formula field', VIRTUAL_FIELD_AGGREGATE_REMEDY],
         ];
-        for (const [field, declared] of cases) {
+        for (const [field, declared, route] of cases) {
           const label = `sum(${field})`;
           const res = await query({ aggregations: agg('sum', field) });
           expect(res.status, `${label}: ${JSON.stringify(res.body)}`).toBe(400);
@@ -246,7 +247,7 @@ for (const cell of CELLS) {
           expect(res.body.error, label).toContain(
             `aggregations[0].field sums '${field}', a declared ${declared}, which the engine does not sum. The query was NOT run.`,
           );
-          expect(res.body.error, label).toContain(SUM_ROUTE);
+          expect(res.body.error, label).toContain(route);
           const err = await engine.aggregate(OBJECT, { aggregations: agg('sum', field) }).then(() => null, (e: any) => e);
           expect({ code: err?.code, status: err?.status }, `engine.aggregate, ${label}`).toEqual({ code: 'INVALID_FIELD', status: 400 });
         }

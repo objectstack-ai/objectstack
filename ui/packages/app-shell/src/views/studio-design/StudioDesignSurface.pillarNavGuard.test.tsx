@@ -3,16 +3,17 @@
 /**
  * Studio header — unsaved-changes guard on SPA navigation (objectui#2600).
  *
- * The pillar links, the Home button and the PackageSwitcher are pure
- * react-router client navigation, so the editors' `beforeunload` guard never
+ * The pillar links and 「‹ Back to app」 (objectstack#36501; it replaced the
+ * Home button and the PackageSwitcher, whose package switch the shell seam
+ * below still guards for every other door) are pure react-router client
+ * navigation, so the editors' `beforeunload` guard never
  * fires; before this guard existed they unmounted a dirty pillar silently and
  * discarded its unsaved edits. Pillars now mirror their dirty state up to the
  * surface (same `onDirtyChange` contract as the Access rail guard, PR #2588),
  * and every header-driven departure gates on a native confirm:
  *
  *   • dirty + pillar switch → confirm; cancel keeps the pillar and its edits,
- *   • dirty + Home → same confirm; cancel stays, confirm leaves,
- *   • dirty + package switch → same confirm,
+ *   • dirty + 「‹ Back to app」 → same confirm; cancel stays, confirm leaves,
  *   • dirty OWD overview rows + pillar switch → same confirm (the pillar
  *     folds the overview's report into the same bit, objectui#2600 follow-up),
  *   • clean navigation never prompts,
@@ -32,6 +33,8 @@
  */
 
 import '@testing-library/jest-dom/vitest';
+// The source under test reaches these through dynamic imports: their first load is paid at collection.
+import '@objectstack/lint';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
@@ -185,6 +188,7 @@ async function renderSurfaceOnAccess() {
       <Routes>
         <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
         <Route path="/studio" element={<div data-testid="studio-landing-page" />} />
+        <Route path="*" element={<div data-testid="left-studio" />} />
       </Routes>
     </MemoryRouter>,
   );
@@ -210,11 +214,11 @@ async function clickAccessInNav() {
 const inSetHeader = () => within(screen.getByTestId('access-item-header'));
 // The header is re-queried on each retry: the pillar's own header stands in
 // while no set is open, and the set's header replaces it once the page loads.
-const findInSetHeader = (text: string) => waitFor(() => inSetHeader().getByText(text));
+const findInSetHeader = (name: string) => waitFor(() => inSetHeader().getByTitle(name));
 
 /** Swap the main panel to the (real) OWD overview and edit a row. */
 async function dirtyTheOwdOverview() {
-  fireEvent.click(screen.getByRole('button', { name: 'Record sharing (OWD)' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Who can see which records' }));
   await screen.findByTestId('owd-internal-a_account');
   const owdPrivate = t('engine.studio.settings.sharingPrivate', 'en-US');
   fireEvent.keyDown(screen.getByTestId('owd-internal-a_account'), { key: 'ArrowDown' });
@@ -246,7 +250,7 @@ describe('Studio header — unsaved pillar edits guard (#2600)', () => {
     fireEvent.click(screen.getByRole('link', { name: 'Interfaces' }));
 
     expect(confirmSpy).toHaveBeenCalledTimes(1);
-    expect(inSetHeader().getByText('set_a')).toBeInTheDocument();
+    expect(inSetHeader().getByTitle('set_a')).toBeInTheDocument();
     matrixEditSurvived();
 
     // Confirming the same switch discards and lands on the Interfaces pillar.
@@ -267,7 +271,7 @@ describe('Studio header — unsaved pillar edits guard (#2600)', () => {
     await renderSurfaceOnAccess();
     // Swap the main panel to the (real) OWD overview and edit a row so the
     // panel's dirty report crosses AccessPillar into the surface guard.
-    fireEvent.click(screen.getByRole('button', { name: 'Record sharing (OWD)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Who can see which records' }));
     await screen.findByTestId('owd-internal-a_account');
     // The dial is the shared Select (objectui#11865): open it and pick, as a user does.
     const owdPrivate = t('engine.studio.settings.sharingPrivate', 'en-US');
@@ -309,59 +313,32 @@ describe('Studio header — unsaved pillar edits guard (#2600)', () => {
     await clickAccessInNav();
 
     expect(confirmSpy).not.toHaveBeenCalled();
-    expect(inSetHeader().getByText('set_a')).toBeInTheDocument();
+    expect(inSetHeader().getByTitle('set_a')).toBeInTheDocument();
     matrixEditSurvived();
   });
 
-  it('gates the Studio home button; cancel stays, confirm returns to the Studio landing', async () => {
+  it('gates 「‹ Back to app」; cancel stays, confirm leaves Studio (objectstack#36501)', async () => {
     await renderSurfaceOnAccess();
     dirtyTheMatrix();
 
     confirmSpy.mockReturnValueOnce(false);
-    fireEvent.click(screen.getByTitle('Studio home'));
+    fireEvent.click(screen.getByTestId('studio-back-to-app'));
     expect(confirmSpy).toHaveBeenCalledTimes(1);
-    expect(inSetHeader().getByText('set_a')).toBeInTheDocument();
+    expect(inSetHeader().getByTitle('set_a')).toBeInTheDocument();
     matrixEditSurvived();
 
     confirmSpy.mockReturnValueOnce(true);
-    fireEvent.click(screen.getByTitle('Studio home'));
-    expect(await screen.findByTestId('studio-landing-page')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('studio-back-to-app'));
+    expect(await screen.findByTestId('left-studio')).toBeInTheDocument();
   });
 
-  it('gates a package switch; cancel keeps the edits in place', async () => {
-    await renderSurfaceOnAccess();
-    dirtyTheMatrix();
-
-    // Open the switcher (its label resolves once fetchPackages lands).
-    fireEvent.click(await screen.findByRole('button', { name: /App A/ }));
-    const other = await screen.findByRole('button', { name: /App B/ });
-
-    confirmSpy.mockReturnValueOnce(false);
-    fireEvent.click(other);
-    expect(confirmSpy).toHaveBeenCalledTimes(1);
-    expect(inSetHeader().getByText('set_a')).toBeInTheDocument();
-    matrixEditSurvived();
-
-    // Confirming jumps to the other package (header re-labels; matrix reloads).
-    fireEvent.click(await screen.findByRole('button', { name: /App A/ }));
-    confirmSpy.mockReturnValueOnce(true);
-    fireEvent.click(await screen.findByRole('button', { name: /App B/ }));
-    expect(confirmSpy).toHaveBeenCalledTimes(2);
-    await waitFor(() =>
-      expect(screen.getByTestId('studio-pkg-chip')).toHaveTextContent('App B'),
-    );
-  });
-
-  it('never prompts a clean package switch', async () => {
+  it('never prompts a clean 「‹ Back to app」', async () => {
     await renderSurfaceOnAccess();
 
-    fireEvent.click(await screen.findByRole('button', { name: /App A/ }));
-    fireEvent.click(await screen.findByRole('button', { name: /App B/ }));
+    fireEvent.click(screen.getByTestId('studio-back-to-app'));
 
     expect(confirmSpy).not.toHaveBeenCalled();
-    await waitFor(() =>
-      expect(screen.getByTestId('studio-pkg-chip')).toHaveTextContent('App B'),
-    );
+    expect(await screen.findByTestId('left-studio')).toBeInTheDocument();
   });
 });
 

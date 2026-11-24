@@ -25,7 +25,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { LiteKernel } from '@objectstack/core';
 import type { Plugin, PluginContext } from '@objectstack/core';
 import { AutomationServicePlugin } from './plugin.js';
-import type { AutomationEngine } from './engine.js';
+import { AutomationEngine } from './engine.js';
 
 /** The showcase's shape: a flow whose only real node is an ADR-0019 `approval`. */
 const approvalFlow = (name: string) => ({
@@ -200,6 +200,24 @@ describe('#4771 — flow node-type validation waits for the plugin-contributed v
         }
 
         expect(warnings.filter((w) => w.includes('no registered executor or descriptor'))).toHaveLength(1);
+        await kernel.shutdown();
+    });
+});
+
+describe('getSealedNodeTypeVocabulary — the closed vocabulary the publish gate judges against', () => {
+    it('answers nothing before the seal, and the closed vocabulary after it', async () => {
+        const quiet = { debug() {}, info() {}, warn() {}, error() {} } as never;
+        const engine = new AutomationEngine(quiet);
+        // Not sealed: "absent" is still "absent YET", so there is no vocabulary to judge by.
+        expect(engine.getSealedNodeTypeVocabulary()).toBeUndefined();
+        engine.sealNodeTypeVocabulary();
+        expect(engine.getSealedNodeTypeVocabulary()).toEqual(expect.arrayContaining(['start', 'end']));
+        expect(engine.getSealedNodeTypeVocabulary()).not.toContain('approval');
+    });
+
+    it('a plugin-contributed type is in the sealed vocabulary of the boot that installed it', async () => {
+        const { kernel, engine } = await boot({ flows: [], withApprovals: true });
+        expect(engine.getSealedNodeTypeVocabulary()).toEqual(expect.arrayContaining(['approval', 'get_record', 'http']));
         await kernel.shutdown();
     });
 });

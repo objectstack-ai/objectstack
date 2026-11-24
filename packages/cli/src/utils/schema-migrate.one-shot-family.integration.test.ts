@@ -87,6 +87,7 @@ import MigrateTextScalars from '../commands/migrate/text-scalars.js';
 import MigrateCommentReactions from '../commands/migrate/comment-reactions.js';
 import MigrateDuplicates from '../commands/migrate/duplicates.js';
 import MigrateFilesToReferences from '../commands/migrate/files-to-references.js';
+import MigrateListPreferences from '../commands/migrate/list-preferences.js';
 import MigrateMeta from '../commands/migrate/meta.js';
 import MigrateMultiValueColumns from '../commands/migrate/multi-value-columns.js';
 import MigrateOrganizationOwnership from '../commands/migrate/organization-ownership.js';
@@ -101,6 +102,7 @@ import MigrateStoredExpressions from '../commands/migrate/stored-expressions.js'
 import MigrateStoredReferences from '../commands/migrate/stored-references/index.js';
 import MigrateStoredReferencesBind from '../commands/migrate/stored-references/bind.js';
 import MigrateSummaryNulls from '../commands/migrate/summary-nulls.js';
+import MigrateUnitCodes from '../commands/migrate/unit-codes.js';
 import MigrateUnmappedColumns from '../commands/migrate/unmapped-columns.js';
 import MigrateValueShapes from '../commands/migrate/value-shapes.js';
 import PluginInstall from '../commands/plugin/install.js';
@@ -110,6 +112,7 @@ import PluginTrustRevoke from '../commands/plugin/trust/revoke.js';
 import SecretOrphans from '../commands/secret/orphans.js';
 import SecretRewrap from '../commands/secret/rewrap.js';
 import StorageOrphans from '../commands/storage/orphans.js';
+import UserSetPassword from '../commands/user/set-password.js';
 
 // [#10126] Pay the first transform of these dist-resolved workspace deps at
 // MODULE LOAD: the commands reach them through dynamic `import()`s inside
@@ -286,6 +289,13 @@ const CALLERS: Record<string, Caller> = {
     noWrite: [{ label: 'migrate files-to-references', argv: ['--database-url', '@DB@', '--json'] }],
     write: [{ label: 'migrate files-to-references --apply', argv: ['--apply', '--yes', '--database-url', '@DB@', '--json'] }],
   },
+  'commands/migrate/list-preferences.ts': {
+    run: invoke(MigrateListPreferences),
+    noWrite: [{ label: 'migrate list-preferences', argv: ['--database-url', '@DB@', '--json'] }],
+    // The fixture holds no `ui.list.*` row, so the run deletes nothing and writes
+    // no export: the plain boot a delete takes is what this case is about.
+    write: [{ label: 'migrate list-preferences --apply', argv: ['--apply', '--export', '@DIR@/list-preferences-export.json', '--yes', '--database-url', '@DB@', '--json'] }],
+  },
   'commands/migrate/meta.ts': {
     run: invoke(MigrateMeta),
     // Without `--stored` the command converts source files and boots nothing.
@@ -409,6 +419,17 @@ const CALLERS: Record<string, Caller> = {
     noWrite: [{ label: 'migrate summary-nulls', argv: ['--database-url', '@DB@', '--json'] }],
     write: [{ label: 'migrate summary-nulls --apply', argv: ['--apply', '--yes', '--database-url', '@DB@', '--json'] }],
   },
+  'commands/migrate/unit-codes.ts': {
+    run: invoke(MigrateUnitCodes),
+    // The fixture's app declares no unit code field, so the backfill refuses
+    // `status` (INVALID_FIELD) after the boot and writes nothing. The boot is
+    // what these cases are about.
+    noWrite: [{ label: 'migrate unit-codes', argv: ['--object', 'osf_lead', '--field', 'status', '--database-url', '@DB@', '--json'] }],
+    write: [{
+      label: 'migrate unit-codes --apply',
+      argv: ['--apply', '--yes', '--object', 'osf_lead', '--field', 'status', '--database-url', '@DB@', '--json'],
+    }],
+  },
   'commands/migrate/unmapped-columns.ts': {
     run: invoke(MigrateUnmappedColumns),
     // `osf_lead` is declared by both releases; the next one adds a column,
@@ -463,6 +484,15 @@ const CALLERS: Record<string, Caller> = {
     noWrite: [{ label: 'storage orphans', argv: ['--database-url', '@DB@', '--json'] }],
     write: [],
     note: 'report-only: it has no writing mode',
+  },
+  'commands/user/set-password.ts': {
+    run: invoke(UserSetPassword),
+    noWrite: [],
+    // No account holds this address: the boot happens and the command then
+    // refuses the address, before it asks for a password. The boot is what
+    // this case is about.
+    write: [{ label: 'user set-password', argv: ['osf-absent@example.com', '--database-url', '@DB@'] }],
+    note: 'every run of it is the write: it has no preview mode',
   },
   // [#27123] The trusted-key read `os plugin install` and `os serve`'s
   // boot-time loader share: a utility, so its boot runs through the command

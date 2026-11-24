@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { appRouteSegment, matchAppBySegment, appAddressSegment, canonicalAppPathname, filterActiveApps, resolveHostAppSegment, appStudioDesignPath, appStudioSurfacePath, appStudioObjectPath, appStudioRoutePath } from '../appRoute';
+import { appRouteSegment, matchAppBySegment, appAddressSegment, canonicalAppPathname, filterActiveApps, resolveHostAppSegment, resolveApprovalsHostSegment, isApprovalsInboxLink, appStudioDesignPath, appStudioSurfacePath, appStudioObjectPath, appStudioRoutePath } from '../appRoute';
 
 /**
  * ADR-0048 (option A) — package-id route segment.
@@ -195,6 +195,61 @@ describe('resolveHostAppSegment', () => {
     // The fallback order's tail is not "never setup" — it is "an app this user
     // can actually open", and for an admin sitting in Setup that is `setup`.
     expect(resolveHostAppSegment([setup, crm], 'setup')).toBe('setup');
+  });
+});
+
+/**
+ * objectstack#35505 (ruling option A, item 1) — the app an approval opened
+ * with no source app stays in, after the object's own app (which the request
+ * page asks): the current app, then the last used app, then the first app.
+ */
+describe('resolveApprovalsHostSegment (objectstack#35505)', () => {
+  const setup = { name: 'setup', _packageId: 'com.objectstack.setup' };
+  const crm = { name: 'crm', _packageId: 'com.acme.crm' };
+  const hr = { name: 'hr' };
+  const ops = { name: 'ops' };
+
+  it('tier 2 — the current app wins over the last used app', () => {
+    expect(resolveApprovalsHostSegment([setup, hr, crm], 'crm', 'hr')).toBe('com.acme.crm');
+  });
+
+  it('tier 3 — with no current app, the last used app', () => {
+    expect(resolveApprovalsHostSegment([setup, hr, crm], undefined, 'crm')).toBe('com.acme.crm');
+  });
+
+  it('tier 3 — a current app the user can no longer open falls through to the last used app', () => {
+    expect(resolveApprovalsHostSegment([setup, hr, { ...crm, active: false }, ops], 'crm', 'ops')).toBe('ops');
+  });
+
+  it('tier 4 — neither current nor last answers: the first app, not Setup ahead of it', () => {
+    expect(resolveApprovalsHostSegment([hr, setup, crm], undefined, undefined)).toBe('hr');
+    expect(resolveApprovalsHostSegment([hr, setup], 'gone', 'also_gone')).toBe('hr');
+    expect(resolveApprovalsHostSegment([hr, { ...crm, hidden: true }], undefined, 'crm')).toBe('hr');
+  });
+
+  it('Setup stays the answer when it is the current or the last used app (ruling item 3)', () => {
+    expect(resolveApprovalsHostSegment([hr, setup], 'setup', 'hr')).toBe('com.objectstack.setup');
+    expect(resolveApprovalsHostSegment([hr, setup], undefined, 'setup')).toBe('com.objectstack.setup');
+  });
+
+  it('an unloaded list keeps the hint, current first', () => {
+    expect(resolveApprovalsHostSegment([], 'crm', 'hr')).toBe('crm');
+    expect(resolveApprovalsHostSegment(undefined, undefined, 'hr')).toBe('hr');
+  });
+});
+
+describe('isApprovalsInboxLink (objectstack#35505)', () => {
+  it('names the inbox and its request deep link, as the approvals service writes them', () => {
+    expect(isApprovalsInboxLink('/system/approvals')).toBe(true);
+    expect(isApprovalsInboxLink('/system/approvals?request=req_1')).toBe(true);
+    expect(isApprovalsInboxLink('system/approvals?request=req_1')).toBe(true);
+  });
+
+  it('CONTROL: other links, and a segment that only starts the same way, are not it', () => {
+    expect(isApprovalsInboxLink('/invoice/inv_1')).toBe(false);
+    expect(isApprovalsInboxLink('/system/approvals_archive')).toBe(false);
+    expect(isApprovalsInboxLink('/apps/crm/system/approvals')).toBe(false);
+    expect(isApprovalsInboxLink(undefined)).toBe(false);
   });
 });
 

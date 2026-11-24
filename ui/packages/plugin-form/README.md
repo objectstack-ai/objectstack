@@ -564,7 +564,10 @@ the fourth column is the `full` dialog's.
 Every count is a container-query grid, so it is an upper bound: the form draws
 as many columns as its container is wide enough for, and one column below the
 `@md` tier (a phone, a narrow drawer). Wide field kinds (textarea, rich text,
-markdown, html, an inline `grid`) and `span: 'full'` fields take the whole row.
+markdown, html, an inline `grid`), `file` / `image` fields whose object field
+declares `multiple: true`, and `span: 'full'` fields take the whole row — the
+detail view widens multi-file fields by the same rule. A single file or image
+keeps one cell, and an authored `span` / `colSpan` is drawn as written.
 
 The grid is applied to the field container **inside** the form, never wrapped
 around the `<form>` (which would put the whole form in cell 1 and leave the other

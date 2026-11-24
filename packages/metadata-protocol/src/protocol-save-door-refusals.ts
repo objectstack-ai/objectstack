@@ -65,6 +65,7 @@ import { isFederatedObject, PackageScopedNameRefusedError, permissionSetHoldersM
 import { itemDiscriminator } from '@objectstack/metadata-core';
 import { externalBindingDatasourceRefusal, resolveInjectedSystemColumns, SeedSchema } from '@objectstack/spec/data';
 import { METADATA_ITEM_NAME_PATTERN } from '@objectstack/spec/shared';
+import { PLATFORM_CAPABILITY_NAMES } from '@objectstack/spec/security';
 import { defaultRecordPageObject } from '@objectstack/spec/ui';
 import { MetadataProtectionFields, findNamespaceObjectNameClashes, validateObjectNamespacePrefix, type NamespaceHolder } from '@objectstack/spec/kernel';
 // [#29898] The one walk of which picklists an object body's fields name — the
@@ -330,7 +331,7 @@ export async function defaultRecordPageSaveRefusal(
  * Not caught: the reading is in memory, and a throw from it is a fault to
  * surface, never "nobody holds the name".
  */
-function registryPackageHoldersOf(registry: unknown, name: string): readonly string[] {
+function registryPackageHoldersOf(registry: unknown, name: string, catalogType: 'permission' | 'capability' = 'permission'): readonly string[] {
     const read = (registry as { packageHeldSecurityCatalogNames?: unknown } | null | undefined)
         ?.packageHeldSecurityCatalogNames;
     if (typeof read !== 'function') return [];
@@ -338,7 +339,7 @@ function registryPackageHoldersOf(registry: unknown, name: string): readonly str
     if (!Array.isArray(held)) return [];
     const holders = new Set<string>();
     for (const entry of held as Array<{ catalogType?: unknown; name?: unknown; packageIds?: unknown } | null>) {
-        if (entry?.catalogType !== 'permission' || entry.name !== name || !Array.isArray(entry.packageIds)) continue;
+        if (entry?.catalogType !== catalogType || entry.name !== name || !Array.isArray(entry.packageIds)) continue;
         for (const id of entry.packageIds) if (typeof id === 'string' && id !== '') holders.add(id);
     }
     return [...holders];
@@ -347,6 +348,15 @@ function registryPackageHoldersOf(registry: unknown, name: string): readonly str
 /**
  * The body of `ObjectStackProtocolImplementation#permissionSetNameCollisionRefusal`;
  * the method's docblock there is its contract.
+ *
+ * [#35157] It judges a `capability` too, by the same two holder readings and
+ * the same envelope, with two differences the type itself makes: a
+ * capability's name is ONE per deployment (a grant and a requirement match
+ * it by string, whichever package declared it), so every holder meets every
+ * other; and a curated platform capability's name is refused outright, before
+ * any read (ADR-0090 D5 revision, boundary 1: the platform floor is
+ * absolute), because a declaration under it would re-declare a platform
+ * power's `scope`.
  *
  * A `permission` set's name was its identity across the whole deployment (Q4 =
  * A on #15196, record 6050490870). [ADR-0150 D2/D9, #31698] It is now one name
@@ -416,7 +426,26 @@ export async function permissionSetNameCollisionRefusal(
     owner: string | null | undefined,
     verb: 'save' | 'publish' | 'restore',
 ): Promise<(Error & { code: 'NAMESPACE_CONFLICT'; status: 422 }) | undefined> {
-    if (singularType !== 'permission') return undefined;
+    if (singularType !== 'permission' && singularType !== 'capability') return undefined;
+    const capability = singularType === 'capability';
+    // [#35157] A capability is ONE name per deployment: a grant and a
+    // requirement match it by string, whichever package declared it, so no
+    // namespace scopes it. And the platform floor is absolute (ADR-0090 D5
+    // revision, boundary 1): a curated platform capability's name is the
+    // platform's, and an environment declaration under it would re-declare a
+    // platform power's `scope` — the input to who may administer the sets
+    // that grant it (ADR-0090 D12 (c)). Refused before any read.
+    if (capability && PLATFORM_CAPABILITY_NAMES.has(name)) {
+        const err = new Error(
+            `Security catalog name conflict: this environment cannot ${verb} the capability "${name}" — it is a `
+            + `platform capability. Nothing was ${verb === 'publish' ? 'published' : 'written'}. Name your capability `
+            + 'with your own module prefix (`<namespace>.<name>`) and grant that one instead. A platform capability is '
+            + 'declared by the platform alone, so no package or environment re-declares its scope.',
+        ) as Error & { code: 'NAMESPACE_CONFLICT'; status: 422 };
+        err.code = 'NAMESPACE_CONFLICT';
+        err.status = 422;
+        return err;
+    }
 
     let records: any[] = [];
     try {
@@ -437,7 +466,7 @@ export async function permissionSetNameCollisionRefusal(
     const residueOf = storedUnbound && storedPackages.size === 1 ? [...storedPackages][0] : undefined;
 
     const holders = new Set<string | null>(storedPackages);
-    for (const packageId of registryPackageHoldersOf(this.engine?.registry, name)) holders.add(packageId);
+    for (const packageId of registryPackageHoldersOf(this.engine?.registry, name, singularType)) holders.add(packageId);
     if (storedUnbound && residueOf === undefined) holders.add(null);
 
     const written = typeof owner === 'string' && owner !== '' ? owner : residueOf ?? null;
@@ -455,7 +484,7 @@ export async function permissionSetNameCollisionRefusal(
         return typeof namespace === 'string' && namespace !== '' ? namespace : undefined;
     };
     const meets = (holder: string | null): boolean =>
-        holder === null || written === null
+        holder === null || written === null || capability
         || permissionSetHoldersMeet(namespaceOf(written), namespaceOf(holder), name);
     const foreign = [...holders]
         .filter((holder) => holder !== written && meets(holder))
@@ -470,9 +499,24 @@ export async function permissionSetNameCollisionRefusal(
     // the metadata door); never an edit inside another package. A set a
     // package ships leaves the writer only the rename.
     const deletable = foreign.filter((holder) => holder === null || storedPackages.has(holder));
+    const noun = capability ? 'capability' : 'set';
     const releases = deletable
-        .map((holder) => (holder === null ? 'delete the environment catalog\'s set' : `delete the set package "${holder}" stores`))
+        .map((holder) => (holder === null ? `delete the environment catalog's ${noun}` : `delete the ${noun} package "${holder}" stores`))
         .join(', or ');
+    if (capability) {
+        const remedy = verb === 'restore'
+            ? `Restore it once the name is free${releases === '' ? '' : ` (${releases} first)`}, or save this version's body as a capability of a name no other holder holds.`
+            : `Rename this capability to a name no other holder holds (prefix it with your own module prefix)${releases === '' ? '' : `, or ${releases} first`}.`;
+        const err = new Error(
+            `Security catalog name conflict: ${writer} cannot ${verb} the capability "${name}" — it is already held by `
+            + `${foreign.map(holderPhrase).join(' and ')}. Nothing was ${verb === 'publish' ? 'published' : 'written'}. ${remedy} `
+            + 'A capability holds one name per deployment: a grant and a requirement match it by name, whichever '
+            + 'package declared it.',
+        ) as Error & { code: 'NAMESPACE_CONFLICT'; status: 422 };
+        err.code = 'NAMESPACE_CONFLICT';
+        err.status = 422;
+        return err;
+    }
     const remedy = verb === 'restore'
         ? (releases === ''
             ? 'Save this version\'s body as a set of a name no other holder holds.'
@@ -992,29 +1036,59 @@ export function namespaceObjectNameClashOf(
     return clashes.length > 0 ? clashes.map((c) => c.message).join(' ') : null;
 }
 
-/** The seed modes whose load matches incoming records to existing rows by the dataset's `externalId`. */
+/**
+ * The seed modes whose load matches incoming records to existing rows by the
+ * dataset's `externalId`: every live mode since the unkeyed `insert` and
+ * `replace` were retired (#34613). A retired mode is the schema's refusal, not
+ * this one's.
+ */
 const KEYED_SEED_MODES: ReadonlySet<string> = new Set(['upsert', 'update', 'ignore']);
 
 /**
  * The body of `ObjectStackProtocolImplementation#seedExternalIdSaveRefusal`;
  * the method's docblock there is its contract. Written here, beside the other
  * refusals the save door and the publish promotion ask in turn, rather than
- * moved: its reads are the engine's registered object and, on a draft save,
- * the object drafts.
+ * moved: its reads are the engine's registered object, the by-name object
+ * read (`readMetaItem`) and, on a draft save, the object drafts.
  */
 export async function seedExternalIdSaveRefusal(
-    this: Pick<SaveDoorRefusalHost, 'engine' | 'listDrafts'>,
+    this: Pick<SaveDoorRefusalHost, 'engine' | 'listDrafts' | 'readMetaItem'>,
     singularType: string,
     item: unknown,
     name: string,
     pending?: 'drafts' | ReadonlyArray<unknown>,
     writeFace?: MetadataWriteFace,
+    door?: 'save',
 ): Promise<(Error & { code: 'INVALID_METADATA'; status: 422; issues: MetadataIssueEntry[] }) | undefined> {
     if (singularType !== 'seed') return undefined;
     if (!item || typeof item !== 'object' || Array.isArray(item)) return undefined;
     const seed = item as { object?: unknown; mode?: unknown; externalId?: unknown };
     if (typeof seed.object !== 'string' || seed.object === '') return undefined;
     const objectName = seed.object;
+    // The object as the publish will have it: a draft of it in the same
+    // package batch, else the engine's registered definition (its fields as
+    // the runtime serves them, extension fields and injected columns
+    // included). On a draft save, an object that is itself still a draft may
+    // gain the field before it is published, so the seed is judged at its
+    // publish instead.
+    const pendingObject = Array.isArray(pending)
+        ? pending.find((o) => (o as { name?: unknown } | null)?.name === objectName) as { fields?: unknown } | undefined
+        : undefined;
+    if (!pendingObject && pending === 'drafts'
+        && (await this.listDrafts({ type: 'object' })).drafts.some((d) => d.name === objectName)) {
+        return undefined;
+    }
+    const registry = this.engine?.registry as { getObject?(name: string): unknown } | undefined;
+    const registered = registry?.getObject?.(objectName) as { fields?: unknown } | undefined;
+    // [#34864] An object resolved by neither: the save door refuses it, so
+    // the seed is never stored to load into nothing; the publish promotion
+    // and the restore doors leave it to the load, which reports an object it
+    // cannot find (#27393 keeps the publish as it is).
+    if (!pendingObject && !registered) {
+        return door === 'save'
+            ? unknownSeedObjectRefusal(this, typeof registry?.getObject === 'function', objectName, name, pending, writeFace)
+            : undefined;
+    }
     // `SeedSchema`'s defaults, as the loader applies them (the `mode` default,
     // read from the schema rather than restated here [#30081], and
     // `externalId: 'name'`): a body read before the parse filled them keys the
@@ -1025,23 +1099,6 @@ export async function seedExternalIdSaveRefusal(
     const externalId = declared ? seed.externalId : 'name';
     const composite = Array.isArray(externalId);
     const members = (composite ? externalId : [externalId]) as unknown[];
-    // The object as the publish will have it: a draft of it in the same
-    // package batch, else the engine's registered definition (its fields as
-    // the runtime serves them, extension fields and injected columns
-    // included). On a draft save, an object that is itself still a draft may
-    // gain the field before it is published, so the seed is judged at its
-    // publish instead. An object resolved by neither is not judged here:
-    // the load reports an object it cannot find.
-    const pendingObject = Array.isArray(pending)
-        ? pending.find((o) => (o as { name?: unknown } | null)?.name === objectName) as { fields?: unknown } | undefined
-        : undefined;
-    if (!pendingObject && pending === 'drafts'
-        && (await this.listDrafts({ type: 'object' })).drafts.some((d) => d.name === objectName)) {
-        return undefined;
-    }
-    const registered = (this.engine?.registry as { getObject?(name: string): unknown } | undefined)
-        ?.getObject?.(objectName) as { fields?: unknown } | undefined;
-    if (!pendingObject && !registered) return undefined;
     const fieldNames = new Set<string>(resolveInjectedSystemColumns(pendingObject ?? registered).names);
     for (const def of [registered, pendingObject]) {
         const fields = def?.fields;
@@ -1055,7 +1112,8 @@ export async function seedExternalIdSaveRefusal(
     if (missing.length === 0) return undefined;
     const consequence = `so a load in \`${mode}\` mode could never match a row it wrote before: each publish and each `
         + `replay would ${mode === 'update' ? 'skip every record' : 'insert every record again'}. Name a field the object `
-        + "declares, or use `mode: 'insert'` for rows with no natural key.";
+        + "declares, a list of fields when no single field names a row, or `'id'` when the records carry "
+        + 'their own ids.';
     const issues: MetadataIssueEntry[] = missing.map(({ member, index }) => ({
         path: composite ? `externalId.${index}` : 'externalId',
         message: (declared
@@ -1066,6 +1124,67 @@ export async function seedExternalIdSaveRefusal(
     }));
     const err = new Error(
         `${singularType}/${name} failed spec validation: ${specValidationFindings(writeFace, issues)}`,
+    ) as Error & { code: 'INVALID_METADATA'; status: 422; issues: MetadataIssueEntry[] };
+    err.code = 'INVALID_METADATA';
+    err.status = 422;
+    err.issues = issues;
+    return err;
+}
+
+/**
+ * [#34864] The save door's refusal of a seed whose `object` neither a draft
+ * of the same save (asked by the caller) nor the engine's registry resolves.
+ * Before it, such a seed was stored 200; its publish then reported
+ * `published` with a failed load, and the probe asked the author to publish
+ * again, which could never work.
+ *
+ * Unknown follows the permission-set grant refusal ({@link unknownGrantObjectSaveRefusal}):
+ * a registry that cannot look an object up by name cannot say a name is
+ * unknown, so nothing is refused on it; an object the environment stores or
+ * the code layer defines that the registry has not (yet) registered is known
+ * (`readMetaItem`); a name two packages hold is held, so known too. An object
+ * of a dependency package answers the same registry read as the package's
+ * own. Answered as the schema gate answers: `422 INVALID_METADATA`, one
+ * finding at `object`, naming the seed and the object, and the fix: correct
+ * the name, or create the object first (a draft of it is enough for a draft
+ * seed; a live seed needs it published).
+ *
+ * Asked by the save door alone (`door` as `'save'`), in draft and in publish
+ * mode, never for a `migrate-stored` re-save. The publish promotion and the
+ * restore doors pass no `door` and leave such an object to the load, which
+ * reports it (#27393 keeps the publish as it is).
+ */
+async function unknownSeedObjectRefusal(
+    host: Pick<SaveDoorRefusalHost, 'readMetaItem'>,
+    canLookUp: boolean,
+    objectName: string,
+    name: string,
+    pending: 'drafts' | ReadonlyArray<unknown> | undefined,
+    writeFace: MetadataWriteFace | undefined,
+): Promise<(Error & { code: 'INVALID_METADATA'; status: 422; issues: MetadataIssueEntry[] }) | undefined> {
+    if (!canLookUp) return undefined;
+    try {
+        if ((await host.readMetaItem({ type: 'object', name: objectName }))?.item) return undefined;
+    } catch (error) {
+        if (error instanceof PackageScopedNameRefusedError) return undefined;
+        throw error;
+    }
+    const draft = pending === 'drafts';
+    const looked = draft
+        ? 'no package registers an object of that name, and no object, published or draft, is saved here'
+        : 'no package registers an object of that name, and no published object is saved here';
+    const fix = draft
+        ? 'or create the object first: a draft of it is enough for this draft.'
+        : 'or create and publish the object first.';
+    const issues: MetadataIssueEntry[] = [{
+        path: 'object',
+        message: `Seed '${name}' loads its records into object '${objectName}', which is not defined: ${looked}, `
+            + "so publishing it would load no record. Correct the name to the object's full name "
+            + `(e.g. 'crm_lead', not 'lead'), ${fix}`,
+        code: 'custom',
+    }];
+    const err = new Error(
+        `seed/${name} failed spec validation: ${specValidationFindings(writeFace, issues)}`,
     ) as Error & { code: 'INVALID_METADATA'; status: 422; issues: MetadataIssueEntry[] };
     err.code = 'INVALID_METADATA';
     err.status = 422;

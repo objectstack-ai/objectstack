@@ -41,7 +41,11 @@
 import { describe, it, expect, vi } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { recordNotFoundError } from '@objectstack/core';
+import { BUILTIN_OPERATION_MESSAGES } from '@objectstack/spec/system';
 import { ObjectStackProtocolImplementation } from './protocol.js';
+// Paid at collection, not inside a case's clock (check:test-source-alias):
+// the source under test loads it dynamically.
+import '@objectstack/lint';
 
 const SCHEMA = {
     name: 'showcase_task',
@@ -737,5 +741,62 @@ describe('an update by id answers the same refusal whether or not the id exists,
         expect(single).toMatchObject({ code: 'RECORD_NOT_FOUND', status: 404 });
         const many: any = await p.updateManyData({ object: 'showcase_task', records: [{ id: 'definitely_missing', data: { progress: 1 } }], context: { userId: 'u1' } } as any);
         expectRecordNotFoundRow(many.results[0], 'definitely_missing');
+    });
+});
+
+/**
+ * [#34699] The bulk faces' own existence check (`assertRecordExists`, asked
+ * only when the engine's update resolved a `null` readback instead of
+ * refusing the row itself) answers in the row's caller's language: the row's
+ * write context is handed to the refusal, so its `userMessage` follows the
+ * request `locale`, then `workspaceLocale`, then `en`.
+ */
+describe('[#34699] the bulk faces\' existence check answers in the caller\'s language', () => {
+    const ZH = BUILTIN_OPERATION_MESSAGES['zh-CN'].record_not_found;
+    const EN = BUILTIN_OPERATION_MESSAGES.en.record_not_found;
+
+    /** An engine that resolves `null` for an id naming no row instead of refusing it: the arm the check exists for. */
+    function makeResolvingEngine() {
+        const t = makeStoreEngine();
+        t.engine.update = vi.fn(async (_object: string, data: any, options?: any) => {
+            assertEngineUpdateDispatch(data, options);
+            return t.rows.get(options?.where?.id) ?? null;
+        });
+        return t;
+    }
+
+    it('updateManyData and batchData update: a zh-CN caller\'s missing row carries the zh-CN sentence', async () => {
+        const t = makeResolvingEngine();
+        const p = new ObjectStackProtocolImplementation(t.engine);
+        const context = { userId: 'u1', locale: 'zh-CN' };
+
+        const many: any = await p.updateManyData({
+            object: 'showcase_task', records: [{ id: 'definitely_missing', data: { progress: 1 } }], context,
+        } as any);
+        const batch: any = await p.batchData({
+            object: 'showcase_task',
+            request: { operation: 'update', records: [{ id: 'definitely_missing', data: { progress: 1 } }] },
+            context,
+        } as any);
+
+        for (const row of [many.results[0], batch.results[0]]) {
+            expectRecordNotFoundRow(row, 'definitely_missing');
+            expect(row.errors[0].userMessage).toBe(ZH);
+        }
+        // The check was the one that answered: the engine resolved, the probe read.
+        expect(t.findOne).toHaveBeenCalled();
+    });
+
+    it('CONTROL: the same row for a caller with no locale carries the English sentence', async () => {
+        expect(ZH).not.toBe(EN);
+        const t = makeResolvingEngine();
+        const p = new ObjectStackProtocolImplementation(t.engine);
+
+        const many: any = await p.updateManyData({
+            object: 'showcase_task', records: [{ id: 'definitely_missing', data: { progress: 1 } }], context: { userId: 'u1' },
+        } as any);
+
+        expectRecordNotFoundRow(many.results[0], 'definitely_missing');
+        expect(many.results[0].errors[0].userMessage).toBe(EN);
     });
 });

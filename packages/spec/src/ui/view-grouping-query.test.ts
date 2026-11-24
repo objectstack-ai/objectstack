@@ -18,15 +18,19 @@ import { ListViewSchema } from './view.zod';
 import type { ColumnSummary } from './view.zod';
 import type { FilterCondition } from '../data/filter.zod';
 import type { EngineAggregateOptions } from '../data/data-engine.zod';
+import { BOOLEAN_VALUE_TYPES } from '../data/field-value.zod';
 import {
   COLUMN_SUMMARY_AGGREGATION,
+  COLUMN_SUMMARY_FIELD_TYPES,
   LIST_VIEW_GROUP_COUNT_ALIAS,
   ListViewGroupQueryError,
   UNMAPPED_COLUMN_SUMMARIES,
   columnSummaryAlias,
+  columnSummaryNodeFunctions,
   compileListViewGroupQuery,
   compileListViewGroupRowsQuery,
   deriveColumnSummary,
+  isColumnSummaryCompatibleWithFieldType,
   listViewGroupKeyPredicate,
   listViewGroupOrderColumn,
 } from './view-grouping-query';
@@ -442,10 +446,102 @@ describe('count_filled / count_empty / percent_filled / percent_empty — ONE CO
   });
 });
 
+// ─── The boolean yes / no counts (#35702) ─────────────────────────────────────
+
+describe('count_true / count_false — SUM(field) and COUNT(field) over a boolean, derived on the header row', () => {
+  interface FlagRow { id: string; business_unit: string; approved: boolean | null }
+  // Per unit: 3 true, 2 false, 1 null in `north`; all null in `south`; 0 true in `east`.
+  const FLAG_ROWS: FlagRow[] = [
+    ...[true, true, true, false, false, null].map((approved, i) => ({ id: `n${i}`, business_unit: 'north', approved })),
+    ...[null, null].map((approved, i) => ({ id: `s${i}`, business_unit: 'south', approved })),
+    ...[false, false, false].map((approved, i) => ({ id: `e${i}`, business_unit: 'east', approved })),
+  ];
+  const FLAG_VIEW = {
+    grouping: { fields: [{ field: 'business_unit' }] },
+    columns: [
+      { field: 'approved', summary: 'count_true' as const },
+      { field: 'id', summary: { type: 'count_false' as const, field: 'approved' } },
+      { field: 'approved', summary: 'count_empty' as const },
+    ],
+  };
+
+  it('compile to one `sum_<field>` node and the shared `count_<field>` node, deduplicated', () => {
+    expect(compileListViewGroupQuery(FLAG_VIEW).aggregations).toEqual([
+      { function: 'count', alias: 'count' },
+      { function: 'sum', field: 'approved', alias: 'sum_approved' },
+      { function: 'count', field: 'approved', alias: 'count_approved' },
+    ]);
+  });
+
+  it('a null cell is neither true nor false: true + false = filled, and the empty count holds the nulls', () => {
+    const headers = reduceHeaderQuery(FLAG_ROWS as unknown as Row[], compileListViewGroupQuery(FLAG_VIEW));
+    const byUnit = (unit: string) => headers.find((h) => h.business_unit === unit)!;
+    const read = (unit: string) => ({
+      yes: deriveColumnSummary(byUnit(unit), 'count_true', 'approved'),
+      no: deriveColumnSummary(byUnit(unit), { type: 'count_false', field: 'approved' }, 'id'),
+      empty: deriveColumnSummary(byUnit(unit), 'count_empty', 'approved'),
+      filled: deriveColumnSummary(byUnit(unit), 'count_filled', 'approved'),
+    });
+    expect(read('north')).toEqual({ yes: 3, no: 2, empty: 1, filled: 5 });
+    expect(read('south')).toEqual({ yes: 0, no: 0, empty: 2, filled: 0 });
+    expect(read('east')).toEqual({ yes: 0, no: 3, empty: 0, filled: 3 });
+  });
+
+  it('a SUM that answered no value reads 0 true; a missing column reads undefined, never a guess', () => {
+    const noValue: ListViewGroupHeaderRow = { business_unit: 'x', count: 2, sum_approved: null, count_approved: 0 };
+    expect(deriveColumnSummary(noValue, 'count_true', 'approved')).toBe(0);
+    expect(deriveColumnSummary(noValue, 'count_false', 'approved')).toBe(0);
+    const noSum: ListViewGroupHeaderRow = { business_unit: 'x', count: 2, count_approved: 2 };
+    expect(deriveColumnSummary(noSum, 'count_true', 'approved')).toBeUndefined();
+    expect(deriveColumnSummary(noSum, 'count_false', 'approved')).toBeUndefined();
+    const noCount: ListViewGroupHeaderRow = { business_unit: 'x', count: 2, sum_approved: 1 };
+    expect(deriveColumnSummary(noCount, 'count_true', 'approved')).toBe(1);
+    expect(deriveColumnSummary(noCount, 'count_false', 'approved')).toBeUndefined();
+    // A driver may answer a sum as its string spelling.
+    expect(deriveColumnSummary({ count: 3, sum_approved: '2', count_approved: '3' }, 'count_false', 'approved')).toBe(1);
+    expectTypeOf(deriveColumnSummary(noValue, 'count_true', 'approved')).toEqualTypeOf<number | null | undefined>();
+  });
+
+  it('applies to the boolean class only — over a number SUM(field) is a total, not a count', () => {
+    expect(COLUMN_SUMMARY_FIELD_TYPES).toEqual({ count_true: ['boolean', 'toggle'], count_false: ['boolean', 'toggle'] });
+    expect([...COLUMN_SUMMARY_FIELD_TYPES.count_true!].sort()).toEqual([...BOOLEAN_VALUE_TYPES].sort());
+    for (const member of ['count_true', 'count_false']) {
+      expect(isColumnSummaryCompatibleWithFieldType(member, 'boolean')).toBe(true);
+      expect(isColumnSummaryCompatibleWithFieldType(member, 'toggle')).toBe(true);
+      for (const type of ['number', 'currency', 'text', 'select', 'date', 'lookup']) {
+        expect(isColumnSummaryCompatibleWithFieldType(member, type), `${member} × ${type}`).toBe(false);
+      }
+    }
+    // A member the table does not restrict is judged by its nodes alone.
+    expect(isColumnSummaryCompatibleWithFieldType('count_filled', 'text')).toBe(true);
+    expect(isColumnSummaryCompatibleWithFieldType('sum', 'number')).toBe(true);
+    // Fail-closed on shape; an inherited key is no member.
+    expect(isColumnSummaryCompatibleWithFieldType(['count_true'] as unknown as string, 'number')).toBe(false);
+    expect(isColumnSummaryCompatibleWithFieldType('toString', 'number')).toBe(true);
+  });
+
+  it('columnSummaryNodeFunctions reads every row: the aggregate function, the derived nodes, nothing for none', () => {
+    expect(columnSummaryNodeFunctions(COLUMN_SUMMARY_AGGREGATION.sum)).toEqual(['sum']);
+    expect(columnSummaryNodeFunctions(COLUMN_SUMMARY_AGGREGATION.count_unique)).toEqual(['count_distinct']);
+    expect(columnSummaryNodeFunctions(COLUMN_SUMMARY_AGGREGATION.count_empty)).toEqual(['count']);
+    expect(columnSummaryNodeFunctions(COLUMN_SUMMARY_AGGREGATION.count_false)).toEqual(['sum', 'count']);
+    expect(columnSummaryNodeFunctions(COLUMN_SUMMARY_AGGREGATION.none)).toEqual([]);
+  });
+
+  it('a boolean field named like its sum column collides loudly', () => {
+    const err = refusal(() => compileListViewGroupQuery({
+      grouping: { fields: [{ field: 'sum_approved' }] },
+      columns: [{ field: 'approved', summary: 'count_false' }],
+    }));
+    expect(err.reason).toBe('alias_collision');
+    expect(err.path).toEqual(['columns', 0, 'summary']);
+  });
+});
+
 // ─── The mapping table ───────────────────────────────────────────────────────
 
 describe('COLUMN_SUMMARY_AGGREGATION — one vocabulary, not two', () => {
-  it('maps every member: six onto AggregationFunction, four by derivation from count, none as nothing', () => {
+  it('maps every member: six onto AggregationFunction, six by derivation, none as nothing', () => {
     expect(COLUMN_SUMMARY_AGGREGATION).toEqual({
       none: { kind: 'none' },
       count: { kind: 'aggregate', function: 'count', fieldless: true },
@@ -454,11 +550,17 @@ describe('COLUMN_SUMMARY_AGGREGATION — one vocabulary, not two', () => {
       avg: { kind: 'aggregate', function: 'avg', fieldless: false },
       min: { kind: 'aggregate', function: 'min', fieldless: false },
       max: { kind: 'aggregate', function: 'max', fieldless: false },
-      count_filled: { kind: 'derived', from: 'count', fieldless: false },
-      count_empty: { kind: 'derived', from: 'count', fieldless: false },
-      percent_filled: { kind: 'derived', from: 'count', fieldless: false },
-      percent_empty: { kind: 'derived', from: 'count', fieldless: false },
+      count_filled: { kind: 'derived', from: 'count', reads: ['count'], fieldless: false },
+      count_empty: { kind: 'derived', from: 'count', reads: ['count'], fieldless: false },
+      percent_filled: { kind: 'derived', from: 'count', reads: ['count'], fieldless: false },
+      percent_empty: { kind: 'derived', from: 'count', reads: ['count'], fieldless: false },
+      count_true: { kind: 'derived', from: 'sum', reads: ['sum'], fieldless: false },
+      count_false: { kind: 'derived', from: 'sum', reads: ['sum', 'count'], fieldless: false },
     });
+    // `from` is the first node a derived row reads, on every derived row.
+    for (const mapping of Object.values(COLUMN_SUMMARY_AGGREGATION)) {
+      if (mapping.kind === 'derived') expect(mapping.reads[0]).toBe(mapping.from);
+    }
     expect(UNMAPPED_COLUMN_SUMMARIES).toEqual([]);
     expect(Object.values(COLUMN_SUMMARY_AGGREGATION).every((m) => m.kind !== 'unmapped')).toBe(true);
   });

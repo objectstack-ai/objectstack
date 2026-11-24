@@ -108,11 +108,12 @@ async function lineLoaded() {
   await waitFor(() => expect(screen.getByDisplayValue('3')).toBeTruthy());
 }
 
-/** A create form: wait for the grid, then type into the entry row so it becomes a line. */
+/** A create form: wait for the grid, press Add and type into the new line (the grid draws no trailing entry row, objectstack#35507). */
 async function addLineViaEntryRow(value: string) {
+  fireEvent.click(await waitFor(() => screen.getByTestId('line-items-add')));
   const cells = await waitFor(() => {
     const els = screen.getAllByLabelText('Qty') as HTMLInputElement[];
-    if (els.length === 0) throw new Error('grid not drawn yet');
+    if (els.length === 0) throw new Error('line not drawn yet');
     return els;
   });
   fireEvent.change(cells[cells.length - 1], { target: { value } });

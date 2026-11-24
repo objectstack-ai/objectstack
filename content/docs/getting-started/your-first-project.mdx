@@ -136,9 +136,6 @@ view, action or flow adds a file and one export line to its directory's
 
 ```typescript title="objectstack.config.ts"
 import { defineStack } from '@objectstack/spec';
-import { ConnectorRestPlugin } from '@objectstack/connector-rest';
-import { ConnectorOpenApiPlugin } from '@objectstack/connector-openapi';
-import { ConnectorMcpPlugin } from '@objectstack/connector-mcp';
 import * as objects from './src/objects';
 import * as views from './src/views';
 import * as actions from './src/actions';
@@ -162,16 +159,10 @@ export default defineStack({
     engines: { protocol: '^18' },
   },
   // `automation` runs flows and, per ADR-0097, materializes declarative
-  // `connectors:` entries at boot. The three generic executors below register
-  // their `rest` / `openapi` / `mcp` provider factories with it. `triggers`
-  // fires a flow that starts on a record change, the kind `os generate flow`
-  // writes.
+  // `connectors:` entries at boot, through the provider factory a connector
+  // executor in `plugins:` registers. `triggers` fires a flow that starts on
+  // a record change, the kind `os generate flow` writes.
   requires: ['automation', 'triggers'],
-  plugins: [
-    new ConnectorRestPlugin(),
-    new ConnectorOpenApiPlugin(),
-    new ConnectorMcpPlugin(),
-  ],
   objects: exportsOf(objects),
   views: exportsOf(views),
   actions: exportsOf(actions),
@@ -216,11 +207,15 @@ them a pattern to rely on:
 </Callout>
 
 The REST API needs no configuration — it is on by default for every object
-with `apiEnabled`. The `plugins:` array ships the three **generic connector
-executors**, so you can integrate an external REST / OpenAPI / MCP service as
-pure metadata: add a `connectors:` entry naming a `provider` and the
-`automation` capability materializes it into a live connector at boot — see
-[Automation → Flows](/docs/automation/flows).
+with `apiEnabled`. The starter lists no `plugins:`: a plugin is code, and an app
+with code in `plugins:` installs only as a managed package, never as the
+editable copy a marketplace trial template is (`manifest.installModes:
+['unmanaged']`). To integrate an external REST / OpenAPI / MCP service as pure
+metadata, install that **generic connector executor**
+(`@objectstack/connector-rest`, `-openapi` or `-mcp`), list it in `plugins:`,
+and add a `connectors:` entry naming its `provider`; the `automation`
+capability materializes it into a live connector at boot — see
+[Automation → Connectors](/docs/automation/connectors).
 
 **`src/objects/note.object.ts`** is a complete data model — schema, validation,
 API surface, and searchability in one typed definition:

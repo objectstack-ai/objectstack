@@ -97,6 +97,8 @@ function formSchema(details: any[]) {
 
 /** Type an amount into the (single) resolved collection's grid. */
 async function enterLineTotal(value: string) {
+  // The grid draws no trailing entry row (objectstack#35507): Add the line first.
+  fireEvent.click(await waitFor(() => screen.getByTestId('line-items-add')));
   const cell = await waitFor(() => screen.getAllByLabelText('Line Total')[0] as HTMLInputElement);
   fireEvent.change(cell, { target: { value } });
   return cell;

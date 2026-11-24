@@ -1407,3 +1407,119 @@ describe('[ADR-0055] moderation on a controlled_by_parent parent — checkEdit, 
     ).resolves.toBeUndefined();
   });
 });
+
+describe('#36071 — resolving a thread: who may, and only on a thread (ruling record 7063285032)', () => {
+  const root = { id: 'c1', thread_id: 'crm_opportunity:opp1', author_id: 'rep1', body: 'question', parent_id: null };
+  const reply = { id: 'c2', thread_id: 'crm_opportunity:opp1', author_id: 'rep1', body: 'answer', parent_id: 'c1' };
+  /** A reader of the parent record who may not edit it, and is not the author. */
+  const READER = { userId: 'rep2', visible: ['crm_opportunity/opp1'] };
+
+  it('a reader of the record may resolve, and reopen, another user\'s thread — without the parent-edit question', async () => {
+    const canEdit = vi.fn(async () => false);
+    const { beforeUpdate } = install({ comments: [root], sharing: { canEdit }, readable: ['crm_opportunity/opp1'] });
+    for (const is_resolved of [true, false]) {
+      await expect(
+        beforeUpdate(writeCtx('beforeUpdate', { id: 'c1', data: { is_resolved } }, READER)),
+      ).resolves.toBeUndefined();
+    }
+    expect(canEdit).not.toHaveBeenCalled();
+  });
+
+  it('the platform stamps and the engine stamps beside it keep the update resolution-only', async () => {
+    const { beforeUpdate } = install({ comments: [root], sharing: { canEdit: async () => false } });
+    await expect(
+      beforeUpdate(
+        writeCtx(
+          'beforeUpdate',
+          { id: 'c1', data: { id: 'c1', is_resolved: true, resolved_by: 'x', resolved_at: 'y', updated_at: 'z', updated_by: 'w' } },
+          READER,
+        ),
+      ),
+    ).resolves.toBeUndefined();
+  });
+
+  it('the same reader changing any other field beside is_resolved still meets the author-or-editor rule', async () => {
+    const { beforeUpdate } = install({
+      comments: [root],
+      sharing: { canEdit: async () => false },
+      readable: ['crm_opportunity/opp1'],
+    });
+    for (const data of [{ is_resolved: true, body: 'rewritten' }, { is_resolved: true, mentions: '["u9"]' }, { body: 'rewritten' }]) {
+      await expect(beforeUpdate(writeCtx('beforeUpdate', { id: 'c1', data }, READER))).rejects.toMatchObject({
+        code: 'RECORD_NOT_ACCESSIBLE',
+        status: 403,
+        object: 'crm_opportunity',
+      });
+    }
+  });
+
+  it('a caller who cannot read the record cannot resolve its thread — the not-visible refusal', async () => {
+    const { beforeUpdate } = install({ comments: [root], sharing: { canEdit: async () => false } });
+    await expect(
+      beforeUpdate(writeCtx('beforeUpdate', { id: 'c1', data: { is_resolved: true } }, { userId: 'rep2', visible: [] })),
+    ).rejects.toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+  });
+
+  it('a thread naming no record is resolved by its author only', async () => {
+    const dangling = { ...root, thread_id: 'crm_opportunity:' };
+    const { beforeUpdate } = install({ comments: [dangling], sharing: { canEdit: async () => true } });
+    await expect(
+      beforeUpdate(writeCtx('beforeUpdate', { id: 'c1', data: { is_resolved: true } }, { userId: 'rep2', visible: ['crm_opportunity/'] })),
+    ).rejects.toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+    await expect(
+      beforeUpdate(writeCtx('beforeUpdate', { id: 'c1', data: { is_resolved: true } }, { userId: 'rep1' })),
+    ).resolves.toBeUndefined();
+  });
+
+  it('a multi-row resolution requires every matched row to pass', async () => {
+    const other = { ...root, id: 'c3', thread_id: 'crm_opportunity:secret' };
+    const { beforeUpdate } = install({ comments: [root, other], sharing: { canEdit: async () => false } });
+    await expect(
+      beforeUpdate(
+        writeCtx('beforeUpdate', { data: { is_resolved: true }, options: { where: { author_id: 'rep1' }, multi: true } }, READER),
+      ),
+    ).rejects.toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+  });
+
+  it('is_resolved on a reply is refused 400 — its author and a parent editor included', async () => {
+    const { beforeUpdate } = install({ comments: [root, reply], sharing: { canEdit: async () => true } });
+    // A record editor reads the record too: the refusal now runs after the
+    // access gate, so the editor's session must see the parent.
+    const EDITOR = { userId: 'manager', visible: ['crm_opportunity/opp1'] };
+    for (const caller of [{ userId: 'rep1' }, EDITOR, READER]) {
+      for (const data of [{ is_resolved: true }, { is_resolved: false, body: 'b' }]) {
+        await expect(beforeUpdate(writeCtx('beforeUpdate', { id: 'c2', data }, caller))).rejects.toMatchObject({
+          code: 'VALIDATION_ERROR',
+          status: 400,
+          field: 'is_resolved',
+        });
+      }
+    }
+    // A reply's other fields stay its author's to edit.
+    await expect(
+      beforeUpdate(writeCtx('beforeUpdate', { id: 'c2', data: { body: 'edited' } }, { userId: 'rep1' })),
+    ).resolves.toBeUndefined();
+  });
+
+  it('is_resolved on a reply from a caller who cannot read the record meets the not-visible refusal, not the 400', async () => {
+    const { beforeUpdate } = install({ comments: [root, reply], sharing: { canEdit: async () => false } });
+    for (const data of [{ is_resolved: true }, { is_resolved: true, body: 'b' }]) {
+      await expect(
+        beforeUpdate(writeCtx('beforeUpdate', { id: 'c2', data }, { userId: 'rep2', visible: [] })),
+      ).rejects.toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+    }
+  });
+
+  it('a new comment is unresolved whatever the client sent', async () => {
+    const { beforeInsert } = install({});
+    const data: Record<string, unknown> = {
+      thread_id: 'crm_opportunity:opp1',
+      body: 'hi',
+      is_resolved: true,
+      resolved_by: 'someone',
+      resolved_at: '2000-01-01T00:00:00.000Z',
+    };
+    await beforeInsert(insertCtx(data, { userId: 'rep1', visible: ['crm_opportunity/opp1'] }));
+    expect(data).toMatchObject({ is_resolved: false, resolved_by: null, resolved_at: null });
+  });
+});

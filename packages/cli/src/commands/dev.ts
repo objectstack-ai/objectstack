@@ -663,7 +663,11 @@ export default class Dev extends Command {
           { stdio: 'inherit' },
         );
         if (compileResult.status !== 0) {
-          printError('Compile failed — fix errors above before starting dev server');
+          // The line says the config did not load or compile, never which: the
+          // parent sees only the child's exit status, and a syntax error, a thrown
+          // refusal at load and a refusal that prints and exits 1 all land here
+          // (ruling record 6998194814, letter D). The child printed the reason.
+          printError('objectstack.config did not load or compile — the reason is printed above; fix it before starting dev server');
           process.exit(1);
         }
       }
@@ -1227,7 +1231,9 @@ export default class Dev extends Command {
             .map((b) => b?.toString().replace(/^\s*\n/, '').trimEnd())
             .filter(Boolean)
             .join('\n');
-          console.log(chalk.red(`  ✗ compile failed (${dt}ms)${output ? '\n' + output : ''}`));
+          // Neutral for the reason the boot compile's line is (ruling record
+          // 6998194814): a load failure and a judged compile failure share it.
+          console.log(chalk.red(`  ✗ objectstack.config did not load or compile (${dt}ms)${output ? '\n' + output : ''}`));
           // A failed compile writes no artifact — the running server still
           // matches dist/objectstack.json, so no restart and no warning.
         } else {

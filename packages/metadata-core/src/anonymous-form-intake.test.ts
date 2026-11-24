@@ -322,13 +322,14 @@ describe('anonymousFormIntakeWithdrawnIn — an explicit withdrawal of the same 
 // The candidates half is declared in `@objectstack/spec/ui` and re-exported by
 // this package. "One copy" is checkable only as IDENTITY: a wrapper or a copy
 // answers the same today and drifts tomorrow, while the same binding cannot.
-describe('the candidates and object-name halves are the spec bindings themselves, re-exported (one copy, not a copy)', () => {
+describe('the candidates, object-name and withdrawal halves are the spec bindings themselves, re-exported (one copy, not a copy)', () => {
     const NAMES = [
         'publicFormSlug',
         'anonymousFormIntakeSlug',
         'anonymousFormIntakeCandidates',
         'anonymousFormIntakeSlugs',
         'anonymousFormObjectName',
+        'anonymousFormIntakeWithdrawnIn',
     ] as const;
 
     it.each(NAMES)('%s: this module and the package barrel export the @objectstack/spec/ui function', (name) => {

@@ -147,7 +147,7 @@ os init my-app --no-install       # Skip dependency installation
 |----------|-----------------|
 | `app` | Full application with objects, barrel imports |
 | `plugin` | **Metadata package**: declarative objects, built by `objectstack compile`, `private` — *not* the kernel code plugin `os create plugin` emits |
-| `empty` | Minimal project with just `objectstack.config.ts` |
+| `empty` | Minimal project: `objectstack.config.ts` and one starter test |
 
 The `app` and `plugin` templates declare their starter object with
 `ObjectSchema.create({ … })` — the one authorised shape for a `*.object.ts`, and the
@@ -854,6 +854,56 @@ for its own keys.
 - A bundle proves what its checkpoints hold. Rows of a sealed window that no checkpoint
   lists (`late` and unsealed) are carried as the writing run found them.
 
+#### `os user set-password`
+
+Sets a user's password in the project database, on the server. A server that is not in
+development mode never accepts a development seed credential: a sign-in with the
+development seed password (`admin123`, or the `OS_SEED_ADMIN_PASSWORD` value) is refused
+on every account, and an account `os dev` seeded (its admin and the stack's `demoStaff`)
+opens no session while it still has the password it was seeded with, a custom
+`--admin-password` included. No session is offered to change it in, because whoever signed
+in first could. This command is the way out, and the refusal names it.
+
+```bash
+os user set-password admin@example.com                     # asks twice, unechoed
+printf %s "$NEW_PASSWORD" | os user set-password admin@example.com --password-stdin
+os user set-password admin@example.com --database-url "postgres://user:pass@host:5432/mydb"
+```
+
+**Options:**
+- `--password-stdin` — read the new password from standard input instead of asking for it
+- `--database-url <url>` — the database to write (defaults to `$OS_DATABASE_URL` / the project database)
+
+What one run does:
+
+- **The password never goes on the command line.** It is asked for on a terminal, or read
+  from standard input.
+- **It checks two things about the new password:** it is not a development seed password,
+  and it is 8 to 128 characters long. The deployment's own password policy and password
+  history are not applied. An address no account holds, and an account with no password
+  sign-in, are refused too. A refusal writes nothing.
+- **It sets the password with the hash every server verifies**, clears the account's
+  development seed mark and a sign-in lock, and records the change time.
+- **It deletes the account's outstanding password-reset links and codes from the project
+  database** before the new password lands.
+- **It ends every session, revokes every API key, unlinks every linked sign-in account
+  and ends every authorized app and approved device sign-in of the account** (a link is a
+  social, OAuth or single sign-on link; the password itself stays; an app's consents,
+  refresh tokens and stored access tokens are deleted, so it asks to be authorized again),
+  **disables every OAuth application the account registered and revokes every SCIM
+  credential it minted** (a platform administrator can enable a disabled application again;
+  a revoked credential is replaced by minting a new one), as an administrator's forced
+  reset does: the sessions, keys, links, grants, applications and credentials the account
+  held under the old password do not outlive it. An application another account registered
+  and a credential another administrator minted are not touched; the account's single
+  sign-on providers and two-factor enrolment are kept. It prints how many of each it ended,
+  and asks for no password change at the next sign-in.
+- **It writes the project database only.** A secondary storage the host configures for the
+  auth service (a cache that can hold reset links and sessions) is out of its reach, for the
+  reset links and the sessions alike. With one configured, run the command with the server
+  stopped, or restart the server afterwards; a secondary storage kept outside the server
+  process outlives a restart and is cleared of the account's entries by hand.
+
 ### Build & Validate
 
 | Command | Description |
@@ -887,7 +937,7 @@ os compile --json                    # JSON output for CI pipelines
   → Normalizing stack definition...
   → Lowering inline handlers...
   → Validating protocol compliance...
-  → Running author-time rules (69)...
+  → Running author-time rules (78)...
   → Checking that every required capability has a provider installable in this edition...
   → Collecting package docs (ADR-0046)... 0 collected
   → Writing artifact...
@@ -1173,6 +1223,7 @@ performed. So `plan` really is a dry run, and everything `apply` is about to do
 
   In place (existing rows converged when you apply)
     ~ crm_contact [normalize_datetime_storage: signed_at — 1,240 row update(s)]
+    ~ crm_deal [normalize_boolean_storage: won — 312 row update(s)]
 
   Needs confirmation
     ~ crm_contact.email [relax_not_null]
@@ -1189,10 +1240,16 @@ column needs when the database predates the canonical UTC storage (ADR-0053
 addendum D-B1..D-B4). It carries a row count because that is the number
 deciding whether to run it now; on MySQL it reads `widen_datetime_columns` and
 is an `ALTER … MODIFY` table rebuild that holds a metadata lock for its
-duration.
+duration. On SQLite it also lists `normalize_boolean_storage`: rows of a
+`Field.boolean` or `Field.toggle` column that an older build stored as the text
+`'true'` / `'false'` become `1` / `0`, so boolean filters, sorts and groups find
+them. Any other text in such a column is left as stored and reported in the
+log.
 
-Both are safe to apply — the convergence preserves every stored instant and is
-idempotent — but only the second takes time proportional to your data.
+All three are safe to apply — the datetime convergence preserves every stored
+instant, the boolean step rewrites only the two canonical spellings, and each is
+idempotent — but only the MySQL widen is a table rebuild whose duration grows with
+your data.
 
 #### Runtime-owned indexes apply builds
 
@@ -1489,6 +1546,7 @@ where the data lives.
 | `os migrate audit-mail-bodies` | Mask the mail bodies (`body_text`, `body_html`) that `sys_audit_log` and `sys_activity` copies of `sys_email` / `sys_identity_email` rows still hold in clear, written before the audit writer masked them. Covers the `archive` datasource `sys_audit_log` archives to as well. Reports counts only. No flag; idempotent. See [below](#os-migrate-audit-mail-bodies) |
 | `os migrate audit-key-material` | Remove the encrypted key-material columns from the `sys_audit_log` and `sys_activity` copies written before the audit writer omitted them. Covers the `archive` datasource `sys_audit_log` archives to as well. Reports counts only. No flag; idempotent. See [below](#os-migrate-audit-key-material) |
 | `os migrate audit-side-copies` | Remove the side-copy columns (another record's field values, such as an approval request's `payload_json`) from the `sys_audit_log` and `sys_activity` copies written before the audit writer omitted them. Covers the `archive` datasource `sys_audit_log` archives to as well. `--object` narrows it to one copy table. Reports counts only, per table and store. No flag; idempotent. See [below](#os-migrate-audit-side-copies) |
+| `os migrate list-preferences` | Delete the per-reader list preference rows an earlier Console stored in `sys_user_preference` under `ui.list.<object>`, which the Console no longer reads. Dry run by default (counts per key, writes no row); `--apply` deletes, only with an owner-only `--export` written and read back first. Run it once after upgrading. See [below](#os-migrate-list-preferences) |
 | `os migrate comment-parent-pair` | Stamp the parent pair (`object_name`, `record_id`) on the `sys_comment` rows written before it existed. Until it runs, a broad comment read past 2,000 candidate rows omits comments the reader may see, and its total agrees with the short list, so run it at once after upgrading. No flag; idempotent |
 | `os migrate meta --stored` | Replay the metadata conversion chain over this deployment's `sys_metadata` rows and rewrite the ones still carrying a pre-protocol shape. Hygiene, not a gate — nothing depends on it having run |
 | `os migrate security-catalog-overlays` | List the environment-wide permission-set and position rows (the legacy plurals `permissions` / `positions` included) stored over a name a configured package holds — the rows a v18 cold boot refuses — each with the package that holds its name; `--apply` deletes them, one history tombstone per row. Run it before the first v18 boot, with the flags and environment the deployment boots with: the platform security plugin's sets are held only where `os serve` composes it (an auth secret set, and the `auth` tier on), and the step takes `serve`'s `--preset` and `--dev` with `serve`'s meaning. Adopts nothing; exits 1 while it lists a row |
@@ -2333,6 +2391,50 @@ the upgraded deployment's schema sync, which an `--apply` run performs itself:
 a dry run against a database no upgraded process has opened cannot read them,
 reports the failed read and exits `1`. A failed read or write exits `1`.
 
+#### `os migrate list-preferences`
+
+An earlier Console remembered each reader's list state on the server: one
+`sys_user_preference` row per reader and object, keyed `ui.list.<object>`. It
+held the column widths, the row height and the view tabs' order, and before
+that the reader's sorts, filters and columns too. The Console no longer reads
+or writes those rows: a change on a list is an unsaved draft until the reader
+saves it into a view, and the widths, row height and tab order are kept in the
+reader's own browser. The stored rows are not carried anywhere; every reader's
+lists open as their views declare them. This command deletes the rows.
+
+```bash
+os migrate list-preferences                          # Dry run: counts per key, writes no rows
+os migrate list-preferences --json                   # the same report, machine-readable
+os migrate list-preferences --apply --export ./list-preferences-backup.json
+os migrate list-preferences --apply --export ./list-preferences-backup.json --yes --json
+```
+
+The report counts the rows, the readers and the organizations, and per key
+(`ui.list.account`, …) the rows and the readers holding it. It never prints a
+value. It reads every organization's rows. A row belongs to the family only when
+its key starts with `ui.list.`, compared exactly, dot and case included:
+`ui.record.<object>` (the record page's "show empty fields" choice, still read),
+`ui.recent` and every other preference key are never touched.
+
+**Options:**
+- `--apply` — delete the listed rows (default off: a read-only dry run)
+- `--export <path>` — **mandatory with `--apply`**: every row the run deletes, as stored, written
+  owner-only (`0600`) and read back before the first delete; refuses to overwrite an existing file
+- `-y, --yes` — skip the confirmation prompt; without it, a run whose stdin is not a terminal (or `--json`) reads
+  nothing, deletes nothing and exits `1`
+- `--force` — apply even when another process is using the SQLite file
+- `--database-url <url>`, `--json`
+
+Each delete is the engine's by-id delete in the system context. After the
+deletes the family is read again, and the run exits `1` when any row is still
+there: one whose delete was refused, or one a Console that still writes the
+family stored after the export. **Re-runnable**: a second run finds nothing,
+writes no export and exits `0`. It is never run for you; nothing on any boot,
+upgrade, migrate or lifecycle path invokes it. Run it once after the upgraded
+Console is serving (an older Console would write the rows again), and keep the
+export until you are certain the sweep was right: it is the only copy, and
+nothing reads it back into the platform.
+
 #### A database created by this version needs no migration
 
 A deployment whose database the platform **creates from empty** records these
@@ -2875,6 +2977,7 @@ os lint --json         # JSON output for CI
 os lint --skip-i18n    # Skip the translation coverage checks entirely
 os lint --include-platform     # Audit the platform built-in i18n keys too
 os lint --eval --eval-min 80   # Score the bundled generation corpus instead
+os lint --item view.json --type view   # Judge ONE item file, no project needed
 ```
 
 **Options.** Every flag the command declares, and its one positional:
@@ -2893,6 +2996,8 @@ os lint --eval --eval-min 80   # Score the bundled generation corpus instead
 | `--eval` | Run the metadata-generation eval over the bundled golden corpus and report scores — a different run, see below |
 | `--eval-min <n>` | Minimum passing score per eval case (default `75`) |
 | `--generator <path>` | Path to a module that default-exports `(prompt, id) => stack`; enables live eval, scoring generated output instead of fixtures. Requires `--eval` |
+| `--item <file>` | Lint ONE metadata item instead of a project: a JSON file holding the item, the body `os meta register --data` takes. Requires `--type`. See **One item** below |
+| `--type <type>` | The metadata type of the `--item` file (`object`, `view`, `flow`, …; a collection's plural spelling is accepted too). Requires `--item` |
 
 **`--eval` is a different run, not an extra check.** It short-circuits the
 project lint entirely and scores the bundled generation corpus, so it does not
@@ -2900,6 +3005,28 @@ combine with the style flags above. `--generator` applies only inside it:
 passed without `--eval` the run exits **1** and says so on both faces, rather
 than accepting a flag nothing outside eval mode reads (which is what it did
 before #15550 — including for a generator path that did not exist).
+
+**One item (`--item`).** For a developer or an AI client authoring metadata
+item by item against a runtime, with no project on disk:
+`os lint --item view.json --type view` places the item alone in a stack and runs
+the shared rule table over it, plus `os lint`'s per-entry naming, label and
+structure conventions. A rule whose verdict on the item needs metadata the run
+does not have is **not run, and named**: the run measures, rule by rule, which
+top-level stack keys the rule reads while judging the item, and a rule that read
+anything beside the item's own collection has its findings dropped and is listed
+with the keys it read (`notJudged` on the `--json` face). `os lint`'s own
+namespace-prefix, i18n-coverage and (for an object) data-model families judge
+the package or the whole stack and are listed as not run (`familiesNotRun`).
+Two limits of the measurement: a rule that resolves the item's references to
+other items of the same type sees no such item, and a rule that walks every
+collection is listed as not run even where it would have judged the item alone.
+The exit code reads as a project run's (`--strict` included). It does not
+combine with a configuration path, `--score` or `--eval`. Stage the item for
+review with `os meta register <type> --data view.json --package <id> --mode draft`:
+the draft is stored into that package's Studio Changes, nothing is published, and
+the command reads the draft back and prints the publish verdict the runtime serves
+on it (`valid`, its errors and warnings; `publishVerdict` on `--format json`).
+`--mode draft` without `--package` is refused before any request.
 
 It does not replace `os validate`: `os lint` never parses the stack against the
 Zod schema (a schema error is `os validate`'s verdict to give), and it emits no
@@ -2936,6 +3063,7 @@ os verify --delete-behaviors                   # Also prove each declared delete
 os verify --unique-scopes --multi-tenant       # Also prove each declared unique collides where its scope says
 os verify --parent-write-reach                 # Also prove each controlled_by_parent detail write follows its master
 os verify --dashboard-windows                  # Also prove each dashboard date picker counts the rows its window selects
+os verify --flow notify_on_new_case --flow-record '{"subject":"Printer jam"}'   # Also run one flow and report its node trace
 ```
 
 1. **Author-time rules.** The rule registry `os validate` runs, over the stack
@@ -2948,9 +3076,17 @@ os verify --dashboard-windows                  # Also prove each dashboard date 
    them, and `os validate` prints them. This stage is the rule registry, not all
    of `os validate`: the `defineStack` provenance refusal (a config whose
    default export `defineStack` did not build, `STACK_PROVENANCE_MISSING`), the
-   package-docs lint, the capability-provider check, the picklist-reference and
-   view-container-name checks and `--strict` stay `os validate`'s, so run it
-   too.
+   package-docs lint, the picklist-reference and view-container-name checks and
+   `--strict` stay `os validate`'s, so run it too.
+
+   The stage then runs `os validate`'s capability-provider check over every
+   declared `requires` token and reports each finding as an **advisory**, in
+   the sentence `os validate` prints: a cloud-only token, an `enterprise` token
+   whose package is not installed, and an `enterprise` token whose package
+   resolves but which no plugin in `plugins[]` provides (for
+   `hierarchy-security`, the hierarchy scopes then behave as owner-only). These
+   never change `os verify`'s exit status, including the cloud-only tokens
+   `os validate` refuses.
 2. **Runtime.** Boot the app in-process and exercise it through the real HTTP
    stack. The boot reads the project's `.env*` files first, the ones `os dev`
    reads, from the directory holding the config (a variable already exported
@@ -2965,7 +3101,27 @@ os verify --dashboard-windows                  # Also prove each dashboard date 
    instead, is reported as not judged. Then, for each object, a record derived
    from its fields is created, read
    back and compared (CRUD round-trip fidelity), and a create, read or
-   fidelity failure fails the run. With `--rls`, a second fresh boot proves the
+   fidelity failure fails the run. The boot connects the datasources the app
+   declares, as `os dev` does, but no stage below writes to an object on an
+   external datasource, even one whose write gate is open
+   (`external.allowWrites` on the datasource and `external.writable` on the
+   object): every stage reports it as not exercised, and the CRUD stage lists
+   it `skipped` as `external datasource "NAME" (writes allowed)` or
+   `(read-only)`, which does not fail the run. An object that requires a
+   reference to it is skipped too, and its reason says the target was withheld
+   on purpose. A write the app itself makes there, its seed or a hook or flow
+   that a stage's write fires, goes where the app sends it, as under `os dev`.
+   A declared managed datasource (`schemaMode: 'managed'`, or none declared) is
+   not connected to the database it names, on any engine the platform ships
+   (`mongodb` included): verify runs it on a fresh in-memory store, as it runs
+   its own default one, so every write to its objects, the app's seed, hooks
+   and flows included, stays in memory and they are exercised by every stage.
+   A managed datasource on a driver id the platform does not ship (a
+   plugin's, or a misspelling) cannot be stood in, so `os verify` refuses to
+   boot while one is declared: it names the datasource and the driver id and
+   exits 1. It refuses the same way when a plugin registers a driver of its
+   own under a managed datasource's name, whatever driver id the datasource
+   declares. There is no flag around either refusal. With `--rls`, a second fresh boot proves the
    cross-owner invariant — a member must not write what it cannot read — for a
    probe persona and for one persona per declared position, and a hole fails
    the run. With `--reference-shapes`, another fresh boot proves that every
@@ -3077,6 +3233,50 @@ os verify --dashboard-windows                  # Also prove each dashboard date 
    ground truth cannot model (`$or`, a range, a
    relationship path, a condition on the window's own field), are reported
    `excluded`.
+   With `--flow <name>`, another fresh boot runs that one flow once and reports
+   what the engine did: each node's status as the run's log records it, the
+   first failure with its code and the node named, and every write the run
+   made. The run starts the way production starts it. A record-change flow is
+   started by its own trigger: the run writes the record `--flow-record`
+   names (its fields as a JSON object) as the dev admin, inserting it for a
+   create or write leg, seeding it and saving it unchanged for an update leg
+   (so a condition comparing old and new values sees no change), and seeding
+   it and deleting it for a delete leg. A flow its own trigger starts is
+   started with no caller, with the context that trigger builds: an
+   API-triggered flow is handed `--flow-input` (a JSON object) as its record
+   and its params, as the inbound hook hands it the request body; a
+   time-relative flow is handed the `--flow-record` row as its record, seeded
+   first so it is in the table, as a swept row is (the acting organization a
+   sweep can set, `tenantId`, is not reproduced); a schedule, or another
+   flow declared `runAs: 'system'`, is handed `--flow-input` as its params
+   (a real tick's own `jobId`, `flowName` and `schedule` params and a
+   binding's acting organization are not reproduced). Any other flow goes
+   through the trigger route as the dev admin, with `--flow-input` as its
+   params. Before the run starts, every node whose type no installed plugin
+   runs is named, reached or not, and a flow whose trigger never binds is
+   reported with the trigger and the engine's reason, and is not run. A
+   schedule or time-relative trigger the deployment's scheduled-work switch
+   keeps unarmed (the default) is not a defect: it is reported as not armed
+   and the flow is still run. A run that fails, a node with no executor, a
+   trigger that never binds, a record-change or time-relative flow given no
+   record, and a write refused because its object lives outside the
+   ephemeral stack each fail `os verify`; a run the start condition skipped,
+   one that paused at a screen, wait or approval, and one stopped at an
+   outbound node are reported and do not. The run writes to the in-memory
+   database this boot creates and nowhere else: a write to an object bound to
+   any other datasource is refused before that datasource's driver is called,
+   and the node that made it fails naming the object and the datasource.
+   Four outbound node types are not executed: `http`, `connector_action`
+   (which also runs every connector a plugin contributes), `notify` and
+   `script`. A plugin's own node type that calls out under another name is
+   not stood in, and runs for real. A run that ends at one of the four stops
+   there, and the report names it (`outbound_not_run`); every node before it
+   ran for real. A stop inside a child flow is named at the child's node, and
+   a `fault` edge on the calling `subflow` or `map` node is still followed.
+   Inside a `try_catch` region the catch region handles the stop as it would
+   a failed call, and the run goes on: the stop is listed
+   (`outboundStops`), and a later node that fails is still the first failure
+   and still fails `os verify`.
    `--multi-tenant` boots org-scoped so tenant-isolation RLS policies
    apply; a walled tenancy posture (`OS_TENANCY_POSTURE` set to `isolated` or
    `group`) asks for the same boot.
@@ -3104,15 +3304,20 @@ document carries depends on where the run ended:
   `path`, `message`, `hint`, plus `package` for a finding raised inside one
   package of the artifact), or the schema issues when the stack does not parse.
 - **Reached the runtime stage:** the report — `app`, `config`, `multiTenant`,
-  `seed` (the boot's seed: its `status`, per-source counts, `totals` and the
+  `capabilities` (the capability-provider advisories: `token`, `message`, and
+  `validate`, which is `error` when `os validate` refuses the stack over it and
+  `warning` when it reports it; `[]` when there are none), `seed` (the boot's seed: its `status`, per-source counts, `totals` and the
   `hardFailures` it adds), `crud`, `rls` (with `--rls`), `referenceShapes` (with `--reference-shapes`),
   `deleteBehaviors` (with `--delete-behaviors`), `uniqueScopes` (with
   `--unique-scopes`; its `boot` names the legs the run could prove),
   `parentWriteReach` (with `--parent-write-reach`; its `personas` name who
   wrote and who could not be provisioned), `dashboardWindows` (with
   `--dashboard-windows`; its `presets` name what each preset handed the door
-  and how it resolved) and `hardFailures`, the count the exit status is read
-  from.
+  and how it resolved), `flowRun` (with `--flow`: the `verdict`, how the run
+  started, the `trigger` and whether it is bound, the `steps`, the
+  `missingExecutors`, the `firstFailure`, the `outboundStops`, the `writes`
+  and the `confinement`)
+  and `hardFailures`, the count the exit status is read from.
 - **Could not run:** `{ "error": "<sentence>" }`, plus `code` and `httpStatus`
   when the failure carries them.
 
@@ -3671,6 +3876,89 @@ the grant, use the environment's console: **Account → Connect an AI Assistant*
 | `--print` | — | Print the endpoint and the command that registers it; run nothing |
 | `-s, --server <url>` | `OS_CLOUD_URL` | Control-plane URL. Default `https://cloud.objectos.ai`, or the URL recorded by `os cloud login` |
 | `-t, --token <key>` | `OS_CLOUD_API_KEY` | Bearer token, used only to find the environment; `$OS_TOKEN` and `~/.objectstack/cloud.json` are the fallbacks |
+
+### Skills
+
+The published skills catalog (`@objectstack/skills`, see [AI Skills](/docs/ai/skills))
+installed into, updated in and checked against your coding agent's skills
+directory. All three work in an empty directory as well as in a project: no
+`package.json` is read or written.
+
+| Command | Description |
+|---------|-------------|
+| `os skills install` | Copy the catalog at one version into the skills directory, and record what was written |
+| `os skills update` | Move the recorded catalog to another version; skills it did not install are never touched |
+| `os skills status` | Report the installed catalog against the expected version: missing, modified and extra skills |
+
+**Which version.** `--version <v>` (an exact version), else `--target <t>` —
+the version the target environment runs, read from its restriction profile
+exactly as [`os validate --target`](#os-validate) reads it (an environment's
+`http(s)` URL, or a profile JSON file) — else this CLI's own version, which is
+the catalog's: the two are released together. The output names which one was
+used. A range or a tag is refused, and so is a version the registry does not
+publish, naming it.
+
+**Where from.** The `@objectstack/skills` tarball at exactly that version, read
+with `npm pack` from the npm registry your environment configures (your
+`.npmrc` files and `npm_config_*` variables apply). Only its
+`dist/skills/<name>/` directories are copied.
+
+**What is recorded.** `install` writes `.objectstack-skills.json` beside the
+skills: the version and every file of every catalog skill with its hash. That
+record is how `update` and `status` tell the catalog's skills from your own.
+
+#### `os skills install`
+
+```bash
+os skills install                                  # this CLI's version, into .claude/skills/
+os skills install --version 18.5.0                 # the version an MCP server names
+os skills install --target https://acme.example.com # the version a target environment runs
+os skills install --dir .agents/skills             # another agent's skills directory
+```
+
+A directory that already holds a recorded catalog is refused, naming
+`os skills update`. A skill directory the record does not name but which shares
+a catalog skill's name (for example one an earlier `skills experimental_sync`
+copied) is refused, naming it; `--force` replaces it with the catalog's.
+
+#### `os skills update`
+
+```bash
+os skills update                                  # this CLI's version
+os skills update --target https://acme.example.com # the version a target environment runs
+os skills update --version 18.6.0
+```
+
+Replaces each recorded skill at the new version and removes each one the new
+version no longer ships. A skill directory the record does not name is never
+written, replaced or removed: a new catalog skill whose name one of yours
+already uses is refused, naming it. A recorded skill you changed is refused,
+naming the files; `--force` discards the change. With no recorded catalog the
+command refuses, naming `os skills install`.
+
+#### `os skills status`
+
+```bash
+os skills status
+os skills status --target https://acme.example.com --check # exit 1 when the catalog is not the target's
+os skills status --json
+```
+
+Reports the installed and the expected version (resolved in the order above),
+`missing` (recorded skills whose directory is gone), `modified` (recorded skills
+with a file changed, removed or added) and `extra` (skill directories the record
+does not name — yours, listed and never judged). The registry is not read. A
+mismatch is no recorded catalog, another version, or any missing or modified
+skill: the command exits `0` regardless, and `1` on a mismatch with `--check`.
+
+| Flag | Commands | Purpose |
+|---|---|---|
+| `--version <v>` | all three | Exact catalog version (not with `--target`) |
+| `--target <t>` | all three | Target environment URL or restriction profile file whose skills version to use |
+| `--dir <path>` | all three | The skills directory (default `.claude/skills/` under the current directory) |
+| `--json` | all three | One JSON document on stdout |
+| `--force` | `install`, `update` | `install`: replace same-named directories it did not install. `update`: discard local changes to catalog skills |
+| `--check` | `status` | Exit `1` on a mismatch |
 
 ### Packages
 

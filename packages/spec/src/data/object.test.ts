@@ -14,6 +14,7 @@ import { collectDroppedRefinements } from '../../scripts/lib/dropped-refinements
 import { Field } from './field.zod';
 import { defineStack } from '../stack.zod';
 import { isMaskedOnReadFieldType } from './masked-field-types';
+import { CONTROLLED_BY_PARENT_MASTER_INVALID, type ControlledByParentMasterShape } from './controlled-by-parent-master';
 import type { StateMachineValidation } from './validation.zod';
 
 describe('ObjectCapabilities', () => {
@@ -32,6 +33,11 @@ describe('ObjectCapabilities', () => {
     // The record-reader approval tier is opt-IN (#8652: default OFF, the
     // downstream project opts in): an absent flag grants nothing.
     expect(result.approvalsVisibleToReaders).toBe(false);
+    // [#36290] Field-change values are on unless turned off, and the flag has
+    // NO default: a parsed body never materializes it, so a built artifact or
+    // a stored definition can always tell an authored `false` from silence.
+    expect('fieldHistory' in result).toBe(false);
+    expect(ObjectCapabilities.parse({ fieldHistory: false }).fieldHistory).toBe(false);
   });
 
   it('should accept custom capability values', () => {
@@ -1259,12 +1265,12 @@ describe('ObjectSchema.create()', () => {
       expect(message).toContain('ADR-0032 "no silent failure"');
     });
 
-    // #4990 note 1 asked whether this file's own `suggestKey` shares the
-    // camelCase weakness that `findClosestMatches` had. It does NOT: it already
-    // lowercases BOTH sides (`editDistance(unknown.toLowerCase(),
-    // key.toLowerCase())`), so a declared key's capitals were never charged to
-    // the author here. Pinning it means the two suggesters cannot drift apart
-    // again — this is the property #4990 fixed in the other one.
+    // #4990 note 1 asked whether this file's own suggester shares the
+    // camelCase weakness that `findClosestMatches` had. It did not, and it no
+    // longer has a suggester of its own: `create()` answers with the shared
+    // `suggestRename` (`shared/rename-guess.ts`), which folds case on BOTH
+    // sides, so a declared key's capitals are never charged to the author.
+    // Pinning it keeps the property #4990 fixed at this door too.
     it('suggestKey judges a typo identically in either case', () => {
       const bullet = (key: string): string => {
         try {
@@ -1630,7 +1636,13 @@ describe('ObjectSchema refuses a controlled_by_parent object without exactly one
     ({ name: 'cbp_line', sharingModel: 'controlled_by_parent' as const, fields });
   const issuesOf = (input: unknown) => {
     const r = ObjectSchema.safeParse(input);
-    return r.success ? [] : r.error.issues.map((i) => ({ path: i.path.join('.'), message: i.message }));
+    return r.success
+      ? []
+      : r.error.issues.map((i) => ({
+          path: i.path.join('.'),
+          message: i.message,
+          params: (i as { params?: Record<string, unknown> }).params,
+        }));
   };
 
   it('ACCEPTS one required master_detail — through the raw parse and through the builder', () => {
@@ -1648,7 +1660,7 @@ describe('ObjectSchema refuses a controlled_by_parent object without exactly one
     const issues = issuesOf(cbp({ parent: { type: 'lookup', reference: 'cbp_header', required: true } }));
     expect(issues).toHaveLength(1);
     expect(issues[0].path).toBe('sharingModel');
-    expect(issues[0].message).toMatch(/^Object 'cbp_line' declares sharingModel 'controlled_by_parent' but no required `master_detail` field, nor a single `master_detail` declared `required: false`\. ADR-0055 §1:/);
+    expect(issues[0].message).toMatch(/^Object 'cbp_line' declares sharingModel 'controlled_by_parent' but no required `master_detail` field, nor a single `master_detail` declared `required: false`\. Since @objectstack\/spec 18, /);
     expect(issues[0].message).toContain("`parent` is a required `lookup`");
     // The builder path refuses it too — the HotCRM shape.
     expect(() => ObjectSchema.create(cbp({ parent: Field.lookup('cbp_header', { label: 'Header', required: true }) }))).toThrow(
@@ -1687,10 +1699,33 @@ describe('ObjectSchema refuses a controlled_by_parent object without exactly one
       b: { type: 'master_detail', reference: 'master_b', required: true },
     }));
     expect(two.map((i) => i.path)).toEqual(['fields']);
-    expect(two[0].message).toMatch(/^Object 'cbp_line' declares sharingModel 'controlled_by_parent' with 2 required `master_detail` fields \(`a`, `b`\)\. ADR-0055 §1:/);
+    expect(two[0].message).toMatch(/^Object 'cbp_line' declares sharingModel 'controlled_by_parent' with 2 required `master_detail` fields \(`a`, `b`\)\. Since @objectstack\/spec 18, /);
     // Both refusals date themselves: 17.7.0 accepts either shape, so each names the release that refuses it.
-    expect(two[0].message).toContain('since @objectstack/spec 18, a controlled-by-parent object derives');
-    expect(none[0].message).toContain('since @objectstack/spec 18, a controlled-by-parent object derives');
+    expect(two[0].message).toContain('Since @objectstack/spec 18, a controlled-by-parent object derives');
+    expect(none[0].message).toContain('Since @objectstack/spec 18, a controlled-by-parent object derives');
+  });
+
+  it('stamps every refusal with the machine-readable code and its shape, and cites no ADR in the message', () => {
+    const SHAPES: Array<[ControlledByParentMasterShape, Record<string, unknown>]> = [
+      ['no-master', { title: { type: 'text' } }],
+      ['required-lookup-only', { parent: { type: 'lookup', reference: 'cbp_header', required: true } }],
+      ['several-masters', {
+        a: { type: 'master_detail', reference: 'master_a', required: false },
+        b: { type: 'master_detail', reference: 'master_b', required: false },
+      }],
+      ['several-required-masters', {
+        a: { type: 'master_detail', reference: 'master_a', required: true },
+        b: { type: 'master_detail', reference: 'master_b', required: true },
+      }],
+      ['master-not-writable', { parent: { type: 'master_detail', reference: 'cbp_header', required: true, system: true } }],
+    ];
+    for (const [shape, fields] of SHAPES) {
+      const issues = issuesOf(cbp(fields));
+      expect(issues, shape).toHaveLength(1);
+      expect(issues[0].params, shape).toEqual({ code: CONTROLLED_BY_PARENT_MASTER_INVALID, shape });
+      expect(issues[0].message, shape).not.toMatch(/ADR-/);
+    }
+    expect(CONTROLLED_BY_PARENT_MASTER_INVALID).toBe('CONTROLLED_BY_PARENT_MASTER_INVALID');
   });
 
   it('judges controlled_by_parent only — every other sharing model keeps its relations as authored', () => {
@@ -3107,5 +3142,37 @@ describe('ObjectSchema.fields — __proto__ / constructor / prototype key refusa
     expect(census.dropped.map((site) => site.path)).not.toContain('fields.out.keyType');
     const site = census.projected.find((s) => s.path === 'fields.out');
     expect(site?.declaredPatterns).toEqual(['banned-keys', 'banned-keys']);
+  });
+});
+
+/**
+ * `ObjectSchema.create()` answers an unknown key with the package's ONE rename
+ * rule (`shared/rename-guess.ts`). It used to carry its own copy of the
+ * `max(2, len/3)` budget, without the short-key screen the strict refusal
+ * gained, so a four-letter key was offered any declared key two unrelated
+ * edits away.
+ */
+describe('ObjectSchema.create — a short unknown key gets the shared rename rule', () => {
+  const bulletFor = (key: string): string => {
+    try {
+      ObjectSchema.create({
+        name: 'demo',
+        fields: {},
+        [key]: 1,
+      } as Record<string, unknown> as Parameters<typeof ObjectSchema.create>[0]);
+    } catch (e) {
+      return ((e as Error).message.split('\n').find((l) => l.trim().startsWith('•')) ?? '').trim();
+    }
+    throw new Error(`expected ObjectSchema.create to reject \`${key}\``);
+  };
+
+  it('a short key two unrelated edits from a declared key is offered nothing', () => {
+    // `page` → `name` is two substitutions, inside the old budget of 2.
+    expect(bulletFor('page')).toBe('• `page` is not an ObjectSchema field.');
+  });
+
+  it('a genuine one-edit slip on a short key is still answered', () => {
+    expect(bulletFor('nmae')).toContain('did you mean `name`');
+    expect(bulletFor('labl')).toContain('did you mean `label`');
   });
 });

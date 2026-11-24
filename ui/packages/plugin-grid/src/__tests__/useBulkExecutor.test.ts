@@ -658,3 +658,101 @@ describe('useBulkExecutor', () => {
     });
   });
 });
+
+// An aggregate handler's resolve value is read per row against the ids the
+// run dispatched (`readAggregateResult`, `BulkActionResultSchema` in
+// `@objectstack/spec/ui`). A rejection stays the one-outcome report above.
+describe('useBulkExecutor — an aggregate run reads its BulkActionResult per row', () => {
+  const agg = (): BulkActionDef => ({
+    name: 'mass_update_stage',
+    operation: 'custom',
+    execution: 'aggregate',
+    actionDef: { name: 'mass_update_stage', type: 'script' },
+  } as BulkActionDef);
+  const ds = () => ({ update: vi.fn(), delete: vi.fn() });
+  const ROWS = [{ id: 'a' }, { id: 'b' }, { id: 'c' }];
+
+  async function runResolving(value: unknown) {
+    const runAggregate = vi.fn(
+      async (
+        _def: BulkActionDef,
+        _rows: Array<Record<string, unknown>>,
+        _params: Record<string, unknown>,
+      ): Promise<unknown> => value,
+    );
+    const { result } = renderHook(() =>
+      useBulkExecutor({ resource: 'opportunity', dataSource: ds(), runAggregate }));
+    await act(async () => {
+      await result.current.run(agg(), ROWS, {});
+    });
+    expect(runAggregate).toHaveBeenCalledTimes(1);
+    return result.current.result!;
+  }
+
+  it('reports the moved count and each failed row with its message', async () => {
+    const r = await runResolving({ succeeded: ['a', 'c'], failed: [{ id: 'b', message: 'B is Closed Won' }] });
+    expect(r).toMatchObject({ total: 3, succeeded: 2, failed: 1 });
+    expect(r.errors).toEqual([{ id: 'b', error: 'B is Closed Won' }]);
+    expect(r.aggregateUnconfirmed).toBeUndefined();
+    expect(r.aggregateUnreadable).toBeUndefined();
+    expect(r.aggregateRejection).toBeUndefined();
+  });
+
+  it('drops an id outside the dispatched selection', async () => {
+    const r = await runResolving({
+      succeeded: ['a', 'b', 'c', 'zz'],
+      failed: [{ id: 'yy', message: 'not selected' }],
+    });
+    expect(r).toMatchObject({ succeeded: 3, failed: 0, errors: [] });
+  });
+
+  it('counts a duplicate id once', async () => {
+    const r = await runResolving({ succeeded: ['a', 'a', 'b', 'c', 'c'], failed: [] });
+    expect(r).toMatchObject({ total: 3, succeeded: 3, failed: 0 });
+  });
+
+  it('counts an id listed in both lists as failed', async () => {
+    const r = await runResolving({ succeeded: ['a', 'b', 'c'], failed: [{ id: 'b', message: 'refused' }] });
+    expect(r).toMatchObject({ succeeded: 2, failed: 1 });
+    expect(r.errors).toEqual([{ id: 'b', error: 'refused' }]);
+  });
+
+  it('keeps the first entry when one id is in failed twice with different messages', async () => {
+    const r = await runResolving({
+      succeeded: ['a', 'c'],
+      failed: [{ id: 'b', message: 'first reason' }, { id: 'b', message: 'second reason' }],
+    });
+    expect(r.failed).toBe(1);
+    expect(r.errors).toEqual([{ id: 'b', error: 'first reason' }]);
+  });
+
+  it('reports a selected id in neither list as not confirmed, never as succeeded', async () => {
+    const r = await runResolving({ succeeded: ['a'], failed: [] });
+    expect(r).toMatchObject({ total: 3, succeeded: 1, failed: 0, errors: [] });
+    expect(r.aggregateUnconfirmed).toEqual(['b', 'c']);
+  });
+
+  it.each([
+    ['counts in place of lists (the data plane batch shape)', { succeeded: 2, failed: 1 }],
+    ['a failed entry spelled with error instead of message', { succeeded: ['a'], failed: [{ id: 'b', error: 'x' }] }],
+    ['only one of the two members', { succeeded: ['a', 'b', 'c'] }],
+    ['a numeric id', { succeeded: [1, 2, 3], failed: [] }],
+  ])('reports a value carrying succeeded/failed that does not parse as unreadable, never as full success: %s', async (_label, value) => {
+    const r = await runResolving(value);
+    expect(r.aggregateUnreadable).toBe(true);
+    expect(r.succeeded).toBe(0);
+    expect(r.errors).toEqual([]);
+    expect(r.aggregateRejection).toBeUndefined();
+  });
+
+  it.each([
+    ['nothing', undefined],
+    ['null', null],
+    ['a summary', { moved: 3 }],
+    ['an artifact link', { url: 'https://example.test/qr.zip' }],
+    ['an array', ['a']],
+  ])('CONTROL: a value with neither member keeps today\'s report: %s', async (_label, value) => {
+    const r = await runResolving(value);
+    expect(r).toEqual({ total: 3, succeeded: 3, failed: 0, errors: [] });
+  });
+});

@@ -30,6 +30,8 @@ export type FieldDefs = Readonly<Record<string, FieldDef | undefined>>;
 export interface SubmittedSectionInput {
   key: string;
   label?: string;
+  /** The field group's declared icon (`fieldGroups[].icon`), drawn beside the heading. */
+  icon?: string;
   columns?: number;
   fields: readonly string[];
 }
@@ -48,6 +50,7 @@ export interface SubmittedField {
 export interface SubmittedSection {
   key: string;
   label?: string;
+  icon?: string;
   columns?: number;
   fields: SubmittedField[];
 }
@@ -185,6 +188,7 @@ export function planSubmittedRecord(
       planned.push({
         key: section.key,
         ...(section.label ? { label: section.label } : {}),
+        ...(section.icon ? { icon: section.icon } : {}),
         ...(section.columns ? { columns: section.columns } : {}),
         fields: drawn,
       });

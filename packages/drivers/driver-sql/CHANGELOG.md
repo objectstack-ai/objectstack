@@ -1,5 +1,224 @@
 # @objectstack/driver-sql
 
+## 18.6.0
+
+### Patch Changes
+
+- 54f8e16: fix(analytics): a dimension through a lookup is one `LEFT JOIN … GROUP BY` on SQL drivers, so it no longer answers 500 past the bind limit
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `POST /analytics/query` with a dimension through a lookup (`opportunity.stage` on a line-item cube) answered `500 DATABASE_ERROR` once the rows pointed at more distinct related records than the database binds parameters for: SQLite refused with `too many SQL variables`, PostgreSQL with a bind count overflow. The ObjectQL analytics path grouped the base rows by the foreign key, then read the related object with `id IN (every distinct key)` and re-bucketed the answer in the service.
+  
+  On the SQL driver (every dialect, and the WASM SQLite driver) the same query is now one statement. The base aggregate `LEFT JOIN`s the related rows the caller may read and groups by the attribute in the database, with no id list and no bound-parameter ceiling. The related rows are the related object's own aggregate, planned as the caller, the read the old path ran without its id list. Its CRUD gate, read middlewares, row scope and field-level gate all apply, and the tenant wall bounds the joined table. The base read is still judged as grouped by the lookup field itself, so a caller who may not read that field is refused exactly as before. A line whose related record is missing, unreadable, in another tenant or not set still counts under `(restricted)`, as before. Every bucket and measure is the one the old path answered.
+  
+  The request is an engine-internal read option, so nothing a client sends changes and the public `groupBy` still refuses a dotted path. The in-memory driver, MongoDB, OData and Turso keep the old path for this dimension, unchanged.
+- 479d1e4: feat(driver-sql, driver-turso): schema sync builds the `(created_at, id)` and `(owner_id)` indexes without a declaration
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  Schema sync now builds two indexes on system columns that no object has to declare:
+  
+  - `(created_at, id)`, named `idx_<table>_created_at_id`, on every table that has both columns. This is the default list order, `created_at desc, id desc`. Without the index, every default-ordered page sorted all of its filtered rows. On PostgreSQL 16 with 1M rows, the admin list statement takes 1.3 ms instead of 317 ms.
+  - `(owner_id)`, named `idx_<table>_owner_id`, on an object whose fields include a single-valued `owner_id`. This is the column a private-OWD read filters on. An object with no `owner_id` gets no such index.
+  
+  Both indexes are non-unique. They follow the #31882 rule for reference columns. If a declared index's key already starts with the same columns, it serves instead, and no second index is built. If an author declares the same key, it gets the same name, so the two converge. On an existing database, `os migrate plan` lists each missing index as a `safe` `create_index`. The next sync builds it, and on PostgreSQL it is built `CONCURRENTLY`. A second sync makes no changes. An existing table that has no `created_at` column gets no default-order index and no error line.
+  
+  Turso's remote face (`libsql://`) now builds the full implicit set too: these two keys and the #31882 reference-column indexes. Until now it built only declared indexes, so the drift plan on a remote database showed a `create_index` for each implicit index after every sync.
+  
+  On SQLite, the index does not speed up a default-ordered page yet. While the engine adds the empty controlled-by-parent chain to the query, the SQLite planner still sorts in a temporary B-tree. When the query has no chain, the same page takes 0.16 ms instead of 1.6 s at 1M rows.
+  
+  Widening: `@objectstack/driver-sql` now exports `implicitReferenceIndexes` from its main entry. Its arguments take an optional `physicalColumns` set, and when one is given, a key over a column the table lacks is left out.
+- d635555: Clause-②: yes (widening)
+  Metadata-protocol: added — `supports.zonedDateBucketing` is a new key a driver author can write on `DriverCapabilities` (`DriverConfig.capabilities`), recorded in `packages/spec/authorable-surface/data.json`.
+  Skills-docs: follow-up #34597
+  
+  PostgreSQL now buckets a non-UTC reference timezone in the database (ADR-0053 Phase 2 D2 as amended). A dashboard grouped by day, week, month, quarter or year in a zone such as `Asia/Taipei` or `Europe/Berlin` no longer pulls every scoped row into the application on PostgreSQL: the bucket is computed by `to_char((col)::timestamptz AT TIME ZONE $zone, …)` with the zone bound, DST-correct, and its labels equal the in-memory ones. A `Field.date` keeps its calendar day under every zone.
+  
+  - `@objectstack/spec`: new driver capability bit `supports.zonedDateBucketing`, and `DriverAggregateQuery` (a `DriverQuery` plus `timezone`), the query `IDataDriver.aggregate` receives. Additive; existing drivers keep compiling and keep today's path.
+  - `@objectstack/objectql`: `engine.aggregate` resolves the request's `timezone` through the runtime first. A name that resolves to `UTC` (`Etc/UTC`, `GMT`, `Zulu`) takes the native UTC path; an area/location name (`CST` resolves to `America/Chicago`) is pushed down as the resolved name to a driver that declares the bit; anything else stays in memory, as before.
+  - `@objectstack/driver-sql`: declares the bit on PostgreSQL only. SQLite (no tz database), MySQL, SQL Server and Oracle keep the in-memory path. A zoned `aggregate()` call made directly against a dialect without the bit is refused `NOT_IMPLEMENTED`/501, and a zone string that is not its own resolved area/location name is refused `INVALID_QUERY`/400, instead of being read as UTC.
+  - `@objectstack/service-analytics`: the `/analytics/sql` dry-run refusal for a non-UTC zone now says the query is bucketed in the database or in memory depending on the driver.
+- 0ac112f: feat(spec, objectql, driver-sql, driver-turso): a per-measure aggregation filter runs in SQL on driver-sql, behind one declared driver capability (#33698)
+  
+  Clause-②: yes (widening: one optional DriverCapabilities bit)
+  Metadata-protocol: semantic
+  
+  **The capability.** `DriverCapabilities` (`@objectstack/spec/data`) gains one optional boolean, `aggregationFilter`: the driver's `aggregate()` evaluates a per-measure `aggregations[].filter` itself, with the answers the engine's in-memory aggregation gives, except that text compares by the database collation (see the last paragraph). Absence means `false`. A driver that declares nothing keeps exactly the path it had.
+  
+  **What runs where.**
+  
+  - `engine.aggregate` sends an aggregate whose measures carry a `filter` to `driver.aggregate` only when the driver declares `aggregationFilter: true` and has the method. Every other driver keeps the in-memory path: `find()` for the scoped rows, then the filter and the aggregate in the engine. A non-UTC timezone with a date bucket still forces the in-memory path, as before.
+  - `driver-sql` declares the bit and compiles each filtered measure as a conditional aggregate, the predicate from the same where compiler a `where` uses: `sum(CASE WHEN (pred) THEN amount END)`, the same for `avg`, `min`, `max`; `count(CASE WHEN (pred) THEN 1 END)` for a count of rows (no `ELSE 0`, which `count` would count); `count(CASE WHEN (pred) THEN field END)` for a count of a field; `count(distinct CASE WHEN (pred) THEN field END)` for `count_distinct`. A group the filter empties answers `0` for `sum` and the counts and `null` for `avg`, `min` and `max`, as before. The tenant wall and the read scope stay on the statement's own `where`, so a measure filter only narrows inside them. `SqliteWasmDriver` inherits the compile.
+  - `driver-turso` turns the bit off in remote mode, where the remote transport refuses the key; local and embedded-replica modes inherit driver-sql's compile.
+  - A direct `SqlDriver#aggregate` call with a measure filter now answers the filtered numbers instead of refusing `NOT_IMPLEMENTED` / 501. The 501 remains only for a compiled predicate the driver cannot isolate, which no tested dialect produces.
+  
+  **What answers differently in memory.** A measure filter, a `having` clause and the in-memory `where` that plugin drivers use all go through one engine evaluator. In that evaluator a column holding no value (SQL NULL) now fails `$gt`, `$gte`, `$lt`, `$lte` and `$between`, as SQL does and as the spec says (null is not ordered). Before, NULL counted as `0` for numbers, so "count where amount ≤ 0" also counted every row with no amount, and `$between` matched a NULL column for any bounds. A `having` on an empty group's `avg`, `min` or `max` (which is `null`) likewise no longer passes an ordering test. `$eq`, `$ne`, `$in`, `$nin`, `$exists`, `$null`, `$empty` and a `null` comparand answer as before.
+  
+  **A measure filter the `where` compiler refuses now refuses on driver-sql.** Because driver-sql compiles a measure filter with the same where compiler, a filter that compiler refuses answers the same `400 INVALID_FILTER` its `where` twin answers. The recorded case is a `{ $field }` comparison between columns of different classes on an object with no audit fields (`created_at` against an image field): before, the engine evaluated it in memory and answered `200`; on driver-sql it now answers `400 INVALID_FILTER`, as `where` always did. A driver without the bit still evaluates it in memory and answers `200`.
+  
+  **Declared latitude: text compares by the database collation.** On driver-sql a measure filter now answers what the `where` of the same datasource answers, so text comparison in it follows the database collation, where the in-memory path compares text exactly. Ordering a non-temporal text column (`$gt` / `$lt` / `$between` on text) follows the collation everywhere; on a case- or accent-insensitive collation, equality and membership do too, so `stage $eq 'won'` also counts `Won` rows, as `where` already does. Measured: SQLite and PostgreSQL 16 agree with the in-memory path on every operator with a `C.UTF-8` collation; PostgreSQL 16 with an ICU `en-US` collation differs only in text ordering. MySQL, SQL Server and Oracle were not measured; the MySQL and SQL Server default collations are case-insensitive.
+- 6091b64: feat(objectql): a nested-relation condition, and an analytics dimension through a lookup, are refused up front with a stable 400 on a driver that compiles no semi-join (MongoDB, OData), decided by the new `DriverCapabilities.readableIdsLeaf` bit
+  
+  Clause-②: yes (narrowing) — narrowed: on a driver that does not declare `DriverCapabilities.readableIdsLeaf` (MongoDB, OData, a third-party driver), a nested-relation condition beneath a single-valued relation on `find`, `findOne`, `count` or `aggregate` is refused `INVALID_FILTER` / 400 before anything is read, where it read the related ids first and answered up to 1,000 related matches (past 1,000 it was already refused `INVALID_FILTER` / 400, never truncated); an analytics dimension through a lookup on such a driver is refused `INVALID_QUERY` / 400 before anything is read, where it was served by reading the related records for the grouped ids. Widened: a driver that declares the bit is served by the planned semi-join whatever its name.
+  Metadata-protocol: added
+  Skills-docs: follow-up #33875 — skills/objectstack-query/SKILL.md (its nested-relation row still promises the capped id read on every driver; MongoDB and OData now refuse it)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata key, accepted value or metadata type is removed, renamed or re-shaped: the one protocol change is the new optional `DriverCapabilities.readableIdsLeaf`, which a driver declares. What moves is a runtime answer on drivers that do not declare it, so there is nothing stored for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for a deployment whose data lives on MongoDB, OData or a third-party driver that does not declare `readableIdsLeaf`. The fix:
+  
+  - FROM `find('opportunity', { where: { account: { region: 'NA' } } })` TO two reads: `find('account', { where: { region: 'NA' }, fields: ['id'] })`, then `find('opportunity', { where: { account: { $in: ids } } })`. The same for `findOne`, `count` and `aggregate`.
+  - FROM an analytics dimension `opportunity.stage` on a line cube TO a dimension on the lookup field itself (`opportunity`), then a read of `opportunity` for `stage` by those ids.
+  - FROM an analytics `where` naming a field through a lookup (`opportunity.stage`), or a dataset whose own `filter` does, TO a filter on the lookup field itself (`opportunity` `$in` the ids read from `opportunity` with that condition): the analytics service hands such a leaf to the engine as the same nested-relation condition, so on these drivers it is refused `INVALID_FILTER` / 400 the same way.
+  - FROM a row-level read scope that holds such a condition (a field through a single-valued relation) TO one on the relation field itself (`account` `$in` the ids it may read): on these drivers an analytics query under the former is refused before anything is read with the withheld `READ_SCOPE_COMPILE_FAILED` / 500, the answer a read scope the engine cannot run already gets.
+  - A third-party driver whose filter compiler composes the leaf declares `supports.readableIdsLeaf: true` and keeps serving both.
+  
+  **`DriverCapabilities.readableIdsLeaf`** (`@objectstack/spec`) is a new optional capability bit: the driver's filter compiler compiles (or, in process, evaluates) a composed `ReadableIds` semi-join leaf. `driver-sql` declares it on every dialect (`SqliteWasmDriver` and `TursoDriver` inherit it), and so does `driver-memory`. MongoDB and OData do not. Absence means `false`.
+  
+  **Where the engine reads it.** A nested-relation condition beneath a single-valued relation on a read verb (`{ account: { region: 'NA' } }` on `find`, `findOne`, `count` or `aggregate`) is planned as one in-database subquery on a driver that declares the bit, as before. On a driver that does not, the engine now refuses the condition before it plans or reads anything: `INVALID_FILTER` / 400, naming the driver and the two-step route (read the related object with that condition, then match the relation field against its ids with `$in`). Until now such a read fell back to reading the related ids first: up to 1,000 related matches were served, and past 1,000 the filter was refused `INVALID_FILTER` / 400. A multi-valued relation and the `where` of `update` / `delete` keep that capped id read on every driver. The engine's filter judge (`IObjectQLEngine.judgeFilter`) answers the same refusal from the driver's declared capabilities, without calling it, so a caller that asks the judge first (the analytics read-scope merge does) gets execution's verdict; an engine that routes the object to no driver does not judge it.
+  
+  **The analytics dimension through a lookup** (`opportunity.stage` on a line cube, `@objectstack/service-analytics` on the ObjectQL face) is decided by the same bit. On a driver without it the query is refused before anything is read: `INVALID_QUERY` / 400, naming the driver and the route (group by the lookup field itself, then read the related object for its attribute by those ids). Until now it was served by reading the related ids. On a driver that declares the bit, the SQL drivers keep the one joined statement and `driver-memory` and Turso keep the id-expand, unchanged.
+- 371e5f1: fix(spec, objectql, driver-sql): a predicate delete with a cascade locks the rows it walks, so a concurrent commit cannot move one out of the predicate before the delete (#34373)
+  
+  Clause-②: yes (widening: DriverOptions.lockRows and DriverCapabilities.lockRows)
+  Metadata-protocol: added
+  
+  **The defect.** A predicate delete (`delete(object, { where, multi: true })`, a flow's `delete_record` with `multi: true`) on an object that delete-family lookups reference reads the matched ids, walks the cascade, then deletes those rows by id. The caller's predicate is not on the final DELETE, so a guard such as `{ id, source: 'idp_pending' }` ("delete only if still pending") held only at the read: a concurrent commit that moved the row out of the predicate between the read and the delete was deleted anyway, and counted.
+  
+  **The fix.** Inside the delete's unit of work, the matched-row read now takes a lock on a driver that can lock, so no other writer can change a matched row behind the unit: it waits until the unit ends, or one side fails. The rows deleted are still exactly the rows walked; nothing changes for a delete that meets no concurrent writer.
+  
+  - `DriverOptions` (`@objectstack/spec/data`) gains `lockRows`: on a read inside a `transaction`, lock the returned rows against concurrent writers until the transaction ends (SQL `SELECT … FOR UPDATE`).
+  - `DriverCapabilities` gains `lockRows`: the driver's `find()` honours that option. Absence means `false`, and the engine sends no lock request to such a driver.
+  - `driver-sql` declares the bit. PostgreSQL and MySQL take row locks (`FOR UPDATE`), SQL Server an update lock (`UPDLOCK`). SQLite compiles nothing: its single-connection pool and database lock already keep another writer from changing a returned row behind the transaction. A second writer through the same driver waits; one on another connection either fails `SQLITE_BUSY` (rollback journal) or commits and makes the transaction's own delete fail `SQLITE_BUSY_SNAPSHOT` (WAL), so the moved row is never deleted. A `find()` with `lockRows` and no transaction is refused `PRECONDITION_REQUIRED` / 428.
+  - The engine's read and delete verbs do not take `lockRows` from a caller (an option they do not execute, as before). Any other option bag that carries it to the engine's driver hop is refused there, before any driver runs: an object whose driver does not declare the bit answers `NOT_IMPLEMENTED` / 501, and a request with no transaction reaching that driver `PRECONDITION_REQUIRED` / 428.
+  
+  **What keeps the window.** A driver without the bit (memory, MongoDB, OData), and a cascade that cannot run in one transaction (the `split` plan, a driver with no transactions), read unlocked as before.
+- 3a78b89: fix(objectql,driver-sql): a boolean field given `'true'` / `'false'` stores the boolean, and a stored text `'false'` reads as false
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The record validator's boolean arm admits `true` / `false`, `0` / `1`, `'0'` / `'1'` and `'true'` / `'false'`, but the engine wrote the reading as sent. On SQLite the text `'true'` was stored beside rows holding `1`: a filter on `won = true` missed the row, and a `requiredWhen: record.won == true` read the string and admitted a write it refuses for `true`. The console's inline grid sends exactly these strings, so a line ticked in the grid could not be found by an equality filter.
+  
+  The engine's write normalisation (`normalizeNumericStringValues`, on insert, update and validate, for every REST, batch and import door) now writes the boolean the arm judged: `'true'`, `'1'` and `1` as `true`; `'false'`, `'0'` and `0` as `false`. The accepted set is unchanged: any other value (`'yes'`, `'TRUE'`, `2`) is refused with `invalid_boolean`, as before.
+  
+  driver-sql read every stored boolean as `Boolean(value)`, so a row stored as the text `'false'` read as `true`. Such a row now reads `'false'` / `'0'` as `false` and `'true'` / `'1'` as `true`. An equality filter on a row already stored as text still compares the text, so `won = false` matches that row only after it is saved again.
+- 23c42c4: fix(driver-sql): boot converges legacy text `'true'` / `'false'` in a SQLite boolean column to `1` / `0`, so boolean filters, sorts and groups find those rows
+  
+  Clause-②: yes (widening: `@objectstack/driver-sql` exports `PendingSchemaWorkKind` from its index, and the CLI consumes it, so the union gains one published value, `normalize_boolean_storage`; boolean filters, sorts and groupBy on SQLite now answer legacy text rows as their boolean)
+  Metadata-protocol: none
+  
+  Before the engine stored the boolean a reading spells, a door that sent the text `'true'` / `'false'` (the console's inline grid) left that text in a SQLite `Field.boolean` or `Field.toggle` column. Since the previous release those rows read back as the right boolean, but every comparison ran against the raw text: `won = false` missed a stored `'false'`, `won = true` missed a stored `'true'`, `$in`, `$ne` and `$nin` answered wrongly, ORDER BY sorted the text after every integer, and an aggregate groupBy presented a text `'false'` as `true`.
+  
+  Schema sync now converges those cells at boot, the fourth storage convergence beside the datetime, time and JSON backfills (`backfillCanonicalBooleans`):
+  
+  - **SQLite only.** Postgres, MSSQL, MySQL and Oracle coerce or refuse the text, so no other dialect can hold such a row.
+  - **One guarded `UPDATE` per column**: `'true'` becomes `1` and `'false'` becomes `0`, and nothing else is written. A second boot converts 0 rows.
+  - **Other text is never rewritten.** A value such as `'yes'` or `'TRUE'` names no boolean the driver can read without guessing; it is counted and logged at `warn`, and boolean filters keep missing it until the value is corrected at the source.
+  - **The record** is an `info` line per table and field with the rows converted and up to five of their ids. There is no down step: a text row already reads as its integer, so an undo would only restore the form the filters miss.
+  - **Dry run.** Under `os migrate plan` the step is listed in place as `normalize_boolean_storage`, with its row count, and nothing is written; `os migrate apply` runs it after the confirmation. `OS_SKIP_SCHEMA_SYNC=1` skips it, as it skips every other schema-sync step.
+  
+  `os migrate plan`'s summary line now reads `N column(s) to converge in place` instead of `N temporal column(s) …`, because a boolean column is counted there too.
+- Updated dependencies [e53e02e]
+- Updated dependencies [1f923d7]
+- Updated dependencies [64c4285]
+- Updated dependencies [b1efa37]
+- Updated dependencies [84e6bbb]
+- Updated dependencies [69783b7]
+- Updated dependencies [bb17350]
+- Updated dependencies [a061708]
+- Updated dependencies [c59198f]
+- Updated dependencies [fb3d1ff]
+- Updated dependencies [2068e03]
+- Updated dependencies [5c7e448]
+- Updated dependencies [de3538c]
+- Updated dependencies [5326028]
+- Updated dependencies [f7b2d02]
+- Updated dependencies [bb3c163]
+- Updated dependencies [d635555]
+- Updated dependencies [0ac112f]
+- Updated dependencies [c934631]
+- Updated dependencies [63e47fe]
+- Updated dependencies [b005638]
+- Updated dependencies [e5c2d76]
+- Updated dependencies [db3bbd3]
+- Updated dependencies [9f32c0f]
+- Updated dependencies [109a903]
+- Updated dependencies [2539ad9]
+- Updated dependencies [98a4449]
+- Updated dependencies [fdfccbf]
+- Updated dependencies [fa1fb6f]
+- Updated dependencies [d10f652]
+- Updated dependencies [ba03d5e]
+- Updated dependencies [3e49033]
+- Updated dependencies [6091b64]
+- Updated dependencies [61ded62]
+- Updated dependencies [75ab117]
+- Updated dependencies [071323e]
+- Updated dependencies [41ff7c3]
+- Updated dependencies [aab8b31]
+- Updated dependencies [e0670b9]
+- Updated dependencies [50d655f]
+- Updated dependencies [3a08833]
+- Updated dependencies [0e2e4f5]
+- Updated dependencies [bef80d3]
+- Updated dependencies [e0670b9]
+- Updated dependencies [9e6fee1]
+- Updated dependencies [52ec26f]
+- Updated dependencies [c2cabce]
+- Updated dependencies [6fb3d0c]
+- Updated dependencies [2c296cf]
+- Updated dependencies [fa9d695]
+- Updated dependencies [d9c4b62]
+- Updated dependencies [8c6ddc5]
+- Updated dependencies [1bf90a0]
+- Updated dependencies [27c0b20]
+- Updated dependencies [842637a]
+- Updated dependencies [227ae36]
+- Updated dependencies [1177058]
+- Updated dependencies [22bf910]
+- Updated dependencies [371e5f1]
+- Updated dependencies [11e0441]
+- Updated dependencies [f23c71e]
+- Updated dependencies [4240719]
+- Updated dependencies [6302c2c]
+- Updated dependencies [7b3e955]
+- Updated dependencies [066177b]
+- Updated dependencies [ddab49d]
+- Updated dependencies [1538596]
+- Updated dependencies [21d84a8]
+- Updated dependencies [4fb8790]
+- Updated dependencies [a1082f3]
+- Updated dependencies [f02f4f6]
+- Updated dependencies [62d9d0d]
+- Updated dependencies [e61af97]
+- Updated dependencies [758bbe7]
+- Updated dependencies [99bd220]
+- Updated dependencies [13057ce]
+- Updated dependencies [a8aa6ab]
+- Updated dependencies [9cf74ae]
+- Updated dependencies [6c1f9b3]
+- Updated dependencies [b633afe]
+- Updated dependencies [aa0fde3]
+- Updated dependencies [743308b]
+- Updated dependencies [bb169c3]
+- Updated dependencies [2487242]
+- Updated dependencies [92a5cac]
+- Updated dependencies [d4b2a75]
+- Updated dependencies [ad9b74b]
+- Updated dependencies [e2a4c66]
+- Updated dependencies [c37e47a]
+- Updated dependencies [a6c2b83]
+- Updated dependencies [1354d2a]
+- Updated dependencies [a2bb7d5]
+  - @objectstack/spec@18.6.0
+  - @objectstack/core@18.6.0
+  - @objectstack/types@18.6.0
+  - @objectstack/observability@18.6.0
+
 ## 18.5.0
 
 ### Patch Changes

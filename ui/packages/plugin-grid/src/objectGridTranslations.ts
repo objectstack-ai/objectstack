@@ -40,6 +40,10 @@ const GRID_DEFAULT_TRANSLATIONS: Record<string, string> = {
   // …and over rows a host handed in while declaring them one page of more.
   'grid.grouping.needsWholeRows':
     'Grouping needs every record, but this grid was handed one page of them, so the groups cannot be counted. Hand in every record, or let the grid fetch them from a data source that implements queryGroupHeaders.',
+  // …and the note over a grouping entry on a field only the draft declares,
+  // dropped under the console's draft preview (objectstack#34898).
+  // Byte-identical to the `en` pack.
+  'grid.grouping.draftOnly': 'Not grouped by {{fields}}: it exists only in the draft until you publish.',
   // Reused by the grouped-view pager (falls back here when no I18nProvider).
   'table.rowsPerPage': 'Rows per page',
   'table.pageInfo': 'Page {{current}} of {{total}}',
@@ -55,6 +59,13 @@ const GRID_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'table.saved': '{{count}} row saved',
   'table.saved_one': '{{count}} row saved',
   'table.saved_other': '{{count}} rows saved',
+  // objectstack#35685 — a list cell save's Undo: the toast's button, the
+  // toast once it has run, and the toast when the server refuses it. The
+  // action runner's and the record page's own keys, byte-identical to the
+  // `en` pack.
+  'actions.undo': 'Undo',
+  'actions.undone': 'Change undone',
+  'table.saveFailed': 'Save failed',
   // The field rules an inline edit is checked against before it is sent
   // (objectstack-ai/objectstack#27520), worded as the record form words them.
   // Byte-identical to the `en` pack, which `defaults-maps-mirror-en-pack`
@@ -96,6 +107,25 @@ const GRID_DEFAULT_TRANSLATIONS: Record<string, string> = {
   // package's own tests) never reaches the locale packs.
   'detail.recordDetail': 'Record Detail',
   'detail.recordDetailWithLabel': '{{label}} Detail',
+  // objectstack#35548 — the summary row's lead, under the first column.
+  'grid.summary.countLead': 'Count {{value}}',
+  // objectstack#35684 — why a list cell opens no editor (`objectGridCellFacts`).
+  'grid.readOnlyReason.readonly': 'This field is read-only.',
+  'grid.readOnlyReason.computed': 'This value is calculated, so it can\'t be edited.',
+  'grid.readOnlyReason.notInline': 'This field can\'t be edited in a list. Open the record to change it.',
+  'grid.readOnlyReason.noFieldPermission': 'You don\'t have permission to edit this field.',
+  'grid.readOnlyReason.viewOff': 'Editing in the list is turned off for this view.',
+  'grid.readOnlyReason.objectReadOnly': 'These records can\'t be edited here.',
+  'grid.readOnlyReason.noPermission': 'You don\'t have permission to edit these records.',
+  'grid.readOnlyReason.approvalLocked': 'This record is locked while it\'s in approval.',
+  'grid.readOnlyReason.checking': 'Checking whether this record can be edited…',
+  'grid.readOnlyReason.noRecordPermission': 'You don\'t have permission to edit this record.',
+  // objectstack#35685 — the confirm before a list cell moves a state-machine
+  // field (`objectGridStateConfirm`). Byte-identical to the `en` pack.
+  'grid.stateChange.title': 'Change {{field}}?',
+  'grid.stateChange.description': '{{field}} changes from {{from}} to {{to}}. Saving may trigger related automation.',
+  'grid.stateChange.confirm': 'Change',
+  'grid.stateChange.cancel': 'Cancel',
 };
 
 /**

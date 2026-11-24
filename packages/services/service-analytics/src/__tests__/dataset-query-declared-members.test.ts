@@ -291,9 +291,10 @@ describe('queryDataset refuses a selection member the dataset does not declare',
     expect(reads).toEqual([]);
   });
 
-  it('mixed comparison date keys: a related record\'s field gets the own-object requirement, a nameable key keeps its declare-it remedy', async () => {
+  it('mixed comparison date keys: a related record\'s field gets the declare-over-it remedy, a nameable key keeps its declare-it remedy', async () => {
     // Seat ruling (option A): a dotted key cannot be a dimension name, so no
-    // sentence tells the author to declare a dimension named after it.
+    // sentence tells the author to declare a dimension named after it; the
+    // remedy is a date dimension declared over it (objectstack#34350).
     const { service, reads } = await boot();
     const e = await service
       .queryDataset(
@@ -315,7 +316,9 @@ describe('queryDataset refuses a selection member the dataset does not declare',
     );
     expect(messageOf(e)).toContain('"account.signed_at" cannot be a dimension name');
     expect(messageOf(e)).toContain(
-      'this comparison cannot run on a dataset query unless that date field is a field of the dataset\'s own object that a declared date dimension names.',
+      'so no date dimension can be declared under it. Declare one date dimension over it instead, with `type: \'date\'` and `field` set to that field, '
+        + 'under any snake_case name (a related record\'s field needs its relationship in the dataset\'s `include`), and name that dimension in '
+        + '`timeDimensions` (and in `compareTo.dimension`, if set): a dashboard compare widget sends its window under that declared name itself.',
     );
     expect(messageOf(e)).toContain(
       'For the key that can be a dimension name, declare a date dimension named "closed_on" on the dataset (over that field).',
@@ -328,11 +331,12 @@ describe('queryDataset refuses a selection member the dataset does not declare',
     expect(reads).toEqual([]);
   });
 
-  it('a related record\'s field as the only undeclared member: the refusal tells the author to declare nothing', async () => {
+  it('a related record\'s field as the only undeclared member: the refusal names no member to declare under the key, only a date dimension over it', async () => {
     // Seat ruling (option A): the message must be true for that class. The
     // select-or-declare sentence would name the dotted key, which no
     // declaration can carry, so it is left out; the compare-window sentence is
-    // the whole remedy.
+    // the whole remedy, a date dimension declared over the field
+    // (objectstack#34350).
     const { service, reads } = await boot();
     const e = await service
       .queryDataset(
@@ -351,8 +355,9 @@ describe('queryDataset refuses a selection member the dataset does not declare',
     expect(messageOf(e)).not.toContain('Use one of these');
     expect(messageOf(e)).toContain(
       '"account.signed_at" cannot be a dimension name (a dimension name is a snake_case identifier, with no dot, so a related record\'s field is never one), '
-        + 'so no date dimension can be declared under it: this comparison cannot run on a dataset query unless the dashboard\'s date field '
-        + 'is a field of the dataset\'s own object that a declared date dimension names.',
+        + 'so no date dimension can be declared under it. Declare one date dimension over it instead, with `type: \'date\'` and `field` set to that field, '
+        + 'under any snake_case name (a related record\'s field needs its relationship in the dataset\'s `include`), and name that dimension in '
+        + '`timeDimensions` (and in `compareTo.dimension`, if set): a dashboard compare widget sends its window under that declared name itself.',
     );
     expect(reads).toEqual([]);
   });
@@ -484,17 +489,19 @@ describe('the source-field gates word their remedy for the door that asked', () 
 describe('compareWindowRemedy — a true sentence for every key, in every mix', () => {
   const windows = (...keys: string[]) =>
     keys.map((member) => ({ member, param: 'timeDimensions' as const, compareWindow: true }));
-  const ownObject = 'is a field of the dataset\'s own object that a declared date dimension names.';
+  const include = 'under any snake_case name (a related record\'s field needs its relationship in the dataset\'s `include`)';
+  const overIt = `so no date dimension can be declared under it. Declare one date dimension over it instead, with \`type: 'date'\` and \`field\` set to that field, ${include}, and name that dimension in \`timeDimensions\` (and in \`compareTo.dimension\`, if set): a dashboard compare widget sends its window under that declared name itself.`;
+  const overEach = `so no date dimension can be declared under them. Declare one date dimension over each instead, with \`type: 'date'\` and \`field\` set to that field, ${include}, and name those dimensions in \`timeDimensions\` (and in \`compareTo.dimension\`, if set): a dashboard compare widget sends each window under its declared name itself.`;
 
   // [nameable keys, unnameable keys, the sentences after the intro]
   for (const [nameable, unnameable, tail] of [
     [['closed_on'], [], 'Declare a date dimension named "closed_on" on the dataset (over that field).'],
     [['closed_on', 'created_at'], [], 'Declare a date dimension for each on the dataset, named "closed_on" and "created_at", each over the field of the same name.'],
-    [[], ['account.founded_at'], `"account.founded_at" cannot be a dimension name (a dimension name is a snake_case identifier, with no dot, so a related record's field is never one), so no date dimension can be declared under it: this comparison cannot run on a dataset query unless the dashboard's date field ${ownObject}`],
-    [[], ['CloseDate'], `"CloseDate" cannot be a dimension name (a dimension name is a snake_case identifier, with no dot, so a related record's field is never one), so no date dimension can be declared under it: this comparison cannot run on a dataset query unless the dashboard's date field ${ownObject}`],
-    [[], ['account.founded_at', 'owner.hired_at'], `"account.founded_at" and "owner.hired_at" cannot be dimension names (a dimension name is a snake_case identifier, with no dot, so a related record's field is never one), so no date dimension can be declared under them: this comparison cannot run on a dataset query unless each of those date fields ${ownObject}`],
-    [['closed_on'], ['account.founded_at', 'owner.hired_at'], `"account.founded_at" and "owner.hired_at" cannot be dimension names (a dimension name is a snake_case identifier, with no dot, so a related record's field is never one), so no date dimension can be declared under them: this comparison cannot run on a dataset query unless each of those date fields ${ownObject} For the key that can be a dimension name, declare a date dimension named "closed_on" on the dataset (over that field).`],
-    [['closed_on', 'created_at'], ['account.founded_at'], `"account.founded_at" cannot be a dimension name (a dimension name is a snake_case identifier, with no dot, so a related record's field is never one), so no date dimension can be declared under it: this comparison cannot run on a dataset query unless that date field ${ownObject} For the keys that can be dimension names, declare a date dimension for each on the dataset, named "closed_on" and "created_at", each over the field of the same name.`],
+    [[], ['account.founded_at'], `"account.founded_at" cannot be a dimension name (a dimension name is a snake_case identifier, with no dot, so a related record's field is never one), ${overIt}`],
+    [[], ['CloseDate'], `"CloseDate" cannot be a dimension name (a dimension name is a snake_case identifier, with no dot, so a related record's field is never one), ${overIt}`],
+    [[], ['account.founded_at', 'owner.hired_at'], `"account.founded_at" and "owner.hired_at" cannot be dimension names (a dimension name is a snake_case identifier, with no dot, so a related record's field is never one), ${overEach}`],
+    [['closed_on'], ['account.founded_at', 'owner.hired_at'], `"account.founded_at" and "owner.hired_at" cannot be dimension names (a dimension name is a snake_case identifier, with no dot, so a related record's field is never one), ${overEach} For the key that can be a dimension name, declare a date dimension named "closed_on" on the dataset (over that field).`],
+    [['closed_on', 'created_at'], ['account.founded_at'], `"account.founded_at" cannot be a dimension name (a dimension name is a snake_case identifier, with no dot, so a related record's field is never one), ${overIt} For the keys that can be dimension names, declare a date dimension for each on the dataset, named "closed_on" and "created_at", each over the field of the same name.`],
   ] as Array<[string[], string[], string]>) {
     it(`${nameable.length} nameable, ${unnameable.length} unnameable`, () => {
       const keys = [...nameable, ...unnameable];

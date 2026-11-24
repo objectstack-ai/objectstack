@@ -49,7 +49,7 @@ import { MemoryRouter } from 'react-router-dom';
  * so the survey is not a valid ViewItem: it pins how the picker labels a
  * served item that names neither.
  */
-const { saveItem, stored, ADAPTER } = vi.hoisted(() => {
+const { saveItem, stored, ADAPTER, METADATA_CLIENT } = vi.hoisted(() => {
   const stored: { submitBehavior: unknown } = { submitBehavior: undefined };
   const published = () => ({
     name: 'showcase_task.public',
@@ -82,12 +82,24 @@ const { saveItem, stored, ADAPTER } = vi.hoisted(() => {
       },
     }),
   };
-  return { saveItem, stored, ADAPTER };
+  // objectstack#35054 — the writers (and the Edit dialog's prefill) start
+  // from the layered read: here the stored item is the served one, read from
+  // the same list (no translation in play).
+  const METADATA_CLIENT = {
+    layered: async (_type: string, name: string) => {
+      const listed: any = await ADAPTER.getClient().meta.getItems('view');
+      const items: any[] = Array.isArray(listed) ? listed : listed?.items ?? [];
+      const found = items.find((i) => i?.name === name) ?? null;
+      return { code: null, overlay: found, overlayScope: found ? 'env' : null, effective: found };
+    },
+  };
+  return { saveItem, stored, ADAPTER, METADATA_CLIENT };
 });
 
 vi.mock('@object-ui/app-shell', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useAdapter: () => ADAPTER,
+  useMetadataClient: () => METADATA_CLIENT,
 }));
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 

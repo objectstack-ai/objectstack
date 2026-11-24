@@ -245,13 +245,15 @@ describe('objectstack#27627 — one request opens a record page', () => {
     expect(data.every((h) => h.wave === 1)).toBe(true);
 
     // The request names what the page draws: its four related lists, the
-    // header's verdicts, the field projection and the approval state.
+    // header's verdicts (the contact carries an owner, so Change Owner's
+    // `transfer` verdict rides the same read, objectstack#35403), the field
+    // projection and the approval state.
     const [page] = data;
     expect(page.body.related.map((r: any) => [r.object, r.field])).toEqual(
       expect.arrayContaining(CHILDREN.map((c) => [c, 'contact'])),
     );
     expect(page.body.related).toHaveLength(CHILDREN.length);
-    expect(page.body).toMatchObject({ explain: ['update', 'delete'], approvals: true, expand: ['account'] });
+    expect(page.body).toMatchObject({ explain: ['update', 'delete', 'transfer'], approvals: true, expand: ['account'] });
 
     // Every badge's total is the payload's.
     for (const c of CHILDREN) expect(RelatedCountStore.get(c, 'contact', 'c1')).toBe(TOTAL[c]);

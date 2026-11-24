@@ -511,6 +511,11 @@ judged; a mention the comment already carried was judged when it was written. A
 nested write that a hook or a flow makes inside this one carries its own options,
 so its verdicts never reach this listener.
 
+A reply (a comment with a `parent_id`) also notifies the thread's starter and the
+people who replied in it before, through the same gate (topic `collab.reply`).
+Those are people the author did not name, so the participants the gate withholds
+are never reported here: the listener names only users the comment @mentioned.
+
 The DataProtocol's `createData` and `updateData` pass this listener and answer the
 ids as `withheldMentions`, on the requester's own answer to that request only and present only when at
 least one user was withheld. Nothing is stored on the comment: a stored member

@@ -86,6 +86,13 @@ function navKind(it: RawNav): string {
 }
 
 /**
+ * The host's name for an entry's kind, drawn on its badge in place of the raw
+ * `type` (Studio passes the name its navigation list shows). `null` — no host
+ * name — keeps the raw kind.
+ */
+const NavKindLabelContext = React.createContext<((item: RawNav) => string) | null>(null);
+
+/**
  * Per-kind color tone — keeps nav kinds scannable at a glance and
  * mirrors the field-type category tinting used elsewhere in Studio.
  * Class strings are written out in full so Tailwind's JIT emits them.
@@ -466,6 +473,11 @@ export interface AppNavCanvasProps {
    * no departure guard leaves it out.
    */
   onRenamePendingChange?: (label: string | null) => void;
+  /**
+   * The name each entry's kind badge shows, in place of the raw `type`; an
+   * empty answer keeps the raw kind. Omitted, every badge shows the raw kind.
+   */
+  kindLabel?: (item: { type?: string; viewName?: unknown }) => string;
 }
 
 export function AppNavCanvas({
@@ -475,6 +487,7 @@ export function AppNavCanvas({
   selection,
   onSelectionChange,
   onRenamePendingChange,
+  kindLabel,
 }: AppNavCanvasProps) {
   const locale = useMetadataLocale();
   const targetLabel = useNavTargetLabel();
@@ -594,6 +607,7 @@ export function AppNavCanvas({
   );
 
   return (
+    <NavKindLabelContext.Provider value={kindLabel ?? null}>
     <div className="rounded-md border bg-card/40">
       {/* objectui#12519 — in the Studio's 240 px rail the add button takes a
           line of its own rather than folding its words. */}
@@ -667,6 +681,7 @@ export function AppNavCanvas({
         )}
       </div>
     </div>
+    </NavKindLabelContext.Provider>
   );
 }
 
@@ -784,6 +799,8 @@ function NavCard({
 }) {
   const kind = navKind(item);
   const tone = kindTone(kind);
+  const hostKindLabel = React.useContext(NavKindLabelContext);
+  const kindText = hostKindLabel?.(item) || kind;
   const target = navTarget(item);
   const label = navLabel(item, index, locale, targetLabel);
   // The rename edits the AUTHORED label: `''` for an entry that has none, whose
@@ -905,7 +922,7 @@ function NavCard({
           </span>
         )}
         <Badge variant="outline" className={cn('h-5 shrink-0 px-1.5 py-0 text-[10px] font-medium', tone.badge)}>
-          {kind}
+          {kindText}
         </Badge>
         {/* An entry with no target yet: kept in the editor, left out of the
             save (`isIncompleteNavEntry`). */}

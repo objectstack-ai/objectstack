@@ -162,8 +162,9 @@ const READ = {
   overrides: [{ type: 'dashboard', name: 'pipeline', basedOn: '4.0.0' }],
   extensions: [{ object: 'crm_account', kind: 'field', name: 'tier__c' }],
   switchedOff: [],
+  arrangements: [],
   contributions: [],
-  counts: { overrides: 1, extensions: 1, switchedOff: 0, contributions: 0 },
+  counts: { overrides: 1, extensions: 1, switchedOff: 0, arrangements: 0, contributions: 0 },
 };
 /**
  * objectstack#29786 — what the third package contributes to the base: a nav
@@ -215,7 +216,7 @@ const SERVED_APP = {
     { id: 'nav_knowledge', type: 'url', label: 'Knowledge base', url: '/kb2' },
   ],
 };
-const EMPTY_READ = { packageId: BASE, overrides: [], extensions: [], switchedOff: [], contributions: [], counts: { overrides: 0, extensions: 0, switchedOff: 0, contributions: 0 } };
+const EMPTY_READ = { packageId: BASE, overrides: [], extensions: [], switchedOff: [], arrangements: [], contributions: [], counts: { overrides: 0, extensions: 0, switchedOff: 0, arrangements: 0, contributions: 0 } };
 
 /** The base's own lists, by type. The override is served under the base's name (ADR-0146 D8 item 2). */
 const BASE_LISTS: Record<string, Array<Record<string, unknown>>> = {
@@ -510,19 +511,10 @@ describe('the Data rail lists the pair’s objects with the base’s (objectstac
   });
 });
 
-describe('the package switcher and the pair’s URLs (objectstack#28572)', () => {
-  it('the switcher gives the pair no row, and names it under its base', async () => {
-    renderAt(`/studio/${BASE}/interfaces`);
-    await waitFor(() => expect(document.querySelector('[data-slot="pkg-name"]')).toHaveTextContent('HotCRM'), { timeout: 8000 });
-    fireEvent.click(document.querySelector('[data-slot="pkg-name"]')!.closest('button')!);
-    await waitFor(() => expect(screen.getAllByTestId('studio-switcher-row').length).toBeGreaterThan(0), { timeout: 8000 });
-    const rows = screen.getAllByTestId('studio-switcher-row');
-    expect(rows.map((r) => r.getAttribute('data-package'))).toEqual([BASE, ADDON]);
-    expect(within(rows[0]!).getByTestId('studio-switcher-pair')).toHaveTextContent(
-      tFormat('engine.studio.pkg.withPair', 'en', { pair: PAIR }),
-    );
-  });
-
+describe('the pair’s URLs (objectstack#28572)', () => {
+  // The package switcher's case (the pair has no row, named under its base)
+  // left with the switcher, objectstack#36501; the Studio landing's cards
+  // fold the pair the same way (`foldCustomizationPairs`).
   it('a pillar URL of the pair lands on the base’s surface, its query kept', async () => {
     renderAt(`/studio/${encodeURIComponent(PAIR)}/interfaces?surface=dashboard:wins`);
     await waitFor(() => expect(screen.getByTestId('location').textContent).toMatch(new RegExp(`^/studio/${BASE}/interfaces\\?`)));

@@ -1,13 +1,19 @@
-import { useState, useEffect, useCallback, useMemo, lazy, Suspense } from 'react';
-import { useParams } from 'react-router-dom';
+import { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense } from 'react';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 const ReportRenderer = lazy(() =>
   import('@object-ui/plugin-report').then((m) => ({ default: m.ReportRenderer })),
 );
 import { Empty, EmptyTitle, EmptyDescription } from '@object-ui/components';
-// Runtime report editor — hosts the studio's spec-driven report inspector
-// (lives in app-shell to avoid a circular dep on plugin-report).
+// objectstack#36374 — the report builder, hosted here (the catalog reads and
+// the served-text boxes need the console's metadata client).
+import { ReportBuilderHost } from './ReportBuilderHost.js';
+import { RuntimeDraftBar } from './RuntimeDraftBar.js';
+// A joined report, and a pre-dataset one, keep the spec-driven report
+// inspector: the builder draws one dataset (see `opensInBuilder`).
 import { ReportConfigPanel } from './ReportConfigPanel.js';
+import { readReportBuilderArrival, withoutReportBuilderArrival } from './reportBuilderArrival.js';
 import { Pencil, BarChart3, Loader2 } from 'lucide-react';
+import { PageHeader } from '../layout/PageHeader.js';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { MetadataPanel, useMetadataInspector } from './MetadataInspector.js';
 import { useMetadata } from '../providers/MetadataProvider.js';
@@ -15,8 +21,9 @@ import { useExpressionContext } from '../providers/ExpressionProvider.js';
 import { preferLocal } from '../utils/preferLocal.js';
 import { useAdapter } from '../providers/AdapterProvider.js';
 import { useMetadataClient } from './metadata-admin/useMetadata.js';
-import { persistRuntimeMetadata } from './runtime-metadata-persistence.js';
-import { formatMetadataError } from '@object-ui/data-objectstack';
+import { saveAndPublishRuntimeMetadata } from './runtime-metadata-persistence.js';
+import { authoredBuffer, extractDraftBody, formatMetadataError, type AuthoredLayers } from '@object-ui/data-objectstack';
+import { t as tStudio, tFormat, useMetadataLocale } from './metadata-admin/i18n.js';
 import { servedPackageId } from '@object-ui/core';
 import { toast } from 'sonner';
 import { useWorkspaceAdminStatus } from '@object-ui/auth';
@@ -26,6 +33,68 @@ import { DrillDownDrawer } from '@object-ui/plugin-dashboard';
 import { DrillNavigationProvider } from '@object-ui/react';
 import { useRecordListDrillNavigation } from './useOpenRecordList.js';
 import { metadataText } from '../hooks/useNavTargetLabel.js';
+import {
+  ServedReportTextContext,
+  servedReportTextOf,
+  type ServedReportText,
+} from './studio-design/servedReportText.js';
+import { conditionToGroup, type FilterCondition } from './metadata-admin/inspectors/datasetFilterCondition.js';
+
+/**
+ * The report keys whose text the server translates where it serves the report
+ * (`translateReport`: the name, the description, a joined report's block
+ * labels) plus the `title` the page header reads first.
+ */
+const SERVED_TEXT_KEYS = ['title', 'label', 'description', 'blocks'] as const;
+
+/**
+ * objectstack#36373 — the report the page DRAWS while the editor is open: the
+ * edited buffer, except that each translated key the edit has not touched is
+ * the served copy's. The buffer is the untranslated authored document
+ * (objectstack#35008), so drawing it whole flipped the page heading and the
+ * subtitle to the source language the moment the editor opened; a key the
+ * author did change is drawn as edited.
+ */
+export function previewWithServedText(
+  served: Record<string, any> | null | undefined,
+  authoredAtOpen: Record<string, any> | null | undefined,
+  edited: Record<string, any>,
+): Record<string, any> {
+  if (!served || !authoredAtOpen) return edited;
+  const out: Record<string, any> = { ...edited };
+  for (const key of SERVED_TEXT_KEYS) {
+    if (JSON.stringify(edited[key]) !== JSON.stringify(authoredAtOpen[key])) continue;
+    if (key in served) out[key] = served[key];
+  }
+  return out;
+}
+
+/**
+ * objectstack#36374 — whether a report is edited in the report builder. The
+ * builder draws ONE dataset-bound report (or a new one); a `joined` report
+ * (several datasets, one per block) and a pre-dataset report (`objectName`,
+ * `dataSource` or inline `data`) keep the report inspector panel, which edits
+ * every shape the spec allows; so does a dataset report the builder has no
+ * setting for (a cross-tab, several values, or a saved filter its 「+ Filter」
+ * cannot hold — an `$or`, a nested group, an operator it does not offer).
+ * A saved filter it CAN hold opens in the builder (objectstack#36645).
+ */
+export function opensInBuilder(report: Record<string, unknown> | null | undefined): boolean {
+  if (!report) return false;
+  if (report.type === 'joined') return false;
+  if (report.objectName !== undefined || report.dataSource !== undefined || report.data !== undefined) return false;
+  // Shapes the builder has no setting for keep the panel, which edits them: a
+  // cross-tab (`columns`), several values, and a saved filter (`runtimeFilter`)
+  // the builder's filter cannot hold. The question is the filter editor's own
+  // read-back (`conditionToGroup`), asked without the field list: its shape
+  // alone decides here, and an operator the field's type does not offer is
+  // kept as saved in the builder, not rewritten (objectstack#36645).
+  const filled = (v: unknown) => Array.isArray(v) ? v.length > 0 : v !== undefined && v !== null;
+  if (filled(report.columns)) return false;
+  if (filled(report.runtimeFilter) && !conditionToGroup(report.runtimeFilter as FilterCondition).representable) return false;
+  if (Array.isArray(report.values) && report.values.length > 1) return false;
+  return true;
+}
 
 // Fallback fields when no schema is available
 const FALLBACK_FIELDS = [
@@ -49,7 +118,11 @@ export function ReportView({ dataSource }: { dataSource?: DataSource }) {
   // Editing a report mutates the SHARED definition, so it is an admin-only
   // quick-edit affordance (mirrors ObjectView's view-config gate).
   const { isAdmin } = useWorkspaceAdminStatus();
-  const [configPanelOpen, setConfigPanelOpen] = useState(false);
+  // objectstack#36374 — which editor is open: the report builder (it
+  // replaces the page), or the inspector panel beside the report.
+  const [editor, setEditor] = useState<'builder' | 'panel' | null>(null);
+  const builderOpen = editor === 'builder';
+  const configPanelOpen = editor === 'panel';
   // Version counter — incremented on save to refresh the stable config reference
   const [configVersion, setConfigVersion] = useState(0);
   
@@ -69,8 +142,10 @@ export function ReportView({ dataSource }: { dataSource?: DataSource }) {
   // Drill-through (ADR-0021 D2): clicking an aggregated row/cell opens the
   // underlying records in an in-place drawer (peek without leaving the report),
   // with an "Open in list →" escape hatch to the full object list page.
-  const drillNavigation = useRecordListDrillNavigation();
-  const [drill, setDrill] = useState<{ object: string; filter: Record<string, unknown>; title: string } | null>(null);
+  const drillNavigation = useRecordListDrillNavigation(
+    metadataText(reportData?.title, language) ?? metadataText(reportData?.label, language),
+  );
+  const [drill, setDrill] = useState<{ object: string; filter: Record<string, unknown>; title: string; fields?: string[] } | null>(null);
 
   const getFieldsForObject = useCallback(
     (objName: string | undefined) => {
@@ -116,7 +191,7 @@ export function ReportView({ dataSource }: { dataSource?: DataSource }) {
   //     dim (the drill lands on a superset rather than filtering wrongly)
   //   - granularity-bucketed dates → need a range, not equality; skip too
   const handleDatasetDrill = useCallback(
-    async ({ dataset, groupKey, object, objectFilter }: DatasetDrillArgs) => {
+    async ({ dataset, groupKey, object, objectFilter, fields }: DatasetDrillArgs) => {
       try {
         // Drawer header: the clicked group's display values (e.g. "West / Q3"),
         // else the report's label in the viewer's language (objectui#13470).
@@ -129,13 +204,15 @@ export function ReportView({ dataSource }: { dataSource?: DataSource }) {
         // server's drillRawRows — correct for select/lookup dims (a stored
         // value, not a display label) with NO dataset-definition round-trip.
         if (object && objectFilter) {
-          setDrill({ object, filter: objectFilter, title });
+          setDrill({ object, filter: objectFilter, title, fields });
           return;
         }
 
         // Fallback (older server with no drill metadata): resolve the dataset's
         // object and reverse-map dimension labels → stored values ourselves.
-        const callerPackage = servedPackageId(editSchema || reportData);
+        // The served report names the package; the authored edit buffer carries no
+        // read decoration (objectstack#35008).
+        const callerPackage = servedPackageId(reportData);
         const def = await metadataClient.get<Record<string, any>>(
           'dataset',
           dataset,
@@ -189,23 +266,34 @@ export function ReportView({ dataSource }: { dataSource?: DataSource }) {
   }, [editSchema, reportData, getFieldsForObject]);
 
   // ---- Save helper --------------------------------------------------------
-  // Resolves whether the draft was staged, so the editor closes only on a
+  // objectstack#36374 — Save writes the report and publishes it in the same
+  // press, so every member sees it on their next read: the maintainer's ruling
+  // on epic #36510 (「人改一项、点保存、立刻生效。草稿加整包发布只留给 AI 的批量改动」).
+  // ADR-0034's draft/publish model is kept underneath — the body is staged as
+  // the item's draft and promoted at once (`saveAndPublishRuntimeMetadata`, the
+  // list view's shared-view save); `sys_report` stays retired. Over a draft
+  // someone else left pending nothing is written and the builder says so: the
+  // draft bar above the preview publishes or discards that draft first.
+  // Resolves whether the report was saved, so the builder closes only on a
   // save that landed (objectui#11583).
   const saveSchema = useCallback(
     async (schema: any): Promise<boolean> => {
       if (!metadataClient) return false;
       try {
-        // ADR-0034: save stages a per-item draft; an explicit Publish
-        // promotes it (RuntimeDraftBar). `sys_report` is retired.
-        await persistRuntimeMetadata('report', reportName!, schema, {
+        const outcome = await saveAndPublishRuntimeMetadata('report', reportName!, schema, {
           metadataClient,
+          dataSource: dataSource as any,
         });
+        if (outcome === 'pending-draft') {
+          toast.error(t('form.saveError'), { description: t('report.builder.pendingDraft') });
+          return false;
+        }
         refresh().catch(() => {});
         return true;
       } catch (err) {
-        console.warn('[ReportView] Auto-save failed:', err);
+        console.warn('[ReportView] Save failed:', err);
         // objectui#11583: a refused save is said, with the door's message.
-        // It fires once per press of the editor's Save (an edit only drives
+        // It fires once per press of the builder's Save (an edit only drives
         // the live preview), so one refusal is one toast.
         toast.error(t('form.saveError'), {
           description: formatMetadataError(err),
@@ -214,21 +302,104 @@ export function ReportView({ dataSource }: { dataSource?: DataSource }) {
         return false;
       }
     },
-    [metadataClient, reportName, refresh, t],
+    [metadataClient, reportName, refresh, t, dataSource],
   );
 
-  // ---- Open / close config panel ------------------------------------------
-  const handleOpenConfigPanel = useCallback(() => {
-    setEditSchema(reportData);
-    setConfigPanelOpen(true);
+  // ---- Open / close the builder ------------------------------------------
+  // objectstack#35008 — the editor edits the report as its author wrote it,
+  // never the report as it is served. `reportData` comes from the served
+  // `/meta/report` list, which the server translates for the console's
+  // Accept-Language: in a zh-CN session its `label`, `description` and block
+  // labels are the catalog's translations, and the save door stores a report
+  // body verbatim (its translated-echo restore covers objects only). Seeded
+  // from that copy, a quick edit of any field stored the translations as the
+  // source text, and every other locale was served them after publish.
+  //
+  // The buffer is the layered read's authored document instead, through the
+  // one reading the Studio editors share (`authoredBuffer`, objectstack#29793):
+  // the stored draft when one is pending, else the published item, both
+  // untranslated. Read at the package the served report came from (ADR-0048).
+  // The served report stays the display copy; with nothing authored to read,
+  // the editor does not open — ⛔ never fall back to the served copy, which is
+  // the translated document this exists to keep out of the save.
+  //
+  // objectstack#35054 — the served draft read, at the same package, is handed
+  // to `authoredBuffer` as the Studio editors hand theirs: it says whether a
+  // draft is pending, so a pending draft whose stored copy the layers do not
+  // serve is `unserved` and opens no editor, instead of an editor seeded with
+  // the published report that a Save would stage over the pending draft.
+  const metadataLocale = useMetadataLocale();
+  // A landed save keeps the saved report as the page's picture until the
+  // metadata refresh it triggers replaces it (`editSchema`). The builder's
+  // buffer is the untranslated source, so a close with no landed save draws
+  // the served report again, which is the display copy for this locale.
+  const [openingEditor, setOpeningEditor] = useState(false);
+  // The authored buffer as the builder opened on it, and the served text of
+  // the report's name and description paired with the published layer — the
+  // builder's name and description boxes read it, and the page draws the
+  // served text for every key a saved edit left alone (`previewWithServedText`).
+  const [authoredAtOpen, setAuthoredAtOpen] = useState<Record<string, any> | null>(null);
+  const [servedText, setServedText] = useState<ServedReportText | null>(null);
+  const handleOpenBuilder = useCallback(async () => {
+    if (!metadataClient || !reportName) return;
+    const packageId = servedPackageId(reportData);
+    setOpeningEditor(true);
+    let body: Record<string, unknown> | null = null;
+    let published: Record<string, unknown> | null = null;
+    let failure: string | null = null;
+    try {
+      const at = packageId ? { packageId } : {};
+      const [layers, servedDraft] = await Promise.all([
+        metadataClient.layered<Record<string, unknown>>('report', reportName, at),
+        metadataClient.getDraft('report', reportName, at),
+      ]);
+      const authored = authoredBuffer('report', layers as AuthoredLayers, extractDraftBody(servedDraft));
+      const lay = layers as { effective?: unknown; code?: unknown } | null;
+      published = (lay?.effective ?? lay?.code ?? null) as Record<string, unknown> | null;
+      if (authored.kind === 'unserved') failure = tStudio('engine.studio.refusal.draftUnreadable', metadataLocale);
+      else if (Object.keys(authored.body).length > 0) body = authored.body;
+      else failure = tStudio('engine.form.notFound', metadataLocale);
+    } catch (err) {
+      failure = formatMetadataError(err);
+    } finally {
+      setOpeningEditor(false);
+    }
+    if (!body) {
+      toast.error(
+        tFormat('engine.edit.loadFailed', metadataLocale, {
+          type: 'report',
+          name: reportName,
+          message: failure ?? tStudio('engine.form.notFound', metadataLocale),
+        }),
+      );
+      return;
+    }
+    setAuthoredAtOpen(body);
+    setServedText(servedReportTextOf(published, reportData));
+    if (opensInBuilder(body)) {
+      setEditor('builder');
+      return;
+    }
+    savedSinceOpenRef.current = false;
+    setEditSchema(body);
+    setEditor('panel');
     setConfigVersion((v) => v + 1);
-  }, [reportData]);
+  }, [metadataClient, reportName, reportData, metadataLocale]);
 
-  const handleCloseConfigPanel = useCallback(() => {
-    setConfigPanelOpen(false);
+  const handleCloseBuilder = useCallback(() => {
+    setEditor(null);
   }, []);
 
-  // ---- Report config panel handlers --------------------------------------
+  // The inspector panel's buffer drives the page's preview while it is open.
+  // A landed save keeps it as the preview until the metadata refresh it
+  // triggers replaces it; a close with no landed save puts the served report
+  // back (the buffer is the untranslated source, no display copy here).
+  const savedSinceOpenRef = useRef(false);
+  const handleCloseConfigPanel = useCallback(() => {
+    setEditor(null);
+    if (!savedSinceOpenRef.current) setEditSchema(null);
+  }, []);
+
   // Stabilize config reference: only recompute after explicit actions (panel
   // open, save). configVersion is incremented on those actions.
   // This prevents useConfigDraft from resetting the draft on every live field
@@ -243,6 +414,7 @@ export function ReportView({ dataSource }: { dataSource?: DataSource }) {
     async (config: Record<string, any>): Promise<boolean> => {
       setEditSchema(config);
       const saved = await saveSchema(config);
+      if (saved) savedSinceOpenRef.current = true;
       // Re-seat the panel's config only on a save that landed: a refused one
       // keeps the open panel's draft, edit included, for a retry
       // (objectui#11583).
@@ -259,15 +431,43 @@ export function ReportView({ dataSource }: { dataSource?: DataSource }) {
     [],
   );
 
+  const handleBuilderSave = useCallback(
+    async (schema: Record<string, any>): Promise<boolean> => {
+      const saved = await saveSchema(schema);
+      // A refused save keeps the builder open with its edit, for a retry
+      // (objectui#11583).
+      if (saved) {
+        setEditSchema(schema);
+        setEditor(null);
+      }
+      return saved;
+    },
+    [saveSchema],
+  );
+
+  // objectstack#36374 — a page that lands here asking for the builder (a
+  // report just created, objectstack#36364) opens it once, then clears the ask.
+  const location = useLocation();
+  const navigate = useNavigate();
+  const arrivalReadRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!isAdmin || loading || !initialReport || !reportName) return;
+    if (!readReportBuilderArrival(location.state, reportName)) return;
+    if (arrivalReadRef.current === location.key) return;
+    arrivalReadRef.current = location.key;
+    navigate(location.pathname + location.search, { replace: true, state: withoutReportBuilderArrival(location.state) });
+    void handleOpenBuilder();
+  }, [isAdmin, loading, initialReport, reportName, location, navigate, handleOpenBuilder]);
+
   // Sync reportData when metadata finishes loading or reportName changes
   useEffect(() => {
     setReportData(initialReport);
   }, [initialReport]);
 
-  // When metadata refreshes, discard stale editSchema if the config panel
-  // is already closed.
+  // When metadata refreshes, discard the saved picture once the editor is
+  // closed: the served report now carries the save.
   useEffect(() => {
-    if (!configPanelOpen) {
+    if (!editor) {
       setEditSchema(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -402,8 +602,12 @@ export function ReportView({ dataSource }: { dataSource?: DataSource }) {
     );
   }
 
-  // Use live-edited schema for preview (persists after closing panel until metadata refreshes)
-  const previewReport = editSchema || reportData;
+  // Use live-edited schema for preview (persists after closing panel until
+  // metadata refreshes), with the served text of every translated key the
+  // edit has not touched (objectstack#36373).
+  const previewReport = editSchema
+    ? previewWithServedText(reportData, authoredAtOpen, editSchema)
+    : reportData;
   // `label` and `description` are the spec's `string | I18nLabel`, so an
   // inline locale map (`{ en, 'zh-CN' }`) is valid metadata and is served
   // unchanged. Drawn raw, React refused the object and the page went blank
@@ -420,30 +624,79 @@ export function ReportView({ dataSource }: { dataSource?: DataSource }) {
   // `{ data, columns }` shapes. `reportRuntimeData` feeds the bridge/legacy
   // paths; DatasetReportRenderer fetches its own rows via `useDatasetRows`.
 
+  // Drill-through dialog: the records behind a clicked group or bar in the
+  // standard list; a record's name opens its page, 「Open in list」 the
+  // object's list page (objectstack-ai/objectstack#36256). The builder's
+  // preview drills the same way.
+  const drillDrawer = (
+    <DrillDownDrawer
+      open={!!drill}
+      onClose={() => setDrill(null)}
+      title={drill?.title ?? ''}
+      objectName={drill?.object ?? ''}
+      filter={drill?.filter}
+      defaultColumns={drill?.fields}
+      target="dialog"
+      dataSource={dataSource as any}
+    />
+  );
+
+  // objectstack#36374 — the builder replaces the page while it is open: the
+  // live picture on the left, the five settings on the right.
+  if (builderOpen && isAdmin && authoredAtOpen) {
+    return (
+      <DrillNavigationProvider value={drillNavigation}>
+        <ReportBuilderHost
+          initial={authoredAtOpen}
+          servedText={servedText}
+          onSave={handleBuilderSave}
+          onClose={handleCloseBuilder}
+          dataSource={dataSource}
+          onDrill={handleDatasetDrill}
+          banner={
+            <div className="mb-3 empty:hidden">
+              <RuntimeDraftBar
+                type="report"
+                name={reportName}
+                metadataClient={metadataClient}
+                dataSource={dataSource as any}
+                // objectstack#35008 — no `onResume`: the builder opens on the
+                // pending draft as stored (the layered read's `authoredBuffer`).
+                onAfterChange={() => refresh().catch(() => {})}
+              />
+            </div>
+          }
+        />
+        {drillDrawer}
+      </DrillNavigationProvider>
+    );
+  }
+
   return (
     <DrillNavigationProvider value={drillNavigation}>
     <div className="flex flex-col h-full overflow-hidden bg-background">
-      <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 sm:gap-4 p-4 sm:p-6 border-b shrink-0">
-        <div className="min-w-0 flex-1">
-           <h1 className="text-lg sm:text-xl md:text-2xl font-bold tracking-tight truncate">{heading}</h1>
-           {description && (
-             <p className="text-sm text-muted-foreground mt-1 line-clamp-2">{description}</p>
-           )}
-        </div>
-        <div className="shrink-0 flex items-center gap-1.5">
-           {isAdmin && (
-           <button
-             type="button"
-             onClick={handleOpenConfigPanel}
-             className="inline-flex items-center gap-1.5 rounded-md border border-input bg-background px-2.5 py-1.5 text-xs font-medium text-muted-foreground shadow-sm hover:bg-accent hover:text-accent-foreground"
-             data-testid="report-edit-button"
-           >
-             <Pencil className="h-3.5 w-3.5" />
-             {t('common.edit')}
-           </button>
-           )}
-        </div>
-      </div>
+      {/* objectstack#36111 — the console page header every list and
+          dashboard draws: the report's name, its description behind the
+          hairline, and the report's own 「Edit」 (the inspector beside the
+          report, not Studio) as its action. The shell's top-right group
+          follows the action where the shell turns it on. */}
+      <PageHeader
+        title={heading}
+        subtitle={description || undefined}
+        icon={<BarChart3 className="h-4 w-4" />}
+        actions={isAdmin ? (
+          <button
+            type="button"
+            onClick={() => { void handleOpenBuilder(); }}
+            disabled={openingEditor}
+            className="inline-flex items-center gap-1.5 rounded-md border border-input bg-background px-2.5 py-1.5 text-xs font-medium text-muted-foreground shadow-sm hover:bg-accent hover:text-accent-foreground"
+            data-testid="report-edit-button"
+          >
+            <Pencil className="h-3.5 w-3.5" />
+            {t('common.edit')}
+          </button>
+        ) : undefined}
+      />
 
       <div className="flex-1 overflow-hidden flex flex-col sm:flex-row relative">
          <div className="flex-1 min-w-0 overflow-auto p-4 sm:p-6 lg:p-8 bg-muted/5">
@@ -462,8 +715,10 @@ export function ReportView({ dataSource }: { dataSource?: DataSource }) {
              </div>
          </div>
 
-         {/* Right-side config panel — studio's spec-driven report inspector,
-             hosted locally in app-shell (see ReportConfigPanel). */}
+         {/* Right-side config panel for a joined or pre-dataset report — the
+             studio's spec-driven report inspector, hosted locally in
+             app-shell (see ReportConfigPanel). */}
+         <ServedReportTextContext.Provider value={servedText}>
          <ReportConfigPanel
            open={configPanelOpen && isAdmin}
            onClose={handleCloseConfigPanel}
@@ -476,6 +731,7 @@ export function ReportView({ dataSource }: { dataSource?: DataSource }) {
            metadataClient={metadataClient}
            onAfterChange={() => refresh().catch(() => {})}
          />
+         </ServedReportTextContext.Provider>
 
          <MetadataPanel
             open={showDebug}
@@ -483,17 +739,7 @@ export function ReportView({ dataSource }: { dataSource?: DataSource }) {
          />
       </div>
     </div>
-    {/* Drill-through drawer: peek the records behind a clicked group, then
-        click a row to open a record, or use "Open in list →" to escalate to
-        the full object list page. */}
-    <DrillDownDrawer
-      open={!!drill}
-      onClose={() => setDrill(null)}
-      title={drill?.title ?? ''}
-      objectName={drill?.object ?? ''}
-      filter={drill?.filter}
-      dataSource={dataSource as any}
-    />
+    {drillDrawer}
     </DrillNavigationProvider>
   );
 }

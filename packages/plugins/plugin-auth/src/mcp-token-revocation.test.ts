@@ -38,7 +38,12 @@
  *    grant of one deletes that organization's whole refresh family (every
  *    rotation of it) and leaves the other organization's family refreshing;
  *    a refresh row with no organization dies on every withdraw (fail closed);
- *    a rotation racing the revoke does not leave a live successor behind.
+ *    a rotation racing the revoke does not leave a live successor behind;
+ *  - the password-change rule reads a token's issue time in milliseconds off
+ *    the claim its authorization server signs in: in the second of a change,
+ *    a token minted after it is admitted and one minted before it refused; a
+ *    token with no claim, or an unreadable one, keeps the whole-second
+ *    refusal.
  */
 
 import { createRequire } from 'node:module';
@@ -48,8 +53,21 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { AuthManager } from './auth-manager.js';
+// The SSO discovery egress guard the source loads with a dynamic import, paid
+// here, during collection (check-test-source-alias, "The source reach").
+import '@objectstack/core/egress';
 import { authIdentityObjects } from './manifest.js';
-import { revokeMcpGrant, UNKNOWN_TOKEN_DESCRIPTIONS, type OAuthGrantStore } from './mcp-token-revocation.js';
+import { decodeJwt } from 'jose';
+import {
+  issuedAtMsAccessTokenClaim,
+  MCP_ISSUED_AT_MS_CLAIM,
+  mcpConsentAdmits,
+  mcpTokenIssuedAtMs,
+  revokeMcpGrant,
+  UNKNOWN_TOKEN_DESCRIPTIONS,
+  type OAuthGrantStore,
+} from './mcp-token-revocation.js';
+import { readCredentialChangedAt } from './credential-change-ends-prior-access.js';
 
 const BASE = 'http://localhost:3000';
 const AUTH = `${BASE}/api/v1/auth`;
@@ -421,6 +439,142 @@ describe('[ruling A, step 5] a server-only `skip_consent` client', () => {
     expect(await bodyOf(hinted)).toEqual(provider);
     expect(await r.manager.verifyMcpAccessToken(access_token)).toMatchObject({ clientId });
   }, 60_000);
+});
+
+describe("an MCP access token issued before the account's password changed", () => {
+  it('is refused at the MCP door whatever its grant, and the token the app refreshes into admits', async () => {
+    const r = await rig();
+    // A client the person consented to, and a server-only one.
+    const { clientId, cookie, access_token, refresh_token } = await r.connect();
+    const serverOnly = await r.registerClient();
+    const [app] = (await r.rowsAtRest('sys_oauth_application')).filter((row) => row.client_id === serverOnly);
+    await (r.engine as any).update('sys_oauth_application', { id: app!.id, skip_consent: true }, SYS);
+    const { code } = await r.authorize(serverOnly, cookie);
+    const server = await r.exchange(serverOnly, code);
+    expect(await r.manager.verifyMcpAccessToken(access_token)).toMatchObject({ clientId });
+    expect(await r.manager.verifyMcpAccessToken(server.access_token)).toMatchObject({ clientId: serverOnly });
+
+    // Two seconds on, past the sign-up's own write of the password, the person changes it.
+    vi.useFakeTimers({ toFake: ['Date'], shouldAdvanceTime: true });
+    vi.setSystemTime(Date.now() + 2_000);
+    const changed = await r.postJson('/change-password', { currentPassword: PASSWORD, newPassword: `${PASSWORD}-changed` }, cookie);
+    expect(changed.status, await changed.clone().text()).toBe(200);
+
+    expect(await r.manager.verifyMcpAccessToken(access_token), 'issued before the change').toBeNull();
+    expect(await r.manager.verifyMcpAccessToken(server.access_token), 'issued before the change').toBeNull();
+
+    // The change keeps the grants: each app refreshes into a token issued after it.
+    vi.setSystemTime(Date.now() + 1_000);
+    for (const [client, refreshToken] of [[clientId, refresh_token], [serverOnly, server.refresh_token]] as const) {
+      const refreshed = await r.refresh(client, refreshToken);
+      expect(refreshed.status, JSON.stringify(refreshed.body)).toBe(200);
+      expect(await r.manager.verifyMcpAccessToken(refreshed.body.access_token)).toMatchObject({ clientId: client });
+    }
+  }, 60_000);
+});
+
+describe("the password-change rule reads an MCP token's issue time in milliseconds (security#2, option (a))", () => {
+  /**
+   * One second, frozen per step: a token minted 100 ms into it, the password
+   * changed 400 ms into it, a token minted 900 ms into it. Both tokens carry
+   * the same whole-second `iat`; only the signed claim tells them apart.
+   */
+  async function sameSecond() {
+    const r = await rig();
+    const { clientId, cookie, refresh_token } = await r.connect();
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const second = (Math.floor(Date.now() / 1000) + 3) * 1000;
+
+    vi.setSystemTime(second + 100);
+    const before = await r.refresh(clientId, refresh_token);
+    expect(before.status, JSON.stringify(before.body)).toBe(200);
+
+    vi.setSystemTime(second + 400);
+    const changed = await r.postJson('/change-password', { currentPassword: PASSWORD, newPassword: `${PASSWORD}-changed` }, cookie);
+    expect(changed.status, await changed.clone().text()).toBe(200);
+    const auth: any = await (r.manager as any).getAuthContext();
+    const userId = String(decodeJwt(before.body.access_token).sub);
+    expect(await readCredentialChangedAt(auth.internalAdapter, userId), 'the change, in ms').toBe(second + 400);
+
+    vi.setSystemTime(second + 900);
+    const after = await r.refresh(clientId, before.body.refresh_token);
+    expect(after.status, JSON.stringify(after.body)).toBe(200);
+
+    /** The door's own read on `token`'s grant, with `claim` in place of the one it was signed with. */
+    const admitsWithClaim = (token: string, claim: unknown) =>
+      mcpConsentAdmits(auth.adapter, { clientId, userId }, decodeJwt(token).iat, auth.internalAdapter, claim);
+    return { r, second, before: before.body.access_token as string, after: after.body.access_token as string, admitsWithClaim };
+  }
+
+  it('⭐ a token minted in the second of the change, AFTER it, is admitted', async () => {
+    const { r, second, after } = await sameSecond();
+    expect(decodeJwt(after)).toMatchObject({ iat: second / 1000, [MCP_ISSUED_AT_MS_CLAIM]: second + 900 });
+    expect(await r.manager.verifyMcpAccessToken(after), 'minted after the change').not.toBeNull();
+  }, 60_000);
+
+  it('⭐ a token minted in the second of the change, BEFORE it, is refused', async () => {
+    const { r, second, before } = await sameSecond();
+    expect(decodeJwt(before)).toMatchObject({ iat: second / 1000, [MCP_ISSUED_AT_MS_CLAIM]: second + 100 });
+    expect(await r.manager.verifyMcpAccessToken(before), 'minted before the change').toBeNull();
+  }, 60_000);
+
+  it('a token with no claim (minted before the claim shipped) keeps the whole-second refusal in the second of the change', async () => {
+    const { after, admitsWithClaim } = await sameSecond();
+    expect(await admitsWithClaim(after, decodeJwt(after)[MCP_ISSUED_AT_MS_CLAIM]), 'control: the claim it was signed with').toBe(true);
+    expect(await admitsWithClaim(after, undefined), 'no claim').toBe(false);
+  }, 60_000);
+
+  it('an unreadable claim falls back to the whole-second refusal, never to an admit', async () => {
+    const { second, after, admitsWithClaim } = await sameSecond();
+    for (const claim of [
+      String(second + 900), // not a number
+      second + 900.5, // not whole milliseconds
+      second + 1_900, // outside the second its `iat` names, later
+      second - 100, // outside it, earlier
+      Number.NaN,
+      Number.POSITIVE_INFINITY,
+      null,
+      {},
+    ]) {
+      expect(await admitsWithClaim(after, claim), `claim ${JSON.stringify(claim)}`).toBe(false);
+    }
+  }, 60_000);
+
+  it('a token admitted without a consent row keeps the whole-second rule', async () => {
+    const r = await rig();
+    const { cookie } = await r.connect();
+    const serverOnly = await r.registerClient();
+    const [app] = (await r.rowsAtRest('sys_oauth_application')).filter((row) => row.client_id === serverOnly);
+    await (r.engine as any).update('sys_oauth_application', { id: app!.id, skip_consent: true }, SYS);
+    const { code } = await r.authorize(serverOnly, cookie);
+    const { refresh_token } = await r.exchange(serverOnly, code);
+    expect((await r.rowsAtRest('sys_oauth_consent')).some((row) => row.client_id === serverOnly), 'no consent row').toBe(false);
+
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const second = (Math.floor(Date.now() / 1000) + 3) * 1000;
+    vi.setSystemTime(second + 400);
+    const changed = await r.postJson('/change-password', { currentPassword: PASSWORD, newPassword: `${PASSWORD}-changed` }, cookie);
+    expect(changed.status, await changed.clone().text()).toBe(200);
+
+    vi.setSystemTime(second + 900);
+    const sameSecondAfter = await r.refresh(serverOnly, refresh_token);
+    expect(sameSecondAfter.status, JSON.stringify(sameSecondAfter.body)).toBe(200);
+    expect(decodeJwt(sameSecondAfter.body.access_token)).toMatchObject({ iat: second / 1000, [MCP_ISSUED_AT_MS_CLAIM]: second + 900 });
+    expect(await r.manager.verifyMcpAccessToken(sameSecondAfter.body.access_token), 'minted after the change, in its second').toBeNull();
+
+    // Control: the same grant's token from the next second is admitted.
+    vi.setSystemTime(second + 1_100);
+    const nextSecond = await r.refresh(serverOnly, sameSecondAfter.body.refresh_token);
+    expect(nextSecond.status, JSON.stringify(nextSecond.body)).toBe(200);
+    expect(await r.manager.verifyMcpAccessToken(nextSecond.body.access_token)).toMatchObject({ clientId: serverOnly });
+  }, 60_000);
+
+  it('the claim is contributed at a mint only, never at an opaque token\'s introspection', () => {
+    expect(issuedAtMsAccessTokenClaim({ grantType: 'refresh_token' }, () => 1_700_000_000_123)).toEqual({ [MCP_ISSUED_AT_MS_CLAIM]: 1_700_000_000_123 });
+    expect(issuedAtMsAccessTokenClaim({ grantType: undefined }, () => 1_700_000_000_123)).toEqual({});
+    expect(mcpTokenIssuedAtMs(1_700_000_000, 1_700_000_000_123)).toBe(1_700_000_000_123);
+    expect(mcpTokenIssuedAtMs(1_700_000_000, undefined)).toBe(1_700_000_000_000);
+  });
 });
 
 describe('a grant is revoked in its own organization only', () => {

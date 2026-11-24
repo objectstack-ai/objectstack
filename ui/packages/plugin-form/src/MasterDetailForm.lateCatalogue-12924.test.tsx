@@ -14,7 +14,13 @@
  * its first paint renders through `fallbackLng: 'en'`, and it re-renders in the
  * user's language when the catalogue lands. `MasterDetailForm` derives a
  * `boolean` / `toggle` column's two options once, in its resolve effect, when
- * the child schema arrives. A schema that arrives first is derived with the
+ * the child schema arrives.
+ *
+ * Since objectstack#36043 a derived boolean column edits as a checkbox, which
+ * draws no word, so the words are read where the grid still draws them: the
+ * at-a-glance rows of a detail in `inlineMode: 'form'` (the `Charges` detail
+ * below). The `Lines` detail is an editable grid and carries the unsaved edit
+ * and its checkboxes. A schema that arrives first is derived with the
  * `en` words, and the re-render the catalogue triggers must still re-label
  * those options, which this file pins.
  *
@@ -84,14 +90,28 @@ const LINES = [
   { id: 'l1', invoice: 'inv1', description: 'Freight', billable: true },
   { id: 'l2', invoice: 'inv1', description: 'Packing', billable: false },
 ];
+const CHARGE_CHILD = {
+  name: 'inv_charge',
+  fields: {
+    invoice: { type: 'master_detail', label: 'Invoice', reference: 'inv' },
+    note: { type: 'text', label: 'Note' },
+    chargeable: { type: 'boolean', label: 'Chargeable' },
+  },
+};
+const CHARGES = [
+  { id: 'c1', invoice: 'inv1', note: 'Courier', chargeable: true },
+  { id: 'c2', invoice: 'inv1', note: 'Waived', chargeable: false },
+];
 
 function dataSource() {
   return {
     getObjectSchema: vi.fn(async (o: string) =>
-      o === 'inv_line' ? CHILD : { name: 'inv', fields: { ref: { type: 'text', label: 'Ref' } } },
+      o === 'inv_line' ? CHILD : o === 'inv_charge' ? CHARGE_CHILD : { name: 'inv', fields: { ref: { type: 'text', label: 'Ref' } } },
     ),
     findOne: vi.fn().mockResolvedValue({ id: 'inv1', ref: 'INV-1' }),
-    find: vi.fn(async (o: string) => ({ data: o === 'inv_line' ? LINES.map((l) => ({ ...l })) : [] })),
+    find: vi.fn(async (o: string) => ({
+      data: o === 'inv_line' ? LINES.map((l) => ({ ...l })) : o === 'inv_charge' ? CHARGES.map((c) => ({ ...c })) : [],
+    })),
     create: vi.fn(),
     update: vi.fn(),
     delete: vi.fn(),
@@ -99,8 +119,16 @@ function dataSource() {
   };
 }
 
-/** The two lines' `Billable` pickers' text, in row order. */
-const billable = () => screen.getAllByRole('combobox', { name: 'Billable' }).slice(0, 2).map((el) => el.textContent);
+/** The two charges' `Chargeable` words, in row order: the at-a-glance rows of
+ *  the `inlineMode: 'form'` detail, where the grid draws a boolean's word. */
+const chargeable = () =>
+  Array.from(document.querySelectorAll('[data-grid-cell$=":chargeable"]')).slice(0, 2).map((el) => el.textContent);
+/** The two lines' `Billable` checkboxes, in row order: the editable grid's
+ *  check cells (objectstack#36043), which hold the value and draw no word. */
+const billableChecks = () =>
+  Array.from(document.querySelectorAll('[data-grid-cell$=":billable"] [role="checkbox"]')).slice(0, 2).map((el) =>
+    el.getAttribute('aria-checked'),
+  );
 const descriptions = () => screen.getAllByLabelText('Description') as HTMLInputElement[];
 
 describe('MasterDetailForm re-labels derived boolean options when the catalogue lands late (objectui#12924)', () => {
@@ -120,7 +148,10 @@ describe('MasterDetailForm re-labels derived boolean options when the catalogue 
             mode: 'edit',
             recordId: 'inv1',
             fields: ['ref'],
-            details: [{ childObject: 'inv_line', title: 'Lines', inlineMode: 'grid' }],
+            details: [
+              { childObject: 'inv_line', title: 'Lines', inlineMode: 'grid' },
+              { childObject: 'inv_charge', title: 'Charges', inlineMode: 'form' },
+            ],
           } as never}
           dataSource={ds as never}
         />
@@ -130,14 +161,15 @@ describe('MasterDetailForm re-labels derived boolean options when the catalogue 
     // Precondition: the catalogue is held, so the columns were derived with
     // the `en` fallback's words. If this read were already zh, the row would
     // not be measuring a late catalogue.
-    await waitFor(() => expect(billable()).toEqual(['Yes', 'No']));
+    await waitFor(() => expect(chargeable()).toEqual(['Yes', 'No']));
+    expect(billableChecks()).toEqual(['true', 'false']);
     expect(screen.getByTestId('md-form-submit').textContent).toBe('Save');
     expect(gate.asked).toContain('zh-Hans');
 
     // An unsaved edit on the first line, made before the catalogue lands.
     fireEvent.change(descriptions()[0], { target: { value: 'Freight, edited' } });
     expect(descriptions()[0].value).toBe('Freight, edited');
-    const lineReads = () => ds.find.mock.calls.filter(([o]) => o === 'inv_line').length;
+    const lineReads = () => ds.find.mock.calls.filter(([o]) => o === 'inv_line' || o === 'inv_charge').length;
     const readsBefore = lineReads();
     const schemaReadsBefore = ds.getObjectSchema.mock.calls.length;
 
@@ -146,11 +178,12 @@ describe('MasterDetailForm re-labels derived boolean options when the catalogue 
     // The catalogue landed and the form re-rendered in zh: its Save button
     // reads the zh word. Without this, a red below could mean nothing landed.
     await waitFor(() => expect(screen.getByTestId('md-form-submit').textContent).toBe(ZH.common.save));
-    await waitFor(() => expect(billable()).toEqual([YES, NO]));
+    await waitFor(() => expect(chargeable()).toEqual([YES, NO]));
     // The resolve effect did not run again: no second schema fetch, no line
     // re-read, and the edit is still on screen.
     expect(ds.getObjectSchema.mock.calls.length).toBe(schemaReadsBefore);
     expect(lineReads()).toBe(readsBefore);
     expect(descriptions()[0].value).toBe('Freight, edited');
+    expect(billableChecks()).toEqual(['true', 'false']);
   });
 });

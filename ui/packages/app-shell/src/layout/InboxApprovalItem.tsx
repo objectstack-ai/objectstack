@@ -62,7 +62,7 @@ export function InboxApprovalItem({ request, onOpen, onDecided }: InboxApprovalI
         <div className="min-w-0 flex-1">
           <div className="text-sm font-medium leading-tight truncate">{approvalRequestTitle(request)}</div>
           {request.createdAt && (
-            <div className="text-[10px] text-muted-foreground mt-1">
+            <div className="text-xs text-muted-foreground mt-1">
               {timeAgo(request.createdAt, displayLocale)}
             </div>
           )}

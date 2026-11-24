@@ -173,6 +173,7 @@ import type { MetaRouteScope, TransportScopedMetaRequest } from './meta-collecti
 import { META_ITEM_MEMBER_PARAM, META_ITEM_PUBLISHED_PARAMS, metaMemberSelector, projectMetaActionItem } from './meta-item-read-gate.js';
 import { refuseUnknownQueryParams } from './query-allowlist.js';
 import { refuseRepeatedQueryParams } from './query-multiplicity.js';
+import { metaSaveRequestOptions } from './meta-save-request.js';
 import {
     META_ITEM_AUDIT_PARAMS,
     META_ITEM_DIFF_PARAMS,
@@ -682,6 +683,21 @@ export function registerMetaItemHistoryRoutes(this: MetaItemHistoryRouteHost, sc
                 if (refuseUnknownQueryParams(req, res, META_ITEM_PUBLISH_PARAMS)) return;
                 if (refuseRepeatedQueryParams(req, res, ['package', META_ITEM_MEMBER_PARAM])) return;
                 const packageId = metaItemPackageBinding(req.query?.package);
+                // [#36601] The ADR-0008 precondition on the PUBLISHED layer:
+                // `If-Match: <version>` publishes only over that active row,
+                // `If-None-Match: *` only where none is stored, neither is
+                // unpinned as before. Read by the save door's one mapping
+                // ({@link metaSaveRequestOptions}), so the two doors of a
+                // Studio Save read the headers alike and refuse the same
+                // malformed pair `400`; only its `parentVersion` is taken
+                // (`?mode=` and `?surface=` are not this door's, and the
+                // closed query set above has already refused them).
+                const precondition = metaSaveRequestOptions({ headers: req.headers });
+                if (!precondition.ok) {
+                    res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: precondition.message } });
+                    return;
+                }
+                const parentVersion = precondition.request.parentVersion;
 
                 // [ADR-0131 D6] No organization, as on the `PUT` twin: a
                 // draft is saved environment-wide, so the promotion looks in
@@ -724,6 +740,8 @@ export function registerMetaItemHistoryRoutes(this: MetaItemHistoryRouteHost, sc
                     ...(actor ? { actor } : {}),
                     ...(message ? { message } : {}),
                     ...(packageId ? { packageId } : {}),
+                    // [#36601] Present only when the caller pinned the active row.
+                    ...(parentVersion !== undefined ? { parentVersion } : {}),
                     // [#22877] Publishes ONE member's draft of a bundled type.
                     ...metaMemberSelector(req.query),
                     // [#32656] The languages the findings' `userMessage` is
@@ -1486,6 +1504,15 @@ export function registerMetaItemPublishedRoute(this: MetaItemPublishedRouteHost,
                         : await (svc as any).getPublished(canonicalMetaUrlType(type), name, ...(mixedOwner !== undefined ? [mixedOwner] : []));
                     const stamp = (data as { _packageId?: unknown } | null | undefined)?._packageId;
                     if (mixedOwner !== undefined && typeof stamp === 'string' && stamp !== mixedOwner && mixedHolders.includes(stamp)) {
+                        data = publishedCode;
+                    }
+                    // [#34248, ruling 6893582352] …and a bare doc's package copy
+                    // where the layered read's code layer is the environment's
+                    // own package-less entry (two enabled holders beside it):
+                    // that entry answers first, never the holder registered last.
+                    const codeStamp = (publishedCode as { _packageId?: unknown } | null | undefined)?._packageId;
+                    if (canonicalMetaUrlType(type) === 'doc' && publishedCode != null && (typeof codeStamp !== 'string' || codeStamp === '' || codeStamp === 'sys_metadata')
+                        && typeof stamp === 'string' && stamp !== '' && stamp !== 'sys_metadata') {
                         data = publishedCode;
                     }
                     // The 404 this route could never produce before. An

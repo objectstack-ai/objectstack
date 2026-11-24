@@ -44,6 +44,7 @@ import {
   type CredentialUseClient,
 } from '@objectstack/core';
 import type { AuthGate } from '@objectstack/core';
+import type { EgressGuard } from '@objectstack/core/egress';
 import {
   effectiveSessionLimits,
   isMfaRequirementLevel,
@@ -53,6 +54,11 @@ import {
   type MfaRequirementLevel,
   type OrganizationAccessPolicy,
 } from './organization-access-policy.js';
+// ADR-0069 D5 — the one reading of an address and of a range lives in an
+// import-free module, so the client-address rule's trusted-network form
+// (`./client-address.ts`) matches a range exactly as the allow-list gate does.
+import { ipMatchesRange, ipv4ToInt, parseIpv6Literal, unreadableIpRangeEntries } from './ip-range.js';
+export { ipMatchesRange, parseIpRange, unreadableIpRangeEntries, type IpRange } from './ip-range.js';
 
 /**
  * [ADR-0069 TL;DR 6] Where `AuthManager` reads each organization's own access
@@ -119,7 +125,7 @@ import {
   type PrincipalSessionAuthContext,
 } from './principal-session-mint.js';
 import { isPlaceholderEmail } from './placeholder-email.js';
-import { resolveClientAddress } from './client-address.js';
+import { readTrustProxy, resolveClientAddress, type ClientAddressTrust } from './client-address.js';
 import {
   type MembershipPolicy,
   type ReconcileOutcome,
@@ -209,6 +215,8 @@ import {
   getOtpSendGuard,
   renderPhoneSmsBody,
   sendChangeEmailNotice,
+  sendPasswordChangeReminder,
+  sendPasswordResetNotice,
   sendPhoneInviteSms,
   storedRecipientLocale,
   type EmailSmsDeliveryHost,
@@ -262,6 +270,11 @@ import {
   isOwnedAccountSuspensionComplete,
   suspendAccountsOfDirectoryDeactivatedOwner,
 } from './service-account-owner-leaves.js';
+import {
+  directoryRegistrationsIncompleteMessage,
+  directoryRevokedCredentialsMessage,
+  endRegistrationsOfARemovedAccount,
+} from './removed-account-registrations.js';
 // [objectstack-ai/cloud#3606, ruling A] `/oauth2/revoke` for an MCP access
 // token: the answer `handleRequest` gives after the provider's, through
 // `answerOAuthTokenRevocation` below.
@@ -595,44 +608,6 @@ export function assertScimAdminCoherence(pluginConfig?: Partial<AuthPluginConfig
   }
 }
 
-/**
- * Expand an IPv6 literal (already unbracketed) to its eight 16-bit groups, or
- * `null` when it is not one. Handles `::` elision and a trailing embedded
- * IPv4 (`::ffff:10.0.0.5`) so the classifier below reads real bits rather
- * than matching text prefixes.
- */
-function parseIpv6Literal(host: string): number[] | null {
-  if (!/^[0-9a-f:.]+$/.test(host)) return null;
-  const halves = host.split('::');
-  if (halves.length > 2) return null;
-  const toGroups = (part: string): number[] | null => {
-    if (part === '') return [];
-    const pieces = part.split(':');
-    const out: number[] = [];
-    for (let i = 0; i < pieces.length; i++) {
-      const piece = pieces[i]!;
-      if (piece.includes('.')) {
-        // An embedded IPv4 tail is legal only in the last position.
-        if (i !== pieces.length - 1) return null;
-        const v4 = ipv4ToInt(piece);
-        if (v4 === null) return null;
-        out.push((v4 >>> 16) & 0xffff, v4 & 0xffff);
-        continue;
-      }
-      if (!/^[0-9a-f]{1,4}$/.test(piece)) return null;
-      out.push(parseInt(piece, 16));
-    }
-    return out;
-  };
-  const head = toGroups(halves[0]!);
-  if (head === null) return null;
-  if (halves.length === 1) return head.length === 8 ? head : null;
-  const tail = toGroups(halves[1]!);
-  if (tail === null) return null;
-  const elided = 8 - head.length - tail.length;
-  if (elided < 1) return null;
-  return [...head, ...new Array<number>(elided).fill(0), ...tail];
-}
 
 /**
  * Is this host LITERAL a loopback, RFC 1918 private, RFC 4193 unique-local or
@@ -1117,10 +1092,14 @@ export interface AuthManagerOptions extends Partial<AuthConfig> {
   /**
    * ADR-0093 D9 — default active-org on session create. When enabled
    * (default), a `session.create.before` hook stamps `activeOrganizationId`
-   * from the caller's `sys_member` row (owner-preferred) whenever the draft
-   * lacks one. A host-supplied `session.create.before` (see
-   * {@link databaseHooks}) chains FIRST and keeps precedence. Set `false`
-   * to restore the raw better-auth behaviour (sessions start org-less).
+   * from the caller's `sys_member` row (owner-preferred, else the oldest)
+   * whenever the draft lacks one and the host named no
+   * `activeOrganizationCandidates`. A host-supplied `session.create.before`
+   * (see {@link databaseHooks}) chains FIRST and keeps precedence: an
+   * organization it set, or a candidate list it returned, is its choice and
+   * the default stays out. Set `false` to restore the raw better-auth
+   * behaviour (sessions start org-less unless the host chooses; a host's
+   * candidate list is honoured either way).
    * @default true
    */
   autoActiveOrganization?: boolean;
@@ -1168,6 +1147,20 @@ export interface AuthManagerOptions extends Partial<AuthConfig> {
    * security, sharing, the ADR-0092 identity write guard — early-returns on
    * `isSystem` by design. A middleware that gates on `isSystem` therefore sees
    * nothing; one that does not, runs.
+   *
+   * **Session creation's organization, with fallbacks (#35829).** A host's
+   * `session.create.before` chooses the new session's organization and wins
+   * over the framework's default (see {@link autoActiveOrganization}); the
+   * framework then refuses the sign-in when that organization's own allowed
+   * IP ranges do not admit the request (`SESSION_SCOPING_REFUSAL`). To accept
+   * a fallback instead, the hook returns an ordered
+   * `activeOrganizationCandidates` list beside `data` (the package export
+   * `SessionCreateBeforeResult`): the session is scoped to the first of
+   * `data.activeOrganizationId`, then the list, that the scoping admits, and
+   * none admitted is refused as before. No list keeps the single choice.
+   * `data` stays required (a list-only hook returns `data: session`), and the
+   * host lists only organizations the user is a member of: membership is not
+   * judged here.
    */
   databaseHooks?: BetterAuthOptions['databaseHooks'];
 
@@ -1356,8 +1349,8 @@ export interface AuthManagerOptions extends Partial<AuthConfig> {
    * client-address trust rule ({@link resolveClientAddress}, shared with the
    * runtime's inbound rate limiter): forwarded headers only when
    * {@link trustProxy} is declared, the transport's peer address otherwise.
-   * Behind a reverse proxy, declare `server.trustProxy`, or the allow-list
-   * judges the proxy's own address.
+   * Behind a reverse proxy, declare `server.trustProxy` (its trusted-network
+   * form names the proxies), or the allow-list judges the proxy's own address.
    *
    * A request whose address cannot be established (no peer address, no trusted
    * forwarded header) is REFUSED with the same `403 IP_NOT_ALLOWED`, and the
@@ -1367,8 +1360,11 @@ export interface AuthManagerOptions extends Partial<AuthConfig> {
   allowedIpRanges?: string[];
 
   /**
-   * The deployment's `server.trustProxy`: believe `X-Forwarded-For` /
-   * `X-Real-IP` when establishing a request's client address for the ADR-0069
+   * The deployment's `server.trustProxy`: believe a forwarded header —
+   * `true` from any peer, the trusted-network form `{ networks, header }` only
+   * from a peer inside `networks` (`./client-address.ts`, {@link readTrustProxy},
+   * which refuses a malformed form at construction) — when establishing a
+   * request's client address for the ADR-0069
    * D5 allow-list ({@link allowedIpRanges}) and the D7 login audit
    * (`last_login_ip`) — and for what the vendored auth library records and
    * keys on by client address (session `ip_address`, the sign-in audit
@@ -1379,7 +1375,7 @@ export interface AuthManagerOptions extends Partial<AuthConfig> {
    * the dispatcher.
    * @default false
    */
-  trustProxy?: boolean;
+  trustProxy?: ClientAddressTrust;
 
   /**
    * ADR-0069 D2 — better-auth-native per-IP rate limiting, passed through to
@@ -1440,6 +1436,18 @@ export interface AuthManagerOptions extends Partial<AuthConfig> {
    * deliberately still wins for this budget — see `getOtpSendGuard`.
    */
   sharedCounterStore?: () => Promise<CounterStore>;
+
+  /**
+   * The outbound-request guard SSO discovery sends its reads through
+   * (`sso-discovery-egress.ts`): the connection resolves the identity
+   * provider's host and connects only to an address that is public at that
+   * moment. Absent → `createSsoDiscoveryEgressGuard()`, whose policy refuses
+   * every address that is not public. A suite that fakes the identity provider
+   * by stubbing the global fetch hands a stand-in here
+   * (`sso-discovery-egress.testkit.ts`); the rule itself is pinned with the
+   * real guard.
+   */
+  ssoDiscoveryEgress?: EgressGuard;
 }
 
 /**
@@ -1454,102 +1462,6 @@ export interface AuthManagerOptions extends Partial<AuthConfig> {
  * - Passkeys
  * - Organization/teams
  */
-/** ADR-0069 D5 — parse a dotted-quad IPv4 to a uint32, or null when not IPv4. */
-function ipv4ToInt(ip: string): number | null {
-  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(ip.trim());
-  if (!m) return null;
-  const p = [Number(m[1]), Number(m[2]), Number(m[3]), Number(m[4])];
-  if (p.some((n) => n > 255)) return null;
-  return (((p[0] << 24) >>> 0) + (p[1] << 16) + (p[2] << 8) + p[3]) >>> 0;
-}
-
-/**
- * An address as the ADR-0069 D5 matcher compares it: an IPv4 address as a
- * uint32, any other IPv6 address as its eight 16-bit groups, or `null` when
- * the text is neither. An IPv4-mapped IPv6 address (`::ffff:0:0/96`, dotted
- * or hex) is the IPv4 address it maps: a dual-stack listener reports an IPv4
- * peer in that form, and the allow-list judges the transport's peer address
- * when no proxy is trusted, so an IPv4 range must admit an IPv4 client on such
- * a socket. An IPv6 zone identifier (`%eth0`) is dropped: it names the
- * interface the address was reached on, not the address.
- */
-type MatchedAddress = { v4: number } | { v6: number[] };
-
-function readMatchedAddress(text: string): MatchedAddress | null {
-  const trimmed = text.trim();
-  const v4 = ipv4ToInt(trimmed);
-  if (v4 !== null) return { v4 };
-  const zoneAt = trimmed.indexOf('%');
-  const groups = parseIpv6Literal((zoneAt === -1 ? trimmed : trimmed.slice(0, zoneAt)).toLowerCase());
-  if (!groups) return null;
-  if (groups.slice(0, 5).every((g) => g === 0) && groups[5] === 0xffff) {
-    return { v4: ((groups[6]! << 16) >>> 0) + groups[7]! };
-  }
-  return { v6: groups };
-}
-
-/** Do the first `bits` bits of two eight-group IPv6 addresses agree? */
-function ipv6PrefixEqual(a: readonly number[], b: readonly number[], bits: number): boolean {
-  for (let i = 0; i < 8 && bits > 0; i++, bits -= 16) {
-    const mask = bits >= 16 ? 0xffff : (0xffff << (16 - bits)) & 0xffff;
-    if ((a[i]! & mask) !== (b[i]! & mask)) return false;
-  }
-  return true;
-}
-
-/**
- * ADR-0069 D5 — one allow-list entry read as the range it names: its base
- * address ({@link readMatchedAddress}) and how many leading bits a client
- * address must share with it.
- */
-export type IpRange = { v4: number; bits: number } | { v6: number[]; bits: number };
-
-/**
- * A prefix length, by family width: one or two decimal digits for IPv4, one to
- * three for IPv6. ASCII digits only; the value is then held to the width.
- */
-const PREFIX_LENGTH_DIGITS: Record<32 | 128, RegExp> = { 32: /^[0-9]{1,2}$/, 128: /^[0-9]{1,3}$/ };
-
-/**
- * ADR-0069 D5 — THE reading of an allow-list entry, for every door that judges
- * or saves the list: the sign-in gate ({@link ipMatchesRange}), the settings
- * save check (`allowed-ip-ranges.ts`), the settings binding that applies a
- * stored or env-pinned list (`auth-plugin.ts`), and the deployment's own
- * declaration ({@link assertAllowedIpRanges}). One reading, so a list is never
- * saved under one rule and enforced under another.
- *
- * An entry is an address, IPv4 or IPv6 (an IPv4-mapped IPv6 address is the
- * IPv4 address it maps, and an IPv6 zone identifier is dropped), optionally
- * followed by `/` and a prefix length written in decimal digits: one or two,
- * from 0 to 32, for an IPv4 base; one to three, from 0 to 128, for an IPv6
- * base. Blanks around the entry are not part of it. Anything else names no
- * range and reads `null`: a prefix with any other character in it, one out of
- * the family's range, or nothing after the `/`; a second `/`; a blank inside
- * the entry; text that is not an address. Bits of the base past the prefix are
- * not judged (`203.0.113.5/24` is `203.0.113.0/24`).
- */
-export function parseIpRange(entry: unknown): IpRange | null {
-  if (typeof entry !== 'string') return null;
-  const text = entry.trim();
-  if (!text || /\s/.test(text)) return null;
-  const slash = text.indexOf('/');
-  const base = readMatchedAddress(slash === -1 ? text : text.slice(0, slash));
-  if (!base) return null;
-  const width = 'v4' in base ? 32 : 128;
-  let bits: number = width;
-  if (slash !== -1) {
-    const prefix = text.slice(slash + 1);
-    if (!PREFIX_LENGTH_DIGITS[width].test(prefix)) return null;
-    bits = Number.parseInt(prefix, 10);
-    if (bits > width) return null;
-  }
-  return 'v4' in base ? { v4: base.v4, bits } : { v6: base.v6, bits };
-}
-
-/** The entries of an allow-list that name no range ({@link parseIpRange}), in list order. */
-export function unreadableIpRangeEntries<T>(entries: readonly T[]): T[] {
-  return entries.filter((entry) => parseIpRange(entry) === null);
-}
 
 /**
  * ADR-0069 D5 — refuse a declared allow-list ({@link AuthManagerOptions.allowedIpRanges})
@@ -1598,37 +1510,6 @@ export function assertAllowedIpRanges(configured: unknown): void {
   );
 }
 
-/**
- * ADR-0069 D5 — does `ip` match `range`? The range is read by
- * {@link parseIpRange}: an IPv4 CIDR (`a.b.c.d/n`), an IPv6 CIDR
- * (`2001:db8::/32`: the first `n` of 128 bits), or one exact address. The
- * address is read as the address it denotes ({@link readMatchedAddress}), so
- * an IPv4-mapped IPv6 address on either side compares as its IPv4 address, and
- * an exact IPv6 entry matches however it is spelled. An address is matched only
- * against a range of its own family: an IPv4 range never admits a pure IPv6
- * address, nor an IPv6 range an IPv4 one.
- *
- * An entry that names no range matches no address, its own base address
- * included, so a list holding one admits exactly what its other entries admit.
- * An `ip` that is not an address matches no entry.
- *
- * One matcher for every door that judges the list: the sign-in gate
- * ({@link AuthManager.isClientIpAllowed}) and the settings save check
- * (`allowed-ip-ranges.ts`) must judge the same address the same way.
- */
-export function ipMatchesRange(ip: string, range: string): boolean {
-  const parsed = parseIpRange(range);
-  if (!parsed || typeof ip !== 'string') return false;
-  const address = readMatchedAddress(ip);
-  if (!address) return false;
-  if ('v4' in parsed) {
-    if (!('v4' in address)) return false;
-    const mask = parsed.bits === 0 ? 0 : (~0 << (32 - parsed.bits)) >>> 0;
-    return ((address.v4 & mask) >>> 0) === ((parsed.v4 & mask) >>> 0);
-  }
-  if (!('v6' in address)) return false;
-  return ipv6PrefixEqual(address.v6, parsed.v6, parsed.bits);
-}
 
 /**
  * [#14522] The better-auth endpoint path prefix every SCIM 2.0 protocol
@@ -2125,6 +2006,10 @@ export class AuthManager {
     // matches no address at the gate instead (`ipMatchesRange`), and the
     // binding names it.
     assertAllowedIpRanges(config.allowedIpRanges);
+    // ADR-0069 D5 — the deployment's `server.trustProxy`, same rationale: a
+    // malformed trusted-network form is refused here, never read as "trust
+    // nobody" (`readTrustProxy`).
+    readTrustProxy(config.trustProxy);
     // [ADR-0069 D3] The retired boolean MFA option is refused, never dropped:
     // dropped, a host that still passes it would run with no requirement and
     // nothing would say so (`assertMfaRequirementOptions`).
@@ -2238,6 +2123,8 @@ export class AuthManager {
       resolvePasswordHasher: (...a) => this.resolvePasswordHasher(...a),
       roleChangeGrantDeps: (...a) => this.roleChangeGrantDeps(...a),
       sendChangeEmailNotice: (...a) => this.sendChangeEmailNotice(...a),
+      sendPasswordChangeReminder: (...a) => this.sendPasswordChangeReminder(...a),
+      sendPasswordResetNotice: (...a) => this.sendPasswordResetNotice(...a),
       sendExistingAccountSignUpNotice: (...a) => this.sendExistingAccountSignUpNotice(...a),
       settleSignInAttempt: (...a) => this.settleSignInAttempt(...a),
       settleSsoProviderDelete: (...a) => this.settleSsoProviderDelete(...a),
@@ -2439,12 +2326,12 @@ export class AuthManager {
       enforceSessionControls: (...a) => this.enforceSessionControls(...a),
       getAppName: (...a) => this.getAppName(...a),
       getAudience: (...a) => this.getAudience(...a),
+      getAuthContext: (...a) => this.getAuthContext(...a),
       getConsolePageUrl: (...a) => this.getConsolePageUrl(...a),
       getDataEngine: (...a) => this.getDataEngine(...a),
       getEmailService: (...a) => this.getEmailService(...a),
       getMcpResourceUrl: (...a) => this.getMcpResourceUrl(...a),
       getApi: (...a) => this.getApi(...a),
-      isEmailDeliveryLive: (...a) => this.isEmailDeliveryLive(...a),
       isPlatformAdminUserId: (...a) => this.isPlatformAdminUserId(...a),
       isSsoOnlyMode: (...a) => this.isSsoOnlyMode(...a),
       get jwtSigningFailureReported() { return readJwtSigningFailureReported(); },
@@ -2717,14 +2604,16 @@ export class AuthManager {
    * "policy says there will never be one" and skip a pointless re-read;
    * `undefined` means the reconciler could not be consulted at all.
    */
-  private settleMembership(userId: unknown): Promise<ReconcileOutcome | undefined> {
+  private settleMembership(userId: unknown, ctx?: unknown): Promise<ReconcileOutcome | undefined> {
     // [#25224 cut 8] The body moved to `auth-manager-membership-admission.ts` (see `MembershipAdmissionHost`).
     const readConfig = () => this.config;
-    const host: Pick<MembershipAdmissionHost, 'config' | 'getMembershipPolicy'> = {
+    const host: Pick<MembershipAdmissionHost, 'config' | 'getMembershipPolicy' | 'hasInvitationAdmissionInRequest' | 'isInvitationAdmissionInRequest'> = {
       get config() { return readConfig(); },
       getMembershipPolicy: (...a) => this.getMembershipPolicy(...a),
+      hasInvitationAdmissionInRequest: (...a) => this.hasInvitationAdmissionInRequest(...a),
+      isInvitationAdmissionInRequest: (...a) => this.isInvitationAdmissionInRequest(...a),
     };
-    return settleMembership.call(host, userId);
+    return settleMembership.call(host, userId, ctx);
   }
 
   /**
@@ -2832,6 +2721,7 @@ export class AuthManager {
   private pendingOwnerVerifiedStamps = new Map<string, { stagedAtMs: number }>();
 
   private static readonly OWNER_STAMP_STAGE_TTL_MS = 10 * 60 * 1000;
+
 
   /**
    * [#14157] Addresses the deployment's OWN boot command is provisioning right
@@ -2988,7 +2878,7 @@ export class AuthManager {
   ): Promise<{ error: string; errorDescription?: string } | undefined> {
     // [#25224 cut 8] The body moved to `auth-manager-membership-admission.ts` (see `MembershipAdmissionHost`).
     const readConfig = () => this.config;
-    const host: Pick<MembershipAdmissionHost, 'audienceLogError' | 'config' | 'enterpriseOAuthProviderIds' | 'getAudience' | 'hasPendingInvitationFor' | 'hasPresentedPendingInvitation' | 'isBootstrapCreation' | 'isOperatorProvisioning' | 'selfRegistrationSetResolvable' | 'stageOwnerVerifiedStamp' | 'stageSelfRegistrationGrant'> = {
+    const host: Pick<MembershipAdmissionHost, 'audienceLogError' | 'config' | 'enterpriseOAuthProviderIds' | 'getAudience' | 'hasPendingInvitationFor' | 'hasPresentedPendingInvitation' | 'isBootstrapCreation' | 'isOperatorProvisioning' | 'selfRegistrationSetResolvable' | 'stageInvitationAdmission' | 'stageOwnerVerifiedStamp' | 'stageSelfRegistrationGrant'> = {
       audienceLogError: (...a) => this.audienceLogError(...a),
       get config() { return readConfig(); },
       enterpriseOAuthProviderIds: (...a) => this.enterpriseOAuthProviderIds(...a),
@@ -2998,6 +2888,7 @@ export class AuthManager {
       isBootstrapCreation: (...a) => this.isBootstrapCreation(...a),
       isOperatorProvisioning: (...a) => this.isOperatorProvisioning(...a),
       selfRegistrationSetResolvable: (...a) => this.selfRegistrationSetResolvable(...a),
+      stageInvitationAdmission: (...a) => this.stageInvitationAdmission(...a),
       stageOwnerVerifiedStamp: (...a) => this.stageOwnerVerifiedStamp(...a),
       stageSelfRegistrationGrant: (...a) => this.stageSelfRegistrationGrant(...a),
     };
@@ -3409,6 +3300,45 @@ export class AuthManager {
     for (const [key, value] of this.pendingOwnerVerifiedStamps) {
       if (value.stagedAtMs < cutoff) this.pendingOwnerVerifiedStamps.delete(key);
     }
+  }
+
+  /**
+   * The addresses the admission gate admitted in each in-flight better-auth
+   * request by their invitation alone (`isAdmittedByInvitationAlone`), keyed by
+   * that request's endpoint context — the object better-auth hands the
+   * admission gate and every database hook of the same endpoint call, as
+   * {@link usersCreatedInRequest} is. `settleMembership`
+   * (`auth-manager-membership-admission.ts`) states the rule it serves.
+   *
+   * Request-scoped on purpose: the admission belongs to the creation it
+   * admitted, so nothing staged here can be read by another creation of the
+   * same address (an administrator's, a boot command's) in a later request,
+   * and both settle seams of THIS creation read the same entry. A `WeakMap`,
+   * so the entry dies with the endpoint context.
+   */
+  private invitationAdmissionsInRequest = new WeakMap<object, Set<string>>();
+
+  /** Record that the current request's admission gate admitted `email` by its invitation alone. */
+  private stageInvitationAdmission(ctx: unknown, email: string): void {
+    if (!ctx || typeof ctx !== 'object') return;
+    let staged = this.invitationAdmissionsInRequest.get(ctx);
+    if (!staged) {
+      staged = new Set();
+      this.invitationAdmissionsInRequest.set(ctx, staged);
+    }
+    staged.add(email.trim().toLowerCase());
+  }
+
+  /** Did this request admit any address by its invitation alone? In-memory only. */
+  private hasInvitationAdmissionInRequest(ctx: unknown): boolean {
+    if (!ctx || typeof ctx !== 'object') return false;
+    return (this.invitationAdmissionsInRequest.get(ctx)?.size ?? 0) > 0;
+  }
+
+  /** Did this request admit `email` by its invitation alone? In-memory only. */
+  private isInvitationAdmissionInRequest(ctx: unknown, email: string): boolean {
+    if (!ctx || typeof ctx !== 'object') return false;
+    return this.invitationAdmissionsInRequest.get(ctx)?.has(email.trim().toLowerCase()) === true;
   }
 
   /**
@@ -3883,6 +3813,79 @@ export class AuthManager {
   }
 
   /**
+   * Mail the account whose password just changed what the change left active:
+   * its API keys, its linked sign-in accounts, the apps it authorized, the
+   * OAuth applications it registered and the SCIM credentials it minted
+   * (`password-reset-ends-added-access.ts`). A password change, unlike a
+   * reset, ends none of them, so the account's owner is reminded of each. Sent
+   * only when there is something to list, to the account's own address, in
+   * its own stored language first (the ladder `sendChangeEmailNotice`
+   * follows).
+   *
+   * ⛔ Never throws: like the change-email notice, a reminder that cannot be
+   * sent — no transport, no template, a failed delivery — is logged at warn
+   * and never fails the change.
+   */
+  private sendPasswordChangeReminder(
+    to: { email: string; name?: string; id?: string },
+    kept: {
+      apiKeys: readonly string[];
+      signInAccounts: readonly string[];
+      authorizedApps: readonly string[];
+      ownedApps: readonly string[];
+      scimCredentials: readonly string[];
+    },
+    requestSource?: unknown,
+  ): Promise<void> {
+    const readConfig = () => this.config;
+    const host: Pick<EmailSmsDeliveryHost, 'config' | 'emailLocaleArg' | 'getAppName' | 'getEmailService' | 'storedRecipientLocale'> = {
+      get config() { return readConfig(); },
+      emailLocaleArg: (...a) => this.emailLocaleArg(...a),
+      getAppName: (...a) => this.getAppName(...a),
+      getEmailService: (...a) => this.getEmailService(...a),
+      storedRecipientLocale: (...a) => this.storedRecipientLocale(...a),
+    };
+    return sendPasswordChangeReminder.call(host, to, kept, requestSource);
+  }
+
+  /**
+   * Mail the account a completed self-service reset just ended for what the
+   * reset ended — counts of its API keys, linked sign-in accounts and
+   * authorized apps, and each OAuth application it disabled and each SCIM
+   * credential it revoked by name — and what it kept: the single sign-on
+   * providers the account registered and its second factor, so the owner can
+   * check them (`password-reset-ends-added-access.ts`). Sent after every
+   * completed self-service reset, to the account's own address, in its own
+   * stored language first (the ladder `sendChangeEmailNotice` follows).
+   *
+   * ⛔ Never throws: like the change reminder, a notice that cannot be sent —
+   * no transport, no template, a failed delivery — is logged at warn and
+   * never fails the reset.
+   */
+  private sendPasswordResetNotice(
+    to: { email: string; name?: string; id?: string },
+    ended: {
+      apiKeys: number;
+      signInAccounts: number;
+      authorizedApps: number;
+      ownedApps: readonly string[];
+      scimCredentials: readonly string[];
+    },
+    kept: { ssoProviders: readonly string[]; twoFactor: boolean },
+    requestSource?: unknown,
+  ): Promise<void> {
+    const readConfig = () => this.config;
+    const host: Pick<EmailSmsDeliveryHost, 'config' | 'emailLocaleArg' | 'getAppName' | 'getEmailService' | 'storedRecipientLocale'> = {
+      get config() { return readConfig(); },
+      emailLocaleArg: (...a) => this.emailLocaleArg(...a),
+      getAppName: (...a) => this.getAppName(...a),
+      getEmailService: (...a) => this.getEmailService(...a),
+      storedRecipientLocale: (...a) => this.storedRecipientLocale(...a),
+    };
+    return sendPasswordResetNotice.call(host, to, ended, kept, requestSource);
+  }
+
+  /**
    * Inject (or replace) the outbound SMS service used by the phone-number
    * OTP callbacks and the SMS invite path (#2780). Mirrors
    * {@link setEmailService}: resolved lazily per send, so it is safe to set
@@ -4275,7 +4278,7 @@ export class AuthManager {
    */
   handleVendorRequest(request: Request, transport?: { remoteAddress?: string }): Promise<Response> {
     // [#25224 cut 10] The body moved to `auth-manager-request-routing.ts` (see `RequestRoutingHost`).
-    const host: Pick<RequestRoutingHost, 'config' | 'betterAuthEndpointPath' | 'getOrCreateAuth' | 'resolveClientAddress' | 'runSubjectErasureAtomically' | 'answerOAuthTokenRevocation' | 'runSsoCallback' | 'runSsoLogout' | 'resolveAuthSecret'> = {
+    const host: Pick<RequestRoutingHost, 'config' | 'betterAuthEndpointPath' | 'getOrCreateAuth' | 'resolveClientAddress' | 'runSubjectErasureAtomically' | 'answerOAuthTokenRevocation' | 'runSsoCallback' | 'runSsoLogout' | 'runSsoDiscoveryEgress' | 'resolveAuthSecret'> = {
       config: this.config,
       betterAuthEndpointPath: (...a) => this.betterAuthEndpointPath(...a),
       getOrCreateAuth: (...a) => this.getOrCreateAuth(...a),
@@ -4284,9 +4287,73 @@ export class AuthManager {
       answerOAuthTokenRevocation: (...a) => this.answerOAuthTokenRevocation(...a),
       runSsoCallback: (...a) => this.runSsoCallback(...a),
       runSsoLogout: (...a) => this.runSsoLogout(...a),
+      runSsoDiscoveryEgress: (...a) => this.runSsoDiscoveryEgress(...a),
       resolveAuthSecret: (...a) => this.resolveAuthSecret(...a),
     };
     return handleRequest.call(host, request, transport);
+  }
+
+  /**
+   * The guard SSO discovery sends its reads through: the host's
+   * ({@link AuthManagerOptions.ssoDiscoveryEgress}), else one built once per
+   * manager, whose refusals go to this manager's logger.
+   */
+  private ssoDiscoveryEgressGuard(): Promise<EgressGuard> {
+    if (!this.ssoDiscoveryEgressGuardPromise) {
+      const configured = this.config.ssoDiscoveryEgress;
+      this.ssoDiscoveryEgressGuardPromise = configured
+        ? Promise.resolve(configured)
+        : import('./sso-discovery-egress.js').then(({ createSsoDiscoveryEgressGuard }) =>
+          createSsoDiscoveryEgressGuard(this.config.logger ? { logger: this.config.logger } : {}),
+        );
+      // A guard that cannot be built is asked again on the next read, not cached.
+      this.ssoDiscoveryEgressGuardPromise.catch(() => {
+        this.ssoDiscoveryEgressGuardPromise = undefined;
+      });
+    }
+    return this.ssoDiscoveryEgressGuardPromise;
+  }
+
+  private ssoDiscoveryEgressGuardPromise?: Promise<EgressGuard>;
+
+  /**
+   * Run a vendor endpoint that reads an identity provider (`/sso/register`,
+   * `/sign-in/sso`, `/sso/callback/*`) inside the SSO discovery scope
+   * (`sso-discovery-egress.ts`). The scope judges only reads at origins the
+   * request's provider configuration names: the global before-hook names a
+   * registration's, and the auth context's observed adapter
+   * (`ssoProviderReadsObserverPlugin`, mounted with `sso`) names a stored
+   * provider's as the vendor reads its row. Every other read the request
+   * makes is sent as it was. A context whose adapter is not observed (a view
+   * that does not hand its reads on through the observed one) is answered
+   * `503 SERVICE_UNAVAILABLE` before the endpoint runs, so nothing is read or
+   * sent: its provider reads could not be judged. Reached only when the built
+   * instance mounts the vendor's `sso` plugin (`mountsSsoEndpoints`, judged in
+   * `handleRequest`): a kernel without SSO answers the vendor's own 404.
+   */
+  private async runSsoDiscoveryEgress(run: () => Promise<Response>): Promise<Response> {
+    const [{ runInSsoDiscoveryEgressScope, observesSsoProviderReads }, guard, auth] = await Promise.all([
+      import('./sso-discovery-egress.js'),
+      this.ssoDiscoveryEgressGuard(),
+      this.getOrCreateAuth(),
+    ]);
+    const context = (await auth.$context) as { adapter?: unknown } | undefined;
+    if (!observesSsoProviderReads(context?.adapter)) {
+      this.audienceLogError(
+        '[AuthManager] SSO request refused: the auth context\'s adapter does not hand its provider reads on through the SSO discovery observer, so the reads they name could not be judged.',
+      );
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error: {
+            code: 'SERVICE_UNAVAILABLE',
+            message: 'SSO is unavailable: this server cannot judge its reads of an identity provider. Nothing was read or sent.',
+          },
+        }),
+        { status: 503, headers: { 'content-type': 'application/json' } },
+      );
+    }
+    return (await runInSsoDiscoveryEgressScope(guard, run)).value;
   }
 
   /**
@@ -4472,6 +4539,14 @@ export class AuthManager {
    * (`ssoDiscoveryTrustedOrigins`) beside the configured ones, on both doors.
    * The discovery read it makes keeps the configured trust, and the request's
    * own origin check never sees them (`sso-discovery-companion-origins.ts`).
+   *
+   * That read connects only to addresses that are public at connect time: it
+   * runs in its own SSO discovery scope, which names the origins the body's
+   * and the stored provider configuration read, and sends a read at one of
+   * them the configured trust does not list through the outbound-request
+   * guard (`sso-discovery-egress.ts`). On a registration, a refusal of the
+   * discovery host the body names is answered on the member that names it,
+   * as the before-hook's earlier judgement of that host answers.
    */
   private async assertSsoSignOutOfIdpSupported(ctx: any): Promise<void> {
     const path = ctx?.path;
@@ -4492,17 +4567,47 @@ export class AuthManager {
       (typeof ctx.body.issuer === 'string' && ctx.body.issuer)
       || (typeof stored?.issuer === 'string' && stored.issuer)
       || undefined;
-    const verdict = await judgeSignOutOfIdpCapability({
-      providerId,
-      issuer,
-      stored: stored ? { samlConfig: stored.samlConfig, oidcConfig: stored.oidcConfig } : undefined,
-      body: { samlConfig: ctx.body.samlConfig, oidcConfig: ctx.body.oidcConfig },
-      isTrustedOrigin: (url) => context.isTrustedOrigin(url),
-      isTrustedLogoutOrigin: trustingBodyNamedOrigins(
-        (url) => context.isTrustedOrigin(url),
-        await this.ssoDiscoveryTrustedOrigins(ctx.body),
-      ),
-    });
+    const isTrustedLogoutOrigin = trustingBodyNamedOrigins(
+      (url) => context.isTrustedOrigin(url),
+      await this.ssoDiscoveryTrustedOrigins(ctx.body),
+    );
+    const [{ runInSsoDiscoveryEgressScope, registerDiscoveryRefusalFor, oidcConfigReadUrls }, { computeDiscoveryUrl }, guard] =
+      await Promise.all([
+        import('./sso-discovery-egress.js'),
+        import('@better-auth/sso'),
+        this.ssoDiscoveryEgressGuard(),
+      ]);
+    const { value: verdict, refused } = await runInSsoDiscoveryEgressScope(
+      guard,
+      () =>
+        judgeSignOutOfIdpCapability({
+          providerId,
+          issuer,
+          stored: stored ? { samlConfig: stored.samlConfig, oidcConfig: stored.oidcConfig } : undefined,
+          body: { samlConfig: ctx.body.samlConfig, oidcConfig: ctx.body.oidcConfig },
+          isTrustedOrigin: (url) => context.isTrustedOrigin(url),
+          isTrustedLogoutOrigin,
+        }),
+      {
+        reads: [
+          ...oidcConfigReadUrls(issuer, ctx.body.oidcConfig, computeDiscoveryUrl),
+          ...oidcConfigReadUrls(issuer, stored?.oidcConfig, computeDiscoveryUrl),
+        ],
+        isConfiguredTrusted: (url) => context.isTrustedOrigin(url) === true,
+      },
+    );
+    const hostRefusal =
+      refused && !refused.unresolved && path === '/sso/register'
+        ? await registerDiscoveryRefusalFor(ctx.body, refused)
+        : undefined;
+    if (hostRefusal) {
+      const { APIError } = await import('better-auth/api');
+      throw new APIError(hostRefusal.status, {
+        code: hostRefusal.code,
+        message: hostRefusal.message,
+        field: hostRefusal.field,
+      });
+    }
     if (!verdict.ok) {
       const { APIError } = await import('better-auth/api');
       throw new APIError(verdict.refusal.status, {
@@ -4965,7 +5070,20 @@ export class AuthManager {
    * still deactivated. It runs on every inactive call after the key
    * revocation, an account already suspended keeps its own reason, and a
    * suspension that does not finish never fails the deprovision; it is
-   * reported once at `error`. An administrator's ban leaves the accounts alone.
+   * reported once at `error`. An administrator's ban suspends them too, with a
+   * reason of its own (`admin-ban-endpoints.ts`).
+   *
+   * An inactive state also ends what a password reset ends of the user's
+   * registrations (`removed-account-registrations.ts`): every OAuth application
+   * the user registered is disabled and every SCIM credential the user minted
+   * is revoked, each revoke recorded against the connection's service
+   * principal; the single sign-on providers the user registered are kept, and a
+   * re-activation restores none of these. It runs on every inactive call after
+   * the suspension and never fails the deprovision. A revoked credential pauses
+   * provisioning through its connection, which looks like nothing from here, so
+   * it is reported in one `error` line naming the credentials and the remedy;
+   * an arm that does not finish is reported once at `error` too, and the next
+   * inactive write retries it.
    *
    * [ADR-0135 D4] This callback also writes the directory-managed mark
    * (`sys_user.source = 'idp_provisioned'`, `scim-identity-source.ts`) on every
@@ -5049,6 +5167,10 @@ export class AuthManager {
       // re-activation resumes none of them.
       const suspension = await suspendAccountsOfDirectoryDeactivatedOwner(engine as never, state.userId);
       if (!isOwnedAccountSuspensionComplete(suspension)) this.logScimAccountSuspensionIncomplete(state.userId, suspension);
+      // ...and ends what a password reset ends of the user's registrations: the
+      // OAuth applications they registered disabled, the SCIM credentials they
+      // minted revoked. A re-activation restores none of them.
+      await this.endScimDeactivatedRegistrations(engine, state.userId);
       try {
         await markDirectoryProvisionedUsers(engine as never, [state.userId]);
       } catch (e) {
@@ -5100,6 +5222,55 @@ export class AuthManager {
     const sink = this.config.logger as { error?: (msg: string, meta?: unknown) => void } | undefined;
     if (typeof sink?.error === 'function') sink.error(message, meta);
     else console.error(message, meta);
+  }
+
+  /**
+   * The directory's half of the rule that an account disabled by any door
+   * keeps nothing running in its name (`removed-account-registrations.ts`):
+   * disable the OAuth applications `userId` registered and revoke the SCIM
+   * credentials they minted, each revoke recorded against the connection that
+   * deactivated them. Never throws. A revoked credential pauses provisioning
+   * through its connection while everything looks healthy, so it is logged at
+   * `error`, once, naming the credentials and the remedy; an arm that did not
+   * finish is logged at `error` once too (the user is disabled, so nothing
+   * looks wrong, but what was not ended keeps working).
+   */
+  private async endScimDeactivatedRegistrations(engine: unknown, userId: string): Promise<void> {
+    const { scimRequestConnectionId, scimServicePrincipal } = await import('./scim-connection-service.js');
+    const connectionId = scimRequestConnectionId();
+    const sink = this.config.logger as
+      | { error?: (msg: string, meta?: unknown) => void; warn?: (msg: string, meta?: unknown) => void }
+      | undefined;
+    const outcome = await endRegistrationsOfARemovedAccount(
+      engine as never,
+      userId,
+      connectionId !== undefined
+        ? {
+            actorId: scimServicePrincipal(connectionId),
+            servicePrincipal: true,
+            act: 'a directory deactivation',
+            warn: (message) => (typeof sink?.warn === 'function' ? sink.warn(message) : console.warn(message)),
+          }
+        : undefined,
+    );
+    const error = (message: string, meta: unknown): void => {
+      if (typeof sink?.error === 'function') sink.error(message, meta);
+      else console.error(message, meta);
+    };
+    if (outcome.scimCredentials.length > 0) {
+      error(directoryRevokedCredentialsMessage(userId, outcome.scimCredentials), {
+        object: 'sys_scim_connection_credential',
+        revoked: outcome.scimCredentials,
+      });
+    }
+    if (outcome.error !== undefined) {
+      error(directoryRegistrationsIncompleteMessage(userId, outcome), {
+        object: 'sys_oauth_application',
+        disabled: outcome.ownedApps.length,
+        revoked: outcome.scimCredentials.length,
+        error: outcome.error,
+      });
+    }
   }
 
   /**
@@ -5345,7 +5516,9 @@ export class AuthManager {
    * (`mcp-token-revocation.ts` `mcpConsentAdmits`). A token is refused when
    * its consent is gone, when the consent was created after the token was
    * issued (revoked, then granted again), when it carries no `azp` to key the
-   * read, and when the read fails (fail closed). So revocation takes effect
+   * read, when it was issued before its subject's password last changed (the
+   * credential clock, `credential-change-ends-prior-access.ts`), and when the
+   * read fails (fail closed). So revocation takes effect
    * on the next request: `/oauth2/revoke` deletes the consent and the
    * client's refresh family for that user (`answerOAuthTokenRevocation`), and
    * the Console's withdraw (`authorized-clients-withdraw.ts`) revokes the same
@@ -5971,6 +6144,10 @@ export class AuthManager {
       // value served only while direct sign-in is on (registered in
       // PUBLIC_AUTH_CONFIG_NON_FLAG_KEYS).
       ...(directSignIn.enabled ? { localSignIn: directSignIn.localSignIn } : {}),
+      // Where the console's explicit sign-out returns (`hold` | `identity-provider`),
+      // served on the same terms as `localSignIn` (registered in
+      // PUBLIC_AUTH_CONFIG_NON_FLAG_KEYS).
+      ...(directSignIn.enabled ? { afterSignOut: directSignIn.afterSignOut } : {}),
       ...(termsUrl ? { termsUrl } : {}),
       ...(privacyUrl ? { privacyUrl } : {}),
       // The public base URL every emailed / OAuth link is built on
@@ -6141,8 +6318,12 @@ export class AuthManager {
    * `/sso/update-provider` body; the answer is the PUBLIC-ROUTABLE origins of its `issuer` and every explicit
    * `oidcConfig` endpoint. Private / internal / loopback hosts are never
    * trusted this way (better-auth's `isPublicRoutableHost`, the same predicate
-   * its own sub-endpoint check uses). Best-effort: anything unreadable yields
-   * `[]`.
+   * its own sub-endpoint check uses). A name that looks public is judged by
+   * its name here; the host a registration's discovery reads is resolved, and
+   * each address judged, before the register door hands this list on
+   * (`refuseSsoDiscoveryHostNotPublic`), and every read is judged again when
+   * it connects (`sso-discovery-egress.ts`). Best-effort: anything unreadable
+   * yields `[]`.
    *
    * ⛔ Never an accepted `Origin`: the request's own origin check reads the
    * deployment's configured trusted origins alone. This list reaches two
@@ -7751,13 +7932,19 @@ export class AuthManager {
     return resolveClientAddress({
       ...(transport.headers ? { headers: transport.headers } : {}),
       ...(transport.remoteAddress ? { remoteAddress: transport.remoteAddress } : {}),
-      trustProxy: this.config.trustProxy === true,
+      trustProxy: readTrustProxy(this.config.trustProxy),
+      // Only a manager with a logger takes the warning: without one it would
+      // spend the once-per-process latch and say nothing.
+      ...(this.config.logger?.warn ? { warn: (message: string) => this.config.logger?.warn(message) } : {}),
     });
   }
 
-  /** Whether this deployment declared `server.trustProxy` ({@link AuthManagerOptions.trustProxy}). */
+  /**
+   * Whether this deployment declared `server.trustProxy`, in either form
+   * ({@link AuthManagerOptions.trustProxy}), so a forwarded header can count.
+   */
   public trustsForwardedHeaders(): boolean {
-    return this.config.trustProxy === true;
+    return readTrustProxy(this.config.trustProxy) !== false;
   }
 
   /**

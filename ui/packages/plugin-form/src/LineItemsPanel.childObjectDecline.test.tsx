@@ -247,8 +247,9 @@ describe('record:line_items — an unresolvable panel offers no editable grid (o
     // assertion so a failure names which affordance came back.
     expect(view.container.querySelector('[data-testid="line-items"]')).toBeNull();
     expect(view.container.querySelector('[data-testid="line-items-add"]')).toBeNull();
-    // No cell to type in — the ghost row is what made the save path reachable in
-    // ONE keystroke, without the Add button being touched at all.
+    // No cell to type in — the always-present entry row the grid drew then
+    // (objectstack#35507 removed it) made the save path reachable in ONE
+    // keystroke, without the Add button being touched at all.
     expect(view.container.querySelector('input[aria-label="Qty"]')).toBeNull();
 
     // ⛔ And NOT a spinner that never ends: hiding a permanent authoring error
@@ -276,7 +277,7 @@ describe('record:line_items — an unresolvable panel offers no editable grid (o
 
     expect(view.container.querySelector('[data-testid="line-items-no-child-object"]')).toBeNull();
     expect(view.container.querySelector('[data-testid="line-items"]')).not.toBeNull();
-    expect(view.container.querySelector('input[aria-label="Qty"]')).not.toBeNull();
+    expect(view.container.querySelector('[data-testid="line-items-add"]')).not.toBeNull();
   });
 
   it('refuses to save when the child object is dropped from a panel with dirty rows', async () => {
@@ -295,6 +296,10 @@ describe('record:line_items — an unresolvable panel offers no editable grid (o
     );
     await settle();
 
+    // A line to dirty (the grid draws no trailing entry row, objectstack#35507).
+    await act(async () => {
+      fireEvent.click(view.container.querySelector('[data-testid="line-items-add"]') as HTMLButtonElement);
+    });
     const cell = view.container.querySelector('input[aria-label="Qty"]') as HTMLInputElement;
     expect(cell).not.toBeNull();
     await act(async () => {

@@ -221,6 +221,12 @@ describe('default permission sets', () => {
       // `shipped-sets-identity-default-row-scope.test.ts`,
       // `private-credential-row-scope.test.ts` and
       // `scim-projection-row-scope.test.ts`; this list only records presence.
+      // [ruling 6973785798] The notification-preference pair: `_self` binds every
+      // holder of the grant, and `_org_admin` is its owner/admin widener (the
+      // `sys_invitation_org_admin` shape). Behaviour per persona is pinned in
+      // `default-permission-sets.notification-preference.integration.test.ts`.
+      'sys_notification_preference_org_admin',
+      'sys_notification_preference_self',
       'sys_notification_receipt_self',
       'sys_oauth_application_self',
       'sys_oauth_consent_self',

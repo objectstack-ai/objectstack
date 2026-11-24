@@ -26,6 +26,9 @@
 
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+// `ObjectView` reaches a dynamic `import('@objectstack/lint')`: pay its load at
+// collection, never inside a case's clocked window (`check:test-source-alias`).
+import '@objectstack/lint';
 import { render, cleanup, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter, Routes, Route, useLocation, useNavigationType } from 'react-router-dom';
 import { createI18n, I18nProvider } from '@object-ui/i18n';
@@ -83,7 +86,6 @@ vi.mock('./metadata-admin/useMetadata', async (importOriginal) => ({
 
 import { ObjectView } from './ObjectView';
 import { ExpressionProvider } from '../providers/ExpressionProvider';
-import { RECORD_OPEN_PREFERENCE_KEY } from '../utils/recordOpenPreference';
 
 const OBJECT_NAME = 'duly_task';
 const VIEW_ID = `${OBJECT_NAME}.all`;
@@ -147,7 +149,6 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   setWidth(DESKTOP_WIDTH);
-  window.localStorage.removeItem(RECORD_OPEN_PREFERENCE_KEY);
   window.history.replaceState(null, '', '/');
 });
 
@@ -216,11 +217,11 @@ describe('on a phone a record opens as a page, always (objectstack#27058)', () =
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 
-  it.each([['drawer'], ['page']])('a reader who prefers %s: nothing is drawn beside the list, and the Display menu offers no Open records', async (preference) => {
-    window.localStorage.setItem(RECORD_OPEN_PREFERENCE_KEY, preference);
+  it('no row draws the side-panel icon, and the Display menu offers no Open records (objectstack#35854)', async () => {
     setWidth(PHONE_WIDTH);
     mountList();
     await screen.findByText('Alpha', undefined, { timeout: 5000 });
+    expect(screen.queryAllByTestId('record-open-in-panel')).toHaveLength(0);
     fireEvent.click(screen.getByTestId('toolbar-display-trigger'));
     // The menu is open (its other sections draw) and holds no Open records.
     await waitFor(() => expect(screen.getByRole('dialog')).toBeTruthy());
@@ -230,7 +231,6 @@ describe('on a phone a record opens as a page, always (objectstack#27058)', () =
     fireEvent.click(screen.getByText('Alpha'));
     await screen.findByTestId('record-page-route', undefined, { timeout: 5000 });
     expect(location()).toBe(`/apps/demo/${OBJECT_NAME}/record/r1`);
-    expect(window.localStorage.getItem(RECORD_OPEN_PREFERENCE_KEY)).toBe(preference);
   });
 
   it('control: at 1440 px the same ?recordId= opens the drawer over the list', async () => {

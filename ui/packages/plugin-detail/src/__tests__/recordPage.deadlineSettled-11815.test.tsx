@@ -19,6 +19,7 @@ import * as React from 'react';
 import { DetailSection } from '../DetailSection';
 import { HeaderHighlight } from '../HeaderHighlight';
 import type { DetailViewSection } from '@object-ui/types';
+import { formatDate } from '@object-ui/core';
 
 beforeAll(() => {
   Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1280 });
@@ -48,9 +49,18 @@ const OBJECT_SCHEMA = {
 
 const SECTION = { title: 'S', fields: [{ name: 'due_date', label: 'Due' }] } as unknown as DetailViewSection;
 
+// objectstack#35745 — a record page writes a business date as the date (with
+// its year, objectui#13331); the relative phrase, the overdue wording
+// included, is the date's tooltip. The red styling is the face's, unchanged.
+const dateText = (iso: string): string => formatDate(iso, undefined, { alwaysShowYear: true });
+
 const dueSpan = (container: HTMLElement) => {
   const span = container.querySelector('span.tabular-nums') as HTMLElement | null;
-  return { text: span?.textContent ?? '', red: !!span?.className.includes('text-red-600') };
+  return {
+    text: span?.textContent ?? '',
+    tooltip: span?.getAttribute('title') ?? '',
+    red: !!span?.className.includes('text-red-600'),
+  };
 };
 
 describe('DetailSection — a declared deadline is judged against the record (objectui#11815)', () => {
@@ -58,14 +68,14 @@ describe('DetailSection — a declared deadline is judged against the record (ob
     const { container } = render(
       <DetailSection section={SECTION} data={{ title: 'Open', status: 'open', due_date: daysAgo(5) }} objectSchema={OBJECT_SCHEMA} />,
     );
-    expect(dueSpan(container)).toEqual({ text: 'Overdue 5d', red: true });
+    expect(dueSpan(container)).toEqual({ text: dateText(daysAgo(5)), tooltip: 'Overdue 5d', red: true });
   });
 
   it('a done record past the same deadline reads neutral, with no red', () => {
     const { container } = render(
       <DetailSection section={SECTION} data={{ title: 'Done', status: 'done', due_date: daysAgo(5) }} objectSchema={OBJECT_SCHEMA} />,
     );
-    expect(dueSpan(container)).toEqual({ text: '5 days ago', red: false });
+    expect(dueSpan(container)).toEqual({ text: dateText(daysAgo(5)), tooltip: '5 days ago', red: false });
   });
 
   it('CONTROL — an undeclared due_date past its day reads neutral on an open record', () => {
@@ -73,7 +83,7 @@ describe('DetailSection — a declared deadline is judged against the record (ob
     const { container } = render(
       <DetailSection section={SECTION} data={{ status: 'open', due_date: daysAgo(5) }} objectSchema={undeclared} />,
     );
-    expect(dueSpan(container)).toEqual({ text: '5 days ago', red: false });
+    expect(dueSpan(container)).toEqual({ text: dateText(daysAgo(5)), tooltip: '5 days ago', red: false });
   });
 });
 
@@ -84,13 +94,13 @@ describe('HeaderHighlight — the same judgement on the highlights strip (object
     const { container } = render(
       <HeaderHighlight fields={FIELDS as any} data={{ status: 'open', due_date: daysAgo(5) }} objectSchema={OBJECT_SCHEMA} />,
     );
-    expect(dueSpan(container)).toEqual({ text: 'Overdue 5d', red: true });
+    expect(dueSpan(container)).toEqual({ text: dateText(daysAgo(5)), tooltip: 'Overdue 5d', red: true });
   });
 
   it('a done record past the same deadline reads neutral, with no red', () => {
     const { container } = render(
       <HeaderHighlight fields={FIELDS as any} data={{ status: 'done', due_date: daysAgo(5) }} objectSchema={OBJECT_SCHEMA} />,
     );
-    expect(dueSpan(container)).toEqual({ text: '5 days ago', red: false });
+    expect(dueSpan(container)).toEqual({ text: dateText(daysAgo(5)), tooltip: '5 days ago', red: false });
   });
 });

@@ -109,6 +109,9 @@ vi.mock('@object-ui/react', async (importOriginal) => {
   return { ...mod, useAdapter: () => ({}) };
 });
 
+// Pay the dynamic `@objectstack/lint` load at collection, never inside a case's
+// clocked window (`check:test-source-alias`).
+import '@objectstack/lint';
 import { InterfacesPillar } from './StudioDesignSurface';
 import { registerMetadataPreview } from '../metadata-admin/preview-registry';
 import { registerMetadataInspector } from '../metadata-admin/inspector-registry';
@@ -171,7 +174,7 @@ async function addMetric(): Promise<void> {
 
 async function bindDataset(): Promise<void> {
   await userEvent.click(within(rail()).getByRole('combobox', { name: t('engine.inspector.widget.dataset', 'en') }));
-  await userEvent.click(await screen.findByRole('option', { name: /sales_ds/ }));
+  await userEvent.click(await screen.findByRole('option', { name: 'Sales' }));
   await flush();
 }
 
@@ -341,10 +344,13 @@ describe('a bound widget whose binding the author empties is held, not sent refu
     await within(rail()).findByDisplayValue(title, undefined, { timeout: 8000 });
   }
 
-  /** The inspector's own remove button on the member `name` of a binding list. */
-  function remove(name: string): void {
+  /**
+   * The inspector's own remove button on a member of a binding list, named by
+   * the row's label — a measure's reads `LABEL · AGGREGATE` (objectstack#36373).
+   */
+  function remove(label: string): void {
     fireEvent.click(
-      within(rail()).getByRole('button', { name: tFormat('engine.viewColumnPanes.remove', 'en', { label: name }) }),
+      within(rail()).getByRole('button', { name: tFormat('engine.viewColumnPanes.remove', 'en', { label }) }),
     );
   }
 
@@ -357,7 +363,7 @@ describe('a bound widget whose binding the author empties is held, not sent refu
     mountPillar(report);
     await ready();
     await selectWidget('pipeline', 'Pipeline');
-    remove('revenue');
+    remove('Revenue · Sum');
     await outlastDebounce();
 
     expect(dashboardSaves(), 'the emptied measure list is not sent').toEqual([]);
@@ -390,7 +396,7 @@ describe('a bound widget whose binding the author empties is held, not sent refu
     mountPillar();
     await ready();
     await selectWidget('by_stage', 'By stage');
-    remove('stage');
+    remove('Stage');
     await waitFor(() => expect(dashboardSaves()).toHaveLength(1), { timeout: 4000 });
     const [sent] = dashboardSaves();
     expect((sent.widgets as unknown[])[1]).toMatchObject({ id: 'by_stage', dimensions: [], values: ['revenue'] });
@@ -404,7 +410,7 @@ describe('a bound widget whose binding the author empties is held, not sent refu
     mountPillar();
     await ready();
     await selectWidget('spread', 'Spread');
-    remove('stage');
+    remove('Stage');
     await outlastDebounce();
 
     expect(dashboardSaves(), 'a scatter the spec refuses for want of a dimension is not sent').toEqual([]);
@@ -432,6 +438,7 @@ describe('a bound widget whose binding the author empties is held, not sent refu
     mountPillar();
     await ready();
     await selectWidget('pipeline', 'Pipeline');
+    // No such dataset, so no member text: the row reads the name.
     remove('revenue');
     await waitFor(() => expect(dashboardSaves()).toHaveLength(1), { timeout: 4000 });
     expect((dashboardSaves()[0].widgets as unknown[])[0]).toMatchObject({ dataset: 'Sales Pipeline', values: [] });

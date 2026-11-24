@@ -139,7 +139,7 @@ export interface NamespacePosition {
 export const NAMESPACE_POSITION_LITERALS: Readonly<Record<AddressDoor, NamespacePosition>> = Object.freeze({
   automation: Object.freeze({
     prefix: '/automation',
-    literals: Object.freeze(['_status', 'actions', 'connectors', 'hooks', 'trigger']),
+    literals: Object.freeze(['_record-starts', '_status', 'actions', 'connectors', 'hooks', 'trigger']),
   }),
   automationTrigger: Object.freeze({ prefix: '/automation/trigger', literals: Object.freeze([]) }),
   inboundHook: Object.freeze({ prefix: '/automation/hooks', literals: Object.freeze(['runs']) }),

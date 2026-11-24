@@ -7,6 +7,8 @@
  */
 
 import * as React from 'react';
+import type { FilterBuilderRowGroup, SortItem } from '@object-ui/components';
+import type { DataSource } from '@object-ui/types';
 
 /**
  * `true` inside the record page's related column (objectstack#26678): a
@@ -74,6 +76,56 @@ export const RELATED_CARD_DROP_LINE =
  * itself (`bodyTableIdsOf`); empty anywhere else.
  */
 export const RecordBodyTablesContext = React.createContext<ReadonlySet<string>>(new Set());
+
+/**
+ * What a record page's EDIT STATE draws in place of its body tables
+ * (objectstack#35599): the relationship ids (`CHILD_OBJECT.FK_FIELD`) it edits,
+ * and the element it draws for each — the host's editor, supplied by the host
+ * because this package does not draw editable lines. A `record:related_list`
+ * whose id is in `ids` renders `render(...)` instead of its read-only list;
+ * every other list, and every list while the value is `null` (read mode, and
+ * every page that is not a record page in its edit state), renders as before.
+ *
+ * Set by the record page host only while its edit state is open and one batch
+ * can carry the tables. The page keeps its `record:related_list` nodes: the
+ * editor is a host element, never a node type a page could carry.
+ */
+export interface RecordBodyTableEditorSlot {
+  /** The body tables the edit state edits, by relationship id. */
+  ids: ReadonlySet<string>;
+  /** The editor drawn in a body table's place. */
+  render: (table: { objectName: string; relationshipField: string; title?: string }) => React.ReactNode;
+}
+
+/** The open edit state's body-table editor slot, or `null` (see {@link RecordBodyTableEditorSlot}). */
+export const RecordBodyTableEditorSlotContext = React.createContext<RecordBodyTableEditorSlot | null>(null);
+
+/**
+ * What a related list opened as the record page's tab draws as its condition
+ * row (objectstack#35892): the list page's own Sort and Filter, supplied by the
+ * host because the row lives in `@object-ui/plugin-list`, which depends on
+ * this package. The host draws `plugin-list`'s `ListConditionsBlock`; while
+ * the value is `null` (a host that supplies none) the tab draws no condition
+ * row. A host element, never a node type a page could carry.
+ */
+export interface RelatedListConditionsProps {
+  objectName?: string;
+  objectDef?: { fields?: Record<string, any> } | null;
+  /** The fields the tab's table shows, in column order. */
+  shownFields?: ReadonlyArray<string>;
+  sort: ReadonlyArray<SortItem>;
+  onSortChange: (next: SortItem[]) => void;
+  filters: FilterBuilderRowGroup;
+  /** The next filter group, with the query node it applies (`undefined` = no filter). */
+  onFiltersChange: (next: FilterBuilderRowGroup, filter: unknown[] | undefined) => void;
+  /** 「Discard」 at the row's end, passed only while the reader changed anything. */
+  onDiscard?: () => void;
+  /** Where the names of the records a lookup condition points at are read. */
+  dataSource?: Pick<DataSource, 'find' | 'getObjectSchema'> | null;
+}
+
+/** The host's condition row for a related tab, or `null` (see {@link RelatedListConditionsProps}). */
+export const RelatedListConditionsSlotContext = React.createContext<((props: RelatedListConditionsProps) => React.ReactNode) | null>(null);
 
 /** Enlarge a related list in place — the host's `?related=` — for a body table. */
 export const RelatedEnlargeContext = React.createContext<((id: string) => void) | null>(null);

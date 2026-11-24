@@ -84,6 +84,10 @@ const entry = (label: string, order?: number, extra: Partial<NavigationItem> = {
     ...extra,
   }) as NavigationItem;
 
+// objectstack#35985: an object row's first span is its icon tile, which
+// carries no text; the row's label is the first span that is not a tile.
+const LABEL_SPAN = 'span:not([data-object-icon-tile])';
+
 function renderShell(
   navigation: NavigationItem[],
   props: Partial<Omit<AppSchemaRendererProps, 'schema' | 'children'>> = {},
@@ -106,9 +110,9 @@ function renderShell(
     return b ? Array.from(b.querySelectorAll('a, button')) : [];
   };
   /** Every tab, link or button, in drawn order, by the label it shows. */
-  const tabs = () => tabEls().map((el) => el.querySelector('span')?.textContent ?? '');
+  const tabs = () => tabEls().map((el) => el.querySelector(LABEL_SPAN)?.textContent ?? '');
   const tab = (label: string) => {
-    const hit = tabEls().filter((el) => el.querySelector('span')?.textContent === label);
+    const hit = tabEls().filter((el) => el.querySelector(LABEL_SPAN)?.textContent === label);
     expect(hit.length).toBeLessThanOrEqual(1);
     return hit[0] ?? null;
   };
@@ -116,11 +120,11 @@ function renderShell(
   const sidebarOrder = (labels: string[]) =>
     Array.from(container.querySelectorAll('a, button'))
       .filter((el) => !bar()?.contains(el))
-      .map((el) => el.querySelector('span')?.textContent ?? el.textContent ?? '')
+      .map((el) => el.querySelector(LABEL_SPAN)?.textContent ?? el.textContent ?? '')
       .filter((text) => labels.includes(text));
   const sidebarRow = (label: string) => {
     const hit = Array.from(container.querySelectorAll('a, button')).filter(
-      (el) => !bar()?.contains(el) && el.querySelector('span')?.textContent === label,
+      (el) => !bar()?.contains(el) && el.querySelector(LABEL_SPAN)?.textContent === label,
     );
     expect(hit.length).toBeLessThanOrEqual(1);
     return hit[0] ?? null;
@@ -303,7 +307,7 @@ describe('objectui#11395 — the enumeration: inputs that are deliberately bar-s
     const navigation = [entry('Accounts'), entry('Deals', undefined, { pinned: true }), entry('Leads')];
     const { tabs, container, bar } = renderShell(navigation, { enablePinning: true, onPinToggle: () => {} });
     const sidebarDeals = Array.from(container.querySelectorAll('a')).filter(
-      (el) => !bar()?.contains(el) && el.querySelector('span')?.textContent === 'Deals',
+      (el) => !bar()?.contains(el) && el.querySelector(LABEL_SPAN)?.textContent === 'Deals',
     );
     expect(sidebarDeals).toHaveLength(2);
     expect(tabs()).toEqual(['Accounts', 'Deals', 'Leads']);

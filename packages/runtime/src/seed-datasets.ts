@@ -28,6 +28,13 @@
  * {@link readSeedDatasets} at invoke time, so it always replays the full union —
  * including datasets appended AFTER its closure was built (a second config app, a
  * marketplace install).
+ *
+ * [#35109] A union of SOURCES, not of merges: a source that merges again — a
+ * package upgraded, reinstalled, reseeded or rehydrated in a running process —
+ * names itself (`owner`, the package id), and its earlier entries are replaced
+ * on the same array instead of kept beside the new ones. An append-only list
+ * kept the superseded version's datasets until a restart, and every
+ * organization founded in between replayed both versions.
  */
 
 /** The subset of a kernel / plugin context this module pokes at. */
@@ -59,8 +66,55 @@ export function readSeedDatasets(ctx: unknown): unknown[] | undefined {
 }
 
 /**
- * Append `datasets` onto the shared `seed-datasets` service, register-once-then-
+ * The owner index of a shared list: each owner's entries as it last merged
+ * them, by reference. It rides ON the live array, under a registry symbol, so
+ * every copy of this module and the install door's inline fallback
+ * (`@objectstack/cloud-connection`) read and write one index. Non-enumerable:
+ * the array's length, iteration and JSON are unchanged.
+ */
+const OWNER_INDEX = Symbol.for('objectstack.seed-datasets.owners');
+
+function ownerIndexOf(list: unknown[]): Map<string, unknown[]> {
+    const held = (list as unknown as Record<symbol, unknown>)[OWNER_INDEX];
+    if (held instanceof Map) return held as Map<string, unknown[]>;
+    const index = new Map<string, unknown[]>();
+    Object.defineProperty(list, OWNER_INDEX, { value: index, enumerable: false });
+    return index;
+}
+
+/**
+ * Replace `owner`'s entries on `list` with `datasets`, in place: its previous
+ * entries are removed (by reference, one occurrence each, the latest first, so
+ * an un-owned copy of the same object stays), and `datasets` go where the first
+ * of them stood — at the end for an owner merging for the first time.
+ */
+function replaceOwnedSeedDatasets(list: unknown[], owner: string, datasets: readonly unknown[]): void {
+    const index = ownerIndexOf(list);
+    const stale = new Map<unknown, number>();
+    for (const entry of index.get(owner) ?? []) stale.set(entry, (stale.get(entry) ?? 0) + 1);
+    let at = list.length;
+    for (let i = list.length - 1; i >= 0 && stale.size > 0; i--) {
+        const left = stale.get(list[i]);
+        if (left === undefined) continue;
+        if (left > 1) stale.set(list[i], left - 1);
+        else stale.delete(list[i]);
+        list.splice(i, 1);
+        at = i;
+    }
+    list.splice(at, 0, ...datasets);
+    if (datasets.length > 0) index.set(owner, [...datasets]);
+    else index.delete(owner);
+}
+
+/**
+ * Merge `datasets` into the shared `seed-datasets` service, register-once-then-
  * mutate. Returns the live array so the caller can log the running total.
+ *
+ * `owner` names the source — the package id, for the install door. Given, the
+ * owner's earlier entries are REPLACED on the list (an upgrade, a reinstall, a
+ * reseed or a rehydrate of one package leaves exactly that package's current
+ * datasets; an empty `datasets` takes them all off). Omitted, `datasets` are
+ * appended, as every config app's boot merge does.
  *
  * `getService` hands back the SAME array reference, so an already-present list is
  * mutated in place and only a brand-new list is registered — the ONE way to avoid
@@ -69,11 +123,15 @@ export function readSeedDatasets(ctx: unknown): unknown[] | undefined {
  * banner/replay concern can't tear down boot; the caller still gets the (now
  * unregistered) list back.
  */
-export function mergeSeedDatasets(ctx: unknown, datasets: readonly unknown[]): unknown[] {
+export function mergeSeedDatasets(ctx: unknown, datasets: readonly unknown[], owner?: string): unknown[] {
     const c = ctx as SeedDatasetHost | null | undefined;
     const current = readSeedDatasets(ctx);
     const list: unknown[] = Array.isArray(current) ? current : [];
-    if (datasets.length > 0) list.push(...datasets);
+    const owned = typeof owner === 'string' && owner !== '';
+    // An owner with nothing to add and no list to take entries off: register nothing.
+    if (owned && datasets.length === 0 && !Array.isArray(current)) return list;
+    if (owned) replaceOwnedSeedDatasets(list, owner, datasets);
+    else if (datasets.length > 0) list.push(...datasets);
 
     // Only the first source registers; every later one mutated the shared list
     // above and must NOT re-register (that is the throw defect ② guards against).

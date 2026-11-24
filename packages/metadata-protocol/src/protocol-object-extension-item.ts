@@ -41,6 +41,7 @@ import { closureDependencyRemedy, narrowObjectsToPackageClosure } from '@objects
 import type { RuntimePackageScope } from '@objectstack/lint/runtime';
 import { judgeExtensionFieldSuffix, extensionFieldSuffixRefusalError } from './protocol-extension-field-suffix.js';
 import { judgeRedeclaredOwnerFields, redeclaredOwnerFieldRefusalError } from './protocol-extension-redeclared-owner-field.js';
+import { judgeExtensionArrangement, extensionArrangementRefusalError } from './protocol-extension-arrangement.js';
 import type { MetadataIssueEntry } from './protocol.js';
 
 /** The metadata type of an object extension item. */
@@ -163,6 +164,9 @@ export interface ObjectExtensionItemSubject {
  *     changes anything outside the display-property whitelist, with the
  *     prescription naming `fieldPatches`. A registry without `getObjectOwner`
  *     leaves it unasked, as the target checks above are.
+ *  8. ADR-0146 D10's arrangement (`judgeExtensionArrangement`): `fieldGroups`
+ *     or `relatedLists` written into a package that is not a base's paired
+ *     `.custom` is refused, with the prescription naming `place`.
  *
  * Whether the package is writable is the door's own refusal
  * (`WRITABLE_PACKAGE_REQUIRED`), asked before any of this.
@@ -248,6 +252,11 @@ export function objectExtensionItemRefusal(
             : undefined),
     }).map((r) => ({ ...r, path: r.path.slice('objectExtensions[0].'.length) }));
     if (redeclared.length > 0) return redeclaredOwnerFieldRefusalError(redeclared);
+
+    // 8.
+    const arrangement = judgeExtensionArrangement({ packageId: binding, objectExtensions: [item] })
+        .map((r) => ({ ...r, path: r.path.slice('objectExtensions[0].'.length) }));
+    if (arrangement.length > 0) return extensionArrangementRefusalError(arrangement);
     return undefined;
 }
 

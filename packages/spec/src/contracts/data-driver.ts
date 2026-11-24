@@ -68,8 +68,9 @@ export type DriverQuery = Omit<QueryAST, 'object'>;
  * keeps a `Field.date` on its own calendar day, and refuses a zone it cannot
  * bucket rather than reading it as UTC. A driver that does NOT declare the bit
  * is never sent the key by the engine; handed one by a direct caller, it
- * refuses the zone the same way (driver-sql: `NOT_IMPLEMENTED` / 501) rather
- * than answering the UTC bucket.
+ * refuses the zone the same way (driver-sql on every dialect but PostgreSQL,
+ * and driver-mongodb: `NOT_IMPLEMENTED` / 501) rather than answering the UTC
+ * bucket.
  *
  * Kept off {@link DriverQuery} on purpose: `find()` / `count()` take that type
  * and no zone means anything to them, so a key they would silently drop is not

@@ -100,7 +100,9 @@ describe('approval status vocabulary (#7232)', () => {
     expect(resolvedStatusLabels('zh-CN')).toEqual({
       pending: '待审批',
       approved: '已批准',
-      rejected: '已拒绝',
+      // #35021: an approval rejection reads 驳回, the flow designer's word for
+      // the branch; 拒绝 is left to access denial and invitations.
+      rejected: '已驳回',
       recalled: '已撤回',
       returned: '已退回修改',
       // #13568. 已作废, deliberately not 已取消: `recalled` is already 已撤回

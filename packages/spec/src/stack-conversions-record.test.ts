@@ -590,6 +590,27 @@ describe('a composeStacks refusal carries its inputs’ records', () => {
     expect(stackConversionsOf(error).map(substance)).toEqual([HEADER_NOTICE, HEADER_NOTICE]);
   });
 
+  it('[#35228] a same-package duplicate identity: the inputs’ records ride the cross-reference refusal', () => {
+    const extending = (ns: string, field: string) => {
+      quiet();
+      return defineStack(
+        {
+          ...source(ns, 'visibility'),
+          objectExtensions: [{ extend: 'xa_thing', fields: { [field]: { type: 'text', label: field } } }],
+        } as never,
+        { strict: false },
+      );
+    };
+    const a = extending('xa', 'xa_one');
+    const b = extending('xb', 'xa_two');
+    const error = thrown(() => composeStacks([a, b] as ObjectStackDefinition[]));
+    expect(error.code).toBe('STACK_CROSS_REFERENCE_INVALID');
+    expect(error.status).toBe(422);
+    expect(error.message).toContain("Object extension of 'xa_thing' is declared twice in `objectExtensions`");
+    expect(stackConversionsOf(error)).toEqual([...stackConversionsOf(a), ...stackConversionsOf(b)]);
+    expect(stackConversionsOf(error).map(substance)).toEqual([HEADER_NOTICE, HEADER_NOTICE]);
+  });
+
   it('an unbuilt input: the built inputs’ records ride the provenance refusal', () => {
     const a = build('pa', 'visibility');
     const error = thrown(() => composeStacks([a, { ...a }] as ObjectStackDefinition[]));

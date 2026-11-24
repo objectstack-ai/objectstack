@@ -24,7 +24,7 @@
  *
  * On Home it sits in the page's 1120 px content column, like every other card
  * above the apps. It says nothing about mail: an unset email service is not a
- * finding this console draws (`deploymentNotice.ts`, objectstack#32643), and the
+ * finding this console draws (`deploymentNoticeState.ts`, objectstack#32643), and the
  * first-run checklist's optional Email delivery row is where mail is set up.
  *
  * @module
@@ -46,7 +46,7 @@ import {
   type DeploymentFinding,
   type DeploymentNoticeState,
   type HideAnswer,
-} from './deploymentNotice.js';
+} from './deploymentNoticeState.js';
 
 export interface DeploymentNoticeProps {
   /** `home`: nothing once hidden. `system-overview`: one small line once hidden. */

@@ -32,6 +32,7 @@ import { SharingService, buildSharingMiddleware } from '@objectstack/plugin-shar
 import { PermissionSetSchema } from '@objectstack/spec/security';
 import type { PermissionSet } from '@objectstack/spec/security';
 import { SecurityPlugin } from './security-plugin.js';
+import { resolveFixedReadLeavesInMemory } from './shared-record-ids-in-memory.testkit.js';
 import { defaultPermissionSets } from './objects/default-permission-sets.js';
 
 // ── metadata ───────────────────────────────────────────────────────────────
@@ -152,6 +153,7 @@ function makeEngine(schema: Record<string, unknown>, storeFaults: ReadonlyMap<st
   };
   const middlewares: any[] = [];
   return {
+    _tables: tables,
     _middlewares: middlewares,
     registerMiddleware: (mw: any) => middlewares.push(mw),
     getSchema: (name: string) => (name === OBJECT ? schema : undefined),
@@ -248,7 +250,16 @@ async function makeStack(
             reached = true;
             // A write stops at the engine's door: reaching it is the admission
             // under test, and no write verb is exercised on this double.
-            if (operation === 'read') rows = await engine.find(OBJECT, { where: opCtx.ast.where });
+            // [ADR-0155 plan step 6] The share-grant leaf in the scoped `where`
+            // is resolved here, once for the statement, as a driver's
+            // semi-join is (`shared-record-ids-in-memory.testkit.ts`): this
+            // double is no driver. With the share store down, the statement
+            // fails on that fault, whichever arm the row would match.
+            if (operation === 'read') {
+              rows = await engine.find(OBJECT, {
+                where: resolveFixedReadLeavesInMemory(opCtx.ast.where, (table) => engine._tables[table]),
+              });
+            }
             // [#20013] …except the one step the engine takes at that door
             // before its statement: it runs the installed stored-row seam
             // (`postHookWriteImageCheck`) on the row it writes, the prior row
@@ -317,6 +328,10 @@ function expectNotEvaluated(decision: any, layer: string): void {
 // ───────────────────────────────────────────────────────────────────────────
 
 describe("plugin-sharing's read filter rejects — explain(read) fails closed", () => {
+  // [ADR-0155 plan step 6] With the share store down, the read filter itself
+  // now answers (it reads no grant row: its share arm is the share-grant leaf);
+  // the fault surfaces where the leaf is evaluated, in the find's statement and
+  // in explain's read of the leaf at the record, and both fail on it.
   const rows: RowKey[] = ['unshared', 'shared', 'owned'];
   it.each(rows)('the share store is down × %s row: not visible, and the find fails on the same fault', async (rowKey) => {
     const stack = await makeStack({ storeFaults: ['sys_record_share'] });

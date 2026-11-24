@@ -254,7 +254,10 @@ async function studioEntriesOnPageRoute(perms: MePermissionsResponse): Promise<S
 
   // The page under the app the top bar resolved — the same app document, as
   // the console mounts it — so the two halves read the same inputs
-  // (objectui#12540).
+  // (objectui#12540). At a phone's width: the floating pencil is the phone's
+  // face since objectstack#36111 (from the phone breakpoint up the page's
+  // header carries the shell's 「Edit app」, `ShellPageActions-36111`).
+  Object.defineProperty(window, 'innerWidth', { configurable: true, value: 375 });
   const page = render(
     <MePermissionsProvider initialPermissions={perms}>
       <ExpressionProvider user={EXPRESSION_USER} app={CLOUD_APP}>
@@ -271,6 +274,7 @@ async function studioEntriesOnPageRoute(perms: MePermissionsResponse): Promise<S
   if (pencilEl) fireEvent.click(pencilEl);
   const pencil = pencilEl ? String(navigateSpy.mock.calls.at(-1)?.[0] ?? '') : null;
   page.unmount();
+  Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1024 });
 
   return {
     'page-edit-in-studio-button': pencil,

@@ -107,7 +107,8 @@ vi.mock('@object-ui/auth', async (importOriginal) => ({
   useAuth: () => ({ user: { id: 'u1', name: 'Ada' }, activeOrganization: null }),
   // The view config panel is admin-only.
   useWorkspaceAdminStatus: () => ({ isAdmin: true, isResolved: true }),
-  createAuthenticatedFetch: () => vi.fn(),
+  // objectstack#35054: the metadata client's transport (`storedViewFetch`).
+  createAuthenticatedFetch: () => storedViewFetch,
 }));
 
 vi.mock('@object-ui/collaboration', async (importOriginal) => ({
@@ -174,14 +175,42 @@ vi.mock('@object-ui/plugin-view', async (importOriginal) => {
   };
 });
 
+// Paid at collection, not in a case's clock: the view inspector's CEL authoring loads it on demand.
+import '@objectstack/lint';
 import { ObjectView } from './ObjectView';
 import { ExpressionProvider } from '../providers/ExpressionProvider';
-import { localListStateKey } from '../context/ListPreferencesProvider';
+import { listLayoutStorageKey } from './listLayoutStore';
+import { listDraftScope, patchListDraft, readListDraft, resetListDraftStoreForTests } from './listDraftStore';
 
 const OBJECT_NAME = 'duly_task';
 
 /** The column identities the grid was last handed. */
 let drawn: string[] | undefined;
+
+/** The views the last mount declared: what `storedViewFetch` serves as stored (objectstack#35054). */
+let storedViews: Record<string, unknown> = {};
+
+/**
+ * objectstack#35054: the view config panel edits the view as stored, read from
+ * its `/layers`, plus its pending draft. A declared view is a stored `view`
+ * item on a real server, so its layers serve the document the object was
+ * mounted with, and no draft is pending (404). Every other metadata read
+ * answers nothing, as this harness's transport always did.
+ */
+async function storedViewFetch(input: RequestInfo | URL): Promise<Response | undefined> {
+  const url = new URL(String(input instanceof Request ? input.url : input), 'http://localhost');
+  const layered = /\/meta\/view\/([^/]+)\/layers$/.exec(url.pathname);
+  if (layered) {
+    const view = storedViews[decodeURIComponent(layered[1])];
+    return view
+      ? Response.json({ code: view, overlay: null, effective: view, draft: null })
+      : Response.json({ success: false }, { status: 404 });
+  }
+  if (/\/meta\/view\/[^/]+$/.test(url.pathname) && url.searchParams.get('state') === 'draft') {
+    return Response.json({ success: false }, { status: 404 });
+  }
+  return undefined;
+}
 /**
  * The `resizable` the grid was last handed: the panel's unrelated edit. (It was
  * `wrapHeaders` until objectui#11013 dropped that key's view rung: a stored view
@@ -238,6 +267,7 @@ function makeDataSource(extra: Record<string, unknown> = {}) {
 /** Mount the object route on `viewId` and wait until the grid is drawn. */
 async function mountRoute(listViews: Record<string, unknown>, viewId: string, dataSource: any): Promise<void> {
   const objects = [{ name: OBJECT_NAME, label: 'Task', fields: FIELDS, listViews }];
+  storedViews = listViews;
   drawn = undefined;
   render(
     <ExpressionProvider user={{ id: 'u1', name: 'Ada', profile: 'user' }}>
@@ -263,21 +293,18 @@ async function drawView(view: Record<string, unknown>): Promise<string[] | undef
 }
 
 /**
- * Untick `field` in `ListView`'s hide-fields list, as a user does: since
- * objectui#12423 a section of the toolbar's Display panel, collapsed while
- * nothing is hidden.
+ * Hide `field` in `ListView`'s field list, as a user does: the Fields level
+ * of the toolbar's Display menu, one row per shown field with its eye.
  */
 async function hideThroughToggle(field: string): Promise<void> {
   if (!screen.queryByTestId('view-settings-content')) {
     fireEvent.click(screen.getByTestId('toolbar-display-trigger'));
   }
   const panel = await screen.findByTestId('view-settings-content');
-  const name = new RegExp(`^${field}$`, 'i');
-  if (!within(panel).queryByText(name)) {
-    fireEvent.click(within(panel).getByRole('button', { name: 'Hide Fields' }));
+  if (!within(panel).queryByTestId('options-page-fields')) {
+    fireEvent.click(within(panel).getByTestId('options-add-column'));
   }
-  const label = await within(panel).findByText(name);
-  fireEvent.click(label.closest('label')!.querySelector('input')!);
+  fireEvent.click(await within(panel).findByTestId(`options-fields-hide-${field}`));
 }
 
 /** The data source's view writes, each a spy: what a write to the shared view would call. */
@@ -290,13 +317,16 @@ const viewWrites = (dataSource: any): unknown[][] => [
 ];
 
 /**
- * objectui#12474 — the hidden fields this user stored for `viewId`, read off
- * their list state. This harness mounts no preference provider, so the state
- * is this browser's cache (the provider-less fallback).
+ * objectui#12474 — the hidden fields this user chose for `viewId`. Since
+ * objectstack#35955 the choice is the list's DRAFT (`./listDraftStore.ts`):
+ * kept while the reader opens a record and comes back (a remount here), never
+ * stored. The second half reads that nothing reaches the layout this
+ * browser keeps for the reader either.
  */
 function storedHiddenFields(viewId: string): unknown {
-  const raw = localStorage.getItem(localListStateKey('u1', OBJECT_NAME));
-  return raw ? JSON.parse(raw)?.perView?.[viewId]?.hiddenFields : undefined;
+  const raw = localStorage.getItem(listLayoutStorageKey('u1', OBJECT_NAME)!);
+  expect(raw ? JSON.parse(raw)?.perView?.[viewId]?.hiddenFields : undefined).toBeUndefined();
+  return readListDraft(listDraftScope('u1', OBJECT_NAME, viewId)).hiddenFields;
 }
 
 /** Longer than the old view write's 300ms debounce, with room to spare. */
@@ -353,7 +383,9 @@ async function expectSessionOnlyToggle(dataSource: any): Promise<void> {
 }
 
 beforeEach(() => {
+  storedViews = {};
   localStorage.clear();
+  resetListDraftStoreForTests();
   unreadable.clear();
   vi.stubGlobal(
     'fetch',
@@ -415,7 +447,7 @@ describe('an unprojected view applies neither hiddenFields nor fieldOrder on the
     expect(storedHiddenFields(PROBE_ID)).toBeUndefined();
   });
 
-  it('CONTROL: on a system view that declares `columns`, the toggle is stored as the user\'s own, and the view is not written (objectui#12474)', async () => {
+  it('CONTROL: on a system view that declares `columns`, the toggle is the reader\'s draft, and the view is not written (objectui#12474, objectstack#35955)', async () => {
     const dataSource = makeDataSource(viewWriteSpies());
     const listViews = {
       [PROBE_ID]: {
@@ -431,12 +463,13 @@ describe('an unprojected view applies neither hiddenFields nor fieldOrder on the
     expect(viewWrites(dataSource)).toEqual([]);
     cleanup();
 
-    // Reload: the user's choice is applied over the view's own `columns`.
+    // Back to the list (objectstack#35955: the draft outlives a record open):
+    // the choice is applied over the view's own `columns`.
     await mountRoute(listViews, PROBE_ID, makeDataSource());
     await waitFor(() => expect(drawn).toEqual(['name', 'stage']));
   });
 
-  it('THE FIX (objectui#12505): on a saved view with no `columns`, the hide is this user\'s own and survives a reload; the row is not written', async () => {
+  it('THE FIX (objectui#12505): on a saved view with no `columns`, the hide is this reader\'s draft and survives coming back to the list; the row is not written', async () => {
     // objectui#12474 made the hide session-only here (it used to persist only
     // through a whole-view write that declared the drawn defaults as `columns`
     // for every user). It is now stored on the user's own list state and
@@ -453,7 +486,7 @@ describe('an unprojected view applies neither hiddenFields nor fieldOrder on the
     expect(viewWrites(first)).toEqual([]);
     cleanup();
 
-    // Reload: the stored list is applied over the drawn defaults.
+    // Back to the list: the draft is applied over the drawn defaults.
     await mountRoute(SAVED_BESIDE, SAVED_ID, savedViewSource());
     await waitFor(() => expect(drawn).toEqual(defaults.filter((f) => f !== 'region')), { timeout: 5000 });
   });
@@ -467,10 +500,7 @@ describe('an unprojected view applies neither hiddenFields nor fieldOrder on the
     const defaults = drawn!;
     cleanup();
 
-    localStorage.setItem(
-      localListStateKey('u1', OBJECT_NAME),
-      JSON.stringify({ perView: { [SAVED_ID]: { hiddenFields: ['amount'] } } }),
-    );
+    patchListDraft(listDraftScope('u1', OBJECT_NAME, SAVED_ID), { hiddenFields: ['amount'] });
     await mountRoute(SAVED_BESIDE, SAVED_ID, savedViewSource({ hiddenFields: ['stage'] }));
     await waitFor(() => expect(drawn).toEqual(defaults.filter((f) => f !== 'amount')), { timeout: 5000 });
   });
@@ -483,10 +513,7 @@ describe('an unprojected view applies neither hiddenFields nor fieldOrder on the
     expect(defaults).not.toContain('id');
     cleanup();
 
-    localStorage.setItem(
-      localListStateKey('u1', OBJECT_NAME),
-      JSON.stringify({ perView: { [SAVED_ID]: { hiddenFields: ['ghost', 'id', 'region'] } } }),
-    );
+    patchListDraft(listDraftScope('u1', OBJECT_NAME, SAVED_ID), { hiddenFields: ['ghost', 'id', 'region'] });
     await mountRoute(SAVED_BESIDE, SAVED_ID, savedViewSource());
     await waitFor(() => expect(drawn).toEqual(defaults.filter((f) => f !== 'region')), { timeout: 5000 });
   });
@@ -498,7 +525,7 @@ describe('an unprojected view applies neither hiddenFields nor fieldOrder on the
     expect(drawn).not.toContain('owner');
     fireEvent.click(screen.getByTestId('toolbar-display-trigger'));
     const panel = await screen.findByTestId('view-settings-content');
-    fireEvent.click(within(panel).getByRole('button', { name: 'Hide Fields' }));
+    fireEvent.click(within(panel).getByTestId('options-add-column'));
     await within(panel).findByText(/^region$/i);
     expect(within(panel).queryByText(/^owner$/i)).toBeNull();
 
@@ -508,10 +535,7 @@ describe('an unprojected view applies neither hiddenFields nor fieldOrder on the
 
   it('CONTROL (objectui#12505): a stored list on a SYSTEM view with no `columns` is still not applied (ruling 5839344270, B)', async () => {
     const defaults = await drawView({ columns: [] });
-    localStorage.setItem(
-      localListStateKey('u1', OBJECT_NAME),
-      JSON.stringify({ perView: { [PROBE_ID]: { hiddenFields: ['region'] } } }),
-    );
+    patchListDraft(listDraftScope('u1', OBJECT_NAME, PROBE_ID), { hiddenFields: ['region'] });
     expect(await drawView({ columns: [] })).toEqual(defaults);
   });
 
@@ -529,10 +553,7 @@ describe('an unprojected view applies neither hiddenFields nor fieldOrder on the
     await waitFor(() => expect(drawn).toEqual(['name', 'owner']));
     cleanup();
 
-    localStorage.setItem(
-      localListStateKey('u1', OBJECT_NAME),
-      JSON.stringify({ perView: { [PROBE_ID]: { hiddenFields: ['region'] } } }),
-    );
+    patchListDraft(listDraftScope('u1', OBJECT_NAME, PROBE_ID), { hiddenFields: ['region'] });
     await mountRoute(listViews, PROBE_ID, makeDataSource());
     // `stage` is back (it is in `columns`); `region` is in no `columns`, so
     // naming it hides nothing and adds nothing.
@@ -542,10 +563,7 @@ describe('an unprojected view applies neither hiddenFields nor fieldOrder on the
     // On a view that declares no projection the stored list is not applied.
     const unprojected = { [PROBE_ID]: { name: PROBE_ID, label: 'Probe', type: 'grid', columns: [] } };
     const defaults = await drawView({ columns: [] });
-    localStorage.setItem(
-      localListStateKey('u1', OBJECT_NAME),
-      JSON.stringify({ perView: { [PROBE_ID]: { hiddenFields: ['stage'] } } }),
-    );
+    patchListDraft(listDraftScope('u1', OBJECT_NAME, PROBE_ID), { hiddenFields: ['stage'] });
     await mountRoute(unprojected, PROBE_ID, makeDataSource());
     await waitFor(() => expect(drawn).toEqual(defaults));
   });
@@ -561,7 +579,7 @@ describe('an unprojected view applies neither hiddenFields nor fieldOrder on the
     await mountRoute(listViews, PROBE_ID, makeDataSource());
     fireEvent.click(screen.getByTestId('toolbar-display-trigger'));
     const panel = await screen.findByTestId('view-settings-content');
-    fireEvent.click(within(panel).getByRole('button', { name: 'Hide Fields' }));
+    fireEvent.click(within(panel).getByTestId('options-add-column'));
     await within(panel).findByText(/^region$/i);
     expect(within(panel).queryByText(/^owner$/i)).toBeNull();
 
@@ -614,5 +632,19 @@ describe('an unprojected view applies neither hiddenFields nor fieldOrder on the
     fireEvent.click(screen.getByTestId('inspector-edit-columns'));
     // [name, stage, owner] projected; `stage` hidden; `owner` sorted first.
     await waitFor(() => expect(drawn).toEqual(['owner', 'name']));
+  });
+  it('objectstack#35955: hidden fields an earlier console stored for the reader no longer apply', async () => {
+    const listViews = {
+      [PROBE_ID]: {
+        name: PROBE_ID, label: 'Probe', type: 'grid',
+        columns: ['name', 'stage', 'owner'], userActions: { hideFields: true },
+      },
+    };
+    localStorage.setItem(
+      `list-state:u1:${OBJECT_NAME}`,
+      JSON.stringify({ perView: { [PROBE_ID]: { hiddenFields: ['stage'] } } }),
+    );
+    await mountRoute(listViews, PROBE_ID, makeDataSource());
+    await waitFor(() => expect(drawn).toEqual(['name', 'stage', 'owner']));
   });
 });

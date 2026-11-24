@@ -195,5 +195,13 @@
       "description": "How parity is measured",
       "groups": [{ "key": "basics", "label": "Basics", "include": "parity_*" }]
     }
+  ],
+  "mappings": [
+    {
+      "name": "parity_feed",
+      "label": "Parity Feed",
+      "targetObject": "parity_object",
+      "fieldMapping": [{ "source": "Status", "target": "status" }]
+    }
   ]
 }

@@ -99,6 +99,7 @@
     "TemplateExpressionInput (type)",
     "TemplateExpressionInputSchema (const)",
     "TypedExpressionDialect (type)",
+    "VALUE_DOMAIN_FIELD_NAMES (const)",
     "ValueDomain (type)",
     "ValueDomainSchema (const)",
     "applyProtection (function)",

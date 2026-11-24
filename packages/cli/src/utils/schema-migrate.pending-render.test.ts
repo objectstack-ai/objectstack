@@ -12,6 +12,16 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+// `schema-migrate.ts` reaches these through guarded dynamic imports
+// (`schema-migration-plugins.ts`); loading them here pays the transform during
+// collection, never inside a case's clocked window (`check:test-source-alias`).
+import '@objectstack/driver-sql';
+import '@objectstack/driver-turso';
+import '@objectstack/platform-objects/plugin';
+import '@objectstack/plugin-security';
+import '@objectstack/rest';
+import '@objectstack/runtime';
+import '@objectstack/service-datasource';
 import {
   renderPendingSchemaWork,
   splitRefusedSchemaWork,
@@ -44,6 +54,7 @@ const IN_PLACE: PendingSchemaWork[] = [
   { table: 'legacy', kind: 'widen_datetime_columns', columns: ['at', 'created_at'], rows: 42 },
   { table: 'shift', kind: 'normalize_time_storage', columns: ['starts_at'], rows: 7 },
   { table: 'shift_my', kind: 'widen_time_columns', columns: ['starts_at'], rows: 9 },
+  { table: 'deal', kind: 'normalize_boolean_storage', columns: ['won'], rows: 3 },
 ];
 
 describe('renderPendingSchemaWork (#3954)', () => {
@@ -82,6 +93,9 @@ describe('renderPendingSchemaWork (#3954)', () => {
     expect(out()).toContain('7 row update(s)');
     expect(out()).toContain('widen_time_columns: starts_at');
     expect(out()).toContain('9 row table rebuild');
+    // The boolean convergence (#34973) is a row update in place, like the
+    // temporal backfills.
+    expect(out()).toContain('deal [normalize_boolean_storage: won — 3 row update(s)]');
   });
 
   it('shows both sections when both kinds are pending', async () => {
@@ -110,8 +124,10 @@ describe('summarizePendingSchemaWork (#3954)', () => {
     const summary = await summarizePendingSchemaWork([...ADDITIVE, ...IN_PLACE]);
     expect(summary).toContain('1 table(s) to create');
     expect(summary).toContain('1 column(s) to add');
-    expect(summary).toContain('5 temporal column(s) to converge in place');
-    expect(summary).toContain('~1,234,625 rows');
+    // [#34973] Not "temporal": a boolean column converges in place too.
+    expect(summary).toContain('6 column(s) to converge in place');
+    expect(summary).not.toContain('temporal');
+    expect(summary).toContain('~1,234,628 rows');
   });
 });
 

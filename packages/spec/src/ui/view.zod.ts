@@ -1330,6 +1330,15 @@ export type ViewFilterElementParsed = z.infer<typeof ViewFilterElementSchema>;
  *     on every face — the stored value is `null` (`aggregation-conformance`);
  *     the footer's client-side reading, which also treats `''` and `[]` as
  *     empty, is objectui's to converge under "one vocabulary".
+ *   * `count_true` / `count_false` — the yes / no counts of a BOOLEAN column
+ *     (`boolean`, `toggle`; `COLUMN_SUMMARY_FIELD_TYPES` in
+ *     `view-grouping-query.ts`) — map by DERIVATION too, on the same fork-i
+ *     ground: booleans aggregate as numbers on every backend (ruling #11152,
+ *     `aggregation-conformance`'s `sum(flag)`), so `count_true` = `SUM(field)`
+ *     and `count_false` = `COUNT(field) − SUM(field)`. A null cell is neither
+ *     — it is `count_empty`'s — so `count_true + count_false = count_filled`.
+ *     They are refused over any other field type: a `SUM(field)` over a
+ *     number is a total, not a count of true values.
  *
  * ⛔ Adding a member here without deciding its row in
  * `COLUMN_SUMMARY_AGGREGATION` is a type error by construction, so the table
@@ -1345,6 +1354,8 @@ export const ColumnSummarySchema = lazySchema(() => z.enum([
   'count_unique',
   'percent_empty',
   'percent_filled',
+  'count_true',
+  'count_false',
   'sum',
   'avg',
   'min',
@@ -1358,6 +1369,8 @@ export const ColumnSummarySchema = lazySchema(() => z.enum([
   + 'count_filled, count_empty, percent_filled, percent_empty derive from one COUNT(field) node (the '
   + 'non-null count) and the group count — count_filled = COUNT(field), count_empty = count − COUNT(field), '
   + 'percent_filled = COUNT(field) / count (0 when count is 0), percent_empty = 1 − percent_filled. '
+  + 'count_true and count_false are a boolean column\'s yes and no counts, boolean fields only — '
+  + 'count_true = SUM(field), count_false = COUNT(field) − SUM(field); a null cell is neither. '
   + 'Server-side "empty" is null on every face; the footer\'s client-side reading of empty strings and '
   + 'empty arrays as empty is the renderer\'s to converge',
 ));
@@ -1903,6 +1916,7 @@ export const VisualizationTypeSchema = lazySchema(() => z.enum([
   'map',
   'chart',
   'tree',
+  'timesheet',
 ]).describe('Visualization type that users can switch to'));
 
 /**
@@ -1954,7 +1968,7 @@ export const UserActionsConfigSchema = lazySchema(() => strictObject({
   sort: z.boolean().default(true).describe('Allow users to sort records'),
   search: z.boolean().default(true).describe('Allow users to search records'),
   filter: z.boolean().default(true).describe('Allow users to filter records'),
-  refresh: z.boolean().default(true).describe('Allow users to reload the view data from the backend without a full page reload'),
+  refresh: z.boolean().default(true).describe('Allow users to reload the view data from the backend without a full page reload. Governs only the wide toolbar\'s Refresh button (`compactToolbar: false`): the default toolbar has no Refresh, so the toggle changes nothing there.'),
   rowHeight: z.boolean().default(true).describe('Allow users to toggle row height/density'),
   group: z.boolean().default(true).describe('Allow users to change record grouping from the toolbar. Toggle only — the grouping itself is configured in the view-level `grouping` block.'),
   addRecordForm: z.boolean().default(false).describe('Add records through a form instead of inline'),
@@ -2160,9 +2174,10 @@ const ADD_RECORD_ENABLED_REQUIRED =
 /**
  * `addRecord.mode` / `addRecord.formView` — retired (#24692, ADR-0049
  * enforce-or-remove; ruling letter B′). No renderer ever read either key:
- * every Add opens the object's create form, chosen by convention —
- * `formViews.create` when the object's view container declares one, else the
- * default form. How that form opens stays the renderer's. D2:
+ * every Add opens the object's create form, which lays out by the object's
+ * `fieldGroups` and leaves out every field marked `showOnCreate: false`
+ * (#36425: an internal `formViews.create` or default `form` is no longer
+ * loaded). How that form opens stays the renderer's. D2:
  * `add-record-mode-form-view-removed`.
  */
 const ADD_RECORD_MODE_RETIRED =
@@ -2174,9 +2189,9 @@ const ADD_RECORD_MODE_RETIRED =
 
 const ADD_RECORD_FORM_VIEW_RETIRED =
   '`addRecord.formView` was removed in @objectstack/spec 18.1.0 (ADR-0049 enforce-or-remove) — no '
-  + 'renderer ever read it: the Add button opens the create form chosen by convention, never a named '
-  + 'form. Delete the key, and to give the Add button its own form declare it as `formViews.create` '
-  + 'on the object\'s view container (without one, the default form is used). '
+  + 'renderer ever read it: the Add button opens the object\'s create form, never a named form. '
+  + 'Delete the key. The create form lays out by the object\'s `fieldGroups`; to leave a field out of '
+  + 'it, set `showOnCreate: false` on that field. '
   + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` '
   + 'applies the ones it can prove, and you apply the rest by hand.';
 
@@ -2188,8 +2203,10 @@ const ADD_RECORD_FORM_VIEW_RETIRED =
  * REQUIRED (no default — `addRecord: {}` is refused instead of drawing
  * nothing), `position` defaults to `top` (where the renderer places an absent
  * position), and `mode` / `formView`, which no renderer read, are tombstoned.
- * The create form is chosen by convention: `formViews.create` when declared,
- * else `form` / `formViews.default`. The stored-row half of `enabled` is the D2
+ * The create form is the object's own: it lays out by the object's
+ * `fieldGroups` and asks for every field not marked `showOnCreate: false`
+ * (#36425: an internal `formViews.create`, `form` or `formViews.default` is no
+ * longer loaded). The stored-row half of `enabled` is the D2
  * conversion `add-record-enabled-defaulted`, which writes the old default
  * (`true`) onto a block that omits it.
  *
@@ -2354,6 +2371,42 @@ export const EmptyStateSchema = lazySchema(() => strictObject({
 }));
 
 /**
+ * objectstack#36370 — a board lane's foot statistic (`kanban.summary`).
+ *
+ * Its own closed set, not the list footer's `ColumnSummaryConfigSchema`: the
+ * board computes these in the browser, so the set is exactly what a reader
+ * computes. `count` counts the lane's records (the lane's own count, the one
+ * its header shows); `sum` totals a number field (`field` required) over the
+ * cards the lane has LOADED, not over every record of the lane, and says so
+ * at the foot when the lane holds more than it drew; `none` shows nothing,
+ * also over `summarizeField`. A sum over the whole lane, and an average, a
+ * minimum or a maximum, wait for a lane aggregate the query answers
+ * (objectstack#36520): over a lane that has loaded only part of its cards none
+ * of them is even a bound.
+ */
+export const KanbanLaneSummarySchema = lazySchema(() => z.discriminatedUnion('type', [
+  strictObject({
+    surface: 'this `none` lane statistic',
+    history: VIEW_HISTORY,
+  }, {
+    type: z.literal('none'),
+  }),
+  strictObject({
+    surface: 'this `count` lane statistic',
+    history: VIEW_HISTORY,
+  }, {
+    type: z.literal('count'),
+  }),
+  strictObject({
+    surface: 'this `sum` lane statistic',
+    history: VIEW_HISTORY,
+  }, {
+    type: z.literal('sum'),
+    field: z.string().min(1).describe('The number field the lane totals over its loaded cards (e.g. amount)'),
+  }),
+]).describe('Lane foot statistic: none, the count of the lane\'s records, or the sum of a number field over the lane\'s loaded cards'));
+
+/**
  * Kanban Settings
  */
 export const KanbanConfigSchema = lazySchema(() => strictObject({
@@ -2416,6 +2469,41 @@ export const KanbanConfigSchema = lazySchema(() => strictObject({
       + 'the view. List each value once.',
     ),
   summarizeField: z.string().optional().describe('Field to sum at top of column (e.g. amount)'),
+  /**
+   * objectstack#36370 — the statistic each lane shows at its foot
+   * ({@link KanbanLaneSummarySchema}): `{ type: 'count' }` counts the lane's
+   * records; `{ type: 'sum', field }` totals a number field over the cards
+   * the lane has loaded (not the lane's every record: objectstack#36520);
+   * `{ type: 'none' }` shows nothing, also over a `summarizeField`. Without
+   * it a lane shows the sum of `summarizeField` where that is set, as before
+   * this key, and nothing otherwise.
+   *
+   * ⛔ No spec-side default: absence keeps a board stored before this key
+   * exactly as it was.
+   */
+  summary: KanbanLaneSummarySchema.optional().describe(
+    'The statistic each lane shows at its foot. `{ type: \'count\' }` counts the lane records; '
+    + '`{ type: \'sum\', field: \'amount\' }` totals a number field over the cards the lane has loaded, '
+    + 'not every record of the lane (the foot says so when the lane holds more); `{ type: \'none\' }` shows nothing. '
+    + 'Takes precedence over summarizeField. Omit to keep summarizeField\'s sum, or no statistic without it.',
+  ),
+  /**
+   * objectstack#36370 — whether a card names each field beside its value.
+   * Absent means `true`, the card as boards drew it before this key; `false`
+   * leaves the values alone.
+   */
+  showFieldLabels: z.boolean().optional().describe(
+    'Whether each card names its fields beside their values. Omit for true (names shown); false shows the values alone.',
+  ),
+  /**
+   * objectstack#36370 — whether a card leaves out a field that holds nothing.
+   * Absent means `true`, the card as boards drew it before this key; `false`
+   * keeps the field's row with an empty value, so every card of the lane
+   * lines up.
+   */
+  hideEmptyFields: z.boolean().optional().describe(
+    'Whether a card leaves out a field that holds no value. Omit for true (left out); false keeps the field with an empty value.',
+  ),
   /**
    * [#16894] The one item-titled view config of the family that omitted this
    * key. `GalleryConfigSchema`, `TimelineConfigSchema`, `CalendarConfigSchema`,
@@ -2783,6 +2871,35 @@ export const TreeConfigSchema = lazySchema(() => strictObject({
 }));
 
 /**
+ * Timesheet (weekly entry grid) Settings
+ *
+ * Pivots the view's records into an editable row × weekday grid: one row per
+ * distinct `rowFields` value tuple, one column per day of the displayed week,
+ * and in each cell the `valueField` of the one record that row and day hold.
+ * Typing a value creates or updates that record, clearing the cell deletes it,
+ * and every write goes through the ordinary record door, so hooks, validation
+ * and permissions judge each cell on its own. Row, day and week totals are
+ * always shown. A cell that holds two or more records shows their sum and is
+ * read-only, because one typed value could not say which record it changes.
+ *
+ * The week follows the viewer's locale for its first day; there is no period
+ * key, because a week is the only window the renderer draws. Every key is
+ * required: an unbound timesheet has nothing to pivot, and the renderer
+ * refuses it with a "Timesheet configuration required" screen.
+ */
+export const TimesheetConfigSchema = lazySchema(() => strictObject({
+  surface: 'this timesheet configuration',
+  history: VIEW_HISTORY,
+}, {
+  rowFields: z.array(z.string()).min(1).max(3)
+    .describe('One to three fields whose values key a row (e.g. ["project", "task"]); a record\'s values for these fields place it on its row, and a new row\'s values are written onto each record it creates'),
+  dateField: z.string()
+    .describe('Date field placing a record on a day column; the renderer fetches only the records whose value falls in the displayed week'),
+  valueField: z.string()
+    .describe('Numeric field (number, currency or percent) a cell shows and edits; row, day and week totals sum it'),
+}));
+
+/**
  * Map View Settings
  *
  * Configures the geospatial (`type: 'map'`) list view: which fields provide
@@ -2857,6 +2974,8 @@ export const ListMapConfigSchema = lazySchema(() => strictObject({
 
 // [#26677] `navigation.mode` retired members — the prescription each one
 // answers with at parse (`enumWithRetiredValues`, `../shared/retired-key.ts`).
+// Since #35854 the key itself is deprecated, which the FIX says; each member's
+// own sentence keeps the history of its removal.
 // Declared with `//` on purpose: an enum's error map consumes this, it is no
 // documented surface (the `NAVIGATION_VIEW_RETIRED` placement note below).
 //
@@ -2868,44 +2987,44 @@ export const ListMapConfigSchema = lazySchema(() => strictObject({
 // conversion (ADR-0087 D2, `conversions/registry.ts`) strips a retired member
 // from existing sources and stored rows, which lands them on the default.
 const NAVIGATION_MODE_RETIRED_FIX =
-  'Delete the value — `drawer` is the default; declare `page` only for an object whose record should '
-  + 'open as a full page; a side-by-side pane is a reader\'s own preference in the list\'s Display menu, '
-  + 'not metadata. '
+  'Delete the value — an object\'s list opens a record one way for every reader: the record name '
+  + 'opens the full page, and the icon beside it while the row is hovered opens the side panel; '
+  + '`navigation.mode` itself is deprecated, so omit the key. '
   + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
 
 const NAVIGATION_MODE_RETIRED = {
   modal:
     "`navigation.mode: 'modal'` was removed in @objectstack/spec 18.3.0 (ADR-0087 D2) — a record opens "
-    + 'one way per object: in the drawer, which expands to the full page, or as the full page for an '
-    + 'object that declares `page`, so a centred dialog was a third surface for the same record. '
+    + 'in the drawer or as its full page, the same record page at two widths, so a centred dialog was '
+    + 'a third surface for the same record. '
     + NAVIGATION_MODE_RETIRED_FIX,
   split:
     "`navigation.mode: 'split'` was removed in @objectstack/spec 18.3.0 (ADR-0087 D2) — whether the "
-    + 'record opens beside the list is each reader\'s own choice, not a mode an author fixes for every '
-    + 'reader of the list. '
+    + 'record opens beside the list is not a mode an author fixes for every reader of the list. '
     + NAVIGATION_MODE_RETIRED_FIX,
   popover:
     "`navigation.mode: 'popover'` was removed in @objectstack/spec 18.3.0 (ADR-0087 D2) — a record opens "
-    + 'one way per object: in the drawer, which expands to the full page, or as the full page for an '
-    + 'object that declares `page`, so a popover was a cramped fourth surface for the same record. '
+    + 'in the drawer or as its full page, the same record page at two widths, so a popover was a '
+    + 'cramped fourth surface for the same record. '
     + NAVIGATION_MODE_RETIRED_FIX,
 } as const;
 
 /**
  * Navigation Mode Enum
- * How a list opens the record a reader clicks. `drawer` is the default: the
- * record opens in the side drawer, which expands to the full page — the same
- * record page at two widths. `page` is for an object whose record should open
- * as a full page, and is declared for that object only. `modal`, `split` and
- * `popover` were retired (#26677): a side-by-side pane is a reader's own
- * preference, not metadata, and each retired member is refused at parse with
- * its prescription.
+ * How a page block that carries `navigation` (a list block, the timeline, an
+ * embedded view) opens the record a reader clicks. `drawer` is the default:
+ * the record opens in the side drawer, which expands to the full page — the
+ * same record page at two widths. `page` opens the full page. On an object's
+ * list (a list view, an object's `listViews`) the key is deprecated (#35854):
+ * there the record's name opens the full page and the hover icon the side
+ * panel, and only `none` still counts. `modal`, `split` and `popover` were
+ * retired (#26677) and each is refused at parse with its prescription.
  */
 export const NavigationModeSchema = lazySchema(() => enumWithRetiredValues([
-  'drawer',     // Open the record in the side drawer, which expands to the full page (default)
-  'page',       // Navigate to the record route — declared only for an object that opens as a full page
-  'new_window', // Open in new browser tab/window
-  'none',       // No navigation (read-only list)
+  'drawer',     // Open the record in the side drawer, which expands to the full page (default); ignored on an object's list
+  'page',       // Navigate to the record route; ignored on an object's list
+  'new_window', // Open in a new browser tab; ignored on an object's list (write `openNewTab: true`)
+  'none',       // No navigation (read-only list), on every surface
 ], NAVIGATION_MODE_RETIRED));
 
 // [#16885] `navigation.view` retirement prescription — director decision batch
@@ -2936,7 +3055,8 @@ const NAVIGATION_VIEW_RETIRED =
   + 'selected nothing and could silently deaden the row click. Delete the key; to choose what '
   + 'opens for a record, assign a `record` page to the object and let `isDefault` pick the one '
   + 'that opens — page assignment is the machinery that resolves a detail layout, and a list '
-  + 'view\'s navigation block only decides HOW the detail is surfaced (`mode`, `size`).';
+  + 'view\'s navigation block only decides HOW the detail is surfaced (its `size`, and on a page block '
+  + 'its `mode`).';
 
 /**
  * Navigation Configuration Schema
@@ -2946,12 +3066,28 @@ export const NavigationConfigSchema = lazySchema(() => strictObject({
   history: VIEW_HISTORY,
 }, {
   /**
-   * [#26677] How a click opens the record. Defaults to `drawer` — before
-   * 18.3.0 it defaulted to `page`, which the console never honoured for an
-   * un-authored list (it guessed the surface from the object's field count).
-   * Declare `page` only for an object whose record should open as a full page.
+   * @deprecated [#35854] On an object's list (a list view, an object's
+   * `listViews`) no longer picks how a record opens (maintainer ruling
+   * 2026-11-20: 「废弃」). The console's object list has one rule for every
+   * reader: the record's name opens the full page, and the icon beside the
+   * name while the row is hovered opens the side panel. There `drawer`, `page`
+   * and `new_window` still parse and change nothing — a list view that
+   * declares one behaves as one that declares nothing; `none` still means the
+   * rows open nothing (prefer `preventNavigation: true`), and
+   * `openNewTab: true` opens the page in a new tab. A page block that carries
+   * `navigation` (a list block, the timeline, an embedded view) still honours
+   * every value: keep the key there. ADR-0087 D3 semantic entry
+   * `navigation-mode-record-open-deprecated`. Kept in the shape so existing
+   * metadata loads.
    */
-  mode: NavigationModeSchema.default('drawer'),
+  mode: NavigationModeSchema.default('drawer').describe(
+    '[DEPRECATED] On an object\'s list (a list view, an object\'s `listViews`) no longer picks how a '
+    + 'record opens: in the console the record name opens the full page and the hover icon beside it '
+    + 'opens the side panel, for every reader. There `drawer`, `page` and `new_window` still parse and '
+    + 'change nothing, so omit the key; `none` still means rows open nothing — prefer '
+    + '`preventNavigation: true`. A page block that carries `navigation` (a list block, the timeline, '
+    + 'an embedded view) still honours every value.',
+  ),
 
   /**
    * [#16885] RETIRED — see {@link NAVIGATION_VIEW_RETIRED} above the schema.
@@ -2963,17 +3099,28 @@ export const NavigationConfigSchema = lazySchema(() => strictObject({
 
   /** Interaction Triggers */
   preventNavigation: z.boolean().default(false).describe('Disable standard navigation entirely'),
-  openNewTab: z.boolean().default(false).describe('Force open in new tab (applies to page mode)'),
+  openNewTab: z.boolean().default(false).describe('Open the record\'s full page in a new browser tab when it is clicked; rows that open nothing stay that way, and a phone opens the page in place'),
   
   /**
-   * [#2578] Overlay size for a drawer detail — coarse T-shirt buckets,
-   * aligned with `FormView.modalSize` (`page` mode ignores it). `'auto'`
-   * (default): the renderer derives the size from the object's field count and
-   * clamps it to the client viewport, so AI writes nothing — it cannot know the
-   * client width. Explicit buckets are a coarse, viewport-independent override.
+   * [#2578] Width of the record drawer, as a coarse T-shirt bucket. Each
+   * explicit bucket is a pixel cap the renderer clamps to the viewport
+   * (`min(92vw, CAP)`): sm 480, md 720, lg 960, xl 1200, full 1600.
+   *
+   * `'auto'` (default) is the host's fixed default width, the same for every
+   * object whatever its field count — nothing is derived from the object's
+   * fields. The console's record side panel (opened from an object's list, and
+   * the drawer level over a record page) opens at `min(92vw, 460px)`; a page
+   * block's drawer opens at that block's own default (`min(960px, 60vw)` for
+   * the grid, kanban, calendar, gantt and tree; 42rem for the list, gallery,
+   * map and timeline). A width the reader drags is remembered and wins over
+   * both `'auto'` and a bucket.
+   *
+   * The key has no effect where the record opens as a page rather than a
+   * drawer (in the console every record opens as a page on a phone), nor on a
+   * phone-width screen, where a block's drawer fills the screen.
    */
   size: z.enum(['auto', 'sm', 'md', 'lg', 'xl', 'full']).default('auto')
-    .describe("Overlay size bucket for the drawer detail: 'auto' (default — renderer derives from field count + viewport; AI writes nothing) or a coarse override sm/md/lg/xl/full. Prefer this over the pixel `width`; page mode ignores it."),
+    .describe("Width bucket for the record drawer: 'auto' (default) keeps the host's fixed default width, the same for every object whatever its field count (the console's record side panel opens at 460px), or a coarse override sm/md/lg/xl/full (a 480/720/960/1200/1600px cap, always clamped to the viewport). A width the reader drags wins over either. Prefer this over the pixel `width`; it has no effect where the record opens as a page (in the console, every record on a phone), nor on a phone-width screen, where the drawer fills it."),
 
   /**
    * @deprecated [#2578 → `size`] A pixel/percent width cannot be authored blind:
@@ -3269,6 +3416,56 @@ export function checkListViewChartBinding(
   ctx.addIssue({ code: 'custom', path: ['chart'], message: LIST_VIEW_CHART_NEEDS_BINDING });
 }
 
+/** [#34382] `type: 'timesheet'` with no `timesheet` block — refused at `timesheet`. */
+const LIST_VIEW_TIMESHEET_NEEDS_BINDING =
+  "This list view is `type: 'timesheet'` but declares no `timesheet` block, so the weekly grid has no "
+  + "rows, day or value to pivot. Declare `timesheet: { rowFields: ['<field>'], dateField: '<date_field>', "
+  + "valueField: '<number_field>' }`: `rowFields` names the 1 to 3 fields whose distinct values make the "
+  + 'rows, `dateField` the date each record falls on, and `valueField` the number each cell edits. There is '
+  + 'no default binding to fall back on. A view that is not meant to be a timesheet takes another `type`.';
+
+/**
+ * [#34382] A `type: 'timesheet'` list view must bind its grid: a `timesheet`
+ * block naming its row fields, date field and value field.
+ *
+ * - No block ⇒ one issue at `timesheet`.
+ * - A declared block ⇒ nothing here: {@link TimesheetConfigSchema} is strict
+ *   and requires all three keys, at `timesheet.*`.
+ *
+ * Without the block the renderer has nothing to fall back on (only the
+ * author knows which fields make the rows, the day and the value), so it
+ * draws only its "configuration required" screen — the fully inert case
+ * ADR-0078 §1 grades an error. The type is new in this release, so refusing
+ * the block-less shape here narrows nothing a published version accepted;
+ * the six older binding rows in `kernel/functional-completeness.ts` stay
+ * warnings because escalating THEM would be that narrowing.
+ *
+ * Reads `type` as the door hands it, exactly as
+ * {@link checkListViewChartBinding} does, and is attached beside it at the
+ * same three list-view doors, exported for the same reason: a mirror built
+ * from `ListViewSchema.shape` re-attaches it.
+ */
+export function checkListViewTimesheetBinding(
+  view: { type?: unknown; timesheet?: unknown },
+  ctx: z.RefinementCtx,
+): void {
+  if (view.type !== 'timesheet' || view.timesheet !== undefined) return;
+  ctx.addIssue({ code: 'custom', path: ['timesheet'], message: LIST_VIEW_TIMESHEET_NEEDS_BINDING });
+}
+
+/**
+ * [#36403] The list view body's refusal of `columnState`. The key was never
+ * declared on this authoring shape; it was a wire key of the stored `view`
+ * row (see `VIEW_COLUMN_STATE_RETIRED`, further down, for the retirement and
+ * its census). No conversion reaches a list view body, so this text names no
+ * migration command — the author deletes the key by hand.
+ */
+const VIEW_LIST_COLUMN_STATE_RETIRED =
+  '`listView.columnState` was removed in @objectstack/spec 18.7.0 (ADR-0049 enforce-or-remove) — it was '
+  + 'never a list view key: it held one column order and set of widths the console once stored on a view '
+  + 'row, and that layout is no longer applied. Delete the key. To ship a column order, list `columns` in that '
+  + 'order (or set `fieldOrder`); to ship a width, set `width` on the column.';
+
 /**
  * List View Schema (Expanded)
  * Defines how a collection of records is displayed to the user.
@@ -3318,13 +3515,10 @@ const ListViewShapeSchema = lazySchema(() => strictObject({
   surface: 'this list view',
   history: VIEW_HISTORY,
   guidance: {
-    // [commit d5552ca13] Runtime-only overlay key, deliberately NOT declared here: this
-    // is the AUTHORING shape, and column order/widths are per-user state the
-    // console grid writes through the `view` metadata API (objectui's
-    // `gridNonAuthorKeys` disposition). The overlay-validation face declares
-    // it (`flattenedViewOverlayFields` / `viewItemWireFields`); an author who
-    // writes it here gets this prescription instead of a bare typo suggestion.
-    columnState: 'Column order/widths are per-user runtime personalization the console grid writes through the `view` metadata API — not authored metadata. Remove it from authored metadata.',
+    // [#36403] Never declared on this AUTHORING shape, and now retired from
+    // the wire members too (`flattenedViewOverlayFields` / `viewItemWireFields`
+    // tombstone it); an author who writes it here gets the retirement text.
+    columnState: VIEW_LIST_COLUMN_STATE_RETIRED,
   },
 }, {
   name: SnakeCaseIdentifierSchema.optional().describe('Internal view name (lowercase snake_case)'),
@@ -3344,7 +3538,8 @@ const ListViewShapeSchema = lazySchema(() => strictObject({
     'gantt',      // Project Timeline
     'map',        // Geospatial
     'chart',      // Aggregate visualisation
-    'tree'        // Self-referencing hierarchy (tree-grid)
+    'tree',       // Self-referencing hierarchy (tree-grid)
+    'timesheet'   // Editable row × weekday entry grid
   ], {
     error: (issue) => (issue.input === 'page' ? LIST_VIEW_TYPE_PAGE_RETIRED : undefined),
   }).default('grid'),
@@ -3472,7 +3667,7 @@ const ListViewShapeSchema = lazySchema(() => strictObject({
   selection: SelectionConfigSchema.optional().describe('Row selection configuration'),
 
   /** Navigation / Interaction */
-  navigation: NavigationConfigSchema.optional().describe('Configuration for item click navigation (drawer by default, page, new_window or none)'),
+  navigation: NavigationConfigSchema.optional().describe('Configuration for item click navigation: the drawer size, and `preventNavigation` for a list whose rows open nothing (`mode` is deprecated — the record name opens the page, the hover icon the side panel)'),
 
   /** Pagination */
   pagination: PaginationConfigSchema.optional().describe('Pagination configuration'),
@@ -3487,6 +3682,7 @@ const ListViewShapeSchema = lazySchema(() => strictObject({
     .describe('Chart binding — applies when the view renders as a chart. A `type: \'chart\'` view must bind one: it names the ADR-0021 `dataset` and the measures (`values`) the chart plots, and there is no default binding'),
   map: ListMapConfigSchema.optional().describe('Map configuration — applies when the view renders as a map layout'),
   tree: TreeConfigSchema.optional().describe('Tree/hierarchy configuration — applies when the view renders as a tree layout'),
+  timesheet: TimesheetConfigSchema.optional().describe('Timesheet binding — applies when the view renders as a timesheet. A `type: \'timesheet\'` view must bind one: the row fields, the date field and the numeric value field the weekly grid pivots and edits'),
 
   /**
    * [#17063] REMOVED — the `type: 'page'` mount this key named was never
@@ -3591,9 +3787,10 @@ const ListViewShapeSchema = lazySchema(() => strictObject({
     + "an `operation: 'custom'` + `execution: 'aggregate'` entry that dispatches the "
     + 'action it NAMES once for the whole selection — the renderer injects `params._selectedIds: '
     + 'string[]` (read that on the server, not `recordId`) so a single call can produce one aggregate '
-    + 'artifact (zip of QR codes, merged PDF, batch print). Aggregate results are all-or-nothing: a '
-    + 'handler that cannot cover the whole selection must reject, and per-row retry is replaced by '
-    + 're-running the action. `batchSize` does not apply (the call is never chunked); set `maxRecords` '
+    + 'artifact (zip of QR codes, merged PDF, batch print). A rejection is one outcome for the whole '
+    + 'selection; a run that moved some rows and refused others resolves with a `BulkActionResult` '
+    + '(`{ succeeded, failed }`), a non-empty `failed` being a legal success answer. Per-row retry is '
+    + 'replaced by re-running the action. `batchSize` does not apply (the call is never chunked); set `maxRecords` '
     + "on defs whose server work is expensive. For the PER-RECORD dispatch use `bulkActions: ['<name>']` "
     + 'instead — the bare-string form, promoted with the action\'s own label, params and `visible`; a '
     + "'custom' def without `execution: 'aggregate'` has no dispatcher and is refused at parse time"
@@ -3704,7 +3901,8 @@ const ListViewShapeSchema = lazySchema(() => strictObject({
 export const ListViewSchema = lazySchema(() =>
   ListViewShapeSchema
     .superRefine(checkListViewCalendarVisualization)
-    .superRefine(checkListViewChartBinding));
+    .superRefine(checkListViewChartBinding)
+    .superRefine(checkListViewTimesheetBinding));
 
 /**
  * [commit c459da6bc] Form-view select option — {@link SelectOptionSchema} minus the
@@ -4040,7 +4238,7 @@ const FormFieldBaseSchema = lazySchema(() => {
    * The read points (`resolveColSpan`, the wide-type list, the span ladder)
    * are recorded in `packages/spec/liveness/view.json`, row `form.sections`.
    */
-  span: z.enum(['auto', 'full']).default('auto').describe("Relative field width. 'auto' (default — omit it): the renderer sizes the field from its widget type × the current column count — only textarea, markdown, html, richtext and repeater resolve to the full column count (repeater reaches it through the wide `field:grid` widget it maps to). 'full': resolves to the form grid's full column count. How far down the container-query tiers that span is emitted is the renderer's, not this key's: the renderer emits one clamped col-span class per multi-column tier (`@md:col-span-2 @2xl:col-span-3` for a 3-column grid), so the field takes the whole row at every multi-column tier, not just the widest."),
+  span: z.enum(['auto', 'full']).default('auto').describe("Relative field width. 'auto' (default — omit it): the renderer sizes the field from its widget type × the current column count — only textarea, markdown, html, richtext and repeater, plus a file or image field whose object field declares `multiple: true`, resolve to the full column count (repeater reaches it through the wide `field:grid` widget it maps to); an authored `colSpan` still wins over that default (`colSpan: 1` keeps such a field in one cell). 'full': resolves to the form grid's full column count. How far down the container-query tiers that span is emitted is the renderer's, not this key's: the renderer emits one clamped col-span class per multi-column tier (`@md:col-span-2 @2xl:col-span-3` for a 3-column grid), so the field takes the whole row at every multi-column tier, not just the widest."),
 
   /** Custom widget override — only needed when auto-inference is insufficient */
   widget: z.string().optional().describe('Custom widget/component name (overrides type-based inference)'),
@@ -4995,23 +5193,23 @@ const FORM_VIEW_TYPE_RETIRED_FIX =
 const FORM_VIEW_TYPE_RETIRED = {
   split:
     "'split' was removed from the form view `type` enum in @objectstack/spec 18.3.0 (ADR-0050) — `type` is "
-    + 'the form\'s layout, and a side-by-side split is not one: whether a record opens beside its list is '
-    + 'each reader\'s own preference in the list\'s Display menu, not metadata. Write `type: \'tabbed\'` (one '
+    + 'the form\'s layout, and a side-by-side split is not one: a record opens from its list in the drawer '
+    + 'or as the full page, never beside the list. Write `type: \'tabbed\'` (one '
     + 'tab per section) or delete the value for the `simple` default, and delete each section\'s `pane` and '
     + 'the form\'s `splitDirection` / `splitSize` / `splitResizable`; to edit child records beside the parent, declare '
     + '`subforms`. '
     + FORM_VIEW_TYPE_RETIRED_FIX,
   drawer:
     "'drawer' was removed from the form view `type` enum in @objectstack/spec 18.3.0 (ADR-0050) — `type` is "
-    + 'the form\'s layout, and where a form opens is decided by whoever opens it: a list opens a clicked '
-    + 'record in the drawer (`navigation.mode`, the default), and the console\'s New and Edit entries open '
+    + 'the form\'s layout, and where a form opens is decided by whoever opens it: an object\'s list opens a '
+    + 'clicked record\'s full page, or its drawer from the hover icon, and the console\'s New and Edit entries open '
     + 'the record form themselves. Delete the value for the `simple` default, or write the layout you want: '
     + '`simple`, `tabbed` or `wizard`. '
     + FORM_VIEW_TYPE_RETIRED_FIX,
   modal:
     "'modal' was removed from the form view `type` enum in @objectstack/spec 18.3.0 (ADR-0050) — `type` is "
     + 'the form\'s layout, and where a form opens is decided by whoever opens it: the console\'s New and Edit '
-    + 'dialogs open the record form themselves (sized by the form\'s `modalSize`), and an action '
+    + 'dialogs open the record form themselves (laid out by the object\'s `fieldGroups`), and an action '
     + '`type: \'modal\'` opens the page it targets. Delete the value for the `simple` default, or write the '
     + 'layout you want: `simple`, `tabbed` or `wizard`. '
     + FORM_VIEW_TYPE_RETIRED_FIX,
@@ -5069,8 +5267,8 @@ const FORM_VIEW_BUTTONS_RESET_RETIRED =
 // stored rows and sources.
 const FORM_VIEW_DRAWER_SIDE_RETIRED =
   '`view.form.drawerSide` was removed in @objectstack/spec 18.3.0 (ADR-0049) — no form view opens in a '
-  + 'drawer, so no form view ever read it. Delete the key: a list opens a clicked record in its drawer '
-  + '(`navigation.mode`), and the React `ObjectForm` block keeps its own `drawerSide` prop for the drawer it '
+  + 'drawer, so no form view ever read it. Delete the key: an object\'s list opens a record in its drawer '
+  + 'from the hover icon, and the React `ObjectForm` block keeps its own `drawerSide` prop for the drawer it '
   + 'opens with `formType=\'drawer\'`. '
   + FORM_VIEW_TYPE_RETIRED_FIX;
 
@@ -5237,9 +5435,9 @@ export const FormViewSchema = lazySchema(() => strictObject({
   /** [#29012] RETIRED — {@link FORM_VIEW_DRAWER_WIDTH_RETIRED}. */
   drawerWidth: retiredKey(FORM_VIEW_DRAWER_WIDTH_RETIRED),
   /**
-   * Size bucket of the dialog a caller opens this form in. Live on every
-   * layout: the console's New / Edit dialog reads it off the form view it
-   * selects, whatever the form's `type` ([#27155] it outlived `type: 'modal'`).
+   * Size bucket of the dialog a caller opens this form in. [#36425] The
+   * console's New / Edit dialog no longer reads a form view, so it is not that
+   * caller: it sizes itself. Its liveness verdict is re-audited on #36544.
    */
   modalSize: z.enum(['sm', 'default', 'lg', 'xl', 'full']).optional().describe("Size bucket of the dialog a caller opens this form in: the console's New / Edit dialog, or the modal container of the React `ObjectForm` block (formType 'modal')"),
 
@@ -5654,7 +5852,8 @@ export const ObjectListViewSchema = lazySchema(() =>
     // authoring surface — as the one door where a calendar-enabled view with
     // no `calendar:` block, or a chart view binding no dataset, parses clean.
     .superRefine(checkListViewCalendarVisualization)
-    .superRefine(checkListViewChartBinding));
+    .superRefine(checkListViewChartBinding)
+    .superRefine(checkListViewTimesheetBinding));
 
 /**
  * [#4001/#7741] The wrap remedy, ONE prose source for two doors: the container's
@@ -6073,36 +6272,33 @@ type ViewItemWireArmShape<K extends 'list' | 'form', C extends z.ZodTypeAny> = {
 };
 
 /**
- * [commit d5552ca13] The per-user column layout the console's grid persists through the
- * `view` metadata door — an **explicitly runtime-only overlay key**, admitted
- * where overlays are validated and deliberately NOT authorable.
+ * [#36403] `columnState` RETIRED — ADR-0049 enforce-or-remove, the spec half
+ * of #35955 (maintainer: 「只记在浏览器里」 for column widths, and the
+ * server-side per-user list preference layer 「整个退掉」, 2026-11-21).
  *
- * Modeled on what the write actually sends (measured on objectui#5233's
- * os-dev-report and `ObjectGridColumnState` in objectui's
- * `plugin-grid/src/ObjectGrid.tsx`): `onColumnStateChange` emits
- * `{ order?: string[]; widths?: Record<string, number> }` — the merged result
- * of a column reorder and a resize — and `persistViewPatch` PUTs it as the
- * `columnState` key of a personalization overlay. Until this key was declared,
- * a `columnState`-only patch carried no key any {@link ViewMetadataSchema}
- * member declared, so {@link assertViewIdentity} refused the body ("no
- * recognized `view` key") and the write 422'd — the ruled patch-only write
- * (objectstack#7494 comment 5261754173) could not land. It survived only
- * inside the fat write's copied base, i.e. laundered past validation.
+ * [commit d5552ca13] had admitted it as a runtime-only overlay key: the
+ * console grid's column order and widths, PUT onto a stored `view` row (a
+ * personalization overlay, or a view item record through `updateView`) and
+ * applied on read. The writer is gone. The overlay writer retired with
+ * objectui#12504, and since #35955 a column drag goes to the list's draft
+ * (saved into the view's own `columns` / `fieldOrder`) while column widths
+ * live only in the reader's browser. Writer census before removal, at `main`
+ * 97b9d1e6: none in this framework, its examples or its console
+ * (`ui/packages/**`), none in the HotCRM app or the gallery; cloud was not
+ * reachable. The reader was not gone: until this release the console
+ * applied a stored layout (a record's key rode `listViews()`, an overlay's
+ * survived its narrowing, and the list renderer seeded the grid from it for a
+ * reader with no layout of their own in the browser). The D2 conversion
+ * strips the key on every read, so from this release no stored layout is
+ * applied and every reader sees the view's own column order and widths — the
+ * maintainer's ruling that a stored layout is not migrated (#35955).
  *
- * Posture decisions, both deliberate:
- *  - **Not `.strict()`**: the console owns the internals of this per-user
- *    state (objectui's `gridNonAuthorKeys` ruling, 2026-08-18), so a future
- *    console key here must not 422 against an older server. The two known
- *    keys are typed; unknown inner keys parse. [#20051] They are not stored:
- *    the save keeps only the keys the schema declares, so a new console key
- *    is declared here before the console relies on reading it back.
- *  - **Not exported, not on {@link ListViewSchema}**: exporting would mint a
- *    protocol def / authorable-surface entries, and declaring it on the
- *    authoring shape would bless hand-authoring a payload the product writes
- *    on the user's behalf. Author-writability is a DIFFERENT spec change,
- *    explicitly out of commit d5552ca13's scope; the authoring doors keep rejecting the
- *    key by name (see `VIEW_ITEM_SURFACE.guidance` and `ListViewSchema`'s
- *    `guidance`).
+ * Tombstoned on BOTH wire doors that declared it ({@link viewItemWireFields}
+ * and {@link flattenedViewOverlayFields}), never deleted: a bare deletion on
+ * a closed member reports only "unrecognized key", and the prescription is
+ * the payload. The authoring doors never declared it; their `guidance`
+ * entries carry the same retirement text. Stored rows and sources are
+ * stripped by the D2 conversion `view-column-state-removed`.
  *
  * Declared ABOVE the ViewItem section on purpose: `viewItemWireFields()` reads
  * it, and under `OS_EAGER_SCHEMAS=1` every `lazySchema` factory runs at module
@@ -6110,15 +6306,14 @@ type ViewItemWireArmShape<K extends 'list' | 'form', C extends z.ZodTypeAny> = {
  * TDZ `ReferenceError` at import time (the `strict-object.ts` docblock carries
  * the measured incident).
  */
-const ViewColumnStateSchema = z.object({
-  order: z.array(z.string()).optional()
-    .describe('Column order as field names, leftmost first (runtime-only state — written by the console grid, never authored).'),
-  widths: z.record(z.string(), z.number()).optional()
-    .describe('Column widths in pixels, keyed by field name (runtime-only state — written by the console grid, never authored).'),
-}).describe(
-  'Runtime-only personalization overlay key: the column layout (order/widths) the console grid '
-  + 'persists through the `view` metadata API. NOT authorable — authoring doors reject it by name; do not write it in metadata source.',
-);
+const VIEW_COLUMN_STATE_RETIRED =
+  '`view.columnState` was removed in @objectstack/spec 18.7.0 (ADR-0049 enforce-or-remove) — it held one '
+  + 'column order and set of widths on a shared view row; nothing writes it any more, and a stored layout is '
+  + 'no longer applied, so every reader sees the view\'s own column order and widths. The console keeps '
+  + 'column widths in each reader\'s browser and saves a column order into the view itself. '
+  + 'Delete the key. To ship a column order, list `columns` in that order (or set `fieldOrder`); to ship a '
+  + 'width, set `width` on the column. '
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
 
 /** The authoring surface `defineViewItem` and Studio's create form are judged by. */
 const VIEW_ITEM_SURFACE = {
@@ -6132,8 +6327,9 @@ const VIEW_ITEM_SURFACE = {
     // instead of leaving them to guess.
     isPinned: 'Pinning is per-user Studio state, not authored metadata — the console writes it through the `view` metadata API. Remove it from authored metadata.',
     sortOrder: 'Switcher position is per-user Studio state, not authored metadata — use `order` for the authored default. Remove it from authored metadata.',
-    // [commit d5552ca13] Runtime-only overlay key — same disposition as the two above.
-    columnState: 'Column order/widths are per-user runtime personalization the console grid writes through the `view` metadata API — not authored metadata. Remove it from authored metadata.',
+    // [#36403] Retired — tombstoned on the wire members; an author gets the
+    // same prescription here ({@link VIEW_COLUMN_STATE_RETIRED}).
+    columnState: VIEW_COLUMN_STATE_RETIRED,
     // [#20456] Declared on the wire members with the switcher's other row
     // state; named here so an author who reaches for it as access control is
     // told what it is.
@@ -6272,14 +6468,11 @@ const VIEW_ITEM_OPTIONS_REFUSED =
 function viewItemWireFields() {
   return {
     ...viewSwitcherRowStateFields(),
-    // Same disposition as the switcher keys: console state written through
-    // the `view` metadata API ({@link ViewColumnStateSchema} carries the
-    // key's own ruling). `updateView` PUTs
-    // `{ ...current, ...partial }`, so on a standalone ViewItem record the
-    // key arrives at THIS member's top level; declaring it validates the
-    // shape where `.strip()` used to let it ride through unchecked.
-    columnState: ViewColumnStateSchema.optional()
-      .describe('Studio round-trip: column order/widths (runtime-only state, written by the console grid and stored on the view\'s row, which has no per-user scope — not authored)'),
+    // [#36403] RETIRED — see {@link VIEW_COLUMN_STATE_RETIRED}. `updateView`
+    // PUT `{ ...current, ...partial }`, so on a standalone ViewItem record the
+    // key arrived at THIS member's top level; a stored record is stripped by
+    // the D2 conversion `view-column-state-removed`.
+    columnState: retiredKey(VIEW_COLUMN_STATE_RETIRED),
     // [#20051] Pinned ABSENT, refused by name — see
     // {@link VIEW_ITEM_OPTIONS_REFUSED}. `z.never()` rather than the form
     // overlay's `z.undefined()` ({@link FORM_OVERLAY_OPTIONS_REFUSED}): this
@@ -6338,7 +6531,7 @@ const FORM_OVERLAY_WIRE_SURFACE: StrictObjectOptions = {
  * The flattened overlays are built by extending an authoring shape, and an
  * extension inherits that shape's refusal: the surface named in it, and the
  * candidate list a typo is pointed at, which would miss every key the overlay
- * adds (`isPinned`, `columnState`, …). So the member is closed with a refusal
+ * adds (`isPinned`, `sortOrder`, …). So the member is closed with a refusal
  * built from its OWN shape — the same `strictObjectError` map
  * {@link strictObject} attaches — and re-declared as a `closedObject`, so the
  * refusal is terminal on this surface and the union keeps its envelope.
@@ -6620,13 +6813,11 @@ function flattenedViewOverlayFields<K extends 'list' | 'form'>(kind: K) {
         + 'personalization PUTs.',
       ),
     label: I18nLabelSchema.optional().describe('Display label (inherited from the shadowed entry —).'),
-    // [commit d5552ca13] Runtime-only overlay key — declared HERE (the overlay-validation
-    // face) and on `viewItemWireFields()`, never on an authoring shape. This is
-    // what lets a `columnState`-only personalization patch through the
-    // identity precondition (the vocabulary is derived from the members' keys)
-    // AND gets its inner shape genuinely validated instead of ridden past
-    // `.strip()` unchecked.
-    columnState: ViewColumnStateSchema.optional(),
+    // [#36403] RETIRED — see {@link VIEW_COLUMN_STATE_RETIRED}. It was the
+    // overlay's per-user column order and widths; no writer is left, and a
+    // stored overlay row is stripped by the D2 conversion
+    // `view-column-state-removed`.
+    columnState: retiredKey(VIEW_COLUMN_STATE_RETIRED),
     // [#20456] A console round-trip key (the switcher's set-default writes it
     // and reads it back), declared here since before that census; now it
     // carries its meaning too.
@@ -6961,7 +7152,7 @@ const LIST_OVERLAY_DEFAULT_TYPE = 'grid';
 const LIST_OVERLAY_TYPE_NEEDS_COLUMNS =
   'This list view overlay sets `type` but lists no `columns`. A body that sets `type` is a full inline list '
   + 'config, and a full config lists its columns: add `columns: ["field_a", "field_b"]`. A patch on the view '
-  + 'it shadows (`sort`, `hiddenFields`, `columnState`, `inlineEdit`, …) sets no `type` and needs no `columns`: '
+  + 'it shadows (`sort`, `hiddenFields`, `rowHeight`, `inlineEdit`, …) sets no `type` and needs no `columns`: '
   + 'remove `type` to save this body as a patch on the view it shadows.';
 
 /**
@@ -7169,6 +7360,7 @@ const ListViewOverlayWireSchema = lazySchema(() =>
     .superRefine(checkListOverlayTypeNeedsColumns)
     .superRefine(checkListViewCalendarVisualization)
     .superRefine(checkListViewChartBinding)
+    .superRefine(checkListViewTimesheetBinding)
     .overwrite(applyListOverlayTypeDefault),
 );
 
@@ -7280,7 +7472,6 @@ export const VIEW_CONSOLE_ROUND_TRIP_KEYS = {
   isPinned: ['viewItem', 'listOverlay'],
   sortOrder: ['viewItem', 'listOverlay'],
   visibility: ['viewItem', 'listOverlay'],
-  columnState: ['viewItem', 'listOverlay'],
   _isOverride: ['listOverlay'],
 } as const satisfies Record<string, readonly ViewMetadataBranch[]>;
 
@@ -8224,7 +8415,10 @@ export type CalendarConfig = z.input<typeof CalendarConfigSchema>;
 export type GanttConfig = z.input<typeof GanttConfigSchema>;
 export type GanttQuickFilter = z.input<typeof GanttQuickFilterSchema>;
 export type KanbanConfig = z.input<typeof KanbanConfigSchema>;
+export type KanbanLaneSummary = z.input<typeof KanbanLaneSummarySchema>;
+export type KanbanLaneSummaryParsed = z.infer<typeof KanbanLaneSummarySchema>;
 export type ListMapConfig = z.input<typeof ListMapConfigSchema>;
 export type NavigationMode = z.input<typeof NavigationModeSchema>;
 export type TreeConfig = z.input<typeof TreeConfigSchema>;
+export type TimesheetConfig = z.input<typeof TimesheetConfigSchema>;
 export type ViewItemName = z.input<typeof ViewItemNameSchema>;

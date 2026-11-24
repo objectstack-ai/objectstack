@@ -89,8 +89,9 @@ describe('ModalForm fieldGroups fallback', () => {
     expect(forms[0].textContent).toContain('Tracking Info');
     expect(forms[0].querySelectorAll('input').length).toBe(4);
 
-    // 4 input fields → 2-column auto-layout threaded onto the field container.
-    expect(forms[0].querySelector('[class*="@md:grid-cols-2"]')).not.toBeNull();
+    // 4 input fields and no declared columns → one per row
+    // (objectstack-ai/objectstack#35980; it was a 2-column grid before).
+    expect(forms[0].querySelector('[class*="@md:grid-cols-2"]')).toBeNull();
   });
 
   it('submits values from EVERY group in a single create() payload', async () => {

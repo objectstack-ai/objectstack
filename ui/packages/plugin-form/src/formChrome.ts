@@ -82,6 +82,16 @@ const FORM_CHROME_DEFAULTS = {
   // The heading of the fields no declared field group claims
   // (`deriveFieldGroupSections`' trailing bucket).
   'common.ungroupedSection': 'Other',
+  // The record page's edit-state body table (`RecordBodyTableEditor`): its
+  // loading line, a failed read, and the label of a refused line.
+  'common.loading': 'Loading…',
+  'form.lineItems.loadFailed': 'Failed to load line items',
+  // The notice after a save that skipped lines nobody edited since Add started
+  // them on their defaults (objectstack#35940).
+  'form.lineItems.untouchedNotSaved': '{{count}} blank line was not saved',
+  'form.lineItems.untouchedNotSaved_one': '{{count}} blank line was not saved',
+  'form.lineItems.untouchedNotSaved_other': '{{count}} blank lines were not saved',
+  'detail.bodyTableRow': 'Row {{row}}',
 };
 
 /**

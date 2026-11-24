@@ -47,6 +47,7 @@
  */
 
 import { REFERENCE_VALUE_TYPES } from '@objectstack/spec/data';
+import { normalizeDatasetTerm } from '@objectstack/spec/ui';
 
 import type { ScenarioExpect } from '../schema.js';
 
@@ -73,7 +74,26 @@ export interface EvalGraph {
   objects: ReadonlyArray<{ name: string; fields: ReadonlyArray<EvalGraphField> }>;
   dashboards?: ReadonlyArray<{ name: string; widgets?: ReadonlyArray<{ dataset?: string; measure?: string }> }>;
   apps?: ReadonlyArray<{ name: string; nav?: ReadonlyArray<EvalGraphNavEntry> }>;
-  datasets?: ReadonlyArray<{ name: string; measures?: ReadonlyArray<string> }>;
+  datasets?: ReadonlyArray<EvalGraphDataset>;
+}
+
+/** A dataset member as the build declares it: its name and the vocabulary it carries (ADR-0149 D1). */
+export interface EvalGraphDatasetMember {
+  kind: 'measure' | 'dimension';
+  name: string;
+  /** Its `synonyms`, as written; empty when it declares none. */
+  synonyms: ReadonlyArray<string>;
+  /** It declares a non-empty `description`. */
+  described: boolean;
+}
+
+export interface EvalGraphDataset {
+  name: string;
+  /** The base object; absent when the graph's source states none. */
+  object?: string;
+  measures?: ReadonlyArray<string>;
+  /** Every measure and dimension with its vocabulary; absent when the graph's source states none. */
+  members?: ReadonlyArray<EvalGraphDatasetMember>;
 }
 
 export interface CheckResult {
@@ -194,6 +214,27 @@ export function scoreGraph(graph: EvalGraph, expect: ScenarioExpect): ScoreResul
 
   for (const dash of expect.dashboards ?? []) {
     add(`dashboard:${dash}`, (graph.dashboards ?? []).some((d) => norm(d.name) === norm(dash)));
+  }
+
+  // A declared dataset: on its base object, and each member carrying every
+  // declared synonym (compared as the dataset tools compare a term) and a
+  // description where the card declares one. The words are what a later
+  // question is matched against, so a missing synonym is a missing answer.
+  for (const ds of expect.datasets ?? []) {
+    const g = (graph.datasets ?? []).find((d) => norm(d.name) === norm(ds.name));
+    add(`dataset:${ds.name}`, !!g && (g.object === undefined || norm(g.object) === norm(ds.object)), g ? `on ${g.object}, not ${ds.object}` : 'missing');
+    const members: Array<['measure' | 'dimension', { name: string; synonyms?: string[]; description?: string }]> = [
+      ...ds.measures.map((m) => ['measure', m] as ['measure', typeof m]),
+      ...(ds.dimensions ?? []).map((d) => ['dimension', d] as ['dimension', typeof d]),
+    ];
+    for (const [kind, m] of members) {
+      const gm = g?.members?.find((x) => x.kind === kind && norm(x.name) === norm(m.name));
+      const has = new Set((gm?.synonyms ?? []).map(normalizeDatasetTerm));
+      const missing = (m.synonyms ?? []).filter((w) => !has.has(normalizeDatasetTerm(w)));
+      const undescribed = m.description !== undefined && gm !== undefined && !gm.described;
+      const problems = !g ? ['no dataset'] : !gm ? ['missing'] : [...(missing.length ? [`no synonym ${missing.map((w) => JSON.stringify(w)).join(', ')}`] : []), ...(undescribed ? ['no description'] : [])];
+      add(`dataset-${kind}:${ds.name}.${m.name}`, problems.length === 0, problems.join('; '));
+    }
   }
 
   // Each expected nav target must be navigated to by some app, through an entry

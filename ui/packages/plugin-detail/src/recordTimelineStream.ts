@@ -15,8 +15,8 @@
  * `trackHistory`), which the host hands over through
  * {@link RecordFieldChangesContext}. This module is the pure part: the audit
  * rows as feed items, the merge (newest first, one action one row), and
- * the four filter chips 全部 / 活动 / 讨论 / 变更 (变更 = the audit's field
- * changes; every activity row is 活动).
+ * the four filter chips 全部 / 事件 / 讨论 / 变更 (变更 = the audit's field
+ * changes; every activity row is 事件).
  */
 
 import * as React from 'react';
@@ -25,9 +25,9 @@ import type { FeedItem } from '@object-ui/types';
 
 /**
  * The record's field changes as feed items, from the host's audit read —
- * `null` while the host has none to give (no `trackHistory`, an authored
- * page, a read not made). Read by the timeline stream on the default record
- * page only.
+ * `null` while the host has none to give (no `trackHistory`, a read not made,
+ * not answered or refused). Read by the timeline stream on the default record
+ * page, and by the feed panels of an authored one (objectstack#33996).
  */
 export const RecordFieldChangesContext = React.createContext<FeedItem[] | null>(null);
 
@@ -69,6 +69,17 @@ export const RecordTimelineTotalContext = React.createContext<number | null>(nul
  * whole stream; `null` while unknown. `null` anywhere else: nothing reports.
  */
 export const RecordTimelineCountContext = React.createContext<((count: number | null) => void) | null>(null);
+
+/**
+ * Whether the record's comments live outside its 动态 stream: in its comment
+ * panel (objectstack#36075), which the host draws beside the default record
+ * page, or on the full page, for a record the host draws in a side preview
+ * (objectstack#36225). The page's 动态 stream — its tab and its peek — then
+ * draws the system entries alone: no comment, no composer, no filter chips,
+ * and its count names those entries only. `false` (an authored page, no host
+ * saying): the stream carries the discussion as before.
+ */
+export const RecordCommentsInPanelContext = React.createContext(false);
 
 /** One audit-log entry as the host enriches it (`RecordDetailView`'s history read). */
 export interface AuditEntryLike {
@@ -112,8 +123,11 @@ const displayOf = (value: unknown): string | undefined =>
 
 /**
  * Audit entries as `field_change` feed items. Only an entry that changed a
- * field becomes one: the record's creation is the activity stream's own
- * `created` row, so it is not said twice.
+ * field becomes one. The record's creation is the activity stream's own
+ * `created` row, so it is not said twice: its audit entry (the values the
+ * record was created with) pairs onto that row ({@link mergeTimelineStream}),
+ * and where it stands alone (the 变更 chip, or no activity row to pair with)
+ * it is one row of its own, never one more edit ({@link isRecordCreationEntry}).
  */
 export function auditEntriesToFeedItems(
   entries: readonly AuditEntryLike[] | null | undefined,
@@ -231,6 +245,37 @@ export function mergeTimelineStream(
   feed: readonly FeedItem[] | null | undefined,
   fieldChanges: readonly FeedItem[] | null | undefined,
 ): TimelineStreamItem[] {
+  return byTime(pairedStream(feed, fieldChanges), -1);
+}
+
+/**
+ * The feed of a panel drawn off the default record page's stream: an authored
+ * `record:discussion` / `record:chatter` / `record:activity` (objectstack#33996).
+ * The same items and the same pairing as {@link mergeTimelineStream}, oldest
+ * first, the order such a panel reads. No field changes: `feed` itself, so a
+ * page without field history draws what it drew before.
+ */
+export function mergeFieldHistoryIntoFeed(
+  feed: readonly FeedItem[],
+  fieldChanges: readonly FeedItem[] | null | undefined,
+): readonly FeedItem[] {
+  if (!fieldChanges || fieldChanges.length === 0) return feed;
+  return byTime(pairedStream(feed, fieldChanges), 1);
+}
+
+/** The items sorted by time, `1` oldest first, `-1` newest first; ties keep their order. */
+function byTime(items: TimelineStreamItem[], direction: 1 | -1): TimelineStreamItem[] {
+  return items
+    .map((item, index) => ({ item, index }))
+    .sort((a, b) => direction * (timeOf(a.item) - timeOf(b.item)) || a.index - b.index)
+    .map(({ item }) => item);
+}
+
+/** The feed with the field changes paired in (objectstack#30122), unsorted. */
+function pairedStream(
+  feed: readonly FeedItem[] | null | undefined,
+  fieldChanges: readonly FeedItem[] | null | undefined,
+): TimelineStreamItem[] {
   const changes = (fieldChanges ?? []) as ReadonlyArray<FeedItem & AuditFeedFacts>;
   const activity = feed ?? [];
   const pairs = pairActions(activity, changes);
@@ -246,13 +291,10 @@ export function mergeTimelineStream(
     if (changes.length > 0 && item.activityType === RECORD_TIMELINE_UPDATE_ACTIVITY_TYPE) return;
     base.push(item);
   });
-  return [...base, ...unpaired]
-    .map((item, index) => ({ item, index }))
-    .sort((a, b) => timeOf(b.item) - timeOf(a.item) || a.index - b.index)
-    .map(({ item }) => item);
+  return [...base, ...unpaired];
 }
 
-/** The stream's filter chips: 全部 / 活动 / 讨论 / 变更. */
+/** The stream's filter chips: 全部 / 事件 / 讨论 / 变更. */
 export type TimelineStreamFilter = 'all' | 'activity' | 'discussion' | 'changes';
 
 export const TIMELINE_STREAM_FILTERS: readonly TimelineStreamFilter[] = ['all', 'activity', 'discussion', 'changes'];
@@ -287,10 +329,24 @@ export function isSystemStreamEntry(item: FeedItem): boolean {
  * `changes_only`, hold these and nothing else (objectstack#30074, ruling C).
  * An activity row (`created` / `updated` / `deleted` / `assigned` / `shared`)
  * shares the `field_change` presentation but is an event, so it is judged by
- * its source and sits under 活动, whatever the history flag.
+ * its source and sits under 事件, whatever the history flag.
  */
 export function isFieldHistoryEntry(item: FeedItem): boolean {
   return item.type === 'field_change' && item.source === 'sys_audit_log';
+}
+
+/**
+ * Whether an item is the audit entry of the record's creation: a
+ * field-history entry written by the ledger's `create` action, the one the
+ * spec pairs with the `created` activity row. It is the record's creation,
+ * said once: never one more edit folded into a run of field changes
+ * (objectstack#35788).
+ */
+export function isRecordCreationEntry(item: FeedItem): boolean {
+  return (
+    isFieldHistoryEntry(item)
+    && foldedActivityTypeOf((item as FeedItem & AuditFeedFacts).auditAction) === RECORD_TIMELINE_FOLDED_ACTIVITY_TYPES.create
+  );
 }
 
 /**

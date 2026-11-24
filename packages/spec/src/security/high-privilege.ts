@@ -92,7 +92,9 @@ function appDeclaredCapabilityNames(
  *
  * Offending bits — the ADR-0090 D5 list: a `systemPermissions` entry naming a
  * PLATFORM system permission, View/Modify All Data (VAMA), or
- * delete/purge/transfer on any object, plus bulk `export` (#3544).
+ * delete/purge/transfer on any object, plus bulk `export` (#3544), plus
+ * `viewAllFields`, the read-only field half of View All (the field-axis
+ * split, ruling of record 6912661484).
  * A plain `'*'` wildcard grant is NOT high-privilege by itself (D5 permits a
  * read — or read/create/edit-own — baseline to cover all objects; the
  * platform's own `viewer_readonly` is exactly that shape, and `member_default`
@@ -164,6 +166,12 @@ export function describeHighPrivilegeBits(def: any, context?: AnchorBindingConte
     for (const [objName, rawPerm] of Object.entries(objects)) {
       const p: any = rawPerm ?? {};
       if (p.viewAllRecords || p.modifyAllRecords) return `View/Modify All Data on '${objName}'`;
+      // [Field-axis split, ruling of record 6912661484] The read-every-field
+      // bit is the field half of View All: bound to an anchor it hands every
+      // holder each field of the object another set hides, so it is judged
+      // with the super-user bits ("every reader of the superuser bits learns
+      // the new one, or it becomes an over-grant").
+      if (p.viewAllFields) return `View All Fields on '${objName}'`;
       // The class message keeps the D5 name "delete/purge/transfer", but the
       // `allowPurge` READ is gone (#12497): the bit is a retiredKey tombstone —
       // no authored or freshly-parsed set can carry it, and a legacy stored row

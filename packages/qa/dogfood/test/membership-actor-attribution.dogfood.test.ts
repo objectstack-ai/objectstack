@@ -238,6 +238,9 @@ describe('#4586: the better-auth actor reaches sys_member history and the grant'
     );
     expect(invitation).toBeDefined();
 
+    // Accepting an invitation needs a verified address; marked in place, as
+    // completing the verification mail does.
+    await ql.update('sys_user', { id: memberUserId, email_verified: true }, { context: SYSTEM_CTX });
     const accept = await stack.apiAs(memberToken, 'POST', '/auth/organization/accept-invitation', {
       invitationId: String(invitation.id),
     });

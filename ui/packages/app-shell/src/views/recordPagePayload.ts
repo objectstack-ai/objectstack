@@ -63,7 +63,7 @@ import {
   seedQueueClaimDecision,
   seedRecordFieldAccess,
   seedRecordVerdict,
-} from '@object-ui/plugin-detail';
+} from '@object-ui/plugin-detail/core';
 import type {
   RecordFieldAccess,
   RecordPageOperation,
@@ -429,8 +429,11 @@ export function seedRecordPageReaders(args: {
       const answer = page?.explain?.[operation];
       return isRefused(answer) ? undefined : answer;
     }));
+    // A transfer decision answers two readers: the queue Claim (its
+    // `queue_claim` attribution) and Change Owner (its verdict,
+    // objectstack#35403). Both join the one part of the payload.
     if (operation === 'transfer') seedQueueClaimDecision(principal, objectName, recordId, decision);
-    else seedRecordVerdict(principal, objectName, recordId, operation, decision);
+    seedRecordVerdict(principal, objectName, recordId, operation, decision);
   }
   if (args.fieldAccess) {
     seedRecordFieldAccess(objectName, recordId, quiet(payload.then((page): RecordFieldAccess | null => {

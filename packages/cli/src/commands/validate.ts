@@ -23,7 +23,11 @@ import { artifactPackages, runPerPackageAuthoringRules } from '../utils/artifact
 import { stackFilterJudge } from '../utils/authoring-filter-judge.js';
 import { runAuthoringRules, splitBySeverity, authoringRulesFor } from '@objectstack/lint';
 import { resolveJsxGateManifest, printJsxGateNotices } from '../utils/sdui-manifest.js';
-import { preflightDeclaredCapabilities, renderCapabilityMessage } from '../utils/capability-preflight.js';
+import {
+  preflightDeclaredCapabilities,
+  preflightProviderWiring,
+  renderCapabilityMessage,
+} from '../utils/capability-preflight.js';
 import { collectAndLintDocs, type DocIssue } from '../utils/collect-docs.js';
 import { collectSeedFiles } from '../utils/bundle-seed-files.js';
 import { collectConnectorSpecFiles } from '../utils/bundle-connector-spec-files.js';
@@ -87,6 +91,7 @@ import { findNamespaceAddressLiteralRefusals } from '../utils/namespace-address-
 // door's own judge, walked over the artifact's packages.
 import { findOverrideDeclarationRefusals } from '../utils/override-declarations.js';
 import { findExtensionFieldSuffixRefusals } from '../utils/extension-field-suffix.js';
+import { findExtensionArrangementRefusals } from '../utils/extension-arrangement.js';
 // [ADR-0146 D10, second rule] The field-patch target check's walk; the verdict
 // is the marketplace install door's own judge.
 import { findFieldPatchTargetRefusals } from '../utils/field-patch-targets.js';
@@ -881,6 +886,34 @@ export default class Validate extends Command {
         this.exit(1);
       }
 
+      // 3a-iv-bis. [ADR-0146 D10] An extended object's whole arrangement is
+      //     the paired `.custom` package's, at author time: `fieldGroups` or
+      //     `relatedLists` on an `objectExtensions` entry of any other package
+      //     is refused, with the prescription naming `place`. The verdict is
+      //     the save and install doors' own (`judgeExtensionArrangement`); see
+      //     `utils/extension-arrangement.ts`.
+      const arrangementRefusals = findExtensionArrangementRefusals(result.data as Record<string, unknown>);
+      if (arrangementRefusals.length > 0) {
+        if (flags.json) {
+          await emitJson({
+            valid: false,
+            errors: arrangementRefusals,
+            warnings: warningsSoFar(),
+            conversions: conversionNotices,
+            duration: timer.elapsed(),
+          });
+          this.exit(1);
+        }
+        const n = arrangementRefusals.length;
+        console.log('');
+        printError(`${n} object extension key${n > 1 ? 's declare' : ' declares'} an arrangement only a paired \`.custom\` package declares (ADR-0146 D10)`);
+        printBulletList(
+          arrangementRefusals.map((r) => `${r.path} [${r.code}] ${r.message}`),
+          { noun: 'extension-arrangement refusal(s)', remedy: JSON_FULL_LIST_REMEDY },
+        );
+        this.exit(1);
+      }
+
       // 3a-v. [ADR-0146 D10, second rule] The field-patch target check, at
       //     author time: an object extension's `fieldPatches` naming a field
       //     its target does not have, or an option value the field does not
@@ -1035,7 +1068,16 @@ export default class Validate extends Command {
         projectDir: dirname(absolutePath),
       });
       const capProviderErrors = capProviderPreflight.errors;
-      capProviderWarnings = capProviderPreflight.warnings.map((c) => ({
+      // An `enterprise` token whose package resolves is still enforced by
+      // nothing until a `plugins[]` entry provides it: no runtime mounts an
+      // enterprise provider from `requires` (`preflightProviderWiring`).
+      const capProviderWiring = await preflightProviderWiring({
+        requires: (config as { requires?: unknown }).requires,
+        packages: packageEntries,
+        plugins: (config as { plugins?: unknown }).plugins,
+        projectDir: dirname(absolutePath),
+      });
+      capProviderWarnings = [...capProviderPreflight.warnings, ...capProviderWiring].map((c) => ({
         token: c.token,
         message: renderCapabilityMessage(c),
       }));

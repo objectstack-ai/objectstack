@@ -48,11 +48,29 @@
  *    name, a field whose type or currency cannot be read, two different
  *    currencies meeting — is unproven.
  *
- * Unproven is never guessed into money: the answer then is exactly what
- * {@link inferExpressionType} gives today, so a numeric formula stays `number`
- * and the stamp never claims a currency it cannot name. A `summary` field is
- * not read as a quantity: a roll-up of a currency field is itself money, and
- * its source type is not on this object.
+ * Unproven is never guessed into money, and on the numeric path it is never
+ * answered `number` either (#35631): a `number` answer means "proved not
+ * money", so a stamp may withdraw a declared `currency` on it. A numeric
+ * expression is answered by {@link inferExpressionType} only when the unit
+ * proof succeeds (a plain quantity or constant), or when every read of the
+ * record — `record.x`, `record['x']`, `record.?x`, `record[?'x']`, or a bare
+ * `x` — is ONE segment naming a field the map declares, whose unit can be read
+ * and is not money. Anything else answers `{}`, unproven:
+ *
+ *  - a read of a `currency` field, a formula declared `currency`, or a
+ *    `summary` other than a `count` (a roll-up passed without its
+ *    `summaryOperations` included) that the proof could not follow;
+ *  - a formula that declares no `returnType` — its unit cannot be read;
+ *  - a hop through a reference (`record.account.balance`) — the leaf's type is
+ *    not on this object;
+ *  - a read whose key is computed, or a name the map does not declare.
+ *
+ * So a numeric formula over declared quantities stays `number`. The CEL type
+ * still decides once the proof succeeds: a bare ratio of two amounts in one
+ * currency (`record.amount / record.tax`) is proven a plain number, but cel-js
+ * types it `dyn`, so it answers `{}` and a declared `currency` is kept. A
+ * `summary` field is not read as a quantity: a roll-up of a currency field is
+ * itself money, and its source type is not on this object.
  */
 
 import { CurrencyConfigSchema, NUMERIC_VALUE_TYPES, type Field } from '@objectstack/spec/data';
@@ -69,15 +87,24 @@ export interface FormulaSourceField {
   readonly returnType?: string;
   /** A currency field's (or a currency formula's) `currencyConfig`, as declared. Absent ⇒ dynamic. */
   readonly currencyConfig?: unknown;
+  /**
+   * `summary` only — its roll-up, as declared. A `count` is a plain number;
+   * any other function, or a roll-up passed without this member, may be money.
+   */
+  readonly summaryOperations?: unknown;
 }
 
 /**
- * A formula field's declared result: the pair authoring stamps onto the field.
- * BOTH members are the answer — a member that is absent is one the formula does
- * not declare, so a stamp writes both and clears an absent one (a formula edited
- * from money to a count must lose its stale `currencyConfig`).
+ * A formula field's declared result, as far as the expression proves it.
  *
- * - `returnType` — absent when no concrete type can be proven.
+ * - `returnType` — absent means NO verdict, never "declares nothing": the
+ *   expression proves no type (`{}`, unproven), and a stamp keeps what the
+ *   author declared (a `currency`, a `percent`). `number` means proved not
+ *   money.
+ * - With a `currency` answer the pair is the declaration: the stamp writes
+ *   `currencyConfig` exactly as answered and removes one the answer leaves
+ *   out (a `dynamic` result). A stamp that writes any other type removes a
+ *   stale `currencyConfig` — a formula edited from money to a count loses it.
  * - `currencyConfig` — present only for a `currency` result whose currency is
  *   `fixed`, or `record` (ADR-0144 D2: each record's own currency, carried as
  *   the same `currencyField` its source amounts name). A `dynamic` result (the
@@ -259,6 +286,54 @@ function dimOf(node: unknown, fields: Readonly<Record<string, FormulaSourceField
   }
 }
 
+/**
+ * Can the unit of the host field `name` be read, and is it not money? A
+ * declared non-`currency` field, a formula that declares a non-`currency`
+ * `returnType`, or a `count` roll-up. Undeclared, untyped, a `currency`
+ * field, a formula with no `returnType`, or any other roll-up: no (#35631).
+ */
+function hasPlainUnit(name: string, fields: Readonly<Record<string, FormulaSourceField>>): boolean {
+  const field = Object.prototype.hasOwnProperty.call(fields, name) ? fields[name] : undefined;
+  if (!field || typeof field.type !== 'string') return false;
+  if (field.type === 'currency') return false;
+  if (field.type === 'formula') return typeof field.returnType === 'string' && field.returnType !== 'currency';
+  if (field.type === 'summary') {
+    const ops = field.summaryOperations;
+    return !!ops && typeof ops === 'object' && (ops as { function?: unknown }).function === 'count';
+  }
+  return true;
+}
+
+/** The four spellings of one member read (`relationship-traversal.ts` reads them alike). */
+const MEMBER_READ_OPS: ReadonlySet<string> = new Set(['.', '.?']);
+const INDEX_READ_OPS: ReadonlySet<string> = new Set(['[]', '[?]']);
+
+/** `{ receiver, name }` for `x.name`, `x.?name`, `x['name']`, `x[?'name']`; `null` for a computed key. */
+function memberRead(node: Node): { receiver: unknown; name: string } | null {
+  if (!Array.isArray(node.args) || node.args.length < 2) return null;
+  const [receiver, key] = node.args;
+  if (MEMBER_READ_OPS.has(node.op)) return typeof key === 'string' ? { receiver, name: key } : null;
+  if (isNode(key) && key.op === 'value' && typeof key.args === 'string') return { receiver, name: key.args };
+  return null;
+}
+
+/**
+ * Is every read of the record one segment naming a declared host field whose
+ * unit can be read and is not money ({@link hasPlainUnit})? A hop, a
+ * computed key, a read off anything but `record`, or a bare `record` is not.
+ */
+function readsOnlyPlainFields(node: unknown, fields: Readonly<Record<string, FormulaSourceField>>): boolean {
+  if (Array.isArray(node)) return node.every((n) => readsOnlyPlainFields(n, fields));
+  if (!isNode(node)) return true;
+  if (MEMBER_READ_OPS.has(node.op) || INDEX_READ_OPS.has(node.op)) {
+    const read = memberRead(node);
+    const onRecord = !!read && isNode(read.receiver) && read.receiver.op === 'id' && read.receiver.args === 'record';
+    return onRecord && hasPlainUnit(read!.name, fields);
+  }
+  if (node.op === 'id') return typeof node.args === 'string' && node.args !== 'record' && hasPlainUnit(node.args, fields);
+  return readsOnlyPlainFields(node.args, fields);
+}
+
 function sourceOf(input: ExprInput): string | null {
   const source = typeof input === 'string'
     ? input
@@ -279,10 +354,16 @@ function sourceOf(input: ExprInput): string | null {
  *   `currencyConfig: { currencyMode: 'record', currencyField }` when they are
  *   record-mode amounts naming one code field (ADR-0144 D2). Sources in two
  *   different currencies are not provably one amount, and fall through.
+ * - A numeric expression the unit proof does not prove a plain number, with a
+ *   record read that is not one segment naming a declared field of a
+ *   readable, non-money unit (a `currency` field, a `currency` formula, a
+ *   formula with no `returnType`, a non-`count` roll-up, a reference hop, a
+ *   computed key, an undeclared name) ⇒ `{}`, unproven. `number` is never
+ *   the answer there: a stamp reads it as "proved not money".
  * - Otherwise ⇒ the {@link inferExpressionType} answer as `returnType`
- *   (`number` / `text` / `boolean` / `date`), or `{}` when that is `unknown` —
- *   unchanged from before this function existed, so a numeric formula stays
- *   `number`.
+ *   (`number` / `text` / `boolean` / `date`), or `{}` when that is `unknown`
+ *   (a bare same-currency ratio such as `record.amount / record.tax` types
+ *   `dyn`), so a numeric formula over declared quantities stays `number`.
  *
  * Pure and conservative: it never throws, and an expression that does not
  * type-check is never money.
@@ -300,7 +381,8 @@ export function inferFormulaReturn(
     // ternary outright — so the guard idiom would never be judged at all.
     const celType = inferCelType(rewriteNullableTernary(source), names);
     if (celType !== null && MONEY_CEL_TYPES.has(celType)) {
-      const dim = dimOf(parseCelToAst(source), fields);
+      const ast = parseCelToAst(source);
+      const dim = dimOf(ast, fields);
       if (dim.kind === 'money') {
         if (dim.currency.mode === 'fixed') {
           return { returnType: 'currency', currencyConfig: { currencyMode: 'fixed', defaultCurrency: dim.currency.code } };
@@ -310,6 +392,10 @@ export function inferFormulaReturn(
         }
         return { returnType: 'currency' };
       }
+      // #35631 — `number` means proved not money: unless the unit proof
+      // succeeded, every record read must name a declared field whose unit
+      // can be read and is not money, or the answer is unproven.
+      if (!isPlainNumber(dim) && !readsOnlyPlainFields(ast, fields)) return {};
     }
   }
   const plain = inferExpressionType(input, { fields: names });
