@@ -4309,3 +4309,190 @@ describe('[#37013] a platform-registered skill and a package\'s same-named skill
     expect(await rows()).toEqual([]);
   });
 });
+
+// ---------- [#37013] every seam honours the platform's stamp the one way ----------
+
+describe('[#37013] the platform\'s record beside a package\'s item, from the stored rows and at every seam that stores or serves a body', () => {
+  const NAME = 'data_explorer';
+  const PKG = 'com.acme.crm';
+  const platformSkill = (instructions: string) => ({ name: NAME, label: 'Data explorer', instructions });
+  const packageSkill = (instructions: string) => ({ name: NAME, label: 'CRM explorer', instructions, _packageId: PKG, _provenance: 'package' });
+  const forged = (instructions: string) => ({ ...platformSkill(instructions), _provenance: 'platform' });
+
+  let driver: IDataDriver;
+  const managerOver = (...loaders: MetadataLoader[]) => new MetadataManager({ formats: ['json'], loaders: loaders.length > 0 ? loaders : [new DatabaseLoader({ driver })] });
+  async function booted(): Promise<MetadataManager> {
+    const manager = managerOver();
+    for (const item of await manager.loadMany<Record<string, unknown>>('skill')) {
+      await manager.register('skill', item.name as string, item, { notify: false, skipSourceLoader: true });
+    }
+    return manager;
+  }
+  const rows = async () => ((await driver.find('sys_metadata', { where: { type: 'skill', name: NAME } })) as Array<Record<string, unknown>>)
+    .map((row) => ({ package_id: row.package_id ?? null, body: typeof row.metadata === 'string' ? JSON.parse(row.metadata) : row.metadata }));
+  const instructionsOf = (items: unknown[]) => (items as Array<{ instructions?: string }>).map((item) => item.instructions).sort();
+
+  beforeEach(() => {
+    driver = createMockDriver();
+  });
+
+  it('platform, package, then platform again (its row saved last): a process primed from the rows reads both, a read naming the package answers the package\'s, and the plural read hands on both', async () => {
+    const first = managerOver();
+    await first.register('skill', NAME, platformSkill('platform v1'), { notify: false, origin: 'platform' });
+    await first.register('skill', NAME, packageSkill('package rules'), { notify: false });
+    await first.register('skill', NAME, platformSkill('platform v2'), { notify: false, origin: 'platform' });
+
+    expect(instructionsOf(await managerOver().loadMany('skill')), 'the plural read keeps the platform\'s row beside the holder\'s').toEqual(['package rules', 'platform v2']);
+    const primed = await booted();
+    expect(((await primed.get('skill', NAME, PKG)) as any)?.instructions).toBe('package rules');
+    expect(((await primed.getPlatformItem('skill', NAME)) as any)?.instructions).toBe('platform v2');
+    const listed = (await primed.list('skill')) as any[];
+    expect(listed.map((item) => [item._provenance, item.instructions]).sort()).toEqual([['package', 'package rules'], ['platform', 'platform v2']]);
+    expect((await rows()).map((row) => [row.package_id, row.body.instructions]).sort()).toEqual([[null, 'platform v2'], [PKG, 'package rules']]);
+  });
+
+  it.each([
+    ['the door\'s loader ahead of the rows', true],
+    ['the rows ahead of the door\'s loader', false],
+  ] as const)('a node whose registry holds nothing of the name, %s: list, a read naming the package and the platform read each answer their own', async (_label, doorFirst) => {
+    const first = managerOver();
+    await first.register('skill', NAME, platformSkill('platform v1'), { notify: false, origin: 'platform' });
+    await first.register('skill', NAME, packageSkill('package rules'), { notify: false });
+    const door = new MemoryLoader();
+    await door.save('skill', NAME, packageSkill('package rules'));
+    const db = new DatabaseLoader({ driver });
+    const node = new MetadataManager({ formats: ['json'], loaders: [] });
+    for (const loader of doorFirst ? [door, db] : [db, door]) node.registerLoader(loader);
+
+    expect(instructionsOf(await node.list('skill'))).toEqual(['package rules', 'platform v1']);
+    expect(((await node.get('skill', NAME, PKG)) as any)?.instructions).toBe('package rules');
+    expect(((await node.getPlatformItem('skill', NAME)) as any)?.instructions).toBe('platform v1');
+  });
+
+  it('a read naming the package is not answered from the registry\'s platform slot while a loader stores the package\'s item', async () => {
+    const first = managerOver();
+    await first.register('skill', NAME, packageSkill('package rules'), { notify: false });
+    const node = managerOver();
+    await node.register('skill', NAME, platformSkill('platform v1'), { notify: false, origin: 'platform', skipSourceLoader: true });
+    expect(((await node.get('skill', NAME, PKG)) as any)?.instructions).toBe('package rules');
+    expect(((await node.get('skill', NAME)) as any)?.instructions, 'CONTROL: a read naming no package keeps its rule').toBe('platform v1');
+  });
+
+  it('registerInMemory stores the body without the platform\'s stamp', async () => {
+    const manager = managerOver();
+    manager.registerInMemory('skill', NAME, forged('seeded'));
+    expect(((await manager.get('skill', NAME)) as any)?._provenance).toBeUndefined();
+    expect(await manager.getPlatformItem('skill', NAME)).toBeUndefined();
+  });
+
+  it('save stores the body without the platform\'s stamp', async () => {
+    const manager = managerOver();
+    await manager.save('skill', NAME, forged('saved'));
+    expect((await rows()).map((row) => [row.package_id, row.body._provenance ?? null])).toEqual([[null, null]]);
+    expect(await managerOver().getPlatformItem('skill', NAME)).toBeUndefined();
+  });
+
+  it('a stored row read and given the stamp by its caller is written back without it: the boot exception keeps only the stamp the row held', async () => {
+    const first = managerOver();
+    await first.register('skill', NAME, platformSkill('the environment\'s'), { notify: false });
+    const node = managerOver();
+    const [read] = await node.loadMany<Record<string, unknown>>('skill');
+    read!._provenance = 'platform';
+    await node.register('skill', NAME, read, { notify: false });
+    expect((await rows()).map((row) => row.body._provenance ?? null)).toEqual([null]);
+    expect(await node.getPlatformItem('skill', NAME)).toBeUndefined();
+    expect(await managerOver().getPlatformItem('skill', NAME)).toBeUndefined();
+  });
+
+  it('a file loader\'s body carrying the stamp is served without it, and is never the platform\'s record', async () => {
+    const rootDir = mkdtempSync(join(tmpdir(), 'i37013-'));
+    try {
+      mkdirSync(join(rootDir, 'skill'), { recursive: true });
+      writeFileSync(join(rootDir, 'skill', `${NAME}.json`), JSON.stringify(forged('on disk')));
+      const node = new MetadataManager({ formats: ['json'], loaders: [] });
+      node.registerLoader(new FilesystemLoader(rootDir, new Map([['json', new JSONSerializer()]]) as never));
+      node.registerLoader(new DatabaseLoader({ driver }));
+      expect(await node.getPlatformItem('skill', NAME)).toBeUndefined();
+      expect(((await node.get('skill', NAME)) as any)?.instructions).toBe('on disk');
+      expect(((await node.get('skill', NAME)) as any)?._provenance).toBeUndefined();
+      expect(((await node.list('skill')) as any[]).map((item) => item._provenance ?? null)).toEqual([null]);
+      expect(((await node.loadMany('skill')) as any[]).map((item) => item._provenance ?? null)).toEqual([null]);
+    } finally {
+      rmSync(rootDir, { recursive: true, force: true });
+    }
+  });
+
+  it('an in-memory loader\'s body carrying the stamp is never the platform\'s record', async () => {
+    const door = new MemoryLoader();
+    await door.save('skill', NAME, forged('in memory'));
+    const node = new MetadataManager({ formats: ['json'], loaders: [] });
+    node.registerLoader(door);
+    expect(await node.getPlatformItem('skill', NAME)).toBeUndefined();
+    expect(((await node.get('skill', NAME)) as any)?._provenance).toBeUndefined();
+  });
+
+  it('the platform\'s withdrawal keeps the package\'s item in the in-memory loader (the artifact door\'s copy)', async () => {
+    const door = new MemoryLoader();
+    await door.save('skill', NAME, packageSkill('package rules'));
+    const node = managerOver();
+    await node.register('skill', NAME, platformSkill('platform v1'), { notify: false, origin: 'platform' });
+    await node.register('skill', NAME, packageSkill('package rules'), { notify: false });
+    node.registerLoader(door);
+    await node.unregister('skill', NAME, { notify: false, origin: 'platform' });
+    expect((await door.loadSlots('skill', NAME)).map((slot) => slot.packageId)).toEqual([PKG]);
+    expect(((await node.get('skill', NAME, PKG)) as any)?.instructions).toBe('package rules');
+    expect(await node.getPlatformItem('skill', NAME)).toBeUndefined();
+  });
+
+  it('MemoryLoader.delete with platformOnly takes the platform\'s slot and keeps the package\'s', async () => {
+    const manager = managerOver();
+    await manager.register('skill', NAME, platformSkill('platform v1'), { notify: false, origin: 'platform' });
+    const door = new MemoryLoader();
+    await door.save('skill', NAME, (await manager.getPlatformItem('skill', NAME)) as object);
+    await door.save('skill', NAME, packageSkill('package rules'));
+    expect((await door.loadSlots('skill', NAME)).map((slot) => slot.packageId ?? null).sort()).toEqual([PKG, null].sort());
+    await door.delete('skill', NAME, { platformOnly: true });
+    expect((await door.loadSlots('skill', NAME)).map((slot) => slot.packageId ?? null)).toEqual([PKG]);
+  });
+
+  it('for a type outside the by-package set, the platform\'s withdrawal takes only an item the platform registered', async () => {
+    const VIEW = 'probe_view';
+    const viewRows = async () => ((await driver.find('sys_metadata', { where: { type: 'view', name: VIEW } })) as unknown[]).length;
+    const manager = managerOver();
+    await manager.register('view', VIEW, { name: VIEW, label: 'the environment\'s' }, { notify: false });
+    await manager.unregister('view', VIEW, { notify: false, origin: 'platform' });
+    expect(((await manager.get('view', VIEW)) as any)?.label).toBe('the environment\'s');
+    expect(await viewRows()).toBe(1);
+    // …and a cold node, whose registry holds nothing, leaves the row too.
+    await managerOver().unregister('view', VIEW, { notify: false, origin: 'platform' });
+    expect(await viewRows()).toBe(1);
+
+    // CONTROL: the platform's own record is withdrawn.
+    await manager.register('view', VIEW, { name: VIEW, label: 'the platform\'s' }, { notify: false, origin: 'platform' });
+    await manager.unregister('view', VIEW, { notify: false, origin: 'platform' });
+    expect(await manager.get('view', VIEW)).toBeUndefined();
+    expect(await viewRows()).toBe(0);
+  });
+});
+
+describe('[#37013] a bundled type: the row a package\'s first item would take over is judged by its member', () => {
+  const PKG = 'com.acme.crm';
+  let driver: IDataDriver;
+  const managerOver = () => new MetadataManager({ formats: ['json'], loaders: [new DatabaseLoader({ driver })] });
+  const template = (locale: string, subject: string) => ({ name: 'welcome', locale, subject, bodyHtml: '<p/>' });
+
+  beforeEach(() => {
+    driver = createMockDriver();
+  });
+
+  it('the environment\'s fr-FR stored first, the platform\'s en-US second, then a package\'s first en-US: the platform\'s row stays, and a cold read finds it', async () => {
+    const manager = managerOver();
+    await manager.register('email_template', 'welcome', template('fr-FR', 'env fr'), { notify: false });
+    await manager.register('email_template', 'welcome', template('en-US', 'platform en'), { notify: false, origin: 'platform' });
+    await manager.register('email_template', 'welcome', { ...template('en-US', 'package en'), _packageId: PKG, _provenance: 'package' }, { notify: false });
+    const stored = ((await driver.find('sys_metadata', { where: { type: 'email_template', name: 'welcome' } })) as Array<Record<string, unknown>>)
+      .map((row) => [row.package_id ?? null, JSON.parse(row.metadata as string).subject]);
+    expect(stored).toEqual(expect.arrayContaining([[null, 'platform en'], [PKG, 'package en']]));
+    expect(((await managerOver().getPlatformItem('email_template', 'welcome')) as any)?.subject).toBe('platform en');
+  });
+});

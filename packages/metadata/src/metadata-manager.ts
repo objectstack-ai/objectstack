@@ -739,6 +739,25 @@ export class MetadataManager implements IMetadataService {
   private loaders: Map<string, MetadataLoader> = new Map();
   /** [#31699 R5-A] The loader {@link loadMany} read each item object from ({@link MetadataRegisterOptions}). */
   private readonly loadedFrom = new WeakMap<object, MetadataLoader>();
+
+  /**
+   * [#37013] The bodies {@link loadMany} handed out from a `datasource:` row
+   * that carried the platform's stamp when read — the rows an earlier platform
+   * registration wrote, as `register` persists only there. `register` keeps
+   * the stamp on such a body alone: a body whose caller set the stamp after
+   * the read is not in it, and is stored without the stamp.
+   */
+  private readonly storedPlatformRows = new WeakSet<object>();
+
+  /**
+   * [#37013] A loader's body as the manager serves it: the platform's stamp is
+   * honoured only on a `datasource:` row, where the platform's registration
+   * persists it, and stripped from any other loader's body (a `file:` or
+   * `memory:` body is authored, never the platform's registration).
+   */
+  private servedLoaderBody<T>(loader: MetadataLoader, data: T): T {
+    return loader.contract.protocol === 'datasource:' ? data : withoutPlatformOrigin(data) as T;
+  }
   /**
    * [#32986] The items of every OTHER type (one not stored per
    * `(package, name)`: `object`, `view`, `app`, `hook`, `dashboard` …) that
@@ -1296,11 +1315,11 @@ export class MetadataManager implements IMetadataService {
     type = canonicalMetadataServiceType(type);
     // [#37013] Only the platform's own registration carries the platform's
     // provenance: stamped here when the caller says so, and stripped from
-    // every other write — but a stored row the boot pass re-registers, which
-    // is what an earlier platform registration wrote, is kept as it was read.
-    const readFrom = data !== null && typeof data === 'object' ? this.loadedFrom.get(data) : undefined;
+    // every other write — but a stored row the boot pass re-registers keeps
+    // the stamp its row held when it was read ({@link storedPlatformRows}),
+    // never one its caller set since.
     if (options?.origin === 'platform') data = withPlatformOrigin(data);
-    else if (readFrom?.contract.protocol !== 'datasource:') data = withoutPlatformOrigin(data);
+    else if (!(data !== null && typeof data === 'object' && this.storedPlatformRows.has(data))) data = withoutPlatformOrigin(data);
 
     // Persistence write gate: when `persistence.writable` is explicitly false
     // we treat register() as read-only. Default `true` (or omitted) preserves
@@ -1400,7 +1419,9 @@ export class MetadataManager implements IMetadataService {
     // and this is the boot-time seeding primitive (see
     // assertMetadataRegisterContract's header for the boundary).
     type = canonicalMetadataServiceType(type);
-    this.writeRegistryEntry(type, name, data);
+    // [#37013] The boot seeding primitive registers authored bodies: never
+    // the platform's stamp (only `register(…, { origin: 'platform' })` sets it).
+    this.writeRegistryEntry(type, name, withoutPlatformOrigin(data));
     this.invalidateListCache(type);
   }
 
@@ -1670,11 +1691,11 @@ export class MetadataManager implements IMetadataService {
     for (const loader of this.loaders.values()) {
       try {
         if (typeof loader.loadSlots === 'function') {
-          slots.push(...(await loader.loadSlots(type, name)));
+          for (const slot of await loader.loadSlots(type, name)) slots.push({ ...slot, data: this.servedLoaderBody(loader, slot.data) });
           continue;
         }
         const result = await loader.load(type, name);
-        if (result.data) slots.push({ packageId: indexedItemPackageId(result.data), data: result.data });
+        if (result.data) slots.push({ packageId: indexedItemPackageId(result.data), data: this.servedLoaderBody(loader, result.data) });
       } catch (e) {
         const message = e instanceof Error ? e.message : String(e);
         errors.push(`${loader.contract.name}: ${message}`);
@@ -1913,6 +1934,11 @@ export class MetadataManager implements IMetadataService {
    * ({@link storeSlotKey}).
    *
    * One loader's own slots do not shadow each other.
+   *
+   * [#37013] The platform's record (`isPlatformOrigin`) is neither: it shadows,
+   * and is shadowed by, the platform's record only. A loader's platform row is
+   * listed beside a held package slot of its name, and a held platform slot
+   * never shadows a loader's package item, as the store keeps the two apart.
    */
   private async admitLoaderSlots(loader: MetadataLoader, type: string, items: Map<string, unknown>): Promise<void> {
     const prior = new Set(items.keys());
@@ -1926,9 +1952,10 @@ export class MetadataManager implements IMetadataService {
       const key = storeSlotKey(type, entry.name, entry.packageId ?? indexedItemPackageId(entry.data), entry.data);
       const identity = keyIdentityOf(key);
       const member = memberSuffixOf(key);
+      const heldBare = prior.has(identity + member) ? items.get(identity + member) : undefined;
       const shadowed = items.has(key) || (slotPackageOf(key) === undefined
-        ? heldIdentities.has(identity + member)
-        : prior.has(identity + member) && !packageHeldIdentities.has(identity));
+        ? !isPlatformOrigin(entry.data) && heldIdentities.has(identity + member)
+        : prior.has(identity + member) && !isPlatformOrigin(heldBare) && !packageHeldIdentities.has(identity));
       if (!shadowed) items.set(key, entry.data);
     }
   }
@@ -1948,9 +1975,10 @@ export class MetadataManager implements IMetadataService {
     const entries: Array<{ name: string; data: unknown; packageId?: string }> = [];
     for (const entry of await loader.loadManySlots(type)) {
       if (!entry || typeof entry.name !== 'string' || entry.name === '') continue;
+      const data = this.servedLoaderBody(loader, entry.data);
       entries.push(entry.packageId === undefined
-        ? { name: entry.name, data: entry.data }
-        : { name: entry.name, data: entry.data, packageId: entry.packageId });
+        ? { name: entry.name, data }
+        : { name: entry.name, data, packageId: entry.packageId });
     }
     return entries;
   }
@@ -1967,13 +1995,13 @@ export class MetadataManager implements IMetadataService {
     if (typeof loader.loadManyKeyed === 'function') {
       for (const entry of await loader.loadManyKeyed(type)) {
         if (!entry || typeof entry.name !== 'string' || entry.name === '') continue;
-        entries.push({ name: entry.name, data: entry.data });
+        entries.push({ name: entry.name, data: this.servedLoaderBody(loader, entry.data) });
       }
       return entries;
     }
     for (const item of await loader.loadMany(type)) {
       const itemAny = item as { name?: unknown } | null;
-      if (itemAny && typeof itemAny.name === 'string' && itemAny.name !== '') entries.push({ name: itemAny.name, data: item });
+      if (itemAny && typeof itemAny.name === 'string' && itemAny.name !== '') entries.push({ name: itemAny.name, data: this.servedLoaderBody(loader, item) });
     }
     return entries;
   }
@@ -4029,7 +4057,7 @@ export class MetadataManager implements IMetadataService {
         try {
             const result = await loader.load(type, name, options);
             if (result.data) {
-                return { data: result.data as T, degraded: false, errors };
+                return { data: this.servedLoaderBody(loader, result.data as T), degraded: false, errors };
             }
         } catch (e) {
             const message = e instanceof Error ? e.message : String(e);
@@ -4106,7 +4134,7 @@ export class MetadataManager implements IMetadataService {
                 : PACKAGE_SLOTTED_STORE_TYPES.has(type) && typeof loader.loadManyKeyed === 'function' && typeof loader.loadManySlots === 'function'
                     ? await keyedEntryBodies<T>(loader, type, options)
                     : await loader.loadMany<T>(type, options);
-            for (const item of items) gathered.push({ item, loader });
+            for (const item of items) gathered.push({ item: this.servedLoaderBody(loader, item), loader });
             this.reportLoaderReadRecovered(loader.contract.name);
         } catch (e) {
             // [#5108] Same seam, same verdict as `list()` — see
@@ -4128,6 +4156,8 @@ export class MetadataManager implements IMetadataService {
         results.push(item);
         if (item !== null && typeof item === 'object') {
           this.loadedFrom.set(item, loader);
+          // [#37013] Read here, before any caller changes it: the row's own stamp.
+          if (loader.contract.protocol === 'datasource:' && isPlatformOrigin(item)) this.storedPlatformRows.add(item);
           // [#32986] Read here, before the boot pass stamps it. A type stored
           // per `(package, name)` is not stamped on such a row (#32812).
           if (loader.contract.protocol === 'datasource:' && !PACKAGE_SLOTTED_STORE_TYPES.has(type) && indexedItemPackageId(item) === undefined) {
@@ -4232,13 +4262,13 @@ export class MetadataManager implements IMetadataService {
       try {
         if (typeof loader.loadManyKeyed === 'function') {
           for (const entry of await loader.loadManyKeyed<T>(type, options)) {
-            if (entry && typeof entry.name === 'string' && entry.name !== '') gathered.push(entry);
+            if (entry && typeof entry.name === 'string' && entry.name !== '') gathered.push({ ...entry, data: this.servedLoaderBody(loader, entry.data) });
           }
         } else {
           for (const name of await loader.list(type)) {
             if (typeof name !== 'string' || name === '') continue;
             const result = await loader.load(type, name, options);
-            if (result?.data != null) gathered.push({ name, data: result.data as T });
+            if (result?.data != null) gathered.push({ name, data: this.servedLoaderBody(loader, result.data as T) });
           }
         }
         this.reportLoaderReadRecovered(loader.contract.name);
@@ -4284,7 +4314,7 @@ export class MetadataManager implements IMetadataService {
         if (!entry || typeof entry.name !== 'string' || entry.name === '') continue;
         const key = bundleEntryKey(type, entry.name, entry.data, entry.packageId) ?? entry.name;
         if (items.has(key)) continue;
-        items.set(key, keyedEntryOf(entry));
+        items.set(key, keyedEntryOf({ ...entry, data: this.servedLoaderBody(loader, entry.data) }));
       }
       return;
     }
@@ -4295,7 +4325,7 @@ export class MetadataManager implements IMetadataService {
       if (result?.data == null) continue;
       const key = bundleEntryKey(type, name, result.data) ?? name;
       if (items.has(key)) continue;
-      items.set(key, { name, data: result.data as T });
+      items.set(key, { name, data: this.servedLoaderBody(loader, result.data as T) });
     }
   }
 
@@ -4356,7 +4386,9 @@ export class MetadataManager implements IMetadataService {
       throw new Error(`Loader '${loader.contract?.name}' does not support saving`);
     }
 
-    return loader.save(type, name, data, options);
+    // [#37013] A save is never the platform's registration: stored without
+    // the platform's stamp.
+    return loader.save(type, name, withoutPlatformOrigin(data) as T, options);
   }
 
   /**
@@ -4669,7 +4701,7 @@ export class MetadataManager implements IMetadataService {
             const store = this.registry.get(p.type);
             this.deleteRegistryEntries(p.type, p.event.name, storeRemovalKeys(store, p.type, p.event.name, removal.packageId).keys);
             this.invalidateListCache(p.type);
-          } else if (removal?.platformOnly && p.event.name && PACKAGE_SLOTTED_STORE_TYPES.has(p.type)) {
+          } else if (removal?.platformOnly && p.event.name) {
             // [#37013] The platform's record only, as the origin dropped it.
             this.deleteRegistryEntries(p.type, p.event.name, storePlatformRemovalKeys(this.registry.get(p.type), p.type, p.event.name).keys);
             this.invalidateListCache(p.type);

@@ -849,3 +849,57 @@ describe('[#31698] a removal takes one package\'s slot, on the origin and on eve
         expect(await mgr.get(TYPE, 'unbound')).toBeUndefined();
     });
 });
+
+/**
+ * [#37013] The platform's withdrawal reaches each peer scoped to the
+ * platform's record: the peer drops its registry's platform slot and its
+ * door's platform copy only, and keeps a package's item of the name — one
+ * held in memory alone (`registerInMemory`) included. A removal whose
+ * platform scope is not `true` is dropped, as a malformed package-less one is.
+ */
+describe('MetadataManager — the platform\'s withdrawal on a cluster peer (#37013)', () => {
+    const NAME = 'data_explorer';
+    const PKG = 'com.acme.crm';
+    const packageSkill = { name: NAME, label: 'package', instructions: 'package rules', _packageId: PKG, _provenance: 'package' };
+
+    async function bootPlatformCluster() {
+        const bus = new TestPubSub();
+        const node = async (nodeId: string) => {
+            const mgr = new MetadataManager({ formats: ['json'], loaders: [] });
+            await mgr.register('skill', NAME, { name: NAME, label: 'platform', instructions: 'platform v1' }, { notify: false, origin: 'platform' });
+            const door = new MemoryLoader();
+            await door.save('skill', NAME, packageSkill);
+            mgr.registerInMemory('skill', NAME, packageSkill);
+            mgr.registerLoader(door);
+            mgr.attachClusterPubSub(bus, nodeId);
+            return { mgr, door };
+        };
+        return { bus, a: await node('node-A'), b: await node('node-B') };
+    }
+
+    it('B drops the platform\'s record and keeps the package\'s, in its registry and its door', async () => {
+        const { a, b } = await bootPlatformCluster();
+        await a.mgr.unregister('skill', NAME, { origin: 'platform' });
+        await flush();
+        for (const [which, node] of [['A', a], ['B', b]] as const) {
+            expect(await node.mgr.getPlatformItem('skill', NAME), which).toBeUndefined();
+            expect(((await node.mgr.get('skill', NAME, PKG)) as any)?.instructions, which).toBe('package rules');
+            expect((await node.door.loadSlots('skill', NAME)).map((slot) => slot.packageId), which).toEqual([PKG]);
+        }
+        // The package's item held in B's registry answers from there: no loader copy needed.
+        (b.mgr as unknown as { loaders: Map<string, unknown> }).loaders.clear();
+        expect(((await b.mgr.get('skill', NAME, PKG)) as any)?.instructions).toBe('package rules');
+    });
+
+    it('a removal whose platform scope is not `true` is dropped — B deletes nothing, not by name', async () => {
+        const { bus, b } = await bootPlatformCluster();
+        await bus.publish('metadata.changed', {
+            originNode: 'node-X',
+            type: 'skill',
+            event: { type: 'deleted', metadataType: 'skill', name: NAME, path: '', timestamp: new Date().toISOString() },
+            removal: { platformOnly: 'yes' },
+        });
+        await flush();
+        expect((await b.door.loadSlots('skill', NAME)).map((slot) => slot.packageId)).toEqual([PKG]);
+    });
+});

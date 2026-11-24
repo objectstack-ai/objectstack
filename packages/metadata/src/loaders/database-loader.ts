@@ -2086,8 +2086,13 @@ export class DatabaseLoader implements MetadataLoader {
       if (!bySlot.has(key)) bySlot.set(key, row);
     }
     // [#37013] A package's first row never takes over the platform's row.
-    // Read off the stored body as written: the stamp is no conversion's.
-    const platformRow = (slot: string) => isPlatformOrigin(storedRowBodyOf(bySlot.get(slot)));
+    // Read off the stored body as written: the stamp is no conversion's. For a
+    // type whose slot holds a row per member, the row judged is the written
+    // member's — the one the write would take over — not the slot's first.
+    const writtenMember = storedRowMemberOf(type, data);
+    const platformRow = (slot: string) => isPlatformOrigin(storedRowBodyOf(writtenMember === undefined
+      ? bySlot.get(slot)
+      : rows.find((row) => slotOf(row) === slot && (memberOf(row) ?? null) === writtenMember)));
     const { key, replaces } = storeRowWriteKey(bySlot, type, name, data, platformRow);
     // [#31699 R4-A, #32422; epic ruling 6799056319] A bundled type's slot holds
     // a row per member: the write goes to the row of the member the body
@@ -2419,6 +2424,9 @@ export class DatabaseLoader implements MetadataLoader {
       // Another package's item (or none this row can name): not this removal's.
       return;
     }
+    // [#37013] The platform's withdrawal takes the row only when the
+    // platform's registration wrote it.
+    if (options?.platformOnly === true && !isPlatformOrigin(storedRowBodyOf(existing))) return;
 
     // Delete from the main metadata table using the record's ID
     await this._delete(this.tableName, existing.id as string);

@@ -604,7 +604,9 @@ export function pluralEntryKeys(
     const held = holders.get(name);
     const sole = held?.size === 1 ? [...held][0] : undefined;
     const customizes = sole !== undefined && (identities === undefined || identities.holders.get(identities.of[at]!)?.has(sole) === true);
-    const holder = packageOf[at] ?? (customizes ? sole : undefined);
+    // [#37013] The platform's record is never a holder's customization: it
+    // keeps a key of its own beside the holder's item.
+    const holder = packageOf[at] ?? (customizes && !isPlatformOrigin(entries[at]!.data) ? sole : undefined);
     return JSON.stringify([holder ?? null, name]);
   });
 }
@@ -692,6 +694,12 @@ function holdsSlot(store: ReadonlyMap<string, unknown>, slot: string): boolean {
   return false;
 }
 
+/** [#37013] Whether `slot` (a package-less one) holds the platform's record, on any member. */
+function holdsPlatformSlot(store: ReadonlyMap<string, unknown>, slot: string): boolean {
+  for (const [key, item] of store) if (slotOfKey(key) === slot && isPlatformSlot(key, item)) return true;
+  return false;
+}
+
 /**
  * [#32517] Of `slot`'s members in `store`, the key written last
  * ({@link writtenLast}) — the one item the slot held before a bundle's members
@@ -772,8 +780,10 @@ export function platformSlotsOf(
   loaderStore: ReadonlyMap<string, unknown>,
 ): Set<string> {
   if (!OWNER_KEYED_SLOT_TYPES.has(type)) return new Set();
+  // [#37013] A slot the platform's registration stamped is the platform's
+  // even where a loader stores it (`register` persists it).
   return new Set(storeKeysNamed(registry, type, name)
-    .filter((key) => slotPackageOf(key) === undefined && !loaderStore.has(key)));
+    .filter((key) => slotPackageOf(key) === undefined && (isPlatformOrigin(registry!.get(key)) || !loaderStore.has(key))));
 }
 
 /**
@@ -952,14 +962,17 @@ export function isPlatformSlot(key: string, item: unknown): boolean {
  * name (nothing is refused: the removal names whose item it is).
  * `platformOnly` carries that scope to each loader's delete and each cluster
  * peer. A type outside {@link PACKAGE_SLOTTED_STORE_TYPES} keeps one item per
- * name, and removes it.
+ * name, and the platform's removal takes it only when the platform's
+ * registration wrote it: ⛔ never an item another writer stored under the name.
  */
 export function storePlatformRemovalKeys(
   store: ReadonlyMap<string, unknown> | undefined,
   type: string,
   name: string,
 ): { keys: string[]; platformOnly?: true } {
-  if (!PACKAGE_SLOTTED_STORE_TYPES.has(type)) return { keys: storeKeysNamed(store, type, name) };
+  if (!PACKAGE_SLOTTED_STORE_TYPES.has(type)) {
+    return { keys: storeKeysNamed(store, type, name).filter((key) => isPlatformOrigin(store!.get(key))), platformOnly: true };
+  }
   return { keys: storeKeysNamed(store, type, name).filter((key) => isPlatformSlot(key, store!.get(key))), platformOnly: true };
 }
 
@@ -1318,7 +1331,12 @@ function readIdentity(
   platformKeys?: ReadonlySet<string>,
 ): { key: string } | 'settled' | undefined {
   const holders = packageSlotsOf(store, identity);
-  if (holders.length === 0) return holdsSlot(store, identity) ? { key: identity } : undefined;
+  // [#37013] The platform's record answers no read naming a package: it is
+  // never that package's item, and the package's own item may be stored in a
+  // loader the caller reads next.
+  if (holders.length === 0) {
+    return holdsSlot(store, identity) && !(isPackageCaller(packageId) && holdsPlatformSlot(store, identity)) ? { key: identity } : undefined;
+  }
   if (isPackageCaller(packageId)) {
     return holders.includes(packageId) ? { key: slotKey(packageId, identity) } : 'settled';
   }
