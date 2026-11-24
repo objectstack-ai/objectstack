@@ -114,7 +114,8 @@ async function callTool(bridge: unknown, args: Record<string, unknown>, grantedS
   ) as Promise<{ result?: { content: Array<{ text: string }>; isError?: boolean }; error?: { message: string } }>;
 }
 
-const knowledgeTool = (tools: Array<{ name: string }>) => tools.find((t) => t.name === SEARCH_KNOWLEDGE_TOOL_NAME);
+type ListedTool = Awaited<ReturnType<typeof listTools>>[number];
+const knowledgeTool = (tools: ListedTool[]): ListedTool | undefined => tools.find((t) => t.name === SEARCH_KNOWLEDGE_TOOL_NAME);
 
 describe('[ADR-0149 D2] search_knowledge on MCP — registration', () => {
   it('a bridge carrying both members registers it, read-only, under the definition\'s description and schema', async () => {
