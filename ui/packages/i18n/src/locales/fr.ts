@@ -5724,6 +5724,8 @@ const fr = {
     saveAndContinue: 'Enregistrer et continuer',
     nextStep: 'Enregistré — étape suivante',
     completed: 'Flux « {{flow}} » terminé',
+    alreadySubmitted: 'Votre envoi précédent a abouti. Le flux est passé à cette étape.',
+    noLongerWaiting: 'Cette étape a peut-être déjà été traitée. Fermez cette boîte de dialogue et vérifiez l’enregistrement avant de réessayer.',
   },
   appManagement: {
     title: "Applications",

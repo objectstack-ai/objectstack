@@ -5565,6 +5565,8 @@ const ko = {
     saveAndContinue: '저장 후 계속',
     nextStep: '저장됨 — 다음 단계',
     completed: '플로우 「{{flow}}」이(가) 완료되었습니다',
+    alreadySubmitted: '이전 제출이 완료되었습니다. 플로우가 이 단계로 진행되었습니다.',
+    noLongerWaiting: '이 단계는 이미 처리되었을 수 있습니다. 대화 상자를 닫고 레코드를 확인한 후 다시 시도하세요.',
   },
   appManagement: {
     title: "애플리케이션",
