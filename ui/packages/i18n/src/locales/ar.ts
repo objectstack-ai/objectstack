@@ -40,6 +40,8 @@ const ar = {
     allResults: 'كل النتائج',
     createNew: 'إنشاء جديد',
     createNamed: 'إنشاء «{{name}}»',
+    createdOutsideFilters: 'تم إنشاء السجل، لكنه لا يطابق عوامل تصفية هذا الحقل، لذا لا يمكن اختياره هنا.',
+    createdUnchecked: 'تم إنشاء السجل، لكن تعذّر التحقق من مطابقته لعوامل تصفية هذا الحقل، لذا لم يتم اختياره. ابحث عنه هنا بدلًا من إنشائه مرة أخرى.',
     showingResults: 'عرض {{shown}} من {{total}} نتيجة',
     showAllResults: 'عرض كل النتائج ({{count}})',
     selectedBadge: 'محدد',
@@ -72,8 +74,6 @@ const ar = {
     autofillCurrencyDiffers: 'لم يُملأ {{field}}: المبلغ المختار هو {{amount}} بعملة {{from}}، لكن {{field}} هنا بعملة {{to}}. أدخله بعملة {{to}}.',
     autofillSourceNoCurrency: 'لم يُملأ {{field}}: المبلغ المختار {{amount}} لا يذكر عملة، لكن {{field}} هنا بعملة {{to}}. أدخله بعملة {{to}}.',
     autofillNoCurrency: 'لم يُملأ {{field}}: المبلغ المختار هو {{amount}}، لكن لم تُختر عملة هنا بعد. اختر العملة، ثم أدخل {{field}}.',
-    createdOutsideFilters: 'تم إنشاء السجل، لكنه لا يطابق عوامل تصفية هذا الحقل، لذا لا يمكن اختياره هنا.',
-    createdUnchecked: 'تم إنشاء السجل، لكن تعذّر التحقق من مطابقته لعوامل تصفية هذا الحقل، لذا لم يتم اختياره. ابحث عنه هنا بدلًا من إنشائه مرة أخرى.',
   },
   common: {
     // objectui#13461 — a disclosure toggle's name (the tree-view node toggle).

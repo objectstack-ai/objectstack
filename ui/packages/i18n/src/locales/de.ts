@@ -40,6 +40,8 @@ const de = {
     allResults: 'Alle Ergebnisse',
     createNew: 'Neu erstellen',
     createNamed: '„{{name}}“ erstellen',
+    createdOutsideFilters: 'Der Datensatz wurde erstellt, entspricht aber nicht den Filtern dieses Felds und kann hier daher nicht ausgewählt werden.',
+    createdUnchecked: 'Der Datensatz wurde erstellt, konnte aber nicht gegen die Filter dieses Felds geprüft werden und wurde daher nicht ausgewählt. Suchen Sie ihn hier, statt ihn erneut anzulegen.',
     showingResults: '{{shown}} von {{total}} Ergebnissen',
     showAllResults: 'Alle Ergebnisse anzeigen ({{count}})',
     selectedBadge: 'Ausgewählt',
@@ -65,8 +67,6 @@ const de = {
     autofillCurrencyDiffers: '{{field}} wurde nicht ausgefüllt: Der gewählte Betrag ist {{amount}} in {{from}}, {{field}} ist hier aber in {{to}}. Geben Sie ihn in {{to}} ein.',
     autofillSourceNoCurrency: '{{field}} wurde nicht ausgefüllt: Der gewählte Betrag {{amount}} nennt keine Währung, {{field}} ist hier aber in {{to}}. Geben Sie ihn in {{to}} ein.',
     autofillNoCurrency: '{{field}} wurde nicht ausgefüllt: Der gewählte Betrag ist {{amount}}, hier ist aber noch keine Währung gewählt. Wählen Sie die Währung und geben Sie dann {{field}} ein.',
-    createdOutsideFilters: 'Der Datensatz wurde erstellt, entspricht aber nicht den Filtern dieses Felds und kann hier daher nicht ausgewählt werden.',
-    createdUnchecked: 'Der Datensatz wurde erstellt, konnte aber nicht gegen die Filter dieses Felds geprüft werden und wurde daher nicht ausgewählt. Suchen Sie ihn hier, statt ihn erneut anzulegen.',
   },
   common: {
     // objectui#13461 — a disclosure toggle's name (the tree-view node toggle).

@@ -40,6 +40,8 @@ const pt = {
     allResults: 'Todos os resultados',
     createNew: 'Criar novo',
     createNamed: 'Criar “{{name}}”',
+    createdOutsideFilters: 'O registro foi criado, mas não atende aos filtros deste campo, por isso não pode ser escolhido aqui.',
+    createdUnchecked: 'O registro foi criado, mas não foi possível verificar se ele atende aos filtros deste campo, por isso não foi escolhido. Procure-o aqui em vez de criá-lo novamente.',
     showingResults: 'Mostrando {{shown}} de {{total}} resultados',
     showAllResults: 'Ver todos os resultados ({{count}})',
     selectedBadge: 'Selecionado',
@@ -66,8 +68,6 @@ const pt = {
     autofillCurrencyDiffers: '{{field}} não foi preenchido: o valor escolhido é {{amount}} em {{from}}, mas aqui {{field}} está em {{to}}. Informe-o em {{to}}.',
     autofillSourceNoCurrency: '{{field}} não foi preenchido: o valor escolhido {{amount}} não indica moeda, mas aqui {{field}} está em {{to}}. Informe-o em {{to}}.',
     autofillNoCurrency: '{{field}} não foi preenchido: o valor escolhido é {{amount}}, mas ainda não há moeda escolhida aqui. Escolha a moeda e depois informe {{field}}.',
-    createdOutsideFilters: 'O registro foi criado, mas não atende aos filtros deste campo, por isso não pode ser escolhido aqui.',
-    createdUnchecked: 'O registro foi criado, mas não foi possível verificar se ele atende aos filtros deste campo, por isso não foi escolhido. Procure-o aqui em vez de criá-lo novamente.',
   },
   common: {
     // objectui#13461 — a disclosure toggle's name (the tree-view node toggle).
