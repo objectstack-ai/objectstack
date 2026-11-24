@@ -21,7 +21,9 @@ The Knowledge Protocol contract and the `service-knowledge` orchestrator are ope
 framework mechanisms. The AI **consumer** that wires the `search_knowledge` tool
 into an in-product chat loop (shown below) ships in
 **ObjectOS**. On the open-source framework, reach your data through `@objectstack/mcp`
-(BYO-AI) instead.
+(BYO-AI) instead: its door serves the same `search_knowledge` tool wherever the
+knowledge service is installed, searching only the sources whose `aiExposed` is
+not `false`, as the caller.
 </Callout>
 
 This document describes the **why**, the **contract**, the **plugin

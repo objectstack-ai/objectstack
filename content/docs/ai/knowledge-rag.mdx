@@ -68,7 +68,9 @@ endpoints, and `aiService.chatWithTools` — is provided by the **ObjectOS**
 in-product runtime. The
 open-source framework has no built-in in-product chat, but everything else here — the Knowledge
 Protocol, adapters, embedder, and `KnowledgeService.search` — is open, so you can call
-`search` directly from your own code, agent, or MCP tool.
+`search` directly from your own code or agent. An MCP client gets it as the
+`search_knowledge` tool, which the MCP door serves wherever the knowledge service is
+installed ([Connect an MCP Client](/docs/ai/connect-mcp)).
 </Callout>
 
 ## What you get for free
