@@ -1166,6 +1166,8 @@ const en = {
       notConfirmedRecords: 'The action did not report on these records. Check their current values:',
       resultRefused: ' \u00b7 Refused {{count}}',
       refusedRecords: 'The action refused these records:',
+      resultPaused: ' \u00b7 Waiting for input {{count}}',
+      pausedRecords: 'These records are waiting for input. Their screens open one after another:',
       aggregateUnreadable: 'The action finished, but its result could not be read, so it is not known which records were changed. The list shows their current values when you close this.',
       retry: 'Retry',
       downloadErrorCsv: 'Download error CSV',

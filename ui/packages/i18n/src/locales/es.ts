@@ -654,6 +654,8 @@ const es = {
       notConfirmedRecords: "La acción no informó sobre estos registros. Compruebe sus valores actuales:",
       resultRefused: " · Rechazados {{count}}",
       refusedRecords: "La acción rechazó estos registros:",
+      resultPaused: " · Esperando datos {{count}}",
+      pausedRecords: "Estos registros esperan datos. Sus pantallas se abren una tras otra:",
       aggregateUnreadable: "La acción terminó, pero no se pudo leer su resultado, así que no se sabe qué registros se modificaron. Al cerrar, la lista muestra sus valores actuales.",
       retry: "Reintentar",
       downloadErrorCsv: "Descargar CSV de errores",

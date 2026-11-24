@@ -2,6 +2,7 @@
 '@object-ui/types': patch
 '@object-ui/plugin-grid': patch
 '@object-ui/app-shell': patch
+'@object-ui/i18n': patch
 ---
 
 fix(console): a per-record bulk flow action counts a record whose run paused at a screen as waiting for input, and every paused record's screen opens in turn

@@ -636,6 +636,8 @@ const ko = {
       notConfirmedRecords: "작업이 이 레코드에 대해 결과를 보고하지 않았습니다. 현재 값을 확인하세요:",
       resultRefused: " · 거부됨 {{count}}",
       refusedRecords: "작업이 이 레코드를 거부했습니다:",
+      resultPaused: " · 입력 대기 {{count}}",
+      pausedRecords: "이 레코드는 입력을 기다리고 있습니다. 화면이 차례로 열립니다:",
       aggregateUnreadable: "작업은 끝났지만 결과를 읽을 수 없어 어떤 레코드가 변경되었는지 알 수 없습니다. 닫으면 목록에 현재 값이 표시됩니다.",
       retry: "다시 시도",
       downloadErrorCsv: "오류 CSV 다운로드",
