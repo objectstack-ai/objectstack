@@ -89,7 +89,7 @@ describe('search_knowledge — the definition', () => {
       type: 'object',
       required: ['query'],
       additionalProperties: false,
-      properties: { topK: { maximum: SEARCH_KNOWLEDGE_MAX_TOP_K } },
+      properties: { topK: { maximum: SEARCH_KNOWLEDGE_MAX_TOP_K }, sourceIds: { minItems: 1 } },
     });
     // The service hands over this same definition.
     expect(new KnowledgeService().knowledgeTools().definitions).toBe(getKnowledgeToolDefinitions());
@@ -183,6 +183,9 @@ describe('search_knowledge — malformed arguments', () => {
     [{ query: 'q', topK: 0 }, 'topK'],
     [{ query: 'q', topK: SEARCH_KNOWLEDGE_MAX_TOP_K + 1 }, 'topK'],
     [{ query: 'q', sourceIds: 'policy_clauses' }, 'sourceIds'],
+    // An empty list names no source: refused, never read as "search nothing"
+    // (which would answer no passage, i.e. "nothing matched").
+    [{ query: 'q', sourceIds: [] }, 'sourceIds'],
     [{ query: 'q', sources: ['policy_clauses'] }, 'sources'],
   ])('refuses %j with VALIDATION_ERROR naming %s, and searches nothing', async (input, named) => {
     const { service, adapter } = setup();

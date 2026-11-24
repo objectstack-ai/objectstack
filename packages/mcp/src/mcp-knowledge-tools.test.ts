@@ -31,7 +31,7 @@ const DEFINITION = {
     type: 'object',
     properties: {
       query: { type: 'string', minLength: 1 },
-      sourceIds: { type: 'array', items: { type: 'string' } },
+      sourceIds: { type: 'array', items: { type: 'string' }, minItems: 1 },
       topK: { type: 'integer', minimum: 1, maximum: 20 },
     },
     required: ['query'],
@@ -163,6 +163,15 @@ describe('[ADR-0149 D2] search_knowledge on MCP — calls', () => {
   it('refuses an undeclared argument before the bridge is asked', async () => {
     const bridge = makeBridge();
     const json = await callTool(bridge, { query: 'refund', sources: ['policy_clauses'] });
+    expect(Boolean(json.error) || json.result?.isError === true).toBe(true);
+    expect(bridge.calls).toEqual([]);
+  });
+
+  it('an empty sourceIds is refused before the bridge is asked, as the definition declares minItems: 1', async () => {
+    const bridge = makeBridge();
+    const tool = knowledgeTool(await listTools(bridge));
+    expect(tool!.inputSchema.properties.sourceIds.minItems).toBe(1);
+    const json = await callTool(bridge, { query: 'refund', sourceIds: [] });
     expect(Boolean(json.error) || json.result?.isError === true).toBe(true);
     expect(bridge.calls).toEqual([]);
   });

@@ -124,7 +124,8 @@ const SEARCH_KNOWLEDGE_PARAMETERS: Record<string, unknown> = Object.freeze({
     sourceIds: {
       type: 'array',
       items: { type: 'string', minLength: 1 },
-      description: 'Only these sources, by the ids an answer lists in `sources`; omit to search every source',
+      minItems: 1,
+      description: 'Only these sources (at least one), by the ids an answer lists in `sources`; omit to search every source',
     },
     topK: {
       type: 'integer',
@@ -188,6 +189,16 @@ function parseInput(input: unknown): SearchKnowledgeInput {
   if (record.sourceIds !== undefined) {
     if (!Array.isArray(record.sourceIds) || record.sourceIds.some((id) => typeof id !== 'string' || id.trim() === '')) {
       throw refusal('VALIDATION_ERROR', 400, '`sourceIds` is a list of source ids, as an answer lists them in `sources`.');
+    }
+    // An empty list names no source. Refused rather than read as "every
+    // source" or as "none": searching nothing would answer no passage, which
+    // this tool's description tells the model to report as "nothing matched".
+    if (record.sourceIds.length === 0) {
+      throw refusal(
+        'VALIDATION_ERROR',
+        400,
+        '`sourceIds` names no source: omit it to search every source, or name at least one id an answer lists in `sources`.',
+      );
     }
     parsed.sourceIds = [...new Set((record.sourceIds as string[]).map((id) => id.trim()))];
   }
