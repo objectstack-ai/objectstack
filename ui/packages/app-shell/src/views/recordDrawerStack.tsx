@@ -62,9 +62,11 @@ import {
   RecordHeaderBarContext,
   type RecordHeaderBar,
   ObjectIconTile,
+  RecordTopBarButton,
   Skeleton,
 } from '@object-ui/components';
 import type { FieldContainerLike } from '@object-ui/core';
+import { useChatDockControl } from '../layout/chatDockControl.js';
 import { useObjectLabel, useObjectTranslation } from '@object-ui/i18n';
 import { servedObjectLabel, servedObjectPluralLabel } from '../hooks/servedObjectLabel.js';
 import { prefetchRelatedCounts, relatedCountTargetsIn } from '@object-ui/plugin-detail/core';
