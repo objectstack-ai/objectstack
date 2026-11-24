@@ -93,6 +93,7 @@ import { STUDIO_NEW_PACKAGE_PATH } from '../../views/studio-design/studioNewPack
 import { useOpenAssistant } from '../../layout/chatDockControl.js';
 import { isProductApp } from '../../utils/homePath.js';
 import { useAddAppEntries, useMayAddApp } from '../../hooks/useAddAppEntries.js';
+import { studioLandingPath } from '../../views/studio-design/studioAddress.js';
 import { catalogServesBuild } from '../../hooks/surfaceAgent.js';
 
 /**
@@ -976,7 +977,7 @@ export function HomePage({ checklist }: HomePageProps = {}) {
                       icon={Hammer}
                       label={t('home.build.title', { defaultValue: 'Build an app' })}
                       tone="soft"
-                      onClick={() => navigate('/studio')}
+                      onClick={() => navigate(studioLandingPath())}
                       disabledReason={!canAuthorMetadata ? authoringGateReason : undefined}
                       reasonId={authoringReasonId}
                       testId="home-build-app"

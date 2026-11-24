@@ -15,6 +15,8 @@
  *   framework-owned, app-independent page for this user (see below).
  */
 
+import { studioHomePath, studioItemPath, studioMetadataItemAddress } from '../views/studio-design/studioAddress.js';
+
 /**
  * The minimal app shape THESE ROUTE HELPERS read.
  *
@@ -260,7 +262,7 @@ export function appStudioDesignPath(
   if (!isWorkspaceAdmin) return null;
   const packageId = studioPackageId(app);
   if (!packageId) return null;
-  return `/studio/${encodeURIComponent(packageId)}/data`;
+  return studioHomePath(packageId);
 }
 
 /**
@@ -284,7 +286,9 @@ export function appStudioSurfacePath(
   const type = surface?.type;
   const name = surface?.name;
   if (!type || !name) return null;
-  return `/studio/${encodeURIComponent(packageId)}/metadata/${encodeURIComponent(type)}/${encodeURIComponent(name)}`;
+  // The area's item page for every type, explicitly: not `studioItemPath`,
+  // which sends a pillar type to its pillar.
+  return studioMetadataItemAddress(packageId, type, name);
 }
 
 /**
@@ -308,8 +312,9 @@ export function appStudioObjectPath(
   const packageId = studioPackageId(app);
   if (!packageId) return null;
   if (!objectName) return null;
-  const value = `object:${encodeURIComponent(objectName)}`;
-  return `/studio/${encodeURIComponent(packageId)}/data?surface=${value}`;
+  // The `'name'` spelling (`object:` as written, the name encoded), as this
+  // bridge has always spelled it.
+  return studioItemPath(packageId, 'object', objectName, { spelling: 'name' });
 }
 
 /**
