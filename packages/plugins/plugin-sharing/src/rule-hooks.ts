@@ -176,8 +176,44 @@ export function bindRuleHooks(
     if (!r.object_name) continue;
     objects.add(r.object_name);
   }
+  bindRuleHooksForObjects(engine, service, objects, logger);
+}
 
+/**
+ * Unbind the rule-hook package and bind it again on
+ * {@link SharingRuleService.listRuleHookObjects} — the ONE way the plugin binds
+ * the per-record rule hooks, at boot and on every `sys_sharing_rule` rebind, so
+ * the two can never derive different object sets.
+ *
+ * The object set is read from the rules' DECLARATIONS and rows, never from the
+ * organizations a declared rule is served in right now: the binding is per
+ * object and organization-agnostic, and the organization is resolved when a
+ * record is evaluated. An organization created after the bind is therefore
+ * served by the hooks already bound, with no rebind and no restart.
+ *
+ * The read runs before the unbind, so a failed read leaves the previous
+ * bindings in place.
+ */
+export async function rebindRuleHooks(
+  engine: MinimalEngine,
+  service: SharingRuleService,
+  logger?: MinimalLogger,
+): Promise<void> {
+  const objects = await service.listRuleHookObjects();
+  unbindAllRuleHooks(engine);
+  bindRuleHooksForObjects(engine, service, objects, logger);
+}
+
+/** {@link bindRuleHooks}'s body, over an object set already derived. */
+export function bindRuleHooksForObjects(
+  engine: MinimalEngine,
+  service: SharingRuleService,
+  objects: Iterable<string>,
+  logger?: MinimalLogger,
+): void {
+  const bound: string[] = [];
   for (const objectName of objects) {
+    bound.push(objectName);
     const opts = { object: objectName, packageId: SHARING_RULE_HOOK_PACKAGE, priority: 180 };
 
     /** Recompute one record; never throws (a hook must not fail the write). */
@@ -310,7 +346,7 @@ export function bindRuleHooks(
       }
     }, opts);
   }
-  logger?.info?.('[sharing-rule] hooks bound', { objects: Array.from(objects), ruleCount: rules.length });
+  logger?.info?.('[sharing-rule] hooks bound', { objects: bound });
 }
 
 export function unbindAllRuleHooks(engine: MinimalEngine): number {

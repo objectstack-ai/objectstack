@@ -1164,6 +1164,35 @@ export class SharingRuleService implements ISharingRuleService {
   }
 
   /**
+   * The objects the per-record rule hooks bind on (`bindRuleHooksForObjects`,
+   * `rule-hooks.ts`): every object an active `sys_sharing_rule` row names, and
+   * every object an active DECLARATION names — whatever scopes it is served in
+   * at this moment, and whatever the activation ledger says of it.
+   *
+   * A declared rule is deployment-wide by nature (ADR-0131 D2); only its
+   * SERVING follows the wall, one projection per organization that exists. A
+   * hook set derived from the served projections is a snapshot of the
+   * organizations at binding time: a kernel that booted with no organization
+   * bound nothing on a declared rule's object, and an organization created
+   * later ({@link addDeclaredRuleScope}) was served the rule with no hook to
+   * evaluate it, until the next boot. So the binding reads the declaration, and
+   * the organization is resolved where a record is evaluated
+   * ({@link evaluateAllForRecord} lists the projections live, each sweeping
+   * inside its own organization). A hook on an object no projection serves yet
+   * evaluates no rule and grants nothing.
+   */
+  async listRuleHookObjects(): Promise<string[]> {
+    const objects = new Set<string>();
+    for (const rule of await this.listRules({ activeOnly: true }, SYSTEM_CTX)) {
+      if (rule.object_name) objects.add(rule.object_name);
+    }
+    for (const rule of this.declaredSource ? await this.declaredSource.list() : []) {
+      if (rule.active && rule.object) objects.add(rule.object);
+    }
+    return [...objects].sort();
+  }
+
+  /**
    * [ADR-0131 D6 regime C] Reconcile a declared rule's name-keyed grants with
    * its activation-ledger row, in the request that wrote the row
    * ({@link bindSharingRuleActivationReconcile}) — not at the next boot's
