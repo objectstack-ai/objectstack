@@ -243,6 +243,7 @@ export const deGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "objects.sys_sso_provider.fields.id.label": "00b0385c9c152888",
   "objects.sys_sso_provider.fields.sign_out_of_idp.help": "ab8ff5fce3001c81",
   "objects.sys_sso_provider.fields.sign_out_of_idp.label": "212587b8191bb91b",
+  "objects.sys_task.fields.status.label": "64a420165247654b",
   "objects.sys_team.fields.name.label": "5274417ff1ccaf01",
   "objects.sys_team.label": "42b87165ac826b2b",
   "objects.sys_team.pluralLabel": "3fe8519872f65108",
