@@ -2720,7 +2720,7 @@
       "title": "Flows outside any package have their own Studio scope: /studio/~org offers only the Automations pillar, lists only package-less flows, opens them editable, saves drafts bound to no package and publishes each by reference",
       "since": "v18",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -2734,7 +2734,7 @@
         ]
       },
       "steps": [
-        "with no package-less flow yet, open /_console/studio: the landing draws no 'Flows in no app' entry (it is drawn only when there is at least one such flow, with the count); open /_console/studio/~org/automations directly: it offers one pillar only, no Create app, and an empty state that names the way to change a packaged flow ('No flows outside a package. To change a packaged flow, open its package and use New similar.', engine.studio.org.none) with no action and no link out of Studio (StudioDesignSurface.tsx, the auto-empty state: since ADR-0146 D11 no Setup page copies into this scope)",
+        "with no package-less flow yet, open /_console/studio/~org/automations directly (the Studio left menu carries its entry under Automations since #36899; the Studio home that drew a 'Flows in no app' card was removed by #36908): it offers one pillar only, no Create app, and an empty state that names the way to change a packaged flow ('No flows outside a package. To change a packaged flow, open its package and use New similar.', engine.studio.org.none) with no action and no link out of Studio (StudioDesignSurface.tsx, the auto-empty state: since ADR-0146 D11 no Setup page copies into this scope)",
         "write the package-less flow (fixtures.requires[1]); reload: the rail lists qa_org_raw and none of the showcase's packaged flows; GET /api/v1/meta/flow?package=com.example.showcase omits it, the unscoped list includes it",
         "open it: the canvas and the Enabled switch are editable; change a node label; let the autosave land; read GET /api/v1/meta/_drafts?type=flow — the draft row carries no package",
         "Publish → the review sheet lists only package-less flow drafts → Publish all; capture the network trace",
@@ -2770,7 +2770,7 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.packageLessFlows-11553.test.tsx (lists the clone only, opens it editable, one pillar, publishes by reference and nothing through the batch door) + BuilderLanding.orgScope-11553.test.tsx: jsdom evidence for all three clauses at the component layer; the live server reads stay the run's"
+        "ref": "ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.packageLessFlows-11553.test.tsx (lists the clone only, opens it editable, one pillar, publishes by reference and nothing through the batch door): jsdom evidence for all three clauses at the component layer; the live server reads stay the run's"
       },
       "source": [
         "ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx (readOnly is false for the package-less scope, objectui#11553; doPublish promotes package-less flow drafts one by one through publishDraft)",
@@ -2792,7 +2792,8 @@
           "ref": "#28345"
         },
         { "revision": 3, "date": "2026-11-03", "change": "fixtures.requires[1] names a fixture that still makes a package-less flow, and steps[0], steps[1], steps[4], acceptance[0].verify and source[1] follow it. Since #28149 (ADR-0146 D4) the clone door lands its copy in the source's pair <base>.custom, so QA run #29672's clone of showcase_urgent_task_alert answered packageId com.example.showcase.custom and made no package-less flow; the run substituted PUT /api/v1/meta/flow/qa_org_raw naming no package (200) and passed every clause on it. Read at base 339f63da30: ADR-0146 D11 closes a package-less write only onto an item a code package ships (packagelessOverlayWriteRefusal), so a fresh name stays writable, and a PUT with no ?mode= is an active save (meta-save-request.ts). The same run found steps[0]'s empty state stale: it now reads engine.studio.org.none with no Open in Setup link (StudioDesignSurface.tsx). The clauses are unchanged. Card #29679, from QA run #29672", "ref": "#29679" },
-        { "revision": 4, "date": "2026-11-17", "change": "steps[0] no longer opens a landing entry when there is no package-less flow: since #34715 the Studio landing draws its 'Flows in no app' entry (formerly 'Organization flows') only when at least one such flow exists, with the count, so the step reads the entry's absence and opens the scope by its URL. The clauses are unchanged. Card #34715", "ref": "#34715" }
+        { "revision": 4, "date": "2026-11-17", "change": "steps[0] no longer opens a landing entry when there is no package-less flow: since #34715 the Studio landing draws its 'Flows in no app' entry (formerly 'Organization flows') only when at least one such flow exists, with the count, so the step reads the entry's absence and opens the scope by its URL. The clauses are unchanged. Card #34715", "ref": "#34715" },
+        { "revision": 5, "date": "2026-11-24", "change": "steps[0] opens the scope by its URL alone and names its menu entry: the Studio home, whose 'Flows in no app' card it read, was removed (#36908), and the left menu carries the entry since #36899. automated.ref drops the deleted home pin. The clauses are unchanged. Card #36908", "ref": "#36908" }
       ]
     },
     {
@@ -5096,10 +5097,10 @@
     },
     {
       "id": "studio-authoring.package-customization-counts-and-marks",
-      "title": "The Studio landing says 'n customized, m switched off' for each read-only base, and the All metadata lists mark the pair's items 'Customized' or 'Added' with an 'only customizations' filter — every number read from GET /packages/:id/customizations",
+      "title": "Setup → Packages says 'n customized, m switched off' in each read-only base's detail, and the All metadata lists mark the pair's items 'Customized' or 'Added' with an 'only customizations' filter — every number read from GET /packages/:id/customizations",
       "since": "v18",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -5118,17 +5119,17 @@
       },
       "steps": [
         "GET /api/v1/packages/com.example.showcase/customizations and record counts.overrides, counts.extensions and counts.switchedOff and the listed items",
-        "open /_console/studio and read the read-only showcase card's line (data-testid studio-landing-customizations, data-state read), its pair link (studio-landing-customizations-pair) and its switched-off link (studio-landing-customizations-switched-off)",
+        "open /_console/apps/setup/component/developer/packages?face=admin, open the showcase row's detail and read its customizations section (data-testid pkg-detail-customizations-summary, data-state read), its rows (pkg-detail-customization, data-mode changed / added / arranged / switchedOff) and its Customize in Studio link (pkg-detail-customize)",
         "open /_console/studio/com.example.showcase/metadata: read the directory total (directory-customizations-total) and the per-type tile counts",
         "open the dashboard list of that area: read the mark on the overridden dashboard and on the pair's added item (customization-mark), then switch on the 'only customizations' filter (metadata-only-customizations) and read what remains",
-        "control: open the landing and a writable package's All metadata area with the network panel recording — the landing asks for no writable card, and the area's read of the writable package draws no line, no mark and no filter; and GET /api/v1/packages/com.example.showcase.custom/customizations"
+        "control: open an authored (writable) package's detail on the same page and a writable package's All metadata area with the network panel recording — the detail draws no customizations section and asks nothing, and the area's read of the writable package draws no line, no mark and no filter; and GET /api/v1/packages/com.example.showcase.custom/customizations"
       ],
       "acceptance": [
         {
-          "clause": "the landing line reads 'n customized, m switched off' where n = counts.overrides + counts.extensions and m = counts.switchedOff of the served read — no number of the console's own",
+          "clause": "the detail's line reads 'n customized, m switched off' where n = counts.overrides + counts.extensions + counts.arrangements (#36833: an arrangement is a customization) and m = counts.switchedOff of the served read — no number of the console's own",
           "oracle": "dom",
           "verify": "after a screenshot confirms the card rendered, the line's numbers equal step 1's served counts (fetchPackageCustomizations computes none); the pair link's href names com.example.showcase.custom, and following it lands on the base's Studio (/_console/studio/com.example.showcase/data: Studio redirects a pair URL to its base, customizationPairBaseOf, ADR-0146 D3), whatever its title 'Open the customization package … in Studio' says; the switched-off link opens the Automations pillar",
-          "evidence": "the served read + the landing DOM read"
+          "evidence": "the served read + the detail DOM read"
         },
         {
           "clause": "the All metadata area marks the pair's items — an override 'Customized', an item the pair adds 'Added' — and the 'only customizations' filter leaves exactly those; the directory's total and tiles match the served read",
@@ -5137,9 +5138,9 @@
           "evidence": "the directory and list DOM reads beside step 1"
         },
         {
-          "clause": "a failed read draws no number and no mark — never a '0' — the landing asks for read-only bases only, a package with nothing customized draws nothing, and a pair id is never asked",
+          "clause": "a failed read draws no number and no mark — never a '0' — the detail asks for read-only bases only, a package with nothing customized draws nothing, and a pair id is never asked",
           "oracle": "network",
-          "verify": "step 5: the landing sends no customizations request for a writable card; the All metadata area of a writable package reads its customizations (usePackageCustomizations asks every package but a pair; metadataAreaHost.customizations-28568 pins that read for a package with no pair) and, the counts being zero, draws no total, no mark and no filter; the pair id answers 400 VALIDATION_ERROR naming its base (the console refuses it before sending). A failed read shows the muted couldn't-read line with the server's sentence, never a count — not staged live: BuilderLanding.customizationCounts-28566 and metadataAreaHost.customizations-28568 pin it",
+          "verify": "step 5: the detail sends no customizations request for a writable package; the All metadata area of a writable package reads its customizations (usePackageCustomizations asks every package but a pair; metadataAreaHost.customizations-28568 pins that read for a package with no pair) and, the counts being zero, draws no total, no mark and no filter; the pair id answers 400 VALIDATION_ERROR naming its base (the console refuses it before sending). A failed read shows the muted couldn't-read line with the server's sentence, never a count — not staged live: BuilderLanding.customizationCounts-28566 and metadataAreaHost.customizations-28568 pin it",
           "evidence": "the network trace + the pair-id refusal body"
         }
       ],
@@ -5153,10 +5154,10 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "ui/packages/app-shell/src/views/studio-design/BuilderLanding.customizationCounts-28566.test.tsx + customizationMarks.test.ts + ui/packages/app-shell/src/views/metadata-admin/metadataAreaHost.customizations-28568.test.tsx (jsdom against a mocked read: acceptance[0]–[2]'s console half) + packages/runtime/src/domains/packages-customizations.test.ts (the route's three lists and counts, and the AGREEMENT that every listed override is the layered read's overlay). No pin reads a live deployment, and the live spec of #28579 slice 3 (ui/e2e/live/studio-customize-journey.spec.ts) does not read the counts or the marks, so every browser and api clause is the run's live leg"
+        "ref": "ui/packages/app-shell/src/views/studio-design/PackageCustomizationsPanel.test.tsx + customizationMarks.test.ts + ui/packages/app-shell/src/views/metadata-admin/metadataAreaHost.customizations-28568.test.tsx (jsdom against a mocked read: acceptance[0]–[2]'s console half) + packages/runtime/src/domains/packages-customizations.test.ts (the route's three lists and counts, and the AGREEMENT that every listed override is the layered read's overlay). No pin reads a live deployment, and the live spec of #28579 slice 3 (ui/e2e/live/studio-customize-journey.spec.ts) does not read the counts or the marks, so every browser and api clause is the run's live leg"
       },
       "source": [
-        "ui/packages/app-shell/src/views/studio-design/packageCustomizations-io.ts#fetchPackageCustomizations (GET /api/v1/packages/:id/customizations, judged by GetPackageCustomizationsResponseSchema; a pair id refused before a request) + ui/packages/app-shell/src/views/studio-design/BuilderLanding.tsx#BuilderLanding (the card's line)",
+        "ui/packages/app-shell/src/views/studio-design/packageCustomizations-io.ts#fetchPackageCustomizations (GET /api/v1/packages/:id/customizations, judged by GetPackageCustomizationsResponseSchema; a pair id refused before a request) + ui/packages/app-shell/src/views/studio-design/PackageCustomizationsPanel.tsx#PackageCustomizationsPanel (the detail's line and rows)",
         "ui/packages/app-shell/src/views/studio-design/customizationMarks.ts#customizationMarkOf + ui/packages/app-shell/src/views/studio-design/CustomizationMark.tsx#CustomizationMark + ui/packages/app-shell/src/views/metadata-admin/ResourceListPage.tsx (the only-customizations filter) + ui/packages/app-shell/src/views/metadata-admin/DirectoryPage.tsx (the total and the tile counts)",
         "docs/adr/0146-studio-designs-setup-administers-one-editor-per-item-paired-customize-package.md D3 (one line per package on the landing) and D8 item 4 (the per-package customization read)",
         "#28566 (N-24) landed by PR #28634; #28568 (N-26b) by PR #28667; the read #28411 (N-15)"
@@ -5179,6 +5180,12 @@
           "date": "2026-11-04",
           "change": "acceptance[0].verify and fixtures.requires[2] corrected from QA run #29893 (W5-STUDIO, at 589049b0): the pair link's href names the pair, but Studio redirects a pair URL to its base (customizationPairBaseOf), and the pair-added fixture item may be written by API. Read at base f68b47ca",
           "ref": "#29906"
+        },
+        {
+          "revision": 4,
+          "date": "2026-11-24",
+          "change": "the line moved from the removed Studio home to the read-only base's detail in Setup → Packages (#36908): title, steps[1], steps[4], acceptance[0] and [2], automated.ref and source re-pointed; acceptance[0] now counts counts.arrangements in n (#36833, closed into #36908). The All metadata half is unchanged",
+          "ref": "#36908"
         }
       ]
     },

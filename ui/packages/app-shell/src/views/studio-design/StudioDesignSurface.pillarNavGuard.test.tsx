@@ -201,7 +201,7 @@ async function renderSurfaceOnAccess() {
         <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
         {/* objectstack#36899 — a menu type entry opens that type's area list. */}
         <Route path="/studio/:packageId/metadata/*" element={<div data-testid="area-landed" />} />
-        <Route path="/studio" element={<div data-testid="studio-landing-page" />} />
+        <Route path="/studio" element={<div data-testid="studio-entry" />} />
         <Route path="*" element={<div data-testid="left-studio" />} />
       </Routes>
       <SearchProbe />

@@ -201,6 +201,24 @@ async function serve({
       if (/^\/api\/v1\/packages\/[^/]+$/.test(path) && method === 'DELETE') {
         return reply(200, { success: true, data: {} });
       }
+      // objectstack#36908 — a read-only base's detail reads what this
+      // deployment changed on it: one tab arrangement, for every base.
+      const customized = /^\/api\/v1\/packages\/([^/]+)\/customizations$/.exec(path);
+      if (customized) {
+        const arrangements = [{ object: 'acme_task', key: 'relatedLists' }];
+        return reply(200, {
+          success: true,
+          data: {
+            packageId: decodeURIComponent(customized[1]),
+            overrides: [],
+            extensions: [],
+            arrangements,
+            switchedOff: [],
+            contributions: [],
+            counts: { overrides: 0, extensions: 0, arrangements: 1, switchedOff: 0, contributions: 0 },
+          },
+        });
+      }
       if (path === '/api/v1/cloud-connection/installed') return reply(404, {});
       if (path === '/api/v1/marketplace/install-local' && method === 'GET') {
         return reply(200, { success: true, data: { items: installs } });
@@ -769,5 +787,43 @@ describe('Setup → Packages: the new-package deep link (objectstack#36908)', ()
     await screen.findByTestId('pkg-row-com.acme.code');
     await waitFor(() => expect(query().has('new')).toBe(false));
     expect(screen.queryByTestId('stub-create-save')).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// objectstack#36908 — the removed Studio home's "n customized, m switched off"
+// and its "Customizations in this environment" panel are drawn in a read-only
+// base's detail on this face (`PackageCustomizationsPanel.test.tsx` pins
+// the panel itself).
+// ---------------------------------------------------------------------------
+
+describe('Setup → Packages: a read-only base’s customizations in its detail (objectstack#36908)', () => {
+  it('a code package’s detail draws what this deployment changed on it, arrangements counted (objectstack#36833)', async () => {
+    await serve({ packages: [CODE] });
+    renderAt(ADMIN_URL);
+    fireEvent.click(await screen.findByTestId('pkg-row-com.acme.code'));
+    const sheet = await screen.findByRole('dialog');
+
+    const section = within(sheet).getByTestId('pkg-detail-customizations');
+    await waitFor(() =>
+      expect(within(section).getByTestId('pkg-detail-customizations-summary')).toHaveTextContent('1 customized, 0 switched off'),
+    );
+    expect(within(section).getByTestId('pkg-detail-customize')).toHaveAttribute('href', '/studio/com.acme.code/data');
+  });
+
+  it('an authored package’s detail draws no customizations section: it is changed in place', async () => {
+    await serve({ packages: [AUTHORED] });
+    renderAt(ADMIN_URL);
+    fireEvent.click(await screen.findByTestId('pkg-row-app.b2r4'));
+    const sheet = await screen.findByRole('dialog');
+    expect(within(sheet).queryByTestId('pkg-detail-customizations')).toBeNull();
+  });
+
+  it('CONTROL: the development surface’s detail draws no customizations section', async () => {
+    await serve({ packages: [CODE] });
+    renderAt(STUDIO_URL);
+    fireEvent.click(await screen.findByTestId('pkg-row-com.acme.code'));
+    const sheet = await screen.findByRole('dialog');
+    expect(within(sheet).queryByTestId('pkg-detail-customizations')).toBeNull();
   });
 });

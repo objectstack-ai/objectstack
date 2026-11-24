@@ -3120,8 +3120,7 @@ const en = {
       //
       // NOT the same thing as the platform's manual automation surfaces, which
       // are real and stay as they are: `home.build.subtitle` (that card opens
-      // Studio, which does author flows), `engine.studio.landing.description`,
-      // `packagedAutomation.*` and the
+      // Studio, which does author flows), `packagedAutomation.*` and the
       // marketplace `automation` category. The boundary is v1 AI AUTHORING, not
       // the word "automation".
       //

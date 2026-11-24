@@ -216,8 +216,8 @@ const VOCABULARY: ReadonlyArray<{ state: string; key: string; en: string; zh: st
 /** Every other key that draws one of the states, and the word it must carry. */
 const SAME_WORD: ReadonlyArray<{ key: string; en: string; zh: string }> = [
   { key: 'engine.directory.customizations.tile', en: 'customized', zh: '已定制' },
-  { key: 'engine.studio.landing.customizations.customized', en: 'customized', zh: '已定制' },
-  { key: 'engine.studio.landing.customizations.switchedOff', en: 'switched off', zh: '已停用' },
+  { key: 'engine.packages.customizations.customized', en: 'customized', zh: '已定制' },
+  { key: 'engine.packages.customizations.switchedOff', en: 'switched off', zh: '已停用' },
   { key: 'engine.directory.hideReadOnly', en: 'read-only', zh: '只读' },
 ];
 
@@ -366,8 +366,7 @@ describe('one word per state, the second pass (objectstack#29729)', () => {
     'engine.studio.customize.restoreBody',
     'engine.studio.customize.restoreFlowBody',
     'engine.edit.resetConfirmBody',
-    'engine.studio.landing.description',
-    'engine.studio.landing.readonlyHint',
+    'engine.packages.customizations.customize',
     'engine.studio.area.formEditor.oneLocale',
     'engine.studio.area.formEditor.translationWhole',
   ];
@@ -377,10 +376,9 @@ describe('one word per state, the second pass (objectstack#29729)', () => {
     expect(ZH[key]).not.toContain('自定义');
   });
 
-  it('the Customize button and the landing lines that quote it agree', () => {
+  it('the Customize button and the Setup package detail’s Customize link agree (objectstack#36908)', () => {
     expect(ZH['engine.studio.customize.action']).toBe('定制');
-    expect(ZH['engine.studio.landing.description']).toContain('「定制」');
-    expect(ZH['engine.studio.landing.readonlyHint']).toContain('「定制」');
+    expect(ZH['engine.packages.customizations.customize']).toContain('定制');
   });
 
   // CONTROL: 自定义 meaning "user-defined" (a custom value, key, renderer, page

@@ -594,9 +594,6 @@ export {
 export {
   registerStudioCanvasPreview,
 } from './views/studio-design/studio-canvas-preview.js';
-// The builder's front door: pick/create a writable package → pillar builder.
-// Standalone at `/studio` and embedded via the `studio:builder` component ref.
-export { BuilderLanding } from './views/studio-design/BuilderLanding.js';
 // objectstack#36908 — bare `/studio` draws no page: it opens the package the
 // author was last in, else the package list. A host that declares the
 // `/studio` routes mounts it as their index.

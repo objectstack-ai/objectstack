@@ -22,7 +22,7 @@
  * mounted the builder ungated.
  *
  * The two builder components are the only stubs, and they are SPIES: the
- * assertion for a non-holder is that `BuilderLanding` / `StudioDesignSurface`
+ * assertion for a non-holder is that `StudioEntryRedirect` / `StudioDesignSurface`
  * were never CALLED, which is strictly stronger than "their DOM is absent" —
  * a component that never mounts cannot render an authoring affordance, a
  * Publish button, or fire the metadata reads behind them. `AuthGuard`,
