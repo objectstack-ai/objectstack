@@ -1226,7 +1226,6 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.edit.detail': '详情',
   'engine.edit.preview': '预览',
   'engine.edit.designer': '可视化编辑器',
-  'engine.edit.related': '关联',
   'engine.edit.hideInspector': '隐藏属性面板',
   'engine.edit.showInspector': '显示属性面板',
   'engine.edit.noChanges': '没有需要保存的更改',
@@ -3610,6 +3609,13 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.list.sort.name.desc': 'API 名称（Z–A）',
   'engine.list.sort.label.asc': '显示名（A–Z）',
   'engine.list.sort.label.desc': '显示名（Z–A）',
+  'engine.list.sort.changed.asc': '修改时间（最早在前）',
+  'engine.list.sort.changed.desc': '修改时间（最新在前）',
+  'engine.list.col.changedAt': '修改时间',
+  'engine.list.draftMark.human': '有未发布的改动',
+  'engine.list.draftMark.humanTitle': '此项有尚未发布的草稿，可在详情里发布或放弃。',
+  'engine.list.draftMark.ai': 'AI 的改动未发布',
+  'engine.list.draftMark.aiTitle': 'AI 助手对此项的改动还是草稿，尚未发布，可在详情里查看。',
   'engine.list.source.artifact': '代码包',
   'engine.list.source.runtime': '运行时',
   'engine.list.source.artifactDesc': '由代码包提供',
@@ -4386,6 +4392,14 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.detailHeader.notInList': '不在当前列表中',
   'engine.studio.detailHeader.package': '来自包 {package}',
   'engine.studio.detailHeader.more': '更多',
+  // Studio 项页签：项工具改为项页面的页签（objectstack#36901）。
+  'engine.studio.itemTabs.details': '详情',
+  'engine.studio.itemTabs.preview': '预览',
+  'engine.studio.itemTabs.related': '相关',
+  'engine.studio.itemTabs.references': '被引用',
+  'engine.studio.itemTabs.history': '历史',
+  'engine.studio.itemTabs.source': '源码',
+  'engine.studio.itemTabs.versions': '版本',
 };
 
 export default STUDIO_ZH;

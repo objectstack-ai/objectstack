@@ -123,10 +123,10 @@ export const GlobalSearchRenderer: React.FC<GlobalSearchRendererProps> = ({
   // uses, never spliced in raw (objectui#11818).
   const baseUrl = `/apps/${appName || resolveHostAppSegment(apps, currentAppName)}`;
   const placeholder = t('search.placeholder', {
-    defaultValue: 'Search objects, dashboards, pages, reports…',
+    defaultValue: 'Search objects, dashboards, pages, reports, components, docs…',
   }) as string;
   const ariaLabel = t('search.inputAriaLabel', {
-    defaultValue: 'Search objects, dashboards, pages, reports',
+    defaultValue: 'Search objects, dashboards, pages, reports, components, docs',
   }) as string;
 
   return (

@@ -34,15 +34,25 @@
  * link. {@link areaLocationRedirect} puts each URL on the leg its query names.
  */
 
-import { DESIGNER_SURFACE_PARAM, formatSurfaceParam } from '../metadata-admin/nav-selection.js';
 import { CATALOG_SCOPE_PARAM, ENVIRONMENT_SCOPE } from '../metadata-admin/catalog-scope.js';
+import {
+  STUDIO_ALL_PACKAGES_SEGMENT,
+  STUDIO_ITEM_PILLAR,
+  STUDIO_ITEM_REVIEW_PARAM,
+  STUDIO_ITEM_REVIEW_VALUE,
+  studioItemPillar,
+  studioMetadataAreaAddress,
+  studioMetadataAreaRoot,
+  studioMetadataItemAddress,
+  studioPillarItemAddress,
+  type StudioPillarKey,
+} from './studioAddress.js';
 import { isStudioOrgScope, studioOrgScopePath } from './studioScope.js';
 
-/** The area's route segment, beside the pillars' (`/studio/<package>/metadata`). */
-export const STUDIO_METADATA_AREA = 'metadata';
-
-/** The reserved `/studio/<segment>` value for the area's cross-package leg. */
-export const STUDIO_ALL_PACKAGES_SEGMENT = '~all';
+// objectstack#36895 — the area's segments are Studio address vocabulary, owned
+// by `studioAddress.ts`; re-exported under their names here.
+export { STUDIO_METADATA_AREA, STUDIO_ALL_PACKAGES_SEGMENT } from './studioAddress.js';
+export type { StudioPillarKey } from './studioAddress.js';
 
 /** Whether a `/studio/:packageId` route segment names the cross-package leg. */
 export function isStudioAllPackagesScope(segment: string | null | undefined): boolean {
@@ -51,11 +61,8 @@ export function isStudioAllPackagesScope(segment: string | null | undefined): bo
 
 /** The area's root for a package, or for the cross-package leg with {@link STUDIO_ALL_PACKAGES_SEGMENT}. */
 export function studioMetadataAreaPath(segment: string): string {
-  return `/studio/${encodeURIComponent(segment)}/${STUDIO_METADATA_AREA}`;
+  return studioMetadataAreaRoot(segment);
 }
-
-/** The pillar keys a pillar type opens in (`StudioDesignSurface`'s `PILLARS`). */
-export type StudioPillarKey = 'data' | 'automations' | 'access';
 
 /**
  * ADR-0146 D1 — "A pillar type opened from the directory opens its pillar".
@@ -67,15 +74,11 @@ export type StudioPillarKey = 'data' | 'automations' | 'access';
  * and this area's generic item page is where they are read and, as a
  * fallback, edited as metadata.
  */
-export const AREA_PILLAR_FOR_TYPE: Readonly<Record<string, StudioPillarKey>> = {
-  object: 'data',
-  flow: 'automations',
-  permission: 'access',
-};
+export const AREA_PILLAR_FOR_TYPE: Readonly<Record<string, StudioPillarKey>> = STUDIO_ITEM_PILLAR;
 
 /** The area's generic item page of one item of a package. */
 export function studioMetadataItemPath(packageId: string, item: { type: string; name: string }): string {
-  return `${studioMetadataAreaPath(packageId)}/${encodeURIComponent(item.type)}/${encodeURIComponent(item.name)}`;
+  return studioMetadataItemAddress(packageId, item.type, item.name);
 }
 
 /** A pillar of a package, opened on one item through its `?surface=` deep link. */
@@ -84,7 +87,7 @@ export function studioPillarItemPath(
   pillar: StudioPillarKey,
   item: { type: string; name: string },
 ): string {
-  return `/studio/${encodeURIComponent(packageId)}/${pillar}?${DESIGNER_SURFACE_PARAM}=${encodeURIComponent(formatSurfaceParam(item))}`;
+  return studioPillarItemAddress(packageId, pillar, item);
 }
 
 /**
@@ -102,10 +105,10 @@ export function areaItemPillarPath(input: {
   name: string;
   search: URLSearchParams;
 }): string | null {
-  const pillar = AREA_PILLAR_FOR_TYPE[input.type];
+  const pillar = studioItemPillar(input.type);
   if (!pillar || !input.packageId) return null;
   if (input.search.get(CATALOG_SCOPE_PARAM) === ENVIRONMENT_SCOPE) return null;
-  if (input.search.get('review') === '1') return null;
+  if (input.search.get(STUDIO_ITEM_REVIEW_PARAM) === STUDIO_ITEM_REVIEW_VALUE) return null;
   return studioPillarItemPath(input.packageId, pillar, { type: input.type, name: input.name });
 }
 
@@ -153,7 +156,7 @@ export function areaItemOpensFormEditor(input: {
     (input.readOnly === true && AREA_CUSTOMIZE_EDITOR_TYPES.includes(input.type));
   if (!opens || !input.packageId) return false;
   if (input.search.get(CATALOG_SCOPE_PARAM) === ENVIRONMENT_SCOPE) return false;
-  return input.search.get('review') !== '1';
+  return input.search.get(STUDIO_ITEM_REVIEW_PARAM) !== STUDIO_ITEM_REVIEW_VALUE;
 }
 
 /** `?package=all` is the metadata list's "every package" scope, not a package (`ResourceEditPage`'s `'all'` fold). */
@@ -186,11 +189,7 @@ export function areaLocationRedirect(segment: string, rest: string, search: stri
   const params = new URLSearchParams(search);
   if (isStudioOrgScope(segment) || isStudioOrgScope(params.get('package'))) return studioOrgScopePath();
   const allLeg = isStudioAllPackagesScope(segment);
-  const tail = rest ? `/${rest}` : '';
-  const at = (leg: string) => {
-    const qs = params.toString();
-    return `${studioMetadataAreaPath(leg)}${tail}${qs ? `?${qs}` : ''}`;
-  };
+  const at = (leg: string) => studioMetadataAreaAddress(leg, rest, { query: params });
 
   if (params.get(CATALOG_SCOPE_PARAM) === ENVIRONMENT_SCOPE) {
     if (allLeg && !params.has('package')) return null;

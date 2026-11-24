@@ -7,3 +7,9 @@ export type {
 } from './knowledge-service.js';
 export { KnowledgeServicePlugin } from './knowledge-service-plugin.js';
 export type { KnowledgeServicePluginOptions } from './knowledge-service-plugin.js';
+export {
+  contributeKnowledgeSettings,
+  knowledgeSetupNavItem,
+  KNOWLEDGE_SETUP_NAV_BUNDLE_ID,
+} from './knowledge-settings-contribution.js';
+export type { KnowledgeSettingsContribution } from './knowledge-settings-contribution.js';

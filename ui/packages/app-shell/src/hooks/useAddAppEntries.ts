@@ -17,6 +17,7 @@ import { useCanAuthorMetadata } from './useCanAuthorMetadata.js';
 import { useAiSurfaceEnabled } from './useAiSurface.js';
 import { isAiStudioEnabled, isMarketplaceEnabled } from '../runtime-config.js';
 import { STUDIO_NEW_PACKAGE_PATH } from '../views/studio-design/studioNewPackage.js';
+import { studioLandingPath } from '../views/studio-design/studioAddress.js';
 
 /** The marketplace, where templates and packages are installed from. */
 const MARKETPLACE_PATH = '/apps/setup/system/marketplace';
@@ -42,18 +43,20 @@ export function useMayAddApp(): boolean {
 
 /**
  * The 「Add app」 choices: building with AI where the deployment offers AI
- * authoring and serves an agent, else a new package in Studio; templates and
+ * authoring and its agent catalog serves the build agent (objectstack#36969:
+ * not merely any agent: where in-app building is closed the catalog keeps
+ * `ask` and drops `build`), else a new package in Studio; templates and
  * the marketplace where a marketplace is mounted. Read only for a viewer
  * {@link useMayAddApp} lets in, so no one else pays the agent-catalog read.
  */
 export function useAddAppEntries(): AddAppEntry[] {
   const { t } = useObjectTranslation();
-  const { enabled: aiEnabled } = useAiSurfaceEnabled();
+  const { buildServed } = useAiSurfaceEnabled();
   const entries: AddAppEntry[] = [];
   if (isAiStudioEnabled()) {
     entries.push(
-      aiEnabled
-        ? { key: 'build-with-ai', to: '/studio', label: t('home.buildWithAI', { defaultValue: 'Build with AI' }), icon: Hammer }
+      buildServed
+        ? { key: 'build-with-ai', to: studioLandingPath(), label: t('home.buildWithAI', { defaultValue: 'Build with AI' }), icon: Hammer }
         : { key: 'new-in-studio', to: STUDIO_NEW_PACKAGE_PATH, label: t('home.build.inStudio', { defaultValue: 'New in Studio' }), icon: Hammer },
     );
   }

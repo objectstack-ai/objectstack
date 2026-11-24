@@ -85,7 +85,7 @@ vi.mock('@object-ui/auth', async (importOriginal) => ({
 // unrelated cloud#816 agent-availability gate.
 vi.mock('@object-ui/plugin-chatbot/core', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@object-ui/plugin-chatbot/core')>()),
-  useAgents: () => ({ agents: [{ name: 'builder' }] }),
+  useAgents: () => ({ agents: [{ name: 'build' }] }),
   isAskAgent: () => false,
   agentHasCapability: () => true,
 }));
