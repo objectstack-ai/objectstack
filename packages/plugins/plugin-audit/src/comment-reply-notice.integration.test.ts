@@ -197,14 +197,14 @@ describe('a reply notifies the thread\'s starter and earlier repliers', () => {
   it('Alice comments, Bob replies: Alice gets one inbox notice and one e-mail that open the record; Bob gets nothing', async () => {
     rig = await boot();
     const root = await say(rig.engine, ALICE, { body: 'Is the launch plan final?' });
-    const reply = await say(rig.engine, BOB, { parentId: root, body: 'Not yet, two items left.' });
+    const bobs = await say(rig.engine, BOB, { parentId: root, body: 'Not yet, two items left.' });
 
     const { reply } = await drained(rig.engine);
     expect(byChannel(reply, ALICE)).toEqual(['email:success', 'inbox:success']);
     expect(byChannel(reply, BOB)).toEqual([]);
     expect(rig.sent).toHaveLength(1);
     expect(rig.sent[0]).toMatchObject({ to: `${ALICE}@example.com`, subject: 'Bob replied to your comment' });
-    expect(rig.sent[0].text).toBe(`Not yet, two items left.\n\nOpen the comment: ${ORIGIN}/_console/${TASK}/t1?comments=${root}&comment=${reply}`);
+    expect(rig.sent[0].text).toBe(`Not yet, two items left.\n\nOpen the comment: ${ORIGIN}/_console/${TASK}/t1?comments=${root}&comment=${bobs}`);
   });
 
   it('Alice comments, Bob replies, Carol replies: Alice and Bob get one notice each, Carol none', async () => {
@@ -241,12 +241,12 @@ describe('a reply notifies the thread\'s starter and earlier repliers', () => {
   it('a reader of zh-CN gets the zh-CN title and link line', async () => {
     rig = await boot();
     const root = await say(rig.engine, MEI);
-    const reply = await say(rig.engine, BOB, { parentId: root, body: '已更新' });
+    const bobs = await say(rig.engine, BOB, { parentId: root, body: '已更新' });
 
     await drained(rig.engine);
     expect(rig.sent).toHaveLength(1);
     expect(rig.sent[0]).toMatchObject({ to: `${MEI}@example.com`, subject: 'Bob 回复了你的评论' });
-    expect(rig.sent[0].text).toBe(`已更新\n\n查看评论：${ORIGIN}/_console/${TASK}/t1?comments=${root}&comment=${reply}`);
+    expect(rig.sent[0].text).toBe(`已更新\n\n查看评论：${ORIGIN}/_console/${TASK}/t1?comments=${root}&comment=${bobs}`);
   });
 
   it('burst: three replies within the window are three inbox notices and one e-mail to the starter', async () => {
