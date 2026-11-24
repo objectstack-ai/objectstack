@@ -15,7 +15,7 @@ import { resolveArtifactPackageOrder, artifactPackageId } from '@objectstack/cor
 import { NodeMetadataManager } from './node-metadata-manager.js';
 import { MemoryLoader } from './loaders/memory-loader.js';
 import { restoreWithheldSeedDatasets, withholdRetiredSeedModes, type WithheldSeedDataset } from './artifact-retired-seed-modes.js';
-import { PACKAGE_SLOTTED_STORE_TYPES, bundleEntryKey, isBundledStoreType, storedItemPackageId } from './package-slotted-store.js';
+import { PACKAGE_SLOTTED_STORE_TYPES, bundleEntryKey, carriesPlatformStamp, isBundledStoreType, isPlatformOrigin, storedItemPackageId } from './package-slotted-store.js';
 import { DEFAULT_METADATA_TYPE_REGISTRY, judgeCollectionItemOwnerStamp, OWNER_STAMP_JUDGED_COLLECTIONS } from '@objectstack/spec/kernel';
 import type { MetadataPluginConfig } from '@objectstack/spec/kernel';
 import { applyProtection } from '@objectstack/spec/shared';
@@ -577,7 +577,9 @@ export function artifactItemPlatformStampRefusal(
     name: string,
     item: unknown,
 ): (Error & { code: 'VALIDATION_ERROR'; status: 400; httpStatus: 400; issues: Array<{ path: string; message: string; code: string }> }) | undefined {
-    if (item === null || typeof item !== 'object' || (item as Record<string, unknown>)._provenance !== 'platform') return undefined;
+    // The store's own reading of where the mark lives, so the door refuses it
+    // exactly where the store would read it, and nowhere else.
+    if (!carriesPlatformStamp(item)) return undefined;
     const issueMessage = "'platform' is set only by the metadata service's own platform registration; "
         + 'remove `_provenance` from the item (the door stamps the provenance itself).';
     const err = new Error(`${metaType} '${name}' carries _provenance: 'platform': ${issueMessage}`) as Error & {
@@ -1851,10 +1853,15 @@ const STORED_ROW_PROTOCOL = 'datasource:';
  * the bare read's refusal, #32812), and the read naming the holder served
  * the holder's own row over its customization. Unstamped, every read answers
  * what it answers on a host that declares no package. The host's own file items, and every other
- * type's items, are stamped as before.
+ * type's items, are stamped as before, but for the platform's own stored record
+ * (#37013), which is never the host's package's item.
  */
 function unstampedStoredRow(type: string, item: unknown, protocol: string | undefined): boolean {
-    return PACKAGE_SLOTTED_STORE_TYPES.has(type) && storedItemPackageId(item) === undefined && protocol === STORED_ROW_PROTOCOL;
+    if (protocol !== STORED_ROW_PROTOCOL || storedItemPackageId(item) !== undefined) return false;
+    // [#37013] The platform's own record, of every type: stamped with the
+    // host's package it would be read as that package's item, and the
+    // platform's withdrawal would leave the registry's copy.
+    return PACKAGE_SLOTTED_STORE_TYPES.has(type) || isPlatformOrigin(item);
 }
 
 /**

@@ -878,17 +878,35 @@ export function storeRowWriteKey(
  * carries (`MetadataProvenanceSchema`, `@objectstack/spec/kernel`): a built-in
  * the host's code registers at boot, as cloud's AI runtime registers its
  * skills, agents and tools. ⛔ Only {@link MetadataManager.register} called
- * with `origin: 'platform'` stamps it, and it strips it from every other
- * write ({@link withoutPlatformOrigin}), so no package write and no
- * environment write carries it.
+ * with `origin: 'platform'` stamps it. Every other write the metadata service
+ * and the metadata protocol make strips it ({@link withoutPlatformOrigin}):
+ * `register` without the option, `registerInMemory`, `save`, `rollback`, the
+ * protocol's save door and its restore doors. A stored row the boot pass
+ * re-registers keeps it only when the row held it as read.
  */
 export const PLATFORM_PROVENANCE = 'platform';
 
-/** The body a stamp of `item` lives on: its own object, or the publish envelope's body. */
+/**
+ * [#37013] The one place the platform's mark lives on an item, for every
+ * metadata type: the item's own top-level `_provenance` key. ⛔ Never a key
+ * nested in the body (an authored `metadata` record, a publish envelope's
+ * body): what sits there is the author's data, not the mark. The store's
+ * predicate, its stamp and strip, and every door that refuses or strips the
+ * mark ({@link carriesPlatformStamp}, {@link withoutPlatformOrigin}) read
+ * this one place, so a door and the store cannot disagree about it.
+ */
 function stampHolderOf(item: unknown): Record<string, unknown> | undefined {
-  if (item === null || typeof item !== 'object' || Array.isArray(item)) return undefined;
-  const body = peelStoredEnvelope(item).body;
-  return body !== null && typeof body === 'object' && !Array.isArray(body) ? body as Record<string, unknown> : undefined;
+  return item !== null && typeof item === 'object' && !Array.isArray(item) ? item as Record<string, unknown> : undefined;
+}
+
+/**
+ * [#37013] Whether `item` carries the platform's mark at its one place
+ * ({@link stampHolderOf}), whatever package it names. A door that stores an
+ * authored body asks this to refuse the mark; the store's own reading of
+ * whose item it is stays {@link isPlatformOrigin}.
+ */
+export function carriesPlatformStamp(item: unknown): boolean {
+  return stampHolderOf(item)?._provenance === PLATFORM_PROVENANCE;
 }
 
 /**
@@ -910,8 +928,7 @@ export function isPlatformOrigin(item: unknown): boolean {
 export function withPlatformOrigin(item: unknown): unknown {
   const body = stampHolderOf(item);
   if (!body || body._provenance === PLATFORM_PROVENANCE) return item;
-  const stamped = { ...body, _provenance: PLATFORM_PROVENANCE };
-  return peelStoredEnvelope(item).wrapped ? { ...(item as Record<string, unknown>), [STORED_BODY_KEY]: stamped } : stamped;
+  return { ...body, _provenance: PLATFORM_PROVENANCE };
 }
 
 /**
@@ -923,7 +940,7 @@ export function withoutPlatformOrigin(item: unknown): unknown {
   const body = stampHolderOf(item);
   if (!body || body._provenance !== PLATFORM_PROVENANCE) return item;
   const { _provenance: _platform, ...rest } = body;
-  return peelStoredEnvelope(item).wrapped ? { ...(item as Record<string, unknown>), [STORED_BODY_KEY]: rest } : rest;
+  return rest;
 }
 
 /**

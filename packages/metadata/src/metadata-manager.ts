@@ -4908,7 +4908,9 @@ export class MetadataManager implements IMetadataService {
 
     // Restore the metadata using the dedicated rollback path so that a single
     // 'revert' history entry is written (instead of a conflicting 'update' entry)
-    let restoredMetadata = targetVersion.metadata;
+    // [#37013] A rollback is never the platform's registration: the restored
+    // version is written without the platform's mark, whatever it held.
+    let restoredMetadata = withoutPlatformOrigin(targetVersion.metadata) as typeof targetVersion.metadata;
     // [#33003] A version restored over an environment row the boot pass
     // stamped is that row (a version a rewrite stored before #33003 carries the
     // host stamp): stored without the stamp, as {@link register} stores it.

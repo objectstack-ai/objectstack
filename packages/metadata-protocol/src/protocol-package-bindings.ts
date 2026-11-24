@@ -19,6 +19,7 @@ import {
 } from '@objectstack/metadata-core';
 import { isServedOverrideRowOf } from './served-override.js';
 import { canonicalMetaType } from './protocol-meta-type-schema.js';
+import { withoutPlatformOrigin } from '@objectstack/metadata';
 
 /**
  * [#21803] The packages that can ship an item of one type, read once from the
@@ -448,6 +449,10 @@ const DERIVED_PROVENANCE_KEYS = ['_packageId', '_packageVersion', '_provenance']
  * validation owns those.
  */
 function stripDerivedProvenance(item: unknown): unknown {
+    // [#37013] The platform's mark first, by the store's own definition of
+    // where it lives (`withoutPlatformOrigin`), so this door strips it exactly
+    // where the store would read it; the key loop below then removes the rest.
+    item = withoutPlatformOrigin(item);
     if (!item || typeof item !== 'object' || Array.isArray(item)) return item;
     const dict = item as Record<string, unknown>;
     if (!DERIVED_PROVENANCE_KEYS.some((k) => k in dict)) return item;
