@@ -183,6 +183,10 @@ const SURFACE_MODULE = 'scripts/i18n-bundle-surface.mjs';
  */
 const METADATA_TYPE_REGISTRY_MODULE = 'packages/spec/src/kernel/metadata-plugin.zod.ts';
 const METADATA_FORM_REGISTRY_MODULE = 'packages/spec/src/system/metadata-form-registry.ts';
+// The list registry is a third producer of the same surface: `walkMetadataForms`
+// emits `metadataForms.<type>.fields.<path>.label` for each list column whose
+// path the type's form does not declare.
+const METADATA_LIST_REGISTRY_MODULE = 'packages/spec/src/system/metadata-list-registry.ts';
 
 /** The one command this gate invokes per package, as oclif topic/command parts. */
 const EXTRACT_COMMAND_ID = ['i18n', 'extract'];
