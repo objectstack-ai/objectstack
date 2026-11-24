@@ -18,7 +18,15 @@ import type {
 import {
   collectCredentialWriteResponseFields,
   collectInternalWriteResponseFields,
+  registryObjectPackageDisabled,
 } from '@objectstack/core';
+import {
+  admitObject,
+  admitSourceFields,
+  type KnowledgeFieldSecurity,
+  type KnowledgeSourceAdmission,
+  type ObjectAdmission,
+} from './knowledge-source-admission.js';
 
 /**
  * Minimal logger shape; falls back to no-op when none is provided.
@@ -47,6 +55,15 @@ export interface KnowledgeServiceOptions {
   /** Optional structured logger. */
   logger?: KnowledgeLogger;
   /**
+   * The `security` service, resolved at search time, for the field gate
+   * (`knowledge-source-admission.ts`). Answers `undefined` when the host
+   * registers none: the contract's fallback then applies (every field
+   * declaring a `maskingRule` is not queryable). `KnowledgeServicePlugin`
+   * always wires it; omitted, the service reads as a host with no security
+   * service.
+   */
+  resolveSecurity?: () => KnowledgeFieldSecurity | undefined;
+  /**
    * Default top-K when callers don't specify. The adapter may cap
    * further; the service does not enforce an upper bound itself.
    * @default 10
@@ -61,6 +78,10 @@ export interface KnowledgeServiceOptions {
  * - Routes search / index calls to the right `IKnowledgeAdapter`.
  * - Re-checks every hit's `sourceRecordId` against the caller's
  *   `ExecutionContext` so row-level security is preserved end-to-end.
+ * - Searches an `object` source for a caller only when the caller's exposure
+ *   decision serves its object and every field it serves is one the caller
+ *   may query (`knowledge-source-admission.ts`), so field-level security and
+ *   the object's API exposure hold for passages too.
  * - Walks ObjectQL when reindexing an `object` source.
  *
  * Non-responsibilities (the parts plugins own):
@@ -200,7 +221,7 @@ export class KnowledgeService implements IKnowledgeService {
 
   async search(query: string, opts: KnowledgeSearchOptions = {}): Promise<KnowledgeHit[]> {
     const topK = opts.topK ?? this.defaultTopK;
-    const sources = this.resolveSearchTargets(opts.sourceIds);
+    const sources = await this.admitSources(this.resolveSearchTargets(opts.sourceIds), opts.executionContext);
     if (sources.length === 0) return [];
 
     const rawHits: KnowledgeHit[] = [];
@@ -308,6 +329,79 @@ export class KnowledgeService implements IKnowledgeService {
       else this.options.logger?.warn?.(`[knowledge] search target '${id}' not registered; skipping.`);
     }
     return out;
+  }
+
+  /**
+   * [ADR-0090 D10 rule 1] The sources this caller's search may reach: an
+   * `object` source over an object the caller's exposure decision refuses, or
+   * one serving a field the caller may not query, is not searched for that
+   * caller — see `knowledge-source-admission.ts` for the gates and why they are
+   * asked at source granularity. Computed once per (caller, object) per search.
+   *
+   * Asked only for a caller that carries a non-system context and only with a
+   * data engine bound: the system context bypasses (as it bypasses the row
+   * re-check), and the two other cases already drop every object-source hit in
+   * {@link applyPermissionFilter}. Fails CLOSED: a gate that throws refuses
+   * every source over that object, logged at `error`.
+   */
+  private async admitSources(
+    sources: KnowledgeSource[],
+    ctx: ExecutionContext | undefined,
+  ): Promise<KnowledgeSource[]> {
+    const engine = this.options.dataEngine;
+    if (!ctx || ctx.isSystem || !engine) return sources;
+    const deps = {
+      readSchema: (object: string): unknown => {
+        const getSchema = (engine as { getSchema?: (name: string) => unknown }).getSchema;
+        return typeof getSchema === 'function' ? getSchema.call(engine, object) : undefined;
+      },
+      isObjectPackageDisabled: (object: string): boolean =>
+        registryObjectPackageDisabled((engine as { registry?: unknown }).registry)(object),
+      resolveSecurity: (): KnowledgeFieldSecurity | undefined => this.options.resolveSecurity?.(),
+    };
+    const byObject = new Map<string, Promise<ObjectAdmission | Error>>();
+    const out: KnowledgeSource[] = [];
+    for (const source of sources) {
+      if (source.source.kind !== 'object') {
+        out.push(source);
+        continue;
+      }
+      const objSource = source.source as ObjectKnowledgeSource;
+      const object = objSource.object;
+      let pending = byObject.get(object);
+      if (!pending) {
+        pending = admitObject(object, ctx, deps).catch((err: unknown) =>
+          err instanceof Error ? err : new Error(String(err)),
+        );
+        byObject.set(object, pending);
+      }
+      const objectAdmission = await pending;
+      if (objectAdmission instanceof Error) {
+        this.reportGateFailure(source.id, object, objectAdmission);
+        continue;
+      }
+      const verdict: KnowledgeSourceAdmission = objectAdmission.refused
+        ? { admitted: false, reason: objectAdmission.refused, object }
+        : admitSourceFields(objSource, objectAdmission);
+      if (verdict.admitted) {
+        out.push(source);
+      } else {
+        this.options.logger?.debug?.(
+          `[knowledge] source '${source.id}' not searched for this caller: ${verdict.reason} ` +
+            `(object='${verdict.object}'${verdict.field ? `, field='${verdict.field}'` : ''}).`,
+        );
+      }
+    }
+    return out;
+  }
+
+  /** A gate lookup threw: the source is refused (fail-closed), reported at `error`, `warn` as the fallback. */
+  private reportGateFailure(sourceId: string, object: string, err: Error): void {
+    const report =
+      `[knowledge] the exposure or field-level read rules of object '${object}' could not be resolved ` +
+      `(${err.message}); source '${sourceId}' is not searched for this caller (fail-closed).`;
+    if (this.options.logger?.error) this.options.logger.error(report);
+    else this.options.logger?.warn?.(report);
   }
 
   private sourcesForObject(object: string): KnowledgeSource[] {

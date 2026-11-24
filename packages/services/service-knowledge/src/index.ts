@@ -5,5 +5,6 @@ export type {
   KnowledgeLogger,
   KnowledgeServiceOptions,
 } from './knowledge-service.js';
+export type { KnowledgeFieldSecurity } from './knowledge-source-admission.js';
 export { KnowledgeServicePlugin } from './knowledge-service-plugin.js';
 export type { KnowledgeServicePluginOptions } from './knowledge-service-plugin.js';

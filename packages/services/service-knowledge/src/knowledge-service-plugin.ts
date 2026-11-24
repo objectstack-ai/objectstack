@@ -9,6 +9,7 @@ import type { KnowledgeSource } from '@objectstack/spec/ai';
 import { KNOWLEDGE_SERVICE } from '@objectstack/spec/contracts';
 import { KnowledgeService } from './knowledge-service.js';
 import type { KnowledgeLogger } from './knowledge-service.js';
+import type { KnowledgeFieldSecurity } from './knowledge-source-admission.js';
 import { createKnowledgeReapGuard, guardedObjectsFor } from './knowledge-reap-guard.js';
 
 /**
@@ -117,6 +118,18 @@ export class KnowledgeServicePlugin implements Plugin {
       dataEngine: engine,
       logger,
       defaultTopK: this.options.defaultTopK,
+      // The field gate's `security` service, resolved per search so plugin
+      // order is free (plugin-security registers it in its own start()). A
+      // lookup that misses — the in-repo kernels answer one by throwing —
+      // reads as "no security service": the contract's fallback applies
+      // (every field declaring a `maskingRule` is not queryable).
+      resolveSecurity: () => {
+        try {
+          return ctx.getService<KnowledgeFieldSecurity | undefined>('security') ?? undefined;
+        } catch {
+          return undefined;
+        }
+      },
     });
 
     for (const source of this.options.sources ?? []) {
