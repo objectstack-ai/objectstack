@@ -78,7 +78,10 @@ describe('「重置 / 更新视图」: the view\'s own actions (objectstack#3673
  * objectstack#36737 (seat review S1) — the button names the save its menu
  * holds: 「更新视图」 where the open view can take the change, else
  * 「另存为我的视图」, the one save there is (a view a read-only package ships,
- * or a reader who may not write the view), on both faces.
+ * or a reader who may not write the view). The narrow face, the phone's chip
+ * row, reads 「保存」 there: the longer name squeezed the view switcher beside
+ * it down to its count at 375 px (measured: 44 px for the switcher against
+ * 76 px beside 「更新视图」).
  */
 describe('the save button names the save it offers (objectstack#36737)', () => {
   const draw = (language: string, saveToView: boolean) =>
@@ -102,13 +105,13 @@ describe('the save button names the save it offers (objectstack#36737)', () => {
     expect(faces()).toEqual(['更新视图', '更新视图']);
     cleanup();
     draw('zh', false);
-    expect(faces()).toEqual(['另存为我的视图', '另存为我的视图']);
+    expect(faces()).toEqual(['另存为我的视图', '保存']);
     expect(screen.getByTestId('list-draft-discard').textContent?.trim()).toBe('重置');
   });
 
   it('en: Update view where the view can take the change, Save as my view where it cannot', async () => {
     draw('en', false);
-    expect(faces()).toEqual(['Save as my view', 'Save as my view']);
+    expect(faces()).toEqual(['Save as my view', 'Save']);
     fireEvent.pointerDown(screen.getByTestId('list-draft-save'), { button: 0, ctrlKey: false, pointerType: 'mouse' });
     const menu = await screen.findByTestId('list-draft-save-menu');
     expect(menu.querySelector('[data-testid="list-draft-save-to-view"]')).toBeNull();

@@ -12,7 +12,8 @@
  *   view」 (`onSaveAsMyView`, which asks a name first). The menu names what is
  *   unsaved, so a reader sees what a save keeps. Where the open view cannot
  *   take the change, the button reads 「Save as my view」, the one save its
- *   menu holds, so it never promises an update it does not offer.
+ *   menu holds, so it never promises an update it does not offer (the narrow
+ *   face, short of room, reads 「Save」 there).
  *
  * The two read as the view's own actions, not as a page's Cancel and Save
  * (objectstack#36737, Twenty's 「Reset / Update view」): a view is its own
@@ -105,8 +106,12 @@ export function ListDraftActions({
   const discardTitle = t('console.objectView.draft.discardTitle');
   // The button names what its menu does: 「Update view」 where the open view
   // can take the change, else the one save there is, 「Save as my view」 (a
-  // view a read-only package ships, or a reader who may not write it).
+  // view a read-only package ships, or a reader who may not write it). The
+  // narrow face (the phone's chip row) says 「Save」 there instead: the longer
+  // name would squeeze the view switcher beside it down to its count, and its
+  // menu, which also holds Reset, names the save.
   const saveLabel = onSaveToView ? t('console.objectView.draft.save') : t('console.objectView.draft.saveAsMyView');
+  const compactSaveLabel = onSaveToView ? t('console.objectView.draft.save') : t('common.save');
   const offersSave = !!onSaveToView || !!onSaveAsMyView;
 
   const saveItems = (
@@ -173,7 +178,7 @@ export function ListDraftActions({
               data-testid="list-draft-compact"
               className="inline-flex h-6 shrink-0 gap-1 px-2 text-sm @[40rem]/list:hidden"
             >
-              {saveLabel}
+              {compactSaveLabel}
               <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
             </Button>
           </DropdownMenuTrigger>
