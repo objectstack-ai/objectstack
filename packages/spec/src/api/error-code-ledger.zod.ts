@@ -950,6 +950,15 @@ export const ERROR_CODE_LEDGER = {
     // any standard member: it is neither the client's bad input (the caller is
     // server-side automation) nor a missing precondition on a request.
     'ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED',
+    // [ADR-0153 D4] A write named a `_sync_` provenance column and is not the
+    // sync-in pull's, or a `before*` hook of any write (the pull's included)
+    // assigned, changed or removed one. 400, judged on the caller's payload
+    // before the middleware, the defaults or a hook run, and on the hooks'
+    // writes before the driver, so nothing is written
+    // (`SyncProvenanceWriteRefusedError`, `sync-provenance-write.ts`). Refused
+    // whatever the caller's context, `isSystem` included: the pull is the
+    // columns' only writer.
+    'ERR_SYNC_PROVENANCE_WRITE_REFUSED',
     // [#8846] `transaction({ require: true })` on a driver with no
     // `beginTransaction` — thrown BEFORE the callback runs, so nothing has
     // been written (`TransactionUnsupportedError`, `transaction-errors.ts`;
