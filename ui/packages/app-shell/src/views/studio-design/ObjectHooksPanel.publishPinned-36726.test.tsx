@@ -181,8 +181,14 @@ function openPanel() {
 async function edit(label: string, condition: string): Promise<void> {
   // The rail's row: the open hook's label shows in its inspector too.
   fireEvent.click((await screen.findAllByText(label, undefined, WAIT))[0]!);
-  fireEvent.click(await screen.findByText('Expression'));
-  const box = screen.getAllByRole('combobox').find((el) => el.tagName === 'TEXTAREA') as HTMLTextAreaElement;
+  // A hook whose condition is already an expression opens on that mode: no "Expression" choice to press.
+  const box = await waitFor(() => {
+    const mode = screen.queryByText('Expression');
+    if (mode) fireEvent.click(mode);
+    const found = screen.queryAllByRole('combobox').find((el) => el.tagName === 'TEXTAREA');
+    if (!found) throw new Error('the condition box is not drawn yet');
+    return found as HTMLTextAreaElement;
+  }, WAIT);
   fireEvent.change(box, { target: { value: condition } });
 }
 

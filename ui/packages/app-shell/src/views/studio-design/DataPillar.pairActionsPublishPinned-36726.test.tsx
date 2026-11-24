@@ -93,7 +93,11 @@ const copy = <T,>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
 const servedObject = () => ({
   name: OBJECT,
   label: 'Lead',
-  fields: { name: { type: 'text', label: 'Name' } },
+  fields: {
+    name: { type: 'text', label: 'Name' },
+    // The "Change a picklist field" preset a new row is made from needs one.
+    status: { type: 'select', label: 'Status', options: [{ label: 'New', value: 'new' }, { label: 'Hot', value: 'hot' }] },
+  },
   actions: [VENDOR, ...[...srv.active.values()].map((a) => ({ ...a, _packageId: PAIR }))],
 });
 

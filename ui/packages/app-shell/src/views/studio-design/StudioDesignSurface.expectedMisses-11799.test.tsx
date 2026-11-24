@@ -268,7 +268,10 @@ describe('Interfaces pillar — an app found only in the drafts ledger (objectui
 });
 
 describe('Automations pillar — opening flows asks no 404 question (objectui#11799)', () => {
-  it('a saved flow with no draft reads its baseline and no draft; an unsaved flow reads its draft and no baseline', async () => {
+  // objectstack#36726 — an unsaved flow's layers are read too, for the Save's
+  // publish pin; an item with only a draft has layers (objectstack#30859), so
+  // the read is answered, never a miss.
+  it('a saved flow with no draft reads its baseline and no draft; an unsaved flow reads its draft and its layers, no miss', async () => {
     put(server.active, 'flow', 'p_flow', flow('p_flow'));
     put(server.drafts, 'flow', 'fresh_flow', flow('fresh_flow'));
     render(
@@ -283,7 +286,7 @@ describe('Automations pillar — opening flows asks no 404 question (objectui#11
     fireEvent.click((await screen.findAllByText('fresh_flow'))[0]);
     await waitFor(() => expect(asked('flow', 'fresh_flow', '?state=draft')).toBe(1));
     await settle();
-    expect(asked('flow', 'fresh_flow', '/layers')).toBe(0);
+    expect(asked('flow', 'fresh_flow', '/layers')).toBe(1);
     expect(misses()).toEqual([]);
   });
 });
