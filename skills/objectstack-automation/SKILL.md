@@ -34,10 +34,10 @@ Also vendor-integration callbacks and **assignment rules**.
 ### Flow Types
 
 | Type | When to Use |
-|:-----|:------------|
-| `autolaunched` | Runs without user interaction — triggered by events, APIs, or other flows |
-| `screen` | Presents UI screens |
-| `schedule` | Runs on a cron/interval cadence declared on the **start node's `config.schedule`** — or a **per-record date sweep** via `config.timeRelative` |
+|:--|:--|
+| `autolaunched` | No user interaction: started by events, APIs or other flows |
+| `screen` | Shows UI screens |
+| `schedule` | Runs on a cron/interval cadence declared on the **start node's `config.schedule`**, or a **per-record date sweep** via `config.timeRelative` |
 | `record_change` | Fires on record create/update/delete. `autolaunched` + the same `record-*` binding behaves identically; `record_change` also opts into the trigger-readiness lint |
 | `api` | Inbound **webhook** (*Inbound webhook triggers*); a flow only ever started explicitly is `autolaunched` |
 
@@ -69,33 +69,33 @@ Built-in (plugins register more; a `type` none runs is refused at a server's pub
 #### Control Flow
 
 | Node | Purpose |
-|:-----|:--------|
-| `start` | Entry point — every flow has exactly one |
-| `end` | Exit point — can have multiple |
-| `decision` | Conditional branching — routed by **edge `condition` predicates**, not node config |
+|:--|:--|
+| `start` | Entry point: exactly one per flow |
+| `end` | Exit point: one or more |
+| `decision` | Branch by **edge `condition` predicates**, not node config |
 | `loop` | Iterate a **nested `config.body` region** once per item of `config.collection` — a CEL value envelope or an inline list, never a string; `iteratorVariable` (default `item`) and optional `indexVariable` bind inside it, `maxIterations` caps it |
 | `parallel` | Fan out into `config.branches[]` (≥ 2 regions) run concurrently, **joined implicitly** at block end |
 | `try_catch` | Run `config.try`; on failure run `config.catch` with the error in `errorVariable` (default `$error`); `config.retry` re-runs `try` with backoff first; in a `record-after-*` flow it (or `errorHandling.strategy: 'retry'`) may not reach an inline `http` / `connector_action`: the save would wait out every attempt. Inside a `subflow` / `map` child, retried by either flow, that is **silent**: the flow saves but never arms (`GET /api/v1/automation/_status`: `bound: false`, `unboundCause: retried_callout_in_subflow`) until the child's `http` is `durable: true` or nothing retries the call. **No `finally`** — the container's ordinary out-edges are the continuation |
 | `map` | Sequential multi-instance — invoke the `config.flowName` flow (named as `subflow`'s) per item of `config.collection` (shaped as `loop`'s); each may pause (batch approvals); a refused name fails it at the first item |
-| `wait` | Pause until a timer elapses or a named signal arrives |
-| `subflow` | Invoke the flow bare `config.flowName` names: a package's flow gets its own, else the one holder in its `dependencies` closure plus `sys`; a package-less flow, the environment's, else the one package holder. Else `os validate` may warn and the node fails at run time (`subflow 'X' failed: …` naming every candidate; no `code`): `outside-closure` — held only by an undeclared package (declare it) or the environment; `ambiguous-in-closure` / `ambiguous-in-environment` — two packages hold it (package / package-less caller) |
+| `wait` | Pause for a timer or a named signal |
+| `subflow` | Invoke the flow bare `config.flowName` names: a package's flow gets its own, else the one holder in its `dependencies` closure plus `sys`; a package-less flow, the environment's, else the one package holder. Else the node fails at run time (`subflow 'X' failed: …` naming every candidate; no `code`): `outside-closure` — held only by an undeclared package (declare it) or the environment; `ambiguous-in-closure` / `ambiguous-in-environment` — two packages hold it (package / package-less caller). `os validate` warns `flow-subflow-unknown` on any name this stack lacks, a correct cross-package call included |
 | `parallel_gateway` / `join_gateway` / `boundary_event` | BPMN-interop forms a `parallel` / `try_catch` container lowers into; author the container |
 
 #### Data Operations
 
 | Node | Purpose |
-|:-----|:--------|
+|:--|:--|
 | `assignment` | Set variable values |
 | `create_record` | Insert a record |
 | `update_record` | Modify records |
 | `delete_record` | Remove records |
-| `get_record` | Fetch records with filters (**no `query_record`**) |
+| `get_record` | Fetch records by filter (**no `query_record`**) |
 | `save_notice` | Tell the saver what this create/update started — record create/update trigger only, not after a pause: **objectstack-data** `rules/lifecycle.md` § Save Notice |
 
 #### External Integration
 
 | Node | Purpose |
-|:-----|:--------|
+|:--|:--|
 | `http` | Call an HTTP API — set `timeoutMs`, or it has no timeout and warns (`flow-http-timeout-missing`). `url` and `headers` are served as written with the definition to every member who can read flows — only `signingSecret` and a start node's `secret` are withheld — so never a credential there: use a declared connector via `connector_action`. Retried after a record change: `durable: true` (outbox-queued, else sent once in the background, unretried; no response) |
 | `notify` | Send a notification (below) |
 | `connector_action` | Dispatch an action of a declared connector (§ *Integrations are declared, not coded*) or a plugin's. `connectorConfig.input` is a value-slot map like `subflow` `input`. Evaluated, it is judged against the action's `inputSchema` (`required`, `type`, `items`, a key outside listed `properties`) before dispatch: a breach fails the step `VALIDATION_ERROR` (`fault`-routable); `os validate` does not judge that fit yet. Retried after a record change: drop the retry, or run the flow on demand / on a schedule |
@@ -105,13 +105,13 @@ Built-in (plugins register more; a `type` none runs is refused at a server's pub
 #### Human Decision
 
 | Node | Purpose |
-|:-----|:--------|
+|:--|:--|
 | `approval` | Route a record for human sign-off |
 
 ### `notify`
 
 An undeclared key is a named parse error. **RAW** keys are read as written:
-a `{token}` in one is refused. The node as JSON (TypeScript: the same
+a `{token}` in one is refused. As JSON (TypeScript: the same
 literal, a `FlowNode`):
 
 ```json
@@ -321,10 +321,11 @@ Most are caught by `objectstack build`:
    ```
 
 4. **A `select` is compared and written by its option `value`, never its label.**
-   The request speaks the label ("Lost"); the row stores the `value` (`lost`).
+   The request says "Lost"; the row stores `lost`.
    A start `condition: "record.status == 'Lost'"` or `fields: { status: 'Lost' }`
    is refused at publish (inline options), else matches no row or fails the
-   run (`invalid_option`). Read the field's `options`.
+   run (`invalid_option`). A label in a `filter` or an edge `condition` is never
+   checked: it silently matches nothing. Read the field's `options`.
 
 ---
 
@@ -417,7 +418,7 @@ token implies the other:
 ### Trigger Types (start-node `config.triggerType`)
 
 | `triggerType` | ObjectQL hook |
-|:------|:------|
+|:--|:--|
 | `record-before-create` (can modify/reject) | `beforeInsert` |
 | `record-after-create` | `afterInsert` |
 | `record-before-update` | `beforeUpdate` |
