@@ -2,6 +2,7 @@
 '@objectstack/plugin-approvals': patch
 '@objectstack/rest': patch
 '@object-ui/console': patch
+'@object-ui/app-shell': patch
 ---
 
 fix(plugin-approvals): the decide refusal of a submitter's own approval, and a submitter notice that names several slots, read in the reader's language
