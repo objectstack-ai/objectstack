@@ -113,7 +113,7 @@ import { createEmptyDataSource } from './__tests__/emptyDataSource';
 
 const dataSource = createEmptyDataSource();
 
-const answer = (body: unknown) => ({ ok: true, status: 200, json: async () => body });
+const answer = (body: unknown) => ({ headers: new Headers(), ok: true, status: 200, json: async () => body });
 
 beforeEach(() => {
   server.drafts = [];

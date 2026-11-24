@@ -87,7 +87,7 @@ describe('PagePreview — slotted record page synthesis', () => {
     // Record binding fetches the object schema + sample records. Resolve both
     // to empty so the effect settles deterministically; synthesis falls back to
     // a def-less default page (structure only), which is all this test asserts.
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ json: async () => ({}) }));
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ headers: new Headers(), json: async () => ({}) }));
   });
   afterEach(() => { vi.unstubAllGlobals(); });
 
@@ -197,6 +197,7 @@ describe('PagePreview — slotted record page detail sections (objectui#12442)',
   /** Serve `def` as the object schema; no sample records. */
   function serve(def: unknown) {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => ({
+      headers: new Headers(),
       json: async () => (url.startsWith('/api/v1/meta/object/') ? { item: def } : { records: [] }),
     })));
   }

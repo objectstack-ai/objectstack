@@ -220,7 +220,7 @@ const TICKET_DRAFT = {
 };
 
 function stubServer() {
-  const ok = (body: unknown) => ({ ok: true, status: 200, json: async () => body });
+  const ok = (body: unknown) => ({ headers: new Headers(), ok: true, status: 200, json: async () => body });
   const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input);
     if (url.includes('/_drafts')) {
@@ -235,7 +235,7 @@ function stubServer() {
     const draft = url.includes('state=draft');
     if (/\/meta\/object\/crm_visit\b/.test(url) && draft) return ok({ item: VISIT_DRAFT });
     if (/\/meta\/object\/crm_ticket\b/.test(url)) return ok(draft ? { item: TICKET_DRAFT } : TICKET_PUBLISHED);
-    return { ok: false, status: 404, json: async () => ({}) };
+    return { headers: new Headers(), ok: false, status: 404, json: async () => ({}) };
   });
   vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
 }
