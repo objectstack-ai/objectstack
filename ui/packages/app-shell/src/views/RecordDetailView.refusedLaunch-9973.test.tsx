@@ -196,7 +196,9 @@ describe('objectui#9973 — record-page flow launch that ends refused', () => {
   it("does NOT toast the action's successMessage, does not invalidate the record, and returns silent success", async () => {
     const { result, changes } = await launch({ success: true, status: 'refused', refusalMessage: SENTENCE });
 
-    expect(result).toEqual({ success: true, silent: true, handedOff: true });
+    // The refusal also rides on the result (objectstack#36915), for a caller
+    // that counts outcomes; the notice above is still this launch's surface.
+    expect(result).toEqual({ success: true, silent: true, handedOff: true, refusal: { message: SENTENCE } });
     expect((toast as any).success).not.toHaveBeenCalled();
     expect((toast as any).error).not.toHaveBeenCalled();
     expect(changes).toEqual([]);
