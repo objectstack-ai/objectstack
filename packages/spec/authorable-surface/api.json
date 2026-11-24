@@ -859,6 +859,7 @@
     "api/GetInstalledPackageResponse:meta",
     "api/GetInstalledPackageResponse:success",
     "api/GetLocalesResponse:locales",
+    "api/GetLocalesResponse:sourceLocale",
     "api/GetMetaDiagnosticsResponse:entries",
     "api/GetMetaDiagnosticsResponse:scannedItems",
     "api/GetMetaDiagnosticsResponse:scannedTypes",
