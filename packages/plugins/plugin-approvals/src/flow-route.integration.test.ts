@@ -203,7 +203,7 @@ describe('[#26668] the approvals get serves the route a request takes, not the f
   };
   /** `decider` rejects `req`; the run walks the `reject` edge to its end. */
   const reject = async (req: any, decider: string): Promise<void> => {
-    const out = await svc.decide(req.id, { decision: 'reject', actorId: decider }, asUser(decider));
+    const out = await svc.decide(req.id, { decision: 'reject', actorId: decider, comment: 'Not this quarter' }, asUser(decider));
     expect([out.finalized, out.resumed], `${decider} rejected ${req.flow_node_id}`).toEqual([true, true]);
     expect(await pendingOn(req.record_id), 'nothing pending after the rejection').toBeUndefined();
   };
