@@ -2745,8 +2745,19 @@ export function ChatPane({
     return Array.from(byPackage, ([id, label]) => ({ id, label }));
   }, [metadataApps, appLabel, t]);
 
+  // objectstack#37146 — with one launchable agent there is nothing to switch,
+  // so the row names no agent (it read only 「提问」 once the in-app build
+  // entry closed). Where the host lifts Share and the Build Doctor into its
+  // own title bar (the drawer, objectstack#35445) and nothing else is left —
+  // no switcher, no build package chip, no offline note — the row is not
+  // drawn at all, so no empty band or border remains.
+  const headerHasContent =
+    showAgentLauncher || isBuildSurface || !actionsInHost || Boolean(agentsError);
+
   const headerSlot = (
-    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/50 px-4 pb-2 pt-3 sm:px-6">
+    <div
+      data-testid="ai-chat-header"
+      className="flex flex-wrap items-center justify-between gap-2 border-b border-border/50 px-4 pb-2 pt-3 sm:px-6">
       <div className="flex min-w-0 flex-1 items-center gap-2">
         {showAgentLauncher ? (
           launcherAgents.length <= 3 ? (
@@ -2805,11 +2816,7 @@ export function ChatPane({
               </SelectContent>
             </Select>
           )
-        ) : (
-          <span className="truncate text-xs font-medium text-foreground/85">
-            {activeAgentLabel}
-          </span>
-        )}
+        ) : null}
         {isBuildSurface ? (
           // A1.b — the binding chip is a SWITCHER now: each app gets its own
           // build conversation (the scope is per-package), so picking one here
@@ -3013,7 +3020,7 @@ export function ChatPane({
         packageRemovalPartialLabel={(failed) => t('console.ai.packageRemovalPartial', { count: failed })}
         surface="plain"
         maxHeight="100%"
-        headerSlot={hideHeader ? undefined : headerSlot}
+        headerSlot={hideHeader || !headerHasContent ? undefined : headerSlot}
         // objectui#12978 — the drafts line (`pendingDraftsBar` above) is a row
         // of the composer's own area, in
         // flow above the input. The bar used to float (`absolute bottom-20`)
