@@ -463,7 +463,7 @@ describe('a date lane statistic draws in the field\'s date format (objectstack#3
     const store = new ValueDataSource<Row>({ items: DATED_ROWS });
     // The door answers a date's `max` as the stored day (ISO order), as the
     // platform's aggregate does.
-    const queryGroupHeaders = vi.fn(async () => [
+    const queryGroupHeaders = vi.fn(async (_object: string, _query: unknown) => [
       { stage: 'open', max_close_date: '2025-03-15' },
       { stage: 'won', max_close_date: '2024-12-01' },
     ]);
