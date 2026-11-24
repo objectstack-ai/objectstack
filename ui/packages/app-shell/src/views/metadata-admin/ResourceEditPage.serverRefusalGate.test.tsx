@@ -140,6 +140,10 @@ const mockClient = {
   get: vi.fn(async () => null),
   saveDraft: vi.fn(async () => ({})),
   save: vi.fn(async () => ({})),
+  // objectstack#36902 — a Save publishes the item it wrote, and a refused
+  // publish takes that draft back.
+  publish: vi.fn(async () => ({})),
+  reset: vi.fn(async () => ({})),
 };
 
 vi.mock('./useMetadata', async (importOriginal) => {
@@ -241,6 +245,19 @@ const refusalHoldsSave = () =>
   saveSays().includes('The server refused this draft');
 
 /**
+ * objectstack#36902 — there is no auto-save: the author presses Save once the
+ * edit has reached the draft (the chip reads it as unsaved, or held). A Save
+ * withheld by the gate is a disabled button, and pressing it sends nothing.
+ */
+async function pressSave() {
+  await waitFor(
+    () => expect(screen.getByTestId('save-status').getAttribute('data-state')).toMatch(/^(unsaved|held)$/),
+    { timeout: 6000 },
+  );
+  fireEvent.click(saveButton());
+}
+
+/**
  * Open the editor and select `which`, returning that block's CEL textarea.
  *
  * The visibility control does not always need the "Expression" switch — it
@@ -278,7 +295,7 @@ function openEditor() {
   );
 }
 
-/** Auto-save debounces 1500ms; wait past it so a fire has room to happen. */
+/** Long enough for a save the button sent to have landed. */
 const AUTOSAVE_WINDOW_MS = 2600;
 const pastAutoSaveWindow = () => new Promise((r) => setTimeout(r, AUTOSAVE_WINDOW_MS));
 
@@ -290,6 +307,7 @@ describe('MetadataResourceEditPage — a draft the SERVER refused blocks Save (#
     openEditor();
     const box = await selectAndOpenCel('bystander');
     fireEvent.change(box, { target: { value: 'record.amount > 11' } });
+    await pressSave();
 
     await waitFor(() => expect(mockClient.save).toHaveBeenCalledTimes(1), { timeout: 6000 });
   }, 20000);
@@ -304,6 +322,7 @@ describe('MetadataResourceEditPage — a draft the SERVER refused blocks Save (#
     openEditor();
     const offenderBox = await selectAndOpenCel('offender');
     fireEvent.change(offenderBox, { target: { value: 'record.amount > 21' } });
+    await pressSave();
 
     // The server refuses that draft. Anchor on the button actually going
     // disabled, so everything after is taken at a moment the gate provably ran.
@@ -315,6 +334,7 @@ describe('MetadataResourceEditPage — a draft the SERVER refused blocks Save (#
     // refused element is untouched, so the block must still stand.
     const bystanderBox = await selectAndOpenCel('bystander');
     fireEvent.change(bystanderBox, { target: { value: 'record.amount > 12' } });
+    await pressSave();
 
     await waitFor(
       () => expect(bystanderBox).toHaveValue('record.amount > 12'),
@@ -332,11 +352,13 @@ describe('MetadataResourceEditPage — a draft the SERVER refused blocks Save (#
     openEditor();
     const offenderBox = await selectAndOpenCel('offender');
     fireEvent.change(offenderBox, { target: { value: 'record.amount > 21' } });
+    await pressSave();
     await waitFor(() => expect(mockClient.save).toHaveBeenCalledTimes(1), { timeout: 6000 });
     await waitFor(() => expect(saveButton()).toBeDisabled(), { timeout: 6000 });
 
     const bystanderBox = await selectAndOpenCel('bystander');
     fireEvent.change(bystanderBox, { target: { value: 'record.amount > 13' } });
+    await pressSave();
 
     await pastAutoSaveWindow();
     // Still ONE. Before this fix the timer fired again here, carrying the same
@@ -353,12 +375,14 @@ describe('MetadataResourceEditPage — a draft the SERVER refused blocks Save (#
     openEditor();
     let offenderBox = await selectAndOpenCel('offender');
     fireEvent.change(offenderBox, { target: { value: 'record.amount > 21' } });
+    await pressSave();
     await waitFor(() => expect(mockClient.save).toHaveBeenCalledTimes(1), { timeout: 6000 });
     await waitFor(() => expect(saveButton()).toBeDisabled(), { timeout: 6000 });
 
     // Touch the refused element itself — the block is keyed to that slice.
     offenderBox = await selectAndOpenCel('offender');
     fireEvent.change(offenderBox, { target: { value: 'record.amount > 22' } });
+    await pressSave();
 
     await waitFor(() => expect(saveButton()).toBeEnabled(), { timeout: 6000 });
     await waitFor(() => expect(mockClient.save).toHaveBeenCalledTimes(2), { timeout: 6000 });
@@ -373,6 +397,7 @@ describe('MetadataResourceEditPage — a draft the SERVER refused blocks Save (#
     openEditor();
     const box = await selectAndOpenCel('offender');
     fireEvent.change(box, { target: { value: 'record.amount > 21' } });
+    await pressSave();
     await waitFor(() => expect(mockClient.save).toHaveBeenCalledTimes(1), { timeout: 6000 });
 
     // The error is still surfaced; only the BLOCK is withheld.
@@ -391,6 +416,7 @@ describe('MetadataResourceEditPage — the advisory half is untouched (#8057 / #
     openEditor();
     const box = await selectAndOpenCel('offender');
     fireEvent.change(box, { target: { value: 'record.amount > 21' } });
+    await pressSave();
 
     await waitFor(() => expect(mockClient.save).toHaveBeenCalledTimes(1), { timeout: 6000 });
     // The server TOOK it: the draft is clean again, and the only thing holding
@@ -404,6 +430,7 @@ describe('MetadataResourceEditPage — the advisory half is untouched (#8057 / #
     // ("Save is always blocked") reddens on this second call.
     const other = await selectAndOpenCel('bystander');
     fireEvent.change(other, { target: { value: 'record.amount > 14' } });
+    await pressSave();
     await waitFor(() => expect(mockClient.save).toHaveBeenCalledTimes(2), { timeout: 8000 });
     expect(refusalHoldsSave()).toBe(false);
   }, 25000);
@@ -417,16 +444,19 @@ describe('MetadataResourceEditPage — the advisory half is untouched (#8057 / #
     openEditor();
     let box = await selectAndOpenCel('offender');
     fireEvent.change(box, { target: { value: 'record.amount > 21' } });
+    await pressSave();
     await waitFor(() => expect(saveButton()).toBeDisabled(), { timeout: 6000 });
 
     box = await selectAndOpenCel('offender');
     fireEvent.change(box, { target: { value: 'record.amount > 22' } });
+    await pressSave();
     await waitFor(() => expect(mockClient.save).toHaveBeenCalledTimes(2), { timeout: 6000 });
     await waitFor(() => expect(refusalHoldsSave()).toBe(false), { timeout: 6000 });
 
     // A later unrelated edit is not held against the settled refusal.
     const other = await selectAndOpenCel('bystander');
     fireEvent.change(other, { target: { value: 'record.amount > 15' } });
+    await pressSave();
     await waitFor(() => expect(mockClient.save).toHaveBeenCalledTimes(3), { timeout: 8000 });
   }, 25000);
 });
@@ -457,6 +487,7 @@ describe('MetadataResourceEditPage — a refusal is read off the parsed error on
       openEditor();
       const box = await selectAndOpenCel('offender');
       fireEvent.change(box, { target: { value: 'record.amount > 21' } });
+      await pressSave();
       await waitFor(() => expect(mockClient.save).toHaveBeenCalledTimes(1), { timeout: 6000 });
       await waitFor(() => expect(saveButton()).toBeDisabled(), { timeout: 6000 });
 
@@ -489,6 +520,7 @@ describe('MetadataResourceEditPage — a refusal is read off the parsed error on
       openEditor();
       const box = await selectAndOpenCel('offender');
       fireEvent.change(box, { target: { value: 'record.amount > 21' } });
+      await pressSave();
       await waitFor(() => expect(mockClient.save).toHaveBeenCalledTimes(1), { timeout: 6000 });
 
       expect(await screen.findByText('Destructive change detected', {}, { timeout: 6000 })).toBeInTheDocument();
@@ -508,6 +540,7 @@ describe('MetadataResourceEditPage — a refusal is read off the parsed error on
     openEditor();
     const box = await selectAndOpenCel('offender');
     fireEvent.change(box, { target: { value: 'record.amount > 21' } });
+    await pressSave();
     await waitFor(() => expect(mockClient.save).toHaveBeenCalledTimes(1), { timeout: 6000 });
 
     expect(await screen.findByText(message)).toBeInTheDocument();
@@ -531,12 +564,13 @@ describe('MetadataResourceEditPage — a refusal is read off the parsed error on
 describe('MetadataResourceEditPage — the save-status chip while a refusal holds auto-save (#29901)', () => {
   const chipState = () => screen.queryByTestId('save-status')?.getAttribute('data-state') ?? null;
 
-  it('CONTROL: an ordinary dirty edit reads the auto-save state, then saves', async () => {
+  it('CONTROL: an ordinary dirty edit reads the unsaved state, then saves', async () => {
     openEditor();
     const box = await selectAndOpenCel('bystander');
     fireEvent.change(box, { target: { value: 'record.amount > 11' } });
 
-    await waitFor(() => expect(chipState()).toBe('autosave-pending'), { timeout: 6000 });
+    await waitFor(() => expect(chipState()).toBe('unsaved'), { timeout: 6000 });
+    await pressSave();
     await waitFor(() => expect(mockClient.save).toHaveBeenCalledTimes(1), { timeout: 6000 });
     await waitFor(() => expect(chipState()).toBe('saved'), { timeout: 6000 });
   }, 20000);
@@ -547,6 +581,7 @@ describe('MetadataResourceEditPage — the save-status chip while a refusal hold
     openEditor();
     const offenderBox = await selectAndOpenCel('offender');
     fireEvent.change(offenderBox, { target: { value: 'record.amount > 21' } });
+    await pressSave();
     await waitFor(() => expect(mockClient.save).toHaveBeenCalledTimes(1), { timeout: 6000 });
 
     await waitFor(() => expect(chipState()).toBe('held'), { timeout: 6000 });
@@ -562,6 +597,7 @@ describe('MetadataResourceEditPage — the save-status chip while a refusal hold
     expect(chipState()).toBe('held');
     const bystanderBox = await selectAndOpenCel('bystander');
     fireEvent.change(bystanderBox, { target: { value: 'record.amount > 12' } });
+    await pressSave();
     await pastAutoSaveWindow();
     expect(chipState()).toBe('held');
     expect(mockClient.save).toHaveBeenCalledTimes(1);
@@ -573,12 +609,14 @@ describe('MetadataResourceEditPage — the save-status chip while a refusal hold
     openEditor();
     let offenderBox = await selectAndOpenCel('offender');
     fireEvent.change(offenderBox, { target: { value: 'record.amount > 21' } });
+    await pressSave();
     await waitFor(() => expect(chipState()).toBe('held'), { timeout: 6000 });
 
     // Editing the slice the server named releases the hold; the next save is
     // accepted.
     offenderBox = await selectAndOpenCel('offender');
     fireEvent.change(offenderBox, { target: { value: 'record.amount > 22' } });
+    await pressSave();
     await waitFor(() => expect(chipState()).not.toBe('held'), { timeout: 6000 });
     await waitFor(() => expect(mockClient.save).toHaveBeenCalledTimes(2), { timeout: 6000 });
     await waitFor(() => expect(chipState()).toBe('saved'), { timeout: 6000 });

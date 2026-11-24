@@ -2299,7 +2299,7 @@ function MetadataResourceEditPageImpl({
         }
         setIssues(mapped);
         // Hold the refusal against the draft slices the server named, so the
-        // next auto-save cannot re-send the same refused document behind an
+        // next Save cannot re-send the same refused document behind an
         // unrelated edit (`9073cf018`). Paths that do not localise are
         // DROPPED rather than kept as a wildcard: a refusal we cannot tie to a
         // slice must gate nothing at all.
@@ -2669,7 +2669,7 @@ function MetadataResourceEditPageImpl({
   }, [draft, createMode]);
 
   // The write gates — hoisted above the early `loading` return so the
-  // auto-save / keyboard / blocker effects below can read them. The item
+  // keyboard / blocker effects below can read them. The item
   // half (`itemWritable`: the type tier and the served `editable`) and the
   // caller half (`canWrite`) are decided once, next to the designer auto-on
   // effect above.
@@ -2912,6 +2912,7 @@ function MetadataResourceEditPageImpl({
     // Cancel reverts the draft to the last saved snapshot, so the document the
     // server refused no longer exists to be refused.
     setSaveRefusal(null);
+    setPublishRefused(null);
     setEditing(false);
   }
 
@@ -3042,9 +3043,8 @@ function MetadataResourceEditPageImpl({
         <SaveStatusIndicator
           saving={saving}
           isDirty={isDirty}
-          // The same two terms that return the auto-save effect early and
-          // disable Save: while either holds, no save is coming, so the chip
-          // must not promise one. Read, never recomputed.
+          // The same two terms that disable Save: while either holds, no save
+          // is coming, so the chip must not promise one. Read, never recomputed.
           held={inspectorBlocking > 0 || refusalBlocking > 0}
           heldReason={saveTitle}
           lastSavedAt={lastSavedAt}
