@@ -19,25 +19,11 @@
  * callers render those as plain text, not dead links.
  */
 
-import {
-  DESIGNER_SURFACE_PARAM,
-  formatSurfaceParam,
-} from '../../views/metadata-admin/nav-selection.js';
-import { studioMetadataItemPath } from '../../views/studio-design/metadataArea.js';
+import { studioItemPath } from '../../views/studio-design/studioAddress.js';
 
 export interface BuiltArtifact {
   type: string;
   name: string;
-}
-
-function pillarPath(
-  packageId: string,
-  pillar: 'data' | 'automations',
-  surface?: BuiltArtifact,
-): string {
-  const base = `/studio/${encodeURIComponent(packageId)}/${pillar}`;
-  if (!surface) return base;
-  return `${base}?${DESIGNER_SURFACE_PARAM}=${encodeURIComponent(formatSurfaceParam(surface))}`;
 }
 
 export function artifactStudioPath(
@@ -48,15 +34,15 @@ export function artifactStudioPath(
   const name = artifact.name?.trim();
   if (!name) return null;
   switch (artifact.type) {
+    // objectstack#36895 — the item's Studio address (`studioItemPath`): its
+    // pillar today for an object or a flow, its "All metadata" page for the rest.
     case 'object':
-      return pillarPath(packageId, 'data', { type: 'object', name });
     case 'flow':
-      return pillarPath(packageId, 'automations', { type: 'flow', name });
     case 'dashboard':
     case 'page':
     case 'view':
     case 'app':
-      return studioMetadataItemPath(packageId, { type: artifact.type, name });
+      return studioItemPath(packageId, artifact.type, name);
     default:
       return null;
   }

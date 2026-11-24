@@ -24,6 +24,9 @@
  *    the localized header, and a position without one shows the empty cell
  *    (objectstack#25909).
  */
+// Paid at collection, not inside a case's clock (check:test-source-alias).
+import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { render, cleanup, screen, waitFor, fireEvent, within } from '@testing-library/react';
 import '@testing-library/jest-dom';
@@ -138,6 +141,9 @@ function mount(type = 'position', search = '?scope=environment') {
 
 const LOCALE = 'en-US';
 
+/** The table row of `name`: its test id sits on the row's first cell, and `ObjectGrid` draws the row (objectstack#36897). */
+const rowOf = (name: string) => screen.getByTestId(`metadata-row-${name}`).closest('tr') as HTMLElement;
+
 describe('the position list reads its two columns from the server (objectstack#25333)', () => {
   it('asks the position list with include=grants; the permission-set list (control) asks the plain list', async () => {
     mount();
@@ -154,7 +160,7 @@ describe('the position list reads its two columns from the server (objectstack#2
   it('shows the served holder count, and "—" — never 0 — where the server served none', async () => {
     mount();
     expect(await screen.findByRole('columnheader', { name: t('engine.list.col._holderCount', LOCALE) })).toBeInTheDocument();
-    const count = (name: string) => within(screen.getByTestId(`metadata-row-${name}`)).getByTestId('position-holder-count');
+    const count = (name: string) => within(rowOf(name)).getByTestId('position-holder-count');
     await waitFor(() => expect(count('sales_manager')).toHaveTextContent('3'));
     expect(count('support_agent')).toHaveTextContent('—');
     expect(count('support_agent')).toHaveAttribute('title', t('engine.position.holders.unknown', LOCALE));
@@ -165,7 +171,7 @@ describe('the position list reads its two columns from the server (objectstack#2
   it('lists the granted sets as served, each badge the set name alone', async () => {
     mount();
     expect(await screen.findByRole('columnheader', { name: t('engine.list.col._grantedPermissionSets', LOCALE) })).toBeInTheDocument();
-    const cell = within(screen.getByTestId('metadata-row-sales_manager')).getByTestId('position-granted-sets');
+    const cell = within(rowOf('sales_manager')).getByTestId('position-granted-sets');
     const badges = Array.from(cell.querySelectorAll('[data-via]'));
     expect(badges.map((b) => [b.textContent, b.getAttribute('data-via')])).toEqual([
       ['crm_sales_user', 'definition'],
@@ -173,9 +179,9 @@ describe('the position list reads its two columns from the server (objectstack#2
     ]);
     for (const badge of badges) expect(badge).not.toHaveAttribute('title');
 
-    expect(within(screen.getByTestId('metadata-row-support_agent')).getByTestId('position-granted-sets'))
+    expect(within(rowOf('support_agent')).getByTestId('position-granted-sets'))
       .toHaveTextContent(t('engine.position.grants.none', LOCALE));
-    expect(within(screen.getByTestId('metadata-row-auditor')).getByTestId('position-granted-sets')).toHaveTextContent('—');
+    expect(within(rowOf('auditor')).getByTestId('position-granted-sets')).toHaveTextContent('—');
   });
 });
 
@@ -188,7 +194,7 @@ describe('the position list shows the served description (objectstack#25909)', (
     expect(headers[col - 1]).toHaveTextContent(t('engine.list.col.label', LOCALE));
     expect(headers[col + 1]).toHaveTextContent(t('engine.list.col._holderCount', LOCALE));
 
-    const cell = (name: string) => screen.getByTestId(`metadata-row-${name}`).querySelectorAll('td')[col] as HTMLElement;
+    const cell = (name: string) => rowOf(name).querySelectorAll('td')[col] as HTMLElement;
     await waitFor(() =>
       expect(cell('sales_manager')).toHaveTextContent('Leads the regional sales team and approves its forecasts.'),
     );
@@ -204,14 +210,16 @@ describe('the position list shows the served description (objectstack#25909)', (
 describe('the whole row opens the position (objectstack#25333)', () => {
   it('a click on a plain cell opens the position, keeping the scope', async () => {
     mount();
-    const row = await screen.findByTestId('metadata-row-sales_manager');
+    await screen.findByTestId('metadata-row-sales_manager');
+    const row = rowOf('sales_manager');
     fireEvent.click(within(row).getByTestId('position-holder-count'));
     expect(await screen.findByTestId('where')).toHaveTextContent('/apps/setup/metadata/position/sales_manager?scope=environment');
   });
 
   it('control: a click on the Active switch is the switch\'s, and a modified click is the browser\'s', async () => {
     mount();
-    const row = await screen.findByTestId('metadata-row-sales_manager');
+    await screen.findByTestId('metadata-row-sales_manager');
+    const row = rowOf('sales_manager');
     const sw = await screen.findByTestId('catalog-active-sales_manager');
     await waitFor(() => expect(sw).toHaveAttribute('aria-checked', 'true'));
     fireEvent.click(sw);

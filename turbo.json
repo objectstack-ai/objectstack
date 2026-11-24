@@ -829,7 +829,8 @@
         "!coverage/**",
         "!.turbo/**",
         "!**/node_modules/**",
-        "$TURBO_ROOT$/packages/**/*.ts"
+        "$TURBO_ROOT$/packages/**/*.ts",
+        "$TURBO_ROOT$/skills/objectstack-mcp-build/evals/draft-door-procedure.json"
       ]
     },
     "@objectstack/runtime#test:repo": {
