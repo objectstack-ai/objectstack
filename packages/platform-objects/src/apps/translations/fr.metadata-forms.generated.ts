@@ -240,6 +240,10 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Comportement à la suppression",
         helpText: "Ce qui se passe lorsque l’enregistrement référencé est supprimé"
       },
+      "fields.transferBehavior": {
+        label: "Comportement au changement de propriétaire",
+        helpText: "Indique si « Changer de propriétaire » sur l'enregistrement référencé peut aussi déplacer les enregistrements qui pointent vers lui par ce champ"
+      },
       "fields.multiple": {
         label: "Multiple",
         helpText: "Autoriser la sélection de plusieurs enregistrements"
@@ -768,6 +772,10 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       deleteBehavior: {
         label: "Comportement à la suppression",
         helpText: "Ce qui se passe lorsque l’enregistrement référencé est supprimé"
+      },
+      transferBehavior: {
+        label: "Comportement au changement de propriétaire",
+        helpText: "Indique si « Changer de propriétaire » sur l'enregistrement référencé peut aussi déplacer les enregistrements qui pointent vers lui par ce champ"
       },
       relatedListFilter: {
         label: "Filtre de la liste associée",

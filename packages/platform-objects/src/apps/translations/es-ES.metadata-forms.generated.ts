@@ -240,6 +240,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Comportamiento al eliminar",
         helpText: "Qué ocurre cuando se elimina el registro referenciado"
       },
+      "fields.transferBehavior": {
+        label: "Comportamiento al cambiar de propietario",
+        helpText: "Indica si «Cambiar propietario» en el registro referenciado también puede mover los registros que apuntan a él mediante este campo"
+      },
       "fields.multiple": {
         label: "Selección múltiple",
         helpText: "Permitir seleccionar varios registros"
@@ -768,6 +772,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       deleteBehavior: {
         label: "Comportamiento al eliminar",
         helpText: "Qué ocurre cuando se elimina el registro referenciado"
+      },
+      transferBehavior: {
+        label: "Comportamiento al cambiar de propietario",
+        helpText: "Indica si «Cambiar propietario» en el registro referenciado también puede mover los registros que apuntan a él mediante este campo"
       },
       relatedListFilter: {
         label: "Filtro de lista relacionada",

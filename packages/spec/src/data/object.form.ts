@@ -380,6 +380,13 @@ export const objectForm = defineForm({
               { label: 'Cascade (delete children)', value: 'cascade' },
               { label: 'Restrict (block the delete)', value: 'restrict' },
             ] },
+            // #35315 — the Change Owner cascade, beside `deleteBehavior`; the
+            // parse refuses the key on every other type. `helpText` matches the
+            // field form's row (one i18n key per field path).
+            { field: 'transferBehavior', type: 'select', helpText: 'Whether Change Owner on the referenced record can also move the records that point at it through this field', visibleWhen: "data.type in ['lookup','master_detail']", options: [
+              { label: 'None (stay with their owner)', value: 'none' },
+              { label: 'Cascade (offer to move with the referenced record)', value: 'cascade' },
+            ] },
             { field: 'multiple', type: 'boolean', helpText: 'Allow selecting multiple records', visibleWhen: "data.type in ['lookup']" },
 
             // Formula / summary
