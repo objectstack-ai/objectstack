@@ -67,6 +67,8 @@ const ru = {
     autofillCurrencyDiffers: 'Поле «{{field}}» не заполнено: выбранная сумма — {{amount}} в {{from}}, а здесь «{{field}}» указывается в {{to}}. Введите её в {{to}}.',
     autofillSourceNoCurrency: 'Поле «{{field}}» не заполнено: у выбранной суммы {{amount}} не указана валюта, а здесь «{{field}}» указывается в {{to}}. Введите её в {{to}}.',
     autofillNoCurrency: 'Поле «{{field}}» не заполнено: выбранная сумма — {{amount}}, но валюта здесь ещё не выбрана. Выберите валюту, затем введите «{{field}}».',
+    autofillCurrencyUnread: 'Поле «{{field}}» не заполнено: выбранная сумма — {{amount}}, но валюту здесь не удалось прочитать. Проверьте валюту, затем введите «{{field}}».',
+    autofillKept: 'В поле «{{field}}» осталось прежнее значение.',
   },
   common: {
     // objectui#13461 — a disclosure toggle's name (the tree-view node toggle).
