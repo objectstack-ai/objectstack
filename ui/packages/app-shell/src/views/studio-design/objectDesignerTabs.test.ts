@@ -9,6 +9,9 @@
  * and a tool tab writes the value every item page reads (`ItemToolTabs`).
  */
 
+// Paid at collection, not inside a case's clock (check:test-source-alias).
+import '@objectstack/lint';
+import '@object-ui/plugin-editor';
 import { describe, expect, it } from 'vitest';
 import {
   OBJECT_DESIGNER_ALWAYS_FLAT,

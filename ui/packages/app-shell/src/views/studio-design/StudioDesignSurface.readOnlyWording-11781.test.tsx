@@ -15,6 +15,8 @@
  * does not redden this file and a missing row does (`t` echoes a missing key).
  */
 
+// Paid at collection, not inside a case's clock (check:test-source-alias).
+import '@objectstack/lint';
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';

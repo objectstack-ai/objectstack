@@ -30,6 +30,9 @@
  * metadata cache is a hand-rolled `MetadataCtx` value that counts its reads.
  */
 
+// Paid at collection, not inside a case's clock (check:test-source-alias).
+import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, fireEvent, waitFor, cleanup, screen } from '@testing-library/react';
