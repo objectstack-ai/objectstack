@@ -5,7 +5,13 @@ import { SettingsManifestSchema } from '@objectstack/spec/system';
 import { PLATFORM_CAPABILITY_PROVIDERS } from '@objectstack/spec/kernel';
 import { SettingsService } from '../settings-service.js';
 import type { CryptoAdapter } from '../crypto-adapter.js';
-import { aiSettingsManifest, aiTestActionHandler, aiTestEmbedderActionHandler } from './ai.manifest.js';
+import {
+  aiSettingsManifest,
+  aiEmbedderSettingsSpecifiers,
+  withAiEmbedderSection,
+  aiTestActionHandler,
+  aiTestEmbedderActionHandler,
+} from './ai.manifest.js';
 
 /**
  * #8026 — the write-door cases below save a complete `openai` provider config,
@@ -258,9 +264,9 @@ describe('aiSettingsManifest — the log_prompts PII warning is an info_banner',
   });
 });
 
-describe('aiSettingsManifest — embedder section', () => {
+describe('aiEmbedderSettingsSpecifiers — the embedder section the knowledge service contributes', () => {
   it('exposes embedder_provider select with 10 options incl. none + 5 Chinese providers', () => {
-    const f = (aiSettingsManifest.specifiers as any[]).find(
+    const f = (aiEmbedderSettingsSpecifiers as any[]).find(
       (s) => s.key === 'embedder_provider' && s.type === 'select',
     );
     expect(f).toBeDefined();
@@ -275,14 +281,14 @@ describe('aiSettingsManifest — embedder section', () => {
   });
 
   it('marks embedder_api_key as encrypted password', () => {
-    const f = (aiSettingsManifest.specifiers as any[]).find((s) => s.key === 'embedder_api_key');
+    const f = (aiEmbedderSettingsSpecifiers as any[]).find((s) => s.key === 'embedder_api_key');
     expect(f).toBeDefined();
     expect(f.type).toBe('password');
     expect(f.encrypted).toBe(true);
   });
 
   it('exposes embedder test action wired to /api/settings/ai/test_embedder', () => {
-    const f = (aiSettingsManifest.specifiers as any[]).find(
+    const f = (aiEmbedderSettingsSpecifiers as any[]).find(
       (s) => s.type === 'action_button' && s.id === 'test_embedder',
     );
     expect(f).toBeDefined();
@@ -291,6 +297,13 @@ describe('aiSettingsManifest — embedder section', () => {
       method: 'POST',
       url: '/api/settings/ai/test_embedder',
     });
+  });
+
+  it('parses inside the ai manifest it joins, and only joins it once', () => {
+    const joined = withAiEmbedderSection(aiSettingsManifest);
+    expect(() => SettingsManifestSchema.parse(joined)).not.toThrow();
+    expect(joined.specifiers).toHaveLength(aiSettingsManifest.specifiers.length + aiEmbedderSettingsSpecifiers.length);
+    expect(withAiEmbedderSection(joined)).toBe(joined);
   });
 });
 
@@ -363,8 +376,9 @@ describe('aiTestActionHandler — live-call hint carries the cloud boundary (#11
 });
 
 /**
- * #24769 — "Test embedder" is now answered (the handler is in the plugin's
- * default map), and what it answers is a form check: no embedding request is
+ * #24769 — "Test embedder" is now answered (the knowledge service registers
+ * the handler with the embedder section it contributes, #33933), and what it
+ * answers is a form check: no embedding request is
  * sent and no package in this repo replaces it with a live probe. A green
  * answer must say so, and must not name a package whose mounting would make the
  * check live.
@@ -398,13 +412,15 @@ describe('aiTestEmbedderActionHandler — a form check says it is one (#24769)',
 describe('aiSettingsManifest — no provider is presented until one is configured (#31960)', () => {
   const providerSpec = () =>
     (aiSettingsManifest.specifiers as any[]).find((s) => s.key === 'provider' && s.type === 'select');
-  const aiSvc = (env: Record<string, string> = {}, errors: string[] = []) => {
+  // `withEmbedder` registers the page as a deployment that mounts the
+  // knowledge service serves it (`withAiEmbedderSection`, #33933).
+  const aiSvc = (env: Record<string, string> = {}, errors: string[] = [], withEmbedder = false) => {
     const svc = new SettingsService({
       env,
       crypto: new ConfidentialTestAdapter(),
       logger: { error: (m: string) => void errors.push(m) },
     });
-    svc.registerManifest(aiSettingsManifest);
+    svc.registerManifest(withEmbedder ? withAiEmbedderSection(aiSettingsManifest) : aiSettingsManifest);
     return svc;
   };
 
@@ -497,7 +513,7 @@ describe('aiSettingsManifest — no provider is presented until one is configure
     expect(providerSpec().required).toBe(false);
     const parsed = SettingsManifestSchema.parse(aiSettingsManifest) as any;
     expect(parsed.specifiers.find((s: any) => s.key === 'provider').required).toBe(false);
-    const svc = aiSvc();
+    const svc = aiSvc({}, [], true);
     await expect(
       svc.setMany('ai', { embedder_provider: 'openai', embedder_api_key: 'k', embedder_model: 'text-embedding-3-small' }),
     ).resolves.toBeDefined();
