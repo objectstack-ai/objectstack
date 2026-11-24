@@ -1,5 +1,6 @@
 ---
 '@objectstack/platform-objects': patch
+'@objectstack/spec': patch
 ---
 
 feat(platform-objects): built-in tasks and notes, `sys_task` and `sys_note`, in every environment
@@ -22,3 +23,12 @@ task is also shared, with edit access, with its assignee through the declared `s
 sharing rule. Neither links to, grants access to, or derives access from any other record. Default
 views: tasks Assigned to Me (open, by due time), Created by Me and All Tasks (a board by status);
 notes My Notes and All Notes. Attachments are on for both.
+
+Both names join `PLATFORM_OBJECTS_BY_PACKAGE['platform-objects']` in `@objectstack/spec`, so
+validation treats them as platform-provided: an app's navigation entry reaches them with
+`requiresObject` beside `objectName` (`{ type: 'object', objectName: 'sys_task', requiresObject:
+'sys_task' }`), which `defineStack` accepts and the console hides on a kernel without the object.
+Their labels ship in the platform's eleven locales (zh-CN 任务 / 备忘).
+
+Members reach both through a permission set that grants the objects: the platform's member baseline
+grants neither.
