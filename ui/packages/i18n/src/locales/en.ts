@@ -1157,6 +1157,8 @@ const en = {
       aggregateNotCompleted: 'The action did not complete for the selected records. Some records may already have been changed; the list shows their current values when you close this.',
       resultNotConfirmed: ' \u00b7 Not confirmed {{count}}',
       notConfirmedRecords: 'The action did not report on these records. Check their current values:',
+      resultRefused: ' \u00b7 Refused {{count}}',
+      refusedRecords: 'The action refused these records:',
       aggregateUnreadable: 'The action finished, but its result could not be read, so it is not known which records were changed. The list shows their current values when you close this.',
       retry: 'Retry',
       downloadErrorCsv: 'Download error CSV',

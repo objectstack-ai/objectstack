@@ -644,6 +644,8 @@ const pt = {
       aggregateNotCompleted: "A ação não foi concluída para os registros selecionados. Alguns registros podem já ter sido alterados; ao fechar, a lista mostra os valores atuais.",
       resultNotConfirmed: " · Não confirmados {{count}}",
       notConfirmedRecords: "A ação não informou nada sobre estes registros. Verifique os valores atuais:",
+      resultRefused: " · Recusados {{count}}",
+      refusedRecords: "A ação recusou estes registros:",
       aggregateUnreadable: "A ação terminou, mas o resultado não pôde ser lido, então não se sabe quais registros foram alterados. Ao fechar, a lista mostra os valores atuais.",
       retry: "Tentar novamente",
       downloadErrorCsv: "Baixar CSV de erros",

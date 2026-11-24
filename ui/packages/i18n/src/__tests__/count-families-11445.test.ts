@@ -119,6 +119,7 @@ const COUNT_NEUTRAL = {
     'grid.bulk.succeeded',
     'grid.bulk.resultFailed',
     'grid.bulk.resultNotConfirmed',
+    'grid.bulk.resultRefused',
     'calendar.moreEvents',
     'calendar.unscheduled',
     'view.moreViews',

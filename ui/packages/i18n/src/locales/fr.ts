@@ -644,6 +644,8 @@ const fr = {
       aggregateNotCompleted: "L’action ne s’est pas terminée pour les enregistrements sélectionnés. Certains enregistrements ont peut-être déjà été modifiés. À la fermeture, la liste affiche leurs valeurs actuelles.",
       resultNotConfirmed: " · Non confirmés {{count}}",
       notConfirmedRecords: "L’action n’a rien indiqué pour ces enregistrements. Vérifiez leurs valeurs actuelles :",
+      resultRefused: " · Refusés {{count}}",
+      refusedRecords: "L’action a refusé ces enregistrements :",
       aggregateUnreadable: "L’action s’est terminée, mais son résultat n’a pas pu être lu : on ne sait pas quels enregistrements ont été modifiés. À la fermeture, la liste affiche leurs valeurs actuelles.",
       retry: "Réessayer",
       downloadErrorCsv: "Télécharger le CSV d'erreurs",

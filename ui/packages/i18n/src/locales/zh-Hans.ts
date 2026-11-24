@@ -887,6 +887,8 @@ const zh = {
       aggregateNotCompleted: '操作未对所选记录全部完成。部分记录可能已被修改；关闭后列表会显示它们的当前值。',
       resultNotConfirmed: ' · 未确认 {{count}}',
       notConfirmedRecords: '操作未报告这些记录的结果，请检查它们的当前值：',
+      resultRefused: ' · 被拒绝 {{count}}',
+      refusedRecords: '操作拒绝了以下记录：',
       aggregateUnreadable: '操作已完成，但无法读取其结果，因此不知道哪些记录被修改了。关闭后列表会显示它们的当前值。',
       retry: '重试',
       downloadErrorCsv: '下载错误 CSV',

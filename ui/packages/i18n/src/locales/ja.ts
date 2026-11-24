@@ -631,6 +631,8 @@ const ja = {
       aggregateNotCompleted: "選択したレコードに対する操作は完了しませんでした。一部のレコードはすでに変更されている可能性があります。閉じると、一覧に現在の値が表示されます。",
       resultNotConfirmed: " · 未確認 {{count}}",
       notConfirmedRecords: "これらのレコードについて操作からの報告がありません。現在の値を確認してください:",
+      resultRefused: " · 拒否 {{count}}",
+      refusedRecords: "操作はこれらのレコードを拒否しました:",
       aggregateUnreadable: "操作は終了しましたが、結果を読み取れなかったため、どのレコードが変更されたかは不明です。閉じると、一覧に現在の値が表示されます。",
       retry: "再試行",
       downloadErrorCsv: "エラー CSV をダウンロード",
