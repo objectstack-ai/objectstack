@@ -52,6 +52,30 @@ export const Contact = ObjectSchema.create({
 });
 ```
 
+A group can also **list its own members and their order** with `fields`. Written, the list wins: the group shows those fields in the list's order, whatever order the object declares them in, so a section can be reordered without moving any field (and without changing a list view's default columns). A field the list leaves out but whose own `group` names the group is shown after the listed ones; a group without `fields` keeps the rule above. `field.group` is the older spelling of the same membership and is still read.
+
+{/* os:check */}
+```ts
+import { ObjectSchema, Field } from '@objectstack/spec/data';
+
+export const Contact = ObjectSchema.create({
+  name: 'showcase_contact',
+  sharingModel: 'private',
+  label: 'Contact',
+  fieldGroups: [
+    { key: 'contact', label: 'Contact', fields: ['email', 'name'] }, // Email first, then Full name
+    { key: 'status',  label: 'Status',  fields: ['stage'] },
+  ],
+  fields: {
+    name:  Field.text({ label: 'Full name' }),
+    email: Field.email({ label: 'Email' }),
+    stage: Field.select({ label: 'Stage', options: [{ label: 'New', value: 'new' }] }),
+  },
+});
+```
+
+The two spellings must agree. The object is refused when a field one group lists names another group in its own `group`, when two groups list the same field, when one list repeats a name, and when a group that places a related list (`relatedList`) also lists `fields`. A listed name the object does not declare is skipped, so deleting a field never makes the object unparseable, and `os lint` warns about it as **`field-group-member-unknown`**. In Studio, dragging a field inside a group writes that group's `fields` list.
+
 A group can also hide itself: `visibleWhen` on a `fieldGroups` entry is a CEL predicate over `record` (plus `previous`, and `parent` on a master-detail line item), and it gates the **whole** section, header included. The gate is **fail-closed**: when the predicate is false, or cannot evaluate at all, the section disappears. `os validate`, `os build` and the metadata save door check it with the same rules as a field's own `visibleWhen`, so a predicate that names a field the object does not have (`record.stauts == 'won'`) is refused as **`expression-invalid`** at the group's key instead of silently hiding the section on every form.
 
 **2. Layout grouping — form `sections` (on a view).** A specific form's explicit arrangement: which fields, which section, how many columns, collapsible. It can **inherit** the object's declared groups as its default or **override** them per form.

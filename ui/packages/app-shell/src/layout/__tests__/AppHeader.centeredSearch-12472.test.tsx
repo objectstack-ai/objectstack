@@ -379,3 +379,25 @@ describe('the phone bar spends no room on group dividers (objectstack#34596)', (
     expect(leftOf()).toContainElement(title);
   });
 });
+
+describe('the docs portal bar is the home bar with a 「/ Documentation」 crumb (objectstack#35424)', () => {
+  it('centers the search like Home and names the portal after the product name, linking to its index', () => {
+    mount({ pathname: '/docs', variant: 'docs' });
+
+    const trigger = screen.getByTestId(DESKTOP);
+    expect(rootOf().children).toHaveLength(3);
+    expect(rootOf().children[1]).toContainElement(trigger);
+    // Home's wider field, named for what the palette finds.
+    expect(classesOf(trigger)).toContain('w-80');
+
+    const crumb = screen.getByTestId('app-bar-docs-crumb');
+    expect(leftOf()).toContainElement(crumb);
+    expect(crumb).toHaveAttribute('href', '/docs');
+    expect(crumb).toHaveTextContent('Documentation');
+  });
+
+  it('CONTROL: the home bar draws no docs crumb', () => {
+    mount({ pathname: '/home', variant: 'home' });
+    expect(screen.queryByTestId('app-bar-docs-crumb')).toBeNull();
+  });
+});

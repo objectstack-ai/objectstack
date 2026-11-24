@@ -193,7 +193,7 @@ const TYPES: ReadonlyArray<{ type: string; field: string; label: string }> = [
   { type: 'multiselect', field: 'tags', label: 'Tags' },
 ];
 
-/** A fresh row on `label`'s column, still on the seed operator (`equals`). */
+/** A fresh row on `label`'s column, still on its seed operator (`equals`; `contains` on a multi-value column). */
 async function freshRowOn(label: string) {
   const utils = renderWidget('');
   await addRow();
@@ -226,7 +226,20 @@ describe('WRITER — each operator on each offered field type writes `$empty` (o
     expectAcceptedByTheFaces(stored);
   });
 
-  it.each(TYPES)('CONTROL: the seed "equals" row on a $type column is untouched', async ({ field, label }) => {
+  // A multi-value column no longer seeds "equals": the server refuses equality on
+  // its JSON column (objectstack#35559), so the shared builder seeds "contains"
+  // there, which writes nothing until a member is picked. The equality CONTROL
+  // therefore runs on the single-value columns, and the multi-value seed is
+  // pinned on its own below.
+  const SINGLE_VALUE_TYPES = TYPES.filter(({ type }) => type !== 'multiselect');
+
+  it('CONTROL: a fresh row on a multiselect column seeds "Contains" and writes nothing yet', async () => {
+    const { onChange } = await freshRowOn('Tags');
+    await waitFor(() => expect(screen.getAllByRole('combobox')[1]).toHaveTextContent('Contains'));
+    expect(lastEmitted(onChange)).toBe('');
+  });
+
+  it.each(SINGLE_VALUE_TYPES)('CONTROL: the seed "equals" row on a $type column is untouched', async ({ field, label }) => {
     // Green before and after: the same harness and the same faces answer
     // "accepted" for an arm this change does not touch, so a red operator row
     // above is about the operator and not about the harness.

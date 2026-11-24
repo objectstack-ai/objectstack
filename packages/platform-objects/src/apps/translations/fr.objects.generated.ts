@@ -176,7 +176,7 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
       },
       ban_user: {
         label: "Bannir l’utilisateur",
-        description: "Bannir cet utilisateur ? Il sera déconnecté, ne pourra plus se connecter et ses clés API seront refusées jusqu’à la levée du bannissement, tout comme ses jetons d’accès OAuth et leurs renouvellements. Les clés fonctionnent de nouveau après la levée du bannissement.",
+        description: "Bannir cet utilisateur ? Il sera déconnecté, ne pourra plus se connecter et ses clés API seront refusées jusqu’à la levée du bannissement, tout comme ses jetons d’accès OAuth et leurs renouvellements. Les clés fonctionnent de nouveau après la levée du bannissement. Le bannissement suspend aussi les comptes de service IA dont il est responsable, désactive les applications OAuth qu'il a enregistrées et révoque les identifiants SCIM qu'il a émis ; la levée du bannissement ne rétablit rien de tout cela.",
         successMessage: "Utilisateur banni",
         params: {
           banReason: {
@@ -284,6 +284,11 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
           }
         }
       },
+      remove_sso_user: {
+        label: "Remove Pending User",
+        confirmText: "Remove this person, who has not signed in yet, and cancel their invitation? If they have signed in meanwhile, or the hosting organization cannot be reached, no one is removed.",
+        successMessage: "Pending user removed"
+      },
       set_user_password: {
         label: "Définir le mot de passe",
         successMessage: "Mot de passe mis à jour",
@@ -322,6 +327,11 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
             helpText: "L’utilisateur dont cette personne relève. Le serveur refuse un responsable extérieur à son organisation, une auto-attribution et un lien qui fermerait la chaîne hiérarchique ou la rendrait trop profonde."
           }
         }
+      },
+      remove_user_manager: {
+        label: "Retirer le responsable",
+        confirmText: "Retirer le responsable de cet utilisateur ? Il ne rendra compte à personne tant qu’un responsable n’est pas de nouveau défini ; le routage des approbations et la portée d’enregistrements own_and_reports suivent ce changement.",
+        successMessage: "Responsable retiré"
       },
       list_platform_admins: {
         label: "Administrateurs de la plateforme",
@@ -486,6 +496,10 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
       revoke_reason: {
         label: "Motif de la révocation",
         help: "Pourquoi la session a été révoquée (idle_timeout, absolute_max, concurrent_cap, user_revoked, admin, organization_membership_ended, admin_password_reset, password_reset, …)."
+      },
+      sso_provider_id: {
+        label: "Fournisseur SSO",
+        help: "Le fournisseur SSO par lequel cette session a été ouverte, le cas échéant. Supprimer ce fournisseur met fin à la session. Géré par le système."
       },
       active_organization_id: {
         label: "Organisation active"
@@ -4414,6 +4428,202 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
         emptyState: {
           title: "Aucun taux de change pour le moment",
           message: "Ajoutez une ligne par devise pour chaque date à laquelle son taux change, par exemple une ligne par devise au début de chaque mois."
+        }
+      }
+    }
+  },
+  sys_unit: {
+    label: "Unit of Measure",
+    pluralLabel: "Units of Measure",
+    description: "The organization's own units of measure, beside the standard units every organization has — one row per unit, named by a code in the organization namespace.",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      code: {
+        label: "Code",
+        help: "The code a quantity stores, in exact uppercase: letters, digits and underscores, at least 4 characters or containing an underscore (BOX_12, JIN1). Standard codes such as KGM and H87 are available to every organization and are not added here. The code cannot be changed after the unit is created."
+      },
+      label: {
+        label: "Label",
+        help: "The name shown beside a quantity in this unit, in the organization's own language."
+      },
+      dimension: {
+        label: "Dimension",
+        help: "What the unit measures. A package unit (a box, a bag) has no fixed ratio. The dimension cannot be changed after the unit is created.",
+        options: {
+          mass: "Mass",
+          length: "Length",
+          area: "Area",
+          volume: "Volume",
+          time: "Time",
+          count: "Count",
+          package: "Package"
+        }
+      },
+      ratio: {
+        label: "Ratio",
+        help: "1 of this unit = Ratio × the base unit of its dimension (mass KGM, length MTR, area MTK, volume MTQ, time SEC, count H87). Example: a unit of half a kilogram in the mass dimension has ratio 0.5. A package unit takes no ratio. Changing the ratio affects only records saved afterwards; records already saved keep the quantity and conversion they were saved with. A changed specification is a new unit, not an edited ratio."
+      },
+      decimal_places: {
+        label: "Decimal Places",
+        help: "How many decimal places a quantity in this unit displays with by default. It never rounds a stored value, and a field's own decimal places still limit what is stored."
+      },
+      retired: {
+        label: "Retired",
+        help: "A retired unit stays on file so its code can never be reused, and records that already use it keep showing it. New records cannot use a retired unit. Retiring cannot be undone."
+      }
+    },
+    _views: {
+      all_units: {
+        label: "All",
+        description: "1 of this unit = Ratio × the base unit of its dimension (mass KGM, length MTR, area MTK, volume MTQ, time SEC, count H87). Example: a unit of half a kilogram in the mass dimension has ratio 0.5. A package unit takes no ratio.",
+        emptyState: {
+          title: "No units of measure yet",
+          message: "Standard units such as kilogram (KGM) and piece (H87) are available already. Add a unit here only when your organization needs one they do not cover."
+        }
+      }
+    },
+    _validations: {
+      unit_code_organization_namespace: {
+        message: "A unit code is uppercase letters, digits and underscores, at least 4 characters long or containing an underscore (for example BOX_12 or JIN1). Shorter codes are reserved for the standard units."
+      },
+      unit_code_immutable: {
+        message: "A unit's code cannot be changed after it is created. Create a new unit with the new code instead."
+      },
+      unit_dimension_immutable: {
+        message: "A unit's dimension cannot be changed after it is created. Create a new unit with the new dimension instead."
+      },
+      unit_ratio_required: {
+        message: "Enter the ratio to the base unit of this dimension."
+      },
+      unit_package_has_no_ratio: {
+        message: "A package unit has no ratio: how much a package holds belongs to the item, not to the unit. Clear the ratio."
+      },
+      unit_retired_one_way: {
+        message: "A retired unit cannot be brought back. Create a unit with a new code instead."
+      }
+    }
+  },
+  sys_work_calendar: {
+    label: "Calendrier de travail",
+    pluralLabel: "Calendriers de travail",
+    description: "Calendriers de travail : les horaires hebdomadaires, le fuseau horaire dans lequel ils s’appliquent et jusqu’à quand les jours fériés sont tenus à jour. Les échéances comptées en temps ouvré les lisent.",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      code: {
+        label: "Code",
+        help: "Code machine par lequel les formules, les escalades d’approbation et les packages désignent ce calendrier, par ex. cn_standard : lettres minuscules, chiffres et traits de soulignement."
+      },
+      name: {
+        label: "Nom"
+      },
+      timezone: {
+        label: "Fuseau horaire",
+        help: "Fuseau horaire IANA dans lequel s’appliquent les plages de travail, par ex. Asia/Shanghai. Le formulaire de création s’ouvre sur le fuseau horaire de l’organisation (Paramètres → Localisation), et une création qui l’omet reçoit le même fuseau."
+      },
+      is_default: {
+        label: "Par défaut",
+        help: "Le calendrier utilisé par une échéance qui n’en désigne aucun. Un par organisation."
+      },
+      maintained_from: {
+        label: "Tenu à jour depuis",
+        help: "Première date à partir de laquelle les jours fériés et les jours de récupération sont saisis. Un calcul qui exige une date antérieure est refusé."
+      },
+      maintained_through: {
+        label: "Tenu à jour jusqu’au",
+        help: "Dernière date jusqu’à laquelle les jours fériés et les jours de récupération sont saisis. Un calcul qui exige une date ultérieure est refusé : saisissez les jours fériés de l’année suivante, puis reportez cette date."
+      },
+      monday_periods: {
+        label: "Lundi",
+        help: "Plages de travail ce jour-là dans le fuseau horaire du calendrier, au format HH:mm-HH:mm séparées par des virgules, par ex. 09:00-12:00, 13:00-18:00. Une plage se termine après son début, le même jour ; 24:00 est la fin la plus tardive. Laissez vide pour un jour non travaillé."
+      },
+      tuesday_periods: {
+        label: "Mardi",
+        help: "Plages de travail ce jour-là dans le fuseau horaire du calendrier, au format HH:mm-HH:mm séparées par des virgules, par ex. 09:00-12:00, 13:00-18:00. Une plage se termine après son début, le même jour ; 24:00 est la fin la plus tardive. Laissez vide pour un jour non travaillé."
+      },
+      wednesday_periods: {
+        label: "Mercredi",
+        help: "Plages de travail ce jour-là dans le fuseau horaire du calendrier, au format HH:mm-HH:mm séparées par des virgules, par ex. 09:00-12:00, 13:00-18:00. Une plage se termine après son début, le même jour ; 24:00 est la fin la plus tardive. Laissez vide pour un jour non travaillé."
+      },
+      thursday_periods: {
+        label: "Jeudi",
+        help: "Plages de travail ce jour-là dans le fuseau horaire du calendrier, au format HH:mm-HH:mm séparées par des virgules, par ex. 09:00-12:00, 13:00-18:00. Une plage se termine après son début, le même jour ; 24:00 est la fin la plus tardive. Laissez vide pour un jour non travaillé."
+      },
+      friday_periods: {
+        label: "Vendredi",
+        help: "Plages de travail ce jour-là dans le fuseau horaire du calendrier, au format HH:mm-HH:mm séparées par des virgules, par ex. 09:00-12:00, 13:00-18:00. Une plage se termine après son début, le même jour ; 24:00 est la fin la plus tardive. Laissez vide pour un jour non travaillé."
+      },
+      saturday_periods: {
+        label: "Samedi",
+        help: "Plages de travail ce jour-là dans le fuseau horaire du calendrier, au format HH:mm-HH:mm séparées par des virgules, par ex. 09:00-12:00, 13:00-18:00. Une plage se termine après son début, le même jour ; 24:00 est la fin la plus tardive. Laissez vide pour un jour non travaillé."
+      },
+      sunday_periods: {
+        label: "Dimanche",
+        help: "Plages de travail ce jour-là dans le fuseau horaire du calendrier, au format HH:mm-HH:mm séparées par des virgules, par ex. 09:00-12:00, 13:00-18:00. Une plage se termine après son début, le même jour ; 24:00 est la fin la plus tardive. Laissez vide pour un jour non travaillé."
+      }
+    },
+    _views: {
+      all_calendars: {
+        label: "Tous",
+        emptyState: {
+          title: "Aucun calendrier de travail pour le moment",
+          message: "Ajoutez un calendrier avec ses horaires hebdomadaires et marquez-en un comme calendrier par défaut, puis saisissez ses jours fériés et ses jours de récupération."
+        }
+      },
+      needs_maintenance: {
+        label: "À mettre à jour",
+        emptyState: {
+          title: "Tous les calendriers sont tenus à jour à l’avance",
+          message: "Un calendrier apparaît ici lorsque ses jours fériés s’arrêtent dans les 60 prochains jours ; les échéances au-delà de cette date sont refusées."
+        }
+      }
+    },
+    _validations: {
+      work_calendar_code_shape: {
+        message: "Le code doit commencer par une lettre minuscule et ne contenir que des lettres minuscules, des chiffres et des traits de soulignement, par ex. cn_standard."
+      }
+    }
+  },
+  sys_work_calendar_exception: {
+    label: "Exception de calendrier",
+    pluralLabel: "Exceptions de calendrier",
+    description: "Dérogations datées à un calendrier de travail : jours fériés, jours de récupération et fermetures. Un jour travaillé porte ses plages de travail complètes.",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      calendar: {
+        label: "Calendrier"
+      },
+      date: {
+        label: "Date"
+      },
+      kind: {
+        label: "Type",
+        help: "Jour chômé : toute la date est chômée. Jour travaillé : la date est travaillée selon les plages ci-dessous, par ex. un jour de récupération.",
+        options: {
+          off: "Jour chômé",
+          on: "Jour travaillé"
+        }
+      },
+      periods: {
+        label: "Plages",
+        help: "Pour un jour travaillé, toutes les heures de cette date ; elles ne sont jamais reprises du jour de la semaine. Plages de travail ce jour-là dans le fuseau horaire du calendrier, au format HH:mm-HH:mm séparées par des virgules, par ex. 09:00-12:00, 13:00-18:00. Une plage se termine après son début, le même jour ; 24:00 est la fin la plus tardive. Laissez vide pour un jour non travaillé."
+      },
+      note: {
+        label: "Note",
+        help: "Ce qu’est la date, par ex. la fête nationale ou un jour de récupération pour la fête du Printemps."
+      }
+    },
+    _views: {
+      all_exceptions: {
+        label: "Tous",
+        emptyState: {
+          title: "Aucune exception de calendrier pour le moment",
+          message: "Ajoutez une ligne par jour férié ou jour de récupération, ou importez-en une année depuis un fichier."
         }
       }
     }

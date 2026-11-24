@@ -27,6 +27,12 @@
 import type { ExecutionContext } from '../kernel/execution-context.zod.js';
 import type { ErrorCode } from '../api/error-code-ledger.zod.js';
 import type { FlowInnerRefusal, ResumeFailureDetails } from '../api/automation-api.zod.js';
+import type {
+  WORK_CALENDAR_INVALID_CODE,
+  WORK_CALENDAR_NOT_MAINTAINED_CODE,
+  WORK_CALENDAR_UNRESOLVED_CODE,
+  WorkCalendarUnresolvedReason,
+} from '../data/work-calendar.js';
 
 /**
  * Lifecycle states of an approval request, in the order the
@@ -65,6 +71,16 @@ export const APPROVAL_STATUSES = [
 
 /** Lifecycle state of an approval request — derived from {@link APPROVAL_STATUSES}. */
 export type ApprovalStatus = (typeof APPROVAL_STATUSES)[number];
+
+/**
+ * The most record ids one {@link IApprovalService.getRecordLocks} call — and
+ * one `POST {basePath}/approvals/records/:object/locks` request — carries. A
+ * longer list is refused whole (`400 VALIDATION_ERROR`), never truncated; a
+ * caller with more rows sends them in batches under it. The same cap as the
+ * record-grained explain batch, so a list page that asks both questions splits
+ * its rows the same way.
+ */
+export const APPROVAL_RECORD_LOCKS_MAX_RECORD_IDS = 200;
 
 /**
  * Authored English display label for each {@link APPROVAL_STATUSES} entry —
@@ -299,11 +315,33 @@ export interface ApprovalRequestRow {
    */
   payload_labels?: Record<string, string>;
   /**
-   * SLA deadline, when the node config carries `escalation.timeoutHours`:
-   * `created_at + timeoutHours`. Display-only for now — automatic escalation
-   * needs a scheduler pass and is not yet wired.
+   * SLA deadline, when the node config carries `escalation.timeoutHours`: the
+   * instant the escalation sweep acts on, computed by the same function the
+   * sweep uses. Under `escalation.clock: 'wall_clock'` it is `created_at +
+   * timeoutHours` elapsed hours; under `'working_time'` it is `timeoutHours`
+   * working hours after `created_at` on the escalation's working calendar,
+   * recomputed on every read (ADR-0157 D12). Absent when the calendar cannot
+   * count it; {@link ApprovalRequestRow.sla_due_refusal} then says why.
    */
   sla_due_at?: string;
+  /**
+   * [ADR-0157 D9] Why a `working_time` escalation has no `sla_due_at`: its
+   * working calendar cannot count the deadline. The sweep does not escalate the
+   * request and tries again on its next pass, so once an administrator fixes
+   * the calendar the deadline returns with no other step. `code` is the
+   * calendar refusal's ledger code; `reason` (on `ERR_WORK_CALENDAR_UNRESOLVED`)
+   * says which resolution step failed; `date` (on
+   * `ERR_WORK_CALENDAR_NOT_MAINTAINED`) is the day the calendar is not
+   * maintained for; `message` is the refusal's own English sentence. Absent
+   * whenever `sla_due_at` is present, and on every `wall_clock` escalation.
+   */
+  sla_due_refusal?: {
+    code: typeof WORK_CALENDAR_UNRESOLVED_CODE | typeof WORK_CALENDAR_NOT_MAINTAINED_CODE | typeof WORK_CALENDAR_INVALID_CODE;
+    reason?: WorkCalendarUnresolvedReason;
+    calendar?: string;
+    date?: string;
+    message: string;
+  };
   /**
    * The owning flow's approval steps in graph order, for progress display
    * (resolved on single-request reads when the automation engine is
@@ -644,6 +682,12 @@ export interface ApprovalActionRow {
 export interface ApprovalDecisionInput {
   decision: 'approve' | 'reject';
   actorId: string;
+  /**
+   * The decision's comment, recorded on the `sys_approval_action` audit row.
+   * A REJECT must carry it as a non-blank string — its reason; `decide()`
+   * refuses a reject whose comment is missing, blank or not a string with
+   * `400 VALIDATION_ERROR` before any write. An approve keeps it optional.
+   */
   comment?: string;
   /**
    * File references (already stored via the storage service) to attach to this
@@ -1087,9 +1131,44 @@ export interface IApprovalService {
   ): Promise<{ locked: boolean } | null>;
 
   /**
+   * **Are these records held by a locking approval?** — {@link getRecordLock}
+   * for a page of rows of one object, in one call, so a list that must know
+   * the lock before it opens a cell editor asks once per page and never once
+   * per row.
+   *
+   * Entry `i` of the answer answers `recordIds[i]` with exactly what
+   * {@link getRecordLock} answers for that id: `{ locked }` when the caller
+   * can read the record, `null` when it cannot or when it does not exist,
+   * ⛔ never an entry that tells the two apart. The same judgement, off the
+   * same snapshot, the record-lock `beforeUpdate` hook enforces. A repeated id
+   * is answered at each of its positions. A caller refused the object's read
+   * outright is refused the same way for every id.
+   *
+   * At most {@link APPROVAL_RECORD_LOCKS_MAX_RECORD_IDS} ids per call; a caller
+   * with more pages under the cap.
+   *
+   * **Optional, and its absence is loud:** a door probes for presence and
+   * answers `501`, never a guess and never one {@link getRecordLock} per id.
+   *
+   * @param object - The target object's name
+   * @param recordIds - The target records' ids, at least one
+   * @returns One entry per id, in order
+   */
+  getRecordLocks?(
+    object: string,
+    recordIds: readonly string[],
+    context: ExecutionContext,
+  ): Promise<Array<{ locked: boolean } | null>>;
+
+  /**
    * Record a decision on a node-driven request. Honours the node's
    * `unanimous` behaviour, finalises the request when satisfied, and resumes
    * the owning flow run down the matching `approve` / `reject` edge.
+   *
+   * A reject carries its reason: one whose `comment` is missing, blank or not
+   * a string is refused with `400 VALIDATION_ERROR` before anything is read
+   * or written ({@link ApprovalDecisionInput.comment}). An approve keeps its
+   * comment optional.
    */
   decide(requestId: string, input: ApprovalDecisionInput, context: ExecutionContext): Promise<ApprovalDecisionResult>;
 

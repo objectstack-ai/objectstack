@@ -6,6 +6,7 @@
 #   scripts/pm/os-verify-lock.sh -- pnpm --filter @objectstack/core test
 #   scripts/pm/os-verify-lock.sh --status        # holder, how long it has held, the queue,
 #                                                # and whether each recorded process still exists
+#   scripts/pm/os-verify-lock.sh --depth         # arrival depth vs LOCK_DEPTH_HOLD: exit 0 go, 1 wait
 #   scripts/pm/os-verify-lock.sh --show-budget   # the acquisition budget this call would use
 #   scripts/pm/os-verify-lock.sh --self-test     # verify this script
 #
@@ -19,7 +20,8 @@
 # `--status` is the one mode with an exit code of its own: 3 means the liveness
 # control at the foot of its output failed, so it printed no reading at all
 # rather than one it cannot stand behind. It takes no lock, so 99 is not
-# something it can ever mean.
+# something it can ever mean. `--depth` shares that 3 and adds 0 (go) and 1
+# (wait) -- see `mode_depth`.
 #
 # A host with no usable `flock` runs in DECLARED UNLOCKED MODE (see the block
 # below): the command runs and its own exit code passes through, so 99 keeps
@@ -612,7 +614,23 @@ queue_usable() {
   [[ -w "$QUEUE_DIR" ]]
 }
 
-# ticket file: "<pid> <starttime> <arrival-epoch> <label>"
+# ticket file: "<pid> <starttime> <taken-epoch> <label>"
+#
+# ⭐ THE PLACE IS THE FILENAME, NOT THE THIRD FIELD (#36532). The queue is
+# ordered by the filename's sub-second arrival prefix and nothing else, so that
+# prefix is the place, and a resumed slot keeps it by keeping its file. The
+# third field is the epoch at which the CALL NOW BEHIND THE RECORD took it: for
+# a fresh ticket that is its arrival, for a resumed slot it is the resume. That
+# is the clock the waiter-age bound below must run on, because what the bound
+# catches is a call that outlived its own budget. It used to carry the original
+# arrival forward on resume, which read every resumer as over-age a few minutes
+# into its second wait; the next scan deleted the ticket and re-minted the
+# caller at the back -- so the call that had waited longest was the one that
+# never acquired. Writing the resume time into the FIELD, rather than teaching
+# the reader a new one, also holds against an older copy of this script in a
+# sibling worktree: every copy shares the queue directory, and every copy
+# already ages a live ticket from this field. The original arrival, where a
+# reader wants it, is read back from the filename (`ticket_arrival_s`).
 #
 # A PARKED slot writes pid 0 -- there is no process behind it, which is the
 # whole point -- so pid 0 is what tells the two kinds apart. It is not a value a
@@ -695,8 +713,8 @@ ticket_state() {
     # bound below is the same one every other parked place is held to.
     #
     # This shape carries no relinquish time -- the field holds the dead
-    # process's real start time -- so it ages from ARRIVAL, the shorter of the
-    # two windows. Stated rather than fixed, because the direction is the safe
+    # process's real start time -- so it ages from when that dead call TOOK the
+    # ticket (its arrival, or its resume), the shorter of the two windows. Stated rather than fixed, because the direction is the safe
     # one: such a place expires EARLIER than a politely parked one, never later,
     # so the worst case is a caller sent to the back, never a line-cut that
     # outlives its bound. It is also transient in practice -- SIGTERM (what the
@@ -771,29 +789,47 @@ slot_ticket_path() {
   [[ -n "$out" ]] && printf '%s' "$out"
 }
 
+# The epoch second a ticket's PLACE was taken at, read from its filename -- the
+# one part of a record that nothing rewrites. The prefix is `now_stamp`'s
+# zero-padded sub-second count, whose resolution is the host's (microseconds
+# from `EPOCHREALTIME`, nanoseconds from `date +%s%N`), so the seconds are its
+# leading ten significant digits rather than a fixed division. A prefix too
+# short to carry an epoch (a hand-made fixture) answers nothing, and callers
+# fall back to the record's own field.
+ticket_arrival_s() {
+  local name="${1##*/}" prefix
+  prefix="${name%%-*}"
+  case "$prefix" in '' | *[!0-9]*) return 1 ;; esac
+  prefix="${prefix#"${prefix%%[!0]*}"}"
+  ((${#prefix} >= 13)) || return 1
+  printf '%s' "${prefix:0:10}"
+}
+
 take_ticket() {
-  local label="$1" start existing pid0 start0 stamp0
+  local label="$1" start existing now0 arrived0
   start="$(proc_starttime "$$" 2> /dev/null || true)"
 
   # Resume a place kept on an earlier foreground call, if there is one and it
-  # has not aged out. The arrival stamp is read back from the ticket and
-  # written again unchanged: that field is the place, so re-stamping it here
-  # would silently send the caller to the back while reporting a resume.
+  # has not aged out. The FILE is kept, because its name is the place; the
+  # record inside is rewritten for the call now behind it, taken-time included
+  # -- see the ticket-format block above for why carrying the original arrival
+  # forward in that field cost the resumer the very place it came back for.
   if [[ -n "$SLOT_SLUG" ]]; then
     existing="$(slot_ticket_path "$SLOT_SLUG")"
     if [[ -n "$existing" && "$(ticket_state "$existing")" != dead ]]; then
-      read -r pid0 start0 stamp0 _ < "$existing" 2> /dev/null || stamp0=''
-      case "$stamp0" in
+      # No clock: carry the record's own field forward rather than refuse the
+      # resume -- the place is worth more than the freshness of its age.
+      now0="$(now_s 2> /dev/null)" || read -r _ _ now0 _ < "$existing" 2> /dev/null || now0=''
+      case "$now0" in
         '' | *[!0-9]*) ;;
         *)
-          if printf '%s %s %s %s\n' "$$" "$start" "$stamp0" "$label" > "$existing" 2> /dev/null; then
+          if printf '%s %s %s %s\n' "$$" "$start" "$now0" "$label" > "$existing" 2> /dev/null; then
             TICKET="$existing"
-            local kept
-            kept="$(now_s 2> /dev/null)" || kept=''
-            case "$kept" in
-              '' | *[!0-9]*) log "resumed slot '${SLOT_SLUG}' — keeping the place it already held" ;;
-              *) log "resumed slot '${SLOT_SLUG}' — keeping the place it took $(human_s $((kept - stamp0))) ago" ;;
-            esac
+            if arrived0="$(ticket_arrival_s "$existing")"; then
+              log "resumed slot '${SLOT_SLUG}' — keeping the place it took $(human_s $((now0 - arrived0))) ago"
+            else
+              log "resumed slot '${SLOT_SLUG}' — keeping the place it already held"
+            fi
             return 0
           fi
           ;;
@@ -1795,9 +1831,18 @@ not_measured_note() {
   log "    If an ablation or a mutation was in flight, its restore is YOUR trap, not this"
   log "    wrapper's: \`trap '<restore>' EXIT INT TERM\` — a call killed mid-mutation leaves a"
   log "    mutated tree, and the next gate run on it returns a well-formed wrong answer."
-  if [[ -n "$SLOT_SLUG" ]]; then
+  # The promise is made only when there is a ticket on disk for the EXIT trap
+  # to park. Without one -- removed while this call waited, or never taken on
+  # the unordered fallback -- the next call with this name finds nothing and
+  # mints a new place at the back, and being told otherwise is how a caller
+  # comes back expecting a place that no longer exists.
+  if [[ -n "$SLOT_SLUG" && -n "$TICKET" && -f "$TICKET" ]]; then
     log "    Your place is KEPT as slot '${SLOT_SLUG}'. Re-run with the same OS_VERIFY_LOCK_SLOT"
     log "    to resume it instead of starting again at the back of the queue."
+  elif [[ -n "$SLOT_SLUG" ]]; then
+    log "    ⚠ Your place as slot '${SLOT_SLUG}' was LOST: this call holds no ticket to park"
+    log "    (it was removed while the call waited, or the queue was unusable). The next call"
+    log "    with the same OS_VERIFY_LOCK_SLOT starts a NEW place at the back of the queue."
   else
     log "    Set OS_VERIFY_LOCK_SLOT=<name> to keep your place across calls: come back with the"
     log "    same name and you resume where you were, rather than behind everyone who arrived"
@@ -2288,6 +2333,8 @@ usage:
   os-verify-lock.sh -c '<shell command>'    run it under the shared verify lock
   os-verify-lock.sh -- <argv...>            same, without a shell
   os-verify-lock.sh --status                who holds the lock, for how long, who is queued
+  os-verify-lock.sh --depth                 arrival depth vs LOCK_DEPTH_HOLD before the next
+                                            dispatch: exit 0 go, 1 wait, 3 cannot read
   os-verify-lock.sh --show-budget           the acquisition budget this call would use
   os-verify-lock.sh --report                aggregate the ledger: waits, holds, queue depth,
                                             which commands own the lock-seconds, and the
@@ -2591,6 +2638,9 @@ mode_status() {
       [[ -n "$pfile" ]] || continue
       read -r pid start stamp label < "$pfile" 2> /dev/null || continue
       p=$((p + 1))
+      # Kept since the place was TAKEN, which is the filename's arrival; the
+      # record's own field is the last resume (see the ticket-format block).
+      ticket_arrival_s "$pfile" > /dev/null 2>&1 && stamp="$(ticket_arrival_s "$pfile")"
       printf 'parked %d: slot %s, place kept %ss (blocks nobody) — %s\n' \
         "$p" "$(basename "$pfile" | sed 's/^[0-9]*-s//')" "$(($(now_s) - stamp))" "${label:-?}"
     done < <(queue_parked)
@@ -2615,6 +2665,78 @@ mode_status() {
   printf '%s\n' "$LIVENESS_CONTROL_LINE"
   liveness_verdicts
   return 0
+}
+
+# --- depth ------------------------------------------------------------------
+
+# The dispatching seat's hold: before the 2nd and every later dev of a batch,
+# it waits while the arrival depth is at or above this. pm-dispatch
+# `references/execution-duties.md` names the value, and the self-test holds the
+# two equal.
+readonly LOCK_DEPTH_HOLD=2
+
+# `--depth`: the arrival depth a dispatching seat used to count by eye off
+# `--status`. Depth = live `queue N:` tickets + 1, the dev about to be
+# dispatched counting as an arrival; the `state:` holder and every parked slot
+# are NOT counted -- the holder has arrived already and a parked place blocks
+# nobody. Exit 0 go (depth below the hold), 1 wait, 3 when the liveness probe
+# that decides which tickets are live is not lit, or the lock cannot operate
+# on this host: ⛔ an unread depth is never read as 1.
+#
+# ⭐ IT COUNTS WITHOUT PRUNING. `queue_live` deletes every ticket it judges
+# dead, and `--status` takes `liveness_snapshot` first for exactly that reason:
+# a dev whose turn ended while waiting leaves its evidence in a dead ticket.
+# This mode runs before every dispatch, so pruning here would delete that
+# evidence where no seat ever reads it. It judges each ticket with the same
+# `ticket_state`, leaves the dead ones in place, and names them, so the next
+# `--status` still prints their liveness verdicts.
+mode_depth() {
+  local q=0 p=0 d=0 file pid start stamp label
+  if ! liveness_control; then
+    printf '%s\n' "$LIVENESS_CONTROL_LINE"
+    printf 'depth: CANNOT READ — the probe that decides which tickets are live is not lit; ⛔ never read as depth 1.\n'
+    return "$LIVENESS_REFUSAL_EXIT"
+  fi
+  if ! preflight; then
+    printf 'depth: CANNOT READ — this host cannot operate the lock (`--status` names why); ⛔ never read as depth 1.\n'
+    return "$LIVENESS_REFUSAL_EXIT"
+  fi
+  local dead_lines=''
+  if [[ -d "$QUEUE_DIR" ]]; then
+    shopt -s nullglob
+    for file in "$QUEUE_DIR"/*; do
+      [[ -f "$file" ]] || continue
+      case "$(ticket_state "$file")" in
+        active) q=$((q + 1)) ;;
+        parked) p=$((p + 1)) ;;
+        *)
+          d=$((d + 1))
+          pid=''
+          start=''
+          stamp=''
+          label=''
+          read -r pid start stamp label < "$file" 2> /dev/null || true
+          dead_lines="${dead_lines}dead ${d}: ticket ${file##*/}, pid ${pid:--} — ${label:-?}"$'\n'
+          ;;
+      esac
+    done
+    shopt -u nullglob
+  fi
+  local depth=$((q + 1)) verdict=go
+  ((depth >= LOCK_DEPTH_HOLD)) && verdict=wait
+  printf 'depth %d (queue %d + 1) · hold at %d → %s · not counted: the holder, %d parked slot(s), %d dead ticket(s)\n' \
+    "$depth" "$q" "$LOCK_DEPTH_HOLD" "$verdict" "$p" "$d"
+  if ((d > 0)); then
+    printf 'dead tickets LEFT IN PLACE, not pruned — `--status` prints their liveness verdicts and then prunes them:\n'
+    printf '%s' "$dead_lines"
+  fi
+  if ((PREFLIGHT_NO_FLOCK == 1)); then
+    printf 'host: NO USABLE flock — a run here takes no ticket and runs in DECLARED UNLOCKED MODE, with no\n'
+    printf '      mutual exclusion, so this depth counts nothing a run on this host waits behind.\n'
+    printf '  · %s\n' "$PREFLIGHT_NO_FLOCK_NOTE"
+  fi
+  [[ "$verdict" == go ]] && return 0
+  return 1
 }
 
 # --- report -----------------------------------------------------------------
@@ -4193,6 +4315,81 @@ FAKEDATE
     "$(bash "$SELF" --status 2>&1 | grep -c 'blocks nobody')" 1
   rm -rf "$sq"
 
+  # ⭐ A RESUMED SLOT IS A LIVE WAITER, AND IT IS AGED AS ONE (#36532). A place
+  # kept across turns has, by construction, an arrival older than one call —
+  # that is what keeping it means. The waiter-age bound (TICKET_MAX_AGE_S) exists
+  # to catch a call that outlived its own budget, so it must run from when THIS
+  # call took the ticket. Run from the arrival it read a resumer as over-age a
+  # few minutes into its second wait: the next scan deleted the ticket, the
+  # caller was re-minted at the back of the queue, and the call that had waited
+  # longest was the one that never acquired. The fixture's arrival is past that
+  # bound on purpose, so this pair cannot pass while the bound reads arrival.
+  mkdir -p "$sq"
+  local la_arrival la_name la_out la_n la_f la_p la_scale=1 la_i
+  la_arrival=$(($(now_s) - TICKET_MAX_AGE_S - 120))
+  # The fixture's place is spelled at THIS host's stamp resolution, so it
+  # sorts among real tickets exactly as a real arrival that long ago would.
+  la_p="$(now_stamp)"
+  la_p="${la_p#"${la_p%%[!0]*}"}"
+  for ((la_i = 10; la_i < ${#la_p}; la_i++)); do la_scale=$((la_scale * 10)); done
+  la_name="$(printf '%020d' $((la_arrival * la_scale)))-slong-wait"
+  printf '0 %s %s long-wait\n' "$(now_s)" "$la_arrival" > "${sq}/${la_name}"
+  bash "$SELF" -c 'sleep 6' > /dev/null 2>&1 &
+  local laholder=$!
+  sleep 1.5
+  la_out="$(OS_VERIFY_LOCK_SLOT=long-wait OS_VERIFY_LOCK_WAIT=3 bash "$SELF" -c true 2>&1)"
+  st_case 'a slot whose arrival is older than one call still resumes it' \
+    "$(printf '%s\n' "$la_out" | grep -c "resumed slot 'long-wait' — keeping the place it took")" 1
+  st_case 'and the place it parks again is that SAME place, not a fresh one at the back' \
+    "$([[ -f "${sq}/${la_name}" ]] && echo yes || echo no)" yes
+  la_n=0
+  for la_f in "$sq"/*-slong-wait; do
+    [[ -f "$la_f" ]] && la_n=$((la_n + 1))
+  done
+  st_case 'and no second place was minted for the slot while it waited' "$la_n" 1
+  st_case 'and the resume line still reports the age of the ORIGINAL arrival' \
+    "$(printf '%s\n' "$la_out" | grep -c "keeping the place it took 9[6-9][0-9]s")" 1
+  st_case '--status reports the kept place by its arrival, not by its last resume' \
+    "$(OS_VERIFY_LOCK_FILE="$L" bash "$SELF" --status 2>&1 | grep -cE "^parked 1: slot long-wait, place kept (9[6-9][0-9]|1[0-9]{3})s")" 1
+  # The other half, in-process: the RESUMED record a live caller writes reads
+  # active. Ticket globals are this shell's, so they are restored after.
+  local la_qsave="$QUEUE_DIR" la_ssave="$SLOT_SLUG" la_tsave="$TICKET"
+  QUEUE_DIR="$sq"
+  SLOT_SLUG=long-wait
+  take_ticket in-process-resume 2> /dev/null
+  st_case 'and the resumed record reads as an ACTIVE waiter, not an over-age corpse' \
+    "$(ticket_state "$TICKET")" active
+  st_case 'and a resume keeps the filename — the place — exactly' "${TICKET##*/}" "$la_name"
+  QUEUE_DIR="$la_qsave"
+  SLOT_SLUG="$la_ssave"
+  TICKET="$la_tsave"
+  kill "$laholder" 2> /dev/null
+  wait "$laholder" 2> /dev/null
+  rm -rf "$sq"
+
+  # And the exit-99 promise is only made when it is true. A slot whose ticket
+  # is gone when the budget runs out has nothing to park, so "your place is
+  # KEPT" would send the caller back expecting a place the next call cannot
+  # find. The ticket is removed by hand here — the hostile-cleanup shape; the
+  # over-age shape above can no longer produce it.
+  mkdir -p "$sq"
+  bash "$SELF" -c 'sleep 6' > /dev/null 2>&1 &
+  local lsholder=$!
+  sleep 1.5
+  local ls_log="${tmp}/lost-slot.log"
+  OS_VERIFY_LOCK_SLOT=lost-slot OS_VERIFY_LOCK_WAIT=3 bash "$SELF" -c true > "$ls_log" 2>&1 &
+  local lswaiter=$!
+  sleep 1.2
+  rm -f "$sq"/*-slost-slot
+  wait "$lswaiter" 2> /dev/null
+  st_case 'a slot whose ticket vanished mid-wait is NOT told its place was kept' \
+    "$(grep -c 'Your place is KEPT' "$ls_log")" 0
+  st_case 'it is told the place was LOST, and that the next call starts at the back' \
+    "$(grep -c "slot 'lost-slot' was LOST" "$ls_log")" 1
+  kill "$lsholder" 2> /dev/null
+  wait "$lsholder" 2> /dev/null
+  rm -rf "$sq"
+
   # ⭐ THE ONE MEASURED EXCEPTION TO HEADSHIP (#15581) — pinned from both sides,
   # because only the pair is the claim the ordering block at the top of this
   # file now makes. That block used to say the tickets ahead of you "can only
@@ -4332,6 +4529,55 @@ FAKEDATE
   st_case 'and prints no verdict line, because there is nothing to judge' \
     "$(printf '%s\n' "$lvout" | grep -cE '^liveness (holder|waiter|parked)')" 0
   rm -rf "$lvq" "${lvl}"*
+
+  # `--depth` — the arrival depth a dispatching seat counted by eye off
+  # `--status`. Driven as a CHILD against a private lock, like the liveness
+  # cases above, because the surface a seat runs is what is owed.
+  local dl dq dout drc dstart
+  dl="${tmp}/depth-lock"
+  dq="${dl}.q"
+  mkdir -p "$dq"
+  drc=0
+  dout="$(OS_VERIFY_LOCK_FILE="$dl" bash "$SELF" --depth 2>&1)" || drc=$?
+  st_case '--depth on an empty queue reads depth 1 (the dev about to be dispatched) and goes' \
+    "${drc}|$(printf '%s\n' "$dout" | grep -c '^depth 1 (queue 0 + 1) · hold at 2 → go')" '0|1'
+  drc=0
+  dout="$(OS_VERIFY_LOCK_FILE="$dl" OS_VERIFY_LOCK_FLOCK="${tmp}/no-such-flock" bash "$SELF" --depth 2>&1)" || drc=$?
+  st_case '--depth on a host with no usable flock still reads, and discloses DECLARED UNLOCKED MODE as --status does' \
+    "${drc}|$(printf '%s\n' "$dout" | grep -c 'DECLARED UNLOCKED MODE')" '0|1'
+  dstart="$(proc_starttime "$$")"
+  printf '%s %s %s depth-holder\n' "$$" "$dstart" "$(now_s)" > "${dl}.holder"
+  printf '0 %s %s depth-parked\n' "$(now_s)" "$(now_s)" > "${dq}/00000000000000000001-sdepthslot"
+  drc=0
+  dout="$(OS_VERIFY_LOCK_FILE="$dl" bash "$SELF" --depth 2>&1)" || drc=$?
+  st_case '--depth counts neither the holder nor a parked slot' \
+    "${drc}|$(printf '%s\n' "$dout" | grep -c '^depth 1 (queue 0 + 1) .* 1 parked slot')" '0|1'
+  printf '%s %s %s depth-waiter\n' "$$" "$dstart" "$(now_s)" > "${dq}/00000000000000000002-$$"
+  drc=0
+  dout="$(OS_VERIFY_LOCK_FILE="$dl" bash "$SELF" --depth 2>&1)" || drc=$?
+  st_case '--depth counts a live waiter: depth 2 reaches the hold and exits 1 (wait)' \
+    "${drc}|$(printf '%s\n' "$dout" | grep -c '^depth 2 (queue 1 + 1) · hold at 2 → wait')" '1|1'
+  # ⭐ A dead ticket is the evidence a dev whose turn ended while waiting
+  # leaves behind. `--depth` runs before every dispatch, so it must neither
+  # count that ticket nor delete it: it names it and leaves it for `--status`.
+  local ddead="${dq}/00000000000000000003-999999"
+  printf '%s %s %s depth-dead-waiter\n' 999999 12345 "$(now_s)" > "$ddead"
+  drc=0
+  dout="$(OS_VERIFY_LOCK_FILE="$dl" bash "$SELF" --depth 2>&1)" || drc=$?
+  st_case '--depth does not count a dead ticket, names it, and leaves it in place' \
+    "${drc}|$(printf '%s\n' "$dout" | grep -c '^depth 2 (queue 1 + 1) .* 1 dead ticket')|$(printf '%s\n' "$dout" | grep -c '^dead 1: ticket 00000000000000000003-999999, pid 999999')|$([[ -f "$ddead" ]] && printf kept)" \
+    '1|1|1|kept'
+  st_case '…so the next --status still prints that dead ticket'"'"'s liveness verdict' \
+    "$(OS_VERIFY_LOCK_FILE="$dl" bash "$SELF" --status 2>&1 | grep -c '^liveness waiter ticket 00000000000000000003-999999: pid 999999 DOES NOT EXIST')" 1
+  drc=0
+  dout="$(OS_VERIFY_LOCK_FILE="$dl" OS_VERIFY_LOCK_SIM_LIVENESS=alive bash "$SELF" --depth 2>&1)" || drc=$?
+  st_case '--depth with an unlit probe exits 3 and is never read as depth 1' \
+    "${drc}|$(printf '%s\n' "$dout" | grep -c '^depth: CANNOT READ')|$(printf '%s\n' "$dout" | grep -c '^depth [0-9]')" '3|1|0'
+  local duties
+  duties="$(dirname "$SELF")/../../.claude/skills/pm-dispatch/references/execution-duties.md"
+  st_case 'LOCK_DEPTH_HOLD equals the value the dispatch rule names, and the rule points at --depth' \
+    "$(grep -c "os-verify-lock.sh --depth\`.*LOCK_DEPTH_HOLD\`(= ${LOCK_DEPTH_HOLD})" "$duties" 2> /dev/null)" 1
+  rm -rf "$dq" "${dl}"*
 
   # arrival stamps sort lexically in arrival order — the FIFO claim rests on it.
   # A host with only whole-second stamps (no EPOCHREALTIME, no GNU `date +%N`,
@@ -4677,6 +4923,10 @@ main() {
       ;;
     --status)
       mode_status
+      exit $?
+      ;;
+    --depth)
+      mode_depth
       exit $?
       ;;
     --show-budget)

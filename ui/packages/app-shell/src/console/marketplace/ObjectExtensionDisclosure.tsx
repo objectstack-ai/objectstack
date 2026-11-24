@@ -43,7 +43,7 @@ function Names({ label, items }: { label: string; items: readonly string[] }) {
       {items.map((it, i) => (
         <span key={it}>
           {i > 0 ? ' ' : null}
-          <code className="font-mono text-[11px] px-1 py-0.5 rounded bg-muted break-all">{it}</code>
+          <code className="font-mono text-xs px-1 py-0.5 rounded bg-muted break-all">{it}</code>
         </span>
       ))}
     </div>

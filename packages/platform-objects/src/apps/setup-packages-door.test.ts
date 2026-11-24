@@ -5,17 +5,25 @@
 //
 // The console's `developer:packages` component is the one list of what is
 // installed. Opened with no `source` filter it is a development surface, so its
-// unfiltered entry lives in Studio only (Overview → Packages). Setup reaches
-// installed packages through the marketplace-filtered "Installed Apps" door —
+// unfiltered door lives in Studio only. Setup reaches installed packages
+// through the marketplace-filtered "Installed Apps" door —
 // `developer:packages` with `params: { source: 'marketplace' }` — which
 // `@objectstack/cloud-connection` contributes to Setup's `group_apps` wherever
 // the marketplace capability is present, and pins on its side
 // (`marketplace-installed-ui-entry.pin.test.ts`).
 //
+// The Studio every boot serves is the console's own, at `/_console/studio`:
+// the `@objectstack/studio` app this package declares (`studio.app.ts`) is not
+// default-loaded (`apps/studio/src/index.ts`). So the served door is the
+// console's, not a nav item: the Studio landing's "All packages" link and each
+// package card's Manage, which opens the detail sheet with Disable / Enable
+// (#35196). The console pins that door
+// (`ui/packages/app-shell/src/views/studio-design/BuilderLanding.packagesDoor-35196.test.tsx`).
+//
 // This file is the platform-objects half: what THIS package ships for each app.
 // Both directions are pinned, because either regression is silent at runtime —
-// an unfiltered Setup entry simply renders, and a Studio entry that goes
-// missing leaves the full list reachable only by a hand-typed URL.
+// an unfiltered Setup entry simply renders, and the declared Studio app's entry
+// is what a host that does load that app serves.
 import { describe, it, expect } from 'vitest';
 
 import { SETUP_APP } from './setup.app.js';
@@ -72,7 +80,10 @@ describe('the unfiltered package list is a Studio surface, not a Setup one (#250
     expect(items.filter((i) => i.id === 'nav_packages')).toEqual([]);
   });
 
-  it('Studio still ships the unfiltered entry, under Overview', () => {
+  // The declared `@objectstack/studio` app, for a host that loads it. Not the
+  // door a default boot serves: that one is the console Studio landing's
+  // (see the file header).
+  it('the declared Studio app still ships the unfiltered entry, under Overview', () => {
     const overview = walk(STUDIO_APP.navigation as unknown[]).find((i) => i.id === 'group_overview');
     expect(overview, 'Studio lost its group_overview').toBeDefined();
 

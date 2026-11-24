@@ -508,7 +508,7 @@ declares no `i18n` block must not clear what another declared.
 
 | Method | Path | Description |
 |:-------|:-----|:------------|
-| `GET` | `/api/v1/i18n/locales` | List available locales |
+| `GET` | `/api/v1/i18n/locales` | List available locales (`isDefault` marks the default one) and name the source locale (`sourceLocale`: the declared `i18n.sourceLocale`, else the default locale) |
 | `GET` | `/api/v1/i18n/translations/:locale` | Get all translations for a locale |
 | `GET` | `/api/v1/i18n/labels/:object/:locale` | Get translated field labels for an object |
 

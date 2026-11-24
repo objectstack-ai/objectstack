@@ -7,6 +7,7 @@
  */
 
 import React, { useMemo } from 'react';
+import { getPersonInitials } from '@object-ui/types';
 import type { PresenceUser } from './usePresence.js';
 import {
   useCollaborationTranslation,
@@ -71,15 +72,6 @@ const statusLabelKeys: Record<string, string> = {
 function statusLabel(status: string, t: CollaborationTranslate): string {
   const key = statusLabelKeys[status];
   return key ? t(key) : status;
-}
-
-function getInitials(name: string): string {
-  return name
-    .split(' ')
-    .map(part => part[0])
-    .join('')
-    .toUpperCase()
-    .slice(0, 2);
 }
 
 /**
@@ -195,7 +187,7 @@ export function PresenceAvatars({
               alt: user.userName,
               style: { width: '100%', height: '100%', objectFit: 'cover' as const },
             })
-          : getInitials(user.userName),
+          : getPersonInitials(user.userName),
         showStatus && React.createElement('span', {
           style: {
             ...statusDotStyle,

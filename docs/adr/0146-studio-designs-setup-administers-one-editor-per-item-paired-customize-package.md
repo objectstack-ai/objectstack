@@ -630,6 +630,23 @@ rules added:
 Studio's "add field" on a base object ([D3](#d3)'s one surface) writes exactly this: an extension in `.custom`, the
 name suffixed, the base untouched (N-23c).
 
+> **Note (2026-11-22, [#35901](https://github.com/objectstack-ai/objectstack/issues/35901)).** A third rule rides on
+> the extension: **it places only what it brings.** `ObjectExtensionSchema.place` puts a field of the extension's own
+> `fields` into a group of the extended object after or before a member, a group of the extension's own after or before
+> one of the object's groups, and a child list of the extension's own package after or before one of the object's tabs.
+> A field of the base (or of another package's extension), a group key the base declares, and another package's list
+> (placed as a tab or by a group's `relatedList`) are refused at parse or at `defineStack` and skipped by the merge with
+> a warning: the base's arrangement stays the base's, as its fields beyond the whitelist do. A field is the extension's
+> by where it comes from, not by its presence in the extension's `fields`: a base field the extension redeclares for its
+> display (admitted above) is still the base's, and the extension cannot place it. The merge judges every door, the
+> stored `object_extension` row and an unparsed manifest body included. The placements are applied once, by the registry fold
+> (`packages/objectql/src/registry-extension-placement.ts#applyExtensionPlacements`, after every contributor's fields are
+> merged), so the record page, the forms and Studio read one arrangement, and uninstalling or disabling the package
+> leaves the base's order as it was. They arrange only what the base declares (ruling 7073014077: a list placement
+> where it declares `relatedLists`, a group or field placement where it declares `fieldGroups`); elsewhere the base's
+> automatic arrangement stays and the boot log names the placement. Studio shows such an item read-only with its
+> source package, as it shows a contributed item ([D3](#d3)).
+
 ### D11 — Migration, then closure: package-less overlay rows become declared overrides, the package-less write closes, and the stopgaps retire {#d11}
 
 - **Migrate** (N-16, Q5). Every `sys_metadata` row with `package_id` NULL that overlays an item a code package ships

@@ -305,8 +305,14 @@ jobs:
     # event of its own, and the run it starts sees no label in either place and
     # enforces. The direction #5580 is about has no such rescue: the `labeled`
     # run's green verdict does not clear the `opened` run's red one.
+    #
+    # Open PRs only. The fleet's post-merge `unlabeled pm:awaiting-merge` fires
+    # this job on a MERGED PR, where `merge-base origin/main HEAD` is the PR's own
+    # merge commit, so it counts 0 changesets and reds a head that shipped one
+    # (#35842 run 44739836712, #35857). A closed PR's verdict is final.
     if: >-
-      !contains(github.event.pull_request.labels.*.name, 'skip-changeset')
+      github.event.pull_request.state == 'open'
+      && !contains(github.event.pull_request.labels.*.name, 'skip-changeset')
       && !(github.head_ref == 'changeset-release/main'
       && github.event.pull_request.user.login == 'github-actions[bot]')
     permissions:

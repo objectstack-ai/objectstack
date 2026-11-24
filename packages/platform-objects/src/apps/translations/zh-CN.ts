@@ -89,6 +89,9 @@ export const zhCN: TranslationData = {
         nav_settings_hub: { label: '全部设置' },
         nav_settings_localization: { label: '本地化' },
         nav_exchange_rates: { label: '汇率' },
+        nav_units_of_measure: { label: '计量单位' },
+        nav_work_calendars: { label: '工作日历' },
+        nav_work_calendar_exceptions: { label: '日历例外' },
         nav_settings_company: { label: '公司' },
         nav_settings_mail: { label: '邮件投递' },
         nav_settings_sms: { label: '短信投递' },
@@ -100,6 +103,7 @@ export const zhCN: TranslationData = {
         nav_settings_knowledge: { label: '知识库' },
         nav_settings_lifecycle: { label: '数据生命周期' },
         nav_recycle_bin: { label: '回收站' },
+        nav_public_forms: { label: '对外表单' },
         nav_notification_preferences: { label: '通知偏好' },
         nav_notification_templates: { label: '通知模板' },
 
@@ -117,6 +121,7 @@ export const zhCN: TranslationData = {
         nav_datasources: { label: '数据源' },
         nav_connector_credentials: { label: '连接器凭据' },
         nav_connector_connections: { label: '连接器连接' },
+        nav_slack: { label: 'Slack' },
 
         nav_oauth_apps: { label: 'OAuth 应用' },
       },

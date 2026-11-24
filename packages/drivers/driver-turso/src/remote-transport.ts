@@ -64,6 +64,12 @@ import {
 // local face (`SqlDriver.applyFilters`), `driver-memory` and `driver-mongodb`.
 import { findMisplacedReadableIds, readableIdsDriverRefusal } from '@objectstack/core';
 import { isComposedReadableIds, type FilterCondition } from '@objectstack/spec/data';
+// [ADR-0155 D2, D4] The fixed-read leaf: where it compiles and the predicates of
+// its fixed inner read, shared with the local face's compiler
+// (`SqlDriver#fixedReadLeafSubquery`), and the refusal every evaluator answers.
+import { fixedReadLeafRefusal } from '@objectstack/core';
+import { findMisplacedFixedReadLeaf, fixedInnerReadPredicates, misplacedFixedReadLeafMessage } from '@objectstack/driver-sql';
+import { isFixedReadLeaf, type FixedReadLeaf } from '@objectstack/spec/data';
 // [#8413] What a `unique: true` FIELD becomes, from the one place that decides
 // it. `uniqueIndexesFromFields`' own contract is that it is "the ONLY place
 // field-level uniqueness becomes an index, so the create-table, alter-table,
@@ -3140,6 +3146,40 @@ export class RemoteTransport {
     return { sql: `SELECT "id" FROM ${this.tableSql(join.table)}${where}`, args };
   }
 
+  /**
+   * [ADR-0155 D2, D4] The fixed inner read a fixed-read leaf compiles to — the
+   * local face's `SqlDriver#fixedReadLeafSubquery`, compiled by this
+   * transport's compiler from the same predicates (`fixedInnerReadPredicates`):
+   *
+   * `SELECT "record_id" FROM "sys_record_share" WHERE "object_name" = ? AND
+   * "recipient_type" = ? AND "recipient_id" = ? [AND "access_level" IN (?, …)]
+   * AND "record_id" IS NOT NULL AND "record_id" <> ?`
+   *
+   * Every value bound. ⛔ No tenant scope (ADR-0155 ① ruled A): the driver
+   * hands over none for it, and the outer statement's scope is ANDed on by
+   * the door as on every statement. No cap, no ordering, no correlation.
+   */
+  private fixedInnerReadSQL(leaf: FixedReadLeaf): { sql: string; args: unknown[] } {
+    const read = fixedInnerReadPredicates(leaf, { emptyStringIsNull: false });
+    const column = this.aliasIdentifierSql(read.column);
+    const parts: string[] = [];
+    const args: unknown[] = [];
+    for (const [name, value] of read.equals) {
+      parts.push(`${this.aliasIdentifierSql(name)} = ?`);
+      args.push(value);
+    }
+    for (const [name, values] of read.memberOf) {
+      parts.push(`${this.aliasIdentifierSql(name)} IN (${values.map(() => '?').join(', ')})`);
+      args.push(...values);
+    }
+    parts.push(`${column} IS NOT NULL`);
+    if (read.notEmpty) {
+      parts.push(`${column} <> ?`);
+      args.push('');
+    }
+    return { sql: `SELECT ${column} FROM ${this.tableSql(read.table)} WHERE ${parts.join(' AND ')}`, args };
+  }
+
   private buildWhereSQL(
     object: string,
     filters: any,
@@ -3161,6 +3201,12 @@ export class RemoteTransport {
       // semi-join is not a leaf, so this answers `null` for every tree it hands over.
       const misplaced = findMisplacedReadableIds(filters, true);
       if (misplaced) throw readableIdsDriverRefusal('driver-turso', misplaced);
+      // [ADR-0155 D1, D4] Likewise a fixed-read leaf anywhere but as a field's
+      // `$in` comparand. A resolved semi-join's scope is a node like a composed
+      // leaf's; `TursoDriver` asks the same walk first, and logs.
+      const misplacedLeaf = findMisplacedFixedReadLeaf(filters, path, (value) =>
+        isRemoteReadableIdsSemiJoin(value) ? value : null);
+      if (misplacedLeaf) throw fixedReadLeafRefusal('driver-turso', misplacedFixedReadLeafMessage(misplacedLeaf));
       try {
         return this.compileWhereSQL(object, filters, path);
       } catch (err) {
@@ -3534,6 +3580,13 @@ export class RemoteTransport {
               // knows the parent's table and wall.
               if (isRemoteReadableIdsSemiJoin(opValue)) {
                 const sub = this.readableIdsSubquerySQL(opValue);
+                clauses.push(`${column} IN (${sub.sql})`);
+                args.push(...sub.args);
+                break;
+              }
+              // [ADR-0155 D2, D4] A fixed-read leaf, in the list's own position.
+              if (isFixedReadLeaf(opValue)) {
+                const sub = this.fixedInnerReadSQL(opValue);
                 clauses.push(`${column} IN (${sub.sql})`);
                 args.push(...sub.args);
                 break;

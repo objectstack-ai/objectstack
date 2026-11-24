@@ -25,6 +25,7 @@
 
 import { templateEngine } from '@objectstack/formula';
 import { markGuardRefusal } from '../guard-refusal.js';
+import { isSkippedScopeKey, scopeContainer } from '../scope-key-segments.js';
 
 export type VariableMap = Map<string, unknown>;
 
@@ -62,12 +63,17 @@ export class FlowTextTemplateError extends Error {
  * wins over a flat key sharing its head (`{a.b}` walked `a`'s value and never
  * read a flat `a.b`), so such a key is not merged into the variable. And it builds
  * fresh containers only — a variable's own object is never written into.
+ *
+ * It follows the rule `../scope-key-segments.ts` states for every scope
+ * builder here, the CEL one included: every container it creates (the root
+ * too) has no prototype, and a key with a skipped segment binds nothing.
  */
 export function textTemplateScope(variables: VariableMap): Record<string, unknown> {
-    const scope: Record<string, unknown> = {};
+    const scope = scopeContainer();
     const fresh = new WeakSet<object>();
     const dotted: Array<[string, unknown]> = [];
     for (const [key, value] of variables) {
+        if (isSkippedScopeKey(key.split('.'))) continue;
         if (key.includes('.')) dotted.push([key, value]);
         else scope[key] = value;
     }
@@ -77,7 +83,7 @@ export function textTemplateScope(variables: VariableMap): Record<string, unknow
         for (let i = 0; i < segments.length - 1 && cursor; i++) {
             const next: unknown = cursor[segments[i]!];
             if (next === undefined) {
-                const container: Record<string, unknown> = {};
+                const container = scopeContainer();
                 fresh.add(container);
                 cursor[segments[i]!] = container;
                 cursor = container;

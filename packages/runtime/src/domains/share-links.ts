@@ -74,11 +74,11 @@ import { readInternalColumn } from '@objectstack/objectql/core';
 // because `@objectstack/plugin-sharing` is a DEV dependency here — the same
 // reason `isPublicSharingEnabled` above is imported from the spec — and both
 // packages already depend on `@objectstack/types`, so the import adds no edge.
-import { readSharePasswordHeader, SHARE_PASSWORD_VARY, type SharePasswordHeaderReading } from '@objectstack/types';
+import { readSharePasswordHeader, SHARE_LINK_PUBLIC_VARY, type SharePasswordHeaderReading } from '@objectstack/types';
 // [#26991] The resolve answer — redaction and the field display projection
 // included — from the ONE builder the plugin-sharing mount serves it with; it
 // lives in `@objectstack/types` for the same dependency reason.
-import { buildShareLinkResolveAnswer } from '@objectstack/types';
+import { buildShareLinkResolveAnswer, type ShareLinkLabelI18n, type ShareLinkLabelProtocol } from '@objectstack/types';
 
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
@@ -97,15 +97,16 @@ export function createShareLinksDomain(deps: DomainHandlerDeps): DomainRoute {
  * `/:token/messages`) answer with, on every outcome — success, refusal, or a
  * thrown error. `Cache-Control: no-store` keeps the token-released record (and
  * any refusal) out of every browser and shared cache; `Vary: X-Share-Password,
- * X-Share-Password-Encoding` marks the answer as depending on that request
- * header, and on the one declaring its encoding (#22049), for any cache that
- * does not honour `no-store`. The plugin-sharing mount
- * (`plugin-sharing/src/share-link-routes.ts`) sends the same pair, from the
- * same `SHARE_PASSWORD_VARY` constant.
+ * X-Share-Password-Encoding, Accept-Language` marks the answer as depending on
+ * that request header, on the one declaring its encoding (#22049), and on the
+ * request's language, which the resolve answer's object label is read in
+ * (#33552), for any cache that does not honour `no-store`. The plugin-sharing
+ * mount (`plugin-sharing/src/share-link-routes.ts`) sends the same value, from
+ * the same `SHARE_LINK_PUBLIC_VARY` constant.
  */
 const PUBLIC_RESPONSE_HEADERS: Readonly<Record<string, string>> = Object.freeze({
     'Cache-Control': 'no-store',
-    Vary: SHARE_PASSWORD_VARY,
+    Vary: SHARE_LINK_PUBLIC_VARY,
 });
 
 function isPublicShareLinkRoute(subPath: string, method: string): boolean {
@@ -366,11 +367,31 @@ async function handleShareLinksRequestBody(
             // [#26991] The redacted record, the link, and the display projection
             // of exactly the fields that record carries (`fields`): the one
             // place an anonymous holder can read authored labels from, since
-            // the meta door refuses that caller.
+            // the meta door refuses that caller. The object's label is read in
+            // the request's locale (`Accept-Language`), through the request's
+            // i18n service, as the plugin-sharing twin reads it.
+            let i18n: unknown;
+            try {
+                i18n = await deps.resolveService(context, 'i18n');
+            } catch {
+                i18n = undefined;
+            }
+            // The request's metadata protocol, for the object's packaged base
+            // (a renamed object keeps its rename, as on the meta door).
+            let protocol: unknown;
+            try {
+                protocol = await deps.resolveService(context, 'protocol');
+            } catch {
+                protocol = undefined;
+            }
             return {
                 handled: true,
                 response: deps.success(
-                    buildShareLinkResolveAnswer(record, resolved, engine?.getSchema(resolved.link.object_name)),
+                    buildShareLinkResolveAnswer(record, resolved, engine?.getSchema(resolved.link.object_name), {
+                        acceptLanguage: headerOf('accept-language'),
+                        i18n: (i18n ?? undefined) as ShareLinkLabelI18n | undefined,
+                        protocol: (protocol ?? undefined) as ShareLinkLabelProtocol | undefined,
+                    }),
                 ),
             };
         }

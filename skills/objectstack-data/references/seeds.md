@@ -1,7 +1,7 @@
 ## Seed Data & Fixtures (`defineSeed()`)
 
 Object definition and seed data live together — a `*.object.ts` usually
-pairs with a `*.seed.ts` (fixtures, reference rows, bootstrap data).
+pairs with a `*.seed.ts`.
 
 > The factory is `defineSeed` — **not** `defineDataset`, which is the
 > unrelated ADR-0021 analytics semantic layer (`@objectstack/spec/ui`).
@@ -44,10 +44,10 @@ export const SeedData = [statusSeed, categorySeed];
 
 | Field | Default | Purpose |
 |:------|:--------|:--------|
-| `object` | derived | Auto-set from `objectDef.name` — never write manually |
-| `externalId` | `'name'` | Stable business key (or field list) every mode matches on |
+| `object` | derived | Auto-set from `objectDef.name`; hand-written only in a runtime save (below) |
+| `externalId` | `'name'` | Stable business key (or field list) every mode matches on; required in every record (below) |
 | `mode` | `'ignore'` | Import strategy (see below) |
-| `columns` | — | Per-column write policy, keyed by field: `{ FIELD: { applyOn: 'create' } }` (below) |
+| `columns` | — | Per-column write policy, keyed by field (below) |
 | `env` | `['prod','dev','test']` | Environments where the seed loads |
 | `locale` | — (every locale) | BCP-47 tags it loads for; a locale no set of the object names gets none |
 | `fallback` | — | `true` on ONE `locale` set per object: also loads for a locale no set names |
@@ -55,6 +55,12 @@ export const SeedData = [statusSeed, categorySeed];
 | `records` | — | `Partial<Record<keyof object.fields, unknown>>[]` |
 
 Full Zod shape: `node_modules/@objectstack/spec/src/data/seed.zod.ts`.
+
+A `seed` saved at runtime names its `object` itself. One that resolves to
+nothing is refused: `422 INVALID_METADATA` at `object`, "which is not defined".
+Correct the name to the object's full name (`crm_lead`, not `lead`) or create
+the object first: a draft of it is enough for a draft seed; a live seed needs
+it published.
 
 ### Import modes
 
@@ -85,34 +91,37 @@ mapping entry's `applyOn` (objectstack-api).
 defineSeed(Invoice, {
   externalId: 'number',
   mode: 'upsert',
-  columns: { status: { applyOn: 'create' } },   // the payment job owns it after the first seed
+  columns: { status: { applyOn: 'create' } },
   records: [{ number: 'INV-001', status: 'draft', amount: 1200 }],
 });
 ```
 
 ### `externalId` selection
 
-Pick a stable natural key. **Never use `id`** for generated UUIDs — they
+**Never use `id`** for generated UUIDs — they
 differ across environments.
+
+Every record carries a value for each `externalId` field (each field of a
+list; `name` when the seed names none). One left blank (no value, `null` or
+`''`; whitespace is a value) is refused at load in every mode: the result names
+the object, record index, field and fix, and the other records still load.
 
 | Scenario | Key |
 |:---------|:----|
 | Named entities (country, currency) | `'code'` / `'slug'` |
 | Users / contacts | `'email'` |
 | Externally sourced | `'external_id'` |
-| Generic | `'name'` (default) |
 
 ### Relationship references
 
-For `lookup` fields, supply the **natural key** of the target record (not
-its UUID). The loader resolves it at load time, and lookups order the load:
+For `lookup` fields, supply the target record's **natural key**. The
+loader resolves it, and lookups order the load:
 a child loads after its parent however the array lists them (array order
 only breaks ties).
 
 > If a lookup value matches no natural key, the loader falls back to
-> resolving it as the target's `id` — so a reference to an existing record
-> by internal id resolves instead of dangling to null. Rely on it only for
-> records you didn't seed (e.g. a system user).
+> resolving it as the target's `id`. Rely on it only for records you didn't
+> seed (e.g. a system user).
 
 ```typescript
 const contacts = defineSeed(Contact, {
@@ -120,7 +129,7 @@ const contacts = defineSeed(Contact, {
   records: [{
     email: 'john@acme.example.com',
     first_name: 'John',
-    account: 'Acme Corporation',   // natural key of an Account record
+    account: 'Acme Corporation',
   }],
 });
 ```
@@ -130,15 +139,21 @@ A `beforeInsert` hook reading a seeded object no lookup links to needs
 object, one no dataset of the load seeds (misspelt, or `env`/`locale`-scoped
 out), or a cycle refuses the whole load; nothing is written.
 
+**Seed rows obey the object's validation rules** (all but `state_machine`); a
+refused row never lands. `os validate` does not run them on seed rows;
+`os verify` fails on each dropped row. A rule reading a parent roll-up
+(`record.invoice.amount_paid`) sees the total earlier rows left, so children
+must fit in record order. ⛔ Never seed the roll-up: a seeded `amount_paid` is
+never stored (a warning per dataset); the child rows compute it.
+
 ### Dynamic values (CEL)
 
 Any field value may be a CEL expression evaluated at install time against
 a single per-load pinned `now`. This is the **only** correct way to author
 time-based or identity-derived seed values — `new Date()` ships the package
-author's clock to every customer and breaks build determinism.
+author's clock to every customer.
 
 ```typescript
-import { defineSeed } from '@objectstack/spec/data';
 import { cel } from '@objectstack/spec';
 
 defineSeed(Opportunity, {
@@ -161,14 +176,11 @@ produce byte-identical `dist/objectstack.json`.
 
 ### Seed best practices
 
-| Practice | Why |
-|:---------|:----|
-| TypeScript: `defineSeed()`, never `SeedSchema.parse()` | Lose compile-time field checks otherwise |
+In TypeScript use `defineSeed()`, never `SeedSchema.parse()`: it loses compile-time field checks.
 
-**Fictional is fine; malformed is not.** A seed row is written through the same
-field validation as a user's insert, and a value the field type refuses never
-lands — the table loads short or empty while sibling rows point at records that
-do not exist. `os validate` / `os build` refuse such a value first, at the
+**Fictional is fine; malformed is not.** A seed row passes the same field
+validation as a user's insert; a refused value drops the row its siblings point at.
+`os validate` / `os build` refuse such a value first, at the
 record's field — run them before trusting the load. So never mask or
 placeholder a sample value: no `138****4207`,
 `***`, `XXX`, `N/A`, `—`, `TBD`. Invent a plausible well-formed one — `+86 138

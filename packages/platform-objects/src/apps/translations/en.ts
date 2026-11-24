@@ -130,6 +130,9 @@ export const en: TranslationData = {
         nav_settings_hub: { label: 'All Settings' },
         nav_settings_localization: { label: 'Localization' },
         nav_exchange_rates: { label: 'Exchange Rates' },
+        nav_units_of_measure: { label: 'Units of Measure' },
+        nav_work_calendars: { label: 'Working Calendars' },
+        nav_work_calendar_exceptions: { label: 'Calendar Exceptions' },
         nav_settings_company: { label: 'Company' },
         nav_settings_mail: { label: 'Mail Delivery' },
         nav_settings_sms: { label: 'SMS Delivery' },
@@ -141,6 +144,7 @@ export const en: TranslationData = {
         nav_settings_knowledge: { label: 'Knowledge' },
         nav_settings_lifecycle: { label: 'Data Lifecycle' },
         nav_recycle_bin: { label: 'Recycle Bin' },
+        nav_public_forms: { label: 'Public Forms' },
         // Notifications (contributed by @objectstack/service-messaging)
         nav_notification_preferences: { label: 'Notification Preferences' },
         nav_notification_templates: { label: 'Notification Templates' },
@@ -163,6 +167,7 @@ export const en: TranslationData = {
         nav_datasources: { label: 'Datasources' },
         nav_connector_credentials: { label: 'Connector Credentials' },
         nav_connector_connections: { label: 'Connector Connections' },
+        nav_slack: { label: 'Slack' },
 
         // Advanced
         //

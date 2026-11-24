@@ -130,8 +130,14 @@ create/update payload.
 
 - **list_objects()** — list available objects. System \`sys_*\` objects are hidden,
   except the few declared readable by agents, such as \`sys_user\` (read only).
-- **describe_object({ objectName })** — an object's fields and features.
-- **validate_expression({ objectName, expression, site?, severity?, triggerKind?, sweepObject?, startCondition?, field? })** — check a CEL
+- **describe_object({ objectName })** — an object's fields and features. A
+  \`readonly\` field is never set in a write (a computed value or a declared
+  read-only field); \`readonly\` is the schema's, not your edit permission, so a
+  write naming a field you may not edit is refused. Send an option's \`value\`.
+  To get a \`defaultValue\`, omit the field: a token (\`NOW()\`, \`current_user\`)
+  or an expression object is never copied. A validation's \`message\` is what a
+  refused write answers.
+- **validate_expression({ objectName, expression, site?, severity?, triggerKind?, sweepObject?, startCondition?, variables?, field? })** — check a CEL
   expression against an object's schema *before* you author it into a formula,
   validation, or flow condition. Returns build-time errors (bare field refs,
   unknown fields/functions; at a \`formula\` or \`validation\` site, every other
@@ -141,7 +147,8 @@ create/update payload.
   an unguarded nullable field or a read of \`parent\`; at a \`flow_condition\`
   of a record-triggered flow, an unguarded nullable \`record.\`/\`previous.\`
   read) and advisory warnings
-  (text/boolean fields misused in arithmetic; an error at a \`validation\` site,
+  (text/boolean fields misused in arithmetic; date-equality pitfalls; an error
+  at a \`validation\` site,
   worded for the rule's \`severity\`, and at a \`flow_condition\` of a
   record-triggered or time-relative flow, where it fails the run; a warning on
   any other flow; at a \`formula\`, \`validation\` or \`flow_condition\` site,
@@ -160,13 +167,32 @@ create/update payload.
   At a \`flow_condition\` the verdict is the runtime publish gate's, the one a
   flow saved through MCP meets: \`os validate\` also judges bare names and
   unbound roots over the whole flow, so write \`record.<field>\`, and pass the
-  flow's \`startCondition\` for an edge or \`decision\` condition after it. Pass
-  \`field\` (formula) to be judged as that field: its type, and the formula
+  flow's \`startCondition\` for an edge or \`decision\` condition after it, and
+  its declared \`variables\`: the shadowed-read warning, and the binding of a
+  bare name to the variable rather than the field, need them at a
+  \`flow_condition\`. Pass \`field\` (formula) to be judged as that field: its type, and the formula
   cycle it would close; a field not yet declared is judged as a new formula.
-- **query_records({ objectName, where?, fields?, limit?, offset?, orderBy? })** —
+- **query_records({ objectName, where?, fields?, limit?, offset?, orderBy?, expand?, latestPer? })** —
   read records. \`where\` is a field→value match, e.g. \`{ "status": "open" }\`.
-  Results are page-capped; use \`limit\`/\`offset\` to page.
-- **get_record({ objectName, recordId })** — fetch one record by id.
+  Results are page-capped; use \`limit\`/\`offset\` to page. The answer's
+  \`source\` names the object, filter, measures and grouping its figures came
+  from; \`source.line\` is that source in the user's language. For "each X with
+  its latest Y", \`latestPer: { "by": ["account"], "orderBy": [{ "field":
+  "close_date", "order": "desc" }] }\` answers one record per group (ties go by
+  id). \`expand: ["account"]\` returns a lookup as the record it names; a field
+  whose object this door does not serve you refuses the call. For counts,
+  sums and breakdowns, \`aggregate_records({ objectName, aggregations,
+  groupBy?, where?, orderBy?, limit? })\` computes them in the database where
+  it is offered: groups of a select field come in the field's option order,
+  an amount over one fixed currency names its ISO 4217 code in \`currencies\`,
+  and a lookup group carries \`<key>__label\`, the record's name: name the group
+  by it, and where it has none, say the record cannot be named rather than
+  quoting the id.
+- **get_record({ objectName, recordId, related? })** — fetch one record by id.
+  \`related: [{ "object": "crm_opportunity" }]\` adds up to 3 lists of the
+  records that point at it (name \`field\` when the child points here through
+  several fields), each under your permissions on that object; a list with
+  \`truncated: true\` has more rows.
 - **create_record({ objectName, data })** — create a record.
 - **update_record({ objectName, recordId, data })** — change fields on a record.
 - **delete_record({ objectName, recordId, confirm })** — delete a record.
@@ -224,7 +250,8 @@ create/update payload.
   account's own key (an agent acting for itself, for no person) the call is
   refused whatever it sends and nothing runs: hand the action to a person, or
   its author declares \`ai.requiresConfirmation: false\` when it is safe
-  unattended.
+  unattended. A flow action that fails answers \`FLOW_FAILED\`: tell the user
+  the reason its second text block gives, never the flow and node chain.
 - **resume_run({ runId, values? })** — continue a flow run that
   \`run_action\` answered with \`status: "paused"\` and a \`screen\` (a form the
   flow needs filled in). Send the screen's field values in \`values\`, keyed by
@@ -254,6 +281,10 @@ create/update payload.
   share a name, tell them apart by email, and ask your human which one if
   unsure. You see the colleagues your console's person picker shows you (your
   organization, directory fields), and \`sys_user\` is read only.
+- **Approvals waiting on you.** Where the app runs approvals, query
+  \`sys_approval_request\` with
+  \`where: {"status":"pending","pending_approvers":{"$contains":"{current_user_id}"}}\`
+  (\`{current_user_id}\` stands for you), and decide one with \`run_action\`.
 - **Prefer actions over hand-edits.** When \`list_actions\` offers an action for
   the task (approve, convert, close, …), call it instead of updating the
   records yourself — actions carry the app's validation and side effects.

@@ -95,6 +95,9 @@ export const ko: TranslationData = {
         nav_settings_hub: { label: '전체 설정' },
         nav_settings_localization: { label: '현지화' },
         nav_exchange_rates: { label: '환율' },
+        nav_units_of_measure: { label: '측정 단위' },
+        nav_work_calendars: { label: '근무 캘린더' },
+        nav_work_calendar_exceptions: { label: '캘린더 예외' },
         nav_settings_company: { label: '회사' },
         nav_settings_mail: { label: '메일 전송' },
         nav_settings_sms: { label: 'SMS 전송' },
@@ -106,6 +109,7 @@ export const ko: TranslationData = {
         nav_settings_knowledge: { label: '지식' },
         nav_settings_lifecycle: { label: '데이터 수명 주기' },
         nav_recycle_bin: { label: '휴지통' },
+        nav_public_forms: { label: '공개 양식' },
         nav_notification_preferences: { label: '알림 기본 설정' },
         nav_notification_templates: { label: '알림 템플릿' },
 
@@ -123,6 +127,7 @@ export const ko: TranslationData = {
         nav_datasources: { label: '데이터 소스' },
         nav_connector_credentials: { label: '커넥터 자격 증명' },
         nav_connector_connections: { label: '커넥터 연결' },
+        nav_slack: { label: 'Slack' },
 
         nav_oauth_apps: { label: 'OAuth 애플리케이션' },
       },

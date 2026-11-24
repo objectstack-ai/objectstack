@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { QuerySchema, DateGranularity } from '../data/query.zod';
 import { IsolationLevelEnum } from '../shared/enums.zod';
 import { retiredKey } from '../shared/retired-key';
+import { FIXED_READ_LEAF_NAMES } from './fixed-read-leaf';
 
 /**
  * Common Driver Options
@@ -196,6 +197,12 @@ const capRemoved = (key: string, mechanism: string) =>
  *   400) on one that does not, before any related read runs. The analytics
  *   relation group join reads the same bit for a dimension through a lookup
  *   (`INVALID_QUERY` / 400 without it).
+ * - `fixedReadLeaves` — the fixed-read leaves (ADR-0155 D4) the filter
+ *   compiler evaluates, by name: the engine's executor seam hands such a leaf
+ *   to a driver that lists its name and refuses it (`INTERNAL_ERROR` / 500)
+ *   before calling one that does not. A list, not a bit, because one key
+ *   covers every fixed-read leaf; separate from `readableIdsLeaf`, because a
+ *   `ReadableIds` leaf is not one.
  *
  * Everything else IS the method: aggregate pushdown gates on
  * `typeof driver.aggregate === 'function'`, schema sync on
@@ -474,7 +481,47 @@ export const DriverCapabilitiesSchema = lazySchema(() => z.object({
    *
    * Optional; absence means `false`, like `batchSchemaSync`.
    */
-  readableIdsLeaf: z.boolean().optional().describe('The filter compiler compiles (or, in process, evaluates) a composed `ReadableIds` semi-join leaf (absence = false: the engine refuses a nested-relation condition on a read verb up front, INVALID_FILTER / 400)'),
+  readableIdsLeaf: z.boolean().optional().describe('The filter compiler compiles (or, in process, evaluates) a composed `ReadableIds` semi-join leaf (absence = false: the engine refuses a nested-relation condition on a read verb up front, INVALID_FILTER / 400). A `ReadableIds` leaf is not a fixed-read leaf, so `fixedReadLeaves` neither implies nor is implied by this bit'),
+
+  /**
+   * [ADR-0155 D4, O1 as ruled] The fixed-read leaves this driver's filter
+   * compiler evaluates exactly, by name (`FIXED_READ_LEAF_NAMES`,
+   * `./fixed-read-leaf.ts`): `SharedRecordIds` today, and ADR-0147's leaf on
+   * the card that adds it. A fixed-read leaf is a branded `$in` comparand that
+   * arrives composed and denotes `field IN (SELECT column FROM table WHERE
+   * <bound predicates> AND column IS NOT NULL AND column <> '')` under system
+   * authority (`fixedInnerReadOf`).
+   *
+   * What the engine does with it: its executor seam, after the position,
+   * verb and recipient checks, hands a fixed-read leaf to the driver as it
+   * stands only when this list holds the leaf's name; when it does not, the
+   * engine REFUSES the operation before any driver is called, `INTERNAL_ERROR`
+   * / 500, naming the driver, the leaf and the remedy (ADR-0155 Q2: R1, and
+   * the declaration R2 reads up front). ⛔ No list fallback: the engine never
+   * substitutes an id list for a leaf a driver does not name.
+   *
+   * Why a list and not a bit: one key covers every fixed-read leaf, as the
+   * comparand door admits them through one option that names its brands
+   * (`admitFixedReadLeaves`), so ADR-0147's leaf joins by adding a name, never
+   * a second key. Why a name and not the brand: a capability is declared data,
+   * and a `unique symbol` cannot be one.
+   *
+   * How it relates to `readableIdsLeaf`: the two stay separate. A
+   * `ReadableIds` leaf is composed by the engine from the caller's read scope
+   * and compiles to a subquery over that scope; a fixed-read leaf arrives
+   * composed and compiles to a fixed inner read of one platform table, and
+   * `isFixedReadLeaf` does not admit a `ReadableIds` leaf. A driver that
+   * evaluates both declares both: a fixed-read leaf inside a composed
+   * `ReadableIds` scope needs both, because a driver without
+   * `readableIdsLeaf` refuses the composed leaf that carries it (ADR-0139 D3).
+   *
+   * ⛔ Not a way to say "this leaf, today": it describes the driver's filter
+   * compiler, is read at dispatch time, and a driver whose transport
+   * evaluates a leaf only sometimes does not list it.
+   *
+   * Optional; absence means none, like `readableIdsLeaf`'s `false`.
+   */
+  fixedReadLeaves: z.array(z.enum(FIXED_READ_LEAF_NAMES)).optional().describe('The fixed-read leaves (ADR-0155 D4) the filter compiler evaluates exactly, by name, e.g. ["SharedRecordIds"] (absence = none: the engine refuses an operation carrying such a leaf before calling the driver, INTERNAL_ERROR / 500). Separate from `readableIdsLeaf`: a `ReadableIds` leaf is not a fixed-read leaf'),
 
   // ============================================================================
   // Retired capability bits (#4634, ADR-0049 enforce-or-remove) — 17.0.0

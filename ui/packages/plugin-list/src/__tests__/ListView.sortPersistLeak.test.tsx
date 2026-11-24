@@ -54,6 +54,7 @@ import { attachObjectSortability } from '@object-ui/core';
 import { ListView } from '../ListView';
 import type { ListViewSchema } from '@object-ui/types';
 import { SchemaRendererProvider } from '@object-ui/react';
+import { openAdvancedSort } from './conditionPanels';
 
 const objectDef = {
   name: 'crm_opportunity',
@@ -131,7 +132,7 @@ async function openSortPopover(
   );
   await waitFor(() => expect(dataSource.getObjectSchema).toHaveBeenCalled());
   fireEvent.click(screen.getByRole('button', { name: /^sort/i }));
-  await screen.findByText('Sort Records');
+  await openAdvancedSort();
   persistSort.mockClear();
   return { persistSort };
 }
@@ -159,12 +160,12 @@ async function sortFieldOptions(): Promise<string[]> {
 /**
  * The X on one builder row. Scoped through the row's own "Sort by" / "Then by"
  * label, so it is that row's control and not whichever icon button the
- * toolbar happens to render first; the two <Select>s in the row are
- * `role="combobox"`, which leaves exactly one button inside it.
+ * toolbar happens to render first; named, since the row also holds its
+ * drag handle (objectstack#35876).
  */
 function removeSortRow(label: 'Sort by' | 'Then by') {
   const row = screen.getByText(label).parentElement as HTMLElement;
-  fireEvent.click(within(row).getByRole('button'));
+  fireEvent.click(within(row).getByRole('button', { name: /remove sort/i }));
 }
 
 /** "Add sort" — an edit to a DIFFERENT part of the sort than the refused row. */

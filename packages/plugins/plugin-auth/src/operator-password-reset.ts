@@ -26,10 +26,21 @@
  *   (`credential-change-ends-reset-tokens.ts`). The CLI holds no server cache,
  *   so it ends the token rows, as the raw adapter (handed no secondary storage)
  *   does.
- * - **Ends every session and revokes every API key** of the account, as an
- *   administrator's forced reset with revocation does
- *   (`forced-reset-revocation.ts`, `admin_password_reset`): the sessions and
- *   keys issued under the old password do not outlive it.
+ * - **Ends every session, revokes every API key, unlinks every sign-in
+ *   account other than the password, ends every authorized app and approved
+ *   device sign-in, disables every OAuth application it registered and
+ *   revokes every SCIM credential it minted** of the account, as an
+ *   administrator's forced reset with
+ *   revocation does (`forced-reset-revocation.ts`, `admin_password_reset`),
+ *   and as a self-service reset does (`password-reset-ends-added-access.ts`):
+ *   the sessions, keys, links, grants, apps and credentials the account held
+ *   under the old password do not outlive it. The grants are read where the
+ *   project database keeps them (`storedOAuthGrants`): the command runs with
+ *   no auth server, so there is no plugin registry to ask, and a store the
+ *   database does not hold has nothing to end. The registered apps and the
+ *   minted credentials are read there too, by their own `user_id`. It sends
+ *   the account no notice: it runs with no mail service, and the operator is
+ *   told what it ended.
  *
  * It asks for no password change at the next sign-in: the operator chose the
  * password.
@@ -38,6 +49,7 @@
 import { SystemObjectName } from '@objectstack/spec/system';
 import { DEV_SEED_CREDENTIAL_FIELD, isDevSeedPassword } from './dev-seed-credential.js';
 import { revokeSessionsAndApiKeys } from './forced-reset-revocation.js';
+import { storedOAuthGrants } from './password-reset-ends-added-access.js';
 import { endResetTokensOnCredentialWrite } from './credential-change-ends-reset-tokens.js';
 
 /** better-auth's default bounds for a password (`emailAndPassword.minPasswordLength` / `maxPasswordLength`). */
@@ -65,10 +77,22 @@ export type OperatorPasswordResetOutcome =
   | {
       outcome: 'set';
       userId: string;
-      /** Sessions ended and API keys revoked. */
+      /**
+       * Sessions ended, API keys revoked, linked sign-in accounts unlinked,
+       * authorized apps ended, registered OAuth applications disabled and
+       * minted SCIM credentials revoked.
+       */
       sessionsEnded: number;
       apiKeysRevoked: number;
-      /** `false` when a session or key could not be read or revoked; the password is set either way. */
+      signInAccountsUnlinked: number;
+      authorizedAppsEnded: number;
+      ownedAppsDisabled: number;
+      scimCredentialsRevoked: number;
+      /**
+       * `false` when a session, key, sign-in account, grant, registered app or
+       * minted credential could not be read or ended; the password is set
+       * either way.
+       */
       revocationComplete: boolean;
     }
   | { outcome: 'refused'; reason: OperatorPasswordResetRefusalReason; message: string };
@@ -178,12 +202,16 @@ export async function setOperatorPassword(
     },
     { context: SYSTEM_CTX },
   );
-  const revocation = await revokeSessionsAndApiKeys(engine, user.id, { logger: opts.logger });
+  const revocation = await revokeSessionsAndApiKeys(engine, user.id, { logger: opts.logger, oauth: storedOAuthGrants(engine) });
   return {
     outcome: 'set',
     userId: user.id,
     sessionsEnded: revocation.sessions,
     apiKeysRevoked: revocation.apiKeys,
+    signInAccountsUnlinked: revocation.signInAccounts,
+    authorizedAppsEnded: revocation.authorizedApps,
+    ownedAppsDisabled: revocation.ownedApps,
+    scimCredentialsRevoked: revocation.scimCredentials,
     revocationComplete: revocation.complete,
   };
 }

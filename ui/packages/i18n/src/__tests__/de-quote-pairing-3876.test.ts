@@ -445,7 +445,45 @@ describe('objectui#3876 — de pack closes „ with “ and not with a straight 
     // suggested-field mark („{{mark}}“) — one interpolated span, pack text.
     // 118 once objectstack-ai/objectstack#34740 retired
     // `empty.objectNotFoundDescription` („{{name}}“) — one interpolated span fewer.
-    expect(okSpans, 'correctly paired spans').toBe(118);
+    // 119 once objectstack-ai/objectstack#35357 added
+    // `approvalsInbox.slaCalendarNotFound`, the inbox naming the calendar an
+    // escalation deadline cannot be counted on („{{calendar}}“) — one
+    // interpolated span, runtime data.
+    // 120 once objectstack-ai/objectstack#35688 added `fields.tags.add`, the
+    // grid cell editor's row adding the typed tag („{{value}}“) — one
+    // interpolated span, user input.
+    // 121 once objectstack-ai/objectstack#35955 added
+    // `console.objectView.draft.saveToViewConfirm`, the shared-view save's
+    // question naming the view („{{name}}“) — one interpolated span, view data.
+    // 123 once objectstack-ai/objectstack#36011 added
+    // `console.objectView.restoreFactoryConfirm` and `restoreFactoryDone`, the
+    // factory-view restore's question and result naming the view („{{name}}“)
+    // — two interpolated spans, view data.
+    // 124 once objectstack-ai/objectstack#36286 added
+    // `console.commandPalette.createAs`, the palette's row creating a record
+    // from the typed words („{{query}}“) — one interpolated span, user input.
+    // 125 once objectstack-ai/objectstack#36363 added `designMode.menu.iconHint`,
+    // the menu editor's icon field naming an example icon („briefcase“) — one
+    // literal span.
+    // 127 once objectstack-ai/objectstack#36370 added `kanban.laneMenu.hideHint`
+    // and `list.optionsMenu.kanbanHiddenLanesHint`, the board's two lines naming
+    // the lane hidden cards land in („Nicht kategorisiert“) — two literal spans.
+    // 128 once objectstack-ai/objectstack#36364 added `designMode.menu.newItemLeft`,
+    // the design mode naming a new dashboard it could not remove („{{name}}“)
+    // — one interpolated span, the name the reader gave it.
+    // 129 once objectstack-ai/objectstack#36364's report half added
+    // `designMode.menu.newReportLeft`, the same sentence for a new report
+    // („{{name}}“) — one interpolated span.
+    // 133 once objectstack-ai/objectstack#36366 added `designMode.pins`: the
+    // header-buttons panel naming the 「More」 menu („Mehr“, twice) and the
+    // arranged action a save refuses („{{name}}“, twice), four spans.
+    // 134 once objectstack-ai/objectstack#36758 named the design mode by its
+    // door in `empty.appMenuEmptyDescription` („Layout
+    // gestalten“) — one literal span.
+    // 133 once objectstack-ai/objectstack#36692 retired the design mode's
+    // new-report flow, and with it `designMode.menu.newReportLeft` („{{name}}“)
+    // — one interpolated span fewer.
+    expect(okSpans, 'correctly paired spans').toBe(133);
   });
 
   it('keeps the count identity that replaces the card’s count(„) === count(“)', () => {
@@ -558,8 +596,33 @@ describe('objectui#3876 — de pack closes „ with “ and not with a straight 
     // 119 / 119 / 0 after objectstack-ai/objectstack#33419 added
     // `chatbot.plan.suggestedFieldLegend`, one more matched pair. 118 / 118 / 0
     // after objectstack-ai/objectstack#34740 retired
-    // `empty.objectNotFoundDescription`, one matched pair fewer.
-    expect({ open, close, rdq }).toEqual({ open: 118, close: 118, rdq: 0 });
+    // `empty.objectNotFoundDescription`, one matched pair fewer. 119 / 119 / 0
+    // after objectstack-ai/objectstack#35357 added
+    // `approvalsInbox.slaCalendarNotFound`, one more matched pair. 120 / 120 / 0
+    // after objectstack-ai/objectstack#35688 added `fields.tags.add`, one more
+    // matched pair. 121 / 121 / 0 after objectstack-ai/objectstack#35955 added
+    // `console.objectView.draft.saveToViewConfirm`, one more matched pair.
+    // 123 / 123 / 0 after objectstack-ai/objectstack#36011 added
+    // `console.objectView.restoreFactoryConfirm` and `restoreFactoryDone`, two
+    // more matched pairs.
+    // 124 / 124 / 0 after objectstack-ai/objectstack#36286 added
+    // `console.commandPalette.createAs`, one more matched pair.
+    // 125 / 125 / 0 after objectstack-ai/objectstack#36363 added
+    // `designMode.menu.iconHint`, one more matched pair.
+    // 127 / 127 / 0 after objectstack-ai/objectstack#36370 added
+    // `kanban.laneMenu.hideHint` and `list.optionsMenu.kanbanHiddenLanesHint`,
+    // two more matched pairs.
+    // 128 / 128 / 0 after objectstack-ai/objectstack#36364 added
+    // `designMode.menu.newItemLeft`, one more matched pair.
+    // 129 / 129 / 0 after its report half added `designMode.menu.newReportLeft`,
+    // one more matched pair.
+    // 133 / 133 / 0 after objectstack-ai/objectstack#36366 added
+    // `designMode.pins`, four more matched pairs.
+    // 134 / 134 / 0 after objectstack-ai/objectstack#36758 named the design
+    // mode „Layout gestalten“ in `empty.appMenuEmptyDescription`, one more pair.
+    // 133 / 133 / 0 after objectstack-ai/objectstack#36692 retired
+    // `designMode.menu.newReportLeft`, one matched pair fewer.
+    expect({ open, close, rdq }).toEqual({ open: 133, close: 133, rdq: 0 });
     // The durable shape: every „ closed by a “, every surplus “ an English
     // opener answered by a ”. Survived translating the two English values.
     expect(close).toBe(open + rdq);

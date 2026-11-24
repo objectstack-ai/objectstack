@@ -10,8 +10,10 @@
 // approval step at all, so `os lint` and `os i18n check` never listed an
 // approval flow as untranslated: HotCRM's six approval flows rendered English
 // in zh-CN / ja-JP / es-ES under a green coverage run. These pins are the CLI
-// half: the walker scaffolds both keys, the coverage gate demands them, and a
-// flow no reader names (no screen, no approval) still owes no label.
+// half: the walker scaffolds both keys and the coverage gate demands them. The
+// flow label is now asked of every named flow (the docs flow embed titles any
+// flow by it), pinned in `i18n-flow-screen-coverage.test.ts`; a scheduled flow
+// still owes no approval or screen key.
 //
 // The ledger mock is `i18n-flow-screen-coverage.test.ts`'s, for its reason:
 // these pins measure the bucket itself, whatever the shipped ledger says next.
@@ -26,6 +28,13 @@ vi.mock('@objectstack/lint', async (importOriginal) => ({
 import { collectExpectedEntries, extractTranslations } from '../src/utils/i18n-bundle-extract.js';
 import { computeI18nCoverage } from '../src/utils/i18n-coverage.js';
 import { TranslationDataSchema } from '@objectstack/spec/system';
+
+/**
+ * The `flows.<flow>.nodes.<node_id>.label` family (ruling 7076440876) is
+ * demanded beside this file's own and pinned by `i18n-flow-node-coverage.test.ts`;
+ * these pins measure their family, so they read every key but that one.
+ */
+const notNodeLabel = (key: string) => !/^flows\.[^.]+\.nodes\./.test(key);
 
 /** An approval-only flow: record-triggered, two approval steps, no screen. */
 const expenseApproval = {
@@ -54,7 +63,7 @@ const quickNote = {
   edges: [],
 };
 
-/** A scheduled flow with no screen and no approval: no reader names it. */
+/** A scheduled flow with no screen and no approval: only its label is read (the docs flow embed's title). */
 const nightlyDigest = {
   name: 'nightly_digest',
   label: 'Nightly Digest',
@@ -67,11 +76,13 @@ const nightlyDigest = {
 };
 
 const flowKeys = (config: any) =>
-  collectExpectedEntries(config).filter((e) => e.path[0] === 'flows').map((e) => e.path.join('.'));
+  collectExpectedEntries(config).filter((e) => e.path[0] === 'flows').map((e) => e.path.join('.')).filter(notNodeLabel);
 
 describe('what the walker harvests from an approval flow (#24916)', () => {
   it('emits the flow label and each approval step label, seeded with the authored text', () => {
-    const entries = collectExpectedEntries({ flows: [expenseApproval] }).filter((e) => e.path[0] === 'flows');
+    const entries = collectExpectedEntries({ flows: [expenseApproval] }).filter(
+      (e) => e.path[0] === 'flows' && notNodeLabel(e.path.join('.')),
+    );
 
     expect(entries.map((e) => e.path.join('.'))).toEqual([
       'flows.expense_approval.label',
@@ -87,8 +98,8 @@ describe('what the walker harvests from an approval flow (#24916)', () => {
     expect(flowKeys({ flows: [flow] })).toEqual(['flows.expense_approval.label']);
   });
 
-  it('still emits no label for a flow with neither a screen nor an approval node', () => {
-    expect(flowKeys({ flows: [nightlyDigest] })).toEqual([]);
+  it('emits only the flow label for a flow with neither a screen nor an approval node', () => {
+    expect(flowKeys({ flows: [nightlyDigest] })).toEqual(['flows.nightly_digest.label']);
   });
 });
 
@@ -99,7 +110,7 @@ describe('the coverage gate demands the approval flow and its steps (#24916)', (
     translations: [{ 'zh-CN': { ...(flows ? { flows } : {}) } }],
   });
   const zhFlowIssues = (config: any) =>
-    computeI18nCoverage(config).issues.filter((i) => i.locale === 'zh-CN' && i.source === 'flow');
+    computeI18nCoverage(config).issues.filter((i) => i.locale === 'zh-CN' && i.source === 'flow' && notNodeLabel(i.key));
 
   it('lists the untranslated approval flow label and step labels in the flow bucket', () => {
     const keys = zhFlowIssues(tree()).map((i) => i.key).filter((k) => k.startsWith('flows.expense_approval.'));
@@ -130,14 +141,14 @@ describe('the coverage gate demands the approval flow and its steps (#24916)', (
     expect(keys.filter((k) => k.startsWith('flows.expense_approval.'))).toEqual([]);
   });
 
-  it('keeps the screen flow\'s demand exactly as it was, and asks nothing of the scheduled flow', () => {
+  it('keeps the screen flow\'s demand exactly as it was, and asks only the scheduled flow\'s label', () => {
     const keys = zhFlowIssues(tree()).map((i) => i.key);
     expect(keys.filter((k) => k.startsWith('flows.quick_note.'))).toEqual([
       'flows.quick_note.label',
       'flows.quick_note.screens.ask.title',
       'flows.quick_note.screens.ask.fields.note.label',
     ]);
-    expect(keys.filter((k) => k.startsWith('flows.nightly_digest.'))).toEqual([]);
+    expect(keys.filter((k) => k.startsWith('flows.nightly_digest.'))).toEqual(['flows.nightly_digest.label']);
   });
 
   it('accepts the translated pack the way the translation contract declares it', () => {
@@ -154,11 +165,11 @@ describe('the skeleton `os i18n extract` writes for an approval flow (#24916)', 
   const result = extractTranslations({ flows: [expenseApproval] }, { locales: ['en', 'zh-CN'] });
 
   it('writes the authored labels into the default locale and empty slots into the others', () => {
-    expect((result.bundles.en as any).flows.expense_approval).toEqual({
+    expect((result.bundles.en as any).flows.expense_approval).toMatchObject({
       label: 'Expense Approval',
       approvals: { manager_review: { label: 'Manager Review' }, finance_review: { label: 'Finance Review' } },
     });
-    expect((result.bundles['zh-CN'] as any).flows.expense_approval).toEqual({
+    expect((result.bundles['zh-CN'] as any).flows.expense_approval).toMatchObject({
       label: '',
       approvals: { manager_review: { label: '' }, finance_review: { label: '' } },
     });

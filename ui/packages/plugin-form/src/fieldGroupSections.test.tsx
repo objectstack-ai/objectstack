@@ -119,8 +119,12 @@ describe.each(CONTAINERS)('%s — fieldGroups fallback (#4774)', (_name, Contain
     expect(forms[0].querySelectorAll('input').length).toBe(4);
 
     // The flat path's column inference survives the upgrade: 4 fields → a
-    // 2-column container grid, not a single-column stack.
-    expect(forms[0].querySelector('[class*="@md:grid-cols-2"]')).not.toBeNull();
+    // 2-column container grid, not a single-column stack — except in the
+    // dialog, which draws four undeclared fields one per row
+    // (objectstack-ai/objectstack#35980).
+    const twoWide = forms[0].querySelector('[class*="@md:grid-cols-2"]');
+    if (formType === 'modal') expect(twoWide).toBeNull();
+    else expect(twoWide).not.toBeNull();
   });
 
   it('submits values from EVERY group in one create() payload', async () => {

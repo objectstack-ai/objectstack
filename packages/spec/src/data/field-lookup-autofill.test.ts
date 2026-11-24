@@ -256,14 +256,14 @@ describe('`lookupAutofill` — source half (defineStack cross-reference)', () =>
 });
 
 describe('control: the grid column key `autofill` keeps its contract', () => {
-  it('a lookup column still takes `autofill` on and off, and its describe is unchanged', () => {
+  it('a lookup column still takes `autofill` on and off, and its describe states the currency rule', () => {
     for (const autofill of [true, false]) {
       expect(InlineGridColumnSchema.safeParse({ name: 'crm_product', type: 'lookup', reference: 'crm_product', autofill }).success).toBe(true);
     }
     expect(InlineGridColumnSchema.safeParse({ name: 'crm_product' }).success).toBe(true);
     const shape = (InlineGridColumnSchema as unknown as { shape: Record<string, { description?: string }> }).shape;
     expect(shape.autofill!.description).toBe(
-      "For `lookup` columns: picking a record copies its same-named fields into sibling columns (a product's unit_price/description). On by default; set false to disable.",
+      "For `lookup` columns: picking a record copies its same-named fields into sibling columns (a product's unit_price/description). On by default; set false to disable. An amount of money is copied only into a cell in the same currency: a picked amount in another currency than its cell (its child field's: a `fixed` code, the code the line or its header holds, or the home currency) is not copied, the cell stays empty and the grid says why. Nothing is converted.",
     );
   });
 

@@ -373,3 +373,41 @@ describe('seed: a row whose key reference was empty at landing stays deleted (#3
     expect(store.dkr_task[0].assignee ?? null).toBeNull();
   });
 });
+
+describe('seed: a key reference that resolves empty is not a blank key (#34857)', () => {
+  /**
+   * The blank-key refusal reads the key as AUTHORED, before any reference
+   * resolves. A deferred key reference is authored (`'Alice'`) and empty only
+   * after resolution, so it is never refused: the row lands, holds one row
+   * across loads, and the #34856 delete record above keeps working.
+   */
+  const blankKeyRefusals = (result: any): any[] =>
+    result.errors.filter((e: any) => e.message.includes('was NOT loaded: it is keyed on externalId'));
+
+  for (const mode of ['ignore', 'upsert'] as const) {
+    it(`CONTROL ${mode}: the deferred-key row lands and is not refused, three loads one row`, async () => {
+      const { engine, store } = createEngine();
+      const seeds = [taskSeed(mode, [{ name: 'Onboard', assignee: 'Alice', notes: 'first week' }])];
+
+      for (let boot = 0; boot < 3; boot++) {
+        const result = await load(engine, seeds);
+        expect(blankKeyRefusals(result)).toEqual([]);
+        expect(store.dkr_task).toHaveLength(1);
+      }
+      expect(store.dkr_task[0].assignee ?? null).toBeNull();
+    });
+  }
+
+  it('CONTROL: beside it, a record of the same dataset whose key reference is authored blank is refused', async () => {
+    const { engine, store } = createEngine();
+    const result = await load(engine, [taskSeed('ignore', [
+      { name: 'Onboard', assignee: 'Alice' },
+      { name: 'Review', assignee: '' },
+    ])]);
+
+    const refused = blankKeyRefusals(result);
+    expect(refused).toHaveLength(1);
+    expect(refused[0]).toMatchObject({ sourceObject: 'dkr_task', field: 'assignee', recordIndex: 1 });
+    expect(store.dkr_task.map((r) => r.name)).toEqual(['Onboard']);
+  });
+});

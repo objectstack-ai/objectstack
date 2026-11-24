@@ -751,9 +751,9 @@ describe('queryDataset passes the server drillRanges sidecar through (#1752)', (
         // Equality sidecars cover the non-date dim only (and carry the RAW value
         // `NA`, not the row's resolved label "North America"); the date dim gets
         // a range instead.
-        // A base-object field: a `relationship.field` path is resolved through
-        // the related ids first (`resolveDatasetDrillFilter`, objectstack#34907)
-        // and the synchronous builder refuses one.
+        // A base-object field: a `relationship.field` path drills as one
+        // nested-relation condition (`resolveDatasetDrillFilter`) and the
+        // synchronous builder refuses one.
         dimensionFields: { region: 'region' },
         drillRawRows: [{ region: 'NA' }],
         drillRanges: [{ closed_month: { field: 'close_date', gte: '2026-06-01', lt: '2026-07-01' } }],

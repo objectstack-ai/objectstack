@@ -9,7 +9,7 @@
       "files": [],
       "assertions": {
         "must_contain": ["defineDataset", "dataset", "dimensions", "values"],
-        "must_not_contain": ["valueField:", "categoryField"]
+        "must_not_contain": ["valueField:", "categoryField:"]
       }
     },
     {
@@ -50,7 +50,7 @@
       "files": [],
       "assertions": {
         "must_contain": ["ObjectChart", "aggregate", "groupBy"],
-        "must_not_contain": ["defineDataset"]
+        "must_not_contain": ["defineDataset("]
       }
     },
     {

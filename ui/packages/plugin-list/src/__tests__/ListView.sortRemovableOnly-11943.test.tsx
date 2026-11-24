@@ -38,6 +38,7 @@ import type { DataSource, ListViewSchema } from '@object-ui/types';
 import { SchemaRendererProvider } from '@object-ui/react';
 import { MePermissionsProvider, type MePermissionsResponse, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 import { ListView } from '../ListView';
+import { openAdvancedSort } from './conditionPanels';
 
 const OBJECT = 'fls_ticket';
 
@@ -154,7 +155,7 @@ async function optionsOf(trigger: HTMLElement): Promise<Option[]> {
 /** Open the popover once the object definition built the list (`Priority` shows it did). */
 async function openSort(): Promise<Option[]> {
   fireEvent.click(await screen.findByRole('button', { name: /^sort/i }));
-  await screen.findByText('Sort Records');
+  await openAdvancedSort();
   let options: Option[] = [];
   await waitFor(async () => {
     options = await optionsOf(sortRowTriggers()[0]);
@@ -213,7 +214,7 @@ describe('a field the Sort picker keeps only for the current sort is removable o
 
       // Removing its row ends the exception: the field leaves the list.
       const firstRow = within(sortPanel()).getByText('Sort by').parentElement as HTMLElement;
-      fireEvent.click(within(firstRow).getByRole('button'));
+      fireEvent.click(within(firstRow).getByRole('button', { name: /remove sort/i }));
       await waitFor(() => expect(sortRowTriggers()).toHaveLength(1));
       expect(sortRowTriggers()[0]).toHaveTextContent('Title');
       expect((await optionsOf(sortRowTriggers()[0])).map((o) => o.label)).toEqual(['Title', 'Priority']);

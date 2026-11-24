@@ -15,6 +15,11 @@
  *   --skills-from SOURCE  `workspace` (default: this checkout's skills/) or an
  *                         `@objectstack/skills` version (`18.5.0`), packed from npm;
  *                         cases and bundles both come from SOURCE
+ *   --triggers-only       only the selected bundles' trigger cases (`should_trigger`), on
+ *                         the with-skill arm; refused beside --regrade or --self-test
+ *   --trigger-field F     what a trigger turn's project holds beside its bundle: `selection`
+ *                         (default: every --skills bundle, or every bundle) or `own` (it alone,
+ *                         as rounds recorded before); refused beside --regrade or --self-test
  *   --repeats N           turns per case per arm (default 1)
  *   --concurrency N       turns at once (default 2)
  *   --max-turns N         `--max-turns` per turn (default 16)
@@ -51,6 +56,9 @@ import { renderSummaryMarkdown, type RoundSummary, summariseRound } from './summ
 
 export const ROUND_RECORD_SCHEMA = 'skill-eval-round/1';
 
+export const TRIGGER_FIELDS = ['selection', 'own'] as const;
+export type TriggerField = (typeof TRIGGER_FIELDS)[number];
+
 export interface SkillEvalArgs {
   skills?: string[];
   skillsFrom: string;
@@ -64,6 +72,9 @@ export interface SkillEvalArgs {
   bin: string;
   out?: string;
   regrade?: string;
+  triggersOnly: boolean;
+  /** `--trigger-field`; absent ⇒ `selection`. */
+  triggerField?: TriggerField;
   dryRun: boolean;
   selfTest: boolean;
   help: boolean;
@@ -77,7 +88,7 @@ const positiveInt = (flag: string, raw: string | undefined): number => {
 
 /** Parse argv; an unknown flag or a flag missing its value is refused. Pure over its input. */
 export function parseSkillEvalArgs(argv: readonly string[]): SkillEvalArgs {
-  const a: SkillEvalArgs = { skillsFrom: 'workspace', repeats: 1, concurrency: 2, maxTurns: 16, caseTimeoutMin: 5, maxUtilization: 0.9, bin: 'claude', dryRun: false, selfTest: false, help: false };
+  const a: SkillEvalArgs = { skillsFrom: 'workspace', repeats: 1, concurrency: 2, maxTurns: 16, caseTimeoutMin: 5, maxUtilization: 0.9, bin: 'claude', triggersOnly: false, dryRun: false, selfTest: false, help: false };
   for (let i = 0; i < argv.length; i++) {
     const flag = argv[i]!;
     const val = () => {
@@ -105,11 +116,21 @@ export function parseSkillEvalArgs(argv: readonly string[]): SkillEvalArgs {
     else if (flag === '--bin') a.bin = val();
     else if (flag === '--out') a.out = val();
     else if (flag === '--regrade') a.regrade = val();
+    else if (flag === '--triggers-only') a.triggersOnly = true;
+    else if (flag === '--trigger-field') {
+      const v = val();
+      if (!(TRIGGER_FIELDS as readonly string[]).includes(v)) throw new Error(`--trigger-field takes ${TRIGGER_FIELDS.join(' or ')}, not \`${v}\``);
+      a.triggerField = v as TriggerField;
+    }
     else if (flag === '--dry-run') a.dryRun = true;
     else if (flag === '--self-test') a.selfTest = true;
     else if (flag === '--help' || flag === '-h') a.help = true;
     else throw new Error(`unknown flag \`${flag}\` (see --help)`);
   }
+  // Refused, never ignored: neither of these reads a selection the flag could narrow.
+  if (a.triggersOnly && a.regrade !== undefined) throw new Error('--triggers-only cannot narrow --regrade: a regrade re-draws the recorded round at the scope it ran, so a --triggers-only round regrades as one without the flag');
+  if (a.triggersOnly && a.selfTest) throw new Error('--triggers-only cannot narrow --self-test: the self-test runs its own fixtures, never a selection of cases');
+  if (a.triggerField && (a.regrade !== undefined || a.selfTest)) throw new Error(`--trigger-field cannot apply to ${a.selfTest ? '--self-test: the self-test runs its own fixtures' : '--regrade: a regrade runs no turn, and keeps the installed set its round recorded'}`);
   return a;
 }
 
@@ -172,7 +193,10 @@ export interface RoundRecord {
     concurrency: number;
     maxUtilization: number;
   };
-  scope: { cases: number; arms: string[]; repeats: number; plannedTurns: number; ranTurns: number; notRunTurns: number };
+  /** `triggersOnly`: the round ran `--triggers-only` (its trigger cases alone, on the with-skill arm), and `--regrade` keeps that scope. */
+  scope: { cases: number; arms: string[]; repeats: number; plannedTurns: number; ranTurns: number; notRunTurns: number; triggersOnly?: true };
+  /** What every trigger turn installed beside its bundle (`--trigger-field`); absent on a round recorded before ⇒ `own`. */
+  triggerField?: { mode: TriggerField; bundles?: string[] };
   stopped?: RoundStop;
   /**
    * Set by `--regrade`: when, by which runner, and how many verdicts now differ
@@ -200,9 +224,15 @@ export function regradedLines(g: NonNullable<RoundRecord['regraded']>): string[]
   ];
 }
 
-/** `N behaviour case(s) × 2 arms [+ M trigger case(s) × the with-skill arm], × R`. Pure. */
+/** `N behaviour case(s) × 2 arms [+ M trigger case(s) × the with-skill arm], × R`; the behaviour part only when there is one, or nothing else. Pure. */
 export const turnsLine = (behaviour: number, trigger: number, repeats: number): string =>
-  `${behaviour} behaviour case(s) × ${ARMS.length} arms${trigger ? ` + ${trigger} trigger case(s) × the with-skill arm` : ''}, × ${repeats}`;
+  `${[behaviour || !trigger ? `${behaviour} behaviour case(s) × ${ARMS.length} arms` : '', trigger ? `${trigger} trigger case(s) × the with-skill arm` : ''].filter(Boolean).join(' + ')}, × ${repeats}`;
+
+/** The summary header's account of what a trigger turn's project held. Pure. */
+export const triggerFieldLine = (f: RoundRecord['triggerField']): string =>
+  f?.mode === 'selection'
+    ? `trigger turns installed the round's selection, ${f.bundles?.length ?? 0} bundle(s): ${(f.bundles ?? []).join(', ')} (--trigger-field selection)`
+    : `trigger turns installed their own bundle alone (${f ? '--trigger-field own' : 'a round recorded before --trigger-field, which always did'})`;
 
 /** `round.json`, `summary.md` and `summary.github.md` into `outDir`, and the per-bundle tables on stdout. */
 export function writeRoundOutputs(outDir: string, round: RoundRecord): void {
@@ -210,13 +240,14 @@ export function writeRoundOutputs(outDir: string, round: RoundRecord): void {
   const { driver: d, scope } = round;
   const wallMin = Math.round(round.wallMs / 6000) / 10;
   const head = {
-    title: `Skill evals · ${round.skills.allBundles ? 'all bundles' : round.skills.bundles.join(', ')} × 2 arms × ${scope.repeats} rep${scope.repeats === 1 ? '' : 's'}`,
+    title: `Skill evals · ${round.skills.allBundles ? 'all bundles' : round.skills.bundles.join(', ')} × ${scope.triggersOnly ? 'trigger cases × the with-skill arm' : '2 arms'} × ${scope.repeats} rep${scope.repeats === 1 ? '' : 's'}`,
     lines: [
       `runner: ${round.runner.repo} ${round.runner.sha}`,
       `skills: ${round.skills.source}`,
       `driver: ${d.driver} ${d.version}, login \`${d.authMethod}\`, no API key; served ${d.servedModels.join(', ') || 'none'}; effort ${d.requestedEffort ?? 'CLI default'}`,
       `turns: ${scope.ranTurns} of ${scope.plannedTurns} ran (${turnsLine(round.summary.cases.length, round.summary.triggers?.cases.length ?? 0, scope.repeats)}), ${d.concurrency} at once, --max-turns ${d.maxTurns}`,
       `wall time: ${wallMin} min; notional cost the CLI reported: $${round.summary.reportedCostUsd} (subscription login, nothing billed)`,
+      ...(round.summary.triggers?.cases.length ? [triggerFieldLine(round.triggerField)] : []),
       ...(round.regraded ? regradedLines(round.regraded) : []),
     ],
     ...(round.stopped ? { stopped: round.stopped } : {}),
@@ -225,7 +256,7 @@ export function writeRoundOutputs(outDir: string, round: RoundRecord): void {
   writeFileSync(join(outDir, 'summary.github.md'), renderSummaryMarkdown(round.summary, head, { forGitHub: true }));
   const md = renderSummaryMarkdown(round.summary, head);
   const triggerTable = md.includes('\n## Trigger cases') ? md.slice(md.indexOf('\n## Trigger cases')).split('\n| trigger case |')[0] : '';
-  console.log(`\n${md.split('## Per case')[0]}${triggerTable}`);
+  console.log(`\n${md.split(/## (?:Per case|Trigger cases)/)[0]}${triggerTable}`);
   console.log(`round: ${join(outDir, 'round.json')} · summary: ${join(outDir, 'summary.md')}`);
 }
 
@@ -249,7 +280,8 @@ export function regradeRound(dir: string, catalog: SkillEvalCatalog, sourceLabel
   if (round.skills.source !== sourceLabel) throw new Error(`--regrade: the round ran on ${round.skills.source}, not ${sourceLabel}; pass the same --skills-from`);
   // The bundles may have left the catalog too; their cases are then set apart as removed.
   const present = round.skills.bundles.filter((b) => catalog.bundles.includes(b));
-  const catalogCases = present.length ? catalog.cases.filter((c) => present.includes(c.bundle)) : [];
+  // A `--triggers-only` round planned its trigger cases alone: its behaviour cases are not `added` since.
+  const catalogCases = present.length ? catalog.cases.filter((c) => present.includes(c.bundle) && (!round.scope.triggersOnly || c.shouldTrigger !== undefined)) : [];
   const view = { bundles: catalog.bundles, unlisted: catalog.unlistedBundles };
   const runsDir = join(dir, 'runs');
   const files = readdirSync(runsDir).filter((n) => n.endsWith('.json')).sort();
@@ -277,7 +309,7 @@ export function regradeRound(dir: string, catalog: SkillEvalCatalog, sourceLabel
 const HELP = `skill-evals — run the published skills' eval cases on a with-skill and a no-skill arm
   pnpm --filter @objectstack/scenarios skill-evals [--skills a,b] [--skills-from workspace|VERSION] [--repeats N]
        [--concurrency N] [--max-turns N] [--case-timeout MIN] [--max-utilization F] [--model M] [--effort L]
-       [--bin PATH] [--out DIR] [--dry-run] [--regrade DIR] [--self-test]
+       [--bin PATH] [--out DIR] [--triggers-only] [--trigger-field selection|own] [--dry-run] [--regrade DIR] [--self-test]
 See packages/qa/scenarios/README.md, "Running the published skills' eval cases".`;
 
 export async function main(argv: readonly string[]): Promise<number> {
@@ -308,7 +340,9 @@ export async function main(argv: readonly string[]): Promise<number> {
     }
     const catalogView = { bundles: catalog.bundles, unlisted: catalog.unlistedBundles };
     if (args.regrade) return regradeRound(resolve(args.regrade), catalog, source.label);
-    const cases = selectBundles(catalog, args.skills);
+    // The competing set every trigger turn installs: the --skills bundles, or every bundle; `own` installs none beside.
+    const triggerField = args.triggerField === 'own' ? undefined : [...new Set(args.skills?.length ? args.skills : catalog.bundles)];
+    const cases = selectBundles(catalog, args.skills, args.triggersOnly, triggerField !== undefined);
     const jobs = planRound(cases, args.repeats);
     const bundles = [...new Set(cases.map((c) => c.bundle))];
     const turnOpts = { maxTurns: args.maxTurns, ...(args.model ? { model: args.model } : {}), ...(args.effort ? { effort: args.effort } : {}) };
@@ -317,9 +351,12 @@ export async function main(argv: readonly string[]): Promise<number> {
       console.log(`skills: ${source.label} (${source.root})`);
       for (const b of bundles) console.log(`  ${b}: ${cases.filter((c) => c.bundle === b).length} case(s)`);
       const triggers = cases.filter((c) => c.shouldTrigger !== undefined);
+      for (const b of triggers.length ? (triggerField ?? []).filter((n) => !bundles.includes(n)) : []) console.log(`  ${b}: no case selected; a competitor in every trigger turn`);
       console.log(`${turnsLine(cases.length - triggers.length, triggers.length, args.repeats)} = ${jobs.length} turn(s), ${args.concurrency} at once`);
+      if (args.triggersOnly) console.log(`--triggers-only: ${selectBundles(catalog, args.skills, false, triggerField !== undefined).length - cases.length} behaviour case(s) of these bundles left out`);
       if (triggers.length) console.log(`trigger cases: ${triggers.filter((c) => c.shouldTrigger).length} should load the bundle, ${triggers.filter((c) => !c.shouldTrigger).length} should not`);
-      console.log(`each turn: a fresh directory holding the case's files; with-skill also holds .claude/skills/BUNDLE/ (no evals/), no-skill no skill`);
+      console.log(`each turn: a fresh directory holding the case's files; with-skill also holds .claude/skills/BUNDLE/ (no evals/)${args.triggersOnly ? '' : ', no-skill no skill'}`);
+      if (triggers.length) console.log(triggerField ? `each trigger turn installs ${triggerField.length} bundle(s) (--trigger-field selection): ${triggerField.join(', ')}` : 'each trigger turn installs its own bundle alone (--trigger-field own)');
       console.log(`argv (prompt on stdin): ${args.bin} ${armArgs('TURN_DIR/mcp.json', turnOpts).join(' ')}`);
       console.log('dry run: no login read, no model called, nothing written');
       return 0;
@@ -348,6 +385,7 @@ export async function main(argv: readonly string[]): Promise<number> {
       maxUtilization: args.maxUtilization,
       ...(args.model ? { model: args.model } : {}),
       ...(args.effort ? { effort: args.effort } : {}),
+      ...(triggerField ? { triggerField } : {}),
       onRecord: (r: SkillEvalRunRecord, done, total) => console.log(`[${done}/${total}] ${r.verdict.padEnd(7)} ${r.arm.padEnd(10)} ${r.key}${r.reason ? ` — ${r.reason}` : ''}`),
     });
     const finishedAt = new Date();
@@ -372,7 +410,8 @@ export async function main(argv: readonly string[]): Promise<number> {
         concurrency: args.concurrency,
         maxUtilization: args.maxUtilization,
       },
-      scope: { cases: cases.length, arms: [...ARMS], repeats: args.repeats, plannedTurns: jobs.length, ranTurns: exec.records.length, notRunTurns: exec.notRun.length },
+      scope: { cases: cases.length, arms: args.triggersOnly ? ['with-skill'] : [...ARMS], repeats: args.repeats, plannedTurns: jobs.length, ranTurns: exec.records.length, notRunTurns: exec.notRun.length, ...(args.triggersOnly ? { triggersOnly: true as const } : {}) },
+      ...(triggerCount ? { triggerField: triggerField ? { mode: 'selection' as const, bundles: triggerField } : { mode: 'own' as const } } : {}),
       ...(exec.stopped ? { stopped: exec.stopped } : {}),
       summary: summariseRound(cases, exec.records, exec.notRun),
     };

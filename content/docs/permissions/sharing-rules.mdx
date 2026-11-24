@@ -56,15 +56,45 @@ If some rows are confidential, the object's OWD should be `private` (or
 Two things the bits do **not** override, regardless of the OWD:
 
 - **Baseline row-level security.** RLS is a separate, *narrowing* layer. The
-  platform baseline `member_default` ships owner-scoped `update`/`delete`
+  platform baseline `member_default` ships creator-only `update`/`delete`
   policies (`created_by == current_user.id`, applicability domain
-  `org_member`), so rank-and-file members stay owner-scoped on writes even
-  under `public_read_write`. The super-user bits short-circuit RLS **only
+  `org_member`). Under `public_read_write` the update policy does not apply
+  (that OWD opens row updates) and the delete policy does; under every other
+  OWD both apply, and record sharing can replace them row by row, as below.
+  A `controlled_by_parent` detail's write is judged by its master gate
+  instead, by id and by predicate alike: a caller who may edit the master (or
+  read it, where the detail declares `writeRequiresMasterRead`) updates and
+  deletes the detail rows under it whoever created them. A predicate
+  (`multi: true`) update or delete writes the rows a by-id write of each
+  would, and is refused whole, with nothing written, when it reaches a master
+  the caller may not write under. The super-user bits short-circuit RLS **only
   where the object's access posture permits it** — `access: { default:
   'private' }`, `tenancy.enabled: false` (deployment-level: no organization column), or better-auth
   managed objects (ADR-0066 D2 ①). On an ordinary tenant business object,
-  `modifyAllRecords` does *not* lift those policies
+  `modifyAllRecords` does *not* short-circuit those policies
   (`plugin-security/src/security-plugin.ts` `computeLayeredRlsFilter`).
+  Where record sharing enforces writes (an `owner_id` and a `private` or
+  `public_read` OWD), the sharing service's `allow` for a row replaces the
+  baseline floor for that row: ownership at the caller's write depth or
+  `modifyAllRecords`, and, for an update, an `edit` share. On an update, a
+  row sitting in a queue the caller belongs to gets the same `allow` under
+  any OWD. A by-id write and a predicate write both take that replacement
+  unless an app-authored `using` policy for the write applies to the caller.
+  Then the write keeps the floor beside that policy: a row the floor admits
+  (one the caller created) stays writable, and the policy still bounds every
+  other row. The master check of a `controlled_by_parent` detail write
+  composes its master row the same way, so a master's creator can write its
+  details beside the master's authored update policy. To hold the creator's
+  own rows to a limit as well: a `check` on the update policy judges the
+  stored image of every row, but not the row as it stood before the write;
+  a `beforeUpdate` lifecycle hook sees that prior row as `ctx.previous`, and
+  a limit on deleting goes in a `beforeDelete` hook. For a master's details
+  the limit goes in a hook on the detail object.
+  A write made on
+  another user's behalf keeps the floor. Under
+  `public_read_write` the sharing service abstains on a delete, so the
+  delete floor stays; on an object with no `owner_id` it abstains on both,
+  so both floors stay. An app-authored policy is never replaced.
   Org admins (`org_admin` / `org_owner`) are outside the `org_member`
   applicability domain and are not narrowed by the baseline.
 - **The Layer 0 tenant wall** (ADR-0095 D1) — always ANDs on top.
@@ -146,8 +176,11 @@ organization, every other recipient is refused with `SHARING_NOT_ENABLED`
 A sharing rule on an object that no sharing gate consults for any recipient is
 refused when it is saved: an object with no real `owner_id` (a system object
 without one, such as `sys_session`, or a federated object whose `owner_id` is
-the platform's injected anchor), a `controlled_by_parent` detail, or a bypass
-object. It is refused with `SHARING_NOT_ENABLED` (422) and a sentence that
+the platform's injected anchor), a `controlled_by_parent` detail, a bypass
+object, or an object whose share grants cannot count where it is stored (it
+sits on another datasource than `sys_record_share`, even a SQL one, or on a
+driver that does not evaluate the share-grant subquery: today MongoDB,
+in-memory and OData; ADR-0155 R2). It is refused with `SHARING_NOT_ENABLED` (422) and a sentence that
 names the object and how to turn record sharing on for it. This holds for Setup's form and the
 `/data` door as well as `POST /api/v1/sharing/rules`, and for an edit that moves
 a rule onto such an object. A rule saved before this check keeps its row and

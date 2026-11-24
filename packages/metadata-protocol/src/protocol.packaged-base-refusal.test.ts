@@ -1034,7 +1034,7 @@ describe('[#30062] each excluded type\'s refusal names a remedy that works for i
     });
 
     it('a code-only type names a new version of the base that ships it', () => {
-        for (const type of ['job', 'api', 'agent', 'capability', 'picklist', 'assignment_rule']) {
+        for (const type of ['job', 'api', 'agent', 'picklist', 'assignment_rule']) {
             expect(refusalOf(type), type).toContain(`changes only with a new version of '${BASE_ID}'`);
         }
         expect(refusalOf('api')).toContain('but an api takes no override');

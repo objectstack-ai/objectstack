@@ -29,7 +29,6 @@ import {
   recordDisplayValueAt,
   evalFieldPredicate,
   resolveNameField,
-  toPredicateRecord,
   withoutDeniedFields,
 } from '@object-ui/core';
 import { DetailView } from '../DetailView';
@@ -40,6 +39,7 @@ import { RecordFieldAccessForRecord } from '../recordFieldAccess';
 import { deriveFieldGroupDetailEntries, type FieldGroupDetailEntry } from '../synth/buildDefaultPageSchema';
 import { useRecordAriaProps } from './recordComponentAria';
 import { recordBindingBlock } from './recordBinding';
+import { dropFieldPredicateHidden, lazyPredicateRecord } from '../fieldPredicateVisibility';
 
 /** Normalize a field entry (string | {field} | {name}) to its machine name. */
 const fieldName = (entry: any): string | null => columnIdentity(entry) ?? null;
@@ -168,37 +168,6 @@ function fillSectionHeadingCount(heading: string, count: number): string {
 }
 
 /**
- * The record a section's `visibleWhen` is evaluated against — assembled the
- * way the entry form assembles its own (objectui#11630).
- *
- * The form's `ruleRecord` (`@object-ui/components`' form renderer) seeds every
- * declared field to `null` and then overlays the DEFINED values it holds, so a
- * predicate naming a column the read did not return compares against `null`
- * instead of faulting on a missing key. This does the same over the object's
- * declared fields and the bound record.
- *
- * Relations are collapsed back to their stored foreign key first
- * (`toPredicateRecord`): the edit form reads its record without `$expand`, so
- * `record.owner == 'u1'` sees the id there, while this page's record may arrive
- * expanded. Without the collapse one predicate would reach two verdicts on the
- * same record.
- */
-function sectionPredicateRecord(
-  data: Record<string, unknown> | null | undefined,
-  objectFields: Record<string, unknown> | undefined,
-): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  if (objectFields && typeof objectFields === 'object' && !Array.isArray(objectFields)) {
-    for (const name of Object.keys(objectFields)) out[name] = null;
-  }
-  const row = toPredicateRecord(data ?? {}, objectFields) as Record<string, unknown>;
-  for (const key of Object.keys(row)) {
-    if (row[key] !== undefined) out[key] = row[key];
-  }
-  return out;
-}
-
-/**
  * Does a field GROUP's ADR-0089 `visibleWhen` admit its section on this
  * record? (objectui#11630 — "the detail page evaluates `visibleWhen` per group
  * exactly as the form does".)
@@ -223,9 +192,9 @@ function sectionPredicateRecord(
  * (`sectionGateVisible` in `@object-ui/components`' form renderer), with the
  * same three inputs it passes —
  *
- *  - `record` — {@link sectionPredicateRecord}; values bind under `record.`
- *    only, so a bare `kind == 'pro'` is an unbound identifier on both
- *    surfaces;
+ *  - `record` — `assemblePredicateRecord` (`../fieldPredicateVisibility`);
+ *    values bind under `record.` only, so a bare `kind == 'pro'` is an
+ *    unbound identifier on both surfaces;
  *  - `previous` — the SAME record. An edit form binds `previous` to the
  *    persisted row, and the row this page shows IS the persisted row, so a
  *    `previous.*` predicate reaches the verdict it reaches on that record's
@@ -590,13 +559,12 @@ const RecordDetailsBody: React.FC<RecordDetailsRendererProps> = ({
   const normaliseList = (list: any[] | undefined): any[] | undefined =>
     Array.isArray(list) ? list.map(normaliseField) : list;
 
-  // Phase N.4: dedupe with the highlight strip — when authors include a
-  // field in `record:highlights` we drop it from the details grid so it
-  // isn't shown twice. The synth pipeline passes the highlight list via
-  // `hideFields`; authors can also set it directly on the schema. We also
-  // merge in any field names registered live via HighlightFieldsContext
-  // (see `liveHighlightNames` above) to cover hand-authored Lightning pages
-  // that don't go through the synth dedup path.
+  // Phase N.4: dedupe with the highlight strip — when a page places a
+  // `record:highlights` block we drop its fields from the details grid so
+  // they aren't shown twice. The default record page places no strip and
+  // sets no `hideFields`; authors can set it directly on the schema. The
+  // field names a mounted `record:highlights` registers live via
+  // HighlightFieldsContext (see `liveHighlightNames` above) are merged in.
   //
   // ⛔ Read UN-CAST (objectui#9965). `hideFields` is DECLARED on the mirror
   // (`RecordDetailsComponentProps.hideFields`, `string[]`, since objectui#9040,
@@ -876,6 +844,26 @@ const RecordDetailsBody: React.FC<RecordDetailsRendererProps> = ({
     });
   };
 
+  // The record a group's or a field's `visibleWhen` is evaluated against —
+  // assembled only when a predicate is actually declared, so a body without
+  // one does no extra work and renders exactly as before.
+  const predicateRecord = lazyPredicateRecord(ctx.data, objSchemaFields);
+
+  /**
+   * Drop every row whose field's own `visibleWhen` is FALSE for this record —
+   * `dropFieldPredicateHidden` (`../fieldPredicateVisibility`), the one
+   * implementation the highlights strip and `DetailView` call too. Applied to
+   * every list this body draws, after the other folds, so it reads only the
+   * rows that would be drawn.
+   */
+  const dropPredicateHidden = (list: any[] | undefined): any[] | undefined =>
+    dropFieldPredicateHidden(list, {
+      objectFields: objSchemaFields,
+      record: predicateRecord,
+      scope: predicateScope,
+      where: (n) => `field '${n}' of record:details on object '${objectName}'`,
+    });
+
   // ── The declared fallback body (objectui#12433) ─────────────────────────
   //
   // `@objectstack/spec` declares what a node with no authored body draws, on
@@ -904,13 +892,14 @@ const RecordDetailsBody: React.FC<RecordDetailsRendererProps> = ({
   const bodyFields: string[] | undefined = bodyFieldsOmitted
     ? (Array.isArray(objSchema?.highlightFields) ? objSchema.highlightFields : undefined)
     : schema.fields;
-  const filteredFields = dropHidden(normaliseList(filterList(bodyFields)));
+  const filteredFields = dropPredicateHidden(dropHidden(normaliseList(filterList(bodyFields))));
 
   // ── `sections[].group` — the ADR-0085 §5 REFERENCE form ──────────────────
   //
   // `{ group: 'parties' }` inherits the object's `fieldGroups` entry with that
-  // key: its members (every visible field pointing at it, in declaration
-  // order) and its own presentation (label, icon, description, collapse) —
+  // key: its members (the group's own `fields` list first, in its order, then
+  // every other visible field pointing at it, in declaration order) and its
+  // own presentation (label, icon, description, collapse) —
   // `@objectstack/spec` 17.3.0 `RecordDetailsProps.sections[].group`
   // (objectstack#13855), whose semantics are single-sourced in
   // `deriveFieldGroupLayout`. This renderer used to read the key NOWHERE, and
@@ -940,11 +929,6 @@ const RecordDetailsBody: React.FC<RecordDetailsRendererProps> = ({
       if (typeof entry.key === 'string') groupEntryByKey.set(entry.key, entry);
     }
   }
-
-  // The record a group's `visibleWhen` is evaluated against — assembled only
-  // when a referenced group actually declares one, so a page without a gated
-  // group does no extra work and renders exactly as before.
-  let sectionRecord: Record<string, unknown> | undefined;
 
   /**
    * Resolve one authored entry to the section the body renders, or `null` when
@@ -976,10 +960,9 @@ const RecordDetailsBody: React.FC<RecordDetailsRendererProps> = ({
       return null;
     }
     if (entry.visibleWhen != null) {
-      sectionRecord ??= sectionPredicateRecord(ctx.data, objSchemaFields);
       const shown = sectionPredicateVisible(
         entry.visibleWhen as FieldRulePredicate,
-        sectionRecord,
+        predicateRecord(),
         predicateScope,
         `group '${s.group}' of record:details on object '${objectName}'`,
       );
@@ -1105,7 +1088,7 @@ const RecordDetailsBody: React.FC<RecordDetailsRendererProps> = ({
         // partly-filled section — is untouched. Pinned four ways in
         // `__tests__/record-details.hideEmptyRetired-7129.test.tsx`.
         hideEmpty: s.hideEmpty ?? true,
-        fields: dropHidden(normaliseList(filterList(s.fields))),
+        fields: dropPredicateHidden(dropHidden(normaliseList(filterList(s.fields)))),
       });
       })
     : schema.sections;

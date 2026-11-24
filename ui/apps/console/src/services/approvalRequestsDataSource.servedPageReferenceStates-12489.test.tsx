@@ -319,21 +319,23 @@ describe('the served request page draws the four reference states the sheet draw
     expect(PageSchema.safeParse(SERVED_PAGE).success).toBe(true);
   });
 
-  it('readable (sheet: recordLink): one link to the record path, inside the card, named by its title', async () => {
+  it('readable (sheet: recordLink): one link to the record path inside the card, named by its title; the H1 names and links the record too', async () => {
     const id = 'Rd4bl3Rec12489QQ';
     targetAnswer = async (rid) => ({ id: rid, name: TARGET_TITLE, amount: 12500 });
     const { container } = openServedPage({ record_id: id, status: 'pending', record_title: TARGET_TITLE });
     const card = await settledCard(container);
 
     expect(card.getAttribute('data-record-preview')).toBe('readable');
-    const links = linksTo(recordPath(id));
-    expect(links).toHaveLength(1);
-    expect(card.contains(links[0])).toBe(true);
-    expect(links[0].textContent).toContain(TARGET_TITLE);
+    await waitFor(() => expect(linksTo(recordPath(id))).toHaveLength(2), { timeout: 8000 });
+    const inCard = linksTo(recordPath(id)).filter((a) => card.contains(a));
+    expect(inCard).toHaveLength(1);
+    expect(inCard[0].textContent).toContain(TARGET_TITLE);
     expect(container.querySelector('[data-record-pointer="deleted"]')).toBeNull();
-    // The H1 names the flow by its label: not the subject's id, not `flow:NAME`.
+    // The H1 names the request by its record, linked once the page read it
+    // (objectstack#35415): not the subject's id, not `flow:NAME`.
     const h1 = await pageTitle();
-    expect(h1.textContent).toBe(FLOW_LABEL);
+    expect(h1.textContent).toBe(TARGET_TITLE);
+    expect(linksTo(recordPath(id)).filter((a) => h1.contains(a))).toHaveLength(1);
     expect(h1.textContent).not.toContain(id);
     expect(h1.textContent).not.toContain(FLOW_SOURCE);
   });
@@ -375,8 +377,12 @@ describe('the served request page draws the four reference states the sheet draw
     expect(tab?.textContent).not.toContain(id);
     // …and nowhere on the page, the H1 included: the counterpart of the sheet's
     // drawer case "tombstones the same reference in the drawer — not one click
-    // deeper" (`ApprovalsInboxPage.tombstone.test.tsx`, objectui#7108).
-    expect((await pageTitle()).textContent).toBe(FLOW_LABEL);
+    // deeper" (`ApprovalsInboxPage.tombstone.test.tsx`, objectui#7108). The H1
+    // names the record by the title the get served, as plain text: the page
+    // never read it, so it links nowhere (objectstack#35415).
+    const h1 = await pageTitle();
+    expect(h1.textContent).toBe('INV-3030');
+    expect(h1.querySelectorAll('a[href]')).toHaveLength(0);
     expect(document.body.innerHTML).not.toContain(id);
   });
 

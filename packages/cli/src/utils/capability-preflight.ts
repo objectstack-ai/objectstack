@@ -92,21 +92,48 @@ export function renderCapabilityMessage(c: DeclaredCapabilityClassification): st
 export const ENTERPRISE_ABSENCE_CONSEQUENCE: Readonly<Record<string, string>> = Object.freeze({
   // The sharing layer fails CLOSED without the `hierarchy-scope-resolver`
   // service (`SharingService.resolveOwnerScopeIds`, ADR-0057): a hierarchy
-  // scope never widens, and nothing logs it.
+  // scope never widens. What the runtime logs about it is
+  // {@link ENTERPRISE_ABSENCE_RUNTIME_NOTICE}'s row.
   'hierarchy-security':
     "the hierarchy scopes (`own_and_reports`, `unit`, `unit_and_below`) behave as owner-only",
 });
 
 /**
+ * The warning the RUNTIME itself logs when an `enterprise` token's fallback is
+ * taken, for the tokens whose runtime says so; the value is that warning's
+ * opening words, as the operator will find them in the server log. A token
+ * with no row here ends its sentence "and no log line says so", which is true
+ * only while its runtime stays silent — so a runtime that starts logging adds
+ * its row here in the same change, or the CLI goes on claiming a silence the
+ * server log contradicts.
+ *
+ * A separate table rather than a clause folded into
+ * {@link ENTERPRISE_ABSENCE_CONSEQUENCE}: the consequence is what the METADATA
+ * does, the notice is what the RUNTIME says, and a token can have either one
+ * without the other. Every key is pinned to an enterprise-edition registry row
+ * in `capability-preflight.test.ts`.
+ */
+export const ENTERPRISE_ABSENCE_RUNTIME_NOTICE: Readonly<Record<string, string>> = Object.freeze({
+  // `SharingService.resolveOwnerScopeIds` (plugin-sharing) logs this once per
+  // boot, at `warn`, the first time a hierarchy scope falls back to owner-only.
+  'hierarchy-security': '[sharing] hierarchy scope NOT widened',
+});
+
+/**
  * The consequence sentence for an `enterprise` token with no provider wired in.
- * It names the edition that enforces the token and what the open edition does
- * instead, and nothing else: no product pitch, one fact an author can act on.
+ * It names the edition that enforces the token, what the open edition does
+ * instead, and whether the runtime says so — nothing else: no product pitch,
+ * one fact an author can act on.
  */
 export function enterpriseAbsenceConsequence(token: string): string {
-  const shape = Object.prototype.hasOwnProperty.call(ENTERPRISE_ABSENCE_CONSEQUENCE, token)
+  const has = (table: Readonly<Record<string, string>>) => Object.prototype.hasOwnProperty.call(table, token);
+  const shape = has(ENTERPRISE_ABSENCE_CONSEQUENCE)
     ? ENTERPRISE_ABSENCE_CONSEQUENCE[token]
     : `nothing provides "${token}", and the metadata that relies on it is not enforced`;
-  return `Only the enterprise edition enforces it: without a wired provider, as on the open edition, ${shape}, and no log line says so.`;
+  const said = has(ENTERPRISE_ABSENCE_RUNTIME_NOTICE)
+    ? `and the runtime logs one warning ("${ENTERPRISE_ABSENCE_RUNTIME_NOTICE[token]} …") the first time it falls back`
+    : 'and no log line says so';
+  return `Only the enterprise edition enforces it: without a wired provider, as on the open edition, ${shape}, ${said}.`;
 }
 
 /** {@link renderCapabilityMessage} without the package prefix. */

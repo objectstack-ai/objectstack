@@ -34,6 +34,7 @@ import '@object-ui/plugin-detail';
 
 import { RelatedRecordActionsBridge } from '../RelatedRecordActionsBridge';
 import { parseUrlFilterTriples } from '../drillUrlFilters';
+import { RECORD_TRAIL_PARAM, decodeRecordTrail } from '../../urlParams';
 
 /** Desktop, pinned (objectui#8399): under 768px a table related list is a card gallery. */
 beforeAll(() => {
@@ -163,6 +164,17 @@ describe('objectui#12741 — "View all" opens this parent’s children on the li
     // Read back the way `ObjectDataPage` reads it: exactly one condition, the
     // list's relationship, equal to this parent.
     expect(parseUrlFilterTriples(new URLSearchParams(search))).toEqual([['project', '=', 'P-1']]);
+  });
+
+  // objectstack#35601 — the list knows where it came from: the record this
+  // list hangs under rides on the record trail, so the list page can name it
+  // in its condition tag and breadcrumb, and reset to it.
+  it('the destination carries this record on the trail, named by its title', async () => {
+    mount();
+    await waitForRows();
+    fireEvent.click(viewAll()!);
+    const search = new URLSearchParams(location().split('?')[1]);
+    expect(decodeRecordTrail(search.get(RECORD_TRAIL_PARAM))).toEqual([{ o: 'project', i: 'P-1', t: 'Launch' }]);
   });
 
   it('`showViewAll: false` draws no link', async () => {

@@ -454,10 +454,10 @@ has been removed from `ObjectSchema`). Record-detail rendering is derived from
 the object's **cross-surface semantic roles** (ADR-0085):
 
 - `nameField` — which field is the record's display name.
-- `highlightFields` — the most important fields (detail highlight strip,
-  default list columns, cards).
-- `stageField` — the linear-lifecycle field behind the detail progress
-  stepper (`false` suppresses detection).
+- `highlightFields` — the most important fields (hover cards, the record
+  picker, default list columns, cards).
+- `stageField` — the linear-lifecycle field behind the stage tag in the
+  record header, a menu that moves it (`false` suppresses detection).
 - `fieldGroups` + `Field.group` — semantic grouping, rendered identically on
   forms, modals, and detail pages.
 

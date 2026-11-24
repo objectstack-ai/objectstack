@@ -250,7 +250,11 @@ The reconciler:
   invitation addressed to it admitted: that account joins by accepting the
   invitation, which needs a verified address
   ([Self-hosting](/docs/deployment/self-hosting)). Under `email_domain` an
-  address on the allowlist is admitted by its domain and is bound;
+  address on the allowlist is admitted by its domain and is bound. A sign-in
+  through a social provider that did not verify the address creates no
+  account to bind under `email_domain`, or under `open` while email
+  verification is in force: the audience gate refuses it
+  ([Authentication](/docs/permissions/authentication));
 - binds only to an **unambiguous** target org — that is `tenancy.defaultOrgId()`,
   which returns the single-org default organization under `single` and `null`
   under any walled **request** (invitations, `add-member` and SSO provisioning

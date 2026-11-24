@@ -34,7 +34,7 @@
 
 import { collectCelRootIdentifiers, isSupportedRlsExpression, validateExpression } from '@objectstack/formula';
 import { APPROVER_EXPRESSION_ROOTS } from '@objectstack/spec/automation';
-import { resolveInjectedSystemColumns } from '@objectstack/spec/data';
+import { isMultiValueField, resolveInjectedSystemColumns } from '@objectstack/spec/data';
 
 type Bag = Record<string, unknown>;
 
@@ -61,6 +61,17 @@ function declaredFieldTypes(def: Bag): Record<string, string> {
   return types;
 }
 
+/** [#36167] The declared fields whose value is a list (`isMultiValueField`), as the build's pass hands them. */
+function declaredMultiValueFields(def: Bag): string[] {
+  const out: string[] = [];
+  for (const [name, field] of isBag(def.fields) ? Object.entries(def.fields) : []) {
+    if (isBag(field) && typeof field.type === 'string' && isMultiValueField({ type: field.type, multiple: field.multiple === true })) {
+      out.push(name);
+    }
+  }
+  return out;
+}
+
 /**
  * Why a `record`-scoped expression of `object` does not compile, or
  * `undefined` when it does: `value` for a computed field, `predicate` for a
@@ -74,6 +85,7 @@ export function recordExpressionRefusal(role: 'value' | 'predicate', raw: unknow
     objectName: object,
     fields: objectColumns(def),
     fieldTypes: declaredFieldTypes(def),
+    multiValueFields: declaredMultiValueFields(def),
     scope: 'record',
     traversalHydration: true,
   });

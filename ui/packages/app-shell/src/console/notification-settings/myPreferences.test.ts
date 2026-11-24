@@ -11,7 +11,10 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   cellWrite,
   digestChoices,
+  followOrganizationWrite,
   quietHoursSaveable,
+  quietHoursStored,
+  QUIET_HOURS_OFF,
   generalWrite,
   loadMyPreferences,
   MY_PREFERENCES_URL,
@@ -122,28 +125,76 @@ describe('the writes', () => {
   });
 });
 
-// The resolver reads a stored digest only as 'daily' / 'weekly', and quiet hours
-// only as a window with a start and an end; anything else falls through to the
-// next row (preference-resolver.ts parseDigest / parseQuietHours). So only the
-// values that override are offered.
-describe('only values that take effect are offered', () => {
+// [objectstack ruling 7073270426 on #35123] Each of digest and quiet hours is
+// three states; a value the person wrote decides, including the explicit off,
+// and the field they do not change stays unset (preference-resolver.ts
+// parseDigest / parseQuietHours). So every choice is offered and takes effect.
+describe('every choice takes effect, the explicit off included', () => {
   const prefs = parseMyPreferences(ANSWER);
 
-  it('a digest in force (here the organization default) offers the two cadences, never "none"', () => {
+  it('"No digest" is offered while an organization digest is in force', () => {
     expect(prefs.general.digest).toEqual({ value: 'daily', source: 'default' });
-    expect(digestChoices(prefs.general)).toEqual(['daily', 'weekly']);
-    expect(digestChoices({ ...prefs.general, digest: { value: 'weekly', source: 'own' } })).toEqual(['daily', 'weekly']);
+    expect(digestChoices()).toEqual(['none', 'daily', 'weekly']);
   });
 
-  it('with no digest in force, "none" is the current value and stays listed', () => {
-    expect(digestChoices({ ...prefs.general, digest: { value: 'none', source: 'builtin' } })).toEqual(['none', 'daily', 'weekly']);
+  it('choosing "No digest" writes the explicit none, and the new row leaves quiet hours unset', () => {
+    expect(generalWrite('alice', prefs.general, { digest: 'none' })).toEqual({
+      kind: 'create',
+      data: { user_id: 'alice', topic: '*', channel: '*', enabled: prefs.general.enabled.value, digest: 'none' },
+    });
   });
 
-  it('a quiet-hours window is saveable only when complete; an empty one never is', () => {
+  it('a quiet-hours window is saveable when complete or cleared, never half-filled', () => {
     expect(quietHoursSaveable({ start: '22:00', end: '07:00' })).toBe(true);
     expect(quietHoursSaveable({ tz: 'UTC', start: '22:00', end: '07:00' })).toBe(true);
-    expect(quietHoursSaveable(null)).toBe(false);
+    expect(quietHoursSaveable(null)).toBe(true);
     expect(quietHoursSaveable(undefined)).toBe(false);
     expect(quietHoursSaveable({ start: '', end: '07:00' })).toBe(false);
+  });
+
+  it('a cleared window is stored as the explicit off { off: true }, never empty; a window as itself', () => {
+    expect(QUIET_HOURS_OFF).toEqual({ off: true });
+    expect(quietHoursStored(null)).toEqual({ off: true });
+    expect(quietHoursStored({ start: '22:00', end: '07:00' })).toEqual({ start: '22:00', end: '07:00' });
+    expect(generalWrite('alice', { ...prefs.general, ownRowId: 'row-g' }, { quiet_hours: quietHoursStored(null) })).toEqual({
+      kind: 'update',
+      id: 'row-g',
+      data: { quiet_hours: { off: true } },
+    });
+  });
+});
+
+// [objectstack ruling 7073270426 on #35123] Empty is the third state, "not
+// set": the next row decides, in the end the organization's default. Going back
+// to following the organization is an update of the person's own (*, *) row
+// that empties one field, never a delete (the member grant carries none).
+describe('"Follow organization setting" empties one field of the person\'s own (*, *) row', () => {
+  const own: GeneralPreferences = {
+    ownRowId: 'row-g',
+    enabled: { value: true, source: 'own' },
+    digest: { value: 'weekly', source: 'own' },
+    quietHours: { value: { start: '12:00', end: '13:00' }, source: 'own' },
+  };
+
+  it('an own digest or quiet hours is cleared by an update writing that field empty, and nothing else', () => {
+    expect(followOrganizationWrite(own, 'digest')).toEqual({ kind: 'update', id: 'row-g', data: { digest: null } });
+    expect(followOrganizationWrite(own, 'quiet_hours')).toEqual({ kind: 'update', id: 'row-g', data: { quiet_hours: null } });
+  });
+
+  it('the explicit off is the person\'s own answer too, and is cleared the same way', () => {
+    const off: GeneralPreferences = { ...own, digest: { value: 'none', source: 'own' }, quietHours: { value: null, source: 'own' } };
+    expect(followOrganizationWrite(off, 'digest')).toEqual({ kind: 'update', id: 'row-g', data: { digest: null } });
+    expect(followOrganizationWrite(off, 'quiet_hours')).toEqual({ kind: 'update', id: 'row-g', data: { quiet_hours: null } });
+  });
+
+  it('nothing to clear: no own (*, *) row, or a field the door says is not the person\'s own', () => {
+    const noRow: GeneralPreferences = { enabled: own.enabled, digest: own.digest, quietHours: own.quietHours };
+    expect(followOrganizationWrite(noRow, 'digest')).toBeNull();
+    expect(followOrganizationWrite(noRow, 'quiet_hours')).toBeNull();
+    for (const source of ['default', 'builtin'] as const) {
+      const inherited: GeneralPreferences = { ...own, digest: { value: 'daily', source }, quietHours: { value: null, source } };
+      expect(followOrganizationWrite(inherited, 'digest')).toBeNull();
+      expect(followOrganizationWrite(inherited, 'quiet_hours')).toBeNull();
+    }
   });
 });

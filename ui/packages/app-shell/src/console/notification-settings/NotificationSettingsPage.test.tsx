@@ -30,6 +30,7 @@ import { MePermissionsProvider, type MePermissionsAuthenticatedResponse } from '
 import { builtInLocales } from '@object-ui/i18n/locales';
 import { NotificationSettingsPage } from './NotificationSettingsPage';
 import { MY_PREFERENCES_URL } from './myPreferences';
+import { SLACK_LINK_URL } from './slackDoors';
 import { getAppComponent } from '../../services/componentRegistry';
 // The registry check below loads every built-in page, which reaches the
 // metadata admin's dynamic `@objectstack/lint` import: pay that load at
@@ -37,7 +38,7 @@ import { getAppComponent } from '../../services/componentRegistry';
 import '@objectstack/lint';
 import '../../services/builtinComponents';
 
-type General = { digest: { value: string; source: string }; quietHours: { value: unknown; source: string } };
+type General = { ownRowId?: string; digest: { value: string; source: string }; quietHours: { value: unknown; source: string } };
 
 const BUILTIN_GENERAL: General = { digest: { value: 'none', source: 'builtin' }, quietHours: { value: null, source: 'builtin' } };
 
@@ -66,10 +67,22 @@ function answer(taskEnabled: boolean, taskRow?: string, general: General = BUILT
   };
 }
 
-function host(apiFetch: ReturnType<typeof vi.fn>, adapter: { create: ReturnType<typeof vi.fn>; update: ReturnType<typeof vi.fn> }) {
+const NO_SLACK_INSTALL = { data: { account: null, link: null } };
+
+/**
+ * The Slack link door (`/me/slack-link`) answers through `slackFetch`, so
+ * `apiFetch` counts only the preference reads these tests are about.
+ */
+function host(
+  apiFetch: ReturnType<typeof vi.fn>,
+  adapter: { create: ReturnType<typeof vi.fn>; update: ReturnType<typeof vi.fn> },
+  slackFetch: (url: string, init?: RequestInit) => Promise<Response> = async () => json(NO_SLACK_INSTALL),
+) {
+  const prefsFetch = apiFetch as unknown as (url: string, init?: RequestInit) => Promise<Response>;
+  const routed = (url: string, init?: RequestInit) => (url.startsWith(SLACK_LINK_URL) ? slackFetch(url, init) : prefsFetch(url, init));
   return ({ children }: { children: ReactNode }) => (
     <AdapterCtx.Provider value={adapter as never}>
-      <SchemaRendererProvider dataSource={adapter as never} apiFetch={apiFetch as never}>
+      <SchemaRendererProvider dataSource={adapter as never} apiFetch={routed as never}>
         {children}
       </SchemaRendererProvider>
     </AdapterCtx.Provider>
@@ -156,7 +169,7 @@ describe('NotificationSettingsPage', () => {
     );
   });
 
-  it('an organization digest in force: "No digest" is not offered, and the digest shows where it comes from', async () => {
+  it('an organization digest in force: "No digest" is offered and saves the explicit none', async () => {
     const orgDaily: General = { ...BUILTIN_GENERAL, digest: { value: 'daily', source: 'default' } };
     const apiFetch = vi.fn().mockResolvedValue(json(answer(false, undefined, orgDaily)));
     const adapter = { create: vi.fn(async () => ({})), update: vi.fn() };
@@ -164,22 +177,30 @@ describe('NotificationSettingsPage', () => {
 
     const select = (await screen.findByTestId('notification-settings-digest')) as HTMLSelectElement;
     expect(select.value).toBe('daily');
-    expect([...select.options].map((o) => o.value)).toEqual(['daily', 'weekly']);
+    expect([...select.options].map((o) => o.value)).toEqual(['none', 'daily', 'weekly']);
     expect(screen.getByTestId('notification-settings-digest-source')).toHaveTextContent('«notificationSettings.sourceDefault»');
-    expect(screen.getByTestId('notification-settings-digest-no-off')).toHaveTextContent('«notificationSettings.digestNoOff»');
+    fireEvent.change(select, { target: { value: 'none' } });
+    await waitFor(() =>
+      expect(adapter.create).toHaveBeenCalledWith('sys_notification_preference', {
+        user_id: 'alice',
+        topic: '*',
+        channel: '*',
+        enabled: true,
+        digest: 'none',
+      }),
+    );
   });
 
-  it('with no digest in force, "No digest" is the current value and the hint is not shown', async () => {
+  it('with no digest in force, "No digest" is the current value', async () => {
     const apiFetch = vi.fn().mockResolvedValue(json(answer(false)));
     render(<NotificationSettingsPage />, { wrapper: host(apiFetch, { create: vi.fn(), update: vi.fn() }) });
 
     const select = (await screen.findByTestId('notification-settings-digest')) as HTMLSelectElement;
     expect(select.value).toBe('none');
     expect(screen.getByTestId('notification-settings-digest-source')).toHaveTextContent('«notificationSettings.sourceBuiltin»');
-    expect(screen.queryByTestId('notification-settings-digest-no-off')).toBeNull();
   });
 
-  it('organization quiet hours in force: clearing the window cannot be saved, a complete window can', async () => {
+  it('organization quiet hours in force: a cleared window saves the explicit off', async () => {
     const orgQuiet: General = { ...BUILTIN_GENERAL, quietHours: { value: { start: '22:00', end: '07:00' }, source: 'default' } };
     const apiFetch = vi.fn().mockResolvedValue(json(answer(false, undefined, orgQuiet)));
     const adapter = { create: vi.fn(async () => ({})), update: vi.fn() };
@@ -192,7 +213,30 @@ describe('NotificationSettingsPage', () => {
 
     fireEvent.change(start, { target: { value: '' } });
     fireEvent.change(end, { target: { value: '' } });
-    expect(await screen.findByTestId('notification-settings-quiet-hours-no-clear')).toHaveTextContent('«notificationSettings.quietHoursNoClear»');
+    await waitFor(() => expect(save).not.toBeDisabled());
+    fireEvent.click(save);
+    await waitFor(() =>
+      expect(adapter.create).toHaveBeenCalledWith('sys_notification_preference', {
+        user_id: 'alice',
+        topic: '*',
+        channel: '*',
+        enabled: true,
+        quiet_hours: { off: true },
+      }),
+    );
+  });
+
+  it('organization quiet hours in force: a half-filled window cannot be saved, a complete one can', async () => {
+    const orgQuiet: General = { ...BUILTIN_GENERAL, quietHours: { value: { start: '22:00', end: '07:00' }, source: 'default' } };
+    const apiFetch = vi.fn().mockResolvedValue(json(answer(false, undefined, orgQuiet)));
+    const adapter = { create: vi.fn(async () => ({})), update: vi.fn() };
+    render(<NotificationSettingsPage />, { wrapper: host(apiFetch, adapter) });
+
+    const start = await screen.findByTestId('quiet-hours-start');
+    const end = screen.getByTestId('quiet-hours-end');
+    const save = screen.getByTestId('notification-settings-quiet-hours-save');
+
+    fireEvent.change(start, { target: { value: '' } });
     expect(save).toBeDisabled();
     fireEvent.click(save);
     expect(adapter.create).not.toHaveBeenCalled();
@@ -200,7 +244,6 @@ describe('NotificationSettingsPage', () => {
     fireEvent.change(start, { target: { value: '23:00' } });
     fireEvent.change(end, { target: { value: '06:00' } });
     await waitFor(() => expect(save).not.toBeDisabled());
-    expect(screen.queryByTestId('notification-settings-quiet-hours-no-clear')).toBeNull();
     fireEvent.click(save);
     await waitFor(() =>
       expect(adapter.create).toHaveBeenCalledWith('sys_notification_preference', {
@@ -230,6 +273,85 @@ describe('NotificationSettingsPage', () => {
 
     expect(await screen.findByTestId('notification-settings-load-failed')).toHaveTextContent('«notificationSettings.loadFailed»');
     expect(screen.queryByTestId('notification-settings-matrix')).toBeNull();
+  });
+
+  // [objectstack ruling 7073270426 on #35123] Empty is "not set": the person's
+  // own (*, *) row with the field emptied hands it back to the organization.
+  describe('"Follow organization setting" returns digest and quiet hours to the organization', () => {
+    const OWN_WINDOW = { start: '12:00', end: '13:00' };
+    const ORG_WINDOW = { start: '22:00', end: '07:00' };
+    const ownBoth: General = {
+      ownRowId: 'row-g',
+      digest: { value: 'weekly', source: 'own' },
+      quietHours: { value: OWN_WINDOW, source: 'own' },
+    };
+
+    it('the digest round trip: their own weekly, cleared to empty, then the organization daily drawn as inherited', async () => {
+      const cleared: General = { ...ownBoth, digest: { value: 'daily', source: 'default' } };
+      const apiFetch = vi
+        .fn()
+        .mockResolvedValueOnce(json(answer(false, undefined, ownBoth)))
+        .mockResolvedValueOnce(json(answer(false, undefined, cleared)));
+      const adapter = { create: vi.fn(), update: vi.fn(async () => ({})) };
+      render(<NotificationSettingsPage />, { wrapper: host(apiFetch, adapter) });
+
+      expect(await screen.findByTestId('notification-settings-digest-source')).toHaveTextContent('«notificationSettings.sourceOwn»');
+      const follow = screen.getByTestId('notification-settings-digest-follow');
+      expect(follow).toHaveTextContent('«notificationSettings.followOrganization»');
+      expect(follow).toHaveAttribute('aria-label', '«notificationSettings.followOrganizationFor»');
+      fireEvent.click(follow);
+
+      await waitFor(() =>
+        expect(screen.getByTestId('notification-settings-digest-source')).toHaveTextContent('«notificationSettings.sourceDefault»'),
+      );
+      expect(adapter.update).toHaveBeenCalledTimes(1);
+      expect(adapter.update).toHaveBeenCalledWith('sys_notification_preference', 'row-g', { digest: null });
+      expect(adapter.create).not.toHaveBeenCalled();
+      expect(apiFetch).toHaveBeenCalledTimes(2);
+      expect((screen.getByTestId('notification-settings-digest') as HTMLSelectElement).value).toBe('daily');
+      // Nothing left to clear on the digest; quiet hours are still their own.
+      expect(screen.queryByTestId('notification-settings-digest-follow')).toBeNull();
+      expect(screen.getByTestId('notification-settings-quiet-hours-follow')).toBeInTheDocument();
+    });
+
+    it('the quiet-hours round trip: their own window, cleared to empty, then the organization window drawn as inherited', async () => {
+      const cleared: General = { ...ownBoth, quietHours: { value: ORG_WINDOW, source: 'default' } };
+      const apiFetch = vi
+        .fn()
+        .mockResolvedValueOnce(json(answer(false, undefined, ownBoth)))
+        .mockResolvedValueOnce(json(answer(false, undefined, cleared)));
+      const adapter = { create: vi.fn(), update: vi.fn(async () => ({})) };
+      render(<NotificationSettingsPage />, { wrapper: host(apiFetch, adapter) });
+
+      expect(((await screen.findByTestId('quiet-hours-start')) as HTMLInputElement).value).toBe('12:00');
+      fireEvent.click(screen.getByTestId('notification-settings-quiet-hours-follow'));
+
+      await waitFor(() =>
+        expect(screen.getByTestId('notification-settings-quiet-hours-source')).toHaveTextContent('«notificationSettings.sourceDefault»'),
+      );
+      expect(adapter.update).toHaveBeenCalledTimes(1);
+      expect(adapter.update).toHaveBeenCalledWith('sys_notification_preference', 'row-g', { quiet_hours: null });
+      expect(((await screen.findByTestId('quiet-hours-start')) as HTMLInputElement).value).toBe('22:00');
+      expect(screen.queryByTestId('notification-settings-quiet-hours-follow')).toBeNull();
+    });
+
+    it('nothing to clear, no action: no own (*, *) row, or a field that is not their own answer', async () => {
+      const orgOnly: General = { digest: { value: 'daily', source: 'default' }, quietHours: { value: ORG_WINDOW, source: 'default' } };
+      const apiFetch = vi.fn().mockResolvedValue(json(answer(false, undefined, orgOnly)));
+      render(<NotificationSettingsPage />, { wrapper: host(apiFetch, { create: vi.fn(), update: vi.fn() }) });
+      await screen.findByTestId('notification-settings-digest');
+      expect(screen.queryByTestId('notification-settings-digest-follow')).toBeNull();
+      expect(screen.queryByTestId('notification-settings-quiet-hours-follow')).toBeNull();
+      cleanup();
+
+      // An own (*, *) row that sets only the digest: quiet hours still follow the organization.
+      const digestOnly: General = { ownRowId: 'row-g', digest: { value: 'none', source: 'own' }, quietHours: { value: ORG_WINDOW, source: 'default' } };
+      render(<NotificationSettingsPage />, {
+        wrapper: host(vi.fn().mockResolvedValue(json(answer(false, undefined, digestOnly))), { create: vi.fn(), update: vi.fn() }),
+      });
+      expect(await screen.findByTestId('notification-settings-digest-follow')).toBeInTheDocument();
+      expect(screen.queryByTestId('notification-settings-quiet-hours-follow')).toBeNull();
+    });
   });
 
   it('every built-in locale carries the same keys and placeholders', () => {
@@ -312,7 +434,12 @@ describe('the caller\'s grant on sys_notification_preference decides whether the
   }
 
   it('an external member sees every control disabled with the reason, and no write is sent', async () => {
-    const orgQuiet: General = { ...BUILTIN_GENERAL, quietHours: { value: { start: '22:00', end: '07:00' }, source: 'default' } };
+    // A row an administrator wrote in their name: the digest is their own answer, so its action is drawn, disabled.
+    const orgQuiet: General = {
+      ownRowId: 'row-g',
+      digest: { value: 'weekly', source: 'own' },
+      quietHours: { value: { start: '22:00', end: '07:00' }, source: 'default' },
+    };
     const apiFetch = vi.fn(async () => json(answer(false, undefined, orgQuiet)));
     const adapter = { create: vi.fn(), update: vi.fn() };
     render(<NotificationSettingsPage />, { wrapper: hostAs(EXTERNAL, apiFetch, adapter) });
@@ -324,7 +451,8 @@ describe('the caller\'s grant on sys_notification_preference decides whether the
     const cell = screen.getByTestId('notification-settings-cell-task.assigned-email');
     const digest = screen.getByTestId('notification-settings-digest');
     const save = screen.getByTestId('notification-settings-quiet-hours-save');
-    for (const control of [cell, digest, save]) {
+    const follow = screen.getByTestId('notification-settings-digest-follow');
+    for (const control of [cell, digest, save, follow]) {
       expect(control).toBeDisabled();
       expect(control).toHaveAttribute('aria-describedby', reasonId);
     }
@@ -336,6 +464,7 @@ describe('the caller\'s grant on sys_notification_preference decides whether the
     fireEvent.click(cell);
     fireEvent.change(digest, { target: { value: 'weekly' } });
     fireEvent.click(save);
+    fireEvent.click(follow);
     expect(adapter.create).not.toHaveBeenCalled();
     expect(adapter.update).not.toHaveBeenCalled();
     expect(apiFetch).toHaveBeenCalledTimes(1);
@@ -364,5 +493,31 @@ describe('the caller\'s grant on sys_notification_preference decides whether the
         enabled: true,
       }),
     );
+  });
+});
+
+describe('the Slack section is drawn only where the preference door lists slack', () => {
+  const withoutSlack = () => {
+    const body = answer(false);
+    body.data.channels = body.data.channels.filter((c) => c.channel !== 'slack');
+    body.data.topics = body.data.topics.map((t) => ({ ...t, channels: t.channels.filter((c) => c.channel !== 'slack') }));
+    return body;
+  };
+
+  it('with slack listed, the section reads the person’s link', async () => {
+    const slackFetch = vi.fn(async () => json(NO_SLACK_INSTALL));
+    render(<NotificationSettingsPage />, { wrapper: host(vi.fn(async () => json(answer(false))), { create: vi.fn(), update: vi.fn() }, slackFetch) });
+
+    expect(await screen.findByTestId('slack-link-section')).toBeInTheDocument();
+    await waitFor(() => expect(slackFetch).toHaveBeenCalledWith(SLACK_LINK_URL, expect.objectContaining({ method: 'GET' })));
+  });
+
+  it('without slack listed, no section and no Slack door is called', async () => {
+    const slackFetch = vi.fn(async () => json(NO_SLACK_INSTALL));
+    render(<NotificationSettingsPage />, { wrapper: host(vi.fn(async () => json(withoutSlack())), { create: vi.fn(), update: vi.fn() }, slackFetch) });
+
+    await screen.findByTestId('notification-settings-matrix');
+    expect(screen.queryByTestId('slack-link-section')).toBeNull();
+    expect(slackFetch).not.toHaveBeenCalled();
   });
 });

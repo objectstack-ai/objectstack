@@ -10,6 +10,8 @@
  *   node scripts/pm/label-write.mjs --issue N --release --recheck-comment ID --comment-file release.md --resume-from BRANCH@SHA
  *   node scripts/pm/label-write.mjs --issue N --add pm:dispatched --remove pm:queue --assign LOGIN --comment-file claim.md
  *   node scripts/pm/label-write.mjs --issue PR --comment-file verdict.md --land
+ *   node scripts/pm/label-write.mjs --issue PR --comment-file request.md --handoff
+ *   node scripts/pm/label-write.mjs --issue PR --handoff --dry-run   # the per-round H43/H48 reading, zero writes
  *   node scripts/pm/label-write.mjs --self-test          # offline, no network at all
  *
  * ## Why this file exists
@@ -188,6 +190,14 @@
  * lands without that run is ejected by the queue's dogfood shards and takes its batch with it. So `--land` judges it
  * BEFORE anything else in the fold (`landDogfoodGate`), on step ①'s own read of the pull's title and body:
  *
+ *   repo      only a pull in a repository that CARRIES the battery is judged: `LAND_DOGFOOD_BATTERY_REPOS`, today
+ *             objectstack-ai/objectstack alone — the one repository with the `@objectstack/dogfood` battery and the
+ *             queue's dogfood shards. Anywhere else (cloud, hotcrm, …) the os-dev report can only say `n/a` and no
+ *             queue shard can eject the pull, so judging it would refuse every marked pull for good: it is NOT
+ *             judged, zero reads, and the fold prints a ✓ line naming the repository. A `--repo` that does not read
+ *             as `owner/name` is judged as before — the battery repository stays fail-closed. A repository that
+ *             gains a battery joins the list in the same pull that adds it.
+ *
  *   marker    the title's `!` (`titleBreakingMarker`): everything before the title's FIRST colon, ending in `!`
  *             (`fix(pm)!: …`, `feat!: …`) — on main's bang subjects it agrees with the changeset-side reader
  *             (`check-adr-0087-registration.mjs`'s type, optional scope, `!:`) — measured equal on all 1331 bang subjects
@@ -200,6 +210,12 @@
  *             candidates are the patrol's readers, called, ⛔ never a second parser. When that report's `pr` names
  *             ANOTHER pull (siblings on one card), the newest trusted report whose `pr` names THIS pull, or none — a
  *             null or URL-less `pr` names no pull, so in that fallback it is not this pull's and is passed over too.
+ *             A FOLD — one closing keyword per card, at equal strength — delivers no single card, and
+ *             `deliveredCardNumber` reports that tie rather than break it (the queue guard's record pairing stays
+ *             refusing on it). The gate then reads EVERY tied card (`deliveredCardsAtStrongest`, the same
+ *             enumeration), each thread whole, under the same author filter and sibling rule, and lands when SOME
+ *             tied card's report carries a battery the head reaches; the verdict never depends on which card is read
+ *             first, and a refusal names every tied card and why each failed. A body naming no card still refuses.
  *   sha       its `dogfood_battery` must open with a sha that is the pull's head, or that a first-parent walk from the
  *             head reaches over merges of the base alone: each step's commit has exactly two parents, the second one
  *             on the base branch (`GET /compare/{parent2}...{base}` answers `ahead` or `identical`).
@@ -211,6 +227,55 @@
  * platform did not answer (`doCall`'s verdict other than `ok`: refused, failed, rate-limited) is exit 3, PREREQUISITE,
  * like every other unread in this file; a judged refusal is exit 2. The ✓ line says the sha alone was judged: whether
  * the battery was full and its reds fixed or reported stays the L1 checklist's.
+ *
+ * ## `--handoff` — the seat's Tier H hand-off as ONE relay stroke, RELAY-ONLY
+ *
+ * pm-dispatch SKILL.md 〈路径分叉〉 ② and ③ make the hand-off three writes: the approval-request comment,
+ * `pm:awaiting-merge` on the pull, and a review request to every `GOVERNED_APPROVERS` account. Made by hand from a
+ * template that carried only the first, the other two were dropped and the pulls sat outside the maintainer's
+ * inbox and review queue. `--issue PR --comment-file request.md --handoff` makes all three in one stroke, in this
+ * order: the comment, `labels_add`, `assign` (the author), `pr_request_reviewers` (the rest).
+ *
+ *   tier      `check-governed-merges.mjs --pr OWNER/NAME#N --json`, spawned: the one reading that chains every
+ *             split (workflows, the low-risk arm, `Rule-change:`) and the size limb. Three populations land by the
+ *             maintainer and proceed: Tier H; the size limb firing (it lands the way Tier H does); and a declared
+ *             narrowing — the queue guard's narrowed leg, which the tier tool has no limb for, read with that leg's
+ *             own `narrowedReading` over the body and the committed changesets at the head (`readChangesetTexts`'
+ *             rule: a changeset the head does not hold, deleted or renamed away, answers 404 and declares nothing),
+ *             Tier S included. On Tier H the paths decide and ⛔ no changeset is read. Tier S (「Tier S 不交人」)
+ *             and an ungoverned pull that declare no narrowing, and a fork (a proposal, adopted by the owning
+ *             seat), are refused. A reading that did not answer is exit 3.
+ *   records   the ACCEPT on the pull's own thread, by check-half-states' H43 hand-off reading
+ *             (`h43HandoffReading`): the NEWEST `## 席位核对` must read ACCEPT and be newer than the head's committer
+ *             date (H69's comparison). The PASS the queue guard's way, with its own readers, ⛔ never re-spelled:
+ *             `loadRecordRecognisers`, `readRecordThreads` over the pull AND the card it delivers
+ *             (`REVIEW_OF_RECORD_LOCATION`), each cut to trusted authors, then `recordVerdict` and
+ *             `recordPassVerdict` — the newest same-head record, signed, at the tier its FACE owes (`reviewFace`
+ *             over every path the tier tool read, pre-lift — a path lifted as a pure regeneration included; off the
+ *             tier route the narrowed leg's pair: the body and each changeset text, `narrowingDeclared` when a
+ *             narrowing is declared on either line — so a code-only size-limb pull is on the declaration face at
+ *             `TIER_DEFAULT` and a narrowing one on the narrowing face), one PASS line, no open grade.
+ *             A `## 维护者速读` comment must be on the thread or be the request itself — H48's brief half.
+ *   plan      the approvers not requested, assigned or holding a submitted review (H43's union); the author among
+ *             them is ASSIGNED, never requested (a request naming the author is a 422). A covered approver and a
+ *             label already on cost no action. ⛔ `fleet-write/execute.mjs`'s `governedReviewPlan` is not called:
+ *             its tier half reads the `.claude/**` row path-only, so it would request nobody on the very pulls
+ *             `Rule-change:` makes Tier H.
+ *   read-back besides the fold's labels, assignees and comment lines: `④ reviewers` against the pull's pending
+ *             requests, then `④ H43` and `④ H48` — the patrol rows THEMSELVES (`h43GovernedReviewRequestGap`,
+ *             `h48GovernedVerdictWithoutBrief`), asked of the pull as read back, on the tier reading's matched
+ *             slice — plus one Tier H entry for the size limb or the declared narrowing when that is what admitted
+ *             the pull (`handoffSlice`: otherwise both rows stand down and read ✓ with nobody asked) — and told the hand-off
+ *             is DUE on the gate's own PASS. Any ✗ is exit 4, never repaired.
+ *   once      a pull already whole — the label on, every approver covered, a `## 维护者速读` brief on the thread —
+ *             sends nothing and exits 0: ⛔ no second request comment. Short of the brief, the request is owed. A request whose signature names an uncovered approver is refused: a seat never
+ *             requests its own account (「⛔ 永不请席位自身账号」).
+ *
+ * Every refusal is exit 2 with ZERO writes. `--dry-run` reads all of it, prints `now H43` / `now H48` for the
+ * pull as it stands and the stroke it would send, and sends nothing — it may omit `--comment-file`, so it is the
+ * per-round reading of a seat's own governed pulls (execution-duties' 四件读数器) without a full patrol run: exit 7
+ * when a `now` row reads ✗ (the hand-off is owed), 0 when both read ✓.
+ * `--handoff` owns its plan: `--land`, `--release` and every label or assignee flag are refused beside it.
  *
  * ## The read-back judge is HANDED to `sendFleetWrite`, never loaded by it
  *
@@ -252,6 +317,8 @@
  *   6  UNCONFIRMED — the dispatch was accepted and its run did not appear, or
  *      did not complete, within the ceiling. The run URL is printed. Go READ
  *      the card; ⛔ never re-run blind: a second dispatch is a second write.
+ *
+ *   7  `--handoff --dry-run` only: a `now` row reads ✗ — the hand-off is OWED. Nothing was written.
  *
  *   Under `--land`, 2 is also the dogfood battery gate's judged refusal and 3 a gate read the platform did not
  *   answer (header: that gate), ⛔ ZERO writes on both.
@@ -389,13 +456,28 @@ import {
   proxyRearmPlan,
   resolveSweepRepo,
   stripSignatureLine,
+  // `--handoff` (header): the H43 hand-off reading and the two patrol rows its read-back asks, CALLED, never re-spelled.
+  MAINTAINER_BRIEF_MARKER,
+  h43HandoffReading,
+  h43GovernedReviewRequestGap,
+  readSignatureLine,
+  h48GovernedVerdictWithoutBrief,
 } from './check-half-states.mjs';
+import { GOVERNED_TIER_H, GOVERNED_TIER_S, LOW_RISK_CHANGESET_PATH, sizeLimbFires } from './check-governed-merges.mjs';
 // The `--land` dogfood gate's readers (header: `--land` on a breaking or narrowing pull), each CALLED from its owner:
 // the one `Clause-②:` reader, the card a pull delivers, the relay's identity and the record leg's author trust.
 import { quoteLine, readClause2Line } from './clause2-line.mjs';
-import { deliveredCardNumber } from './record-recognisers.mjs';
+import { deliveredCardNumber, deliveredCardsAtStrongest } from './record-recognisers.mjs';
 import { RELAY_COMMENT_AUTHOR } from './fleet-write/ops.mjs';
-import { GOVERNED_APPROVERS, recordAuthorTrusted, recordTrustedAuthors } from './check-governed-queue-guard.mjs';
+import { GOVERNED_APPROVERS, NARROWED_RULING, RECOGNISER_SOURCES, loadRecordRecognisers, narrowedReading, readRecordThreads, recordAuthorTrusted, recordPassVerdict, recordTrustedAuthors, recordVerdict } from './check-governed-queue-guard.mjs';
+// `--handoff`'s record reading loads the guard's recognisers through the guard's OWN loader, handed these two
+// namespaces for the two specifiers it imports (`RECOGNISER_SOURCES`). ⛔ Never a dynamic import from here:
+// `check-handover.mjs` imports post-stamped, which reaches this file through `fleet-write/dispatch.mjs`, so a dynamic
+// import of it under this file's top-level `await main(…)` waits on that very await and node exits 13 (the same
+// cycle the read-back judge section above describes). A static import evaluates with the cycle; neither namespace is
+// touched at module scope.
+import * as recordRecognisersModule from './record-recognisers.mjs';
+import * as checkHandoverModule from './check-handover.mjs';
 // The comment half of a release, borrowed exactly as close-cards borrows it:
 // the one `comment` op, the stamp render, and the board-side read-back of the
 // stored bytes. ⛔ None of these is touched at module scope — post-stamped
@@ -429,6 +511,8 @@ export const EXIT_OK = 0;
 export const EXIT_USAGE = 2;
 export const EXIT_READ_BACK_MISMATCH = 4;
 export const EXIT_PLATFORM_REFUSAL = 5;
+/** `--handoff --dry-run` only: a `now` row reads ✗ — the hand-off is owed (header: exit codes). */
+export const EXIT_HANDOFF_OWED = 7;
 
 /**
  * Re-exported so a caller reads ONE name rather than remembering that 3 is
@@ -1167,6 +1251,7 @@ export function parseOptions(argv) {
     json: false,
     release: false,
     land: false,
+    handoff: false,
     recheckComment: null,
     commentFile: null,
     resumeFrom: null,
@@ -1190,6 +1275,7 @@ export function parseOptions(argv) {
     else if (flag === '--json') opts.json = true;
     else if (flag === '--release') opts.release = true;
     else if (flag === '--land') opts.land = true;
+    else if (flag === '--handoff') opts.handoff = true;
     else if (flag === '--recheck-comment') opts.recheckComment = value();
     else if (flag === '--comment-file') opts.commentFile = value();
     else if (flag === '--resume-from') opts.resumeFrom = value();
@@ -1217,6 +1303,7 @@ export function parseOptions(argv) {
   const releaseOnly = ['--recheck-comment', '--resume-from'].filter((f, k) => [opts.recheckComment, opts.resumeFrom][k] !== null);
   if (!opts.release && releaseOnly.length) return { ok: false, error: `${releaseOnly.join(', ')} belong to --release and mean nothing without it` };
   if (opts.release) {
+    if (opts.handoff) return { ok: false, error: '--handoff hands a pull request to its approvers; a --release moves an issue out of a claim — the two never share a stroke' };
     if (opts.land) return { ok: false, error: '--land readies and arms a pull request; a --release moves an issue out of a claim — the two never share a stroke' };
     if (opts.add.length || opts.remove.length || opts.assign.length || opts.unassign.length || opts.clearAssignees || opts.allowTwoStates) {
       return { ok: false, error: `--release writes exactly \`${RELEASE_FROM}\` → \`${RELEASE_TO}\` and clears every assignee; --add/--remove/--assign/--unassign/--clear-assignees/--allow-two-states are refused beside it` };
@@ -1243,6 +1330,16 @@ export function parseOptions(argv) {
   }
   if (opts.tierEvidence !== null && !opts.commentFile) return { ok: false, error: '--tier-evidence PATH is the transcript behind a `## Contract review` record and travels with --comment-file PATH; alone it judges nothing' };
   if (opts.tierEvidence === '') return { ok: false, error: '--tier-evidence names no file: pass the reviewing run\'s transcript, --tier-evidence PATH' };
+  // ── `--handoff` owns its plan (header): the label is fixed, the reviewers and the author's assignment are read ──
+  if (opts.handoff) {
+    if (opts.land) return { ok: false, error: '--handoff leaves a Tier H pull DRAFT for the maintainer\'s merge and --land readies and arms one — the two never share a stroke' };
+    if (opts.add.length || opts.remove.length || opts.assign.length || opts.unassign.length || opts.clearAssignees || opts.allowTwoStates) {
+      return { ok: false, error: `--handoff writes its own plan — \`${GOVERNED_PR_AWAITING_MERGE_LABEL}\` on, every uncovered approver requested and an approver who is the author assigned — so --add/--remove/--assign/--unassign/--clear-assignees/--allow-two-states are refused beside it` };
+    }
+    if (!opts.commentFile && !opts.dryRun) return { ok: false, error: '--handoff needs --comment-file PATH, the signed approval-request comment; only --dry-run, which sends nothing, may omit it' };
+    opts.add = [GOVERNED_PR_AWAITING_MERGE_LABEL];
+    return { ok: true, options: opts };
+  }
   if (opts.land && !opts.commentFile) return { ok: false, error: '--land folds the landing into a verdict comment\'s stroke and needs --comment-file PATH; a bare landing is the relay actions file `rest-channel.md` spells' };
   const planned = opts.add.length || opts.remove.length || opts.assign.length || opts.unassign.length || opts.clearAssignees;
   if (opts.commentFile && !planned && !opts.land) {
@@ -1264,6 +1361,7 @@ const USAGE = [
   '  node scripts/pm/label-write.mjs --issue N --release --recheck-comment ID --comment-file PATH',
   `                                  --resume-from BRANCH@SHA|${RESUME_FROM_NONE} [--repo OWNER/NAME] [--dry-run] [--json]`,
   '  node scripts/pm/label-write.mjs --issue N [label/assignee flags] --comment-file PATH [--tier-evidence PATH] [--land] [--dry-run] [--json]',
+  '  node scripts/pm/label-write.mjs --issue PR --comment-file PATH --handoff [--dry-run] [--json]   (--dry-run may omit the file)',
   '  node scripts/pm/label-write.mjs --self-test',
   '',
   `  --release reclaims a SILENT claim: ${RELEASE_FROM} → ${RELEASE_TO}, every assignee cleared, behind the \`Release:\``,
@@ -1279,6 +1377,10 @@ const USAGE = [
   '  trusted os-dev-report to show dogfood_battery run on the head (or below it over merges of the base only); else exit 2.',
   '  A `## Contract review` record naming CONTRACT_REVIEW_TIER folds only with --tier-evidence PATH, the reviewing run\'s',
   '  transcript, passed by verify-review-tier.mjs (post-stamped\'s rule; the path stays local).',
+  '  --handoff hands a Tier H pull to its approvers in ONE stroke: the request comment, `pm:awaiting-merge`, the',
+  '  author-approver assigned, every other uncovered GOVERNED_APPROVERS account requested; read back with H43 and H48.',
+  '  Refused (exit 2, zero writes) unless check-governed-merges --pr reads Tier H (or the size limb) and the thread holds',
+  '  a seat ACCEPT newer than the head, a same-head trusted Contract review PASS at its Served-tier, and a brief.',
   '',
   '  Additive `POST .../labels` and directed `DELETE .../labels/{name}` first — neither can strip a',
   '  label a concurrent seat wrote. A platform refusal falls back ONCE to `PATCH .../issues/{n}` with',
@@ -1427,9 +1529,10 @@ export async function runLabelWrite(options, deps = {}) {
   }
 
   // ── `--comment-file`: the comment (and `--land`) folded into this ONE stroke, RELAY-ONLY (header) ──
-  if (options.commentFile) {
+  if (options.commentFile || options.handoff) {
     const readText = deps.readText ?? ((p) => readFileSync(p, 'utf8'));
-    return foldStroke({ options, repo, issue, base, labels, assignees, kind: targetKind.kind, card: read.json, route, send, clock, readText, record, stamp, result, doCall, httpCalls });
+    const handoffDeps = { tierReading: deps.tierReading, recognisers: deps.recognisers, approvers: deps.approvers };
+    return foldStroke({ options, repo, issue, base, labels, assignees, kind: targetKind.kind, card: read.json, route, send, clock, readText, record, stamp, result, doCall, httpCalls, handoffDeps });
   }
 
   const fallbackBody = patchFallbackBody({ labelTarget: labels.target, assigneeTarget: assignees.target });
@@ -1617,6 +1720,11 @@ export const LAND_DOGFOOD_REPORT_KEY = 'dogfood_battery';
 export const LAND_COMMENT_PAGE_CAP = 30;
 /** How many merge-of-base commits the first-parent walk from the head steps over before it stops and refuses. */
 export const LAND_MERGE_HOP_CAP = 20;
+/**
+ * The repositories that carry the dogfood battery and its merge-queue shards (header: `repo`), matched
+ * case-insensitively. A pull in any other `owner/name` is not judged; ⛔ never add one that has no battery.
+ */
+export const LAND_DOGFOOD_BATTERY_REPOS = Object.freeze(['objectstack-ai/objectstack']);
 /** How much of the title a refusal quotes, at `clause2-line.mjs`'s `quoteLine` cap. */
 export const LAND_TITLE_QUOTE_CAP = 160;
 /** The compare statuses that put a commit on the base branch: the base is ahead of it, or it IS the base's tip. */
@@ -1624,6 +1732,16 @@ const ON_BASE_STATUSES = Object.freeze(['ahead', 'identical']);
 const FULL_SHA = /^[0-9a-f]{40}$/u;
 // A `dogfood_battery` that ran opens with the sha it ran on (os-dev.md: `<head sha> · VERDICT · …`), optionally quoted.
 const BATTERY_SHA_SHAPE = /^[`'"]?([0-9a-f]{7,40})(?![0-9a-z])/iu;
+
+/**
+ * Does `repo` carry the dogfood battery? `false` only for an `owner/name` outside `LAND_DOGFOOD_BATTERY_REPOS`; a
+ * value that does not read as `owner/name` answers `true`, so the gate judges it — fail-closed. Pure.
+ */
+export function repoCarriesDogfoodBattery(repo) {
+  const slug = typeof repo === 'string' ? repo.trim().toLowerCase() : '';
+  if (!/^[^/\s]+\/[^/\s]+$/u.test(slug)) return true;
+  return LAND_DOGFOOD_BATTERY_REPOS.some((r) => r.toLowerCase() === slug);
+}
 
 /**
  * Does a pull request's TITLE carry the conventional-commit breaking mark — `!` as the last character before its
@@ -1706,8 +1824,9 @@ export function readBatterySha(text) {
 }
 
 /**
- * The gate itself (header): on a `--land` stroke, BEFORE anything is judged or sent. A pull with no marker is not
- * judged (`{ judged: false }`, zero extra reads). A marked pull lands only when the NEWEST `os-dev-report` on the card
+ * The gate itself (header): on a `--land` stroke, BEFORE anything is judged or sent. A pull in a repository with no
+ * battery (`repoCarriesDogfoodBattery`) is not judged (`{ judged: false, noBattery: true }`, zero reads); nor is a
+ * pull with no marker (`{ judged: false }`, zero extra reads). A marked pull lands only when the NEWEST `os-dev-report` on the card
  * it delivers — trusted authors only (`recordAuthorTrusted`: the relay's identity and `GOVERNED_APPROVERS`; another
  * account's comment is data, ⛔ never a reason to land) — carries a `dogfood_battery` naming a sha that IS the pull's
  * current head, or is reached from the head by a first-parent walk over merges of the base branch alone:
@@ -1722,9 +1841,16 @@ export function readBatterySha(text) {
  * readable `dogfood_battery`, an `n/a` one or one naming no sha all refuse — NOT MEASURED is a refusal here, never a
  * pass. A read the platform did not answer comes back `unread: true`, which the fold exits 3 on, not 2.
  *
- * @returns {Promise<{ judged: false } | { judged: true, ok: boolean, title: string|null, marker: string, why?: string, clear?: string, report?: number|null, battery?: string|null, hops?: number, unread?: true }>}
+ * A TIE (a fold's equal closing keywords, `deliveredCardsAtStrongest`): every tied card's thread is read whole before
+ * anything is judged — one that does not read is exit 3 and one that cannot be read whole refuses, whatever the other
+ * cards carry — then each card's report is chosen exactly as above, and the pull lands when the head, or one first-parent
+ * walk from it, reaches ANY tied card's battery sha. The result then carries `card`, `cleared` and `tied` (each card
+ * read, its report and battery); a tie refusal carries `tied` with each card's reason. ⛔ Never a choice by number order.
+ *
+ * @returns {Promise<{ judged: false, noBattery?: true } | { judged: true, ok: boolean, title: string|null, marker: string, why?: string, clear?: string, report?: number|null, battery?: string|null, hops?: number, unread?: true, card?: number, cleared?: object[], tied?: object[] }>}
  */
 export async function landDogfoodGate({ repo, issue, card, doCall }) {
+  if (!repoCarriesDogfoodBattery(repo)) return { judged: false, noBattery: true };
   const title = typeof card?.title === 'string' ? quoteLine(card.title, LAND_TITLE_QUOTE_CAP) : null;
   const read = landDogfoodMarkers({ title: card?.title, body: card?.body });
   const rerun = (head) =>
@@ -1746,74 +1872,131 @@ export async function landDogfoodGate({ repo, issue, card, doCall }) {
   const baseRef = pull.json?.base?.ref;
   if (!FULL_SHA.test(head) || typeof baseRef !== 'string' || baseRef === '') return refuse('the pull read carries no full head sha or no base branch', 'land again once the pull reads whole');
   const delivered = deliveredCardNumber(pull.json);
-  if (delivered.card === null) return refuse(`no card: ${delivered.reason}`, `declare the card on the body (\`Fixes #N\` or \`Part of #N\`), then ${rerun(head)}`);
+  // A fold delivers one card per closing keyword at equal strength, and `deliveredCardNumber` reports that tie
+  // (`card: null`) rather than break it. The gate then reads EVERY tied card (`deliveredCardsAtStrongest`, the
+  // same enumeration) and judges over all of them; a body naming no card still refuses here.
+  const tie = delivered.card === null ? deliveredCardsAtStrongest(pull.json) : null;
+  if (delivered.card === null && tie.cards.length < 2) return refuse(`no card: ${delivered.reason}`, `declare the card on the body (\`Fixes #N\` or \`Part of #N\`), then ${rerun(head)}`);
+  const cards = tie === null ? [delivered.card] : tie.cards;
 
-  const rows = [];
-  for (let page = 1; ; page += 1) {
-    if (page > LAND_COMMENT_PAGE_CAP) {
-      return refuse(
-        `card #${delivered.card}'s thread is still full after ${LAND_COMMENT_PAGE_CAP} pages of 100 — a TRUNCATED listing, so its newest report is unknown`,
-        'report it to the maintainer: this gate cannot read the newest report on a thread that long, and it lands nothing it has not read',
-      );
-    }
-    const listed = await doCall('comments-list', `/repos/${repo}/issues/${delivered.card}/comments?per_page=100&page=${page}`, {});
-    if (listed.verdict !== 'ok') {
-      // A 404 is as likely the pull delivering the wrong card (its body or its branch) as the platform failing to answer.
-      return unread(`card #${delivered.card}'s thread`, listed, `land again once the card reads${listed.status === 404 ? `, or correct the card this pull delivers (#${delivered.card})` : ''}`);
-    }
-    if (!Array.isArray(listed.json)) return refuse(`card #${delivered.card}'s thread answered no list on page ${page}`, 'land again once the card reads');
-    rows.push(...listed.json);
-    if (listed.json.length < 100) break;
-  }
   const trusted = recordTrustedAuthors(RELAY_COMMENT_AUTHOR);
-  const kept = rows.filter((row) => recordAuthorTrusted(row, trusted));
-  const newest = latestMarkedComment(kept, OS_DEV_REPORT_MARKER);
-  if (newest === null) return refuse(`card #${delivered.card} carries no \`os-dev-report\` by ${trusted.join(' / ')} (${rows.length} comment(s) read)`, rerun(head));
-  let row = kept[newest.index];
-  // Sibling pulls on one card: the newest report may be another pull's. Then the newest naming THIS pull, or none.
-  if (reportNamesPull(row?.body, { repo, number: issue }) === 'other') {
-    const own = kept.filter((r) => reportNamesPull(r?.body, { repo, number: issue }) === 'this');
-    const mine = latestMarkedComment(own, OS_DEV_REPORT_MARKER);
-    if (mine === null) {
-      report = row?.id ?? null;
-      battery = reportedDogfoodBattery(row?.body);
-      return refuse(`card #${delivered.card}'s newest trusted report names another pull in \`pr\`, and no trusted report names this one`, rerun(head));
+  // One card's thread, read whole, and the report the gate judges on it: `{ blocked }` when the thread cannot be read
+  // whole (the gate's verdict, as on one card), else `{ card, report, battery, sha }` or `{ card, report, battery, why }`.
+  const readCard = async (number) => {
+    const rows = [];
+    for (let page = 1; ; page += 1) {
+      if (page > LAND_COMMENT_PAGE_CAP) {
+        return {
+          blocked: refuse(
+            `card #${number}'s thread is still full after ${LAND_COMMENT_PAGE_CAP} pages of 100 — a TRUNCATED listing, so its newest report is unknown`,
+            'report it to the maintainer: this gate cannot read the newest report on a thread that long, and it lands nothing it has not read',
+          ),
+        };
+      }
+      const listed = await doCall('comments-list', `/repos/${repo}/issues/${number}/comments?per_page=100&page=${page}`, {});
+      if (listed.verdict !== 'ok') {
+        // A 404 is as likely the pull delivering the wrong card (its body or its branch) as the platform failing to answer.
+        return { blocked: unread(`card #${number}'s thread`, listed, `land again once the card reads${listed.status === 404 ? `, or correct the card this pull delivers (#${number})` : ''}`) };
+      }
+      if (!Array.isArray(listed.json)) return { blocked: refuse(`card #${number}'s thread answered no list on page ${page}`, 'land again once the card reads') };
+      rows.push(...listed.json);
+      if (listed.json.length < 100) break;
     }
-    row = own[mine.index];
+    const kept = rows.filter((row) => recordAuthorTrusted(row, trusted));
+    const newest = latestMarkedComment(kept, OS_DEV_REPORT_MARKER);
+    if (newest === null) return { card: number, report: null, battery: null, why: `card #${number} carries no \`os-dev-report\` by ${trusted.join(' / ')} (${rows.length} comment(s) read)` };
+    let row = kept[newest.index];
+    // Sibling pulls on one card: the newest report may be another pull's. Then the newest naming THIS pull, or none.
+    if (reportNamesPull(row?.body, { repo, number: issue }) === 'other') {
+      const own = kept.filter((r) => reportNamesPull(r?.body, { repo, number: issue }) === 'this');
+      const mine = latestMarkedComment(own, OS_DEV_REPORT_MARKER);
+      if (mine === null) {
+        return { card: number, report: row?.id ?? null, battery: reportedDogfoodBattery(row?.body), why: `card #${number}'s newest trusted report names another pull in \`pr\`, and no trusted report names this one` };
+      }
+      row = own[mine.index];
+    }
+    const found = { card: number, report: row?.id ?? null, battery: reportedDogfoodBattery(row?.body) };
+    if (found.battery === null) return { ...found, why: `the newest report carries no readable \`${LAND_DOGFOOD_REPORT_KEY}\` string` };
+    const ran = readBatterySha(found.battery);
+    if (ran.ran === false) return { ...found, why: 'the battery was not run (`n/a`)' };
+    if (ran.ran === null) return { ...found, why: `\`${LAND_DOGFOOD_REPORT_KEY}\` names no sha it ran on` };
+    return { ...found, sha: ran.sha };
+  };
+  const outcomes = [];
+  for (const number of cards) {
+    const one = await readCard(number);
+    if (one.blocked) return tie === null ? one.blocked : { ...one.blocked, tied: outcomes.map(tiedRow) };
+    outcomes.push(one);
   }
-  report = row?.id ?? null;
-  battery = reportedDogfoodBattery(row?.body);
-  if (battery === null) return refuse(`the newest report carries no readable \`${LAND_DOGFOOD_REPORT_KEY}\` string`, rerun(head));
-  const ran = readBatterySha(battery);
-  if (ran.ran === false) return refuse('the battery was not run (`n/a`)', rerun(head));
-  if (ran.ran === null) return refuse(`\`${LAND_DOGFOOD_REPORT_KEY}\` names no sha it ran on`, rerun(head));
-  if (head.startsWith(ran.sha)) return { judged: true, ok: true, title, marker, report, battery, hops: 0 };
+  const judgeable = outcomes.filter((one) => one.sha !== undefined);
+  // On a tie the refusal names every card read and why each failed; on one card it is that card's reason, as before.
+  const tieRefuse = (walkWhy) => {
+    const rows = outcomes.map((one) => ({ ...tiedRow(one), why: one.why ?? walkWhy }));
+    return {
+      ...refuse(
+        `it delivers ${cards.length} cards at the same strength (${cards.map((n) => `#${n}`).join(', ')}, ${tie.evidence}), each card's thread was read, and none carries a report that clears this pull — ${rows.map((r) => `card #${r.card}: ${r.why}`).join('; ')}`,
+        rerun(head),
+      ),
+      tied: rows,
+    };
+  };
+  if (tie === null) {
+    report = outcomes[0].report;
+    battery = outcomes[0].battery;
+    if (outcomes[0].why !== undefined) return refuse(outcomes[0].why, rerun(head));
+  } else if (judgeable.length === 0) {
+    return tieRefuse(null);
+  }
+  const shaWords = judgeable.length === 1 ? `the battery's \`${judgeable[0].sha}\`` : `the tied cards' batteries (${[...new Set(judgeable.map((one) => one.sha))].map((sha) => `\`${sha}\``).join(', ')})`;
+  // A pass names the report(s) whose sha the head reaches first; on a tie every card read rides along in `tied`.
+  const pass = (at, hops) => {
+    const clearing = judgeable.filter((one) => at.startsWith(one.sha));
+    if (clearing.length === 0) return null;
+    report = clearing[0].report;
+    battery = clearing[0].battery;
+    return { judged: true, ok: true, title, marker, report, battery, hops, ...(tie === null ? {} : { card: clearing[0].card, cleared: clearing.map(tiedRow), tied: outcomes.map(tiedRow) }) };
+  };
+  const walkRefuse = (why) => (tie === null ? refuse(why, rerun(head)) : tieRefuse(why));
+  const walkUnread = (what, r) => (tie === null ? unread(what, r, rerun(head)) : { ...unread(what, r, rerun(head)), tied: outcomes.map(tiedRow) });
+  const passedOnHead = pass(head, 0);
+  if (passedOnHead) return passedOnHead;
 
   let at = head;
   for (let hop = 1; hop <= LAND_MERGE_HOP_CAP; hop += 1) {
     const commit = await doCall('commit-read', `/repos/${repo}/commits/${at}`, {});
-    if (commit.verdict !== 'ok') return unread(`commit \`${at}\`, on the walk to the battery's \`${ran.sha}\`,`, commit, rerun(head));
+    if (commit.verdict !== 'ok') return walkUnread(`commit \`${at}\`, on the walk to ${shaWords},`, commit);
     const parents = (Array.isArray(commit.json?.parents) ? commit.json.parents : []).map((p) => String(p?.sha ?? '').toLowerCase());
     if (parents.length !== 2 || !parents.every((p) => FULL_SHA.test(p))) {
-      return refuse(`commit \`${at}\` lies after the battery's \`${ran.sha}\` and is not a merge (${parents.length} parent(s)) — the battery did not run on this code`, rerun(head));
+      return walkRefuse(`commit \`${at}\` lies after ${shaWords} and is not a merge (${parents.length} parent(s)) — the battery did not run on this code`);
     }
     const compared = await doCall('compare-read', `/repos/${repo}/compare/${parents[1]}...${enc(baseRef)}`, {});
-    if (compared.verdict !== 'ok') return unread(`whether merge \`${at}\`'s second parent \`${parents[1]}\` is on \`${baseRef}\``, compared, rerun(head));
+    if (compared.verdict !== 'ok') return walkUnread(`whether merge \`${at}\`'s second parent \`${parents[1]}\` is on \`${baseRef}\``, compared);
     if (!ON_BASE_STATUSES.includes(compared.json?.status)) {
-      return refuse(`merge \`${at}\` brings in \`${parents[1]}\`, which \`${baseRef}\` does not hold (compare status ${JSON.stringify(compared.json?.status ?? null)}) — not a merge of the base`, rerun(head));
+      return walkRefuse(`merge \`${at}\` brings in \`${parents[1]}\`, which \`${baseRef}\` does not hold (compare status ${JSON.stringify(compared.json?.status ?? null)}) — not a merge of the base`);
     }
     at = parents[0];
-    if (at.startsWith(ran.sha)) return { judged: true, ok: true, title, marker, report, battery, hops: hop };
+    const passed = pass(at, hop);
+    if (passed) return passed;
   }
-  return refuse(`the battery's \`${ran.sha}\` is not reached within ${LAND_MERGE_HOP_CAP} merges of \`${baseRef}\` on the head's first-parent line`, rerun(head));
+  return walkRefuse(`${shaWords} ${judgeable.length === 1 ? 'is' : 'are'} not reached within ${LAND_MERGE_HOP_CAP} merges of \`${baseRef}\` on the head's first-parent line`);
+}
+
+/** One tied card's row on a tie verdict: the card, its judged report comment (or null) and that report's battery text. Pure. */
+function tiedRow(one) {
+  return { card: one.card, report: one.report ?? null, battery: one.battery ?? null };
 }
 
 /** The refusal line a failed gate prints: the title, the marker, the report comment and its `dogfood_battery` text, why, and what clears it. */
 export function landDogfoodRefusal(gate) {
+  const reportWords = (r) => `${r.report === null || r.report === undefined ? 'none' : `comment ${r.report}`}`;
+  const batteryWords = (r) => `${r.battery === null || r.battery === undefined ? 'none' : JSON.stringify(r.battery)}`;
+  // A tie names every tied card read, each with its report and battery; one card prints as it always has.
+  const reportPart = Array.isArray(gate.tied)
+    ? `reports: ${gate.tied.length === 0 ? 'none read' : gate.tied.map((r) => `card #${r.card} ${reportWords(r)}, ${LAND_DOGFOOD_REPORT_KEY} ${batteryWords(r)}`).join('; ')}`
+    : `report: ${reportWords(gate)} · ${LAND_DOGFOOD_REPORT_KEY}: ${batteryWords(gate)}`;
   return (
     `--land REFUSED by the dogfood battery gate (${LAND_DOGFOOD_RULE_PATH}) — title: ${gate.title === null || gate.title === undefined ? 'none read' : JSON.stringify(gate.title)} · marker: ${gate.marker} · ` +
-    `report: ${gate.report === null || gate.report === undefined ? 'none' : `comment ${gate.report}`} · ` +
-    `${LAND_DOGFOOD_REPORT_KEY}: ${gate.battery === null || gate.battery === undefined ? 'none' : JSON.stringify(gate.battery)} · why: ${gate.why} · to clear: ${gate.clear}.`
+    `${reportPart} · why: ${gate.why} · to clear: ${gate.clear}.`
   );
 }
 
@@ -1821,15 +2004,279 @@ export function landDogfoodRefusal(gate) {
  * `--comment-file`'s stroke, from step ② on (header): judge the comment on post-stamped's path, send the ONE
  * dispatch, read every part back on its own line. `c` carries `runLabelWrite`'s steps ① and ② and its doors.
  */
+// ---------------------------------------------------------------------------
+// `--handoff` — the seat's Tier H hand-off as ONE relay stroke (header)
+// ---------------------------------------------------------------------------
+
+/** Where the hand-off this mode writes is defined: 〈路径分叉〉 ② (the label) and ③ (the request). */
+export const HANDOFF_RULE_PATH = '.claude/skills/pm-dispatch/SKILL.md';
+/** The tier instrument the hand-off asks, spawned so every split it chains is the one reading (header: `--handoff`). */
+export const HANDOFF_TIER_TOOL = 'scripts/pm/check-governed-merges.mjs';
+/** How many 100-row pages of the pull's own thread the hand-off reads; a thread still full on the last one is TRUNCATED. */
+export const HANDOFF_COMMENT_PAGE_CAP = 30;
+/** The spawned tier reading's wall-clock ceiling: it pages the changed files and may read the checkout. */
+export const HANDOFF_TIER_TIMEOUT_MS = 180_000;
+
+/**
+ * The tier reading, spawned: `check-governed-merges.mjs --pr OWNER/NAME#N --json`. Answers `{ exit, json, detail }` —
+ * `json` the tool's own verdict object when its exit is 0 or 3 (NOT governed / GOVERNED) and its stdout parses, else
+ * null with `detail` saying why. Never throws.
+ */
+export function readGovernedTier({ repo, issue }) {
+  const tool = fileURLToPath(new URL('./check-governed-merges.mjs', import.meta.url));
+  const r = spawnSync(process.execPath, [tool, '--pr', `${repo}#${issue}`, '--json'], { encoding: 'utf8', env: process.env, maxBuffer: 64 * 1024 * 1024, timeout: HANDOFF_TIER_TIMEOUT_MS });
+  const tail = String(r.stderr ?? '').trim().split('\n').slice(-2).join(' · ');
+  if (r.error) return { exit: null, json: null, detail: `the spawn failed: ${r.error.message}` };
+  if (r.status !== 0 && r.status !== 3) return { exit: r.status, json: null, detail: `exit ${r.status}${tail ? ` — ${tail}` : ''}` };
+  try {
+    return { exit: r.status, json: JSON.parse(r.stdout), detail: '' };
+  } catch {
+    return { exit: r.status, json: null, detail: `exit ${r.status} and its stdout is not the --json verdict` };
+  }
+}
+
+/**
+ * Does the verdict turn on the pull's narrowing declarations? Pure: a readable reading that is neither a fork nor
+ * Tier H — there the paths decide, and ⛔ no changeset text is read at all (header: `--handoff`, tier).
+ */
+export function handoffOwesDeclarations(reading) {
+  const v = reading?.json;
+  return Boolean(v && typeof v === 'object' && v.fork?.isFork !== true && !(v.governed === true && v.tier === GOVERNED_TIER_H));
+}
+
+/**
+ * Does the tier reading let the hand-off proceed? Pure. `{ ok, unread, why, route?, matched?, narrowing? }` —
+ * `matched` the tool's own post-split slice on a pass, which the patrol rows are asked on. Three populations land
+ * by the maintainer (SKILL.md 〈路径分叉〉 Tier H and the line after it) and proceed: Tier H (`tier`), the size limb
+ * firing (`size`), and a declared narrowing — the queue guard's narrowed leg, read with its own
+ * `narrowedReading` (`narrowed`), whatever the register says, Tier S included. `declarations` is that reading's
+ * list, owed wherever `handoffOwesDeclarations` says so: null there is `unread`, never a pass. A fork, and a
+ * Tier S or ungoverned pull that declares no narrowing, are refused; a reading with no verdict object is `unread` —
+ * a PREREQUISITE, never a verdict.
+ */
+export function handoffTierVerdict(reading, declarations = null) {
+  const v = reading?.json;
+  const tool = `\`${HANDOFF_TIER_TOOL} --pr\``;
+  if (!v || typeof v !== 'object') return { ok: false, unread: true, why: `${tool} gave no reading (${reading?.detail || 'no answer'}) — NOT MEASURED, so nothing is handed to anyone` };
+  if (v.fork?.isFork === true) return { ok: false, unread: false, why: `${tool} reads a FORK pull request (head ${v.fork.headRepo ?? '?'}): a proposal, never a delivery — no seat hands it to an approver; the owning seat adopts the diff onto an internal branch and hands THAT off` };
+  const matched = Array.isArray(v.matched) ? v.matched : [];
+  if (v.governed === true && v.tier === GOVERNED_TIER_H) return { ok: true, unread: false, route: 'tier', json: v, matched, narrowing: false, why: `${tool} reads Tier H (${matched.map((s) => `\`${s.glob}\`×${s.files?.length ?? 0}`).join(', ')})` };
+  if (!Array.isArray(declarations)) return { ok: false, unread: true, why: 'the narrowing declarations of the body and the committed changesets were not read, so whether the narrowed leg hands this pull to the maintainer is unknown — NOT MEASURED' };
+  const narrowing = declarations.length > 0;
+  const declared = narrowing ? `\`${declarations[0].key}:\` narrowing on ${declarations.map((d) => d.where).join(', ')}` : '';
+  if (sizeLimbFires(v.size)) return { ok: true, unread: false, route: 'size', json: v, matched, narrowing, why: `${tool} reads the SIZE limb: ${v.size.changedLines} changed lines over ${v.size.threshold}, which lands the way Tier H does${narrowing ? `; it also declares a narrowing (${declared})` : ''}` };
+  if (narrowing) return { ok: true, unread: false, route: 'narrowed', json: v, matched, narrowing, why: `the pull declares a narrowing (${declared}): the queue guard's narrowed leg lands it by the maintainer (${NARROWED_RULING}), whatever ${tool} reads (tier ${v.tier ?? 'none'})` };
+  if (v.governed === true && v.tier === GOVERNED_TIER_S) return { ok: false, unread: false, why: `${tool} reads Tier S and no narrowing is declared: it lands on the owning seat's review of record and no human is handed it (「Tier S 不交人」, ${HANDOFF_RULE_PATH})` };
+  return { ok: false, unread: false, why: `${tool} reads this pull as NOT governed (tier ${v.tier ?? 'none'}, size limb clear) and no narrowing is declared on the body or a committed changeset: nobody is owed a hand-off` };
+}
+
+/**
+ * The hand-off's request plan: the approvers NOT requested, assigned or holding a submitted review (H43's union),
+ * split into `toAssign` (an uncovered approver who is the pull's author — a request naming the author is a 422) and
+ * `toRequest` (the rest). Logins match case-insensitively; the answer keeps `approvers`' spelling and order. Pure.
+ */
+export function handoffReviewPlan({ approvers = GOVERNED_APPROVERS, author = null, requested = [], assigned = [], reviewed = [] } = {}) {
+  const lower = (list) => (Array.isArray(list) ? list : []).map((l) => String(l).toLowerCase());
+  const have = new Set([...lower(requested), ...lower(assigned), ...lower(reviewed)]);
+  const list = Array.isArray(approvers) ? approvers : [];
+  const missing = list.filter((a) => !have.has(a.toLowerCase()));
+  const isAuthor = (a) => typeof author === 'string' && a.toLowerCase() === author.toLowerCase();
+  return { covered: list.filter((a) => have.has(a.toLowerCase())), toRequest: missing.filter((a) => !isAuthor(a)), toAssign: missing.filter(isAuthor) };
+}
+
+/** The guard's `loadRecordRecognisers`, handed this file's static namespaces for its two sources (import note above). */
+export function loadHandoffRecognisers() {
+  const held = { [RECOGNISER_SOURCES.tier]: recordRecognisersModule, [RECOGNISER_SOURCES.author]: checkHandoverModule };
+  return loadRecordRecognisers((specifier) => (specifier in held ? Promise.resolve(held[specifier]) : import(specifier)));
+}
+
+/** One thread, every page: `{ rows }`, or `{ unread }` naming the read that failed or the cap a full thread reached. */
+async function readThreadRows(doCall, repo, number) {
+  const rows = [];
+  for (let page = 1; ; page++) {
+    if (page > HANDOFF_COMMENT_PAGE_CAP) return { unread: `#${number}'s thread is still full after ${HANDOFF_COMMENT_PAGE_CAP} pages — a TRUNCATED thread can hide the newest record` };
+    const r = await doCall('comments-list', `/repos/${repo}/issues/${number}/comments?per_page=100&page=${page}`, {});
+    if (r.verdict !== 'ok' || !Array.isArray(r.json)) return { unread: `${r.call} -> HTTP ${r.status}: #${number}'s thread could not be read` };
+    rows.push(...r.json);
+    if (r.json.length < 100) return { rows };
+  }
+}
+
+/**
+ * The committed changesets at the head, the queue guard's way (`readChangesetTexts`): the paths its
+ * `LOW_RISK_CHANGESET_PATH` picks out of the tier tool's list, each read at the head. A path the head does not hold —
+ * a changeset the pull DELETED, a rename's old name — answers 404 and is left out, declaring nothing; any other
+ * failed read is NOT MEASURED. `{ measured, reason, files: [{ path, text }] }`.
+ */
+async function readHeadChangesets(doCall, repo, headSha, paths) {
+  const files = [];
+  for (const path of paths.filter((p) => LOW_RISK_CHANGESET_PATH.test(p))) {
+    const read = await doCall('contents-read', `/repos/${repo}/contents/${path.split('/').map(enc).join('/')}?ref=${headSha}`, {});
+    if (read.status === 404) continue;
+    if (read.verdict !== 'ok' || typeof read.json?.content !== 'string') return { measured: false, reason: `${read.call} -> HTTP ${read.status}: \`${path}\` could not be read at the head`, files: [] };
+    files.push({ path, text: Buffer.from(read.json.content, read.json.encoding === 'base64' ? 'base64' : 'utf8').toString('utf8') });
+  }
+  return { measured: true, reason: null, files };
+}
+
+/**
+ * The slice the two patrol rows are asked on (header: `--handoff`, read-back). A Tier H reading hands its own
+ * post-split matched slice. A SIZE-limb reading hands that slice plus ONE Tier H entry for the size limb over every
+ * path: on a code-only or Tier S pull the register's slice alone is empty or Tier S, and both rows would stand down
+ * and read ✓ although nobody was asked. Pure.
+ */
+export function handoffSlice(tier, paths = []) {
+  const matched = Array.isArray(tier?.matched) ? tier.matched : [];
+  if (tier?.route === 'narrowed') return [...matched, { id: 'narrowed', glob: 'declared narrowing (the narrowed leg)', tier: GOVERNED_TIER_H, files: [...paths], what: 'a declared narrowing: lands by the maintainer' }];
+  if (tier?.route !== 'size') return matched;
+  const size = tier.json?.size ?? {};
+  return [...matched, { id: 'size-limb', glob: `size limb (${size.changedLines ?? '?'} > ${size.threshold ?? '?'} changed lines)`, tier: GOVERNED_TIER_H, files: [...paths], what: 'the SIZE limb: lands the way Tier H does' }];
+}
+
+/** The pull as the two patrol rows read it: the pull answer, with the labels and assignees of the card read beside it. */
+function handoffPullView(pull, labels, assignees) {
+  return { ...pull, labels: labels.map((name) => ({ name })), assignees: assignees.map((login) => ({ login })) };
+}
+
+/** The `now H43` / `④ H43` and `H48` lines: each row's own finding sentence, or ✓ when it has none. Pure. */
+export function handoffRowLines({ pull, matched, approvers, reviewed, handoff, rows }) {
+  const h43 = h43GovernedReviewRequestGap(pull, matched, approvers, reviewed, handoff);
+  const h48 = h48GovernedVerdictWithoutBrief(pull, matched, rows);
+  return { h43, h48, clean: h43 === null && h48 === null };
+}
+
+/**
+ * Every read and refusal of `--handoff` before the comment is judged (header). Returns `{ ok: true, … }` with the
+ * plan and the readings the read-back reuses, or `{ ok: false, exit, why }` — exit 2 a judged refusal, 3 a read the
+ * platform or the tier tool did not answer. ⛔ Writes nothing.
+ */
+async function handoffGate(c) {
+  const { repo, issue, doCall, record, stamp } = c;
+  const deps = c.handoffDeps ?? {};
+  const approvers = deps.approvers ?? GOVERNED_APPROVERS;
+  const refuse = (why) => ({ ok: false, exit: EXIT_USAGE, why });
+  const unread = (why) => ({ ok: false, exit: EXIT_PREREQUISITE, why });
+  if (c.kind !== KIND_PULL) return refuse(`--handoff hands a PULL REQUEST to its approvers, and ${repo}#${issue} is ${c.kind === null ? 'of no kind step ① could read' : 'an issue'}`);
+  if (c.card?.state !== 'open') return refuse(`${repo}#${issue} is ${c.card?.state ?? 'of no readable state'}: the hand-off is over once a pull is closed or merged`);
+
+  const reading = await (deps.tierReading ?? readGovernedTier)({ repo, issue });
+  const owes = handoffOwesDeclarations(reading);
+  let tier = owes ? null : handoffTierVerdict(reading);
+  if (tier && !tier.ok) return tier.unread ? unread(tier.why) : refuse(tier.why);
+
+  const pull = await doCall('pull-read', `/repos/${repo}/pulls/${issue}`, {});
+  if (pull.verdict !== 'ok' || !pull.json) return unread(`${pull.call} -> HTTP ${pull.status}: the pull's head, author and pending requests are unknown`);
+  const headSha = String(pull.json.head?.sha ?? '');
+  // Every changed path the tier tool read, pre-lift (`reviewFace` reads the register before a pure regeneration is
+  // lifted): the post-lift hits, the paths off the register, and each path an exception lifted or tried.
+  const paths = [...new Set([...(reading.json?.hitPaths ?? []), ...(reading.json?.clearPaths ?? []), ...(reading.json?.exceptions ?? []).map((e) => e?.path).filter((p) => typeof p === 'string' && p !== '')])];
+  const body = typeof pull.json.body === 'string' ? pull.json.body : '';
+  let changesets = null;
+  if (owes) {
+    // The narrowed leg's own reading (header: tier): the body and the committed changesets, its readers CALLED.
+    changesets = await readHeadChangesets(doCall, repo, headSha, paths);
+    if (!changesets.measured) return unread(`${changesets.reason} — whether the pull declares a narrowing is unknown`);
+    tier = handoffTierVerdict(reading, narrowedReading({ pr: issue, body, changesets }).declarations);
+    if (!tier.ok) return tier.unread ? unread(tier.why) : refuse(tier.why);
+  }
+  record(`[${stamp()}] ② hand-off tier ✓ — ${tier.why}`);
+  const reviews = await doCall('reviews-list', `/repos/${repo}/pulls/${issue}/reviews?per_page=100`, {});
+  if (reviews.verdict !== 'ok' || !Array.isArray(reviews.json)) return unread(`${reviews.call} -> HTTP ${reviews.status}: who has already reviewed is unknown`);
+  const reviewed = reviews.json.filter((r) => r?.state !== 'PENDING').map((r) => r?.user?.login).filter(Boolean);
+  const own = await readThreadRows(doCall, repo, issue);
+  if (own.unread) return unread(own.unread);
+  const rows = own.rows;
+  const commit = await doCall('commit-read', `/repos/${repo}/commits/${headSha}`, {});
+  const headMs = Date.parse(commit.json?.commit?.committer?.date ?? '');
+  if (commit.verdict !== 'ok' || !Number.isFinite(headMs)) return unread(`${commit.call} -> HTTP ${commit.status}: the head's committer date is unknown, so no record can be dated against it`);
+  // The queue guard's record recognisers (header): the ONE loader the guard, `--pr` and the relay read records with.
+  const recognisers = await (deps.recognisers ?? loadHandoffRecognisers)();
+  if (recognisers?.available !== true) return unread(`the queue guard's record recognisers did not load (${recognisers?.reason ?? 'no reason given'}), so no record can be read`);
+  const authors = { available: true, admits: (row) => recordAuthorTrusted(row, recognisers.trustedAuthors), reason: null };
+
+  const handoffPr = h43HandoffReading(rows, headSha, authors);
+  const labels = labelNamesOf(c.card?.labels);
+  const assigned = loginsOf(c.card?.assignees);
+  const slice = handoffSlice(tier, paths);
+  // `now H43` / `now H48` (header): the rows as the pull stands, printed on every exit past the reads.
+  let nowClean = false;
+  const printNow = (handoff) => {
+    const now = handoffRowLines({ pull: handoffPullView(pull.json, labels, assigned), matched: slice, approvers, reviewed, handoff, rows });
+    nowClean = now.clean;
+    record(`[${stamp()}] ② now H43 ${now.h43 === null ? '✓' : '✗'} · now H48 ${now.h48 === null ? '✓' : '✗'} — ${repo}#${issue} as it stands, head \`${headSha.slice(0, 12)}\`${now.h43 ? `\n      H43: ${now.h43}` : ''}${now.h48 ? `\n      H48: ${now.h48}` : ''}`);
+  };
+  const stop = (res) => {
+    printNow(handoffPr);
+    return res;
+  };
+
+  const sha12 = headSha.slice(0, 12);
+  if (!handoffPr.record) return stop(refuse(`no \`## 席位核对\` record is on the thread: the seat's review comes before the hand-off (〈路径分叉〉 ①)`));
+  if (!handoffPr.accepted) return stop(refuse(`the newest \`## 席位核对\` record (${handoffPr.record.createdAt ?? 'undated'}) does not read ACCEPT: only an accepted pull is handed to a human`));
+  if (handoffPr.record.stamp === null || handoffPr.record.stamp <= headMs) {
+    return stop(refuse(`the newest \`## 席位核对\` ACCEPT (${handoffPr.record.createdAt ?? 'undated'}) is not newer than the head \`${sha12}\` (committed ${commit.json.commit.committer.date}): the seat read a diff the approver will not be shown — re-make the record for this head`));
+  }
+
+  // The PASS, the guard's way (header): the pull's thread AND its card, cut to trusted authors, at the FACE's tier.
+  // On the tier route the paths decide the face and no declaration is handed (the guard's governed entry); off it,
+  // the narrowed leg's pair: the body and every changeset text, and `narrowingDeclared` when it declares one.
+  const card = recognisers.deliveredCard(pull.json);
+  const declared = changesets === null ? {} : { declaredOn: [body, ...changesets.files.map((f) => f.text)], narrowingDeclared: tier.narrowing === true };
+  const pair = { pr: issue, card: card.card, headSha, paths, repo: tier.json?.repo, ...declared };
+  const fetchComments = async (n) => {
+    if (n === issue) return rows;
+    const thread = await readThreadRows(doCall, repo, n);
+    if (thread.unread) throw new Error(thread.unread);
+    return thread.rows;
+  };
+  const threads = await readRecordThreads({ pair, recognisers, fetchComments });
+  if (threads.unreadable) return stop(unread(threads.unreadable));
+  const pass = recordPassVerdict(recordVerdict({ pair, recognisers }), pair, recognisers);
+  const where = recognisers.location;
+  const cardWords = card.card === null ? ` (no card: ${card.reason})` : ` (card #${card.card} read)`;
+  if (pass.state === 'unreadable') return stop(unread(pass.reason));
+  if (pass.state === 'absent') return stop(refuse(`no trusted \`## Contract review\` record on ${where} names the head \`${sha12}\` (${pass.readSummary})${cardWords}: the hand-off waits for a same-head PASS (「审核通过才会推送给我审核」)`));
+  if (pass.state === 'unsigned') return stop(refuse(`the newest same-head \`## Contract review\` (comment ${pass.id} on the ${pass.where}) carries no \`Reviewed-by:\` line, so it is no review of record`));
+  if (pass.state === 'below-tier') {
+    return stop(refuse(`the same-head \`## Contract review\` (comment ${pass.id} on the ${pass.where}) does not stand at its tier: the \`${pass.face}\` face owes \`Served-tier: ${pass.tierName}\` and its \`Served-tier:\` line reads ${pass.servedIsIdentifier ? 'a model-identifier token (not quoted)' : pass.served?.state === 'read' ? `\`${pass.served.value}\`` : pass.served?.state ?? 'nothing'}`));
+  }
+  if (pass.state !== 'stands' || pass.verdict !== 'PASS') return stop(refuse(`the same-head \`## Contract review\` (comment ${pass.id} on the ${pass.where}) is not PASS: ${pass.verdictReason ?? pass.state}`));
+  record(`[${stamp()}] ② hand-off records ✓ — ACCEPT ${handoffPr.record.createdAt} newer than head \`${sha12}\` · PASS comment ${pass.id} on the ${pass.where}, the \`${pass.face}\` face at \`Served-tier: ${pass.tierName}\``);
+
+  // The gate's own verdict is what the rows are told: the hand-off is DUE, on the PASS the guard's reading chose.
+  const handoff = { ...handoffPr, state: 'due', passed: true, review: { id: pass.id, sha: pass.sha, verdict: 'PASS', createdAt: pass.at } };
+  printNow(handoff);
+  const plan = handoffReviewPlan({ approvers, author: pull.json.user?.login ?? null, requested: (pull.json.requested_reviewers ?? []).map((u) => u?.login).filter(Boolean), assigned, reviewed });
+  const named = (l) => (l.length ? l.map((x) => `\`${x}\``).join(', ') : 'none');
+  record(`[${stamp()}] ② hand-off plan — covered ${named(plan.covered)} · request ${named(plan.toRequest)} · assign the author ${named(plan.toAssign)} · \`${GOVERNED_PR_AWAITING_MERGE_LABEL}\` ${labels.includes(GOVERNED_PR_AWAITING_MERGE_LABEL) ? 'already on' : 'to add'}`);
+  return { ok: true, plan, tier, slice, pull: pull.json, reviewed, rows, handoff, headSha, approvers, nowClean, hasBrief: latestMarkedComment(rows, MAINTAINER_BRIEF_MARKER) !== null };
+}
+
+/** A dry run's exit: 0, or under `--handoff` `EXIT_HANDOFF_OWED` when a `now` row reads ✗ (header: exit codes). */
+const dryRunExit = (gate) => (gate && gate.nowClean !== true ? EXIT_HANDOFF_OWED : EXIT_OK);
+
 async function foldStroke(c) {
-  const { options, repo, issue, base, labels, assignees, route, record, stamp, result, doCall } = c;
+  const { options, repo, issue, base, labels, route, record, stamp, result, doCall } = c;
+  let { assignees } = c;
   const nothing = () => record(`[${stamp()}] ⛔ NOTHING WAS WRITTEN.`);
-  const done = (exit, extra = {}) => result(exit, { mode: 'fold', labels, assignees, transport: route.transport, ...extra });
+  const done = (exit, extra = {}) => result(exit, { mode: options.handoff ? 'handoff' : 'fold', labels, assignees, transport: route.transport, ...extra });
   const refuse = (why, extra = {}) => {
     record(`[${stamp()}] ② REFUSED — ${why}`);
     nothing();
     return done(EXIT_USAGE, { stoppedAt: 2, refusal: why, ...extra });
   };
+  // `--handoff` (header): every read and refusal before the comment is judged, so a refusal sends nothing at all.
+  let gate = null;
+  if (options.handoff) {
+    gate = await handoffGate(c);
+    if (!gate.ok && gate.exit === EXIT_PREREQUISITE) {
+      record(`[${stamp()}] ② PREREQUISITE NOT MET — ${gate.why}`);
+      nothing();
+      return done(EXIT_PREREQUISITE, { stoppedAt: 2, refusal: 'handoff-unread' });
+    }
+    if (!gate.ok) return refuse(gate.why);
+    assignees = computeAssigneeTarget({ current: loginsOf(c.card?.assignees), assign: gate.plan.toAssign });
+  }
   if (options.land && c.kind !== KIND_PULL) {
     return refuse(`--land readies and arms a PULL REQUEST, and ${repo}#${issue} is ${c.kind === null ? 'of no kind step ① could read' : 'an issue'}`);
   }
@@ -1845,25 +2292,50 @@ async function foldStroke(c) {
     if (gate.judged && !gate.ok) return refuse(landDogfoodRefusal(gate), { gate });
     record(
       gate.judged
-        ? `[${stamp()}] ② dogfood gate ✓ — marker: ${gate.marker} · report comment ${gate.report} · ${LAND_DOGFOOD_REPORT_KEY} ${JSON.stringify(gate.battery)} · sha judged only · ${gate.hops === 0 ? 'ran on the head' : `ran ${gate.hops} merge(s) of the base below the head`}`
-        : `[${stamp()}] ② dogfood gate — not judged: no \`!\` in the title and no \`(narrowing)\` arm`,
+        ? `[${stamp()}] ② dogfood gate ✓ — marker: ${gate.marker} · report comment ${gate.report} · ${LAND_DOGFOOD_REPORT_KEY} ${JSON.stringify(gate.battery)} · sha judged only · ${gate.hops === 0 ? 'ran on the head' : `ran ${gate.hops} merge(s) of the base below the head`}${Array.isArray(gate.tied) ? ` · a tie of ${gate.tied.length} cards (${gate.tied.map((r) => `#${r.card}`).join(', ')}), every thread read, cleared by ${gate.cleared.map((r) => `card #${r.card} comment ${r.report}`).join(', ')}` : ''}`
+        : gate.noBattery
+          ? `[${stamp()}] ② dogfood gate ✓ — not judged: ${repo} has no dogfood battery (only ${LAND_DOGFOOD_BATTERY_REPOS.join(', ')} carries one)`
+          : `[${stamp()}] ② dogfood gate — not judged: no \`!\` in the title and no \`(narrowing)\` arm`,
     );
   }
-  let text;
-  try {
-    text = c.readText(options.commentFile);
-  } catch (e) {
-    return refuse(`cannot read --comment-file ${options.commentFile}: ${e?.message ?? e}`);
+  // A `--handoff --dry-run` may carry no comment (header): the per-round reading, which sends nothing.
+  let rendered = null;
+  let body = null;
+  if (options.commentFile) {
+    let text;
+    try {
+      text = c.readText(options.commentFile);
+    } catch (e) {
+      return refuse(`cannot read --comment-file ${options.commentFile}: ${e?.message ?? e}`);
+    }
+    const judged = judgeBody(text, { mode: 'comment', tierEvidence: options.tierEvidence }, c.clock().getTime(), 'label-write');
+    if (!judged.ok) {
+      record(judged.text);
+      nothing();
+      return done(EXIT_USAGE, { stoppedAt: 2, refusal: 'comment' });
+    }
+    rendered = judged.rendered;
+    body = rendered.body;
+    record(`[${stamp()}] ② comment — ${Buffer.byteLength(body, 'utf8')} byte(s) for ${repo}#${issue}, stamped \`${rendered.stamp}\` · ${substitutionSummary(rendered)}`);
   }
-  const judged = judgeBody(text, { mode: 'comment', tierEvidence: options.tierEvidence }, c.clock().getTime(), 'label-write');
-  if (!judged.ok) {
-    record(judged.text);
-    nothing();
-    return done(EXIT_USAGE, { stoppedAt: 2, refusal: 'comment' });
+  // H48's brief half (header): a `## 维护者速读` comment on the thread, or the request itself.
+  if (gate && !gate.hasBrief && !(body !== null && markerMatches(MAINTAINER_BRIEF_MARKER, body))) {
+    if (body !== null) return refuse('no comment on the thread opens a `## 维护者速读` line and the request does not either: H48 reads an ACCEPT with no brief as half a hand-off — post the seat record (its brief first) or put the brief in the request');
+    record(`[${stamp()}] ② note — no \`## 维护者速读\` comment on the thread: a hand-off from here needs the brief in its request comment`);
   }
-  const { rendered } = judged;
-  const body = rendered.body;
-  record(`[${stamp()}] ② comment — ${Buffer.byteLength(body, 'utf8')} byte(s) for ${repo}#${issue}, stamped \`${rendered.stamp}\` · ${substitutionSummary(rendered)}`);
+  if (gate) {
+    // ⛔ Never request the seat's own account (〈路径分叉〉 ③): the request comment's signature line names it.
+    const seat = body === null ? null : readSignatureLine(body)?.account ?? null;
+    if (seat && gate.plan.toRequest.some((a) => a.toLowerCase() === seat.toLowerCase())) {
+      return refuse(`the seat's own account \`${seat}\` (the request's signature line) is an uncovered approver, and a seat never requests itself (「⛔ 永不请席位自身账号」) — the hand-off to that account is the maintainer's to arrange`);
+    }
+    // Idempotent (header): a pull already whole — label on, every approver covered, a brief on the thread — is not
+    // handed off twice. With no brief on the thread the request comment is still owed (H48's brief half).
+    if (labels.addCalls.length === 0 && assignees.addCalls.length === 0 && gate.plan.toRequest.length === 0 && gate.hasBrief) {
+      record(`[${stamp()}] ③ already handed off — \`${GOVERNED_PR_AWAITING_MERGE_LABEL}\` is on, every approver is requested, assigned or has reviewed and a \`## 维护者速读\` brief is on the thread (the \`now\` line above): no stroke, ⛔ no second request comment.`);
+      return done(EXIT_OK, { alreadyHandedOff: true, plan: gate.plan });
+    }
+  }
 
   if (route.error) {
     record(`[${stamp()}] ③ PREREQUISITE NOT MET — ${route.error}`);
@@ -1879,7 +2351,13 @@ async function foldStroke(c) {
     return done(EXIT_PREREQUISITE, { stoppedAt: 3, refusal: 'relay-only' });
   }
   record(`[${stamp()}] ③ transport ${route.transport} — ${route.reason}`);
-  const actions = foldActions({ issue, body, labels, assignees, land: options.land });
+  const reviewerOp = gate?.plan.toRequest.length ? [{ op: 'pr_request_reviewers', pull: issue, reviewers: [...gate.plan.toRequest] }] : [];
+  const actions = body === null ? [...relayActions({ issue, labels, assignees }), ...reviewerOp] : [...foldActions({ issue, body, labels, assignees, land: options.land }), ...reviewerOp];
+  if (body === null) {
+    record(`[${stamp()}] ③ DRY RUN — no comment file, so no stroke is packed; with the request comment first it would send: ${['comment', ...actions.map((a) => a.op)].join(' → ')}${reviewerOp.length ? ` (reviewers ${render(reviewerOp[0].reviewers)})` : ''}`);
+    record(`[${stamp()}] ④ read-back SKIPPED — ⛔ a dry run proves the PLAN and never the board.`);
+    return done(dryRunExit(gate), { dryRun: true, plan: gate?.plan ?? null });
+  }
   const packed = packRequest({ repo, session: route.session, actions, now: () => c.clock().getTime() });
   if (!packed.ok) {
     record(relayRefusalText(packed.errors));
@@ -1890,7 +2368,7 @@ async function foldStroke(c) {
   if (options.dryRun) {
     record(`[${stamp()}] ③ DRY RUN — nothing sent. Payload: ${JSON.stringify(packed.payload)}`);
     record(`[${stamp()}] ④ read-back SKIPPED — ⛔ a dry run proves the PLAN and never the board.`);
-    return done(EXIT_OK, { dryRun: true, payload: packed.payload });
+    return done(dryRunExit(gate), { dryRun: true, payload: packed.payload });
   }
   const sentAt = c.clock().getTime();
   const sent = await c.send(packed.payload, { token: TOKEN, judge: readBackJudge(), log: (line) => record(`      ${line}`) });
@@ -1913,7 +2391,7 @@ async function foldStroke(c) {
   const runRef = sent.run?.url ?? sent.run?.id ?? '';
   const back = await doCall('card-read', base, {});
   const tailRead = back.verdict === 'ok' ? await doCall('comments-list', `${base}/comments?since=${encodeURIComponent(new Date(dispatchedAt - 60_000).toISOString())}&per_page=100`, {}) : null;
-  const pullRead = options.land && tailRead?.verdict === 'ok' ? await doCall('pull-read', `/repos/${repo}/pulls/${issue}`, {}) : null;
+  const pullRead = (options.land || options.handoff) && tailRead?.verdict === 'ok' ? await doCall('pull-read', `/repos/${repo}/pulls/${issue}`, {}) : null;
   const unread = [back, tailRead, pullRead].filter((r) => r !== null).find((r) => r.verdict !== 'ok');
   if (unread) {
     record(
@@ -1947,22 +2425,33 @@ async function foldStroke(c) {
     });
     for (const l of said.lines ?? []) record(`    ${String(l).trim()}`);
   }
-  const pullReady = pullRead === null ? true : pullRead.json?.draft === false;
-  if (pullRead !== null) {
+  const pullReady = pullRead === null || !options.land ? true : pullRead.json?.draft === false;
+  // `--handoff`'s own parts (header): the pending requests, then the two patrol rows asked of the pull as read back.
+  let handoffClean = true;
+  if (gate) {
+    const pending = (pullRead.json?.requested_reviewers ?? []).map((u) => String(u?.login ?? '').toLowerCase());
+    const unasked = gate.plan.toRequest.filter((a) => !pending.includes(a.toLowerCase()));
+    record(`[${stamp()}] ④ reviewers ${mark(unasked.length === 0)} — pending ${render((pullRead.json?.requested_reviewers ?? []).map((u) => u?.login))} · requested by this stroke ${render(gate.plan.toRequest)}${unasked.length ? ` · NOT pending: ${render(unasked)}` : ''}`);
+    const rows = handoffRowLines({ pull: handoffPullView(pullRead.json ?? {}, backLabels, backAssignees), matched: gate.slice, approvers: gate.approvers, reviewed: gate.reviewed, handoff: gate.handoff, rows: hit ? [...gate.rows, hit] : gate.rows });
+    record(`[${stamp()}] ④ H43 ${mark(rows.h43 === null)} — ${rows.h43 ?? 'every GOVERNED_APPROVERS account is requested, assigned or has reviewed'}`);
+    record(`[${stamp()}] ④ H48 ${mark(rows.h48 === null)} — ${rows.h48 ?? `\`${GOVERNED_PR_AWAITING_MERGE_LABEL}\` and a \`## 维护者速读\` brief both on the pull`}`);
+    handoffClean = unasked.length === 0 && rows.clean;
+  }
+  if (pullRead !== null && options.land) {
     const armed = pullRead.json?.auto_merge ? `auto_merge ${pullRead.json.auto_merge.merge_method ?? 'set'}` : 'auto_merge null on this read';
     record(
       `[${stamp()}] ④ pull ${mark(pullReady)} — draft ${pullRead.json?.draft} · ${armed}, printed and ⛔ not judged (unstable; never a reason to re-arm) — ` +
         `the arming is the executor's landed check on automerge_enable's own answer, which this success run passed`,
     );
   }
-  if (!hit || !verdictIsClean(labelVerdict) || !verdictIsClean(assigneeVerdict) || !pullReady) {
+  if (!hit || !verdictIsClean(labelVerdict) || !verdictIsClean(assigneeVerdict) || !pullReady || !handoffClean) {
     record(
       `[${stamp()}] ④ MISMATCH — the relay run ${runRef} reported success and the board does not show the stroke whole (the ✗ lines above). ` +
         '⛔ Not repaired here — under the relay a re-send is a second write. Go READ the card and fix it deliberately.',
     );
     return done(EXIT_READ_BACK_MISMATCH, { stoppedAt: 4, relay: sent, comment: hit?.id ?? null, labelVerdict, assigneeVerdict, pullReady });
   }
-  record(`[${stamp()}] ④ MATCHES — comment ${hit.id} · labels ${render(backLabels)} · assignees ${render(backAssignees)}${pullRead ? ' · pull ready' : ''} (via the relay run ${runRef}).`);
+  record(`[${stamp()}] ④ MATCHES — comment ${hit.id} · labels ${render(backLabels)} · assignees ${render(backAssignees)}${options.land ? ' · pull ready' : ''}${gate ? ' · reviewers pending · H43 ✓ · H48 ✓' : ''} (via the relay run ${runRef}).`);
   return done(EXIT_OK, { relay: sent, comment: hit.id, backLabels, backAssignees, labelVerdict, assigneeVerdict });
 }
 
@@ -2271,8 +2760,10 @@ export function classifyOp(method, path) {
   if (/\/branches\//.test(path)) return 'branch-read';
   if (/\/pulls(\?|$)/.test(path)) return 'pulls-list';
   if (/\/pulls\/\d+$/.test(path)) return 'pull-read';
+  if (/\/pulls\/\d+\/reviews(\?|$)/.test(path)) return 'reviews-list';
   if (/\/commits\/[0-9a-f]+$/.test(path)) return 'commit-read';
   if (/\/compare\/[^/]+$/.test(path)) return 'compare-read';
+  if (/\/contents\//.test(path)) return 'contents-read';
   if (/\/labels\/[^/]+$/.test(path) && method === 'DELETE') return 'label-delete';
   if (/\/labels$/.test(path)) return 'label-add';
   if (/\/assignees$/.test(path)) return method === 'DELETE' ? 'assignee-remove' : 'assignee-add';
@@ -2295,6 +2786,7 @@ export function classifyOp(method, path) {
  * reports — the clock the release reads an age from, which is deliberately
  * not this process's.
  */
+const path0 = (path) => path.slice(path.indexOf('/contents/') + '/contents/'.length).split('?')[0];
 export function fakeBoard(initial = {}) {
   const board = {
     number: initial.number ?? 7,
@@ -2323,6 +2815,14 @@ export function fakeBoard(initial = {}) {
     cards: { ...(initial.cards ?? {}) },
     commits: { ...(initial.commits ?? {}) },
     onBase: new Set(initial.onBase ?? []),
+    // `--handoff`'s reads: the pull's author, its pending review requests, its submitted reviews, and each commit's
+    // committer date (`commitDates`: sha → ISO), which `GET /commits/{sha}` answers beside the parents.
+    author: initial.author ?? 'objectstack-fleet[bot]',
+    requested: [...(initial.requested ?? [])],
+    reviews: [...(initial.reviews ?? [])],
+    commitDates: { ...(initial.commitDates ?? {}) },
+    // Files at the head, as `GET /contents/{path}?ref=` answers them (base64): the changesets the review face reads.
+    files: { ...(initial.files ?? {}) },
   };
   const calls = [];
   const bodies = [];
@@ -2374,8 +2874,18 @@ export function fakeBoard(initial = {}) {
     }
     if (op === 'commit-read') {
       const sha = path.slice(path.lastIndexOf('/') + 1);
-      if (!(sha in board.commits)) return wrap(404, { message: 'No commit found' });
-      return wrap(200, { sha, parents: board.commits[sha].map((p) => ({ sha: p })) });
+      if (!(sha in board.commits) && !(sha in board.commitDates)) return wrap(404, { message: 'No commit found' });
+      return wrap(200, { sha, parents: (board.commits[sha] ?? []).map((p) => ({ sha: p })), commit: { committer: { date: board.commitDates[sha] ?? null } } });
+    }
+    if (op === 'contents-read') {
+      const file = decodeURIComponent(path0(path));
+      if (!(file in board.files)) return wrap(404, { message: 'Not Found' });
+      if (typeof board.files[file] === 'object') return wrap(board.files[file].status, { message: 'fixture: a read the platform did not answer' });
+      return wrap(200, { path: file, encoding: 'base64', content: Buffer.from(board.files[file], 'utf8').toString('base64') });
+    }
+    if (op === 'reviews-list') {
+      if (board.kind !== 'pull') return wrap(404, { message: 'Not Found' });
+      return wrap(200, board.reviews);
     }
     if (op === 'compare-read') {
       const [from, to] = decodeURIComponent(path.slice(path.lastIndexOf('/') + 1)).split('...');
@@ -2403,7 +2913,20 @@ export function fakeBoard(initial = {}) {
 
     if (op === 'pull-read') {
       if (board.kind !== 'pull') return wrap(404, { message: 'Not Found' });
-      return wrap(200, { number: board.number, state: board.state, draft: board.draft, auto_merge: board.autoMerge, title: board.title, body: board.body, head: board.head, base: { ref: board.baseRef } });
+      return wrap(200, {
+        number: board.number,
+        state: board.state,
+        draft: board.draft,
+        auto_merge: board.autoMerge,
+        title: board.title,
+        body: board.body,
+        head: board.head,
+        base: { ref: board.baseRef },
+        user: { login: board.author },
+        requested_reviewers: board.requested.map((login) => ({ login })),
+        labels: board.labels.map((name) => ({ name })),
+        assignees: board.assignees.map((login) => ({ login })),
+      });
     }
     if (op === 'card-read') {
       // The two members `readTargetKind` reads, shaped as GitHub's issues endpoint answers them.
@@ -2490,6 +3013,7 @@ function fakeRelay(board, outcome = 'success', sent = []) {
       if (a.op === 'labels_remove') board.labels = board.labels.filter((l) => !a.labels.includes(l));
       if (a.op === 'assign') board.assignees = dedupe([...board.assignees, ...a.assignees]);
       if (a.op === 'unassign') board.assignees = board.assignees.filter((u) => !a.assignees.includes(u));
+      if (a.op === 'pr_request_reviewers') board.requested = dedupe([...board.requested, ...a.reviewers]);
     }
     return { ...base, state: 'success', ok: true, run: RUN, detail: 'conclusion success' };
   };
@@ -2562,7 +3086,7 @@ async function driveOffline(argv, boardInit = {}, extra = {}) {
     if (p in files) return files[p];
     throw new Error(`ENOENT: no such file, open '${p}'`);
   };
-  const res = await runLabelWrite(parsed.options, { call: fake.call, log: (l) => out.push(l), route: extra.route ?? DIRECT_ROUTE, send, readText, now: extra.now });
+  const res = await runLabelWrite(parsed.options, { call: fake.call, log: (l) => out.push(l), route: extra.route ?? DIRECT_ROUTE, send, readText, now: extra.now, tierReading: extra.tierReading, recognisers: extra.recognisers, approvers: extra.approvers });
   return { parsed, exit: res.exit, res, fake, out, sent, text: out.join('\n') };
 }
 
@@ -2637,9 +3161,10 @@ export async function relayMissProbe({ route, send }) {
 const FOLD_BATTERY = "the fold: a claim (comment + labels + assignee) and a verdict (comment + pr_ready + automerge_enable) as ONE relay stroke, the comment judged on post-stamped's path, every part read back on its own line, a part that fails read-back exit 4 and never repaired, RELAY-ONLY";
 const REAL_TRANSPORT_BATTERY = "the real transport: a comment-bearing stroke (a fold, a release) through fleet-write's own sendFleetWrite — fake fetch, real dispatch, real read-back — settles, exit 0, every ④ line printed";
 const KIND_BATTERY = 'the kind rule: no pm state added to a pull request, no `pm:awaiting-merge` added to an issue, a removal never refused, an unreadable kind refused — on both write paths, before the transport';
-const LAND_DOGFOOD_BATTERY = "the --land dogfood gate: a `!` title or a `(narrowing)` arm lands only on a trusted newest os-dev-report whose dogfood_battery names the head or a first-parent ancestor reached over merges of the base alone; every NOT MEASURED refuses before any send; an unmarked pull is not judged";
+const LAND_DOGFOOD_BATTERY = "the --land dogfood gate: a `!` title or a `(narrowing)` arm lands only on a trusted newest os-dev-report whose dogfood_battery names the head or a first-parent ancestor reached over merges of the base alone; every NOT MEASURED refuses before any send; an unmarked pull, or one in a repository with no battery, is not judged";
 const STATELESS_BATTERY = 'the stateless write: an OPEN card never loses its last pm state unless the same write adds a state or needs-user-decision or closes it, a parked card never keeps an assignee a state or assignee move left there, a release stays legal — before the transport, zero writes';
 const HAND_SET_BATTERY = "the hand-set grade: a `priority:*` whose newest `labeled` event is not the fleet's (no app, no bot actor), or is the fleet's with its own `Ruling-ref: <that grade>` fold beside it, is never changed — refused at step ② with zero writes unless the folded comment's `Ruling-ref:` names the grade it writes";
+const HANDOFF_BATTERY = "--handoff: the Tier H hand-off — request comment, pm:awaiting-merge, the author-approver assigned and the rest requested — as ONE relay stroke, refused with zero writes off Tier H, the size limb or a declared narrowing (the narrowed leg), or without a seat ACCEPT newer than the head and a same-head trusted PASS on the PR or its card at the tier its face owes, read back with the H43 and H48 rows themselves on a slice that carries the size limb; idempotent only with the brief on the thread, never the seat's own account; --dry-run the per-round reading, exit 7 while owed";
 const SELF_TEST_BATTERIES = Object.freeze({
   'the re-exec guard: the name this tool sets, and the patrol name that must not silence it': 11,
   'the arithmetic: union, difference, and the two idempotent no-ops': 12,
@@ -2657,10 +3182,13 @@ const SELF_TEST_BATTERIES = Object.freeze({
   [FOLD_BATTERY]: 28,
   [REAL_TRANSPORT_BATTERY]: 5,
   [STATELESS_BATTERY]: 19,
-  [LAND_DOGFOOD_BATTERY]: 50,
+  // Raised 50 → 65 with the fold's tie: two `Fixes` lines read on every tied card, passing and refusing, and the structural pin.
+  // Raised 65 → 70 with the battery repositories: the pure predicate, the zero-read gate, cloud `(narrowing)` and `!` landing, objectstack still refusing.
+  [LAND_DOGFOOD_BATTERY]: 70,
   [HAND_SET_BATTERY]: 42,
+  [HANDOFF_BATTERY]: 59,
 });
-const SELF_TEST_BATTERY_FLOOR = 18;
+const SELF_TEST_BATTERY_FLOOR = 19;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 const batteryCases = new Map();
@@ -3371,6 +3899,25 @@ export async function selfTest() {
     const widening = await land(pull({ title: 'feat(pm): a widening fixture', body: 'Fixes #8\n\nClause-②: yes (widening)\n', cards: {} }));
     t('…a `(widening)` arm is not a marker either', [widening.exit, widening.text.includes('not judged')], [EXIT_OK, true]);
 
+    // The battery repositories: a pull in a repository with no dogfood battery is not judged; objectstack stays fail-closed.
+    t('the battery repositories: objectstack (any case) carries one; cloud, hotcrm and gallery do not; a value that is no `owner/name` is judged — fail-closed',
+      ['objectstack-ai/objectstack', ' ObjectStack-AI/ObjectStack ', 'objectstack-ai/cloud', 'objectstack-ai/hotcrm', 'objectstack-ai/gallery', '', null, undefined, 'objectstack', 'a/b/c', 'a /b'].map(repoCarriesDogfoodBattery),
+      [true, true, false, false, false, true, true, true, true, true, true]);
+    const gateCalls = [];
+    const cloudGate = await landDogfoodGate({ repo: 'objectstack-ai/cloud', issue: 7, card: { title: 'fix(svc)!: x', body: 'Clause-②: no (narrowing)' }, doCall: async (...a) => { gateCalls.push(a); return { verdict: 'failed', status: 500, call: a[0] }; } });
+    t('⭐ the gate on a cloud pull carrying both markers: not judged, `noBattery`, and ZERO reads', [cloudGate, gateCalls.length], [{ judged: false, noBattery: true }, 0]);
+    const NARROW_NA = { title: 'fix(service-cloud): a narrowing fixture', body: 'Fixes #8\n\nClause-②: no (narrowing)\nMetadata-protocol: none\n', cards: { 8: [report(NA)] } };
+    const cloudArgv = ['--repo', 'objectstack-ai/cloud', ...landArgv.slice(2)];
+    const CLOUD_NA = { ...NARROW_NA, cards: { 8: [report(NA, { pr: 'https://github.com/objectstack-ai/cloud/pull/7' })] } };
+    const cloud = await driveOffline(cloudArgv, pull(CLOUD_NA), { route, relay: 'success', files, now: NOW });
+    t('⭐ NOT JUDGED: a cloud pull with a `(narrowing)` arm over an `n/a` report lands — ONE dispatch, comment → pr_ready → automerge_enable, exit 0, no gate read, and the ✓ line names the repository',
+      [cloud.exit, cloud.sent[0]?.actions.map((a) => a.op), cloud.fake.board.draft, cloud.text.includes('② dogfood gate ✓ — not judged: objectstack-ai/cloud has no dogfood battery (only objectstack-ai/objectstack carries one)'), cloud.text.includes('REFUSED'), cloud.fake.calls.map((c) => c.op)],
+      [EXIT_OK, ['comment', 'pr_ready', 'automerge_enable'], false, true, false, ['card-read', 'card-read', 'comments-list', 'pull-read']], cloud.text.slice(-700));
+    const cloudBang = await driveOffline(cloudArgv, pull({ ...CLOUD_NA, title: 'fix(service-cloud)!: a breaking fixture' }), { route, relay: 'success', files, now: NOW });
+    t('…and a cloud `!` title with the same arm lands the same way', [cloudBang.exit, cloudBang.text.includes('not judged: objectstack-ai/cloud has no dogfood battery')], [EXIT_OK, true], cloudBang.text.slice(-600));
+    const osNarrow = await land(pull(NARROW_NA));
+    t('⭐ REFUSED: the SAME `(narrowing)` pull over an `n/a` report in objectstack still refuses — exit 2, zero sends, nothing written', [...refused(osNarrow), osNarrow.text.includes('why: the battery was not run'), osNarrow.text.includes('has no dogfood battery')], [...REFUSED, true, false], osNarrow.text.slice(-600));
+
     // FAIL CLOSED — every case NOT MEASURED is a refusal.
     // Each case: its board, and the fragment of the `why` only its own branch prints — so a branch ablated away
     // cannot hide behind a later refusal that happens to fire too.
@@ -3444,6 +3991,39 @@ export async function selfTest() {
       [gateLine.includes('`!`'), gateLine.includes('dogfood'), gateLine.includes('`os-dev.md`'), LAND_DOGFOOD_RULE_PATH, ruleLine !== ''],
       [true, true, true, '.claude/agents/os-dev.md', true], `rule line: ${JSON.stringify(ruleLine)}`);
 
+    // A FOLD: one closing keyword per card, at equal strength. `deliveredCardNumber` reports the tie (no card), and
+    // the gate reads EVERY tied card's thread, judging over all of them -- never one picked by number order.
+    const FOLD = 'Fixes #8\nFixes #9\n\nClause-②: no\nMetadata-protocol: none\n';
+    const threadsRead = (run) => run.fake.calls.filter((c) => c.op === 'comments-list').map((c) => Number(/\/issues\/(\d+)\/comments/u.exec(c.path)?.[1]));
+    const foldHead = await land(pull({ body: FOLD, cards: { 8: [report(RAN_HEAD)], 9: [] } }));
+    t('⭐ PASSES: a `!` fold whose body carries TWO `Fixes` lines and a dogfood report on the chain-head card — exit 0, ready and armed, both threads read', [foldHead.exit, foldHead.sent[0]?.actions.map((a) => a.op), threadsRead(foldHead).filter((n) => n !== 7), foldHead.text.includes('a tie of 2 cards (#8, #9), every thread read, cleared by card #8 comment 501')], [EXIT_OK, ['comment', 'pr_ready', 'automerge_enable'], [8, 9], true], foldHead.text.slice(-700));
+    const foldReversed = await land(pull({ body: 'Fixes #9\nFixes #8\n\nClause-②: no\n', cards: { 8: [report(RAN_HEAD)], 9: [] } }));
+    t('…the verdict does not follow number or body order: the same fold with its lines swapped passes on the same card', [foldReversed.exit, foldReversed.text.includes('cleared by card #8 comment 501'), threadsRead(foldReversed).filter((n) => n !== 7)], [EXIT_OK, true, [9, 8]], foldReversed.text.slice(-500));
+    const foldSecond = await land(pull({ body: FOLD, cards: { 8: [], 9: [report(RAN_HEAD, { id: 901 })] } }));
+    t('…and a report on the SECOND-named card clears it the same way', [foldSecond.exit, foldSecond.text.includes('cleared by card #9 comment 901')], [EXIT_OK, true], foldSecond.text.slice(-500));
+    const foldPartOf = await land(pull({ body: 'Part of #8\nPart of #9\n\nClause-②: no\n', cards: { 8: [report(RAN_HEAD)], 9: [] } }));
+    t('…a tie of two `Part of` declarations is read the same way', foldPartOf.exit, EXIT_OK, foldPartOf.text.slice(-500));
+    const foldNone = await land(pull({ body: FOLD, cards: { 8: [], 9: [] } }));
+    t('⭐ REFUSED: a fold on which NO delivered card carries a report — exit 2, zero sends, and the refusal names every tied card read and why each failed', [...refused(foldNone), ['it delivers 2 cards at the same strength (#8, #9, closing-keyword)', 'card #8: card #8 carries no `os-dev-report` by', 'card #9: card #9 carries no `os-dev-report` by', 'reports: card #8 none, dogfood_battery none; card #9 none'].map((w) => foldNone.text.includes(w))], [...REFUSED, [true, true, true, true]], foldNone.text.slice(-700));
+    const foldNa = await land(pull({ body: FOLD, cards: { 8: [report(NA)], 9: [report(RAN_BELOW, { id: 902 })] }, commits: { [HEAD]: [BELOW] } }));
+    t('⛔ REFUSED: an `n/a` on one tied card and a battery the head does not reach on the other — each card\'s own reason, the walk\'s on the one it judged', [...refused(foldNa), ['card #8: the battery was not run (`n/a`)', 'card #9: commit `', 'lies after the battery\'s `bbbb', 'card #8 comment 501, dogfood_battery "n/a', 'card #9 comment 902'].map((w) => foldNa.text.includes(w))], [...REFUSED, [true, true, true, true, true]], foldNa.text.slice(-700));
+    const foldMerged = await land(pull({ body: FOLD, cards: { 8: [report(NA)], 9: [report(RAN_BELOW, { id: 903 })] }, commits: { [HEAD]: [BELOW, MAIN_SIDE] }, onBase: [MAIN_SIDE] }));
+    t('…while a tied card whose battery ran one merge of main below the head passes, over an `n/a` on the other', [foldMerged.exit, foldMerged.text.includes('ran 1 merge(s) of the base below the head'), foldMerged.text.includes('cleared by card #9 comment 903')], [EXIT_OK, true, true], foldMerged.text.slice(-500));
+    const foldBoth = await land(pull({ body: FOLD, cards: { 8: [report(RAN_BELOW)], 9: [report(RAN_BELOW, { id: 904 })] }, commits: { [HEAD]: [BELOW, STRAY] }, onBase: [MAIN_SIDE] }));
+    t('⛔ …and when the shared walk refuses, every judged card carries the walk\'s reason', [...refused(foldBoth), foldBoth.text.includes('card #8: merge `'), foldBoth.text.includes('card #9: merge `'), (foldBoth.text.match(/which `main` does not hold/gu) ?? []).length], [...REFUSED, true, true, 2], foldBoth.text.slice(-700));
+    const foldLinear = await land(pull({ body: FOLD, cards: { 8: [report(RAN_BELOW)], 9: [report(`${STRAY} · VERDICT command-exit 0`, { id: 906 })] }, commits: { [HEAD]: [BELOW] } }));
+    t('…the walk names every battery it looked for, once each, when it stops on new code', [...refused(foldLinear), foldLinear.text.includes(`lies after the tied cards' batteries (\`${BELOW}\`, \`${STRAY}\`) and is not a merge`)], [...REFUSED, true], foldLinear.text.slice(-700));
+    const foldUnread = await land(pull({ body: FOLD, cards: { 8: [report(RAN_HEAD)] } }));
+    t('⛔ FAIL CLOSED: a tied card whose thread does not read is NOT MEASURED — exit 3 and zero sends, even with the other card clearing', [foldUnread.exit, foldUnread.sent.length, writesOf(foldUnread), foldUnread.text.includes("card #9's thread did not read"), foldUnread.text.includes('reports: card #8 comment 501')], [EXIT_PREREQUISITE, 0, [], true, true], foldUnread.text.slice(-600));
+    const foldNoList = await land({ ...pull({ body: FOLD, cards: { 8: [report(RAN_HEAD)], 9: [] } }), hooks: { 'comments-list': [{ status: 200, json: { message: 'not a list' } }] } });
+    t('⛔ …and a tied card\'s thread answering no list refuses before the next card is read, saying none was read whole', [...refused(foldNoList), foldNoList.text.includes("card #8's thread answered no list on page 1"), foldNoList.text.includes('reports: none read')], [...REFUSED, true, true], foldNoList.text.slice(-500));
+    const foldWalkUnread = await land(pull({ body: FOLD, cards: { 8: [report(RAN_BELOW)], 9: [report(NA, { id: 907 })] } }));
+    t('⛔ …and a walk commit that does not read on a tie is NOT MEASURED too, naming every tied card\'s report', [foldWalkUnread.exit, foldWalkUnread.sent.length, foldWalkUnread.text.includes('on the walk to the battery\'s `bbbb'), foldWalkUnread.text.includes('reports: card #8 comment 501'), foldWalkUnread.text.includes('card #9 comment 907')], [EXIT_PREREQUISITE, 0, true, true, true], foldWalkUnread.text.slice(-600));
+    const foldSibling = await land(pull({ body: FOLD, cards: { 8: [report(RAN_HEAD, { pr: 'https://github.com/objectstack-ai/objectstack/pull/9' })], 9: [report(RAN_HEAD, { id: 905 })] } }));
+    t('the sibling-pull rule holds per tied card: a card whose newest report names another pull is passed over, the other card clears', [foldSibling.exit, foldSibling.text.includes('cleared by card #9 comment 905')], [EXIT_OK, true], foldSibling.text.slice(-500));
+    const foldForeign = await land(pull({ body: FOLD, cards: { 8: [report(RAN_HEAD, { login: 'someone-else' })], 9: [] } }));
+    t('⛔ …and the trusted-author filter too: an untrusted report on a tied card is data, never a reason to land', [...refused(foldForeign), foldForeign.text.includes('card #8: card #8 carries no `os-dev-report` by')], [...REFUSED, true], foldForeign.text.slice(-500));
+
     // Ordering and shape.
     const early = await land(pull({ cards: { 8: [report(NA)] } }));
     t('the gate refuses BEFORE the comment is judged and before any send — the comment file is never even read', [early.exit, early.sent.length, early.text.includes('② comment —')], [EXIT_USAGE, 0, false]);
@@ -3453,6 +4033,9 @@ export async function selfTest() {
     t('structural: in the fold the gate runs before judgeBody; ⛔ no second report parser — the marker, the payload candidates, the newest-of and the card are the owners\' readers',
       [foldSource.indexOf('landDogfoodGate(') > 0 && foldSource.indexOf('landDogfoodGate(') < foldSource.indexOf('judgeBody('), /latestMarkedComment\(kept, OS_DEV_REPORT_MARKER\)/u.test(gateSource), /deliveredCardNumber\(pull\.json\)/u.test(gateSource), /recordAuthorTrusted\(row, trusted\)/u.test(gateSource), /\bOS_DEV_REPORT_MARKER\s*=/u.test(own)],
       [true, true, true, true, false]);
+    t('structural: a tie is read through the owner\'s tie relation, ⛔ never a second enumeration of the body, and nothing in the gate ranks cards by number',
+      [/deliveredCardsAtStrongest\(pull\.json\)/u.test(gateSource), /closingKeywordTargets|partOfTargets|deliveryEvidence\(/u.test(gateSource), /\.sort\(|Math\.(?:min|max)\(/u.test(gateSource)],
+      [true, false, false]);
   }
 
   // ── the real transport ───────────────────────────────────────────────────
@@ -3492,6 +4075,240 @@ export async function selfTest() {
     const sends = own.match(/\bsend\(packed\.payload, \{[^}]*\}/gu) ?? [];
     t('structural: every send from this file hands sendFleetWrite the read-back judge, so it never imports one under this file\'s top-level await', [sends.length, sends.every((call) => call.includes('judge: readBackJudge()'))], [3, true]);
     t('…and its ④ read-back prints after it, the release comment found by its stored bytes', [rel.text.includes('④ MATCHES — released'), rel.res?.comment === releaseBoard.board.comments.at(-1)?.id], [true, true], rel.text.slice(-600));
+  }
+
+  // ── `--handoff` ──────────────────────────────────────────────────────────
+  battery(HANDOFF_BATTERY);
+  {
+    const SESSION = 'session_01ABCDEFGHJKMNPQRSTVWXYZ';
+    const route = { requested: 'auto', transport: 'dispatch', reason: 'self-test: dispatch', error: null, session: SESSION };
+    const SIG = `domain:skills#2 · os-justin · ${SESSION}`;
+    const REQ_FILE = '/tmp/self-test/request.md';
+    const REQUEST = `${SIG}\nTier H approval request at {{NOW}} — the seat record and the PASS are above; the click is yours.\n`;
+    const BRIEF_REQUEST = `${SIG}\n## 维护者速读\n\n- 用户能看到什么变化:用户无感。\n\nTier H approval request at {{NOW}}.\n`;
+    const HEAD = '0123456789abcdef'.repeat(2) + '01234567';
+    const OLD_HEAD = 'fedcba9876543210'.repeat(2) + 'fedcba98';
+    const at = Date.UTC(2026, 10, 8, 15, 0, 0);
+    const NOW = () => new Date(at);
+    const PAIR = ['os-zhuang', 'os-second'];
+    // The queue guard's REAL recognisers — loaded here, at self-test time, exactly as the live run loads them.
+    const RECOGNISERS = await loadHandoffRecognisers();
+    const recognisers = async () => RECOGNISERS;
+    const H_SLICE = [{ id: 'claude-tree', glob: '.claude/**', tier: GOVERNED_TIER_H, files: ['.claude/skills/pm-dispatch/SKILL.md'] }];
+    const reading = (json) => async () => ({ exit: json.governed ? 3 : 0, json, detail: '' });
+    const TIER_H = reading({ repo: 'objectstack', governed: true, tier: GOVERNED_TIER_H, matched: H_SLICE, hitPaths: H_SLICE[0].files, clearPaths: [], size: { exceeds: false, lifted: null }, fork: { isFork: false } });
+    const TIER_S = reading({ repo: 'objectstack', governed: true, tier: GOVERNED_TIER_S, matched: [{ ...H_SLICE[0], tier: GOVERNED_TIER_S }], hitPaths: H_SLICE[0].files, clearPaths: [], size: { exceeds: false, lifted: null }, fork: { isFork: false } });
+    const row = (id, created, body) => ({ id, user: { login: RELAY_COMMENT_AUTHOR }, created_at: created, updated_at: created, body });
+    const RECORD = (verdict = 'ACCEPT') => `${SIG}\n## 维护者速读\n\n- 用户能看到什么变化:用户无感。\n\n## 席位核对\n\n**${verdict}** · the six items read\n`;
+    const PASS = (sha = HEAD, served = '`CONTRACT_REVIEW_TIER`', word = 'PASS') => `${SIG}\n## Contract review\n\nServed-tier: ${served}\nHead-sha: \`${sha}\`\nReviewed-by: an isolated reviewer session\nLocal-runs: none\n\nNo must-fix, no should-fix.\n\n**VERDICT: ${word}**\n`;
+    const CODE_PATHS = ['packages/core/src/kernel.ts'];
+    const SIZE = (paths = CODE_PATHS, matched = []) => reading({ repo: 'objectstack', governed: matched.length > 0, tier: matched.length ? GOVERNED_TIER_S : null, matched, hitPaths: matched.flatMap((m) => m.files), clearPaths: paths, size: { exceeds: true, lifted: null, changedLines: 3400, threshold: 3000 }, fork: { isFork: false } });
+    const board = (over = {}) => ({
+      kind: 'pull',
+      number: 7,
+      labels: ['domain:skills'],
+      assignees: ['zhuangjianguo'],
+      author: 'os-zhuang',
+      body: 'Fixes #35\n\nClause-②: no\n',
+      cards: { 35: [] },
+      head: { sha: HEAD, ref: 'claude/issue-35-fixture' },
+      commitDates: { [HEAD]: '2026-11-08T13:00:00Z' },
+      comments: [row(501, '2026-11-08T14:00:00Z', RECORD()), row(502, '2026-11-08T14:10:00Z', PASS())],
+      serverNow: at,
+      ...over,
+    });
+    const argv = ['--repo', 'objectstack-ai/objectstack', '--issue', '7', '--comment-file', REQ_FILE, '--handoff'];
+    const hand = (b, extra = {}) => driveOffline(extra.argv ?? argv, b, { route, relay: extra.relay ?? 'success', files: { [REQ_FILE]: extra.request ?? REQUEST }, now: NOW, tierReading: extra.tier ?? TIER_H, recognisers, approvers: PAIR, ...(extra.send ? { send: extra.send } : {}) });
+    const writesOf = (run) => run.fake.calls.filter((c) => c.method !== 'GET').map((c) => `${c.method} ${c.path}`);
+    const handoffOf = (b) => h43HandoffReading(b.comments, b.head.sha, { available: true, admits: (r) => r?.user?.login === RELAY_COMMENT_AUTHOR });
+    const rowsOn = (b, slice = H_SLICE, handoff = handoffOf(b)) => {
+      const pull = { number: b.number, state: b.state, user: { login: b.author }, requested_reviewers: b.requested.map((login) => ({ login })), assignees: b.assignees.map((login) => ({ login })), labels: b.labels.map((name) => ({ name })), head: b.head };
+      return { h43: h43GovernedReviewRequestGap(pull, slice, PAIR, [], handoff), h48: h48GovernedVerdictWithoutBrief(pull, slice, b.comments) };
+    };
+
+    // The CLI owns the plan.
+    t('the CLI: --handoff beside --land, --release or any label/assignee flag is refused; without --comment-file only --dry-run parses', [
+      parseOptions([...argv, '--land']).ok,
+      parseOptions([...argv, '--add', 'x']).ok,
+      parseOptions([...argv, '--assign', 'u']).ok,
+      parseOptions(['--issue', '7', '--handoff']).ok,
+      parseOptions(['--issue', '7', '--handoff', '--dry-run']).ok,
+      parseOptions(argv).options?.add,
+    ], [false, false, false, false, true, [GOVERNED_PR_AWAITING_MERGE_LABEL]]);
+
+    // The tier reading, pure.
+    const verdictOf = (json, declarations = []) => handoffTierVerdict({ exit: 3, json }, declarations);
+    t('the tier: Tier H and the size limb proceed; Tier S, ungoverned and a fork refuse; no verdict object is UNREAD', [
+      verdictOf({ governed: true, tier: 'H', matched: H_SLICE }).ok,
+      verdictOf({ governed: false, tier: null, size: { exceeds: true, lifted: null, changedLines: 3100, threshold: 3000 } }).ok,
+      verdictOf({ governed: true, tier: 'S', size: { exceeds: false } }).ok,
+      verdictOf({ governed: false, tier: null, size: { exceeds: false } }).ok,
+      verdictOf({ governed: true, tier: 'H', fork: { isFork: true, headRepo: 'x/y' } }).ok,
+      handoffTierVerdict({ exit: 1, json: null, detail: 'exit 1' }).unread,
+      verdictOf({ governed: true, tier: 'S', size: { exceeds: false } }).why.includes('Tier S 不交人'),
+    ], [true, true, false, false, false, true, true]);
+
+    // The plan, pure: H43's union, the author assigned.
+    t('the plan: uncovered approvers requested, the author-approver ASSIGNED, covered ones (requested, assigned, reviewed — any case) cost nothing', [
+      handoffReviewPlan({ approvers: PAIR, author: 'OS-Zhuang' }),
+      handoffReviewPlan({ approvers: PAIR, author: 'x', requested: ['os-second'], reviewed: ['OS-ZHUANG'] }),
+      handoffReviewPlan({ approvers: PAIR, author: 'x', assigned: ['os-zhuang'] }).toRequest,
+    ], [{ covered: [], toRequest: ['os-second'], toAssign: ['os-zhuang'] }, { covered: ['os-zhuang', 'os-second'], toRequest: [], toAssign: [] }, ['os-second']]);
+
+    // ⭐ The acceptance: all three written in ONE stroke, the author assigned, H43 and H48 pass after.
+    const before = board();
+    const control = rowsOn(fakeBoard(before).board);
+    t('⭐ control: the same pull BEFORE the hand-off fires BOTH patrol rows — H43 (nobody asked) and H48 (ACCEPT, no label)', [control.h43 !== null, control.h48 !== null, String(control.h43).includes('ASSIGN'), String(control.h48).includes(GOVERNED_PR_AWAITING_MERGE_LABEL)], [true, true, true, true]);
+    const ok = await hand(before);
+    t('⭐ --handoff writes all three in ONE dispatch: comment → labels_add pm:awaiting-merge → assign the author → pr_request_reviewers the rest, exit 0', [ok.exit, ok.sent.length, ok.sent[0]?.actions.map((a) => a.op), ok.sent[0]?.actions.find((a) => a.op === 'labels_add')?.labels, ok.sent[0]?.actions.find((a) => a.op === 'assign')?.assignees, ok.sent[0]?.actions.find((a) => a.op === 'pr_request_reviewers')?.reviewers], [EXIT_OK, 1, ['comment', 'labels_add', 'assign', 'pr_request_reviewers'], [GOVERNED_PR_AWAITING_MERGE_LABEL], ['os-zhuang'], ['os-second']], ok.text.slice(-900));
+    t('⭐ …the author-approver is ASSIGNED and never requested (a request naming the author is a 422)', [ok.fake.board.assignees.includes('os-zhuang'), ok.fake.board.requested.includes('os-zhuang'), ok.fake.board.requested], [true, false, ['os-second']]);
+    const after = rowsOn(ok.fake.board);
+    t('⭐ a seat that ran ONLY --handoff leaves the pull passing H43 and H48 — the patrol rows themselves, asked of the board after', [after.h43, after.h48], [null, null]);
+    t('…and the read-back says so on its own lines: reviewers, H43, H48, beside labels, assignees and comment', ['④ labels ✓', '④ assignees ✓', '④ comment ✓', '④ reviewers ✓', '④ H43 ✓', '④ H48 ✓', '④ MATCHES', '② now H43 ✗ · now H48 ✗'].map((l) => ok.text.includes(l)), [true, true, true, true, true, true, true, true]);
+    t('…from reads alone: ZERO direct writes', writesOf(ok), []);
+
+    // Refusals, each with zero sends and zero writes.
+    const zero = (run) => [run.exit, run.sent.length, writesOf(run).length];
+    const tierS = await hand(board(), { tier: TIER_S });
+    t('⭐ REFUSED on a Tier S pull: exit 2, zero sends, zero writes, the rule named', [...zero(tierS), tierS.text.includes('Tier S 不交人')], [EXIT_USAGE, 0, 0, true]);
+    const ungoverned = await hand(board(), { tier: reading({ governed: false, tier: null, matched: [], size: { exceeds: false }, fork: { isFork: false } }) });
+    t('REFUSED on an ungoverned pull: exit 2, zero sends', zero(ungoverned), [EXIT_USAGE, 0, 0]);
+    const unread = await hand(board(), { tier: async () => ({ exit: 1, json: null, detail: 'exit 1 — the API did not answer' }) });
+    t('a tier reading that did not answer is PREREQUISITE NOT MET: exit 3, zero sends', [...zero(unread), unread.text.includes('NOT MEASURED')], [EXIT_PREREQUISITE, 0, 0, true]);
+    const oldPass = await hand(board({ comments: [row(501, '2026-11-08T14:00:00Z', RECORD()), row(502, '2026-11-08T14:10:00Z', PASS(OLD_HEAD))] }));
+    t('⭐ REFUSED with no same-head PASS (the PASS names an older head): exit 2, zero sends', [...zero(oldPass), oldPass.text.includes('names the head')], [EXIT_USAGE, 0, 0, true]);
+    const noPass = await hand(board({ comments: [row(501, '2026-11-08T14:00:00Z', RECORD())] }));
+    t('REFUSED with no contract review at all: exit 2, zero sends', zero(noPass), [EXIT_USAGE, 0, 0]);
+    const fail = await hand(board({ comments: [row(501, '2026-11-08T14:00:00Z', RECORD()), row(502, '2026-11-08T14:10:00Z', PASS(HEAD, '`CONTRACT_REVIEW_TIER`', 'FAIL'))] }));
+    t('REFUSED on a same-head FAIL: exit 2, zero sends', [...zero(fail), fail.text.includes('is not PASS')], [EXIT_USAGE, 0, 0, true]);
+    const wrongTier = await hand(board({ comments: [row(501, '2026-11-08T14:00:00Z', RECORD()), row(502, '2026-11-08T14:10:00Z', PASS(HEAD, '`TIER_DEFAULT`'))] }));
+    t('REFUSED on a PASS whose Served-tier does not stand at its face (`rules` owes CONTRACT_REVIEW_TIER): exit 2, zero sends', [...zero(wrongTier), wrongTier.text.includes('the `rules` face owes `Served-tier: CONTRACT_REVIEW_TIER`')], [EXIT_USAGE, 0, 0, true]);
+    const untrusted = await hand(board({ comments: [row(501, '2026-11-08T14:00:00Z', RECORD()), { ...row(502, '2026-11-08T14:10:00Z', PASS()), user: { login: 'someone' } }] }));
+    t('REFUSED on a PASS by an author the queue guard does not trust: exit 2, zero sends', zero(untrusted), [EXIT_USAGE, 0, 0]);
+    const rework = await hand(board({ comments: [row(501, '2026-11-08T14:00:00Z', RECORD('REWORK')), row(502, '2026-11-08T14:10:00Z', PASS())] }));
+    t('REFUSED when the newest seat record reads REWORK: exit 2, zero sends', [...zero(rework), rework.text.includes('does not read ACCEPT')], [EXIT_USAGE, 0, 0, true]);
+    const stale = await hand(board({ commitDates: { [HEAD]: '2026-11-08T14:05:00Z' } }));
+    t('⭐ REFUSED when the ACCEPT is older than the head (H69\'s comparison): exit 2, zero sends', [...zero(stale), stale.text.includes('not newer than the head')], [EXIT_USAGE, 0, 0, true]);
+    const noBrief = [row(501, '2026-11-08T14:00:00Z', `${SIG}\n## 席位核对\n\n**ACCEPT** · read\n`), row(502, '2026-11-08T14:10:00Z', PASS())];
+    const briefless = await hand(board({ comments: noBrief }));
+    t('REFUSED with no `## 维护者速读` on the thread or in the request (H48\'s brief half): exit 2, zero sends', [...zero(briefless), briefless.text.includes('维护者速读')], [EXIT_USAGE, 0, 0, true]);
+    const briefInRequest = await hand(board({ comments: noBrief }), { request: BRIEF_REQUEST });
+    t('…the brief carried by the request itself clears it, and H48 reads it back ✓', [briefInRequest.exit, briefInRequest.text.includes('④ H48 ✓'), rowsOn(briefInRequest.fake.board).h48], [EXIT_OK, true, null], briefInRequest.text.slice(-600));
+    const issue = await hand(board({ kind: 'issue' }));
+    t('REFUSED on an issue — the kind rule, before any read of the gate: exit 2, zero sends', zero(issue), [EXIT_USAGE, 0, 0]);
+    const closed = await hand(board({ state: 'closed' }));
+    t('REFUSED on a closed pull: exit 2, zero sends', zero(closed), [EXIT_USAGE, 0, 0]);
+    const unsigned = await hand(board(), { request: REQUEST.slice(SIG.length + 1) });
+    t('an unsigned request is refused by post-stamped\'s own judge: exit 2, zero sends', zero(unsigned), [EXIT_USAGE, 0, 0]);
+    const direct = await driveOffline(argv, board(), { route: DIRECT_ROUTE, files: { [REQ_FILE]: REQUEST }, now: NOW, tierReading: TIER_H, recognisers, approvers: PAIR });
+    t('RELAY-ONLY: a direct route is exit 3 with zero writes', [direct.exit, writesOf(direct).length], [EXIT_PREREQUISITE, 0]);
+
+    // Idempotence: covered approvers and a label already on cost no action.
+    const covered = await hand(board({ labels: ['domain:skills', GOVERNED_PR_AWAITING_MERGE_LABEL], assignees: ['os-zhuang'], requested: ['os-second'] }));
+    t('⭐ idempotent: a pull already labelled, its author assigned and the other approver requested sends NOTHING — no second request comment — exit 0', [covered.exit, covered.sent.length, writesOf(covered).length, covered.res.alreadyHandedOff, covered.text.includes('already handed off')], [EXIT_OK, 0, 0, true, true]);
+    const rerun = await hand(ok.fake.board);
+    t('…and a re-run on the pull the first --handoff left whole is the same: zero sends, the comment count unchanged', [rerun.exit, rerun.sent.length, rerun.fake.board.comments.length], [EXIT_OK, 0, ok.fake.board.comments.length]);
+    const selfSig = await hand(board(), { request: REQUEST.replace('os-justin', 'os-second') });
+    t('⭐ never the seat\'s own account: a request signed by an uncovered approver (who is not the author) is refused, exit 2, zero sends', [...zero(selfSig), selfSig.text.includes('永不请席位自身账号')], [EXIT_USAGE, 0, 0, true]);
+    const reviewedBy = await hand(board({ reviews: [{ state: 'COMMENTED', user: { login: 'os-second' } }] }));
+    t('…an approver who has SUBMITTED a review is covered: only the author is assigned', [reviewedBy.exit, reviewedBy.sent[0]?.actions.map((a) => a.op)], [EXIT_OK, ['comment', 'labels_add', 'assign']]);
+
+    // Read-back: a run that skipped a part is exit 4, never repaired.
+    const lied = await hand(board(), { relay: 'lie-pr_request_reviewers' });
+    t('⭐ a run that skipped the request: `④ reviewers ✗` and `④ H43 ✗`, exit 4, one send', [lied.exit, lied.text.includes('④ reviewers ✗'), lied.text.includes('④ H43 ✗'), lied.sent.length], [EXIT_READ_BACK_MISMATCH, true, true, 1]);
+    const noLabel = await hand(board(), { relay: 'lie-labels_add' });
+    t('…a run that skipped the label: `④ labels ✗` and `④ H48 ✗`, exit 4', [noLabel.exit, noLabel.text.includes('④ labels ✗'), noLabel.text.includes('④ H48 ✗')], [EXIT_READ_BACK_MISMATCH, true, true]);
+
+    // The per-round reading: --dry-run with no comment file, zero sends, the two rows printed.
+    const neverSend = async () => { throw new Error('a dry run must not dispatch'); };
+    const dry = await hand(board(), { argv: ['--repo', 'objectstack-ai/objectstack', '--issue', '7', '--handoff', '--dry-run'], send: neverSend });
+    t('⭐ --handoff --dry-run with NO comment file reads the pull, prints now H43 / now H48 and the stroke, sends nothing, exit 7 — the hand-off is OWED', [dry.exit, dry.res.dryRun, dry.text.includes('② now H43 ✗ · now H48 ✗'), dry.text.includes('comment → labels_add → assign → pr_request_reviewers'), writesOf(dry).length], [EXIT_HANDOFF_OWED, true, true, true, 0], dry.text.slice(-600));
+    const dryFile = await hand(board(), { argv: [...argv, '--dry-run'], send: neverSend });
+    t('…and a dry run WITH the request file packs the stroke and exits 7 on the same ✗ rows, never 0', [dryFile.exit, dryFile.text.includes('Payload:'), writesOf(dryFile).length], [EXIT_HANDOFF_OWED, true, 0]);
+    const dryDone = await hand(ok.fake.board, { argv: ['--repo', 'objectstack-ai/objectstack', '--issue', '7', '--handoff', '--dry-run'], send: neverSend });
+    t('…and on the pull AFTER the hand-off it reads ✓ ✓ and plans nothing to request', [dryDone.exit, dryDone.text.includes('② now H43 ✓ · now H48 ✓'), dryDone.res.plan?.toRequest, dryDone.res.plan?.toAssign], [EXIT_OK, true, [], []], dryDone.text.slice(-600));
+
+    // S2 — the PASS on the CARD, read the guard's way (REVIEW_OF_RECORD_LOCATION).
+    const recordOnly = [row(501, '2026-11-08T14:00:00Z', RECORD())];
+    const onCard = await hand(board({ comments: recordOnly, cards: { 35: [row(601, '2026-11-08T14:10:00Z', PASS())] } }));
+    t('⭐ a same-head PASS on the CARD the pull delivers (`Fixes #35`) clears the gate, the guard\'s way: exit 0, all three written, H43 ✓', [onCard.exit, onCard.sent[0]?.actions.map((a) => a.op), onCard.text.includes('PASS comment 601 on the card'), onCard.text.includes('④ H43 ✓')], [EXIT_OK, ['comment', 'labels_add', 'assign', 'pr_request_reviewers'], true, true], onCard.text.slice(-700));
+    const cardUntrusted = await hand(board({ comments: recordOnly, cards: { 35: [{ ...row(601, '2026-11-08T14:10:00Z', PASS()), user: { login: 'someone' } }] } }));
+    t('…control: the same card PASS by an untrusted author is cut before any reader sees it — refused, exit 2, zero sends', [...zero(cardUntrusted), cardUntrusted.text.includes('on the PR or its card')], [EXIT_USAGE, 0, 0, true]);
+    const noCard = await hand(board({ comments: recordOnly, body: 'No card named.\n', head: { sha: HEAD, ref: 'feature/x' }, cards: { 35: [row(601, '2026-11-08T14:10:00Z', PASS())] } }));
+    t('…control: a pull that delivers no card reads only its own thread — the card PASS is not its record, refused', [...zero(noCard), noCard.text.includes('no card:')], [EXIT_USAGE, 0, 0, true]);
+
+    // S1 — the SIZE limb carried through: the face's tier, and rows that do not stand down.
+    const codeBoard = (over = {}) => board({ comments: [row(501, '2026-11-08T14:00:00Z', RECORD()), row(502, '2026-11-08T14:10:00Z', PASS(HEAD, '`TIER_DEFAULT`'))], ...over });
+    const sized = await hand(codeBoard(), { tier: SIZE() });
+    t('⭐ a code-only SIZE-limb pull is on the declaration face: its TIER_DEFAULT PASS stands, the hand-off is written, exit 0', [sized.exit, sized.sent[0]?.actions.map((a) => a.op), sized.text.includes('the `declaration` face at `Served-tier: TIER_DEFAULT`')], [EXIT_OK, ['comment', 'labels_add', 'assign', 'pr_request_reviewers'], true], sized.text.slice(-700));
+    const sizedAtContract = await hand(board(), { tier: SIZE() });
+    t('…control: the same pull with a CONTRACT_REVIEW_TIER PASS is refused — the face\'s tier is EXACT, in either direction', [...zero(sizedAtContract), sizedAtContract.text.includes('the `declaration` face owes `Served-tier: TIER_DEFAULT`')], [EXIT_USAGE, 0, 0, true]);
+    const narrowing = await hand(codeBoard({ files: { '.changeset/x.md': '---\n---\n\nClause-②: no (narrowing)\nMetadata-protocol: narrowed\n' } }), { tier: SIZE([...CODE_PATHS, '.changeset/x.md']) });
+    t('…and a committed changeset declaring `(narrowing)` moves the face, read off the head: the TIER_DEFAULT PASS no longer stands', [...zero(narrowing), narrowing.text.includes('the `narrowing` face owes')], [EXIT_USAGE, 0, 0, true]);
+    const SIZE_SLICE = handoffSlice(handoffTierVerdict(await SIZE()(), []), CODE_PATHS);
+    const sizedDue = { ...handoffOf(codeBoard()), state: 'due', passed: true };
+    t('⭐ control for the rows on the size limb: the register\'s own slice is EMPTY there, so both rows stand down and would read ✓ with nobody asked', [rowsOn(fakeBoard(codeBoard()).board, [], sizedDue)], [{ h43: null, h48: null }]);
+    t('…the hand-off slice carries the size limb, so the same pull BEFORE the hand-off fires both rows, and the board AFTER reads null on both', [Object.values(rowsOn(fakeBoard(codeBoard()).board, SIZE_SLICE, sizedDue)).map((v) => v !== null), rowsOn(sized.fake.board, SIZE_SLICE, sizedDue)], [[true, true], { h43: null, h48: null }]);
+    const sizedDry = await hand(codeBoard(), { tier: SIZE(), argv: ['--repo', 'objectstack-ai/objectstack', '--issue', '7', '--handoff', '--dry-run'], send: neverSend });
+    t('…and the per-round dry run on that pull reads `now H43 ✗ · now H48 ✗` (exit 7), never a stand-down ✓', [sizedDry.exit, sizedDry.text.includes('② now H43 ✗ · now H48 ✗'), sized.text.includes('④ H43 ✓'), sized.text.includes('④ H48 ✓')], [EXIT_HANDOFF_OWED, true, true, true]);
+
+    // M1 — the NARROWED leg: a declared narrowing, no governed path, under the size threshold, lands by the maintainer.
+    const UNGOVERNED = (paths = CODE_PATHS, over = {}) => reading({ repo: 'objectstack', governed: false, tier: null, matched: [], hitPaths: [], clearPaths: paths, size: { exceeds: false, lifted: null, changedLines: 40, threshold: 3000 }, fork: { isFork: false }, ...over });
+    const NARROW_BODY = 'Fixes #35\n\nClause-②: no\nMetadata-protocol: narrowed\n';
+    const DECL = [{ key: 'Metadata-protocol', line: 'Metadata-protocol: narrowed', where: 'the PR body' }];
+    t('the tier, narrowed: a declaration admits an ungoverned or Tier S pull on the `narrowed` route; none refuses; an unread list is UNREAD; Tier H needs none', [
+      verdictOf({ governed: false, tier: null, size: { exceeds: false } }, DECL).route,
+      verdictOf({ governed: true, tier: 'S', size: { exceeds: false } }, DECL).route,
+      verdictOf({ governed: false, tier: null, size: { exceeds: true, changedLines: 3100, threshold: 3000 } }, DECL).narrowing,
+      verdictOf({ governed: false, tier: null, size: { exceeds: false } }, []).ok,
+      handoffTierVerdict({ exit: 0, json: { governed: false, tier: null, size: { exceeds: false } } }).unread,
+      handoffOwesDeclarations({ json: { governed: true, tier: 'H' } }),
+      handoffOwesDeclarations({ json: { governed: true, tier: 'S' } }),
+    ], ['narrowed', 'narrowed', true, false, true, false, true]);
+    const narrowed = await hand(board({ body: NARROW_BODY }), { tier: UNGOVERNED() });
+    t('⭐ a narrowing declared on the `Metadata-protocol:` line beside a bare `Clause-②: no`, no governed path, 40 lines: HANDED OFF — all three written, exit 0', [narrowed.exit, narrowed.sent[0]?.actions.map((a) => a.op), narrowed.text.includes('narrowed leg'), narrowed.text.includes('the `narrowing` face at `Served-tier: CONTRACT_REVIEW_TIER`')], [EXIT_OK, ['comment', 'labels_add', 'assign', 'pr_request_reviewers'], true, true], narrowed.text.slice(-900));
+    t('…and the board after passes H43 and H48 on the narrowed slice, read back on their own lines', [narrowed.text.includes('④ H43 ✓'), narrowed.text.includes('④ H48 ✓'), narrowed.text.includes('② now H43 ✗ · now H48 ✗')], [true, true, true]);
+    const notNarrowed = await hand(board({ body: 'Fixes #35\n\nClause-②: no\nMetadata-protocol: none\n' }), { tier: UNGOVERNED() });
+    t('⭐ control: the same pull declaring `none` is NOT governed and refused, exit 2, zero sends', [...zero(notNarrowed), notNarrowed.text.includes('no narrowing is declared')], [EXIT_USAGE, 0, 0, true]);
+    const narrowedS = await hand(board({ body: NARROW_BODY }), { tier: TIER_S });
+    t('…a Tier S pull that declares a narrowing is handed off too (the narrowed leg owes a human half whatever the register says)', [narrowedS.exit, narrowedS.sent.length], [EXIT_OK, 1], narrowedS.text.slice(-600));
+    const narrowedLow = await hand(board({ body: NARROW_BODY, comments: [row(501, '2026-11-08T14:00:00Z', RECORD()), row(502, '2026-11-08T14:10:00Z', PASS(HEAD, '`TIER_DEFAULT`'))] }), { tier: UNGOVERNED() });
+    t('⭐ S3: the narrowing face is held from the `Metadata-protocol:` line, so a TIER_DEFAULT PASS is refused there — the guard\'s `narrowingDeclared`', [...zero(narrowedLow), narrowedLow.text.includes('the `narrowing` face owes `Served-tier: CONTRACT_REVIEW_TIER`')], [EXIT_USAGE, 0, 0, true]);
+    const CS = '.changeset/narrow.md';
+    const narrowedCs = await hand(board({ body: 'Fixes #35\n\nMetadata-protocol: none\n', files: { [CS]: '---\n---\n\nMetadata-protocol: narrowed\n' } }), { tier: UNGOVERNED([...CODE_PATHS, CS]) });
+    t('…a narrowing declared only in a committed changeset, read at the head, is the same population: exit 0', [narrowedCs.exit, narrowedCs.text.includes(`\`${CS}\``)], [EXIT_OK, true], narrowedCs.text.slice(-600));
+    const NARROW_SLICE = handoffSlice(handoffTierVerdict(await UNGOVERNED()(), DECL), CODE_PATHS);
+    const narrowDue = { ...handoffOf(board()), state: 'due', passed: true };
+    t('⭐ control for the rows on the narrowed leg: the register\'s slice is empty, both rows stand down; the hand-off slice fires both before', [rowsOn(fakeBoard(board()).board, [], narrowDue), Object.values(rowsOn(fakeBoard(board()).board, NARROW_SLICE, narrowDue)).map((v) => v !== null)], [{ h43: null, h48: null }, [true, true]]);
+
+    // S1 — a changeset the head does not hold declares nothing; the tier route reads none.
+    const GONE = '.changeset/gone.md';
+    const deleted = await hand(codeBoard(), { tier: SIZE([...CODE_PATHS, GONE]) });
+    t('⭐ a size-limb pull that DELETES (or renames away) a changeset: the 404 at the head declares nothing, the hand-off proceeds, exit 0', [deleted.exit, deleted.sent.length], [EXIT_OK, 1], deleted.text.slice(-600));
+    const brokenRead = await hand(codeBoard({ files: { [GONE]: { status: 502 } } }), { tier: SIZE([...CODE_PATHS, GONE]) });
+    t('…control: any other failed read of a changeset is NOT MEASURED, exit 3, zero sends', [...zero(brokenRead), brokenRead.text.includes('PREREQUISITE NOT MET')], [EXIT_PREREQUISITE, 0, 0, true]);
+    const tierWithCs = await hand(board(), { tier: reading({ repo: 'objectstack', governed: true, tier: GOVERNED_TIER_H, matched: H_SLICE, hitPaths: H_SLICE[0].files, clearPaths: [GONE], size: { exceeds: false }, fork: { isFork: false } }) });
+    t('…and on the TIER route no changeset is read at all: exit 0, zero contents reads', [tierWithCs.exit, tierWithCs.fake.calls.filter((c) => c.path.includes('/contents/')).length], [EXIT_OK, 0]);
+
+    // S3 — a path lifted as a pure regeneration is still on the face reviewFace reads.
+    const REGEN = 'skills/objectstack-ui/references/react-blocks.md';
+    const liftedRead = reading({ repo: 'objectstack', governed: false, tier: null, matched: [], hitPaths: [], clearPaths: CODE_PATHS, exceptions: [{ path: REGEN, pureRegeneration: true }], size: { exceeds: true, lifted: null, changedLines: 3400, threshold: 3000 }, fork: { isFork: false } });
+    const regenLow = await hand(codeBoard(), { tier: liftedRead });
+    t('⭐ S3: a size-limb pull whose only register hit was LIFTED as a pure regeneration is on the `rules` face, pre-lift, as the guard reads it: TIER_DEFAULT refused', [...zero(regenLow), regenLow.text.includes('the `rules` face owes `Served-tier: CONTRACT_REVIEW_TIER`')], [EXIT_USAGE, 0, 0, true], regenLow.text.slice(-600));
+    const regenAt = await hand(board(), { tier: liftedRead });
+    t('…control: the same pull with a CONTRACT_REVIEW_TIER PASS is handed off, exit 0', [regenAt.exit, regenAt.sent.length], [EXIT_OK, 1]);
+
+    // S2 — "whole" includes the brief on the thread.
+    const coveredNoBrief = { labels: ['domain:skills', GOVERNED_PR_AWAITING_MERGE_LABEL], assignees: ['os-zhuang'], requested: ['os-second'], comments: noBrief };
+    const owed = await hand(board(coveredNoBrief), { request: BRIEF_REQUEST });
+    t('⭐ S2: label on and every approver covered but NO brief on the thread — the request is still owed: ONE dispatch, the comment alone, H48 ✓ after, exit 0', [owed.exit, owed.sent.length, owed.sent[0]?.actions.map((a) => a.op), owed.text.includes('already handed off'), owed.text.includes('④ H48 ✓'), rowsOn(owed.fake.board).h48], [EXIT_OK, 1, ['comment'], false, true, null], owed.text.slice(-700));
+    const owedDry = await hand(board(coveredNoBrief), { argv: ['--repo', 'objectstack-ai/objectstack', '--issue', '7', '--handoff', '--dry-run'], send: neverSend });
+    t('…and the per-round dry run on that pull never says it is whole: `now H48 ✗`, exit 7', [owedDry.exit, owedDry.text.includes('already handed off'), owedDry.text.includes('now H48 ✗')], [EXIT_HANDOFF_OWED, false, true]);
+
+    // The rule this mode writes is the skill's, pinned as substrings so a reworded rule reds here.
+    const skill = readFileSync(new URL(HANDOFF_RULE_PATH, REPO_ROOT), 'utf8');
+    const perRound = readFileSync(new URL('.claude/skills/pm-dispatch/references/execution-duties.md', REPO_ROOT), 'utf8');
+    t('the skill\'s hand-off line points at this ONE command, the per-round reader (execution-duties 四件读数器) at its dry run, and the author-assign rule it enforces is still the skill\'s', [skill.includes('label-write.mjs --handoff'), perRound.includes('四件读数器:每 PR 跑 `label-write.mjs --issue PR --handoff --dry-run`'), skill.includes('作者是审批人 ⇒ `assign` 它'), skill.includes('Tier S 不交人')], [true, true, true, true]);
   }
 
   // ── the floor, BEFORE the verdict ────────────────────────────────────────

@@ -39,6 +39,25 @@ export function parentCurrencyFieldsOf(
 }
 
 /**
+ * The child fields that hold an amount of money (`currency`, or a `formula`
+ * returning `currency`), by name, or `undefined` when none does. The line grid
+ * reads a pick's target currency off these (`GridField`'s `columnFields`), as
+ * the record form does (objectstack#36249).
+ */
+export function currencyFieldDefsOf(
+  childFields: Readonly<Record<string, unknown>> | null | undefined,
+): Readonly<Record<string, unknown>> | undefined {
+  if (!childFields || typeof childFields !== 'object') return undefined;
+  let out: Record<string, unknown> | undefined;
+  for (const [name, def] of Object.entries(childFields)) {
+    const d = def as { type?: unknown; returnType?: unknown } | null;
+    if (!d || typeof d !== 'object') continue;
+    if (d.type === 'currency' || (d.type === 'formula' && d.returnType === 'currency')) (out ??= {})[name] = def;
+  }
+  return out;
+}
+
+/**
  * The currency of each following column, read off the live header record. A
  * header with no code yet maps the column to `undefined`: no symbol, never the
  * tenant's, as the resolver answers a following row with a blank parent.

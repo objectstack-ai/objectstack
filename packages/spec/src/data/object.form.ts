@@ -38,6 +38,9 @@ export const objectForm = defineForm({
         { field: 'label', type: 'text', colSpan: 1, helpText: 'Singular display name (e.g. "Account")' },
         { field: 'pluralLabel', type: 'text', colSpan: 1, helpText: 'Plural display name (e.g. "Accounts")' },
         { field: 'icon', type: 'text', colSpan: 1, helpText: 'Lucide icon name (e.g. "building", "users")' },
+        // [#35985] The colour of the square the icon is drawn on: the swatch row
+        // (`color-picker`) reads its nine names off the closed enum.
+        { field: 'color', widget: 'color-picker', colSpan: 1, helpText: 'Color of the square the icon is drawn on, from the fixed palette. Unset draws gray.' },
         { field: 'description', type: 'textarea', colSpan: 2, helpText: 'Developer documentation' },
         // #19331 — `nameField` is declared by ObjectSchema and was offered by no
         // control, so the ADR-0079 record-title pointer could only be written
@@ -67,13 +70,17 @@ export const objectForm = defineForm({
         // it would offer an empty list. A misspelt entry is not dropped quietly:
         // the publish door refuses it (`object-field-ref-unknown`,
         // `searchable-field-unknown`, both at `error`), and so does `os validate`.
-        { field: 'highlightFields', widget: 'string-tags', colSpan: 2, helpText: 'Field names of this object, most important first — the first entry wins where only one fits (ADR-0085). Drives the default list columns, cards, child-record previews and the detail highlight strip. A name that is not a field of this object is refused at publish.' },
-        // #27069 — the business order of the record page's related lists: a
-        // list of inbound relationship names (child object, or `object.field`)
-        // on the `highlightFields` row's face. A dangling name is refused at
-        // the publish door (`related-list-ref-unknown`, `error`, judged against
-        // the registry's children) and by `os validate` / `os build`.
-        { field: 'relatedLists', widget: 'string-tags', colSpan: 2, helpText: 'Business order of this object\'s related lists on its record page, most important first. Each entry is a child object name (e.g. task), or object.field when that child has more than one relationship to this object. Listed lists come first; the rest follow in the derived order. A name that matches no relationship pointing at this object places nothing, so saving or validating the object refuses it.' },
+        { field: 'highlightFields', widget: 'string-tags', colSpan: 2, helpText: 'Field names of this object, most important first — the first entry wins where only one fits (ADR-0085). Drives the default list and related-list columns, cards, child-record previews, the record hover card and the record picker. A name that is not a field of this object is refused at publish.' },
+        // #27069 / #35897 / #35899 — the record page's tab list: inbound
+        // relationship names (child object, or `object.field`), the three
+        // built-in tabs by object name, or an entry's object form
+        // `{ list, label?, columns? }`. Its own widget, not `string-tags`: that
+        // chip input casts the value to `string[]`, and an object entry (which
+        // Studio's Record page tabs editor writes once a title or columns are
+        // set) cannot render as a chip there (#35923 review M1). A dangling name
+        // is refused at the publish door (`related-list-ref-unknown`, `error`,
+        // judged against the registry's children) and by `os validate` / `os build`.
+        { field: 'relatedLists', widget: 'related-list-entries', colSpan: 2, helpText: 'The record page tabs after the overview, in order. Each entry is a child object name (e.g. task), object.field when that child has more than one relationship to this object, a built-in tab (sys_attachment, sys_approval_request, sys_activity), or an entry with its own title and columns, set in Studio\'s object settings. Once anything is listed, a related list no entry names shows no tab, a list another package adds included, until this object names it; attachments show only when listed. Empty: every list shows in the default order. A name that matches no relationship pointing at this object is refused when the object is saved.' },
         { field: 'searchableFields', widget: 'string-tags', colSpan: 2, helpText: 'Field names the $search query matches (ADR-0061): the default for the record picker, list quick-search and global search; a view may narrow it. Unset, search uses the name/title field plus short-text fields. Each entry must name a stored field of this object — an unknown name or a virtual formula field is refused at publish.' },
         // #19332 (flight G2a of ruling record 5861442317) — the object's field
         // groups, the ADR-0085 layout role beside `nameField` / `highlightFields`.
@@ -98,21 +105,23 @@ export const objectForm = defineForm({
         // outranks it (the parse derives `collapse` from an alias only when
         // `collapse` is absent).
         //
-        // No field-name list lives here: a field joins a group through its own
-        // `group` key, so there is no name for a misspelling to hide in.
+        // `fields` is the group's own member list (field names, in display
+        // order), a `tags` row as `hook.form.ts` gives a list of names; a name
+        // no field declares is skipped by the layout and warned by `os lint`.
         {
           field: 'fieldGroups',
           type: 'repeater',
           colSpan: 2,
-          helpText: 'Ordered sections that group this object\'s fields on the entry form and the record detail page (ADR-0085); array order is display order. A field joins a group by naming its key in the field\'s own group setting. Fields in no group follow the groups, and a group no field joins is not drawn.',
+          helpText: 'Ordered sections that group this object\'s fields on the entry form and the record detail page (ADR-0085); array order is display order. A group lists its fields, in order, in its Fields setting; a group without that list holds the fields that name its key in their own group setting. Fields in no group follow the groups, and a group no field joins is not drawn.',
           fields: [
-            { field: 'key', label: 'Key', type: 'text', required: true, helpText: 'Machine key in snake_case, unique within this object — the schema refuses anything else. Fields join the group by naming this key, so renaming it leaves them ungrouped.' },
+            { field: 'key', label: 'Key', type: 'text', required: true, helpText: 'Machine key in snake_case, unique within this object — the schema refuses anything else. Fields the group lists in its Fields stay with it when the key is renamed; a field that joins by naming this key in its own group setting is left ungrouped.' },
             { field: 'label', label: 'Label', type: 'text', required: true, helpText: 'Header text of the group\'s section.' },
+            { field: 'fields', label: 'Fields', type: 'tags', helpText: 'The fields this group shows, in display order (field names). Written, it sets the order inside the group without moving any field. A field this list names may not name another group in its own group setting, and a field may be listed by one group only. Not allowed with Related List.' },
             { field: 'icon', label: 'Icon', type: 'text', helpText: 'Lucide icon name shown beside the header on the record detail page (e.g. "banknote"). The entry form does not show it.' },
             { field: 'description', label: 'Description', type: 'textarea', helpText: 'Text shown under the header, on the entry form and the record detail page.' },
-            { field: 'relatedList', label: 'Related List', type: 'text', helpText: 'Makes this entry a related list\'s table instead of a section of fields: name the child object (or object.field) whose list is drawn at this position in the record\'s details column. Such a group holds no fields; a field that names it as its group is refused, and so is a name that matches no relationship pointing at this object. The record page does not draw this placement yet.' },
-            { field: 'collapse', label: 'Collapse', type: 'select', helpText: 'Whether the section can be collapsed, on the entry form and the record detail page. Unset: none.', options: [
-              { label: 'None — always open, no toggle', value: 'none' },
+            { field: 'relatedList', label: 'Related List', type: 'text', helpText: 'Makes this entry a related list\'s table instead of a section of fields: name the child object (or object.field) whose list is drawn at this position in the record\'s details column. Such a group holds no fields; a field that names it as its group is refused, and so is a name that matches no relationship pointing at this object. The parent\'s create and edit forms inline the table too, and the record page\'s Edit saves the record and its rows together.' },
+            { field: 'collapse', label: 'Collapse', type: 'select', helpText: 'Whether the section can be collapsed. The entry form follows it as set. The default record page lets the reader fold every titled group, so there it only sets the first state: Collapsed starts closed, the others start open. Unset: none.', options: [
+              { label: 'None — always open on the entry form, no toggle', value: 'none' },
               { label: 'Expanded — collapsible, starts open', value: 'expanded' },
               { label: 'Collapsed — collapsible, starts closed', value: 'collapsed' },
             ] },
@@ -371,6 +380,13 @@ export const objectForm = defineForm({
               { label: 'Cascade (delete children)', value: 'cascade' },
               { label: 'Restrict (block the delete)', value: 'restrict' },
             ] },
+            // #35315 — the Change Owner cascade, beside `deleteBehavior`; the
+            // parse refuses the key on every other type. `helpText` matches the
+            // field form's row (one i18n key per field path).
+            { field: 'transferBehavior', type: 'select', helpText: 'Whether Change Owner on the referenced record can also move the records that point at it through this field', visibleWhen: "data.type in ['lookup','master_detail']", options: [
+              { label: 'None (stay with their owner)', value: 'none' },
+              { label: 'Cascade (offer to move with the referenced record)', value: 'cascade' },
+            ] },
             { field: 'multiple', type: 'boolean', helpText: 'Allow selecting multiple records', visibleWhen: "data.type in ['lookup']" },
 
             // Formula / summary
@@ -381,7 +397,7 @@ export const objectForm = defineForm({
             // engine computes and stores it on write (`planStoredExpressions`),
             // so a formula-only row hid a live key on a stored field.
             { field: 'expression', type: 'code', language: 'expression', helpText: 'CEL expression the field\'s value is computed from. On a formula field: computed on read, no stored column. On any other field: computed by the engine from the row each write stores, and stored, so a client-sent value never stands.' },
-            // The five members are what `FieldSchema.returnType` declares, and
+            // The six members are what `FieldSchema.returnType` declares, and
             // the same explicit list the field designer's own control carries
             // in `field.form.ts` (#19677). This grid additionally offered
             // `datetime` and `currency`, so an author who added a formula field
@@ -389,11 +405,12 @@ export const objectForm = defineForm({
             // refusal arriving from the save door, naming a key they never
             // typed. Declared-vs-enforced, one seam before that door.
             // `currency` is declared since #22727 and offered again, in the
+            // same change as the enum; `percent` joined with #35047, in the
             // same change as the enum; `datetime` is still refused.
             { field: 'returnType', type: 'select', helpText: 'Result type for formulas', visibleWhen: "data.type == 'formula'", options: [
               { label: 'Text', value: 'text' }, { label: 'Number', value: 'number' },
               { label: 'Boolean', value: 'boolean' }, { label: 'Date', value: 'date' },
-              { label: 'Currency', value: 'currency' },
+              { label: 'Currency', value: 'currency' }, { label: 'Percent', value: 'percent' },
             ] },
             // A roll-up is ONE key — `summaryOperations` {object, field, function}.
             // The flat `summaryType` / `summaryField` pair named neither of them
@@ -428,7 +445,9 @@ export const objectForm = defineForm({
             // named the `auditTrail` / `dataQuality` / `encryptionConfig` family
             // pruned in 2026-06 as dead in both layers (see the FieldSchema
             // tombstone); at-rest protection is `type: 'secret'`, not a flag.
-            { field: 'trackHistory', type: 'boolean', helpText: 'Summarize this field on the record activity timeline' },
+            // [#36482] Three-way, as on the field form: Default removes the key.
+            { field: 'fieldHistory', widget: 'field-history', helpText: "Old → new values for this field on the record activity timeline. Default follows the platform: on for most types, off for a media, JSON or credential field. Off names the change by label only; On also shows a media or JSON field's values. A credential field never shows values, and the object's own Field History off wins." },
+            { field: 'trackHistory', type: 'boolean', helpText: "Opt a media or JSON field (image, file, json, …) into old → new values on the activity timeline. Every other field shows them already, and off does not hide them: use Field History." },
             { field: 'visibleWhen', type: 'code', language: 'expression', helpText: 'CEL predicate — field is shown only when TRUE' },
             { field: 'readonlyWhen', type: 'code', language: 'expression', helpText: 'CEL predicate — field is read-only when TRUE (enforced server-side)' },
             { field: 'requiredWhen', type: 'code', language: 'expression', helpText: 'CEL predicate — field is required when TRUE (enforced server-side)' },
@@ -452,6 +471,7 @@ export const objectForm = defineForm({
           helpText: 'Enable/disable system features',
           fields: [
             { field: 'trackHistory', type: 'boolean' },
+            { field: 'fieldHistory', widget: 'field-history', helpText: "Old → new values of changed fields on the record activity timeline. Default is on. Off turns values off for the whole object, whatever a field says." },
             { field: 'searchable', type: 'boolean' },
             { field: 'apiEnabled', type: 'boolean' },
             { field: 'files', type: 'boolean' },
@@ -712,7 +732,7 @@ export const objectForm = defineForm({
         // #19332 (flight G2b of ruling record 5861442317) — the per-entry override
         // of the matrix `managedBy` above resolves (`resolveCrudAffordances`),
         // so it sits directly under it. A composite with declared sub-rows over
-        // all five keys of the strict block (its alias and guidance words —
+        // all six keys of the strict block (its alias and guidance words —
         // `new`, `export`, the VIEW block's `sort`, … — are refusals, not keys).
         //
         // `create` / `import` / `edit` / `delete` are each a UNION — a boolean,
@@ -723,7 +743,9 @@ export const objectForm = defineForm({
         // new entry (the first arm) renders a switch, and a stored object
         // renders its three keys, whose edits merge into it. The object arm is
         // therefore written in source and edited here once stored. `exportCsv` is
-        // a plain boolean, the `enable` toggles' face.
+        // a plain boolean, the `enable` toggles' face. `transfer` (the Change Owner
+        // switch, ruling 7000907189 point 1) is the same union as the four CRUD
+        // entries, so it takes their `json` face.
         //
         // A switch reads `false` for an unset entry, which is not what the
         // resolved default says for most buckets, so the composite's help text
@@ -731,13 +753,26 @@ export const objectForm = defineForm({
         {
           field: 'userActions',
           type: 'composite',
-          helpText: 'Which generic entries (New, Import, Edit, Delete, Export) UI clients offer on this object\'s records, overriding the managedBy default one entry at a time. An unset entry keeps that default: platform offers all five; config and system-data all but Import; engine-owned, append-only and better-auth only Export. An untouched switch writes nothing, so it reads off even where the default offers the entry. On an engine-owned or append-only object, turning an entry on also lets users make that write through the data API. Users still need the matching permission.',
+          helpText: 'Which generic entries (New, Import, Edit, Delete, Export) UI clients offer on this object\'s records, overriding the managedBy default one entry at a time. An unset entry keeps that default: platform offers all five; config and system-data all but Import; engine-owned, append-only and better-auth only Export. An untouched switch writes nothing, so it reads off even where the default offers the entry. On an engine-owned or append-only object, turning an entry on also lets users make that write through the data API. Users still need the matching permission. Change Owner is not part of that matrix: its default follows the sharing model (see its entry).',
           fields: [
             { field: 'create', label: 'Create', widget: 'json', helpText: 'The New button: on shows it, off hides it. A stored {enabled, visibleWhen, disabledWhen} object is edited key by key; write one in source to gate the button on the record in scope, evaluated once per toolbar (the host record on a related list).' },
             { field: 'import', label: 'Import', widget: 'json', helpText: 'The CSV import entry: on shows it, off hides it. A stored {enabled, visibleWhen, disabledWhen} object is edited key by key; write one in source to gate the entry on the record in scope, evaluated once per toolbar.' },
             { field: 'edit', label: 'Edit', widget: 'json', helpText: 'Editing existing records, inline and in the form: on offers it, off hides it. A stored {enabled, visibleWhen, disabledWhen} object is edited key by key; write one in source to gate each row on its own record.' },
             { field: 'delete', label: 'Delete', widget: 'json', helpText: 'Row and bulk delete: on offers it, off hides it. A stored {enabled, visibleWhen, disabledWhen} object is edited key by key; write one in source to gate each row on its own record.' },
-            { field: 'exportCsv', label: 'Export CSV', type: 'boolean', helpText: 'The CSV export entry. Unset: shown, since every managedBy bucket offers export.' },
+            { field: 'exportCsv', label: 'Export CSV', type: 'boolean', helpText: 'The Export entry that downloads this object\'s data (CSV, XLSX or JSON) on its grids, list views and dataset reports: on shows it, off hides it. A Gantt chart\'s PNG / PDF export is not covered. Unset: shown, since every managedBy bucket offers export. It is not a permission: who may export is the permission set\'s allowExport.' },
+            { field: 'transfer', label: 'Change Owner', widget: 'json', helpText: 'The Change Owner action, single and bulk: on offers it, off hides it. Unset: on, except off on a controlled_by_parent detail. Offered only on an object whose records have a reassignable owner (ownership user or unset, no managedBy, not a sys_ object, owner_id not readonly and, on an external object, declared or mapped); turning it on anywhere else is refused. It gates the action only, not a plain edit of owner_id. A stored {enabled, visibleWhen, disabledWhen} object is edited key by key; write one in source to gate the action on each record.' },
+          ],
+        },
+        // [#36366] The action layout per scope. Each arm is an object of two
+        // name lists (`pinned`, `more`), edited as JSON; the design mode edits
+        // it on the page.
+        {
+          field: 'actionLayout',
+          type: 'composite',
+          helpText: 'The order of this object\'s actions and which are buttons, per scope: pinned (at most 3 buttons, in order) and more (the More menu\'s order; an action named in neither follows in its default order). Unset: each surface picks its buttons by the actions\' order, as before.',
+          fields: [
+            { field: 'list', label: 'List', widget: 'json', helpText: 'The list page toolbar, as {"pinned": [...], "more": [...]}: action names placed on the list toolbar; $import / $export only in pinned. At most 3 pinned. Not pinned, the page still draws its own Import / Export menu. os validate refuses a name that is no action of this object or is not placed on the list toolbar; such a name draws nothing.' },
+            { field: 'record', label: 'Record', widget: 'json', helpText: 'The record header (record page, side preview, phone bar), as {"pinned": [...], "more": [...]}: action names placed in the record header or its More menu. At most 3 pinned. os validate refuses a name that is no action of this object or is not placed on the record page; such a name draws nothing.' },
           ],
         },
         { field: 'editMode', type: 'select', helpText: "Edit-interaction intent for records of this object. Absent, the renderer picks its own default. Cross-renderer intent, not styling.", options: [

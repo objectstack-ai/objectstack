@@ -3784,7 +3784,8 @@ export default class Serve extends Command {
                 if (compiled.status !== 0) {
                   console.error(
                     `${compiled.stdout ?? ''}${compiled.stderr ?? ''}\n`
-                    + chalk.red(`  ✗ Compile failed — fix errors above before starting the dev server.\n`)
+                    // Neutral wording, never a classification (ruling record 6998194814).
+                    + chalk.red(`  ✗ ${relativeConfig} did not load or compile — the reason is printed above; fix it before starting the dev server.\n`)
                     + chalk.dim(`    A dev boot over ${hmrArtifactPath} compiles ${relativeConfig} into it first, so the`)
                     + chalk.dim('\n    metadata it serves is the config this boot evaluates.'),
                   );
@@ -4657,8 +4658,11 @@ export default class Serve extends Command {
               // dispatcher's inbound rate limiter receives below: whether the
               // ADR-0069 D5 IP allow-list and the D7 login audit may believe
               // X-Forwarded-For / X-Real-IP when establishing a client address.
-              // Undeclared, both judge the transport's peer address.
-              trustProxy: (config as any).server?.trustProxy === true,
+              // Undeclared, both judge the transport's peer address. Handed over
+              // as authored, either form: AuthPlugin reads it with the
+              // client-address rule's own `readTrustProxy`, which refuses a
+              // malformed trusted-network form at boot.
+              trustProxy: (config as any).server?.trustProxy,
               // The stack's `demoStaff`, read off the definition this process
               // loaded — the authored config, since `os build` writes the key
               // into no artifact. Handed over whatever the boot: plugin-auth
@@ -5205,7 +5209,12 @@ export default class Serve extends Command {
       try {
         const { createRestApiPlugin } = await import('@objectstack/rest');
         await kernel.use(
-          createRestApiPlugin({ api: { api: { enableProjectScoping, projectResolution } } as any }),
+          createRestApiPlugin({
+            api: { api: { enableProjectScoping, projectResolution } } as any,
+            // The same switch the dispatcher plugin is handed below, so the two
+            // doors of this host judge environment membership alike.
+            enforceProjectMembership: apiConfig.enforceProjectMembership,
+          }),
         );
         trackPlugin('RestAPI');
       } catch (e: any) {
@@ -5234,7 +5243,9 @@ export default class Serve extends Command {
         const serverConfig = (config as any).server ?? {};
         const rateLimitConfig = {
             ...(serverConfig.security?.rateLimit ? { budget: serverConfig.security.rateLimit } : {}),
-            trustProxy: serverConfig.trustProxy === true,
+            // As authored, either form; the dispatcher reads it with
+            // `readTrustProxy`, the same reading AuthPlugin applies above.
+            trustProxy: serverConfig.trustProxy,
         };
 
         // Register Dispatcher plugin (auth, graphql, analytics, packages, hub, storage, automation)
@@ -5474,7 +5485,9 @@ export default class Serve extends Command {
       // only from the app's own `plugins[]`, a cloud-only tier from a cloud
       // runtime. The loop below stays quiet for those (they are known
       // vocabulary, not typos), and the sharing layer then fails closed to
-      // owner-only without a word. Say it once at start-up, in the sentence
+      // owner-only; the runtime logs that once, at the first fallback, which
+      // may be long after boot. So say it here too, once at start-up and
+      // before any request, in the sentence
       // `os validate` and `os verify` print for the same token, and only when
       // nothing in `plugins[]` provides it. A warning, never a refusal: the
       // boot is unchanged.

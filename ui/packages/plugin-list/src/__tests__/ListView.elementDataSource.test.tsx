@@ -96,8 +96,9 @@ describe('list-view — dataSource: { object, view } (objectstack#5576)', () => 
     // The view's filter and sort are applied…
     expect(query.$filter).toEqual([['rating', '=', 'hot']]);
     expect(query.$orderby).toEqual([{ field: 'name', order: 'desc' }]);
-    // …and its columns drive the projection (`id` is always requested).
-    expect(query.$select).toEqual(['id', 'name', 'rating']);
+    // …and its columns drive the projection (`id` is always requested; the
+    // editable grid's concurrency token `updated_at` too, objectui#12292).
+    expect(query.$select).toEqual(['id', 'name', 'rating', 'updated_at']);
     // The regression face: writing the binding must not break the block.
     expect(container.querySelector('[data-testid="list-error-state"]')).toBeNull();
   });
@@ -129,7 +130,7 @@ describe('list-view — dataSource: { object, view } (objectstack#5576)', () => 
     await waitFor(() => expect(adapter.find).toHaveBeenCalled());
     expect(adapter.find.mock.calls[0][0]).toBe('account');
     const query = firstQuery(adapter);
-    expect(query.$select).toEqual(['id', 'name']);
+    expect(query.$select).toEqual(['id', 'name', 'updated_at']);
     expect(query.$filter).toBeUndefined();
     expect(container.querySelector('[data-testid="list-error-state"]')).toBeNull();
     expect(container.querySelector('[data-testid="list-view-datasource-error"]')).toBeNull();
@@ -200,7 +201,7 @@ describe('list-view — dataSource: { object, view } (objectstack#5576)', () => 
     );
 
     await waitFor(() => expect(adapter.find).toHaveBeenCalled());
-    expect(firstQuery(adapter).$select).toEqual(['id', 'name']);
+    expect(firstQuery(adapter).$select).toEqual(['id', 'name', 'updated_at']);
     // The view is still applied for everything the component did not author.
     expect(firstQuery(adapter).$filter).toEqual([['rating', '=', 'hot']]);
   });

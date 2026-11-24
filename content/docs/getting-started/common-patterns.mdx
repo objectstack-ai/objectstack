@@ -103,6 +103,9 @@ Create a parent-child relationship between a master and its detail records. A `m
       name: 'order',
       label: 'Order',
       sharingModel: 'public_read',
+      // The group naming order_line puts the lines in the order's form and
+      // record page; without it they are a tab of the record page.
+      fieldGroups: [{ key: 'lines', label: 'Lines', relatedList: 'order_line' }],
       fields: {
         order_number: { label: 'Order #', type: 'autonumber', autonumberFormat: 'ORD-{0000}' },
         customer: { label: 'Customer', type: 'lookup', reference: 'contact' },

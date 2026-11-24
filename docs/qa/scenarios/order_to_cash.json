@@ -1,5 +1,5 @@
 {
-  "$comment": "Seed rule (so every truth can be worked by hand), as of 2026-10-31: account a(k), k = 1..12, is owned by rep [e02, e03, e04, e06, e07, e08][(k-1) mod 6] (team east: e02-e04 under manager e01; team west: e06-e08 under e05) on net_45 terms when k mod 4 = 0, else net_30. Order i = 1..120 is for a((i-1) mod 12 + 1), owned by that account's owner, dated 2026-07..10 day ((i-1) mod 30)+1 (i 1-30 July, 31-60 August, 61-90 September, 91-120 October), with two lines: hardware p((i-1) mod 3 + 1) x (10 + 5(i mod 5)) at list price, 20% off when i mod 10 = 0, and service p(4 + i mod 3) x (1 + i mod 4) at list price. A line discount above 10% routes the order to the owner's manager (`approver`; `approved_on` the next day once approved). Status: i 1-90 cancelled when i mod 20 = 13, else fulfilled; i 91-120 by i mod 10: 1-3 fulfilled, 4, 5 and 9 confirmed, 6-7 draft, 8 cancelled, 0 pending_approval. A fulfilled order is invoiced 7 days after its order date as INV-(1000+i), due after the account's terms. Payments as of asOf: Harbor Foods (a05) has paid nothing; Ironwood Labs (a09) pays half on the due date; Cedar Logistics (a02) pays in full 20 days after the due date; every other account pays in full 3 days before it; method by k mod 3: 0 wire, 1 ach, 2 check. Activities: one touchpoint per account per month on day 30 - 2k by the owner (July meeting, August call, September email, October call), plus a collection_call by e09 on the day an invoice is 15 days past due when it is not fully paid by then.",
+  "$comment": "Seed rule (so every truth can be worked by hand), as of 2026-10-31: account a(k), k = 1..12, is owned by rep [e02, e03, e04, e06, e07, e08][(k-1) mod 6] (team east: e02-e04 under manager e01; team west: e06-e08 under e05) on net_45 terms when k mod 4 = 0, else net_30. Order i = 1..120 is for a((i-1) mod 12 + 1), owned by that account's owner, dated 2026-07..10 day ((i-1) mod 30)+1 (i 1-30 July, 31-60 August, 61-90 September, 91-120 October), with two lines: hardware p((i-1) mod 3 + 1) x (10 + 5(i mod 5)) at list price, 20% off when i mod 10 = 0, and service p(4 + i mod 3) x (1 + i mod 4) at list price. A line discount above 10% routes the order to the owner's manager (`approver`; `approved_on` the next day once approved). Status: i 1-90 cancelled when i mod 20 = 13, else fulfilled; i 91-120 by i mod 10: 1-3 fulfilled, 4, 5 and 9 confirmed, 6-7 draft, 8 cancelled, 0 pending_approval. A fulfilled order is invoiced 7 days after its order date as INV-(1000+i), due after the account's terms. Payments as of asOf: Harbor Foods (a05) has paid nothing; Ironwood Labs (a09) pays half on the due date; Cedar Logistics (a02) pays in full 20 days after the due date; every other account pays in full 3 days before it, except PAY-0044 (INV-1058, due 2026-10-04), paid 2026-10-02 so no payment sits on 2026-10-01, the day the platform's last_30_days preset (31 days ending on asOf) counts and the card's 30-day window does not; method by k mod 3: 0 wire, 1 ach, 2 check. Activities: one touchpoint per account per month on day 30 - 2k by the owner (July meeting, August call, September email, October call), plus a collection_call by e09 on the day an invoice is 15 days past due when it is not fully paid by then.",
   "id": "order_to_cash",
   "code": "order",
   "tier": "starter",
@@ -634,7 +634,7 @@
         {"id": "pay041", "name": "PAY-0041", "invoice": "inv054", "amount": 3600, "payment_date": "2026-09-27", "method": "wire", "bank_reference": "WT-0927-054"},
         {"id": "pay042", "name": "PAY-0042", "invoice": "inv040", "amount": 1560, "payment_date": "2026-09-28", "method": "ach", "bank_reference": "ACH-0928-040"},
         {"id": "pay043", "name": "PAY-0043", "invoice": "inv055", "amount": 3600, "payment_date": "2026-09-28", "method": "ach", "bank_reference": "ACH-0928-055"},
-        {"id": "pay044", "name": "PAY-0044", "invoice": "inv058", "amount": 4800, "payment_date": "2026-10-01", "method": "ach", "bank_reference": "ACH-1001-058"},
+        {"id": "pay044", "name": "PAY-0044", "invoice": "inv058", "amount": 4800, "payment_date": "2026-10-02", "method": "ach", "bank_reference": "ACH-1002-058"},
         {"id": "pay045", "name": "PAY-0045", "invoice": "inv044", "amount": 8400, "payment_date": "2026-10-02", "method": "check", "bank_reference": "CHK-1002-044"},
         {"id": "pay046", "name": "PAY-0046", "invoice": "inv059", "amount": 11100, "payment_date": "2026-10-02", "method": "check", "bank_reference": "CHK-1002-059"},
         {"id": "pay047", "name": "PAY-0047", "invoice": "inv057", "amount": 1200, "payment_date": "2026-10-03", "method": "wire", "bank_reference": "WT-1003-057"},
@@ -735,6 +735,7 @@
       {
         "id": "open_receivables",
         "ask": {"zh": "目前应收账款还有多少没收回来?", "en": "How much is still outstanding on open and partially paid invoices?"},
+        "askKind": "count",
         "object": "invoice",
         "truth": {
           "kind": "sum",
@@ -746,6 +747,7 @@
       {
         "id": "receivables_aging",
         "ask": {"zh": "未收余额按账龄分段各有多少?", "en": "How does the outstanding balance break down by aging bucket?"},
+        "askKind": "group_sum",
         "object": "invoice",
         "truth": {
           "kind": "sum",
@@ -758,6 +760,7 @@
       {
         "id": "orders_by_status",
         "ask": {"zh": "各个状态的销售订单各有多少张?", "en": "How many sales orders are in each status?"},
+        "askKind": "group_sum",
         "object": "sales_order",
         "truth": {"kind": "count", "groupBy": "status"},
         "personas": ["sales_rep"]
@@ -765,6 +768,7 @@
       {
         "id": "top_accounts_billed",
         "ask": {"zh": "开票金额最多的三个客户是哪几个?", "en": "Which three accounts have been invoiced the most?"},
+        "askKind": "top_n",
         "object": "invoice",
         "truth": {
           "kind": "topN",
@@ -781,6 +785,7 @@
           "zh": "最近 30 天的回款按客户负责人所在的销售团队各是多少?",
           "en": "How much has been collected in the last 30 days, per sales team of the account owner?"
         },
+        "askKind": "time_range",
         "object": "payment",
         "truth": {
           "kind": "sum",
@@ -796,6 +801,7 @@
           "zh": "已确认和已履约订单的明细金额按产品类别各是多少?",
           "en": "On confirmed and fulfilled orders, how much has been booked per product category?"
         },
+        "askKind": "join",
         "object": "order_line",
         "truth": {
           "kind": "sum",
@@ -810,6 +816,7 @@
           "zh": "逾期未收的余额分别在哪位销售代表的客户名下,各多少?",
           "en": "Whose accounts hold the overdue balance, and how much each?"
         },
+        "askKind": "join",
         "object": "invoice",
         "truth": {
           "kind": "sum",
@@ -826,6 +833,7 @@
       {
         "id": "so_0120_waiting_on",
         "ask": {"zh": "订单 SO-0120 现在在等谁审批?", "en": "Who is order SO-0120 waiting on for approval?"},
+        "askKind": "owner_latest",
         "object": "sales_order",
         "truth": {
           "kind": "count",
@@ -842,6 +850,7 @@
           "zh": "最近两周谁跟进过 Harbor Foods,各跟进了几次?",
           "en": "Who has followed up with Harbor Foods in the last two weeks, and how many times each?"
         },
+        "askKind": "owner_latest",
         "object": "activity",
         "truth": {
           "kind": "count",
@@ -855,6 +864,7 @@
       {
         "id": "september_commission",
         "ask": {"zh": "九月份的订单销售代表一共能拿多少提成?", "en": "How much commission do the reps earn on September's orders?"},
+        "askKind": "unanswerable",
         "object": "sales_order",
         "truth": {
           "kind": "unanswerable",
@@ -1068,11 +1078,11 @@
       }
     ],
     "datasetQuestions": [
-      {"id": "dq_bookings", "ask": {"zh": "我们的订单金额合计是多少?", "en": "What do our bookings add up to?"}, "words": ["bookings", "订单金额"], "expect": {"kind": "metric_selected", "dataset": "order_book", "measure": "booked_amount"}},
-      {"id": "dq_receivables", "ask": {"zh": "我们的应收账款还有多少?", "en": "How much do we have in receivables?"}, "words": ["receivables", "应收账款"], "expect": {"kind": "metric_selected", "dataset": "billing", "measure": "open_balance"}},
-      {"id": "dq_revenue", "ask": {"zh": "我们的总营收是多少?", "en": "What is our total revenue?"}, "words": ["revenue", "营收"], "expect": {"kind": "asked_back", "reason": "ambiguous", "candidates": [{"dataset": "order_book", "measure": "booked_amount"}, {"dataset": "billing", "measure": "billed_amount"}]}},
-      {"id": "dq_booking_total", "ask": {"zh": "我们的成交合计是多少?", "en": "What is our booking total?"}, "words": ["booking", "成交"], "expect": {"kind": "asked_back", "reason": "near_miss", "candidates": [{"dataset": "order_book", "measure": "booked_amount"}]}},
-      {"id": "dq_payment_count", "ask": {"zh": "我们一共收到了多少笔付款?", "en": "How many payments have we received?"}, "words": ["payments", "付款"], "expect": {"kind": "fallback_labelled", "object": "payment"}}
+      {"id": "dq_bookings", "ask": {"zh": "我们的订单金额合计是多少?", "en": "What do our bookings add up to?"}, "askKind": "business_term", "words": ["bookings", "订单金额"], "expect": {"kind": "metric_selected", "dataset": "order_book", "measure": "booked_amount"}},
+      {"id": "dq_receivables", "ask": {"zh": "我们的应收账款还有多少?", "en": "How much do we have in receivables?"}, "askKind": "business_term", "words": ["receivables", "应收账款"], "expect": {"kind": "metric_selected", "dataset": "billing", "measure": "open_balance"}},
+      {"id": "dq_revenue", "ask": {"zh": "我们的总营收是多少?", "en": "What is our total revenue?"}, "askKind": "ambiguous", "words": ["revenue", "营收"], "expect": {"kind": "asked_back", "reason": "ambiguous", "candidates": [{"dataset": "order_book", "measure": "booked_amount"}, {"dataset": "billing", "measure": "billed_amount"}]}},
+      {"id": "dq_booking_total", "ask": {"zh": "我们的成交合计是多少?", "en": "What is our booking total?"}, "askKind": "ambiguous", "words": ["booking", "成交"], "expect": {"kind": "asked_back", "reason": "near_miss", "candidates": [{"dataset": "order_book", "measure": "booked_amount"}]}},
+      {"id": "dq_payment_count", "ask": {"zh": "我们一共收到了多少笔付款?", "en": "How many payments have we received?"}, "askKind": "count", "words": ["payments", "付款"], "expect": {"kind": "fallback_labelled", "object": "payment"}}
     ]
   },
   "iterate": {

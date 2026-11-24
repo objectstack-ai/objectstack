@@ -439,18 +439,22 @@ describe('console record header — approvalLocked composition (objectui#4213)',
     );
   });
 
-  it('keeps approvalLocked disabling Edit with NO predicate declared', async () => {
-    // The pre-#4213 behavior, byte-identical: `disabled: approvalLocked`.
+  // objectstack#35593 — an approval lock no longer greys Edit: the header
+  // draws no Edit at all, and its approval tag says why. The predicate's half
+  // of the key is unchanged (below).
+  it('draws no Edit under approvalLocked with NO predicate declared', async () => {
     await mountRecordPage(LOCKED, undefined);
 
-    expect(headerEditButton()).toBeDisabled();
+    expect(headerToolbar()).toBeTruthy();
+    expect(headerEditButton()).toBeNull();
   });
 
-  it('keeps approvalLocked disabling Edit when the predicate does NOT disable', async () => {
-    // `approvalLocked || false` — the lock still wins on its own.
+  it('draws no Edit under approvalLocked when the predicate does NOT disable', async () => {
+    // The lock still wins on its own.
     await mountRecordPage(LOCKED, { edit: { disabledWhen: 'record.status == "closed"' } });
 
-    expect(headerEditButton()).toBeDisabled();
+    expect(headerToolbar()).toBeTruthy();
+    expect(headerEditButton()).toBeNull();
   });
 
   it('disables Edit when the predicate holds and there is no approval lock', async () => {
@@ -460,10 +464,11 @@ describe('console record header — approvalLocked composition (objectui#4213)',
     expect(headerEditButton()).toBeDisabled();
   });
 
-  it('disables Edit when BOTH hold', async () => {
+  it('draws no Edit when BOTH hold: the approval lock decides', async () => {
     await mountRecordPage(LOCKED, { edit: { disabledWhen: 'record.status == "reported"' } });
 
-    expect(headerEditButton()).toBeDisabled();
+    expect(headerToolbar()).toBeTruthy();
+    expect(headerEditButton()).toBeNull();
   });
 
   it('leaves Edit enabled when NEITHER holds', async () => {

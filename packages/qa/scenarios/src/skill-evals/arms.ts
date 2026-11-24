@@ -4,7 +4,9 @@
  * The two arms one case runs under, as the directory a `claude -p` turn starts
  * in and the argv it is given. The arms differ in exactly one thing — whether
  * the case's bundle sits in the turn's project skills
- * (`.claude/skills/BUNDLE/`) — and share everything else:
+ * (`.claude/skills/BUNDLE/`) — and share everything else. A trigger case runs
+ * on the with-skill arm alone, with the round's competing set of bundles
+ * installed beside its own (`installedFor` in `run.ts`). Both arms share:
  *
  * - a fresh temporary directory as the working directory, so nothing of this
  *   checkout is in reach (a read outside the working directory needs a
@@ -76,20 +78,20 @@ export interface ArmWorkdir {
 
 /**
  * Make one turn's directory: `ROOT/project` as the working directory, holding
- * `.claude/skills/BUNDLE/` (without `evals/`) on the with-skill arm and
- * nothing on the no-skill arm, and `ROOT/mcp.json` beside it.
+ * `.claude/skills/BUNDLE/` (without `evals/`) for each of `bundles` on the
+ * with-skill arm and nothing on the no-skill arm, and `ROOT/mcp.json` beside it.
  *
  * `ROOT` is always under the system temp directory, spelled at the call so the
  * dispatch-gates scratch scan reads it as outside the tree; a caller that
  * wants it gone removes `root` itself.
  */
-export function prepareArmWorkdir(arm: Arm, bundle: string, skillsRoot: string): ArmWorkdir {
+export function prepareArmWorkdir(arm: Arm, bundles: string | readonly string[], skillsRoot: string): ArmWorkdir {
   const root = mkdtempSync(join(tmpdir(), 'skill-eval-'));
   const cwd = join(root, 'project');
   mkdirSync(cwd);
   const mcpConfigPath = join(root, 'mcp.json');
   writeFileSync(mcpConfigPath, JSON.stringify({ mcpServers: {} }));
-  if (arm === 'with-skill') {
+  for (const bundle of arm === 'with-skill' ? [bundles].flat() : []) {
     const from = join(skillsRoot, bundle);
     const withheld = join(from, WITHHELD_BUNDLE_DIR);
     cpSync(from, join(cwd, '.claude', 'skills', bundle), {

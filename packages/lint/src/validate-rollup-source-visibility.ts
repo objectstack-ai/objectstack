@@ -219,6 +219,8 @@ function grantFor(set: AnyRec, objectName: string, isPrivate: boolean): Effectiv
   const wild = objects['*'];
   if (!isRec(wild)) return undefined;
   if (!isPrivate) return wild as EffectiveObjectPermission;
+  // Record scope, not a field vote: `viewAllFields` does not make a wildcard
+  // cover a private object, exactly as `resolveObjectPermission` reads it.
   return wild.viewAllRecords === true || wild.modifyAllRecords === true ? (wild as EffectiveObjectPermission) : undefined;
 }
 
@@ -227,7 +229,9 @@ function grantFor(set: AnyRec, objectName: string, isPrivate: boolean): Effectiv
  * hides it unless the set's Modify All on the object votes every field
  * readable (ADR-0066 D2 ⑧ as amended). The set's View All alone casts no vote
  * on a field its own entry hides (note of 2026-11-15), so the entry binds
- * there. No entry ⇒ not hidden.
+ * there. Nor does its `viewAllFields`: inside one set the specific row beats
+ * the general bit (the field-axis split, ruling of record 6912661484), so the
+ * bit never lifts this answer. No entry ⇒ not hidden.
  */
 function fieldHidden(set: AnyRec, objectName: string, fieldName: string): boolean {
   const fields = isRec(set.fields) ? set.fields : undefined;

@@ -7,7 +7,8 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { convertFiltersToAST, convertOperatorToAST, type FilterNode } from '../filter-converter';
+import { parseFilterAST } from '@objectstack/spec/data';
+import { convertFiltersToAST, convertOperatorToAST, FilterOperatorError, type FilterNode } from '../filter-converter';
 
 describe('Filter Converter Utilities', () => {
   describe('convertOperatorToAST', () => {
@@ -152,5 +153,130 @@ describe('Filter Converter Utilities', () => {
       });
       expect(result).toBeUndefined();
     });
+  });
+});
+
+describe('the nested-relation node (objectstack#34990)', () => {
+  /** The refusal a call throws, captured so its envelope can be asserted. */
+  const refusalOf = (run: () => unknown): FilterOperatorError => {
+    try {
+      run();
+    } catch (error) {
+      return error as FilterOperatorError;
+    }
+    throw new Error('expected a refusal');
+  };
+
+  it('lowers a condition on the related record to one equality node the spec lowers back to the nested form', () => {
+    const node = convertFiltersToAST({ account: { owner: 'u1' } });
+    expect(node).toEqual(['account', '=', { owner: 'u1' }]);
+    expect(parseFilterAST(node)).toEqual({ account: { owner: 'u1' } });
+  });
+
+  it('carries a deeper relation and the related condition\'s own operators verbatim', () => {
+    const filter = { account: { parent: { kind: { $in: ['a', 'b'] } }, region: { $ne: 'x' } } };
+    const node = convertFiltersToAST(filter);
+    expect(node).toEqual(['account', '=', filter.account]);
+    expect(parseFilterAST(node)).toEqual(filter);
+  });
+
+  it('sits beside plain conditions and inside a combinator like any other leaf', () => {
+    expect(convertFiltersToAST({ status: 'open', account: { owner: 'u1' } }))
+      .toEqual(['and', ['status', '=', 'open'], ['account', '=', { owner: 'u1' }]]);
+    expect(convertFiltersToAST({ $or: [{ account: { owner: 'u1' } }, { status: 'won' }] }))
+      .toEqual(['or', ['account', '=', { owner: 'u1' }], ['status', '=', 'won']]);
+  });
+
+  it('CONTROL: a map that mixes operators and plain keys is still an operator map, and is refused', () => {
+    const refusal = refusalOf(() => convertFiltersToAST({ account: { $eq: 'a1', owner: 'u1' } }));
+    expect(refusal).toBeInstanceOf(FilterOperatorError);
+    expect({ code: refusal.code, status: refusal.httpStatus, operator: refusal.operator, field: refusal.field })
+      .toEqual({ code: 'INVALID_FILTER', status: 400, operator: 'owner', field: 'account' });
+  });
+
+  it('CONTROL: an operator map and an empty map keep their answers', () => {
+    expect(convertFiltersToAST({ age: { $gte: 18 } })).toEqual(['age', '>=', 18]);
+    const refusal = refusalOf(() => convertFiltersToAST({ account: {} }));
+    expect({ code: refusal.code, status: refusal.httpStatus, field: refusal.field })
+      .toEqual({ code: 'INVALID_FILTER', status: 400, field: 'account' });
+  });
+});
+
+/**
+ * `$null` and `$exists` take a BOOLEAN flag, as `$empty` does.
+ * `SpecialOperatorSchema` declares all three `z.boolean()`, and the spec's save
+ * door and every query face refuse a non-boolean rather than read it for its
+ * truthiness. The converter used to lower `{ f: { $null: 'no' } }` to
+ * `['f', 'is_null', true]` (a truthy string read as IS NULL), so a server-backed
+ * source answered rows its own door would have refused.
+ */
+describe('a `$null` / `$exists` flag that is not a boolean is refused, not read for truthiness', () => {
+  const NON_BOOLEAN_FLAGS: unknown[] = ['no', 'true', 'false', 1, 0, null, { owner: 'u1' }, {}, []];
+
+  const thrownBy = (run: () => unknown): unknown => {
+    try {
+      run();
+    } catch (error) {
+      return error;
+    }
+    return undefined;
+  };
+
+  describe.each(['$null', '$exists'] as const)('%s', (operator) => {
+    it.each(NON_BOOLEAN_FLAGS.map((flag) => [JSON.stringify(flag), flag]))(
+      'refuses the flag %s in the INVALID_FILTER envelope, naming the operator and the field',
+      (_label, flag) => {
+        const thrown = thrownBy(() => convertFiltersToAST({ f: { [operator]: flag } }));
+        expect(thrown).toBeInstanceOf(FilterOperatorError);
+        expect(thrown).toMatchObject({ code: 'INVALID_FILTER', httpStatus: 400, operator, field: 'f' });
+        expect((thrown as Error).message.split('; ')[0])
+          .toBe(`[ObjectUI] The '${operator}' filter operator on field 'f' takes a boolean flag (true or false)`);
+      },
+    );
+
+    it('refuses it beside a key that lowers, so it cannot vanish from the filter', () => {
+      const thrown = thrownBy(() => convertFiltersToAST({ status: 'a', f: { [operator]: 'no' } }));
+      expect(thrown).toMatchObject({ code: 'INVALID_FILTER', operator, field: 'f' });
+    });
+  });
+
+  it('CONTROL: `true` and `false` lower exactly as before, and round-trip through the spec', () => {
+    const cases = [
+      [{ f: { $null: true } }, ['f', 'is_null', true], { f: { $null: true } }],
+      [{ f: { $null: false } }, ['f', 'is_not_null', true], { f: { $null: false } }],
+      [{ f: { $exists: true } }, ['f', 'is_not_null', true], { f: { $null: false } }],
+      [{ f: { $exists: false } }, ['f', 'is_null', true], { f: { $null: true } }],
+    ] as const;
+    for (const [filter, node, readBack] of cases) {
+      expect(convertFiltersToAST(filter)).toEqual(node);
+      expect(parseFilterAST(node as unknown as FilterNode)).toEqual(readBack);
+    }
+  });
+
+  it('`$empty` refuses in the same sentence shape', () => {
+    const thrown = thrownBy(() => convertFiltersToAST({ f: { $empty: 'yes' } }));
+    expect(thrown).toMatchObject({ code: 'INVALID_FILTER', httpStatus: 400, operator: '$empty', field: 'f' });
+    expect((thrown as Error).message.split('; ')[0])
+      .toBe("[ObjectUI] The '$empty' filter operator on field 'f' takes a boolean flag (true or false)");
+  });
+
+  it.each([
+    ['$null', 'a missing value', 'a present one'],
+    ['$exists', 'a present value', 'a missing one'],
+    ['$empty', 'an empty value', 'a non-empty one'],
+  ] as const)('`%s` refuses in one full sentence: the received value and both directions', (operator, whenTrue, whenFalse) => {
+    const thrown = thrownBy(() => convertFiltersToAST({ f: { [operator]: 'no' } }));
+    expect((thrown as Error).message).toBe(
+      `[ObjectUI] The '${operator}' filter operator on field 'f' takes a boolean flag (true or false); `
+      + `received "no". Write { f: { ${operator}: true } } for ${whenTrue}, or `
+      + `{ f: { ${operator}: false } } for ${whenFalse}.`,
+    );
+  });
+
+  it('a flag that cannot be serialised is still refused in words, not by a second throw', () => {
+    const cyclic: Record<string, unknown> = {};
+    cyclic.self = cyclic;
+    const thrown = thrownBy(() => convertFiltersToAST({ f: { $null: cyclic } }));
+    expect(thrown).toMatchObject({ code: 'INVALID_FILTER', operator: '$null', field: 'f' });
   });
 });

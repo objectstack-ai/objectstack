@@ -116,6 +116,12 @@ export const GANTT_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'gantt.readOnlyHint': 'Editing is disabled for this view.',
   'gantt.lockedHint': 'No edit permission',
   'gantt.writeFailed': 'Save failed — the change was rolled back',
+  // The refused-read state (objectstack#35317) reuses the shared no-access
+  // sentence the list page and the related list draw, so a host pack that
+  // translates them translates this chart too; these rows are the
+  // provider-less fallback and say exactly what the `en` pack says.
+  'list.loadErrorForbiddenTitle': 'You don’t have access',
+  'list.loadErrorForbiddenMessage': 'You don’t have permission to view these records. Contact your administrator if you think you should have access.',
 };
 
 /** The defaults are English, so English plural rules pick a family's row. */

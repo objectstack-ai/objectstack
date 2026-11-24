@@ -54,12 +54,14 @@ export function readFollowedParentObject(field: unknown): string | undefined {
  * `resolveFieldCurrency`, with the parent row as the record.
  *
  * `dynamic` (and a `currencyConfig` naming no `currencyMode`, which the spec
- * parses as `dynamic`) is admitted by the spec only on a roll-up of a stored
- * home amount, a child field some `homeAmount.field` names (objectstack#33659).
- * That field is a `dynamic` currency field in the home currency (ADR-0144 D8
- * rule 5), so its total is too: `resolveFieldCurrency` answers the tenant
- * default (`localization.currency`), the code a metric tile over the same home
- * field resolves, and a plain number when none is set. A summary that declares
+ * parses as `dynamic`) is admitted by the spec only on a roll-up of an amount
+ * in the home currency: any child `currency` field in `dynamic` mode (an absent
+ * mode is `dynamic`), a stored home amount, one some `homeAmount.field` names,
+ * included (objectstack#33659, widened by objectstack#35045). Every row of
+ * such a field is in the home currency (ADR-0144 D4, D8 rule 5), so its total
+ * is too: `resolveFieldCurrency` answers the tenant default
+ * (`localization.currency`), the code a metric tile over the same child field
+ * resolves, and a plain number when none is set. A summary that declares
  * no `currencyConfig` stays a number.
  */
 export function summaryDeclaresCurrency(field: unknown): boolean {

@@ -59,8 +59,9 @@ describe('objectstack#26674 · the drawer offers no External ID switch', () => {
     fireEvent.click(screen.getByTestId('grid-add-btn'));
     await waitFor(() => expect(screen.getByTestId('mock-drawer-form')).toBeTruthy());
 
-    // POSITIVE CONTROL: a sibling of the same ADVANCED section.
-    expect(screen.getByTestId('drawer-field-trackHistory')).toBeTruthy();
+    // POSITIVE CONTROL: a sibling of the same ADVANCED section (Field Change
+    // Values, objectstack#36290, in place of the old Track History switch).
+    expect(screen.getByTestId('drawer-field-fieldHistoryDefaultOn')).toBeTruthy();
     expect(screen.queryByTestId('drawer-field-externalId')).toBeNull();
   });
 
@@ -69,7 +70,7 @@ describe('objectstack#26674 · the drawer offers no External ID switch', () => {
     await openEditDrawer('code');
 
     expect(screen.getByTestId('drawer-mode').textContent).toBe('edit');
-    expect(screen.getByTestId('drawer-field-trackHistory')).toBeTruthy();
+    expect(screen.getByTestId('drawer-field-fieldHistoryDefaultOn')).toBeTruthy();
     expect(screen.queryByTestId('drawer-field-externalId')).toBeNull();
   });
 });

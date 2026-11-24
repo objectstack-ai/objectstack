@@ -299,14 +299,14 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
   //
   // The `object.fields` subset precedent at the top of this ledger, on the
   // field form: a curated repeater over four of `InlineGridColumnSchema`'s
-  // twenty keys. Unlike `object.fields` there is no fuller editor to defer to,
+  // twenty-one keys. Unlike `object.fields` there is no fuller editor to defer to,
   // so the long tail is authored in source, and the reason says why that is
   // the right place for each group of keys left out.
   {
     kind: 'subset',
     type: 'field',
     path: 'inlineColumns',
-    why: "a curated inline-grid column (ruling record 5861442317): `name` plus the three keys that apply to a column of any type (`label`, `width`, `defaultHidden`). An entry naming only a field is the shape the key's own describe recommends, because objectui's `hydrateColumns` completes it from the child field, so the rest is authored in source: `type`, since declaring it opts the column out of that hydration; the keys that apply to one cell type only (`options`, `reference`, `displayField`, `idField`, `autofill`, `multiple`, `accept`, `prefix`, `step`, `scale`, `computed`, `expr`), since a column takes its type from the child field at render and a sub-row here cannot be gated on it, so each would be offered on every column; and `required` / `readonlyWhen` / `requiredWhen`, which hydration copies from the child field, where the rule the server enforces lives",
+    why: "a curated inline-grid column (ruling record 5861442317): `name` plus the three keys that apply to a column of any type (`label`, `width`, `defaultHidden`). An entry naming only a field is the shape the key's own describe recommends, because objectui's `hydrateColumns` completes it from the child field, so the rest is authored in source: `type`, since declaring it opts the column out of that hydration; the keys that apply to one cell type only (`options`, `reference`, `displayField`, `idField`, `autofill`, `multiple`, `accept`, `max`, `prefix`, `step`, `scale`, `computed`, `expr`), since a column takes its type from the child field at render and a sub-row here cannot be gated on it, so each would be offered on every column; and `required` / `readonlyWhen` / `requiredWhen`, which hydration copies from the child field, where the rule the server enforces lives",
   },
   // ── The root coordinate (#19333): top-level keys no form may offer ──
   //
@@ -433,6 +433,18 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     key: 'conditionalFormatting',
     why: "planned, not yet rendered — a field's cell formatting rules (`[{ condition, style }]`, the list view's own rule element) are validated at parse and their CEL is judged at the authoring doors (it parses, it reads only `value` and `record`), but no renderer styles a cell from them until objectui's cell renderers read them, after the spec publishes. A form control offered today would let an author set a style nothing paints",
   },
+  // [ADR-0158 U4, U5; Open item 8] A quantity's unit declaration is read at
+  // write from the day it ships (the engine's unit membership check), but the
+  // designer's control for it is the unit picker's card (#35490), which owns
+  // the Setup face and its locale strings. Until then the key is authored in
+  // the package source, as `homeAmount` was.
+  {
+    kind: 'omit',
+    type: 'field',
+    path: ROOT_PATH,
+    key: 'unitConfig',
+    why: "authored in the package source until the unit picker's card offers it — the declaration is validated at parse (a `fixed` unit is one standard code, a `record` pointer names a `text` sibling, a `code` marker sits on a `text` field) and read at every write by the engine's unit membership check, but the field designer's control, the unit picker and their labels ship with the display card. A control offered before it would ask an author for a unit code with no picker and no list of the organization's units",
+  },
   // cloud#3652 ruling D3 — a field's rename declaration lands spec-first the
   // same way: `planned` in the liveness ledger, read by no upgrade until the
   // rename execution card. Offering the key in the field form first would be
@@ -464,40 +476,6 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     key: 'homeAmount',
     why: "planned, not yet written — the `{ field, rateDate, rateField }` pointers are validated at parse (all three required, each judged against the object's field map), but no engine converts the amount or stores the home amount and the rate until the write-time home-currency projection lands, which ADR-0144 D9 releases with this key. A form control offered today would let an author declare a home amount nothing writes",
   },
-  // #34374 — a hook's declared texts land in the hook's source first. The
-  // Studio row (a key-only record beside `refusals`, with its help text in
-  // the eleven metadata-forms bundles) is a follow-up, so this row records
-  // why the key is not offered yet.
-  {
-    kind: 'omit',
-    type: 'hook',
-    path: ROOT_PATH,
-    key: 'texts',
-    why: "live, not yet offered in the Studio — the sentences a hook writes into records (`ctx.text`, answered in the organization's language) are validated at parse (snake_case keys, closed-scope holes over declared `params`, a literal `ctx.text` key the hook does not declare refused at save) and read at run time, and they are declared in the hook's package source beside the code that asks for them. The Studio row, a key-only record beside `refusals`, needs its labels and help text translated in the eleven metadata-forms bundles and is owed to a follow-up card; until then a hook authored in the Studio declares `texts` through the metadata API or its package source",
-  },
-  // #34273 — an action's refusal catalogue lands in the action's source
-  // first, as a hook's declared texts did (#34374). The Studio row (a
-  // key-only record, with its help text in the eleven metadata-forms
-  // bundles) is a follow-up, so this row records why the key is not offered.
-  {
-    kind: 'omit',
-    type: 'action',
-    path: ROOT_PATH,
-    key: 'refusals',
-    why: "live, not yet offered in the Studio — the refusals a `script` action's `js` body throws by code (answered with the declared sentence in the caller's locale) are validated at parse (SCREAMING_SNAKE codes, the hook entry's closed-scope holes over declared `params`, a literal code or reason the catalogue does not declare refused at save) and read at run time, and they are declared in the action's package source beside the body that throws them. The Studio row, a key-only record, needs its labels and help text translated in the eleven metadata-forms bundles and is owed to a follow-up card; until then an action authored in the Studio declares `refusals` through the metadata API or its package source",
-  },
-  // #34374 (action half) — an action's declared texts land in the action's
-  // source first, as its refusal catalogue (#34273) and a hook's declared
-  // texts did. The Studio row (a key-only record, with its help text in the
-  // eleven metadata-forms bundles) is a follow-up, so this row records why the
-  // key is not offered.
-  {
-    kind: 'omit',
-    type: 'action',
-    path: ROOT_PATH,
-    key: 'texts',
-    why: "live, not yet offered in the Studio — the sentences a `script` action's `js` body writes into records (`ctx.text`, answered in the organization's language) are validated at parse (snake_case keys, closed-scope holes over declared `params`, a literal `ctx.text` key the action does not declare refused at save) and read at run time, and they are declared in the action's package source beside the body that asks for them. The Studio row, a key-only record beside `refusals`, needs its labels and help text translated in the eleven metadata-forms bundles and is owed to a follow-up card; until then an action authored in the Studio declares `texts` through the metadata API or its package source",
-  },
   // #27946 — an action's pressed-state predicate lands spec-first the same
   // way: `planned` in the liveness ledger, drawn by no action surface until
   // the console card that draws `aria-pressed` on the header buttons.
@@ -528,13 +506,6 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     path: ROOT_PATH,
     key: 'lookupAutofill',
     why: "planned, not yet read — a lookup's pick autofill pairs (`[{ target, source, overwrite? }]`) are validated at parse (a single-value relationship; each target a writable field of the same object, named once) and their sources at `os validate` / `os build`, but no form or grid fills a field from them until the ui card's lookup widget writes the declared targets on pick. A form control offered today would let an author declare a fill nothing performs",
-  },
-  {
-    kind: 'omit',
-    type: 'view',
-    path: ROOT_PATH,
-    key: 'columnState',
-    why: "platform-written, never authored — `Studio round-trip: column order/widths (runtime-only state, written by the console grid and stored on the view's row, which has no per-user scope — not authored)`. Declared on the wire members only so the console's own write parses; the authoring door (`ViewItemSchema`) rejects the key by name",
   },
   {
     kind: 'omit',

@@ -50,9 +50,11 @@ import type { WriteObservabilityOptions } from '@objectstack/spec/contracts';
 import { validateRecordInScope, normalizeBlankTypedValues, normalizeNumericStringValues, ValidationError, valueShapeStrictEffective, mediaStrictEffective } from './validation/record-validator.js';
 import { evaluateValidationRules, hasParentScopedRequiredWhen, stripReadonlyFields, stripRuntimeOwnedFields } from './validation/rule-validator.js';
 import { createBatchSummaryAccumulator } from './summary-batch-accumulation.js';
+import { attachInsertSummaryDependents } from './engine-update.js';
 import { formulaValuesFor } from './engine-top-level.js';
 import { resolveMasterDetailRelation } from './master-detail.js';
 import { assertRecordCurrencyCodes, followParentCurrencyCodes, parentCodeFieldServingOf, recordCurrencyPairs, RecordCurrencyCodeRequiredError, touchesRecordCurrency } from './validation/record-currency-code.js';
+import { assertUnitCodes, isUnitCodeRefusal, organizationUnitRowsOf, readOrganizationUnits, touchesUnitCodes } from './validation/unit-code-membership.js';
 import { assertFollowedCurrencyCodesUnchanged, parentCurrencyLockReads, touchesFollowedCurrencyCode } from './record-currency-parent-lock.js';
 import { isHomeAmountRefusal } from './home-amount-projection.js';
 import { referencesCheckedBeforeRules } from './engine-referential-integrity.js';
@@ -98,6 +100,12 @@ export interface ValidateHost {
   resolvePredicateRelated: ObjectQL['resolvePredicateRelated'];
   resolveOptionPermissions: ObjectQL['resolveOptionPermissions'];
   getSummaryDescriptors: ObjectQL['getSummaryDescriptors'];
+  // [#34821] What computes a parent's fields calculated from the roll-ups a multi-row insert moves.
+  readonly facade: ObjectQL;
+  getSchema: ObjectQL['getSchema'];
+  resolveFormulaPermissions: ObjectQL['resolveFormulaPermissions'];
+  resolveFormulaRelated: ObjectQL['resolveFormulaRelated'];
+  formulaOptionLabels: ObjectQL['formulaOptionLabels'];
   assertReferencesResolve: ObjectQL['assertReferencesResolve'];
   previewHomeAmounts: ObjectQL['previewHomeAmounts'];
   homeAmountServing: ObjectQL['homeAmountServing'];
@@ -108,7 +116,7 @@ export interface ValidateHost {
 
 /** The body of `ObjectQL#validate`; the method's docblock there is its contract. */
 export async function validate(
-  this: Pick<ValidateHost, 'resolveObjectName' | '_registry' | 'permissionResolution' | 'resolveDefaultPermissions' | 'initializeSummaryFields' | 'applyFieldDefaults' | '_writeWallVerdict' | 'staticReadonlyCreateStrip' | 'logger' | 'mediaValueShapeStrictFor' | 'valueShapeStrictFor' | 'validationMessageContext' | 'buildEvalUser' | 'findOne' | 'readUpdatePriorRow' | 'resolvePreviewParents' | '_writeGateProbe' | 'resolvePredicateRelated' | 'resolveOptionPermissions' | 'getSummaryDescriptors' | 'assertReferencesResolve' | 'previewHomeAmounts' | 'homeAmountServing' | 'find' | 'getDriver' | 'buildDriverOptions'>,
+  this: Pick<ValidateHost, 'resolveObjectName' | '_registry' | 'permissionResolution' | 'resolveDefaultPermissions' | 'initializeSummaryFields' | 'applyFieldDefaults' | '_writeWallVerdict' | 'staticReadonlyCreateStrip' | 'logger' | 'mediaValueShapeStrictFor' | 'valueShapeStrictFor' | 'validationMessageContext' | 'buildEvalUser' | 'findOne' | 'readUpdatePriorRow' | 'resolvePreviewParents' | '_writeGateProbe' | 'resolvePredicateRelated' | 'resolveOptionPermissions' | 'getSummaryDescriptors' | 'facade' | 'getSchema' | 'resolveFormulaPermissions' | 'resolveFormulaRelated' | 'formulaOptionLabels' | 'assertReferencesResolve' | 'previewHomeAmounts' | 'homeAmountServing' | 'find' | 'getDriver' | 'buildDriverOptions'>,
   object: string,
   data: Record<string, unknown> | Record<string, unknown>[],
   options?: {
@@ -520,6 +528,15 @@ export async function validate(
   const previewParentMaster = batchSummaries && previewParents
     ? resolveMasterDetailRelation(schemaForValidation as any)?.master
     : undefined;
+  // [#34821] And the parent's formula and stored computed fields calculated
+  // from a moved roll-up, through the write's own door.
+  if (batchSummaries) {
+    await attachInsertSummaryDependents(
+      this, batchSummaries, judgedViews, previewRelatedForRow, previewParentMaster,
+      previewParents ? (i) => previewParents.parents[i] : undefined,
+      options?.context, (i) => wallRefusalOf(i) !== undefined,
+    );
+  }
 
   // [#26684] Judged one row after another, as the write's validation loop
   // judges them: a row's admission (the reference check below) is awaited
@@ -589,6 +606,20 @@ export async function validate(
           followCodes && currencyImage ? followCodes(currencyImage) : currencyImage, mode, mode === 'insert' ? undefined : row, storedIds[i],
           messages, parentCodeFieldServingOf(this._registry),
         );
+        // [ADR-0158 U5, Open item 9] The write's unit check, on the same image
+        // and under the same condition: a code the write would refuse as no
+        // member, retired or of another dimension, or a quantity beside a
+        // blank code, is refused here with the same code. It reads the
+        // organization's units; it writes nothing.
+        if (currencyImage && (mode === 'insert' || touchesUnitCodes(currencyFields, row))) {
+          const unitOrganization = ObjectQLStatics.homeAmountOrganizationOf(currencyImage, options?.context);
+          const touched = mode === 'insert' ? undefined : row;
+          const organizationUnits = await readOrganizationUnits(
+            currencyFields, [{ image: currencyImage, touched, organizationId: unitOrganization }], mode,
+            organizationUnitRowsOf({ _registry: this._registry, find: (o, q) => this.find(o, q as never) }, options?.context as Record<string, unknown> | undefined),
+          );
+          assertUnitCodes(object, currencyFields, currencyImage, mode, touched, storedIds[i], unitOrganization, organizationUnits);
+        }
         // [ADR-0144 D2, amended] …and the write's parent-code lock, on the
         // stored row the by-id update writes: a record a child row follows
         // keeps its code field.
@@ -635,7 +666,8 @@ export async function validate(
         // [#22474] The header the write binds: the insert's
         // `insertParentForRow`, the update's landing header and, for a
         // repoint, `roWhenPreviousParent`.
-        parent: previewParentMaster ? batchSummaries!.overlayRow(previewParentMaster, previewParents?.parents[i]) : previewParents?.parents[i],
+        // [#34821] Onto the columns the caller was served only (`servedColumns`).
+        parent: previewParentMaster ? batchSummaries!.overlayRow(previewParentMaster, previewParents?.parents[i], previewParents?.servedColumns[i] ?? new Set()) : previewParents?.parents[i],
         previousParent: previewParents?.previousParents[i],
         related: batchSummaries ? batchSummaries.overlay(previewRelatedForRow(judgedViews[i])) : previewRelatedForRow(judgedViews[i]),
         permissions: previewPermissionsFor(row),
@@ -649,7 +681,7 @@ export async function validate(
         return { valid: false, errors: e.fields.map((f) => ({ ...f })), warnings };
       }
       // The write throws this refusal whole; the preview answers it as the row's finding.
-      if (e instanceof RecordCurrencyCodeRequiredError || isHomeAmountRefusal(e)) {
+      if (e instanceof RecordCurrencyCodeRequiredError || isHomeAmountRefusal(e) || isUnitCodeRefusal(e)) {
         return { valid: false, errors: [{ field: e.field, code: e.code, message: e.message }], warnings };
       }
       throw e;

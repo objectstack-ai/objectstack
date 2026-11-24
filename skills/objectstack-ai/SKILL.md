@@ -81,9 +81,11 @@ A `skill.tools[]` entry resolves against the union of four sources
 3. **`action_<name>`** — one tool per AI-exposed Action of your own stack
    (`PLATFORM_TOOL_FAMILY_PREFIXES`). **The default path** for anything your app
    does.
-4. **`MCP_FILE_TOOL_NAMES`** (same file) — the MCP door's file tools, resolved
-   only for a skill MCP can offer (`mcpPrompt` not `false`): no in-product turn
-   registers them.
+4. **`MCP_DOOR_TOOL_NAMES`** (same file) — every tool the MCP door registers
+   (`query_records`, `run_action`, the `MCP_FILE_TOOL_NAMES` file pair, …),
+   resolved only for a skill MCP can offer (`mcpPrompt` not `false`). On a
+   `mcpPrompt: false` skill a name only the door serves still warns, with its
+   own hint: no in-product turn registers it.
 
 A name none of them resolves raises **`ai-skill-tool-unresolved`** (warning,
 ADR-0078 advisory-first). The rule exists because one audited app shipped 10

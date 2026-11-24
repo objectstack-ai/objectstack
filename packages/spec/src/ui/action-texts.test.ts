@@ -130,9 +130,63 @@ describe('Action.texts — a key the body asks for literally is refused at save 
     expect(ActionSchema.safeParse({ ...base, body: body(source), texts: TEXTS }).success).toBe(true);
   });
 
+  // The optional-call shape is a literal ask too, read by the one key reader
+  // the hook door shares. (An action's door reads `body.source` alone: it has
+  // no handler path.)
+  const SHAPES = [
+    ['ctx.text?.(', (k: string) => `ctx.text?.('${k}')`],
+    ['await ctx.text?.(', (k: string) => `await ctx.text?.('${k}', { subject: input.subject })`],
+  ] as const;
+
+  it.each(SHAPES)('refuses an undeclared key asked for as %s at save, with the same sentence', (_shape, ask) => {
+    const r = ActionSchema.safeParse({ ...base, body: body(`const line = ${ask('email_body')};`), texts: TEXTS });
+    expect(r.success).toBe(false);
+    const issue = issuesOf(r).find((i) => i.path.join('.') === 'body.source')!;
+    expect(issue.message).toBe(undeclaredActionTextKeyAtSave('email_body', ['email_subject']));
+  });
+
+  it.each(SHAPES)('CONTROL: a declared key asked for as %s, and a computed key in that shape, pass the save', (_shape, ask) => {
+    const computed = ask('email_subject').replace("'email_subject'", 'k');
+    const source = `${ask('email_subject')};\nconst k = pick(); ${computed};`;
+    expect(ActionSchema.safeParse({ ...base, body: body(source), texts: TEXTS }).success).toBe(true);
+  });
+
   it('CONTROL: an action that declares no texts is not read for ctx.text calls (the run-time fault names it)', () => {
     expect(ActionSchema.safeParse({ ...base, body: body("await ctx.text('anything');") }).success).toBe(true);
     expect(undeclaredActionTextAtRun('send_email', 'anything', [])).toMatch(/^action 'send_email' asked for text 'anything'.*declared: none/);
+  });
+});
+
+// The hook door's reading, at the action door: a key is literal only when its
+// closing quote ends the argument (`,` or `)` follows, after optional
+// whitespace); a key built from a literal is computed, the run-time refusal's.
+describe('Action.texts — a literal ask ends at its closing quote; a key built from a literal is computed', () => {
+  const LITERAL = [
+    ['a lone argument', "await ctx.text('email');"],
+    ['a first argument', "await ctx.text('email', { subject: input.subject });"],
+    ['whitespace before the comma', "await ctx.text('email' , { subject: input.subject });"],
+    ['a line break before the close', "await ctx.text(\n  'email'\n);"],
+    ['a backtick with no hole', 'await ctx.text(`email`);'],
+    ['the optional call', "await ctx.text?.('email', { subject: input.subject });"],
+  ] as const;
+
+  it.each(LITERAL)('lit: refuses an undeclared literal key asked for as %s, at body.source', (_shape, source) => {
+    const r = ActionSchema.safeParse({ ...base, body: body(source), texts: TEXTS });
+    expect(r.success).toBe(false);
+    const issue = issuesOf(r).find((i) => i.path.join('.') === 'body.source')!;
+    expect(issue.message).toBe(undeclaredActionTextKeyAtSave('email', ['email_subject']));
+  });
+
+  const COMPUTED = [
+    ['a concatenation', "await ctx.text('email' + suffix);"],
+    ['a concatenation in the optional call', "await ctx.text?.('email' + suffix, { subject: input.subject });"],
+    ['a backtick concatenation', 'await ctx.text(`email` + suffix);'],
+    ['a member access', "await ctx.text('email'.concat(suffix));"],
+    ['a template hole', 'await ctx.text(`email_${suffix}`);'],
+  ] as const;
+
+  it.each(COMPUTED)('dark: passes the save for a key built from a literal by %s (the run-time refusal decides it)', (_shape, source) => {
+    expect(ActionSchema.safeParse({ ...base, body: body(`const suffix = '_subject';\n${source}`), texts: TEXTS }).success).toBe(true);
   });
 });
 

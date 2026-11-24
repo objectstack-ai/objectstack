@@ -176,7 +176,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       ban_user: {
         label: "利用停止",
-        description: "このユーザーを利用停止にしますか？利用停止になるとサインアウトされ、解除されるまでサインインできず、API キーも拒否されます。OAuth アクセストークンとトークンの更新も同様に拒否されます。解除後はキーが再び使えるようになります。",
+        description: "このユーザーを利用停止にしますか？利用停止になるとサインアウトされ、解除されるまでサインインできず、API キーも拒否されます。OAuth アクセストークンとトークンの更新も同様に拒否されます。解除後はキーが再び使えるようになります。利用停止により、このユーザーが責任者である AI サービスアカウントも停止され、登録した OAuth アプリケーションは無効化、発行した SCIM 認証情報は失効します。利用停止を解除してもこれらは元に戻りません。",
         successMessage: "ユーザーを利用停止にしました",
         params: {
           banReason: {
@@ -284,6 +284,11 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
           }
         }
       },
+      remove_sso_user: {
+        label: "保留中のユーザーを削除",
+        confirmText: "まだサインインしていないこのユーザーを削除し、招待を取り消しますか？その間にサインインした場合、またはホスト組織に接続できない場合は、誰も削除されません。",
+        successMessage: "保留中のユーザーを削除しました"
+      },
       set_user_password: {
         label: "パスワードを設定",
         successMessage: "パスワードを更新しました",
@@ -322,6 +327,11 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
             helpText: "このユーザーの直属の上長。組織が異なるマネージャー、自分自身の指定、レポートラインが循環する、または深さの上限を超える指定はサーバー側で拒否されます。"
           }
         }
+      },
+      remove_user_manager: {
+        label: "マネージャーを解除",
+        confirmText: "このユーザーのマネージャーを解除しますか?マネージャーを再設定するまで、このユーザーには報告先がありません。承認ルーティングと own_and_reports レコードスコープもこの変更に従います。",
+        successMessage: "マネージャーを解除しました"
       },
       list_platform_admins: {
         label: "プラットフォーム管理者",
@@ -486,6 +496,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       revoke_reason: {
         label: "失効理由",
         help: "セッションが失効した理由（idle_timeout、absolute_max、concurrent_cap、ip_not_allowed、user_revoked、admin、organization_membership_ended、admin_password_reset、password_reset など）。"
+      },
+      sso_provider_id: {
+        label: "SSO プロバイダー",
+        help: "このセッションのサインインに使われた SSO プロバイダー（ある場合）。そのプロバイダーを削除するとセッションは終了します。システム管理。"
       },
       active_organization_id: {
         label: "アクティブ組織"
@@ -4414,6 +4428,202 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         emptyState: {
           title: "為替レートはまだありません",
           message: "通貨ごとに、レートが変わる日付ごとに 1 行追加します。例：毎月初めに通貨ごとに 1 行。"
+        }
+      }
+    }
+  },
+  sys_unit: {
+    label: "Unit of Measure",
+    pluralLabel: "Units of Measure",
+    description: "The organization's own units of measure, beside the standard units every organization has — one row per unit, named by a code in the organization namespace.",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      code: {
+        label: "Code",
+        help: "The code a quantity stores, in exact uppercase: letters, digits and underscores, at least 4 characters or containing an underscore (BOX_12, JIN1). Standard codes such as KGM and H87 are available to every organization and are not added here. The code cannot be changed after the unit is created."
+      },
+      label: {
+        label: "Label",
+        help: "The name shown beside a quantity in this unit, in the organization's own language."
+      },
+      dimension: {
+        label: "Dimension",
+        help: "What the unit measures. A package unit (a box, a bag) has no fixed ratio. The dimension cannot be changed after the unit is created.",
+        options: {
+          mass: "Mass",
+          length: "Length",
+          area: "Area",
+          volume: "Volume",
+          time: "Time",
+          count: "Count",
+          package: "Package"
+        }
+      },
+      ratio: {
+        label: "Ratio",
+        help: "1 of this unit = Ratio × the base unit of its dimension (mass KGM, length MTR, area MTK, volume MTQ, time SEC, count H87). Example: a unit of half a kilogram in the mass dimension has ratio 0.5. A package unit takes no ratio. Changing the ratio affects only records saved afterwards; records already saved keep the quantity and conversion they were saved with. A changed specification is a new unit, not an edited ratio."
+      },
+      decimal_places: {
+        label: "Decimal Places",
+        help: "How many decimal places a quantity in this unit displays with by default. It never rounds a stored value, and a field's own decimal places still limit what is stored."
+      },
+      retired: {
+        label: "Retired",
+        help: "A retired unit stays on file so its code can never be reused, and records that already use it keep showing it. New records cannot use a retired unit. Retiring cannot be undone."
+      }
+    },
+    _views: {
+      all_units: {
+        label: "All",
+        description: "1 of this unit = Ratio × the base unit of its dimension (mass KGM, length MTR, area MTK, volume MTQ, time SEC, count H87). Example: a unit of half a kilogram in the mass dimension has ratio 0.5. A package unit takes no ratio.",
+        emptyState: {
+          title: "No units of measure yet",
+          message: "Standard units such as kilogram (KGM) and piece (H87) are available already. Add a unit here only when your organization needs one they do not cover."
+        }
+      }
+    },
+    _validations: {
+      unit_code_organization_namespace: {
+        message: "A unit code is uppercase letters, digits and underscores, at least 4 characters long or containing an underscore (for example BOX_12 or JIN1). Shorter codes are reserved for the standard units."
+      },
+      unit_code_immutable: {
+        message: "A unit's code cannot be changed after it is created. Create a new unit with the new code instead."
+      },
+      unit_dimension_immutable: {
+        message: "A unit's dimension cannot be changed after it is created. Create a new unit with the new dimension instead."
+      },
+      unit_ratio_required: {
+        message: "Enter the ratio to the base unit of this dimension."
+      },
+      unit_package_has_no_ratio: {
+        message: "A package unit has no ratio: how much a package holds belongs to the item, not to the unit. Clear the ratio."
+      },
+      unit_retired_one_way: {
+        message: "A retired unit cannot be brought back. Create a unit with a new code instead."
+      }
+    }
+  },
+  sys_work_calendar: {
+    label: "稼働カレンダー",
+    pluralLabel: "稼働カレンダー",
+    description: "稼働カレンダー：週ごとの稼働時間、その時間帯の基準となるタイムゾーン、祝日をどこまで登録済みか。稼働時間で数える期日はこれを参照します。",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      code: {
+        label: "コード",
+        help: "数式、承認エスカレーション、パッケージがこのカレンダーを指すときの機械コード（例: cn_standard）。英小文字、数字、アンダースコアのみ使用できます。"
+      },
+      name: {
+        label: "名前"
+      },
+      timezone: {
+        label: "タイムゾーン",
+        help: "稼働時間帯の基準となる IANA タイムゾーン（例: Asia/Shanghai）。作成フォームには組織のタイムゾーン（設定 → ローカリゼーション）があらかじめ入力され、省略して作成した場合も同じタイムゾーンになります。"
+      },
+      is_default: {
+        label: "既定",
+        help: "期日がカレンダーを指定しないときに使うカレンダー。組織ごとに 1 つです。"
+      },
+      maintained_from: {
+        label: "登録開始日",
+        help: "祝日と振替出勤日を登録している最初の日付。これより前の日付を必要とする計算は拒否されます。"
+      },
+      maintained_through: {
+        label: "登録終了日",
+        help: "祝日と振替出勤日を登録している最後の日付。これより後の日付を必要とする計算は拒否されます。翌年の祝日を登録してから、この日付を延ばしてください。"
+      },
+      monday_periods: {
+        label: "月曜日",
+        help: "その日の稼働時間帯（カレンダーのタイムゾーン基準）。HH:mm-HH:mm 形式をカンマで区切ります。例: 09:00-12:00, 13:00-18:00。時間帯は同じ日の中で開始より後に終わる必要があり、最も遅い終了は 24:00 です。休みの日は空欄にします。"
+      },
+      tuesday_periods: {
+        label: "火曜日",
+        help: "その日の稼働時間帯（カレンダーのタイムゾーン基準）。HH:mm-HH:mm 形式をカンマで区切ります。例: 09:00-12:00, 13:00-18:00。時間帯は同じ日の中で開始より後に終わる必要があり、最も遅い終了は 24:00 です。休みの日は空欄にします。"
+      },
+      wednesday_periods: {
+        label: "水曜日",
+        help: "その日の稼働時間帯（カレンダーのタイムゾーン基準）。HH:mm-HH:mm 形式をカンマで区切ります。例: 09:00-12:00, 13:00-18:00。時間帯は同じ日の中で開始より後に終わる必要があり、最も遅い終了は 24:00 です。休みの日は空欄にします。"
+      },
+      thursday_periods: {
+        label: "木曜日",
+        help: "その日の稼働時間帯（カレンダーのタイムゾーン基準）。HH:mm-HH:mm 形式をカンマで区切ります。例: 09:00-12:00, 13:00-18:00。時間帯は同じ日の中で開始より後に終わる必要があり、最も遅い終了は 24:00 です。休みの日は空欄にします。"
+      },
+      friday_periods: {
+        label: "金曜日",
+        help: "その日の稼働時間帯（カレンダーのタイムゾーン基準）。HH:mm-HH:mm 形式をカンマで区切ります。例: 09:00-12:00, 13:00-18:00。時間帯は同じ日の中で開始より後に終わる必要があり、最も遅い終了は 24:00 です。休みの日は空欄にします。"
+      },
+      saturday_periods: {
+        label: "土曜日",
+        help: "その日の稼働時間帯（カレンダーのタイムゾーン基準）。HH:mm-HH:mm 形式をカンマで区切ります。例: 09:00-12:00, 13:00-18:00。時間帯は同じ日の中で開始より後に終わる必要があり、最も遅い終了は 24:00 です。休みの日は空欄にします。"
+      },
+      sunday_periods: {
+        label: "日曜日",
+        help: "その日の稼働時間帯（カレンダーのタイムゾーン基準）。HH:mm-HH:mm 形式をカンマで区切ります。例: 09:00-12:00, 13:00-18:00。時間帯は同じ日の中で開始より後に終わる必要があり、最も遅い終了は 24:00 です。休みの日は空欄にします。"
+      }
+    },
+    _views: {
+      all_calendars: {
+        label: "すべて",
+        emptyState: {
+          title: "稼働カレンダーはまだありません",
+          message: "週ごとの稼働時間を入れてカレンダーを追加し、1 つを既定に設定してから、祝日と振替出勤日を登録します。"
+        }
+      },
+      needs_maintenance: {
+        label: "要メンテナンス",
+        emptyState: {
+          title: "すべてのカレンダーが先まで登録済みです",
+          message: "祝日の登録が 60 日以内に切れるカレンダーがここに表示されます。その日付を過ぎる期日の計算は拒否されます。"
+        }
+      }
+    },
+    _validations: {
+      work_calendar_code_shape: {
+        message: "コードは英小文字で始め、英小文字、数字、アンダースコアのみを使用してください（例: cn_standard）。"
+      }
+    }
+  },
+  sys_work_calendar_exception: {
+    label: "カレンダー例外",
+    pluralLabel: "カレンダー例外",
+    description: "稼働カレンダーの日付ごとの上書き：祝日、振替出勤日、休業日。稼働日にはその日の稼働時間帯をすべて入力します。",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      calendar: {
+        label: "カレンダー"
+      },
+      date: {
+        label: "日付"
+      },
+      kind: {
+        label: "種類",
+        help: "休日：終日休みです。稼働日：下の時間帯で稼働する日です（振替出勤日など）。",
+        options: {
+          off: "休日",
+          on: "稼働日"
+        }
+      },
+      periods: {
+        label: "稼働時間帯",
+        help: "稼働日の場合、その日のすべての稼働時間を入力します。曜日の設定は引き継がれません。その日の稼働時間帯（カレンダーのタイムゾーン基準）。HH:mm-HH:mm 形式をカンマで区切ります。例: 09:00-12:00, 13:00-18:00。時間帯は同じ日の中で開始より後に終わる必要があり、最も遅い終了は 24:00 です。休みの日は空欄にします。"
+      },
+      note: {
+        label: "メモ",
+        help: "その日付の内容（例: 国慶節、春節の振替出勤日）。"
+      }
+    },
+    _views: {
+      all_exceptions: {
+        label: "すべて",
+        emptyState: {
+          title: "カレンダー例外はまだありません",
+          message: "祝日または振替出勤日ごとに 1 行追加するか、ファイルから 1 年分をインポートします。"
         }
       }
     }

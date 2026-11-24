@@ -150,6 +150,7 @@ rotate. Two variables would make "URL updated, hash not" a state you can reach.
 | `#sha256=` present, artifact host unreachable | Falls back to the cached copy **only** if it still hashes to the pin, with a loud warning that the instance is running on cached content. |
 | Artifact's `engines.protocol` excludes this runtime | **Refuses to boot** — the safety belt of the two-axis split. Repoint the reference, or run a matching image version. |
 | The artifact needs a destructive schema change | Safe migrations run at boot; a destructive one **refuses to boot** and names each change. Run `os migrate apply --allow-destructive` deliberately, then restart. Never skipped in silence. |
+| The app's stack lists code plugins (`plugins: [new XPlugin()]`) | Boots **without them**: an artifact carries the app's metadata and hook handlers, not its code plugins, so nothing those plugins register exists. The boot warns once, naming each listed plugin the kernel does not run. To run them, boot a host config that loads the artifact and lists the plugins in its own `plugins`, or package them as a plugin (`os plugin build`, then `os plugin install`). |
 
 **Recommended production discipline** (convention, not enforced by the runtime):
 publish immutable, version-named objects; give only CI write access to the
@@ -497,6 +498,27 @@ a named volume), set `OS_STORAGE_LOCAL_ROOT_SHARED=true`. That variable is a
 declaration, not a check. A `ReadWriteOnce` volume, as on Kubernetes, cannot be
 shared across replicas: use S3 there.
 
+**An S3 bucket needs a CORS rule for browser uploads and file previews.** With
+S3 or an S3-compatible store (R2, MinIO), the browser talks to the bucket
+directly: an upload `PUT`s the file to a presigned URL, and the in-page preview
+of a text or CSV file reads it with a `GET` on its signed download link. Both
+are cross-origin requests from the Console's origin, so the bucket's CORS
+configuration must allow them:
+
+| CORS field | Value |
+|:---|:---|
+| `AllowedOrigins` | the Console's public origin, exactly (`https://app.example.com`) — never `*` |
+| `AllowedMethods` | `GET`, `HEAD`, `PUT` |
+| `AllowedHeaders` | `content-type` (or `*`) |
+| `ExposeHeaders` | `Content-Length`, `Content-Type`, `Content-Disposition`, `ETag` |
+| `MaxAgeSeconds` | `3000` |
+
+A PDF preview needs no CORS: the Console shows it in a frame, and its
+content-security-policy already allows frames from the bucket's origin, the same
+origin it allows uploads to. Without the rule, uploads to the bucket fail, and a
+text or CSV preview cannot read the file: the preview then offers to open the
+file in a new tab, which needs neither CORS nor a frame source.
+
 **`/ready` reports the cluster driver's health once replicas are declared.**
 When the deployment declares itself multi-node — `OS_EXPECT_MULTI_NODE=true` or
 `OS_CLUSTER_REPLICAS` greater than 1; `OS_CLUSTER_DRIVER` alone is not a
@@ -625,11 +647,28 @@ serve a database `os dev` wrote, set each seeded account's password on the
 server with [`os user set-password`](/docs/deployment/cli#os-user-set-password)
 first; the refusal names that command.
 
-What this release refuses is the seed password and every new session for a
-seeded account still on it. Sessions and API keys a seeded account was issued
-before the server left development mode are ended by `os user set-password`, so
-run it on each seeded account before serving the database; ending them at boot
-is follow-up #35184.
+Nothing the development seed issued keeps acting once the deployment leaves
+development mode. At every boot outside development mode, before the server
+serves a request, it retires what each seeded account still on its seed
+password was issued: its sessions, including any it opened acting as another
+account, its API keys, the apps authorized to it and
+its device sign-ins, its outstanding password-reset links, any sign-in account
+linked to it, the OAuth applications it registered (disabled) and the SCIM
+credentials it minted (revoked). A retired session or key answers exactly as a
+revoked one does, and the log names each account and what was retired. When
+the host supplies a `secondaryStorage` that holds the sessions, the server ends
+them there too, which `os user set-password` cannot reach. An
+account whose password was set since the seed (by `os user set-password`, by
+an administrator, or by its own reset) holds a credential the seed did not
+issue and is untouched, as is every account the seed did not create. A boot in
+development mode retires nothing. There is no switch.
+
+If the retirement cannot complete (the database refuses a read or a write),
+the server does not start, and the error names the accounts; fix the database
+access, or run `os user set-password` on each of them, and start it again.
+`os user set-password` itself ends the account's own sessions, keys and
+grants when it sets the password, and from then on the boot leaves that
+account alone.
 
 ### A seeded directory opens no bootstrap window
 
@@ -676,8 +715,10 @@ dead end this section describes.
 directly against the store the deployment reads, then have that person register
 through the ordinary sign-up endpoint, sending the row's `id` as `invitationId`
 beside the email — under `invite_only` a sign-up is admitted only by the
-invitation it presents. The invitation carve-out admits that one creation under
-every posture, so the `invite_only` default stays where it is. One
+invitation it presents. That one creation is admitted under every posture — by
+the invitation under `invite_only` and off an `email_domain` list, by the
+posture's own rule, read first, under `open` and on the list — so the `invite_only` default stays where
+it is. One
 `sys_invitation` row:
 
 | Column | Value |
@@ -780,8 +821,31 @@ the list admits that address's sign-up. Verification is forced on under this
 posture, and while the account's address is unverified it joins no
 organization: it joins by accepting the invitation once the address is
 verified, and the acceptance writes the membership the invitation names. Verifying the address binds nothing by itself.
-An address on the list is admitted by its domain, invitation or not, and the
-membership policy binds it at creation as before.
+An address on the list is admitted by its domain, invitation or not: the
+membership policy binds it at creation as before, it receives the declared
+`selfRegistrationPermissionSet` like an uninvited sign-up, and a pending
+invitation still places it as the invitation names once it accepts. Both admissions have one
+exception: under this posture a sign-in through a social provider creates an
+account only when the provider reports the address verified, and is otherwise
+refused `403 SELF_REGISTRATION_CLOSED`, whatever the list or an invitation
+says ([Authentication](/docs/permissions/authentication#2-handle-callback)).
+Once the provider verifies the address, the next sign-in is admitted.
+Under `open` every address is admitted by the posture, invitation or not, so an
+invited sign-up likewise receives the declared set beside its invitation — except
+a sign-in through a social provider whose address the provider did not verify
+while email verification is in force, which is refused
+`403 SELF_REGISTRATION_CLOSED` as above.
+
+**A sign-up the posture admits needs its declared set, invited or not.** When
+`selfRegistrationPermissionSet` cannot be resolved (no such set, or the set is
+switched off), every sign-up the posture's own rule admits is refused
+`403 AUTH_CONFIG_ERROR`, and the message names the set: any address under
+`open`, an address on the list under `email_domain`, with or without a pending
+invitation. Nothing is created, and the deployment logs the same reason at
+error level. Correct the setting, or switch the set on, and the next sign-up is
+admitted. A pending invitation does not admit such a sign-up without the set.
+The two admissions an invitation makes alone, under `invite_only` and for an
+address off the list under `email_domain`, ask for no set and are unaffected.
 
 **Accepting, declining and listing an invitation need a verified email
 address, on every deployment.** The invitation's `id`, which its link carries,
@@ -860,6 +924,12 @@ on `open`, keep verification on and connect a mail transport.
   off**: set `OS_AUTH_REQUIRE_EMAIL_VERIFICATION=false`, or
   `emailAndPassword.requireEmailVerification: false` in the stack config. A
   sign-up is then signed in at once and no verification mail is sent.
+
+Under `email_domain`, and under `open` while verification is in force, a new
+account through a social provider is created only when the provider reports
+the address verified; otherwise the sign-in is refused
+`403 SELF_REGISTRATION_CLOSED` and nothing is written
+([Authentication](/docs/permissions/authentication#2-handle-callback)).
 
 The `open` opt-out is for a deployment with no mail transport that trusts
 whoever can reach it, such as a pre-production environment. It is loud and it

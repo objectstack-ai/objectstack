@@ -3,12 +3,13 @@ import { Input, EmptyValue, cn } from '@object-ui/components';
 import { PHONE_TOUCH_HEIGHT } from './touchTarget.js';
 import { FieldWidgetComponentProps } from './types.js';
 import { toDomProps } from './toDomProps.js';
+import { InCellTextInput } from './InCellTextInput.js';
 
 /**
  * PhoneField - Telephone number input with tel link in readonly mode
  * Renders as a clickable tel link when readonly, standard phone input otherwise
  */
-export function PhoneField({ value, onChange, field, readonly, error, ...props }: FieldWidgetComponentProps<string>) {
+export function PhoneField({ value, onChange, field, readonly, error, inCell, onCommit: _onCommit, ...props }: FieldWidgetComponentProps<string>) {
   const config = field;
   if (readonly) {
     if (!value) return <EmptyValue />;
@@ -23,6 +24,21 @@ export function PhoneField({ value, onChange, field, readonly, error, ...props }
   }
 
   const domProps = toDomProps(props);
+
+  // objectstack#36023 — in a list cell the cell itself is the input.
+  if (inCell) {
+    return (
+      <InCellTextInput
+        {...domProps}
+        type="tel"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={config?.placeholder || '(555) 123-4567'}
+        disabled={domProps.disabled}
+        aria-invalid={!!error}
+      />
+    );
+  }
 
   return (
     <Input

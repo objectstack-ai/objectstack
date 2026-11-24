@@ -345,7 +345,7 @@ describe('[#16488] negative control: the U+0000 joiner still separates map keys'
     expect(nulCount('a')).toBe(0);
   });
 
-  it("the ruling's own pair — ('a','b') and ('a\\0b','') — still do not collide", async () => {
+  it("the ruling's own pair — ('a','b') and ('a\\0b','') — still do not collide: the blank-component record is refused, never matched", async () => {
     const objects = { demo_pair: { name: 'demo_pair', fields: { a: { type: 'text' }, b: { type: 'text' } } } };
     const seeds = [{
       object: 'demo_pair',
@@ -362,10 +362,14 @@ describe('[#16488] negative control: the U+0000 joiner still separates map keys'
     const result = await new SeedLoaderService(engine, createMetadata(objects), createLogger() as never)
       .load({ seeds, config: CONFIG } as never);
 
-    expect(result.success).toBe(true);
-    // Two rows, not one: the second never matched the first.
-    expect(store.demo_pair).toHaveLength(2);
-    expect(store.demo_pair.map((r: any) => r.a).sort()).toEqual([`a${NUL}b`, 'a'].sort());
+    // [#34857] The second record leaves `b` blank, so a keyed load refuses it
+    // before it is written; it is reported by index, never matched to (or
+    // swallowed by) the first row, which lands on its own.
+    expect(result.success).toBe(false);
+    expect(store.demo_pair).toHaveLength(1);
+    expect(store.demo_pair[0].a).toBe('a');
+    expect(result.errors).toHaveLength(1);
+    expect(result.errors[0]).toMatchObject({ sourceObject: 'demo_pair', field: 'b', recordIndex: 1 });
   });
 
   it('a pair that WOULD collide under a visible `+` joiner still dedupes as two rows on replay', async () => {

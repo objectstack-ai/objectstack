@@ -65,6 +65,7 @@ import { useHomeItemClaimed, type HomeItem } from '@object-ui/app-shell';
 import { FirstRunChecklist, type FirstRunChecklistPlacement } from '../FirstRunChecklist';
 import { __resetBootPainted } from '../../../loadLocales';
 import type { Specifier } from '../types';
+import { builtInLocales } from '@object-ui/i18n/locales';
 
 const LOCALE_SPEC: Specifier = {
   type: 'select',
@@ -1139,5 +1140,166 @@ describe('on a phone, after the apps, the card starts folded to one line (object
     expect(card().getAttribute('data-folded')).toBeNull();
     expect(screen.queryByTestId('first-run-checklist-continue')).toBeNull();
     expect(screen.queryByTestId('first-run-checklist-fold')).toBeNull();
+  });
+});
+
+describe('the done control counts what the progress line counts: required and optional apart', () => {
+  const SETUP_APP = { name: 'setup', _packageId: 'com.objectstack.setup', navigation: [] };
+  const OWN_APP = {
+    name: 'crm',
+    _packageId: 'app.crm',
+    navigation: [{ id: 'n_deal', type: 'object', objectName: 'deal' }],
+  };
+
+  it('managed, two optional rows done: the progress counts the required rows, the control names both counts', async () => {
+    AUTH.getAuthConfig.mockResolvedValue({ features: { cloudManaged: true } });
+    // Done: language and country, timezone, the first app (required); mail
+    // that delivers and a first record (optional). Left: name, currency, invite.
+    localizationValues = { ...freshLocalization(), locale: resolved('zh-CN', 'tenant'), default_country: resolved('CN', 'tenant'), timezone: resolved('Asia/Shanghai', 'tenant') };
+    mailValues = { provider: resolved('smtp', 'global'), smtp_host: resolved('mx', 'global'), from_email: resolved('a@b.co', 'global') };
+    SHELL.apps = [SETUP_APP, OWN_APP];
+    SHELL.adapter = { find: vi.fn(async (object: string) => ({ data: object === 'sys_activity' ? [{ id: 'act_1' }] : [] })) };
+    renderChecklist(ADMIN);
+    await waitFor(() => expect(screen.getByTestId('first-run-checklist-progress').textContent).toBe('3 of 6 done'));
+    await waitFor(() =>
+      expect(screen.getByTestId('first-run-checklist-toggle-done').textContent).toBe('Show completed (3 required · 2 optional)'),
+    );
+    cleanup();
+
+    renderChecklist(ADMIN, 'zh');
+    await waitFor(() =>
+      expect(screen.getByTestId('first-run-checklist-toggle-done').textContent).toBe('显示已完成的项（必做 3 · 可选 2）'),
+    );
+  });
+
+  it('CONTROL: self-hosted, no optional row done: the control names one count, the progress line\'s', async () => {
+    localizationValues = { ...freshLocalization(), locale: resolved('zh-CN', 'tenant'), default_country: resolved('CN', 'tenant'), timezone: resolved('Asia/Shanghai', 'tenant') };
+    renderChecklist(ADMIN);
+    await screen.findByTestId('first-run-checklist-row-invite');
+    expect(screen.getByTestId('first-run-checklist-progress').textContent).toBe('2 of 5 done');
+    expect(screen.getByTestId('first-run-checklist-toggle-done').textContent).toBe('Show completed (2)');
+  });
+});
+
+describe('above the page, two rows left or fewer: the card folds to one line', () => {
+  const card = () => screen.getByTestId('first-run-checklist');
+  const DESCRIPTION = 'What to set up before your colleagues start. Every item can be changed later in Setup.';
+  /** Every row done but the currency; mail delivers. */
+  function onlyCurrencyLeft() {
+    localizationValues = { ...freshLocalization(), locale: resolved('zh-CN', 'tenant'), default_country: resolved('CN', 'tenant'), timezone: resolved('Asia/Shanghai', 'tenant') };
+    mailValues = { provider: resolved('smtp', 'global'), smtp_host: resolved('mx', 'global'), from_email: resolved('a@b.co', 'global') };
+    AUTH.activeOrganization = { id: 'org_1', name: 'Acme' };
+    AUTH.getMembers.mockResolvedValue([{ id: 'm_1' }, { id: 'm_2' }]);
+  }
+
+  it('one row left: title, progress, the row with its Set and the close button; no description, no done rows, no control', async () => {
+    onlyCurrencyLeft();
+    renderChecklist(ADMIN);
+    await waitFor(() => expect(screen.getByTestId('first-run-checklist-progress').textContent).toBe('4 of 5 done'));
+    expect(card().getAttribute('data-one-line')).toBe('true');
+    expect(within(card()).getByText('Get your system ready')).toBeTruthy();
+    expect(within(card()).getAllByRole('listitem').map((li) => li.getAttribute('data-testid'))).toEqual([
+      'first-run-checklist-row-currency',
+    ]);
+    expect(within(row('currency')).getByText('Default currency')).toBeTruthy();
+    expect(screen.getByTestId('first-run-checklist-set-currency').textContent).toBe('Set');
+    expect(screen.getByTestId('first-run-checklist-dismiss')).toBeTruthy();
+    expect(screen.queryByText(DESCRIPTION)).toBeNull();
+    expect(screen.queryByTestId('first-run-checklist-toggle-done')).toBeNull();
+    expect(screen.queryByText('Not set yet, so amounts are shown without a currency symbol.')).toBeNull();
+  });
+
+  it("the row's Set opens the full card with that row's editor; Cancel folds it back to the line", async () => {
+    onlyCurrencyLeft();
+    renderChecklist(ADMIN);
+    fireEvent.click(await screen.findByTestId('first-run-checklist-set-currency'));
+    expect(card().getAttribute('data-one-line')).toBeNull();
+    expect(screen.getByText(DESCRIPTION)).toBeTruthy();
+    expect(screen.getByTestId('first-run-checklist-editor-currency')).toBeTruthy();
+    expect(puts()).toHaveLength(0);
+
+    fireEvent.click(screen.getByTestId('first-run-checklist-cancel-currency'));
+    expect(card().getAttribute('data-one-line')).toBe('true');
+    expect(screen.queryByTestId('first-run-checklist-editor-currency')).toBeNull();
+  });
+
+  it('two rows left: a row that links opens its page from the line, and the close button hides it', async () => {
+    onlyCurrencyLeft();
+    AUTH.activeOrganization = { id: 'org_1', name: 'Default Organization' };
+    renderChecklist(ADMIN);
+    await waitFor(() => expect(screen.getByTestId('first-run-checklist-progress').textContent).toBe('3 of 5 done'));
+    expect(card().getAttribute('data-one-line')).toBe('true');
+    const link = screen.getByTestId('first-run-checklist-link-organization_name');
+    expect(link.getAttribute('href')).toBe('/apps/setup/sys_organization/record/org_1');
+    expect(link.textContent).toBe('Set');
+    fireEvent.click(screen.getByTestId('first-run-checklist-dismiss'));
+    expect(screen.queryByTestId('first-run-checklist')).toBeNull();
+  });
+
+  it('CONTROL: three rows left, the card is drawn whole as before', async () => {
+    onlyCurrencyLeft();
+    AUTH.activeOrganization = { id: 'org_1', name: 'Default Organization' };
+    AUTH.getMembers.mockResolvedValue([{ id: 'm_1' }]);
+    renderChecklist(ADMIN);
+    await waitFor(() => expect(screen.getByTestId('first-run-checklist-progress').textContent).toBe('2 of 5 done'));
+    expect(card().getAttribute('data-one-line')).toBeNull();
+    expect(screen.getByText(DESCRIPTION)).toBeTruthy();
+    expect(screen.getByTestId('first-run-checklist-toggle-done')).toBeTruthy();
+  });
+
+  it('CONTROL: on a phone the card keeps its own fold, with no one-line row list', async () => {
+    onlyCurrencyLeft();
+    renderChecklist(ADMIN, 'en', 'afterApps');
+    await waitFor(() => expect(screen.getByTestId('first-run-checklist-progress').textContent).toBe('4 of 5 done'));
+    expect(card().getAttribute('data-folded')).toBe('true');
+    expect(card().getAttribute('data-one-line')).toBeNull();
+    expect(screen.getByTestId('first-run-checklist-continue')).toBeTruthy();
+  });
+
+  it('zh: the line reads in the reader language', async () => {
+    onlyCurrencyLeft();
+    renderChecklist(ADMIN, 'zh');
+    expect((await screen.findByTestId('first-run-checklist-set-currency')).textContent).toBe('设置');
+    expect(within(card()).getByText('完成初始设置')).toBeTruthy();
+  });
+});
+
+describe("the checklist's copy names the Setup app by its own label in each language, never the English word", () => {
+  // The Setup app's label per pack (platform-objects' app translations).
+  const SETUP_LABEL: Record<string, string> = {
+    ar: 'الإعداد',
+    es: 'Configuración',
+    fr: 'Configuration',
+    ja: 'セットアップ',
+    ko: '설정',
+    'pt-BR': 'Configuração',
+    ru: 'Настройка',
+    'zh-Hans': '系统设置',
+    'zh-Hant': '系統設定',
+  };
+  const KEYS = ['description', 'aiProvider.doneSettings', 'connectAssistant.todo'];
+  const at = (pack: unknown, key: string) =>
+    `console.firstRunChecklist.${key}`
+      .split('.')
+      .reduce<unknown>((node, k) => (node && typeof node === 'object' ? (node as Record<string, unknown>)[k] : undefined), pack);
+
+  it('every pack is covered: the ones whose label is Setup, and the rest', () => {
+    expect(Object.keys(builtInLocales).sort()).toEqual([...Object.keys(SETUP_LABEL), 'de', 'en'].sort());
+  });
+
+  it.each(Object.keys(SETUP_LABEL))('%s: the three strings carry its label and no "Setup"', (code) => {
+    const pack = builtInLocales[code as keyof typeof builtInLocales];
+    for (const key of KEYS) {
+      const value = at(pack, key);
+      expect(typeof value).toBe('string');
+      expect(value as string).toContain(SETUP_LABEL[code]);
+      expect(value as string).not.toMatch(/Setup/);
+    }
+  });
+
+  it('CONTROL: en and de keep "Setup", which is their label', () => {
+    for (const code of ['en', 'de'] as const) {
+      for (const key of KEYS) expect(at(builtInLocales[code], key) as string).toContain('Setup');
+    }
   });
 });

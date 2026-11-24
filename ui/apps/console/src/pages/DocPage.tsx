@@ -8,17 +8,20 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, Navigate, useHref, useLocation, useNavigate, useParams } from 'react-router-dom';
-import { AlertCircle, ChevronDown, FileQuestion, Layers, Loader2, Menu } from 'lucide-react';
+import { AlertCircle, ChevronDown, ChevronRight, FileQuestion, Layers, Loader2, Menu } from 'lucide-react';
 import { useAdapter } from '@object-ui/app-shell';
-import { MarkdownRenderer, extractToc } from '@object-ui/plugin-markdown';
+import { MarkdownRenderer, MermaidEnlargeContext, extractToc } from '@object-ui/plugin-markdown';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { rewriteDocLinks } from './doc-links';
 import { conflictCandidates, readsByNameAfter } from './doc-address';
 import { DocShell } from './DocShell';
-import { BookSidebar } from './BookSidebar';
+import { useAppDocsBackTo } from './useAppDocsBackTo';
+import { DocsNav, type DocsNavBook } from './DocsNav';
 import { DocRefusal } from './BookPage';
 import { useBookData } from './use-book-data';
-import { resolveBookTree, bookSlug, bookNamedBy, homeBook, labelUncategorized, type ResolvedBook } from './book-nav';
+import { useActiveHeading } from './useActiveHeading';
+import { articleNeighbours, bookHoldsArticle, type BookArticle } from './docs-reading';
+import { resolveBookTree, bookSlug, bookNamedBy, homeBook, labelUncategorized, pkgOfBook, type ResolvedBook } from './book-nav';
 
 interface DocItem {
   name: string;
@@ -244,15 +247,61 @@ export default function DocPage() {
       : null;
   }, [books, authoredBooks, allDocs, slug, uncategorizedLabel]);
   const docHref = useCallback((docName: string) => `${base}/${slug}/${docName}`, [base, slug]);
+  // objectstack#35424 — the docs column lists every book of the package the
+  // reader is in: the current book's package, else the route's app package.
+  const packageBooks = useMemo<DocsNavBook[]>(() => {
+    const current = books.find((b) => bookSlug(b) === slug);
+    const pkg = current ? pkgOfBook(current) : appName;
+    if (!pkg) return [];
+    return books
+      .filter((b) => pkgOfBook(b) === pkg)
+      .map((b) => ({
+        slug: bookSlug(b),
+        book: labelUncategorized(resolveBookTree(b, allDocs, undefined, authoredBooks), uncategorizedLabel),
+      }));
+  }, [books, authoredBooks, allDocs, slug, appName, uncategorizedLabel]);
+  const neighbours = useMemo(
+    () => (resolvedBook ? articleNeighbours(resolvedBook, name) : { previous: null, next: null }),
+    [resolvedBook, name],
+  );
+  const bookDocHref = useCallback((bookSegment: string, docName: string) => `${base}/${bookSegment}/${docName}`, [base]);
+  // The app the reader returns to (its docs column's back link).
+  const backTo = useAppDocsBackTo();
+  const tocIds = useMemo(() => toc.map((item) => item.id), [toc]);
+  const activeHeading = useActiveHeading(state === 'ready' ? tocIds : []);
+  const enlargeText = useMemo(
+    () => ({
+      enlarge: t('help.enlargeDiagram', { defaultValue: 'Enlarge' }),
+      title: t('help.diagram', { defaultValue: 'Diagram' }),
+    }),
+    [t],
+  );
   // A `:slug` segment that is a book's NAME rather than its slug — what a
   // `{ type: 'doc', book, doc }` navigation entry links to (objectui#11197) — is
   // redirected to the canonical `bookSlug` URL, so the page reads in that book's
   // context. Only a segment NO book answers by slug is consulted, so every
   // reader URL that finds its book today keeps its answer.
   const namedBook = useMemo(() => (slug && !resolvedBook ? bookNamedBy(slug, books) : null), [slug, resolvedBook, books]);
+  // objectstack#35424 — a reader URL whose book does not hold its doc (a
+  // hand-typed `/docs/BOOK_A/DOC_OF_BOOK_B`) reads in the doc's own book: it is
+  // redirected there once the doc has loaded, so the column, the path above
+  // the article and the pager all describe the book the article is in. With
+  // no book that holds it, the page draws no pager (see below).
+  const inBook = resolvedBook ? bookHoldsArticle(resolvedBook, name) : false;
+  const ownBook = useMemo(() => {
+    if (state !== 'ready' || doc?.name !== name || !name || !resolvedBook || inBook) return null;
+    const home = homeBook(name, books, allDocs, appName);
+    if (!home || bookSlug(home) === slug) return null;
+    const resolved = resolveBookTree(home, allDocs, undefined, authoredBooks);
+    return bookHoldsArticle(resolved, name) ? home : null;
+  }, [state, doc, name, resolvedBook, inBook, books, allDocs, authoredBooks, appName, slug]);
 
   if (namedBook && name) {
     return <Navigate to={{ pathname: `${base}/${bookSlug(namedBook)}/${name}`, hash }} replace />;
+  }
+
+  if (ownBook && name) {
+    return <Navigate to={{ pathname: `${base}/${bookSlug(ownBook)}/${name}`, hash }} replace />;
   }
 
   if (state === 'loading') {
@@ -265,7 +314,7 @@ export default function DocPage() {
 
   if (state === 'missing') {
     return (
-      <DocShell breadcrumb={name}>
+      <DocShell>
         <div className="mx-auto flex max-w-3xl flex-col items-center gap-3 p-10 text-center">
           <FileQuestion className="h-10 w-10 text-muted-foreground" />
           <h1 className="text-lg font-semibold">Documentation not found</h1>
@@ -279,12 +328,12 @@ export default function DocPage() {
   }
 
   if (state === 'refused') {
-    return <DocRefusal name={name} message={errorMessage} />;
+    return <DocRefusal message={errorMessage} />;
   }
 
   if (state === 'conflict') {
     return (
-      <DocShell breadcrumb={name}>
+      <DocShell>
         <div className="mx-auto flex max-w-3xl flex-col items-center gap-3 p-10 text-center">
           <Layers className="h-10 w-10 text-muted-foreground" />
           <h1 className="text-lg font-semibold">
@@ -325,7 +374,7 @@ export default function DocPage() {
 
   if (state === 'error') {
     return (
-      <DocShell breadcrumb={name}>
+      <DocShell>
         <div className="mx-auto flex max-w-3xl flex-col items-center gap-3 p-10 text-center">
           <AlertCircle className="h-10 w-10 text-destructive" />
           <h1 className="text-lg font-semibold">Failed to load documentation</h1>
@@ -335,62 +384,169 @@ export default function DocPage() {
     );
   }
 
+  const docsNav =
+    packageBooks.length > 0 ? (
+      <DocsNav
+        books={packageBooks}
+        currentSlug={slug}
+        activeDoc={name}
+        docHref={bookDocHref}
+        backTo={backTo}
+        allDocsHref="/docs"
+      />
+    ) : null;
+  const docsLabel = t('help.documentation', { defaultValue: 'Documentation' });
+
   return (
-    <DocShell breadcrumb={doc?.label ?? name}>
-      {/* Narrow screens: the persistent left sidebar is hidden, so the book
-        * nav collapses into a disclosure above the content instead of vanishing. */}
-      {resolvedBook ? (
-        <details className="group mx-auto max-w-6xl px-4 pt-4 sm:px-6 lg:hidden">
-          <summary className="flex cursor-pointer list-none items-center gap-2 rounded-md border bg-muted/30 px-3 py-2 text-sm font-medium [&::-webkit-details-marker]:hidden">
-            <Menu className="h-4 w-4 text-muted-foreground" />
-            <span className="truncate">{resolvedBook.label ?? 'Contents'}</span>
-            <ChevronDown className="ml-auto h-4 w-4 text-muted-foreground transition-transform group-open:rotate-180" />
-          </summary>
-          <div className="mt-2 rounded-md border p-3">
-            <BookSidebar book={resolvedBook} activeDoc={name} docHref={docHref} />
+    <DocShell backLink={!docsNav}>
+      {/* objectstack#35424 — the docs column is the page's one navigation.
+        * Inside an app it sits where the app menu would, full height beside
+        * the article; on narrow screens it folds into a disclosure above it. */}
+      <div className="flex min-h-full" data-testid="doc-reader">
+        {docsNav ? (
+          <aside className="hidden w-72 shrink-0 border-r lg:block">
+            <nav
+              aria-label={t('help.docsNavigation', { defaultValue: 'Documentation navigation' })}
+              className={`sticky overflow-auto px-4 py-6 ${appName ? 'top-0 max-h-[calc(100svh-3rem)]' : 'top-12 max-h-[calc(100svh-3rem)]'}`}
+            >
+              {docsNav}
+            </nav>
+          </aside>
+        ) : null}
+        <div className="min-w-0 flex-1">
+          {docsNav ? (
+            <details className="group mx-4 mt-4 sm:mx-6 lg:hidden">
+              <summary className="flex cursor-pointer list-none items-center gap-2 rounded-md border bg-muted/30 px-3 py-2 text-sm font-medium [&::-webkit-details-marker]:hidden">
+                <Menu className="h-4 w-4 text-muted-foreground" />
+                <span className="truncate">{resolvedBook?.label ?? docsLabel}</span>
+                <ChevronDown className="ml-auto h-4 w-4 text-muted-foreground transition-transform group-open:rotate-180" />
+              </summary>
+              <div className="mt-2 rounded-md border p-3">{docsNav}</div>
+            </details>
+          ) : null}
+          <div className="mx-auto flex max-w-[1080px] justify-center gap-10 px-4 py-6 sm:px-8 lg:py-8">
+            <div className="min-w-0 max-w-[720px] flex-1">
+              <nav
+                aria-label={t('help.docsBreadcrumb', { defaultValue: 'Documentation path' })}
+                className="mb-3 flex flex-wrap items-center gap-1 text-sm text-muted-foreground"
+                data-testid="doc-breadcrumb"
+              >
+                <Link to={base} className="hover:text-foreground">
+                  {docsLabel}
+                </Link>
+                {resolvedBook ? (
+                  <>
+                    <ChevronRight className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                    <Link to={`${base}/${slug}`} className="hover:text-foreground">
+                      {resolvedBook.label ?? resolvedBook.name}
+                    </Link>
+                  </>
+                ) : null}
+              </nav>
+              <article
+                ref={articleRef}
+                className="[&_h1]:scroll-mt-24 [&_h2]:scroll-mt-24 [&_h3]:scroll-mt-24"
+                onClick={onContentClick}
+              >
+                <MermaidEnlargeContext.Provider value={enlargeText}>
+                  <MarkdownRenderer
+                    schema={{
+                      type: 'markdown',
+                      className: '!text-[15px]',
+                      content: rewriteDocLinks(doc?.content ?? '', docsHref),
+                    }}
+                  />
+                </MermaidEnlargeContext.Provider>
+              </article>
+              {resolvedBook && inBook ? (
+                <ArticlePager
+                  previous={neighbours.previous}
+                  next={neighbours.next}
+                  href={(article) => docHref(article.doc)}
+                />
+              ) : null}
+            </div>
+            {toc.length >= 3 ? (
+              <aside className="hidden w-56 shrink-0 xl:block">
+                <nav aria-label={tocLabel} className="sticky top-6 max-h-[calc(100svh-6rem)] overflow-auto">
+                  <div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    {tocLabel}
+                  </div>
+                  <ul className="border-l border-border text-sm">
+                    {toc.map((item) => {
+                      const current = item.id === activeHeading;
+                      return (
+                        <li key={item.id} style={{ paddingLeft: (item.depth - 2) * 12 }}>
+                          <a
+                            href={`#${item.id}`}
+                            onClick={(e) => onTocClick(e, item.id)}
+                            aria-current={current ? 'location' : undefined}
+                            className={`-ml-px block border-l-2 py-1 pl-3 ${
+                              current
+                                ? 'border-primary font-medium text-primary'
+                                : 'border-transparent text-muted-foreground hover:border-border hover:text-foreground'
+                            }`}
+                          >
+                            {item.text}
+                          </a>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </nav>
+              </aside>
+            ) : null}
           </div>
-        </details>
-      ) : null}
-      <div className={`mx-auto flex gap-8 p-4 sm:p-6 ${resolvedBook ? 'max-w-6xl' : 'max-w-5xl'}`}>
-        {resolvedBook ? (
-          <aside className="hidden w-56 shrink-0 lg:block">
-            <nav className="sticky top-20 max-h-[calc(100vh-6rem)] overflow-auto pr-1">
-              <BookSidebar book={resolvedBook} activeDoc={name} docHref={docHref} />
-            </nav>
-          </aside>
-        ) : null}
-        <article
-          ref={articleRef}
-          className="min-w-0 max-w-3xl flex-1 [&_h1]:scroll-mt-24 [&_h2]:scroll-mt-24 [&_h3]:scroll-mt-24"
-          onClick={onContentClick}
-        >
-          <MarkdownRenderer
-            schema={{ type: 'markdown', content: rewriteDocLinks(doc?.content ?? '', docsHref) }}
-          />
-        </article>
-        {toc.length >= 3 ? (
-          <aside className="hidden xl:block w-56 shrink-0">
-            <nav aria-label={tocLabel} className="sticky top-20 max-h-[calc(100vh-6rem)] overflow-auto">
-              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                {tocLabel}
-              </div>
-              <ul className="border-l border-border text-sm">
-                {toc.map((item) => (
-                  <li key={item.id} style={{ paddingLeft: (item.depth - 2) * 12 }}>
-                    <a
-                      href={`#${item.id}`}
-                      onClick={(e) => onTocClick(e, item.id)}
-                      className="-ml-px block border-l border-transparent py-0.5 pl-3 text-muted-foreground hover:border-primary hover:text-foreground"
-                    >
-                      {item.text}
-                    </a>
-                  </li>
-                ))}
-              </ul>
-            </nav>
-          </aside>
-        ) : null}
+        </div>
       </div>
     </DocShell>
+  );
+}
+
+/**
+ * The previous and next article of the book, at the article's end
+ * (objectstack#35424). At either end of the book the empty side says so
+ * instead of disappearing, so the two cards keep their places.
+ */
+function ArticlePager({
+  previous,
+  next,
+  href,
+}: {
+  previous: BookArticle | null;
+  next: BookArticle | null;
+  href: (article: BookArticle) => string;
+}) {
+  const { t } = useObjectTranslation();
+  const card = 'flex min-h-[4.5rem] flex-col justify-center gap-1 rounded-lg border px-4 py-3';
+  return (
+    <nav
+      aria-label={t('help.articlePager', { defaultValue: 'Previous and next article' })}
+      className="mt-12 grid gap-3 border-t pt-6 sm:grid-cols-2"
+      data-testid="doc-pager"
+    >
+      {previous ? (
+        <Link to={href(previous)} rel="prev" className={`${card} hover:bg-muted/50`} data-testid="doc-pager-previous">
+          <span className="text-xs text-muted-foreground">{t('help.previousArticle', { defaultValue: 'Previous' })}</span>
+          <span className="font-medium text-primary">← {previous.label}</span>
+        </Link>
+      ) : (
+        <div className={`${card} text-muted-foreground`} data-testid="doc-pager-first">
+          <span className="text-xs">{t('help.previousArticle', { defaultValue: 'Previous' })}</span>
+          <span className="text-sm">{t('help.firstInBook', { defaultValue: 'This is the first article in this book' })}</span>
+        </div>
+      )}
+      {next ? (
+        <Link to={href(next)} rel="next" className={`${card} items-end text-right hover:bg-muted/50`} data-testid="doc-pager-next">
+          <span className="text-xs text-muted-foreground">{t('help.nextArticle', { defaultValue: 'Next' })}</span>
+          <span className="font-medium text-primary">{next.label} →</span>
+        </Link>
+      ) : (
+        <div className={`${card} items-end text-right text-muted-foreground`} data-testid="doc-pager-last">
+          <span className="text-xs">{t('help.nextArticle', { defaultValue: 'Next' })}</span>
+          <span className="text-sm">{t('help.lastInBook', { defaultValue: 'This is the last article in this book' })}</span>
+        </div>
+      )}
+    </nav>
   );
 }

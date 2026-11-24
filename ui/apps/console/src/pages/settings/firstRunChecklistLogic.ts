@@ -161,6 +161,44 @@ export function checklistCompletion(
   return { done, total: required.length, complete: done === required.length };
 }
 
+/** The rows that are done, split the way the progress line counts them. */
+export interface ChecklistDoneCount {
+  /** Done rows the progress line counts ({@link checklistCompletion}'s `done`). */
+  required: number;
+  /** Done rows that are optional, which the progress line leaves out. */
+  optional: number;
+}
+
+/**
+ * How many of the rows shown are done, required and optional apart. The
+ * control that unfolds the done rows names this count: the progress line
+ * counts the required rows alone, so a bare total of every done row would
+ * read larger than the progress line once an optional row is done.
+ */
+export function checklistDoneCount(
+  rows: ReadonlyArray<{ id: string; done: boolean }>,
+  isOptional: (id: string) => boolean = isOptionalRow,
+): ChecklistDoneCount {
+  const done = rows.filter((row) => row.done);
+  const optional = done.filter((row) => isOptional(row.id)).length;
+  return { required: done.length - optional, optional };
+}
+
+/**
+ * The most rows still to do, required and optional alike, for which the
+ * checklist above the page folds to one line ({@link drawsOneLine}).
+ */
+export const ONE_LINE_ROWS_LEFT = 2;
+
+/**
+ * Whether the checklist above the page draws as one line: few enough rows are
+ * left to do that each fits beside the title as its name and a Set button.
+ */
+export function drawsOneLine(rows: ReadonlyArray<{ done: boolean }>): boolean {
+  const left = rows.filter((row) => !row.done).length;
+  return left > 0 && left <= ONE_LINE_ROWS_LEFT;
+}
+
 /**
  * Where the "this administrator hid the checklist" record lives, per workspace
  * and per user: `os:first-run-checklist:<orgId>:<userId>`.

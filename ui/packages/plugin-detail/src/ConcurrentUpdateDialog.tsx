@@ -174,7 +174,7 @@ export const ConcurrentUpdateDialog: React.FC<ConcurrentUpdateDialogProps> = ({
               <AlertDialogTitle>{t('detail.concurrentUpdateTitle')}</AlertDialogTitle>
               <AlertDialogDescription className="mt-1">
                 {beforeField}
-                <strong className="font-semibold">{fieldLabel}</strong>
+                <strong className="font-medium">{fieldLabel}</strong>
                 {afterField}
               </AlertDialogDescription>
             </div>
@@ -184,7 +184,7 @@ export const ConcurrentUpdateDialog: React.FC<ConcurrentUpdateDialogProps> = ({
         {fieldRows ? (
           <div className="space-y-2 text-sm">
             {(racerUpdatedBy || racerUpdatedAt) && (
-              <div className="text-[11px] text-muted-foreground">
+              <div className="text-xs text-muted-foreground">
                 {racerUpdatedBy && (
                   <span>{t('detail.concurrentUpdateUpdatedBy', { name: racerUpdatedBy })}</span>
                 )}
@@ -231,7 +231,7 @@ export const ConcurrentUpdateDialog: React.FC<ConcurrentUpdateDialogProps> = ({
                 {t('detail.concurrentUpdateCurrentValue')}
               </div>
               {(racerUpdatedBy || racerUpdatedAt) && (
-                <div className="text-[11px] text-muted-foreground">
+                <div className="text-xs text-muted-foreground">
                   {racerUpdatedBy && (
                     <span>{t('detail.concurrentUpdateUpdatedBy', { name: racerUpdatedBy })}</span>
                   )}

@@ -394,7 +394,7 @@ export class NamespacesAndClaimsFacet {
   /**
    * The cold-boot half of the rule (`security-catalog-namespace.ts`, "The cold
    * boot"; maintainer ruling letter A on #22307, record 6063176077): every
-   * package-held position and permission-set name the environment catalog also
+   * package-held position, permission-set and capability name the environment catalog also
    * holds, as the conflicts {@link SecurityCatalogNameConflictError} reports —
    * the package that declares the name as the incoming side, the environment
    * catalog as the holder. Read-only: it records nothing and refuses nothing;
@@ -466,12 +466,12 @@ export class NamespacesAndClaimsFacet {
   }
 
   /**
-   * Every position and permission-set name a package holds, with its holders —
+   * Every position, permission-set and capability name a package holds, with its holders —
    * the package half of {@link environmentHeldSecurityCatalogConflicts}, and the
    * reading {@link findPackageHeldSecurityCatalogNames} exports.
    *
    * The candidate names are every composite slot's name and every install
-   * claim of the two types the environment catalog can hold
+   * claim of the types the environment catalog can hold
    * ({@link ENVIRONMENT_HELD_SECURITY_CATALOG_TYPES}); each one's holders are
    * {@link securityCatalogPackageHolders}'s answer, the one predicate. Built-in
    * names are skipped, as the cold boot skips them (see the method above).

@@ -2165,7 +2165,7 @@ describe('ColumnSummarySchema', () => {
   it('should accept all summary functions', () => {
     const functions = [
       'none', 'count', 'count_empty', 'count_filled', 'count_unique',
-      'percent_empty', 'percent_filled', 'sum', 'avg', 'min', 'max',
+      'percent_empty', 'percent_filled', 'count_true', 'count_false', 'sum', 'avg', 'min', 'max',
     ] as const;
 
     functions.forEach(fn => {

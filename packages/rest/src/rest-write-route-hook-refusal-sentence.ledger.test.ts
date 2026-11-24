@@ -65,6 +65,7 @@ import { mountAndRecordDirectRoutes } from './direct-mount-composition.js';
 import { REST_ROUTE_LEDGER } from './rest-route-ledger.js';
 import { sandboxFaultAnswer } from './error-response.js';
 import { isSandboxOwnFault } from '@objectstack/types';
+import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 
 const SENTENCE = 'Locked rows cannot be changed here.';
 const WRAPPER = `hook 'mz_guard' threw: Error: ${SENTENCE}`;
@@ -116,6 +117,12 @@ const RECORD_CURRENCY_FIELDS = {
     mz_amount: { type: 'currency', currencyConfig: { currencyMode: 'record', currencyField: 'mz_currency' } },
     mz_currency: { type: 'text', valueDomain: 'iso_4217_currency' },
     organization_id: { type: 'text' },
+};
+
+/** [ADR-0158 U7 R1] A quantity and its unit code column, for the unit code backfill door's row. */
+const UNIT_CODE_FIELDS = {
+    mz_uom: { type: 'text' },
+    mz_weight: { type: 'number', unitConfig: { unitMode: 'record', unitField: 'mz_uom', unitDimension: 'mass' } },
 };
 
 /** Reads the harness answers; every other protocol method rejects with the refusal. */
@@ -173,12 +180,25 @@ function boot(error: () => Error, protocol: Record<string, Fn> = {}): Booted {
     const engine = {
         transaction: async (fn: Fn) => fn({}),
         getConfigs: () => ({ [OBJECT]: { name: OBJECT, fields: { owner_id: { type: 'lookup', reference: 'sys_user' } } } }),
-        find: async (object: string) => (object === 'sys_user' ? [{ id: 'u2', banned: false }] : [{ id: 'r1', mz_amount: 5, organization_id: 'org_mz' }]),
+        find: async (object: string) => (object === 'sys_user'
+            ? [{ id: 'u2', banned: false }]
+            : [{ id: 'r1', mz_amount: 5, organization_id: 'org_mz', mz_uom: 'kg', mz_weight: 5 }]),
         // [#30675] The backfill reads the object's declaration: one record-mode
         // amount, and the `r1` row above holds it beside a blank code.
-        getObject: (name: string) => (name === OBJECT ? { name, fields: RECORD_CURRENCY_FIELDS } : undefined),
+        // [ADR-0158 U7 R1] And one quantity, whose unit the `r1` row stores as
+        // the free text `kg`, for the unit code backfill door.
+        getObject: (name: string) => (name === OBJECT ? { name, fields: { ...RECORD_CURRENCY_FIELDS, ...UNIT_CODE_FIELDS } } : undefined),
         count: async () => 0,
-        update: async () => { calls.push('engine.update'); throw error(); },
+        // Opened by the engine's own dispatch predicate, so a door that hands
+        // `update` a shape `ObjectQL.update` refuses reds here, not in production.
+        update: async (_object: string, data: unknown, options: unknown) => {
+            assertEngineUpdateDispatch(data as any, options as any);
+            calls.push('engine.update');
+            throw error();
+        },
+        // [#35402] The Change Owner doors read the object's definition to ask
+        // whether it offers the action: an owned object with the switch unset.
+        getSchema: (name: string) => (name === OBJECT ? { name, fields: { owner_id: { type: 'lookup', reference: 'sys_user' } } } : undefined),
         // [#30237] The recycle bin's doors call the engine's own verbs.
         listRecycleBin: async () => ({ object: OBJECT, entries: [], hasMore: false }),
         restore: async () => { calls.push('engine.restore'); throw error(); },
@@ -336,6 +356,12 @@ const ANSWERS_THE_SENTENCE: Record<string, Driver> = {
         body: { object: OBJECT, field: 'mz_amount', code: 'USD', apply: true },
         answer: (res) => res.body?.data?.failures?.[0]?.error,
     },
+    // [ADR-0158 U7 R1] Its twin, the same way: the hook refuses the row's unit code write.
+    'POST /api/v1/meta/_migrate-unit-codes': {
+        called: 'engine.update',
+        body: { object: OBJECT, field: 'mz_uom', mapping: { kg: 'KGM' }, apply: true },
+        answer: (res) => res.body?.data?.failures?.[0]?.error,
+    },
     'PUT /api/v1/meta/:type/:name': { called: 'protocol.saveMetaItem', body: { name: 'name_1', label: 'X' } },
     'DELETE /api/v1/meta/:type/:name': { called: 'protocol.deleteMetaItem' },
     'POST /api/v1/meta/:type/:name/publish': { called: 'protocol.publishMetaItem' },
@@ -401,11 +427,21 @@ const ANSWERS_THE_SENTENCE: Record<string, Driver> = {
         answer: (res) => res.body?.data?.results?.[0]?.error?.message,
     },
     'POST /api/v1/security/explain': { called: 'security.explain', body: { object: OBJECT, operation: 'read' } },
+    // A read over POST, like explain: the caller's read of the ids is the one awaited.
+    'POST /api/v1/approvals/records/:object/locks': { called: 'approvals.getRecordLocks', body: { recordIds: ['r1'] } },
     // [#30205] The hand-over answers per row, inside its `200`: a refused row's
     // entry in `failures` carries the `/data` door's sentence for that throw.
     'POST /api/v1/security/users/:id/assigned-work/transfer': {
         called: 'engine.update', body: { toUserId: 'u2' },
         answer: (res) => res.body?.data?.objects?.[0]?.failures?.[0]?.message,
+    },
+    // [#35402] The Change Owner doors write through the engine's by-id
+    // update: the single door answers the `/data` door's sentence in its
+    // refusal, the bulk one inside its `200`, in the refused row's entry.
+    'POST /api/v1/data/:object/:id/change-owner': { called: 'engine.update', body: { ownerId: 'u2' } },
+    'POST /api/v1/data/:object/change-owner': {
+        called: 'engine.update', body: { ids: ['r1'], ownerId: 'u2' },
+        answer: (res) => res.body?.data?.failures?.[0]?.message,
     },
     // [#30237] The recycle bin's write doors: the engine's verb is what the refusal reaches.
     'POST /api/v1/data/:object/recycle-bin/:entryId/restore': { called: 'engine.restore' },

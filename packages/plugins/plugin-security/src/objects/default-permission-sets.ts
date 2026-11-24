@@ -399,6 +399,16 @@ const baseDefaultPermissionSets: PermissionSet[] = [
         allowDelete: true,
         viewAllRecords: true,
         modifyAllRecords: true,
+        // [Field-axis split, ruling of record 6912661484, letter A] The
+        // read-only "every field" vote, said explicitly. Today it duplicates
+        // the vote `viewAllRecords`/`modifyAllRecords` already cast on every
+        // field (`superuserFieldVote`, `@objectstack/core`), so nothing
+        // answers differently; it is what keeps an organization administrator
+        // reading every field once those two bits stop voting on fields. The
+        // explicit entries below carry no super-user bit and so no field vote
+        // either: an explicit entry is the set's whole answer for its object.
+        // `deriveWallLessOrgAdmin` drops it with the two bypass bits.
+        viewAllFields: true,
         // [#3544] The super-user bits do not imply export.
         //
         // [#8681] …and this set no longer GRANTS it either — read the twin
@@ -446,6 +456,19 @@ const baseDefaultPermissionSets: PermissionSet[] = [
       // nothing, and an admin-only delete would be the admin management the
       // ruling leaves out.
       sys_personal_view: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: false },
+      // [ADR-0158 Open items 2 and 11] The organization's units of measure:
+      // created, relabelled, re-rated and retired here, never deleted.
+      // Retiring is the delete, and a removed row would free its code to be
+      // created again with another meaning, so the effective map offers no
+      // delete, and the engine refuses a direct one in every context
+      // (`ERR_UNIT_DELETE_REFUSED`, `@objectstack/objectql`); only the
+      // organization's own delete removes its units (#35812). WITHOUT the
+      // superuser bits: `modifyAllRecords` grants delete on its own, and the
+      // derived no-bypass variant inherits this line. Units carry no owner
+      // scope for an administrator (the owner-only floor binds `org_member`),
+      // so an administrator edits every unit of their organization without
+      // them.
+      sys_unit: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: false },
     },
     // `manage_mailboxes` (ruling 6116489638, Q4 → A): an organization
     // administrator reads its organization's mailboxes and their unassociated
@@ -897,6 +920,22 @@ const baseDefaultPermissionSets: PermissionSet[] = [
       // `sys_approval_action` and `sys_approval_approver` are not named. An
       // external member resolves `external_default` and gets no such line.
       sys_approval_request: { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false },
+      // [ADR-0158 U3, the owning seat's settlement under U3] The organization's
+      // own units of measure, READ only, so the label of a quantity's unit
+      // displays to every member who reads the quantity. A new read grant on
+      // this baseline, ruled for this object alone: `sys_exchange_rate`'s
+      // posture (no member line at all) is deliberately not copied.
+      //
+      // ⛔ No row policy: every row of this object is reference data of the
+      // member's own organization, and Layer 0, the tenant wall (ADR-0095 D1),
+      // already confines a read to it. ⛔ No write bit (ADR-0158 Open item 2):
+      // organization administrators create, edit and retire units through
+      // `organization_admin`'s wildcard grant; a unit's ratio is an admin act
+      // (L1). No `allowDelete` either way: the object serves no delete, since
+      // retiring is its delete (Open item 11), and this set is anchor-safe
+      // (ADR-0090 D5). An external member resolves `external_default` and gets
+      // no such line.
+      sys_unit: { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false },
     },
     // [#21237] The identity object's `Admin` group is admin-review data, not a
     // staff directory: `sys_user_org_members` below opens every org peer's row,
@@ -1705,14 +1744,16 @@ const baseDefaultPermissionSets: PermissionSet[] = [
 /**
  * [ADR-0105 D4] Derive the wall-less org-admin variant
  * ({@link ORGANIZATION_ADMIN_NO_BYPASS}) from `organization_admin` by dropping
- * the wildcard `viewAllRecords`/`modifyAllRecords` bits — everything else
+ * the wildcard `viewAllRecords`/`modifyAllRecords` bits, and with them the
+ * wildcard `viewAllFields` — everything else
  * (object grants, managed-write denies, the assignment-table overrides,
  * system permissions, the identity RLS carve-outs) is carried over verbatim.
  *
  * DERIVED, never a second literal: two hand-maintained copies of a
  * high-privilege set are a drift waiting to happen, and the drift would be a
- * silent privilege difference. The only intended delta is the superuser bits,
- * so the only thing this function may do is remove them.
+ * silent privilege difference. The only intended delta is the superuser bits
+ * (and the `viewAllFields` bit that rides with them on the wildcard), so the
+ * only thing this function may do is remove them.
  *
  * ⚠️ The copy is SHALLOW and taken at MODULE LOAD, so what it carries over is
  * the compile-time baseline only — the registry-driven managed-write denies
@@ -1735,8 +1776,15 @@ function deriveWallLessOrgAdmin(base: PermissionSet): PermissionSet {
   // superuser bits. Ownership, sharing and business RLS still apply; grant
   // `admin_full_access` (or an explicit set carrying the bits) when a
   // deployment-wide data superuser is genuinely intended.
+  //
+  // [Field-axis split, ruling of record 6912661484] `viewAllFields` leaves
+  // with the two bypass bits. The variant never held the field vote those
+  // bits cast, so keeping the parent's `viewAllFields` would hand its holders
+  // every field another set hides, a behaviour change the additive step must
+  // not make. It is a field vote, not a record bypass: dropping it is about
+  // keeping today's answer, not about the tenant wall.
   const objects: Record<string, any> = { ...(base.objects ?? {}) };
-  const { viewAllRecords: _v, modifyAllRecords: _m, ...wildcardWithoutBypass } =
+  const { viewAllRecords: _v, modifyAllRecords: _m, viewAllFields: _f, ...wildcardWithoutBypass } =
     (objects['*'] ?? {}) as Record<string, unknown>;
   objects['*'] = wildcardWithoutBypass;
   return PermissionSetSchema.parse({

@@ -244,7 +244,6 @@ describe('#4501 clause 1b — the abstain floor', () => {
 
     await selectWholePage();
 
-    expect(screen.queryByTestId('bulk-cross-page-banner')).not.toBeInTheDocument();
     expect(screen.queryByTestId('bulk-select-all-matching')).not.toBeInTheDocument();
     // The ordinary page selection is untouched — only the escalation is gone.
     expect(within(screen.getByTestId('bulk-actions-bar')).getByText(/10 selected/)).toBeInTheDocument();
@@ -270,7 +269,6 @@ describe('#4501 clause 1b — the abstain floor', () => {
     fireEvent.click(rowCheckboxes()[0]);
     await waitFor(() => expect(screen.getByTestId('bulk-actions-bar')).toBeInTheDocument());
     // Params ARE available here; the suppression is the `single` clause alone.
-    expect(screen.queryByTestId('bulk-cross-page-banner')).not.toBeInTheDocument();
     expect(screen.queryByTestId('bulk-select-all-matching')).not.toBeInTheDocument();
   });
 });
@@ -283,7 +281,7 @@ describe('#4501 clause 2 — the escalation resets when the host\'s query change
     await selectWholePage();
     fireEvent.click(await screen.findByTestId('bulk-select-all-matching'));
     await waitFor(() =>
-      expect(screen.getByTestId('bulk-cross-page-banner')).toHaveTextContent(/matching records are selected/),
+      expect(screen.getByTestId('bulk-selection-count')).toHaveAttribute('title', expect.stringMatching(/matching records are selected/)),
     );
 
     // The user changes the filter in the host's toolbar.
@@ -292,9 +290,9 @@ describe('#4501 clause 2 — the escalation resets when the host\'s query change
     await waitFor(() =>
       expect(screen.getByTestId('bulk-select-all-matching')).toBeInTheDocument(),
     );
-    expect(screen.getByTestId('bulk-cross-page-banner')).toHaveTextContent(
-      'All 10 on this page are selected.',
-    );
+    // objectstack#35678 — the bar counts the page again, with no all-matching title.
+    expect(screen.getByTestId('bulk-selection-count')).toHaveTextContent('10 selected');
+    expect(screen.getByTestId('bulk-selection-count')).not.toHaveAttribute('title');
   });
 
   it('survives a re-render that hands down an EQUAL query (a plain refetch)', async () => {
@@ -304,16 +302,14 @@ describe('#4501 clause 2 — the escalation resets when the host\'s query change
     await selectWholePage();
     fireEvent.click(await screen.findByTestId('bulk-select-all-matching'));
     await waitFor(() =>
-      expect(screen.getByTestId('bulk-cross-page-banner')).toHaveTextContent(/matching records are selected/),
+      expect(screen.getByTestId('bulk-selection-count')).toHaveAttribute('title', expect.stringMatching(/matching records are selected/)),
     );
 
     // A fresh object with identical content — what a host re-render produces.
     rerender(tree(ds, onBulkDelete, hostProps({ findParams: { ...HOST_PARAMS } })));
 
-    await waitFor(() => expect(screen.getByTestId('bulk-cross-page-banner')).toBeInTheDocument());
-    expect(screen.getByTestId('bulk-cross-page-banner')).toHaveTextContent(
-      /matching records are selected/,
-    );
+    await waitFor(() => expect(screen.getByTestId('bulk-selection-count')).toHaveAttribute('title'));
+    expect(screen.getByTestId('bulk-selection-count')).toHaveAttribute('title', expect.stringMatching(/matching records are selected/));
     expect(screen.queryByTestId('bulk-select-all-matching')).not.toBeInTheDocument();
   });
 });
@@ -369,9 +365,10 @@ describe('#4501 must-not-change — the internal-loader path', () => {
 
     await selectWholePage();
     fireEvent.click(await screen.findByTestId('bulk-select-all-matching'));
-    // objectstack#28552 — the banner names the number the fan-out delivers,
-    // read from the one constant both sides read.
-    expect(screen.getByTestId('bulk-cross-page-banner')).toHaveTextContent(
+    // objectstack#28552 — the count chip's title names the number the fan-out
+    // delivers, read from the one constant both sides read.
+    expect(screen.getByTestId('bulk-selection-count')).toHaveAttribute(
+      'title',
       en.grid.bulkAllMatchingSelectedCapped
         .replace('{{cap}}', String(BULK_SELECT_ALL_MATCHING_CAP))
         .replace('{{total}}', String(BIG)),

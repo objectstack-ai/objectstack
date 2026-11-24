@@ -1,14 +1,12 @@
 ---
 name: objectstack-i18n
 description: >
-  Author ObjectStack translation bundles — object/field labels, view text,
-  app navigation strings, automation messages — and configure locale
-  fallback, coverage reporting, and the source layout. Use when the user is
-  adding `*.translation.ts` files, authoring a `translation` metadata item in
-  the Studio or through the metadata API, shipping a generated bundle from a
-  package or plugin, wiring a new locale, or resolving missing-translation
-  warnings. Do not use for general i18n library questions unrelated to
-  ObjectStack bundles.
+  Translate an ObjectStack app, in a project or through MCP: object and field
+  labels, select options, view, navigation and dashboard text, automation
+  messages; add a locale, and find and fill missing keys (`os i18n check`). Use
+  when adding a language, relabelling for a locale, or editing
+  `*.translation.ts` or a `translation` metadata item. Not for i18n libraries
+  outside ObjectStack bundles, or `@object-ui/*` component strings (objectui).
 license: Apache-2.0
 compatibility: Requires @objectstack/spec 18.x (Zod v4 schemas)
 metadata:
@@ -48,9 +46,8 @@ export default defineStack({
 | `fallbackLocale` | `string` | optional | Fallback when translation missing |
 
 An app authored in English for Chinese users declares `defaultLocale: 'zh-CN', sourceLocale: 'en'`,
-not an English `defaultLocale`. ⚠️ Validation and refusal messages still read labels through `t()`, which
-falls back to `fallbackLocale`, else `defaultLocale`: without `fallbackLocale: 'en'` an `en` refusal names
-a field by its zh-CN row.
+not an English `defaultLocale`. Validation, delete-restriction and permission-denial messages name fields
+and objects in the request's language, as label serving does: an `en` request reads the inline label.
 `sourceLanguage`, `authoringLocale` and `authoringLanguage` are refused, each naming `sourceLocale`.
 
 ---
@@ -394,7 +391,7 @@ stack config carries `translations` or `i18n` (kernel bootstrap is
 ## Server-Composed User Text (`userMessage`)
 
 Text the server addresses to the end user — `userMessage` on an error envelope, a save /
-publish advisory or a 422 issue — comes back in the REQUEST's locale, composed where it is
+publish advisory, a 422 or `probes` issue — comes back in the REQUEST's locale, composed where it is
 produced; a client renders it as received.
 
 - **Platform-composed** text follows one ladder over the platform locale table

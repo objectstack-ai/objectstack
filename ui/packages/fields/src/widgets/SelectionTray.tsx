@@ -97,7 +97,7 @@ export function SelectionTray({
               <span
                 key={String(id)}
                 data-testid="selection-chip"
-                className="inline-flex items-center gap-1.5 rounded-full border bg-background py-0.5 pl-0.5 pr-1.5 text-sm"
+                className="inline-flex items-center gap-1.5 rounded-md border bg-background py-0.5 pl-0.5 pr-1.5 text-sm"
               >
                 <Avatar className="size-6 shrink-0">
                   {avatarUrl && <AvatarImage src={avatarUrl} alt={name} />}

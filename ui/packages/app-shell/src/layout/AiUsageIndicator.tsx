@@ -244,7 +244,7 @@ export function AiUsageIndicator({ apiBase, enabled = true, className }: AiUsage
         </Button>
       </PopoverTrigger>
       <PopoverContent align="end" className="w-64 p-3" data-testid="ai-usage-popover">
-        <div className="mb-2 text-xs font-semibold text-foreground/80">
+        <div className="mb-2 text-xs font-medium text-foreground/80">
           {t('console.ai.usage.title', { defaultValue: 'AI usage' })}
         </div>
         <div className="flex items-start gap-2.5">

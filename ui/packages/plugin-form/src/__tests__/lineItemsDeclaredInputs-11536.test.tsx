@@ -159,6 +159,13 @@ describe('record:line_items: each of the ten declared keys moves the panel (obje
   it('parentId saves a new line under that parent', async () => {
     const adapter = makeAdapter([]);
     mount(adapter, node({ parentId: 'p1' }));
+    // The grid draws no trailing entry row (objectstack#35507): Add the line.
+    const add = await waitFor(() => {
+      const el = document.body.querySelector('[data-testid="line-items-add"]') as HTMLButtonElement | null;
+      if (!el) throw new Error('grid not drawn yet');
+      return el;
+    });
+    fireEvent.click(add);
     const ops = await editAndSave(adapter);
     expect(ops).toEqual([{ object: 'po_line', action: 'create', data: { label: 'edited', amount: null, po: 'p1' } }]);
   });
@@ -268,17 +275,17 @@ describe('record:line_items: each of the ten declared keys moves the panel (obje
     mount(floored, node({ parentId: 'p1', minRows: 2 }));
     await linesDrawn();
     expect(buttonsLabelled('Remove row').map((b) => b.disabled)).toEqual([true, true]);
-    // It adds no blank lines to reach the number: two lines plus the entry row.
-    expect(lineInputs()).toHaveLength(3);
+    // It adds no blank lines to reach the number: the two lines, no more.
+    expect(lineInputs()).toHaveLength(2);
   });
 
-  it('maxRows disables Add line and Duplicate row and drops the entry row at that many lines; CONTROL: without it they stay', async () => {
+  it('maxRows disables Add line and Duplicate row at that many lines; CONTROL: without it they stay', async () => {
     const open = makeAdapter();
     mount(open, node({ parentId: 'p1' }));
     await linesDrawn();
     expect(buttonNamed('Add line')?.disabled).toBe(false);
     expect(buttonsLabelled('Duplicate row').map((b) => b.disabled)).toEqual([false, false]);
-    expect(lineInputs()).toHaveLength(3);
+    expect(lineInputs()).toHaveLength(2);
     cleanup();
 
     const capped = makeAdapter();

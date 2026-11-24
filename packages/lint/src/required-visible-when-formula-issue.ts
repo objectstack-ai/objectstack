@@ -2,42 +2,53 @@
 
 /**
  * [ADR-0113 D1, as amended] A `required` field whose own `visibleWhen` reads a
- * `formula` field draws a WARNING where it is authored.
+ * `formula` field THE FORM CANNOT COMPUTE draws a WARNING where it is
+ * authored.
  *
  * The server judges the requirement on every write from that predicate, with
  * each formula it reads computed over the record being written, the value a
- * read of that record would serve. Two things the author can see at build time:
+ * read of that record would serve. The form computes the object's formulas
+ * over the record being edited before it judges the predicate (`@object-ui/core`
+ * `planObjectFormulas`), so for a formula it can compute the form and the
+ * server judge the same value, and nothing is warned. They still part on a
+ * formula the form cannot compute, and that is the one arm warned:
  *
- *  - **The server's computed value decides.** The form computes the object's
- *    formulas over the record being edited before it judges the predicate
- *    (ADR-0113, as amended), so for a formula it can compute it judges what
- *    the server judges. A check that computes none, a wizard's final-submit
- *    check or a form whose data source serves no object schema, judges the
- *    formula value last read, none on a create, and can disagree with the
- *    server; the warning is the reminder that the server's value decides.
- *  - **Some formulas the write path cannot compute at all.** A formula that
- *    reads through a reference, calls `label()` or calls `current_user.can()`,
- *    or reads such a formula at any depth: the server cannot know the value a
- *    read serves, counts the predicate as SHOWN, and the field stays required
- *    on every write. The form cannot compute such a formula either: it shows
- *    the field and keeps it required. The engine's
- *    classifier is `unservableReason` in `@objectstack/objectql`
- *    (`engine-top-level.ts`); this reads the same three marks off the same
- *    sources (the member reader for reads and hops, `label(` as the engine's
- *    `planCallsOptionLabel` spells it, a `can` receiver call off the parse).
- *    A `can` call is the one the engine does compute on a write that picks a
- *    permission-gated option (that write resolves the permission map), so the
- *    message says the verdict for such a field can differ between writes.
- *    The engine's fourth mark, a formula that reads the acting user on a
- *    write with none (a system write, logged `no-acting-user`), draws no
- *    warning: such a formula is computed per writer on every write that has
- *    one, and the counts-as-shown fallback there is the strict direction.
+ *  - **The write path cannot compute it either.** A formula that reads through
+ *    a reference, calls `label()` or calls `current_user.can()`, or reads such
+ *    a formula at any depth: the server cannot know the value a read serves,
+ *    counts the predicate as SHOWN, and the field stays required on every
+ *    write, so the condition never waives it. The engine's classifier is
+ *    `unservableReason` in `@objectstack/objectql` (`engine-top-level.ts`);
+ *    this reads the same three marks off the same sources (the member reader
+ *    for reads and hops, `label(` as the engine's `planCallsOptionLabel`
+ *    spells it, a `can` receiver call off the parse). A `can` call is the one
+ *    the engine does compute on a write that picks a permission-gated option
+ *    (that write resolves the permission map), so the message says the
+ *    verdict for such a field can differ between writes.
+ *  - **Only the form cannot compute it.** A formula that reads `os`, or reads
+ *    such a formula: the server binds `os` from the acting user and the
+ *    tenant and computes it, so it can waive the field on a record where the
+ *    form, which binds no `os` for a formula, still shows it and keeps it
+ *    required. The
+ *    form's classifier is `planObjectFormulas` in `@object-ui/core`
+ *    (`formulaRecord.ts`); `os` is read as it reads it, any bare `os` root.
+ *
+ * Either way a form that computes the object's formulas shows the field and
+ * keeps it required; a check that holds no formula plan judges the formula
+ * value last read instead, so it can hide the field or not demand it.
+ *
+ * Two more formulas the form cannot compute draw nothing. One that reads the
+ * acting user is uncomputable only where nobody is signed in, and the
+ * engine's fourth mark answers that write the same way (no acting user, logged
+ * `no-acting-user`, counted as SHOWN); on every write that has a user both
+ * compute it. And one served without its expression (a field-level-security
+ * mask) is a per-reader fact the stack does not hold.
  *
  * A warning, never a refusal: the server accepts the field, and a predicate it
  * cannot evaluate keeps exactly the unconditional `required` the field had
  * before the amendment.
  */
-import { analyzeRelationshipTraversals, parseCelToAst } from '@objectstack/formula';
+import { analyzeRelationshipTraversals, collectCelRootIdentifiers, parseCelToAst } from '@objectstack/formula';
 import { REFERENCE_VALUE_TYPES } from '@objectstack/spec/data';
 
 type AnyRec = Record<string, unknown>;
@@ -98,10 +109,24 @@ function callsCan(source: string): boolean {
   }
 }
 
+/** Does a source read the `os` root, which the form does not bind for a formula? */
+function readsOs(source: string): boolean {
+  const roots = collectCelRootIdentifiers(source);
+  return roots.ok && roots.roots.includes('os');
+}
+
+/** Why the form cannot compute one formula, and whether the write path cannot either. */
+interface Unservable {
+  why: string;
+  /** The write path cannot compute it either, so the server counts the predicate as SHOWN. */
+  writePath: boolean;
+}
+
 /**
  * The warning for field `fname` of object `objectName`, or `undefined` when it
  * is not `required`, has no `visibleWhen`, or its `visibleWhen` reads no
- * formula field. `fields` are the object's fields by name, as served.
+ * formula field the form cannot compute. `fields` are the object's fields by
+ * name, as served.
  */
 export function requiredVisibleWhenFormulaIssue(
   objectName: string,
@@ -118,56 +143,75 @@ export function requiredVisibleWhenFormulaIssue(
   const formulas = [...predicateReads.all].filter(isFormula).sort();
   if (formulas.length === 0) return undefined;
 
-  // Why the write path cannot compute a formula, walked through the formulas
-  // it reads; memoised, and a formula on a cycle is not revisited.
-  const verdicts = new Map<string, string | null>();
-  const unservable = (name: string): string | null => {
+  // Why the form cannot compute a formula, walked through the formulas it
+  // reads; memoised, and a formula on a cycle is not revisited. A mark the
+  // write path shares outranks `os`, at any depth, as the engine judges it.
+  const verdicts = new Map<string, Unservable | null>();
+  const unservable = (name: string): Unservable | null => {
     const known = verdicts.get(name);
     if (known !== undefined) return known;
     verdicts.set(name, null);
     const expr = celSource(fields.get(name)?.expression);
-    let why: string | null = null;
+    let verdict: Unservable | null = null;
     if (expr) {
       const reads = readsOf(expr, ['record']);
       const hops = reads ? [...reads.through].filter((f) => REFERENCE_VALUE_TYPES.has(String(fields.get(f)?.type))) : [];
-      if (hops.length > 0) why = `reads through ${hops.map((f) => `'${f}'`).join(', ')}`;
-      else if (LABEL_CALL.test(expr)) why = 'calls label()';
-      else if (callsCan(expr)) why = 'calls current_user.can()';
+      if (hops.length > 0) verdict = { why: `reads through ${hops.map((f) => `'${f}'`).join(', ')}`, writePath: true };
+      else if (LABEL_CALL.test(expr)) verdict = { why: 'calls label()', writePath: true };
+      else if (callsCan(expr)) verdict = { why: 'calls current_user.can()', writePath: true };
       else {
-        for (const read of [...(reads?.all ?? [])].filter(isFormula)) {
-          const inner = unservable(read);
-          if (inner) {
-            why = `reads the formula '${read}', which ${inner}`;
-            break;
-          }
-        }
+        const inner = [...(reads?.all ?? [])].filter(isFormula).flatMap((read) => {
+          const v = unservable(read);
+          return v ? [{ read, ...v }] : [];
+        });
+        const through = (via: (typeof inner)[number]): Unservable => ({
+          why: `reads the formula '${via.read}', which ${via.why}`,
+          writePath: via.writePath,
+        });
+        const blind = inner.find((v) => v.writePath);
+        if (blind) verdict = through(blind);
+        else if (readsOs(expr)) verdict = { why: 'reads `os`', writePath: false };
+        else if (inner.length > 0) verdict = through(inner[0]);
       }
     }
-    verdicts.set(name, why);
-    return why;
+    verdicts.set(name, verdict);
+    return verdict;
   };
   const blocked = formulas.flatMap((f) => {
-    const why = unservable(f);
-    return why === null ? [] : [`'${f}' ${why}`];
+    const v = unservable(f);
+    return v === null ? [] : [{ formula: f, ...v }];
   });
+  // Every formula it reads the form computes as the server does: they agree.
+  if (blocked.length === 0) return undefined;
 
-  const named = formulas.map((f) => `'${f}'`).join(', ');
+  const writePath = blocked.filter((b) => b.writePath);
+  const formOnly = blocked.filter((b) => !b.writePath);
+  const list = (bs: typeof blocked) => bs.map((b) => `'${b.formula}' ${b.why}`).join('; ');
   let message =
-    `Field '${fname}' is \`required\`, and its \`visibleWhen\` reads the formula field ${named}. A reminder: the ` +
-    `server judges that requirement on the formula value it computes over the record being written (ADR-0113 D1). ` +
-    `The form computes the same formula over the record being edited; a check that does not (a wizard's ` +
-    `final-submit check, or a form whose data source serves no object schema) judges the value last read, none ` +
-    `on a create, and can disagree with the server.`;
-  if (blocked.length > 0) {
+    `Field '${fname}' is \`required\`, and its \`visibleWhen\` reads ` +
+    `${blocked.length === 1 ? 'a formula field' : 'formula fields'} the form cannot compute ` +
+    `over the record being edited (ADR-0113 D1).`;
+  if (writePath.length > 0) {
     message +=
-      ` Worse, ${blocked.join('; ')}, which the write path does not compute: the server counts the field as SHOWN ` +
-      `on every write, so it stays required on every record. The form cannot compute it either: it shows the ` +
-      `field and keeps it required.`;
-    if (blocked.some((b) => b.includes('calls current_user.can()'))) {
+      ` ${list(writePath)}, which the write path does not compute either: the server counts the field as ` +
+      `SHOWN on every write, so it stays required on every record and the condition never waives it.`;
+    if (writePath.some((b) => b.why.includes('calls current_user.can()'))) {
       message +=
         ' (A `current_user.can()` call is computed on a write that picks a permission-gated option, which resolves ' +
         'the permission map, so on such a write the formula is judged on its value instead.)';
     }
   }
+  if (formOnly.length > 0 && writePath.length > 0) {
+    // The write path's mark decides the server's verdict: the predicate faults, so it is shown.
+    message += ` ${list(formOnly)}: the form cannot compute that either.`;
+  } else if (formOnly.length > 0) {
+    message +=
+      ` ${list(formOnly)}, which the server computes (it binds \`os\` from the acting user and the tenant): it judges the ` +
+      `requirement on that value and can waive the field on a record where the form still demands it.`;
+  }
+  message +=
+    ` A form that computes the object's formulas shows the field and keeps it required; a check that holds no ` +
+    `formula plan (a form whose data source serves no object schema, for one) judges the formula value last ` +
+    `read, none on a create, and can hide the field or not demand it.`;
   return { where: `object '${objectName}' · field '${fname}' visibleWhen`, message, source, severity: 'warning' };
 }

@@ -26,11 +26,21 @@
  * in the same read. The budget stays ONE read, asking for the three keys and
  * both prefixes.
  *
+ * objectstack#35881 adds a fourth key, the person's last app (`ui.app.last`):
+ * the budget stays ONE read, now asking for four keys and both prefixes.
+ *
+ * objectstack#35955 retires the list-state family: a list's widths, row height
+ * and tab order are kept in this browser only (`list-layout:<user>:<object>`),
+ * and no Console reads or writes `ui.list.<object>` any more. The read asks
+ * for the four keys and the record-state prefix alone; a `ui.list.*` row an
+ * earlier Console stored stays where it is, unread and never written
+ * (`os migrate list-preferences` removes it).
+ *
  * ## The tree
  *
  * The real `ConsoleShell` providers and the real `ConnectedShell`: its
  * `AdapterProvider` builds the real `ObjectStackAdapter` and client, and its
- * `UserStateBridge` builds the three adapters and the list-state family. The
+ * `UserStateBridge` builds the adapters and the record-state family. The
  * network is the fake framework of `preferenceFramework.ts` on the global
  * `fetch`, which answers preference reads the way the server does, by
  * `user_id` and by `key` (`=`, `in`, `startswith`), and refuses any other
@@ -39,11 +49,10 @@
  * ## The pins
  *
  *   1. One boot puts ONE `sys_user_preference` GET on the wire, and it asks
- *      for the three keys, the list-state prefix and the record-state prefix.
- *   2. Every consumer receives its own row from that one answer, the list
- *      state of an object included.
- *   3. Each adapter still writes its own row, and only its own; the list state
- *      writes its object's row.
+ *      for the four keys and the record-state prefix, never `ui.list.`.
+ *   2. Every consumer receives its own row from that one answer.
+ *   3. Each adapter still writes its own row, and only its own; a list layout
+ *      change writes no row at all.
  *   4. Signing in as another user reads again, for that user, and every
  *      consumer ends on that user's rows.
  *   5. Two loads of one key at once are still one request.
@@ -91,21 +100,23 @@ import { ConsoleShell, ConnectedShell } from '../ConsoleShell';
 import { useFavorites } from '../../context/FavoritesProvider';
 import { useRecentItems } from '../../context/RecentItemsProvider';
 import { useFlowPaletteRecents } from '../../context/FlowPaletteRecentsProvider';
-import { useObjectListPreferences, type ObjectListPreference } from '../../context/ListPreferencesProvider';
+import { useLastApp } from '../../context/LastAppProvider';
+import { useObjectListLayout } from '../../views/listLayoutStore';
 import { useRecordPagePreferences } from '@object-ui/react';
 import { createPreferenceFramework, preferenceRowId as rowId, type PreferenceFramework } from './preferenceFramework';
 
 const FAVORITES_KEY = 'ui.favorites';
 const RECENT_KEY = 'ui.recent';
 const FLOW_KEY = 'ui.flow.palette.recents';
-const BRIDGE_KEYS = [FAVORITES_KEY, RECENT_KEY, FLOW_KEY];
-/** objectui#12418 — the list-state family, and one object's row of it. */
+/** objectstack#35881 — the person's last app, a fourth key in the same read. */
+const LAST_APP_KEY = 'ui.app.last';
+const BRIDGE_KEYS = [FAVORITES_KEY, RECENT_KEY, FLOW_KEY, LAST_APP_KEY];
+/** objectstack#35955 — a row of the retired list-state family an earlier Console stored. */
 const LIST_PREFIX = 'ui.list.';
 const LIST_KEY = 'ui.list.account';
 /** objectstack#25883 — the record-state family, and one object's row of it. */
 const RECORD_PREFIX = 'ui.record.';
 const RECORD_KEY = 'ui.record.account';
-const BOTH_PREFIXES = [LIST_PREFIX, RECORD_PREFIX].sort();
 
 /** Each user's stored rows, one distinct payload per key, so a starved consumer shows up. */
 const STORE: Record<string, Record<string, unknown>> = {
@@ -113,6 +124,7 @@ const STORE: Record<string, Record<string, unknown>> = {
     [FAVORITES_KEY]: [{ id: 'object:contact', label: 'Contact', href: '/contact', type: 'object' }],
     [RECENT_KEY]: [{ id: 'object:lead', type: 'object', name: 'lead', href: '/lead', visitedAt: '2026-10-01T00:00:00.000Z' }],
     [FLOW_KEY]: ['flow_step_alpha'],
+    [LAST_APP_KEY]: ['sales'],
     [LIST_KEY]: { viewOrder: ['account.mine', 'account.all'] },
     [RECORD_KEY]: { showEmptyFields: true },
   },
@@ -120,6 +132,7 @@ const STORE: Record<string, Record<string, unknown>> = {
     [FAVORITES_KEY]: [{ id: 'object:invoice', label: 'Invoice', href: '/invoice', type: 'object' }],
     [RECENT_KEY]: [{ id: 'object:quote', type: 'object', name: 'quote', href: '/quote', visitedAt: '2026-10-02T00:00:00.000Z' }],
     [FLOW_KEY]: ['flow_step_omega'],
+    [LAST_APP_KEY]: ['service'],
     [LIST_KEY]: { viewOrder: ['account.all', 'account.closed'] },
     [RECORD_KEY]: { showEmptyFields: false },
   },
@@ -135,7 +148,9 @@ interface Seen {
   favorites: string[];
   recent: string[];
   flow: string[];
-  /** The `account` list state's tab order (objectui#12418). */
+  /** The person's last app (objectstack#35881). */
+  lastApp: string | null;
+  /** The `account` list's tab order, kept in this browser (objectstack#35955). */
   listOrder: string[];
   /** The `account` record page's "show empty fields" choice (objectstack#25883). */
   recordShowEmpty: boolean | undefined;
@@ -146,14 +161,15 @@ interface Seen {
  * — the same shape `MetadataProvider.requestBudget.test.tsx` uses. Not props,
  * because writing through a prop is what the react-compiler rule refuses.
  */
-const EMPTY_SEEN: Seen = { favorites: [], recent: [], flow: [], listOrder: [], recordShowEmpty: undefined };
+const EMPTY_SEEN: Seen = { favorites: [], recent: [], flow: [], lastApp: null, listOrder: [], recordShowEmpty: undefined };
 const latest: { current: Seen } = { current: EMPTY_SEEN };
 const actions: {
   current: {
     addFavorite?: ReturnType<typeof useFavorites>['addFavorite'];
     addRecentItem?: ReturnType<typeof useRecentItems>['addRecentItem'];
     recordRecent?: ReturnType<typeof useFlowPaletteRecents>['recordRecent'];
-    patchListView?: ReturnType<typeof useObjectListPreferences>['patchView'];
+    rememberApp?: ReturnType<typeof useLastApp>['rememberApp'];
+    patchListView?: ReturnType<typeof useObjectListLayout>['patchView'];
     updateRecordPage?: NonNullable<ReturnType<typeof useRecordPagePreferences>>['update'];
   };
 } = { current: {} };
@@ -162,9 +178,9 @@ function Consumers() {
   const { favorites, addFavorite } = useFavorites();
   const { recentItems, addRecentItem } = useRecentItems();
   const { recents, recordRecent } = useFlowPaletteRecents();
-  const list = useObjectListPreferences('account');
-  const listPreference: ObjectListPreference = list.preference;
-  const listOrderKey = JSON.stringify(listPreference.viewOrder ?? []);
+  const { lastApp, rememberApp } = useLastApp();
+  const list = useObjectListLayout('account');
+  const listOrderKey = JSON.stringify(list.layout.viewOrder ?? []);
   const patchListView = list.patchView;
   const recordPage = useRecordPagePreferences();
   const recordShowEmpty = recordPage?.get('account').showEmptyFields;
@@ -174,11 +190,12 @@ function Consumers() {
       favorites: favorites.map((f) => f.id),
       recent: recentItems.map((r) => r.id),
       flow: [...recents],
+      lastApp,
       listOrder: JSON.parse(listOrderKey),
       recordShowEmpty,
     };
-    actions.current = { addFavorite, addRecentItem, recordRecent, patchListView, updateRecordPage };
-  }, [favorites, recentItems, recents, listOrderKey, recordShowEmpty, addFavorite, addRecentItem, recordRecent, patchListView, updateRecordPage]);
+    actions.current = { addFavorite, addRecentItem, recordRecent, rememberApp, patchListView, updateRecordPage };
+  }, [favorites, recentItems, recents, lastApp, listOrderKey, recordShowEmpty, addFavorite, addRecentItem, recordRecent, rememberApp, patchListView, updateRecordPage]);
   return <main data-testid="content">content</main>;
 }
 
@@ -204,12 +221,13 @@ async function settle(ms = 150) {
 }
 
 const U1_SEEN: Seen = {
-  favorites: ['object:contact'], recent: ['object:lead'], flow: ['flow_step_alpha'],
-  listOrder: ['account.mine', 'account.all'], recordShowEmpty: true,
+  favorites: ['object:contact'], recent: ['object:lead'], flow: ['flow_step_alpha'], lastApp: 'sales',
+  // The stored `ui.list.account` row is never read: the list has no order of the reader's.
+  listOrder: [], recordShowEmpty: true,
 };
 const U2_SEEN: Seen = {
-  favorites: ['object:invoice'], recent: ['object:quote'], flow: ['flow_step_omega'],
-  listOrder: ['account.all', 'account.closed'], recordShowEmpty: false,
+  favorites: ['object:invoice'], recent: ['object:quote'], flow: ['flow_step_omega'], lastApp: 'service',
+  listOrder: [], recordShowEmpty: false,
 };
 
 describe('console sys_user_preference request budget (objectui#12187)', () => {
@@ -226,7 +244,7 @@ describe('console sys_user_preference request budget (objectui#12187)', () => {
     vi.unstubAllGlobals();
   });
 
-  it('one boot puts one sys_user_preference read on the wire, asking for the three keys and both family prefixes', async () => {
+  it('one boot puts one sys_user_preference read on the wire, asking for the four keys and the record-state prefix', async () => {
     boot();
     await waitFor(() => expect(wire().gets.length).toBeGreaterThan(0));
     await settle();
@@ -234,9 +252,10 @@ describe('console sys_user_preference request budget (objectui#12187)', () => {
     expect(wire().gets).toHaveLength(1);
     expect(wire().gets[0].user).toBe('u1');
     expect([...wire().gets[0].keys].sort()).toEqual([...BRIDGE_KEYS].sort());
-    // objectui#12418 / objectstack#25883 — every object's list state and
-    // record-page state ride the same read.
-    expect([...wire().gets[0].prefixes].sort()).toEqual(BOTH_PREFIXES);
+    // objectstack#25883 — every object's record-page state rides the same
+    // read; objectstack#35955 — the list-state family no longer does.
+    expect([...wire().gets[0].prefixes]).toEqual([RECORD_PREFIX]);
+    expect([...wire().gets[0].prefixes]).not.toContain(LIST_PREFIX);
   });
 
   it('every consumer receives its own row from that one answer', async () => {
@@ -247,7 +266,7 @@ describe('console sys_user_preference request budget (objectui#12187)', () => {
     expect(wire().gets).toHaveLength(1);
   });
 
-  it('each adapter still writes its own row, and only its own', async () => {
+  it('each adapter still writes its own row, and only its own; a list layout change writes none', async () => {
     boot();
     await waitFor(() => expect(latest.current).toEqual(U1_SEEN));
     await settle();
@@ -257,30 +276,32 @@ describe('console sys_user_preference request budget (objectui#12187)', () => {
       actions.current.addFavorite?.({ id: 'object:account', label: 'Account', href: '/account', type: 'object' });
       actions.current.addRecentItem?.({ id: 'object:deal', type: 'object', name: 'deal', href: '/deal' });
       actions.current.recordRecent?.('flow_step_beta');
-      actions.current.patchListView?.('account.all', { sort: [{ field: 'name', order: 'desc' }] });
+      actions.current.rememberApp?.('service');
+      actions.current.patchListView?.('account.all', { widths: { name: 240 } });
       actions.current.updateRecordPage?.('account', { showEmptyFields: false });
     });
 
     // Each provider debounces its write (500 ms; the record page writes on the
-    // click); all five land, once each.
+    // click); all five land, once each. The list layout is this browser's.
     await waitFor(() => expect(wire().writes).toHaveLength(5), { timeout: 3000 });
-    await settle();
+    await settle(700);
     expect(wire().writes).toHaveLength(5);
+    expect(JSON.parse(localStorage.getItem('list-layout:u1:account')!)).toEqual({
+      perView: { 'account.all': { widths: { name: 240 } } },
+    });
 
     const byId = new Map(wire().writes.map((w) => [w.id, w]));
     // An update of the row its own load found — no insert, no other row.
     expect(wire().writes.every((w) => w.method === 'PATCH' || w.method === 'PUT')).toBe(true);
-    expect([...byId.keys()].sort()).toEqual([...BRIDGE_KEYS, LIST_KEY, RECORD_KEY].map((k) => rowId('u1', k)).sort());
+    expect([...byId.keys()].sort()).toEqual([...BRIDGE_KEYS, RECORD_KEY].map((k) => rowId('u1', k)).sort());
     expect((byId.get(rowId('u1', FAVORITES_KEY))?.value as { id: string }[]).map((f) => f.id)).toContain(
       'object:account',
     );
     expect((byId.get(rowId('u1', RECENT_KEY))?.value as { id: string }[])[0].id).toBe('object:deal');
     expect(byId.get(rowId('u1', FLOW_KEY))?.value).toEqual(['flow_step_beta', 'flow_step_alpha']);
-    // The object's row carries what it held and the new sort.
-    expect(byId.get(rowId('u1', LIST_KEY))?.value).toEqual({
-      viewOrder: ['account.mine', 'account.all'],
-      perView: { 'account.all': { sort: [{ field: 'name', order: 'desc' }] } },
-    });
+    expect(byId.get(rowId('u1', LAST_APP_KEY))?.value).toEqual(['service']);
+    // The retired row is never written.
+    expect(byId.has(rowId('u1', LIST_KEY))).toBe(false);
     expect(byId.get(rowId('u1', RECORD_KEY))?.value).toEqual({ showEmptyFields: false });
     // A write found its row from the load: it asked the server nothing more.
     expect(wire().gets).toHaveLength(1);
@@ -300,10 +321,10 @@ describe('console sys_user_preference request budget (objectui#12187)', () => {
 
     const afterSwitch = wire().gets.slice(before);
     const forU2 = afterSwitch.filter((g) => g.user === 'u2');
-    // One read for the new user, asking for all three keys and both prefixes.
+    // One read for the new user, asking for all four keys and the record-state prefix.
     expect(forU2).toHaveLength(1);
     expect([...forU2[0].keys].sort()).toEqual([...BRIDGE_KEYS].sort());
-    expect([...forU2[0].prefixes].sort()).toEqual(BOTH_PREFIXES);
+    expect([...forU2[0].prefixes]).toEqual([RECORD_PREFIX]);
     // No u2 read was answered with u1's rows: every consumer shows u2's.
     expect(latest.current).toEqual(U2_SEEN);
   });

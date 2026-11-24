@@ -87,7 +87,7 @@ export {
 } from './registry.js';
 
 // [#22371] The package half of the cold-boot check's holder reading (ADR-0048
-// N.3): every package-held position and permission-set name, with its holders.
+// N.3): every package-held position, permission-set and capability name, with its holders.
 // Exported for `os migrate security-catalog-overlays`, which boots the
 // deployment's composition without hydrating `sys_metadata` and meets this
 // list with the stored rows — the population the cold boot refuses — so the
@@ -259,6 +259,8 @@ export type { CompanionFieldMeta, CompanionObjectMeta } from './search-companion
 // Export Engine
 export { ObjectQL, ObjectRepository, ScopedContext } from './engine.js';
 export type { HookHandler, HookEntry, OperationContext, EngineMiddleware, HeldFileResolver, FieldOwnedFileReadAuthorizer, WriteWallVerdict, WriteWallRowVerdict } from './engine.js';
+// [#34700] The middleware options, and the search-field withholder a guard middleware declares in them.
+export type { EngineMiddlewareOptions, SearchFieldWithholder, SearchFieldWithholdingRequest } from './engine-top-level.js';
 export type { AdmittedValueShapeViolationTally } from './engine.js';
 // The declarative datasource definition the engine indexes, and the element
 // type of `ObjectQL.listDatasourceDefs()`. Exported so a consumer sweeping for
@@ -269,6 +271,12 @@ export type { DatasourceDef } from './engine.js';
 // refuses the filter rather than truncate it, and its words name this number.
 // Exported so a caller running the two-step route itself can page by it.
 export { RELATION_FILTER_ID_CAP } from './relation-filter-lowering.js';
+// [ADR-0155 D4, plan step 5] The seam's recognition of D4's two classes and
+// its reader of a driver's `fixedReadLeaves` declaration, so an evaluator that
+// declines before it compiles (the analytics native compiler) asks the seam
+// and restates neither.
+export { driverEvaluatesFixedReadLeaf, fixedReadLeafClassOfEngine } from './fixed-read-leaf-seam.js';
+export type { FixedReadLeafClass } from './fixed-read-leaf-seam.js';
 // Groups ordered by an aggregated column, cut and counted in the driver's own
 // statement: the engine-internal read option a door carries to `aggregate`,
 // and the request it carries. Carriers that do not import this package spell
@@ -314,6 +322,15 @@ export type { SummaryRecomputeFailure } from './summary-errors.js';
 // holding the other realm's copy of the class gets `instanceof` === false,
 // silently.
 export { ReadonlyFieldRejectedError, READONLY_FIELD_REJECTED_CODE } from './readonly-strict-errors.js';
+// [ADR-0153 D4] The sync-in pull's write mark and the refusal of a `_sync_`
+// provenance column in any other write. The mark is the pull's alone
+// (`@objectstack/service-automation`); see `sync-provenance-write.ts`.
+export {
+  SYNC_PULL_WRITE,
+  markSyncPullWrite,
+  SyncProvenanceWriteRefusedError,
+  SYNC_PROVENANCE_WRITE_REFUSED_CODE,
+} from './sync-provenance-write.js';
 // [#32768] What `ObjectQL#judgeFieldWriteLock` answers for a field its
 // `readonlyWhen` locks now: the drop reason and the strict refusal's phrase.
 export type { FieldWriteLock } from './engine-field-write-lock.js';
@@ -605,6 +622,10 @@ export { evaluateFormulaField } from './engine.js';
 // asymmetry is #16260's question, deliberately not decided here.
 export { ValidationError, validateRecord, validateInsertValues, VALIDATION_FAILED_CODE } from './validation/record-validator.js';
 export type { FieldValidationError } from './validation/record-validator.js';
+// #34030 — the labels a refusal names are read through `messages.labelTranslation`
+// (a translation bundle and its resolve options), no longer through `translate`;
+// a direct caller of the validators writes against this type.
+export type { ValidationLabelTranslation } from './validation/record-validator.js';
 // [ADR-0104 / #4769] The counterexample a boot produces by ADMITTING an
 // off-shape value. Exported because the fresh-datastore attestation
 // (`@objectstack/platform-objects`) reads it before certifying anything: a
@@ -689,6 +710,22 @@ export type {
     RecordCurrencyBackfillOrganization,
     RecordCurrencyBackfillOrganizationsRefusal,
 } from './record-currency-backfill.js';
+// [ADR-0158 U7 R1, Open item 12] The unit code backfill behind `os migrate
+// unit-codes`: stored free text rewritten into unit codes from the operator's mapping.
+export {
+    backfillUnitCodes,
+    formatUnitCodeBackfillReport,
+    unitCodeBackfillComplete,
+    unitCodeMappingOf,
+} from './unit-code-backfill.js';
+export type {
+    UnitCodeBackfillReport,
+    UnitCodeBackfillEngine,
+    UnitCodeBackfillOptions,
+    UnitCodeBackfillValue,
+    UnitCodeBackfillOrganization,
+    UnitCodeMapping,
+} from './unit-code-backfill.js';
 // [ADR-0144 D5, D7 parameter 1, Open item 8] The explicit recompute of stored
 // home amounts behind `os migrate recompute-home-amounts`: the write's own
 // projection over stored rows. Same split as the two backfills above.
@@ -730,6 +767,24 @@ export type {
     HookMetricOutcome,
     HookSkipReason,
 } from './hook-metrics.js';
+
+// [ADR-0157] The working-calendar service and the calendar objects' write
+// hooks. Its contract is `IWorkCalendarService` (`@objectstack/spec/contracts`);
+// its refusals and arithmetic are `@objectstack/formula`'s.
+export {
+  WorkCalendarService,
+  installWorkCalendarHooks,
+  WORK_CALENDAR_OBJECT,
+  WORK_CALENDAR_EXCEPTION_OBJECT,
+  WORK_CALENDAR_CACHE_TTL_MS,
+  WORK_CALENDAR_HOOK_PACKAGE,
+} from './work-calendar-service.js';
+export type {
+  WorkCalendarServiceOptions,
+  WorkCalendarHookOptions,
+  WorkCalendarReadEngine,
+  WorkCalendarHookEngine,
+} from './work-calendar-service.js';
 
 // Export LifecycleService (ADR-0057 — declarative retention/rotation/archival)
 export {

@@ -2313,7 +2313,8 @@ describe('objectui#7924 — the retirement: seventeen `?: never` tombstones, obj
     expect(appShell).not.toContain('viewDef.prefixField');
     expect(appShell).not.toContain('viewDef.allowExport');
     // Firing control on the same file: the relay still reads other keys off the view.
-    expect(appShell).toContain('rowColor: viewDef.rowColor ?? listSchema.rowColor,');
+    // objectstack#35955 — the view's own rule is read once, so the draft's can lie over it.
+    expect(appShell).toContain('const viewOwnRowColor = viewDef.rowColor ?? listSchema.rowColor;');
     const listView = readRepo(LISTVIEW);
     expect(listView).not.toMatch(/\bprefixField\b/);
     expect(listView).toMatch(/\ballowExport\b/);

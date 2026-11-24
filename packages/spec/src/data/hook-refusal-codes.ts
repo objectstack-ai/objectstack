@@ -423,8 +423,10 @@ function undeclaredRefusalReasonAtRun(
  * (parameter 4).
  *
  * The same two halves as a refusal code: a key the hook's source asks for
- * LITERALLY and `texts` does not declare is refused at save
- * ({@link hookTextKeysAskedIn}); any other key is refused when the hook runs.
+ * LITERALLY — `ctx.text('key'` or `ctx.text?.('key'`, the quote closing the
+ * argument — and `texts` does not declare is refused at save
+ * ({@link hookTextKeysAskedIn}); any other key, a key built from a literal
+ * included, is refused when the hook runs.
  */
 
 /**
@@ -433,16 +435,35 @@ function undeclaredRefusalReasonAtRun(
  */
 export const HOOK_TEXT_KEY_PATTERN = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/;
 
-/** `ctx.text('key'` — the call a hook's code asks for a declared text with. */
+/**
+ * `ctx.text('key'` — the call a hook's code asks for a declared text with — and
+ * its optional-call shape `ctx.text?.('key'`, which strict TypeScript reaches
+ * for because `HookContext.text` is optional. Both ask for the key literally.
+ *
+ * The key is literal only when its closing quote ends the argument: `,` or `)`
+ * follows, after optional whitespace (a comment is blanked to whitespace
+ * first). Anything else after the quote — `'key' + suffix`, a member access
+ * such as `'key'.concat(suffix)` — builds a computed key, and a template with
+ * a `${}` hole is never kept as a literal by the masking at all; both are
+ * left to the run-time refusal.
+ *
+ * A non-null `ctx.text!('key'` is not read: it is TypeScript with no
+ * JavaScript form. A handler's `!` is erased before the save reads
+ * `Function.prototype.toString()`, so it arrives as the plain call; in a `js`
+ * body it is a syntax error, and the body never runs.
+ */
 const TEXT_CALL = new RegExp(
-  String.raw`(?<![\w$.])ctx\s*\.\s*text\s*\(\s*(?<tquote>['"\x60])(?<key>[a-z][a-z0-9]*(?:_[a-z0-9]+)*)\k<tquote>`,
+  String.raw`(?<![\w$.])ctx\s*\.\s*text(?:\s*\?\.)?\s*\(\s*(?<tquote>['"\x60])(?<key>[a-z][a-z0-9]*(?:_[a-z0-9]+)*)\k<tquote>(?=\s*[,)])`,
   'g',
 );
 
 /**
- * The text keys a hook's source asks for LITERALLY — `ctx.text('key', …)` —
- * in first-seen order: the cases a save can decide. A key that arrives any
- * other way (a variable, a computed value) is left to the run-time refusal.
+ * The text keys a hook's source asks for LITERALLY — `ctx.text('key', …)` or
+ * `ctx.text?.('key', …)` — in first-seen order:
+ * the cases a save can decide, each a quoted key that ends the argument. A
+ * key that arrives any other way (a variable, a computed value — a literal
+ * joined to something, a member access on one, a template with a hole) is left
+ * to the run-time refusal.
  * Comments and longer strings are blanked first, as for a refusal code.
  */
 export function hookTextKeysAskedIn(source: string): string[] {

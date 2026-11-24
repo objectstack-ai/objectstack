@@ -20,7 +20,7 @@
 ### 常设承诺
 
 - driver conformance 台账只降不升:driver 卡的派发令要求 dev 前后各读一次 covered 与 DEBT。
-- 放宽接受集或扩大公开面的卡按条款②处理,判据与档位在 SKILL.md,⛔ 不另抄。
+- 放宽接受集或扩大公开面的卡照 `../execution-duties.md` 条款②处理,⛔ 不另抄。
 
 ### 席内判断
 

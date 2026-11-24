@@ -3,8 +3,8 @@
 
 ## 座位
 
-- 席位 `l2-review#N`,一席一座位贴;坐席账号能达 `CONTRACT_REVIEW_TIER`,席会话本身跑默认档。
-- effort `high`;每送审 head 起一个全新只读子代理达档审,⛔ 席内达档审(`../contract-review.md`)。
+- 席位 `l2-review#N`,一席一座位贴;坐席账号能达 `CONTRACT_REVIEW_TIER`。
+- 席会话档位与 effort 照 `../execution-duties.md` 定档节;每送审 head 起一个全新只读子代理达档审,⛔ 席内达档审。
 - 每席开一个 `pm:mailbox` PR(`mailbox-open.mjs --seat l2-review#N`);签名、坐席与收班同他席。
 
 ## 路由

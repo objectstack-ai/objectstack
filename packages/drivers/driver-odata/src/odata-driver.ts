@@ -50,7 +50,8 @@
  * read from `$metadata`, which the driver reads once, at the first request.
  */
 
-import { findMisplacedReadableIds, readableIdsDriverRefusal } from '@objectstack/core';
+import { describeFixedReadLeaf, findMisplacedReadableIds, fixedReadLeafRefusal, readableIdsDriverRefusal } from '@objectstack/core';
+import { isComposedReadableIds, isFixedReadLeaf } from '@objectstack/spec/data';
 import type { DriverQuery, IDataDriver, IntrospectedSchema, IntrospectedTable } from '@objectstack/spec/contracts';
 import type { DriverOptions } from '@objectstack/spec/data';
 import type { EdmEntitySet, EdmEntityType, EdmProperty, ODataDialect, ODataServiceModel } from './dialect.js';
@@ -288,6 +289,7 @@ export class ODataDriver implements IDataDriver {
 
   async find(object: string, query: DriverQuery = {}, _options?: DriverOptions): Promise<Row[]> {
     refuseReadableIds(query.where);
+    refuseFixedReadLeaf(query.where);
     const binding = await this.bind(object);
     const limit = typeof query.limit === 'number' ? query.limit : undefined;
     const offset = typeof query.offset === 'number' ? query.offset : undefined;
@@ -327,6 +329,7 @@ export class ODataDriver implements IDataDriver {
 
   async count(object: string, query: DriverQuery = {}, _options?: DriverOptions): Promise<number> {
     refuseReadableIds(query.where);
+    refuseFixedReadLeaf(query.where);
     const binding = await this.bind(object);
     const { filter, complete } = translateWhere(query.where, binding, this.dialect);
     if (!complete) {
@@ -622,6 +625,50 @@ export class ODataDriver implements IDataDriver {
 function refuseReadableIds(where: unknown): void {
   const site = findMisplacedReadableIds(where, false);
   if (site) throw readableIdsDriverRefusal('driver-odata', site, 'an OData $filter has no form of the tenant-walled semi-join');
+}
+
+/**
+ * [ADR-0155 D4, D5; Q2's storage rows as ruled: R2, with R1 behind it] A
+ * FIXED-READ LEAF (`SharedRecordIds`: "the records of X shared with this
+ * user") is a semi-join over a platform table this service does not hold, and
+ * `$filter` has no form of it. The translator leaves what it cannot spell to
+ * the engine, which would read the leaf as no restriction, so it is refused,
+ * loudly and before anything is sent, wherever it sits: D4's envelope,
+ * `INTERNAL_ERROR` / 500, ⛔ never a 400 and never read as an ordinary
+ * comparand. This driver declares no `fixedReadLeaves`, so the engine's seam
+ * refuses the leaf before calling it; this is the driver's own refusal for a
+ * call that reached it another way. Unlogged, as {@link refuseReadableIds} is:
+ * the driver holds no logger, and the seam logs its own refusal once.
+ */
+function refuseFixedReadLeaf(where: unknown): void {
+  const onPath = new Set<object>();
+  const find = (value: unknown, at: string): { at: string; leaf: unknown } | null => {
+    if (isFixedReadLeaf(value)) return { at, leaf: value };
+    if (isComposedReadableIds(value)) return find(value.scope, `${at}.scope`);
+    if (value === null || typeof value !== 'object' || onPath.has(value)) return null;
+    onPath.add(value);
+    try {
+      const entries: [string, unknown][] = Array.isArray(value)
+        ? value.map((item, i) => [`${at}[${i}]`, item])
+        : Object.keys(value).map((key) => [`${at}.${key}`, (value as Record<string, unknown>)[key]]);
+      for (const [path, item] of entries) {
+        const found = find(item, path);
+        if (found) return found;
+      }
+      return null;
+    } finally {
+      onPath.delete(value);
+    }
+  };
+  const found = find(where, 'where');
+  if (found === null) return;
+  throw fixedReadLeafRefusal(
+    'driver-odata',
+    `${describeFixedReadLeaf(found.at, found.leaf)}: an OData $filter has no form of the fixed inner read's ` +
+      'subquery, and this driver declares no fixedReadLeaves (ADR-0155 D4). The request was NOT sent, rather than ' +
+      'read the leaf as no restriction. Read this object through the engine, whose seam answers the leaf for a ' +
+      'driver that evaluates it.',
+  );
 }
 
 const etagKey = (object: string, id: string | number) => `${object}\u0000${String(id)}`;

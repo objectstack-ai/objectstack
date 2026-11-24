@@ -12,7 +12,7 @@ import { SmilePlus } from 'lucide-react';
 import type { Reaction } from '@object-ui/types';
 import { useDetailTranslation } from './useDetailTranslation';
 
-const DEFAULT_EMOJI_OPTIONS = ['👍', '❤️', '🎉', '😂', '😮', '😢'];
+export const DEFAULT_EMOJI_OPTIONS = ['👍', '❤️', '🎉', '😂', '😮', '😢'];
 
 export interface ReactionPickerProps {
   /** Existing reactions on the feed item */

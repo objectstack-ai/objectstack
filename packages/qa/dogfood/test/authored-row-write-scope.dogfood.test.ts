@@ -284,7 +284,7 @@ describe('[#7281] checkAuthoredRowWrite answers the declaration, not the caller 
     expect(
       await sharing.buildReadFilter(CLOSED, bobCtx),
       'private: reads are owner-scoped, which is what removed the verdict',
-    ).toMatchObject({ owner_id: bobId });
+    ).toMatchObject({ $or: expect.arrayContaining([{ owner_id: bobId }]) });
 
     // And it really bites on reads: Bob cannot see Alice's row on `private`.
     const seen = await ql.find(CLOSED, { where: {}, context: bobCtx });

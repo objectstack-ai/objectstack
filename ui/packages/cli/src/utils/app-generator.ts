@@ -405,6 +405,12 @@ const APP_THEME_TOKENS = `@theme {
   --color-secondary-foreground: hsl(var(--secondary-foreground));
   --color-destructive: hsl(var(--destructive));
   --color-destructive-foreground: hsl(var(--destructive-foreground));
+  /* Danger TEXT colour (text-destructive and its variants). Tailwind reads
+     --text-color-* before --color-* for text utilities, so this splits the
+     text colour from the fill used by bg-/border-/ring-destructive. Light and
+     dark each set --destructive-text, through --destructive-text-light /
+     -dark, which ThemeEngine derives per mode from a theme's error colour. */
+  --text-color-destructive: hsl(var(--destructive-text, var(--destructive)));
   --color-muted: hsl(var(--muted));
   --color-muted-foreground: hsl(var(--muted-foreground));
   --color-accent: hsl(var(--accent));
@@ -465,6 +471,9 @@ const APP_THEME_VARIABLES = `:root {
   --accent: 210 40% 96.1%;
   --accent-foreground: 222.2 47.4% 11.2%;
   --destructive: 0 84.2% 60.2%;
+  /* Danger text on light surfaces (red-700, #b91c1c); --destructive stays the
+     brand red for button and badge fills. */
+  --destructive-text: var(--destructive-text-light, 0 73.7% 41.8%);
   --destructive-foreground: 210 40% 98%;
   --border: 214.3 31.8% 91.4%;
   --input: 214.3 31.8% 91.4%;
@@ -510,6 +519,9 @@ const APP_THEME_VARIABLES = `:root {
   --accent: 217.2 32.6% 17.5%;
   --accent-foreground: 210 40% 98%;
   --destructive: 0 62.8% 30.6%;
+  /* Readable red for danger text on dark surfaces; --destructive stays the
+     red-button fill (white text on it). */
+  --destructive-text: var(--destructive-text-dark, 0 91% 71%);
   --destructive-foreground: 210 40% 98%;
   --border: 217.2 32.6% 17.5%;
   --input: 217.2 32.6% 17.5%;

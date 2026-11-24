@@ -1407,8 +1407,9 @@ describe('DatasetReportRenderer — the report\'s package as the reader\'s packa
 });
 
 // objectstack#34907 — a dimension whose `field` is a `relationship.field` path
-// drills with the relationship field `$in` the related ids, read through the
-// report's data source first; the data API refuses the dotted path itself.
+// drills with one nested-relation condition beneath the relationship field
+// (objectstack#34990: no related id is read); the data API refuses the dotted
+// path itself.
 describe('DatasetReportRenderer — drilling a relationship-path dimension (objectstack#34907)', () => {
   const relationshipSource = (field: string, accounts: Array<{ id: string }>) => ({
     ...makeSource({
@@ -1426,7 +1427,7 @@ describe('DatasetReportRenderer — drilling a relationship-path dimension (obje
       : { fields: { owner_id: { type: 'user' } } })),
   });
 
-  it('emits an objectFilter on the lookup field $in the related ids', async () => {
+  it('emits an objectFilter with the nested condition beneath the lookup field, reading no related record', async () => {
     const src = relationshipSource('crm_account.owner_id', [{ id: 'acc1' }]);
     const onDrill = vi.fn();
     render(
@@ -1439,10 +1440,10 @@ describe('DatasetReportRenderer — drilling a relationship-path dimension (obje
     await waitFor(() => expect(screen.getByTestId('dataset-drill-row')).toBeInTheDocument());
     fireEvent.click(screen.getByTestId('dataset-drill-row'));
     await waitFor(() => expect(onDrill).toHaveBeenCalled());
-    expect(src.find).toHaveBeenCalledWith('crm_account', { $filter: { owner_id: 'user_zhang' }, $select: ['id'], $top: 201 });
+    expect(src.find).not.toHaveBeenCalled();
     expect(onDrill).toHaveBeenCalledWith(expect.objectContaining({
       object: 'crm_order',
-      objectFilter: { crm_account: { $in: ['acc1'] } },
+      objectFilter: { crm_account: { owner_id: 'user_zhang' } },
     }));
   });
 

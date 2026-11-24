@@ -84,7 +84,7 @@ describe('action-body-does-not-compile · the wrapper is the runtime\'s', () => 
     expect(validateActionBodyCompiles({ actions })).toEqual([]);
   });
 
-  it('reports a regular-expression literal the host refuses as a warning, never a refusal', () => {
+  it('reports a regular-expression pattern the host refuses as a warning, never a refusal', () => {
     const [f] = validateActionBodyCompiles({ actions: [scriptAction('p', 'return /(/.test(input.s);')] });
     expect(f.severity).toBe('warning');
     expect(f.message).toContain('regular expression');
@@ -148,5 +148,58 @@ describe('action-body-does-not-compile · the doors that run it', () => {
       context: { objects: [ticket([scriptAction('p', CARD_BODY)])] },
     });
     expect(compileFindings(r.errors)).toEqual([]);
+  });
+});
+
+describe('action-body-does-not-compile · a regular-expression literal\'s token is refused, only its pattern warns', () => {
+  // Measured against the runtime's QuickJS (quickjs-emscripten, the engine quickjs-runner.ts runs a body in):
+  // every case refused here is refused by QuickJS too, and both warning cases compile and run there.
+  const only = (source: string) => {
+    const findings = validateActionBodyCompiles({ actions: [scriptAction('p', source)] });
+    expect(findings, source).toHaveLength(1);
+    return findings[0];
+  };
+
+  it.each([
+    ['an unterminated literal', 'return /abc;'],
+    ['an unterminated literal whose class never closes', 'return /[/.test(input.s);'],
+    ['a literal the body ends inside', 'const ok = /abc'],
+    ['a literal broken by a line terminator', 'return /ab\nc/.test(input.s);'],
+  ])('refuses %s at error, the way every other compile error is refused', (_label, source) => {
+    const f = only(source);
+    expect([f.rule, f.severity, f.path]).toEqual([ACTION_BODY_DOES_NOT_COMPILE, 'error', 'actions[0].body.source']);
+  });
+
+  it.each([
+    ['a repeated flag', 'return /a/gg;'],
+    ['an unknown flag', 'return /a/zz;'],
+    ['`u` with `v`', 'return /a/uv;'],
+  ])('refuses a flag set that is not one, %s, at error', (_label, source) => {
+    const f = only(source);
+    expect([f.rule, f.severity]).toEqual([ACTION_BODY_DOES_NOT_COMPILE, 'error']);
+  });
+
+  it.each([
+    ['a duplicate named capture group', 'return /(?<a>x)|(?<a>y)/.test(input.s);'],
+    ['a modifier group', 'return /(?i:a)/.test(input.s);'],
+  ])('still only warns on %s, a pattern the runtime\'s engine accepts', (_label, source) => {
+    const f = only(source);
+    expect([f.rule, f.severity]).toEqual([ACTION_BODY_DOES_NOT_COMPILE, 'warning']);
+  });
+
+  it('accepts the flags both engines take', () => {
+    const actions = ['return /a/dgimsuy;', 'return /[a&&b]/v;'].map((source, i) => scriptAction(`ok${i}`, source));
+    expect(validateActionBodyCompiles({ actions })).toEqual([]);
+  });
+
+  it('os validate refuses an unterminated literal, and so does the runtime publish door', () => {
+    const body = 'return /abc;';
+    const stack = { objects: [ticket()], actions: [scriptAction('p', body)] };
+    const fs = compileFindings(runAuthoringRules('validate', { normalized: stack, parsed: stack }));
+    expect(fs.map((f) => [f.severity, f.path])).toEqual([['error', 'actions[0].body.source']]);
+
+    const refused = runRuntimeAuthoringRules({ type: 'action', item: scriptAction('p', body), context: { objects: [ticket()] } });
+    expect(compileFindings(refused.errors)).toHaveLength(1);
+    expect(compileFindings(refused.advisories)).toEqual([]);
   });
 });

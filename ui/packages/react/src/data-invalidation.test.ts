@@ -15,6 +15,7 @@ import {
   dataChangeMatches,
   useDataInvalidation,
   RELATED_CHANGED_EVENT,
+  createOwnWrites,
 } from './data-invalidation';
 
 describe('dataChangeMatches (objectui#2269)', () => {
@@ -111,5 +112,41 @@ describe('useMutationInvalidationBridge', () => {
   it('is inert for a dataSource without onMutation', () => {
     expect(() => renderHook(() => useMutationInvalidationBridge({} as any)).unmount()).not.toThrow();
     expect(() => renderHook(() => useMutationInvalidationBridge(null)).unmount()).not.toThrow();
+  });
+});
+
+describe('createOwnWrites (objectstack#35685)', () => {
+  it('absorbs a change naming a held record until the last hold lets go', () => {
+    const own = createOwnWrites();
+    const a = own.hold('deal', 'd1');
+    const b = own.hold('deal', 'd1');
+    expect(own.absorbs({ objectName: 'deal', recordId: 'd1' })).toBe(true);
+    a();
+    a(); // a second call of one release changes nothing
+    expect(own.absorbs({ objectName: 'deal', recordId: 'd1' })).toBe(true);
+    b();
+    expect(own.absorbs({ objectName: 'deal', recordId: 'd1' })).toBe(false);
+  });
+
+  it('never absorbs another record, another object, an object-wide change or *', () => {
+    const own = createOwnWrites();
+    own.hold('deal', 'd1');
+    expect(own.absorbs({ objectName: 'deal', recordId: 'd2' })).toBe(false);
+    expect(own.absorbs({ objectName: 'lead', recordId: 'd1' })).toBe(false);
+    expect(own.absorbs({ objectName: 'deal' })).toBe(false);
+    expect(own.absorbs({ objectName: '*' })).toBe(false);
+  });
+
+  it('useDataInvalidation given the registry lets a held write go by; without it the reader moves', () => {
+    const own = createOwnWrites();
+    const withOwn = renderHook(() => useDataInvalidation('deal', undefined, own));
+    const without = renderHook(() => useDataInvalidation('deal'));
+    const release = own.hold('deal', 'd1');
+    act(() => notifyDataChanged({ objectName: 'deal', recordId: 'd1' }));
+    expect(withOwn.result.current).toBe(0);
+    expect(without.result.current).toBe(1);
+    release();
+    act(() => notifyDataChanged({ objectName: 'deal', recordId: 'd1' }));
+    expect(withOwn.result.current).toBe(1);
   });
 });

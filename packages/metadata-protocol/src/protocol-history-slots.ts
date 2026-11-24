@@ -17,7 +17,10 @@
  *    by more than one row slot — two packages', or a package's beside the
  *    package-less row — is refused `409` naming every holder
  *    (`ambiguous-in-environment`), before any row is read or written: nothing
- *    picks one (ADR-0150 D3, epic red line 2). So is a name the bare plain
+ *    picks one (ADR-0150 D3, epic red line 2), except where the bare read
+ *    serves the row-held base (#34441 cell 2): there the door addresses the
+ *    base's slot, as naming the base does (#34681,
+ *    `packagelessRowHeldBaseAddress`). So is a name the bare plain
  *    read refuses (ADR-0150 D5: a holder in code counts, so two packages
  *    shipping the name are two holders while only one has saved a row): the
  *    registry's resolver (`resolveItem`, the one the plain read asks) throws
@@ -58,6 +61,7 @@ import type { ProtocolHost } from './protocol-host.js';
 import { memberOption } from './protocol-bundle-members.js';
 import { shippingPackageIds } from './protocol-environment-rows.js';
 import type { HistoryVersionOwner } from './sys-metadata-repository.js';
+import { packagelessRowHeldBaseAddress } from './protocol-save.js';
 
 /** What {@link historySlotOf} answers for a door of a by-package type. */
 export interface HistorySlot {
@@ -153,13 +157,19 @@ function refuseWhereBareReadRefuses(host: Pick<ProtocolHost, 'engine'>, type: st
  *   before.
  * @throws a `400 VALIDATION_ERROR` for `?package=` on a type not stored per
  *   `(package, name)`.
+ * [#34681, epic ruling 6781691009] A bare request of a name whose rows at the
+ * member the read naming no package serves at the row-held base
+ * ({@link packagelessRowHeldBaseAddress}) addresses that base's slot, as the
+ * same request naming it does: the history, diff and rollback naming no
+ * package read and restore the base's versions, never another holder's.
+ *
  * @throws {PackageScopedNameRefusedError} `ambiguous-in-environment` for a
- *   bare request of a name two or more row slots hold, or the bare plain
- *   read's own refusal; `not-held-by-qualifier` for a package that neither
+ *   bare request of a name two or more row slots hold (other than a row-held
+ *   base's, above), or the bare plain read's own refusal; `not-held-by-qualifier` for a package that neither
  *   holds a row of the name nor ships it, while another slot holds one.
  */
 export async function historySlotOf(
-    host: Pick<ProtocolHost, 'engine' | 'findServedOverlayRow' | 'packagelessAddress' | 'shippedArtifactsOf'>,
+    host: Pick<ProtocolHost, 'declinesStoredRow' | 'engine' | 'findServedOverlayRow' | 'packagelessAddress' | 'readItemActiveRows' | 'rethrowUnlessMetadataStoreUnprovisioned' | 'shippedArtifactsOf'>,
     request: { type: string; name: string; member?: string; packageId?: string },
 ): Promise<HistorySlot | undefined> {
     const { type, name, member, packageId } = request;
@@ -167,7 +177,11 @@ export async function historySlotOf(
     if (!PACKAGE_SLOTTED_STORE_TYPES.has(type)) return undefined;
     const slots = await rowSlotsOf(host, type, name, member);
     if (packageId === undefined) {
-        if (slots.length > 1) throw slotRefusal(type, name, 'ambiguous-in-environment', null, slots);
+        if (slots.length > 1) {
+            const base = await packagelessRowHeldBaseAddress(host, type, name, member);
+            if (base !== undefined) return historySlotOf(host, { ...request, packageId: base });
+            throw slotRefusal(type, name, 'ambiguous-in-environment', null, slots);
+        }
         refuseWhereBareReadRefuses(host, type, name, member);
         if (slots.length === 0) return undefined;
         return { owner: { packageId: slots[0] ?? null, sole: true }, addressed: false, held: true };

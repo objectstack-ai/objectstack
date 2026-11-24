@@ -45,7 +45,7 @@ import type { MutationProjectionOutcome } from './protocol-mutation-events.js';
 import { PREFLIGHT_AUDIT_CODE, withPendingAudit } from './protocol-audit-entry.js';
 import type { PublishMetaItemRequest } from './protocol-door-requests.js';
 import { withRefusalAudit } from './protocol-refusal-audit.js';
-import { environmentActionPublishSlotRefusal } from './protocol-save.js';
+import { environmentActionPublishSlotRefusal, packagelessRowHeldBaseAddress } from './protocol-save.js';
 import { overlayMemberWhere } from './migrations/overlay-index.js';
 import { isMissingTableError } from '@objectstack/metadata/errors';
 import { readPublishBackfillRequest } from './protocol-publish-backfill-request.js';
@@ -67,6 +67,7 @@ import type { HistoryVersionOwner } from './sys-metadata-repository.js';
 import { historySlotOf, refusePackageSelectorOutsideSlottedTypes } from './protocol-history-slots.js';
 import { captureStoredExpressionChange, fillStoredExpressionChange, type StoredExpressionFillCapture } from './protocol-stored-expression-fill.js';
 import { OBJECT_REGISTRY_REFUSED, reportObjectRegistryRefusal } from './protocol-registry-hydration.js';
+import { OBJECT_EXTENSION_TYPE, registrableObjectExtension } from './protocol-object-extension-item.js';
 
 /**
  * [#32396] A promotion a package publish wrote: what {@link undoLandedPromotions}
@@ -202,7 +203,7 @@ async function undoLandedPromotions(host: Pick<ProtocolHost, 'engine' | 'isArtif
 
 export class ProtocolHistoryAndPublishFacet {
     /** The body of `ObjectStackProtocolImplementation#historyMetaItem`; the method's docblock there is its contract. */
-    static async historyMetaItem(host: Pick<ProtocolHost, 'engine' | 'findServedOverlayRow' | 'getOverlayRepo' | 'historyMetaItem' | 'isOverlayAllowed' | 'isRuntimeCreateAllowed' | 'packagelessAddress' | 'resolveRowlessExpandedView' | 'shippedArtifactsOf' | 'storedHashDigest'>, request: {
+    static async historyMetaItem(host: Pick<ProtocolHost, 'declinesStoredRow' | 'engine' | 'findServedOverlayRow' | 'getOverlayRepo' | 'historyMetaItem' | 'isOverlayAllowed' | 'isRuntimeCreateAllowed' | 'packagelessAddress' | 'readItemActiveRows' | 'resolveRowlessExpandedView' | 'rethrowUnlessMetadataStoreUnprovisioned' | 'shippedArtifactsOf' | 'storedHashDigest'>, request: {
             type: string;
             name: string;
             sinceSeq?: number;
@@ -278,6 +279,8 @@ export class ProtocolHistoryAndPublishFacet {
         // holders' rows hold is refused naming both when no package is named,
         // and `?package=` reads that holder's versions alone. A name one slot
         // holds, named bare, reads its whole log as before.
+        // [#34681] A row-held base's name, named bare, reads that base's
+        // versions, as `?package=` naming it does ({@link historySlotOf}).
         const slot = await historySlotOf(host, {
             type: singularType, name: request.name, ...memberOption(member),
             ...(request.packageId !== undefined ? { packageId: request.packageId } : {}),
@@ -671,7 +674,7 @@ export class ProtocolHistoryAndPublishFacet {
      * `recordPendingDenialAudit`, rethrow. Skip it and the refusal is silent
      * again — the pre-#7748 state, not merely a worse one.
      */
-    static async promoteDraftForPublish(host: Pick<ProtocolHost, 'anonymousElevatedFlowRefusal' | 'assertRuntimeAuthoringRules' | 'classifyObjectContribution' | 'credentialChannelFor' | 'defaultRecordPageSaveRefusal' | 'engine' | 'ensureOverlayIndex' | 'externalBindingSaveRefusal' | 'getOverlayRepo' | 'isArtifactBacked' | 'isOverlayAllowed' | 'isRuntimeCreateAllowed' | 'isSealedManagedItem' | 'lockWriteRefusal' | 'metadataConflictRefusal' | 'namedBaseOverlayWriteRefusal' | 'objectExtensionItemRefusal' | 'objectNamespaceObjectNameClash' | 'objectNamespacePrefixViolation' | 'objectRegistrationRefusal' | 'optimisticConflictAuditEntry' | 'overlayPackageMismatchError' | 'overrideWriteVerdict' | 'packagelessAddress' | 'packagelessDraftAddress' | 'permissionSetNameCollisionRefusal' | 'readItemActiveRows' | 'resolveSduiManifest' | 'seedExternalIdSaveRefusal' | 'uninstalledNamedBaseRefusal' | 'unknownDatasourceSaveRefusal' | 'unknownGrantObjectSaveRefusal' | 'unknownPicklistBindingSaveRefusal'>, request: {
+    static async promoteDraftForPublish(host: Pick<ProtocolHost, 'anonymousElevatedFlowRefusal' | 'assertRuntimeAuthoringRules' | 'classifyObjectContribution' | 'credentialChannelFor' | 'declinesStoredRow' | 'defaultRecordPageSaveRefusal' | 'engine' | 'ensureOverlayIndex' | 'externalBindingSaveRefusal' | 'getOverlayRepo' | 'isArtifactBacked' | 'isOverlayAllowed' | 'isRuntimeCreateAllowed' | 'isSealedManagedItem' | 'lockWriteRefusal' | 'metadataConflictRefusal' | 'namedBaseOverlayWriteRefusal' | 'objectExtensionItemRefusal' | 'objectNamespaceObjectNameClash' | 'objectNamespacePrefixViolation' | 'objectRegistrationRefusal' | 'optimisticConflictAuditEntry' | 'overlayPackageMismatchError' | 'overrideWriteVerdict' | 'packagelessAddress' | 'packagelessDraftAddress' | 'permissionSetNameCollisionRefusal' | 'readItemActiveRows' | 'resolveSduiManifest' | 'rethrowUnlessMetadataStoreUnprovisioned' | 'seedExternalIdSaveRefusal' | 'shippedArtifactsOf' | 'storedParentForToken' | 'uninstalledNamedBaseRefusal' | 'unknownDatasourceSaveRefusal' | 'unknownGrantObjectSaveRefusal' | 'unknownPicklistBindingSaveRefusal'>, request: {
             type: string; name: string; actor?: string; message?: string;
             /**
              * [#8907] ADR-0048 — the package binding of the draft being promoted,
@@ -725,6 +728,14 @@ export class ProtocolHistoryAndPublishFacet {
             member?: string;
             /** [#32656] The write request's `userTextLocales`, for the findings' `userMessage`. */
             userTextLocales?: readonly (string | undefined)[];
+            /**
+             * [#36601] `PublishMetaItemRequestSchema.parentVersion`: the
+             * caller's pin on the active row this promotion replaces — a
+             * token, `null` for "no active row here", absent for unpinned.
+             * Stated by the per-item publish only; a package publish pins
+             * nothing.
+             */
+            parentVersion?: string | null;
             /**
              * [ADR-0144 D2 and D6, amended] The registry question this
              * promotion asks before the row goes live, stated by every producer
@@ -834,7 +845,17 @@ export class ProtocolHistoryAndPublishFacet {
             // is the 503 the lock read raised before this read moved above it
             // ({@link packagelessAddress} discriminates both).
             const address = await host.packagelessDraftAddress(singularType, request.name, request.member);
-            if (address.kind === 'ambiguous') {
+            // [#34681] Active rows bound to two or more packages where the read
+            // naming no package serves the row-held base: the base's draft, as
+            // the publish naming that base promotes it
+            // ({@link packagelessRowHeldBaseAddress}).
+            const base = address.kind === 'ambiguous'
+                ? await packagelessRowHeldBaseAddress(host, singularType, request.name, request.member)
+                : undefined;
+            if (base !== undefined) {
+                draftKey = base;
+                promoteInto = base;
+            } else if (address.kind === 'ambiguous') {
                 draftKey = null;
                 promoteInto = null;
                 addressRefusal = packagelessAddressAmbiguityRefusal('publish', request.type, request.name, address.candidates);
@@ -1050,6 +1071,32 @@ export class ProtocolHistoryAndPublishFacet {
                 singularType, draftForGate.body, request.name, promoteInto,
             );
             if (extensionRefusal) throw extensionRefusal;
+        }
+        // [ADR-0144 D2 and D6, amended; #33593 ruling R1] …and the follow
+        // door the published save of the same body asks (`saveMetaItem`, the
+        // R1 block beside its own `objectExtensionItemRefusal` call): the
+        // extension judged as its object will be served, with this body in the
+        // slot of the package promoted into. The per-item publish makes this
+        // one body live at once, as that save does; without the question it
+        // answered `published` for an amount whose `currencyField` the served
+        // object cannot satisfy — a pointer naming no field, or a
+        // `master_detail`-led path to a parent field holding no code — and
+        // every later write of the amount was refused, or stored a currency
+        // nobody declared. Asked with the save door's call and envelope
+        // (`422 INVALID_METADATA`, the registry's sentence), before
+        // `repo.promoteDraft` writes, so the draft stays a draft. Asked only on
+        // the against-registry question: a package publish judges its
+        // promoted unit before its commit (`registry-question.ts`). The
+        // registry answers no verdict for an object nothing serves yet, and
+        // none before the cold boot sealed it.
+        if (draftForGate && singularType === OBJECT_EXTENSION_TYPE
+            && request.registryQuestion === 'against-registry' && promoteInto) {
+            const registry = host.engine?.registry as { objectRegistrationRefusal?: (schema: unknown, packageId: string | undefined, ownership: string, options: { againstRegistry?: boolean }) => Error | null } | undefined;
+            if (typeof registry?.objectRegistrationRefusal === 'function') {
+                const { extend, priority: _priority, ...contribution } = registrableObjectExtension(draftForGate.body);
+                const followRefusal = registry.objectRegistrationRefusal({ ...contribution, name: extend }, promoteInto, 'extend', { againstRegistry: true });
+                if (followRefusal) throw followRefusal;
+            }
         }
         // [harden] …and a permission-set draft whose name a DIFFERENT owner
         // already holds by the time it is published: a draft save judged the
@@ -1291,6 +1338,25 @@ export class ProtocolHistoryAndPublishFacet {
         // with no manifest promotes the draft as written, as it saves it.
         const sduiManifest = host.resolveSduiManifest();
         try {
+            // [#36601] The caller's pin on the PUBLISHED layer, judged on the
+            // active row at the address this promotion writes (`promoteInto`,
+            // the binding `repo.promoteDraft` writes the active row under):
+            // a token is matched in keyed form ({@link storedParentForToken},
+            // the save door's comparison) and handed to the store as the
+            // stored hash its `put` locks against, so a row published between
+            // this read and the write is refused there too; `null` asserts no
+            // active row. The draft's own pin is `expectedDraftHash` below:
+            // the two judge different rows. Without it the promotion replaces
+            // whatever is live, as before.
+            let expectedActiveHash: string | null | undefined;
+            if (request.parentVersion !== undefined) {
+                const activeHead = await repo.headAt(ref, {
+                    state: 'active',
+                    packageId: promoteInto,
+                    ...memberOption(request.member),
+                });
+                expectedActiveHash = await host.storedParentForToken(ref, request.parentVersion, activeHead.head?.hash ?? null);
+            }
             const result = await repo.promoteDraft(ref, {
                 deriveActiveBody: (draftBody) => stampHtmlPageRequires(singularType, draftBody, sduiManifest),
                 // #4556 — NULL, not 'system', for an actor-less publish.
@@ -1319,6 +1385,8 @@ export class ProtocolHistoryAndPublishFacet {
                 // none), so a draft saved after the gate's read is refused as a
                 // conflict instead of being promoted unjudged.
                 expectedDraftHash: draftForGate ? draftForGate.hash : null,
+                // [#36601] …over the active row the caller pinned, when it pinned one.
+                ...(expectedActiveHash !== undefined ? { expectedActiveHash } : {}),
                 // [#22877] …of the member that was judged.
                 ...memberOption(request.member),
             });
@@ -1338,6 +1406,8 @@ export class ProtocolHistoryAndPublishFacet {
                         ? `${request.type}/${request.name} draft changed after this publish judged it, so nothing was `
                             + `published. Publish again to judge and promote the current draft.`
                         : `${request.type}/${request.name} published row advanced while you held the draft.`,
+                    // [#36601] A publish pinned "no active row here" is told so, as the save door's first-write pin is.
+                    request.parentVersion === null && !(err instanceof DraftConflictError) ? 'active' : undefined,
                 );
                 // [#8594] Attached, not written — same reason as the lock gate
                 // above. The repository's own transaction has already unwound by

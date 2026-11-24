@@ -121,6 +121,17 @@ export const DETAIL_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'detail.deleteRow': 'Delete',
   // objectui#13333 — the related list's row delete names the row by its title.
   'detail.deleteRowConfirmation': 'Are you sure you want to delete "{{name}}"?',
+  // objectstack#35892 — the related tab: a filter that matches nothing, and its bulk delete.
+  'detail.relatedNoMatches': 'No records match the filter',
+  'detail.deleteRowsTitle': 'Delete selected records',
+  'detail.deleteRowsConfirmation': '{{count}} records will be deleted. This cannot be undone.',
+  'detail.deleteRowsConfirmation_one': '{{count}} record will be deleted. This cannot be undone.',
+  'detail.deleteRowsConfirmation_other': '{{count}} records will be deleted. This cannot be undone.',
+  // The bulk delete's outcome, in the list page's own words (`objectActions`).
+  'objectActions.bulkDeleteSuccess': 'Deleted {{count}} {{label}} records',
+  'objectActions.bulkDeleteSuccess_one': 'Deleted {{count}} {{label}} record',
+  'objectActions.bulkDeleteSuccess_other': 'Deleted {{count}} {{label}} records',
+  'objectActions.bulkDeletePartial': '{{succeeded}} deleted, {{failed}} failed',
   'detail.actions': 'Actions',
   'detail.previousPage': 'Previous',
   'detail.nextPage': 'Next',
@@ -147,6 +158,27 @@ export const DETAIL_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'detail.addCommentPlaceholder': 'Add a comment… (Ctrl+Enter to submit)',
   'detail.noMatchingComments': 'No matching comments',
   'detail.noCommentsYet': 'No comments yet',
+  'detail.closeComments': 'Close comments',
+  'detail.collapseReplies': 'Collapse replies',
+  'detail.commentActions': 'Comment actions',
+  'detail.commentsEmptyHint': 'Write the first one below. Use @ to mention a colleague.',
+  'detail.resolveThread': 'Mark resolved',
+  'detail.reopenThread': "Reopen",
+  'detail.threadResolved': "Resolved",
+  'detail.threadResolvedBy': "Resolved by {{name}}",
+  'detail.filterComments': "Filter comments",
+  // objectstack#36076 — the phone's comment page: a reaction in the long-press
+  // sheet, the thread's title, and the toolbar's names without their shortcut.
+  'detail.addReactionEmoji': 'React with {{emoji}}',
+  'detail.commentThread': 'Thread',
+  'detail.formatBold': 'Bold',
+  'detail.formatItalic': 'Italic',
+  'detail.showResolvedComments': "Show resolved",
+  'detail.commentsInvolvingMe': "Only threads I'm in",
+  'detail.noUnresolvedComments': "No unresolved comments",
+  'detail.noCommentsInvolvingMe': "No comments you're part of",
+  'detail.showAllComments': "Show all comments",
+  'detail.commentResolveFailed': "The thread was not updated. Please try again.",
   'detail.pinned': 'Pinned',
   'detail.pin': 'Pin',
   'detail.unpin': 'Unpin',
@@ -246,6 +278,17 @@ export const DETAIL_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'detail.foldedMoreFields_other': '{{count}} more',
   'detail.expandFolded': 'Show each update',
   'detail.collapseFolded': 'Hide updates',
+  // objectstack#36290 — the per-field lines under an activity entry.
+  'detail.fieldChangeLabel': '{{field}}:',
+  'detail.fieldChangeEmpty': 'Empty',
+  'detail.fieldChangeExpand': 'Show all',
+  'detail.fieldChangeCollapse': 'Show less',
+  // objectstack#36290 — one field's change-history card: its entry point's
+  // name (the record page's field button, the list cell's context menu) and
+  // what it says for a field never changed.
+  'detail.fieldHistory': 'Change history',
+  'detail.fieldHistoryNone': 'No changes recorded',
+  'detail.fieldHistoryNoneRecent': 'No changes in the recent activity',
   // …and the punctuation that joins its field list: the shared list key the
   // form's field lists already use, not a second spelling of it.
   'validation.formInvalidJoiner': ', ',
@@ -328,6 +371,17 @@ export const DETAIL_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'detail.pathStageChangeConflict': 'Someone else changed this record, and the latest version is now shown. Press the stage again if the move still applies.',
   'detail.pathStageChangeDenied': "You don't have permission to change this record's stage.",
   'detail.pathStageChangeFailed': 'The stage could not be changed.',
+  // objectstack#35928 — the flows a stage change would start, listed under
+  // the confirm's sentence (`stageChangeStarts`); byte-identical to the `en` pack.
+  'detail.stageChangeStartsHeading': 'Saving this change starts these flows:',
+  'detail.stageChangeStartsApproval': 'starts an approval',
+  // objectstack#35685 — the save bar's note when the record changed elsewhere
+  // during the edit session (`InlineEditSaveBar`). Byte-identical to the `en` pack.
+  'detail.inlineEditRecordChanged': 'This record was changed elsewhere while you were editing. Your unsaved changes are kept, and Save writes them over the latest version.',
+  'detail.stageMenuTrigger': 'Stage: {{stage}}. Change stage',
+  'detail.stageMenuCurrent': 'current stage',
+  'detail.stageMenuNotReachable': "Can't move here from {{stage}}",
+  'detail.stageMenuFieldsDescription': 'To move this record to {{stage}}, fill in:',
   // objectui#9050 — RelatedList's malformed-filter state. Byte-identical to
   // the `en` pack (`defaults-maps-mirror-en-pack`), and present HERE as well
   // because a provider-less host mounting `RelatedList` directly is exactly

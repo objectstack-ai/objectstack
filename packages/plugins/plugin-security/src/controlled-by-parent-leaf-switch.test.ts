@@ -601,7 +601,10 @@ for (const cell of CELLS) describe(`on ${cell.label}`, () => {
       });
       const reads = statements.filter(readsTable(`${DEEP}_2`));
       expect(reads, statements.join('\n')).toHaveLength(1);
-      expect(reads[0].match(/in \(select/gi) ?? []).toHaveLength(8);
+      expect(reads[0].match(/in \(select .id. from/gi) ?? []).toHaveLength(8);
+      // [ADR-0155 plan step 6] The root's share arm rides inside the innermost
+      // scope as the share-grant semi-join, the statement's ninth subquery.
+      expect(reads[0].match(/in \(select .record_id. from .sys_record_share./gi) ?? []).toHaveLength(1);
       expect(await rig.read(`${DEEP}_${DEEP_LINKS - 1}`, context)).toEqual([`${DEEP}_${DEEP_LINKS - 1}_r`]);
     });
   });

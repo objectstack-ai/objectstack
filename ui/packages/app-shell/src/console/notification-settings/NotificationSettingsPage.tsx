@@ -13,15 +13,25 @@
  * data door, as them, and then reads the door again, so what the page shows is
  * always what is in force. See `myPreferences.ts`.
  *
- * Digest and quiet hours offer only values that take effect when saved
- * (`digestChoices`, `quietHoursSaveable`): the resolver reads a stored
- * `'none'` or an empty window as "no opinion" and falls through to the
- * organization's default, so neither is ever offered as a way to turn
- * something off.
+ * Digest and quiet hours offer every choice, and each takes effect when saved
+ * (`digestChoices`, `quietHoursSaveable`): "No digest" saves the explicit
+ * `'none'`, and a cleared quiet-hours window saves the explicit "no quiet
+ * hours" (`QUIET_HOURS_OFF`), so a person can turn off what their
+ * organization's default sets (objectstack ruling 7073270426). The field they
+ * do not change keeps following the organization.
+ *
+ * Once digest or quiet hours is the person's own answer (the door says
+ * `own`), a "Follow organization setting" action beside it empties that field
+ * on their own `(*, *)` row (`followOrganizationWrite`), the same empty the
+ * Setup grid writes; the page then reads the door again and draws the value in
+ * force with its source. Where the field is not their own answer there is
+ * nothing to clear, and the action is not drawn.
  *
  * Channels are columns as the door lists them, so a channel the deployment
  * adds later (Slack, …) appears without a change here; a channel the
- * deployment cannot send on yet says so in its header.
+ * deployment cannot send on yet says so in its header. Where the door lists
+ * `slack` (connector-slack is composed), the page also draws the person's own
+ * Slack link (`SlackLinkSection`): Slack delivers only to a confirmed link.
  *
  * A caller who holds neither a create nor an edit grant on
  * `sys_notification_preference` (an external member: `external_default`
@@ -61,7 +71,9 @@ import { PageHeader } from '../../layout/PageHeader.js';
 import {
   cellWrite,
   digestChoices,
+  followOrganizationWrite,
   quietHoursSaveable,
+  quietHoursStored,
   generalWrite,
   loadMyPreferences,
   PREFERENCE_OBJECT,
@@ -75,6 +87,7 @@ import {
   type PreferenceWrite,
   type QuietHoursWindow,
 } from './myPreferences.js';
+import { SlackLinkSection } from './SlackLinkSection.js';
 
 type Load = { readonly state: 'loading' } | { readonly state: 'failed' } | { readonly state: 'read'; readonly prefs: MyPreferences };
 
@@ -93,6 +106,9 @@ const SOURCE_KEY: Record<PreferenceSource, string> = {
   builtin: 'notificationSettings.sourceBuiltin',
   mandatory: 'notificationSettings.sourceMandatory',
 };
+
+/** The channel the Slack section belongs to, as the preference door lists it. */
+const SLACK_CHANNEL = 'slack';
 
 function errorText(err: unknown): string {
   return err instanceof Error && err.message ? err.message : String(err);
@@ -185,6 +201,9 @@ export function NotificationSettingsPage() {
   // Every disabled control names the one visible reason as its description.
   const readOnlyDescribedBy = writeGranted ? undefined : readOnlyReasonId;
   const quietValue = quietDraft === undefined ? prefs.general.quietHours.value : quietDraft;
+  const followDigest = followOrganizationWrite(prefs.general, 'digest');
+  const followQuietHours = followOrganizationWrite(prefs.general, 'quiet_hours');
+  const followLabel = (setting: string) => t('notificationSettings.followOrganizationFor', { setting });
 
   const topicLabel = (topic: PreferenceTopic) =>
     topic.topic === PREFERENCE_WILDCARD ? t('notificationSettings.allTopics') : topic.topic;
@@ -224,24 +243,33 @@ export function NotificationSettingsPage() {
                 aria-describedby={readOnlyDescribedBy}
                 onChange={(e) => {
                   const digest = e.target.value as DigestCadence;
-                  // `none` is offered only while it is already the value, so it never reaches a write.
-                  if (digest !== 'none') void apply(generalWrite(userId!, prefs.general, { digest }));
+                  void apply(generalWrite(userId!, prefs.general, { digest }));
                 }}
               >
-                {digestChoices(prefs.general).map((d) => (
+                {digestChoices().map((d) => (
                   <option key={d} value={d}>
                     {t(DIGEST_KEY[d])}
                   </option>
                 ))}
               </select>
-              <p className="text-xs text-muted-foreground" data-testid="notification-settings-digest-source">
-                {t(SOURCE_KEY[prefs.general.digest.source])}
-              </p>
-              {prefs.general.digest.value !== 'none' && (
-                <p className="text-xs text-muted-foreground" data-testid="notification-settings-digest-no-off">
-                  {t('notificationSettings.digestNoOff')}
+              <div className="flex items-center gap-3">
+                <p className="text-xs text-muted-foreground" data-testid="notification-settings-digest-source">
+                  {t(SOURCE_KEY[prefs.general.digest.source])}
                 </p>
-              )}
+                {followDigest && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    data-testid="notification-settings-digest-follow"
+                    aria-label={followLabel(t('notificationSettings.digest'))}
+                    disabled={!canWrite}
+                    aria-describedby={readOnlyDescribedBy}
+                    onClick={() => void apply(followDigest)}
+                  >
+                    {t('notificationSettings.followOrganization')}
+                  </Button>
+                )}
+              </div>
             </div>
             <div className="space-y-1" data-testid="notification-settings-quiet-hours">
               <Label>{t('notificationSettings.quietHours')}</Label>
@@ -260,7 +288,10 @@ export function NotificationSettingsPage() {
                   disabled={!canWrite || !quietHoursSaveable(quietDraft)}
                   aria-describedby={readOnlyDescribedBy}
                   onClick={() => {
-                    if (quietHoursSaveable(quietDraft)) void apply(generalWrite(userId!, prefs.general, { quiet_hours: quietDraft }));
+                    // A cleared window saves the explicit "no quiet hours", never empty.
+                    if (quietHoursSaveable(quietDraft)) {
+                      void apply(generalWrite(userId!, prefs.general, { quiet_hours: quietHoursStored(quietDraft) }));
+                    }
                   }}
                 >
                   {t('notificationSettings.save')}
@@ -268,12 +299,20 @@ export function NotificationSettingsPage() {
                 <span className="text-xs text-muted-foreground" data-testid="notification-settings-quiet-hours-source">
                   {t(SOURCE_KEY[prefs.general.quietHours.source])}
                 </span>
+                {followQuietHours && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    data-testid="notification-settings-quiet-hours-follow"
+                    aria-label={followLabel(t('notificationSettings.quietHours'))}
+                    disabled={!canWrite}
+                    aria-describedby={readOnlyDescribedBy}
+                    onClick={() => void apply(followQuietHours)}
+                  >
+                    {t('notificationSettings.followOrganization')}
+                  </Button>
+                )}
               </div>
-              {quietDraft === null && prefs.general.quietHours.value !== null && (
-                <p className="text-xs text-muted-foreground" data-testid="notification-settings-quiet-hours-no-clear">
-                  {t('notificationSettings.quietHoursNoClear')}
-                </p>
-              )}
             </div>
           </CardContent>
         </Card>
@@ -336,6 +375,8 @@ export function NotificationSettingsPage() {
             </div>
           </CardContent>
         </Card>
+
+        {apiFetch && prefs.channels.some((c) => c.channel === SLACK_CHANNEL) && <SlackLinkSection apiFetch={apiFetch} />}
       </div>
     </div>
   );

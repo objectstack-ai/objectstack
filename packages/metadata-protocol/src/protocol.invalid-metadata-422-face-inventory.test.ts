@@ -81,6 +81,8 @@
  * it to `src/protocol.ts` and no `dist/` is on the path; the ablation therefore
  * needs no rebuild, and its RED result rules out a stale-artifact false green.
  */
+// Pays the lint root's first load at collection, never inside a clocked case.
+import './lint-root-preload.testkit.js';
 import { describe, expect, it } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
@@ -194,7 +196,7 @@ describe('[#10888] `issues[]` is attached identically on every face', () => {
         // ⭐ The load-bearing non-effect: trimming the SENTENCE withholds
         // nothing, because this array is what the sentence was restating.
         expect(envelope.issues).toEqual(plain.issues);
-        expect(envelope.issues.length).toBeGreaterThan(1);
+        expect(envelope.issues.some((i: { code?: string }) => i.code === 'unrecognized_keys')).toBe(true);
     });
 
     it('an invalid body is still refused, and still persists nothing', async () => {
@@ -232,7 +234,7 @@ describe('[#10888] `meta-envelope` renders the headline, not the prose', () => {
         // `path [zod code]` locators — so one mistake reads the same whichever
         // authoring door reported it.
         expect(err.message).toMatch(/\d+ issues? — /);
-        expect(err.message).toContain('[invalid_union]');
+        expect(err.message).toContain('[unrecognized_keys]');
     });
 
     /**
@@ -241,9 +243,10 @@ describe('[#10888] `meta-envelope` renders the headline, not the prose', () => {
      * key names live only in `issues[]`. MEASURED here rather than assumed,
      * because the answer decides whether the headline grammar needs work.
      *
-     * It renders `<root> [invalid_union]; <root> [unrecognized_keys]` — the
-     * `path || '<root>'` fallback predates this card and survives it, so the
-     * locator is never blank. Degraded but not lossy: this face is, by the
+     * It renders `<root> [unrecognized_keys]` — the `path || '<root>'` fallback
+     * predates this card and survives it, so the locator is never blank. [#35400]
+     * It read `<root> [invalid_union]; <root> [unrecognized_keys]` until the
+     * union's bare head, explained by the branch below it, was dropped. Degraded but not lossy: this face is, by the
      * definition of the face, one where `issues[]` rides along carrying the key
      * names. Hoisting them into the locator is an improvement to the shared
      * headline grammar (`metadataIssueHeadline`, which the seed refusal and the
@@ -254,9 +257,9 @@ describe('[#10888] `meta-envelope` renders the headline, not the prose', () => {
         const { protocol } = makeProtocol();
         const err = await refusal(protocol, 'meta-envelope');
 
-        expect(err.message).toContain('<root> [invalid_union]');
+        expect(err.message).toContain('— <root> [unrecognized_keys]');
         expect(err.message).not.toMatch(/: {2}\[/);
-        expect(err.message).not.toContain(' [invalid_union];  [');
+        expect(err.message).not.toContain('[invalid_union]');
 
         // …and the key names the headline does not carry are on the channel
         // that made the trim safe in the first place.

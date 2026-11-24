@@ -356,9 +356,14 @@ describe('objectui#8748 — a non-string `icontains` comparand is refused in bot
     // refusal that threw while explaining itself would turn the quiet path into
     // the loud one — for the in-memory callers who hand `find()` a literal,
     // which is the only way either shape gets here (a JSON-sourced filter
-    // carries neither).
-    const cyclic: Record<string, unknown> = {};
-    cyclic.self = cyclic;
+    // carries neither). The cyclic value is a class instance: a PLAIN object
+    // with no `$` key is refused earlier, as a nested relation condition, by
+    // the builder both dialects share, so only a non-plain one reaches this
+    // door's description of the comparand.
+    class Cyclic {
+      self: unknown = this;
+    }
+    const cyclic = new Cyclic();
     for (const comparand of [BigInt(10), cyclic]) {
       const { ids, refusals } = await selectionAndRefusals({ score: { $icontains: comparand } });
       expect(ids, 'refused like any other non-string comparand').toEqual([]);

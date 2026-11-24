@@ -58,6 +58,8 @@ import {
   Check,
   X,
   Lock,
+  Eye,
+  RotateCcw,
 } from 'lucide-react';
 import { cn } from '@object-ui/components';
 import { useObjectTranslation } from '@object-ui/react';
@@ -108,6 +110,12 @@ export interface ManageViewsDialogProps {
   onAddView?: () => void;
   /** Open the edit-config drawer for a view (closes the dialog first) */
   onConfigView?: (viewId: string) => void;
+  /**
+   * Restore the factory version of a customized view
+   * (`ViewTabItem.customized`): the host removes the override, after its own
+   * confirm. Offered only on a customized row; omit to offer it nowhere.
+   */
+  onRestoreFactory?: (viewId: string) => void;
 }
 
 const DEFAULT_ICON: ComponentType<{ className?: string }> = TableIcon;
@@ -131,6 +139,7 @@ interface RowProps {
   onSetDefault?: (id: string) => void;
   onSetPinned?: (id: string, pinned: boolean) => void;
   onConfigView?: (id: string) => void;
+  onRestoreFactory?: (id: string) => void;
 }
 
 const SortableRow: React.FC<RowProps> = ({
@@ -147,6 +156,7 @@ const SortableRow: React.FC<RowProps> = ({
   onSetDefault,
   onSetPinned,
   onConfigView,
+  onRestoreFactory,
 }) => {
   const vt = useViewLabel();
   const {
@@ -170,6 +180,14 @@ const SortableRow: React.FC<RowProps> = ({
   // default, pin, edit configuration, delete). Duplicate is preserved
   // because it produces a fresh override that *is* mutable.
   const isReadonly = !!view.readonly;
+  // A row whose definition is read-only but whose row state is not
+  // (`ViewTabItem.definitionReadonly`): no Delete, and its configuration is
+  // offered to look at. `readonly` wins without a check here: it already
+  // drops both entries this flag changes.
+  const definitionReadonly = !!view.definitionReadonly;
+  // A customization of a read-only package's view (`ViewTabItem.customized`):
+  // marked, and its override can be removed. `readonly` wins.
+  const customized = !isReadonly && !!view.customized;
 
   /**
    * The overflow menu's entries, each resolved ONCE to the handler it will
@@ -187,9 +205,10 @@ const SortableRow: React.FC<RowProps> = ({
   const configAction = isReadonly ? undefined : onConfigView;
   const setDefaultAction = isReadonly || view.isDefault ? undefined : onSetDefault;
   const pinAction = isReadonly ? undefined : onSetPinned;
-  const deleteAction = isReadonly ? undefined : onDelete;
+  const deleteAction = isReadonly || definitionReadonly ? undefined : onDelete;
+  const restoreAction = customized ? onRestoreFactory : undefined;
   const hasEntryAboveDelete =
-    !!(renameAction || duplicateAction || configAction || setDefaultAction || pinAction);
+    !!(renameAction || duplicateAction || configAction || setDefaultAction || pinAction || restoreAction);
   const hasMenuEntry = hasEntryAboveDelete || !!deleteAction;
 
   useEffect(() => {
@@ -289,6 +308,15 @@ const SortableRow: React.FC<RowProps> = ({
                 <Star className="h-3 w-3 mr-0.5 fill-current" /> {vt('view.defaultBadge', 'default')}
               </span>
             )}
+            {customized && (
+              <span
+                data-testid={`manage-views-customized-${view.id}`}
+                className="ml-1 shrink-0 rounded border px-1 text-[10px] uppercase tracking-wide text-muted-foreground"
+                title={vt('view.customizedTitle', 'Changed here: everyone sees this copy instead of the version its package ships.')}
+              >
+                {vt('view.customizedBadge', 'customized')}
+              </span>
+            )}
           </button>
         )}
       </div>
@@ -380,7 +408,9 @@ const SortableRow: React.FC<RowProps> = ({
                 data-testid={`manage-views-action-config-${view.id}`}
                 onClick={() => configAction(view.id)}
               >
-                <Pencil className="h-4 w-4 mr-2" /> {vt('view.editViewConfig', 'Edit view config')}
+                {definitionReadonly
+                  ? <><Eye className="h-4 w-4 mr-2" /> {vt('view.showViewConfig', 'View config')}</>
+                  : <><Pencil className="h-4 w-4 mr-2" /> {vt('view.editViewConfig', 'Edit view config')}</>}
               </DropdownMenuItem>
             )}
             {setDefaultAction && (
@@ -399,6 +429,14 @@ const SortableRow: React.FC<RowProps> = ({
                 {view.isPinned
                   ? <><PinOff className="h-4 w-4 mr-2" /> {vt('view.unpinView', 'Unpin View')}</>
                   : <><Pin className="h-4 w-4 mr-2" /> {vt('view.pinView', 'Pin View')}</>}
+              </DropdownMenuItem>
+            )}
+            {restoreAction && (
+              <DropdownMenuItem
+                data-testid={`manage-views-action-restore-${view.id}`}
+                onClick={() => restoreAction(view.id)}
+              >
+                <RotateCcw className="h-4 w-4 mr-2" /> {vt('view.restoreFactory', 'Restore factory version')}
               </DropdownMenuItem>
             )}
             {deleteAction && (
@@ -457,6 +495,7 @@ export const ManageViewsDialog: React.FC<ManageViewsDialogProps> = ({
   onReorder,
   onAddView,
   onConfigView,
+  onRestoreFactory,
 }) => {
   const vt = useViewLabel();
   const [search, setSearch] = useState('');
@@ -576,6 +615,7 @@ export const ManageViewsDialog: React.FC<ManageViewsDialogProps> = ({
                         onSetDefault={onSetDefault}
                         onSetPinned={onSetPinned}
                         onConfigView={onConfigView ? handleConfig : undefined}
+                        onRestoreFactory={onRestoreFactory}
                       />
                     );
                   })}

@@ -176,7 +176,7 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
       },
       ban_user: {
         label: "Benutzer sperren",
-        description: "Diesen Benutzer sperren? Er wird abgemeldet, kann sich nicht anmelden, und seine API-Schlüssel werden bis zur Entsperrung abgelehnt, ebenso seine OAuth-Zugriffstoken und Token-Aktualisierungen. Nach der Entsperrung funktionieren die Schlüssel wieder.",
+        description: "Diesen Benutzer sperren? Er wird abgemeldet, kann sich nicht anmelden, und seine API-Schlüssel werden bis zur Entsperrung abgelehnt, ebenso seine OAuth-Zugriffstoken und Token-Aktualisierungen. Nach der Entsperrung funktionieren die Schlüssel wieder. Die Sperre setzt außerdem die KI-Dienstkonten aus, für die der Benutzer verantwortlich ist, deaktiviert die von ihm registrierten OAuth-Anwendungen und widerruft die von ihm erstellten SCIM-Anmeldedaten; das Entsperren stellt nichts davon wieder her.",
         successMessage: "Benutzer gesperrt",
         params: {
           banReason: {
@@ -284,6 +284,11 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
           }
         }
       },
+      remove_sso_user: {
+        label: "Remove Pending User",
+        confirmText: "Remove this person, who has not signed in yet, and cancel their invitation? If they have signed in meanwhile, or the hosting organization cannot be reached, no one is removed.",
+        successMessage: "Pending user removed"
+      },
       set_user_password: {
         label: "Passwort festlegen",
         successMessage: "Passwort aktualisiert",
@@ -322,6 +327,11 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
             helpText: "Die Person, an die dieser Benutzer berichtet. Der Server lehnt einen Vorgesetzten außerhalb der Organisation, eine Selbstzuweisung und eine Verknüpfung ab, die die Berichtskette schließen oder zu tief machen würde."
           }
         }
+      },
+      remove_user_manager: {
+        label: "Vorgesetzten entfernen",
+        confirmText: "Den Vorgesetzten dieses Benutzers entfernen? Bis erneut ein Vorgesetzter festgelegt wird, berichtet er an niemanden; das Genehmigungsrouting und der Datensatzbereich own_and_reports folgen der Änderung.",
+        successMessage: "Vorgesetzter entfernt"
       },
       list_platform_admins: {
         label: "Plattformadministratoren",
@@ -486,6 +496,10 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
       revoke_reason: {
         label: "Widerrufsgrund",
         help: "Warum die Sitzung widerrufen wurde (idle_timeout, absolute_max, concurrent_cap, ip_not_allowed, user_revoked, admin, organization_membership_ended, admin_password_reset, password_reset, …)."
+      },
+      sso_provider_id: {
+        label: "SSO-Anbieter",
+        help: "Der SSO-Anbieter, über den diese Sitzung angemeldet wurde, falls vorhanden. Das Löschen dieses Anbieters beendet die Sitzung. Vom System verwaltet."
       },
       active_organization_id: {
         label: "Aktive Organisation"
@@ -4414,6 +4428,202 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
         emptyState: {
           title: "Noch keine Wechselkurse",
           message: "Fügen Sie pro Währung für jedes Datum, an dem sich ihr Kurs ändert, eine Zeile hinzu, zum Beispiel eine Zeile pro Währung zu Beginn jedes Monats."
+        }
+      }
+    }
+  },
+  sys_unit: {
+    label: "Unit of Measure",
+    pluralLabel: "Units of Measure",
+    description: "The organization's own units of measure, beside the standard units every organization has — one row per unit, named by a code in the organization namespace.",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      code: {
+        label: "Code",
+        help: "The code a quantity stores, in exact uppercase: letters, digits and underscores, at least 4 characters or containing an underscore (BOX_12, JIN1). Standard codes such as KGM and H87 are available to every organization and are not added here. The code cannot be changed after the unit is created."
+      },
+      label: {
+        label: "Label",
+        help: "The name shown beside a quantity in this unit, in the organization's own language."
+      },
+      dimension: {
+        label: "Dimension",
+        help: "What the unit measures. A package unit (a box, a bag) has no fixed ratio. The dimension cannot be changed after the unit is created.",
+        options: {
+          mass: "Mass",
+          length: "Length",
+          area: "Area",
+          volume: "Volume",
+          time: "Time",
+          count: "Count",
+          package: "Package"
+        }
+      },
+      ratio: {
+        label: "Ratio",
+        help: "1 of this unit = Ratio × the base unit of its dimension (mass KGM, length MTR, area MTK, volume MTQ, time SEC, count H87). Example: a unit of half a kilogram in the mass dimension has ratio 0.5. A package unit takes no ratio. Changing the ratio affects only records saved afterwards; records already saved keep the quantity and conversion they were saved with. A changed specification is a new unit, not an edited ratio."
+      },
+      decimal_places: {
+        label: "Decimal Places",
+        help: "How many decimal places a quantity in this unit displays with by default. It never rounds a stored value, and a field's own decimal places still limit what is stored."
+      },
+      retired: {
+        label: "Retired",
+        help: "A retired unit stays on file so its code can never be reused, and records that already use it keep showing it. New records cannot use a retired unit. Retiring cannot be undone."
+      }
+    },
+    _views: {
+      all_units: {
+        label: "All",
+        description: "1 of this unit = Ratio × the base unit of its dimension (mass KGM, length MTR, area MTK, volume MTQ, time SEC, count H87). Example: a unit of half a kilogram in the mass dimension has ratio 0.5. A package unit takes no ratio.",
+        emptyState: {
+          title: "No units of measure yet",
+          message: "Standard units such as kilogram (KGM) and piece (H87) are available already. Add a unit here only when your organization needs one they do not cover."
+        }
+      }
+    },
+    _validations: {
+      unit_code_organization_namespace: {
+        message: "A unit code is uppercase letters, digits and underscores, at least 4 characters long or containing an underscore (for example BOX_12 or JIN1). Shorter codes are reserved for the standard units."
+      },
+      unit_code_immutable: {
+        message: "A unit's code cannot be changed after it is created. Create a new unit with the new code instead."
+      },
+      unit_dimension_immutable: {
+        message: "A unit's dimension cannot be changed after it is created. Create a new unit with the new dimension instead."
+      },
+      unit_ratio_required: {
+        message: "Enter the ratio to the base unit of this dimension."
+      },
+      unit_package_has_no_ratio: {
+        message: "A package unit has no ratio: how much a package holds belongs to the item, not to the unit. Clear the ratio."
+      },
+      unit_retired_one_way: {
+        message: "A retired unit cannot be brought back. Create a unit with a new code instead."
+      }
+    }
+  },
+  sys_work_calendar: {
+    label: "Arbeitskalender",
+    pluralLabel: "Arbeitskalender",
+    description: "Arbeitskalender: die wöchentlichen Arbeitszeiten, die Zeitzone, in der sie gelten, und bis wann die Feiertage gepflegt sind. Fälligkeitsdaten, die in Arbeitszeit gezählt werden, lesen sie.",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      code: {
+        label: "Code",
+        help: "Maschinencode, mit dem Formeln, Genehmigungseskalationen und Pakete diesen Kalender benennen, z. B. cn_standard: Kleinbuchstaben, Ziffern und Unterstriche."
+      },
+      name: {
+        label: "Name"
+      },
+      timezone: {
+        label: "Zeitzone",
+        help: "IANA-Zeitzone, in der die Arbeitszeiten gelten, z. B. Asia/Shanghai. Das Formular zum Anlegen öffnet sich mit der Zeitzone der Organisation (Einstellungen → Lokalisierung), und ein Anlegen ohne Angabe erhält dieselbe Zeitzone."
+      },
+      is_default: {
+        label: "Standard",
+        help: "Der Kalender, den ein Fälligkeitsdatum verwendet, wenn es keinen nennt. Einer pro Organisation."
+      },
+      maintained_from: {
+        label: "Gepflegt ab",
+        help: "Erstes Datum, ab dem Feiertage und Ersatzarbeitstage erfasst sind. Eine Berechnung, die ein früheres Datum braucht, wird abgelehnt."
+      },
+      maintained_through: {
+        label: "Gepflegt bis",
+        help: "Letztes Datum, bis zu dem Feiertage und Ersatzarbeitstage erfasst sind. Eine Berechnung, die ein späteres Datum braucht, wird abgelehnt: Erfassen Sie die Feiertage des nächsten Jahres und verschieben Sie dann dieses Datum."
+      },
+      monday_periods: {
+        label: "Montag",
+        help: "Arbeitszeiten an diesem Tag in der Zeitzone des Kalenders, HH:mm-HH:mm durch Kommas getrennt, z. B. 09:00-12:00, 13:00-18:00. Ein Zeitraum endet am selben Tag später, als er beginnt; 24:00 ist das späteste Ende. Für einen freien Tag leer lassen."
+      },
+      tuesday_periods: {
+        label: "Dienstag",
+        help: "Arbeitszeiten an diesem Tag in der Zeitzone des Kalenders, HH:mm-HH:mm durch Kommas getrennt, z. B. 09:00-12:00, 13:00-18:00. Ein Zeitraum endet am selben Tag später, als er beginnt; 24:00 ist das späteste Ende. Für einen freien Tag leer lassen."
+      },
+      wednesday_periods: {
+        label: "Mittwoch",
+        help: "Arbeitszeiten an diesem Tag in der Zeitzone des Kalenders, HH:mm-HH:mm durch Kommas getrennt, z. B. 09:00-12:00, 13:00-18:00. Ein Zeitraum endet am selben Tag später, als er beginnt; 24:00 ist das späteste Ende. Für einen freien Tag leer lassen."
+      },
+      thursday_periods: {
+        label: "Donnerstag",
+        help: "Arbeitszeiten an diesem Tag in der Zeitzone des Kalenders, HH:mm-HH:mm durch Kommas getrennt, z. B. 09:00-12:00, 13:00-18:00. Ein Zeitraum endet am selben Tag später, als er beginnt; 24:00 ist das späteste Ende. Für einen freien Tag leer lassen."
+      },
+      friday_periods: {
+        label: "Freitag",
+        help: "Arbeitszeiten an diesem Tag in der Zeitzone des Kalenders, HH:mm-HH:mm durch Kommas getrennt, z. B. 09:00-12:00, 13:00-18:00. Ein Zeitraum endet am selben Tag später, als er beginnt; 24:00 ist das späteste Ende. Für einen freien Tag leer lassen."
+      },
+      saturday_periods: {
+        label: "Samstag",
+        help: "Arbeitszeiten an diesem Tag in der Zeitzone des Kalenders, HH:mm-HH:mm durch Kommas getrennt, z. B. 09:00-12:00, 13:00-18:00. Ein Zeitraum endet am selben Tag später, als er beginnt; 24:00 ist das späteste Ende. Für einen freien Tag leer lassen."
+      },
+      sunday_periods: {
+        label: "Sonntag",
+        help: "Arbeitszeiten an diesem Tag in der Zeitzone des Kalenders, HH:mm-HH:mm durch Kommas getrennt, z. B. 09:00-12:00, 13:00-18:00. Ein Zeitraum endet am selben Tag später, als er beginnt; 24:00 ist das späteste Ende. Für einen freien Tag leer lassen."
+      }
+    },
+    _views: {
+      all_calendars: {
+        label: "Alle",
+        emptyState: {
+          title: "Noch keine Arbeitskalender",
+          message: "Fügen Sie einen Kalender mit seinen wöchentlichen Arbeitszeiten hinzu, markieren Sie einen als Standard und erfassen Sie dann seine Feiertage und Ersatzarbeitstage."
+        }
+      },
+      needs_maintenance: {
+        label: "Pflege erforderlich",
+        emptyState: {
+          title: "Alle Kalender sind vorausschauend gepflegt",
+          message: "Ein Kalender erscheint hier, wenn seine Feiertage innerhalb der nächsten 60 Tage enden; Fälligkeitsdaten nach diesem Datum werden abgelehnt."
+        }
+      }
+    },
+    _validations: {
+      work_calendar_code_shape: {
+        message: "Der Code muss mit einem Kleinbuchstaben beginnen und darf nur Kleinbuchstaben, Ziffern und Unterstriche enthalten, z. B. cn_standard."
+      }
+    }
+  },
+  sys_work_calendar_exception: {
+    label: "Kalenderausnahme",
+    pluralLabel: "Kalenderausnahmen",
+    description: "Datierte Abweichungen von einem Arbeitskalender: Feiertage, Ersatzarbeitstage und Betriebsruhen. Ein Arbeitstag trägt seine vollständigen Arbeitszeiten.",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      calendar: {
+        label: "Kalender"
+      },
+      date: {
+        label: "Datum"
+      },
+      kind: {
+        label: "Art",
+        help: "Frei: Der ganze Tag ist frei. Arbeitstag: An dem Datum wird mit den Zeiträumen unten gearbeitet, z. B. an einem Ersatzarbeitstag.",
+        options: {
+          off: "Frei",
+          on: "Arbeitstag"
+        }
+      },
+      periods: {
+        label: "Zeiträume",
+        help: "Für einen Arbeitstag alle Stunden dieses Datums; sie werden nie vom Wochentag übernommen. Arbeitszeiten an diesem Tag in der Zeitzone des Kalenders, HH:mm-HH:mm durch Kommas getrennt, z. B. 09:00-12:00, 13:00-18:00. Ein Zeitraum endet am selben Tag später, als er beginnt; 24:00 ist das späteste Ende. Für einen freien Tag leer lassen."
+      },
+      note: {
+        label: "Notiz",
+        help: "Was das Datum ist, z. B. Nationalfeiertag oder ein Ersatzarbeitstag zum Frühlingsfest."
+      }
+    },
+    _views: {
+      all_exceptions: {
+        label: "Alle",
+        emptyState: {
+          title: "Noch keine Kalenderausnahmen",
+          message: "Fügen Sie pro Feiertag oder Ersatzarbeitstag eine Zeile hinzu oder importieren Sie ein Jahr davon aus einer Datei."
         }
       }
     }

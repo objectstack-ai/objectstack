@@ -25,10 +25,15 @@ import { describe, it, expect, afterAll, afterEach, beforeEach, vi } from 'vites
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { AuthManager } from './auth-manager.js';
+// The SSO discovery egress guard the source loads with a dynamic import, paid
+// here, during collection (check-test-source-alias, "The source reach").
+import '@objectstack/core/egress';
 import { authIdentityObjects } from './manifest.js';
 import { SIGN_UP_INVITATION_ID_FIELD } from './presented-invitation.js';
 import { operatorProvisioningField } from './audience-gate-test-support';
 import { ACCEPT_INVITATION_ONE_STEP_PATH } from './invitation-mailbox-proof.js';
+import { SELF_REGISTRATION_CLOSED } from './audience-posture.js';
+import { GRANT_SET_NAME_FIELD } from './grant-set-name.js';
 import { memoizeScrypt } from './__tests__/scrypt-memo.testkit';
 import { bindTestSecurityCatalog } from './__tests__/security-catalog.testkit.js';
 import { relaxTenantColumns } from './pre-18-tenant-column.testkit.js';
@@ -99,7 +104,7 @@ const permissionSetObjects = [
     fields: {
       id: { name: 'id', type: 'text', primaryKey: true },
       user_id: { name: 'user_id', type: 'text' },
-      permission_set_id: { name: 'permission_set_id', type: 'text' },
+      [GRANT_SET_NAME_FIELD]: { name: GRANT_SET_NAME_FIELD, type: 'text' },
       organization_id: { name: 'organization_id', type: 'text' },
     },
   },
@@ -228,11 +233,12 @@ async function verdict(res: Response): Promise<{ status: number; code?: unknown 
  */
 async function deployment(
   config: Record<string, unknown> = {},
-  { mail = 'live', into = PARTNER_ORG }: { mail?: MailState; into?: string } = {},
+  { mail = 'live', into = PARTNER_ORG, grantTable = false }: { mail?: MailState; into?: string; grantTable?: boolean } = {},
 ) {
-  const engine = await bootEngine({
-    selfRegistrationSet: (config as { audience?: { posture?: unknown } }).audience?.posture === 'email_domain',
-  });
+  // Both self-registration postures grant the declared set to a sign-up their own rule admits;
+  // `grantTable` declares the grant store for a posture that declares no set, so its absence can be read.
+  const posture = (config as { audience?: { posture?: unknown } }).audience?.posture;
+  const engine = await bootEngine({ selfRegistrationSet: grantTable || posture === 'email_domain' || posture === 'open' });
   const sent: SentMail[] = [];
   const manager = makeManager(engine, sent, config, mail);
   const first = await send(manager, 'POST', '/sign-up/email', { email: OWNER, password: PASSWORD, name: 'Owner' });
@@ -300,6 +306,35 @@ async function socialSession(d: Deployment, verified: boolean): Promise<string> 
   return cookie;
 }
 
+/** A sign-in through the social provider, which asserts `email` as verified or not; the answer is returned as it came. */
+function socialSignIn(d: Deployment, email: string, verified: boolean): Promise<Response> {
+  providerProfile = { sub: `google-${email}`, email, email_verified: verified };
+  return send(d.manager, 'POST', '/sign-in/social', { provider: 'google', idToken: { token: 'synthetic' } });
+}
+
+/** How many rows each identity object holds. */
+async function identityRowCounts(engine: ObjectQL): Promise<Record<string, number>> {
+  const counts: Record<string, number> = {};
+  for (const object of ['sys_user', 'sys_account', 'sys_session', 'sys_member']) counts[object] = (await rows(engine, object)).length;
+  return counts;
+}
+
+/**
+ * A social sign-in whose provider did not verify `email` is refused at the
+ * admission gate, `403 SELF_REGISTRATION_CLOSED`, and writes nothing: no
+ * account row, no linked account, no session, no membership.
+ */
+async function expectSocialCreationRefused(d: Deployment, email: string) {
+  const before = await identityRowCounts(d.engine);
+  const res = await socialSignIn(d, email, false);
+  // One comparison, so a failure shows every leg at once.
+  expect(
+    { verdict: await verdict(res), signedIn: cookieFrom(res) !== '', rows: await identityRowCounts(d.engine) },
+    await res.clone().text(),
+  ).toEqual({ verdict: { status: 403, code: SELF_REGISTRATION_CLOSED }, signedIn: false, rows: before });
+  expect(await rows(d.engine, 'sys_user', { email })).toEqual([]);
+}
+
 
 /** The answer the one-step door gives a signed-in session (no proof). */
 async function oneStepAnswer(d: Deployment, cookie: string): Promise<unknown> {
@@ -355,6 +390,46 @@ async function expectDeclined(d: Deployment, cookie: string) {
   expect(await d.membershipsIn(d.into)).toEqual([]);
 }
 
+/** The self-registration grants `email` holds, as `[organization, set]` pairs. */
+async function grantsOf(d: Deployment, email: string) {
+  const [user] = await rows(d.engine, 'sys_user', { email });
+  return user
+    ? (await rows(d.engine, 'sys_user_permission_set', { user_id: user.id })).map((g) => [g.organization_id, g[GRANT_SET_NAME_FIELD]])
+    : [];
+}
+
+/** The memberships `email` holds, as `[organization, role]` pairs, sorted. */
+async function membershipsOf(d: Deployment, email: string) {
+  const [user] = await rows(d.engine, 'sys_user', { email });
+  return user ? (await rows(d.engine, 'sys_member', { user_id: user.id })).map((m) => [m.organization_id, m.role]).sort() : [];
+}
+
+/** A password sign-up the posture admits while email verification is in force, so it is not signed in. */
+async function signUpUnverified(d: Deployment, email: string, extra: Record<string, unknown> = {}) {
+  const res = await send(d.manager, 'POST', '/sign-up/email', { email, password: PASSWORD, name: 'Person', ...extra });
+  expect(res.status, await res.clone().text()).toBe(200);
+  expect(cookieFrom(res), 'no session before the mailbox answers').toBe('');
+  const [user] = await rows(d.engine, 'sys_user', { email });
+  expect(user, `${email} was created`).toBeDefined();
+  expect(Boolean(user.email_verified)).toBe(false);
+}
+
+/** Follow the verification mail the sign-up of `email` sent, then sign in with the password. */
+async function verifyAndSignIn(d: Deployment, email: string = INVITEE): Promise<string> {
+  const mail = await vi.waitFor(() => {
+    const found = [...d.sent].reverse().find((m) => m.template === 'auth.verify_email' && JSON.stringify(m.to).includes(email));
+    expect(found, 'the sign-up sent the verification mail').toBeDefined();
+    return found!;
+  });
+  const verified = await send(d.manager, 'GET', String(mail.data.verificationUrl));
+  expect(verified.status, await verified.clone().text()).toBeLessThan(400);
+  const [user] = await rows(d.engine, 'sys_user', { email });
+  expect(Boolean(user?.email_verified)).toBe(true);
+  const signIn = await send(d.manager, 'POST', '/sign-in/email', { email, password: PASSWORD });
+  expect(signIn.status, await signIn.clone().text()).toBe(200);
+  return cookieFrom(signIn);
+}
+
 /** Complete the verification mail round trip for the signed-in invitee. */
 async function verifyByMail(d: Deployment, cookie: string) {
   const asked = await send(d.manager, 'POST', '/send-verification-email', { email: INVITEE }, cookie);
@@ -367,6 +442,14 @@ async function verifyByMail(d: Deployment, cookie: string) {
 }
 
 const OPEN = { audience: { posture: 'open', selfRegistrationPermissionSet: 'member_default' } };
+/**
+ * `open` with the deployment's email verification declared off. An address-based
+ * posture (`email_domain`, or `open` while email verification is in force)
+ * refuses a social creation whose provider did not verify the address, so this
+ * is the deployment on which such an account exists and the answer rules for it
+ * are driven.
+ */
+const OPEN_VERIFICATION_OFF = { ...OPEN, emailAndPassword: { requireEmailVerification: false } };
 
 describe('accepting, declining and listing an invitation require a verified email address; reading it does not', () => {
   it('a password account that never verified its address is refused at accept, decline and the listing, and can read the invitation', async () => {
@@ -390,7 +473,7 @@ describe('accepting, declining and listing an invitation require a verified emai
   });
 
   it('an account whose social provider asserted the address unverified is refused at accept, decline and the listing', async () => {
-    const d = await deployment(OPEN);
+    const d = await deployment(OPEN_VERIFICATION_OFF);
     await expectAnswerRefusedReadOpen(d, await socialSession(d, false));
   });
 
@@ -405,7 +488,7 @@ describe('accepting, declining and listing an invitation require a verified emai
   });
 
   it('the one-step door accepts for a signed-in account only once its address is verified', async () => {
-    const d = await deployment(OPEN);
+    const d = await deployment(OPEN_VERIFICATION_OFF);
     const cookie = await socialSession(d, false);
     await expectAnswerRefusedReadOpen(d, cookie);
 
@@ -449,7 +532,7 @@ describe('the rule holds whatever the state of the mail transport', () => {
     });
 
     it(`${label}: an unverified social account is refused at accept, decline and the listing`, async () => {
-      const d = await deployment(OPEN, { mail });
+      const d = await deployment(OPEN_VERIFICATION_OFF, { mail });
       await expectAnswerRefusedReadOpen(d, await socialSession(d, false));
     });
 
@@ -545,6 +628,16 @@ describe('under invite_only, a sign-up admitted by the invitation it presents jo
     expect((await d.allMemberships()).map((m) => [m.organization_id, m.role])).toEqual([[DEFAULT_ORG, 'member']]);
   });
 
+  it('CONTROL: the sign-up receives no self-registration permission set, before or after it accepts', async () => {
+    const d = await deployment({}, { into: DEFAULT_ORG, grantTable: true });
+    const cookie = await unverifiedPasswordSession(d);
+    expect(await grantsOf(d, INVITEE)).toEqual([]);
+    await verifyByMail(d, cookie);
+    await expectAccepted(d, cookie);
+    expect(await membershipsOf(d, INVITEE)).toEqual([[DEFAULT_ORG, 'admin']]);
+    expect(await grantsOf(d, INVITEE)).toEqual([]);
+  });
+
   it('CONTROL: the first account of the deployment is still bound to the default organization', async () => {
     const d = await deployment({}, { into: DEFAULT_ORG });
     const [owner] = await rows(d.engine, 'sys_user', { email: OWNER });
@@ -568,36 +661,6 @@ describe('under email_domain, a sign-up off the allowlist that an invitation adm
   };
   const COLLEAGUE = 'colleague@corp.example';
 
-  const membershipsOf = async (d: Deployment, email: string) => {
-    const [user] = await rows(d.engine, 'sys_user', { email });
-    return user ? (await rows(d.engine, 'sys_member', { user_id: user.id })).map((m) => [m.organization_id, m.role]) : [];
-  };
-
-  /** A password sign-up the posture admits; verification is forced on here, so it is not signed in. */
-  async function signUpUnverified(d: Deployment, email: string, extra: Record<string, unknown> = {}) {
-    const res = await send(d.manager, 'POST', '/sign-up/email', { email, password: PASSWORD, name: 'Person', ...extra });
-    expect(res.status, await res.clone().text()).toBe(200);
-    expect(cookieFrom(res), 'no session before the mailbox answers').toBe('');
-    const [user] = await rows(d.engine, 'sys_user', { email });
-    expect(user, `${email} was created`).toBeDefined();
-    expect(Boolean(user.email_verified)).toBe(false);
-  }
-
-  /** Follow the verification mail the sign-up sent, then sign in with the password. */
-  async function verifyAndSignIn(d: Deployment): Promise<string> {
-    const mail = await vi.waitFor(() => {
-      const found = [...d.sent].reverse().find((m) => m.template === 'auth.verify_email' && JSON.stringify(m.to).includes(INVITEE));
-      expect(found, 'the sign-up sent the verification mail').toBeDefined();
-      return found!;
-    });
-    const verified = await send(d.manager, 'GET', String(mail.data.verificationUrl));
-    expect(verified.status, await verified.clone().text()).toBeLessThan(400);
-    expect(Boolean((await d.inviteeRow())?.email_verified)).toBe(true);
-    const signIn = await send(d.manager, 'POST', '/sign-in/email', { email: INVITEE, password: PASSWORD });
-    expect(signIn.status, await signIn.clone().text()).toBe(200);
-    return cookieFrom(signIn);
-  }
-
   it('the unverified sign-up holds no membership, not even in the default organization', async () => {
     const d = await deployment(EMAIL_DOMAIN, { into: DEFAULT_ORG });
     await signUpUnverified(d, INVITEE);
@@ -614,18 +677,24 @@ describe('under email_domain, a sign-up off the allowlist that an invitation adm
     expect((await d.allMemberships()).map((m) => [m.organization_id, m.role])).toEqual([[DEFAULT_ORG, 'admin']]);
   });
 
-  it('an account a social provider made for that address, unverified, holds no membership and is refused at accept', async () => {
-    const d = await deployment(EMAIL_DOMAIN, { into: DEFAULT_ORG });
-    const cookie = await socialSession(d, false);
-    expect(await d.allMemberships()).toEqual([]);
-    await expectAnswerRefusedReadOpen(d, cookie);
-    expect(await d.allMemberships()).toEqual([]);
+  it('a social provider that did not verify that address is refused at admission like any unverified social creation: no account, no session, no membership', async () => {
+    const d = await deployment(EMAIL_DOMAIN, { into: PARTNER_ORG });
+    await expectSocialCreationRefused(d, INVITEE);
+    expect((await d.invitation())?.status).toBe('pending');
+
+    // The invitation still serves: the same person, once the provider verifies
+    // the address, is admitted and accepts the invited role.
+    const res = await socialSignIn(d, INVITEE, true);
+    expect(res.status, await res.clone().text()).toBe(200);
+    expect(cookieFrom(res), 'the verified social sign-in is signed in').not.toBe('');
+    await expectAccepted(d, cookieFrom(res));
   });
 
-  it('CONTROL: an address on the allowlist is bound to the default organization at creation, uninvited or invited', async () => {
+  it('CONTROL: an address on the allowlist is bound to the default organization at creation and receives the declared permission set, uninvited or invited', async () => {
     const d = await deployment(EMAIL_DOMAIN, { into: DEFAULT_ORG });
     await signUpUnverified(d, COLLEAGUE);
     expect(await membershipsOf(d, COLLEAGUE)).toEqual([[DEFAULT_ORG, 'member']]);
+    expect(await grantsOf(d, COLLEAGUE)).toEqual([[DEFAULT_ORG, SELF_REGISTRATION_SET]]);
 
     const invitedColleague = 'invited@corp.example';
     const invited = await send(
@@ -638,6 +707,23 @@ describe('under email_domain, a sign-up off the allowlist that an invitation adm
     expect(invited.status, await invited.clone().text()).toBe(200);
     await signUpUnverified(d, invitedColleague);
     expect(await membershipsOf(d, invitedColleague)).toEqual([[DEFAULT_ORG, 'member']]);
+    expect(await grantsOf(d, invitedColleague)).toEqual([[DEFAULT_ORG, SELF_REGISTRATION_SET]]);
+
+    // The invitation still places it: once verified it accepts the invited role, and the grant stays the one row.
+    const cookie = await verifyAndSignIn(d, invitedColleague);
+    const accept = await send(d.manager, 'POST', '/organization/accept-invitation', { invitationId: String(((await invited.json()) as { id: unknown }).id) }, cookie);
+    expect(accept.status, await accept.clone().text()).toBe(200);
+    expect(await membershipsOf(d, invitedColleague)).toEqual([[DEFAULT_ORG, 'member'], [PARTNER_ORG, 'admin']]);
+    expect(await grantsOf(d, invitedColleague)).toEqual([[DEFAULT_ORG, SELF_REGISTRATION_SET]]);
+  });
+
+  it('CONTROL: a sign-up off the allowlist that an invitation admitted receives no self-registration permission set, before or after it accepts', async () => {
+    const d = await deployment(EMAIL_DOMAIN, { into: DEFAULT_ORG });
+    await signUpUnverified(d, INVITEE);
+    expect(await grantsOf(d, INVITEE)).toEqual([]);
+    await expectAccepted(d, await verifyAndSignIn(d));
+    expect(await membershipsOf(d, INVITEE)).toEqual([[DEFAULT_ORG, 'admin']]);
+    expect(await grantsOf(d, INVITEE)).toEqual([]);
   });
 
   it('CONTROL: an address off the allowlist that an operator provisions is bound to the default organization while an invitation to it is pending', async () => {
@@ -670,3 +756,71 @@ describe('under email_domain, a sign-up off the allowlist that an invitation adm
   });
 });
 
+describe('under open, an invited sign-up is admitted by the posture and receives the declared permission set beside its invitation placement', () => {
+  it('the invited sign-up is bound to the default organization with the declared set at creation, and accepts the invited role', async () => {
+    const d = await deployment(OPEN, { into: PARTNER_ORG });
+    expect((await d.invitation())?.status).toBe('pending');
+    await signUpUnverified(d, INVITEE);
+    expect(await membershipsOf(d, INVITEE)).toEqual([[DEFAULT_ORG, 'member']]);
+    expect(await grantsOf(d, INVITEE)).toEqual([[DEFAULT_ORG, SELF_REGISTRATION_SET]]);
+    await expectAccepted(d, await verifyAndSignIn(d));
+    expect(await membershipsOf(d, INVITEE)).toEqual([[DEFAULT_ORG, 'member'], [PARTNER_ORG, 'admin']]);
+    expect(await grantsOf(d, INVITEE)).toEqual([[DEFAULT_ORG, SELF_REGISTRATION_SET]]);
+  });
+
+  it('CONTROL: an uninvited sign-up receives the same set', async () => {
+    const d = await deployment(OPEN, { into: PARTNER_ORG });
+    const stranger = 'stranger@anywhere.example';
+    await signUpUnverified(d, stranger);
+    expect(await membershipsOf(d, stranger)).toEqual([[DEFAULT_ORG, 'member']]);
+    expect(await grantsOf(d, stranger)).toEqual([[DEFAULT_ORG, SELF_REGISTRATION_SET]]);
+  });
+});
+
+describe('under an address-based audience posture, a self-serve social creation is admitted only with a provider-verified address', () => {
+  /** {@link ON_LIST} is on this list; {@link OWNER} and {@link ANYONE} are off it. */
+  const ALLOWLIST = {
+    audience: { posture: 'email_domain', allowedEmailDomains: ['corp.example'], selfRegistrationPermissionSet: SELF_REGISTRATION_SET },
+  };
+  const ON_LIST = 'colleague@corp.example';
+  const ANYONE = 'someone@anywhere.example';
+
+  const membershipsOf = async (d: Deployment, email: string) => {
+    const [user] = await rows(d.engine, 'sys_user', { email });
+    return user ? (await rows(d.engine, 'sys_member', { user_id: user.id })).map((m) => [m.organization_id, m.role]) : [];
+  };
+
+  it('email_domain: a social provider that did not verify an address on the allowlist is refused: no account, no session, no membership', async () => {
+    const d = await deployment(ALLOWLIST);
+    await expectSocialCreationRefused(d, ON_LIST);
+  });
+
+  it('open with email verification in force: a social provider that did not verify the address is refused: no account, no session, no membership', async () => {
+    const d = await deployment(OPEN);
+    await expectSocialCreationRefused(d, ANYONE);
+  });
+
+  for (const [label, config, email] of [
+    ['email_domain, an address on the allowlist', ALLOWLIST, ON_LIST],
+    ['open with email verification in force', OPEN, ANYONE],
+  ] as const) {
+    it(`CONTROL: ${label}: a social provider that verified the address admits it, signs it in and binds it to the default organization`, async () => {
+      const d = await deployment(config);
+      const res = await socialSignIn(d, email, true);
+      expect(res.status, await res.clone().text()).toBe(200);
+      expect(cookieFrom(res), 'the verified social sign-in is signed in').not.toBe('');
+      const [user] = await rows(d.engine, 'sys_user', { email });
+      expect(Boolean(user?.email_verified)).toBe(true);
+      expect(await membershipsOf(d, email)).toEqual([[DEFAULT_ORG, 'member']]);
+    });
+  }
+
+  it('CONTROL: open with the deployment\'s email verification declared off: a social provider that did not verify the address admits it and signs it in', async () => {
+    const d = await deployment(OPEN_VERIFICATION_OFF);
+    const res = await socialSignIn(d, ANYONE, false);
+    expect(res.status, await res.clone().text()).toBe(200);
+    expect(cookieFrom(res), 'the sign-in is signed in').not.toBe('');
+    const [user] = await rows(d.engine, 'sys_user', { email: ANYONE });
+    expect(Boolean(user?.email_verified)).toBe(false);
+  });
+});

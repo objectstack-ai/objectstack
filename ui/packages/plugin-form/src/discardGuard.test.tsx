@@ -344,6 +344,8 @@ describe('master-detail overlay unsaved-changes guard (objectstack#34599)', () =
     const onOpenChange = vi.fn();
     render(<ModalForm schema={mdSchema(onOpenChange)} dataSource={mdDs} />);
     await headerInput();
+    // A line to edit (the grid draws no trailing entry row, objectstack#35507).
+    fireEvent.click(await waitFor(() => screen.getByTestId('line-items-add')));
     const amount = await waitFor(() => screen.getAllByLabelText('Amount')[0] as HTMLInputElement);
     fireEvent.change(amount, { target: { value: '42' } });
 

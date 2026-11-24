@@ -120,7 +120,8 @@ export const ConvertLeadScreenFlow = defineFlow({
     },
 
     // ── 5. Step 2 — full Opportunity form WITH product line items ──────────
-    // crm_opportunity_line_item.opportunity declares inlineEdit: 'grid', so the
+    // crm_opportunity's `lines` field group names crm_opportunity_line_item
+    // (objectstack#35889) and its FK declares inlineEdit: 'grid', so the
     // standard Opportunity form (and therefore this step) renders an editable
     // product line-item grid below the header — the master-detail entry the
     // user asked for. The account FK is prefilled with Step 1's new id.

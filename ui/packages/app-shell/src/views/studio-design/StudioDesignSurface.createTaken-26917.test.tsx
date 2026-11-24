@@ -24,6 +24,9 @@
  * door does, and refuses the pin over a draft row.
  */
 
+// Warmed at module top so the first load of the console's lazily loaded
+// authoring code is paid during collection, not inside a test's clock.
+import '@objectstack/lint';
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -192,7 +195,11 @@ afterEach(() => {
 /** Fill the create dialog's label (the identifier derives from it) and submit. */
 function submitCreate(dialog: HTMLElement, label: string) {
   fireEvent.change(dialog.querySelectorAll('input')[0], { target: { value: label } });
-  fireEvent.click(within(dialog).getByRole('button', { name: en('engine.studio.createDraft') }));
+  // objectstack#36511 — a live editor's dialog says Create; an app's still says Save as draft.
+  fireEvent.click(
+    within(dialog).queryByRole('button', { name: en('engine.studio.createLive') }) ??
+      within(dialog).getByRole('button', { name: en('engine.studio.createDraft') }),
+  );
 }
 
 describe('objectstack#26917 — Automations: New automation over a taken identifier', () => {

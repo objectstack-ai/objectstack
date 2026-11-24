@@ -23,9 +23,10 @@
  *    `warn`. On a deactivation it refuses the deactivation (`503`, nothing
  *    written): only the host can say whether the person is an organization
  *    owner or admin, whom ruling 5 keeps out of reach from the environment
- *    side. On an add or a reactivation it never undoes or blocks the
- *    operation: the answer carries `host: { notified: false, reason:
- *    'host_failed' }`.
+ *    side. On a removal it refuses the removal (`503`, nothing removed): the
+ *    door calls the host once and keeps no record to ask again from. On an
+ *    add or a reactivation it never undoes or blocks the operation: the
+ *    answer carries `host: { notified: false, reason: 'host_failed' }`.
  *
  * The host is never called inside a database transaction: each door calls it
  * outside its unit of work.
@@ -70,8 +71,8 @@ export interface EnvironmentUserEvent {
  * written; `userDeactivated`, `userReactivated` and `userRemoved` before the
  * ban, unban or removal is written. A member that throws
  * {@link EnvironmentUserHostRefusal} refuses the operation. Any other throw
- * refuses a deactivation (`503`) and is reported on the answer for an add, a
- * reactivation or a removal, which it never undoes or blocks.
+ * refuses a deactivation or a removal (`503`) and is reported on the answer
+ * for an add or a reactivation, which it never undoes or blocks.
  */
 export interface EnvironmentUserHost {
   /** A person was added (or re-added while still pending) to this environment. */
@@ -275,7 +276,7 @@ const goesAhead = (kind: EnvironmentUserEventKind): string =>
     : kind === 'deactivated'
       ? 'The deactivation is refused: only the host can say whether this person may be removed.'
       : kind === 'removed'
-        ? 'The removal goes ahead.'
+        ? 'The removal is refused: the door keeps no record to ask the host again from.'
         : 'The change goes ahead.';
 
 const describe = (error: unknown): string => (error instanceof Error ? error.message : String(error));

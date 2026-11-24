@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   ENTERPRISE_ABSENCE_CONSEQUENCE,
+  ENTERPRISE_ABSENCE_RUNTIME_NOTICE,
+  enterpriseAbsenceConsequence,
   judgeDeclaredCapabilities,
   preflightDeclaredCapabilities,
   preflightProviderWiring,
@@ -382,6 +384,26 @@ describe('the enterprise consequence sentence', () => {
     for (const token of Object.keys(ENTERPRISE_ABSENCE_CONSEQUENCE)) {
       expect(PLATFORM_CAPABILITY_PROVIDERS[token]?.edition, token).toBe('enterprise');
     }
+  });
+
+  it('every runtime-notice row keys an enterprise-edition registry token', () => {
+    for (const token of Object.keys(ENTERPRISE_ABSENCE_RUNTIME_NOTICE)) {
+      expect(PLATFORM_CAPABILITY_PROVIDERS[token]?.edition, token).toBe('enterprise');
+    }
+  });
+
+  it('hierarchy-security no longer claims silence: it names the warning the runtime logs', () => {
+    const m = enterpriseAbsenceConsequence('hierarchy-security');
+    expect(m).not.toContain('no log line says so');
+    // The prefix plugin-sharing's HIERARCHY_RESOLVER_ABSENT_NOTICE opens with.
+    expect(m).toContain('[sharing] hierarchy scope NOT widened');
+  });
+
+  it('CONTROL: a token whose runtime logs nothing still says so', () => {
+    const m = enterpriseAbsenceConsequence('fixture-enterprise-token');
+    expect(Object.prototype.hasOwnProperty.call(ENTERPRISE_ABSENCE_RUNTIME_NOTICE, 'fixture-enterprise-token')).toBe(false);
+    expect(m).toContain('no log line says so');
+    expect(m).not.toContain('[sharing]');
   });
 
   it('hierarchy-security names the owner-only fallback, absent and unwired alike', async () => {

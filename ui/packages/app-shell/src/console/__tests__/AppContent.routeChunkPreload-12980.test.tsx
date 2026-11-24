@@ -21,13 +21,18 @@
  *       with the chrome and no splash is ever drawn inside the chrome.
  *   (b) CONTROL: a route whose chunk is still in flight when its metadata
  *       lands keeps a splash in the route slot (never a blank), then renders.
+ *
+ * objectstack#35981 — the chrome no longer waits for the route's reads, and
+ * the route slot's fallback while a chunk loads is the route's skeleton, not
+ * the full-screen splash: both still carry the boot marker (`splashUp()`), and
+ * `watchSplashInsideChrome` counts the full-screen splash only.
  */
 
 import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import React from 'react';
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
-import { MemoryRouter, Routes, Route } from 'react-router-dom';
+import { MemoryRouter, Routes, Route, useNavigate, type NavigateFunction } from 'react-router-dom';
 import { AuthProvider, ActiveOrganizationStorage } from '@object-ui/auth';
 import type { AuthClient, AuthOrganization } from '@object-ui/auth';
 
@@ -38,7 +43,7 @@ const chunks = vi.hoisted(() => {
     const ready = new Promise<void>((r) => { release = r; });
     return { requested: false, splashUpWhenRequested: null as boolean | null, ready, release };
   };
-  return { page: gate(), dashboard: gate() };
+  return { page: gate(), dashboard: gate(), objectView: gate() };
 });
 
 const splashUp = () => document.querySelector('[data-boot-splash]') !== null;
@@ -54,6 +59,18 @@ vi.mock('../../views/DashboardView', async () => {
   chunks.dashboard.splashUpWhenRequested = document.querySelector('[data-boot-splash]') !== null;
   await chunks.dashboard.ready;
   return { DashboardView: () => <div data-testid="dashboard-view" /> };
+});
+
+vi.mock('../../views/ObjectView', async () => {
+  chunks.objectView.requested = true;
+  await chunks.objectView.ready;
+  const { useParams } = await import('react-router-dom');
+  return {
+    ObjectView: () => {
+      const { objectName } = useParams();
+      return <div data-testid={`object-view-${objectName}`} />;
+    },
+  };
 });
 
 vi.mock('@object-ui/plugin-designer', async (importOriginal) => ({
@@ -78,9 +95,16 @@ vi.mock('@object-ui/i18n', async (importOriginal) => ({
   useObjectLabel: () => ({ objectLabel: ({ label }: { label?: string }) => label, objectPluralLabel: () => '' }),
 }));
 
+/** objectstack#35535 — the two saved-view readers `ObjectView` calls on mount. */
+const viewReads = vi.hoisted(() => ({
+  listViews: vi.fn(async (_objectName: string) => [] as unknown[]),
+  listViewOverrides: vi.fn(async (_objectName: string) => ({}) as Record<string, unknown>),
+}));
 const dataSourceStub = {
   onConnectionStateChange: () => () => {},
   getConnectionState: () => 'connected',
+  listViews: viewReads.listViews,
+  listViewOverrides: viewReads.listViewOverrides,
 };
 vi.mock('../../providers/AdapterProvider', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -139,6 +163,10 @@ vi.mock('@object-ui/react', async (importOriginal) => ({
   useMutationInvalidationBridge: () => {},
 }));
 
+// The source under test reaches `@objectstack/lint` through a dynamic import;
+// its first load is paid here, during collection, never inside a case's clocked
+// window (`check:test-source-alias`).
+import '@objectstack/lint';
 import { AppContent } from '../AppContent';
 
 const USER = 'u_12980';
@@ -175,7 +203,10 @@ function watchSplashInsideChrome() {
     for (const record of records) {
       record.addedNodes.forEach((node) => {
         if (!(node instanceof Element)) return;
-        const splashes = node.matches('[data-boot-splash]') ? [node] : [...node.querySelectorAll('[data-boot-splash]')];
+        // The full-screen splash, not the route skeleton that also carries the
+        // boot marker (objectstack#35981).
+        const FULL = '[data-boot-splash]:not([data-testid="route-metadata-skeleton"])';
+        const splashes = node.matches(FULL) ? [node] : [...node.querySelectorAll(FULL)];
         for (const splash of splashes) {
           if (splash.closest('[data-testid="console-layout"]')) seen.count += 1;
         }
@@ -221,7 +252,11 @@ describe('the route element chunk loads beside the route reads (objectui#12980)'
     await waitFor(() => expect(chunks.page.requested).toBe(true));
     expect(chunks.page.splashUpWhenRequested).toBe(true);
     expect(splashUp()).toBe(true);
-    expect(screen.queryByTestId('console-layout')).not.toBeInTheDocument();
+    // objectstack#35981 — the chrome comes up (once the deployment flags have
+    // answered, a promise apart from the chunk's); the route's skeleton is the
+    // boot wait.
+    await waitFor(() => expect(screen.getByTestId('console-layout')).toBeInTheDocument());
+    expect(screen.getByTestId('route-metadata-skeleton')).toHaveAttribute('data-boot-splash');
     expect(meta.status.page).toBe('loading');
 
     // The chunk answers while the reads are still in flight; then the reads.
@@ -245,13 +280,96 @@ describe('the route element chunk loads beside the route reads (objectui#12980)'
     await waitFor(() => expect(chunks.dashboard.requested).toBe(true));
     expect(screen.getByTestId('console-layout')).toBeInTheDocument();
     expect(screen.queryByTestId('dashboard-view')).not.toBeInTheDocument();
-    // Never a blank: the route slot draws the splash while its chunk loads.
+    // Never a blank: the route slot draws the route's skeleton while its chunk
+    // loads (objectstack#35981: no longer the full-screen splash inside the
+    // chrome), and it is still the boot wait.
     expect(splashUp()).toBe(true);
-    expect(watch.seen.count).toBeGreaterThan(0);
+    expect(screen.getByTestId('route-metadata-skeleton')).toHaveAttribute('data-boot-splash');
+    expect(watch.seen.count).toBe(0);
 
     await act(async () => { chunks.dashboard.release(); });
     await waitFor(() => expect(screen.getByTestId('dashboard-view')).toBeInTheDocument());
     expect(splashUp()).toBe(false);
     watch.stop();
+  });
+});
+
+/**
+ * objectstack#35535 — an object list's saved-view read starts with the route,
+ * not when `ObjectView` mounts: it is issued in the commit where the route can
+ * render, while the list's chunk import is still pending, and it is the call
+ * `ObjectView` makes (`listViewOverrides`), so the list joins it. That the list
+ * then asks nothing more is pinned against a real adapter in
+ * `ObjectView.refreshRereadsViews-13057.test.tsx`.
+ */
+describe('an object list starts its view read beside its chunk (objectstack#35535)', () => {
+  let navigateTo: NavigateFunction = () => {};
+  function NavProbe() {
+    navigateTo = useNavigate();
+    return null;
+  }
+  function bootList(url: string) {
+    render(
+      <AuthProvider authUrl="/api/auth" client={createClient()}>
+        <MemoryRouter initialEntries={[url]}>
+          <NavProbe />
+          <Routes>
+            <Route path="/apps/:appName/*" element={<AppContent />} />
+          </Routes>
+        </MemoryRouter>
+      </AuthProvider>,
+    );
+  }
+  const prefetched = () => viewReads.listViewOverrides.mock.calls.map(([name]) => name);
+
+  beforeEach(() => {
+    viewReads.listViews.mockClear();
+    viewReads.listViewOverrides.mockClear();
+  });
+
+  it('(c) the read leaves once the route can render, while the list chunk is still pending, and is not repeated', async () => {
+    bootList('/apps/crm/showcase_task');
+    await waitFor(() => expect(chunks.objectView.requested).toBe(true));
+    // The route's object has not landed: nothing is read yet.
+    expect(prefetched()).toEqual([]);
+
+    await settle(['object'], { object: [{ name: 'showcase_task', label: 'Task' }] });
+    // The chunk import has not answered, and the read is already out.
+    expect(screen.queryByTestId('object-view-showcase_task')).not.toBeInTheDocument();
+    expect(prefetched()).toEqual(['showcase_task']);
+    expect(viewReads.listViews).not.toHaveBeenCalled();
+
+    await act(async () => { chunks.objectView.release(); });
+    await waitFor(() => expect(screen.getByTestId('object-view-showcase_task')).toBeInTheDocument());
+    expect(prefetched()).toEqual(['showcase_task']);
+  });
+
+  it('(d) CONTROL: an object the route does not serve sends no read', async () => {
+    bootList('/apps/crm/showcase_secret');
+    await settle(['object'], { object: [{ name: 'showcase_task', label: 'Task' }] });
+    await waitFor(() => expect(screen.getByTestId('console-layout')).toBeInTheDocument());
+    expect(prefetched()).toEqual([]);
+  });
+
+  it('(e) CONTROL: moving to a second object reads that object once', async () => {
+    bootList('/apps/crm/showcase_task');
+    await settle(['object'], {
+      object: [{ name: 'showcase_task', label: 'Task' }, { name: 'showcase_project', label: 'Project' }],
+    });
+    await waitFor(() => expect(screen.getByTestId('object-view-showcase_task')).toBeInTheDocument());
+    await act(async () => { navigateTo('/apps/crm/showcase_project/view/all'); });
+    await waitFor(() => expect(screen.getByTestId('object-view-showcase_project')).toBeInTheDocument());
+    expect(prefetched()).toEqual(['showcase_task', 'showcase_project']);
+  });
+
+  it('(f) CONTROL: a route that draws no object list sends none', async () => {
+    bootList('/apps/crm/page/welcome');
+    await act(async () => { chunks.page.release(); });
+    await settle(['page', 'object'], {
+      page: [{ name: 'welcome', label: 'Welcome' }],
+      object: [{ name: 'showcase_task', label: 'Task' }],
+    });
+    await waitFor(() => expect(screen.getByTestId('page-view')).toBeInTheDocument());
+    expect(prefetched()).toEqual([]);
   });
 });

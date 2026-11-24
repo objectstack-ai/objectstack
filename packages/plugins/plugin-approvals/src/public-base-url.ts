@@ -63,3 +63,61 @@ export function resolvePublicBaseUrl(
   }
   return { url: value, source };
 }
+
+/**
+ * The auth service's Console page composer (`AuthManager.getConsoleUrl`):
+ * `${origin}${uiBasePath}${path}`, where `AuthConfig.uiBasePath` (default
+ * `/_console`) is the one setting that says where this deployment mounts the
+ * Console. Absent, or answering nothing, when the kernel has no auth service.
+ */
+export type ConsolePageComposer = (path: string) => string | undefined;
+
+/**
+ * [#34862] The link to a Console page under the approval links' base:
+ * `${publicBaseUrl}${mount}${pagePath}`.
+ *
+ * The Console routes on its own paths (`/system/approvals`), and a server
+ * mounts it under a path of its own: `os serve` serves it at `/_console/` and
+ * nothing at `/system/*`, so a link without the mount opens nothing. The mount
+ * is read from the auth service's composer, never written here, so the
+ * approval links follow `uiBasePath` exactly as the auth e-mails (and the
+ * mention e-mail) do: `/_console` by default, nothing for a deployment that
+ * sets it to `/`.
+ *
+ * The origin stays `publicBaseUrl` (`resolvePublicBaseUrl`, never a guessed
+ * one): only the composer's PATH is taken, less any base path the two share,
+ * so a deployment under a sub-path is not prefixed twice. No composer, or one
+ * that throws or answers something that is not a URL: no mount, the link the
+ * plugin built before.
+ */
+export function consolePageLink(
+  publicBaseUrl: string,
+  composer: ConsolePageComposer | undefined,
+  pagePath: string,
+): string {
+  return `${publicBaseUrl}${consoleMountPath(publicBaseUrl, composer)}${pagePath}`;
+}
+
+function consoleMountPath(publicBaseUrl: string, composer: ConsolePageComposer | undefined): string {
+  let composed: string | undefined;
+  try {
+    composed = composer?.('/');
+  } catch {
+    return '';
+  }
+  if (!composed) return '';
+  let mount: string;
+  try {
+    mount = new URL(composed).pathname.replace(/\/+$/, '');
+  } catch {
+    return '';
+  }
+  let basePath = '';
+  try {
+    basePath = publicBaseUrl ? new URL(publicBaseUrl).pathname.replace(/\/+$/, '') : '';
+  } catch {
+    basePath = '';
+  }
+  if (basePath && (mount === basePath || mount.startsWith(`${basePath}/`))) return mount.slice(basePath.length);
+  return mount;
+}

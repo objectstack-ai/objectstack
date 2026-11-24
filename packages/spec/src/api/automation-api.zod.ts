@@ -51,6 +51,7 @@ import { DroppedFieldsEventSchema } from '../data/data-engine.zod';
  * POST   /api/v1/automation/:name/clone          — Copy a flow, switched off, into a package
  * GET    /api/v1/automation/:name/runs           — List execution runs
  * GET    /api/v1/automation/:name/runs/:runId    — Get single execution run
+ * POST   /api/v1/automation/_record-starts       — Flows a proposed record update would start
  * ```
  */
 
@@ -885,6 +886,83 @@ export type GetRunResponse = z.input<typeof GetRunResponseSchema>;
 export type GetRunResponseParsed = z.infer<typeof GetRunResponseSchema>;
 
 // ==========================================
+// 10a. Record Update Starts (POST /api/v1/automation/_record-starts)
+// ==========================================
+
+/**
+ * Request of the record-update preview: which flows a proposed update of ONE
+ * record would start (#35928, ruling record 7073655354).
+ *
+ * Read by the stage-change confirms (the list cell's and the record page's),
+ * which show the reader the flows their save will start before they confirm
+ * it. `changes` is the proposed write as the confirm would send it — the
+ * fields it sets and their new values; the record's other fields are read as
+ * stored. Nothing is written and no flow runs.
+ *
+ * Answered to a caller who can read the record: the record is read AS THE
+ * CALLER, and one the caller cannot read answers `404 RECORD_NOT_FOUND`, the
+ * same answer as a record id that does not exist. Every `changes` key must be
+ * a declared field of `object`; any other key is refused
+ * `400 VALIDATION_FAILED` and the engine is not asked.
+ *
+ * What the preview binds of the caller: their user id and tenant only. A live
+ * run also binds the writer's positions, request params and expand, so a
+ * start condition that reads those is judged without them here, and the
+ * preview can differ from the save in either direction (it never runs a flow).
+ *
+ * @example POST /api/v1/automation/_record-starts
+ * { object: 'showcase_project', recordId: 'p_1', changes: { status: 'completed' } }
+ */
+export const RecordUpdateStartsRequestSchema = lazySchema(() => z.object({
+  object: z.string().min(1).describe('Machine name of the record\'s object.'),
+  recordId: z.string().min(1).describe('Id of the record the update would write.'),
+  changes: z.record(
+    z.string().regex(/^[a-z_][a-z0-9_]*$/, {
+      message: 'A change key is a field machine name (snake_case, the field-name grammar of `data/field.zod.ts`).',
+    }),
+    z.unknown(),
+  ).describe(
+    'The proposed update: each field it sets and its new value, keyed by the field\'s machine name. Every key must be a declared field of `object`; the door refuses any other key `400 VALIDATION_FAILED` before the engine is asked. The record\'s other fields are read as stored.',
+  ),
+}).strict());
+export type RecordUpdateStartsRequest = z.input<typeof RecordUpdateStartsRequestSchema>;
+export type RecordUpdateStartsRequestParsed = z.infer<typeof RecordUpdateStartsRequestSchema>;
+
+/**
+ * One flow the proposed update would start, as an ordinary reader may see it:
+ * the flow's machine name and display label, and whether it starts an
+ * approval (the flow holds an approval node, ADR-0019). No description,
+ * condition or node is served (ruling record 7073655354). Hooks are never
+ * listed: they are not the business-facing tier (ADR-0077 §2).
+ */
+export const RecordUpdateStartSchema = lazySchema(() => z.object({
+  name: z.string().describe('The flow\'s machine name — the key a client translates its label by (`flows.<name>.label`).'),
+  label: z.string().describe('The flow\'s display label as authored (a client translates it by `name`).'),
+  startsApproval: z.boolean().describe('Whether the flow contains an approval node, so the update starts an approval.'),
+}));
+export type RecordUpdateStart = z.input<typeof RecordUpdateStartSchema>;
+export type RecordUpdateStartParsed = z.infer<typeof RecordUpdateStartSchema>;
+
+/**
+ * Response of the record-update preview.
+ *
+ * `data.flows` lists the ENABLED flows, armed on a record-update trigger of
+ * the record's object, whose start condition holds for the record with
+ * `changes` applied (`record`) against the record as read (`previous`) —
+ * evaluated by the engine's own start-condition gate, the one a live run
+ * passes. A flow whose condition cannot be evaluated against that record is
+ * not listed. Empty when the update starts nothing.
+ */
+export const RecordUpdateStartsResponseSchema = lazySchema(() => BaseResponseSchema.extend({
+  data: z.object({
+    flows: z.array(RecordUpdateStartSchema).describe('The flows the update would start, in no promised order.'),
+  }),
+}));
+export type RecordUpdateStartsResponse = z.input<typeof RecordUpdateStartsResponseSchema>;
+/** Post-parse shape of {@link RecordUpdateStartsResponse} — defaults applied, transforms run (ADR-0122). */
+export type RecordUpdateStartsResponseParsed = z.infer<typeof RecordUpdateStartsResponseSchema>;
+
+// ==========================================
 // 11. Automation API Error Codes
 // ==========================================
 
@@ -957,6 +1035,12 @@ export const AutomationApiContracts = {
     path: '/api/v1/automation/:name/clone',
     input: CloneFlowRequestSchema,
     output: CloneFlowResponseSchema,
+  },
+  listRecordUpdateStarts: {
+    method: 'POST' as const,
+    path: '/api/v1/automation/_record-starts',
+    input: RecordUpdateStartsRequestSchema,
+    output: RecordUpdateStartsResponseSchema,
   },
   listRuns: {
     method: 'GET' as const,

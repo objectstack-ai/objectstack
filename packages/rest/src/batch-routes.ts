@@ -200,6 +200,42 @@ function bulkReportStatus(report: unknown): 200 | 207 {
 }
 
 /**
+ * [#35726] The operation a refusal of the whole cross-object batch is FOR: its
+ * position in the request's `operations` and the object that op named. It
+ * rides the refusal body as `failedOperation`, beside `error` / `code` /
+ * `userMessage`, so a caller that sent several ops can say which one failed:
+ * the console's related-list add names the picked record at that index. A
+ * refusal's own sentence names the record for a not-found or a permission
+ * refusal, but a validation refusal names only the field.
+ *
+ * Present only when one op is the cause: an op refused up front for naming no
+ * row, and an op that threw while the transaction ran (the engine's refusal of
+ * that op, an unresolved `$ref`, a fault). Absent on a refusal of the request
+ * as a whole (schema, `atomic: false`, size, no transaction), on an
+ * object-level gate (API exposure, the API-key management rule: judged once per
+ * object and action, so no single op is the cause), and on a failure after the
+ * last op ran. Additive: the success body and the all-or-none outcome do not
+ * change (ADR-0119 D4); nothing is written either way.
+ */
+type FailedBatchOperation = { index: number; object: string };
+
+/**
+ * `res` as the shared error door writes to it (`res.status(s).json(body)`),
+ * with `failedOperation` added to the JSON body. The door still decides the
+ * status, the code and the sentence; this adds one key to what it decided.
+ * With no failed operation it is `res` itself.
+ */
+function namingFailedOperation(res: any, failedOperation: FailedBatchOperation | undefined): any {
+    if (!failedOperation) return res;
+    const named = Object.create(res);
+    named.status = (code: number) => { res.status(code); return named; };
+    named.json = (body: unknown) => res.json(
+        body && typeof body === 'object' && !Array.isArray(body) ? { ...body, failedOperation } : body,
+    );
+    return named;
+}
+
+/**
  * Register batch operation endpoints — `RestServer#registerBatchEndpoints`'
  * body, called by that method with the server as `this`. The method's own
  * docblock, which the published declaration carries, names it.
@@ -227,6 +263,9 @@ export function registerBatchEndpoints(this: BatchRouteHost, basePath: string): 
         method: 'POST',
         path: `${basePath}/batch`,
         handler: async (req: any, res: any) => {
+            // [#35726] The op being run when a throw left the transaction; see
+            // {@link FailedBatchOperation}.
+            let failedOperation: FailedBatchOperation | undefined;
             try {
                 const environmentId = isScoped ? req.params?.environmentId : undefined;
                 const context = await this.resolveExecCtx(environmentId, req);
@@ -340,9 +379,13 @@ export function registerBatchEndpoints(this: BatchRouteHost, basePath: string): 
                 // conditionally, so surface it as a 400 up front. "Missing" is
                 // the address the op's arm would hand the engine naming no row
                 // (`namesNoRow`): a blank id gets the answer an absent one does.
-                for (const op of ops) {
+                for (const [index, op] of ops.entries()) {
                     if ((op.action === 'update' || op.action === 'delete') && namesNoRow(op.action, batchOpRowAddress(op, op.data))) {
-                        res.status(400).json({ error: `Operation '${op.action}' on '${op.object}' requires an id`, code: 'VALIDATION_FAILED' });
+                        res.status(400).json({
+                            error: `Operation '${op.action}' on '${op.object}' requires an id`,
+                            code: 'VALIDATION_FAILED',
+                            failedOperation: { index, object: op.object } satisfies FailedBatchOperation,
+                        });
                         return;
                     }
                 }
@@ -452,6 +495,7 @@ export function registerBatchEndpoints(this: BatchRouteHost, basePath: string): 
                     entered = true;
                     const out: any[] = [];
                     for (const [index, op] of ops.entries()) {
+                        failedOperation = { index, object: op.object };
                         const data = resolveRefs(op.data, out);
                         if (op.action === 'create') {
                             // [#3835] Go through the protocol's create ingress —
@@ -513,6 +557,8 @@ export function registerBatchEndpoints(this: BatchRouteHost, basePath: string): 
                             out.push(await ql.delete(op.object, { where: { id: batchOpRowAddress(op, data) }, context: trxCtx }));
                         }
                     }
+                    // Every op ran: a failure from here on (the commit) is no one op's.
+                    failedOperation = undefined;
                     return out;
                 };
                 let results: any[];
@@ -542,7 +588,8 @@ export function registerBatchEndpoints(this: BatchRouteHost, basePath: string): 
                 // keeps that one loud while staying quiet on the coded 4xx.
                 // [#32250] A package-scoped refusal names its candidates
                 // (`details.candidates`), as on every `/data` door.
-                handleRouteError(res, error, undefined, PACKAGE_SCOPED_CANDIDATES);
+                // [#35726] An op's own failure names that op (`failedOperation`).
+                handleRouteError(namingFailedOperation(res, failedOperation), error, undefined, PACKAGE_SCOPED_CANDIDATES);
             }
         },
         metadata: {

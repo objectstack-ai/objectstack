@@ -15,8 +15,8 @@
  * `trackHistory`), which the host hands over through
  * {@link RecordFieldChangesContext}. This module is the pure part: the audit
  * rows as feed items, the merge (newest first, one action one row), and
- * the four filter chips 全部 / 活动 / 讨论 / 变更 (变更 = the audit's field
- * changes; every activity row is 活动).
+ * the four filter chips 全部 / 事件 / 讨论 / 变更 (变更 = the audit's field
+ * changes; every activity row is 事件).
  */
 
 import * as React from 'react';
@@ -70,6 +70,17 @@ export const RecordTimelineTotalContext = React.createContext<number | null>(nul
  */
 export const RecordTimelineCountContext = React.createContext<((count: number | null) => void) | null>(null);
 
+/**
+ * Whether the record's comments live outside its 动态 stream: in its comment
+ * panel (objectstack#36075), which the host draws beside the default record
+ * page, or on the full page, for a record the host draws in a side preview
+ * (objectstack#36225). The page's 动态 stream — its tab and its peek — then
+ * draws the system entries alone: no comment, no composer, no filter chips,
+ * and its count names those entries only. `false` (an authored page, no host
+ * saying): the stream carries the discussion as before.
+ */
+export const RecordCommentsInPanelContext = React.createContext(false);
+
 /** One audit-log entry as the host enriches it (`RecordDetailView`'s history read). */
 export interface AuditEntryLike {
   id?: string | number;
@@ -112,8 +123,11 @@ const displayOf = (value: unknown): string | undefined =>
 
 /**
  * Audit entries as `field_change` feed items. Only an entry that changed a
- * field becomes one: the record's creation is the activity stream's own
- * `created` row, so it is not said twice.
+ * field becomes one. The record's creation is the activity stream's own
+ * `created` row, so it is not said twice: its audit entry (the values the
+ * record was created with) pairs onto that row ({@link mergeTimelineStream}),
+ * and where it stands alone (the 变更 chip, or no activity row to pair with)
+ * it is one row of its own, never one more edit ({@link isRecordCreationEntry}).
  */
 export function auditEntriesToFeedItems(
   entries: readonly AuditEntryLike[] | null | undefined,
@@ -280,7 +294,7 @@ function pairedStream(
   return [...base, ...unpaired];
 }
 
-/** The stream's filter chips: 全部 / 活动 / 讨论 / 变更. */
+/** The stream's filter chips: 全部 / 事件 / 讨论 / 变更. */
 export type TimelineStreamFilter = 'all' | 'activity' | 'discussion' | 'changes';
 
 export const TIMELINE_STREAM_FILTERS: readonly TimelineStreamFilter[] = ['all', 'activity', 'discussion', 'changes'];
@@ -315,10 +329,24 @@ export function isSystemStreamEntry(item: FeedItem): boolean {
  * `changes_only`, hold these and nothing else (objectstack#30074, ruling C).
  * An activity row (`created` / `updated` / `deleted` / `assigned` / `shared`)
  * shares the `field_change` presentation but is an event, so it is judged by
- * its source and sits under 活动, whatever the history flag.
+ * its source and sits under 事件, whatever the history flag.
  */
 export function isFieldHistoryEntry(item: FeedItem): boolean {
   return item.type === 'field_change' && item.source === 'sys_audit_log';
+}
+
+/**
+ * Whether an item is the audit entry of the record's creation: a
+ * field-history entry written by the ledger's `create` action, the one the
+ * spec pairs with the `created` activity row. It is the record's creation,
+ * said once: never one more edit folded into a run of field changes
+ * (objectstack#35788).
+ */
+export function isRecordCreationEntry(item: FeedItem): boolean {
+  return (
+    isFieldHistoryEntry(item)
+    && foldedActivityTypeOf((item as FeedItem & AuditFeedFacts).auditAction) === RECORD_TIMELINE_FOLDED_ACTIVITY_TYPES.create
+  );
 }
 
 /**

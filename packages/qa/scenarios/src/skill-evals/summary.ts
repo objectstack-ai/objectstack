@@ -56,6 +56,8 @@ export interface TriggerCaseScore {
   loadedBySkillTool: number;
   /** Judged turns that only read a file under it (no `Skill` launch). */
   loadedByReadOnly: number;
+  /** Judged turns that loaded another bundle, per bundle: a neighbour of the competing set that took the prompt. */
+  othersLoaded: Record<string, number>;
 }
 
 export interface TriggerBundleSummary {
@@ -99,7 +101,7 @@ export function summariseRound(
   const byCase = new Map<string, CaseScore>();
   for (const c of cases) if (c.shouldTrigger === undefined) byCase.set(c.key, { key: c.key, bundle: c.bundle, withSkill: empty(), noSkill: empty(), withSkillMissing: [], withSkillForbidden: [] });
   const byTrigger = new Map<string, TriggerCaseScore>();
-  for (const c of cases) if (c.shouldTrigger !== undefined) byTrigger.set(c.key, { key: c.key, bundle: c.bundle, shouldTrigger: c.shouldTrigger, tally: empty(), loadedBySkillTool: 0, loadedByReadOnly: 0 });
+  for (const c of cases) if (c.shouldTrigger !== undefined) byTrigger.set(c.key, { key: c.key, bundle: c.bundle, shouldTrigger: c.shouldTrigger, tally: empty(), loadedBySkillTool: 0, loadedByReadOnly: 0, othersLoaded: {} });
   let cost = 0;
   for (const r of records) {
     const t = byTrigger.get(r.key);
@@ -110,6 +112,7 @@ export function summariseRound(
         const by = r.trigger?.loadedBy ?? [];
         if (by.includes('skill-tool')) t.loadedBySkillTool += 1;
         else if (by.includes('read')) t.loadedByReadOnly += 1;
+        for (const b of r.trigger?.othersLoaded ?? []) t.othersLoaded[b] = (t.othersLoaded[b] ?? 0) + 1;
       }
       continue;
     }
@@ -185,33 +188,38 @@ const cell = (s: string, forGitHub: boolean) => {
   return '`' + (forGitHub ? t.replace(/</g, '(lt)').replace(/>/g, '(gt)') : t) + '`';
 };
 
-/** The round's summary as Markdown: the per-bundle table, then every case's scores on both arms. */
+/**
+ * The round's summary as Markdown: the per-bundle table and every case's scores on both arms, then the trigger
+ * section. A round of trigger cases alone (`--triggers-only`) renders the trigger section only.
+ */
 export function renderSummaryMarkdown(s: RoundSummary, head: { title: string; lines: string[]; stopped?: RoundStop }, opts: { forGitHub?: boolean } = {}): string {
   const code = (t: string) => cell(t, opts.forGitHub === true);
   const out: string[] = [`# ${head.title}`, '', ...head.lines.map((l) => `- ${l}`)];
   if (head.stopped) out.push(`- **Stopped** after ${head.stopped.afterRuns} turns: ${head.stopped.reason}`);
-  out.push(
-    '',
-    '## Per bundle',
-    '',
-    '| bundle | cases | with-skill pass | no-skill pass | with-skill failing cases | no-skill ≥ with-skill | out of the denominator (with / no) |',
-    '|:--|--:|--:|--:|--:|--:|:--|',
-  );
-  for (const b of s.bundles) {
-    out.push(`| ${b.bundle} | ${b.cases} | ${pct(b.withSkill)} | ${pct(b.noSkill)} | ${b.withSkillFailures.length} | ${b.noSkillAtLeastWithSkill.length} | ${outOf(b.withSkill)} / ${outOf(b.noSkill)} |`);
-  }
-  out.push(`| **all** | ${s.cases.length} | ${pct(s.totals.withSkill)} | ${pct(s.totals.noSkill)} | ${s.bundles.reduce((n, b) => n + b.withSkillFailures.length, 0)} | ${s.bundles.reduce((n, b) => n + b.noSkillAtLeastWithSkill.length, 0)} | ${outOf(s.totals.withSkill)} / ${outOf(s.totals.noSkill)} |`);
-  out.push('', '## Per case', '', '| case | with-skill | no-skill | with-skill missed | with-skill carried forbidden |', '|:--|--:|--:|:--|:--|');
-  for (const c of s.cases) {
-    out.push(`| ${c.key} | ${pct(c.withSkill)} | ${pct(c.noSkill)} | ${c.withSkillMissing.map(code).join(' ')} | ${c.withSkillForbidden.map(code).join(' ')} |`);
-  }
   const tr = s.triggers;
+  if (s.cases.length || !tr.cases.length) {
+    out.push(
+      '',
+      '## Per bundle',
+      '',
+      '| bundle | cases | with-skill pass | no-skill pass | with-skill failing cases | no-skill ≥ with-skill | out of the denominator (with / no) |',
+      '|:--|--:|--:|--:|--:|--:|:--|',
+    );
+    for (const b of s.bundles) {
+      out.push(`| ${b.bundle} | ${b.cases} | ${pct(b.withSkill)} | ${pct(b.noSkill)} | ${b.withSkillFailures.length} | ${b.noSkillAtLeastWithSkill.length} | ${outOf(b.withSkill)} / ${outOf(b.noSkill)} |`);
+    }
+    out.push(`| **all** | ${s.cases.length} | ${pct(s.totals.withSkill)} | ${pct(s.totals.noSkill)} | ${s.bundles.reduce((n, b) => n + b.withSkillFailures.length, 0)} | ${s.bundles.reduce((n, b) => n + b.noSkillAtLeastWithSkill.length, 0)} | ${outOf(s.totals.withSkill)} / ${outOf(s.totals.noSkill)} |`);
+    out.push('', '## Per case', '', '| case | with-skill | no-skill | with-skill missed | with-skill carried forbidden |', '|:--|--:|--:|:--|:--|');
+    for (const c of s.cases) {
+      out.push(`| ${c.key} | ${pct(c.withSkill)} | ${pct(c.noSkill)} | ${c.withSkillMissing.map(code).join(' ')} | ${c.withSkillForbidden.map(code).join(' ')} |`);
+    }
+  }
   if (tr.cases.length) {
     out.push(
       '',
       '## Trigger cases',
       '',
-      'With-skill arm only. A turn loaded the bundle when it launched it with the `Skill` tool or read a file under it; the case passes when that matches `should_trigger`.',
+      'With-skill arm only. A turn loaded the bundle when it launched it with the `Skill` tool or read a file under it; the case passes when that matches `should_trigger`. Other bundles loaded: the turns that loaded another bundle of the catalog instead or as well, never counted as the case\'s own.',
       '',
       '| bundle | cases | loaded when it should | left alone when it should not load | missed loads | false loads | out of the denominator |',
       '|:--|--:|--:|--:|--:|--:|:--|',
@@ -220,8 +228,8 @@ export function renderSummaryMarkdown(s: RoundSummary, head: { title: string; li
       out.push(`| ${b.bundle} | ${b.cases} | ${pct(b.shouldTrigger)} | ${pct(b.shouldNotTrigger)} | ${b.missedLoads.length} | ${b.falseLoads.length} | ${outOf(add(b.shouldTrigger, b.shouldNotTrigger))} |`);
     }
     out.push(`| **all** | ${tr.cases.length} | ${pct(tr.totals.shouldTrigger)} | ${pct(tr.totals.shouldNotTrigger)} | ${tr.bundles.reduce((n, b) => n + b.missedLoads.length, 0)} | ${tr.bundles.reduce((n, b) => n + b.falseLoads.length, 0)} | ${outOf(add(tr.totals.shouldTrigger, tr.totals.shouldNotTrigger))} |`);
-    out.push('', '| trigger case | should load | as it should | loaded by Skill / by reading only |', '|:--|:--|--:|:--|');
-    for (const t of tr.cases) out.push(`| ${t.key} | ${t.shouldTrigger ? 'yes' : 'no'} | ${pct(t.tally)} | ${t.loadedBySkillTool} / ${t.loadedByReadOnly} |`);
+    out.push('', '| trigger case | should load | as it should | loaded by Skill / by reading only | other bundles loaded |', '|:--|:--|--:|:--|:--|');
+    for (const t of tr.cases) out.push(`| ${t.key} | ${t.shouldTrigger ? 'yes' : 'no'} | ${pct(t.tally)} | ${t.loadedBySkillTool} / ${t.loadedByReadOnly} | ${Object.entries(t.othersLoaded).map(([b, n]) => `${b} ×${n}`).join(', ')} |`);
   }
   return out.join('\n') + '\n';
 }

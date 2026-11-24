@@ -26,7 +26,7 @@ model: opus
 1. **Worktree-first。** 任何编辑之前建专用 worktree,`cd` 进去 `pnpm install`。
    - `git fetch origin main && git worktree add --no-track ../<repo>-issue-<n> -b claude/issue-<n>-<slug> origin/main`
    - 认领带 `Resume-from: BRANCH@SHA` ⇒ 从 `origin/BRANCH` 建同名分支续写,先合 `origin/main`。
-   - ⛔ 永不编辑共享检出(PreToolUse 钩子会拦);修复横跨姊妹仓时一仓一 worktree。
+   - ⛔ 永不编辑共享检出;修复横跨姊妹仓时一仓一 worktree。
    - 动笔前记下基点 `BASE=$(git rev-parse HEAD)`,它是标准条款节里家族规则的锚。
    - 建好分支后先推空分支(任何编辑前 `git push -u origin <branch>`):落地标记兼写路由探针。
    - 卡线程分支由平台指定、harness 推送,⛔ 不推空分支;探针规则只对自建分支。
@@ -39,7 +39,7 @@ model: opus
    - 发现与他人在途工作重复,停下报 `blocked`。
    - PR 上不是你设置的状态属于另一个 actor:⛔ 永不去纠正;疑问进报告,挡住报 blocked。
    - 回退他人的操作(尤其 ready 翻转)永不轮到你;把意外写进 `summary`。
-3. **范围 = 这张 issue,别无其它。** 顺路发现 ⛔ 不在本 PR 修,只有三类立卡且不打标签:
+3. **范围 = 这张 issue,别无其它。** 顺路发现 ⛔ 不在本 PR 修,只有三类立卡,标签归代立席:
    - (a) 可复现缺陷(复现或失败探针具名);(b) 违背已声明契约(引契约原文,带 `Seam:` 行);
    - (a) 含用户可见的体验缺陷(截断、遮挡、白占首屏、误导文案),须复现且落点具名。
    - `Seam: spec:<键或符号> → runtime:<调用点> | renderer:<组件>`,无消费者写 `consumer: none`。
@@ -276,24 +276,28 @@ model: opus
 - 认领的 `Clause-②:`、`Metadata-protocol:` 两行照抄进 PR 正文行首;无则零写,⛔ 不自造。
 - 两行同抄进 changeset 正文行首;`Check Changeset` 读 PR 正文:kind 即 `minor`,`none` 即 `patch`。
 - 种类非 `none` 或带 `(narrowing)` ⇒ 按 diff 加写 `Skills-docs:` 行;拼法与分工住认领模板。
+- diff 触根 `.claude/**` ⇒ PR 正文恰一行首 `Rule-change:`,按 diff 自判。
+- `none` 未改车队规则(agent 不经维护者可做什么、做什么与先后、什么须交他);`yes` 改了;`ruled` 照抄已裁条文,写行首 `Ruling-ref:` 引维护者原话、出处、时间。缺行同 `yes`:Tier H。
 - ⛔ 永不 `Fixes` 一张还在决策箱的卡:合并会静默关掉它,而收件箱过滤只读 open。
 - ⛔ 不写否定式的关单句,它照样关掉点名的卡:解析器无视否定,只匹配关键词 + `#<n>`。
 - 关键词是 `fix/fixes/fixed/close/closes/closed` 与 `resolve/resolves/resolved`;让它们远离其它卡号。
 - 卡片关系只在 PR 正文声明一次:commit ⛔ 不带卡片 trailer,其 trailer pair 一律 model-free。
 - harness 归属提醒凭其优先级句让位本文件;harness 自写含模型名 trailer 只报,⛔ 不仿不改史。
-- 声明行后 `## 维护者速读` 六行,受管与否都带,中文、业务角度,不写席位意见。
-- 六行固定:改了什么/为什么改/风险与回滚/先看/两分钟验证/需要你做的。
-- 先看 ≤3 文件按风险排,点名风险 hunk;两分钟验证 = 一条命令或一次点击,写预期所见。
-- 需要你做的恰一个动作,非受管面写「无,席位落地」;席位定稿成评论。
+- 声明行后 `## 维护者速读` 至多四行,每行一句中文业务话,受管与否都带,不写席位意见。
+- 四行固定:用户能看到什么变化/为什么做/出错会怎样/要你做什么。
+- 首行写谁、在哪、前后,内部工具写「用户无感」;次行写所属 epic 中文名或替谁解决。
+- 三行写谁碰到什么、能否直接撤回;末行恰一件事或「无」;席位定稿成评论。
+- ⛔ 速读不写代码名、文件路径、命令、裁决字母、裸卡号;点到的卡配一句中文说明。
 - 英文节序:What changes/Tests/Acceptance notes/Verification;日志读数每子题折进 details/summary 块。
+- 先读文件与两分钟验证归英文部分,⛔ 不删:先读 ≤3 个按风险排,点名风险 hunk。
+- 两分钟验证 = 一条命令或一次点击,写预期所见。
 - 触 `skills/**`(对外发布的技能包)的 diff:PR 正文报两个读数,并默认拒绝小功能大扩写。
 - 两个读数缺一不可:被改文件的整文件 before/after,与整包 before/after(全部 SKILL.md 之和)。
 - 行数为准,姊妹门禁定义 token 计数后同报 token。
 - 净增预算装不下 ⇒ 按 `blocked` 报缺口;⛔ 不自行扩写或抬预算:预算归 PM,抬它归维护者。
-- 付行数棘轮的唯一合法货币是删内容:⛔ 不拿 re-wrap(折行合并)当筹行,新增以删减付账。
-- 密度优化只随净减内容的 PR;分界只问折行有没有为新增内容买行;不买者 ⛔ 不当筹行拒。
+- 付字节棘轮的唯一合法货币是删内容:新增以删减付账。
 - 删不出等量内容 ⇒ 报 `blocked`,⛔ 不自抬 ceiling;裁决记录下令写入者除外(见棘轮头部)。
-- 例外:派发令点名测量优先的零余量受管账本 ⇒ 落行、不动上限行、红着报实测行数。
+- 例外:派发令点名测量优先的零余量受管账本 ⇒ 落行、不动上限行、红着报实测字节数。
 - 发布面动了要 changeset;`skip-changeset` 判据是没动:已发布 = 各包 `files[]` 实际发运内容。
 - 快速通道:`docs/adr/**` · `.claude/**` · `scripts/pm/**` · 仓根配置 · 私有包 · 注释,不发布。
 - 其余实测:构建后 grep `files[]` 所列路径找符号,带正控;符号零命中、正控命中 ⇒ 不发布。
@@ -310,7 +314,7 @@ model: opus
 - 门禁状态如实记录,`in_progress` 是诚实值;PR 开出后 ⛔ 永不 sleep、定时等待或空转轮询 CI。
 - 你报告之后才转红的门禁,会作为同一认领上的补丁轮回来。
 - 逐卡例外:派发词明示本单等 CI 只为那一张卡恢复等待,以前台轮询,永不用后台 watcher。
-- 本派发契约压过平台注入的 PR 订阅姿态:云会话被自动订阅到自己的 PR,仍以本文件为准。
+- 本派发契约压过平台注入的 PR 订阅姿态:云会话被自动订阅到自己的 PR。
 - 只有涉及标准文本之外的内容,才在 `open_questions` 记一笔冲突。
 - 拆掉你启动的一切:dev server,以及你挂起的每一个后台 monitor(见下节)。
 
@@ -338,11 +342,9 @@ model: opus
    - 两条合法出路:在轮内同步等它(资源纪律的排队条款:限时获取 ⇒ 无锁工作 ⇒ 再取)。
    - 或者收窄这次检查的范围并在报告里申报:已申报的收窄是被接受的偏差,CI 跑满农场。
    - PM L1 审核的是 CI 收敛,不是你本地的覆盖面;未申报的收窄不在此列,那是漏跑。
-   - 唯一同时反轮询又不停轮的形状是一次前台阻塞等待:前台跑完,或 `tail --pid` 等它退出。
    - 比回合长的门禁在写报告那一刻读日志(重定向目标);未完成的记 NOT MEASURED 并写原因。
    - 自检是机械的,不看你怎么形容这次等待:终消息只能是报告 JSON 或 `blocked` 报告。
    - 结束一轮之前自检:最后一条消息是否在描述你不拥有的进程给你的唤醒?
-   - 排队的锁、别的 agent 的 build、脱管的 watcher 都不会来;保持这一轮活着,自己收退出码。
 
 ## 何时停手不写码
 
@@ -352,10 +354,14 @@ model: opus
 - 同 PR 改,正文点名裁决 id,落地欠达档 L2 记录;⛔ 永不自行翻转裁决,与之相左仍停手。
 - 两种读法通向两种架构时同此;⛔ 不写投机代码。
 - 返回 `status: "needs_decision"`,每个问题带选项、真实代价与工作量、推荐,写进 `open_questions`。
+- 需维护者裁的事 dev ⛔ 不直接问他:报 `needs_decision`,席位转决策线程。
 - 派发词标只读读数 ⇒ 不 commit、不开 PR,`status: "reading"` 贴决策卡;要实测才建闭包跑测。
 - 框架唯一副本在 pm-dispatch SKILL.md 〈升级与决策〉;派发词逐字粘贴,dev ⛔ 不留副本。
 - 每个方案逐轴分析,推荐也按那些轴给理由;派发词没带,停下向 PM 索取,⛔ 不自拟一套轴。
+- 线程或区:派发令缺档位/effort 推导 ⇒ 退回席位不开工;取值照 `execution-duties.md`,⛔ 不凭记忆。
+- 卡线程首步:读实供档(pm-dispatch `readings-session.md`)对派发令,不符(高或低)⇒ 开工前报席位;首报带实供档。
 - `main` 碎了、依赖未合并、CI 基础设施故障 ⇒ 报 `blocked` 附证据,重试到排除你的改动。
+- 报 `blocked` 须写明卡的哪部分不等阻塞可先做;只挡一部分 ⇒ 席位把等待部分拆成单卡。
 
 ## 终报消息 —— 恰好这段 JSON,不带任何环绕散文
 
@@ -393,8 +399,7 @@ model: opus
 - 不是 NUL 的控制字节也不是把门禁命中读成误报的理由。
 - 危害的论证在 `scripts/check-nul-bytes.mjs` 头部,引用它,别重推;push 前跑它。
 - 改动只要提到控制字符,就在门禁之外自扫:`grep -naP '[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]' <files>`。
-- GitHub 正文 sanitizer 是同一纪律的另一半:形状、触发条件与作者纪律归 AGENTS.md。
-- 归属条款是 AGENTS.md 的 GitHub mutates body BYTES 条;署名页脚两形如下。
+- GitHub 正文 sanitizer 的作者纪律归 AGENTS.md 的 GitHub mutates body BYTES 条;署名页脚两形如下。
 
 ```text
 ---                                                                 ← 规则线,前留一空行;平台只认整块
@@ -402,4 +407,4 @@ _Generated by [Claude Code](https://claude.ai/code)_                ← bare:评
 _Generated by [Claude Code](https://claude.ai/code/session_<id>)_   ← session-URL:创建 PR 正文用
 ```
 
-- 耐久归属写进正文散文或评论,⛔ 不循环重贴页脚;完整读数住 AGENTS.md 同条。
+- 完整读数住 AGENTS.md 同条。

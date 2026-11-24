@@ -171,7 +171,7 @@ async function openTask(): Promise<void> {
 
 /** The card's repro: add a Picklist "Priority" with no option yet; the autosave holds it. */
 async function holdAPicklist(): Promise<void> {
-  fireEvent.click(await screen.findByRole('button', { name: 'Form' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Field layout' }));
   await addFieldFromFormToolbar(undefined, { label: 'Priority', type: /^Picklist$/ });
   await screen.findByTestId('studio-held', undefined, { timeout: 8000 });
 }
@@ -198,7 +198,7 @@ describe('a held Data field guards create and Pending changes (objectstack#26845
     fireEvent.change(within(dialog).getByLabelText(t('engine.studio.data.nameLabel', 'en')), {
       target: { value: 'Ticket' },
     });
-    fireEvent.click(within(dialog).getByRole('button', { name: t('engine.studio.createDraft', 'en') }));
+    fireEvent.click(within(dialog).getByRole('button', { name: t('engine.studio.createLive', 'en') }));
     await openObjectIs('acme_ticket');
     expect(confirmSpy).toHaveBeenCalledTimes(2);
   });

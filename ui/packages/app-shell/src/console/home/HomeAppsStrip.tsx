@@ -1,8 +1,8 @@
 /**
  * HomeAppsStrip
  *
- * iOS-springboard-style app launcher for Home: vibrant gradient squircle
- * icons with the name beneath. Business users live in a handful of apps and
+ * iOS-springboard-style app launcher for Home: solid squircle icons with the
+ * name beneath. Business users live in a handful of apps and
  * switch via the top-bar AppSwitcher / ⌘K — so Home shows apps as recognizable
  * icons, not a wall of marketing cards.
  *
@@ -23,10 +23,11 @@
  * The strip's look is the Home artboard's apps section (objectui#12601): a
  * 15 px heading with a count pill, 112 px tiles with a 56 px icon on the app's
  * colour and a 13 px name on one line. The icon square follows the app's own
- * branding, the way `AppMark` does in the top bar and the switcher: its
- * `branding.logo` when it declares one, else its `icon` on its
- * `branding.primaryColor` when that is a hex, else its `icon` on the
- * name-keyed gradient. A logo that fails to load falls back to the tile. Three optional parts ride along, all
+ * branding by the rule `AppMark` follows in the top bar and the switcher
+ * (objectstack#36157): its `branding.logo` when it declares one, else its
+ * `icon` on the tile `appTileFace` answers — its hex `branding.primaryColor`,
+ * else its automatic palette colour. A logo that fails to load falls back to
+ * the tile. Three optional parts ride along, all
  * off unless the host asks: an 11 px "2 hr. ago" line under a tile's
  * name (`lastOpened`, which Home reads from the recent-items store), a muted
  * "System Settings" link at the heading's right (`settingsHref` — Home moves
@@ -47,8 +48,8 @@ import { getIcon } from '../../utils/getIcon.js';
 import { timeAgo } from '../../utils/relativeTime.js';
 import { TILE_OPENED_TIME_FORMAT } from './appLastOpened.js';
 import type { FavoriteItem } from '../../hooks/useFavorites.js';
-import { ICON_BOX_CLASSES, TILE_CLASSES, launcherIconGradient } from './launcherTile.js';
-import { BRANDED_TILE_CLASSES, appTileColors, appTileStyle } from '../../layout/appTileColors.js';
+import { ICON_BOX_CLASSES, TILE_CLASSES } from './launcherTile.js';
+import { appTileFace } from '../../layout/appTileColors.js';
 
 const COMPACT_LIMIT = 19;
 
@@ -82,16 +83,14 @@ function LauncherAppIcon({ app, children }: { app: any; children?: ReactNode }) 
   }
 
   const Icon = getIcon(app?.icon);
-  const colors = appTileColors(app?.branding?.primaryColor);
+  const face = appTileFace(app);
   return (
     <span
-      className={cn(
-        box,
-        colors ? BRANDED_TILE_CLASSES : cn('bg-gradient-to-br text-white', launcherIconGradient(app.name)),
-      )}
-      style={colors ? appTileStyle(colors) : undefined}
+      className={cn(box, face.className)}
+      style={face.kind === 'declared' ? face.style : undefined}
       data-testid={`app-tile-icon-${app.name}`}
-      data-branded={colors ? 'true' : undefined}
+      data-app-tile={face.kind === 'auto' ? face.color : face.kind}
+      data-branded={face.kind === 'declared' ? 'true' : undefined}
     >
       {/* eslint-disable-next-line react-hooks/static-components -- getIcon returns a stable icon component from a static registry, not one created during render */}
       <Icon className="size-[26px]" />
@@ -191,11 +190,11 @@ export function HomeAppsStrip({
   return (
     <section>
       <div className="mb-2 flex items-center gap-2">
-        <h2 className="text-[15px] font-semibold tracking-tight">
+        <h2 className="text-sm font-medium tracking-tight">
           {t('home.yourApps', { defaultValue: 'Your apps' })}
         </h2>
         <span
-          className="inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-muted px-1.5 text-[11px] font-semibold tabular-nums text-muted-foreground"
+          className="inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-muted px-1.5 text-xs font-medium tabular-nums text-muted-foreground"
           data-testid="home-apps-count"
         >
           {ordered.length}
@@ -248,10 +247,10 @@ export function HomeAppsStrip({
                   </span>
                 )}
               </LauncherAppIcon>
-              <span className="w-full truncate text-[13px] font-medium">{label}</span>
+              <span className="w-full truncate text-sm font-medium">{label}</span>
               {openedAgo && (
                 <span
-                  className="-mt-1 w-full truncate text-[11px] text-muted-foreground"
+                  className="-mt-1 w-full truncate text-xs text-muted-foreground"
                   data-testid={`app-tile-opened-${app.name}`}
                 >
                   {t('home.appOpened', { time: openedAgo, defaultValue: '{{time}}' })}
@@ -276,7 +275,7 @@ export function HomeAppsStrip({
             >
               +{overflow}
             </span>
-            <span className="w-full truncate text-[13px] text-muted-foreground">
+            <span className="w-full truncate text-xs text-muted-foreground">
               {t('home.showMoreApps', { defaultValue: 'More' })}
             </span>
           </button>
@@ -300,7 +299,7 @@ export function HomeAppsStrip({
             >
               <Plus className="size-[22px]" aria-hidden />
             </span>
-            <span className="w-full truncate text-[13px] font-medium">
+            <span className="w-full truncate text-sm font-medium">
               {t('home.addApp', { defaultValue: 'Add app' })}
             </span>
           </button>

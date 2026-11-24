@@ -19,6 +19,7 @@ import type { BatchTransactionOperation } from '@object-ui/types';
 // `changedFields` is the ONE dirty-field comparison, shared with the edit
 // form's own record diff (objectui#10156) — see `isSameStoredValue` there.
 import { sanitizeFormData, changedFields } from './sanitize';
+import { isUntouchedNewRow } from '@object-ui/fields';
 
 export const idOf = (rec: any): string | undefined =>
   rec == null ? undefined : (rec.id ?? rec._id ?? rec.recordId);
@@ -97,9 +98,15 @@ const ID_KEYS = new Set(['id', '_id', 'recordId']);
  * null while their inputs are blank, so they don't count as input. Used to
  * drop the always-present trailing "ghost" line (and any row the user cleared)
  * so it never persists as an empty child record.
+ *
+ * objectstack#35816 — a line `Add` started on its defaults that nobody has
+ * edited (`isUntouchedNewRow`) is blank too: it holds only those defaults. A
+ * line the user edited is judged by its values alone, so a value typed back to
+ * the default still counts as input.
  */
 export function isBlankRow(row: Record<string, any>, relationshipField?: string): boolean {
   if (!row) return true;
+  if (isUntouchedNewRow(row)) return true;
   return Object.entries(row).every(([k, v]) => {
     if (k === relationshipField || ID_KEYS.has(k)) return true;
     return v === null || v === undefined || v === '';

@@ -17,6 +17,7 @@ export const Project = ObjectSchema.create({
   label: 'Project',
   pluralLabel: 'Projects',
   icon: 'folder-kanban',
+  color: 'orange',
   description: 'A delivery project for an account.',
 
   // [#2727 / #2970] Opt in to the generic Attachments panel on the record
@@ -191,9 +192,6 @@ export const Project = ObjectSchema.create({
       description: 'Health should change one step at a time; skips are warned, not blocked.',
       field: 'health',
       events: ['update'] as const,
-      // A project starts `green` (the field's default). Updates only, so this
-      // states the entry rather than checking it on create.
-      initialStates: ['green'],
       severity: 'warning' as const,
       message: 'Health changed by more than one step — confirm this is intentional.',
       transitions: {

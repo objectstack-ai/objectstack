@@ -118,6 +118,12 @@ function mountBenchmark(subject: string, fields: ReadonlyArray<CatalogRow> = TYP
   return render(<Harness initial={`record.status == 'done' && ${subject} == 'x'`} fields={fields} />);
 }
 
+/** The same on a LIST subject, whose stored second row is membership: a list is
+ *  not offered `==`, so `S == 'x'` would open in the raw editor (objectstack#36167). */
+function mountListBenchmark(subject: string) {
+  return render(<Harness initial={`record.status == 'done' && (${subject} != null && 'x' in ${subject})`} fields={TYPED_FIELDS} />);
+}
+
 describe('the benchmark rule on a DATE field evaluates both ways (objectui#11894)', () => {
   it('"is empty" compiles to a null check, true with no due date and false with one', async () => {
     const { container } = mountBenchmark('record.due_date');
@@ -170,7 +176,7 @@ describe('a TEXT field: "is empty" is null or the empty string', () => {
 
 describe('a MULTI-VALUE field: "is empty" is null or the empty list', () => {
   it('`tags`: true for null and for [], false for a member', async () => {
-    const { container } = mountBenchmark('record.tags');
+    const { container } = mountListBenchmark('record.tags');
     await pickOp(container, 'is empty');
     const cel = committed();
     expect(cel).toBe("record.status == 'done' && (record.tags == null || size(record.tags) == 0)");
@@ -180,7 +186,7 @@ describe('a MULTI-VALUE field: "is empty" is null or the empty list', () => {
   });
 
   it('a lookup is multi-value only when declared `multiple: true` — the spec reads both keys', async () => {
-    const multi = mountBenchmark('record.watchers');
+    const multi = mountListBenchmark('record.watchers');
     await pickOp(multi.container, 'is not empty');
     const multiCel = committed();
     expect(multiCel).toBe("record.status == 'done' && (record.watchers != null && size(record.watchers) != 0)");

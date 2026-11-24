@@ -435,6 +435,16 @@
           "isActive"
         ]
       }
+    },
+    {
+      "id": 25,
+      "prompt": "A purchase-order approval step must hand the request to `procurement_supervisor` once it has waited 8 business hours: nights, weekends and public holidays must not count. Our plants keep a working calendar with the code `cn_plant`. How do I declare that on the approval node?",
+      "expected_output": "Sets `escalation: { timeoutHours: 8, clock: 'working_time', calendar: 'cn_plant', action: 'reassign', escalateTo: 'procurement_supervisor' }` in the node config. `clock` must be written: its default, `'wall_clock'`, counts nights, weekends and holidays. Under `working_time` the hours count on a working calendar: the `calendar` code, else the organization's default calendar, else refused, never wall-clock time. The calendar is `sys_work_calendar` data each organization maintains in Setup, so the app declares no calendar or holiday object and no hook that stamps the deadline. While the calendar cannot count the deadline (no such calendar, or not maintained that far) the request does not escalate and the inbox shows why, until the calendar is fixed. `calendar` without `clock: 'working_time'` is a lint error (`approval-escalation-calendar-without-working-time`).",
+      "files": [],
+      "assertions": {
+        "must_contain": ["clock: 'working_time'", "calendar: 'cn_plant'"],
+        "must_not_contain": ["3_600_000"]
+      }
     }
   ]
 }

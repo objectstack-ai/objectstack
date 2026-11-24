@@ -21,6 +21,7 @@
  * | approval-approver-type-deprecated          | warning  | ADR-0090 D3 (#3133)        |
  * | approval-approver-type-unknown             | warning  | contract-first (PD #12)    |
  * | approval-escalation-reassign-no-target     | warning  | silent notify degradation  |
+ * | approval-escalation-calendar-without-working-time | error | ADR-0157 D9 (static only) |
  * | approval-approvers-may-resolve-empty       | info     | empty-position dead-end (#3424) |
  * | approval-approvers-may-resolve-empty       | info     | unset-manager dead-end (#16748) |
  * | approval-expression-invalid                | error/info | #3447 P2 closed-root expressions |
@@ -61,6 +62,7 @@ export const APPROVAL_APPROVER_TYPE_DEPRECATED = 'approval-approver-type-depreca
 export const APPROVAL_APPROVER_TYPE_UNKNOWN = 'approval-approver-type-unknown';
 export const APPROVAL_APPROVER_TYPE_UNSUPPORTED = 'approval-approver-type-unsupported';
 export const APPROVAL_ESCALATION_REASSIGN_NO_TARGET = 'approval-escalation-reassign-no-target';
+export const APPROVAL_ESCALATION_CALENDAR_WITHOUT_WORKING_TIME = 'approval-escalation-calendar-without-working-time';
 export const APPROVAL_APPROVERS_MAY_RESOLVE_EMPTY = 'approval-approvers-may-resolve-empty';
 export const APPROVAL_EXPRESSION_INVALID = 'approval-expression-invalid';
 export const APPROVAL_EXPRESSION_NO_EMPTY_POLICY = 'approval-expression-no-empty-policy';
@@ -794,6 +796,27 @@ export function validateApprovalApprovers(
             userTextParams: { flow: flowLabel, node: nodeLabel },
           });
         }
+      }
+
+      // ADR-0157 D9, the static half of the working-time clock: a calendar
+      // code beside the wall clock (written, or the default) names a calendar
+      // nothing reads — the hours count on the wall clock, while the author
+      // who named a calendar meant working time. Whether the named calendar
+      // EXISTS is per-organization runtime data and is never judged here.
+      const calendar = escalation && typeof escalation === 'object' && typeof escalation.calendar === 'string'
+        ? escalation.calendar.trim()
+        : '';
+      if (calendar && escalation!.clock !== 'working_time') {
+        findings.push({
+          severity: 'error',
+          rule: APPROVAL_ESCALATION_CALENDAR_WITHOUT_WORKING_TIME,
+          where,
+          path: `${nodePath}.config.escalation.calendar`,
+          message:
+            `escalation.calendar '${calendar}' is set but escalation.clock is not 'working_time' — the ` +
+            `wall clock counts the timeout and nothing reads the calendar.`,
+          hint: `Set escalation.clock to 'working_time' to count working hours on that calendar, or remove escalation.calendar.`,
+        });
       }
     }
   }

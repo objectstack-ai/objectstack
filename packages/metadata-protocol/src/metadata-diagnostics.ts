@@ -45,6 +45,7 @@ import { storedFlowVerdictBody } from './protocol-flow-save-replay.js';
 import { stackKeyForType } from '@objectstack/lint/runtime';
 // [#26886] The resolution's mark on options it derived from a shared picklist.
 import { isResolvedPicklistOptions } from '@objectstack/metadata-core';
+import { SYNC_PROVENANCE_COLUMNS, SYNC_PROVENANCE_FIELD_DEFS, isInjectedColumnDefinition } from '@objectstack/spec/data';
 import type { RuntimeAuthoringIssue } from '@objectstack/spec/api';
 
 /**
@@ -227,6 +228,30 @@ function withoutResolvedPicklistOptions(document: unknown): unknown {
 }
 
 /**
+ * [ADR-0153 D4] A served object document with the platform's own `_sync_`
+ * provenance columns left out of its name-keyed `fields`. The injected-columns
+ * plan gives them to a `managedBy: 'synced'` object, the read serves the
+ * effective schema (#6562), and `ObjectSchema` reserves the `_sync_` prefix
+ * against AUTHOR fields, so judged as served every synced object would read
+ * `valid: false` over columns the platform added. Only a field identical to
+ * the platform's definition is left out: an author's `_sync_` field stays and
+ * is refused by name, as it must be. By reference when there is none.
+ */
+function withoutInjectedSyncProvenanceColumns(document: unknown): unknown {
+    if (!document || typeof document !== 'object') return document;
+    const fields = (document as { fields?: unknown }).fields;
+    if (!fields || typeof fields !== 'object' || Array.isArray(fields)) return document;
+    let next: Record<string, unknown> | undefined;
+    for (const name of SYNC_PROVENANCE_COLUMNS) {
+        const field = (fields as Record<string, unknown>)[name];
+        if (field === undefined || !isInjectedColumnDefinition(field, SYNC_PROVENANCE_FIELD_DEFS[name])) continue;
+        next ??= { ...(fields as Record<string, unknown>) };
+        delete next[name];
+    }
+    return next ? { ...(document as object), fields: next } : document;
+}
+
+/**
  * Compute spec diagnostics for a single metadata document.
  *
  * Returns `undefined` when the type has no registered Zod schema
@@ -289,7 +314,15 @@ export function computeMetadataDiagnostics(
     // accepted it. For the VERDICT only: the read serves the body it was
     // handed. Not a redaction, so the #8154 order below is untouched: the
     // body judged is still the unredacted one.
-    const candidate = withoutResolvedPicklistOptions(storedFlowVerdictBody(singular, stripReadDecorations(item)));
+    //
+    // [ADR-0153 D4] …and judge a served object without the `_sync_` provenance
+    // columns the platform injected on a synced object
+    // ({@link withoutInjectedSyncProvenanceColumns}): the author may not write
+    // them, so the document the author wrote never held them.
+    const stripped = storedFlowVerdictBody(singular, stripReadDecorations(item));
+    const candidate = withoutResolvedPicklistOptions(
+        singular === 'object' ? withoutInjectedSyncProvenanceColumns(stripped) : stripped,
+    );
 
     // [#25783] A document parsed before against this same schema is answered
     // from the memo — see "The verdict memo" above.
@@ -330,9 +363,11 @@ function parseDiagnostics(schema: z.ZodType, candidate: unknown): MetadataDiagno
     // KIND, fewest-issues wins, `unrecognized_keys` breaks the tie, ties all
     // emitted under a cap, nested unions recursed with absolute paths) is
     // defined once, so opening a broken document and saving it give the author
-    // the same words. The expansion is strictly additive — the union's own
-    // entry is still first, so any consumer reading `errors[0]` today reads the
-    // same entry after this change.
+    // the same words — including which union heads stay: a head that is only
+    // zod's bare `"Invalid input"` is dropped once an entry below explains it,
+    // so `errors[0]` is the first located cause, and a head carrying the
+    // schema's own sentence stays ahead of its causes. Read entries by `path`
+    // and `code`, never by index.
     const errors = zodIssuesToMetadataIssues(parsed.error.issues);
 
     return { valid: false, errors };

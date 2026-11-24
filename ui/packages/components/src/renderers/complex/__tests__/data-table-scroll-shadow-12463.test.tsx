@@ -140,3 +140,50 @@ describe('data-table scroll box, sticky columns and right-edge shadow (objectui#
     expect(queryByTestId('data-table-scroll-shadow-right')).toBeNull();
   });
 });
+
+/**
+ * objectstack#35446 — while the table is wider than its box the box draws its
+ * scrollbar at rest, so columns out of view are announced without the pointer
+ * over the box; a table that fits keeps the shared hover-only bar
+ * (objectui#12708). The box's geometry is stubbed before the table mounts,
+ * because the read is taken at mount and on resize, not on scroll.
+ */
+describe('data-table scrollbar at rest while the table scrolls sideways (objectstack#35446)', () => {
+  const AT_REST = '[scrollbar-color:var(--color-muted-foreground)_transparent]!';
+  const TRANSPARENT = '[scrollbar-color:transparent_transparent]!';
+
+  function stubBoxWidths(scrollWidth: number, clientWidth: number): () => void {
+    const proto = HTMLElement.prototype;
+    const isBox = (el: HTMLElement) => el.hasAttribute('data-table-scroll-box');
+    Object.defineProperty(proto, 'scrollWidth', { configurable: true, get(this: HTMLElement) { return isBox(this) ? scrollWidth : 0; } });
+    Object.defineProperty(proto, 'clientWidth', { configurable: true, get(this: HTMLElement) { return isBox(this) ? clientWidth : 0; } });
+    return () => {
+      delete (proto as unknown as Record<string, unknown>).scrollWidth;
+      delete (proto as unknown as Record<string, unknown>).clientWidth;
+    };
+  }
+
+  it('a table wider than its box draws the bar at rest', () => {
+    const restore = stubBoxWidths(1400, 700);
+    try {
+      const { getByTestId } = renderTable(baseSchema);
+      const classes = getByTestId('data-table-scroll-box').className.split(/\s+/);
+      expect(classes).toContain(AT_REST);
+      expect(classes).not.toContain(TRANSPARENT);
+    } finally {
+      restore();
+    }
+  });
+
+  it('CONTROL: a table that fits keeps the hover-only bar', () => {
+    const restore = stubBoxWidths(700, 700);
+    try {
+      const { getByTestId } = renderTable(baseSchema);
+      const classes = getByTestId('data-table-scroll-box').className.split(/\s+/);
+      expect(classes).toContain(TRANSPARENT);
+      expect(classes).not.toContain(AT_REST);
+    } finally {
+      restore();
+    }
+  });
+});

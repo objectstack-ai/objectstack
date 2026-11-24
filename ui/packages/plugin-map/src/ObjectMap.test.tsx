@@ -109,3 +109,60 @@ describe('ObjectMap', () => {
         });
     });
 });
+
+/**
+ * A refused read draws the calm no-access state, not the raw error.
+ *
+ * A reader who may open the page but not read the map's object used to see
+ * the transport's own string ("Error: ApiDataSource: HTTP 403 Forbidden — ...").
+ * The map now classifies a failed load with the shared `classifyLoadError` and,
+ * for a `forbidden` read, draws the shared `list.loadErrorForbidden*` sentence
+ * as a neutral `role="status"` panel. Every other failure keeps the existing
+ * error screen (CONTROL).
+ */
+describe('ObjectMap: a refused read draws the no-access state', () => {
+    const schema: any = {
+        type: 'map',
+        map: { latitudeField: 'latitude', longitudeField: 'longitude', titleField: 'name' },
+        data: { provider: 'object', object: 'locations' },
+    };
+
+    function failingSource(err: Error): DataSource {
+        return {
+            find: vi.fn(async () => { throw err; }),
+            findOne: vi.fn(),
+            create: vi.fn(),
+            update: vi.fn(),
+            delete: vi.fn(),
+            getObjectSchema: vi.fn(),
+        } as unknown as DataSource;
+    }
+
+    it('a 403 read draws the no-access state, with none of the server text', async () => {
+        const err = new Error(
+            'ApiDataSource: HTTP 403 Forbidden — {"error":"PERMISSION_DENIED: no read access to locations"}',
+        ) as Error & { httpStatus?: number; code?: string };
+        err.httpStatus = 403;
+        err.code = 'PERMISSION_DENIED';
+        const { container } = render(<ObjectMap schema={schema} dataSource={failingSource(err)} />);
+
+        const panel = await screen.findByTestId('map-no-access');
+        expect(panel.getAttribute('role')).toBe('status');
+        expect(panel.textContent).toContain('You don’t have access');
+        expect(panel.textContent).toContain('You don’t have permission to view these records.');
+        const text = container.textContent ?? '';
+        expect(text).not.toContain('Error');
+        expect(text).not.toContain('PERMISSION_DENIED');
+        expect(text).not.toContain('HTTP 403');
+        expect(screen.queryByLabelText('Map')).toBeNull();
+    });
+
+    it('CONTROL: a 500 keeps the existing error screen', async () => {
+        const err = new Error('ApiDataSource: HTTP 500 Internal Server Error') as Error & { httpStatus?: number };
+        err.httpStatus = 500;
+        render(<ObjectMap schema={schema} dataSource={failingSource(err)} />);
+
+        expect(await screen.findByText('Error: ApiDataSource: HTTP 500 Internal Server Error')).toBeTruthy();
+        expect(screen.queryByTestId('map-no-access')).toBeNull();
+    });
+});

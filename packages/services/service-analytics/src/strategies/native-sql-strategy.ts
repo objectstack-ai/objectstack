@@ -37,7 +37,7 @@ import {
   numberComparandRefusalMessage,
 } from '@objectstack/spec/data';
 import { findCrossFieldComparand, findUninterpretableTemporalMember } from '../comparand-shape.js';
-import { assertReadScopeCannotVacate, compileScopedFilterToSql, findReadableIdsLeaf } from '../read-scope-sql.js';
+import { assertReadScopeCannotVacate, compileScopedFilterToSql, findReadableIdsLeaf, fixedReadLeavesIn } from '../read-scope-sql.js';
 import { nonTextColumnResolver, textOperatorPolarity } from '../non-text-column.js';
 import { declaredValueShapeResolver, whereEmptyLeafSql } from '../empty-operator-sql.js';
 // [#20986] The one resolver of the object a relationship-path hop reads.
@@ -46,6 +46,8 @@ import { datasetInvalidError, invalidMemberError } from '../dataset-refusal.js';
 import { type LikeShape } from '../like-pattern.js';
 import { textMatchPredicateSql, sqlDialectFor, type AnalyticsSqlDialect } from '../text-match-sql.js';
 import { whereContainsMembershipSql } from '../contains-membership-sql.js';
+import { refuseWhereJsonColumnComparison, whereComparisonColumnClass } from '../json-column-comparison-refusal.js';
+import { JSON_COLUMN_INCOMPATIBLE_OPERATORS } from '@objectstack/core';
 // [#25778] The per-row operand of a dataset duration measure, per dialect.
 import { durationMeasureIn, durationMeasureKey, durationOperandSql, hasDurationSql } from '../duration-measure-sql.js';
 import { scopedMeasureFilter } from '../scoped-measure-key.js';
@@ -912,6 +914,22 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     // reason: one owner of the composition, no second copy here. Every object
     // the statement scopes is read, as the cross-field decline reads them.
     if (this.readScopeCarriesReadableIds(query, ctx)) return false;
+    // ── [ADR-0155 D4, Q2 as ruled] DECLINE a share-grant leaf of D4's classes ─
+    //
+    // A read scope may carry the engine-internal fixed-read leaf
+    // (`SharedRecordIds`) as the `$in` comparand of `id`, and Q2 ruled that
+    // this strategy compiles it (`compileScopedFilterToSql` emits its
+    // subquery). Where either of D4's two classes applies (the object bound to
+    // another datasource than the leaf's inner table, or a middleware or find
+    // hook registered for that table by name), the subquery would read the
+    // wrong database or read around the registration, so the query declines
+    // to the ObjectQL strategy before anything compiles, and the engine's seam
+    // gives the class its answer. The class is the seam's recognition, asked
+    // through the host (`fixedReadLeafClassOf`); ⛔ no second copy here. It
+    // FAILS CLOSED like the middleware decline: no hook, an `undefined`
+    // answer, a throw, and a dialect this compiler cannot name decline too.
+    // See {@link readScopeCarriesUncompilableFixedReadLeaf}.
+    if (this.readScopeCarriesUncompilableFixedReadLeaf(query, ctx)) return false;
     // ── [#25778] DECLINE a duration measure on a dialect nobody named ──────
     //
     // A dataset duration measure is the time between two `datetime` columns of
@@ -957,6 +975,40 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
       ? [...scoped]
       : [this.extractObjectName(cube), ...Object.keys(cube.joins ?? {}).map((alias) => cube.joins?.[alias]?.name ?? alias)];
     return objects.some((object) => findReadableIdsLeaf(ctx.getReadScope!(object)) !== null);
+  }
+
+  /**
+   * [ADR-0155 D4] Does the read scope of any object this statement scopes carry
+   * a fixed-read leaf this strategy may not compile? See the decline at
+   * {@link canHandle}. The objects are the ones {@link readScopeCarriesReadableIds}
+   * reads. Every leaf in a scope is asked about, wherever it sits: one out of
+   * position is not declined here, and `compileScopedFilterToSql` refuses it in
+   * ADR-0139 D3's envelope, as the engine would.
+   */
+  private readScopeCarriesUncompilableFixedReadLeaf(query: AnalyticsQuery, ctx: StrategyContext): boolean {
+    if (typeof ctx.getReadScope !== 'function') return false;
+    const cube = query.cube ? ctx.getCube(query.cube) : undefined;
+    if (!cube) return false;
+    const scoped = (ctx as DatasetScopedStrategyContext).readScopedObjects;
+    const objects = scoped
+      ? [...scoped]
+      : [this.extractObjectName(cube), ...Object.keys(cube.joins ?? {}).map((alias) => cube.joins?.[alias]?.name ?? alias)];
+    const classOf = (ctx as DatasetScopedStrategyContext).fixedReadLeafClassOf;
+    return objects.some((object) => {
+      const leaves = fixedReadLeavesIn(ctx.getReadScope!(object));
+      if (leaves.length === 0) return false;
+      // The subquery's blank-id guard is spelled per dialect (Oracle stores
+      // `''` as NULL); a dialect this compiler cannot name is declined.
+      if (sqlDialectFor(ctx, object) === 'unknown') return true;
+      if (typeof classOf !== 'function') return true;
+      return leaves.some((leaf) => {
+        try {
+          return classOf.call(ctx, leaf) !== null;
+        } catch {
+          return true;
+        }
+      });
+    });
   }
 
   /**
@@ -1040,6 +1092,16 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
    * declared value shape and its dialect), so the decline fires where an
    * emitter's `'unknown'` refusal would and nowhere else.
    *
+   * [#36168] A fourth refusal reads the same population on the caller's
+   * `where`, the dataset's `filter` and the measures' `filter`s (not the read
+   * scope, which `read-scope-sql.ts` compiles): an operator of
+   * `JSON_COLUMN_INCOMPATIBLE_OPERATORS`, or implicit equality, on a JSON-stored
+   * field (`json-column-comparison-refusal.ts`). It needs no JSON function, and
+   * on a named dialect it refuses; on `'unknown'` the query is declined here
+   * instead, so a non-SQL datasource keeps its engine's answer (`driver-memory`
+   * refuses the same operators, and `driver-mongodb` answers them) rather than
+   * meeting this compiler's refusal ahead of the hand-off.
+   *
    * It reads every filter this strategy would compile through those emitters:
    * - the caller's `where`, lowered, plus the compiled dataset's own `filter`
    *   and the `filter` of each requested measure, as
@@ -1059,33 +1121,47 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     const baseTable = this.extractObjectName(cube);
     const referenceOf = relationshipReferenceOf(ctx);
     type Target = { object: string; field: string } | undefined;
-    const needsJson = (target: Target, op: string): boolean => {
-      if (!target || (op !== '$contains' && op !== '$notContains' && op !== '$empty')) return false;
-      if (hasJsonMembershipSql(sqlDialectFor(ctx, target.object))) return false;
+    // `comparisons`: whether this filter is one `buildFilterClause` compiles,
+    // and so meets the [#36168] comparison refusal (`'='` is implicit
+    // equality). A read scope is not.
+    const needsJson = (target: Target, op: string, comparisons: boolean): boolean => {
+      if (!target) return false;
+      const comparison = comparisons && (op === '=' || JSON_COLUMN_INCOMPATIBLE_OPERATORS.has(op));
+      if (!comparison && op !== '$contains' && op !== '$notContains' && op !== '$empty') return false;
+      const dialect = sqlDialectFor(ctx, target.object);
+      if (comparison ? dialect !== 'unknown' : hasJsonMembershipSql(dialect)) return false;
+      // [#36190] The comparison refusal's population, which the storing
+      // driver's single-value media class joins.
+      if (comparison) return whereComparisonColumnClass(ctx, target) !== undefined;
       const shape = declaredValueShapeResolver(ctx, target.object)?.(target.field);
       if (op === '$empty') return shape !== undefined && expandEmptyOperator(shape).arm === 'multi_value';
       return isJsonStoredShape(shape);
     };
     // One filter condition: `$and` / `$or` / `$not` recurse, and a field key
-    // whose value is an operator object is judged operator by operator. A
-    // plain object under a field key is the nested-relation form, which its
-    // own decline above routes.
-    const carries = (node: unknown, targetOf: (key: string) => Target): boolean => {
+    // whose value is an operator object is judged operator by operator, one
+    // whose value is a comparand as implicit equality. A plain object under a
+    // field key is the nested-relation form, which its own decline above
+    // routes.
+    const carries = (node: unknown, targetOf: (key: string) => Target, comparisons = true): boolean => {
       if (!node || typeof node !== 'object' || Array.isArray(node)) return false;
       for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
         if (key === '$and' || key === '$or') {
-          if (Array.isArray(value) && value.some((child) => carries(child, targetOf))) return true;
+          if (Array.isArray(value) && value.some((child) => carries(child, targetOf, comparisons))) return true;
           continue;
         }
         if (key === '$not') {
-          if (carries(value, targetOf)) return true;
+          if (carries(value, targetOf, comparisons)) return true;
           continue;
         }
-        if (key.startsWith('$') || !value || typeof value !== 'object' || Array.isArray(value)) continue;
+        if (key.startsWith('$')) continue;
+        if (!value || typeof value !== 'object' || Array.isArray(value) || value instanceof Date) {
+          if (needsJson(targetOf(key), '=', comparisons)) return true;
+          continue;
+        }
         const ops = Object.keys(value as Record<string, unknown>);
         if (ops.length === 0 || !ops.every((op) => op.startsWith('$'))) continue;
         const target = targetOf(key);
-        if (ops.some((op) => needsJson(target, op))) return true;
+        if (ops.some((op) => needsJson(target, op, comparisons))) return true;
       }
       return false;
     };
@@ -1116,7 +1192,7 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     const objects = scoped
       ? [...scoped]
       : [baseTable, ...Object.keys(cube.joins ?? {}).map((alias) => cube.joins?.[alias]?.name ?? alias)];
-    return objects.some((object) => carries(ctx.getReadScope!(object), (field) => ({ object, field })));
+    return objects.some((object) => carries(ctx.getReadScope!(object), (field) => ({ object, field }), false));
   }
 
   /**
@@ -1750,7 +1826,13 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     // D-A1 / D-A2), bound to the OBJECT (never the alias), so a temporal
     // comparand binds in the column's storage form and the scope admits the
     // rows the engine admits.
+    // [ADR-0155 D2, D4] …and the object and this service's refusal sink, so a
+    // share-grant leaf compiles to its subquery in the scope of the object it
+    // names, and a leaf out of position is refused in D4's envelope, logged
+    // once. `canHandle` declined D4's two classes before this point.
     const { sql, params: scopeParams } = compileScopedFilterToSql(filter, alias, {
+      object: objectName,
+      fixedReadLeafRefusal: (ctx as DatasetScopedStrategyContext).fixedReadLeafRefusal,
       nonTextColumn: nonTextColumnResolver(ctx, objectName),
       dialect: sqlDialectFor(ctx, objectName),
       context: ctx.context,
@@ -2420,6 +2502,15 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
         bind: (v) => { params.push(v); return `$${params.length}`; },
       });
     }
+
+    // [#36168] A scalar comparison or text operator on a column the host
+    // DECLARES multi-valued or JSON-stored would compare the stored JSON
+    // serialization (`tags IN ('a')` counts nothing, `$nin` counts the rows it
+    // excludes): refused `INVALID_FILTER` / 400 in the data door's words,
+    // before anything binds. `contains` / `notContains` (the membership branch
+    // below) and the null predicates above are not refused. See
+    // `json-column-comparison-refusal.ts`.
+    refuseWhereJsonColumnComparison({ ctx, target, operator });
 
     if (operator === 'in' || operator === 'notIn') {
       if (!values || values.length === 0) return null;

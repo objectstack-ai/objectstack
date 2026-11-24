@@ -34,6 +34,9 @@
  * the two comparand arms it names no operator, so `field` is its subject.
  * objectui#11094 added the `$empty` flag refusal (a flag that is not a
  * boolean) the same way; it names its operator, so `$empty` is its subject.
+ * objectstack#35533 added the foreign-realm refusal (a field's whole condition
+ * is a plain object of another realm); it names no operator, so `field` is its
+ * subject.
  *
  * ⚠️ Each input is driven through `toFilterNodeSafely` — the RENDER-time entry,
  * not `convertFiltersToAST` directly — because the question is what a renderer
@@ -43,6 +46,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
+import { runInNewContext } from 'node:vm';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import {
@@ -70,6 +74,7 @@ const REFUSALS: Array<{
   { site: 'combinator value is not an array', input: { $and: 'nope' }, operator: '$and', field: undefined, subject: '$and' },
   { site: 'combinator member is not an object', input: { $and: ['nope'] }, operator: '$and', field: undefined, subject: '$and' },
   { site: '$icontains comparand', input: { name: { $icontains: '' } }, operator: '$icontains', field: 'name', subject: '$icontains' },
+  { site: 'plain object from another realm', input: { age: runInNewContext('({ $gte: 18 })') }, operator: undefined, field: 'age', subject: 'age' },
   { site: 'empty operator map with no other condition', input: { a: {} }, operator: undefined, field: 'a', subject: 'a' },
   { site: '$not combinator', input: { $not: { a: 1 } }, operator: '$not', field: undefined, subject: '$not' },
   { site: 'bare array equality comparand', input: { tags: ['a', 'b'] }, operator: undefined, field: 'tags', subject: 'tags' },

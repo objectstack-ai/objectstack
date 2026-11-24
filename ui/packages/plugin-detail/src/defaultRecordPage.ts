@@ -48,13 +48,93 @@ export function useDefaultRecordPage(): boolean {
 export const EmptySectionsLineContext = React.createContext(false);
 
 /**
- * The most columns a frameless detail section may take on the page being
- * drawn (objectstack#27524, Target 6): the record page's layout sets 2 in its
- * two-column tier, where the details share the row with the 320 px right
- * column, and leaves 3 in the wide tier and the stack, where the section's
- * own container width decides. 3 anywhere else.
+ * One approval band per record page (objectstack#35253, objectstack#35483,
+ * objectstack#35484): the band (the "Locked for approval" / "In approval"
+ * status chip, its recall lever and its tally, drawn by a `DetailView` whose
+ * own header is suppressed) is the RECORD's state, so a page draws it once,
+ * however many `record:details` bodies it places. Every page host mounts
+ * {@link ApprovalBandOnceScope} around its details: the laid-out page around
+ * its details column (`RecordPageColumns`), and the host around a page drawn
+ * as written (an authored page, or a synthesized page whose strip cannot be
+ * laid out). Under the scope every body that reaches the band's place marks
+ * it, and only the FIRST mark in document order draws the band: a first node
+ * that draws no body leaves no mark, and a `lockRecord: false` first node
+ * draws its own (editable) band, the page's one. The band keeps its recall
+ * lever and its tally. Outside a scope — a standalone `DetailView` (the `detail-view`
+ * node, an overlay panel) — every body draws its band as before. Whether the band reads locked
+ * or editable is untouched: that is `resolveApprovalLock`'s rule.
  */
-export const DetailsColumnCapContext = React.createContext<2 | 3>(3);
+export interface ApprovalBandOnce {
+  /** Mark a body's band place; returns the unmark. `onChange` re-renders the body when the first mark moves. */
+  register: (mark: Element, onChange: () => void) => () => void;
+  /** The first mark in document order, or `null`. */
+  first: () => Element | null;
+}
+
+export function createApprovalBandOnce(): ApprovalBandOnce {
+  const marks = new Map<Element, () => void>();
+  const notify = () => {
+    for (const onChange of Array.from(marks.values())) onChange();
+  };
+  return {
+    register(mark, onChange) {
+      marks.set(mark, onChange);
+      notify();
+      return () => {
+        marks.delete(mark);
+        notify();
+      };
+    },
+    first() {
+      let first: Element | null = null;
+      for (const mark of marks.keys()) {
+        if (!mark.isConnected) continue;
+        if (!first || first.compareDocumentPosition(mark) & Node.DOCUMENT_POSITION_PRECEDING) first = mark;
+      }
+      return first;
+    },
+  };
+}
+
+export const ApprovalBandOnceContext = React.createContext<ApprovalBandOnce | null>(null);
+
+/** The page scope under which one approval band is drawn (see {@link ApprovalBandOnce}). */
+export function ApprovalBandOnceScope({ children }: { children?: React.ReactNode }): React.ReactElement {
+  const [once] = React.useState(createApprovalBandOnce);
+  return React.createElement(ApprovalBandOnceContext.Provider, { value: once }, children);
+}
+
+/**
+ * A details body's part in the page's one band: `draws` is whether this body
+ * draws it, `mark` the hidden element it renders where the band would be.
+ * Outside a scope it draws, with no mark.
+ */
+export function useApprovalBandOnce(): { draws: boolean; mark: React.ReactNode } {
+  const once = React.useContext(ApprovalBandOnceContext);
+  const [mark, setMark] = React.useState<HTMLElement | null>(null);
+  const [, rerender] = React.useReducer((n: number) => n + 1, 0);
+  React.useLayoutEffect(() => {
+    if (!once || !mark) return undefined;
+    return once.register(mark, rerender);
+  }, [once, mark]);
+  if (!once) return { draws: true, mark: null };
+  return {
+    draws: mark !== null && once.first() === mark,
+    mark: React.createElement('span', { ref: setMark, hidden: true, 'data-approval-band-mark': '' }),
+  };
+}
+
+/**
+ * The most columns a frameless detail section may take on the page being
+ * drawn: the record page's layout sets 1 wherever the details sit beside other
+ * tabs or are one of them — a drawer, a phone, a narrow page, the pinned left
+ * column (objectstack#36147: one field a row, label left and value right, at
+ * any width) — and leaves 3 only on a full page whose details are its only
+ * face, where the section's own container width decides. 3 anywhere else.
+ * 1 is also the field list face: `DetailSection` draws its rows one under the
+ * other with a hairline between them.
+ */
+export const DetailsColumnCapContext = React.createContext<1 | 2 | 3>(3);
 
 /**
  * How many columns a frameless detail section lays its fields in, by the
@@ -62,8 +142,8 @@ export const DetailsColumnCapContext = React.createContext<2 | 3>(3);
  * 1–3 列」): one field takes one column, two to five take two, six and more
  * take three — never more than `cap` ({@link DetailsColumnCapContext}).
  */
-export function framelessSectionColumns(visibleFieldCount: number, cap: 2 | 3 = 3): 1 | 2 | 3 {
-  if (visibleFieldCount <= 1) return 1;
+export function framelessSectionColumns(visibleFieldCount: number, cap: 1 | 2 | 3 = 3): 1 | 2 | 3 {
+  if (visibleFieldCount <= 1 || cap === 1) return 1;
   if (visibleFieldCount <= 5 || cap === 2) return 2;
   return 3;
 }

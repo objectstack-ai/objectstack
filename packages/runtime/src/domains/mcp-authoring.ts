@@ -10,6 +10,15 @@
  * `delete_metadata_draft`). No tool publishes and none takes a `force` (D2 A):
  * a person reviews and publishes the drafts in Studio.
  *
+ * [#35761] `list_metadata_items` with `contract: true` also answers the type's
+ * contract: the entry `getMetaTypes` serves `GET /meta/types` for it, its JSON
+ * Schema (`getMetadataTypeSchema` through the protocol's one converter) and
+ * its `createSeed`, never a second derivation. A flag, not a sixth tool: it
+ * costs `tools/list` fewer bytes (the PR states both). The default answer is
+ * the schema's lean form, a one-level projection of that served schema;
+ * `contractPath` drills into it, and no contract exceeds
+ * `CONTRACT_REPLY_BYTE_CAP`.
+ *
  * ## Who is admitted (seat ruling D1 A)
  *
  * The effective right is an intersection, and both halves are read here, once
@@ -102,6 +111,8 @@
  *    refused with the writable packages named. A judgement that fails after
  *    the save landed is said beside the saved identity, never as a refused
  *    save.
+ *  - [#34774] `save_metadata_draft`'s optional `clientSpecVersion` is judged
+ *    first ({@link clientSpecVersionVerdict}).
  *  - `delete_metadata_draft` discards a pending draft through `deleteMetaItem`
  *    with `state: 'draft'`, never an active item.
  *  - Both ask the `/meta` type-level write admission (`metaTypeWriteRefusal`,
@@ -136,6 +147,7 @@
  * and their names never meet.
  */
 
+import { createRequire } from 'node:module';
 import { resolveUserAuthzGrants, userTextLocalesOf } from '@objectstack/core';
 import { metaWriteCapabilityVerdict, walledCatalogWriteVerdict } from '@objectstack/metadata-core';
 import {
@@ -149,6 +161,7 @@ import {
     type MetaReadGateCaller,
 } from '@objectstack/rest';
 import { MCP_OAUTH_SCOPE_METADATA_WRITE } from '@objectstack/spec/ai';
+import { SEMVER_2_0_0_VERSION_PATTERN } from '@objectstack/spec/kernel';
 import { canonicalMetaUrlType } from '@objectstack/spec/shared';
 import type { ErrorCode, ListDraftsResponse, MetadataProtocol, RuntimeAuthoringIssue } from '@objectstack/spec/api';
 import type { AIToolDefinition } from '@objectstack/spec/contracts';
@@ -168,6 +181,46 @@ const VALIDATION_ERROR: ErrorCode = 'VALIDATION_ERROR';
 const RESOURCE_NOT_FOUND: ErrorCode = 'RESOURCE_NOT_FOUND';
 const SERVICE_UNAVAILABLE: ErrorCode = 'SERVICE_UNAVAILABLE';
 const INTERNAL_ERROR: ErrorCode = 'INTERNAL_ERROR';
+
+/** [#34774] The `@objectstack/spec` this process resolves (the version `initialize` states). */
+const SERVER_SPEC_VERSION: string | undefined = (() => {
+    try {
+        const { version } = createRequire(import.meta.url)('@objectstack/spec/package.json') as { version?: unknown };
+        return typeof version === 'string' && version ? version : undefined;
+    } catch {
+        return undefined;
+    }
+})();
+
+/**
+ * [#34774] The save's judgement of the client's declared spec version (#34659
+ * ruling D4 = A), before anything is written: another major is refused with the
+ * install line (`refusal`), another minor is saved with an `advisory`, and none
+ * or the same major and minor says nothing. The type's schema parse on the save
+ * stays the final gate either way.
+ */
+function clientSpecVersionVerdict(declared: unknown, server = SERVER_SPEC_VERSION): { refusal?: string; advisory?: string } {
+    if (declared === undefined) return {};
+    if (typeof declared !== 'string' || !SEMVER_2_0_0_VERSION_PATTERN.test(declared)) {
+        return { refusal: '`clientSpecVersion` is the `@objectstack/spec` version you built against, in SemVer form (e.g. 18.6.0).' };
+    }
+    if (!server) return { advisory: `This server could not read its own @objectstack/spec version, so ${declared} was not compared.` };
+    const [clientMajor, clientMinor] = declared.split('.').map(Number);
+    const [serverMajor, serverMinor] = server.split('.').map(Number);
+    const install = `npm i -D @objectstack/spec@${server}`;
+    if (clientMajor !== serverMajor) {
+        return {
+            refusal: `This server runs @objectstack/spec ${server}, and you built against ${declared}, another major: what `
+                + 'that major lets an item say is not what this server accepts. Nothing was saved. Install the server\'s '
+                + `version, rebuild the item against it and save again: ${install}`,
+        };
+    }
+    if (clientMinor === serverMinor) return {};
+    return {
+        advisory: `This server runs @objectstack/spec ${server}, and you built against ${declared}: the same major, so the `
+            + `draft was saved, but a key or value one of the two minors adds may be refused or not understood. ${install}`,
+    };
+}
 
 /** The lifecycle selector the item reads take. */
 const STATES = ['active', 'draft'] as const;
@@ -205,6 +258,14 @@ const READ_TOOLS: readonly AIToolDefinition[] = Object.freeze([
                 state: {
                     ...STATE_PARAMETER,
                     description: 'Omit to list drafts in place of their published versions; `active` lists the published items only; `draft` lists the pending drafts only.',
+                },
+                contract: {
+                    type: 'boolean',
+                    description: '`true` adds `contract`: the type\'s JSON Schema in lean form (each top-level key\'s type, enum and description; `drill` marks nested structure) and its create seed. `schema: null` says why none is served.',
+                },
+                contractPath: {
+                    type: 'string',
+                    description: 'With `contract: true`, a JSON Pointer such as `/properties/fields`: answers the full schema there, or its lean form marked `truncated` when over the reply cap.',
                 },
             },
             required: ['type'],
@@ -279,6 +340,14 @@ const WRITE_TOOLS: readonly AIToolDefinition[] = Object.freeze([
                     type: 'string',
                     minLength: 1,
                     description: 'Optional: the `version` a read or a save answered. The save is refused if the draft changed since.',
+                },
+                clientSpecVersion: {
+                    type: 'string',
+                    minLength: 1,
+                    description: 'Recommended: the `@objectstack/spec` version you built the item against (SemVer, e.g. 18.6.0). '
+                        + 'This server\'s version is the `Authoring contract` line of its instructions. Another major is '
+                        + 'refused before anything is saved, naming the version to install; another minor is saved and '
+                        + 'advised. The saved item is still validated either way.',
                 },
             },
             required: ['type', 'name', 'item'],
@@ -600,12 +669,24 @@ export function createOpenAuthoringRegistry(opts: {
                         if (typeof protocol?.getMetaItems !== 'function') return unavailable();
                         const type = canonicalTypeOf(input.type);
                         if (!type) return refuse(VALIDATION_ERROR, 'Name the metadata type as `type`.', 400);
+                        const contractPath = input.contractPath;
+                        if (contractPath !== undefined) {
+                            if (input.contract !== true) {
+                                return refuse(VALIDATION_ERROR, '`contractPath` drills into the contract: send it with `contract: true`.', 400);
+                            }
+                            if (typeof contractPath !== 'string' || (contractPath !== '' && !contractPath.startsWith('/'))) {
+                                return refuse(VALIDATION_ERROR, '`contractPath` is a JSON Pointer into the type\'s schema, such as `/properties/fields`.', 400);
+                            }
+                        }
                         const typeRefused = await typeReadRefusal(type);
                         if (typeRefused) return typeRefused;
                         // A type the platform does not declare and this deployment holds
                         // nothing under is refused, as the `/meta` list refuses it, rather
                         // than answered an empty list.
                         await refuseUnknownMetaListType(protocol, type);
+                        const contract = input.contract === true ? await typeContractOf(protocol, type, contractPath as string | undefined) : undefined;
+                        if (contract === null) return unavailable();
+                        if (contract && 'unresolved' in contract) return refuse(VALIDATION_ERROR, contract.unresolved, 400);
                         // `state: "draft"` reads the draft-overlaid list and keeps its
                         // drafts, rather than `listDrafts({ type })`: the list gate
                         // below judges each item's BODY (its `requiredPermissions`,
@@ -621,7 +702,7 @@ export function createOpenAuthoringRegistry(opts: {
                         const items = kept
                             .map(summaryOf)
                             .filter((item) => state !== 'draft' || item.draft);
-                        return answer({ type: listed?.type ?? type, count: items.length, items });
+                        return answer({ type: listed?.type ?? type, count: items.length, items, ...(contract ? { contract } : {}) });
                     }
                     case 'get_metadata_item': {
                         if (typeof protocol?.getMetaItem !== 'function') return unavailable();
@@ -706,6 +787,10 @@ export function createOpenAuthoringRegistry(opts: {
                         if (input.ifMatch !== undefined && !ifMatch) {
                             return refuse(VALIDATION_ERROR, '`ifMatch` is the `version` a read or a save answered.', 400);
                         }
+                        // [#34774] The client's spec version, judged before anything is written.
+                        const specVerdict = clientSpecVersionVerdict(input.clientSpecVersion);
+                        if (specVerdict.refusal) return refuse(VALIDATION_ERROR, specVerdict.refusal, 400);
+                        const advised = specVerdict.advisory ? { specVersionAdvisory: specVerdict.advisory } : {};
                         // The `/meta` type-level write admission, before anything is written.
                         const typeWriteRefused = await typeAdmission('PUT', type);
                         if (typeWriteRefused) return refuse(typeWriteRefused.code, typeWriteRefused.message, typeWriteRefused.status);
@@ -739,7 +824,7 @@ export function createOpenAuthoringRegistry(opts: {
                         // `/meta` type-level read admission admits this human.
                         const typeReadRefused = await typeAdmission('read', type);
                         if (typeReadRefused) {
-                            return answer({ saved: identity, verdict: null, verdictWithheld: typeReadRefused, review });
+                            return answer({ saved: identity, verdict: null, verdictWithheld: typeReadRefused, review, ...advised });
                         }
                         let judgement: OpenAuthoringDraftJudgement;
                         try {
@@ -747,9 +832,9 @@ export function createOpenAuthoringRegistry(opts: {
                         } catch (error) {
                             // The draft is saved; only its verdict is missing, and the
                             // reply says so rather than reading as a refused save.
-                            return answer({ saved: identity, verdict: null, verdictError: verdictErrorOf(error), review });
+                            return answer({ saved: identity, verdict: null, verdictError: verdictErrorOf(error), review, ...advised });
                         }
-                        return answer({ saved: identity, verdict: verdictOf(judgement), review });
+                        return answer({ saved: identity, verdict: verdictOf(judgement), review, ...advised });
                     }
                     case 'delete_metadata_draft': {
                         if (typeof protocol?.deleteMetaItem !== 'function') return unavailable();
@@ -898,6 +983,294 @@ export function createOpenAuthoringRegistry(opts: {
     };
 }
 
+/**
+ * [#35761] The most bytes a contract may take in a reply, measured as the
+ * pretty-printed `{ contract }` the door answers. 24 KiB: MCP clients commonly
+ * cap one tool result near 25,000 tokens (Claude Code's default), and JSON
+ * dense with punctuation tokenizes at about two bytes a token at worst, so a
+ * capped contract stays near half that budget and leaves the rest for the
+ * item list it rides with. The served schemas of the most-written types are
+ * far larger (`object` about 185 KB compact, `view` about 370 KB), which is
+ * why the default answer is the lean form and the full schema is read one
+ * `contractPath` at a time.
+ */
+export const CONTRACT_REPLY_BYTE_CAP = 24 * 1024;
+
+/** A contract as `list_metadata_items` answers it. */
+export type TypeContract = {
+    /** `lean` is a one-level projection of the served schema; `full` is the served schema at `path`, verbatim. */
+    form?: 'lean' | 'full';
+    /** The JSON Pointer answered, on a `contractPath` read. */
+    path?: string;
+    schema: unknown;
+    reason?: string;
+    createSeed?: unknown;
+    /** The answer at `path` is not the whole of it: it was cut to fit {@link CONTRACT_REPLY_BYTE_CAP}. */
+    truncated?: true;
+    note?: string;
+};
+
+/**
+ * [#35761] One type's contract, read off the entry `getMetaTypes` answers
+ * `GET /meta/types` with: no second converter. Without `path` the answer is
+ * the lean form, a projection of that same served schema
+ * ({@link leanSchemaOf}); with `path`, a JSON Pointer into it, the served
+ * sub-schema there, verbatim, or its lean form marked `truncated` when the
+ * full one would exceed {@link CONTRACT_REPLY_BYTE_CAP}. No answer exceeds the
+ * cap. `null` when the protocol has no type listing; `{ unresolved }` names a
+ * path that does not resolve. A type with no JSON Schema is answered
+ * `schema: null` with the reason, never `{}`.
+ */
+async function typeContractOf(
+    protocol: OpenAuthoringProtocol,
+    type: string,
+    path: string | undefined,
+): Promise<TypeContract | { unresolved: string } | null> {
+    if (typeof protocol.getMetaTypes !== 'function') return null;
+    const listing = await protocol.getMetaTypes();
+    const entry = listing?.entries?.find((e) => e?.type === type) as { schema?: unknown; createSeed?: unknown } | undefined;
+    const schema = entry?.schema;
+    const seed = entry?.createSeed !== undefined ? { createSeed: entry.createSeed } : {};
+    if (!isSchemaRecord(schema) || Object.keys(schema).length === 0) {
+        const reason = entry
+            ? `The platform derives no JSON Schema for '${type}'. Read a published item of the type, and let the save validate yours.`
+            : `This environment's type listing has no entry for '${type}', so no contract is served for it.`;
+        if (path !== undefined) return { unresolved: `\`contractPath\` '${path}' has no schema to resolve in. ${reason}` };
+        return { schema: null, reason, ...seed };
+    }
+    if (path === undefined) {
+        return fitContract(LEAN_LEVELS.map((level, i) => ({
+            form: 'lean',
+            schema: leanSchemaOf(schema, '', level),
+            ...seed,
+            ...(i === 0 ? {} : { truncated: true as const, note: LEAN_CUT }),
+        })), '');
+    }
+    const resolved = resolveContractPath(schema, path);
+    if ('unresolved' in resolved) return { unresolved: `\`contractPath\` '${path}' does not resolve in the '${type}' schema: ${resolved.unresolved}` };
+    const { node, kind } = resolved;
+    const lean = (level: LeanLevel) => kind === 'map' && isSchemaRecord(node)
+        ? Object.fromEntries(Object.entries(node).map(([k, v]) => [k, descriptorOf(v, `${path}/${escapePointer(k)}`, level.descriptions)]))
+        : kind === 'array' && Array.isArray(node)
+            ? node.map((v, i) => descriptorOf(v, `${path}/${i}`, level.descriptions))
+            : kind === 'schema' && isSchemaRecord(node) ? leanSchemaOf(node, path, level) : undefined;
+    const candidates: TypeContract[] = [{ form: 'full', path, schema: node }];
+    if (kind !== 'value') {
+        candidates.push(...LEAN_LEVELS.map((level) => ({ form: 'lean' as const, path, schema: lean(level), truncated: true as const, note: DRILL_AGAIN })));
+    }
+    return fitContract(candidates, path);
+}
+
+const DRILL_AGAIN = 'The full schema here is over the reply cap: this is its lean form. Send a `drill` pointer below as the next `contractPath`.';
+const LEAN_CUT = 'Cut to fit the reply cap: send a `drill` pointer below as `contractPath` to read that part whole.';
+
+/** The first candidate within {@link CONTRACT_REPLY_BYTE_CAP}, else a `schema: null` that says so: never a reply over the cap. */
+function fitContract(candidates: readonly TypeContract[], path: string): TypeContract {
+    for (const candidate of candidates) {
+        if (contractReplyBytes(candidate) <= CONTRACT_REPLY_BYTE_CAP) return candidate;
+    }
+    return {
+        ...(path ? { path } : {}),
+        schema: null,
+        reason: `The schema at '${path || '/'}' is over the reply cap of ${CONTRACT_REPLY_BYTE_CAP} bytes even in its lean form. Send a narrower \`contractPath\`, such as '${path}/properties/' followed by one key.`,
+    };
+}
+
+/** The bytes a contract takes in the door's pretty-printed reply. */
+export function contractReplyBytes(contract: unknown): number {
+    return new TextEncoder().encode(JSON.stringify({ contract }, null, 2)).length;
+}
+
+/**
+ * How much of a node the lean form keeps, tried richest first until the reply
+ * fits: `descriptions` keeps each key's one-line description; `alternatives`
+ * lists a union node's alternatives by their own keys rather than one
+ * descriptor each.
+ */
+type LeanLevel = { descriptions: boolean; alternatives: boolean };
+const LEAN_LEVELS: readonly LeanLevel[] = [
+    { descriptions: true, alternatives: true },
+    { descriptions: false, alternatives: true },
+    { descriptions: true, alternatives: false },
+    { descriptions: false, alternatives: false },
+];
+
+/** Keywords whose value maps names to schemas. */
+const SCHEMA_MAP_KEYWORDS = new Set(['properties', 'patternProperties', '$defs', 'definitions', 'dependentSchemas']);
+/** Keywords whose value is an array of schemas. */
+const SCHEMA_ARRAY_KEYWORDS = new Set(['anyOf', 'oneOf', 'allOf', 'prefixItems']);
+/** Keywords whose value is one schema. */
+const SCHEMA_KEYWORDS = new Set([
+    'items', 'additionalProperties', 'not', 'if', 'then', 'else', 'contains', 'propertyNames', 'unevaluatedProperties', 'unevaluatedItems',
+]);
+/** Keywords the lean form leaves out: the meta-schema id and sample values. */
+const LEAN_DROPPED_KEYWORDS = new Set(['$schema', 'examples']);
+const LEAN_ENUM_CAP = 20;
+const LEAN_DESCRIPTION_CAP = 160;
+const LEAN_UNION_ARMS_CAP = 12;
+
+function isSchemaRecord(value: unknown): value is Record<string, unknown> {
+    return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function escapePointer(segment: string): string {
+    return segment.replace(/~/g, '~0').replace(/\//g, '~1');
+}
+
+/**
+ * The lean form of one schema node: its own scalar keywords as served, its
+ * description cut to one line, an enum cut to {@link LEAN_ENUM_CAP} values
+ * (`enumTotal` then says how many there are), and every sub-schema
+ * (`properties`, `items`, `anyOf`, `$defs`, …) replaced by its
+ * {@link descriptorOf} — never inlined. A projection of the served node, so it
+ * cannot say anything the full schema does not.
+ */
+function leanSchemaOf(node: Record<string, unknown>, pointer: string, level: LeanLevel): Record<string, unknown> {
+    const withDescriptions = level.descriptions;
+    const out: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(node)) {
+        if (LEAN_DROPPED_KEYWORDS.has(key)) continue;
+        const at = `${pointer}/${escapePointer(key)}`;
+        if (SCHEMA_MAP_KEYWORDS.has(key) && isSchemaRecord(value)) {
+            out[key] = Object.fromEntries(Object.entries(value).map(([k, v]) => [k, descriptorOf(v, `${at}/${escapePointer(k)}`, withDescriptions)]));
+        } else if (SCHEMA_ARRAY_KEYWORDS.has(key) && Array.isArray(value)) {
+            // A union that IS the node (no `properties` of its own, as `view`'s
+            // root) lists its alternatives' own top-level keys: they are this
+            // node's keys, not nested ones.
+            const alternatives = level.alternatives && (key === 'anyOf' || key === 'oneOf') && node.properties === undefined;
+            out[key] = value.map((v, i) => alternatives && isSchemaRecord(v) && typeof v.$ref !== 'string'
+                ? { ...leanSchemaOf(v, `${at}/${i}`, level), drill: `${at}/${i}` }
+                : descriptorOf(v, `${at}/${i}`, withDescriptions));
+        } else if (SCHEMA_KEYWORDS.has(key) && isSchemaRecord(value)) {
+            out[key] = descriptorOf(value, at, withDescriptions);
+        } else if (key === 'description') {
+            if (withDescriptions && typeof value === 'string') out.description = oneLine(value);
+        } else if (key === 'enum' && Array.isArray(value)) {
+            Object.assign(out, cappedEnum(value));
+        } else if (isPlainValue(value)) {
+            out[key] = value;
+        }
+    }
+    return out;
+}
+
+/**
+ * One sub-schema as the lean form names it: its `type` (a union summarised
+ * as `a | b`, an array of scalars as `string[]`), `const`, a capped `enum`, a
+ * one-line `description`, its `$ref`, and `drill`, the JSON Pointer to send as
+ * `contractPath` to read it whole, wherever it has structure of its own.
+ */
+function descriptorOf(node: unknown, pointer: string, withDescriptions: boolean): Record<string, unknown> {
+    if (!isSchemaRecord(node)) return { type: node === false ? 'never' : 'any' };
+    const out: Record<string, unknown> = {};
+    const type = typeSummaryOf(node);
+    if (type !== undefined) out.type = type;
+    if (node.const !== undefined && isPlainValue(node.const)) out.const = node.const;
+    const values = Array.isArray(node.enum) ? node.enum
+        : isSchemaRecord(node.items) && Array.isArray(node.items.enum) ? node.items.enum : undefined;
+    if (values) Object.assign(out, cappedEnum(values));
+    if (withDescriptions && typeof node.description === 'string') out.description = oneLine(node.description);
+    const ref = typeof node.$ref === 'string' ? node.$ref : undefined;
+    if (ref !== undefined) out.$ref = ref;
+    if (!isLeafSchema(node)) out.drill = ref?.startsWith('#/') ? ref.slice(1) : pointer;
+    return out;
+}
+
+/** A schema with no structure a client would drill into: no sub-schema beyond scalar items or scalar union arms. */
+function isLeafSchema(node: unknown): boolean {
+    if (!isSchemaRecord(node)) return true;
+    if (typeof node.$ref === 'string') return false;
+    for (const key of [...SCHEMA_MAP_KEYWORDS, ...SCHEMA_ARRAY_KEYWORDS, ...SCHEMA_KEYWORDS]) {
+        const value = node[key];
+        if (value === undefined || typeof value === 'boolean') continue;
+        if (key === 'items' && isLeafSchema(value)) continue;
+        if ((key === 'anyOf' || key === 'oneOf') && Array.isArray(value) && value.every(isLeafSchema)) continue;
+        return false;
+    }
+    return true;
+}
+
+function typeSummaryOf(node: Record<string, unknown>): string | undefined {
+    if (node.type !== undefined) {
+        const type = Array.isArray(node.type) ? node.type.join(' | ') : String(node.type);
+        if (type === 'array' && isSchemaRecord(node.items)) {
+            const inner = typeSummaryOf(node.items);
+            if (inner !== undefined) return inner.includes(' | ') ? `(${inner})[]` : `${inner}[]`;
+        }
+        return type;
+    }
+    const arms = Array.isArray(node.anyOf) ? node.anyOf : Array.isArray(node.oneOf) ? node.oneOf : undefined;
+    if (!arms) return undefined;
+    const names = [...new Set(arms.map((arm) => {
+        if (!isSchemaRecord(arm)) return 'any';
+        if (arm.const !== undefined && isPlainValue(arm.const)) return JSON.stringify(arm.const);
+        return typeSummaryOf(arm) ?? (typeof arm.$ref === 'string' ? arm.$ref : 'any');
+    }))];
+    return names.length > LEAN_UNION_ARMS_CAP
+        ? `${names.slice(0, LEAN_UNION_ARMS_CAP).join(' | ')} | …`
+        : names.join(' | ');
+}
+
+function cappedEnum(values: readonly unknown[]): { enum: unknown[]; enumTotal?: number } {
+    return values.length > LEAN_ENUM_CAP
+        ? { enum: values.slice(0, LEAN_ENUM_CAP), enumTotal: values.length }
+        : { enum: [...values] };
+}
+
+function oneLine(text: string): string {
+    const line = text.split('\n').find((l) => l.trim().length > 0)?.trim().replace(/\s+/g, ' ') ?? '';
+    return line.length > LEAN_DESCRIPTION_CAP ? `${line.slice(0, LEAN_DESCRIPTION_CAP - 1)}…` : line;
+}
+
+/** A scalar, or an array of scalars (`required`, a `type` list, a scalar `default`). */
+function isPlainValue(value: unknown): boolean {
+    if (value === null || ['string', 'number', 'boolean'].includes(typeof value)) return true;
+    return Array.isArray(value) && value.every((v) => v === null || ['string', 'number', 'boolean'].includes(typeof v));
+}
+
+/**
+ * Resolve a JSON Pointer (RFC 6901) into a served schema, tracking what each
+ * step lands on: a schema, a name → schema map, an array of schemas, or a
+ * plain value. Own keys only, so `__proto__` resolves nowhere. A miss names
+ * the deepest pointer that resolved and the keys there.
+ */
+function resolveContractPath(
+    root: Record<string, unknown>,
+    path: string,
+): { node: unknown; kind: 'schema' | 'map' | 'array' | 'value' } | { unresolved: string } {
+    if (path === '') return { node: root, kind: 'schema' };
+    let node: unknown = root;
+    let kind = 'schema' as 'schema' | 'map' | 'array' | 'value';
+    let at = '';
+    for (const raw of path.slice(1).split('/')) {
+        const segment = raw.replace(/~1/g, '/').replace(/~0/g, '~');
+        let next: unknown;
+        if (Array.isArray(node)) {
+            if (!/^(0|[1-9][0-9]*)$/.test(segment) || Number(segment) >= node.length) {
+                return { unresolved: `'${at || '/'}' is an array of ${node.length}; '${raw}' is not an index in it.` };
+            }
+            next = node[Number(segment)];
+        } else if (isSchemaRecord(node) && Object.prototype.hasOwnProperty.call(node, segment)) {
+            next = node[segment];
+        } else {
+            const keys = isSchemaRecord(node) ? Object.keys(node) : [];
+            const named = keys.length > 60 ? `${keys.slice(0, 60).join(', ')}, …` : keys.join(', ');
+            const topLevel = at !== '/properties' && isSchemaRecord(root.properties)
+                ? ` The type's top-level keys, each drilled as '/properties/' followed by its name: ${Object.keys(root.properties).join(', ')}.`
+                : '';
+            return { unresolved: `'${at || '/'}' has no '${segment}'. ${keys.length ? `The keys there: ${named}.` : 'Nothing is under it.'}${topLevel}` };
+        }
+        kind = kind === 'map' || kind === 'array' ? 'schema'
+            : kind === 'value' ? 'value'
+                : SCHEMA_MAP_KEYWORDS.has(segment) ? 'map'
+                    : SCHEMA_ARRAY_KEYWORDS.has(segment) ? 'array'
+                        : SCHEMA_KEYWORDS.has(segment) ? 'schema' : 'value';
+        node = next;
+        at += `/${raw}`;
+    }
+    return { node, kind };
+}
+
 /** A judgement as the replies carry it: `publishable` is "no refusal". */
 function verdictOf(judgement: OpenAuthoringDraftJudgement): {
     publishable: boolean;
@@ -911,13 +1284,13 @@ function verdictOf(judgement: OpenAuthoringDraftJudgement): {
 
 /**
  * Where a person reviews the draft, as Console routes: the package's Changes
- * drawer (`?changes=review` on its Interfaces pillar, `studioChangesLink.ts`)
+ * drawer (`?changes=review` on its Studio home, the Data pillar, `studioChangesLink.ts`)
  * and the item's draft review on Studio's metadata area (`?review=1`).
  */
 function reviewRoutes(packageId: string, type: string, name: string): { changes: string; item: string; note: string } {
     const pkg = encodeURIComponent(packageId);
     return {
-        changes: `/studio/${pkg}/interfaces?changes=review`,
+        changes: `/studio/${pkg}/data?changes=review`,
         item: `/studio/${pkg}/metadata/${encodeURIComponent(type)}/${encodeURIComponent(name)}?review=1`,
         note: 'Console routes. A person reviews and publishes the draft there; this server cannot publish.',
     };

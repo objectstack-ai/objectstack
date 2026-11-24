@@ -35,6 +35,7 @@ import {
   ArrowDown,
   SlidersHorizontal,
   X,
+  Plus,
 } from 'lucide-react';
 import type { DataSource, LookupColumnDef } from '@object-ui/types';
 // The repo's single filter sink (`packages/core/src/utils/filter-converter.ts`)
@@ -49,6 +50,7 @@ import { useRecordQuery } from './useRecordQuery.js';
 import { isRecordReference, type LookupFilterEntry } from './lookupRecordReference.js';
 import { objectResolvesSearch } from './searchOffer.js';
 import { PHONE_TOUCH_HEIGHT } from './touchTarget.js';
+import { isImeKey } from './imeKey.js';
 // The one place a lookup column's display value is decided — shared with the
 // inline dropdown in LookupField so a single `lookupColumns` declaration
 // cannot render two different ways (objectui#5492).
@@ -526,6 +528,14 @@ export interface RecordPickerDialogProps {
    * )}
    */
   renderGrid?: (props: RecordPickerGridSlotProps) => React.ReactNode;
+
+  /**
+   * A first row above the records that creates one instead of picking one
+   * (objectstack#35601: a record page's related tab offers its 「新建」 here,
+   * so 「+ 添加」 is one entry). Choosing it is the host's to handle; the
+   * dialog only draws the row. Absent, nothing is drawn.
+   */
+  createRow?: { label: string; onSelect: () => void };
 }
 
 /**
@@ -577,6 +587,7 @@ export function RecordPickerDialog({
   filterColumns,
   renderFilterBar,
   renderGrid,
+  createRow,
 }: RecordPickerDialogProps) {
   // The column the record title stands in for. The `'name'` default only keys
   // that column; `declaredDisplayField` is what the title resolver ranks.
@@ -964,7 +975,9 @@ export function RecordPickerDialog({
   // Page jump handler
   const handlePageJump = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
-      if (e.key !== 'Enter') return;
+      // objectstack#35996 — an Enter that picks an input-method candidate
+      // neither jumps nor clears the box under the composition.
+      if (e.key !== 'Enter' || isImeKey(e)) return;
       const page = parseInt(pageJumpValue, 10);
       if (!isNaN(page) && page >= 1 && page <= totalPages) {
         setCurrentPage(page);
@@ -1346,6 +1359,21 @@ export function RecordPickerDialog({
           </div>
         )}
 
+        {createRow && (
+          <button
+            type="button"
+            className={cn(
+              'flex w-full items-center gap-2 rounded-md border border-dashed px-3 py-2 text-left text-sm text-primary hover:bg-muted/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+              PHONE_TOUCH_HEIGHT,
+            )}
+            onClick={createRow.onSelect}
+            data-testid="record-picker-create-row"
+          >
+            <Plus className="size-4 shrink-0" aria-hidden="true" />
+            {createRow.label}
+          </button>
+        )}
+
         {/* Grid area — external ObjectGrid via renderGrid slot, or built-in table */}
         {renderGrid ? (
           /* External grid component (e.g. ObjectGrid from plugin-grid) */
@@ -1462,7 +1490,7 @@ export function RecordPickerDialog({
                             <TableHead
                               key={col.field}
                               style={styleWidth}
-                              className="cursor-pointer select-none relative group text-xs font-semibold uppercase tracking-wider"
+                              className="cursor-pointer select-none relative group text-xs font-medium uppercase tracking-wider"
                               onClick={() => handleSort(col.field)}
                               aria-sort={sortField === col.field ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}
                             >

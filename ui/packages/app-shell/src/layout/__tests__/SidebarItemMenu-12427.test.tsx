@@ -5,15 +5,16 @@
  *
  * The entries derive from the entry's type and target: Add to / Remove from
  * favorites first, then Open in new tab and Copy link for an entry that goes
- * somewhere, then Design for an entry with a designer, shown only to a
- * principal who may author metadata (`isAdmin && canAuthorMetadata`). A
- * right-click on the row opens the same menu.
+ * somewhere, then Object settings for an object entry (objectstack#36487),
+ * shown only to a principal who may author metadata
+ * (`isAdmin && canAuthorMetadata`). A right-click on the row opens the same
+ * menu.
  *
  * Harness: the real component in a real `SidebarMenuItem` row, the real router
  * and the real `resolveHref` of `@object-ui/layout` for the entry's address;
  * the translator returns each call site's inline default, and the two
  * principal answers are stand-ins. The entry's app is owned by a package, so
- * Design has a Studio surface to open (objectui#12520), and the package list
+ * Object settings has a Studio surface to open (objectui#12520), and the package list
  * serves that package writable, so the gate's package half passes
  * (objectui#12615).
  */
@@ -123,8 +124,8 @@ async function openMenu(): Promise<string[]> {
 beforeEach(() => {
   viewer.isAdmin = true;
   viewer.canAuthorMetadata = true;
-  // objectui#12615 — the app's package is served writable, so the Design
-  // gate's package half passes and this file's own questions are the ones asked.
+  // objectui#12615 — the app's package is served writable, so the Object
+  // settings gate's package half passes and this file's own questions are the ones asked.
   vi.stubGlobal(
     'fetch',
     vi.fn(async (url: unknown) => ({
@@ -147,12 +148,12 @@ afterEach(() => {
 });
 
 describe('SidebarItemMenu: the entries an object entry offers (objectui#12427)', () => {
-  it('lists exactly four entries for a principal who may author metadata, Design last', async () => {
+  it('lists exactly four entries for a principal who may author metadata, Object settings last', async () => {
     renderRow();
-    expect(await openMenu()).toEqual(['Add to favorites', 'Open in new tab', 'Copy link', 'Design']);
+    expect(await openMenu()).toEqual(['Add to favorites', 'Open in new tab', 'Copy link', 'Object settings']);
   });
 
-  it('lists exactly three for a non-admin: no Design entry', async () => {
+  it('lists exactly three for a non-admin: no Object settings entry', async () => {
     viewer.isAdmin = false;
     renderRow();
     expect(await openMenu()).toEqual(['Add to favorites', 'Open in new tab', 'Copy link']);
@@ -175,10 +176,10 @@ describe('SidebarItemMenu: the entries an object entry offers (objectui#12427)',
 });
 
 describe('SidebarItemMenu: what each entry does (objectui#12427)', () => {
-  it('Design opens Studio\'s Data surface for the entry\'s object (objectui#12520)', async () => {
+  it('Object settings opens Studio\'s Data surface for the entry\'s object (objectui#12520, objectstack#36487)', async () => {
     renderRow();
     await openMenu();
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Design' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Object settings' }));
     await waitFor(() =>
       expect(screen.getByTestId('where')).toHaveTextContent('/studio/com.acme.crm/data?surface=object:crm_lead'),
     );
@@ -222,7 +223,7 @@ describe('SidebarItemMenu: what each entry does (objectui#12427)', () => {
 });
 
 describe('SidebarItemMenu: entries an entry type does not offer (objectui#12427)', () => {
-  it('a url entry shows no Design entry, even to an admin who may author metadata', async () => {
+  it('a url entry shows no Object settings entry, even to an admin who may author metadata', async () => {
     renderRow({ item: HELP });
     expect(await openMenu()).toEqual(['Add to favorites', 'Open in new tab', 'Copy link']);
   });
@@ -241,23 +242,25 @@ describe('SidebarItemMenu: right-click (objectui#12427)', () => {
     const notPrevented = fireEvent.contextMenu(screen.getByTestId('row-link'));
     expect(notPrevented).toBe(false);
     const items = await screen.findAllByRole('menuitem');
-    expect(items.map((el) => el.textContent)).toEqual(['Add to favorites', 'Open in new tab', 'Copy link', 'Design']);
+    expect(items.map((el) => el.textContent)).toEqual(['Add to favorites', 'Open in new tab', 'Copy link', 'Object settings']);
   });
 });
 
-describe('sidebarItemDesignPath: the Studio surface per entry type (objectui#12427, objectui#12520)', () => {
-  it('a page entry opens its Interfaces surface, as the app bar does on the page', () => {
-    const page = { id: 'p', type: 'page', pageName: 'home_page', label: 'Home' } as NavigationItem;
-    expect(sidebarItemDesignPath(page, APP)).toBe('/studio/com.acme.crm/interfaces?surface=page:home_page');
-  });
-
-  it('an object entry opens the Data surface, a dashboard entry the Interfaces surface', () => {
+describe('sidebarItemDesignPath: only an object entry has a Studio entry (objectui#12520, objectstack#36487)', () => {
+  it('an object entry opens its object in the Data surface', () => {
     expect(sidebarItemDesignPath(LEADS, APP)).toBe('/studio/com.acme.crm/data?surface=object:crm_lead');
-    const dash = { id: 'd', type: 'dashboard', dashboardName: 'sales', label: 'Sales' } as NavigationItem;
-    expect(sidebarItemDesignPath(dash, APP)).toBe('/studio/com.acme.crm/interfaces?surface=dashboard:sales');
   });
 
-  it('url, component and separator entries have no designer', () => {
+  it('a dashboard, page or report entry has none: each is edited on its own page', () => {
+    const page = { id: 'p', type: 'page', pageName: 'home_page', label: 'Home' } as NavigationItem;
+    const dash = { id: 'd', type: 'dashboard', dashboardName: 'sales', label: 'Sales' } as NavigationItem;
+    const report = { id: 'r', type: 'report', reportName: 'pipeline', label: 'Pipeline' } as NavigationItem;
+    expect(sidebarItemDesignPath(page, APP)).toBeNull();
+    expect(sidebarItemDesignPath(dash, APP)).toBeNull();
+    expect(sidebarItemDesignPath(report, APP)).toBeNull();
+  });
+
+  it('url, component and separator entries have none', () => {
     const component = { id: 'c', type: 'component', componentRef: 'x:y', label: 'C' } as NavigationItem;
     const separator = { id: 's', type: 'separator' } as NavigationItem;
     expect(sidebarItemDesignPath(HELP, APP)).toBeNull();

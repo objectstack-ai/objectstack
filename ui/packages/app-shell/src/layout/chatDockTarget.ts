@@ -69,6 +69,18 @@ export interface ChatDockHandoff {
 /** How the drawer presents its body: the side rail, the full window, or the phone sheet. */
 export type ChatDockPresentation = 'rail' | 'full' | 'sheet';
 
+/** objectstack#35445 — what the drawer's 「···」 menu offers for the thread in view. */
+export interface ChatDockConversationActions {
+  /** The thread Share and the Build Doctor act on; absent until the first send creates it. */
+  conversationId?: string;
+  /**
+   * Whether the Build Doctor is offered: the agent in use serves it and this
+   * user may build (`useCanAuthorMetadata`, the reading that decides who gets
+   * the build composer).
+   */
+  showDebug: boolean;
+}
+
 /** Reads a handoff from `location.state`; anything that is not a non-empty string is absent. */
 export function readBuilderHandoffState(state: unknown): BuilderHandoffState {
   if (!state || typeof state !== 'object') return {};

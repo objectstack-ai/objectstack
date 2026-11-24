@@ -19,10 +19,7 @@
   "dependencies": {
     "@objectstack/spec": "18.6.0",
     "@objectstack/runtime": "18.6.0",
-    "@objectstack/plugin-hono-server": "18.6.0",
-    "@objectstack/connector-rest": "18.6.0",
-    "@objectstack/connector-openapi": "18.6.0",
-    "@objectstack/connector-mcp": "18.6.0"
+    "@objectstack/plugin-hono-server": "18.6.0"
   },
   "devDependencies": {
     "@objectstack/cli": "18.6.0",

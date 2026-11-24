@@ -284,7 +284,7 @@ describe('aggregate_records — ordered, cut and counted groups', () => {
     const bridge = makeBridge() as RecordingBridge;
     bridge.aggregateGroups = async () => ({ rows: [{ customer: 'a', revenue: 1 }], totalGroups: 1 });
     const { body } = await call(bridge, { orderBy: [{ field: 'revenue', order: 'desc' }], limit: 5 });
-    expect(body).toEqual({ rows: [{ customer: 'a', revenue: 1 }], totalGroups: 1 });
+    expect(body).toEqual({ rows: [{ customer: 'a', revenue: 1 }], totalGroups: 1, source: expect.any(Object) });
   });
 
   it('the engine\'s refusal of an order key (INVALID_SORT, naming the columns) reaches the caller as its envelope', async () => {
@@ -322,7 +322,7 @@ describe('aggregate_records — ordered, cut and counted groups', () => {
   it('CONTROL — no order and no limit: the uncut path as before, totalGroups and no second spelling of it', async () => {
     const bridge = makeCutBridge();
     const { body } = await call(bridge, {});
-    expect(body).toEqual({ rows: [{ n: 2, all: 5 }], totalGroups: 1 });
+    expect(body).toEqual({ rows: [{ n: 2, all: 5 }], totalGroups: 1, source: expect.any(Object) });
     expect(bridge.cuts).toEqual([]);
     expect(bridge.calls).toHaveLength(1);
   });
@@ -482,15 +482,16 @@ describe('aggregate_records — select groups in declared option order, a fixed 
     throwing.servedObjectDefinitionOf = async () => { throw new Error('metadata outage'); };
     for (const bridge of [bare, throwing]) {
       const out = await answer(bridge, args);
-      expect(out).toEqual({ rows: driverOrder, totalGroups: 2 });
+      expect(out).toEqual({ rows: driverOrder, totalGroups: 2, source: expect.any(Object) });
     }
   });
 
-  it('a call with no group key and no amount column does not read the served schema', async () => {
+  it('a call with no group key and no amount column reads no fact off the served schema; it is read once, for the source line', async () => {
     const bridge = servedBridge([{ n: 3 }]);
     const out = await answer(bridge, { aggregations: [{ function: 'count', alias: 'n' }] });
-    expect(out).toEqual({ rows: [{ n: 3 }], totalGroups: 1 });
-    expect(bridge.schemaReads).toBe(0);
+    expect(out).toEqual({ rows: [{ n: 3 }], totalGroups: 1, source: expect.any(Object) });
+    // [#35138] One read, for the labels the source line names fields by.
+    expect(bridge.schemaReads).toBe(1);
   });
 });
 
@@ -611,7 +612,7 @@ describe('aggregate_records — the declared option order on the order-and-cut p
     delete bare.servedObjectDefinitionOf;
     const out = await answer(bare, { groupBy: ['stage'], limit: 5 });
     expect(bare.cuts[0][1].orderBy).toEqual([]);
-    expect(out).toEqual({ rows: DRIVER_ORDER, totalGroups: 5 });
+    expect(out).toEqual({ rows: DRIVER_ORDER, totalGroups: 5, source: expect.any(Object) });
   });
 });
 
@@ -737,13 +738,13 @@ describe('aggregate_records — a lookup group names its record beside the id, r
     for (const defs of cases) {
       const bridge = lookupBridge(rows, { defs });
       const out = await answer(bridge, args);
-      expect(out).toEqual({ rows, totalGroups: 2 });
+      expect(out).toEqual({ rows, totalGroups: 2, source: expect.any(Object) });
       expect(bridge.reads).toEqual([]);
     }
     // A referenced `sys_*` object this tool does not read is never read for a name.
     const system = lookupBridge(rows, { defs: { deal: DEAL, sys_partner: ACCOUNT } });
     const out = await answer(system, { aggregations: COUNT, groupBy: ['partner'] });
-    expect(out).toEqual({ rows, totalGroups: 2 });
+    expect(out).toEqual({ rows, totalGroups: 2, source: expect.any(Object) });
     expect(system.reads).toEqual([]);
   });
 
@@ -755,7 +756,7 @@ describe('aggregate_records — a lookup group names its record beside the id, r
     shapeless.query = async () => [{ id: 'a1', title: 'Acme' }];
     for (const bridge of [throwing, shapeless]) {
       const out = await answer(bridge, { aggregations: COUNT, groupBy: ['account'] });
-      expect(out).toEqual({ rows, totalGroups: 1 });
+      expect(out).toEqual({ rows, totalGroups: 1, source: expect.any(Object) });
     }
   });
 
@@ -789,6 +790,7 @@ describe('aggregate_records — a lookup group names its record beside the id, r
       rows: [{ account: 'a2', account__label: 'Globex', n: 9 }, { account: 'a1', account__label: 'Acme', n: 5 }],
       totalGroups: 3,
       truncated: true,
+      source: expect.any(Object),
     });
     // One read of the referenced object, for the served groups only: never the probe row past the cut.
     expect(bridge.reads).toHaveLength(1);
@@ -826,6 +828,7 @@ describe('aggregate_records — a lookup group names its record beside the id, r
       expect(JSON.parse(res.content[0]!.text)).toEqual({
         rows: [{ account: 'a1', account__label: 'Acme', n: 2 }, { account: 'a4', n: 1 }],
         totalGroups: 2,
+        source: expect.any(Object),
       });
       expect(engine.find).toHaveBeenCalledTimes(1);
       const [object, query, opts] = engine.find.mock.calls[0] as unknown as [string, any, unknown];

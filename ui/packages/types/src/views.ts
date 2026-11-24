@@ -358,7 +358,14 @@ export interface DetailViewSection {
     | 'destructive/10';
   /**
    * Hide this section's empty fields, and — when EVERY field is empty — hide
-   * the whole section: no heading, no skeleton.
+   * the whole section: no heading, no skeleton, for as long as the reader
+   * hides empty fields (objectstack#36593). Once the reader shows them, the
+   * section draws like a kept one (below): on the record page's field list,
+   * whose one "Show N empty fields" row also counts its fields, and wherever
+   * the reader's remembered per-object choice reaches `DetailSection` (it is
+   * handed the object name), on a `record:details` and a `detail-view`
+   * section alike. With no remembered choice, outside the field list, it
+   * stays hidden. A print page keeps it hidden.
    *
    * Set `false` to keep an all-empty section, the spelling a brand-new record
    * needs so its authored sections do not vanish. A kept all-empty section
@@ -376,13 +383,15 @@ export interface DetailViewSection {
    *
    * - **`record:details`** (`RecordDetailsRenderer`) maps every authored
    *   section with `hideEmpty ?? true`, so an omitted key behaves as `true`
-   *   and an all-empty section renders nothing. That is the default the spec's
+   *   and an all-empty section renders nothing while the reader hides empty
+   *   fields (as above). That is the default the spec's
    *   own `describe()` states, and this renderer is the one the key is
    *   declared on.
    * - **`detail-view`** (`DetailViewRenderer`, whose registration takes a
    *   `sections` input) hands each section to `DetailSection` unchanged. No
    *   default is applied there, so an omitted key keeps the all-empty section
-   *   (folded, as above). Only an explicit `true` hides it.
+   *   (folded, as above). Only an explicit `true` hides it, and only while
+   *   the reader hides empty fields (as above).
    *
    * Measured at objectui#8603, non-vacuously — a sibling control section that
    * must render was present in every case, and it rendered in all six:
@@ -579,6 +588,28 @@ export interface FeedItem {
    * `Reaction.reacted`.
    */
   authoredByViewer?: boolean;
+  /**
+   * Whether this top-level comment's thread is resolved (objectstack#36071,
+   * #36075): the row's `is_resolved`. `undefined` where the deployment stores
+   * no resolution (the row carries no `is_resolved`), so a surface offers no
+   * resolve control there. Meaningless on a reply.
+   */
+  resolved?: boolean;
+  /** Who resolved the thread: the row's `resolved_by` user id. */
+  resolvedById?: string;
+  /**
+   * The resolver's display name, where the host knows it (the viewer, or an
+   * author in the same discussion); a surface may look it up elsewhere.
+   */
+  resolvedByName?: string;
+  /** When the thread was resolved (ISO 8601): the row's `resolved_at`. */
+  resolvedAt?: string;
+  /**
+   * Whether the item's stored `mentions` name the signed-in viewer. Set by the
+   * host, relative to the viewer like `authoredByViewer`; the comment panel's
+   * 「只看我参与的」 reads it (objectstack#36075).
+   */
+  mentionsViewer?: boolean;
   /**
    * Source rich-entity pointer (ADR-0052 ActivityPointer). When the activity
    * was derived from a separate record — an email in `sys_email`, a call/meeting

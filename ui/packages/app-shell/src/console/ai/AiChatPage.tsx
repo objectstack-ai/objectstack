@@ -1791,6 +1791,13 @@ interface ChatPaneProps {
    * @default false
    */
   hideHeader?: boolean;
+  /**
+   * objectstack#35445 — the host offers Share and the Build Doctor in its own
+   * title bar (the console drawer's 「···」 menu), so the pane's header row
+   * draws neither. The rest of the row (the agent switcher, the app chip) stays.
+   * @default false
+   */
+  actionsInHost?: boolean;
 }
 
 export function ChatPane({
@@ -1821,6 +1828,7 @@ export function ChatPane({
   onDebug,
   showDebug,
   hideHeader = false,
+  actionsInHost = false,
 }: ChatPaneProps) {
   const { t, language } = useObjectTranslation();
   const navigate = useNavigate();
@@ -2783,7 +2791,7 @@ export function ChatPane({
                       {localizeAgentLabel(t, agent.name, agent.label)}
                     </span>
                     {agent.description ? (
-                      <span className="block text-muted-foreground text-[10px] truncate max-w-[260px]">
+                      <span className="block text-muted-foreground text-xs truncate max-w-[260px]">
                         {agent.description}
                       </span>
                     ) : null}
@@ -2860,6 +2868,7 @@ export function ChatPane({
           </DropdownMenu>
         ) : null}
       </div>
+      {actionsInHost ? null : (
       <div className="flex shrink-0 items-center gap-1">
         {showDebug && onDebug ? (
           <Button
@@ -2888,9 +2897,10 @@ export function ChatPane({
           <Share2 className="h-3.5 w-3.5" />
         </Button>
       </div>
+      )}
       {agentsError ? (
         <span
-          className="basis-full text-[10px] text-amber-700 dark:text-amber-400"
+          className="basis-full text-xs text-amber-700 dark:text-amber-400"
           title={agentsError.message}
         >
           {t('console.ai.offlineDemoMode')}
@@ -3129,16 +3139,18 @@ export function ChatPane({
         // The secondary door (在 Studio 中查看): Studio is the built app's
         // iteration home (direct edit + the same copilot conversation in the
         // dock, which the build's binding resumes). The package id is the
-        // canvas segment (one package = one app).
+        // canvas segment (one package = one app). objectstack#36502 — it opens
+        // the package's Studio home; the app's interfaces are designed in the
+        // running app, which the primary door opens.
         onDesignBuiltApp={(_appName, appSegment) => {
           const pkg = appSegment ?? boundPackageId;
           if (!pkg) return;
-          navigate(`/studio/${encodeURIComponent(pkg)}/interfaces`);
+          navigate(`/studio/${encodeURIComponent(pkg)}/data`);
         }}
         designBuiltAppLabel={t('console.ai.viewBuiltAppInStudio', { defaultValue: 'View in Studio' })}
         // Artifact deep links: every artifact the agent built gets a one-click
         // path to where it can be edited BY HAND (object → Data, flow →
-        // Automations, dashboard/page/view/app → Interfaces). Returns null for
+        // Automations, dashboard/page/view/app → its All metadata item page). Returns null for
         // types with no direct-edit home (seed/dataset) → rendered as text.
         getArtifactAction={(artifact, appSegment) => {
           const path = artifactStudioPath(appSegment ?? boundPackageId, artifact);

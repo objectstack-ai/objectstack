@@ -193,11 +193,12 @@
  * `/contents/**` and `/git/**`; `REFUSED_PATH_FAMILIES` refuses both for every
  * row, the one mailbox ref DELETE aside (above). The workflow-run dispatch (`workflow_dispatch`) and the failed-jobs
  * re-run (`run_rerun_failed`), both below, are `actions: write`, the two rows
- * spending it; the five advisory rows that write (`advisory_report`,
- * `advisory_create`, `advisory_collaborators_add`, `advisory_versions` and
- * `advisory_state`, below) are `repository-advisories: write`, and the two
- * that read (`advisory_read` and `advisory_list`, below) spend the same grant
- * at `read` alone (each row's `grant`), the seven rows spending it; the
+ * spending it; the seven advisory rows that write (`advisory_report`,
+ * `advisory_create`, `advisory_collaborators_add`, `advisory_versions`,
+ * `advisory_state`, `advisory_note` and `advisory_rewrite`, below) are
+ * `repository-advisories: write`, and the two that read (`advisory_read` and
+ * `advisory_list`, below) spend the same grant at `read` alone (each row's
+ * `grant`), the nine rows spending it; the
  * front-of-queue enqueue (`pr_enqueue_front`, below) and the dequeue
  * (`pr_dequeue`, below) are `merge-queues: write`, the two rows spending it —
  * GitHub's GraphQL mutations are outside that ledger,
@@ -641,16 +642,28 @@
  * `published` is reached by ONE row and ONE transition: `advisory_state`, from
  * `draft` alone, and only once the executor's own GET reads at least one
  * `vulnerabilities` entry, every one in the versions row's spelling (the
- * `versions` fence, `ADVISORY_FENCES`) — the versions are set first. No other
+ * `versions` fence, `ADVISORY_FENCES`) — the versions are set first — and a
+ * description that is text or none and carries no seat signature line (the
+ * `notes` fence, `advisoryNoteSectionCount`: every `advisory_note` section
+ * opens with one, and none belongs in public text, so a section whose stamp
+ * or body was edited away is still seen). A publish makes the whole
+ * description public, so the working text is replaced first
+ * (`advisory_rewrite`); the refusal names the count and no byte of the text.
+ * The fence proves the description holds no seat note, not that a rewrite
+ * happened. Its window is the row's one read: a note landing between that GET
+ * and the PATCH is published, because `advisoryStateReadBack` judges the state
+ * and the versions, never the description. No other
  * field takes it as a value, and no body but the executor's `{ state }` can
  * carry it: the report's and the draft's bodies are the row's, holding no state
  * (the endpoint creates a draft and takes none), the versions row's is its
  * entries alone, and the other two PATCH bodies are the executor's
- * (`validate.mjs --self-test` pins every one). Editing an advisory's summary or
- * the text of its description, removing a collaborator, the CVE request and the
- * temporary fork are out of reach of every row; APPENDING a note to its
- * description is one row's alone, sealed inbound (`advisory_note`, the last of
- * these sections); reading an advisory's text is one row's alone,
+ * (`validate.mjs --self-test` pins every one). Editing a PUBLISHED or withdrawn
+ * advisory's text, removing a collaborator, the CVE request and the temporary
+ * fork are out of reach of every row; APPENDING a note to an unpublished
+ * advisory's description is one row's alone, sealed inbound (`advisory_note`),
+ * and REPLACING an unpublished advisory's summary and/or description is one
+ * row's alone, sealed the same way (`advisory_rewrite`, the last of these
+ * sections); reading an advisory's text is one row's alone,
  * which seals it (`advisory_read`, the next section); and listing advisories is
  * one row's alone too, narrowed to three states and five fields per advisory
  * and sealed the same way (`advisory_list`, the section after it):
@@ -727,7 +740,7 @@
  *     transition with nothing sent (`ADVISORY_TRANSITIONS`: `draft` from
  *     `triage` — the accept — or from `closed` — the reopen; `closed` from
  *     `triage` or `draft`; `published` from `draft` alone, through the
- *     `versions` fence; nothing from `published` or `withdrawn`, and a state
+ *     `versions` and `notes` fences; nothing from `published` or `withdrawn`, and a state
  *     the table does not name fails closed). Its PATCH body is `{ state }` and
  *     nothing else, and it LANDS only when the answer shows that state
  *     (`advisoryStateReadBack`) — a publish only when the published answer
@@ -865,7 +878,7 @@
  * 31368 records them: 「你应该能自主读到所有的安全问题才是合理的」.
  *
  *   row             request                                                                    the payload carries
- *   `advisory_list` `GET …/security-advisories?state=S&per_page=100[&after=C]`, and nothing else  `public_key` alone
+ *   `advisory_list` `GET …/security-advisories?state=S&per_page=100[&after=C]`, and at most one `GET /repos/{repo}`  `public_key` alone
  *
  * The caller names NO state and NO query parameter: the row lists every state
  * in `ADVISORY_LIST_STATES` (`triage`, `draft` and `closed`, every unpublished
@@ -883,7 +896,23 @@
  * origin and path are the relay's own API and this collection, its `state` the
  * walk's own, and the cursor one value in `ADVISORY_LIST_CURSOR_SHAPE`
  * (`advisoryListNextCursor`); the next path is the relay's own spelling with
- * that cursor, never the link. A link that is none of these, a page that is not
+ * that cursor, never the link. The collection is this one under either
+ * spelling: `/repos/{repo}/security-advisories`, or the numeric
+ * `/repositories/{id}/security-advisories` GitHub's `Link` headers use for a
+ * request made on the named path (its pagination guide's example; this
+ * repository's own pull-files links, `scripts/pm/check-governed-merges.mjs`)
+ * — the numeric one only when `{id}` equals the repository's own id, which the
+ * walk reads ONCE, with one `GET /repos/{repo}`, the first time a link names
+ * one (`advisoryListRepoIdOf`: 200, its own full name, a positive integer),
+ * ⛔ never an id taken from the link; a read that fails is a FAILED action
+ * naming its status alone (`advisoryListRepoIdUnreadText`). Other query
+ * parameters of the link (`per_page`, a `page` beside the cursor) are never
+ * read. A refused link prints its SHAPE beside the fixed sentence
+ * (`advisoryListLinkShape`): the next-link count, the origin as the relay's or
+ * another, the path with the owner, the name and every id replaced by a
+ * placeholder, the query parameter NAMES, and whether `state` and `after`
+ * stand as the walk needs — ⛔ never a host, id, state, cursor or any other
+ * value, so the next mismatch reads from the job log. A link that is none of these, a page that is not
  * a list of advisories in the state asked for, an advisory whose `severity` is
  * not one of `ADVISORY_LIST_SEVERITIES` or null or whose `created_at` or
  * `updated_at` is neither null nor an ISO-8601 string
@@ -919,9 +948,10 @@
  * no byte read-back for it: opening the parts IS its read-back.
  *
  * ⛔ What crosses the public run: that the listing landed or failed, the HTTP
- * status, `advisoryListCall` (the call, its states in braces) and the padded
- * ciphertext. NEVER an id, a count, a state, a severity, a cursor, a page
- * number, or a byte or part count of the listing.
+ * status, `advisoryListCall` (the call, its states in braces), the padded
+ * ciphertext and, on a refused next link, that link's shape. NEVER an id, a
+ * count, a state, a severity, a cursor, a page number, or a byte or part count
+ * of the listing.
  *
  * The grant and the gate are `advisory_read`'s. Its `grant` is `read` on the
  * stroke-scoped `repository-advisories`, so the validator writes
@@ -929,8 +959,8 @@
  * workflow's existing input; it travels `alone`; and its `senderGate` is
  * `target-write` from `ADVISORY_READ_SENDER_GATES`: write, maintain or admin on
  * the target, which every stroke passes before its first request. A row naming
- * any other gate is refused before the first GET. The first live run measures
- * what the read grant lists and the form of the `Link` cursor. A refusal there
+ * any other gate is refused before the first GET. The repository read rides
+ * the stroke's literal `metadata: read`. A refusal there
  * is a FAILED action carrying `ADVISORY_LIST_ACCESS_REMEDY`, ⛔ never a retry
  * under a wider token.
  *
@@ -999,6 +1029,69 @@
  *
  * The grant and the gate are `advisory_state`'s: `repository-advisories: write`, minted for the stroke alone; it
  * travels `alone`; and the stroke's target-write sender gate, write, maintain or admin on the target.
+ *
+ * ## The one row that REPLACES an advisory's text — `advisory_rewrite`, sealed like a note
+ *
+ * Publishing makes an advisory's whole description public, every appended seat note included, so a seat preparing a
+ * publish replaces the working text with the public one first: the summary, the impact, the affected packages and
+ * versions, the fix and the credits. The maintainer's words, verbatim as the body of issue 36662 records them:
+ * 「中继改不了正文，立卡现在派发处理」 and 「先解决这个问题」. A publish is then three strokes, each alone:
+ * `advisory_rewrite`, then `advisory_versions`, then `advisory_state` to `published` — a closed advisory reopened to
+ * `draft` by `advisory_state` before the versions, as before (the rewrite itself takes `closed` too).
+ *
+ *   row                request                                                              the payload carries
+ *   `advisory_rewrite` `GET`, `GET`, then `PATCH …/security-advisories/{id}`, then `GET`      `ghsa_id` and `sealed_note`
+ *
+ * REPLACE, NEVER APPEND. The PATCH sends the fields the rewrite names — `{ summary }`, `{ description }` or both — and
+ * nothing else: the text sent is the text sealed, byte for byte. The field it does not name is left as it is, and the
+ * read-back holds it to that.
+ *
+ * THE NOTE'S SEALING PATH, NOT A SECOND ONE. The field is the note's `sealed_note` (kind `sealed`), so
+ * `ADVISORY_NOTE_OPS` derives this row too; the envelope is `sealAdvisoryNote` / `openAdvisoryNote` to
+ * `ADVISORY_NOTE_RELAY_PUBLIC_KEY`, under the relay's secret `ADVISORY_NOTE_KEY_SECRET`, the seat's one-time digest key
+ * sealed in front; the validator marks the stroke `ADVISORY_NOTE_OUTPUT`=`yes` exactly as a note's, so the workflow
+ * hands the key over for it with no change of its own. What differs is the associated data: `advisorySealAad` binds
+ * the op, under the rewrite's own prefix, so a note never opens as a rewrite and a rewrite never as a note. The seat
+ * (`dispatch.mjs`, `armAdvisoryNotes`) reads the text from the files the actions file names — `summary_file` and/or
+ * `description_file`, keys of that file and never of the payload — each placed outside every git repository by
+ * `advisoryNoteFilePlace` before it is read; it drops a summary's surrounding whitespace and a description's leading
+ * blank lines and trailing whitespace, carries NO signature line or stamp (this is the public text), spells the
+ * fields as `advisoryRewriteText` (a JSON object, the fields in `ADVISORY_REWRITE_FIELDS` order) and judges it with
+ * `advisoryRewriteFailure`: an empty or blank field refused, a summary of more than one line or over the platform's
+ * `ADVISORY_SUMMARY_MAX_CHARS`, a control character, the whole over the note's `MAX_ADVISORY_NOTE_BYTES`.
+ *
+ * The executor (`advisoryRewriteAction`, `execute.mjs`), in the note's order, nothing sent before the PATCH:
+ *
+ *   1. the key, `advisoryNoteKeyFailure`;
+ *   2. the advisory's GET, judged by `ADVISORY_REWRITE_FENCES`: `ADVISORY_NOTE_FENCES` with `from`
+ *      `ADVISORY_REWRITE_STATES` — `triage`, `draft` or `closed`, `published` and `withdrawn` refused — and a summary
+ *      that is text or none;
+ *   3. the open, under the rewrite's associated data;
+ *   4. the text judged again (`advisoryRewriteFailure`), then `::add-mask::` for every line of each field;
+ *   5. the CONCURRENCY read: a second GET immediately before the PATCH, refused unless it passes the fences and its
+ *      summary and description are exactly the first's;
+ *   6. ONE PATCH of the fields sealed;
+ *   7. the READ-BACK (`advisoryRewriteReadBack`): the PATCH's answer, then a GET after it, each holding exactly the
+ *      fields sent and the other one as read — a mismatch FAILED, carrying `ADVISORY_REWRITE_NOT_RESENT`.
+ *
+ * The residual window is the note's: a write or a state move landing between step 5's read and the PATCH is not
+ * seen before the write (about one round trip). The read-back judges the text, not the state, so a publish inside
+ * that window lands the row and prints the state it read; a text write after the PATCH fails the read-back.
+ *
+ * Which states the platform takes the PATCH in is the platform's REST description's answer (read 2026-11-23, operation
+ * `security-advisories/update-repository-advisory`): none is excluded for `summary` or `description` (`maxLength`
+ * 1024 and 65535), and its one documented refusal is a state move, `published` → `draft`. NOT measured against a live
+ * advisory: the first live rewrite after merge, on a draft the security seat chooses, confirms it, and `triage` and
+ * `closed` stay readings until a rewrite lands in each. The fence is narrower than the platform either way.
+ *
+ * ⛔ What crosses the public run is the note's: the id, the state, the statuses, each field's byte counts before and
+ * after, and ONE notice — the note's spelling (`relayAdvisoryNoteAnnotationMessage`, op `advisory_rewrite`) carrying
+ * the sealed text's byte count and its keyed digest, taken over `advisoryRewriteText` of the fields the GET after the
+ * PATCH STORES (`advisoryRewriteStoredDigest`). The seat recomputes both from what it sealed, and a match is its
+ * read-back (`confirmRunAdvisoryNotes`). Never a byte of the summary or the description, the old or the new.
+ *
+ * The grant and the gate are the note's: `repository-advisories: write`, minted for the stroke alone; it travels
+ * `alone`; and the stroke's target-write sender gate.
  *
  * ## The platform's `client_payload` ceilings — pinned, with their source
  *
@@ -1955,6 +2048,32 @@ const fromOf = (c) => (Array.isArray(c.from) ? c.from : c.to ? [] : ADVISORY_OPE
 const setsVersions = (c) => Array.isArray(c.versions);
 const orList = (xs) => (xs.length > 1 ? `${xs.slice(0, -1).join(', ')} or ${xs[xs.length - 1]}` : xs.join(''));
 const publishes = (c) => c.to === ADVISORY_PUBLISHED_STATE;
+
+/** A note section's stamp line — the one spelling the seat's door writes under the signature (`advisoryNoteSection`, `dispatch.mjs`). */
+export const ADVISORY_NOTE_STAMP_SHAPE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
+
+/**
+ * A seat signature line in ANY lane — `LANE#N · ACCOUNT · SESSION`, the lane any word without a space. A superset of
+ * `SEAT_SIGNATURE_LINE` (`check-half-states.mjs`): every line that check accepts, this one does too
+ * (`validate.mjs --self-test` pins it). Looser on purpose: retiring a lane word from that list would let notes already
+ * signed under it pass a fence that read the live list, so lane words are only ever added there, and this shape does
+ * not depend on them. Public text carries no signature line (the rewrite's contract), so the extra reach refuses no
+ * legitimate publish.
+ */
+export const ADVISORY_SEAT_SIGNATURE_SHAPE = /^\S+#[1-9][0-9]* · [A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38} · session_[A-Za-z0-9]{6,}$/u;
+
+/**
+ * How many seat signature lines `description` carries (header: "The rows that write a security advisory", the
+ * `notes` fence): each line, trimmed — so a CRLF line end, a padded line or a tab does not hide one — that is
+ * `ADVISORY_SEAT_SIGNATURE_SHAPE`. Every `advisory_note` section opens with one, and a signature line has no place in
+ * an advisory's public text, so the count is taken on the signature alone: a section whose stamp, blank line or body
+ * was edited away still counts. A count and nothing else: ⛔ never a byte of the text. Pure.
+ */
+export function advisoryNoteSectionCount(description) {
+  if (typeof description !== 'string' || description === '') return 0;
+  return description.split('\n').filter((line) => ADVISORY_SEAT_SIGNATURE_SHAPE.test(line.trim())).length;
+}
+
 export const ADVISORY_FENCES = Object.freeze([
   Object.freeze({
     fence: 'read',
@@ -2006,6 +2125,21 @@ export const ADVISORY_FENCES = Object.freeze([
       if (listed.total === 0) return 'the advisory lists no vulnerabilities entry';
       const unspelled = listed.foreign + listed.entries.filter((v) => advisoryVersionEntryFailure(v) !== null).length;
       return unspelled ? `${unspelled} of the advisory's ${entriesText(listed.total)} carry no npm package, version range or patched versions in the versions row's spelling` : null;
+    },
+  }),
+  // The notes (header): judged for a publish alone, on the executor's own GET just before its PATCH. A publish makes
+  // the whole description public, so it is refused while a seat note's signature line is still in it — the rewrite replaces
+  // the working text first. A count alone, ⛔ never a byte of the description.
+  Object.freeze({
+    fence: 'notes',
+    wants: () => 'a description that is text or none and carries no seat signature line, the head of every seat note — advisory_rewrite replaces the working text before the publish',
+    fails: (c) => {
+      if (!publishes(c)) return null;
+      if (!advisoryRead(c)) return 'not judged, because the advisory was not read';
+      const d = c.answer.json.description;
+      if (d !== undefined && d !== null && typeof d !== 'string') return `the advisory's description is ${Array.isArray(d) ? 'an array' : typeof d}, so it cannot be judged free of seat notes`;
+      const n = advisoryNoteSectionCount(d ?? '');
+      return n === 0 ? null : `the advisory's description still carries ${n} seat signature line(s), the head of a seat note`;
     },
   }),
 ]);
@@ -2480,20 +2614,44 @@ export const ADVISORY_LIST_CURSOR_REFUSED =
   'collection or this state, or a cursor that is not exactly one value in its declared shape — so nothing was sealed or emitted';
 
 /**
- * The next cursor of a full page (header): `{ after }` — `null` when the `Link` header names no `rel="next"`, which ends
- * the walk — or `{ fail }` with `ADVISORY_LIST_CURSOR_REFUSED`. A next link is followed only when there is exactly one,
- * its origin is `api`'s and its path is exactly `repo`'s collection, its `state` is exactly the walk's, and it carries
- * exactly one `after` in `ADVISORY_LIST_CURSOR_SHAPE`. Pure; never throws.
+ * The collection a next link may name by the repository's NUMERIC id (header: "The one row that LISTS advisories"):
+ * `/repositories/{id}/security-advisories`, the spelling GitHub's `Link` headers use for the collection the request
+ * named as `/repos/{owner}/{name}/…`. The id is decimal digits with no sign and no leading zero, at most 20. It is
+ * followed only when it equals the repository's own id, read once by the walk (`advisoryListRepoIdOf`).
  */
-export function advisoryListNextCursor(link, { api, repo, state }) {
-  if (link === null || link === undefined || link === '') return { after: null };
-  if (typeof link !== 'string') return { fail: ADVISORY_LIST_CURSOR_REFUSED };
-  const nexts = [];
-  for (const m of link.matchAll(/<([^>]*)>((?:\s*;\s*[^;,]*)*)/g)) {
-    const rel = /;\s*rel\s*=\s*"?([^";]*)"?/i.exec(m[2]);
-    // RFC 8288 §3.3: a relation type compares case-insensitively.
-    if (rel && rel[1].trim().toLowerCase().split(/\s+/).includes('next')) nexts.push(m[1]);
-  }
+export const ADVISORY_LIST_NUMERIC_COLLECTION_SHAPE = /^\/repositories\/([1-9][0-9]{0,19})\/security-advisories$/;
+
+/**
+ * The repository's own numeric id from the answer of `GET /repos/{repo}`: a positive safe integer, as a decimal string,
+ * when the answer is 200 with an `id` of that shape and a `full_name` equal to `repo` (case-insensitively, as the
+ * platform names a repository); otherwise `null`. Pure; never throws.
+ */
+export function advisoryListRepoIdOf(answer, repo) {
+  const json = answer?.json;
+  if (answer?.status !== 200 || json === null || typeof json !== 'object' || Array.isArray(json)) return null;
+  if (typeof json.full_name !== 'string' || json.full_name.toLowerCase() !== String(repo).toLowerCase()) return null;
+  return Number.isSafeInteger(json.id) && json.id > 0 ? String(json.id) : null;
+}
+
+/** What a walk prints when the repository's own id, needed to judge a numeric next link, could not be read: the status alone. */
+export function advisoryListRepoIdUnreadText(status) {
+  return `a full page's Link header names the collection by a repository id, and the repository's own id could not be read (GET of the repository answered HTTP ${status}) to compare it with — nothing was sealed or emitted`;
+}
+
+/**
+ * The next cursor of a full page (header): `{ after }` — `null` when the `Link` header names no `rel="next"`, which ends
+ * the walk — or `{ fail }` with `ADVISORY_LIST_CURSOR_REFUSED`, or `{ needsRepoId: true }` when the one next link
+ * names the collection by a numeric id and `repoId` was not given (the walk reads the repository's own id once and
+ * asks again). A next link is followed only when there is exactly one, its origin is `api`'s, its path is exactly
+ * `repo`'s collection — as `/repos/{repo}/security-advisories`, or as `/repositories/{id}/security-advisories` with
+ * `{id}` exactly `repoId`, the repository's own (`ADVISORY_LIST_NUMERIC_COLLECTION_SHAPE`) — its `state` is exactly
+ * the walk's, and it carries exactly one `after` in `ADVISORY_LIST_CURSOR_SHAPE`. Other query parameters (`per_page`,
+ * a `page` beside the cursor, an empty `before`) are never read: the next path is the relay's own spelling. Pure;
+ * never throws.
+ */
+export function advisoryListNextCursor(link, { api, repo, state, repoId = null }) {
+  const nexts = advisoryListNextLinks(link);
+  if (nexts === null) return { fail: ADVISORY_LIST_CURSOR_REFUSED };
   if (nexts.length === 0) return { after: null };
   if (nexts.length > 1) return { fail: ADVISORY_LIST_CURSOR_REFUSED };
   let url;
@@ -2504,11 +2662,81 @@ export function advisoryListNextCursor(link, { api, repo, state }) {
   } catch {
     return { fail: ADVISORY_LIST_CURSOR_REFUSED };
   }
-  if (url.origin !== base.origin || url.pathname !== `/repos/${repo}/security-advisories`) return { fail: ADVISORY_LIST_CURSOR_REFUSED };
+  if (url.origin !== base.origin) return { fail: ADVISORY_LIST_CURSOR_REFUSED };
   const states = url.searchParams.getAll('state');
   const afters = url.searchParams.getAll('after');
   if (states.length !== 1 || states[0] !== state || afters.length !== 1 || !ADVISORY_LIST_CURSOR_SHAPE.test(afters[0])) return { fail: ADVISORY_LIST_CURSOR_REFUSED };
-  return { after: afters[0] };
+  if (url.pathname === `/repos/${repo}/security-advisories`) return { after: afters[0] };
+  const numeric = ADVISORY_LIST_NUMERIC_COLLECTION_SHAPE.exec(url.pathname);
+  if (!numeric) return { fail: ADVISORY_LIST_CURSOR_REFUSED };
+  if (repoId === null || repoId === undefined) return { needsRepoId: true };
+  return String(repoId) === numeric[1] ? { after: afters[0] } : { fail: ADVISORY_LIST_CURSOR_REFUSED };
+}
+
+/** The targets of a `Link` header's `rel="next"` links — `[]` for none or an empty header, `null` for one that is no string. */
+function advisoryListNextLinks(link) {
+  if (link === null || link === undefined || link === '') return [];
+  if (typeof link !== 'string') return null;
+  const nexts = [];
+  for (const m of link.matchAll(/<([^>]*)>((?:\s*;\s*[^;,]*)*)/g)) {
+    const rel = /;\s*rel\s*=\s*"?([^";]*)"?/i.exec(m[2]);
+    // RFC 8288 §3.3: a relation type compares case-insensitively.
+    if (rel && rel[1].trim().toLowerCase().split(/\s+/).includes('next')) nexts.push(m[1]);
+  }
+  return nexts;
+}
+
+/** The path segments a refused link's shape prints as they are; every other segment prints as a placeholder. */
+const ADVISORY_LIST_SHAPE_WORDS = Object.freeze(['repos', 'repositories', 'security-advisories']);
+
+/**
+ * The diagnostic a refused next link prints in the job log (header): the link's SHAPE, ⛔ never a value — how many
+ * next links, whether the first is on the relay's API origin, its path with the owner, the name and every id or other
+ * segment replaced by a placeholder (and whether they are this repository's), its query parameter NAMES, and of its
+ * `state` and `after` only whether each is the walk's, how many there are and whether a cursor is in its shape.
+ * No host, owner, name, id, state, cursor or other value is ever printed. Pure; never throws.
+ */
+export function advisoryListLinkShape(link, { api, repo, state, repoId = null }) {
+  const nexts = advisoryListNextLinks(link);
+  if (nexts === null) return 'link shape: the Link header is no string';
+  if (nexts.length === 0) return 'link shape: no rel="next" link';
+  const parts = [`${nexts.length} rel="next" link(s)`];
+  let url;
+  let base;
+  try {
+    url = new URL(nexts[0]);
+    base = new URL(api);
+  } catch {
+    return `link shape: ${parts[0]}; the first is no absolute URL`;
+  }
+  parts.push(url.origin === base.origin ? "on the relay's API origin" : 'on another origin');
+  const segs = url.pathname.split('/').slice(1);
+  const [own0, own1] = String(repo).split('/');
+  const shown = [];
+  let note = '';
+  for (let k = 0; k < segs.length; k++) {
+    const seg = segs[k];
+    if (k === 1 && segs[0] === 'repos' && segs.length > 2) {
+      shown.push('OWNER', 'NAME');
+      const same = seg === own0 && segs[2] === own1;
+      const folded = !same && seg.toLowerCase() === String(own0).toLowerCase() && segs[2].toLowerCase() === String(own1).toLowerCase();
+      note = same ? ' (OWNER/NAME this repository)' : folded ? ' (OWNER/NAME this repository in another letter case)' : ' (OWNER/NAME another repository)';
+      k++;
+    } else if (k === 1 && segs[0] === 'repositories') {
+      shown.push('ID');
+      note = !/^[1-9][0-9]{0,19}$/.test(seg) ? ' (ID not a repository id)' : repoId === null || repoId === undefined ? ' (ID not compared: the repository id was not read)' : String(repoId) === seg ? " (ID this repository's)" : ' (ID another repository\'s)';
+    } else if (ADVISORY_LIST_SHAPE_WORDS.includes(seg) || seg === '') shown.push(seg);
+    else shown.push(/^[0-9]+$/.test(seg) ? 'N' : 'SEG');
+  }
+  parts.push(`path /${shown.join('/')}${note}`);
+  const names = [...url.searchParams.keys()].map((n) => (/^[a-z_]{1,32}$/.test(n) ? n : 'NAME'));
+  parts.push(`query names [${names.join(',')}]`);
+  const states = url.searchParams.getAll('state');
+  parts.push(`state ${states.length === 0 ? 'absent' : states.length > 1 ? `${states.length} values` : states[0] === state ? "the walk's" : 'not the walk\'s'}`);
+  const afters = url.searchParams.getAll('after');
+  const cursor = (c) => (ADVISORY_LIST_CURSOR_SHAPE.test(c) ? 'in its shape' : c.length > ADVISORY_LIST_CURSOR_MAX_CHARS ? 'over its length cap' : c.length === 0 ? 'empty' : 'with a character outside its alphabet');
+  parts.push(`after ${afters.length === 0 ? 'absent' : afters.length > 1 ? `${afters.length} values` : cursor(afters[0])}`);
+  return `link shape: ${parts.join('; ')}`;
 }
 
 /** The severities a listed advisory may carry, beside null (the platform's own enum for the field). */
@@ -2600,6 +2828,9 @@ export function advisorySealAad({ requestId, action, op, ghsaId }) {
   if (op === 'advisory_list') return Buffer.from(`${ADVISORY_READ_INFO} request=${requestId} action=${action} op=advisory_list`, 'utf8');
   // The one INBOUND seal (header: "The one row that APPENDS"): the note's own label, the op and the advisory's id.
   if (op === 'advisory_note') return Buffer.from(`fleet-write:advisory_note:v1 request=${requestId} action=${action} op=advisory_note ghsa_id=${ghsaId}`, 'utf8');
+  // The same seal, the rewrite's (header: "The one row that REPLACES"): its own prefix and op, so a note never opens as
+  // a rewrite and a rewrite never as a note.
+  if (op === 'advisory_rewrite') return Buffer.from(`fleet-write:advisory_rewrite:v1 request=${requestId} action=${action} op=advisory_rewrite ghsa_id=${ghsaId}`, 'utf8');
   throw new Error('no sealed answer is bound for this op');
 }
 
@@ -2669,7 +2900,7 @@ export const ADVISORY_NOTE_PRIVATE_KEY_SHAPE = /^MC4CAQAwBQYDK2VuBCIEI[A-P][A-Za
 export function advisoryNoteKeyFailure(text, relayPublicKey = ADVISORY_NOTE_RELAY_PUBLIC_KEY) {
   if (relayPublicKey === null) return `the relay's note key is not committed — ADVISORY_NOTE_RELAY_PUBLIC_KEY is null; the maintainer makes the pair, sets the repository secret ${ADVISORY_NOTE_KEY_SECRET} and commits its public half`;
   if (advisoryReadKeyFailure(relayPublicKey) !== null) return 'the committed ADVISORY_NOTE_RELAY_PUBLIC_KEY is not an X25519 public key in its one spelling';
-  if (typeof text !== 'string' || text === '') return `the execute step carries no ${ADVISORY_NOTE_KEY_ENV} — the repository secret ${ADVISORY_NOTE_KEY_SECRET} is unset, or the stroke was not marked a note's`;
+  if (typeof text !== 'string' || text === '') return `the execute step carries no ${ADVISORY_NOTE_KEY_ENV} — the repository secret ${ADVISORY_NOTE_KEY_SECRET} is unset, or the stroke was not marked as sealed to the relay's note key (a note's or a rewrite's)`;
   if (!ADVISORY_NOTE_PRIVATE_KEY_SHAPE.test(text)) return `${ADVISORY_NOTE_KEY_ENV} is not an X25519 private key in base64 PKCS#8 DER, its one spelling`;
   let key;
   try {
@@ -2832,6 +3063,165 @@ export function advisoryNoteLandedText({ ghsaId, state, existingBytes, sectionBy
   return (
     `${advisoryPrintable(ghsaId, GHSA_ID_SHAPE, 'advisory id')} · state ${advisoryPrintable(state, ADVISORY_STATE_SHAPE, 'advisory state')} · ` +
     `appended a ${sectionBytes}-byte note to a ${existingBytes}-byte description — ${storedBytes} bytes stored, read back byte for byte · keyed digest ${digest}`
+  );
+}
+
+// ---------------------------------------------------------------------------
+// `advisory_rewrite` (header: "The one row that REPLACES an advisory's text") — the note's seal, key, digest and
+// fences, with the text, its judgment, the fence on the summary and the read-back of its own.
+// ---------------------------------------------------------------------------
+
+/**
+ * The states a rewrite replaces the text in — the note's three, every unpublished state the text is private in.
+ * The platform's own REST description (`github/rest-api-description`, operation
+ * `security-advisories/update-repository-advisory`, read 2026-11-23) sets NO state limit on a `summary` or
+ * `description` PATCH; its one refused move is a state one (`published` → `draft`, 422). The fence is the relay's:
+ * `published` and `withdrawn` are refused, because a rewrite there edits public text (header).
+ */
+export const ADVISORY_REWRITE_STATES = Object.freeze(['triage', 'draft', 'closed']);
+/** The fields a rewrite may replace, in the one order its text spells them. */
+export const ADVISORY_REWRITE_FIELDS = Object.freeze(['summary', 'description']);
+/** The platform's cap on an advisory's `summary`, in characters (its REST description's `maxLength`). */
+export const ADVISORY_SUMMARY_MAX_CHARS = 1024;
+/** The characters no rewritten description carries: every control character but the tab and the newline. */
+const REWRITE_DESCRIPTION_CONTROL_SHAPE = /[\u0000-\u0008\u000b-\u001f\u007f]/u;
+/** The characters no rewritten summary carries: every control character, the tab and the newline among them — one line. */
+const REWRITE_SUMMARY_CONTROL_SHAPE = /[\u0000-\u001f\u007f]/u;
+
+/**
+ * The text a rewrite seals, and the text its digest is taken over: a JSON object of the fields given, in
+ * `ADVISORY_REWRITE_FIELDS` order and nothing else. The seat seals it; the executor rebuilds it from what the advisory
+ * STORES after the PATCH, so equal digests are a read-back of the stored fields. Pure.
+ */
+export function advisoryRewriteText(fields = {}) {
+  const out = {};
+  for (const key of ADVISORY_REWRITE_FIELDS) if (fields[key] !== undefined) out[key] = fields[key];
+  return JSON.stringify(out);
+}
+
+/**
+ * Why `text` is not a rewrite's sealed text, or null when it is (header: "The one row that REPLACES"): a JSON object
+ * whose keys are `ADVISORY_REWRITE_FIELDS` alone, in that order, at least one; a `summary` that is one line, not
+ * blank, with no surrounding whitespace and at most `ADVISORY_SUMMARY_MAX_CHARS` characters and
+ * `MAX_ADVISORY_SUMMARY_BYTES` bytes; a `description` that is not blank, ends in no whitespace and carries no control
+ * character but the tab and the newline; the whole at most `MAX_ADVISORY_NOTE_BYTES`, the note's cap, so its seal is a
+ * `sealed_note` in shape. The seat judges it before the seal and the executor again after the open — so ⛔ no sentence
+ * carries a byte of it: the executor's lines reach a public log. Pure.
+ */
+export function advisoryRewriteFailure(text) {
+  if (typeof text !== 'string' || text === '') return 'the rewrite is empty';
+  const bytes = Buffer.byteLength(text, 'utf8');
+  if (bytes > MAX_ADVISORY_NOTE_BYTES) return `the rewrite is ${bytes} bytes as sealed, over its cap of ${MAX_ADVISORY_NOTE_BYTES}`;
+  let fields;
+  try {
+    fields = JSON.parse(text);
+  } catch {
+    return 'the rewrite is not the JSON object this door seals';
+  }
+  if (!isObject(fields) || Array.isArray(fields)) return 'the rewrite is not the JSON object this door seals';
+  const keys = Object.keys(fields);
+  if (keys.length === 0) return 'the rewrite names neither a summary nor a description';
+  if (keys.some((k) => !ADVISORY_REWRITE_FIELDS.includes(k))) return 'the rewrite carries a field other than summary and description';
+  if (advisoryRewriteText(fields) !== text) return 'the rewrite is not in the one spelling this door seals';
+  if (fields.summary !== undefined) {
+    const s = fields.summary;
+    if (typeof s !== 'string' || s.trim() === '') return 'the summary is empty';
+    if (REWRITE_SUMMARY_CONTROL_SHAPE.test(s)) return 'the summary is not one line — it carries a newline, a tab or another control character';
+    if (s !== s.trim()) return 'the summary begins or ends in whitespace';
+    if (codePoints(s) > ADVISORY_SUMMARY_MAX_CHARS) return `the summary is ${codePoints(s)} characters, over the platform's ${ADVISORY_SUMMARY_MAX_CHARS}`;
+    if (Buffer.byteLength(s, 'utf8') > MAX_ADVISORY_SUMMARY_BYTES) return `the summary is ${Buffer.byteLength(s, 'utf8')} bytes, over its cap of ${MAX_ADVISORY_SUMMARY_BYTES}`;
+  }
+  if (fields.description !== undefined) {
+    const d = fields.description;
+    if (typeof d !== 'string' || d.trim() === '') return 'the description is empty';
+    if (REWRITE_DESCRIPTION_CONTROL_SHAPE.test(d)) return 'the description carries a control character other than a tab or a newline (a carriage return among them)';
+    if (d !== d.trimEnd()) return 'the description ends in whitespace';
+    if (codePoints(d) > ADVISORY_DESCRIPTION_MAX_CHARS) return `the description is ${codePoints(d)} characters, over the platform's ${ADVISORY_DESCRIPTION_MAX_CHARS}`;
+  }
+  return null;
+}
+
+/** A judged rewrite's fields — called only after `advisoryRewriteFailure` passed `text`. Pure. */
+export function advisoryRewriteOf(text) {
+  return JSON.parse(text);
+}
+
+/** The summary as read: the text, or '' for the null an advisory with none answers. Pure. */
+export const advisorySummaryOf = (json) => (typeof json?.summary === 'string' ? json.summary : '');
+/** One field of an advisory's answer as a rewrite compares it. Pure. */
+const rewriteFieldOf = (json, key) => (key === 'summary' ? advisorySummaryOf(json) : advisoryDescriptionOf(json));
+
+/**
+ * The fences on a rewrite's advisory, judged on each of the executor's GETs — the note's (`ADVISORY_NOTE_FENCES`:
+ * `ADVISORY_FENCES` and the description), with `from` the rewrite's states, then the summary: a string, or null.
+ */
+export const ADVISORY_REWRITE_FENCES = Object.freeze([
+  ...ADVISORY_NOTE_FENCES,
+  Object.freeze({
+    fence: 'summary',
+    wants: () => 'a summary that is text, or none at all',
+    fails: (c) => {
+      if (!advisoryRead(c)) return 'not judged, because the advisory was not read';
+      const s = c.answer.json.summary;
+      return s === undefined || s === null || typeof s === 'string' ? null : `the advisory's summary is ${Array.isArray(s) ? 'an array' : typeof s}`;
+    },
+  }),
+]);
+
+/** The rewrite fences `ctx` fails: `[{ fence, wants, got }]`, `[]` when all hold — spoken through `advisoryFenceText`. Pure. */
+export function advisoryRewriteFenceFailures(ctx = {}) {
+  return ADVISORY_REWRITE_FENCES.map((f) => ({ fence: f.fence, wants: f.wants(ctx), got: f.fails(ctx) })).filter((f) => f.got !== null);
+}
+
+/**
+ * The digest a landed rewrite's notice carries: `advisoryNoteDigest` over `advisoryRewriteText` of the fields the
+ * advisory STORES, for the fields the rewrite sent — never over the text opened, so a match at the seat is a read-back
+ * of the stored bytes. Pure.
+ */
+export function advisoryRewriteStoredDigest({ digestKey, json, fields }) {
+  const stored = {};
+  for (const key of ADVISORY_REWRITE_FIELDS) if (fields.includes(key)) stored[key] = rewriteFieldOf(json, key);
+  return advisoryNoteDigest({ digestKey, section: advisoryRewriteText(stored) });
+}
+
+/**
+ * What LANDED means for a rewrite (header): the stored advisory — the PATCH's answer, then a GET after it — holds
+ * EXACTLY each field sent, byte for byte, and the field NOT sent exactly as read before the PATCH. `sent` is the
+ * rewrite's fields, `before` the advisory read just before the PATCH, `answer` one of the two reads. Answers
+ * `{ ok, why }`; `why` carries the id, a status, a field's name and byte counts alone — ⛔ never a byte of any text.
+ * Either way the PATCH was sent, so ⛔ a failed read-back is never re-sent. Pure.
+ */
+export function advisoryRewriteReadBack({ ghsaId, sent, before, answer, read = 'the PATCH answer' } = {}) {
+  if (!twoXX(answer)) return { ok: false, why: `${read} is HTTP ${answer?.status ?? 'none'}` };
+  if (!advisoryShaped(answer.json)) return { ok: false, why: `${read} is HTTP ${answer.status}, but not an advisory, so its text cannot be read back` };
+  if (answer.json.ghsa_id !== ghsaId) return { ok: false, why: `${read} is HTTP ${answer.status}, but names ${advisoryPrintable(answer.json.ghsa_id, GHSA_ID_SHAPE, 'advisory id')}` };
+  for (const key of ADVISORY_REWRITE_FIELDS) {
+    const want = sent[key] !== undefined ? sent[key] : rewriteFieldOf(before, key);
+    const got = rewriteFieldOf(answer.json, key);
+    if (got === want) continue;
+    return {
+      ok: false,
+      why:
+        sent[key] !== undefined
+          ? `${read} holds a ${Buffer.byteLength(got, 'utf8')}-byte ${key} that is not the ${Buffer.byteLength(want, 'utf8')}-byte ${key} sent, byte for byte`
+          : `${read} holds a ${Buffer.byteLength(got, 'utf8')}-byte ${key}, not the ${Buffer.byteLength(want, 'utf8')} bytes read before the PATCH, which this rewrite did not send — another write raced this one`,
+    };
+  }
+  return { ok: true, why: '' };
+}
+
+/** What a rewrite whose read-back failed adds: the PATCH was sent, so the new text may be there. */
+export const ADVISORY_REWRITE_NOT_RESENT = 'the PATCH was sent, so the new text may be on the advisory — read it (advisory_read) before anything else, ⛔ never re-send the rewrite';
+
+/**
+ * The row a landed rewrite prints: the id, the state, each field replaced with its byte counts before and after, and
+ * the keyed digest — ⛔ never a byte of any text. `fields` is `[{ key, beforeBytes, afterBytes }]`. Pure.
+ */
+export function advisoryRewriteLandedText({ ghsaId, state, fields, digest }) {
+  const replaced = fields.map((f) => `the ${f.key} (${f.beforeBytes} → ${f.afterBytes} bytes)`).join(' and ');
+  return (
+    `${advisoryPrintable(ghsaId, GHSA_ID_SHAPE, 'advisory id')} · state ${advisoryPrintable(state, ADVISORY_STATE_SHAPE, 'advisory state')} · ` +
+    `replaced ${replaced}, read back byte for byte · keyed digest ${digest}`
   );
 }
 
@@ -3173,7 +3563,7 @@ export function transferRemedy(source, target) {
  *                 the hierarchy rows' `issue` and `sub_issue`: an issue is
  *                 never its own sub-issue (header above);
  *   `requests`    the request descriptors the executor issues, in order:
- *                 `{ verb, path, body?, idempotent404?, graphql?, updateBranch?, rerunFailed?, enqueueFront?, subIssue?, advisoryRead?, advisoryNote?, fromAnswer?, assigned?, labelled? }`
+ *                 `{ verb, path, body?, idempotent404?, graphql?, updateBranch?, rerunFailed?, enqueueFront?, subIssue?, advisoryRead?, advisoryNote?, advisoryRewrite?, fromAnswer?, assigned?, labelled? }`
  *                 — a `graphql` descriptor names the mutation and the pull (or
  *                 the issue and target) whose node ids it needs; a pull's
  *                 descriptor also carries `landed`, its `PR_LANDED_STATE`
@@ -3208,7 +3598,10 @@ export function transferRemedy(source, target) {
  *                 sealed note, which the executor opens, fences, sends as the
  *                 description and reads back (`advisoryNoteAction`,
  *                 execute.mjs) — it carries no `body`, the description is the
- *                 executor's; a `fromAnswer` descriptor names the
+ *                 executor's; an `advisoryRewrite` descriptor carries the same
+ *                 two, the seal a rewrite's, which the executor opens, fences,
+ *                 sends as the summary and/or the description and reads back
+ *                 (`advisoryRewriteAction`) — no `body` either; a `fromAnswer` descriptor names the
  *                 field of its action's FIRST request's answer that fills the
  *                 `answerPlaceholder` in its path (`fillFromAnswer`,
  *                 execute.mjs); an `assigned` descriptor lists the logins its
@@ -3571,6 +3964,18 @@ export const OPS = Object.freeze({
     optional: Object.freeze([]),
     alone: true,
     requests: (a, repo) => [{ verb: 'PATCH', path: `/repos/${repo}/security-advisories/${a.ghsa_id}`, advisoryNote: { ghsaId: a.ghsa_id, sealedNote: a.sealed_note } }],
+  }),
+  // The one row that REPLACES an advisory's text — see the header. The note's field, seal, key and gate: the id and the
+  // new summary and/or description SEALED to the relay's committed key, and no plaintext. The executor opens it, reads
+  // the advisory twice (the fences, then the text just before the write), sends ONE PATCH of the fields sealed and
+  // nothing else, and lands only when a GET after it reads each of them back byte for byte. repository-advisories
+  // write, alone, the stroke's target-write gate.
+  advisory_rewrite: Object.freeze({
+    permission: 'repository-advisories',
+    required: Object.freeze(['ghsa_id', 'sealed_note']),
+    optional: Object.freeze([]),
+    alone: true,
+    requests: (a, repo) => [{ verb: 'PATCH', path: `/repos/${repo}/security-advisories/${a.ghsa_id}`, advisoryRewrite: { ghsaId: a.ghsa_id, sealedNote: a.sealed_note } }],
   }),
 });
 

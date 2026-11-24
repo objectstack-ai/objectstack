@@ -85,6 +85,10 @@ export {
   LoadingFallback,
 } from './console/ConsoleShell.js';
 
+// objectstack#36732 — what a host draws above the Setup app's first page (the
+// console's first-run checklist, now that the desktop's home page retired).
+export { SetupFirstPageSlotProvider, type SetupFirstPageSlot } from './console/setupFirstPageSlot.js';
+
 // Host-app route policy (ADR-0048) — which app's `/apps/<segment>/…` URL a
 // framework-owned, app-INDEPENDENT page should build, and the two predicates it
 // is defined in terms of. Published from the package root (objectui#4280)
@@ -94,6 +98,11 @@ export {
 // (objectui#4109 / PR #4279), which is the "two readers of one prose contract"
 // shape #3367 / #3842 record. `./utils/appRoute` is the contract.
 export { resolveHostAppSegment, appRouteSegment, filterActiveApps } from './utils/index.js';
+// objectstack#35424 — the docs reader names the app it returns to (「← Back to
+// APP」) the way the app bar does: the app its route segment addresses, by its
+// served label.
+export { matchAppBySegment } from './utils/index.js';
+export { useServedAppLabel } from './hooks/useServedAppLabel.js';
 // objectstack#32667 — which app OWNS a record of an object (the app a link to
 // the record, or to a page about it, opens under), as opposed to which app
 // hosts an app-independent page. `./utils/objectHostApp` is the contract.
@@ -123,7 +132,7 @@ export {
 // emptiness heuristic on top of the SAME declaration reader the chrome's Home
 // affordances use, so the post-login landing and the top-bar logo cannot name
 // two different homes.
-export { HOME_LAUNCHER_PATH, resolveDeclaredHomePath } from './utils/index.js';
+export { HOME_LAUNCHER_PATH, resolveDeclaredHomePath, resolveDesktopHomePath } from './utils/index.js';
 
 // `a810bb2ae` — ONE read of the ADR-0112 failure envelope, published so a
 // consumer OUTSIDE this package inherits the pinned rule instead of writing a
@@ -283,6 +292,10 @@ export {
   useAttachUserStateAdapters,
 } from './context/index.js';
 export type { UserDataAdapter, UserStateKind } from './context/index.js';
+// objectstack#35881 — the person's last app and the phone breakpoint: the
+// console's `/` landing reads both on a phone.
+export { useLastApp } from './context/LastAppProvider.js';
+export { usePhoneViewport } from './hooks/usePhoneViewport.js';
 
 // Default page implementations (consumers can partial-override slots)
 export { AppContent as DefaultAppContent } from './console/AppContent.js';

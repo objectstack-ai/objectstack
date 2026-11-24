@@ -46,8 +46,17 @@
  * - `avg` — the stored average does not say how many rows it averages.
  * - `sum` / `min` / `max` meeting a value that is not a number (a date, a
  *   text), or a stored value that is not one.
- * - a summary whose `filter` names a dotted path (it reads through another
- *   reference, which the new row does not carry), or that the walker refuses.
+ * - a summary whose `filter` reads through another reference, in either
+ *   spelling (a dotted path, or the nested one-level form
+ *   `{ account: { status: 'x' } }`): the new row does not carry the related
+ *   record. Or one the walker refuses.
+ *
+ * [#34821] A formula or stored computed field of the parent calculated from
+ * an accumulated roll-up (`remaining = budget - total`) is computed again
+ * over the moved values, as the recompute's write and the next read compute
+ * it one by one: the caller hands the accumulator what computes them
+ * ({@link BatchSummaryAccumulator.setDependents}), the same
+ * {@link SummaryDependents} the predicate update's fold below reads.
  *
  * Concurrent writes are out of scope: two batches in flight each read the
  * stored value they started from.
@@ -83,10 +92,26 @@ export interface BatchSummaryAccumulator {
    * row and not as a related binding. A copy; `row` itself is never mutated.
    * A row no admitted row moves, and an unbound header (`null` /
    * `undefined`, the fail-closed signal), are returned as they are.
+   *
+   * [#34821] `visible`, when given, names the only columns of `row` the
+   * reader was served (the insert preview's caller-visible header): no other
+   * column is moved or computed onto the copy, so it reads as served — the
+   * same at every row — and decides nothing it did not decide at the first.
+   * A roll-up the reader was not served is still moved, from the stored
+   * parent, for the visible fields calculated from it.
    */
-  overlayRow<R extends Record<string, unknown> | null | undefined>(object: string, row: R): R;
+  overlayRow<R extends Record<string, unknown> | null | undefined>(object: string, row: R, visible?: ReadonlySet<string>): R;
   /** Count `row` in. Call it only once the row's rules have admitted it. */
   accept(row: Record<string, unknown>): void;
+  /**
+   * [#34821] The roll-ups this accumulator moves whose parent object is one of
+   * `objects` (the parents the batch's rules read), per parent object: their
+   * fields and the parents `rows` name. What {@link setDependents} is loaded
+   * for.
+   */
+  foldedSummaries(rows: readonly unknown[], objects: ReadonlySet<string>): Map<string, { fields: Set<string>; parentIds: Set<string> }>;
+  /** [#34821] Hand the accumulator what computes a parent's fields calculated from its moved roll-ups ({@link SummaryDependents}). */
+  setDependents(dependents: SummaryDependents): void;
 }
 
 const ACCUMULABLE: ReadonlySet<SummaryDescriptor['fn']> = new Set(['count', 'sum', 'min', 'max']);
@@ -150,13 +175,17 @@ export function createBatchSummaryAccumulator(
   descriptors: readonly SummaryDescriptor[],
   childFields: unknown,
 ): BatchSummaryAccumulator | undefined {
-  const live = descriptors.filter((d) => ACCUMULABLE.has(d.fn) && !filterNamesDottedPath(d.filter));
+  // [#34821] The screen the predicate update's fold applies: a filter reading
+  // through a reference in the nested form is no more exact than a dotted one.
+  const live = descriptors.filter((d) => ACCUMULABLE.has(d.fn) && !filterReadsThroughReference(d.filter));
   if (live.length === 0) return undefined;
   const classes = declaredFieldClasses(childFields);
   const jsonStored = declaredJsonStoredFields(childFields);
   /** Descriptor → parent id → delta. A descriptor that met a value it cannot accumulate is dropped. */
   const deltas = new Map<SummaryDescriptor, Map<string, ParentDelta>>();
   const dropped = new Set<SummaryDescriptor>();
+
+  let dependents: SummaryDependents | undefined;
 
   const accept = (row: Record<string, unknown>): void => {
     for (const desc of live) {
@@ -196,6 +225,18 @@ export function createBatchSummaryAccumulator(
       }
       byParent.set(parentId, delta);
     }
+    // [#34821] One by one, the recompute writes every parent the row names
+    // after its insert; the next write starts from the row that write stored.
+    if (!dependents?.advance) return;
+    const named = new Map<string, { object: string; parentId: string }>();
+    for (const desc of live) {
+      const parentId = singleId(row[desc.fkField]);
+      if (parentId !== undefined) named.set(`${desc.parentObject}|${parentId}`, { object: desc.parentObject, parentId });
+    }
+    for (const { object, parentId } of named.values()) {
+      const values = movedOf(object, parentId);
+      if (values) dependents.advance(object, parentId, values);
+    }
   };
 
   /** The summary value `stored` moves to under `delta`, or `undefined` when it cannot be said exactly. */
@@ -211,20 +252,54 @@ export function createBatchSummaryAccumulator(
     }
   };
 
-  /** A copy of `row` (a stored row of `object`) with every summary the admitted rows move, or `undefined` when none moves. */
-  const patchRow = (object: string, row: Record<string, unknown>): Record<string, unknown> | undefined => {
-    const parentId = singleId(row.id);
-    if (parentId === undefined) return undefined;
-    let patched: Record<string, unknown> | undefined;
+  /**
+   * The summary values the admitted rows move parent `parentId` (a row of
+   * `object`) to, or `undefined` when none moves. Each is moved from the value
+   * `row` carries, or, for a roll-up `row` was not handed or not served
+   * (`visible`), and for no row, from the stored parent the dependents read:
+   * both are read before the batch writes anything.
+   */
+  const movedOf = (object: string, parentId: string, row?: Record<string, unknown>, visible?: ReadonlySet<string>): Record<string, number> | undefined => {
+    const stored = dependents?.stored?.(object, parentId);
+    let out: Record<string, number> | undefined;
     for (const [desc, byParent] of deltas) {
       if (dropped.has(desc) || desc.parentObject !== object) continue;
-      if (!(desc.summaryField in row)) continue; // the reader was not handed this roll-up
       const delta = byParent.get(parentId);
       if (!delta) continue;
-      const value = moved(desc, row[desc.summaryField], delta);
+      const carried = row !== undefined && desc.summaryField in row && (!visible || visible.has(desc.summaryField));
+      const from = carried ? row : stored && desc.summaryField in stored ? stored : undefined;
+      if (!from) continue;
+      const value = moved(desc, from[desc.summaryField], delta);
       if (value === undefined) continue;
+      (out ??= {})[desc.summaryField] = value;
+    }
+    return out;
+  };
+
+  /** A copy of `row` (a stored row of `object`) with every summary the admitted rows move, or `undefined` when none moves. */
+  const patchRow = (object: string, row: Record<string, unknown>, visible?: ReadonlySet<string>): Record<string, unknown> | undefined => {
+    const parentId = singleId(row.id);
+    if (parentId === undefined) return undefined;
+    const values = movedOf(object, parentId, row, visible);
+    if (!values) return undefined;
+    /** A column the reader was handed, and (with `visible`) served. */
+    const served = (field: string): boolean => field in row && (!visible || visible.has(field));
+    let patched: Record<string, unknown> | undefined;
+    for (const [field, value] of Object.entries(values)) {
+      if (!served(field)) continue; // the reader was not handed this roll-up
       patched ??= { ...row };
-      patched[desc.summaryField] = value;
+      patched[field] = value;
+    }
+    // [#34821] A formula or stored computed field of the parent calculated
+    // from a moved roll-up is computed again with the moved values, as the
+    // predicate update's fold computes it.
+    const computed = dependents?.(object, parentId, values);
+    if (computed) {
+      for (const [field, value] of Object.entries(computed)) {
+        if (!served(field)) continue;
+        patched ??= { ...row };
+        patched[field] = value;
+      }
     }
     return patched;
   };
@@ -244,12 +319,27 @@ export function createBatchSummaryAccumulator(
     return out ?? binding;
   };
 
-  const overlayRow = <R extends Record<string, unknown> | null | undefined>(object: string, row: R): R => {
+  const overlayRow = <R extends Record<string, unknown> | null | undefined>(object: string, row: R, visible?: ReadonlySet<string>): R => {
     if (!row || deltas.size === 0) return row;
-    return (patchRow(object, row) as R | undefined) ?? row;
+    return (patchRow(object, row, visible) as R | undefined) ?? row;
   };
 
-  return { accept, overlay, overlayRow };
+  const foldedSummaries = (rows: readonly unknown[], objects: ReadonlySet<string>): Map<string, { fields: Set<string>; parentIds: Set<string> }> => {
+    const out = new Map<string, { fields: Set<string>; parentIds: Set<string> }>();
+    for (const desc of live) {
+      if (!objects.has(desc.parentObject)) continue;
+      let entry = out.get(desc.parentObject);
+      if (!entry) out.set(desc.parentObject, (entry = { fields: new Set(), parentIds: new Set() }));
+      entry.fields.add(desc.summaryField);
+      for (const row of rows) {
+        const parentId = row && typeof row === 'object' ? singleId((row as Record<string, unknown>)[desc.fkField]) : undefined;
+        if (parentId !== undefined) entry.parentIds.add(parentId);
+      }
+    }
+    return out;
+  };
+
+  return { accept, overlay, overlayRow, foldedSummaries, setDependents: (fn) => { dependents = fn; } };
 }
 
 /**
@@ -295,6 +385,79 @@ export function createBatchSummaryAccumulator(
  * dialect's bound-parameter limit (SQLite 32766, PostgreSQL 65535).
  */
 export const MIN_MAX_EXCLUDED_ID_BUDGET = 5000;
+
+/**
+ * [#34821] Why a predicate update's fold leaves a roll-up unfolded, so its
+ * rules read the value the binding carries (the stored one): its `filter`
+ * reads through a reference or the in-memory walker refuses it; a value that
+ * is not a number; or a `min` / `max` whose exclusion does not fit
+ * {@link MIN_MAX_EXCLUDED_ID_BUDGET}. Each stands the roll-up down for every
+ * parent of that update.
+ */
+export type SummaryFoldStandDown = 'filter' | 'not_a_number' | 'exclusion_budget';
+
+/** [#34821] Told once per roll-up a fold stands down, with why: the trace that makes the published limit observable. */
+export type SummaryFoldStandDownSink = (desc: SummaryDescriptor, reason: SummaryFoldStandDown) => void;
+
+/**
+ * [#34821] Add to `into` every field a condition's value reads as a
+ * `{ $field }` comparand, an `addDays: { $field }` offset included (the
+ * fold's walker resolves both against the row); `false` when one names no
+ * field by a string.
+ */
+function addFieldReferents(value: unknown, into: Set<string>): boolean {
+  if (Array.isArray(value)) return value.every((v) => addFieldReferents(v, into));
+  if (!value || typeof value !== 'object' || value instanceof Date) return true;
+  for (const [key, inner] of Object.entries(value as Record<string, unknown>)) {
+    if (key === '$field') {
+      if (typeof inner !== 'string' || inner === '') return false;
+      into.add(inner.split('.')[0]!);
+      continue;
+    }
+    if (!addFieldReferents(inner, into)) return false;
+  }
+  return true;
+}
+
+/** The fields a filter names, as keys or as `{ $field }` referents, or `undefined` when it holds a condition this cannot read the fields of. */
+function filterFieldNames(cond: unknown, into: Set<string>): Set<string> | undefined {
+  if (Array.isArray(cond)) {
+    for (const c of cond) if (!filterFieldNames(c, into)) return undefined;
+    return into;
+  }
+  if (!cond || typeof cond !== 'object') return into;
+  for (const [key, value] of Object.entries(cond as Record<string, unknown>)) {
+    if (key === '$and' || key === '$or' || key === '$not') {
+      if (!filterFieldNames(value, into)) return undefined;
+      continue;
+    }
+    if (key.startsWith('$')) return undefined;
+    into.add(key.split('.')[0]!);
+    if (!addFieldReferents(value, into)) return undefined;
+  }
+  return into;
+}
+
+/**
+ * [#34821] Whether a patch can move roll-up `desc` at all: it writes the
+ * foreign key, the source field (not a `count`'s) or a field the filter names
+ * (as a key, or as a `{ $field }` comparand or `addDays` offset), or holds a
+ * filter this cannot read the fields of. A patch that cannot leaves every matched
+ * row's contribution where it stands, so the roll-up is not folded and its
+ * rules read the stored value, as the by-id update reads it, at no cost: a
+ * base aggregated from the children differs from the stored value only where
+ * that is stale or held at a column scale.
+ */
+export function summaryPatchCanMove(desc: SummaryDescriptor, patch: Readonly<Record<string, unknown>>): boolean {
+  if (desc.fkField in patch) return true;
+  // A `count` counts rows, whatever its source field holds.
+  if (desc.fn !== 'count' && desc.sourceField !== undefined && desc.sourceField in patch) return true;
+  if (!desc.filter) return false;
+  const named = filterFieldNames(desc.filter, new Set());
+  if (!named) return true;
+  for (const field of named) if (field in patch) return true;
+  return false;
+}
 
 /** Whether a roll-up's base counts the matched rows as stored (else it leaves them out). */
 function baseHoldsMatched(fn: SummaryDescriptor['fn']): boolean {
@@ -343,10 +506,11 @@ export async function loadPredicateUpdateSummaryBases(
   descriptors: readonly SummaryDescriptor[],
   matched: readonly MatchedRowStates[],
   execCtx?: unknown,
+  standDown?: SummaryFoldStandDownSink,
 ): Promise<SummaryBases> {
   const bases: SummaryBases = new Map();
   for (const desc of descriptors) {
-    if (filterReadsThroughReference(desc.filter)) continue;
+    if (filterReadsThroughReference(desc.filter)) { standDown?.(desc, 'filter'); continue; }
     if (desc.fn !== 'count' && desc.sourceField === undefined) continue;
     const holdsMatched = baseHoldsMatched(desc.fn);
     const parents = new Set<string>();
@@ -382,7 +546,7 @@ export async function loadPredicateUpdateSummaryBases(
       current.push(id);
       excludedInCurrent += held;
     }
-    if (!fits) continue;
+    if (!fits) { standDown?.(desc, 'exclusion_budget'); continue; }
     if (current.length > 0) statements.push(current);
     const byParent = new Map<string, SummaryBase>();
     // The aggregate's aliases must not be the group key's name.
@@ -424,7 +588,7 @@ export async function loadPredicateUpdateSummaryBases(
         byParent.set(String(key), base);
       }
     }
-    if (!numeric) continue;
+    if (!numeric) { standDown?.(desc, 'not_a_number'); continue; }
     // A parent no row matched has the empty set's base.
     for (const id of parents) if (!byParent.has(id)) byParent.set(id, { count: 0, sum: 0, nonNull: 0, min: null, max: null });
     bases.set(desc, byParent);
@@ -462,6 +626,12 @@ export interface PredicateUpdateSummaryFold {
  */
 export type SummaryDependents = ((object: string, parentId: string, moved: Readonly<Record<string, number | null>>) => Record<string, unknown> | undefined) & {
   advance?: (object: string, parentId: string, moved: Readonly<Record<string, number | null>>) => void;
+  /**
+   * [#34821] The parent row as stored before the write, as the dependents
+   * read it: the base the bulk insert's accumulator moves a roll-up from when
+   * the reader's row does not carry it.
+   */
+  stored?: (object: string, parentId: string) => Readonly<Record<string, unknown>> | undefined;
 };
 
 /** What one row adds to one parent's roll-up. */
@@ -485,27 +655,28 @@ export function createPredicateUpdateSummaryFold(
   bases: SummaryBases,
   matched: readonly MatchedRowStates[],
   childFields: unknown,
+  standDown?: SummaryFoldStandDownSink,
 ): PredicateUpdateSummaryFold | undefined {
   if (bases.size === 0) return undefined;
   const classes = declaredFieldClasses(childFields);
   const jsonStored = declaredJsonStoredFields(childFields);
   const live = new Map(bases);
 
-  /** The row's contribution to `desc`, `null` for none, `undefined` when it cannot be said exactly. */
-  const contributionOf = (desc: SummaryDescriptor, row: Record<string, unknown>): Contribution | null | undefined => {
+  /** The row's contribution to `desc`, `null` for none, or why it cannot be said exactly. */
+  const contributionOf = (desc: SummaryDescriptor, row: Record<string, unknown>): Contribution | null | SummaryFoldStandDown => {
     const parentId = singleId(row[desc.fkField]);
     if (parentId === undefined) return null;
     if (desc.filter) {
       try {
         if (!matchesAggregationFilter(row, desc.filter as any, 0, classes, jsonStored)) return null;
       } catch {
-        return undefined;
+        return 'filter';
       }
     }
     if (desc.fn === 'count') return { parentId, value: undefined };
     const raw = row[desc.sourceField!];
     if (raw == null) return { parentId, value: undefined };
-    if (typeof raw !== 'number' || !Number.isFinite(raw)) return undefined;
+    if (typeof raw !== 'number' || !Number.isFinite(raw)) return 'not_a_number';
     return { parentId, value: raw };
   };
 
@@ -513,15 +684,15 @@ export function createPredicateUpdateSummaryFold(
   const contributions = new Map<SummaryDescriptor, Array<[Contribution | null, Contribution | null]>>();
   for (const desc of [...live.keys()]) {
     const list: Array<[Contribution | null, Contribution | null]> = [];
-    let exact = true;
+    let inexact: SummaryFoldStandDown | undefined;
     for (const { previous, next } of matched) {
       const was = contributionOf(desc, previous);
       const now = contributionOf(desc, next);
-      if (was === undefined || now === undefined) { exact = false; break; }
+      if (typeof was === 'string' || typeof now === 'string') { inexact = typeof was === 'string' ? was : now as SummaryFoldStandDown; break; }
       list.push([was, now]);
     }
-    if (exact) contributions.set(desc, list);
-    else live.delete(desc);
+    if (inexact === undefined) contributions.set(desc, list);
+    else { live.delete(desc); standDown?.(desc, inexact); }
   }
   if (live.size === 0) return undefined;
 

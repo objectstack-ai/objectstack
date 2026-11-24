@@ -66,7 +66,9 @@
  * maintainer ruling of 2026-09-03 — option C, #14147 — the static `readonly`
  * strip runs inside `engine.insert` for every non-system caller and the
  * ingress copy is deleted, so on that point the two transports no longer
- * differ.) None of those is the authorization boundary
+ * differ. The receipts' `droppedFields` member is answered here too, from the
+ * same engine listener that layer wires, on `create` and `update`.) None of
+ * those is the authorization boundary
  * — every call here still passes the engine's CRUD/FLS/RLS — but the two
  * transports should not differ at all, and unifying them behind one
  * transport-neutral data seam is filed as follow-up work rather than forked
@@ -117,7 +119,7 @@ import {
   DATA_ACTION_TO_API_OPERATION,
   type EnableLike,
 } from '@objectstack/spec/data';
-import type { EngineDeleteOptions } from '@objectstack/spec/data';
+import type { DroppedFieldsEvent, EngineDeleteOptions } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 // [#21207] The stored-metadata-body family's ONE projection and its object set,
 // from where every other surface of the family takes them (the data door, the
@@ -286,7 +288,8 @@ export interface StdioDataBridgeDeps {
  */
 export interface StdioDatasetToolsService {
   datasetTools(deps: {
-    loadDatasets: (context: unknown) => Promise<readonly unknown[]>;
+    loadDatasets: (context: unknown) => Promise<readonly unknown[] | { items: readonly unknown[]; warning?: string }>;
+    translationLocale?: (context: unknown) => Promise<string | undefined>;
     diagnoseDelegation?: (object: string, context: unknown) => Promise<{ narrowed: boolean; statement?: string } | undefined>;
     maxQueryLimit?: number;
   }): {
@@ -913,16 +916,28 @@ export async function enforceApiExposure(
  * performs — and an unserved target REFUSES the call: dropping the condition
  * would widen the result. The data door asks the same of the same sites
  * (`refuseUnservedRelationTarget`), found by the one walk both doors import
- * (`relationConditionSites`). One hop, as the engine serves one: a relation
- * beneath a condition is refused by the engine before anything is read.
+ * (`relationConditionSites`).
+ *
+ * [#36393] EVERY HOP the engine serves, not the first one only: the engine
+ * lowers a condition beneath a condition (`{ c_ref: { b_ref: { … } } }`) up to
+ * `RELATION_CONDITION_MAX_HOPS` relationships (`@objectstack/objectql`),
+ * reading each related object in turn. So each site's own condition is walked
+ * against its target's field map, and every target on the way is asked the
+ * whole of {@link enforceApiExposure} (disabled package first, then exposure)
+ * at its full position (`where.c_ref.b_ref`), the order the data door's walk
+ * asks in. A system context is asked nothing at any hop: {@link enforceApiExposure}
+ * owns that bypass, and this walk only reaches it. `depth` is a backstop against a self-referential
+ * in-process `where`, never the hop limit.
  */
 async function enforceRelationTargetExposure(
   reads: StdioObjectReads,
   object: string,
   where: unknown,
   context: ExecutionContext,
+  prefix = 'where',
+  depth = 0,
 ): Promise<void> {
-  if (where == null) return;
+  if (where == null || depth > RELATION_CONDITION_WALK_DEPTH) return;
   let def: ObjectDef | null | undefined;
   try {
     // [#25138] The field map from the definition the gate judged, so a
@@ -932,9 +947,14 @@ async function enforceRelationTargetExposure(
     def = undefined; // no field map, no site: the gate above falls open the same way
   }
   for (const site of relationConditionSites(def?.fields, where)) {
-    await enforceApiExposure(reads, site.target, GATED_ACTIONS.query, context, `where.${site.field}`);
+    const position = `${prefix}.${site.field}`;
+    await enforceApiExposure(reads, site.target, GATED_ACTIONS.query, context, position);
+    await enforceRelationTargetExposure(reads, site.target, site.condition, context, position, depth + 1);
   }
 }
+
+/** [#36393] The relation walk's backstop depth, the data door's and the engine evaluate gate's. */
+const RELATION_CONDITION_WALK_DEPTH = 8;
 
 // ---------------------------------------------------------------------------
 // [#21207] The stored-metadata-body family, at this engine-only reader
@@ -1319,6 +1339,32 @@ function describedFieldNames(described: Record<string, unknown>): string[] {
 }
 
 /**
+ * The caller's write payload without the keys the engine reported dropped
+ * (`onFieldsDropped`), for the `create` and `update` answers: a dropped key
+ * echoed from the payload would answer a value the write never stored. A
+ * `stored_expression` key is dropped here too; the write result carries the
+ * value the engine stored in its place.
+ */
+function withoutDroppedKeys(
+  data: Record<string, unknown>,
+  dropped: readonly DroppedFieldsEvent[],
+): Record<string, unknown> {
+  if (dropped.length === 0) return data;
+  const out = { ...data };
+  for (const event of dropped) for (const field of event.fields) delete out[field];
+  return out;
+}
+
+/**
+ * The `droppedFields` member of a write answer, as the protocol's `createData`
+ * and `updateData` answer it behind the HTTP bridge (`CreateDataResponseSchema`,
+ * `UpdateDataResponseSchema`): present only when the engine dropped a key.
+ */
+function droppedFieldsMember(dropped: DroppedFieldsEvent[]): { droppedFields?: DroppedFieldsEvent[] } {
+  return dropped.length > 0 ? { droppedFields: dropped } : {};
+}
+
+/**
  * Build the stdio transport's principal-bound data bridge.
  *
  * `aggregate` is attached only when the engine implements it, so a partial
@@ -1593,13 +1639,24 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
       // the `create_record` tool answers the create it is.
       let stale: SummaryRecomputeRefusal | undefined;
       let written: Record<string, unknown> | undefined;
+      // The engine's verdict on the caller's keys it did not store (a
+      // `readonly` column, a roll-up `summary`, a formula…), answered as
+      // `droppedFields` through the listener the protocol's `createData` wires
+      // behind the HTTP bridge, so both transports say the same thing.
+      const dropped: DroppedFieldsEvent[] = [];
       try {
-        written = (await engine.insert(object, data, { context })) as Record<string, unknown> | undefined;
+        written = (await engine.insert(object, data, {
+          context,
+          onFieldsDropped: (e: DroppedFieldsEvent) => { dropped.push(e); },
+        })) as Record<string, unknown> | undefined;
       } catch (e) {
         stale = staleSummaryRefusalOrThrow(e);
         written = stale.written as Record<string, unknown> | undefined;
       }
-      const record = { ...data, ...(written ?? {}) };
+      // The caller's payload fills keys the write result omits, minus every key
+      // the engine dropped: echoed, a dropped value would read as stored (a
+      // `readonly` column with no default, a `min` roll-up seeded empty).
+      const record = { ...withoutDroppedKeys(data, dropped), ...(written ?? {}) };
       // [#8497] `written` is the engine's WRITE result, which since #7823 keeps
       // the stored row whole — flagged columns included. This is a generic data
       // mouth answering an external caller, so it owns the response-body half
@@ -1610,7 +1667,7 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
       // is absent for a package's boot-registered object on an `environmentId`
       // kernel, and with no schema the helper masks and omits nothing.
       omitInternalFieldsFromWriteResponse(await readObjectDeclaration(reads, object), record);
-      const answer = { object, id: record.id, record };
+      const answer = { object, id: record.id, record, ...droppedFieldsMember(dropped) };
       if (stale) throw withEarnedAnswer(stale, answer);
       return answer;
     },
@@ -1638,12 +1695,21 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
       // attached to the refusal by #28781's carrier as `create` does; every
       // other throw, a refusal before the write among them, propagates as is.
       let stale: SummaryRecomputeRefusal | undefined;
+      // The engine's verdict on the patch keys it did not store, answered as
+      // `droppedFields` as the protocol's `updateData` answers it (see `create`).
+      const dropped: DroppedFieldsEvent[] = [];
       try {
-        await engine.update(object, data, { where: { id }, context });
+        await engine.update(object, data, {
+          where: { id },
+          context,
+          onFieldsDropped: (e: DroppedFieldsEvent) => { dropped.push(e); },
+        });
       } catch (e) {
         stale = staleSummaryRefusalOrThrow(e);
       }
-      const record = { ...(existing as Record<string, unknown>), ...data };
+      // The read-path row under the caller's patch, minus every key the engine
+      // dropped: the stored value of such a field is the one that stands.
+      const record = { ...(existing as Record<string, unknown>), ...withoutDroppedKeys(data, dropped) };
       // [#8497] The engine's update RESULT is deliberately discarded here (this
       // arm echoes the read-path row plus the caller's own patch), so no STORED
       // flagged value can reach this line. The strip still runs, for the one
@@ -1654,7 +1720,7 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
       // property literally true on every verb of this bridge rather than true-
       // by-argument on one.
       omitInternalFieldsFromWriteResponse(await readObjectDeclaration(reads, object), record);
-      const answer = { object, id, record };
+      const answer = { object, id, record, ...droppedFieldsMember(dropped) };
       if (stale) throw withEarnedAnswer(stale, answer);
       return answer;
     },
@@ -1703,12 +1769,14 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
   // carries no request, so the locale is the i18n service's default (what
   // `metaRequestLocale` answers with no header), the workspace default the
   // stdio principal speaks. An i18n service this host cannot resolve leaves the
-  // list untranslated, as there. The stdio bridge has no delegation probe (an
-  // API key is not delegated), so none is passed, as `query_records` here
-  // carries none.
+  // list untranslated, as there. [#34993] So does a translation fault, whose
+  // sentence the rows carry as their `warning`. [#35083] `translationLocale`
+  // is that one locale, so the executor's sentences speak the labels' language.
+  // The stdio bridge has no delegation probe (an API key is not delegated), so
+  // none is passed, as `query_records` here carries none.
   if (deps.datasetTools) {
     const service = deps.datasetTools;
-    const loadDatasets = async (): Promise<readonly unknown[]> => {
+    const loadDatasets = async () => {
       const protocolService = protocol?.();
       let merged: StdioProtocolObjectReads | undefined;
       let items: readonly unknown[];
@@ -1718,11 +1786,21 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
       } else {
         items = (await metadataService.list('dataset')) ?? [];
       }
-      const translated = await translateMetaList(defaultLocaleSources(deps.i18n, async () => merged), 'dataset', items);
-      return Array.isArray(translated) ? translated : items;
+      let warning: string | undefined;
+      const translated = await translateMetaList(
+        { ...defaultLocaleSources(deps.i18n, async () => merged), reportTranslationFault: (w: string) => { warning = w; } },
+        'dataset',
+        items,
+      );
+      const rows = Array.isArray(translated) ? translated : items;
+      return warning === undefined ? rows : { items: rows, warning };
+    };
+    const translationLocale = async () => {
+      const sources = defaultLocaleSources(deps.i18n, async () => undefined);
+      return sources.requestLocale(await sources.resolveI18nService());
     };
     const executor = (maxQueryLimit?: number) =>
-      service.datasetTools({ loadDatasets, ...(maxQueryLimit !== undefined ? { maxQueryLimit } : {}) });
+      service.datasetTools({ loadDatasets, translationLocale, ...(maxQueryLimit !== undefined ? { maxQueryLimit } : {}) });
     bridge.listDatasets = async (input) => executor().listDatasets(input, await resolvePrincipal());
     bridge.queryDataset = async (input, opts) => executor(opts.maxRows).queryDataset(input, await resolvePrincipal());
     bridge.datasetToolDefinitions = () => executor().definitions;

@@ -230,7 +230,7 @@ async function drain(held: Held[]) {
 }
 
 /** Mount the real record page under StrictMode, as the console's `main.tsx` does. */
-async function openRecordPage() {
+async function openRecordPage(page: unknown = RECORD_PAGE) {
   const { fetch, held } = heldTransport();
   vi.stubGlobal('fetch', fetch);
   const ds = new ObjectStackAdapter({ baseUrl: BASE, fetch, autoReconnect: false });
@@ -238,7 +238,7 @@ async function openRecordPage() {
   (ds as unknown as { getObjectSchema: () => Promise<unknown> }).getObjectSchema = async () => objectDef;
 
   let objects: unknown[] = [objectDef];
-  const pages = [RECORD_PAGE];
+  const pages = [page];
   const tree = () => {
     const metadata = {
       objects, pages, loading: false, error: null,
@@ -346,5 +346,52 @@ describe('a record open sends one approvals read and one record read (objectui#1
     const recordReads = held.filter(isRecordRead);
     expect(recordReads, 'one refetch, never a second read beside it').toHaveLength(2);
     expect(expansionOf(recordReads[1])).toEqual(['account', 'created_by', 'owner', 'reviewer']);
+  });
+});
+
+/**
+ * objectstack#35484 (and the drawn-as-written fallback of objectstack#35483) —
+ * a page drawn as written whose details are split across two
+ * `record:details` nodes draws the record's approval band ONCE, recall
+ * included, on the first body (`ApprovalBandOnceScope` around the page).
+ */
+describe('a page drawn as written with two details nodes draws one approval band (objectstack#35484)', () => {
+  const twoDetails = (first: unknown) => ({
+    ...RECORD_PAGE,
+    regions: [{
+      name: 'main',
+      width: 'full',
+      components: [
+        first,
+        {
+          type: 'record:details',
+          properties: { sections: [{ name: 'more', label: 'More', columns: 2, fields: ['account', 'owner'] }] },
+        },
+        { type: 'record:approvals', properties: {} },
+      ],
+    }],
+  });
+  const FIRST = {
+    type: 'record:details',
+    properties: { sections: [{ name: 'overview', label: 'Overview', columns: 2, fields: ['title', 'stage'] }] },
+  };
+  const bands = () => screen.queryAllByText('Locked for approval');
+
+  it('two details bodies: "Locked for approval" once, with one recall lever, on the first body', async () => {
+    await openRecordPage(twoDetails(FIRST));
+    await waitFor(() => expect(bands()).toHaveLength(1));
+    // Both bodies mark the band's place; only the first draws it.
+    expect(document.querySelectorAll('[data-approval-band-mark]')).toHaveLength(2);
+    const first = document.querySelectorAll('[data-approval-band-mark]')[0];
+    expect(first.compareDocumentPosition(bands()[0]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // The approvals panel draws its own state; the band's recall is drawn once.
+    const panel = await screen.findByTestId('record-approvals-panel');
+    const bandRecalls = screen.getAllByText('Recall approval').filter((el) => !panel.contains(el));
+    expect(bandRecalls).toHaveLength(1);
+  });
+
+  it('CONTROL: the one-body page draws its band as before (the open-requests page above)', async () => {
+    await openRecordPage();
+    await waitFor(() => expect(bands()).toHaveLength(1));
   });
 });

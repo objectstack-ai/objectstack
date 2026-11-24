@@ -158,7 +158,7 @@
  *   launch hosts alike.
  *
  * WHERE the bundle comes from is the channel the console already has:
- * `activeFlowsBundle` (`utils/flowsBundle`) reads the `flows` group back out
+ * `activeFlowsBundle` (`@object-ui/i18n`) reads the `flows` group back out
  * of the i18next resource tree the provider loaded, for the active language.
  * There is no second loader.
  *
@@ -307,6 +307,36 @@
  * of closing. A screen with no fields at all is not display-only either (see
  * {@link isDisplayOnlyScreen}), and a terminal failure or a refusal keeps its
  * single Close.
+ *
+ * ## A step the run already left is never submitted again (objectstack#36831)
+ *
+ * A resume can finish on the server while its answer never reaches this
+ * dialog intact: a gateway times out or the connection drops while the run
+ * writes, so the browser gets a `504` or a thrown fetch. Both used to read as
+ * "the suspension was not consumed", which is true only of a request that never
+ * arrived. The dialog kept the step with Submit live, and the next press sent
+ * that step's values to whatever screen the run had moved on to — HotCRM's
+ * quote wizard had already created the quote, and the user read the engine's
+ * `INVALID_SCREEN_INPUT` sentence naming fields of a screen they never saw.
+ *
+ * So before any retry is offered — on no answer at all, and on every failure
+ * `interpretFlowResponse` calls retryable — the dialog re-reads where the run
+ * stands through the route's refresh-safe screen read
+ * (`GET .../runs/RUN/screen`) and compares the screen it waits on with this
+ * one by `nodeId`, the contract's own correlation of a resume to its pause:
+ * - **Another screen:** the step went through. The dialog shows that screen,
+ *   with a plain notice saying so (`flowRunner.alreadySubmitted`) and no error
+ *   toast or banner.
+ * - **No screen (`404`):** the run waits on no screen any more — it ended,
+ *   failed, or a resume holds it right now. Submit is withdrawn with a plain
+ *   notice (`flowRunner.noLongerWaiting`), and mounted readers refetch.
+ * - **This screen, or no usable answer:** a real retry, shown exactly as
+ *   before. A genuine refusal of this screen's values keeps its sentence.
+ *
+ * The notices are the console's catalog words, so a stale submit never shows
+ * the engine's sentence. The engine's refusal itself is unchanged. A loop that
+ * pauses on the same screen node again is indistinguishable from a retry by
+ * `nodeId`, and keeps today's answer.
  */
 import { Suspense, useEffect, useState } from 'react';
 import {
@@ -349,7 +379,7 @@ import {
 } from './ScreenView.js';
 import { flowSuccessCopy, interpretFlowResponse } from '../utils/flowResponse.js';
 import { announceFlowDroppedFields } from '../utils/flowLaunch.js';
-import { activeFlowsBundle, type FlowsTranslation } from '../utils/flowsBundle.js';
+import { activeFlowsBundle, type FlowsTranslation } from '@object-ui/i18n';
 
 export type { ScreenSpec, ScreenFieldSpec } from './ScreenView.js';
 
@@ -497,6 +527,47 @@ interface RefusedOutcome {
   message: string;
 }
 
+/**
+ * What re-reading the run said after a resume whose outcome is unknown
+ * (objectstack#36831 — see the header). `terminal` means the run waits on no
+ * screen any more, so the submit affordance is withdrawn; otherwise the run
+ * had moved on and the dialog now shows the screen it waits on.
+ */
+interface ReconciledNotice {
+  message: string;
+  terminal: boolean;
+}
+
+/**
+ * Where a run stands, read off `GET .../runs/RUN/screen` — the route's
+ * refresh-safe re-fetch for this runner. `screen`: it waits on that screen.
+ * `none`: the route answered `404`, it waits on no screen (it ended, failed,
+ * or a resume holds it right now). `unknown`: any other answer, including a
+ * read that never got one, which proves nothing either way.
+ */
+type RunPosition = { kind: 'screen'; screen: ScreenSpec } | { kind: 'none' } | { kind: 'unknown' };
+
+async function readRunPosition(
+  authFetch: FlowRunnerProps['authFetch'],
+  baseUrl: string,
+  flowName: string,
+  runId: string,
+): Promise<RunPosition> {
+  try {
+    const res = await authFetch(
+      `${baseUrl}/api/v1/automation/${encodeURIComponent(flowName)}/runs/${encodeURIComponent(runId)}/screen`,
+      { method: 'GET' },
+    );
+    if (res.status === 404) return { kind: 'none' };
+    if (!res.ok) return { kind: 'unknown' };
+    const json = await res.json().catch(() => null);
+    const screen = json?.data?.screen;
+    return screen && typeof screen.nodeId === 'string' ? { kind: 'screen', screen: screen as ScreenSpec } : { kind: 'unknown' };
+  } catch {
+    return { kind: 'unknown' };
+  }
+}
+
 export interface FlowRunnerProps {
   /** The paused screen-flow to drive, or `null` when closed. */
   state: ScreenFlowState | null;
@@ -532,6 +603,7 @@ export function FlowRunner({ state, authFetch, baseUrl, onClose, onComplete, dat
   const [submitting, setSubmitting] = useState(false);
   const [resumeError, setResumeError] = useState<ResumeError | null>(null);
   const [refused, setRefused] = useState<RefusedOutcome | null>(null);
+  const [reconciled, setReconciled] = useState<ReconciledNotice | null>(null);
   // The message each field the last Submit refused is drawn with, by field
   // name (objectstack#26882 — see the header).
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -549,6 +621,7 @@ export function FlowRunner({ state, authFetch, baseUrl, onClose, onComplete, dat
       // A fresh run must not open under the previous run's refusal.
       setResumeError(null);
       setRefused(null);
+      setReconciled(null);
       setFieldErrors({});
     }
   }, [state]);
@@ -587,11 +660,56 @@ export function FlowRunner({ state, authFetch, baseUrl, onClose, onComplete, dat
   // Shared by the flat-field submit and the object-form save callback;
   // `savedRecord` says whether this step persisted a record before resuming,
   // which only an `object-form` step does (objectstack#26578 — see the header).
+  // A resume whose outcome this dialog cannot know — no answer at all, a
+  // gateway's, or a refusal the engine calls retryable — re-reads where the run
+  // stands before a retry is offered (objectstack#36831 — see the header).
+  // Answers `true` when the run's real position settled the dialog: it moved
+  // on to another screen, which the dialog now shows, or it waits on none, and
+  // Submit is withdrawn. `false` leaves the failure to be shown as before.
+  const reconcileWithRun = async (): Promise<boolean> => {
+    const position = await readRunPosition(authFetch, baseUrl, flowName, runId);
+    if (position.kind === 'screen' && position.screen.nodeId !== screen.nodeId) {
+      setScreen(position.screen);
+      setValues(initialScreenValues(position.screen));
+      setFieldErrors({});
+      setResumeError(null);
+      setReconciled({
+        message: t('flowRunner.alreadySubmitted', {
+          defaultValue: 'Your previous submission went through. The flow has moved on to this step.',
+        }),
+        terminal: false,
+      });
+      return true;
+    }
+    if (position.kind === 'none') {
+      setResumeError(null);
+      setReconciled({
+        message: t('flowRunner.noLongerWaiting', {
+          defaultValue: 'This step may already have been processed. Close this dialog and check the record before trying again.',
+        }),
+        terminal: true,
+      });
+      // The run may well have written; whatever is mounted refetches, as on
+      // completion (see the header's resume-RESULT section on the `'*'`).
+      notifyDataChanged({ objectName: '*' });
+      return true;
+    }
+    return false;
+  };
+
   const resumeWith = async (inputs: Record<string, unknown>, savedRecord: boolean): Promise<void> => {
-    const res = await authFetch(
-      `${baseUrl}/api/v1/automation/${encodeURIComponent(flowName)}/runs/${encodeURIComponent(runId)}/resume`,
-      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ inputs }) },
-    );
+    setReconciled(null);
+    let res: Response;
+    try {
+      res = await authFetch(
+        `${baseUrl}/api/v1/automation/${encodeURIComponent(flowName)}/runs/${encodeURIComponent(runId)}/resume`,
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ inputs }) },
+      );
+    } catch (err) {
+      // No answer at all: the server may have finished the resume anyway.
+      if (await reconcileWithRun()) return;
+      throw err;
+    }
     const json = await res.json().catch(() => null);
     // Shared with the two flow-LAUNCH handlers (useConsoleActionRuntime,
     // RecordDetailView) so the resume path and the launch path can never again
@@ -605,6 +723,10 @@ export function FlowRunner({ state, authFetch, baseUrl, onClose, onComplete, dat
     // refused write's permission line is read in.
     const outcome = interpretFlowResponse<ScreenSpec>(res, json, 'Resume', language);
     if (outcome.kind === 'failed') {
+      // "Retryable" is a claim about THIS screen; a gateway's answer, or an
+      // engine refusal of fields the run's screen does not declare, may mean
+      // the run has already left it (objectstack#36831 — see the header).
+      if (outcome.retryable && await reconcileWithRun()) return;
       // Two carriers on purpose (`c40f3b8ca`): the toast is the console's
       // viewport-fixed failure idiom; the inline Alert stays in the dialog,
       // above the scrolling body, with the values that caused it.
@@ -724,8 +846,9 @@ export function FlowRunner({ state, authFetch, baseUrl, onClose, onComplete, dat
       // File fields go out as their bare `sys_file` id (objectstack#25801).
       await resumeWith(screenResumeValues(screen, values), false);
     } catch (err) {
-      // The request never produced a response (network / abort), so the
-      // suspension was not consumed — this one IS retryable.
+      // The request never produced a response (network / abort) AND re-reading
+      // the run proved nothing either way (`resumeWith`, objectstack#36831), so
+      // a retry is offered as before.
       const message = (err as Error).message;
       toast.error(message);
       setResumeError({ message, retryable: true });
@@ -760,7 +883,9 @@ export function FlowRunner({ state, authFetch, baseUrl, onClose, onComplete, dat
   // end is never resumed — so it shares this flag rather than a parallel one:
   // withdrawing the submit affordance is one behaviour with two causes, and
   // splitting it is how the `object-form` arm of it gets forgotten.
-  const terminal = refused !== null || (resumeError !== null && !resumeError.retryable);
+  const terminal = refused !== null
+    || (resumeError !== null && !resumeError.retryable)
+    || reconciled?.terminal === true;
   // A refused end shows its message alone (objectui#13342 — see the header):
   // the screen it paused on is not drawn under it. Narrower than `terminal` on
   // purpose — a terminal failure keeps the screen and the values it explains.
@@ -814,6 +939,16 @@ export function FlowRunner({ state, authFetch, baseUrl, onClose, onComplete, dat
           // not copy with a key, exactly like the server sentence below.
           <Alert>
             <AlertDescription>{refused.message}</AlertDescription>
+          </Alert>
+        )}
+
+        {reconciled && (
+          // `default`, not `destructive`: the step the user submitted went
+          // through, or may have (objectstack#36831 — see the header). The
+          // console's own words, so read from its catalog — never the engine's
+          // sentence, which names fields of a screen the user never saw.
+          <Alert data-testid="flow-reconciled-notice">
+            <AlertDescription>{reconciled.message}</AlertDescription>
           </Alert>
         )}
 

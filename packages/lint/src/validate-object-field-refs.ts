@@ -77,8 +77,8 @@
  * THAT object, and that no other rule already resolves:
  *
  *  - **`highlightFields[]`** (ADR-0085, `packages/spec/src/data/object.zod.ts`
- *    line 2092) — drives default list columns, cards, previews and the detail
- *    highlight strip. A dangling entry is dropped by every consumer.
+ *    line 2092) — drives default list columns, cards, previews, the hover
+ *    card and the record picker. A dangling entry is dropped by every consumer.
  *  - **`publicSharing.redactFields[]`** (`object.zod.ts` line 2258) — the
  *    field names stripped from records served through a share link. This one
  *    fails OPEN, which the schema's own `history` note says in as many words:

@@ -226,7 +226,7 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
       },
       digest: {
         label: "摘要",
-        help: "將這些通知彙整成一份摘要，而不是逐則送出：daily 於午夜送出，weekly 於週一午夜送出，none 則每則立即送出。緊急通知一律立即送出。僅在通道為 *（所有通道）的偏好設定上生效。",
+        help: "將這些通知彙整成一份摘要，而不是逐則送出：daily 於午夜送出，weekly 於週一午夜送出，none 則每則立即送出。緊急通知一律立即送出。僅在通道為 *（所有通道）的偏好設定上生效。留空時由下一筆偏好設定決定：先是所有使用者的預設設定，然後是 none。",
         options: {
           none: "不彙整",
           daily: "每日",
@@ -235,7 +235,7 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
       },
       quiet_hours: {
         label: "勿擾時段",
-        help: "每天暫緩通知、並於時段結束時送達的時段，例如 { \"tz\": \"Europe/Berlin\", \"start\": \"22:00\", \"end\": \"07:00\" }。時間為該時區的 HH:MM（未填 tz 時為 UTC），時段可以跨越午夜。緊急通知不會暫緩。僅在通道為 *（所有通道）的偏好設定上生效。"
+        help: "每天暫緩通知、並於時段結束時送達的時段，例如 { \"tz\": \"Europe/Berlin\", \"start\": \"22:00\", \"end\": \"07:00\" }。時間為該時區的 HH:MM（未填 tz 時為 UTC），時段可以跨越午夜。緊急通知不會暫緩。僅在通道為 *（所有通道）的偏好設定上生效。{ \"off\": true } 表示不設免打擾時段；留空時由下一筆偏好設定決定：先是所有使用者的預設設定，然後是不設。"
       },
       created_at: {
         label: "建立時間"
@@ -487,6 +487,64 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
       },
       created_at: {
         label: "建立時間"
+      }
+    }
+  },
+  sys_channel_account: {
+    label: "通道帳戶",
+    pluralLabel: "通道帳戶",
+    description: "組織安裝的聊天應用程式（例如其自有的 Slack 應用程式）及其取得的機器人權杖。",
+    fields: {
+      channel_id: {
+        label: "通道"
+      },
+      display_name: {
+        label: "工作區"
+      },
+      external_id: {
+        label: "工作區 ID"
+      },
+      bot_token: {
+        label: "機器人權杖"
+      },
+      status: {
+        label: "狀態",
+        options: {
+          active: "有效",
+          revoked: "已撤銷"
+        }
+      }
+    }
+  },
+  sys_channel_user_link: {
+    label: "通道使用者連結",
+    pluralLabel: "通道使用者連結",
+    description: "使用者與其在聊天工作區中本人帳號之間的連結：依電子郵件比對提議，本人確認後才開始傳送。",
+    fields: {
+      account_id: {
+        label: "帳戶"
+      },
+      user_id: {
+        label: "使用者"
+      },
+      external_user_id: {
+        label: "聊天使用者 ID"
+      },
+      external_display_name: {
+        label: "聊天使用者名稱"
+      },
+      state: {
+        label: "狀態",
+        options: {
+          proposed: "已提議",
+          confirmed: "已確認"
+        }
+      },
+      confirmed_at: {
+        label: "確認時間"
+      },
+      proposal_email_hash: {
+        label: "提議電子郵件雜湊"
       }
     }
   }

@@ -463,7 +463,7 @@ describe('ObjectGrid — bulk bar Clear resets both selection sources (#4140)', 
 
     // Escalate to the cross-page selection, then Clear it.
     //
-    // The banner's two branches are told apart *structurally*, by whether the
+    // The bar's two states are told apart *structurally*, by whether the
     // escalation button is still offered — not by its copy. These grid tests
     // wrap in `ActionProvider` only, with no `I18nProvider`, so `{{count}}`
     // interpolation never runs and count-bearing strings reach the DOM as the
@@ -477,7 +477,8 @@ describe('ObjectGrid — bulk bar Clear resets both selection sources (#4140)', 
     await waitFor(() =>
       expect(screen.queryByTestId('bulk-select-all-matching')).not.toBeInTheDocument(),
     );
-    expect(screen.getByTestId('bulk-cross-page-banner')).toBeInTheDocument();
+    // objectstack#35678 — the count chip carries the all-matching sentence.
+    expect(screen.getByTestId('bulk-selection-count')).toHaveAttribute('title');
 
     clickClear();
 

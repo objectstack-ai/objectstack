@@ -152,6 +152,50 @@ describe('generateColorVars', () => {
     expect(vars['--destructive']).toBeTruthy();
   });
 
+  describe('danger text derived from the error colour (objectstack#35911)', () => {
+    const toHex = (triple: string) => {
+      const [h, sat, lig] = triple.split(/\s+/).map((p) => parseFloat(p));
+      const a = (sat / 100) * Math.min(lig / 100, 1 - lig / 100);
+      const k = (n: number) => (n + h / 30) % 12;
+      const f = (n: number) => Math.round(255 * (lig / 100 - a * Math.max(-1, Math.min(k(n) - 3, 9 - k(n), 1))));
+      return '#' + [f(0), f(8), f(4)].map((c) => c.toString(16).padStart(2, '0')).join('');
+    };
+    const LIGHT = ['#ffffff', toHex('210 40% 96.1%'), toHex('240 18% 94%')];
+    const DARK = [toHex('222.2 84% 4.9%'), toHex('217.2 32.6% 17.5%'), toHex('240 5% 16%'), toHex('240 6% 6%'), toHex('240 6% 11%')];
+    const floor = (text: string, surfaces: string[]) => Math.min(...surfaces.map((s) => contrastRatio(toHex(text), s)!));
+
+    it.each(['#EF4444', '#7C3AED', '#F97316', '#991B1B', '#FCA5A5'])('%s gives a light and a dark text that clear 4.5:1, in its own hue', (error) => {
+      const vars = generateColorVars({ primary: '#000', error });
+      const light = vars['--destructive-text-light'];
+      const dark = vars['--destructive-text-dark'];
+      expect(floor(light, LIGHT), `light ${light}`).toBeGreaterThanOrEqual(4.5);
+      expect(floor(dark, DARK), `dark ${dark}`).toBeGreaterThanOrEqual(4.5);
+      const hue = (t: string) => parseFloat(t);
+      expect(Math.abs(hue(light) - hue(vars['--destructive']))).toBeLessThanOrEqual(1);
+      expect(Math.abs(hue(dark) - hue(vars['--destructive']))).toBeLessThanOrEqual(1);
+    });
+
+    it('#EF4444: neither text equals the fill, and the fill is the colour itself', () => {
+      const vars = generateColorVars({ primary: '#000', error: '#EF4444' });
+      expect(vars['--destructive']).toBe(hexToHSL('#EF4444'));
+      expect(vars['--destructive-text-light']).not.toBe(vars['--destructive']);
+      expect(vars['--destructive-text-dark']).not.toBe(vars['--destructive']);
+      expect(vars['--destructive-text-light']).not.toBe(vars['--destructive-text-dark']);
+    });
+
+    it('never writes --destructive-text itself, which would override the per-mode stylesheet choice', () => {
+      expect(generateColorVars({ primary: '#000', error: '#EF4444' })).not.toHaveProperty('--destructive-text');
+    });
+
+    it('no error colour, or a non-hex one, derives nothing and leaves the stylesheet danger text', () => {
+      for (const colors of [{ primary: '#000' }, { primary: '#000', error: 'oklch(0.6 0.2 25)' }]) {
+        const vars = generateColorVars(colors);
+        expect(vars).not.toHaveProperty('--destructive-text-light');
+        expect(vars).not.toHaveProperty('--destructive-text-dark');
+      }
+    });
+  });
+
   it('should map surface → --card', () => {
     const vars = generateColorVars({ primary: '#000', surface: '#F8FAFC' });
     expect(vars['--card']).toBeTruthy();

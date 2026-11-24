@@ -74,6 +74,7 @@ import {
     type AuthGate,
 } from '@objectstack/core';
 import { createLazyCounterStore, type CounterStore } from '@objectstack/plugin-auth/rate-limit-storage';
+import type { ClientAddressTrust } from '@objectstack/plugin-auth/client-address';
 import type { ApiEndpoint } from '@objectstack/spec/api';
 
 import { apiErrorResponse, type ApiErrorEnvelope } from './error-envelope.js';
@@ -219,8 +220,11 @@ export interface EndpointPolicyContext {
     resolveGatedSessionUser?: (headers: HeaderBag) => Promise<unknown>;
     /** Per-endpoint limiters. Required: an armed budget with nowhere to count is a wiring bug, not a config. */
     limiters: EndpointRateLimiterRegistry;
-    /** `server.trustProxy` — believe forwarded headers when keying by address. */
-    trustProxy?: boolean;
+    /**
+     * `server.trustProxy`, as `readTrustProxy` (`@objectstack/plugin-auth/client-address`)
+     * reads it — whose forwarded headers to believe when keying by address.
+     */
+    trustProxy?: ClientAddressTrust;
     logger?: RateLimitLogger;
 }
 
@@ -369,7 +373,8 @@ export async function applyEndpointPolicies(input: EndpointPolicyInput): Promise
             ...(principalId ? { principalId } : {}),
             headers: input.headers ?? {},
             ...(input.remoteAddress ? { remoteAddress: input.remoteAddress } : {}),
-            trustProxy: input.trustProxy === true,
+            trustProxy: input.trustProxy ?? false,
+            ...(logger?.warn ? { warn: (message: string) => logger.warn?.(message) } : {}),
         });
 
         let decision;

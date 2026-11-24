@@ -31,8 +31,7 @@
  *
  * ## Reverse verification (direction predicted BEFORE running)
  *
- * Restore `data` to `buildExpressionScope` (and the `data:` argument at this
- * page's own `createExpressionEvaluator` call):
+ * Restore `data` to `buildExpressionScope`:
  *   - `publishes a predicate scope with no data root` goes RED — the key is
  *     back;
  *   - `a data.* gate is REPORTED` goes RED, and in the informative way: the
@@ -58,6 +57,7 @@ import { usePredicateScope } from '../../../../react/src/hooks/useExpression';
 // later test reads silence — "a green run that checked nothing", in that
 // module's own words.
 import { __resetVisibilityPredicateWarnings } from '../../../../react/src/utils/visibilityDiagnostic';
+import { resolveFieldRuleState } from '@object-ui/core';
 import { RecordFormPage } from '../../views/RecordFormPage';
 
 const h = React.createElement;
@@ -142,6 +142,23 @@ function renderPage() {
 const lastScope = (): Record<string, any> => publishedScopes[publishedScopes.length - 1];
 const lastFields = (): string[] => formSchemas[formSchemas.length - 1].fields;
 
+/**
+ * The FORM's judgement of `field`'s `visibleWhen` under the scope this page
+ * publishes. Since objectstack#35249 the page's list reads the static `hidden`
+ * only and the form judges `visibleWhen`, through `resolveFieldRuleState`, with
+ * that scope — so the fault this card made loud is now the form's to report,
+ * as `faults.visibleWhen`.
+ */
+const formJudges = (field: keyof typeof CONTACTS.fields) =>
+  resolveFieldRuleState(
+    { visibleWhen: (CONTACTS.fields[field] as any).visibleWhen },
+    {},
+    {},
+    undefined,
+    lastScope(),
+    `field '${field}'`,
+  );
+
 let warnings: string[];
 
 beforeEach(() => {
@@ -186,38 +203,30 @@ describe('objectui#8166 — the record form page, rendered', () => {
 
   it('REPORTS the `data.*` gate — the same channel the `app` control uses', async () => {
     renderPage();
-    await waitFor(() => expect(formSchemas.length).toBeGreaterThan(0));
-
-    const dataLine = warnings.find((w) => w.includes("data.status == 'x'"));
-    const appLine = warnings.find((w) => w.includes("app.name == 'crm'"));
+    await waitFor(() => expect(publishedScopes.length).toBeGreaterThan(0));
 
     // The control first: this is what "loud" already looked like on this
-    // surface, and it is the shape the `data` line has to match.
-    expect(appLine).toBeDefined();
-    expect(appLine).toContain('Unknown variable: app');
-
-    expect(dataLine).toBeDefined();
-    expect(dataLine).toContain('Unknown variable: data');
-    // The author's locator: the predicate SOURCE and the key they wrote.
-    expect(dataLine).toContain('visibleWhen');
+    // surface, and it is the shape the `data` fault has to match.
+    expect(String(formJudges('app_gated').faults.visibleWhen)).toContain('Unknown variable: app');
+    expect(String(formJudges('wrong_layer').faults.visibleWhen)).toContain('Unknown variable: data');
   });
 
   it('REGRESSION FLOOR — a correct identity gate still hides, an ungated field still shows', async () => {
     renderPage();
     await waitFor(() => expect(formSchemas.length).toBeGreaterThan(0));
 
-    const fields = lastFields();
+    // The list reads `hidden` only, so every field here is listed.
+    expect(lastFields()).toEqual(expect.arrayContaining(['name', 'admin_only', 'wrong_layer', 'app_gated']));
     // The floor: the gate that CAN resolve still bites, and a clerk is not a
-    // platform admin. If this ever reads `toContain`, the change broke working
+    // platform admin. If this ever reads visible, the change broke working
     // predicates and the card's whole point with it.
-    expect(fields).not.toContain('admin_only');
-    // Ungated fields are untouched.
-    expect(fields).toContain('name');
+    const admin = formJudges('admin_only');
+    expect(admin.visible).toBe(false);
+    expect(admin.faults.visibleWhen).toBeUndefined();
     // And the faulting ones fail OPEN, which is this tier's shipped, documented
-    // posture (objectui#6443 / #6487) and NOT this card's to flip: the field is
-    // on screen and the console says why. Asserted so the behaviour is a stated
-    // outcome rather than an accident nobody wrote down.
-    expect(fields).toContain('wrong_layer');
-    expect(fields).toContain('app_gated');
+    // posture (objectui#6443 / #6487) and NOT this card's to flip. Asserted so
+    // the behaviour is a stated outcome rather than an accident nobody wrote down.
+    expect(formJudges('wrong_layer').visible).toBe(true);
+    expect(formJudges('app_gated').visible).toBe(true);
   });
 });

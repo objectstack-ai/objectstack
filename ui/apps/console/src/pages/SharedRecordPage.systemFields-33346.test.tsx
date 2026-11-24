@@ -54,7 +54,7 @@ const FIELDS = {
   owner_id: { label: 'Owner', type: 'lookup', reference: 'sys_user' },
 };
 
-function shareServer(fields?: Record<string, unknown>) {
+function shareServer(fields?: Record<string, unknown>, linkExtra: Record<string, unknown> = {}) {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: string | URL | Request) => {
@@ -73,6 +73,7 @@ function shareServer(fields?: Record<string, unknown>) {
                 record_id: BRIEF.id,
                 permission: 'view',
                 audience: 'anyone',
+                ...linkExtra,
               },
               redactFields: ['internal_notes', 'deal_value'],
               ...(fields ? { fields } : {}),
@@ -120,5 +121,31 @@ describe('#33346 row 99 — the share page lists fields by the record page rule'
 
     // No projection, so no way to tell a declared key: every non-system key stays, labelled from the key.
     expect(labels()).toEqual(['Id', 'Title', 'Summary', 'Status', 'Owner Id']);
+  });
+});
+
+describe('objectstack#33552 — the header names the object by its label, and a hidden field is not listed', () => {
+  it('a field the projection marks hidden is not listed, though the object declares it', async () => {
+    shareServer({ ...FIELDS, summary: { ...FIELDS.summary, hidden: true } });
+    renderLink();
+    await screen.findByText('Northwind renewal');
+
+    expect(labels()).toEqual(['Title', 'Status', 'Owner']);
+    expect(document.body.textContent).not.toMatch(/Client Summary|Two-year renewal/);
+  });
+
+  it('the header shows the object label the answer carries', async () => {
+    shareServer(FIELDS, { object_label: 'Client Brief' });
+    renderLink();
+
+    expect(await screen.findByRole('heading', { level: 1 })).toHaveTextContent('Shared Client Brief');
+    expect(document.body.textContent).not.toMatch(/showcase_client_brief/);
+  });
+
+  it('an answer with no object label (an older server) names the object by its name', async () => {
+    shareServer(FIELDS);
+    renderLink();
+
+    expect(await screen.findByRole('heading', { level: 1 })).toHaveTextContent('Shared showcase_client_brief');
   });
 });

@@ -6,7 +6,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 
@@ -16,6 +16,7 @@ vi.mock('@object-ui/auth', async (importOriginal) => ({
   useAuth: () => ({ user: mockUser.current, isAuthenticated: !!mockUser.current, isLoading: false }),
 }));
 
+import { ActiveOrganizationStorage } from '@object-ui/auth';
 import {
   RecentItemsProvider,
   useDropDeletedRecordsFromRecents,
@@ -590,5 +591,55 @@ describe('RecentItemsProvider — a deleted record leaves the recents (objectsta
     unmount();
     act(() => source.emit({ type: 'delete', resource: 'crm_account', id: 'a1' }));
     expect(ids(JSON.parse(localStorage.getItem(KEY)!))).toEqual(before);
+  });
+});
+
+// objectstack#36244 — the browser copy is kept per (user, organization). The
+// organization is the one the real `ActiveOrganizationStorage` holds; a switch
+// reloads the console, so each organization is a fresh mount.
+describe('RecentItemsProvider — kept per organization (objectstack#36244)', () => {
+  function bootIn(orgId: string) {
+    ActiveOrganizationStorage.set(orgId);
+    const paints: string[][] = [];
+    const view = renderHook(
+      () => {
+        const recent = useRecentItems();
+        paints.push(recent.recentItems.map((r) => r.id));
+        return recent;
+      },
+      { wrapper },
+    );
+    return { view, firstPaint: paints[0] };
+  }
+
+  beforeEach(() => {
+    localStorage.clear();
+    mockUser.current = { id: 'user-1', name: 'Alice', email: 'a@x' } as any;
+    localStorage.setItem('auth-session-user-id', 'user-1');
+  });
+
+  afterEach(() => {
+    ActiveOrganizationStorage.clear();
+    localStorage.clear();
+  });
+
+  it("the items visited in A are absent from B's first paint, and A keeps them", () => {
+    const a = bootIn('org_a');
+    act(() => a.view.result.current.addRecentItem({ id: 'object:a', type: 'object', name: 'a', href: '/a' }));
+    a.view.unmount();
+
+    const b = bootIn('org_b');
+    expect(b.firstPaint).toEqual([]);
+    act(() => b.view.result.current.addRecentItem({ id: 'object:b', type: 'object', name: 'b', href: '/b' }));
+    b.view.unmount();
+
+    expect(bootIn('org_a').firstPaint).toEqual(['object:a']);
+  });
+
+  it('a single organization keeps the copy kept before the organization was part of the key', () => {
+    const before: RecentItem[] = [{ id: 'object:c', type: 'object', name: 'c', href: '/c', visitedAt: '2024-01-01' }];
+    localStorage.setItem('objectui-recent-items:u:user-1', JSON.stringify(before));
+    expect(bootIn('org_a').firstPaint).toEqual(['object:c']);
+    expect(localStorage.getItem('objectui-recent-items:u:user-1')).toBeNull();
   });
 });

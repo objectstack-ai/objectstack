@@ -8,7 +8,7 @@
 
 import { ObjectStackClient, type QueryOptions as ObjectStackQueryOptions } from '@objectstack/client';
 import type { DroppedFieldsEvent, EngineAggregateOptions } from '@objectstack/spec/data';
-import type { ListViewGroupHeaderRow } from '@objectstack/spec/ui';
+import type { Dataset, ListViewGroupHeaderRow } from '@objectstack/spec/ui';
 // objectui#11013 — a VALUE import: the keys `listViews` carries off a stored
 // ViewItem record are the spec's own record of the console's round-trip keys,
 // read off the pin rather than hand-listed (see `VIEW_ITEM_ROUND_TRIP_KEYS`).
@@ -6481,6 +6481,11 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
         // unpublished view (ADR-0037). The overlay tags the item, not its
         // nested spec, so read from either.
         const isDraft = v._draft === true || spec?._draft === true;
+        // objectstack#35933 — the package the server served the row under
+        // (the item's `_packageId`, which the overlay stamps on the item,
+        // not on a nested spec), carried as served on both arms, so the list
+        // can tell a view a read-only package ships from one it may save.
+        const packageId = typeof v._packageId === 'string' && v._packageId !== '' ? v._packageId : undefined;
         // Canonical ViewItem (ADR-0017) carries its body under `config`;
         // the display `type` (grid/kanban/gallery/…) lives at `config.type`,
         // and only the list/form *family* sits at the top level (`viewKind`).
@@ -6515,10 +6520,20 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
             if (spec[key] !== undefined) row[key] = spec[key];
           }
           row.isDefault = !!spec.isDefault;
+          // objectstack#36011 — the record's override declaration (ADR-0146
+          // D2, on the record's top level), so the list can tell a view a
+          // package's customization overrides from the package's own.
+          if (spec.overrides !== undefined) row.overrides = spec.overrides;
           if (isDraft) row._draft = true;
+          if (packageId !== undefined) row._packageId = packageId;
           return row;
         }
-        return isDraft ? { ...spec, _draft: true } : spec;
+        if (!isDraft && (packageId === undefined || spec?._packageId === packageId)) return spec;
+        return {
+          ...spec,
+          ...(isDraft ? { _draft: true } : {}),
+          ...(packageId !== undefined ? { _packageId: packageId } : {}),
+        };
       });
     } catch (err) {
       // Kept verbatim, on every arm. The console breadcrumb was never the
@@ -7141,6 +7156,71 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
     }
   }
 
+  /**
+   * Restore the factory version of a view a read-only package ships: remove
+   * the override its customization pair holds (ADR-0146 D2, "Restore package
+   * original" = delete the overriding item from `.custom`), so every user of
+   * the view is served the package's own view again.
+   *
+   * The override is the one {@link updateView} writes
+   * ({@link viewCustomizationHome}): the served read names the shipping
+   * package (`_packageId`) and carries the declaration (`overrides` naming
+   * that package). The pair is the ensure door's answer for that package, the
+   * same home `updateView` wrote into; the pair's draft of the view, then its
+   * row, are deleted there (`DELETE /meta/view/NAME?package=PAIR`, the door
+   * Studio's restore takes). Nothing is deleted at the package that ships the
+   * view, and the pair package itself stays.
+   *
+   * @throws when the served view is not an override of the package it is
+   *   served under (nothing is sent); when a delete is refused, with the
+   *   server's reason on the message's next line (`formatMetadataError`);
+   *   and when the pair held no row of the view, so nothing was restored.
+   */
+  async restoreFactoryView(
+    objectName: string,
+    viewName: string,
+  ): Promise<DeleteViewResult> {
+    await this.connect();
+    const read: any = await this.client.meta.getItem('view', viewName);
+    const current: Record<string, any> = (read && (read.item || read)) || {};
+    const base = current._packageId;
+    const declared = current.overrides;
+    if (typeof base !== 'string' || base === '' || !declared || declared.package !== base) {
+      throw new Error(
+        `restoreFactoryView: view "${viewName}" on object "${objectName}" is not a customization of a package's view,` +
+          ' so it has no factory version to restore. Nothing was removed.',
+      );
+    }
+    const pair = (await this.client.packages.ensureCustomization(base)).packageId;
+    const metaClient = this.metadataClient();
+    try {
+      let draft: ViewHomeDeleteOutcome;
+      let published: ViewHomeDeleteOutcome;
+      try {
+        draft = readViewDeleteReceipt(await metaClient.reset('view', viewName, { state: 'draft', packageId: pair }));
+        published = readViewDeleteReceipt(await metaClient.reset('view', viewName, { packageId: pair }));
+      } catch (err) {
+        throw Object.assign(
+          new Error(
+            `restoreFactoryView: the factory version of view "${viewName}" was NOT restored:` +
+              ` removing its customization from "${pair}" failed.\n` +
+              formatMetadataError(err),
+          ),
+          { cause: err },
+        );
+      }
+      if (!published.removed) {
+        throw new Error(
+          `restoreFactoryView: the factory version of view "${viewName}" was NOT restored:` +
+            ` "${pair}" holds no customization of it, so nothing was removed.`,
+        );
+      }
+      return { deleted: true, draft, published };
+    } finally {
+      this.invalidateViewKeys(objectName, viewName);
+    }
+  }
+
 
   /**
    * Get an application definition by name or ID.
@@ -7310,6 +7390,42 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
       // Server doesn't support page metadata — return null to fall back to static config
       return null;
     }
+  }
+
+  /**
+   * Get a semantic-layer dataset definition (`DataSource.getDataset`).
+   *
+   * Reads `GET /api/v1/meta/dataset/:name` through the client's
+   * `meta.getItem`, with the reader's package as `callerPackage` when the
+   * caller names one (ADR-0150 D3), so the name resolves the way the
+   * dataset query that follows resolves it.
+   *
+   * No such dataset is `null`, in both answers a server gives for it: the
+   * envelope with no `item` ({@link metaEnvelopeCarriesItem}) and the `404`
+   * ({@link is404Error}). Every other failure rejects, unlike {@link getPage}:
+   * the dashboard reports a definition it could not read, and a swallowed
+   * failure would read as "no dataset".
+   *
+   * Cached per name and reader package; `invalidateCache` / `clearCache`
+   * drop it like every other metadata read here.
+   */
+  async getDataset(datasetName: string, options?: { callerPackage?: string }): Promise<Dataset | null> {
+    await this.connect();
+    const callerPackage = options?.callerPackage;
+    const cacheKey = `dataset:${datasetName}${callerPackage ? `@${callerPackage}` : ''}`;
+    return this.metadataCache.get(cacheKey, async () => {
+      try {
+        const envelope: unknown = await this.client.meta.getItem(
+          'dataset',
+          datasetName,
+          callerPackage ? { callerPackage } : undefined,
+        );
+        return metaEnvelopeCarriesItem(envelope) ? ((envelope as { item: Dataset }).item) : null;
+      } catch (error: unknown) {
+        if (is404Error(error)) return null;
+        throw error;
+      }
+    });
   }
 
   /**

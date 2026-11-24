@@ -114,6 +114,9 @@ export function DashboardDefaultInspector({
   locale,
   onSelectionChange,
   serverSchema,
+  issues,
+  revealIssues,
+  onInlineIssueFieldsChange,
 }: MetadataDefaultInspectorProps) {
   const tr = React.useCallback((key: string) => t(key, locale), [locale]);
   // objectui#12688 — the component list DRAWS a widget's served title (the
@@ -313,6 +316,9 @@ export function DashboardDefaultInspector({
             value={draft}
             hiddenFields={['name', 'label', 'description', 'widgets']}
             readOnly={readOnly}
+            issues={issues}
+            revealIssues={revealIssues}
+            onInlineIssueFieldsChange={onInlineIssueFieldsChange}
             onChange={(next) => onPatch(fallbackFormPatch(draft, next))}
           />
         ) : (

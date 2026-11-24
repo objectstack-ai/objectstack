@@ -76,6 +76,9 @@ const FULL_PAGE = 1184;
  * The allocation-plan columns the card names, Status last. Their widths fit
  * the drawer menu-only and do not fit it with the inline button: the readings
  * each case reports say by how much, so a font that moves them is visible.
+ * With the 12px header and weight 500 (objectstack#36047) the table was 8 px
+ * short of overflowing, so the warehouse name carries a bay: menu-only it is
+ * 593 px wide in the 622 px drawer, and the inline button adds 64.
  */
 const PLAN_COLUMNS = ['name', 'plan_date', 'amount', 'warehouse', 'status'];
 /** Wide enough to overflow the drawer even menu-only. */
@@ -140,7 +143,7 @@ const FIELDS = {
 };
 const ROWS = [1, 2, 3].map((i) => ({
   id: 'p' + i, name: 'Allocation ' + i, plan_date: '2026-11-0' + i, quantity: 10 * i, amount: 1250.5 * i,
-  warehouse: 'Main warehouse east', owner: 'Dana Smith', note: 'Ship with the next batch',
+  warehouse: 'Main warehouse east, bay 2', owner: 'Dana Smith', note: 'Ship with the next batch',
   status: i === 1 ? 'confirmed' : 'draft',
 }));
 const dataSource = {
@@ -397,10 +400,11 @@ test.describe('enlarged related list in a record drawer — the pinned Actions c
     report(testInfo, c, r);
     expect(r.folded).toBe(true);
     expect(r.inlineButtons).toBe(0);
-    // Still wider than the drawer: the pinned column sits at the box's edge
-    // over whichever column scrolls under it, as on any list that scrolls
-    // sideways. A scroll to the end shows Status whole.
+    // Still wider than the drawer: the Actions column leaves the right edge
+    // for the frozen zone beside the name column (objectstack#35446), and a
+    // scroll to the end shows Status whole.
     expect(r.box.scrollWidth).toBeGreaterThan(r.box.clientWidth);
+    expect(r.actions.left, 'the Actions column still sits at the right edge').toBeLessThan(r.box.clientWidth / 2);
     const end = await page.evaluate(async () => {
       const box = document.querySelector<HTMLElement>('[data-table-scroll-box]')!;
       box.scrollLeft = box.scrollWidth;

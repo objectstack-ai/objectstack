@@ -103,7 +103,11 @@ const itemIds = (menu: HTMLElement) =>
   within(menu).queryAllByRole('menuitem').map((el) => el.getAttribute('data-testid'));
 const OPEN_ITEMS = ['row-context-open', 'row-context-open-new-tab'];
 
-/** Desktop: the row's context menu, minus Open / Open in new tab. */
+/**
+ * Desktop: the row's context menu, minus Open / Open in new tab and minus the
+ * cell's own section a menu opened on a data cell lists first
+ * (objectstack#36289): the row's actions only.
+ */
 async function desktopRowActions(): Promise<Record<string, (string | null)[]>> {
   setWidth(1280);
   renderGrid();
@@ -116,7 +120,9 @@ async function desktopRowActions(): Promise<Record<string, (string | null)[]>> {
     const cell = within(screen.getByText(row.name).closest('tr') as HTMLElement).getByText(row.status);
     act(() => { fireEvent.contextMenu(cell, { button: 2, clientX: 40, clientY: 60 }); });
     const menu = await screen.findByTestId('row-context-menu');
-    out[row.name] = itemIds(menu).filter((id) => !OPEN_ITEMS.includes(id ?? ''));
+    out[row.name] = itemIds(menu).filter(
+      (id) => !OPEN_ITEMS.includes(id ?? '') && !id?.startsWith('row-context-cell-') && id !== 'row-context-field-history',
+    );
     await userEvent.keyboard('{Escape}');
     await waitFor(() => expect(screen.queryByTestId('row-context-menu')).toBeNull());
   }
@@ -164,14 +170,16 @@ afterEach(() => {
 describe('objectstack#29150 · a phone list card offers its row actions', () => {
   it('at 390 px each card\'s menu lists the desktop row\'s actions, in the same order', async () => {
     const desktop = await desktopRowActions();
-    // The desktop reference is the full set: Edit, Delete, the primary, then
-    // the secondaries, the gated one only where its predicate holds.
+    // The desktop reference is the full set: Edit, the primary, then the
+    // secondaries (the gated one only where its predicate holds), and Delete
+    // last (objectstack#35554).
     expect(desktop.Acme).toEqual([
       'row-action-builtin-edit',
-      'row-action-builtin-delete',
       'row-action-promote',
       'row-action-submit_review',
       'row-action-archive',
+      // objectstack#35554: Delete closes the menu, after a separator.
+      'row-action-builtin-delete',
     ]);
     expect(desktop.Globex).not.toContain('row-action-submit_review');
 

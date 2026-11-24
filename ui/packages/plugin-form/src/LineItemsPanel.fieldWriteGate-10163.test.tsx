@@ -116,12 +116,11 @@ function mount(perms: any | null, schema: any = SCHEMA) {
   );
 }
 
-/** Every rendered cell of one column — the two loaded rows plus the entry row. */
+/** Every rendered cell of one column — the two loaded rows (no entry row follows them, objectstack#35507). */
 async function cells(label: string): Promise<HTMLInputElement[]> {
   return waitFor(() => {
     const els = screen.getAllByLabelText(label) as HTMLInputElement[];
-    // Two loaded rows and the grid's always-present entry row.
-    if (els.length < ROWS.length + 1) throw new Error(`${label} cells not rendered yet`);
+    if (els.length < ROWS.length) throw new Error(`${label} cells not rendered yet`);
     return els;
   });
 }

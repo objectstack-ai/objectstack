@@ -16,6 +16,7 @@ export const Preference = ObjectSchema.create({
   label: 'Setting',
   pluralLabel: 'Settings',
   icon: 'settings',
+  color: 'amber',
   description: 'Workspace preferences edited from the Settings page.',
   fields: {
     name: Field.text({ label: 'Name', required: true, searchable: true }),

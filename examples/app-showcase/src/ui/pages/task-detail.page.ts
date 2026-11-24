@@ -19,7 +19,9 @@ import { definePage } from '@objectstack/spec/ui';
  *   • `record:highlights` + `record:details` — the standard compact + section
  *                            layout.
  * `kind: 'full'` — this page fully owns the record layout, as the Project
- * page does for its own tab strip.
+ * page does for its own tab strip. It is drawn on the desktop full page only
+ * (objectstack#36150): on a phone and in the side drawer a task opens on the
+ * standard page, without the review banner or the section bar.
  */
 export const TaskDetailPage = definePage({
   name: 'showcase_task_detail',
@@ -47,8 +49,11 @@ export const TaskDetailPage = definePage({
         // `record_header` actions render as inline buttons, and an action
         // declaring `record_more` without `record_header` always goes under
         // the ⋯ overflow. The list is the object's whole `record_header` /
-        // `record_more` set, which is what the synthesized header would carry;
-        // `test/record-action-location-hosts.test.ts` holds the two equal.
+        // `record_more` set, which is what the synthesized header would carry,
+        // less the actions the section bar below draws (they declare
+        // `record_more` only for the standard page a phone or the side drawer
+        // shows, objectstack#36150); `test/record-action-location-hosts.test.ts`
+        // holds the two equal.
         // The host still appends its own Edit / Share / Delete after these.
         // No `title`: the header derives it from the record.
         {

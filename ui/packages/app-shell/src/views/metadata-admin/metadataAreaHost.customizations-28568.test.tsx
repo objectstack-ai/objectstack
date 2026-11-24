@@ -22,6 +22,8 @@
  *  - objectstack#30063 — the page tile counts a page's override.
  */
 
+// Paid at collection, not inside a case's clock (check:test-source-alias).
+import '@objectstack/lint';
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
@@ -115,10 +117,11 @@ const HOTCRM_READ = {
   ],
   extensions: [{ object: 'crm_account', kind: 'field', name: 'tier__c' }],
   switchedOff: [],
+  arrangements: [],
   contributions: [],
-  counts: { overrides: 2, extensions: 1, switchedOff: 0, contributions: 0 },
+  counts: { overrides: 2, extensions: 1, switchedOff: 0, arrangements: 0, contributions: 0 },
 };
-const EMPTY_READ = { packageId: PLAIN, overrides: [], extensions: [], switchedOff: [], contributions: [], counts: { overrides: 0, extensions: 0, switchedOff: 0, contributions: 0 } };
+const EMPTY_READ = { packageId: PLAIN, overrides: [], extensions: [], switchedOff: [], arrangements: [], contributions: [], counts: { overrides: 0, extensions: 0, switchedOff: 0, arrangements: 0, contributions: 0 } };
 
 let customizationsFail = false;
 /** objectstack#30063 — the read also lists a page's override. */

@@ -67,13 +67,13 @@ describe('query_records latestPer — the tool', () => {
     expect(answer.isError, answer.text).toBe(false);
     expect(queries).toHaveLength(1);
     expect(queries[0].opts).toMatchObject({ where: { stage: 'open' }, limit: 50, latestPer: NEWEST });
-    expect(answer.payload).toEqual({ object: OBJECT, records: [{ id: 'd3' }, { id: 'd6' }], hasMore: false });
+    expect(answer.payload).toEqual({ object: OBJECT, records: [{ id: 'd3' }, { id: 'd6' }], hasMore: false, source: expect.any(Object) });
   });
 
   it('more groups than came back: truncated: true', async () => {
     const { bridge } = makeBridge({ object: OBJECT, records: [{ id: 'd3' }], hasMore: true });
     const answer = await call(bridge, { latestPer: NEWEST, limit: 1 });
-    expect(answer.payload).toEqual({ object: OBJECT, records: [{ id: 'd3' }], hasMore: true, truncated: true });
+    expect(answer.payload).toEqual({ object: OBJECT, records: [{ id: 'd3' }], hasMore: true, truncated: true, source: expect.any(Object) });
   });
 
   it('a bridge that answered an ordinary list (a row total) is no answer: a coded server fault, no rows', async () => {
@@ -102,7 +102,7 @@ describe('query_records latestPer — the tool', () => {
     const list = { object: OBJECT, records: [{ id: 'd1' }], total: 7 };
     const { bridge, queries } = makeBridge(list);
     const answer = await call(bridge, { limit: 1 });
-    expect(answer.payload).toEqual(list);
+    expect(answer.payload).toEqual({ ...list, source: expect.any(Object) });
     expect('latestPer' in queries[0].opts).toBe(false);
   });
 });

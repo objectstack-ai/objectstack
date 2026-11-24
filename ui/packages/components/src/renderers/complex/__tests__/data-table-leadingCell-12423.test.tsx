@@ -104,12 +104,15 @@ describe('data-table leading cell (objectui#12423)', () => {
     expect(screen.queryByText('#')).toBeNull();
   });
 
-  it('with row numbers off the leading cell is blank until hover', () => {
+  // objectstack#35663 — reversed: without row numbers (every host's default
+  // now) the leading cell is the checkbox, shown on every row at rest. The
+  // hover swap belongs to the row number alone.
+  it('with row numbers off the checkbox is shown at rest, no hover needed', () => {
     renderTable({ showRowNumbers: false });
     for (const tr of bodyRows()) {
       expect(numberOf(tr)).toBeNull();
-      expect(leadingCell(tr).textContent).toBe('');
-      expect(selectOf(tr)).toHaveClass('opacity-0', 'group-hover/row:opacity-100');
+      expect(within(selectOf(tr)).getByRole('checkbox')).toBeInTheDocument();
+      expect(selectOf(tr)).not.toHaveClass('opacity-0');
     }
   });
 

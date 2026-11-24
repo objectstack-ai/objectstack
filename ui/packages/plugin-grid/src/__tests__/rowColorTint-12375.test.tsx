@@ -135,13 +135,13 @@ describe('the tint reaches the right-pinned actions column and the frozen column
 
     const sticky = stickyCells(tr);
     const actions = screen.getAllByTestId('row-action-inline-open')[0].closest('td')!;
-    // CONTROL: the row number, the frozen Name column and the right-pinned
-    // actions column (the grid shows row numbers and freezes its first
-    // column by default).
-    expect(sticky).toHaveLength(3);
-    expect(sticky[0]).toHaveTextContent('1');
-    expect(sticky[1]).toHaveTextContent('Tinted');
-    expect(sticky[2]).toBe(actions);
+    // CONTROL: the frozen Name column and the right-pinned actions column (the
+    // grid freezes its first column by default and, since objectstack#35663,
+    // draws no row numbers; the leading cell's tint is pinned in
+    // `data-table-row-tint-sticky-12375.test.tsx`).
+    expect(sticky).toHaveLength(2);
+    expect(sticky[0]).toHaveTextContent('Tinted');
+    expect(sticky[1]).toBe(actions);
     for (const td of sticky) {
       const t = tokens(td.className);
       expect(t).toContain(STICKY_ROW_TINT);

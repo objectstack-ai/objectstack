@@ -131,7 +131,7 @@ export interface MetadataResourceConfig {
    * What the list page asks the server to serve beside each item (the list
    * read's `include`). `'grants'` is the `position` list's holder count and
    * permission sets in force (objectstack#25333); the columns that read them
-   * are this type's own `listColumns`. Omit for the plain list.
+   * are this type's own `listExtraColumns`. Omit for the plain list.
    */
   listInclude?: 'grants';
   /**
@@ -145,7 +145,13 @@ export interface MetadataResourceConfig {
    */
   bundleMemberField?: string;
 
-  /** Columns rendered in the list page. */
+  /**
+   * Columns rendered in the list page of a type that serves NO list layout
+   * (`/meta/types` `entries[].list`, the spec's `METADATA_LIST_REGISTRY`).
+   * A type that declares its list in the spec never reads this: its columns
+   * are the served ones, with {@link listCells} and {@link listExtraColumns}
+   * (`servedListColumns.tsx`).
+   */
   listColumns?: Array<{
     key: string;
     label: string;
@@ -153,7 +159,30 @@ export interface MetadataResourceConfig {
     render?: (value: unknown, item: Record<string, unknown>) => ReactNode;
     /** Column width hint in CSS (e.g. `'180px'`, `'30%'`). */
     width?: string;
+    /**
+     * The header is already in the reader's locale (a served column), so it is
+     * shown as is and not looked up in the `engine.list.col.*` table.
+     */
+    labelLocalized?: boolean;
   }>;
+  /**
+   * Console cell drawing for a column the served list layout declares, keyed by
+   * the column's `field`: a renderer for a value whose shape the declared
+   * renderer cannot draw well, and an optional width. The header stays the
+   * served one.
+   */
+  listCells?: Record<string, {
+    /** `value` is the item's value at the column path, or its schema default. */
+    render?: (value: unknown, item: Record<string, unknown>) => ReactNode;
+    width?: string;
+  }>;
+  /**
+   * Columns appended after the list's own (served, else {@link listColumns},
+   * else the default): values the server stamps on a list row
+   * (`_holderCount`, `_packageId`, a field's `object`) that are not keys of the
+   * type's own schema, so the spec cannot declare them.
+   */
+  listExtraColumns?: MetadataResourceConfig['listColumns'];
   /**
    * Fully custom list page. When provided, the generic shell is bypassed.
    * Receives `{ type }`. Use this for ObjectManager, etc.

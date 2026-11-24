@@ -113,21 +113,27 @@ describe('#19249 — sys_user.set_user_manager posts the admin endpoint', () => 
     expect(ACTION.locations).toContain('record_header');
   });
 
-  it('collects the manager as an inline sys_user lookup under the body key the endpoint reads', () => {
+  it('collects the manager on `manager_id`, seeded from the row, under the body key the endpoint reads', () => {
     const params = (ACTION.params ?? []) as AnyParam[];
     expect(params).toHaveLength(1);
     const [p] = params;
     expect(p.name).toBe('managerId');
-    expect(p.type).toBe('lookup');
-    expect(p.reference).toBe('sys_user');
-    // INLINE, not field-backed: `{ field: 'manager_id' }` would inherit the
-    // referenced field's metadata, and that field is `readonly: true`
-    // (ADR-0092 D4 keeps it non-editable in the standard edit form).
-    expect(p.field).toBeUndefined();
+    // FIELD-BACKED and seeded from the row, so the dialog opens on the
+    // CURRENT manager: before, it opened empty and an admin re-pointing a
+    // manager could not see what the click would replace. The console's param
+    // resolver inherits the field's type and target, never its `readonly`
+    // (ADR-0092 D4 keeps the column locked in the edit form, not here).
+    expect(p.field).toBe('manager_id');
+    expect(p.defaultFromRow).toBe(true);
+    expect(SysUser.fields.manager_id.type).toBe('lookup');
+    expect((SysUser.fields.manager_id as { reference?: string }).reference).toBe('sys_user');
+    // Seeded, not carried: the admin picks the new manager, so the control
+    // stays editable.
+    expect(p.carryOver).toBeUndefined();
     // Required, because the endpoint refuses an ABSENT or empty key by design
     // ("managerId is required — send null to clear the link, never omit the
     // key"). A dialog that could submit nothing would turn an ordinary click
-    // into a 400 about a key the user never saw.
+    // into a 400 about a key the user never saw; the clear is its own action.
     expect(p.required).toBe(true);
   });
 
@@ -211,5 +217,79 @@ describe('the visible predicate: offered on every row, the SCIM-held refusal is 
     // `feature-gate-guard.test.ts` goes red in its reverse direction.
     expect(ACTION.requiresFeature).toBeUndefined();
     expect(visible()).not.toContain('features.');
+  });
+});
+
+/**
+ * `remove_user_manager` — the clear the required picker above cannot send.
+ * The endpoint clears the link on `managerId: null` ("send null to clear the
+ * link, never omit the key"); the action sends that null as its static body
+ * and asks a confirm question instead of collecting anything. The forward
+ * itself — the null arriving at the target — is pinned at the door, in
+ * `@objectstack/runtime`'s `platform-admin-action-gate.test.ts`.
+ */
+describe('sys_user.remove_user_manager clears the link through the same endpoint', () => {
+  const REMOVE = (() => {
+    const found = actionsOf().find((a) => a.name === 'remove_user_manager');
+    if (!found) throw new Error('sys_user declares no remove_user_manager action');
+    return found;
+  })();
+
+  it('posts the set-user-manager endpoint with `managerId: null` and collects nothing', () => {
+    expect(REMOVE.type).toBe('api');
+    expect(REMOVE.target).toBe(ACTION.target);
+    expect(REMOVE.recordIdParam).toBe(ACTION.recordIdParam);
+    expect(REMOVE.method === undefined || REMOVE.method === 'POST').toBe(true);
+    // The key PRESENT and null: an absent key is the endpoint's 400.
+    expect(REMOVE.bodyExtra).toEqual({ managerId: null });
+    expect(Object.prototype.hasOwnProperty.call(REMOVE.bodyExtra, 'managerId')).toBe(true);
+    expect(REMOVE.params ?? []).toEqual([]);
+    // Nothing collected, so the question rides `confirmText`, not
+    // `description` (the param-collecting set action's carrier).
+    expect(REMOVE.confirmText).toBeTruthy();
+    expect(REMOVE.description).toBeUndefined();
+  });
+
+  it('⛔ does NOT write manager_id through the generic data API', () => {
+    expect(String(REMOVE.target)).not.toContain('/data/');
+    expect(REMOVE.operation).toBeUndefined();
+    expect(REMOVE.patch).toBeUndefined();
+  });
+
+  it('is gated exactly like set_user_manager: the same capability gate, the same standing term first', () => {
+    expect(REMOVE.requiredPermissions).toEqual(ACTION.requiredPermissions);
+    expect(REMOVE.requiresFeature).toBeUndefined();
+    expect(REMOVE.locations).toEqual(ACTION.locations);
+    const standing = sourceOf(ACTION.visible)!;
+    expect(sourceOf(REMOVE.visible)!.startsWith(`${standing} && `)).toBe(true);
+  });
+
+  it('reads only the row\'s `manager_id`, never a copy of a server refusal', () => {
+    const visible = sourceOf(REMOVE.visible)!;
+    const columns = new Set([...visible.matchAll(/record\.([a-z_][a-z0-9_]*)/gi)].map((m) => m[1]));
+    expect([...columns]).toEqual(['manager_id']);
+    expect(visible).not.toContain('record.source');
+    expect(visible).not.toContain('ctx.user.id');
+  });
+
+  it('is offered only while the row has a manager, and only to the standing the door admits', () => {
+    const visible = sourceOf(REMOVE.visible)!;
+    expect(evaluate(visible, { id: 'someone_else', manager_id: 'u_mgr' })).toBe(true);
+    // An SSO-only person's manager is cleared here too; a SCIM-held row is the
+    // endpoint's refusal, as for the set.
+    expect(evaluate(visible, { id: 'someone_else', manager_id: 'u_mgr', source: 'idp_provisioned' })).toBe(true);
+    expect(evaluate(visible, { id: 'someone_else', manager_id: null })).toBe(false);
+    // The sparse face (no column projected) is not a fault, just not offered.
+    expect(evaluate(visible, { id: 'someone_else' })).toBe(false);
+    const member = { id: 'm_1', isPlatformAdmin: false, positions: [] as string[] };
+    const r = celEngine.evaluate(
+      { dialect: 'cel', source: visible },
+      { record: { id: 'someone_else', manager_id: 'u_mgr' }, extra: { current_user: member, user: member, ctx: { user: member }, os: { user: member }, features: {} } },
+    );
+    expect(r.ok && r.value).toBe(false);
+  });
+
+  it('stays human-only: no `ai` block, like every action after the ADR-0011 assessment', () => {
+    expect(REMOVE.ai).toBeUndefined();
   });
 });

@@ -468,16 +468,34 @@ export interface RecordCrudVerdicts extends RecordCrudVerdictLookup {
    * clicked into a refused write.
    */
   readonly pending: boolean;
+  /**
+   * The questions on the wire, as one promise that settles when they have all
+   * answered (or failed), or `null` when none is. Read when asked, so it sees a
+   * question sent since the last render (objectstack#35795: an inline cell
+   * asked to edit waits for its row's verdict instead of opening an editor the
+   * verdict may refuse).
+   */
+  readonly settling: () => Promise<void> | null;
+  /**
+   * The same lookup as the function itself, but answered from the verdicts
+   * published LAST — not the ones of the render that made this object. A
+   * caller that holds on to this object across an answer (a wait that is
+   * re-asked once {@link settling} settles, before React has re-rendered)
+   * reads the answer that just landed here (objectstack#35795).
+   */
+  readonly current: RecordCrudVerdictLookup;
 }
 
 function lookupOf(
   verdicts: ReadonlyMap<string, boolean>,
   requestVerdicts: () => void,
   pending: boolean,
+  settling: () => Promise<void> | null,
+  current: RecordCrudVerdictLookup,
 ): RecordCrudVerdicts {
   const lookup: RecordCrudVerdictLookup = (recordId, operation) =>
     recordId == null ? undefined : verdicts.get(`${operation}:${String(recordId)}`);
-  return Object.assign(lookup, { requestVerdicts, pending });
+  return Object.assign(lookup, { requestVerdicts, pending, settling, current });
 }
 
 export function useRecordCrudVerdicts(opts: {
@@ -526,6 +544,17 @@ export function useRecordCrudVerdicts(opts: {
 
   const [verdicts, setVerdicts] = React.useState<ReadonlyMap<string, boolean>>(() => new Map());
   const [pending, setPending] = React.useState(false);
+  const wireRef = React.useRef<Promise<void> | null>(null);
+  const settling = React.useCallback(() => wireRef.current, []);
+  // What was published last, written in the same stroke as `setVerdicts`: a
+  // wait re-asked as soon as the wire settles runs before the re-render that
+  // publishes the answer, so it reads the answer here (objectstack#35795).
+  const publishedRef = React.useRef<ReadonlyMap<string, boolean>>(new Map());
+  const current = React.useCallback<RecordCrudVerdictLookup>(
+    (recordId, operation) =>
+      recordId == null ? undefined : publishedRef.current.get(`${operation}:${String(recordId)}`),
+    [],
+  );
 
   // [objectstack#34208] The object whose rows' actions have been reached for on
   // this list, or `null` until then. Until then nothing is asked: the
@@ -548,8 +577,10 @@ export function useRecordCrudVerdicts(opts: {
     if (wantUpdate) operations.push('update');
     if (wantDelete) operations.push('delete');
     if (!objectName || ids.length === 0 || operations.length === 0) {
-      setVerdicts(new Map());
+      publishedRef.current = new Map();
+      setVerdicts(publishedRef.current);
       setPending(false);
+      wireRef.current = null;
       return;
     }
     // What is ASKED: every wanted operation once the row actions were reached
@@ -569,6 +600,7 @@ export function useRecordCrudVerdicts(opts: {
           if (typeof verdict === 'boolean') next.set(`${operation}:${id}`, verdict);
         }
       }
+      publishedRef.current = next;
       setVerdicts(next);
     };
 
@@ -591,12 +623,15 @@ export function useRecordCrudVerdicts(opts: {
       }
     }
     setPending(settled.length > 0);
+    wireRef.current = null;
     if (settled.length > 0) {
-      void Promise.all(settled).then(() => {
+      const wire = Promise.all(settled).then(() => {
+        if (wireRef.current === wire) wireRef.current = null;
         if (cancelled) return;
         publish();
         setPending(false);
       });
+      wireRef.current = wire;
     }
 
     // Rows already in the cache answer on this render rather than after the
@@ -610,7 +645,7 @@ export function useRecordCrudVerdicts(opts: {
   }, [objectName, ids, wantUpdate, wantDelete, updateOnMount, demanded, apiFetch, principal, invalidationNonce]);
 
   return React.useMemo<RecordCrudVerdicts>(
-    () => lookupOf(verdicts, requestVerdicts, pending),
-    [verdicts, requestVerdicts, pending],
+    () => lookupOf(verdicts, requestVerdicts, pending, settling, current),
+    [verdicts, requestVerdicts, pending, settling, current],
   );
 }

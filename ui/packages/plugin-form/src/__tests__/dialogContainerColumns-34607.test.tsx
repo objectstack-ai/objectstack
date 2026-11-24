@@ -33,7 +33,9 @@ import '@object-ui/components';
 import { ModalForm } from '../ModalForm';
 import { ObjectForm } from '../ObjectForm';
 import {
+  dialogDrawsSingleColumn,
   dialogUndeclaredColumns,
+  DIALOG_SINGLE_COLUMN_MAX_FIELDS,
   sectionedGridLayout,
   UNDECLARED_SECTION_COLUMNS,
 } from '../autoLayout';
@@ -214,10 +216,11 @@ describe('#34607 — undeclared sections and field groups in the dialog take the
     expect(ladder('notes')).toEqual([1, 1, 1]);
   });
 
-  it('a light form keeps the two-wide floor in the same xl dialog', async () => {
+  it('a light form that declares nothing is one column in the lg dialog (#35980)', async () => {
     const dialog = await openDialog(FIVE);
-    expect(dialog.className).toContain('sm:max-w-5xl');
-    expect(ladder('f0')).toEqual([2, 2, 2]);
+    expect(dialog.className).toContain('sm:max-w-2xl');
+    expect(dialog.className).not.toContain('sm:max-w-5xl');
+    expect(ladder('f0')).toEqual([1, 1, 1]);
   });
 });
 
@@ -250,5 +253,78 @@ describe('#34607 dialogUndeclaredColumns', () => {
     expect([9, 15, 16, 40].map((n) => dialogUndeclaredColumns(n, 'xl'))).toEqual([3, 3, 3, 3]);
     expect([9, 15, 16, 40].map((n) => dialogUndeclaredColumns(n, 'full'))).toEqual([3, 3, 4, 4]);
     expect(dialogUndeclaredColumns(16, 'lg')).toBe(3);
+  });
+});
+
+/**
+ * objectstack-ai/objectstack#35980 — a short dialog that declares nothing is
+ * one column in the narrow `lg` size; past six fields (the maintainer's
+ * choice, ruling of record 7061696632 on #35980), or with any declared
+ * `columns`, the dialog is as #34607 left it.
+ */
+describe('#35980 — up to six fields and nothing declared: one column, lg', () => {
+  const SIX = {
+    name: 'thing',
+    fields: Object.fromEntries(PLAIN.slice(0, 6).map((n) => [n, { type: 'text', label: `Field ${n}` }])),
+  };
+  const SEVEN = {
+    name: 'thing',
+    fields: Object.fromEntries(PLAIN.slice(0, 7).map((n) => [n, { type: 'text', label: `Field ${n}` }])),
+  };
+
+  it('the predicate: count, form columns and every section columns', () => {
+    expect(DIALOG_SINGLE_COLUMN_MAX_FIELDS).toBe(6);
+    expect([0, 1, 5, 6].map((n) => dialogDrawsSingleColumn(n, undefined))).toEqual([true, true, true, true]);
+    expect([7, 8, 9].map((n) => dialogDrawsSingleColumn(n, undefined))).toEqual([false, false, false]);
+    expect(dialogDrawsSingleColumn(5, 2)).toBe(false);
+    expect(dialogDrawsSingleColumn(5, 1)).toBe(false);
+    expect(dialogDrawsSingleColumn(5, undefined, [undefined, undefined])).toBe(true);
+    expect(dialogDrawsSingleColumn(5, undefined, [undefined, 3])).toBe(false);
+  });
+
+  it('six flat fields: one per row in the lg dialog', async () => {
+    const dialog = await openDialog(SIX);
+    expect(dialog.className).toContain('sm:max-w-2xl');
+    expect(ladder('f0')).toEqual([1, 1, 1]);
+  });
+
+  it('seven flat fields: the wide dialog and its grid, as before', async () => {
+    const dialog = await openDialog(SEVEN);
+    expect(dialog.className).toContain('sm:max-w-5xl');
+    expect(ladder('f0')).toEqual([2, 2, 2]);
+  });
+
+  it('undeclared sections of six fields in all: one per row too', async () => {
+    const dialog = await openDialog(SIX, {
+      sections: [
+        { name: 'a', label: 'A', fields: PLAIN.slice(0, 3) },
+        { name: 'b', label: 'B', fields: PLAIN.slice(3, 6) },
+      ],
+    });
+    expect(dialog.className).toContain('sm:max-w-2xl');
+    expect(ladder('f0')).toEqual([1, 1, 1]);
+    expect(ladder('f3')).toEqual([1, 1, 1]);
+  });
+
+  it('a declared form columns is drawn as written, in the size it drew before', async () => {
+    const dialog = await openDialog(FIVE, { columns: 2 });
+    expect(dialog.className).toContain('sm:max-w-5xl');
+    expect(ladder('f0')).toEqual([2, 2, 2]);
+  });
+
+  it('one declared section keeps the dialog as it was: its neighbour draws two', async () => {
+    const dialog = await openDialog(SIX, {
+      sections: [
+        { name: 'a', label: 'A', fields: PLAIN.slice(0, 4) },
+        { name: 'b', label: 'B', columns: 3, fields: PLAIN.slice(4, 6) },
+      ],
+    });
+    expect(dialog.className).toContain('sm:max-w-5xl');
+    expect(ladder('f0')).toEqual([2, 2, 2]);
+  });
+
+  it('an authored modalSize wins over the narrow size', async () => {
+    const dialog = await openDialog(FIVE, { modalSize: 'xl' });
+    expect(dialog.className).toContain('sm:max-w-5xl');
   });
 });

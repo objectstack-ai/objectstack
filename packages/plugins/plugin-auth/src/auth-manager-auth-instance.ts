@@ -81,6 +81,7 @@ import { createBetterAuthLogSink } from './sso-oidc-refusal-cause.js';
 import { withSystemReadContext } from './objectql-adapter.js';
 import { refuseSsoAccountOutsideProvenDomain, refuseSsoAccountWithoutAddress } from './sso-account-at-proven-domain.js';
 import { refuseSamlAccountKeyContradiction } from './sso-saml-account-key.js';
+import { stageSsoSignInProvider } from './sso-session-provider.js';
 import { acceptEachTotpCodeOnce } from './totp-code-single-use.js';
 
 /** The path better-auth declares for the email sign-up endpoint. */
@@ -179,6 +180,8 @@ export interface AuthInstanceHost {
   resolvePasswordHasher: AuthManager['resolvePasswordHasher'];
   roleChangeGrantDeps: AuthManager['roleChangeGrantDeps'];
   sendChangeEmailNotice: AuthManager['sendChangeEmailNotice'];
+  sendPasswordChangeReminder: AuthManager['sendPasswordChangeReminder'];
+  sendPasswordResetNotice: AuthManager['sendPasswordResetNotice'];
   sendExistingAccountSignUpNotice: AuthManager['sendExistingAccountSignUpNotice'];
   settleSignInAttempt: AuthManager['settleSignInAttempt'];
   settleSsoProviderDelete: AuthManager['settleSsoProviderDelete'];
@@ -373,6 +376,9 @@ export async function createAuthInstance(this: AuthInstanceHost): Promise<Auth<a
       // (`sso-saml-account-key.ts`).
       validateUserInfo: async (data: any, ctx: any) => {
         this.idpLocale.stage(data, ctx);
+        // The provider an SSO sign-in comes through is staged too, refusing
+        // nothing; the session it mints records it (`sso-session-provider.ts`).
+        stageSsoSignInProvider(data, ctx);
         const contradicted = refuseSamlAccountKeyContradiction(data, this.config.logger);
         if (contradicted) return contradicted;
         const provenDomain = {
@@ -888,11 +894,14 @@ export async function createAuthInstance(this: AuthInstanceHost): Promise<Auth<a
           auditRefusedSignIn: (...a) => this.auditRefusedSignIn(...a),
           enforceConcurrentCap: (...a) => this.enforceConcurrentCap(...a),
           externalDirectoryDoorDeps: (...a) => this.externalDirectoryDoorDeps(...a),
+          getDataEngine: (...a) => this.getDataEngine(...a),
           isEmailDeliveryLive: (...a) => this.isEmailDeliveryLive(...a),
           logDurabilityDegradation: (...a) => this.logDurabilityDegradation(...a),
           recordPasswordHistory: (...a) => this.recordPasswordHistory(...a),
           roleChangeGrantDeps: (...a) => this.roleChangeGrantDeps(...a),
           sendChangeEmailNotice: (...a) => this.sendChangeEmailNotice(...a),
+          sendPasswordChangeReminder: (...a) => this.sendPasswordChangeReminder(...a),
+          sendPasswordResetNotice: (...a) => this.sendPasswordResetNotice(...a),
           settleSignInAttempt: (...a) => this.settleSignInAttempt(...a),
           settleSsoProviderDelete: (...a) => this.settleSsoProviderDelete(...a),
           settleSsoSignOutOfIdp: (...a) => this.settleSsoSignOutOfIdp(...a),

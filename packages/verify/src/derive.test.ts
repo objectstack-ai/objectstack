@@ -9,44 +9,144 @@ import { Field, FieldType, isMultiValueField } from '@objectstack/spec/data';
 // costing 1 × TS2835 plus one TS7006 per callback parameter in the file.
 import { deriveCrudCases, fixtureBody, laterBy, uniqueFields, vary } from './derive.js';
 
-describe('deriveCrudCases — federated (external) objects (ADR-0015)', () => {
-  it('blocks a read-only external object so verify never probe-inserts it', () => {
-    const config = {
-      datasources: [{ name: 'wh', schemaMode: 'external', external: { allowWrites: false } }],
-      objects: [
-        { name: 'wh_order', datasource: 'wh', external: { remoteName: 'orders' }, fields: { amount: { type: 'number' } } },
-      ],
-    };
-    const c = deriveCrudCases(config).find((x) => x.object === 'wh_order');
-    expect(c?.blocked).toMatch(/external read-only/);
+// Verify writes only to its ephemeral store: an object on an external
+// datasource is blocked whatever its write gate says, and the reason names the
+// gate's state. The boot-level proof that no write reaches such a datasource is
+// `verify.external-datasource-no-writes.test.ts`.
+describe('deriveCrudCases — objects on an external datasource are not exercised (ADR-0015)', () => {
+  const external = (dsExternal: Record<string, unknown>, objExternal: Record<string, unknown> | undefined) => ({
+    datasources: [{ name: 'wh', schemaMode: 'external', external: dsExternal }],
+    objects: [
+      {
+        name: 'wh_order',
+        datasource: 'wh',
+        ...(objExternal ? { external: objExternal } : {}),
+        fields: { amount: { type: 'number' } },
+      },
+    ],
+  });
+  const caseOf = (config: any) => deriveCrudCases(config).find((x) => x.object === 'wh_order');
+
+  it('blocks a read-only external object and names it read-only', () => {
+    const c = caseOf(external({ allowWrites: false }, { remoteName: 'orders' }));
+    expect(c?.blocked).toContain('external datasource "wh" (read-only): not exercised');
+    expect(c?.body).toBeUndefined();
   });
 
-  it('blocks when the object opts in but the datasource does not', () => {
-    const config = {
-      datasources: [{ name: 'wh', schemaMode: 'external', external: { allowWrites: false } }],
-      objects: [
-        { name: 'wh_order', datasource: 'wh', external: { remoteName: 'orders', writable: true }, fields: { amount: { type: 'number' } } },
-      ],
-    };
-    const c = deriveCrudCases(config).find((x) => x.object === 'wh_order');
-    expect(c?.blocked).toMatch(/external read-only/);
+  it('blocks when the object opts in but the datasource does not, and names it read-only', () => {
+    const c = caseOf(external({ allowWrites: false }, { remoteName: 'orders', writable: true }));
+    expect(c?.blocked).toContain('(read-only): not exercised');
   });
 
-  it('does NOT block a fully write-opted-in external object (datasource + object)', () => {
-    const config = {
-      datasources: [{ name: 'wh', schemaMode: 'external', external: { allowWrites: true } }],
-      objects: [
-        { name: 'wh_order', datasource: 'wh', external: { remoteName: 'orders', writable: true }, fields: { amount: { type: 'number' } } },
-      ],
-    };
-    const c = deriveCrudCases(config).find((x) => x.object === 'wh_order');
-    expect(c?.blocked).toBeFalsy();
+  it('blocks a fully write-opted-in external object (datasource + object) and names its gate open', () => {
+    const c = caseOf(external({ allowWrites: true }, { remoteName: 'orders', writable: true }));
+    expect(c?.blocked).toContain('external datasource "wh" (writes allowed): not exercised');
+    expect(c?.body).toBeUndefined();
   });
 
-  it('leaves managed objects unaffected', () => {
-    const config = { objects: [{ name: 'task', fields: { title: { type: 'text' } } }] };
-    const c = deriveCrudCases(config).find((x) => x.object === 'task');
-    expect(c?.blocked).toBeFalsy();
+  it('blocks an object bound to an external datasource by its schemaMode alone', () => {
+    const c = caseOf(external({ allowWrites: true }, undefined));
+    expect(c?.blocked).toContain('external datasource "wh" (read-only): not exercised');
+  });
+
+  // One reader with verify's driver factory (`isManagedDatasource`): a mode
+  // spelled only inside `config` or `external` gets the real driver at boot, so
+  // derive must withhold its objects too, or verify's rows reach that database.
+  it.each([
+    ['config', { driver: 'postgres', config: { host: 'wh.internal', schemaMode: 'external' } }],
+    ['external', { driver: 'postgres', config: { host: 'wh.internal' }, external: { schemaMode: 'validate-only' } }],
+  ])('withholds an object whose datasource spells schemaMode only inside `%s`', (_where, ds) => {
+    const c = deriveCrudCases({
+      datasources: [{ name: 'wh', ...ds }],
+      objects: [{ name: 'wh_order', datasource: 'wh', fields: { amount: { type: 'number' } } }],
+    }).find((x) => x.object === 'wh_order');
+    expect(c?.blocked).toContain('external datasource "wh" (read-only): not exercised');
+    expect(c?.body).toBeUndefined();
+  });
+
+  it('a required relation to an external object is blocked too, so nothing is written for it', () => {
+    const config = external({ allowWrites: true }, { remoteName: 'orders', writable: true });
+    config.objects.push({
+      name: 'wh_note',
+      fields: { order: { type: 'lookup', reference: 'wh_order', required: true } },
+    } as any);
+    expect(deriveCrudCases(config).find((x) => x.object === 'wh_note')?.blocked).toContain(
+      'required relational target "wh_order"',
+    );
+  });
+
+  it('a managed object requiring a withheld target says it was withheld on purpose, and why', () => {
+    const config = external({ allowWrites: false }, { remoteName: 'orders' });
+    config.objects.push(
+      { name: 'wh_note', fields: { order: { type: 'lookup', reference: 'wh_order', required: true } } } as any,
+      { name: 'wh_reply', fields: { note: { type: 'lookup', reference: 'wh_note', required: true } } } as any,
+    );
+    const cases = deriveCrudCases(config);
+    const note = cases.find((x) => x.object === 'wh_note')?.blocked;
+    expect(note).toBe(
+      'required relational target "wh_order" is withheld on purpose — external datasource "wh" (read-only): ' +
+        'not exercised — verify writes only to its ephemeral store',
+    );
+    expect(note).not.toContain('not synthesizable');
+    // Transitively too: the dependent of a dependent is not called unsynthesizable.
+    const reply = cases.find((x) => x.object === 'wh_reply')?.blocked;
+    expect(reply).toContain('required relational target "wh_note" is withheld on purpose');
+    expect(reply).not.toContain('not synthesizable');
+  });
+
+  it('a required target blocked for a field shape keeps the generic sentence', () => {
+    const cases = deriveCrudCases({
+      objects: [
+        { name: 'p', fields: { blob: { type: 'composite', required: true } } },
+        { name: 'c', fields: { parent: { type: 'lookup', reference: 'p', required: true } } },
+      ],
+    });
+    expect(cases.find((x) => x.object === 'c')?.blocked).toBe('required relational target "p" is not synthesizable');
+  });
+
+  it('leaves managed objects unaffected, including one on a declared managed datasource', () => {
+    const config = {
+      datasources: [{ name: 'side', schemaMode: 'managed' }],
+      objects: [
+        { name: 'task', fields: { title: { type: 'text' } } },
+        { name: 'side_task', datasource: 'side', fields: { title: { type: 'text' } } },
+      ],
+    };
+    const cases = deriveCrudCases(config);
+    expect(cases.find((x) => x.object === 'task')?.blocked).toBeFalsy();
+    expect(cases.find((x) => x.object === 'side_task')?.blocked).toBeFalsy();
+  });
+
+  // Every managed datasource on an engine the platform ships runs on verify's
+  // stand-in, `mongodb` included, so its objects are exercised
+  // (`verify.managed-datasource-stand-in.test.ts`), and so is an object that
+  // requires one. A managed datasource on a plugin's driver id never reaches
+  // derive in a run: `bootStack` refuses that boot before it composes, so
+  // derive carries no second gate for it.
+  it('exercises objects on managed datasources of every shipped engine, mongodb included', () => {
+    const config = {
+      datasources: [
+        { name: 'pg', driver: 'postgres', schemaMode: 'managed' },
+        { name: 'docs', driver: 'mongodb' },
+        { name: 'plug', driver: 'acme-plugin-driver', schemaMode: 'managed' },
+      ],
+      objects: [
+        { name: 'pg_task', datasource: 'pg', fields: { title: { type: 'text' } } },
+        { name: 'doc_task', datasource: 'docs', fields: { title: { type: 'text' } } },
+        { name: 'plug_task', datasource: 'plug', fields: { title: { type: 'text' } } },
+        { name: 'doc_note', fields: { doc: { type: 'lookup', reference: 'doc_task', required: true } } },
+      ],
+    };
+    const cases = deriveCrudCases(config);
+    for (const object of ['pg_task', 'doc_task', 'plug_task', 'doc_note']) {
+      const c = cases.find((x) => x.object === object);
+      expect(c?.blocked, object).toBeFalsy();
+    }
+    expect(cases.find((x) => x.object === 'doc_task')?.body).toHaveProperty('title');
+    // The required target is created first and its id threaded in.
+    expect(cases.findIndex((x) => x.object === 'doc_task')).toBeLessThan(
+      cases.findIndex((x) => x.object === 'doc_note'),
+    );
   });
 });
 

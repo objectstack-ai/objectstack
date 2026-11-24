@@ -38,6 +38,14 @@ import { DefaultRecordPageContext } from '../defaultRecordPage';
 
 afterEach(cleanup);
 
+/**
+ * Each changed field's line as it reads (objectstack#36290): `Label: old → new`,
+ * drawn over several elements, so read off the line rather than matched as one
+ * element's text.
+ */
+const changeLines = (): string[] =>
+  Array.from(document.querySelectorAll('[data-field-change]')).map((line) => line.textContent ?? '');
+
 const comment: FeedItem = { id: 'c1', type: 'comment', actor: 'Ada', body: 'Budget is set', createdAt: '2026-10-23T10:00:00Z' };
 const call: FeedItem = { id: 'a1', type: 'task', actor: 'Dev', body: 'Logged a call', createdAt: '2026-10-28T10:20:00Z' };
 const updated = { id: 'a2', type: 'field_change', actor: 'Dev', body: 'updated', createdAt: '2026-10-27T16:05:00Z', activityType: 'updated' } as FeedItem;
@@ -87,15 +95,19 @@ describe('RecordActivityTimeline — the stream face', () => {
     expect(screen.queryByRole('combobox')).toBeNull();
     const lines = Array.from(container.querySelectorAll('[data-stream-system-row]')).map((l) => l.textContent);
     expect(lines).toHaveLength(2);
-    expect(lines[0]).toContain('Status New → Contacted');
+    expect(lines[0]).toContain('Status: New → Contacted');
     // A comment keeps its full row.
     expect(screen.getByText('Budget is set')).toBeTruthy();
   });
 
-  it('CONTROL — the panel face keeps its dropdown and no compact lines', () => {
+  // Since the dense activity rows (objectstack#35602) the panel draws its
+  // entries as the same one-line rows; what stays the panel's own is the
+  // dropdown in place of the chips.
+  it('CONTROL — the panel face keeps its dropdown, not the chips, over the same one-line rows', () => {
     const { container } = render(<RecordActivityTimeline items={items} />);
     expect(container.querySelector('[data-stream-filter]')).toBeNull();
-    expect(container.querySelector('[data-stream-system-row]')).toBeNull();
+    expect(screen.getByRole('combobox')).toBeTruthy();
+    expect(container.querySelector('[data-stream-system-row]')).not.toBeNull();
   });
 });
 
@@ -149,8 +161,9 @@ describe('record:activity on the default record page is the stream', () => {
   it('CONTROL — elsewhere the block keeps its panel face, and the field changes join its feed', () => {
     const { container } = mount(false);
     expect(container.querySelector('[data-stream-filters]')).toBeNull();
-    expect(container.querySelector('[data-stream-system-row]')).toBeNull();
-    expect(screen.getByText('Contacted')).toBeTruthy();
+    expect(screen.getByRole('combobox')).toBeTruthy();
+    // The change is one line with its before and after (objectstack#35602).
+    expect(changeLines()).toContain('Status: New → Contacted');
   });
 });
 
@@ -240,7 +253,7 @@ describe("the panel's `changes_only` is offered by the same rule as the 变更 c
 
   it('CONTROL: with history shown, the same `changes_only` holds the field change only', () => {
     render(panel(true, 'changes_only'));
-    expect(screen.getByText('Status')).toBeTruthy();
+    expect(changeLines()).toContain('Status: New → Contacted');
     expect(screen.queryByText('Logged a call')).toBeNull();
     expect(screen.queryByText('Budget is set')).toBeNull();
   });
@@ -282,20 +295,20 @@ describe('an activity row sits under 活动 whatever the history flag; 变更 ho
       const shown = events.filter((e) => !(fieldHistory && e.activityType === 'updated'));
       for (const event of shown) expect(screen.getByText(`Event ${event.activityType}`)).toBeTruthy();
       expect(screen.getByText('Logged a call')).toBeTruthy();
-      expect(screen.queryByText(/New → Contacted/)).toBeNull();
+      expect(changeLines().some((line) => line.includes('New → Contacted'))).toBe(false);
     });
   }
 
   it('CONTROL, history on: 变更 holds the field change with its old and new values, and no activity event', () => {
     const { container } = render(page(true));
     choose(container, 'changes');
-    expect(screen.getByText(/Status New → Contacted/)).toBeTruthy();
+    expect(changeLines()).toEqual(['Status: New → Contacted']);
     for (const event of events) expect(screen.queryByText(`Event ${event.activityType}`)).toBeNull();
   });
 
   it("the panel's `changes_only` keeps the same rule as the stream", () => {
     render(<RecordActivityTimeline items={[call, created, ...audit]} filterMode="changes_only" />);
-    expect(screen.getByText('Status')).toBeTruthy();
+    expect(changeLines()).toContain('Status: New → Contacted');
     expect(screen.queryByText('Created the lead')).toBeNull();
     expect(screen.queryByText('Logged a call')).toBeNull();
   });
@@ -376,7 +389,7 @@ describe('one action, one row: an activity row carries its audit entry (objectst
     expect(rows).toHaveLength(1);
     expect(rows[0].querySelector('[data-stream-change]')?.textContent).toBe('Activity r1');
     expect(rows[0].textContent).toContain('Dev Admin');
-    expect(rows[0].querySelector('[data-stream-change-diff]')?.textContent).toBe('Company Old Co → New Co 11');
+    expect(rows[0].querySelector('[data-stream-change-diff]')?.textContent).toBe('Company: Old Co → New Co 11');
   });
 
   it('a reader without the audit log sees the same ONE row, without a diff', () => {
@@ -392,7 +405,7 @@ describe('one action, one row: an activity row carries its audit entry (objectst
     fireEvent.click(container.querySelector('[data-stream-filter="changes"]')!);
     const rows = container.querySelectorAll('[data-stream-system-row]');
     expect(rows).toHaveLength(1);
-    expect(rows[0].querySelector('[data-stream-change]')?.textContent).toBe('Company Old Co → New Co 12');
+    expect(rows[0].querySelector('[data-stream-change]')?.textContent).toBe('Company: Old Co → New Co 12');
     expect(rows[0].querySelector('[data-stream-change-diff]')).toBeNull();
   });
 
@@ -492,16 +505,17 @@ describe("an authored page's feed panels hold the record's field history (object
     it('全部 holds the changes: the paired update shows its before and after, the unpaired change is its own row', () => {
       mount(block, {});
       expect(screen.getByText('Updated the deal')).toBeTruthy();
-      expect(screen.getByText('Negotiation')).toBeTruthy();
-      expect(screen.getByText('250')).toBeTruthy();
+      // Each change is one line with its before and after (objectstack#35602).
+      expect(changeLines().some((line) => line.includes('Prospecting → Negotiation'))).toBe(true);
+      expect(changeLines().some((line) => line.includes('100 → 250'))).toBe(true);
       expect(screen.getByText('Kick-off note')).toBeTruthy();
     });
 
     it('an authored `filterMode: changes_only` opens on Field Changes and holds the field history only', () => {
       mount(block, { filterMode: 'changes_only' });
       expect(screen.getByRole('combobox').textContent).toContain('Field Changes');
-      expect(screen.getByText('Negotiation')).toBeTruthy();
-      expect(screen.getByText('250')).toBeTruthy();
+      expect(changeLines().some((line) => line.includes('Prospecting → Negotiation'))).toBe(true);
+      expect(changeLines().some((line) => line.includes('100 → 250'))).toBe(true);
       expect(screen.queryByText('Kick-off note')).toBeNull();
       expect(screen.queryByText('Updated the deal')).toBeNull();
     });
@@ -515,8 +529,8 @@ describe("an authored page's feed panels hold the record's field history (object
 
     it('`unifiedTimeline: false` un-mixes them: no field change drawn, and no `changes_only` offered', async () => {
       mount(block, { unifiedTimeline: false, filterMode: 'changes_only' });
-      expect(screen.queryByText('Negotiation')).toBeNull();
-      expect(screen.queryByText('250')).toBeNull();
+      expect(screen.queryAllByText(/Negotiation/)).toHaveLength(0);
+      expect(screen.queryAllByText(/250/)).toHaveLength(0);
       expect(screen.getByRole('combobox').textContent).toContain('All Activity');
       expect(await options()).not.toContain('Field Changes');
     });
@@ -525,8 +539,8 @@ describe("an authored page's feed panels hold the record's field history (object
   it('CONTROL: a discussion panel on the default record page leaves the changes to the stream', async () => {
     mount('record:discussion', {}, { onDefaultPage: true });
     expect(screen.getByText('Kick-off note')).toBeTruthy();
-    expect(screen.queryByText('Negotiation')).toBeNull();
-    expect(screen.queryByText('250')).toBeNull();
+    expect(screen.queryAllByText(/Negotiation/)).toHaveLength(0);
+    expect(screen.queryAllByText(/250/)).toHaveLength(0);
     expect(await options()).not.toContain('Field Changes');
   });
 });

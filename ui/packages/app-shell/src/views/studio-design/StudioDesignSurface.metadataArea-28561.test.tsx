@@ -97,6 +97,9 @@ vi.mock('./StudioBundleItemEditor.js', () => ({
 
 import { StudioDesignSurface } from './StudioDesignSurface';
 import { t } from '../metadata-admin/i18n';
+// The source under test reaches dynamic imports of `@objectstack/lint`; their first
+// load is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@objectstack/lint';
 
 const answer = (body: unknown) => ({ ok: true, status: 200, json: async () => body });
 
@@ -202,7 +205,7 @@ describe('Studio: the "All metadata" area in the builder (objectstack#28561)', (
     const current = nav().getByRole('link', { current: 'page' });
     expect(current).toHaveAttribute('href', `/studio/${PACKAGE_ID}/metadata`);
     // The builder's header stays: the package chip, its pillars, the area.
-    expect(nav().getAllByRole('link')).toHaveLength(5);
+    expect(nav().getAllByRole('link')).toHaveLength(4);
     expect(screen.queryByTestId('studio-pillar-not-found')).toBeNull();
     // The surface and the area share the one package-list read.
     expect(fetchMock.mock.calls.filter(([input]) => String(input) === '/api/v1/packages')).toHaveLength(1);

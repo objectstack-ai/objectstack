@@ -40,6 +40,8 @@ export interface Surface {
   label: string;
   /** Lucide icon name from the object's metadata (`icon` field); falls back per getIcon. */
   icon?: string;
+  /** The object's palette colour (`ObjectSchema.color`), for its tile (objectstack#35985). */
+  color?: string;
   /**
    * The nav entry's spec `id` (objectui#11774) — the entry's IDENTITY, which
    * `{type,name}` is not: an app may hold several entries that open one

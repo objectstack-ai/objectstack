@@ -734,7 +734,20 @@ export const CEILINGS = new Map([
   // bytes -> ceil(24030 / 4) = 6008; the ceiling moves +11, the measured
   // remainder only. Pinned AT the measurement.
   //   ceil(($(wc -c < skills/objectstack-formula/SKILL.md) - 20) / 4) == ceil(24030 / 4)
-  ['skills/objectstack-formula/SKILL.md', 6008], //     -53 (was 6055), then -5 A2′ (was 6002), then +11 (was 5997)
+  // #35356 (ADR-0157 D4), by the standing ruling 「A:先削重复,余额按实测提高」
+  // (record 6513306068): the working-day functions paragraph, with the
+  // contract review's asks on PR #36796 (start excluded and end included, the
+  // refused sites, the blank-until-next-write consequence, and the PRIOR() and
+  // date `+ duration` sentences it found were not restatement). Paid first by
+  // deleting restatement IN THIS FILE: the "No date arithmetic" note folded
+  // into the table header it repeated, the Salesforce-flavor examples the
+  // translation table lists, and the ISBLANK() translation. Priced bytes
+  // against `main`'s 24016 (headroom 4): the changed lines remove 789 bytes and
+  // add 1130, so the LANDED priced text is 24357 bytes -> ceil(24357 / 4) =
+  // 6090; the ceiling moves +82, the measured remainder only. Pinned AT the
+  // measurement.
+  //   ceil(($(wc -c < skills/objectstack-formula/SKILL.md) - 20) / 4) == ceil(24357 / 4)
+  ['skills/objectstack-formula/SKILL.md', 6090], //     -53 (was 6055), then -5 A2′ (was 6002), then +11 (was 5997), then +82 (was 6008)
   ['skills/objectstack-i18n/SKILL.md', 6333], //        -11 (was 6349), then -5 A2′ (was 6338)
   // 12705 -> 12984 (2026-08-31 app-repo-principles raise, see the block above).
   // The largest of the five and the frame the other four are read under: what an
@@ -1111,7 +1124,11 @@ export const CEILINGS = new Map([
   // headroom, ceiling +204, pinned AT the measurement. Standing ruling (2026-10-27,
   // tap A, verbatim and untranslated): 「A:先削重复,余额按实测提高」; recognised path per
   // ruling record 6513306068.
-  ['skills/objectstack-data/rules/field-types.md', 3553],
+  // 3553 -> 3541 (2026-11-19): the `homeAmount` literal returned to the currency
+  // block and the time-zone / country sentence landed, paid by four same-file
+  // restatement cuts that over-paid by 12 tokens; the row is lowered to the
+  // measurement so the headroom is banked, not spent later. Shrink-only.
+  ['skills/objectstack-data/rules/field-types.md', 3541],
   ['skills/objectstack-data/rules/indexing.md', 3241],
   // 1590 -> 1909 (#32364, 2026-11-11): § Sealing (`seal`) teaches `lifecycle.seal`
   // (+1574 B). PAID DOWN FIRST by three same-file restatements (-296 B): the ❌
@@ -1366,7 +1383,21 @@ export const CEILINGS = new Map([
   // paragraph (home: SKILL.md, String Operators) and a second `$between` Date
   // example (home: the operator table's `$between` row). Arithmetic in bytes:
   // 9925 -> 9892 (-33 net) -> ceil(9892 / 4) = 2473; headroom 0 tokens.
-  ['skills/objectstack-query/rules/filters.md', 2473],
+  // 2473 -> 2596 (#35496): the `{current_iso_week}` period key in § Date Macros
+  // (its `YYYY-Www` value, the text-field-only rule, the `INVALID_FILTER` / 400
+  // refusal on date / datetime / time fields, the two date-only surfaces that
+  // refuse it) and the client resolver that covers all three vocabularies.
+  // Raise path the standing ruling 「A:先削重复,余额按实测提高」 (ruling record
+  // 6513306068, letter B). PAID DOWN FIRST — five restatements cut in the same
+  // section: the wrapper regex beside the prose that already says both
+  // spellings parse, the code comment repeating the sentence above its block,
+  // the second date-macro comparison in the session-token example (the week key
+  // takes its place), the two per-vocabulary predicates (one predicate answers
+  // for all three) and the driver sentence's list of value kinds. Arithmetic in
+  // bytes: 9876 landed -> 10382, +506 -> 127 tokens, the row's 4 tokens of
+  // headroom absorbed, ceiling +123, pinned AT the measurement.
+  //   ceil($(wc -c < skills/objectstack-query/rules/filters.md) / 4) == ceil(10382 / 4)
+  ['skills/objectstack-query/rules/filters.md', 2596],
   ['skills/objectstack-query/rules/pagination.md', 1382],
 
   // objectstack-ui `rules/` — the five files the #14296 item 1 split created.
@@ -1481,7 +1512,18 @@ export const CEILINGS = new Map([
   // before, ceiling +153, the measured remainder only, pinned AT the measurement. Same ruling
   // (2026-10-27, tap A): 「A:先削重复,余额按实测提高」 (ruling record 6513306068, letter B).
   //   ceil($(wc -c < skills/objectstack-ui/rules/actions.md) / 4) == ceil(13330 / 4)
-  ['skills/objectstack-ui/rules/actions.md', 3333],
+  // 3333 -> 3711 (#34648, #34268): two bullets in the feedback list. `resultDialog`: its keys,
+  // the `fields` row, the six formats, `table` with its required `columns`, and that a `text` or
+  // `code-list` cell has no copy control while `secret` / `qrcode` keep theirs. The
+  // `execution: 'aggregate'` bulk handler: it resolves `{ succeeded, failed }` and does not throw,
+  // and how the console counts ids against `_selectedIds`. PAID DOWN FIRST by 28 bytes of
+  // restatement in this file: "`{ path, label?, format? }` " on the `preflight` bullet (the
+  // `resultDialog` bullet right below it now spells that row). Arithmetic: the text adds 1541
+  // bytes, the cut removes 28, so the file is 13330 -> 14843 bytes -> 3711 tokens, zero headroom
+  // before, ceiling +378, the measured remainder only, pinned AT the measurement. Same ruling
+  // (2026-10-27, tap A): 「A:先削重复,余额按实测提高」 (ruling record 6513306068, letter B).
+  //   ceil($(wc -c < skills/objectstack-ui/rules/actions.md) / 4) == ceil(14843 / 4)
+  ['skills/objectstack-ui/rules/actions.md', 3711],
   // 6090 -> 6252 (#19715, card item 4): a 5-line table of contents at the top,
   // anchors to the file's existing headings, nothing else changed. +162 tokens,
   // zero headroom to absorb any of it, ceiling +162. Maintainer ruling
@@ -1831,7 +1873,24 @@ export const CEILINGS = new Map([
   // 6984 -> 6570 after the cuts (-414); the teaching nets +466 -> 7036 ->
   // ceil(7036 / 4) = 1759; headroom was 0, so the ceiling moves +13, the
   // measured remainder only. Pinned AT the measurement.
-  ['skills/objectstack-data/references/seeds.md', 1759],
+  // 1759 -> 1812: `### externalId selection` says every record carries a value
+  // for each `externalId` field and that a blank one is refused at load, and the
+  // `externalId` row points at it. Raise path the standing ruling
+  // 「A:先削重复,余额按实测提高」 (ruling record 6513306068, letter B). PAID DOWN
+  // FIRST — restatement cut in the same file: the `columns` row's shape literal
+  // (its own section shows it), the one-row best-practices table (a sentence
+  // now) and the second telling of what a refused seed value leaves behind.
+  // Arithmetic in bytes: 7033 -> 6905 after the cuts (-128); the teaching nets
+  // +340 -> 7245 -> ceil(7245 / 4) = 1812; headroom was 0, so the ceiling moves
+  // +53, the measured remainder only. Pinned AT the measurement.
+  // 1812 -> 1898: the note under the field table says a `seed` saved at runtime
+  // names an object that exists or the save answers `422 INVALID_METADATA` at
+  // `object`, and that a draft object is enough for a draft seed; the `object`
+  // row points at it in place of "never write manually". Same raise path and
+  // the same paydown as the step above (one PR, the cuts are its deletion):
+  // 7245 -> 7590 bytes (+345) -> ceil(7590 / 4) = 1898; headroom was 0, so the
+  // ceiling moves +86, the measured remainder only. Pinned AT the measurement.
+  ['skills/objectstack-data/references/seeds.md', 1898],
   // 1351 -> 1343: the body-pin values left the count (#31115, ruling B; see
   // BODY_PIN_REPIN); the file's count fell by the same 8, headroom unchanged.
   ['skills/objectstack-platform/references/bootstrap.md', 1343],
@@ -2031,6 +2090,29 @@ export const CEILINGS = new Map([
   // headroom; no other row moves.
   ['skills/objectstack-ask/SKILL.md', 1877],
 
+  // ── the objectstack-mcp-build skill joins the catalog — ruling #34691 S3 = A ──
+  // (decision record: comment 6943107981 on #34691, "one copy of the shape
+  // knowledge, two thin procedures"). A new published process skill for a
+  // client that builds through the open MCP draft door: the order of work
+  // (read what exists, load the type's domain skill, save a draft, read the
+  // publish verdict, repair, hand the Studio review route to a person). It
+  // names the door's five tools, restates none of their arguments, and points
+  // to the domain skills for every shape. The row is an INITIAL measurement of
+  // the new file on the PR that adds it, pinned AT it — zero headroom, on the
+  // same terms as the objectstack-ask row above and the objectstack-project row
+  // below. Its evals are unpriced (population 1b). No existing row moves: no
+  // other skill file is edited. The PR that adds the row is Tier H and lands
+  // only on an authorized approval, which is the pricing act the header
+  // reserves to the maintainer.
+  // Re-measured before landing, on that same PR and under the same ruling: its
+  // contract review (record 7024514720) had the file say what stands in for a
+  // contract a client with no file tool cannot read, what one
+  // `PERMISSION_DENIED` refuses, whose drafts `list_drafts` lists, and which
+  // package serves the door. 4622 -> 4921 bytes, less the 20-byte stamp line:
+  // 1151 -> 1226 (+75), the measured remainder only, still zero headroom.
+  //   ceil(($(wc -c < skills/objectstack-mcp-build/SKILL.md) - 20) / 4) == ceil(4901 / 4)
+  ['skills/objectstack-mcp-build/SKILL.md', 1226],
+
   // ── the objectstack-project skill joins the catalog ──
   // A new published process skill: how a change moves through a metadata-app
   // project (app or platform, what to write per stage, what the app tests
@@ -2047,7 +2129,25 @@ export const CEILINGS = new Map([
   // 10011). The PR that adds the row is Tier H and lands only on an authorized
   // approval, which is the pricing act the header reserves to the maintainer.
   //   ceil(($(wc -c < skills/objectstack-project/SKILL.md) - 20) / 4) == ceil(11603 / 4)
-  ['skills/objectstack-project/SKILL.md', 2901],
+  // 2901 -> 2990 (2026-11-19): §0 gains its third question — check the generated
+  // platform catalog before adding an object, a field or a flow; use what the
+  // platform ships; a missing capability a second app would copy is a platform
+  // card, built meanwhile under a `PLATFORM-CANDIDATE` marker — and §5 step 4
+  // sweeps those markers beside the `PLATFORM-GAP` tests. The SCOPE is the
+  // card's — the maintainer graded it 「立卡 p1」 (2026-11-19) after the skills
+  // platform-first analysis; no ruling orders the wording, and none is cited
+  // for it. The AUTHORITY for the raise is the standing path alone, on its own
+  // form: PAID DOWN FIRST by two same-file cuts, 142 bytes — §2's "Unsure
+  // whether a check exists? Inject the defect and run the command: if it fails,
+  // the platform checks it." (its technique survives in §2's retire sentence;
+  // the aside for an author unsure a check exists does not) and §0's "and read
+  // it from there afterwards" (restated by the same sentence's "Record the
+  // answer ... once") — then the measured remainder: `wc -c` = 11978 bytes,
+  // stamp line 20 -> ceil(11958 / 4) = 2990 tokens, zero headroom, ceiling +89,
+  // pinned AT the measurement. Raise path: the standing ruling (2026-10-27,
+  // verbatim and untranslated) 「A:先削重复,余额按实测提高」, recognised per
+  // ruling record 6513306068.
+  ['skills/objectstack-project/SKILL.md', 2990],
 ]);
 
 /**
@@ -2849,6 +2949,7 @@ function selfTest() {
       'skills/objectstack-formula/references/_index.md',
       'skills/objectstack-i18n/references/_index.md',
       'skills/objectstack-platform/references/_index.md',
+      'skills/objectstack-project/references/platform-catalog.md',
       'skills/objectstack-query/references/_index.md',
       'skills/objectstack-ui/references/_index.md',
       'skills/objectstack-ui/references/react-blocks.md',

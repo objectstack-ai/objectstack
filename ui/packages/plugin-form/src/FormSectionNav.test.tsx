@@ -27,7 +27,7 @@ import React from 'react';
 import { registerAllFields } from '@object-ui/fields';
 import { ModalForm } from './ModalForm';
 import { ObjectForm } from './ObjectForm';
-import { FormSectionNav } from './FormSectionNav';
+import { FormSectionNav, JUMP_MARK_ATTR, JUMP_MARK_MS } from './FormSectionNav';
 
 registerAllFields();
 
@@ -268,9 +268,11 @@ describe('ObjectForm section navigation (objectstack#34605)', () => {
 const VIEW_TOP = 100;
 const VIEW_HEIGHT = 600;
 
-function mountFixture(offsets: number[], contentHeight: number) {
+function mountFixture(offsets: number[], initialContentHeight: number, collapsedKeys: string[] = []) {
   const keys = offsets.map((_, i) => `s${i}`);
   let scrollTop = 0;
+  let contentHeight = initialContentHeight;
+  const expanded: string[] = [];
   const host = render(
     <div data-testid="fixture-dialog" style={{ overflowY: 'hidden' }}>
       <FormSectionNav
@@ -279,8 +281,10 @@ function mountFixture(offsets: number[], contentHeight: number) {
           label: `Section ${i}`,
           anchorId: `anchor-${key}`,
           errorCount: 0,
-          collapsed: false,
-          expand: () => {},
+          collapsed: collapsedKeys.includes(key),
+          expand: () => {
+            expanded.push(key);
+          },
         }))}
       />
       <div data-testid="fixture-scroller" style={{ overflowY: 'auto' }}>
@@ -313,7 +317,11 @@ function mountFixture(offsets: number[], contentHeight: number) {
       .getAllByRole('button')
       .find((b) => b.getAttribute('aria-current') === 'true')
       ?.textContent;
-  return { scrollTo, highlighted, scroller };
+  /** Grow or shrink the content, as a section unfolding does. */
+  const setContentHeight = (height: number) => {
+    contentHeight = height;
+  };
+  return { scrollTo, highlighted, scroller, setContentHeight, expanded };
 }
 
 describe('FormSectionNav highlight follows the scroll position after a click (objectstack#34819)', () => {
@@ -447,5 +455,166 @@ describe('FormSectionNav jump scrolls only the form scroller (objectstack#35092)
     expect(elementScrollTo.mock.contexts[0]).toBe(scroller);
     expect(scrollIntoView).not.toHaveBeenCalled();
     expect(windowScrollTo).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * objectstack#35472 — the bar is a jump bar, and every click on it shows where
+ * it went. A dialog derived from an object's field groups drew the bar over
+ * all sections stacked; when they fit, a click had nothing to scroll and only
+ * the highlight moved, which read as tabs that do not switch.
+ *
+ * Two pins: (1) with nothing to scroll there is no bar, and the bar comes back
+ * when the content outgrows the scroller; (2) a click marks the heading it
+ * jumped to for a moment, so a jump to a heading already in view still shows.
+ *
+ * The test DOM does no layout and its `ResizeObserver` is a no-op: the boxes
+ * are given their heights, and a recording observer stands in, so the test
+ * says when the sizes changed.
+ */
+describe('FormSectionNav is a jump bar: hidden when the sections fit, a click marks its section (objectstack#35472)', () => {
+  let resizeCallbacks: Array<() => void> = [];
+  class RecordingResizeObserver {
+    private readonly callback: () => void;
+    constructor(callback: () => void) {
+      this.callback = callback;
+      resizeCallbacks.push(callback);
+    }
+    observe() {}
+    unobserve() {}
+    disconnect() {
+      resizeCallbacks = resizeCallbacks.filter((c) => c !== this.callback);
+    }
+  }
+  const resized = () => act(() => resizeCallbacks.forEach((c) => c()));
+
+  beforeEach(() => {
+    resizeCallbacks = [];
+    vi.stubGlobal('ResizeObserver', RecordingResizeObserver);
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  describe('a fixture scroller', () => {
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'requestAnimationFrame', 'cancelAnimationFrame'] });
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('draws no bar while the sections fit the scroller, and draws it once they outgrow it', () => {
+      // Two short sections in a 600 box: nothing to scroll.
+      const { setContentHeight } = mountFixture([0, 200], 400);
+      resized();
+      expect(nav()).toBeNull();
+
+      // A section unfolds and the content outgrows the box.
+      setContentHeight(1400);
+      resized();
+      expect(nav()).not.toBeNull();
+      expect(within(nav()!).getAllByRole('button').map((b) => b.textContent)).toEqual(['Section 0', 'Section 1']);
+
+      setContentHeight(600);
+      resized();
+      expect(nav()).toBeNull();
+    });
+
+    it('a click marks the heading it jumped to for a moment, even one already in view', () => {
+      const { scroller } = mountFixture([0, 300, 1200, 1800], 2400);
+      resized();
+      const anchor = (key: string) => document.getElementById(`anchor-${key}`)!;
+
+      // s1's heading (300) is already inside the 600 box.
+      fireEvent.click(screen.getByTestId('form-section-nav:s1'));
+      expect(elementScrollTo.mock.contexts[0]).toBe(scroller);
+      expect(anchor('s1').hasAttribute(JUMP_MARK_ATTR)).toBe(true);
+
+      // A second jump moves the mark: one section is marked at a time.
+      fireEvent.click(screen.getByTestId('form-section-nav:s3'));
+      expect(anchor('s1').hasAttribute(JUMP_MARK_ATTR)).toBe(false);
+      expect(anchor('s3').hasAttribute(JUMP_MARK_ATTR)).toBe(true);
+
+      act(() => {
+        vi.advanceTimersByTime(JUMP_MARK_MS);
+      });
+      expect(anchor('s3').hasAttribute(JUMP_MARK_ATTR)).toBe(false);
+    });
+
+    it('CONTROL: a trailing collapsed section stays folded until its own entry is clicked, then unfolds and is marked', () => {
+      const { expanded } = mountFixture([0, 600, 1200], 2400, ['s2']);
+      resized();
+      fireEvent.click(screen.getByTestId('form-section-nav:s1'));
+      expect(expanded).toEqual([]);
+
+      fireEvent.click(screen.getByTestId('form-section-nav:s2'));
+      expect(expanded).toEqual(['s2']);
+      // The jump waits a frame for the unfolded fields to mount.
+      act(() => {
+        vi.advanceTimersToNextFrame();
+      });
+      expect(document.getElementById('anchor-s2')!.hasAttribute(JUMP_MARK_ATTR)).toBe(true);
+    });
+  });
+
+  describe('the record dialog', () => {
+    /** The dialog's form scroller, given a box and content of its own. */
+    const sizeScroller = (clientHeight: number, scrollHeight: number) => {
+      const scroller = styleDialogScrollers(100);
+      Object.defineProperty(scroller, 'clientHeight', { configurable: true, get: () => clientHeight });
+      Object.defineProperty(scroller, 'scrollHeight', { configurable: true, get: () => scrollHeight });
+      return scroller;
+    };
+    const header = () => document.querySelector<HTMLElement>('[role="dialog"] h2')!.parentElement!;
+
+    it('draws no bar when every section fits the body, and the header keeps its own separator', async () => {
+      renderModal();
+      await waitFor(() => expect(nav()).not.toBeNull());
+      // With the bar drawn, the bar is the separator under the header.
+      await waitFor(() => expect(header().classList.contains('border-b')).toBe(false));
+
+      sizeScroller(600, 420);
+      resized();
+      expect(nav()).toBeNull();
+      expect(header().classList.contains('border-b')).toBe(true);
+      // Every section is still drawn, stacked.
+      for (const key of ['overview', 'forecast', 'qualification', 'description']) {
+        expect(heading(`__section_${key}`)).not.toBeNull();
+      }
+    });
+
+    it('draws the bar when the sections overflow the body, and a click scrolls and marks the section', async () => {
+      renderModal();
+      await waitFor(() => expect(nav()).not.toBeNull());
+      const scroller = sizeScroller(600, 1500);
+      resized();
+      expect(nav()).not.toBeNull();
+      heading('__section_qualification').getBoundingClientRect = () => rectAt(460);
+
+      fireEvent.click(screen.getByTestId('form-section-nav:__section_qualification'));
+
+      expect(elementScrollTo.mock.contexts[0]).toBe(scroller);
+      expect(elementScrollTo).toHaveBeenCalledWith({ top: 360, behavior: 'smooth' });
+      expect(heading('__section_qualification').hasAttribute(JUMP_MARK_ATTR)).toBe(true);
+    });
+
+    it('CONTROL: an authored tabbed dialog keeps its tab strip, which switches the panel, and draws no bar', async () => {
+      renderModal({ contentLayout: 'tabbed' });
+      await waitFor(() => expect(screen.getByTestId('form-tab:forecast')).toBeTruthy());
+      expect(nav()).toBeNull();
+      expect(screen.getAllByRole('tab').map((t) => t.textContent)).toEqual([
+        'Overview',
+        'Forecast',
+        'Qualification',
+        'Description',
+      ]);
+      const panel = (key: string) => screen.getByTestId(`form-tab-panel:${key}`).getAttribute('data-state');
+      expect(panel('overview')).toBe('active');
+      // Radix tabs activate on the pointer press.
+      fireEvent.mouseDown(screen.getByTestId('form-tab:forecast'), { button: 0, ctrlKey: false });
+      await waitFor(() => expect(panel('forecast')).toBe('active'));
+      expect(panel('overview')).toBe('inactive');
+    });
   });
 });

@@ -37,6 +37,7 @@
 
 import React from 'react';
 import { formatDate, getRecordDisplayName } from '@object-ui/core';
+import { RelatedRecordActionsProvider, useRelatedRecordActions } from '@object-ui/react';
 import type { LookupColumnDef } from '@object-ui/types';
 import { BooleanValueText } from './booleanValueLabel.js';
 
@@ -168,7 +169,52 @@ export interface LookupColumnRenderContext {
 }
 
 /**
+ * Cell renderer keys that draw their value as their OWN anchor without asking
+ * the host — `mailto:`, a URL, `tel:`, and the file family's download link. A
+ * candidate's column draws them with {@link PICKER_TEXT_FACE} instead: the
+ * address, the URL, the number, the file's name.
+ */
+const PICKER_SELF_LINKING_CELL_TYPES: ReadonlySet<string> = new Set([
+  'email',
+  'url',
+  'phone',
+  'file',
+  'video',
+  'audio',
+]);
+
+/** The cell renderer key a self-linking value is drawn with in a picker. */
+const PICKER_TEXT_FACE = 'text';
+
+/**
+ * The reference family (the lookup cell's `ReferencedRecordLink`, its hover
+ * card) draws an anchor only when the host answers `recordHref`; under this
+ * wrapper the host answers no record destination, which the context documents
+ * as "render the plain value". Every other member of the host passes through;
+ * with no host there is nothing to withhold.
+ */
+function WithoutRecordLinks({ children }: { children: React.ReactNode }): React.ReactElement {
+  const host = useRelatedRecordActions();
+  if (!host) return <>{children}</>;
+  return (
+    <RelatedRecordActionsProvider value={{ ...host, recordHref: undefined, openRecord: undefined }}>
+      {children}
+    </RelatedRecordActionsProvider>
+  );
+}
+
+/**
  * Render one column of one candidate record.
+ *
+ * A candidate's column is never a navigational link, on either picker surface:
+ * the option row (the dropdown) or the table row (the browse-all dialog) is the
+ * one click target, and a link inside it is a second one that competes with
+ * the pick — a record chip opening its record, a `mailto:` opening the mail
+ * client, instead of selecting the candidate (objectui#11903,
+ * objectstack#36479). So a self-linking type is drawn with the text face
+ * ({@link PICKER_SELF_LINKING_CELL_TYPES}), and every cell renders under a host
+ * with no record destination ({@link WithoutRecordLinks}): a reference keeps
+ * its face — the record page's chip included — without the anchor.
  *
  * Order:
  *   1. the record title, for the display column only and only when the
@@ -213,9 +259,15 @@ export function renderLookupColumnValue(
   // schema field's type via `fieldsMeta`) and a resolver are available.
   const descriptor = descriptors[col.field];
   if (descriptor && cellRenderer) {
-    const Renderer = cellRenderer(descriptor.type);
+    const Renderer = cellRenderer(
+      PICKER_SELF_LINKING_CELL_TYPES.has(descriptor.type) ? PICKER_TEXT_FACE : descriptor.type,
+    );
     if (Renderer) {
-      return <Renderer value={val} field={descriptor} />;
+      return (
+        <WithoutRecordLinks>
+          <Renderer value={val} field={descriptor} />
+        </WithoutRecordLinks>
+      );
     }
   }
 

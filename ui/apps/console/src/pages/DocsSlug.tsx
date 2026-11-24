@@ -147,7 +147,7 @@ export default function DocsSlug() {
   // portal's own answer below standing.
   const refusal = answer !== null && answer.slug === slug ? answer.refusal : null;
   if (refusal !== null) {
-    return <DocRefusal name={slug} message={refusal} />;
+    return <DocRefusal message={refusal} />;
   }
 
   // The name-prefix fallback for a name no installed doc carries (unchanged).
@@ -156,7 +156,7 @@ export default function DocsSlug() {
   }
 
   return (
-    <DocShell breadcrumb={slug}>
+    <DocShell>
       <div className="mx-auto flex max-w-3xl flex-col items-center gap-3 p-10 text-center">
         <FileQuestion className="h-10 w-10 text-muted-foreground" />
         <h1 className="text-lg font-semibold">Documentation not found</h1>

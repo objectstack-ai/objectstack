@@ -12,6 +12,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
   // Does this schema-driven action render for THIS row? The ONE definition
   // for every row menu, and here it governs BOTH surfaces a def can land on —
@@ -37,6 +38,7 @@ import {
 import { Edit, Trash2, MoreVertical } from 'lucide-react';
 import { evalRowPredicate, hasDeclaredPredicate, isActionSwitchedOff, type CrudAffordances } from '@object-ui/core';
 import { useObjectTranslation, useRowPredicate, useCapabilityGate, usePredicateScope } from '@object-ui/react';
+import { orderRowMenuActions } from '../rowActionArrangement';
 
 const ROW_ACTION_FALLBACKS: Record<string, string> = {
   'grid.openMenu': 'Open menu',
@@ -268,7 +270,8 @@ export interface RowActionMenuPlan {
   /**
    * Menu-bound defs surviving their own `visible`: the surviving primaries that
    * did not fit an inline slot, then the surviving non-primaries — each group in
-   * declared order, primaries above secondaries as before.
+   * declared order, primaries above secondaries as before. The defs the
+   * object's `actionLayout.record` names lead, in its order (objectstack#36494).
    */
   custom: RowActionDef[];
   /** Legacy string row actions. Predicate-free, so all of them render. */
@@ -362,12 +365,14 @@ export function planRowActionMenu(input: {
   const survivingPrimaries = surviving.filter((def) => def.variant === 'primary');
   const inlineBudget = Math.max(0, input.maxInlineActions ?? 1);
   const inline = survivingPrimaries.slice(0, inlineBudget);
-  const custom = [
+  // objectstack#36494 — the object's `actionLayout.record` order leads the
+  // menu (`rankRowActionDefs`); defs it does not rank keep the order below.
+  const custom = orderRowMenuActions([
     // Primaries that outran the inline budget stay above the secondaries, the
     // menu order this surface has always had.
     ...survivingPrimaries.slice(inlineBudget),
     ...surviving.filter((def) => def.variant !== 'primary'),
-  ];
+  ]);
   const legacy = [...(input.rowActions ?? [])];
   return {
     inline,
@@ -498,18 +503,30 @@ export const BuiltinRowActionItem: React.FC<{
     label: `builtin:${name}:disabledWhen`,
     fields: objectFields,
   });
+  // The declared `disabledWhen` verdict alone — never the OR below, so a
+  // pending record-grained verdict greys the item without earning a reason.
+  const disabledByPredicate = predicates?.disabledWhen != null && isDisabled;
+  // The reason the record page gives for the same verdict (objectstack#35135):
+  // `userActions` declares no reason key, so the generic
+  // `actions.notAvailableForRecord` sentence, as the item's second line and its
+  // accessible description. Called ahead of the early return.
+  const disabledReason = useDisabledReason(disabledByPredicate);
   if (!isVisible) return null;
-  const disabled = verdictPending || (predicates?.disabledWhen != null && isDisabled);
+  const disabled = verdictPending || disabledByPredicate;
   return (
     <DropdownMenuItem
       disabled={disabled}
       aria-busy={verdictPending || undefined}
       onClick={() => { if (!disabled) onSelect(row); }}
       data-testid={`row-action-builtin-${name}`}
+      {...menuItemReasonAria(disabledReason)}
       className={className}
     >
       {icon}
-      {label}
+      {/* An item with no reason keeps its bare label, as before. */}
+      {disabledReason
+        ? <DisabledReasonMenuLabel reason={disabledReason}>{label}</DisabledReasonMenuLabel>
+        : label}
     </DropdownMenuItem>
   );
 };
@@ -544,12 +561,15 @@ function toButtonVariant(v: RowActionDef['variant']): 'default' | 'secondary' | 
  * the way the record header's button does: `aria-describedby` on the button,
  * a focusable tooltip trigger around it.
  */
-const RowActionInlineButton: React.FC<{
+export const RowActionInlineButton: React.FC<{
   def: RowActionDef;
   row: any;
   objectFields?: unknown;
   onActionDef?: (def: RowActionDef, row: any) => void;
-}> = ({ def, row, objectFields, onActionDef }) => {
+  /** objectstack#35678 — the selection bar draws its exposed actions as outline buttons, at its own size. */
+  buttonVariant?: 'default' | 'secondary' | 'destructive' | 'ghost' | 'link' | 'outline';
+  buttonClassName?: string;
+}> = ({ def, row, objectFields, onActionDef, buttonVariant, buttonClassName }) => {
   const scope = usePredicateScope();
   const isVisible = React.useMemo(
     () => isCustomRowActionVisible(def, row, scope, objectFields),
@@ -565,9 +585,9 @@ const RowActionInlineButton: React.FC<{
   const ActionIcon = resolveIcon(def.icon);
   const button = (
     <Button
-      variant={toButtonVariant(def.variant)}
+      variant={buttonVariant ?? toButtonVariant(def.variant)}
       size="sm"
-      className="h-8"
+      className={buttonClassName ?? 'h-6'}
       data-testid={`row-action-inline-${def.name}`}
       disabled={isDisabled}
       aria-describedby={disabledReason?.id}
@@ -718,18 +738,6 @@ export const RowActionMenuItems: React.FC<{
           onSelect={(r) => onEdit?.(r)}
         />
       )}
-      {plan.remove && (
-        <BuiltinRowActionItem
-          name="delete"
-          predicates={deletePredicates}
-          row={row}
-          icon={<Trash2 className="mr-2 h-4 w-4" />}
-          label={t('grid.delete')}
-          objectFields={objectFields}
-          verdictPending={!!crudVerdictPending?.delete}
-          onSelect={(r) => onDelete?.(r)}
-        />
-      )}
       {plan.custom.map(def => (
         <RowActionMenuItem
           key={def.name}
@@ -748,6 +756,25 @@ export const RowActionMenuItems: React.FC<{
           {formatActionLabel(action)}
         </DropdownMenuItem>
       ))}
+      {/* objectstack#35554 — Delete is the menu's last item, set apart by a
+          separator and drawn in the danger colour, whichever menu hosts it
+          (the row's "⋮", the row's context menu, the page bar's overflow). */}
+      {plan.remove && (plan.edit || plan.custom.length > 0 || plan.legacy.length > 0) && (
+        <DropdownMenuSeparator data-testid="row-action-delete-separator" />
+      )}
+      {plan.remove && (
+        <BuiltinRowActionItem
+          name="delete"
+          predicates={deletePredicates}
+          row={row}
+          icon={<Trash2 className="mr-2 h-4 w-4" />}
+          label={t('grid.delete')}
+          objectFields={objectFields}
+          verdictPending={!!crudVerdictPending?.delete}
+          className="text-destructive focus:text-destructive"
+          onSelect={(r) => onDelete?.(r)}
+        />
+      )}
     </>
   );
 };
@@ -796,7 +823,7 @@ export const RowActionMenu: React.FC<RowActionMenuProps> = (props) => {
               // pointer, where no hover will ever lift it. The tone
               // is a text colour, never an opacity, so the resting glyph keeps
               // the muted-foreground contrast every other secondary icon has.
-              className="h-8 w-8 min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0 text-muted-foreground transition-colors group-hover/row:text-foreground group-focus-within/row:text-foreground group-data-[state=selected]/row:text-foreground data-[state=open]:text-foreground focus-visible:text-foreground pointer-coarse:text-foreground"
+              className="h-6 w-6 min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0 text-muted-foreground transition-colors group-hover/row:text-foreground group-focus-within/row:text-foreground group-data-[state=selected]/row:text-foreground data-[state=open]:text-foreground focus-visible:text-foreground pointer-coarse:text-foreground"
               data-testid="row-action-trigger"
             >
               <MoreVertical className="h-4 w-4" />

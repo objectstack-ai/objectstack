@@ -37,7 +37,10 @@
  *   refuses to hand the slot back to them; an SLA escalation leaves them off;
  * - CONTROLS: the option off leaves every slate, timeline and decision as
  *   before; the option on with a slate that never named the submitter writes
- *   no note.
+ *   no note;
+ * - a request that opens on the slate naming no one says so on its timeline
+ *   and tells its submitter, and the submitter's refused approval names the
+ *   remedy — only when no one else is on the slate.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -160,6 +163,8 @@ describe('[#25573] excludeSubmitter keeps the submitter from approving their own
     return JSON.parse(row.node_config_json);
   };
   const EXCLUDED = "The request's submitter was removed from its approvers because this step sets excludeSubmitter";
+  const NO_ONE_ELSE = 'No one else can approve this request yet. An organization administrator must add a member '
+    + 'who can approve it, then reassign the request to them.';
 
   beforeAll(async () => {
     engine = new ObjectQL();
@@ -263,9 +268,7 @@ describe('[#25573] excludeSubmitter keeps the submitter from approving their own
     it('an organization whose only administrator is the submitter opens on the slate that names no one', async () => {
       const row = await open('solo', FIELD_STEP, ON, { org: SOLO_ORG });
       expect(row.pending_approvers).toEqual([]);
-      expect(await notesOf(row.id)).toEqual([
-        `${EXCLUDED}; no one else could take it, so only a privileged override can decide it.`,
-      ]);
+      expect(await notesOf(row.id)).toEqual([`${EXCLUDED}, and no one else could take it.`, NO_ONE_ELSE]);
       // …and the submitter, that organization's administrator, cannot take it
       // through the override either.
       await expect(svc.decide(row.id, { decision: 'approve', actorId: 'u_sub' } as any,
@@ -301,7 +304,7 @@ describe('[#25573] excludeSubmitter keeps the submitter from approving their own
       await expect(svc.decide(row.id, { decision: 'approve', actorId: 'u_sub' } as any, SUB))
         .rejects.toThrow(/^FORBIDDEN: 'u_sub' submitted this request, and its approval step sets excludeSubmitter/);
       expect((await actionsOf(row.id)).map((a) => a.action)).toEqual(['submit']);
-      const out = await svc.decide(row.id, { decision: 'reject', actorId: 'u_sub' } as any, SUB);
+      const out = await svc.decide(row.id, { decision: 'reject', comment: 'Over budget.', actorId: 'u_sub' } as any, SUB);
       expect(out.request.status).toBe('rejected');
     });
 
@@ -411,6 +414,156 @@ describe('[#25573] excludeSubmitter keeps the submitter from approving their own
       const row = await open('own_override_elsewhere', [{ type: 'user', value: 'u_bob' }]);
       const moved = await svc.reassign(row.id, { actorId: 'u_sub', to: 'position:procurement_director' } as any, submitterAdmin);
       expect(moved.request.pending_approvers).toEqual(['position:procurement_director']);
+    });
+  });
+
+  // A request no one can decide tells its submitter so, and the refusal of the
+  // submitter's own approval names what to do instead of an approver who does
+  // not exist. The ruled outcome is unchanged: they still cannot approve it.
+  describe('a request no one but its submitter can decide names the remedy', () => {
+    const sent: any[] = [];
+    const soloAdmin = as('u_sub', SOLO_ORG, ['organization_admin']);
+    beforeAll(() => {
+      svc.attachMessaging({ emit: (async (input: any) => { sent.push(input); }) as any });
+    });
+
+    it('the slate that names no one: the timeline says so, the submitter is told, and the refusal names the remedy', async () => {
+      const row = await open('solo_told', FIELD_STEP, ON, { org: SOLO_ORG });
+      expect(row.pending_approvers).toEqual([]);
+      expect((await notesOf(row.id)).at(-1)).toBe(NO_ONE_ELSE);
+      const told = sent.filter((e) => e.source?.id === row.id);
+      expect(told.map((e) => [e.topic, e.audience, e.keyedText.titleKey, e.keyedText.bodyKey])).toEqual([
+        ['approval.comment', ['u_sub'], 'messages.approvalNoApproverTitle', 'messages.approvalNoApprover'],
+      ]);
+      expect(told[0].payload.body).toBe(NO_ONE_ELSE);
+      await expect(svc.decide(row.id, { decision: 'approve', actorId: 'u_sub' } as any, soloAdmin)).rejects.toThrow(
+        "FORBIDDEN: 'u_sub' submitted this request, and its approval step sets excludeSubmitter, so they cannot "
+          + `approve it. ${NO_ONE_ELSE}`,
+      );
+    });
+
+    it('the override refusal names the literal a member must hold, when only it is left on the slate', async () => {
+      const row = await open('solo_literal', FIELD_STEP, {}, { org: SOLO_ORG });
+      await engine.update('sys_approval_request', { id: row.id, pending_approvers: 'position:legal' },
+        { context: SYSTEM } as any);
+      await expect(svc.decide(row.id, { decision: 'approve', actorId: 'u_sub' } as any, soloAdmin)).rejects.toThrow(
+        "through the administrator override. No one else can approve this request yet. An organization "
+          + "administrator must add a member who holds position 'legal'; that member can then decide it. To "
+          + 'withdraw it instead, reject it or recall it.',
+      );
+    });
+
+    // [#36308] The refusal names the position as the timeline note does,
+    // through the same resolver: the decider's pack label, else the declared
+    // label, else the name (the pin above, on a service that knows no label).
+    // The sentence stays the English the note stores.
+    it('the refusal names a labelled position by the decider\'s pack label, else its declared label', async () => {
+      const i18n = createMemoryI18n();
+      for (const [locale, data] of Object.entries(ApprovalsTranslations)) {
+        i18n.loadTranslations(locale, data as Record<string, unknown>);
+      }
+      i18n.loadTranslations('zh-CN', { positions: { legal: { label: '法务' } } });
+      const labelled = new ApprovalService({
+        engine: engine as any,
+        clock: { now: () => new Date(now += 1000) },
+        logger: { warn: () => {}, info: () => {}, error: () => {}, debug: () => {} } as any,
+        i18nServiceSource: () => i18n,
+        positionLabelSource: async (name) => (name === 'legal' ? 'Legal Counsel' : undefined),
+      });
+      const row = await open('solo_labelled', FIELD_STEP, {}, { org: SOLO_ORG });
+      await engine.update('sys_approval_request', { id: row.id, pending_approvers: 'position:legal,team:ops' },
+        { context: SYSTEM } as any);
+      const remedy = (who: string) => 'No one else can approve this request yet. An organization administrator must '
+        + `add a member who holds ${who}; that member can then decide it. To withdraw it instead, reject it or recall it.`;
+      await expect(labelled.decide(row.id, { decision: 'approve', actorId: 'u_sub' } as any, { ...soloAdmin, locale: 'zh-CN' }))
+        .rejects.toThrow(remedy("position '法务', team 'ops'"));
+      await expect(labelled.decide(row.id, { decision: 'approve', actorId: 'u_sub' } as any, { ...soloAdmin, locale: 'ja-JP' }))
+        .rejects.toThrow(remedy("position 'Legal Counsel', team 'ops'"));
+      await expect(labelled.decide(row.id, { decision: 'approve', actorId: 'u_sub' } as any, soloAdmin))
+        .rejects.toThrow(remedy("position 'Legal Counsel', team 'ops'"));
+    });
+
+    // [#36463] The end user's half rides beside the English: the thrown
+    // error's `userMessage`, the same refusal in the decider's language (the
+    // REST door carries it to the wire). The `message` is the English above.
+    it('each refusal carries the decider\'s language as its userMessage, the message keeping its English', async () => {
+      const i18n = createMemoryI18n();
+      for (const [locale, data] of Object.entries(ApprovalsTranslations)) {
+        i18n.loadTranslations(locale, data as Record<string, unknown>);
+      }
+      i18n.loadTranslations('zh-CN', { positions: { legal: { label: '法务' } } });
+      const labelled = new ApprovalService({
+        engine: engine as any,
+        clock: { now: () => new Date(now += 1000) },
+        logger: { warn: () => {}, info: () => {}, error: () => {}, debug: () => {} } as any,
+        i18nServiceSource: () => i18n,
+        positionLabelSource: async (name) => (name === 'legal' ? 'Legal Counsel' : undefined),
+      });
+      const refusalOf = (requestId: string, context: any): Promise<any> =>
+        labelled.decide(requestId, { decision: 'approve', actorId: 'u_sub' } as any, context).then(
+          () => { throw new Error('expected a refusal'); }, (err) => err);
+      const zhRemedy = '目前还没有其他人能审批此请求。组织管理员需要添加一名担任岗位「法务」、团队「ops」的成员，之后由该成员决定。';
+
+      const overridden = await open('solo_user_message', FIELD_STEP, {}, { org: SOLO_ORG });
+      await engine.update('sys_approval_request', { id: overridden.id, pending_approvers: 'position:legal,team:ops' },
+        { context: SYSTEM } as any);
+      const zhOverride = await refusalOf(overridden.id, { ...soloAdmin, locale: 'zh-CN' });
+      expect(zhOverride.message).toBe("FORBIDDEN: 'u_sub' submitted this request and holds no slot on it, so they cannot "
+        + 'approve it through the administrator override. No one else can approve this request yet. An organization '
+        + "administrator must add a member who holds position '法务', team 'ops'; that member can then decide it. To "
+        + 'withdraw it instead, reject it or recall it.');
+      expect(zhOverride.userMessage).toBe(`此请求由您提交，且您不在其审批人之列，因此不能以管理员身份代为批准它。${zhRemedy}如需撤销，请驳回或撤回该请求。`);
+
+      const excluded = await open('solo_user_message_excluded', FIELD_STEP, ON, { org: SOLO_ORG });
+      await engine.update('sys_approval_request', { id: excluded.id, pending_approvers: 'position:legal,team:ops' },
+        { context: SYSTEM } as any);
+      expect((await refusalOf(excluded.id, { ...soloAdmin, locale: 'zh-CN' })).userMessage)
+        .toBe(`此请求由您提交，而其审批步骤不允许提交人批准自己的请求，因此您不能批准它。${zhRemedy}`);
+
+      // A decider who asked in no language reads the English, which names no id.
+      const plain = await refusalOf(overridden.id, soloAdmin);
+      expect(plain.userMessage).toBe('You submitted this request and hold no slot on it, so you cannot approve it '
+        + 'through the administrator override. No one else can approve this request yet. An organization administrator '
+        + "must add a member who holds position 'Legal Counsel', team 'ops'; that member can then decide it. To withdraw "
+        + 'it instead, reject it or recall it.');
+    });
+
+    it('the excludeSubmitter refusal names a labelled position the same way', async () => {
+      const labelled = new ApprovalService({
+        engine: engine as any,
+        clock: { now: () => new Date(now += 1000) },
+        logger: { warn: () => {}, info: () => {}, error: () => {}, debug: () => {} } as any,
+        positionLabelSource: async (name) => (name === 'legal' ? 'Legal Counsel' : undefined),
+      });
+      const row = await open('solo_excluded_labelled', FIELD_STEP, ON, { org: SOLO_ORG });
+      await engine.update('sys_approval_request', { id: row.id, pending_approvers: 'position:legal' },
+        { context: SYSTEM } as any);
+      await expect(labelled.decide(row.id, { decision: 'approve', actorId: 'u_sub' } as any, soloAdmin)).rejects.toThrow(
+        "FORBIDDEN: 'u_sub' submitted this request, and its approval step sets excludeSubmitter, so they cannot "
+          + 'approve it. No one else can approve this request yet. An organization administrator must add a member '
+          + "who holds position 'Legal Counsel'; that member can then decide it.",
+      );
+    });
+
+    it('CONTROL: with another approver on the slate, both refusals keep naming that approver', async () => {
+      const excluded = await open('ctl_excluded', [{ type: 'user', value: 'u_bob' }], ON);
+      await engine.update('sys_approval_request', { id: excluded.id, pending_approvers: 'u_sub,u_bob' },
+        { context: SYSTEM } as any);
+      await expect(svc.decide(excluded.id, { decision: 'approve', actorId: 'u_sub' } as any, SUB)).rejects.toThrow(
+        'so they cannot approve it. Another approver on the step decides it; if the submitter holds the only '
+          + 'slot, reassign it to someone else.',
+      );
+      const overridden = await open('ctl_override', FIELD_STEP, {}, { org: SOLO_ORG });
+      await engine.update('sys_approval_request', { id: overridden.id, pending_approvers: 'u_bob' },
+        { context: SYSTEM } as any);
+      await expect(svc.decide(overridden.id, { decision: 'approve', actorId: 'u_sub' } as any, soloAdmin))
+        .rejects.toThrow('through the administrator override. An approver on the step decides it. To move it');
+      // [#36463] …and the end user's half names that approver too (a service with no i18n reads the English).
+      await expect(svc.decide(excluded.id, { decision: 'approve', actorId: 'u_sub' } as any, SUB)).rejects.toMatchObject({
+        userMessage: 'You submitted this request, and its approval step keeps its submitter from approving it, so you '
+          + 'cannot approve it. Another approver on the step decides it; if you hold the only slot, reassign it to someone else.',
+      });
+      expect(sent.filter((e) => e.source?.id === excluded.id && e.topic === 'approval.comment')).toEqual([]);
     });
   });
 });

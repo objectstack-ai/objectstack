@@ -77,18 +77,36 @@ import type { ObjectQL } from './engine.js';
  */
 const trioTransactionScopes = new WeakMap<object, TransactionScope>();
 
+/**
+ * [#35149] The handles the trio opened and has since committed or rolled back.
+ * The engine's `isClosedUnitHandle` answers `true` for them, as it does for a
+ * `transaction()` unit whose callback settled (#22855), so every reader of a
+ * threaded handle treats one as absent: work that still carries it runs
+ * unenrolled. Dropping the owner record alone left such a handle unattributed,
+ * and a late write routed to another datasource was handed the dead handle.
+ * Weak, for the reason the owner record is.
+ */
+const closedTrioHandles = new WeakSet<object>();
+
 /** [#35028] Record the owner of a handle the trio just opened. A primitive handle cannot key it and stays unattributed. */
 export function recordTrioTransactionScope(handle: unknown, scope: TransactionScope): void {
   if (handle !== null && (typeof handle === 'object' || typeof handle === 'function')) {
     trioTransactionScopes.set(handle, scope);
+    // [#35149] A driver that hands the same object out again opened it again.
+    closedTrioHandles.delete(handle);
   }
 }
 
-/** [#35028] Forget a trio handle's owner: its commit or rollback closed it. */
-export function forgetTrioTransactionScope(handle: unknown): void {
+/** [#35149] Close a handle the trio opened: its commit or rollback ended it. A handle it never opened is left as it was. */
+export function closeTrioTransactionScope(handle: unknown): void {
   if (handle !== null && (typeof handle === 'object' || typeof handle === 'function')) {
-    trioTransactionScopes.delete(handle);
+    if (trioTransactionScopes.delete(handle)) closedTrioHandles.add(handle);
   }
+}
+
+/** [#35149] Did the trio open `handle` and since commit or roll it back? */
+export function isClosedTrioHandle(handle: unknown): boolean {
+  return handle !== null && (typeof handle === 'object' || typeof handle === 'function') && closedTrioHandles.has(handle);
 }
 
 /** [#35028] The owner of an open trio handle, or `undefined` for any other handle. */

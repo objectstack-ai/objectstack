@@ -214,7 +214,7 @@ describe('a list block half the page or wider is capped (objectstack#26613)', ()
     expect(within(main).queryByText('Rating')).toBeNull();
 
     // None of the object list's chrome: no toolbar, no grid (so no `#` column), no count bar.
-    expect(within(main).queryByTestId('toolbar-filter-trigger')).toBeNull();
+    expect(within(main).queryByTestId('condition-add-filter')).toBeNull();
     expect(within(main).queryByTestId('grid-spy')).toBeNull();
     expect(within(main).queryByTestId('record-count-bar')).toBeNull();
 
@@ -295,6 +295,6 @@ describe('the other postures are unchanged (objectstack#26613)', () => {
     const main = regionOf(container, 'main');
     await waitFor(() => expect(within(main).getByTestId('grid-spy')).toBeTruthy());
     expect(within(main).queryByTestId('list-capped-table')).toBeNull();
-    expect(within(main).getByTestId('toolbar-filter-trigger')).toBeTruthy();
+    expect(within(main).getByTestId('condition-add-filter')).toBeTruthy();
   });
 });

@@ -143,6 +143,7 @@ import {
   type MetadataSelection,
 } from './preview-registry.js';
 import { readFields } from './previews/object-fields-io.js';
+import { declaredFieldOptions } from './previews/useObjectFields.js';
 import { useRegisterAssistantEditor, type AssistantEditorContext } from '../../assistant/assistantBus.js';
 import { useRegisteredMetadataInspector } from './inspector-registry.js';
 import { useRegisteredMetadataDefaultInspector } from './default-inspector-registry.js';
@@ -157,7 +158,7 @@ import {
   withServerOnlyErrors,
   type ServerDiagnostics,
 } from './draftVerdict.js';
-import { describeIssuePath, issueSlicePath, issueSliceFingerprint } from './issuePath.js';
+import { describeIssuePath, issuePathDrawnBy, issueSlicePath, issueSliceFingerprint } from './issuePath.js';
 import { buildCreateModeBody, seedStructuralDefaults, unsetSeedPlaceholders } from './createBody.js';
 import { errorCodeIs, errorCodeIsAnyOf } from '@object-ui/types';
 import { useCanAuthorMetadata, useCanReadAuthoringTrail } from '../../hooks/useCanAuthorMetadata.js';
@@ -532,6 +533,41 @@ type ObjectCatalog = {
 };
 
 /**
+ * The field and action catalogs of one served object document, as the
+ * pickers read them. A field's declared `multiple: true` rides along: the
+ * `filter-builder` widget reads it to offer a list-valued column membership
+ * and the empty checks only (`operatorsForField`). Its declared `options` ride
+ * along too, read by `declaredFieldOptions`: the widget's builder draws a
+ * picklist column's value as a picker over them and stores the option's
+ * `value`, so a picklist filter holds a value the column can match.
+ *
+ * @internal exported for tests
+ */
+export function objectCatalogOf(obj: { fields?: Record<string, any> | Array<any> } | null | undefined): ObjectCatalog {
+  const fieldOf = (name: unknown, f: any): ObjectFieldOption => {
+    const options = f && typeof f === 'object' ? declaredFieldOptions(f) : undefined;
+    return {
+      name: name as string,
+      label: f?.label,
+      type: f?.type,
+      ...(f?.multiple === true ? { multiple: true } : {}),
+      ...(options ? { options } : {}),
+    };
+  };
+  const raw = obj?.fields;
+  const list = Array.isArray(raw)
+    ? raw.map((f: any) => fieldOf(f?.name, f))
+    : raw && typeof raw === 'object'
+      ? Object.entries(raw).map(([name, f]: [string, any]) => fieldOf(name, f))
+      : [];
+  const rawActions = (obj as any)?.actions;
+  const acts = Array.isArray(rawActions)
+    ? rawActions.map((a: any) => ({ name: a?.name, label: a?.label, locations: a?.locations })).filter((a: any) => !!a.name)
+    : [];
+  return { fields: list.filter((f) => !!f.name), actions: acts };
+}
+
+/**
  * A refusal the SERVER returned for this document, held against the draft
  * slices its issue paths named (`9073cf018`).
  *
@@ -718,8 +754,9 @@ function MetadataResourceEditPageImpl({
   const [createDirty, setCreateDirty] = React.useState(false);
   // objectstack#27865 — one message per mistake. `revealIssues` ends the create
   // form's show-on-touch deferral once Save is attempted; `inlineIssueFields`
-  // is what the form reports it draws inline (a top-level field, mounted, not
-  // deferred), which the summary banner and the refusal line leave out.
+  // is the path prefixes the form or default inspector reports it draws
+  // inline (a row, mounted, not deferred), which the summary banner and the
+  // refusal line leave out (`issuePathDrawnBy`, objectstack#35628).
   const [revealIssues, setRevealIssues] = React.useState(false);
   const [inlineIssueFields, setInlineIssueFields] = React.useState<ReadonlySet<string>>(() => new Set());
   const inlineIssueFieldsRef = React.useRef(inlineIssueFields);
@@ -1301,17 +1338,7 @@ function MetadataResourceEditPageImpl({
         sourceObjectName
           ? async () => {
               const obj = (await client.get('object', sourceObjectName)) as { fields?: Record<string, any> | Array<any> } | null;
-              const raw = obj?.fields;
-              const list = Array.isArray(raw)
-                ? raw.map((f: any) => ({ name: f?.name, label: f?.label, type: f?.type }))
-                : raw && typeof raw === 'object'
-                  ? Object.entries(raw).map(([name, f]: [string, any]) => ({ name, label: f?.label, type: f?.type }))
-                  : [];
-              const rawActions = (obj as any)?.actions;
-              const acts = Array.isArray(rawActions)
-                ? rawActions.map((a: any) => ({ name: a?.name, label: a?.label, locations: a?.locations })).filter((a: any) => !!a.name)
-                : [];
-              return { fields: list.filter((f) => !!f.name), actions: acts };
+              return objectCatalogOf(obj);
             }
           : null,
       [client, sourceObjectName],
@@ -2246,17 +2273,25 @@ function MetadataResourceEditPageImpl({
           seenSlices.add(slicePath);
           held.push({ slicePath, fingerprint, label: labelForIssuePath(m.path) });
         }
+        // objectstack#35499 — a root slice has no label: it is skipped, never
+        // joined as an empty name, and a refusal held only at the root says
+        // the root entry's own message.
+        const heldLabels = held.map((h) => h.label).filter((label) => label !== '');
         setSaveRefusal({
           held,
-          summary: held.map((h) => h.label).join(', '),
+          summary:
+            heldLabels.length > 0
+              ? heldLabels.join(', ')
+              : (mapped.find((m) => !m.path)?.message ?? ''),
         });
         // objectstack#27865 — a refusal the form draws in full on its fields is
         // said there, once. Only where the summary banner reads these issues
         // (a client validator exists), so a field that leaves the screen still
-        // has its message somewhere.
+        // has its message somewhere. Judged by the drawn path prefixes, the
+        // rows the form places an issue on (objectstack#35499, objectstack#35628).
         const drawnInline =
           hasClientValidator(type, draftMode) &&
-          mapped.every((m) => !!m.path && inlineIssueFieldsRef.current.has(m.path));
+          mapped.every((m) => !!m.path && issuePathDrawnBy(inlineIssueFieldsRef.current, m.path));
         if (drawnInline) {
           setError(null);
         } else if (mapped.length === 1 && !mapped[0].path) {
@@ -3410,9 +3445,15 @@ function MetadataResourceEditPageImpl({
                 return null;
               }
               // objectstack#27865 — an error the form already draws on its
-              // field is not repeated here.
+              // field is not repeated here — any issue under a path prefix a
+              // row draws, which places it on that row or deeper
+              // (objectstack#35499, objectstack#35628).
               const errs = liveErrors.filter(
-                (e) => !(inlineIssueFields.has(e.path) && displayIssues.some((d) => d.path === e.path)),
+                (e) =>
+                  !(
+                    issuePathDrawnBy(inlineIssueFields, e.path) &&
+                    displayIssues.some((d) => d.path === e.path)
+                  ),
               );
               const warns = diag?.warnings ?? [];
               const hasErrs = !liveValid && errs.length > 0;
@@ -3779,6 +3820,10 @@ function MetadataResourceEditPageImpl({
                               readOnly={formReadOnly}
                               locale={locale}
                               serverSchema={entry?.schema as Record<string, unknown> | undefined}
+                              serverForm={entry?.form}
+                              issues={displayIssues}
+                              revealIssues={revealIssues}
+                              onInlineIssueFieldsChange={setInlineIssueFields}
                             />
                           )
                         ) : (

@@ -1,7 +1,4 @@
 import { defineStack } from '@objectstack/spec';
-import { ConnectorRestPlugin } from '@objectstack/connector-rest';
-import { ConnectorOpenApiPlugin } from '@objectstack/connector-openapi';
-import { ConnectorMcpPlugin } from '@objectstack/connector-mcp';
 import * as objects from './src/objects';
 import * as views from './src/views';
 import * as actions from './src/actions';
@@ -42,10 +39,10 @@ export default defineStack({
   },
 
   // `automation` backs flow execution and materializes any declarative
-  // `connectors:` entry into a live, dispatchable connector at boot. The
-  // connector executors below register their provider factories with it —
-  // without `automation` loaded they have nowhere to register and boot fails,
-  // so keep this capability whenever `plugins:` lists a connector.
+  // `connectors:` entry into a live, dispatchable connector at boot. A
+  // connector executor you add to `plugins:` registers its provider factory
+  // with it — without `automation` loaded it has nowhere to register and boot
+  // fails, so keep this capability whenever `plugins:` lists a connector.
   //
   // `triggers` fires a flow that starts on a record change, the kind
   // `objectstack generate flow NAME` writes: without it this config stops
@@ -53,19 +50,20 @@ export default defineStack({
   // hold one.
   requires: ['automation', 'triggers'],
 
-  // Generic connector executors, default-present so you can add a `connectors:`
-  // entry naming `provider: 'rest' | 'openapi' | 'mcp'` and have it materialize
-  // with zero host code. Zero-arg = contribute the provider factory only. Brand
-  // connectors (Slack, …) stay marketplace/opt-in.
+  // No `plugins:` yet, on purpose. A plugin is code, and code is the one thing
+  // a template install cannot copy: an app with an entry in `plugins:` installs
+  // only as a managed package, never as an editable copy (`installModes:
+  // ['unmanaged']`, how a marketplace trial is installed). So the scaffold adds
+  // none until the app needs one.
+  //
+  // To call an external system from a flow as pure metadata, add a
+  // `connectors:` entry naming `provider: 'rest' | 'openapi' | 'mcp'`, install
+  // that provider's package (`@objectstack/connector-rest`, `-openapi`, `-mcp`)
+  // and list its executor here, e.g. `plugins: [new ConnectorRestPlugin()]`.
   // Security: a declarative `mcp` stdio transport spawns a local process from
   // metadata, so it is denied by default — opt in per host with
   // `new ConnectorMcpPlugin({ declarativeStdio: ['<trusted-command>'] })`.
   // Authoring guide: https://objectstack.ai/docs/automation/connectors
-  plugins: [
-    new ConnectorRestPlugin(),
-    new ConnectorOpenApiPlugin(),
-    new ConnectorMcpPlugin(),
-  ],
 
   // Every directory `objectstack generate` writes into is wired here: its
   // index.ts exports what the directory holds, and each list below hands

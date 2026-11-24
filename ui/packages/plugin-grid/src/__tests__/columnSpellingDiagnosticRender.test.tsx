@@ -112,27 +112,27 @@ describe('objectui#5349 — the four-way matrix, rendering and diagnostic togeth
       data: { provider: 'value', items: ROWS },
       columns: [{ field: 'name', label: 'Name' }, { field: 'amount', label: 'Amount' }],
     });
-    expect(headers).toEqual(['#', 'Name', 'Amount']);
+    expect(headers).toEqual(['Name', 'Amount']);
     expect(screen.getByText('Ada')).toBeInTheDocument();
     expect(diagnostics).toEqual([]);
   });
 
   it('accessorKey-only: header-only grid — and now a diagnostic that says which columns and why', () => {
     // THE card. Before this landed the reading below was identical except for
-    // an empty `diagnostics` array: a grid with its row-number column, no data
-    // columns, and no error, no warning, no empty state.
+    // an empty `diagnostics` array: a grid with no data columns, and no error,
+    // no warning, no empty state.
     const { headers, diagnostics } = renderGrid({
       objectName: 'opportunities',
       data: { provider: 'value', items: ROWS },
       columns: [{ accessorKey: 'name', header: 'Name' }, { accessorKey: 'amount', header: 'Amount' }],
     });
-    expect(headers).toEqual(['#']);
+    expect(headers).toEqual([]);
     expect(screen.queryByText('Ada')).not.toBeInTheDocument();
 
     expect(diagnostics).toHaveLength(1);
     expect(diagnostics[0]).toContain("object-grid (objectName: 'opportunities')");
     expect(diagnostics[0]).toContain('2 of 2 authored columns resolve to nothing');
-    expect(diagnostics[0]).toContain('row-number column and NO data columns');
+    expect(diagnostics[0]).toContain('so this grid renders NO data columns');
     expect(diagnostics[0]).toContain("columns[0]: keys seen: `accessorKey`, `header`");
     expect(diagnostics[0]).toContain("Write `{ field: 'name', label: 'Name' }` instead.");
     expect(diagnostics[0]).toContain("Write `{ field: 'amount', label: 'Amount' }` instead.");
@@ -144,7 +144,7 @@ describe('objectui#5349 — the four-way matrix, rendering and diagnostic togeth
       data: { provider: 'value', items: ROWS },
       columns: [{ field: 'name', label: 'Name' }, { accessorKey: 'amount', header: 'Amount' }],
     });
-    expect(headers).toEqual(['#', 'Name']);
+    expect(headers).toEqual(['Name']);
     expect(diagnostics).toHaveLength(1);
     expect(diagnostics[0]).toContain('1 of 2 authored columns resolve to nothing');
     expect(diagnostics[0]).toContain('columns[1]');
@@ -160,7 +160,7 @@ describe('objectui#5349 — the four-way matrix, rendering and diagnostic togeth
       data: { provider: 'value', items: ROWS },
       columns: [{ accessorKey: 'amount', header: 'Amount' }, { field: 'name', label: 'Name' }],
     });
-    expect(headers).toEqual(['#', 'Name']);
+    expect(headers).toEqual(['Name']);
     expect(diagnostics).toHaveLength(1);
     expect(diagnostics[0]).toContain('columns[0]');
     expect(diagnostics[0]).not.toContain('columns[1]');
@@ -174,19 +174,19 @@ describe('objectui#5349 — the column-side fallbacks that keep their silence', 
       data: { provider: 'value', items: ROWS },
       columns: ['name', 'amount'],
     });
-    expect(headers).toEqual(['#', 'Name', 'Amount']);
+    expect(headers).toEqual(['Name', 'Amount']);
     expect(diagnostics).toEqual([]);
   });
 
   it('no `columns` at all: the grid auto-derives them and is not scolded for it', () => {
     const { headers, diagnostics } = renderGrid({ objectName: 'opportunities', data: { provider: 'value', items: ROWS } });
-    expect(headers).toEqual(['#', 'Id', 'Name', 'Amount']);
+    expect(headers).toEqual(['Id', 'Name', 'Amount']);
     expect(diagnostics).toEqual([]);
   });
 
   it('an empty `columns` array: same auto-derivation, same silence', () => {
     const { headers, diagnostics } = renderGrid({ objectName: 'opportunities', data: { provider: 'value', items: ROWS }, columns: [] });
-    expect(headers).toEqual(['#', 'Id', 'Name', 'Amount']);
+    expect(headers).toEqual(['Id', 'Name', 'Amount']);
     expect(diagnostics).toEqual([]);
   });
 
@@ -199,7 +199,7 @@ describe('objectui#5349 — the column-side fallbacks that keep their silence', 
       data: { provider: 'value', items: ROWS },
       columns: [{ field: 'name', label: 'Name', hidden: true }],
     });
-    expect(headers).toEqual(['#']);
+    expect(headers).toEqual([]);
     expect(diagnostics).toEqual([]);
 
     // Counter-probe: the same grid, one column mis-spelled instead of hidden.
@@ -209,7 +209,7 @@ describe('objectui#5349 — the column-side fallbacks that keep their silence', 
       data: { provider: 'value', items: ROWS },
       columns: [{ accessorKey: 'name', header: 'Name' }],
     });
-    expect(probe.headers).toEqual(['#']);
+    expect(probe.headers).toEqual([]);
     expect(probe.diagnostics).toHaveLength(1);
   });
 });
@@ -250,7 +250,7 @@ describe('objectui#5349 — the row-side fallbacks a `needs columns` predicate w
   it("inline rows as `data: { provider: 'value', items }` — the declared shape", () => {
     const schema = { objectName: 'opportunities', data: { provider: 'value', items: ROWS } };
     const ok = renderGrid({ ...schema, columns: GOOD });
-    expect(ok.headers).toEqual(['#', 'Name']);
+    expect(ok.headers).toEqual(['Name']);
     expect(screen.getByText('Grace')).toBeInTheDocument();
     expect(ok.diagnostics).toEqual([]);
 
@@ -260,7 +260,7 @@ describe('objectui#5349 — the row-side fallbacks a `needs columns` predicate w
 
   it('legacy `staticData`', () => {
     const ok = renderGrid({ objectName: 'opportunities', staticData: ROWS, columns: GOOD });
-    expect(ok.headers).toEqual(['#', 'Name']);
+    expect(ok.headers).toEqual(['Name']);
     expect(screen.getByText('Ada')).toBeInTheDocument();
     expect(ok.diagnostics).toEqual([]);
 
@@ -271,7 +271,7 @@ describe('objectui#5349 — the row-side fallbacks a `needs columns` predicate w
   it('`bind` — rows resolved from the surrounding data scope', () => {
     const scopeData = { rows: ROWS };
     const ok = renderGrid({ bind: 'rows', columns: GOOD }, { scopeData });
-    expect(ok.headers).toEqual(['#', 'Name']);
+    expect(ok.headers).toEqual(['Name']);
     expect(screen.getByText('Ada')).toBeInTheDocument();
     expect(ok.diagnostics).toEqual([]);
 
@@ -284,7 +284,7 @@ describe('objectui#5349 — the row-side fallbacks a `needs columns` predicate w
     // at all here — the rows arrive as a prop, which is why a predicate built
     // on `'data' in props` would have been wrong in both directions.
     const ok = renderGrid({ objectName: 'opportunities', columns: GOOD }, { props: { data: ROWS } });
-    expect(ok.headers).toEqual(['#', 'Name']);
+    expect(ok.headers).toEqual(['Name']);
     expect(screen.getByText('Grace')).toBeInTheDocument();
     expect(ok.diagnostics).toEqual([]);
 

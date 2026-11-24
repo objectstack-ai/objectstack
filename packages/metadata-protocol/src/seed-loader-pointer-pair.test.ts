@@ -522,10 +522,22 @@ const ADOPTER_SCHEMAS: Record<string, any> = {
 /** A dataset for an object with no natural key of its own — every adopted
  *  object here is engine/append-only owned. The keyless `insert` mode such
  *  rows were once authored with is retired (#34613), so the dataset keys on
- *  `id`; these rows carry none, so each one is written as a new row. */
+ *  `id`, and each record carries its own: a keyed load refuses a record that
+ *  leaves a key field blank (#34857). */
 function insertSeed(object: string, records: Array<Record<string, unknown>>) {
-  return { object, externalId: 'id', mode: 'ignore', env: ['prod', 'dev', 'test'], records };
+  return {
+    object, externalId: 'id', mode: 'ignore', env: ['prod', 'dev', 'test'],
+    records: records.map((record, i) => ({ id: `${object}_seed_${i + 1}`, ...record })),
+  };
 }
+
+/** [#34857] A dataset with no natural key at all: no `mode`, read by a load
+ *  whose config names no default either — a request built without the parse's
+ *  defaults, the one load that still writes a row whose key is `''`. */
+function keylessSeed(object: string, records: Array<Record<string, unknown>>) {
+  return { object, externalId: 'id', env: ['prod', 'dev', 'test'], records };
+}
+const KEYLESS_CONFIG = { ...CONFIG, defaultMode: undefined } as any;
 
 describe('pointer-pair adoption per object (#11386)', () => {
   describe('sys_audit_log — object_name / record_id', () => {
@@ -583,12 +595,12 @@ describe('pointer-pair adoption per object (#11386)', () => {
       // can save this — and pass 2 now can, with no externalId declared.
       const result = await service.load({
         seeds: [
-          insertSeed('sys_audit_log', [
+          keylessSeed('sys_audit_log', [
             { action: 'read', object_name: 'crm_lead', record_id: 'Lisa Thompson' },
           ]),
           LEAD_SEED,
         ] as any,
-        config: CONFIG,
+        config: KEYLESS_CONFIG,
       });
 
       expect(result.success).toBe(true);
@@ -919,7 +931,7 @@ describe('required-deferral early signal (#11674)', () => {
     ).length;
   }
 
-  it('FIRES when a keyless required id half defers — before the row is written, naming the fix', async () => {
+  it('FIRES when a required id half defers — before the row is written, naming the fix', async () => {
     const { service, logger, engine, store } = newService(ADOPTER_SCHEMAS);
 
     const result = await service.load({

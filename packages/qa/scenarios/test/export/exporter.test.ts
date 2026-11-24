@@ -14,7 +14,10 @@ import { join, relative } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
+import ts from 'typescript';
+
 import { exportGallery, scratchProjectDir, type ExportOptions } from '../../src/export/exporter.js';
+import { listingManifest, SAMPLE_DATA_BINDING, SAMPLE_DATA_FILE, sampleDataOf, trialPackageSource, TrialPackageRefusal, withSampleData } from '../../src/export/trial-package.js';
 import { GALLERY_GUARD, type GalleryGuard } from '../../src/export/generic.js';
 import { GalleryIndexSchema, parseIndex } from '../../src/export/manifest.js';
 import { ASK_MODE_NOT_EXPORTED, judgeRecord } from '../../src/export/pass.js';
@@ -22,7 +25,7 @@ import { readRunRecords, redactWorkDir, ScenarioRunRecordSchema, type ScenarioRu
 import { buildTranscript, mergeRecordings, renderTranscript } from '../../src/export/transcript.js';
 import type { CaptureScreenshots } from '../../src/export/screenshots.js';
 import { main, parseExportArgs, renderSummary } from '../../src/export/cli.js';
-import { stepKey, type Recording } from '../../src/runner/driver.js';
+import { stepKey, type AgentDriver, type Recording } from '../../src/runner/driver.js';
 import type { LoadedScenario } from '../../src/loader.js';
 import type { ScenarioOrigin, ScenarioTier } from '../../src/schema.js';
 import { CARD_ID, loadAllCards, loadCrm, runCrm, tempDir, writeRecord, type FixtureRun } from './fixture.js';
@@ -142,6 +145,10 @@ describe('judgeRecord — ⛔ a not-measured turn is not a pass, even under a `p
     expect(judgeRecord(asRecord(edited)).reasons).toEqual([
       `${CARD_ID}.scratch.run operation ${String(first!.operation)} as ${String(first!.persona)}: not measured — seed: needs democrm_account ac1, which the app refused`,
     ]);
+    // A confirmed write not measured (no confirmation service) is no reason: the operation was judged on its ask.
+    const confirmTurn = { notMeasured: 'the action door has no pending-confirmation service on this server' };
+    const unconfirmed = { ...record, cardRun: { ...cardRun, modes: cardRun.modes.map((m) => (m === scratch ? { ...m, run: { ...m.run, operations: [{ ...first, confirmTurn }, ...rest] } } : m)) } };
+    expect(judgeRecord(asRecord(unconfirmed))).toMatchObject({ passed: true, reasons: [] });
   });
 });
 
@@ -164,6 +171,7 @@ describe('exportGallery — one passing, generic app', () => {
       'source/package.json',
       'source/src/objects/account.object.ts',
       'source/src/objects/contact.object.ts',
+      'source/src/sample-data.json',
       'source/tsconfig.json',
       'transcript.json',
       'transcript.md',
@@ -468,6 +476,179 @@ describe('exportGallery — ⛔ the default guard: origin `generic`, tier `start
   });
 });
 
+/**
+ * The shape every generated app's `objectstack.config.ts` starts from: the
+ * blank scaffold's config (create-objectstack's `templates/blank`), abridged —
+ * imports, a module-level helper, comments between the keys, a `manifest`
+ * literal and barrel lists. Inline, not read from that package, so this suite
+ * declares no input outside its own package.
+ */
+const SCAFFOLD_SHAPED_CONFIG = `import { defineStack } from '@objectstack/spec';
+import { ConnectorRestPlugin } from './src/plugins';
+import * as objects from './src/objects';
+import * as views from './src/views';
+
+// Every value a barrel exports, as the list a stack key takes.
+const exportsOf = <M extends object>(barrel: M): M[keyof M][] => Object.values(barrel);
+
+// This file is a MODULE, and the whole module is the stack.
+export default defineStack({
+  manifest: {
+    id: 'com.example.demotravel',
+    namespace: 'demotravel',
+    version: '0.1.0',
+    type: 'app',
+    name: 'Travel Expense',
+    // Protocol compatibility range.
+    engines: { protocol: '^18' },
+  },
+
+  requires: ['automation', 'triggers'],
+
+  // Generic connector executors, default-present.
+  plugins: [
+    new ConnectorRestPlugin(),
+  ],
+
+  objects: exportsOf(objects),
+  views: exportsOf(views),
+});
+`;
+
+/** The `defineStack({ … })` literal's property names, and the module's import specifiers, read back with the compiler. */
+function stackShape(text: string): { keys: string[]; imports: string[]; data?: string } {
+  const file = ts.createSourceFile('objectstack.config.ts', text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const diagnostics = (file as unknown as { parseDiagnostics: unknown[] }).parseDiagnostics;
+  expect(diagnostics).toEqual([]);
+  const imports = file.statements.filter(ts.isImportDeclaration).map((d) => (d.moduleSpecifier as ts.StringLiteral).text);
+  const exported = file.statements.find(ts.isExportAssignment)!;
+  const literal = (exported.expression as ts.CallExpression).arguments[0] as ts.ObjectLiteralExpression;
+  const props = literal.properties.filter(ts.isPropertyAssignment);
+  const data = props.find((p) => (p.name as ts.Identifier).text === 'data');
+  return { keys: props.map((p) => (p.name as ts.Identifier).text), imports, ...(data ? { data: data.initializer.getText(file) } : {}) };
+}
+
+describe('exportGallery — the trial package: listing text, facet and sample data, added after scoring', () => {
+  it("source/ carries the card's listing text and facet, its seed rows as sample data, and a config that reads them", async () => {
+    const { out, fx, opts } = await setup();
+    const s = await exportGallery(opts());
+    expect(s.refused).toEqual([]);
+    const source = join(out, 'apps', CARD_ID, 'source');
+    const card = fx.scenario.card;
+
+    // objectstack.manifest.json: the build's own keys kept, the four listing keys written.
+    expect(JSON.parse(readFileSync(join(source, 'objectstack.manifest.json'), 'utf8'))).toEqual({
+      id: 'com.example.democrm',
+      displayName: card.title.en,
+      description: card.prompt.short.en,
+      businessFunctions: ['sales'],
+      translations: { zh: { displayName: card.title.zh, description: card.prompt.short.zh } },
+    });
+
+    // src/sample-data.json: one dataset per seeded object, namespaced, keyed on the card's row id; the user handle left out.
+    const data = JSON.parse(readFileSync(join(source, SAMPLE_DATA_FILE), 'utf8')) as Array<{ object: string; externalId: string; records: Array<Record<string, unknown>> }>;
+    expect(data.map((d) => [d.object, d.externalId, d.records.length])).toEqual([
+      ['democrm_account', 'id', card.run.seed.account!.length],
+      ['democrm_contact', 'id', card.run.seed.contact!.length],
+    ]);
+    expect(data[0]!.records[0]).toEqual({ id: 'ac1', name: 'Acme', industry: 'tech', employees: 120 });
+    expect(data[1]!.records[0]).toEqual(card.run.seed.contact![0]);
+    expect(data.flatMap((d) => d.records).some((r) => 'owner' in r)).toBe(false);
+
+    // objectstack.config.ts: the import and the `data:` property, and every other byte as the AI wrote it.
+    const config = readFileSync(join(source, 'objectstack.config.ts'), 'utf8');
+    expect(stackShape(config)).toEqual({ keys: ['data', 'manifest'], imports: ['@objectstack/spec', `./${SAMPLE_DATA_FILE}`], data: SAMPLE_DATA_BINDING });
+    const authored = readFileSync(join(scratchProjectDir(fx.work, card), 'objectstack.config.ts'), 'utf8');
+    expect(config.replace(`\nimport ${SAMPLE_DATA_BINDING} from './${SAMPLE_DATA_FILE}';`, '').replace(/\n  \/\/ The card's seed rows[^\n]*\n  data: gallerySampleData,/, '')).toBe(authored);
+    // ⛔ After scoring, into the export only: the run's own project is as the AI left it.
+    expect(authored).not.toContain(SAMPLE_DATA_BINDING);
+    expect(existsSync(join(scratchProjectDir(fx.work, card), SAMPLE_DATA_FILE))).toBe(false);
+
+    const readme = readFileSync(join(out, 'apps', CARD_ID, 'README.md'), 'utf8');
+    expect(readme).toContain("- Sample data: the card's 8 seed rows in 2 objects, without `account.owner` (a user handle of the run's own environment, left unset)");
+  });
+
+  it("a scaffold-shaped config gains one import and one `data:` property; the rest of the file is byte for byte", () => {
+    const scaffold = SCAFFOLD_SHAPED_CONFIG;
+    const edited = withSampleData(ts, scaffold);
+    const before = stackShape(scaffold);
+    const after = stackShape(edited);
+    expect(after.keys).toEqual(['data', ...before.keys]);
+    expect(after.imports).toEqual([...before.imports, `./${SAMPLE_DATA_FILE}`]);
+    expect(after.data).toBe(SAMPLE_DATA_BINDING);
+    expect(before.keys).not.toContain('data');
+    expect(edited.replace(`\nimport ${SAMPLE_DATA_BINDING} from './${SAMPLE_DATA_FILE}';`, '').replace(/\n  \/\/ The card's seed rows[^\n]*\n  data: gallerySampleData,/, '')).toBe(scaffold);
+    expect(edited.length - scaffold.length).toBe(
+      `\nimport ${SAMPLE_DATA_BINDING} from './${SAMPLE_DATA_FILE}';`.length + `\n  // The card's seed rows, the sample data an install loads (added by the gallery export).\n  data: ${SAMPLE_DATA_BINDING},`.length,
+    );
+  });
+
+  it('a config with no import line takes the import as its first line', () => {
+    const edited = withSampleData(ts, "export default defineStack({ manifest: { id: 'com.example.democrm' } });\n");
+    expect(edited.startsWith(`import ${SAMPLE_DATA_BINDING} from './${SAMPLE_DATA_FILE}';\n`)).toBe(true);
+    expect(stackShape(edited).keys).toEqual(['data', 'manifest']);
+  });
+
+  it.each([
+    ['declares `data:` already', "import { defineStack } from '@objectstack/spec';\nexport default defineStack({ manifest: {}, data: [] });\n", /already declares `data:`/],
+    ['declares `data` as a shorthand property', "import { defineStack } from '@objectstack/spec';\nconst data = [];\nexport default defineStack({ manifest: {}, data });\n", /already declares `data:`/],
+    ['spreads a value into the literal', "import { defineStack } from '@objectstack/spec';\nconst base = {};\nexport default defineStack({ ...base, manifest: {} });\n", /spreads a value/],
+    ['default-exports a binding, not the call', "import { defineStack } from '@objectstack/spec';\nconst stack = defineStack({ manifest: {} });\nexport default stack;\n", /does not default-export `defineStack\(\{ … \}\)`/],
+    ['hands `defineStack` no object literal', "import { defineStack } from '@objectstack/spec';\nimport base from './base';\nexport default defineStack(base);\n", /does not default-export `defineStack\(\{ … \}\)`/],
+    ['already uses the import binding name', `import { defineStack } from '@objectstack/spec';\nconst ${SAMPLE_DATA_BINDING} = 1;\nexport default defineStack({ manifest: {} });\n`, /already uses the name/],
+  ])('⛔ refused, never guessed: a config that %s', (_, text, why) => {
+    expect(() => withSampleData(ts, text)).toThrow(TrialPackageRefusal);
+    expect(() => withSampleData(ts, text)).toThrow(why);
+  });
+
+  it('⛔ refused: a seeded object the build does not declare, a build that wrote the sample-data file itself, a card with no seed rows', async () => {
+    const card = loadCrm().card;
+    const files = new Map([['objectstack.config.ts', Buffer.from("export default defineStack({ manifest: {} });\n")]]);
+    await expect(trialPackageSource(files, card, new Set(['democrm_account']))).rejects.toThrow('the build declares no object `democrm_contact`, which the sample data loads into');
+    const both = new Set(['democrm_account', 'democrm_contact']);
+    await expect(trialPackageSource(new Map([...files, [SAMPLE_DATA_FILE, Buffer.from('[]')]]), card, both)).rejects.toThrow(`the build already wrote ${SAMPLE_DATA_FILE}`);
+    await expect(trialPackageSource(files, { ...card, run: { ...card.run, seed: {} } }, both)).rejects.toThrow('the card has no seed rows');
+    const ok = await trialPackageSource(files, card, both);
+    expect([...ok.files.keys()]).toEqual(['objectstack.config.ts', 'objectstack.manifest.json', SAMPLE_DATA_FILE]);
+    expect(ok.omitted).toEqual(['account.owner']);
+  });
+
+  it('an export whose config already declares `data:` is refused with the reason, and no app directory is written', async () => {
+    const { out, fx, opts } = await setup();
+    const config = join(scratchProjectDir(fx.work, fx.scenario.card), 'objectstack.config.ts');
+    writeFileSync(config, "import { defineStack } from '@objectstack/spec';\nexport default defineStack({ manifest: { id: 'com.example.democrm', namespace: 'democrm' }, data: [] });\n");
+    const s = await exportGallery(opts());
+    expect(s.refused).toEqual([{ id: CARD_ID, reasons: ["objectstack.config.ts already declares `data:`, so the card's seed rows are not added as the sample data"] }]);
+    expect(existsSync(join(out, 'apps', CARD_ID))).toBe(false);
+  });
+
+  it('listingManifest: no file is an empty one; a translations map keeps its other locales; a text that is not a JSON object is refused', () => {
+    const card = loadCrm().card;
+    expect(JSON.parse(listingManifest(undefined, card)).displayName).toBe(card.title.en);
+    const kept = JSON.parse(listingManifest(JSON.stringify({ readmePath: 'README.md', displayName: 'Democrm', translations: { ja: { displayName: 'CRM' } } }), card));
+    expect(kept).toEqual({
+      readmePath: 'README.md',
+      displayName: card.title.en,
+      description: card.prompt.short.en,
+      businessFunctions: ['sales'],
+      translations: { ja: { displayName: 'CRM' }, zh: { displayName: card.title.zh, description: card.prompt.short.zh } },
+    });
+    expect(() => listingManifest('{ not json', card)).toThrow(/is not JSON/);
+    expect(() => listingManifest('[]', card)).toThrow(/is not a JSON object/);
+  });
+
+  it("sampleDataOf: every card in the library loads into its own namespace's objects, keyed on id, with each row's fields as the card states them", () => {
+    for (const { card } of loadAllCards()) {
+      const { datasets, omitted } = sampleDataOf(card);
+      const handles = new Set((card.run.userHandleFields ?? []).map((h) => `${h.object}.${h.field}`));
+      expect(datasets.map((d) => d.object), card.id).toEqual(Object.keys(card.run.seed).map((o) => `demo${card.code}_${o}`));
+      for (const d of datasets) expect(d.externalId).toBe('id');
+      expect(datasets.reduce((n, d) => n + d.records.length, 0), card.id).toBe(Object.values(card.run.seed).reduce((n, rows) => n + rows.length, 0));
+      expect(omitted, card.id).toEqual([...handles].sort());
+    }
+  });
+});
+
 describe('exportGallery — what it refuses', () => {
 
   it('an asked turn with no recorded reply is refused: a grade is never shown without its answer', async () => {
@@ -696,5 +877,33 @@ describe('exportGallery — a record that holds an ask mode (`--modes ask`, #337
     // The same edit on the scratch mode fails it, as before.
     edited.cardRun.modes.find((m) => m.mode === 'scratch')!.run.questions[0]!.notMeasured = 'seed: refused';
     expect(judgeRecord(asRecord(edited)).reasons).toEqual([`${CARD_ID}.scratch.run question tech_accounts: not measured — seed: refused`]);
+  });
+});
+
+describe('buildTranscript — a masking-off round re-grades each reply under the masking its record states', () => {
+  // `partner_user` may not read accounts. On a masking-off round the object is
+  // in its schema, so "the app doesn't record accounts" is no decline there,
+  // and the run graded it so. The transcript re-grades every recorded reply and
+  // refuses one that grades otherwise: it reads the masking off the record.
+  const absent = (scripted: AgentDriver): AgentDriver => ({
+    info: () => scripted.info(),
+    author: (task) => scripted.author(task),
+    ask: async (task) => (task.persona === 'partner_user' && task.step === 'account_count' ? { replyText: "The app doesn't record accounts.", toolCalls: [], meta: { resultSubtype: 'success' } } : scripted.ask(task)),
+  });
+
+  it('shows the grade the run gave under `env.schemaMasking: off`; the same record without the stamp is refused', async () => {
+    const fx = await runCrm({ modes: ['scratch'], iterateRun: false, schemaMasking: 'off', wrap: absent });
+    const record = asRecord(fx.record);
+    expect((record.env as { schemaMasking?: unknown }).schemaMasking).toBe('off');
+    const t = buildTranscript(fx.scenario, record, mergeRecordings([fx.recording]));
+    const asked = t.halves[0]!.turns.find((x) => x.question === 'account_count' && x.persona === 'partner_user')!;
+    expect(asked.answer!.replyText).toBe("The app doesn't record accounts.");
+    expect(asked.grade).toMatchObject({ correct: false, declined: false, problems: ['did not decline a question the persona may not see'] });
+
+    const unstamped = asRecord({ ...fx.record, env: { ...(fx.record.env as Record<string, unknown>), schemaMasking: undefined } });
+    const key = stepKey({ card: CARD_ID, mode: 'scratch', phase: 'run', step: 'account_count', persona: 'partner_user' });
+    expect(() => buildTranscript(fx.scenario, unstamped, mergeRecordings([fx.recording]))).toThrow(
+      `the recorded reply for \`${key}\` grades differently from the run record: the recording is not this run's`,
+    );
   });
 });

@@ -18,17 +18,27 @@
  *     Chinese label derives through its pinyin (`romanizeHan`).
  *
  * All edits flow through `onPatch` as shallow draft patches.
+ *
+ * Split mode (`split`, objectstack#36512): the object Settings tab mounts this
+ * panel twice — the business rows (label, plural label, icon and colour,
+ * description) on top, and the rows a developer reads (internal name, access)
+ * in a "Developer options" section below. Each half draws its rows only (the
+ * host's section is the frame). With `keysOnHover`, the metadata key a row
+ * writes is its title's hover text, never drawn on the panel at rest
+ * (objectstack#36746). Without `split` the panel is drawn whole, as before,
+ * for every other host.
  */
 
 import * as React from 'react';
 import type { MetadataDefaultInspectorProps } from '../default-inspector-registry.js';
 import { InspectorShell, InspectorTextField } from './_shared.js';
-import { Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@object-ui/components';
+import { Input, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@object-ui/components';
 import { toFieldNameLoose } from '../previews/object-fields-io.js';
 import { slugify } from '../createDerive.js';
 import { romanizeHan, useWhenRomanizerLands } from '../romanizeHan.js';
 import { t } from '../i18n.js';
 import { IconPickerWidget } from '../widgets.js';
+import { IssuePrefixLines, useIssuePrefixRegister } from '../issuePath.js';
 
 export function ObjectDefaultInspector({
   name,
@@ -36,8 +46,24 @@ export function ObjectDefaultInspector({
   onPatch,
   readOnly,
   locale,
+  issues,
+  onInlineIssueFieldsChange,
+  split,
 }: MetadataDefaultInspectorProps) {
   const tr = React.useCallback((key: string) => t(key, locale), [locale]);
+  // objectstack#35628 — each row below edits one top-level key and draws the
+  // host's issues under it; every other path (fields, validations, …) stays
+  // in the host's banner.
+  const registerIssuePrefix = useIssuePrefixRegister(onInlineIssueFieldsChange);
+  const issueLines = (key: string, rowLabel: string) => (
+    <IssuePrefixLines
+      issues={issues}
+      prefix={key}
+      label={rowLabel}
+      value={draft[key]}
+      register={registerIssuePrefix}
+    />
+  );
   // The host passes an empty `name` only while creating a new object.
   const createMode = !name;
   const str = (key: string) => (typeof draft[key] === 'string' ? (draft[key] as string) : '');
@@ -52,6 +78,9 @@ export function ObjectDefaultInspector({
   const deriveName = (label: string) => slugify(romanizeHan(label));
   const nameFollowsLabel = createMode && (str('name') === '' || str('name') === deriveName(str('label')));
   const iconFieldId = React.useId();
+  const descriptionId = React.useId();
+  // The key(s) a row writes, as its title's hover text — split mode with `keysOnHover` only.
+  const keyOf = (...keys: string[]): string | undefined => (split?.keysOnHover ? keys.join(' · ') : undefined);
 
   const setLabel = (v: string) => {
     const patch: Record<string, unknown> = { label: v || undefined };
@@ -73,6 +102,98 @@ export function ObjectDefaultInspector({
   const nameValue = createMode ? str('name') : name || str('name');
   const title = str('label') || name || tr('designer.object.kind');
 
+  const nameRow = (
+    <Field hint={tr('designer.object.nameHint')}>
+      <KeyedTextField
+        keys={keyOf('name')}
+        label={tr('designer.object.name')}
+        value={nameValue}
+        onCommit={setName}
+        disabled={readOnly || !createMode}
+        mono
+        testId="object-name-input"
+        placeholder={tr('designer.object.namePlaceholder')}
+      />
+      {issueLines('name', tr('designer.object.name'))}
+    </Field>
+  );
+  const businessRows = (
+    <>
+      <KeyedTextField
+        keys={keyOf('label')}
+        label={tr('designer.object.label')}
+        value={str('label')}
+        onCommit={setLabel}
+        disabled={readOnly}
+        placeholder={tr('designer.object.labelPlaceholder')}
+      />
+      {issueLines('label', tr('designer.object.label'))}
+      <KeyedTextField
+        keys={keyOf('pluralLabel')}
+        label={tr('designer.object.pluralLabel')}
+        value={str('pluralLabel')}
+        onCommit={(v) => onPatch({ pluralLabel: v || undefined })}
+        disabled={readOnly}
+        placeholder={tr('designer.object.pluralPlaceholder')}
+      />
+      {issueLines('pluralLabel', tr('designer.object.pluralLabel'))}
+      {/* objectui#12531 — the icon is picked from the catalog the console
+          ships (preview, search, an inline warning on a name that matches no
+          icon) rather than typed blind. Clearing it patches `icon: undefined`,
+          as the text field this replaced did. */}
+      {/* objectstack#35985 — the icon and the colour are picked together:
+          the picker shows the nine palette swatches and previews every icon
+          as the tile it becomes. A colour is written only when picked; an
+          object without one is drawn in the neutral gray. */}
+      <div className="space-y-1">
+        <RowTitle keys={keyOf('icon', 'color')}>
+          <Label htmlFor={iconFieldId} className="text-xs text-muted-foreground">{tr('designer.object.iconAndColor')}</Label>
+        </RowTitle>
+        <IconPickerWidget
+          id={iconFieldId}
+          schema={{ type: 'string' }}
+          value={str('icon')}
+          onChange={(v) => onPatch({ icon: typeof v === 'string' && v !== '' ? v : undefined })}
+          tileColor={str('color') || undefined}
+          onTileColorChange={(c) => onPatch({ color: c })}
+          readOnly={readOnly}
+        />
+        {issueLines('icon', tr('designer.object.icon'))}
+        {issueLines('color', tr('engine.form.iconColor'))}
+      </div>
+      <div className="space-y-1">
+        <RowTitle keys={keyOf('description')}>
+          <Label htmlFor={split ? descriptionId : undefined} className="text-xs text-muted-foreground">{tr('designer.object.description')}</Label>
+        </RowTitle>
+        <textarea
+          id={split ? descriptionId : undefined}
+          value={str('description')}
+          disabled={readOnly}
+          rows={2}
+          placeholder={tr('designer.object.descriptionPlaceholder')}
+          onChange={(e) => onPatch({ description: e.target.value || undefined })}
+          className="w-full text-sm rounded-md border bg-background px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-primary disabled:cursor-not-allowed disabled:opacity-50"
+        />
+        {issueLines('description', tr('designer.object.description'))}
+      </div>
+    </>
+  );
+  const access = (
+    <AccessSection draft={draft} onPatch={onPatch} readOnly={readOnly} tr={tr} issueLines={issueLines} keyOf={keyOf} />
+  );
+
+  if (split?.part === 'business') {
+    return <div className="space-y-2" data-testid="object-inspector-business">{businessRows}</div>;
+  }
+  if (split?.part === 'developer') {
+    return (
+      <div className="space-y-4" data-testid="object-inspector-developer">
+        {nameRow}
+        {access}
+      </div>
+    );
+  }
+
   return (
     <InspectorShell
       kindLabel={tr('designer.object.kind')}
@@ -84,58 +205,10 @@ export function ObjectDefaultInspector({
         title={tr('designer.object.section.basic')}
         hint={tr('designer.object.section.basicHint')}
       >
-        <Field hint={tr('designer.object.nameHint')}>
-          <InspectorTextField
-            label={tr('designer.object.name')}
-            value={nameValue}
-            onCommit={setName}
-            disabled={readOnly || !createMode}
-            mono
-            testId="object-name-input"
-            placeholder={tr('designer.object.namePlaceholder')}
-          />
-        </Field>
-        <InspectorTextField
-          label={tr('designer.object.label')}
-          value={str('label')}
-          onCommit={setLabel}
-          disabled={readOnly}
-          placeholder={tr('designer.object.labelPlaceholder')}
-        />
-        <InspectorTextField
-          label={tr('designer.object.pluralLabel')}
-          value={str('pluralLabel')}
-          onCommit={(v) => onPatch({ pluralLabel: v || undefined })}
-          disabled={readOnly}
-          placeholder={tr('designer.object.pluralPlaceholder')}
-        />
-        {/* objectui#12531 — the icon is picked from the catalog the console
-            ships (preview, search, an inline warning on a name that matches no
-            icon) rather than typed blind. Clearing it patches `icon: undefined`,
-            as the text field this replaced did. */}
-        <div className="space-y-1">
-          <Label htmlFor={iconFieldId} className="text-xs text-muted-foreground">{tr('designer.object.icon')}</Label>
-          <IconPickerWidget
-            id={iconFieldId}
-            schema={{ type: 'string' }}
-            value={str('icon')}
-            onChange={(v) => onPatch({ icon: typeof v === 'string' && v !== '' ? v : undefined })}
-            readOnly={readOnly}
-          />
-        </div>
-        <div className="space-y-1">
-          <Label className="text-xs text-muted-foreground">{tr('designer.object.description')}</Label>
-          <textarea
-            value={str('description')}
-            disabled={readOnly}
-            rows={2}
-            placeholder={tr('designer.object.descriptionPlaceholder')}
-            onChange={(e) => onPatch({ description: e.target.value || undefined })}
-            className="w-full text-sm rounded-md border bg-background px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-primary disabled:cursor-not-allowed disabled:opacity-50"
-          />
-        </div>
+        {nameRow}
+        {businessRows}
       </Section>
-      <AccessSection draft={draft} onPatch={onPatch} readOnly={readOnly} tr={tr} />
+      {access}
     </InspectorShell>
   );
 }
@@ -189,11 +262,17 @@ function AccessSection({
   onPatch,
   readOnly,
   tr,
+  issueLines,
+  keyOf,
 }: {
   draft: Record<string, unknown>;
   onPatch: (patch: Record<string, unknown>) => void;
   readOnly?: boolean;
   tr: (key: string) => string;
+  /** The issue lines of the row editing a top-level key (objectstack#35628). */
+  issueLines: (key: string, rowLabel: string) => React.ReactNode;
+  /** The key a row writes, as its title's hover text (split mode only). */
+  keyOf: (...keys: string[]) => string | undefined;
 }) {
   const perOpSupported = usePerOpSupport();
 
@@ -245,7 +324,9 @@ function AccessSection({
     >
       <Field hint={posture === 'private' ? tr('designer.object.posture.privateHint') : tr('designer.object.posture.publicHint')}>
         <div className="space-y-1">
-          <Label className="text-xs text-muted-foreground">{tr('designer.object.posture')}</Label>
+          <RowTitle keys={keyOf('access.default')}>
+            <Label className="text-xs text-muted-foreground">{tr('designer.object.posture')}</Label>
+          </RowTitle>
           {/*
             objectui#11865 — the shared `Select`, where this used to be a
             browser-native select element. A pick hands `setPosture` the
@@ -266,13 +347,16 @@ function AccessSection({
               <SelectItem value="private">{tr('designer.object.posture.private')}</SelectItem>
             </SelectContent>
           </Select>
+          {issueLines('access', tr('designer.object.posture'))}
         </div>
       </Field>
 
       <Field hint={tr('designer.object.reqPerms.hint')}>
         <div className="space-y-1">
           <div className="flex items-center justify-between">
-            <Label className="text-xs text-muted-foreground">{tr('designer.object.reqPerms')}</Label>
+            <RowTitle keys={keyOf('requiredPermissions')}>
+              <Label className="text-xs text-muted-foreground">{tr('designer.object.reqPerms')}</Label>
+            </RowTitle>
             {perOpSupported && (
               <div className="inline-flex rounded border text-[11px]" role="group">
                 <button
@@ -327,6 +411,7 @@ function AccessSection({
               ))}
             </div>
           )}
+          {issueLines('requiredPermissions', tr('designer.object.reqPerms'))}
         </div>
       </Field>
     </Section>
@@ -353,6 +438,51 @@ function Section({
         {hint && <div className="text-[10px] normal-case text-muted-foreground/70 mt-0.5">{hint}</div>}
       </div>
       <div className="space-y-2">{children}</div>
+    </div>
+  );
+}
+
+/**
+ * A row's title, with `keys` (the key the row writes, split mode) as its hover
+ * text. The hover text rides on a wrapper, not on the label, so the control's
+ * accessible name stays the title alone. Without `keys` the title is drawn
+ * alone, exactly as before.
+ */
+function RowTitle({ keys, children }: { keys?: string; children: React.ReactNode }) {
+  if (!keys) return <>{children}</>;
+  return (
+    <div title={keys} data-setting-key={keys} className="w-fit">
+      {children}
+    </div>
+  );
+}
+
+/**
+ * `InspectorTextField`, with the row's key as its title's hover text when
+ * `keys` is given. Without it this IS `InspectorTextField`, so whole-panel
+ * hosts draw exactly what they drew before.
+ */
+function KeyedTextField({
+  keys,
+  ...props
+}: React.ComponentProps<typeof InspectorTextField> & { keys?: string }) {
+  const id = React.useId();
+  if (!keys) return <InspectorTextField {...props} />;
+  return (
+    <div className="space-y-1">
+      <RowTitle keys={keys}>
+        <Label htmlFor={id} className="text-xs text-muted-foreground">{props.label}</Label>
+      </RowTitle>
+      <Input
+        id={id}
+        value={props.value}
+        onChange={(e) => props.onCommit(e.target.value)}
+        onBlur={(e) => props.onBlur?.(e.target.value)}
+        placeholder={props.placeholder}
+        disabled={props.disabled}
+        data-testid={props.testId}
+        className={props.mono ? 'h-8 text-sm font-mono' : 'h-8 text-sm'}
+      />
     </div>
   );
 }

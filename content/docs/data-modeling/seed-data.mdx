@@ -76,6 +76,14 @@ customer has since edited.
 | `update` | Update only, skip if not found | Migration patches on existing rows |
 
 Every mode matches on `externalId`, so a replay finds the row an earlier load wrote.
+Every record carries a value for each `externalId` field (`name` when the dataset
+names none). A record that leaves one blank (no value, `null` or `''`) could match no
+row and would be inserted again on every replay, so the load refuses it: nothing of
+it is written, the load reports an error naming the object, the record and the blank
+field, and the dataset's other records load. The check reads the key as written in the
+seed, after the record's expressions resolve, so an expression that comes out empty is
+refused, while a reference the load cannot resolve yet (a person who has not signed
+up) is not blank.
 The unkeyed modes `insert` and `replace` are retired: see
 [Moving off `insert` and `replace`](#moving-off-insert-and-replace).
 
@@ -311,6 +319,7 @@ defineSeed(Account, {
 
 // Automated test fixtures — CI/CD only
 defineSeed(TestUser, {
+  externalId: 'email',   // the records carry no `name`, the default key
   env: ['test'],
   records: [
     { email: 'ci-admin@example.com', role: 'admin' },
@@ -413,11 +422,9 @@ The rules:
   and the load's error (also logged at warn) names the object. Every marked set
   still loads for the locales it lists, exactly as an unmarked set would, and
   every other object still seeds. Identical copies of one set — the same
-  package's datasets merged twice — count once. Two versions of one package
-  whose marked set changed are two sets: an upgrade keeps the earlier
-  version's datasets on the per-organization replay list until the process
-  restarts, so until then an organization on an unlisted locale gets no
-  fallback for that object.
+  package's datasets merged twice — count once. An upgrade replaces the
+  package's datasets on the per-organization replay list, so two versions of
+  one package are never two sets; two packages marking the same object are.
 
 The loader logs, at info, each fallback set it loaded and the locale it filled
 in for. Datasets without the marker load exactly as before.
@@ -608,7 +615,9 @@ A join (junction) table linking two objects many-to-many has **no single-field
 natural key** — the *pair* of foreign keys is what makes a row unique. Pass a
 **list** of field names as the `externalId` so the seed runner can match existing
 rows on the composite key and stay idempotent across replays. The foreign keys are
-compared by their *resolved* record ids, which are stable between boots.
+compared by their *resolved* record ids, which are stable between boots. Every record
+carries every listed field: a record with one of them blank is refused at load, like
+any record with a blank key (see [Import Modes](#import-modes)).
 
 ```typescript
 // A team can staff many projects; a project can have many teams.
@@ -832,7 +841,7 @@ export a single aggregate array.
 ```
 src/
   data/
-    index.ts              ← exports SeedData array in dependency order
+    index.ts              ← exports the SeedData array (the loader orders it)
     accounts.seed.ts
     contacts.seed.ts
     leads.seed.ts
@@ -911,7 +920,8 @@ company names, email addresses, and values — not `foo`, `bar`, or `test123`.
 ### One file per object
 
 Split large seed payloads into `{object}.seed.ts` files. A single `index.ts` that
-re-exports and orders them keeps the entry point clean.
+re-exports them keeps the entry point clean; lookups and `dependsOn` order the
+load, and array position only breaks ties.
 
 ---
 

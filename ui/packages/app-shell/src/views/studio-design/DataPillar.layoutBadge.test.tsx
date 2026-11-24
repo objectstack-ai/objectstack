@@ -25,6 +25,8 @@ import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@testing-library/react';
+// The source reaches a dynamic `import('@objectstack/lint')`: its first load is paid at collection (`check:test-source-alias`).
+import '@objectstack/lint';
 import { completeAddFieldPopover } from './__tests__/dataPillarAddField';
 import { MemoryRouter } from 'react-router-dom';
 
@@ -85,7 +87,7 @@ async function openFormTab(props: Partial<React.ComponentProps<typeof DataPillar
     </MemoryRouter>,
   );
   // First object auto-selects; the Form tab is the second segmented control.
-  fireEvent.click(await screen.findByRole('button', { name: 'Form' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Field layout' }));
   // `formMode` defaults to 'layout', so the layout caption is on screen once
   // its sub-mode control is. (Not awaited on the caption text: a read-only
   // package has its own caption since objectui#11781.)

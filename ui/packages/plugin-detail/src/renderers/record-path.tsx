@@ -147,7 +147,7 @@ const PHONE_LIST_LABEL_CLASS = 'text-left [overflow-wrap:anywhere]';
 
 type StageState = 'completed' | 'current' | 'upcoming';
 
-type PathStage = { value: unknown; label: string; terminal?: 'won' | 'lost' };
+export type PathStage = { value: unknown; label: string; terminal?: 'won' | 'lost' };
 
 /**
  * `stages[].label` is an `I18nLabel` in the spec row
@@ -226,8 +226,11 @@ function readsActingUser(pred: FieldRulePredicate): boolean {
  *
  * No read is added: the record and its object definition are the ones the
  * record context already holds.
+ *
+ * ⚠️ Package-internal: exported for `RecordStageMenu` (objectstack#35891),
+ * which offers the same stages; NOT re-exported from the package entry.
  */
-function stagesThisRecordWalks(
+export function stagesThisRecordWalks(
   stages: PathStage[],
   options: unknown,
   record: Record<string, unknown> | undefined,
@@ -547,7 +550,7 @@ const RecordPathBody: React.FC<RecordPathRendererProps> = ({
   const labelClass = (state: StageState, terminal?: 'won' | 'lost') =>
     cn(
       'block min-w-0 text-xs',
-      state === 'current' && (terminal === 'lost' ? 'font-semibold text-destructive' : 'font-semibold text-foreground'),
+      state === 'current' && (terminal === 'lost' ? 'font-medium text-destructive' : 'font-medium text-foreground'),
       state === 'completed' && 'font-normal text-muted-foreground',
       state === 'upcoming' && 'font-normal text-muted-foreground',
     );
@@ -645,7 +648,7 @@ const RecordPathBody: React.FC<RecordPathRendererProps> = ({
         >
           {o.terminal === 'lost' && <span aria-hidden="true" className="mr-1 opacity-70">✗</span>}
           {o.terminal !== 'lost' && o.state === 'completed' && (
-            <span aria-hidden="true" className="mr-1 text-emerald-600 dark:text-emerald-400 font-semibold">✓</span>
+            <span aria-hidden="true" className="mr-1 text-emerald-600 dark:text-emerald-400 font-medium">✓</span>
           )}
           {o.stage.label}
         </span>

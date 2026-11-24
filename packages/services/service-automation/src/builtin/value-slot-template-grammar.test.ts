@@ -155,9 +155,9 @@ describe('the remedy a refused path prints reads, through CEL, the value the tem
   // Every identifier CEL claims before a flow variable can (`flow-template-token.ts`
   // in the spec reads them off cel-js 8.0.0): the type identifiers, the namespace
   // constants, the reserved words and the keywords. `__proto__` is claimed there
-  // too, and is left out of this list: the flow CEL scope is a plain object, where
-  // `__proto__` names the prototype rather than a key, so no CEL spelling reads a
-  // variable of that name.
+  // too, and is left out of this list: the flow CEL scope binds nothing for a key
+  // with a `__proto__` segment (`../scope-key-segments.ts`), so no CEL spelling
+  // reads a variable of that name.
   it.each([
     'bool', 'bytes', 'double', 'int', 'list', 'map', 'null_type', 'string', 'type', 'uint',
     'cel', 'google', 'optional',

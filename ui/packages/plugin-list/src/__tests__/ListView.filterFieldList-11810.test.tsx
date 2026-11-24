@@ -51,6 +51,7 @@ vi.mock('@object-ui/components', async (importOriginal) => {
 });
 
 import { ListView } from '../ListView';
+import { openAdvancedFilter } from './conditionPanels';
 
 /** The declared fields of the showcase Tasks object, in declaration order. */
 const DECLARED: Record<string, Record<string, unknown>> = {
@@ -118,7 +119,7 @@ function mount(schemaExtra: Record<string, unknown> = {}, props: Record<string, 
 /** Open the Filter popover and wait for the list built from the DEFINITION (not the columns-only fallback). */
 async function openFilterFieldList(): Promise<string[]> {
   fireEvent.click(screen.getByRole('button', { name: /^filter/i }));
-  await screen.findByText('Filter Records');
+  await openAdvancedFilter();
   await waitFor(() => {
     const latest = captured.fields[captured.fields.length - 1] ?? [];
     // `estimate_hours` is no column, so seeing it proves the definition loaded.

@@ -625,6 +625,25 @@ export interface ISecurityService {
    *
    * A host that must scope repeated queries re-calls this method; it does not
    * hold the returned object.
+   *
+   * **Hand it to an engine read, in process, under the context it was asked
+   * for (ADR-0155, Consequences).** The scope can carry engine-internal leaves:
+   * a `ReadableIds` leaf (ADR-0139) today, and, from plugin-sharing's switch on
+   * (ADR-0155 plan step 6), a `SharedRecordIds` leaf composed for `context`'s
+   * user, through the sharing service's read filter. So, for every consumer:
+   *
+   *  - ⛔ never serialise it: a copy that crossed JSON, a structured clone or a
+   *    serializing wire arrives unbranded and is refused `INVALID_FILTER` /
+   *    400, ⛔ never read as an empty list;
+   *  - the engine read it is handed to runs under `context` itself, under a
+   *    context acting on behalf of `context`'s user (ADR-0090 D10), or under a
+   *    system context: the engine's seam refuses a `SharedRecordIds` leaf whose
+   *    recipient is neither the reading context's user nor its delegator, as a
+   *    composition fault (`INTERNAL_ERROR` / 500, ADR-0155 D4);
+   *  - a consumer that compiles or matches the scope itself, outside the engine
+   *    (the analytics raw-SQL path, an in-process matcher), owes each leaf an
+   *    exact evaluation or a loud refusal, ⛔ never an ordinary-comparand
+   *    reading (ADR-0155 D5).
    */
   getReadFilter(object: string, context?: SecurityContext): Promise<FilterCondition | undefined>;
 

@@ -24,6 +24,9 @@ import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFin
 import { ERROR_CODE_LEDGER } from '@objectstack/spec/api';
 import { MCP_AGENT_PERMISSION_SETS } from '@objectstack/spec/ai';
 import { AuthManager } from './auth-manager';
+// The SSO discovery egress guard the source loads with a dynamic import, paid
+// here, during collection (check-test-source-alias, "The source reach").
+import '@objectstack/core/egress';
 import { bindTestSecurityCatalog, catalogFromTables } from './__tests__/security-catalog.testkit.js';
 import {
   assertAudienceConfig,
@@ -337,6 +340,31 @@ describe('admission decision matrix (#11739): posture × creation class', () => 
       creationClass: 'self-serve',
     });
     expect(verdict).toEqual({ admit: true, grantPermissionSet: false });
+  });
+
+  // A sign-up the posture's own rule admits is admitted by that rule,
+  // invitation or not, and receives the declared set; one admitted by its
+  // invitation alone gets the account and no grant.
+  it.each([
+    ['email_domain', 'on the allowlist', 'colleague@acme.com', true, { admit: true, grantPermissionSet: true }],
+    ['email_domain', 'on the allowlist', 'colleague@acme.com', false, { admit: true, grantPermissionSet: true }],
+    ['email_domain', 'off the allowlist', 'contractor@external.com', true, { admit: true, grantPermissionSet: false }],
+    ['open', 'any address', 'anyone@external.com', true, { admit: true, grantPermissionSet: true }],
+    ['open', 'any address', 'anyone@external.com', false, { admit: true, grantPermissionSet: true }],
+    ['invite_only', 'any address', 'anyone@external.com', true, { admit: true, grantPermissionSet: false }],
+  ] as const)('%s, an address %s (%s), invited %s: %o', (posture, _where, email, invited, expected) => {
+    const verdict = decideAudienceAdmission({
+      ...base,
+      email,
+      hasPendingInvitation: invited,
+      audience: audience({
+        posture,
+        allowedEmailDomains: posture === 'email_domain' ? ['acme.com'] : [],
+        selfRegistrationPermissionSet: posture === 'invite_only' ? undefined : 'portal_user',
+      }),
+      creationClass: 'self-serve',
+    });
+    expect(verdict).toEqual(expected);
   });
 
   it('open admits self-serve with the grant', () => {
@@ -921,6 +949,47 @@ describe('end of the chain: better-auth pipeline over the memory engine (#11739)
     expect((engine.tables.get('sys_user') ?? []).length).toBe(1);
   });
 
+  // An invited sign-up the posture's own rule admits is a self-registrant: it
+  // asks for the declared set like an uninvited one, so a set that cannot be
+  // resolved refuses it too. The invitation does not admit it without the grant.
+  it.each([
+    ['open', 'missing', { posture: 'open' }, 'invited@anywhere.com'],
+    ['open', 'switched off', { posture: 'open' }, 'invited@anywhere.com'],
+    ['email_domain (on the allowlist)', 'missing', { posture: 'email_domain', allowedEmailDomains: ['acme.com'] }, 'invited@acme.com'],
+    ['email_domain (on the allowlist)', 'switched off', { posture: 'email_domain', allowedEmailDomains: ['acme.com'] }, 'invited@acme.com'],
+  ] as const)('%s: an invited sign-up whose declared set is %s is refused AUTH_CONFIG_ERROR, like an uninvited one', async (_posture, state, posture, email) => {
+    const engine = createMemoryEngine();
+    seedExistingUser(engine);
+    if (state === 'switched off') {
+      seedPermissionSet(engine, 'member_default');
+      engine.tables.set('sys_metadata_activation', [
+        { id: 'act_member', metadata_type: 'permission', name: 'member_default', package_id: 'pkg', active: false },
+      ]);
+    }
+    seedPendingInvitation(engine, email);
+    const set = state === 'missing' ? 'ghost' : 'member_default';
+    const manager = makeManager(engine, { audience: { ...posture, selfRegistrationPermissionSet: set } });
+    const res = await signUp(manager, email);
+    expect(res.status).toBe(403);
+    const body = await res.json();
+    expect(body.code).toBe(AUDIENCE_CONFIG_ERROR);
+    expect(String(body.message)).toContain(`'${set}'`);
+    expect((engine.tables.get('sys_user') ?? []).length).toBe(1);
+  });
+
+  it('CONTROL: email_domain, an invited sign-up OFF the allowlist is admitted by its invitation alone, asking for no set, so a missing set does not refuse it', async () => {
+    const engine = createMemoryEngine();
+    seedExistingUser(engine);
+    seedPendingInvitation(engine, 'contractor@external.com');
+    const manager = makeManager(engine, {
+      audience: { posture: 'email_domain', allowedEmailDomains: ['acme.com'], selfRegistrationPermissionSet: 'ghost' },
+    });
+    const res = await signUp(manager, 'contractor@external.com');
+    expect(res.status, await res.clone().text()).toBeLessThan(300);
+    expect((engine.tables.get('sys_user') ?? []).length).toBe(2);
+    expect(engine.tables.get('sys_user_permission_set') ?? []).toEqual([]);
+  });
+
   it('[ADR-0131 D3] the set ROW\'s `active` switches nothing: a row flagged off still admits and grants', async () => {
     // The resolver reads no catalog row, so the row flag is not a deactivation.
     const engine = createMemoryEngine();
@@ -1126,5 +1195,147 @@ describe('a sign-up admitted by its invitation alone (isAdmittedByInvitationAlon
     expect(alone({ creationClass: 'provider' })).toBe(false);
     expect(alone({ audience: audience({ posture: 'open' }) })).toBe(false);
     expect(alone({ audience: { ...DOMAIN, invalid: { raw: "'bogus'" } } })).toBe(false);
+  });
+});
+
+describe('a self-serve social creation under an address-based posture is admitted only with a provider-verified address', () => {
+  const DOMAIN = audience({ posture: 'email_domain', allowedEmailDomains: ['acme.com'], selfRegistrationPermissionSet: 'portal_user' });
+  const OPEN_POSTURE = audience({ posture: 'open', selfRegistrationPermissionSet: 'portal_user' });
+  const decide = (over: Partial<Parameters<typeof decideAudienceAdmission>[0]> = {}) =>
+    decideAudienceAdmission({
+      audience: DOMAIN,
+      creationClass: 'self-serve',
+      method: 'oauth',
+      email: 'user@acme.com',
+      hasPendingInvitation: false,
+      isBootstrap: false,
+      ...over,
+    });
+  const expectRefused = (verdict: ReturnType<typeof decideAudienceAdmission>, label?: string) => {
+    expect(verdict.admit, label).toBe(false);
+    if (!verdict.admit) expect(verdict.code, label).toBe(SELF_REGISTRATION_CLOSED);
+  };
+
+  it('email_domain: an address on the allowlist is refused unless the provider reported it verified, `true` and nothing else', () => {
+    for (const emailVerified of [false, undefined, null, 'true', 1]) expectRefused(decide({ emailVerified }), String(emailVerified));
+    expect(decide({ emailVerified: true })).toEqual({ admit: true, grantPermissionSet: true });
+  });
+
+  it('email_domain: verification is in force whatever the deployment declares', () => {
+    for (const declaredEmailVerification of [undefined, true, false]) {
+      expectRefused(decide({ emailVerified: false, declaredEmailVerification }), String(declaredEmailVerification));
+    }
+  });
+
+  it('email_domain: a pending invitation addressed to the creation does not admit it while the provider did not verify the address', () => {
+    expectRefused(decide({ email: 'contractor@partner.example', hasPendingInvitation: true, emailVerified: false }));
+    expectRefused(decide({ hasPendingInvitation: true, emailVerified: false }));
+    expect(decide({ email: 'contractor@partner.example', hasPendingInvitation: true, emailVerified: true })).toEqual({
+      admit: true,
+      grantPermissionSet: false,
+    });
+    // On the allowlist, the verified creation is admitted by its domain, invitation or not.
+    expect(decide({ hasPendingInvitation: true, emailVerified: true })).toEqual({ admit: true, grantPermissionSet: true });
+  });
+
+  it('open: refused while email verification is in force (undeclared or declared true), an invitation included', () => {
+    for (const declaredEmailVerification of [undefined, true]) {
+      expectRefused(decide({ audience: OPEN_POSTURE, emailVerified: false, declaredEmailVerification }), String(declaredEmailVerification));
+    }
+    expectRefused(decide({ audience: OPEN_POSTURE, emailVerified: false, hasPendingInvitation: true }));
+    expect(decide({ audience: OPEN_POSTURE, emailVerified: true })).toEqual({ admit: true, grantPermissionSet: true });
+  });
+
+  it('CONTROL: open with email verification declared off by the deployment admits as before', () => {
+    expect(decide({ audience: OPEN_POSTURE, emailVerified: false, declaredEmailVerification: false })).toEqual({
+      admit: true,
+      grantPermissionSet: true,
+    });
+  });
+
+  it('CONTROL: the operator-registered provider class and the operator class are admitted whatever the provider said', () => {
+    for (const aud of [DOMAIN, OPEN_POSTURE]) {
+      for (const [creationClass, method] of [['provider', 'oauth'], ['provider', 'sso-oidc'], ['provider', 'sso-saml'], ['operator', 'admin'], ['operator', 'scim']] as const) {
+        expect(decide({ audience: aud, creationClass, method, emailVerified: false }), `${aud.posture} ${creationClass} ${method}`).toEqual({
+          admit: true,
+          grantPermissionSet: false,
+        });
+      }
+    }
+  });
+
+  it('CONTROL: every other self-serve method is judged as before', () => {
+    for (const method of ['email-password', 'magic-link', 'email-otp', undefined]) {
+      expect(decide({ method, emailVerified: false }), String(method)).toEqual({ admit: true, grantPermissionSet: true });
+      expect(decide({ audience: OPEN_POSTURE, method, emailVerified: false }), String(method)).toEqual({ admit: true, grantPermissionSet: true });
+    }
+  });
+
+  it('the bootstrap carve-out stays ahead of the rule: the first account of a fresh install is admitted', () => {
+    for (const aud of [DOMAIN, OPEN_POSTURE]) {
+      expect(decide({ audience: aud, isBootstrap: true, emailVerified: false })).toEqual({ admit: true, grantPermissionSet: false });
+    }
+  });
+
+  it('CONTROL: under invite_only the invitation proof carries the rule, and the decision reads as before', () => {
+    expectRefused(decide({ audience: audience(), emailVerified: false }));
+    expect(decide({ audience: audience(), emailVerified: true, hasPendingInvitation: true })).toEqual({ admit: true, grantPermissionSet: false });
+  });
+
+  it('the refusal names the posture it was judged under', () => {
+    for (const aud of [DOMAIN, OPEN_POSTURE]) {
+      const verdict = decide({ audience: aud, emailVerified: false });
+      expect(verdict.admit).toBe(false);
+      if (!verdict.admit) expect(verdict.message).toContain(aud.posture);
+    }
+  });
+});
+
+describe('the admission gate: a self-serve social creation needs a provider-verified address under an address-based posture', () => {
+  const nonBootstrapCtx = { context: { adapter: { findOne: async () => ({ id: 'usr_existing' }) } } };
+  const gateOf = (manager: AuthManager) => (user: Record<string, unknown>, source: Record<string, unknown>) =>
+    (manager as any).validateAudienceAdmission({ user, source: { action: 'create-user', ...source } }, nonBootstrapCtx);
+  const social = (providerId = 'google') => ({ method: 'oauth', oauth: { providerId } });
+
+  it('email_domain: refused unless the provider verified the address, for any social provider; an oidcProviders entry and an SSO provider are admitted whatever they said', async () => {
+    const engine = createMemoryEngine();
+    seedExistingUser(engine);
+    seedPermissionSet(engine, 'portal_user');
+    const gate = gateOf(
+      makeManager(engine, {
+        getTenancy: SINGLE_TENANCY,
+        audience: { posture: 'email_domain', allowedEmailDomains: ['acme.com'], selfRegistrationPermissionSet: 'portal_user' },
+        oidcProviders: [
+          { providerId: 'okta', clientId: 'x', clientSecret: 'y', discoveryUrl: 'https://idp.example/.well-known/openid-configuration' },
+        ],
+      }),
+    );
+    expect((await gate({ email: 'jit@acme.com', emailVerified: false }, social()))?.error).toBe(SELF_REGISTRATION_CLOSED);
+    expect((await gate({ email: 'jit@acme.com' }, social()))?.error).toBe(SELF_REGISTRATION_CLOSED);
+    expect((await gate({ email: 'jit@acme.com', emailVerified: false }, social('a-provider-configured-later')))?.error).toBe(
+      SELF_REGISTRATION_CLOSED,
+    );
+    expect(await gate({ email: 'jit@acme.com', emailVerified: true }, social())).toBeUndefined();
+
+    expect(await gate({ email: 'jit@acme.com', emailVerified: false }, social('okta'))).toBeUndefined();
+    expect(await gate({ email: 'jit@acme.com', emailVerified: false }, { method: 'sso-oidc', sso: { providerId: 'acme' } })).toBeUndefined();
+  });
+
+  it('open: refused while email verification is in force, admitted once the deployment declares it off', async () => {
+    const forced = createMemoryEngine();
+    seedExistingUser(forced);
+    seedPermissionSet(forced, 'portal_user');
+    const open = { posture: 'open', selfRegistrationPermissionSet: 'portal_user' };
+    const forcedGate = gateOf(makeManager(forced, { getTenancy: SINGLE_TENANCY, audience: open }));
+    expect((await forcedGate({ email: 'joiner@anywhere.com', emailVerified: false }, social()))?.error).toBe(SELF_REGISTRATION_CLOSED);
+    expect(await forcedGate({ email: 'joiner@anywhere.com', emailVerified: true }, social())).toBeUndefined();
+
+    const off = createMemoryEngine();
+    seedExistingUser(off);
+    seedPermissionSet(off, 'portal_user');
+    const offGate = gateOf(
+      makeManager(off, { getTenancy: SINGLE_TENANCY, audience: open, emailAndPassword: { requireEmailVerification: false } }),
+    );
+    expect(await offGate({ email: 'joiner@anywhere.com', emailVerified: false }, social())).toBeUndefined();
   });
 });

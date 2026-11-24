@@ -53,9 +53,9 @@ import {
   COMPUTED_VALUE_TYPES,
   FieldSchema,
   isAggregateCompatibleWithFieldType,
-  isBodyTableRelationship,
   MULTI_OPTION_TYPES,
   NUMERIC_VALUE_TYPES,
+  resolveFieldHistory,
   SelectOptionSchema,
   SINGLE_OPTION_TYPES,
   summaryFunctionReadsField,
@@ -115,7 +115,7 @@ import {
 } from '@object-ui/components';
 import { Plus, X, ArrowUp, ArrowDown, Copy, AlertTriangle, ChevronRight, MoreHorizontal, Trash2 } from 'lucide-react';
 import { InspectorComboField, type InspectorComboOption } from './InspectorComboField.js';
-import { ObjectPicker } from './ObjectPicker.js';
+import { ObjectPicker, useObjectCatalog } from './ObjectPicker.js';
 import { useObjectFields } from '../previews/useObjectFields.js';
 import {
   readFields,
@@ -123,6 +123,10 @@ import {
   toFieldNameLoose,
   toFieldNameOrEmpty,
   indexOfField,
+  readGroups,
+  groupMembership,
+  currentGroupLayout,
+  writeGroupLayout,
   type FieldsView,
   type FieldEntry,
 } from '../previews/object-fields-io.js';
@@ -146,8 +150,14 @@ import {
 } from '../previews/external-object.js';
 import { CelPredicateField } from '../CelPredicateField.js';
 import { useRequiredVisibleWhenFormulaReads, useRequiredVisibleWhenReferenceReads } from './requiredVisibleWhenReference.js';
-import type { CelLintIssue, CelValueType } from '../celAuthoring.js';
+import {
+  inferFormulaReturnDeclaration,
+  type CelLintIssue,
+  type CelValueType,
+  type FormulaReturnVerdict,
+} from '../celAuthoring.js';
 import { t, tFormat, type SupportedLocale } from '../i18n.js';
+import { fieldHistoryChoiceOf, fieldHistoryOptions, fieldHistoryValueOf } from '../fieldHistoryChoice.js';
 import { FilterConditionField } from './FilterConditionField.js';
 import type { FilterCondition } from './datasetFilterCondition.js';
 import { usePickerLoad, type LoadState } from '../loadState.js';
@@ -734,6 +744,15 @@ const FIELD_RULE_ROOTS = ['record', 'previous', 'parent'];
  */
 const FORMULA_ROOTS = ['record'];
 
+/** Do two flat records (a `currencyConfig`) hold the same keys and values? Absent equals absent only. */
+function sameFlatRecord(a: unknown, b: unknown): boolean {
+  if (a === undefined || b === undefined) return a === b;
+  if (!a || !b || typeof a !== 'object' || typeof b !== 'object') return false;
+  const ak = Object.keys(a as object);
+  const bk = Object.keys(b as object);
+  return ak.length === bk.length && ak.every((k) => (a as Record<string, unknown>)[k] === (b as Record<string, unknown>)[k]);
+}
+
 /** Read a `*When` predicate for editing: a bare string or an Expression envelope's `source`. */
 function readPredicate(v: unknown): string {
   if (typeof v === 'string') return v;
@@ -904,6 +923,13 @@ export function ObjectFieldInspector({
     typed?: boolean;
     inferred?: CelValueType | null;
   }>({ field: '', source: '' });
+  // objectstack#35631 — the money verdict (`inferFormulaReturn`) is read from
+  // the lazily loaded engine, so it lands after the render that settled the
+  // two editor verdicts; the stamp it completes is the LATEST render's, whose
+  // draft is the one a write must build on.
+  const stampFormulaTypeRef = React.useRef<
+    ((settled: typeof formulaVerdictRef.current, declared: FormulaReturnVerdict | null) => void) | null
+  >(null);
 
   /* ─── Who owns the API name (objectui#7615) ──────────────────────────────
    *
@@ -1060,6 +1086,29 @@ export function ObjectFieldInspector({
     onPatch({ fields: writeFields(next) });
   };
 
+  /**
+   * Move this field to another group (or out of every group). Where no list
+   * is involved — the field is listed nowhere and the target lists nothing —
+   * the older `group` key is all there is to write, as before. Otherwise the
+   * move goes through `writeGroupLayout`, which keeps a group's `fields` list
+   * and the field's own `group` from contradicting each other
+   * (objectstack#35900): the field joins the end of the target group.
+   */
+  const moveToGroup = (target: string | null) => {
+    const groups = readGroups(fieldGroups);
+    const listsIt = groups.some((g) => Array.isArray(g.fields) && g.fields.includes(entry.name));
+    const targetLists = target !== null && groups.some((g) => g.key === target && Array.isArray(g.fields));
+    if (!listsIt && !targetLists) {
+      patchDef({ group: target ?? undefined });
+      return;
+    }
+    const layout = currentGroupLayout(view, groups);
+    for (const [key, names] of layout) layout.set(key, names.filter((n) => n !== entry.name));
+    layout.set(target, [...(layout.get(target) ?? []), entry.name]);
+    const patch = writeGroupLayout(view, groups, layout);
+    if (patch.fields !== undefined || patch.fieldGroups !== undefined) onPatch(patch);
+  };
+
   const patchDef = (patch: Record<string, unknown>) => {
     const nextEntries = [...view.entries];
     nextEntries[idx] = { ...entry, def: { ...def, ...patch } };
@@ -1098,11 +1147,53 @@ export function ObjectFieldInspector({
     const now = { ...(same ? was : { field: entry.name, source }), ...verdict };
     formulaVerdictRef.current = now;
     if (!formulaEdited.current || now.errors === undefined || !now.typed || now.errors > 0) return;
+    // objectstack#35631 — the third verdict, money, comes from the engine's
+    // `inferFormulaReturn` over this object's declared fields. A newer verdict
+    // recorded meanwhile supersedes this one, and settles in its own turn.
+    void inferFormulaReturnDeclaration(source, siblingDefs).then((declared) => {
+      if (formulaVerdictRef.current !== now) return;
+      stampFormulaTypeRef.current?.(now, declared);
+    });
+  };
+
+  /** objectstack#35631 — writes the settled verdicts as the formula's declared result (`returnType` + `currencyConfig`). */
+  const stampFormulaType = (settled: typeof formulaVerdictRef.current, declared: FormulaReturnVerdict | null) => {
+    // The draft moved to another field or another source since: that one settles itself.
+    // (`settled.field` is the verdict record's field NAME, not a column identity.)
+    const sameField = settled.field === entry.name;
+    if (!sameField) return;
+    if (settled.source !== readPredicate(def.expression ?? def.formula)) return;
     // Spec: `returnType` carries only a PROVEN concrete type —
     // an ambiguous (`unknown`) or unavailable verdict clears it.
-    const next = now.inferred && now.inferred !== 'unknown' ? now.inferred : undefined;
-    if (def.returnType !== next) patchDef({ returnType: next });
+    const proven = settled.inferred && settled.inferred !== 'unknown' ? settled.inferred : undefined;
+    // objectstack#35047 — `percent` is DECLARED: no type proves a quotient is
+    // a percentage, so a declared one survives every verdict that proves no
+    // OTHER type — `number`, and an unproven one alike (a field-over-field
+    // quotient types `dyn`). A verdict that proves text, boolean or date still
+    // stamps.
+    if (def.returnType === 'percent' && (proven === undefined || proven === 'number')) return;
+    let next: string | undefined = proven;
+    if (declared?.returnType === 'currency') {
+      // Provably money: the engine names the result and its currency.
+      next = 'currency';
+    } else if (def.returnType === 'currency' && (proven === undefined || proven === 'number')) {
+      // Only the money verdict's own `number` withdraws a declared `currency`
+      // (the edit stopped computing money). Unproven — a field-over-field
+      // quotient, two currencies meeting — or no engine verdict keeps it.
+      if (declared?.returnType !== 'number') return;
+      next = 'number';
+    }
+    // The declaration is the PAIR (`inferFormulaReturn`): a `currency` result
+    // carries the proven currency, absent for the tenant default, and any
+    // other result carries none, so a withdrawn one loses its stale config.
+    const nextConfig = next === 'currency' ? declared?.currencyConfig : undefined;
+    if (def.returnType === next && sameFlatRecord(def.currencyConfig, nextConfig)) return;
+    const nextDef: Record<string, unknown> = { ...def, returnType: next };
+    if (nextConfig) nextDef.currencyConfig = nextConfig;
+    else delete nextDef.currencyConfig;
+    writeDef(nextDef);
   };
+  stampFormulaTypeRef.current = stampFormulaType;
 
   /**
    * objectui#10202 — "use picklist". Naming a list sets `picklist` and removes
@@ -1465,9 +1556,21 @@ export function ObjectFieldInspector({
   // A stored field computed from its `expression` (a formula is computed by
   // its type, and keeps its own readings).
   const computedByExpression = type !== 'formula' && isExpressionComputedField(def);
+  // objectstack#36290 — what an unset `fieldHistory` resolves to for this
+  // field ON THIS OBJECT: the predicate the activity writer uses, asked with
+  // the field's own `fieldHistory` left out and the object document in hand.
+  const objectEnable = draft.enable && typeof draft.enable === 'object' ? (draft.enable as { fieldHistory?: unknown }) : undefined;
+  const objectFieldHistoryOff = objectEnable?.fieldHistory === false;
+  const fieldHistoryDefaultOn = resolveFieldHistory(
+    { type: def.type, trackHistory: def.trackHistory },
+    { managedBy: draft.managedBy, enable: objectEnable },
+  );
   // The siblings an expression may read: every field but this one (a field
   // computed from itself is circular), named as every other surface names it.
   const siblingFieldNames = view.entries.map((e) => e.name).filter((n) => n !== entry.name);
+  // Each field's type and `multiple`, so every CEL editor below judges a
+  // list-valued field as the object draft check does (`list-equality`).
+  const celFieldDefs = view.entries.map((e) => ({ name: e.name, type: e.def.type, multiple: e.def.multiple }));
   const siblingFieldOptions = view.entries
     .filter((e) => e.name !== entry.name)
     .map((e) => {
@@ -1743,6 +1846,7 @@ export function ObjectFieldInspector({
                 objectName={typeof (draft as any).name === 'string' ? ((draft as any).name as string) : undefined}
                 // A formula may reference every sibling, not itself (circular).
                 fieldNames={siblingFieldNames}
+                fieldDefs={celFieldDefs}
                 fieldOptions={siblingFieldOptions}
                 scope="record"
                 roots={FORMULA_ROOTS}
@@ -1875,6 +1979,7 @@ export function ObjectFieldInspector({
               // The engine computes it as it computes a formula, over the
               // row the write stores: `record` is the one root it binds.
               fieldNames={siblingFieldNames}
+              fieldDefs={celFieldDefs}
               fieldOptions={siblingFieldOptions}
               scope="record"
               roots={FORMULA_ROOTS}
@@ -1910,13 +2015,47 @@ export function ObjectFieldInspector({
               onCommit={(v) => patchDef({ hidden: v || undefined })}
               disabled={locked}
             />
+            {/* objectstack-ai/objectstack#36425 — whether a create asks for the
+                field. On is the default and is written as no key (removed, not
+                set to `undefined`); off writes `showOnCreate: false`. A required field is always asked for (the
+                parse refuses it off), so its box stays ticked and locked. */}
             <InspectorCheckboxField
-              label={tr('designer.field.trackHistory')}
-              value={!!def.trackHistory}
-              onCommit={(v) => patchDef({ trackHistory: v || undefined })}
-              disabled={locked}
+              label={tr('designer.field.showOnCreate')}
+              value={def.showOnCreate !== false}
+              onCommit={(v) => (v ? unsetDefKey('showOnCreate') : patchDef({ showOnCreate: false }))}
+              disabled={locked || (def.required === true && def.showOnCreate !== false)}
             />
           </div>
+          {def.required === true && (
+            <p data-testid="field-show-on-create-required" className="text-[11px] leading-snug text-muted-foreground">
+              {tr('designer.field.showOnCreateRequired')}
+            </p>
+          )}
+          {/* objectstack#36290 — whether a change to this field shows its
+              old → new values on the record activity: Default (removes the
+              key) / On / Off, the same three choices as the metadata form's
+              `field-history` widget (`fieldHistoryChoice.ts`). This rail holds
+              the whole object, so Default is resolved against it too: the
+              object's own off wins, and the row says so. There is no Track
+              history box beside it any more: a field's `trackHistory: false`
+              reads like absent, and `true` only does what On does for a media
+              or JSON field; a stored value is kept, never written here. */}
+          <InspectorSelectField
+            label={tr('designer.field.fieldHistory')}
+            value={fieldHistoryChoiceOf(def.fieldHistory)}
+            options={fieldHistoryOptions(fieldHistoryDefaultOn, locale)}
+            onCommit={(v) => {
+              const next = fieldHistoryValueOf(v);
+              if (next === undefined) unsetDefKey('fieldHistory');
+              else patchDef({ fieldHistory: next });
+            }}
+            disabled={locked}
+          />
+          {objectFieldHistoryOff && (
+            <p data-testid="field-history-object-off" className="text-[11px] leading-snug text-muted-foreground">
+              {tr('designer.field.fieldHistoryObjectOff')}
+            </p>
+          )}
         </DisplayPatchLock>
         <InspectorTextField
           label={tr('designer.field.placeholder')}
@@ -1941,6 +2080,7 @@ export function ObjectFieldInspector({
               placeholder="record.status != 'draft'"
               objectName={typeof (draft as any).name === 'string' ? ((draft as any).name as string) : undefined}
               fieldNames={view.entries.map((e) => e.name)}
+              fieldDefs={celFieldDefs}
               scope="record"
               roots={FIELD_RULE_ROOTS}
               // The authored key, so the wrong-layer advisory reads the
@@ -1964,24 +2104,21 @@ export function ObjectFieldInspector({
                 </span>
               </p>
             )}
-            {visibleWhenFormulaReads.formulas.length > 0 && (
+            {/* Only a formula the form cannot compute: one it computes is judged on the server's value. */}
+            {(visibleWhenFormulaReads.writePath.length > 0 || visibleWhenFormulaReads.formOnly.length > 0) && (
               <p
                 data-testid="field-required-visiblewhen-formula"
                 className="flex items-start gap-1 px-0.5 text-[11px] leading-snug text-amber-700 dark:text-amber-400"
               >
                 <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                 <span>
-                  {tFormat('designer.field.requiredVisibleWhenFormula', locale, {
-                    fields: visibleWhenFormulaReads.formulas.join(', '),
-                  })}
-                  {visibleWhenFormulaReads.unservable.length > 0 && (
-                    <>
-                      {' '}
-                      {tFormat('designer.field.requiredVisibleWhenFormulaUnservable', locale, {
-                        fields: visibleWhenFormulaReads.unservable.join(', '),
+                  {visibleWhenFormulaReads.writePath.length > 0
+                    ? tFormat('designer.field.requiredVisibleWhenFormulaUnservable', locale, {
+                        fields: visibleWhenFormulaReads.writePath.join(', '),
+                      })
+                    : tFormat('designer.field.requiredVisibleWhenFormulaFormOnly', locale, {
+                        fields: visibleWhenFormulaReads.formOnly.join(', '),
                       })}
-                    </>
-                  )}
                 </span>
               </p>
             )}
@@ -1995,6 +2132,7 @@ export function ObjectFieldInspector({
               placeholder="record.status == 'closed'"
               objectName={typeof (draft as any).name === 'string' ? ((draft as any).name as string) : undefined}
               fieldNames={view.entries.map((e) => e.name)}
+              fieldDefs={celFieldDefs}
               scope="record"
               roots={FIELD_RULE_ROOTS}
               // The authored key, so the wrong-layer advisory reads the
@@ -2015,6 +2153,7 @@ export function ObjectFieldInspector({
               placeholder="record.amount > 10000"
               objectName={typeof (draft as any).name === 'string' ? ((draft as any).name as string) : undefined}
               fieldNames={view.entries.map((e) => e.name)}
+              fieldDefs={celFieldDefs}
               scope="record"
               roots={FIELD_RULE_ROOTS}
               // The authored key, so the wrong-layer advisory reads the
@@ -2034,14 +2173,14 @@ export function ObjectFieldInspector({
           <DisplayPatchLock>
             <InspectorSelectField
               label={tr('designer.field.group')}
-              value={typeof def.group === 'string' ? (def.group as string) : ''}
+              value={groupMembership(view, fieldGroups).groupOf.get(entry.name) ?? ''}
               options={[
                 { value: '', label: tr('designer.field.noGroup') },
                 ...fieldGroups
                   .filter((g) => typeof g.key === 'string')
                   .map((g) => ({ value: g.key as string, label: String(g.label ?? g.key) })),
               ]}
-              onCommit={(v) => patchDef({ group: v || undefined })}
+              onCommit={(v) => moveToGroup(v || null)}
               disabled={locked}
             />
           </DisplayPatchLock>
@@ -2691,6 +2830,18 @@ function readDependsOn(def: Record<string, unknown>): string[] {
  * dependent-lookup links to other fields on the same record (`dependsOn`).
  * Every field choice is picked from the referenced object's live schema.
  */
+/**
+ * The label an object is shown by in the author's sentences: its catalog
+ * label, else its name; `undefined` while no object is named. Reads the same
+ * catalog the object picker beside it reads, so the request is shared.
+ */
+function useObjectLabel(name: string | undefined): string | undefined {
+  const catalog = useObjectCatalog();
+  if (!name) return undefined;
+  const entry = catalog.status === 'loaded' ? catalog.data.find((e) => e.name === name) : undefined;
+  return entry?.label || name;
+}
+
 function LookupConfigFields({
   def,
   patchDef,
@@ -2707,6 +2858,7 @@ function LookupConfigFields({
   const tr = (key: string) => t(key, locale);
   const reference = typeof def.reference === 'string' ? (def.reference as string) : undefined;
   const { fields: targetFields, loading } = useObjectFields(reference);
+  const referenceLabel = useObjectLabel(reference);
 
   const fieldOptions: InspectorComboOption[] = React.useMemo(
     () => targetFields.filter((f) => !f.hidden).map((f) => ({ value: f.name, label: f.label, hint: f.type })),
@@ -2791,7 +2943,9 @@ function LookupConfigFields({
         </div>
         {filters.length === 0 ? (
           <p className="rounded-md border border-dashed bg-muted/30 px-3 py-2 text-center text-[11px] text-muted-foreground">
-            {tFormat('designer.field.lookup.noFilter', locale, { ref: reference || 'related' })}
+            {referenceLabel
+              ? tFormat('designer.field.lookup.noFilter', locale, { ref: referenceLabel })
+              : tr('designer.field.lookup.setTargetFirst')}
           </p>
         ) : (
           filters.map((f, i) => (
@@ -2969,21 +3123,15 @@ function DeleteBehaviorField({
 type RelatedListMode = 'shown' | 'hidden' | 'primary';
 
 /**
- * The stored `relatedList` as one of the control's three states. `true` reads
- * as `shown`. ABSENT reads as the relationship's default, which the record
- * page's own predicate decides (`@objectstack/spec`'s `isBodyTableRelationship`,
- * objectstack#27069 / objectstack#27478): a
- * `master_detail` FK that sets `inlineEdit` is primary by default, every other
- * FK is shown. Without `field` an absent value reads as `shown`.
+ * The stored `relatedList` as one of the control's three states. `true` and
+ * ABSENT read as `shown`: since objectstack#35889 every FK with no
+ * `relatedList` is a tab by default, a `master_detail` one included (a field
+ * group of the parent may still make that one a body table; the field
+ * inspector does not see the parent's groups).
  */
-export function readRelatedListMode(
-  value: unknown,
-  field?: { type?: unknown; inlineEdit?: unknown },
-): RelatedListMode {
+export function readRelatedListMode(value: unknown): RelatedListMode {
   if (value === false) return 'hidden';
   if (value === 'primary') return 'primary';
-  if (value === undefined && field && typeof field.type === 'string'
-    && isBodyTableRelationship({ type: field.type, inlineEdit: field.inlineEdit })) return 'primary';
   return 'shown';
 }
 
@@ -2999,8 +3147,8 @@ const RELATED_LIST_MODES: ReadonlyArray<{ mode: RelatedListMode; labelKey: strin
  *
  *  - The three-state `relatedList` control: shown, hidden (`false`), and
  *    primary (`'primary'`), a core relationship. The relationship's default
- *    state leaves the key ABSENT: shown, or primary on a `master_detail` FK
- *    that sets `inlineEdit` (objectstack#27069); the other states write it. The primary state's wording,
+ *    state leaves the key ABSENT: shown (objectstack#35889, every FK type);
+ *    the other states write it. The primary state's wording,
  *    "Primary (in body)", follows the record-page v3 ruling that a primary
  *    related list is drawn in the record body as a full-width table (the
  *    rendering half is the record-page card objectstack#27069).
@@ -3025,12 +3173,13 @@ function RelatedListFields({
   locale?: string;
 }) {
   const tr = (key: string) => t(key, locale);
-  const mode = readRelatedListMode(def.relatedList, def);
+  const mode = readRelatedListMode(def.relatedList);
   // The state an absent key already means here. Picking it clears the key;
-  // picking another writes it, so "Show" on an inline-edited `master_detail`
-  // (primary by default) is an explicit `true`.
-  const defaultMode = readRelatedListMode(undefined, def);
+  // picking another writes it. "Show" leaves a `master_detail` FK's key absent,
+  // so a field group of the parent can still place it (objectstack#35889).
+  const defaultMode = readRelatedListMode(undefined);
   const reference = typeof def.reference === 'string' && def.reference ? (def.reference as string) : '';
+  const referenceLabel = useObjectLabel(reference || undefined);
   const setMode = (next: RelatedListMode) => {
     if (next === mode) return;
     if (next === defaultMode) unsetDefKey('relatedList');
@@ -3043,6 +3192,7 @@ function RelatedListFields({
         value: e.name,
         label: typeof e.def.label === 'string' && e.def.label ? (e.def.label as string) : e.name,
         type: typeof e.def.type === 'string' ? (e.def.type as string) : 'text',
+        ...(e.def.multiple === true ? { multiple: true } : {}),
       })),
     [ownFields],
   );
@@ -3072,13 +3222,12 @@ function RelatedListFields({
           </button>
         ))}
       </div>
-      <p className="text-[10px] text-muted-foreground">
-        {tFormat(
-          RELATED_LIST_MODES.find((r) => r.mode === mode)!.helpKey,
-          locale,
-          { ref: reference || tr('designer.field.relatedList.parentFallback') },
-        )}
-      </p>
+      {/* Says which record page the list lands on: nothing to say until a target is set. */}
+      {referenceLabel && (
+        <p className="text-[10px] text-muted-foreground" data-testid="field-related-list-help">
+          {tFormat(RELATED_LIST_MODES.find((r) => r.mode === mode)!.helpKey, locale, { ref: referenceLabel })}
+        </p>
+      )}
       {mode !== 'hidden' && (
         <FilterConditionField
           testId="field-related-list-filter"

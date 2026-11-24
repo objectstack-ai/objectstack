@@ -41,6 +41,10 @@ export { renderChildren, renderNodeSlot, isEmptyNodeSlot } from './lib/utils';
 export { cva } from 'class-variance-authority';
 export { getLazyIcon, isLucideIconName, LazyIcon, toKebabIconName } from './lib/lazy-icon';
 
+// The one "does the input method own this key?" predicate (objectstack#35996):
+// the list grid and the field widgets of `@object-ui/fields` both ask it.
+export { isImeKey } from './lib/ime-key';
+
 // The inline Markdown subset `element:text` draws (objectui#12778). Exported
 // because app-shell's marketplace README renderer draws its inline text with
 // the same one, so both share the raw-HTML skip and the link-scheme refusal.
@@ -99,7 +103,9 @@ export type { PageBlockSpan } from './renderers/layout/page-block-span';
 // renderer (objectui#12703): `compact` when the region is narrower than half
 // the page. Exported for the blocks that read it in other packages — the
 // `list-view` block in `@object-ui/plugin-list` draws a short list there.
-export { usePageRegionPosture } from './renderers/layout/page-region-posture';
+// `PageRegionPostureReset` clears it for a surface a block opens over the page
+// (a drill dialog), so the list there draws in full (objectstack#36256).
+export { usePageRegionPosture, PageRegionPostureReset } from './renderers/layout/page-region-posture';
 export type { PageRegionPosture } from './renderers/layout/page-region-posture';
 
 // The count channel a `page:tabs` panel opens to the blocks inside it
@@ -116,11 +122,19 @@ export { PageHeaderActions } from './renderers/layout/containers';
 // The host slot at the end of that row (objectstack#27241): the console's
 // record view puts the reader's panel switches there.
 export { PageHeaderTrailingContext } from './renderers/layout/page-header-trailing-context';
+// The host owns the page's title (objectstack#36111): the console's page route
+// draws the page's name and description in its page header, so the page
+// renderer draws neither, and an authored titled `page:header` draws an `h2`.
+export { PageTitleHostContext } from './renderers/layout/page-title-host-context';
 // The phone's host slot (objectstack#27058): the console's record page hands
 // the header its bottom action bar, where the same row is drawn in its bar
 // face, and the subtitle it draws when the header declares none.
 export { PageHeaderPhoneContext } from './renderers/layout/page-header-phone-context';
 export type { PageHeaderPhoneFace } from './renderers/layout/page-header-phone-context';
+// The record's one-row header (objectstack#35593): the host bar's two slots the
+// record header draws into, and the record state's tags and button group.
+export { RecordHeaderBarContext, RecordHeaderStateContext } from './renderers/layout/record-header-bar-context';
+export type { RecordHeaderBar, RecordHeaderGroupParts, RecordHeaderStageParts, RecordHeaderState, RecordHeaderTitle } from './renderers/layout/record-header-bar-context';
 export type { PageHeaderActionsProps } from './renderers/layout/containers';
 // The form's host slots (objectstack#28104, objectstack#28106): the console's
 // create page names the fields an AI chat draft filled, and the form marks them
@@ -166,6 +180,23 @@ export {
   useGridFieldAuthoring,
   type GridFieldAuthoring,
 } from './context/gridFieldAuthoring';
+
+// The select-first cell model (objectstack#35684): a host opts a data-table
+// into it by wrapping the table in the provider.
+export {
+  GridCellSelectionProvider,
+  useGridCellSelection,
+  type GridCellSelection,
+  type GridCellFacts,
+  type GridReferenceCells,
+} from './context/gridCellSelection';
+
+// The header that opens the column menu instead of sorting (objectstack#35876):
+// a host opts a data-table into it by wrapping the table in the provider.
+export {
+  GridHeaderMenuProvider,
+  useGridHeaderMenu,
+} from './context/gridHeaderMenu';
 
 // Export raw Shadcn UI components
 export * from './ui';

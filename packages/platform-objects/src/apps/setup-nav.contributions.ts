@@ -41,14 +41,21 @@ export const SETUP_NAV_CONTRIBUTIONS: NavigationContribution[] = [
   // No `group_apps` entry ships from this package.
   //
   // No unfiltered Packages entry (#25098, ruling 甲 amending #23892 B): the
-  // full `developer:packages` list is a development surface, so its one
-  // unfiltered door is Studio's Overview → Packages (`studio.app.ts`). Setup
-  // reaches installed packages through the marketplace-filtered "Installed
-  // Apps" door (`nav_marketplace_installed`, `developer:packages` with
+  // full `developer:packages` list is a development surface, so its door is in
+  // Studio only. The Studio that every boot serves is the console's own, at
+  // `/_console/studio` (the `@objectstack/studio` app is not default-loaded,
+  // so `studio.app.ts`'s Overview → Packages entry is served only where a host
+  // loads that app). There, the landing's "All packages" link opens the
+  // unfiltered page, and each package card's Manage (like the top-bar
+  // switcher's "Package info & settings") opens the package's detail sheet,
+  // with Disable / Enable (#35196, pinned on the console side by
+  // `BuilderLanding.packagesDoor-35196.test.tsx`). Setup reaches installed
+  // packages through the marketplace-filtered "Installed Apps" door
+  // (`nav_marketplace_installed`, `developer:packages` with
   // `params: { source: 'marketplace' }`), which
   // `@objectstack/cloud-connection` contributes to this group wherever the
   // marketplace capability is present. `setup-packages-door.test.ts` pins
-  // both halves.
+  // what this package ships for each app.
   //
   // And no Packaged Actions entry (objectstack#34724, the ADR-0146 D4
   // amendment of 2026-11-17): a packaged action's on/off switch for this
@@ -127,6 +134,18 @@ export const SETUP_NAV_CONTRIBUTIONS: NavigationContribution[] = [
       // `requiredPermissions`: the object grant decides who reads and writes
       // (organization admins), and Setup itself already needs `setup.access`.
       { id: 'nav_exchange_rates', type: 'object', label: 'Exchange Rates', objectName: 'sys_exchange_rate', viewName: 'all_rates', icon: 'arrow-right-left' },
+      // [ADR-0158 U3] The organization's own units of measure, beside the
+      // exchange rates as the other per-organization reference table. No
+      // `requiredPermissions`: the object grant decides (every member reads,
+      // organization admins write), and Setup itself already needs `setup.access`.
+      { id: 'nav_units_of_measure', type: 'object', label: 'Units of Measure', objectName: 'sys_unit', viewName: 'all_units', icon: 'ruler' },
+      // [ADR-0157 D1, D3] Working calendars and their holidays, beside the
+      // other organization reference data Localization governs. The exceptions
+      // get their own entry because their list page is the import door for a
+      // year of holidays; the calendar list's `needs_maintenance` view is the
+      // D8 notice. Access as Exchange Rates: the object grant decides.
+      { id: 'nav_work_calendars', type: 'object', label: 'Working Calendars', objectName: 'sys_work_calendar', viewName: 'all_calendars', icon: 'calendar-clock' },
+      { id: 'nav_work_calendar_exceptions', type: 'object', label: 'Calendar Exceptions', objectName: 'sys_work_calendar_exception', viewName: 'all_exceptions', icon: 'calendar-x' },
       { id: 'nav_settings_company', type: 'url', label: 'Company', url: '/apps/setup/system/settings/company', icon: 'building-2' },
       // `nav_settings_branding` is contributed by `@objectstack/service-settings`
       // with the `branding` namespace, which is offered only where no
@@ -161,6 +180,11 @@ export const SETUP_NAV_CONTRIBUTIONS: NavigationContribution[] = [
       // per object (`manageRecycleBin`), and the page lists only the objects
       // whose bin the caller manages.
       { id: 'nav_recycle_bin', type: 'component', label: 'Recycle Bin', componentRef: 'data:recycle-bin', icon: 'trash-2' },
+      // objectstack#36444 — every public form of the environment (a form anyone
+      // fills in without signing in): switch one on or off, copy its address,
+      // open it. Operations only; Studio designs the forms. For system
+      // administrators: the page asks the same capability.
+      { id: 'nav_public_forms', type: 'component', label: 'Public Forms', componentRef: 'forms:public-forms', icon: 'file-text', requiredPermissions: ['manage_platform_settings'] },
     ],
   },
   {

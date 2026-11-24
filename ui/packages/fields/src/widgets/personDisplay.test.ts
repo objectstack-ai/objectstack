@@ -111,3 +111,37 @@ describe('matchRanges', () => {
     ]);
   });
 });
+
+// objectstack#36046 — initials are made of letters only: a bracket, a
+// punctuation mark or a digit is never drawn as an initial.
+describe('getPersonInitials — letters only (objectstack#36046)', () => {
+  it('skips brackets: "Alice (Sales)" gives AS, never A(', () => {
+    expect(getPersonInitials('Alice (Sales)')).toBe('AS');
+    expect(getPersonInitials('(Bob)')).toBe('BO');
+    expect(getPersonInitials('[Ops] Carol')).toBe('OC');
+  });
+  it('skips punctuation and digits inside and between words', () => {
+    expect(getPersonInitials("Mary O'Brien")).toBe('MB');
+    expect(getPersonInitials('Jean-Luc Picard')).toBe('JP');
+    expect(getPersonInitials('Agent 007')).toBe('AG');
+    expect(getPersonInitials('"Dee" Snider!')).toBe('DS');
+  });
+  it('falls back to one letter when one is all there is', () => {
+    expect(getPersonInitials('A.')).toBe('A');
+    expect(getPersonInitials('(Z)')).toBe('Z');
+  });
+  it('no letter at all gives "?"', () => {
+    expect(getPersonInitials('()')).toBe('?');
+    expect(getPersonInitials('42')).toBe('?');
+  });
+  it('a CJK name keeps its own characters, brackets dropped', () => {
+    expect(getPersonInitials('（王小明）')).toBe('小明');
+    expect(getPersonInitials('张三')).toBe('张三');
+    expect(getPersonInitials('李')).toBe('李');
+  });
+  it('every result is letters only', () => {
+    for (const name of ['Alice (Sales)', '(Bob)', 'A(', 'x_y', 'Ö. Ünal', '— Émile —']) {
+      expect(getPersonInitials(name)).toMatch(/^\p{L}{1,2}$/u);
+    }
+  });
+});

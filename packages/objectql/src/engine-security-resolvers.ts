@@ -35,10 +35,12 @@
  * evaluation cycle. `index.ts` re-exports nothing from this module.
  */
 
+import { formulaWorkCalendarsFor } from './formula-work-calendars.js';
 import { isPlannedRelationLeaf } from './relation-semi-join.js';
 import { referenceTargetOf } from '@objectstack/spec/data';
 import type { EngineQueryOptions, QueryAST } from '@objectstack/spec/data';
 import { collectComposableReadableIds, describeReadableIdsLeaf, readableIdsRefusalError } from './filter-comparand-shape.js';
+import { passFixedReadLeaves } from './fixed-read-leaf-seam.js';
 import type { ComposableReadableIdsSite } from './filter-comparand-shape.js';
 import { isStoredMetadataBodyObject } from '@objectstack/spec/kernel';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
@@ -72,6 +74,7 @@ export interface SecurityResolversHost {
   readonly formulaHopReads: ObjectQL['formulaHopReads'];
   formulaOptionLabels: ObjectQL['formulaOptionLabels'];
   hasObjectMiddleware: ObjectQL['hasObjectMiddleware'];
+  readonly hooks: ObjectQL['hooks'];
   readonly i18nService: ObjectQL['i18nService'];
   readonly insertRecomputeListeners: ObjectQL['insertRecomputeListeners'];
   readonly logger: ObjectQL['logger'];
@@ -221,16 +224,23 @@ export class SecurityResolversFacet {
    * aggregations' own filters are judged here too, so a leaf a middleware
    * wrote there is refused rather than evaluated in memory.
    */
-  static async composeReadableIdsAtBoundary<A extends QueryAST>(this: Pick<SecurityResolversHost, 'composeReadableIdsChain' | 'logger' | 'readableIdsSecurityReported' | 'resolveReadableIdsSecurity'>, object: string, operation: 'find' | 'findOne' | 'count' | 'aggregate', ast: A, context: ExecutionContext | undefined, driverOptions?: unknown): Promise<A> {
+  static async composeReadableIdsAtBoundary<A extends QueryAST>(this: Pick<SecurityResolversHost, 'composeReadableIdsChain' | 'facade' | 'hasObjectMiddleware' | 'hooks' | 'logger' | 'readableIdsSecurityReported' | 'resolveDatasourceBinding' | 'resolveReadableIdsSecurity'>, object: string, operation: 'find' | 'findOne' | 'count' | 'aggregate', ast: A, context: ExecutionContext | undefined, driverOptions?: unknown): Promise<A> {
     if (operation === 'aggregate') {
       collectComposableReadableIds(object, operation, ast.having, 'having');
+      passFixedReadLeaves(this, object, operation, ast.having, context, 'having');
       const aggregations = Array.isArray(ast.aggregations) ? ast.aggregations : [];
       aggregations.forEach((agg, i) => {
         collectComposableReadableIds(object, operation, (agg as { filter?: unknown } | undefined)?.filter, `aggregations[${i}].filter`);
+        passFixedReadLeaves(this, object, operation, (agg as { filter?: unknown } | undefined)?.filter, context, `aggregations[${i}].filter`);
       });
     }
     const sites = collectComposableReadableIds(object, operation, ast.where, 'where');
-    if (sites.length === 0) return ast;
+    // [ADR-0155 D4] The fixed-read leaves pass through: nothing to compose, every
+    // check on the final where, the composed scopes included (below).
+    if (sites.length === 0) {
+      passFixedReadLeaves(this, object, operation, ast.where, context);
+      return ast;
+    }
 
     const security = this.resolveReadableIdsSecurity();
     // A planned relation leaf asks the security service nothing
@@ -248,6 +258,7 @@ export class SecurityResolversFacet {
     }
     const chain: ReadableIdsChain = { object, operation, security, context, answers: new Map(), driverOptions };
     const where = await this.composeReadableIdsChain(chain, ast.where, sites, []);
+    passFixedReadLeaves(this, object, operation, where, context);
     return { ...ast, where };
   }
 
@@ -374,7 +385,7 @@ export class SecurityResolversFacet {
   }
 
   /** The body of `ObjectQL#serveFormulaField`; the method's docblock there is its contract. */
-  static async serveFormulaField(this: Pick<SecurityResolversHost, '_registry' | 'formulaFaultSink' | 'formulaOptionLabels' | 'permissionResolution' | 'resolveFormulaPermissions' | 'resolveFormulaRelated'>, objectName: string, record: Record<string, unknown>, field: string, context?: ExecutionContext): Promise<unknown> {
+  static async serveFormulaField(this: Pick<SecurityResolversHost, '_registry' | 'formulaFaultSink' | 'formulaOptionLabels' | 'permissionResolution' | 'resolveFormulaPermissions' | 'resolveFormulaRelated' | 'facade'>, objectName: string, record: Record<string, unknown>, field: string, context?: ExecutionContext): Promise<unknown> {
     const schema = this._registry.getObject(objectName);
     const { plan } = planFormulaProjection(schema, [field]);
     if (plan.length === 0) return undefined;
@@ -382,12 +393,12 @@ export class SecurityResolversFacet {
     applyFormulaPlan(plan, [scratch], context, await this.resolveFormulaPermissions(
       objectName, plan, [scratch], context, this.permissionResolution(context),
     ), this.formulaFaultSink(objectName), await this.resolveFormulaRelated(schema, plan, [scratch], context),
-    this.formulaOptionLabels(schema, plan, context));
+    this.formulaOptionLabels(schema, plan, context), await formulaWorkCalendarsFor(this.facade, plan, [scratch], context));
     return scratch[field];
   }
 
   /** The body of `ObjectQL#computeStoredExpressionsOver` (#29961); the method's docblock there is its contract. */
-  static async computeStoredExpressionsOver(this: Pick<SecurityResolversHost, '_registry' | 'formulaFaultSink' | 'permissionResolution' | 'resolveFormulaPermissions' | 'resolveFormulaRelated'>, object: string, rows: ReadonlyArray<Record<string, unknown>>, context?: ExecutionContext, onFault?: (field: string, message: string) => void): Promise<Array<Record<string, unknown>>> {
+  static async computeStoredExpressionsOver(this: Pick<SecurityResolversHost, '_registry' | 'formulaFaultSink' | 'permissionResolution' | 'resolveFormulaPermissions' | 'resolveFormulaRelated' | 'facade'>, object: string, rows: ReadonlyArray<Record<string, unknown>>, context?: ExecutionContext, onFault?: (field: string, message: string) => void): Promise<Array<Record<string, unknown>>> {
     const schema = this._registry.getObject(object);
     const resolution = this.permissionResolution(context);
     return computeStoredExpressions(planStoredExpressions(schema), rows, context, {
@@ -395,6 +406,7 @@ export class SecurityResolversFacet {
       onFault: onFault ? (field, error) => onFault(field, error.message) : this.formulaFaultSink(object),
       relatedFor: (plan, records) => this.resolveFormulaRelated(schema, plan, records, context),
       optionLabelsFor: (plan) => declaredOptionLabels(schema, plan),
+      workCalendarsFor: (plan, records) => formulaWorkCalendarsFor(this.facade, plan, records, context),
     });
   }
 

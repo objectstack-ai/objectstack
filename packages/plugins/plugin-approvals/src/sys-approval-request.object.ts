@@ -42,6 +42,7 @@ export const SysApprovalRequest = ObjectSchema.create({
   label: 'Approval Request',
   pluralLabel: 'Approval Requests',
   icon: 'inbox',
+  color: 'orange',
   isSystem: true,
   managedBy: 'engine-owned',
   description: 'Live approval instance tracked per submission',
@@ -66,10 +67,11 @@ export const SysApprovalRequest = ObjectSchema.create({
   // page fell through to the since-retired `titleFormat`, the machine name and
   // the raw subject record id.
   //
-  // The title names no subject record. The request page names the subject on
-  // the card the `record_id` / `object_name` pair draws in the Details tab,
-  // which says so when the reader may not read the record or it was deleted;
-  // a title cannot, so a bare record id is never shown there.
+  // The title names no subject record: lists and search name a request by its
+  // flow. On the request's own page the console's header names the subject by
+  // the `record_title` the approvals get serves for it, linked to it, and
+  // keeps this title where the get serves none (objectstack#35415), so a bare
+  // record id is never shown there either.
   //
   // Where `process_label` is empty — a row written before the column, until the
   // boot fill labels it (`display-label-backfill.ts`) — the retired
@@ -698,8 +700,17 @@ export const SysApprovalRequest = ObjectSchema.create({
       type: 'api',
       method: 'POST',
       target: '/api/v1/approvals/requests/{id}/reject',
+      // A reject through `approval_reject` always carries its reason
+      // (maintainer requirement on the record page's Reject). `required: true`
+      // is enforced by the declared param contract (ADR-0104 D2,
+      // `validateActionParams`), which counts a blank or whitespace-only
+      // string as missing: the action door, MCP `run_action` and the console's
+      // param dialog all refuse a reject without one, before the target route
+      // is called. The target route judges it again: `ApprovalService.decide()`
+      // refuses a reject without a non-blank string reason, so a caller that
+      // skips this action is held to the same rule.
       params: [
-        { name: 'comment', label: 'Comment', type: 'textarea', required: false },
+        { name: 'comment', label: 'Comment', type: 'textarea', required: true },
         { name: 'attachments', label: 'Attachments', type: 'file', multiple: true, required: false },
       ],
       visible:
@@ -711,7 +722,7 @@ export const SysApprovalRequest = ObjectSchema.create({
       ai: {
         exposed: true,
         description:
-          'Reject a pending approval request (the record: a sys_approval_request id) on behalf of the user, with an optional comment. A rejection is final for every approver. Only a current approver of the request, or an administrator who may override a stuck request, may decide it; anyone else is refused. Ask the human to confirm before calling.',
+          'Reject a pending approval request (the record: a sys_approval_request id) on behalf of the user. The param comment, the reason for the rejection, is required: a call without one, or with a blank one, is refused. A rejection is final for every approver. Only a current approver of the request, or an administrator who may override a stuck request, may decide it; anyone else is refused. Ask the human to confirm before calling.',
         requiresConfirmation: true,
       },
     },

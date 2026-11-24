@@ -278,12 +278,19 @@ export async function validateAudienceAdmission(
         }
       }
     }
+    // The method, the provider's word on the address and the deployment's
+    // declared email verification: a social-provider creation is admitted only
+    // with a provider-verified address under a posture whose admission rests on
+    // the address (`decideAudienceAdmission`).
     const verdict = decideAudienceAdmission({
       audience,
       creationClass,
       email,
       hasPendingInvitation,
       isBootstrap,
+      method: data?.source?.method,
+      emailVerified: data?.user?.emailVerified,
+      declaredEmailVerification: this.config.emailAndPassword?.requireEmailVerification,
       ...(ssoProvider ? { ssoProvider } : {}),
     });
     if (!verdict.admit) {

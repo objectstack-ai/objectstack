@@ -87,6 +87,7 @@ import MigrateTextScalars from '../commands/migrate/text-scalars.js';
 import MigrateCommentReactions from '../commands/migrate/comment-reactions.js';
 import MigrateDuplicates from '../commands/migrate/duplicates.js';
 import MigrateFilesToReferences from '../commands/migrate/files-to-references.js';
+import MigrateListPreferences from '../commands/migrate/list-preferences.js';
 import MigrateMeta from '../commands/migrate/meta.js';
 import MigrateMultiValueColumns from '../commands/migrate/multi-value-columns.js';
 import MigrateOrganizationOwnership from '../commands/migrate/organization-ownership.js';
@@ -101,6 +102,7 @@ import MigrateStoredExpressions from '../commands/migrate/stored-expressions.js'
 import MigrateStoredReferences from '../commands/migrate/stored-references/index.js';
 import MigrateStoredReferencesBind from '../commands/migrate/stored-references/bind.js';
 import MigrateSummaryNulls from '../commands/migrate/summary-nulls.js';
+import MigrateUnitCodes from '../commands/migrate/unit-codes.js';
 import MigrateUnmappedColumns from '../commands/migrate/unmapped-columns.js';
 import MigrateValueShapes from '../commands/migrate/value-shapes.js';
 import PluginInstall from '../commands/plugin/install.js';
@@ -287,6 +289,13 @@ const CALLERS: Record<string, Caller> = {
     noWrite: [{ label: 'migrate files-to-references', argv: ['--database-url', '@DB@', '--json'] }],
     write: [{ label: 'migrate files-to-references --apply', argv: ['--apply', '--yes', '--database-url', '@DB@', '--json'] }],
   },
+  'commands/migrate/list-preferences.ts': {
+    run: invoke(MigrateListPreferences),
+    noWrite: [{ label: 'migrate list-preferences', argv: ['--database-url', '@DB@', '--json'] }],
+    // The fixture holds no `ui.list.*` row, so the run deletes nothing and writes
+    // no export: the plain boot a delete takes is what this case is about.
+    write: [{ label: 'migrate list-preferences --apply', argv: ['--apply', '--export', '@DIR@/list-preferences-export.json', '--yes', '--database-url', '@DB@', '--json'] }],
+  },
   'commands/migrate/meta.ts': {
     run: invoke(MigrateMeta),
     // Without `--stored` the command converts source files and boots nothing.
@@ -409,6 +418,17 @@ const CALLERS: Record<string, Caller> = {
     run: invoke(MigrateSummaryNulls),
     noWrite: [{ label: 'migrate summary-nulls', argv: ['--database-url', '@DB@', '--json'] }],
     write: [{ label: 'migrate summary-nulls --apply', argv: ['--apply', '--yes', '--database-url', '@DB@', '--json'] }],
+  },
+  'commands/migrate/unit-codes.ts': {
+    run: invoke(MigrateUnitCodes),
+    // The fixture's app declares no unit code field, so the backfill refuses
+    // `status` (INVALID_FIELD) after the boot and writes nothing. The boot is
+    // what these cases are about.
+    noWrite: [{ label: 'migrate unit-codes', argv: ['--object', 'osf_lead', '--field', 'status', '--database-url', '@DB@', '--json'] }],
+    write: [{
+      label: 'migrate unit-codes --apply',
+      argv: ['--apply', '--yes', '--object', 'osf_lead', '--field', 'status', '--database-url', '@DB@', '--json'],
+    }],
   },
   'commands/migrate/unmapped-columns.ts': {
     run: invoke(MigrateUnmappedColumns),

@@ -91,7 +91,10 @@ describe('localizeMetadataForm — the spec form, in the author’s language', (
       'dashboard',
       'zh-CN',
     );
-    expect(fieldByName(zh, 'columns')).toMatchObject({ label: '列数', helpText: '栅格列数（默认 12）' });
+    expect(fieldByName(zh, 'columns')).toMatchObject({
+      label: '列数',
+      helpText: '组件排布所用的列数，1 到 24。留空时仪表盘会按组件的宽度自动选择。',
+    });
     expect(fieldByName(zh, 'refreshIntervalSeconds')?.label).toBe('自动刷新');
     expect(fieldByName(zh, 'header')?.label).toBe('页眉');
   });
@@ -105,29 +108,44 @@ describe('localizeMetadataForm — the spec form, in the author’s language', (
     const gap = fieldByName(zh, 'gap');
     expect(gap?.label).toBe('间距');
 
-    // ⚠️ THE CONTROL IS NOT A SENTENCE PIN, and it used to be one. This asserted
-    // that the English producer copy still said "Tailwind" — true while the spec
-    // shipped `Grid gap (Tailwind units)`, and false from @objectstack/spec
-    // 17.4.0, which rewrote it to "Space between widgets, in steps of 0.25rem
-    // (4 = 1rem)" (objectui#8785). The producer was right to fix its own copy;
-    // the pin was wrong to name a sentence it does not own, and re-pointing it
-    // at the new sentence would buy exactly one release before rotting again.
-    //
-    // What this test actually claims is narrower and durable: the overlay hands
-    // the author text they can act on, where the producer's copy reaches for
-    // DEVELOPER vocabulary — a framework name, a CSS unit — to say the same
-    // thing. So the control asserts the English carries some of that vocabulary
-    // and the zh carries none of it. It stays non-vacuous (the English leg must
-    // fire for the zh leg to mean anything) without pinning any one wording, and
-    // if the spec ever writes this hint in plain author language the control
-    // reddens and someone re-reads the overlay — which is the correct outcome,
-    // not a false alarm: the overlay would have nothing left to do here.
+    // The control used to read the PRODUCER's English and assert it still
+    // carried developer vocabulary, so that the zh leg meant something. That leg
+    // was built to redden once the spec spoke plainly, and it did: the spec's
+    // hints were rewritten in author language (objectstack#36816). The
+    // vocabulary test now proves it can fire against a FIXED literal, the hint
+    // as the spec shipped it before that rewrite, and then holds BOTH the
+    // producer's English and the zh overlay free of it.
     // A framework name, or a CSS length written as an author never would —
     // digits welded to a unit. ⚠️ `\brem\b` does NOT work here: the boundary
     // before `rem` never matches in `0.25rem`, because `5` is a word character.
     const DEVELOPER_UNITS = /tailwind|\d\s*(rem|px)\b/i;
-    expect(fieldByName(dashboardForm, 'gap')?.helpText).toMatch(DEVELOPER_UNITS);
+    expect('Space between widgets, in steps of 0.25rem (4 = 1rem)').toMatch(DEVELOPER_UNITS);
+    expect(fieldByName(dashboardForm, 'gap')?.helpText).not.toMatch(DEVELOPER_UNITS);
     expect(gap?.helpText).not.toMatch(DEVELOPER_UNITS);
+  });
+
+  it('no dashboard hint, English or zh, uses developer vocabulary', () => {
+    const zh = localizeMetadataForm(
+      dashboardForm as unknown as Record<string, unknown>,
+      'dashboard',
+      'zh-CN',
+    );
+    // Casing jargon and "config" join the units: the hints the spec shipped
+    // before objectstack#36816 said "snake_case unique identifier" and
+    // "Dashboard header config (title, subtitle, actions)".
+    const DEVELOPER_VOCABULARY = /tailwind|\d\s*(rem|px)\b|snake_case|\bconfig\b/i;
+    expect('snake_case unique identifier').toMatch(DEVELOPER_VOCABULARY);
+    const hints = (form: Record<string, unknown> | undefined) =>
+      sections(form).flatMap((s) => (s.fields ?? []).flatMap((f) => [f, ...(f.fields ?? [])]))
+        .filter((f) => typeof f.helpText === 'string')
+        .map((f) => `${f.field}: ${f.helpText}`);
+    const en = hints(dashboardForm as unknown as Record<string, unknown>);
+    const zhHints = hints(zh);
+    // Non-vacuity: both forms carry the nine top-level hints and more.
+    expect(en.length).toBeGreaterThanOrEqual(9);
+    expect(zhHints.length).toBeGreaterThanOrEqual(9);
+    expect(en.filter((h) => DEVELOPER_VOCABULARY.test(h))).toEqual([]);
+    expect(zhHints.filter((h) => DEVELOPER_VOCABULARY.test(h))).toEqual([]);
   });
 
   it('synthesizes ALL of the `header` composite’s sub-rows — a partial list would hide the rest', () => {

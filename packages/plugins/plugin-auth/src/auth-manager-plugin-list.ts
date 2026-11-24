@@ -58,6 +58,7 @@
  */
 
 import { agentForwardIdentityViewPlugin } from './agent-forward-identity-view.js';
+import { issuedAtMsAccessTokenClaim } from './mcp-token-revocation.js';
 import type { AuthPluginConfig } from '@objectstack/spec/system';
 import { MCP_OAUTH_SCOPES } from '@objectstack/spec/ai';
 import { resolveUserAuthzGrants } from '@objectstack/core';
@@ -744,6 +745,15 @@ export async function buildPluginList(this: PluginListHost): Promise<any[]> {
       // `IAuthService.verifyMcpAccessToken` contract names.
       customAccessTokenClaims: ({ referenceId }) =>
         referenceId ? { [OAUTH_ORGANIZATION_CLAIM]: referenceId } : {},
+      // ── The token's issue time in milliseconds (`mcp-token-revocation.ts`) ──
+      // `iat` is whole seconds, and the MCP door refuses a token issued
+      // before its subject's password last changed. This claim, written by
+      // the server's own clock at the mint and signed with the token, places
+      // a token minted in the same second as the change on the right side of
+      // it. A claims contributor rather than `customAccessTokenClaims`: the
+      // provider hands a contributor the grant type, so the clock is read at
+      // a mint only, never at an opaque token's introspection.
+      extensions: [{ claims: { accessToken: (input) => issuedAtMsAccessTokenClaim(input) } }],
       // ── A banned user is minted no token (`oauth-grant-ban-refusal.ts`) ──
       // The provider's one pre-write callback for every grant that acts for a
       // user, with that user's row in hand: while the ban holds, the grant is
@@ -786,6 +796,11 @@ export async function buildPluginList(this: PluginListHost): Promise<any[]> {
   //
   // Toggle with `OS_SSO_ENABLED` (mirrors `OS_OIDC_PROVIDER_ENABLED`).
   if (enabled.sso) {
+    // SSO discovery connects only to addresses that are public at connect
+    // time: the adapter the vendor reads its providers through names their
+    // origins for the request's scope (`sso-discovery-egress.ts`).
+    const { ssoProviderReadsObserverPlugin } = await import('./sso-discovery-egress.js');
+    plugins.push(ssoProviderReadsObserverPlugin() as any);
     await this.addOptionalPlugin(plugins, 'sso', async () => {
     const { sso } = await import('@better-auth/sso');
     // NOTE: the `ssoProvider` model is bridged to `sys_sso_provider` by the

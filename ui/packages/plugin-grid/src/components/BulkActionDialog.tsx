@@ -705,7 +705,7 @@ export const BulkActionDialog: React.FC<BulkActionDialogProps> = ({
                           <Button
                             variant="ghost"
                             size="sm"
-                            className="h-5 px-1.5 text-[10px] shrink-0"
+                            className="h-5 px-1.5 text-xs shrink-0"
                             onClick={() => handleRetry(e.id)}
                             disabled={retrying === e.id}
                             data-testid={`bulk-error-retry-${e.id}`}
@@ -949,7 +949,7 @@ const ParamField: React.FC<ParamFieldProps> = ({ param, multiple, value, onChang
           {...cascadeProps}
         />
       </Suspense>
-      {param.help && <p className="text-[11px] text-muted-foreground">{param.help}</p>}
+      {param.help && <p className="text-xs text-muted-foreground">{param.help}</p>}
     </div>
   );
 };

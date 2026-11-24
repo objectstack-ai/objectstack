@@ -8,22 +8,56 @@
  * component reads the returned handlers.
  */
 
-import { useCallback, type Dispatch, type SetStateAction } from 'react';
-import type { useNavigate } from 'react-router-dom';
+import { useCallback, useEffect, useMemo, useRef, type Dispatch, type SetStateAction } from 'react';
+import { useParams, type useNavigate } from 'react-router-dom';
 import { formatMetadataError } from '@object-ui/data-objectstack';
+import { viewSaveRefusalText } from './viewSaveRefusal.js';
 import { toast } from 'sonner';
 import type { useObjectTranslation } from '@object-ui/i18n';
-import type { useObjectListPreferences } from '../context/ListPreferencesProvider.js';
+import type { useObjectListLayout } from './listLayoutStore.js';
 import { PREVIEW_QUERY_FLAG, PREVIEW_QUERY_VALUE } from '../preview/PreviewModeContext.js';
 import type { usePreviewDrafts } from '../preview/PreviewModeContext.js';
 import { isSavedViewId } from '../utils/viewIdentity.js';
 import type { useConsoleActionRuntime } from '../hooks/useConsoleActionRuntime.js';
 import type { useMetadataClient } from './metadata-admin/useMetadata.js';
-import { persistRuntimeMetadata, createRuntimeMetadata, viewEnvelope } from './runtime-metadata-persistence.js';
+import { persistRuntimeMetadata, createRuntimeMetadata, saveAndPublishRuntimeMetadata, viewEnvelope } from './runtime-metadata-persistence.js';
+import type { RuntimeCreateApp, SaveAndPublishOutcome } from './runtime-metadata-persistence.js';
+import type { DraftVersionGuard } from './metadata-admin/DraftConflictDialog.js';
+import { draftBarPackageOf } from '../preview/DraftPreviewBar.js';
+import { useMetadata } from '../providers/MetadataProvider.js';
 import { buildAddViewSpec, setDefaultViewPatches, buildViewConfigSaveBody } from './objectViewTabs.js';
 import type { buildViewTabs } from './objectViewTabs.js';
 import { dispatchViewPatches } from './objectViewOptions.js';
 import type { ConsoleObjectViewProps } from './ObjectView.js';
+import type { InPlaceViewRequest } from './CreateViewDialog.js';
+import { buildInPlaceViewConfig, type PersonalViewListState } from './personalViews.js';
+import { FILTER_FOLD_REFUSAL_KEYS } from './viewFilterFold.js';
+
+/**
+ * objectstack#35624 — the app a view created here is saved into
+ * (`RuntimePersistCtx.app`): the routed app's package by the draft preview
+ * bar's own rule (`draftBarPackageOf`), so the bar counts and publishes the
+ * view the create wrote. When the create could not be saved into the app, the
+ * author is told where it went instead.
+ */
+export function useRuntimeCreateApp(t: ReturnType<typeof useObjectTranslation>['t']): RuntimeCreateApp {
+    const { appName } = useParams();
+    const { apps } = useMetadata();
+    const packageId = draftBarPackageOf(appName, apps as Parameters<typeof draftBarPackageOf>[1]);
+    // Memoised for cost only: the create reads the two fields, never the identity.
+    return useMemo(
+        () => ({
+            packageId,
+            onSavedOutsideApp: () => {
+                toast.info(t('view.savedOutsideApp', {
+                    defaultValue:
+                        'This view was saved as a draft outside this app, because the app’s customization package cannot be used here. This app’s draft bar does not count or publish it: publish it from Home.',
+                }));
+            },
+        }),
+        [packageId, t],
+    );
+}
 
 export function useObjectViewViewCrud({
     dataSource,
@@ -41,7 +75,7 @@ export function useObjectViewViewCrud({
     setRefreshKey,
     confirmHandler,
     savedViews,
-    listPrefs,
+    listLayout,
     views,
     activeViewId,
     baseView,
@@ -61,14 +95,15 @@ export function useObjectViewViewCrud({
     setRefreshKey: Dispatch<SetStateAction<number>>;
     confirmHandler: ReturnType<typeof useConsoleActionRuntime>['confirmHandler'];
     savedViews: Parameters<typeof buildViewTabs>[0]['savedViews'];
-    listPrefs: ReturnType<typeof useObjectListPreferences>;
+    listLayout: ReturnType<typeof useObjectListLayout>;
     views: ReturnType<typeof buildViewTabs>;
     activeViewId: string | undefined;
     baseView: ReturnType<typeof buildViewTabs>[number];
 }) {
+    const createApp = useRuntimeCreateApp(t);
     // objectui#12504 — no toolbar control writes the shared view. The sort and
-    // the column layout (objectui#12418), the density and the Hide Fields
-    // popover (objectui#12474) are the user's own list state (`listPrefs`), and
+    // the columns are the list's draft (`./listDraftStore.ts`), the widths and
+    // the density the reader's layout in this browser (`listLayout`), and
     // the shared view is written only by an explicit save
     // (`handleViewConfigSave`, below). The toolbar-to-view writer that lived
     // here, `persistViewPatch`, retired with the adapter method it was the last
@@ -79,7 +114,7 @@ export function useObjectViewViewCrud({
      * There is deliberately NO `persistViewFilter` here (objectui#4155).
      *
      * The list toolbar's filter panel is the USER's state — it belongs to the
-     * session and to that user's own list state (`listPrefs`, objectui#12418),
+     * session and to the list's draft (`./listDraftStore.ts`),
      * not to the view's stored body. It used to persist: every `onFilterChange` the panel
      * emitted was folded and written to the view overlay, so merely opening the
      * panel and clicking `Add filter` wrote an incomplete `field equals ''`
@@ -103,8 +138,16 @@ export function useObjectViewViewCrud({
      * The view-config panel's edit Save. Resolves whether the draft was staged,
      * so the panel stays dirty, and announces no draft, on anything but `true`
      * (objectui#11583).
+     *
+     * objectstack#36137 — `saveDraft` is the panel's draft-version guard: the
+     * write is pinned to the draft the panel loaded, so a save that would
+     * cross another admin's 「Save to this view」 between its draft write and
+     * its publish is refused and asked about, never published with it.
      */
-    const handleViewConfigSave = useCallback(async (draft: Record<string, any>): Promise<boolean> => {
+    const handleViewConfigSave = useCallback(async (
+        draft: Record<string, any>,
+        saveDraft?: DraftVersionGuard['save'],
+    ): Promise<boolean> => {
         setViewDraft(draft);
         setRefreshKey(k => k + 1);
 
@@ -118,23 +161,81 @@ export function useObjectViewViewCrud({
         try {
             // `dataSource` + `objectName` let the seam drop this object's view
             // cache keys (#4373) — the adapter owns which keys those are.
-            await persistRuntimeMetadata('view', vid, buildViewConfigSaveBody(objectName, draft), {
+            const outcome = await persistRuntimeMetadata('view', vid, buildViewConfigSaveBody(objectName, draft), {
                 metadataClient,
                 dataSource,
                 objectName,
-            });
-            return true;
+            }, saveDraft);
+            // `'reloaded'`: the author chose the saved version, and the panel reads it again.
+            return outcome === 'saved';
         } catch (err) {
             console.error('[ViewConfigPanel] Failed to persist view config:', err);
-            // objectui#11583: a refused save is SAID, with the door's own
-            // message, as the Create View doors do (objectui#11578).
+            // objectui#11583: a refused save is SAID, as the Create View doors
+            // do (objectui#11578), with the door's own message;
+            // objectstack#36195: a package's view in the reader's words
+            // (`viewSaveRefusalText`).
             toast.error(t('form.saveError'), {
-                description: formatMetadataError(err),
+                description: viewSaveRefusalText(err, t),
                 classNames: { description: 'whitespace-pre-line' },
             });
             return false;
         }
     }, [metadataClient, dataSource, objectName, t]);
+
+    /**
+     * objectstack#35932 — the draft bar's Publish or Discard changed what is
+     * stored. The saved views are read again, and the local copy of the draft
+     * (`viewDraft`, what a save put on screen) goes once that read has landed,
+     * so the list shows what is now stored without first falling back to the
+     * read from before. The list stays mounted across a draft save, so this
+     * copy is not dropped by anything else.
+     */
+    const dropViewDraftOnRead = useRef(false);
+    const handleDraftBarChange = useCallback(() => {
+        dropViewDraftOnRead.current = true;
+        setRefreshKey(k => k + 1);
+    }, [setRefreshKey]);
+    useEffect(() => {
+        if (!dropViewDraftOnRead.current) return;
+        dropViewDraftOnRead.current = false;
+        setViewDraft(null);
+    }, [savedViews, setViewDraft]);
+
+    /**
+     * objectstack#35955 — 「Save to this view」 on a shared view, after its
+     * confirm: the body is saved and published at once (ruling record
+     * 7058616478), so everyone sees it on their next read. Over a pending
+     * draft nothing is written (`'pending-draft'`, the caller says so); a
+     * refusal is said with the door's own message (`'failed'`). On
+     * `'published'` the list shows the saved body at once and keeps it until
+     * the saved views have been read again ({@link handleDraftBarChange}).
+     */
+    const handleViewSaveAndPublish = useCallback(async (view: Record<string, any>): Promise<SaveAndPublishOutcome | 'failed'> => {
+        const vid = view.id;
+        if (!metadataClient || !vid) {
+            console.warn('[ObjectView] Cannot save the view: missing metadataClient or viewId.');
+            return 'failed';
+        }
+        try {
+            const outcome = await saveAndPublishRuntimeMetadata('view', vid, buildViewConfigSaveBody(objectName, view), {
+                metadataClient,
+                dataSource,
+                objectName,
+            });
+            if (outcome === 'published') {
+                setViewDraft(view);
+                handleDraftBarChange();
+            }
+            return outcome;
+        } catch (err) {
+            console.error('[ObjectView] Failed to save and publish a view:', err);
+            toast.error(t('form.saveError'), {
+                description: formatMetadataError(err),
+                classNames: { description: 'whitespace-pre-line' },
+            });
+            return 'failed';
+        }
+    }, [metadataClient, dataSource, objectName, t, setViewDraft, handleDraftBarChange]);
 
     /**
      * Create a new view: the Create View dialog's door and the view-config
@@ -175,6 +276,8 @@ export function useObjectViewViewCrud({
                     // `useAdapter()`) so the seam can drop the object's view keys.
                     dataSource,
                     objectName,
+                    // objectstack#35624 — saved into the app it was made in.
+                    app: createApp,
                 });
             }
             setShowViewConfigPanel(false);
@@ -204,12 +307,12 @@ export function useObjectViewViewCrud({
             // message (the field-anchored issues of a 422, or the refusal's
             // text), and reported to the dialog as unsaved so it stays open.
             toast.error(t('form.saveError'), {
-                description: formatMetadataError(err),
+                description: viewSaveRefusalText(err, t),
                 classNames: { description: 'whitespace-pre-line' },
             });
             return false;
         }
-    }, [dataSource, objectName, objects, navigate, viewId, metadataClient, previewDrafts, t]);
+    }, [dataSource, objectName, objects, navigate, viewId, metadataClient, previewDrafts, t, createApp]);
 
     /** Real-time draft field update — propagates each toggle/input change immediately */
     const handleViewUpdate = useCallback((field: string, value: any) => {
@@ -276,7 +379,7 @@ export function useObjectViewViewCrud({
             // message, through the channel objectui#11583 gave the view saves
             // and objectui#12398 gave Delete view.
             toast.error(t('objectViewActions.renameFailed'), {
-                description: formatMetadataError(err),
+                description: viewSaveRefusalText(err, t),
                 classNames: { description: 'whitespace-pre-line' },
             });
         }
@@ -321,6 +424,41 @@ export function useObjectViewViewCrud({
         }
     }, [dataSource, isSavedView, activeViewId, views, viewId, navigate, t, confirmHandler]);
 
+    /**
+     * objectstack#36011 — "Restore factory version" on a customized view of a
+     * read-only package (`ViewTabItem.customized`): after one confirm saying
+     * every user of the view sees the factory version again, the override
+     * the package's customization holds is removed
+     * (`restoreFactoryView`), and the views are read again. A refusal is
+     * said with the door's own message.
+     */
+    const handleRestoreFactoryView = useCallback(async (vid: string) => {
+        if (!dataSource || !objectName) return;
+        if (typeof (dataSource as any)?.restoreFactoryView !== 'function') return;
+        const targetView = views.find((v: any) => v.id === vid);
+        const viewLabel = targetView?.label || vid;
+        const confirmed = await confirmHandler(
+            t('console.objectView.restoreFactoryConfirm', { name: viewLabel }),
+            {
+                title: t('console.objectView.restoreFactoryTitle'),
+                confirmText: t('console.objectView.restoreFactory'),
+                cancelText: t('console.objectView.cancel'),
+            },
+        );
+        if (!confirmed) return;
+        try {
+            await (dataSource as any).restoreFactoryView(objectName, vid);
+            setRefreshKey(k => k + 1);
+            toast.success(t('console.objectView.restoreFactoryDone', { name: viewLabel }));
+        } catch (err) {
+            console.error('[ManageViews] Failed to restore the factory view:', err);
+            toast.error(t('objectViewActions.restoreFactoryFailed'), {
+                description: formatMetadataError(err),
+                classNames: { description: 'whitespace-pre-line' },
+            });
+        }
+    }, [dataSource, objectName, views, t, confirmHandler, setRefreshKey]);
+
     const handlePinView = useCallback(async (vid: string, pinned: boolean) => {
         if (!dataSource) return;
         if (!isSavedView(vid)) {
@@ -336,7 +474,7 @@ export function useObjectViewViewCrud({
             console.error('[ViewTabBar] Failed to pin view:', err);
             // objectui#11583: a refused pin is said, with the door's message.
             toast.error(t('form.saveError'), {
-                description: formatMetadataError(err),
+                description: viewSaveRefusalText(err, t),
                 classNames: { description: 'whitespace-pre-line' },
             });
         }
@@ -370,27 +508,23 @@ export function useObjectViewViewCrud({
             console.error('[ViewTabBar] Failed to set default view:', err);
             // objectui#11583: said like its siblings, with the door's message.
             toast.error(t('form.saveError'), {
-                description: formatMetadataError(err),
+                description: viewSaveRefusalText(err, t),
                 classNames: { description: 'whitespace-pre-line' },
             });
         }
     }, [dataSource, objectName, savedViews, isSavedView, t]);
 
     /**
-     * A drag in Manage Views reorders the tabs FOR THIS USER (objectui#12418).
-     *
-     * It used to write `viewOrder:<object>` to this browser and then PATCH a
-     * `sortOrder` onto every saved view's shared row, "so other sessions /
-     * users can pick up the order": one user's drag reordered the tabs for
-     * everyone, and under a walled posture the metadata write was refused. The
-     * order is now the user's preference (the `ui.list.<object>` row, through
-     * `listPrefs`), and nothing here writes `/meta/view`. The authored order —
-     * the declared sequence, then a stored `sortOrder` — stays every user's
-     * default, and the view editor is where an author changes it.
+     * A drag in Manage Views reorders the tabs FOR THIS READER, in this
+     * browser (`listLayout`, `./listLayoutStore.ts`). Nothing here writes
+     * `/meta/view` or any other server row: the authored order — the declared
+     * sequence, then a stored `sortOrder` — stays every user's default, and
+     * the view editor is where an author changes it.
      */
+    const setViewOrder = listLayout.setViewOrder;
     const handleReorderViews = useCallback((orderedIds: string[]) => {
-        listPrefs.setViewOrder(orderedIds);
-    }, [listPrefs.setViewOrder]);
+        setViewOrder(orderedIds);
+    }, [setViewOrder]);
 
     const handleConfigView = useCallback((vid: string) => {
         // System (metadata-defined) views are read-only — opening the
@@ -411,6 +545,8 @@ export function useObjectViewViewCrud({
 
     return {
         handleViewConfigSave,
+        handleDraftBarChange,
+        handleViewSaveAndPublish,
         handleViewCreate,
         handleViewUpdate,
         handleViewChange,
@@ -418,10 +554,91 @@ export function useObjectViewViewCrud({
         handleViewAction,
         handleRenameView,
         handleDeleteView,
+        handleRestoreFactoryView,
         handlePinView,
         handleSetDefaultView,
         handleReorderViews,
         handleConfigView,
         handleAddView,
     };
+}
+
+/**
+ * The switcher's in-place create (the create card's `onCreate`): build the new
+ * view's body from the open view ({@link buildInPlaceViewConfig}), then
+ *
+ * - `personal` — save it as one of the reader's own views (`sys_personal_view`)
+ *   and open it;
+ * - `shared` — hand it to the add-view door (`createShared`, the view-config
+ *   panel's create: an invisible draft opened in draft preview, published
+ *   explicitly), under the machine key the card generated. The draft and
+ *   publish rules are that door's, unchanged.
+ *
+ * Resolves `true` once the view exists; on a refusal it says why (a toast with
+ * the door's own words) and resolves `false`, so the card keeps its input.
+ */
+export function useCreateViewInPlace({
+    objectName,
+    activeView,
+    readListState,
+    savePersonal,
+    openPersonal,
+    createShared,
+    clearSourceListState,
+    t,
+}: {
+    objectName: string;
+    /** The open view, the new view's starting point. */
+    activeView: Record<string, any> | undefined;
+    /** The list on screen, read at create time (the address's toolbar state, the panel, the reader's state). */
+    readListState: () => PersonalViewListState;
+    /** Save one of the reader's own views; resolves its id. */
+    savePersonal: (label: string, config: Record<string, unknown>) => Promise<string>;
+    /** Open one of the reader's own views by id. */
+    openPersonal: (id: string) => void;
+    /** The add-view door for a shared view (`handleViewCreate`). */
+    createShared: (config: Record<string, any>) => Promise<boolean>;
+    /**
+     * Clear the reader's temporary list state on the view the new one came
+     * from, once a personal view took it over (as Save as my view does,
+     * objectstack#30073): that view then opens as its own again.
+     */
+    clearSourceListState?: (viewId: string) => void;
+    t: ReturnType<typeof useObjectTranslation>['t'];
+}) {
+    return useCallback(async ({ config, scope, includeCurrent }: InPlaceViewRequest): Promise<boolean> => {
+        const { type, label, name } = config;
+        const block = config[type];
+        const listState = readListState();
+        const built = buildInPlaceViewConfig(
+            objectName,
+            activeView ?? {},
+            { type, ...(block && typeof block === 'object' ? { block } : {}) },
+            includeCurrent ? listState : { preference: listState.preference },
+        );
+        if (!built.ok) {
+            toast.error(t('form.saveError'), { description: t(FILTER_FOLD_REFUSAL_KEYS[built.reason]) });
+            return false;
+        }
+        if (scope === 'shared') {
+            // The body's own identity is the open view's; the new view's is
+            // the name and key the card gave it.
+            const body: Record<string, unknown> = { ...built.config, type, label, name };
+            delete body.id;
+            return createShared(body);
+        }
+        try {
+            const id = await savePersonal(label, built.config);
+            if (includeCurrent && activeView?.id) clearSourceListState?.(String(activeView.id));
+            openPersonal(id);
+            return true;
+        } catch (err) {
+            console.error('[ObjectView] Failed to create a personal view:', err);
+            toast.error(t('form.saveError'), {
+                description: viewSaveRefusalText(err, t),
+                classNames: { description: 'whitespace-pre-line' },
+            });
+            return false;
+        }
+    }, [objectName, activeView, readListState, savePersonal, openPersonal, createShared, clearSourceListState, t]);
 }

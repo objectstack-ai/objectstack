@@ -453,10 +453,62 @@ function seedLandedKey(record: Record<string, unknown>, externalId: string | str
   const pairs: Array<[string, string]> = [];
   for (const field of fields) {
     const value = record[field];
-    if (value === undefined || value === null || value === '') return '';
+    if (isBlankSeedKeyValue(value)) return '';
     pairs.push([field, String(value)]);
   }
   return JSON.stringify(pairs);
+}
+
+/**
+ * [#34857] Whether a seed record's value for one `externalId` field leaves
+ * that key field blank: no value, `null` or `''`. The one blank rule
+ * {@link seedLandedKey} and {@link SeedLoaderService.externalIdKey} key `''`
+ * by, and the keyed modes refuse a record by. A whitespace-only value is a
+ * value here (no trim).
+ */
+function isBlankSeedKeyValue(value: unknown): boolean {
+  return value === undefined || value === null || value === '';
+}
+
+/**
+ * [#34857, #35336] The refusal of a keyed seed record that leaves a key field
+ * blank — reported in the load result, the record not written. It names the
+ * object, the record, the blank field(s) and the fix; the fix covers both
+ * shapes it arises from: one record missing a value its siblings carry, and a
+ * dataset whose `externalId` names a field no record carries.
+ *
+ * A key of `name` alone says it is also the key a dataset gets when it names
+ * none: the parse defaults `externalId` to `name` before any load sees it, so
+ * whether the author wrote it cannot be told here, and an author who never
+ * wrote one is the commonest reader of this refusal.
+ */
+function blankSeedKeyRefusal(
+  objectName: string,
+  recordIndex: number,
+  externalId: string | string[],
+  blankFields: readonly string[],
+  mode: string | undefined,
+): ReferenceResolutionError {
+  const fields = Array.isArray(externalId) ? externalId : [externalId];
+  const defaultKey = fields.length === 1 && fields[0] === DEFAULT_EXTERNAL_ID_FIELD;
+  const keyLabel = `externalId '${fields.join('+')}'${defaultKey ? ' (also the key a dataset gets when it names none)' : ''}`;
+  const blank = blankFields.map((field) => `'${field}'`).join(', ');
+  const consequence = mode === 'update'
+    ? 'so an update load can never find the row it names'
+    : 'so no load can ever match it to a row it wrote: written, it would be inserted again on every load';
+  return {
+    sourceObject: objectName,
+    field: blankFields.join(', '),
+    targetObject: objectName,
+    targetField: '(externalId)',
+    attemptedValue: null,
+    recordIndex,
+    message:
+      `Seed record #${recordIndex} of '${objectName}' was NOT loaded: it is keyed on ${keyLabel} and leaves ` +
+      `${blank} blank (no value, null or an empty string), ${consequence}. Give the record a value for ` +
+      `${blank}, or key the dataset on fields every record carries: a field the object declares, a list of ` +
+      `fields when no single field names a row, or 'id' when the records carry their own ids.`,
+  };
 }
 
 /**
@@ -577,9 +629,11 @@ function seedRowTenantColumn(definition: unknown): string | null {
  * its definition declares, plus `owner_id` when the system-column pass injects
  * it and the object does not declare it.
  *
- * The definition the loader resolves is the metadata service's, which is what
- * the author wrote. An object that relies on the platform's owner has no
- * `owner_id` there: objectql adds it at registration, from the same
+ * The definition the loader resolves is the engine's registered schema, which
+ * already carries the injected column, and otherwise the metadata service's
+ * copy ([#35254] `resolveObjectDefinition`), which is what the author wrote.
+ * An object that relies on the platform's owner has no `owner_id` in that
+ * copy: objectql adds it at registration, from the same
  * `resolveInjectedSystemColumns` plan read here, as {@link OWNER_FIELD_DEF} (a
  * `sys_user` lookup). Read from the declared fields alone, a seed value naming
  * a person in that column was written as the name itself, while a declared
@@ -722,6 +776,29 @@ function createOnlySeedColumns(dataset: Seed, externalId: string | string[]): Re
     if (policy?.applyOn === 'create' && !keyFields.has(column)) createOnly.add(column);
   }
   return createOnly;
+}
+
+/**
+ * [#35655] The roll-up `summary` fields the definition declares — every one,
+ * whatever its aggregate (`count`, `sum`, `min`, `max`, `avg`) and whether or
+ * not it is declared `readonly`. A seed never stores a value for one (maintainer
+ * ruling D, record 7063117450): the engine computes it from the child rows, so
+ * {@link SeedLoaderService} takes a seed record's value for it out before the
+ * replay compare and before the write, and says so in one `warn` per dataset.
+ *
+ * Keyed on `type === 'summary'` literally, as the engine's roll-up readers
+ * are (`summaryFieldsLockedOnWrite`, `getSummaryDescriptors`). A definition
+ * the loader cannot resolve declares none, and its records are written as
+ * authored: the engine is then the one to judge the columns.
+ */
+function summaryFieldNames(definition: unknown): readonly string[] {
+  const fields = (definition as { fields?: unknown } | null | undefined)?.fields;
+  if (!fields || typeof fields !== 'object' || Array.isArray(fields)) return [];
+  const names: string[] = [];
+  for (const [name, field] of Object.entries(fields as Record<string, unknown>)) {
+    if (field && typeof field === 'object' && (field as { type?: unknown }).type === 'summary') names.push(name);
+  }
+  return names;
 }
 
 /**
@@ -1583,30 +1660,54 @@ export class SeedLoaderService implements ISeedLoaderService {
   }
 
   /**
-   * Object definition for reference-graph construction: the metadata service
-   * first, then the engine's own schema registry.
+   * The object definition every per-field decision of a load reads: the
+   * reference graph, natural-key resolution, required-on-insert, the tenant
+   * column, the roll-up strip, the replay comparands. It is the object AS THE
+   * ENGINE SERVES IT — the engine's own schema registry, object extensions
+   * folded in — and the metadata service's copy only when the engine has no
+   * schema for the name.
    *
-   * The engine fallback matters for marketplace-installed packages: their
-   * objects are registered through the `manifest` service straight into the
-   * ObjectQL registry AFTER `bridgeObjectsToMetadataService` ran at boot, so
-   * the metadata service has never heard of them. Resolving only via metadata
-   * left the reference graph empty for those objects — every lookup /
-   * master_detail seed value was written verbatim (the raw externalId string,
-   * e.g. `crm_contact.crm_account = 'Acme Corporation'`) instead of the target
-   * record's id. Dangling references break parent joins, and under
+   * [#35254] The engine comes FIRST because it is the one store that holds the
+   * object a write lands on. A boot that ingests a compiled artifact (`os dev`,
+   * `os serve`, the cloud runtime) gives the metadata service each object as
+   * its package authored it, and the fields another package adds through
+   * `objectExtensions` (ADR-0130 D5) live only in the registry's fold. Read
+   * from that copy, a lookup an extension adds was no reference at all: no
+   * dependency edge, no natural-key resolution, and the raw key written into
+   * the foreign-key column — while the in-process boot, whose metadata service
+   * is bridged from the folded registry, resolved the same seed. The loader
+   * does not merge extensions itself: the registry's fold is the one source.
+   *
+   * The metadata service stays the fallback for an engine that exposes no
+   * schema registry (the `IDataEngine` contract does not require one) or does
+   * not know the name. The fallback the other way round predates this order:
+   * marketplace-installed packages register straight into the ObjectQL
+   * registry AFTER `bridgeObjectsToMetadataService` ran at boot, so the
+   * metadata service never hears of them, and resolving through it alone left
+   * their reference graph empty — every lookup / master_detail seed value
+   * written verbatim (e.g. `crm_contact.crm_account = 'Acme Corporation'`).
+   * Dangling references break parent joins, and under
    * `sharingModel: controlled_by_parent` RLS that makes the whole object
    * invisible to everyone, admins included.
    */
   private async resolveObjectDefinition(objectName: string): Promise<any> {
-    const fromMetadata = (await this.metadata.getObject(objectName)) as any;
-    if (fromMetadata?.fields) return fromMetadata;
+    const served = this.engineSchemaOf(objectName) as any;
+    if (served?.fields) return served;
+    return (await this.metadata.getObject(objectName)) as any;
+  }
+
+  /**
+   * The engine's own registered schema for `objectName` — the merged one,
+   * object extensions included — or `undefined` when the engine exposes no
+   * schema registry (or its read throws).
+   */
+  private engineSchemaOf(objectName: string): unknown {
     try {
-      const engineSchema = (this.engine as { getSchema?(name: string): unknown }).getSchema?.(objectName) as any;
-      if (engineSchema?.fields) return engineSchema;
+      return (this.engine as { getSchema?(name: string): unknown }).getSchema?.(objectName);
     } catch {
-      // Engine may not expose a schema registry — the metadata result stands.
+      // Engine may not expose a schema registry — the caller's other source stands.
+      return undefined;
     }
-    return fromMetadata;
   }
 
   /**
@@ -1802,22 +1903,11 @@ export class SeedLoaderService implements ISeedLoaderService {
     }
     // [#28952] A keyed dataset whose every record keys EMPTY — its
     // `externalId` names a field no record carries, most often a field the
-    // object does not have — can never match a row: each record is written as
-    // new (`upsert`, `ignore`) or skipped (`update`) on every load. The save
-    // door and the publish promotion refuse such a seed; this load never
-    // refuses (a boot must not fail on a stored seed), so it says so once per
-    // dataset, at `warn`, and loads exactly as before.
-    if (keyedMode && dataset.records.length > 0
-      && dataset.records.every((record) => this.externalIdKey(record as Record<string, unknown>, externalId) === '')) {
-      this.logger.warn(
-        `[SeedLoader] Seed dataset for '${objectName}' keys every record on externalId ` +
-          `'${this.externalIdLabel(externalId)}', and no record carries a value for it, so this ${mode} load can ` +
-          `match no existing row: ${mode === 'update' ? 'every record is skipped' : 'every record is written as a new row, on every load'}. ` +
-          `Set externalId to a field the object declares and each record carries, a list of fields when no ` +
-          `single field names a row, or 'id' when the records carry their own ids.`,
-        { object: objectName, externalId: this.externalIdLabel(externalId), mode, records: dataset.records.length },
-      );
-    }
+    // object does not have — can never match a row. Each such record is
+    // refused in the record loop below with the fix for both shapes (give the
+    // record the value, or key the dataset on fields every record carries), the
+    // way any record with a blank key field is (#34857); a dataset-level
+    // notice on top would report the same records twice.
 
     // [#21665] Per-organization row identity. On a per-organization replay,
     // decide which id each row authored with an `id` holds in THIS
@@ -2060,6 +2150,16 @@ export class SeedLoaderService implements ISeedLoaderService {
     // `organization_id`, as it keeps the stamp.
     const organizationColumn = seedRowTenantColumn(objectDefinition) ?? DEFAULT_TENANT_FIELD;
     this.warnOnUndeclaredSeedColumns(dataset, objectDefinition);
+    // [#35655] The roll-up columns a seed never writes (`summaryFieldNames`),
+    // the values this dataset's records supplied for them, and which of them
+    // did — reported once, after the record loop. Read from the resolved
+    // definition, which is the engine's merged schema whenever the engine has
+    // one ([#35254] `resolveObjectDefinition`), so a roll-up an object
+    // extension contributes, which the engine computes, is never written by a
+    // seed either.
+    const summaryFields = summaryFieldNames(objectDefinition);
+    let summaryValuesDropped = 0;
+    const summaryFieldsDropped = new Set<string>();
     // How a replay compares each field (`isNoOpReplay`): [#24562] a temporal
     // field in its stored form, [#24624] a field the read path masks never by
     // its set value, [#29277] a seed blank the write door stores as `null` as
@@ -2129,6 +2229,8 @@ export class SeedLoaderService implements ISeedLoaderService {
       this.unownedOrganizationCount !== undefined &&
       seedRowNeedsOrganization(objectDefinition);
     let unownedRefusalLogged = false;
+    /** [#34857] The blank-key refusal is logged once per dataset (every refused record is still reported). */
+    let blankKeyRefusalLogged = false;
 
     // Pin a single `now()` snapshot for the entire dataset so multi-pass
     // loads see one logical clock — the M9 determinism guarantee for seeds.
@@ -2193,6 +2295,20 @@ export class SeedLoaderService implements ISeedLoaderService {
         continue;
       }
       const record = { ...(seedResult.value as Record<string, unknown>) };
+      // [#35655] A seed never stores a roll-up (ruling D, record 7063117450).
+      // Taken out here, before anything reads the record, so every path below
+      // sees it gone: the no-op replay compare (a stored total that differs
+      // from the seed's is no difference to undo), the insert (the engine
+      // starts the column at its empty-child-list value and the child rows
+      // compute it) and the update (the row keeps the value it holds).
+      for (const field of summaryFields) {
+        if (!Object.prototype.hasOwnProperty.call(record, field)) continue;
+        if (record[field] !== undefined) {
+          summaryValuesDropped++;
+          summaryFieldsDropped.add(field);
+        }
+        delete record[field];
+      }
       // [#22301] The stored form, not a `Date`, before any hook can see it.
       seedValuesInStoredForm(record, objectDefinition);
       /**
@@ -2289,10 +2405,42 @@ export class SeedLoaderService implements ISeedLoaderService {
         authoredIdByRecordIndex.set(i, authoredId);
       }
 
+      // [#34857, #35336] A keyed record that leaves a key field blank — an
+      // empty string, null or no value; any component of a composite key, or
+      // the one field of a single-field key (`name` when the dataset names
+      // none) — keys `''`, so it matches no row this load or any earlier one
+      // wrote: it was inserted again on every load (never found, on `update`),
+      // and nothing said so. It is REFUSED here, on the key as authored: after
+      // its expressions resolved and its organization was stamped, BEFORE any
+      // reference resolves. A reference deferred to pass 2 still holds its
+      // authored value at this point, so it is never caught here. The blank
+      // rule is {@link seedLandedKey}'s and `externalIdKey`'s (no trim).
+      if (keyedMode) {
+        const blankKeyFields = [...keyFields].filter((field) => isBlankSeedKeyValue(record[field]));
+        if (blankKeyFields.length > 0) {
+          errored++;
+          const error = blankSeedKeyRefusal(objectName, i, externalId, blankKeyFields, mode);
+          errors.push(error);
+          allErrors.push(error);
+          // `error` (#4632): the record is dropped. Said once per dataset — the
+          // fix is the same for every such record — and every refused record
+          // is still reported in the result. A dry run reports it like any
+          // other refusal it finds.
+          if (!config.dryRun && !blankKeyRefusalLogged) {
+            blankKeyRefusalLogged = true;
+            this.logger.error(`[SeedLoader] ${error.message}`, undefined, {
+              object: objectName, recordIndex: i, fields: blankKeyFields,
+            });
+          }
+          continue;
+        }
+      }
+
       // [#34800] The key as AUTHORED, before any of its references resolves:
       // the identity of a row that lands while one of them is still empty.
-      // `''` when the dataset keys on no reference or the record leaves a key
-      // field blank as written; such a record matches by natural key alone.
+      // `''` when the dataset keys on no reference, or — outside the keyed
+      // modes, which refuse such a record above — when the record leaves a
+      // key field blank as written; such a record matches by natural key alone.
       const authoredKey = existingRowsById ? seedLandedKey(record, externalId) : '';
       const authoredKeyValues = authoredKey === ''
         ? undefined
@@ -3111,6 +3259,24 @@ export class SeedLoaderService implements ISeedLoaderService {
         .map(([, id]) => id),
     )];
 
+    // [#35655] Once per dataset, naming the object, the fields and the count:
+    // the seed asked for a total the platform did not store. This notice IS
+    // the report (ruling D as analysed in 7062334196, point (e); the seat's
+    // correction 7064615114): no load-result key carries it. `warn`, not
+    // `error`: nothing claimed persisted is lost — a roll-up is never the
+    // seed's to write, and the rest of every record landed.
+    if (summaryValuesDropped > 0) {
+      const fields = [...summaryFieldsDropped];
+      this.logger.warn(
+        `[SeedLoader] The ${objectName} seed supplies ${summaryValuesDropped} value(s) for the roll-up summary ` +
+          `field(s) ${fields.map((f) => `\`${f}\``).join(', ')}, which a seed never stores: the values are not ` +
+          `written, the rest of each record is, and each roll-up is computed from its child rows, so a record ` +
+          `with no children reads the empty-child-list value (0 for count and sum, empty for min, max and avg). ` +
+          `Seed the child rows the total counts, and leave the summary field out of the ${objectName} seed.`,
+        { object: objectName, fields, droppedValues: summaryValuesDropped },
+      );
+    }
+
     if (this.loadProgress) this.loadProgress.loading = undefined;
     return {
       object: objectName,
@@ -3564,17 +3730,16 @@ export class SeedLoaderService implements ISeedLoaderService {
    * The one question {@link resolveFromDatabase} must be able to answer before
    * it may add the `name` leg to its probe chain. Answered from the SAME
    * definition resolver the reference graph is built from
-   * ({@link resolveObjectDefinition} — the metadata service first, then the
-   * engine's own schema registry), so the loader cannot form one opinion about
+   * ({@link resolveObjectDefinition} — the engine's own schema registry first,
+   * then the metadata service), so the loader cannot form one opinion about
    * an object's columns here and a different one two methods up. That resolver
    * is already imported and already called at boot, so this asks the registry
    * a question it is standing right next to; no new dependency, no new seam.
    *
    * **`true` on an unknown**, deliberately. Three populations reach here: an
-   * object the metadata service knows (authoritative), one only the engine's
-   * registry knows (marketplace-installed packages — the reason
-   * `resolveObjectDefinition` has its fallback at all), and one NEITHER can
-   * describe. For the third the honest answer is "unknown", and an unknown is
+   * object the engine's registry knows (the served object), one only the
+   * metadata service knows (an engine with no schema registry), and one
+   * NEITHER can describe. For the third the honest answer is "unknown", and an unknown is
    * not a denial: keeping the leg preserves today's behaviour exactly, and the
    * probe against a genuinely absent object fails on its first leg regardless.
    * Answering `false` there would be this file making up a column list.
@@ -5374,15 +5539,16 @@ export class SeedLoaderService implements ISeedLoaderService {
    * two keys match on replay and the row dedupes (framework#3434).
    *
    * Returns '' when ANY component is absent — a partial key is not a usable
-   * uniqueness key, so callers fall back to inserting (this mirrors the
-   * single-field miss, which also yields '').
+   * uniqueness key (this mirrors the single-field miss, which also yields
+   * ''). A keyed load refuses such a record before it is written (#34857);
+   * only a load with no keyed mode falls back to inserting it.
    */
   private externalIdKey(record: Record<string, unknown>, externalId: string | string[]): string {
     if (Array.isArray(externalId)) {
       const parts: string[] = [];
       for (const field of externalId) {
         const value = record[field];
-        if (value === undefined || value === null || value === '') return '';
+        if (isBlankSeedKeyValue(value)) return '';
         parts.push(String(value));
       }
       return parts.join('\u0000');
@@ -5532,9 +5698,9 @@ function seedDeclarationFingerprint(dataset: Seed): string {
  * a package's datasets once per merge (boot rehydrate, install or upgrade,
  * reseed), and a second copy of the one fallback set is not a second choice.
  * Object names are global, so two packages marking the same object are two
- * declarations and that object's fallback choice is refused. So are two
- * versions of one package whose marked set changed: an upgrade appends the new
- * version's datasets beside the old version's until the process restarts.
+ * declarations and that object's fallback choice is refused. (An upgrade
+ * replaces a package's datasets on the replay list, so two versions of one
+ * package do not meet here.)
  *
  * Judged whatever the load's locale: the declaration is ambiguous on every
  * load, not only on one that needs the fallback, and a refusal that waited for
@@ -5560,10 +5726,9 @@ function findDuplicateFallbackSets(datasets: readonly Seed[]): DuplicateFallback
         `Seed datasets of '${object}' mark ${distinct.size} different sets \`fallback: true\` (${scopes.join('; ')}). ` +
         'An object has at most one fallback set: it is the one set that loads when no other set lists the ' +
         `resolved locale. No fallback was used for '${object}': each marked set still loads for the locales it ` +
-        'lists, and a locale none of them lists gets none of them; every other object seeds as usual. Two causes ' +
-        `leave more than one marked set: the packages being seeded mark more than one set of '${object}' (keep the ` +
-        'marker on one), or an upgrade within this process changed a package\'s marked set (the earlier ' +
-        'version\'s datasets stay on the replay list until the process restarts).',
+        'lists, and a locale none of them lists gets none of them; every other object seeds as usual. The ' +
+        `packages being seeded mark more than one set of '${object}', most often two packages marking the same ` +
+        'object: keep the marker on one.',
     });
   }
   return refusals;

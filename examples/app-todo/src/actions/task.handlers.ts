@@ -97,15 +97,17 @@ export async function cloneTask(ctx: ActionHandlerContext): Promise<{ id: string
   });
 }
 
-/** Mark all selected tasks as complete (bulk) — same `status`-only rule as {@link completeTask} (#7036) */
+/**
+ * Mark each selected task as complete (bulk, `execution: 'perRecord'`): one
+ * dispatch per selected row, so the row is `ctx.record` — loaded in the
+ * caller's own scope before this runs — and the same `status`-only rule as
+ * {@link completeTask} applies (#7036).
+ */
 export async function massCompleteTasks(ctx: ActionHandlerContext): Promise<void> {
-  const { params, engine } = ctx;
-  const ids = (params?.selectedIds ?? []) as string[];
-  for (const id of ids) {
-    await engine.update('todo_task', id, {
-      status: 'completed',
-    });
-  }
+  const { record, engine } = ctx;
+  await engine.update('todo_task', record.id as string, {
+    status: 'completed',
+  });
 }
 
 /** Delete all completed tasks */

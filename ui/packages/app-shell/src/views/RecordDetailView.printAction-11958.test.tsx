@@ -81,6 +81,10 @@ function boundPage(print?: Record<string, unknown>) {
     label: 'Invoice',
     type: 'record',
     object: OBJECT,
+    // The invoice's default record page, as the showcase invoice's is: the
+    // implicit declaration-order fallback no longer picks a print page
+    // (objectstack#35250), so a bound print page is the declared default.
+    isDefault: true,
     ...(print ? { print } : {}),
     regions: [
       { name: 'header', components: [{ type: 'text', value: 'ACME Ltd' }] },

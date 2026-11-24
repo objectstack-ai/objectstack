@@ -96,6 +96,9 @@ export const de: TranslationData = {
         nav_settings_hub: { label: 'Alle Einstellungen' },
         nav_settings_localization: { label: 'Lokalisierung' },
         nav_exchange_rates: { label: 'Wechselkurse' },
+        nav_units_of_measure: { label: 'Maßeinheiten' },
+        nav_work_calendars: { label: 'Arbeitskalender' },
+        nav_work_calendar_exceptions: { label: 'Kalenderausnahmen' },
         nav_settings_company: { label: 'Unternehmen' },
         nav_settings_mail: { label: 'E-Mail-Versand' },
         nav_settings_sms: { label: 'SMS-Versand' },
@@ -107,6 +110,7 @@ export const de: TranslationData = {
         nav_settings_knowledge: { label: 'Wissen' },
         nav_settings_lifecycle: { label: 'Datenlebenszyklus' },
         nav_recycle_bin: { label: 'Papierkorb' },
+        nav_public_forms: { label: 'Öffentliche Formulare' },
         nav_notification_preferences: { label: 'Benachrichtigungseinstellungen' },
         nav_notification_templates: { label: 'Benachrichtigungsvorlagen' },
 
@@ -124,6 +128,7 @@ export const de: TranslationData = {
         nav_datasources: { label: 'Datenquellen' },
         nav_connector_credentials: { label: 'Konnektor-Anmeldedaten' },
         nav_connector_connections: { label: 'Konnektor-Verbindungen' },
+        nav_slack: { label: 'Slack' },
 
         nav_oauth_apps: { label: 'OAuth-Anwendungen' },
       },

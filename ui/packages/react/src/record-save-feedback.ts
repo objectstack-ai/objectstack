@@ -169,10 +169,16 @@ export function claimAnswerWarnings(adapter: object, scope: AnswerWarningScope):
   };
 }
 
+/** A button on a record save toast, such as the save's Undo. */
+export interface RecordSaveToastAction {
+  label: string;
+  onClick: () => void;
+}
+
 /** Where a record save toast goes. Structurally satisfied by sonner's `toast`. */
 export interface RecordSaveSink {
-  success(title: string, options?: { description?: string }): void;
-  warning(title: string, options?: { description?: string }): void;
+  success(title: string, options?: { description?: string; action?: RecordSaveToastAction }): void;
+  warning(title: string, options?: { description?: string; action?: RecordSaveToastAction }): void;
 }
 
 /**
@@ -180,15 +186,22 @@ export interface RecordSaveSink {
  * title, and under it the write's notice and then its advisory warnings, one
  * per line. Any warning puts it on the warning variant; a notice alone keeps
  * it a success, because a notice reports an outcome, never a problem.
+ * `action` is a button the toast carries whichever variant it takes (a list
+ * cell save's Undo, objectstack#35685).
  */
 export function toastRecordSave(
   sink: RecordSaveSink,
   message: string,
   feedback: Partial<RecordSaveFeedback> = {},
+  action?: RecordSaveToastAction,
 ): void {
   const warnings = feedback.warnings ?? [];
   const lines = feedback.notice ? [feedback.notice, ...warnings] : [...warnings];
-  if (warnings.length > 0) sink.warning(message, { description: lines.join('\n') });
-  else if (lines.length > 0) sink.success(message, { description: lines.join('\n') });
+  const options: { description?: string; action?: RecordSaveToastAction } = {};
+  if (lines.length > 0) options.description = lines.join('\n');
+  if (action) options.action = action;
+  const hasOptions = options.description !== undefined || options.action !== undefined;
+  if (warnings.length > 0) sink.warning(message, options);
+  else if (hasOptions) sink.success(message, options);
   else sink.success(message);
 }

@@ -66,11 +66,12 @@ import { withSystemContext } from './objectql-adapter.js';
 import type { PlatformAdminActor } from './platform-admin-gate.js';
 import { readJsonRequestBody } from './request-json-body.js';
 import {
-  SCIM_CREDENTIAL_OBJECT,
   SCIM_SERVICE_PRINCIPAL_PREFIX,
   revokeScimConnectionCredential,
+  scimCredentialAuditRow,
   type MintScimConnectionCredentialInput,
   type MintedScimConnectionCredential,
+  type ScimCredentialAuditDecisions,
 } from './scim-connection-service.js';
 
 /** The two mounts, relative to the auth base path. */
@@ -126,21 +127,8 @@ export interface ScimCredentialAdminDeps {
   logger?: { warn: (message: string) => void; error: (message: string) => void };
 }
 
-/**
- * What a credential audit row's `metadata` may carry: the event and the
- * connection, and nothing else. Closed on purpose — there is no key a bearer,
- * a digest or a field value of the credential could ride in.
- */
-export interface ScimCredentialAuditDecisions {
-  event: 'scim_credential_minted' | 'scim_credential_revoked';
-  connectionId: string;
-  /**
-   * The administrator at the keyboard when the mint ran on an impersonation
-   * session, under the key the audit writers record it with
-   * (`sys_audit_log.metadata.impersonated_by`). Absent otherwise.
-   */
-  impersonated_by?: string;
-}
+/** What a credential audit row's `metadata` may carry: declared beside the row's one shape (`scimCredentialAuditRow`). */
+export type { ScimCredentialAuditDecisions } from './scim-connection-service.js';
 
 function fail(status: ScimCredentialAdminResult['status'], code: string, message: string): ScimCredentialAdminResult {
   return { status, body: { success: false, error: { code, message } } };
@@ -226,14 +214,7 @@ async function writeCredentialAudit(
   try {
     await engine.insert(
       'sys_audit_log',
-      {
-        action: entry.action,
-        user_id: entry.actor.id,
-        actor: entry.actor.id,
-        object_name: SCIM_CREDENTIAL_OBJECT,
-        record_id: entry.credentialId,
-        metadata: JSON.stringify(entry.metadata),
-      },
+      scimCredentialAuditRow({ action: entry.action, actorId: entry.actor.id, credentialId: entry.credentialId, metadata: entry.metadata }),
       { context: SYSTEM_CTX },
     );
   } catch (error) {

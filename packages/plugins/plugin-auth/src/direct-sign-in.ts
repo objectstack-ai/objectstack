@@ -114,8 +114,19 @@ export const DIRECT_SIGN_IN_ENV = {
 /** The start door's path under the auth `basePath`. */
 export const DIRECT_SIGN_IN_PATH = '/sign-in/direct';
 
-/** The start door's closed query-parameter set (AGENTS.md, route rule 5). */
-export const DIRECT_SIGN_IN_QUERY_PARAMS: readonly string[] = ['callbackURL'];
+/**
+ * The start door's closed query-parameter set (AGENTS.md, route rule 5), each
+ * name accepted at most once.
+ *
+ * - `callbackURL`: the return path ({@link keptReturnPath}).
+ * - `state`: accepted and never read. Under `afterSignOut: 'identity-provider'`
+ *   the door is the post-logout redirect URI, and an identity provider echoes
+ *   there the opaque `state` a `/sign-out` body carried to its logout
+ *   (OpenID Connect RP-Initiated Logout 1.0 §3). The door starts a fresh
+ *   sign-in with the vendor's own state, so there is nothing to check it
+ *   against, and it is never forwarded.
+ */
+export const DIRECT_SIGN_IN_QUERY_PARAMS: readonly string[] = ['callbackURL', 'state'];
 
 /**
  * The `error` code the door lands on the sign-in page with when it cannot
@@ -413,8 +424,9 @@ function queryOf(url: URL): Record<string, string[]> {
 /**
  * Answer one `GET {basePath}/sign-in/direct` request.
  *
- * - An unknown query parameter, or `callbackURL` sent more than once ⇒
- *   `400 VALIDATION_ERROR` (the door's closed set).
+ * - An unknown query parameter, or `callbackURL` or `state` sent more than
+ *   once ⇒ `400 VALIDATION_ERROR` (the door's closed set,
+ *   {@link DIRECT_SIGN_IN_QUERY_PARAMS}); a single `state` changes nothing.
  * - Otherwise `302` to the identity provider with the vendor's state cookie,
  *   returning to the kept path ({@link keptReturnPath}) or the Console root;
  *   every failure of the sign-in lands on the Console's `/login` with `error`.
@@ -440,9 +452,11 @@ export async function runDirectSignIn(request: Request, host: DirectSignInHost):
   const query = queryOf(url);
   // The shared sentences every route answers these two refusals with
   // (`@objectstack/rest`); the unknown name outranks the repeated one.
-  const callbackCount = query.callbackURL?.length ?? 0;
+  const repeated = DIRECT_SIGN_IN_QUERY_PARAMS
+    .map((name) => [name, query[name]?.length ?? 0] as const)
+    .find(([, count]) => count > 1);
   const message = unknownQueryParamRefusalMessage(query, DIRECT_SIGN_IN_QUERY_PARAMS)
-    ?? (callbackCount > 1 ? repeatedQueryParamMessage('callbackURL', callbackCount) : undefined);
+    ?? (repeated !== undefined ? repeatedQueryParamMessage(...repeated) : undefined);
   if (message !== undefined) {
     return new Response(JSON.stringify({ success: false, error: { code: 'VALIDATION_ERROR', message } }), {
       status: 400,

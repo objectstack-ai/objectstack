@@ -20,6 +20,9 @@
 
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+// `ObjectView` reaches a dynamic `import('@objectstack/lint')`: pay its load at
+// collection, never inside a case's clocked window (`check:test-source-alias`).
+import '@objectstack/lint';
 import { render, cleanup, act, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { ListViewSchema, ViewItemSchema } from '@objectstack/spec/ui';
@@ -145,9 +148,11 @@ describe('ObjectView.handleViewCreate persists a kanban through the one builder 
       </ExpressionProvider>,
     );
     await settle();
-    // New view, from the page title's view switcher (objectstack#27594).
+    // The Create View dialog, from the view switcher's Manage views (its
+    // 「Add view」 creates in place since objectstack#35553).
     fireEvent.click(screen.getByTestId('list-view-switcher'));
-    fireEvent.click(screen.getByTestId('list-view-switcher-new'));
+    fireEvent.click(screen.getByTestId('list-view-switcher-manage'));
+    fireEvent.click(await screen.findByTestId('manage-views-add'));
     const card = (await screen.findByTestId('create-view-type-kanban')) as HTMLButtonElement;
     await waitFor(() => expect(card.disabled).toBe(false));
     fireEvent.click(card);
@@ -159,7 +164,7 @@ describe('ObjectView.handleViewCreate persists a kanban through the one builder 
     await waitFor(() => expect(metadataClient.save).toHaveBeenCalledTimes(1));
     const [type, , body, opts] = metadataClient.save.mock.calls[0] as unknown as [string, string, any, any];
     expect(type).toBe('view');
-    expect(opts).toEqual({ mode: 'draft' });
+    expect(opts).toEqual({ mode: 'draft', ifNoneMatch: '*' });
     // The spec's verdict first: it is the claim this pin exists for.
     const listView = ListViewSchema.safeParse(body.config);
     expect(listView.success, JSON.stringify(listView.error?.issues)).toBe(true);

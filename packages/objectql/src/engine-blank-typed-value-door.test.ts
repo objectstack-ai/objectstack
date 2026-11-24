@@ -242,7 +242,9 @@ describe('engine write doors: a blank on a non-string-typed column reaches the d
 
   it('a readonlyWhen lock still holds against a caller blank — the snapshot it judges is the normalised one', async () => {
     await engine.insert('blank_req', { id: 'l1', r_number: 1, status: 'closed', locked_amount: 10 });
-    await engine.update('blank_req', { id: 'l1', locked_amount: '' });
+    // `status` (unchanged, writable) survives the strip, so the write reaches
+    // the driver: an update whose every caller key is dropped writes nothing.
+    await engine.update('blank_req', { id: 'l1', status: 'closed', locked_amount: '' });
     const sent = last('update');
     expect('locked_amount' in sent).toBe(false);
     expect(stub.rows.get('l1')?.locked_amount).toBe(10);

@@ -243,7 +243,7 @@ import { isEmptyForRequired, recordAdvisoryHit } from '@objectstack/core';
 // reports it unconditionally, even under `systemFields: false`), and the
 // engine's whole by-id addressing reads that key (`idAddressesThisRow`,
 // `addressKey: 'id'`).
-import { SystemFieldName, objectValidationMessageKey, scalarOverridesPackagedBase } from '@objectstack/spec/system';
+import { SystemFieldName, scalarOverridesPackagedBase } from '@objectstack/spec/system';
 import Ajv, { type ValidateFunction } from 'ajv';
 // #5029 — `format` is NOT built into ajv 8; it ships in this separate package.
 // See the `const ajv` note below for why the runtime registers it.
@@ -253,6 +253,7 @@ import {
   buildFieldError,
   requiredWhenShown,
   resolveFieldLabel,
+  translatedLabels,
   type FieldValidationError,
   type ValidationMessageContext,
 } from './record-validator.js';
@@ -1969,10 +1970,11 @@ export function stripReadonlyWhenFieldsMulti(
  *  - The exemption. {@link stripRuntimeOwnedFields} keeps a value under
  *    `preserveAudit` as well as `isSystem`. The create-side static strip
  *    honours `isSystem` alone (the `preserveAudit` ruling below), and that is
- *    the boundary a roll-up needs: seed loads, package installs and
- *    historical imports (`treatAsHistorical` is system-only) write as the
- *    system principal and keep a pre-computed total; an in-process caller
- *    that merely sets `preserveAudit` does not.
+ *    the boundary a roll-up needs: historical imports (`treatAsHistorical`
+ *    is system-only) write as the system principal and keep a pre-computed
+ *    total; an in-process caller that merely sets `preserveAudit` does not.
+ *    (A seed load never sends one: the seed loader takes a seed record's
+ *    roll-up value out before the write, #35655.)
  *  - The seed. The runtime-owned strip judges the RAW caller payload (#6339)
  *    and runs AFTER the seed pass, which skipped the field BECAUSE the caller
  *    supplied it, so taking `task_count: 42` there would land the column
@@ -4064,11 +4066,17 @@ export function emitValidationAdvisories(
  *
  * ## What this is NOT
  *
- * It is not a second i18n path into objectql. The lookup runs on the SAME
- * `ValidationMessageContext.translate` hook — the engine's `i18nService`,
- * bridged by `ObjectQLPlugin` — that `resolveFieldLabel` and
- * `renderValidationMessage` already use. What was missing was a key shape for
- * an author-written rule, not a channel to resolve one.
+ * It is not a second i18n path into objectql. [#35384] The message is
+ * METADATA (`objects.<o>._validations.<rule>.message`, the key `/meta`'s
+ * `translateObjectValidations` reads), so it resolves as `/meta` serves it:
+ * `translateObject` (`@objectstack/spec/system`) over
+ * `ValidationMessageContext.labelTranslation` — the bundle and the
+ * `ResolveOptions` the field, option and object labels of the same refusal
+ * read (#34030), ⛔ never a second copy of those options. So a request in the
+ * deployment's declared `sourceLocale` reads the sentence as authored, never
+ * the `defaultLocale` row `t()` falls back to; `translate` (`t()`) carries the
+ * built-in MESSAGES only. What #14253 added was a key shape for an
+ * author-written rule, not a channel to resolve one.
  *
  * The authored message is handed over verbatim on a miss and the translation is
  * handed over verbatim on a hit: no `{{…}}` interpolation, because an authored
@@ -4088,26 +4096,27 @@ export function emitValidationAdvisories(
  * one here), so the served rule and the refusal of the same write keep
  * showing one sentence. A rule the packaged declaration does not carry, or no
  * lookup at all, has nothing to diverge from: the catalog applies.
+ *
+ * Nothing is translated — the authored sentence stands — without an object
+ * name or a locale, with a service that cannot hand its translations over
+ * (`labelTranslation` answers `undefined`), and when the translator throws
+ * ({@link translatedLabels}: a misbehaving i18n service must not turn a 400
+ * into a 500).
  */
 function authoredRuleMessage(
   rule: Pick<BaseRule, 'name' | 'message'>,
   messages: ValidationMessageContext | undefined,
 ): string {
-  if (messages?.translate && messages.objectName && messages.locale
-      && typeof rule.name === 'string' && rule.name.length > 0) {
+  if (messages?.objectName && messages.locale && typeof rule.name === 'string' && rule.name.length > 0) {
     if (scalarOverridesPackagedBase(messages.packagedRule?.(rule.name), 'message', rule.message)) {
       return rule.message;
     }
-    const key = objectValidationMessageKey(messages.objectName, rule.name);
-    try {
-      const translated = messages.translate(key, messages.locale);
-      // II18nService echoes the key back on a miss.
-      if (typeof translated === 'string' && translated.length > 0 && translated !== key) {
-        return translated;
-      }
-    } catch {
-      // A misbehaving i18n service must not turn a 400 into a 500.
-    }
+    const doc = translatedLabels(
+      { name: messages.objectName, validations: [{ name: rule.name, message: rule.message }] },
+      messages,
+    );
+    const translated: unknown = doc.validations[0]?.message;
+    if (typeof translated === 'string' && translated.length > 0) return translated;
   }
   return rule.message;
 }
@@ -4141,9 +4150,12 @@ function evaluateRule(rule: BaseRule, ctx: RuleContext): FieldValidationError | 
  * State-machine check.
  *
  * On UPDATE (with a prior record): if the state field changed, the new value
- * must appear in `transitions[oldValue]`. Lenient where it cannot reason (no
- * prior record, unchanged value, or a prior state with no declared transitions)
- * so it never blocks legitimate or legacy data.
+ * must appear in `transitions[oldValue]`, where `oldValue` is the STORED state.
+ * Clearing the field is a transition to the empty value `''`, judged the same
+ * way, so no sequence of writes leaves a state the machine would refuse to
+ * leave in one write. Lenient where it cannot reason (no prior record,
+ * unchanged value, or a prior state with no declared transitions) so it never
+ * blocks legitimate or legacy data.
  *
  * On INSERT: if the rule declares `initialStates` (#3165), the state field's
  * (defaulted) value must be one of them — the FSM entry point, since a `select`
@@ -4220,10 +4232,15 @@ function checkStateMachine(
   // The PATCH didn't touch the state field → no transition to validate.
   if (!(rule.field in data)) return null;
 
+  // Judged from the STORED state (`previous`), never from the payload.
   const from = previous[rule.field];
   const to = data[rule.field];
-  // No change, or clearing the value → nothing to enforce.
-  if (from === to || to === undefined || to === null) return null;
+  // Clearing the field is itself a transition — to the empty value, spelled
+  // `''` as a choice field's empty value is — and is judged like any other,
+  // so no sequence of writes leaves a state the machine would refuse to leave
+  // in one write. A state meant to be clearable lists `''` among its targets.
+  if (from === to) return null; // no change
+  const cleared = isEmptyStateValue(to);
 
   const fromKey = String(from);
   const allowed = rule.transitions[fromKey];
@@ -4231,8 +4248,8 @@ function checkStateMachine(
   // reason about its legal targets, so don't block.
   if (!Array.isArray(allowed)) return null;
 
-  if (!allowed.includes(String(to))) {
-    const toKey = String(to);
+  const toKey = cleared ? '' : String(to);
+  if (!allowed.includes(toKey)) {
     // `constraint` carries the raw option values a client acts on; the
     // built-in sentence names the same two states the way the user sees them.
     return fallback('invalid_transition', { from: fromKey, to: toKey }, undefined, () => {
@@ -4246,6 +4263,11 @@ function checkStateMachine(
   return null;
 }
 
+/** A state field carrying no state: absent, `null`, or the empty string. */
+function isEmptyStateValue(value: unknown): boolean {
+  return value === undefined || value === null || value === '';
+}
+
 /**
  * One option of a choice field, named the way the user sees it, in the
  * caller's locale: the field's own translation
@@ -4253,11 +4275,13 @@ function checkStateMachine(
  * field, the shared list's (`picklists.<name>.options.<value>`) → the option's
  * declared `label` → the raw value.
  *
- * The chain `translateObject` serves a field's options by on `/meta`, so the
- * refusal names a state with the word the form's dropdown showed. Asked through
- * the same `ValidationMessageContext.translate` hook `resolveFieldLabel` uses —
- * no second i18n path. The raw value is the last resort, as the API name is
- * for a field label: it stays available to clients in `constraint`.
+ * The chain `translateObject` serves a field's options by on `/meta`, and
+ * asked of `translateObject` itself, through the same
+ * `ValidationMessageContext.labelTranslation` `resolveFieldLabel` reads
+ * (#34030), so the refusal names a state with the word the form's dropdown
+ * showed — in the declared `sourceLocale`, the authored label. The raw value
+ * is the last resort, as the API name is for a field label: it stays
+ * available to clients in `constraint`.
  */
 function resolveOptionLabel(
   fieldName: string,
@@ -4265,30 +4289,29 @@ function resolveOptionLabel(
   value: string,
   ctx: ValidationMessageContext | undefined,
 ): string {
-  if (ctx?.translate && ctx.objectName && ctx.locale) {
-    const keys = [`objects.${ctx.objectName}.fields.${fieldName}.options.${value}`];
-    if (typeof def?.picklist === 'string' && def.picklist.length > 0) {
-      keys.push(`picklists.${def.picklist}.options.${value}`);
-    }
-    for (const key of keys) {
-      try {
-        const translated = ctx.translate(key, ctx.locale);
-        // II18nService echoes the key back on a miss.
-        if (typeof translated === 'string' && translated.length > 0 && translated !== key) {
-          return translated;
-        }
-      } catch {
-        // A misbehaving i18n service must not turn a 400 into a 500.
-      }
-    }
-  }
   // A bare scalar option carries no label of its own.
   const option = (Array.isArray(def?.options) ? (def.options as unknown[]) : []).find(
     (o): o is ConditionalFieldOption =>
       typeof o === 'object' && o !== null && String((o as ConditionalFieldOption).value) === value,
   );
   const declared = typeof option?.label === 'string' ? option.label.trim() : '';
-  return declared.length > 0 ? declared : value;
+  let label: string | undefined = declared;
+  if (ctx?.objectName && ctx.locale) {
+    const picklist = typeof def?.picklist === 'string' && def.picklist.length > 0 ? def.picklist : undefined;
+    const doc = translatedLabels({
+      name: ctx.objectName,
+      fields: {
+        [fieldName]: {
+          ...(picklist !== undefined ? { picklist } : {}),
+          options: [{ value, ...(declared.length > 0 ? { label: declared } : {}) }],
+        },
+      },
+    }, ctx);
+    const fields = doc.fields as Record<string, { options?: Array<{ label?: unknown }> }> | undefined;
+    const translated = fields?.[fieldName]?.options?.[0]?.label;
+    label = typeof translated === 'string' ? translated : undefined;
+  }
+  return typeof label === 'string' && label.length > 0 ? label : value;
 }
 
 /**

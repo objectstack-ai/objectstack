@@ -57,7 +57,7 @@ export function PanelToggles({ items, label, className }: PanelTogglesProps) {
       <div
         role="group"
         aria-label={label}
-        className={cn('inline-flex h-8 items-center gap-0.5', className)}
+        className={cn('inline-flex h-7 items-center gap-0.5', className)}
         data-panel-toggles=""
       >
         {items.map((item) => {
@@ -72,7 +72,7 @@ export function PanelToggles({ items, label, className }: PanelTogglesProps) {
                   aria-label={item.label}
                   aria-keyshortcuts={item.ariaKeyShortcuts}
                   className={cn(
-                    'h-8 w-8 min-w-0 rounded-md p-0 text-muted-foreground',
+                    'h-7 w-7 min-w-0 rounded-md p-0 text-muted-foreground',
                     'hover:bg-muted hover:text-foreground',
                     // `aria-pressed`, not Radix's `data-state`: the tooltip
                     // trigger writes its own `data-state` onto this button.

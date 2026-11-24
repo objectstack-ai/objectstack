@@ -25,6 +25,10 @@
  * are stubbed, as in `AppContent.inaccessibleAppStrand.test.tsx`.
  */
 
+// The chrome's lint helpers load `@objectstack/lint` lazily: pay that load
+// during collection, not inside a case's clocked window
+// (scripts/check-test-source-alias.mjs).
+import '@objectstack/lint';
 import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import React from 'react';
@@ -79,11 +83,16 @@ vi.mock('@object-ui/i18n', async (importOriginal) => ({
 
 /** The viewer under test: a `member` by default, a workspace admin where stated. */
 let isWorkspaceAdmin = false;
+// One function for every render, as `AuthProvider`'s `useCallback` gives:
+// `AppContent` re-reads the deployment flags whenever it changes, and since
+// objectstack#35981 its chrome waits for that answer, so a fresh function per
+// render would re-ask on every render and starve the landing's redirects.
+const getAuthConfig = vi.hoisted(() => async () => ({ features: {} }));
 vi.mock('@object-ui/auth', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useAuth: () => ({
     user: { id: 'u_1', name: 'Dev Admin', email: 'admin@objectos.ai', role: 'member' },
-    getAuthConfig: async () => ({ features: {} }),
+    getAuthConfig,
     activeOrganization: { id: 'org_1', name: 'Org' },
   }),
   useWorkspaceAdminStatus: () => ({ isAdmin: isWorkspaceAdmin, isResolved: true }),
@@ -182,6 +191,18 @@ describe('AppContent — an app with empty navigation lands on an empty state (o
   it('links a caller who can grant access to Setup, at the URL the /setup deep link resolves', async () => {
     isWorkspaceAdmin = true;
     metadataApps = [CLM_EMPTY, SETUP];
+    // objectstack#36748 — for a caller who can grant, the screen reads the
+    // app's STORED menu first. HotCLM's holds entries (every group gated
+    // away from this caller), so the access answer stands.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({ effective: { name: 'clm', navigation: [{ id: 'g', type: 'group', requiredPermissions: ['clm.admin'], children: [] }] } }),
+          { status: 200 },
+        ),
+      ),
+    );
     renderConsoleAt('/apps/clm');
 
     const emptyState = await screen.findByTestId('app-no-access-empty-state');
@@ -190,6 +211,7 @@ describe('AppContent — an app with empty navigation lands on an empty state (o
     expect(link).toHaveTextContent('Open Setup');
     // `resolveSetupAppPath` — the Setup app's canonical `/apps/PACKAGE_ID` URL.
     expect(link).toHaveAttribute('href', '/apps/com.objectstack.setup');
+    vi.unstubAllGlobals();
   });
 
   it('reads the admin verdict, not whether Setup is in the app list', async () => {

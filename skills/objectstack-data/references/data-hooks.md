@@ -123,11 +123,6 @@ const myHook = defineHook({
 
 ### Key Properties Explained
 
-#### `body` — Implementation
-
-A `source` of statements against `ctx`; a throw aborts the write
-([Sandboxed Hook Bodies](#sandboxed-hook-bodies-body--what-the-sandbox-ctx-can-call)).
-
 #### `condition` — Declarative Filtering
 
 Skip the hook if the condition is false. Author it as a **CEL
@@ -155,9 +150,7 @@ made total over the object's **declared** fields (`null` when a declared field i
 in neither). So:
 
 - Reference **any** declared field, not just the ones this update touches —
-  `record.done == true` works on an update that only sets `status`. (This is
-  unlike `ctx.input` / `ctx.result` inside the body, which stay partial — see
-  Gotcha 1.)
+  `record.done == true` works on an update that only sets `status`.
 - `record` describes the record's **state**, not the diff. `record.done == true`
   fires on every update of an already-done record, not only on the update that
   set it. **For the transition, compare against `previous`**:
@@ -171,8 +164,7 @@ in neither). So:
   is not in hand, which fails closed rather than reading an update as an
   insert. The `before*` dispatch of a predicate (`multi: true`) write is
   **not** such a case: `beforeUpdate` / `beforeDelete` dispatch once per
-  matched row, each on a single-record-shaped context whose `previous` is that
-  row's pre-image and whose `input.id` (`handler`; a `body`: `ctx.previous.id`) names the row (ADR-0058 Addendum II,
+  matched row, each with that row's pre-image as `previous` (ADR-0058 Addendum II,
   D1/D2), so a transition condition evaluates there exactly as on a
   single-record write, and `record` is that row's state, stored ⊕ payload. Only
   the *payload* stays batch-scoped (D3):
@@ -255,7 +247,9 @@ The sandbox is handed a **JSON snapshot** of these (built by
 
 (Action bodies additionally receive `ctx.recordId` and `ctx.record`, and their
 wrap is `(async (input, ctx) => { … })(input, ctx)` — the action params arrive as
-the first arg.)
+`input`. Both are already bound: `const input = ctx.input || {};` or `let ctx`
+is `action-body-does-not-compile`, refused
+[like a hook body's](#sandbox-restrictions).)
 
 ### `ctx.api.object(name)` — the cross-object repo
 
@@ -344,10 +338,19 @@ The body runs in an isolated QuickJS VM, **not** Node:
   a name bound at module scope, e.g. a `const slugify = …` helper sitting next to
   the hook. A `body` must be **self-contained**: inline the helper, or keep that
   hook as a bundled (deprecated) `handler`.
+- **Refused when it does not compile:** a `js` source is compiled, unrun, inside
+  its wrapper, where `ctx` is already declared. So
+  `const ctx = ctx.input || {};` (or `let ctx`, one name declared twice, any
+  syntax error) is `hook-body-does-not-compile`: an **error** from `os validate`,
+  `os build`, `os lint` and a runtime save (`422 INVALID_METADATA`), naming
+  the hook, the `SyntaxError` and its line. Fix: use `ctx` as it is, or rename
+  the local (`const data = ctx.input || {};`). A job's `js` body runs in the
+  same wrapper: `job-body-does-not-compile`, from the three commands. A regex
+  pattern the checking engine refuses is a warning: the runtime may accept it.
 
-> **A deadline stamped from an hours table is calendar hours** — nights, weekends and
-> holidays count. Name it `*_CALENDAR_HOURS` (`SLA_CALENDAR_HOURS`, or its camelCase)
-> and add elapsed milliseconds (`hours * 3_600_000`); never label it "business hours".
+> **A deadline stamped from an hours table is wall-clock hours** — nights, weekends and
+> holidays count. Name it `*_WALL_CLOCK_HOURS`, add `hours * 3_600_000` ms, never label it
+> "business hours"; an approval's `escalation.clock: 'working_time'` counts working hours.
 
 ### ⚠️ Gotcha 1 — `ctx.result` is a *partial* record on afterUpdate
 
@@ -450,8 +453,7 @@ interface HookContext {
   // Execution context
   session?: {
     userId?: string;
-    organizationId?: string; // Active org — the single blessed name. Matches the
-                             // `organization_id` column + `current_user.organizationId` (RLS).
+    organizationId?: string; // Active org — the single blessed name.
                              // The former `tenantId` alias was removed in v16.
                              // Privilege is judged by the security service,
                              // never by a session claim.
@@ -660,11 +662,8 @@ const cascadeAccountUpdate = defineHook({
 
 A `body` cannot do this: it writes back only `ctx.input`, and its `ctx.result` is a snapshot.
 
-> For **static** field masking (a field is always hidden/masked for a permission
-> set or position), prefer declarative **field-level metadata** (secret/masked
-> fields) — it applies on every read path automatically. Use an `afterFind` hook
-> only for masking that depends on runtime logic the field metadata can't
-> express.
+> Static masking is declarative **field-level metadata** (secret/masked fields);
+> an `afterFind` hook is only for masking that depends on runtime logic.
 
 ```typescript
 const maskSensitiveData = defineHook({
@@ -674,7 +673,6 @@ const maskSensitiveData = defineHook({
   handler: async (ctx) => {
     // Exempt the engine's own elevated reads (`isSystem`) — internal writes
     // and self-reads must see the real values.
-    // ⚠️ Never a session claim (`ctx.session.roles` is gone, ctx table above).
     const isElevated = ctx.session?.isSystem === true;
 
     if (!isElevated) {
@@ -777,9 +775,8 @@ the layout both real hook modules in the repo use.
 
 ## Best Practices
 
-✅ **DO** — use `before*` for validation and `after*` for side effects; set
-`async: true` for non-critical background work; go through `ctx.api` for
-cross-object operations; refuse a business rule by a
+✅ **DO** — set `async: true` for non-critical background work; go through
+`ctx.api` for cross-object operations; refuse a business rule by a
 [declared code](#declared-refusals-refusals); test hooks in isolation.
 
 ❌ **DON'T** — do expensive work in `before*` (it blocks the transaction); write

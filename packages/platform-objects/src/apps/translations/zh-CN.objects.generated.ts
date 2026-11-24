@@ -176,7 +176,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       ban_user: {
         label: "封禁用户",
-        description: "要封禁该用户吗？封禁后会立即登出，在解除封禁前无法再次登录，其 API 密钥也会被拒绝，OAuth 访问令牌与令牌续期同样被拒绝。解除封禁后这些密钥恢复可用。",
+        description: "要封禁该用户吗？封禁后会立即登出，在解除封禁前无法再次登录，其 API 密钥也会被拒绝，OAuth 访问令牌与令牌续期同样被拒绝。解除封禁后这些密钥恢复可用。封禁还会暂停该用户负责的 AI 服务账号、停用其注册的 OAuth 应用并吊销其创建的 SCIM 凭据；解除封禁不会恢复这些。",
         successMessage: "用户已封禁",
         params: {
           banReason: {
@@ -284,6 +284,11 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
           }
         }
       },
+      remove_sso_user: {
+        label: "移除待登录用户",
+        confirmText: "移除这位尚未登录的人员并取消其邀请？如果对方在此期间已经登录，或无法联系到托管组织，则不会移除任何人。",
+        successMessage: "已移除待登录用户"
+      },
       set_user_password: {
         label: "设置密码",
         successMessage: "密码已更新",
@@ -322,6 +327,11 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
             helpText: "该用户的直接汇报对象。服务端会拒绝不在同一组织的经理、把用户指派给自己,以及会形成环路或超出汇报链深度上限的关系。"
           }
         }
+      },
+      remove_user_manager: {
+        label: "移除经理",
+        confirmText: "要移除该用户的经理吗?在重新设置经理之前,该用户不向任何人汇报;审批路由与 own_and_reports 记录范围会随之变化。",
+        successMessage: "已移除经理"
       },
       list_platform_admins: {
         label: "平台管理员",
@@ -486,6 +496,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       revoke_reason: {
         label: "撤销原因",
         help: "会话被撤销的原因（idle_timeout、absolute_max、concurrent_cap、ip_not_allowed、user_revoked、admin、organization_membership_ended、admin_password_reset、password_reset 等）。"
+      },
+      sso_provider_id: {
+        label: "SSO 提供方",
+        help: "此会话登录时所经由的 SSO 提供方（如有）。删除该提供方会结束此会话。由系统管理。"
       },
       active_organization_id: {
         label: "当前组织"
@@ -4414,6 +4428,202 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         emptyState: {
           title: "还没有汇率",
           message: "每个币种在汇率变动的每个日期各录一行，例如每月初为每个币种录一行。"
+        }
+      }
+    }
+  },
+  sys_unit: {
+    label: "计量单位",
+    pluralLabel: "计量单位",
+    description: "组织自定义的计量单位，与所有组织共有的标准单位并列——每个单位一行，以组织命名空间中的代码标识。",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      code: {
+        label: "代码",
+        help: "数量所存储的代码，须为大写：字母、数字和下划线，至少 4 个字符或包含下划线（如 BOX_12、JIN1）。KGM、H87 等标准代码所有组织均可使用，无需在此添加。单位创建后代码不可更改。"
+      },
+      label: {
+        label: "名称",
+        help: "数量旁显示的单位名称，使用组织自己的语言填写。"
+      },
+      dimension: {
+        label: "量纲",
+        help: "该单位度量的是什么。包装单位（箱、袋）没有固定换算比例。单位创建后量纲不可更改。",
+        options: {
+          mass: "质量",
+          length: "长度",
+          area: "面积",
+          volume: "体积",
+          time: "时间",
+          count: "计数",
+          package: "包装"
+        }
+      },
+      ratio: {
+        label: "换算比例",
+        help: "1 个本单位 = 换算比例 × 其量纲的基本单位（质量 KGM、长度 MTR、面积 MTK、体积 MTQ、时间 SEC、计数 H87）。例：质量量纲中半千克的单位，换算比例为 0.5。包装单位没有换算比例。修改换算比例只影响之后保存的记录；已保存的记录保留保存时的数量和换算。规格变了应新建单位，而不是修改比例。"
+      },
+      decimal_places: {
+        label: "小数位数",
+        help: "该单位的数量默认显示几位小数。它从不对已存储的值取整，存储的位数仍受字段自身的小数位数限制。"
+      },
+      retired: {
+        label: "已停用",
+        help: "停用的单位仍保留在档，其代码永不再用，已使用它的记录照常显示。新记录不能使用已停用的单位。停用不可撤销。"
+      }
+    },
+    _views: {
+      all_units: {
+        label: "全部",
+        description: "1 个本单位 = 换算比例 × 其量纲的基本单位（质量 KGM、长度 MTR、面积 MTK、体积 MTQ、时间 SEC、计数 H87）。例：质量量纲中半千克的单位，换算比例为 0.5。包装单位没有换算比例。",
+        emptyState: {
+          title: "尚无计量单位",
+          message: "千克（KGM）、件（H87）等标准单位已可直接使用。仅当组织需要标准单位未涵盖的单位时，才在此添加。"
+        }
+      }
+    },
+    _validations: {
+      unit_code_organization_namespace: {
+        message: "单位代码由大写字母、数字和下划线组成，至少 4 个字符或包含下划线（例如 BOX_12 或 JIN1）。更短的代码保留给标准单位。"
+      },
+      unit_code_immutable: {
+        message: "单位创建后代码不可更改。请用新代码新建一个单位。"
+      },
+      unit_dimension_immutable: {
+        message: "单位创建后量纲不可更改。请用新量纲新建一个单位。"
+      },
+      unit_ratio_required: {
+        message: "请填写相对于该量纲基本单位的换算比例。"
+      },
+      unit_package_has_no_ratio: {
+        message: "包装单位没有换算比例：一个包装装多少属于物品，而不属于单位。请清空换算比例。"
+      },
+      unit_retired_one_way: {
+        message: "已停用的单位不能恢复。请用新代码新建一个单位。"
+      }
+    }
+  },
+  sys_work_calendar: {
+    label: "工作日历",
+    pluralLabel: "工作日历",
+    description: "工作日历：每周的工作时段、时段所在的时区，以及节假日维护到哪一天。按工作时间计算的到期日读取它们。",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      code: {
+        label: "代码",
+        help: "公式、审批升级和软件包用来指称此日历的机器代码，如 cn_standard：仅限小写字母、数字和下划线。"
+      },
+      name: {
+        label: "名称"
+      },
+      timezone: {
+        label: "时区",
+        help: "工作时段所在的 IANA 时区，如 Asia/Shanghai。新建表单会预填组织的时区（设置 → 本地化）；创建时留空也取同一时区。"
+      },
+      is_default: {
+        label: "默认",
+        help: "到期日未指定日历时使用的日历。每个组织一个。"
+      },
+      maintained_from: {
+        label: "维护起始日",
+        help: "节假日和调休工作日从这一天开始录入。需要更早日期的计算会被拒绝。"
+      },
+      maintained_through: {
+        label: "维护截止日",
+        help: "节假日和调休工作日录入到这一天为止。需要更晚日期的计算会被拒绝：请录入下一年的节假日，再顺延此日期。"
+      },
+      monday_periods: {
+        label: "星期一",
+        help: "当天的工作时段，按日历的时区计，格式为 HH:mm-HH:mm，多个时段用逗号分隔，如 09:00-12:00, 13:00-18:00。时段须在同一天内且结束晚于开始；最晚结束为 24:00。留空表示当天休息。"
+      },
+      tuesday_periods: {
+        label: "星期二",
+        help: "当天的工作时段，按日历的时区计，格式为 HH:mm-HH:mm，多个时段用逗号分隔，如 09:00-12:00, 13:00-18:00。时段须在同一天内且结束晚于开始；最晚结束为 24:00。留空表示当天休息。"
+      },
+      wednesday_periods: {
+        label: "星期三",
+        help: "当天的工作时段，按日历的时区计，格式为 HH:mm-HH:mm，多个时段用逗号分隔，如 09:00-12:00, 13:00-18:00。时段须在同一天内且结束晚于开始；最晚结束为 24:00。留空表示当天休息。"
+      },
+      thursday_periods: {
+        label: "星期四",
+        help: "当天的工作时段，按日历的时区计，格式为 HH:mm-HH:mm，多个时段用逗号分隔，如 09:00-12:00, 13:00-18:00。时段须在同一天内且结束晚于开始；最晚结束为 24:00。留空表示当天休息。"
+      },
+      friday_periods: {
+        label: "星期五",
+        help: "当天的工作时段，按日历的时区计，格式为 HH:mm-HH:mm，多个时段用逗号分隔，如 09:00-12:00, 13:00-18:00。时段须在同一天内且结束晚于开始；最晚结束为 24:00。留空表示当天休息。"
+      },
+      saturday_periods: {
+        label: "星期六",
+        help: "当天的工作时段，按日历的时区计，格式为 HH:mm-HH:mm，多个时段用逗号分隔，如 09:00-12:00, 13:00-18:00。时段须在同一天内且结束晚于开始；最晚结束为 24:00。留空表示当天休息。"
+      },
+      sunday_periods: {
+        label: "星期日",
+        help: "当天的工作时段，按日历的时区计，格式为 HH:mm-HH:mm，多个时段用逗号分隔，如 09:00-12:00, 13:00-18:00。时段须在同一天内且结束晚于开始；最晚结束为 24:00。留空表示当天休息。"
+      }
+    },
+    _views: {
+      all_calendars: {
+        label: "全部",
+        emptyState: {
+          title: "还没有工作日历",
+          message: "添加一个日历并填写每周工作时段，将其中一个设为默认，然后录入它的节假日和调休工作日。"
+        }
+      },
+      needs_maintenance: {
+        label: "待维护",
+        emptyState: {
+          title: "所有日历都已提前维护",
+          message: "节假日将在 60 天内用完的日历会出现在这里；超出该日期的到期日计算会被拒绝。"
+        }
+      }
+    },
+    _validations: {
+      work_calendar_code_shape: {
+        message: "代码须以小写字母开头，且只能包含小写字母、数字和下划线，如 cn_standard。"
+      }
+    }
+  },
+  sys_work_calendar_exception: {
+    label: "日历例外",
+    pluralLabel: "日历例外",
+    description: "工作日历的按日期覆盖：法定节假日、调休工作日和停工日。工作日须带上当天完整的工作时段。",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      calendar: {
+        label: "日历"
+      },
+      date: {
+        label: "日期"
+      },
+      kind: {
+        label: "类型",
+        help: "休息日：整天休息。工作日：当天按下方时段上班，如调休工作日。",
+        options: {
+          off: "休息日",
+          on: "工作日"
+        }
+      },
+      periods: {
+        label: "工作时段",
+        help: "工作日须填写当天的全部工作时间，不会从对应星期的时段继承。当天的工作时段，按日历的时区计，格式为 HH:mm-HH:mm，多个时段用逗号分隔，如 09:00-12:00, 13:00-18:00。时段须在同一天内且结束晚于开始；最晚结束为 24:00。留空表示当天休息。"
+      },
+      note: {
+        label: "备注",
+        help: "该日期是什么，如国庆节或春节调休工作日。"
+      }
+    },
+    _views: {
+      all_exceptions: {
+        label: "全部",
+        emptyState: {
+          title: "还没有日历例外",
+          message: "每个节假日或调休工作日录一行，或从文件导入一整年的数据。"
         }
       }
     }

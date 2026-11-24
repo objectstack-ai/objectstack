@@ -202,7 +202,9 @@ describe('Home leaves out a recent row whose object is not registered, and never
     await waitFor(() => expect(icons()).toEqual(['building', 'briefcase']));
     expect(titles()).toEqual(['Acme', 'Wayne Operations Module Rollout']);
     await settle();
-    expect(objectReads(enabled)).toContain('object/pm_project');
+    // The presence read served both, and answers their by-name scope: no
+    // `object/NAME` read follows it (objectstack#35306).
+    expect(objectReads(enabled)).toEqual(['object?names=crm_account,pm_project']);
     cleanup();
 
     // The package is disabled; the stored entry outlives it.
@@ -212,8 +214,9 @@ describe('Home leaves out a recent row whose object is not registered, and never
     expect(titles()).toEqual(['Acme']);
     await settle();
     expect(titles()).toEqual(['Acme']);
-    // One presence read for both names; by name only the served one.
-    expect(objectReads(disabled).sort()).toEqual(['object/crm_account', 'object?names=crm_account,pm_project']);
+    // One presence read for both names; nothing by name: the served one is
+    // answered by that read (objectstack#35306), the left-out one is not asked.
+    expect(objectReads(disabled)).toEqual(['object?names=crm_account,pm_project']);
     expect(objectReads(disabled)).not.toContain('object/pm_project');
   });
 

@@ -218,6 +218,18 @@ export interface InlineEditContextValue {
    */
   approvalRecallDrawnByHost?: boolean;
   /**
+   * Whether the HOST already names the pending approval in the record's
+   * header (objectstack#35593: the 「待你审批」 / 「审批中」 tag after the
+   * record's name), so the band must not draw its 「审批中已锁定」 badge for an
+   * APPROVAL lock as well. The tally and an editable approval's badge stay.
+   *
+   * Optional, and absent means `false`: the band draws its badge as before.
+   *
+   * ⚠️ PLACEMENT ONLY: it decides where the lock is named, never whether the
+   * record is locked.
+   */
+  approvalTagDrawnByHost?: boolean;
+  /**
    * Human-readable reason for the approval lock, surfaced as the band's
    * tooltip. Optional — consumers fall back to their own localized default
    * when omitted.
@@ -339,6 +351,11 @@ export interface InlineEditProviderProps {
    * band draws its recall as before (see `InlineEditContextValue`).
    */
   approvalRecallDrawnByHost?: boolean;
+  /**
+   * The host's header names the pending approval (objectstack#35593), so the
+   * band omits its approval-lock badge. Omitted ⇒ `false` ⇒ drawn as before.
+   */
+  approvalTagDrawnByHost?: boolean;
   /** Optional human-readable lock reason, surfaced as the band tooltip. */
   lockedReason?: string;
   children: React.ReactNode;
@@ -352,6 +369,7 @@ export const InlineEditProvider: React.FC<InlineEditProviderProps> = ({
   approvalProgress,
   approvalIsSubmitter,
   approvalRecallDrawnByHost = false,
+  approvalTagDrawnByHost = false,
   lockedReason,
   children,
 }) => {
@@ -406,6 +424,7 @@ export const InlineEditProvider: React.FC<InlineEditProviderProps> = ({
       approvalProgress,
       approvalIsSubmitter,
       approvalRecallDrawnByHost,
+      approvalTagDrawnByHost,
       lockedReason,
       draft,
       autoFocusField,
@@ -420,7 +439,7 @@ export const InlineEditProvider: React.FC<InlineEditProviderProps> = ({
       setError,
       setFieldErrors,
     }),
-    [editing, canEdit, locked, pending, approvalReadAnswered, approvalProgress, approvalIsSubmitter, approvalRecallDrawnByHost, lockedReason, draft, autoFocusField, saving, error, fieldErrors, enter, setField, teardown],
+    [editing, canEdit, locked, pending, approvalReadAnswered, approvalProgress, approvalIsSubmitter, approvalRecallDrawnByHost, approvalTagDrawnByHost, lockedReason, draft, autoFocusField, saving, error, fieldErrors, enter, setField, teardown],
   );
 
   return <InlineEditContext.Provider value={value}>{children}</InlineEditContext.Provider>;

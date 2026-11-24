@@ -240,16 +240,14 @@ describe('an object route in an app whose package holds none of its objects read
 
     expect(objectCalls()[0]).toBe(`object?package=${CLOUD}`);
     // objectstack#34244 — the requiresObject entry and the lookup targets are
-    // asked by name once the `?names=` presence read has answered them served.
+    // asked in `?names=` presence reads, whose served answers are their
+    // definitions (objectstack#35306): no by-name read of any of them.
     expect(sorted(objectCalls())).toEqual(
       sorted([
         `object?package=${CLOUD}`,
         'object?names=sys_member',
         'object?names=sys_organization,sys_user',
         'object/sys_environment',
-        'object/sys_organization',
-        'object/sys_user',
-        'object/sys_member',
       ]),
     );
     // The sidebar's capability gate answers from the same scope.
@@ -284,9 +282,6 @@ describe('a record route reads the objects its declared record page binds (objec
         'object?names=sys_organization,sys_user',
         'object/sys_environment',
         'object/sys_environment_member',
-        'object/sys_organization',
-        'object/sys_user',
-        'object/sys_member',
       ]),
     );
   });
@@ -320,8 +315,9 @@ describe('CONTROLs: the shapes this card does not change ask what they asked bef
     await waitFor(() => expect(screen.getByTestId('object-view')).toHaveTextContent('sys_user'));
     await settle();
 
-    // objectstack#34244 — the target outside the package after one presence read.
-    expect(objectCalls()).toEqual([`object?package=${CRM}`, 'object?names=sys_user', 'object/sys_user']);
+    // objectstack#34244 — the target outside the package in one presence read,
+    // whose served answer is its definition (objectstack#35306).
+    expect(objectCalls()).toEqual([`object?package=${CRM}`, 'object?names=sys_user']);
   });
 
   it('a record route with no declared record page reads the whole registry, and nothing by name', async () => {

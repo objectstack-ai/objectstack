@@ -37,9 +37,7 @@ function Harness() {
       t={t as (key: string, opts?: any) => string}
       allFields={[{ name: 'status', label: 'Status' }]}
       showColor
-      // A configured row colour is what makes the section render EXPANDED
-      // (`defaultOpen={!!rowColorConfig}`), so its body — the `Color by field`
-      // label the exact-match assertion below leans on — is in the DOM.
+      // A configured row colour: the level then offers Clear beside its title.
       rowColorConfig={{ field: 'status', colors: {} }}
       setRowColorConfig={vi.fn()}
     />
@@ -56,6 +54,8 @@ function openPopover() {
     </I18nProvider>,
   );
   fireEvent.click(screen.getByTestId('toolbar-display-trigger'));
+  // The colour picker is the Options menu's Row color level (objectstack#35551).
+  fireEvent.click(screen.getByTestId('options-row-color'));
 }
 
 describe('ViewSettingsPopover — the colour section takes the section key (objectui#4118)', () => {

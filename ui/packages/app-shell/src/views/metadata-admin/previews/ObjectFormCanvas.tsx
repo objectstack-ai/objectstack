@@ -57,6 +57,8 @@ import {
   removeGroup,
   moveGroup,
   clearFieldGroup,
+  currentGroupLayout,
+  writeGroupLayout,
   diffFields,
   type FieldEntry,
   type ObjectFieldGroup,
@@ -80,6 +82,12 @@ import {
 } from './external-object.js';
 import { t, tFormat } from '../i18n.js';
 import { DisabledControlReason } from '../inspectors/_shared.js';
+
+/** The container (group key, or `null` for ungrouped) holding `name` in a layout. */
+function containerOf(layout: Map<string | null, string[]>, name: string): string | null | undefined {
+  for (const [key, names] of layout) if (names.includes(name)) return key;
+  return undefined;
+}
 
 /* ─── locale helpers ─── */
 // Both resolve through the Studio catalog now. They used to read a `labelZh`
@@ -270,25 +278,27 @@ export function ObjectFormCanvas({
         name = `${base}_${i}`;
       }
       const entry = newField(name, type);
-      if (groupKey) entry.def = { ...entry.def, group: groupKey };
-      // Insert at the end of the target group's run so it lands in-section,
-      // otherwise append to the very end (ungrouped / no groups).
-      let insertAt = view.entries.length;
-      if (groupKey) {
-        for (let j = view.entries.length - 1; j >= 0; j -= 1) {
-          if (view.entries[j].def.group === groupKey) { insertAt = j + 1; break; }
-        }
-      }
-      const entries = view.entries.slice();
-      entries.splice(insertAt, 0, entry);
-      onPatch({ fields: writeFields({ shape: view.shape, entries }) });
+      // A new field is declared last. In a group that lists its members
+      // (`fieldGroups[].fields`) it joins the end of that list; in one that
+      // does not, its `group` puts it at the end of the group's run either way
+      // (objectstack#35900).
+      const target = groupKey ? declaredGroups.find((g) => g.key === groupKey) : undefined;
+      const listed = target !== undefined && Array.isArray(target.fields);
+      if (groupKey && !listed) entry.def = { ...entry.def, group: groupKey };
+      const entries = [...view.entries, entry];
+      onPatch({
+        fields: writeFields({ shape: view.shape, entries }),
+        ...(listed
+          ? { fieldGroups: declaredGroups.map((g) => (g.key === groupKey ? { ...g, fields: [...(g.fields ?? []), name] } : g)) }
+          : {}),
+      });
       onSelectionChange?.({
         kind: 'field',
         id: name,
         label: String(entry.def.label ?? name),
       });
     },
-    [onPatch, onSelectionChange, view],
+    [onPatch, onSelectionChange, view, declaredGroups],
   );
 
   /* ─── Section (field group) operations ─── */
@@ -335,90 +345,76 @@ export function ObjectFormCanvas({
     [onPatch, declaredGroups],
   );
 
+  // Every move below edits the grouped layout and writes it back through
+  // `writeGroupLayout`: membership and in-group order live on the group's
+  // `fields` list, so a move never reorders the object's fields except inside
+  // the ungrouped bucket, which has no list (objectstack#35900).
+  const applyLayout = React.useCallback(
+    (edit: (layout: Map<string | null, string[]>) => boolean) => {
+      if (!onPatch) return;
+      const layout = currentGroupLayout(view, declaredGroups);
+      if (!edit(layout)) return;
+      const patch = writeGroupLayout(view, declaredGroups, layout);
+      if (patch.fields !== undefined || patch.fieldGroups !== undefined) onPatch(patch);
+    },
+    [onPatch, view, declaredGroups],
+  );
   // Reorder fields by moving `fromName` to the position of `toName`.
   // Uses native HTML5 DnD — no library, no animations, just a working
   // reorder for the most common designer interaction.
   // If `toName`'s field is in a different group than the dragged field,
-  // adopt that group so cross-group drops are intuitive.
+  // it joins that group so cross-group drops are intuitive.
   const reorderField = React.useCallback(
     (fromName: string, toName: string, position: 'before' | 'after') => {
-      if (!onPatch) return;
       if (fromName === toName) return;
-      const entries = view.entries.slice();
-      const fromIdx = entries.findIndex((e) => e.name === fromName);
-      if (fromIdx < 0) return;
-      const [moved] = entries.splice(fromIdx, 1);
-      const toIdx = entries.findIndex((e) => e.name === toName);
-      const targetEntry = toIdx >= 0 ? entries[toIdx] : undefined;
-      if (targetEntry) {
-        const targetGroup = typeof targetEntry.def.group === 'string' ? targetEntry.def.group : undefined;
-        const fromGroup = typeof moved.def.group === 'string' ? moved.def.group : undefined;
-        if (targetGroup !== fromGroup) {
-          moved.def = { ...moved.def, group: targetGroup };
-        }
-      }
-      if (toIdx < 0) {
-        entries.push(moved);
-      } else {
-        entries.splice(position === 'before' ? toIdx : toIdx + 1, 0, moved);
-      }
-      onPatch({ fields: writeFields({ shape: view.shape, entries }) });
+      applyLayout((layout) => {
+        const from = containerOf(layout, fromName);
+        const to = containerOf(layout, toName);
+        if (from === undefined || to === undefined) return false;
+        layout.set(from, layout.get(from)!.filter((n) => n !== fromName));
+        const target = layout.get(to)!.slice();
+        const at = target.indexOf(toName);
+        target.splice(position === 'before' ? at : at + 1, 0, fromName);
+        layout.set(to, target);
+        return true;
+      });
     },
-    [onPatch, view],
+    [applyLayout],
   );
 
-  // Keyboard reorder (Alt+↑/↓): swap a field with its nearest neighbour
-  // in the SAME group so a focused row moves predictably within its
-  // section without ever changing groups.
+  // Keyboard reorder (Alt+↑/↓): swap a field with its neighbour in the SAME
+  // group so a focused row moves predictably within its section without ever
+  // changing groups.
   const moveFieldByOffset = React.useCallback(
     (name: string, dir: -1 | 1) => {
-      if (!onPatch) return;
-      const entries = view.entries.slice();
-      const idx = entries.findIndex((e) => e.name === name);
-      if (idx < 0) return;
-      const grp = typeof entries[idx].def.group === 'string' ? entries[idx].def.group : null;
-      let j = idx + dir;
-      while (j >= 0 && j < entries.length) {
-        const g = typeof entries[j].def.group === 'string' ? entries[j].def.group : null;
-        if (g === grp) break;
-        j += dir;
-      }
-      if (j < 0 || j >= entries.length) return;
-      const tmp = entries[idx];
-      entries[idx] = entries[j];
-      entries[j] = tmp;
-      onPatch({ fields: writeFields({ shape: view.shape, entries }) });
+      applyLayout((layout) => {
+        const key = containerOf(layout, name);
+        if (key === undefined) return false;
+        const names = layout.get(key)!.slice();
+        const idx = names.indexOf(name);
+        const j = idx + dir;
+        if (j < 0 || j >= names.length) return false;
+        [names[idx], names[j]] = [names[j], names[idx]];
+        layout.set(key, names);
+        return true;
+      });
     },
-    [onPatch, view],
+    [applyLayout],
   );
 
-  // Drop a field into a group section's empty space (or onto its header).
-  // Reassigns Field.group and moves the entry to the end of that group's
-  // run in the source order so it visually lands where it was dropped.
+  // Drop a field into a group section's empty space (or onto its header): it
+  // joins that group, after its current members.
   const moveToGroup = React.useCallback(
     (fromName: string, groupKey: string | null) => {
-      if (!onPatch) return;
-      const entries = view.entries.slice();
-      const fromIdx = entries.findIndex((e) => e.name === fromName);
-      if (fromIdx < 0) return;
-      const [moved] = entries.splice(fromIdx, 1);
-      const currentGroup = typeof moved.def.group === 'string' ? moved.def.group : null;
-      if (currentGroup === groupKey) {
-        // No group change — re-insert at original position (effectively no-op).
-        entries.splice(fromIdx, 0, moved);
-        return;
-      }
-      moved.def = { ...moved.def, group: groupKey ?? undefined };
-      // Find end of target group's run; if no members, append at end.
-      let insertAt = entries.length;
-      for (let i = entries.length - 1; i >= 0; i -= 1) {
-        const g = typeof entries[i].def.group === 'string' ? entries[i].def.group : null;
-        if (g === groupKey) { insertAt = i + 1; break; }
-      }
-      entries.splice(insertAt, 0, moved);
-      onPatch({ fields: writeFields({ shape: view.shape, entries }) });
+      applyLayout((layout) => {
+        const from = containerOf(layout, fromName);
+        if (from === undefined || from === groupKey || !layout.has(groupKey)) return false;
+        layout.set(from, layout.get(from)!.filter((n) => n !== fromName));
+        layout.set(groupKey, [...layout.get(groupKey)!, fromName]);
+        return true;
+      });
     },
-    [onPatch, view],
+    [applyLayout],
   );
 
   // Inline label rename — used by double-click on the field card label.

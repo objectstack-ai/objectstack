@@ -35,6 +35,11 @@ import {
 import { authIdentityManifest } from './manifest';
 import { BREACH_CHECK_VENDOR_DEFAULT_PATHS } from './auth-manager-plugin-list';
 import { INTERACTIVE_REVOKE_REASON } from './session-tombstone';
+import { readCredentialChangedAt } from './credential-change-ends-prior-access';
+// The SSO discovery egress guard the source loads with a dynamic import: its
+// first module load is paid here, during collection, not inside the first case
+// (AGENTS.md, Build & Test: clocked windows measure behaviour).
+import '@objectstack/core/egress';
 
 const SECRET = 'test-secret-at-least-32-chars-long!!';
 const BASE = 'http://localhost:3000';
@@ -1233,6 +1238,64 @@ describe('#34257 — a password the door sets starts the password-age clock and 
 
   it('the sessions the door ends are ledgered with the reason a password reset records', () => {
     expect(INTERACTIVE_REVOKE_REASON[ACCEPT_INVITATION_ONE_STEP_PATH]).toBe('password_reset');
+  });
+});
+
+describe('a credential change ends access issued before it — the one-step door', () => {
+  quietConsole();
+
+  it('a session opened before the door writes the password is ended, and the session the door opens stands', async () => {
+    const { engine, manager, invite } = await boot();
+    const { invitation, proof } = await invite('raced@example.com');
+    await signUp(manager, engine, 'raced@example.com');
+    const internal = (await manager.getAuthContext()).internalAdapter;
+    const original = internal.updatePassword.bind(internal);
+    let opened: string | undefined;
+    vi.spyOn(internal, 'updatePassword').mockImplementation(async (...args: unknown[]) => {
+      if (opened === undefined) {
+        const res = await post(manager, '/sign-in/email', { email: 'raced@example.com', password: PASSWORD });
+        opened = res.status === 200 ? cookieFrom(res) : '';
+      }
+      return (original as (...a: unknown[]) => Promise<unknown>)(...args);
+    });
+
+    const res = await door(manager, { invitationId: invitation.id, proof, name: 'R', password: NEW_PASSWORD });
+    await expectAccepted(res);
+
+    expect(opened, 'a sign-in ran before the password write').toBeTruthy();
+    expect(await sessionUser(manager, opened!)).toBeNull();
+    expect(await sessionUser(manager, cookieFrom(res))).toMatchObject({ email: 'raced@example.com' });
+  });
+
+  it("the first password the door sets on an existing account is a change; one it creates with the account is not", async () => {
+    const { engine, manager, invite } = await boot();
+    const internal = (await manager.getAuthContext()).internalAdapter;
+    // An account that holds no local password: it was there before the door,
+    // and signed in some other way.
+    const existing = await invite('passwordless@example.com');
+    const { userId } = await signUp(manager, engine, 'passwordless@example.com');
+    engine.tables.set('sys_account', (engine.tables.get('sys_account') ?? []).filter((row) => row.user_id !== userId));
+    expect(await readCredentialChangedAt(internal, userId), 'no local password: never changed').toBeUndefined();
+    const newcomer = await invite('newcomer@example.com');
+    try {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(Date.now() + 2_000);
+
+      await expectAccepted(
+        await door(manager, { invitationId: existing.invitation.id, proof: existing.proof, name: 'P', password: NEW_PASSWORD }),
+      );
+      const changedAt = await readCredentialChangedAt(internal, userId);
+      expect(changedAt, 'the first password set onto the existing account is a change').toBeGreaterThan(Date.now() - 1_000);
+
+      // The control: the door creates the account and its password in one request.
+      await expectAccepted(
+        await door(manager, { invitationId: newcomer.invitation.id, proof: newcomer.proof, name: 'N', password: NEW_PASSWORD }),
+      );
+      const created = String(userRow(engine, 'newcomer@example.com')!.id);
+      expect(await readCredentialChangedAt(internal, created), 'a password created with its account is not a change').toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

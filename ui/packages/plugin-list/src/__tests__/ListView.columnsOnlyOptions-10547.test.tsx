@@ -52,6 +52,7 @@ vi.mock('@object-ui/components', async (importOriginal) => {
 });
 
 import { ListView } from '../ListView';
+import { openAdvancedFilter } from './conditionPanels';
 
 const STATUS_OPTIONS = [
   { value: 'open', label: 'Open' },
@@ -92,7 +93,7 @@ async function renderAndOpenFilter(columns: unknown[], getObjectSchema: () => Pr
   );
   await waitFor(() => expect(dataSource.getObjectSchema).toHaveBeenCalled());
   fireEvent.click(screen.getByRole('button', { name: /^filter/i }));
-  await screen.findByText('Filter Records');
+  await openAdvancedFilter();
   await waitFor(() => expect(captured.fields.length).toBeGreaterThan(0));
 }
 

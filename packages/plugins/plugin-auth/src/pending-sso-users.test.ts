@@ -28,6 +28,9 @@ import { CLOUD_MANAGED_REFUSAL_MESSAGES } from './cloud-managed';
 import { PENDING_SSO_MESSAGES, PENDING_SSO_SOURCE } from './pending-sso-marker';
 import { BANNED_USER_SESSION_REFUSAL, PENDING_SSO_SESSION_REFUSAL } from './user-session-admission';
 import { EnvironmentUserHostRefusal, type EnvironmentUserEvent, type EnvironmentUserHost } from './environment-user-host';
+// The SSO discovery egress guard the source loads with a dynamic import, paid
+// during collection rather than inside a clocked case (check-test-source-alias, "The source reach").
+import '@objectstack/core/egress';
 import { runAdminUnbanUser } from './admin-ban-endpoints';
 import { runAddSsoUser } from './pending-sso-users';
 import { INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
@@ -1484,6 +1487,82 @@ describe('[#33228] a deactivated person is never sent an invitation, and a remov
   });
 });
 
+/** The admin audit rows a removal writes (`writeAdminAudit`, action `delete`); an add's row is `create`. */
+const removalAuditRows = (s: Awaited<ReturnType<typeof stage>>): any[] =>
+  ((s.engine.tables.get('sys_audit_log') ?? []) as any[]).filter((r) => r.action === 'delete');
+
+describe('[#34404] admin/remove-sso-user writes an admin audit row for a removal that committed', () => {
+  it('a removal the host took writes one delete row naming the admin, the person and the decision', async () => {
+    const { host } = removingHost();
+    const s = await managedStage({ host });
+    const id = await addPending(s, 'audit.typo@exmaple.com');
+
+    const res = await s.fire('/admin/remove-sso-user', { userId: id }, s.bearers.admin);
+
+    expect(res.status, await res.clone().text()).toBe(200);
+    expect(s.row('audit.typo@exmaple.com')).toBeUndefined();
+    const rows = removalAuditRows(s);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      action: 'delete',
+      user_id: s.ids.admin,
+      actor: s.ids.admin,
+      object_name: 'sys_user',
+      record_id: id,
+    });
+    expect(JSON.parse(rows[0].metadata)).toEqual({ event: 'user.admin_removed_pending', hostNotified: true });
+  });
+
+  it('a removal with no host wired writes the row with hostNotified false', async () => {
+    const s = await managedStage({ host: 'none' });
+    const id = await addPending(s, 'audit.nohost@example.com');
+
+    expect((await s.fire('/admin/remove-sso-user', { userId: id }, s.bearers.admin)).status).toBe(200);
+
+    const rows = removalAuditRows(s);
+    expect(rows).toHaveLength(1);
+    expect(JSON.parse(rows[0].metadata)).toEqual({ event: 'user.admin_removed_pending', hostNotified: false });
+  });
+
+  it('CONTROL: a host that cannot be reached refuses the removal with 503 and no row is written', async () => {
+    const { host } = removingHost({
+      removed: () => {
+        throw new Error('connect ECONNREFUSED');
+      },
+    });
+    const s = await managedStage({ host });
+    const id = await addPending(s, 'audit.unreachable@example.com');
+
+    const v = await verdict(await s.fire('/admin/remove-sso-user', { userId: id }, s.bearers.admin));
+
+    expect(v.status, v.text).toBe(503);
+    expect(v.code).toBe('SERVICE_UNAVAILABLE');
+    expect(s.row('audit.unreachable@example.com')).toBeDefined();
+    expect(removalAuditRows(s)).toHaveLength(0);
+  });
+
+  it('CONTROL: a host refusal and a person who is not pending write no row', async () => {
+    const { host } = removingHost({
+      removed: () => {
+        throw new EnvironmentUserHostRefusal(409, 'RESOURCE_CONFLICT', 'An organization owner cannot be removed here.');
+      },
+    });
+    const s = await managedStage({ host });
+    const id = await addPending(s, 'audit.refused@example.com');
+
+    const refused = await verdict(await s.fire('/admin/remove-sso-user', { userId: id }, s.bearers.admin));
+    expect(refused.status, refused.text).toBe(409);
+    expect(refused.code).toBe('RESOURCE_CONFLICT');
+    expect(s.row('audit.refused@example.com')).toBeDefined();
+
+    const notPending = await verdict(await s.fire('/admin/remove-sso-user', { userId: s.ids.member }, s.bearers.admin));
+    expect(notPending.status, notPending.text).toBe(409);
+    expect(notPending.code).toBe('RESOURCE_CONFLICT');
+
+    expect(removalAuditRows(s)).toHaveLength(0);
+  });
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Setup → Users: Unlock is offered and works without the admin plugin
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1496,6 +1575,73 @@ describe('[#33228] a deactivated person is never sent an invitation, and a remov
 // `lockoutThreshold` wrong passwords through the real sign-in, shows the right
 // password refused while the lock holds, then judges and drives the DECLARED
 // action against the door and signs in again.
+
+/** What a ban of an account that runs nothing in its name ended beside the ban, as its audit row counts it. */
+const NOTHING_ENDED = { suspendedServiceAccounts: 0, revokedOwnedApps: 0, revokedScimCredentials: 0, revocationComplete: true };
+
+/** The admin audit rows a ban or an unban writes (`writeAdminAudit`, action `update`). */
+const banAuditRows = (s: Awaited<ReturnType<typeof stage>>): any[] =>
+  ((s.engine.tables.get('sys_audit_log') ?? []) as any[]).filter((r) => r.action === 'update');
+
+describe('[#35440] admin/ban-user and admin/unban-user write an admin audit row for a change that committed', () => {
+  for (const adminPlugin of [false, true]) {
+    it(`a ban and its lifting each write one update row naming the admin and the event (admin plugin ${adminPlugin ? 'on' : 'off'})`, async () => {
+      const s = await stage({ adminPlugin });
+
+      expect((await s.fire('/admin/ban-user', { userId: s.ids.member, banReason: 'left' }, s.bearers.admin)).status).toBe(200);
+      expect((await s.fire('/admin/unban-user', { userId: s.ids.member }, s.bearers.admin)).status).toBe(200);
+
+      const rows = banAuditRows(s);
+      expect(rows).toHaveLength(2);
+      for (const row of rows) {
+        expect(row).toMatchObject({ user_id: s.ids.admin, actor: s.ids.admin, object_name: 'sys_user', record_id: s.ids.member });
+      }
+      expect(rows.map((r) => JSON.parse(r.metadata))).toEqual([
+        // A ban's row also counts what it ended beside the ban (`admin-ban-endpoints.ts`): here, nothing.
+        { event: 'user.admin_banned', hostNotified: true, ...NOTHING_ENDED },
+        { event: 'user.admin_unbanned', hostNotified: true },
+      ]);
+    });
+  }
+
+  it('the ban columns\' write itself names the admin for plugin-audit\'s mirror row, with the admin plugin off as on', async () => {
+    for (const adminPlugin of [false, true]) {
+      const s = await stage({ adminPlugin });
+      const contexts: any[] = [];
+      const update = s.engine.update.bind(s.engine);
+      s.engine.update = (async (name: string, data: any, options?: any) => {
+        if (name === 'sys_user' && 'banned' in data) contexts.push(options?.context);
+        return update(name, data, options);
+      }) as typeof s.engine.update;
+
+      expect((await s.fire('/admin/ban-user', { userId: s.ids.member }, s.bearers.admin)).status).toBe(200);
+      expect((await s.fire('/admin/unban-user', { userId: s.ids.member }, s.bearers.admin)).status).toBe(200);
+
+      expect(contexts, `admin plugin ${adminPlugin ? 'on' : 'off'}`).toEqual([
+        expect.objectContaining({ isSystem: true, attributedUserId: s.ids.admin }),
+        expect.objectContaining({ isSystem: true, attributedUserId: s.ids.admin }),
+      ]);
+    }
+  });
+
+  it('with no host wired the rows carry hostNotified false', async () => {
+    const s = await stage({ host: 'none' });
+    expect((await s.fire('/admin/ban-user', { userId: s.ids.member }, s.bearers.admin)).status).toBe(200);
+    expect(banAuditRows(s).map((r) => JSON.parse(r.metadata))).toEqual([{ event: 'user.admin_banned', hostNotified: false, ...NOTHING_ENDED }]);
+  });
+
+  it('CONTROL: a refused ban and a refused unban write no row', async () => {
+    const banRefused = await stage({ host: refusingHost(OWNER_CONFLICT, { deactivated: true }).host });
+    expect((await banRefused.fire('/admin/ban-user', { userId: banRefused.ids.member }, banRefused.bearers.admin)).status).toBe(409);
+    expect((await banRefused.fire('/admin/ban-user', { userId: banRefused.ids.admin }, banRefused.bearers.admin)).status).toBe(400);
+    expect(banRefused.engine.tables.get('sys_audit_log') ?? []).toEqual([]);
+
+    const unbanRefused = await stage({ host: refusingHost(MEMBER_CAP, { reactivated: true }).host });
+    expect((await unbanRefused.fire('/admin/ban-user', { userId: unbanRefused.ids.member }, unbanRefused.bearers.admin)).status).toBe(200);
+    expect((await unbanRefused.fire('/admin/unban-user', { userId: unbanRefused.ids.member }, unbanRefused.bearers.admin)).status).toBe(403);
+    expect(banAuditRows(unbanRefused).map((r) => JSON.parse(r.metadata).event)).toEqual(['user.admin_banned']);
+  });
+});
 
 describe('[#34010] Unlock is offered and works without the admin plugin', () => {
   const LOCKOUT = { lockoutThreshold: 3, lockoutDurationMinutes: 15 };

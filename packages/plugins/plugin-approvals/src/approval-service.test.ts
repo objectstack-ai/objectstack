@@ -1415,9 +1415,48 @@ describe('ApprovalService (node era)', () => {
 
   it('decide: finalizes even when no automation is attached (resumed=false)', async () => {
     const req = await svc.openNodeRequest(openInput(['u9']), CTX);
-    const out = await svc.decide(req.id, { decision: 'reject', actorId: 'u9' }, SYS);
+    const out = await svc.decide(req.id, { decision: 'reject', actorId: 'u9', comment: 'Over budget.' }, SYS);
     expect(out.finalized).toBe(true);
     expect(out.resumed).toBe(false);
+  });
+
+  // ── a reject carries its reason ─────────────────────────────────
+  //
+  // The `approval_reject` action door's refusal, at the member every human
+  // door reaches: the same code, status and sentence, nothing read or written.
+
+  it('decide: refuses a reject whose comment is missing, empty, blank, null or not a string, and leaves the request pending', async () => {
+    const resumed: any[] = [];
+    svc.attachAutomation({ async resume(runId) { resumed.push(runId); } });
+    const req: any = await svc.openNodeRequest(openInput(['u9']), CTX);
+    for (const comment of [undefined, '', '   ', null]) {
+      const err: any = await svc.decide(req.id, { decision: 'reject', actorId: 'u9', comment } as any, SYS)
+        .then(() => undefined, (e) => e);
+      expect([err?.status, err?.code], String(comment)).toEqual([400, 'VALIDATION_ERROR']);
+      expect(err.message).toBe('Invalid action params: Action param "comment" is required');
+    }
+    // Not a string is no reason either: the door's `textarea` value shape refuses it.
+    for (const [comment, received] of [[0, 'number'], [false, 'boolean'], [[], 'array'], [{}, 'object']] as const) {
+      const err: any = await svc.decide(req.id, { decision: 'reject', actorId: 'u9', comment } as any, SYS)
+        .then(() => undefined, (e) => e);
+      expect([err?.status, err?.code], JSON.stringify(comment)).toEqual([400, 'VALIDATION_ERROR']);
+      expect(err.message).toBe(
+        `Invalid action params: Action param "comment" (textarea): Invalid input: expected string, received ${received}`,
+      );
+    }
+    const [row] = await engine.find('sys_approval_request', { where: { id: req.id } });
+    expect(row.status).toBe('pending');
+    expect((engine._tables['sys_approval_action'] ?? []).filter((a: any) => a.request_id === req.id && a.action === 'reject')).toEqual([]);
+    expect(resumed).toEqual([]);
+  });
+
+  // An approve keeps its comment optional: the resume test above approves with none.
+  it('decide: CONTROL — a reject with its reason is recorded with it', async () => {
+    const req: any = await svc.openNodeRequest(openInput(['u9']), CTX);
+    const out = await svc.decide(req.id, { decision: 'reject', actorId: 'u9', comment: 'Over budget.' }, SYS);
+    expect([out.finalized, out.request.status]).toEqual([true, 'rejected']);
+    expect((engine._tables['sys_approval_action'] ?? []).find((a: any) => a.request_id === req.id && a.action === 'reject')?.comment)
+      .toBe('Over budget.');
   });
 
   // ── #4420: a REPORTED resume failure is a failure ────────────────
@@ -1726,7 +1765,7 @@ describe('ApprovalService (node era)', () => {
 
     it('reject: names the record, the way the inbox row\'s inline Reject does', async () => {
       const id = await openRequestId(openInput(['u9']), CTX);
-      const out = await svc.decide(id, { decision: 'reject', actorId: 'u9' }, SYS);
+      const out = await svc.decide(id, { decision: 'reject', comment: 'Over budget.', actorId: 'u9' }, SYS);
       expect(out.request.status).toBe('rejected');
       expect(named('approval_reject', out)).toBe('Rejected "Acme Renewal"');
     });
@@ -1891,6 +1930,74 @@ describe('ApprovalService (node era)', () => {
     // A reader who holds no slot — the submitter — is refused by the door's own rule.
     await expect(svc.reassign((req as { id: string }).id, { actorId: 'u1', to: 'u7' }, CTX)).rejects.toThrow(/^FORBIDDEN/);
     await expect(svc.reassign(req.id, { actorId: 'u9', to: 'u2' }, asUser('u9'))).rejects.toThrow(/VALIDATION_FAILED/);
+  });
+
+  describe('reassign: an approver hands over only their own slot', () => {
+    const PLATFORM_ADMIN_CTX = { userId: 'root', tenantId: 't1', positions: [], permissions: ['admin_full_access'] } as any;
+    const openUnanimous = async () => {
+      const req = await svc.openNodeRequest(openInput(['u9', 'u2'], {}, { behavior: 'unanimous' }), CTX);
+      staffDirectory(engine, 'u7');
+      return (req as { id: string }).id;
+    };
+    const slate = (id: string) => (engine._tables['sys_approval_request'] ?? []).find(r => r.id === id)?.pending_approvers;
+    const moves = (id: string) =>
+      (engine._tables['sys_approval_action'] ?? []).filter(r => r.request_id === id && r.action === 'reassign');
+
+    it('refuses a slot holder naming another approver\'s slot, and moves nothing', async () => {
+      const id = await openUnanimous();
+      await expect(svc.reassign(id, { actorId: 'u9', from: 'u2', to: 'u7' }, asUser('u9')))
+        .rejects.toThrow(/^FORBIDDEN: actor 'u9' may move only a slot it holds/);
+      expect(slate(id)).toBe('u9,u2');
+      expect(moves(id)).toEqual([]);
+    });
+
+    it('CONTROL: the same holder naming their own slot moves it', async () => {
+      const id = await openUnanimous();
+      const out = await svc.reassign(id, { actorId: 'u9', from: 'u9', to: 'u7' }, asUser('u9'));
+      expect(out.request.pending_approvers).toEqual(['u7', 'u2']);
+      expect(moves(id)).toHaveLength(1);
+    });
+
+    it('the administrator override still moves another approver\'s slot', async () => {
+      const id = await openUnanimous();
+      const out = await svc.reassign(id, { actorId: 'root', from: 'u2', to: 'u7' }, PLATFORM_ADMIN_CTX);
+      expect(out.request.pending_approvers).toEqual(['u9', 'u7']);
+    });
+
+    describe('a position slot', () => {
+      const FIN = { userId: 'u_fin', tenantId: 't1', positions: ['finance'], permissions: [] } as any;
+      const openOnPosition = async () => {
+        const req = await svc.openNodeRequest(openInput(['u2'], {}, {
+          approvers: [{ type: 'position' as const, value: 'finance' }, { type: 'user' as const, value: 'u2' }],
+          behavior: 'unanimous',
+        }), CTX);
+        staffDirectory(engine, 'u7');
+        const id = (req as { id: string }).id;
+        expect(slate(id), 'precondition: the slate holds the position slot and a user slot').toBe('position:finance,u2');
+        return id;
+      };
+
+      it('its holder moves it', async () => {
+        const id = await openOnPosition();
+        const out = await svc.reassign(id, { actorId: 'u_fin', from: 'position:finance', to: 'u7' }, FIN);
+        expect(out.request.pending_approvers).toEqual(['u7', 'u2']);
+        expect(moves(id)).toHaveLength(1);
+      });
+
+      it('its holder cannot move another approver\'s slot, and nothing moves', async () => {
+        const id = await openOnPosition();
+        await expect(svc.reassign(id, { actorId: 'u_fin', from: 'u2', to: 'u7' }, FIN))
+          .rejects.toThrow(/^FORBIDDEN: actor 'u_fin' may move only a slot it holds/);
+        expect(slate(id)).toBe('position:finance,u2');
+        expect(moves(id)).toEqual([]);
+      });
+    });
+
+    it('the system still moves another approver\'s slot', async () => {
+      const id = await openUnanimous();
+      const out = await svc.reassign(id, { actorId: 'system', from: 'u2', to: 'u7' }, SYS);
+      expect(out.request.pending_approvers).toEqual(['u9', 'u7']);
+    });
   });
 
   // ── reassign target resolution (#25485) ─────────────────────────
@@ -2138,6 +2245,42 @@ describe('ApprovalService (node era)', () => {
     expect(acts.at(-1)).toMatchObject({ action: 'approve', actor_id: 'u9', comment: 'Via action link' });
     // replay
     expect(await svc.redeemActionToken(approve)).toMatchObject({ ok: false, reason: 'consumed' });
+  });
+
+  it('redeem: a reject records the reason typed on the confirm page as its comment', async () => {
+    const resumed: any[] = [];
+    svc.attachAutomation({ async resume(runId, signal) { resumed.push({ runId, signal }); } });
+    const { id: reqId } = (await svc.openNodeRequest(openInput(['u9']), CTX)) as { id: string };
+    const { reject } = await svc.issueActionTokens(reqId, 'u9');
+    const out = await svc.redeemActionToken(reject, { comment: 'Over budget for this quarter.' });
+    expect(out).toMatchObject({ ok: true, action: 'reject', approverId: 'u9' });
+    expect((out as any).request.status).toBe('rejected');
+    expect(resumed[0]?.signal?.branchLabel).toBe('reject');
+    const acts = await svc.listActions(reqId, SYS);
+    expect(acts.at(-1)).toMatchObject({ action: 'reject', actor_id: 'u9', comment: 'Over budget for this quarter.' });
+    expect(acts.some(a => a.comment === 'Via action link')).toBe(false);
+  });
+
+  it('redeem: a reject with no reason is refused before the token is consumed — nothing decided, the link stays live', async () => {
+    const { id: reqId } = (await svc.openNodeRequest(openInput(['u9']), CTX)) as { id: string };
+    const { reject } = await svc.issueActionTokens(reqId, 'u9');
+    for (const input of [undefined, {}, { comment: '' }, { comment: '   \n\t ' }, { comment: 42 }, { comment: ['why'] }]) {
+      const out = await svc.redeemActionToken(reject, input as any);
+      expect(out, JSON.stringify(input)).toMatchObject({ ok: false, reason: 'reason_required', action: 'reject', approverId: 'u9' });
+      expect((out as any).request.id).toBe(reqId);
+    }
+    expect(engine._tables['sys_approval_token'].every(r => r.consumed_at == null)).toBe(true);
+    expect((await svc.getRequest(reqId, SYS))?.status).toBe('pending');
+    expect((await svc.listActions(reqId, SYS)).filter(a => a.action === 'reject')).toEqual([]);
+    // Still live: the same link decides once a reason comes with it.
+    expect(await svc.redeemActionToken(reject, { comment: 'Missing receipts.' })).toMatchObject({ ok: true, action: 'reject' });
+  });
+
+  it('redeem: an approve reads no reason and keeps its fixed comment', async () => {
+    const { id: reqId } = (await svc.openNodeRequest(openInput(['u9']), CTX)) as { id: string };
+    const { approve } = await svc.issueActionTokens(reqId, 'u9');
+    expect(await svc.redeemActionToken(approve, { comment: 'typed anyway' })).toMatchObject({ ok: true, action: 'approve' });
+    expect((await svc.listActions(reqId, SYS)).at(-1)).toMatchObject({ action: 'approve', comment: 'Via action link' });
   });
 
   it('peek: validates without consuming (GET never mutates)', async () => {
@@ -2799,7 +2942,7 @@ describe('ApprovalService — admin override (#3424)', () => {
 
   it('a platform admin can reject a stuck request', async () => {
     const req = await svc.openNodeRequest(stuckInput(), CTX);
-    const out = await svc.decide(req.id, { decision: 'reject', actorId: 'root' }, PLATFORM_ADMIN);
+    const out = await svc.decide(req.id, { decision: 'reject', comment: 'Over budget.', actorId: 'root' }, PLATFORM_ADMIN);
     expect(out.finalized).toBe(true);
     expect(out.request.status).toBe('rejected');
   });
@@ -6074,7 +6217,9 @@ describe('ApprovalService — every slot reader takes the acting addresses (#213
     await expect(svc.comment(req.id, { comment: 'hi' } as any, BYSTANDER))
       .rejects.toThrow(`REQUEST_NOT_FOUND: ${req.id}`);
     await svc.comment(req.id, { comment: 'hi' } as any, HOLDER);
-    const [said] = actionsOf(engine, req.id, 'comment');
+    // The request opened on a slate no one can decide, so its timeline also
+    // carries the system's no-approver note (no actor); the holder's is the other.
+    const [said] = actionsOf(engine, req.id, 'comment').filter((a: any) => a.actor_id);
     expect([said.actor_id, said.acted_as]).toEqual(['u_holder', SLOT]);
 
     await expect(svc.reassign(req.id, { to: 'u_next' } as any, READING_BYSTANDER))
@@ -6601,7 +6746,7 @@ describe('in-band transitions finalise before they resume (#3456 invariant)', ()
 
   it('decide(reject) finalises before resuming', async () => {
     const req = await open();
-    await svc.decide(req.id, { decision: 'reject', actorId: 'u9' }, SYS);
+    await svc.decide(req.id, { decision: 'reject', comment: 'Over budget.', actorId: 'u9' }, SYS);
     expectCleanHandoffs();
   });
 
@@ -7189,5 +7334,73 @@ describe('ApprovalService — one spec names each resolved person once (#28684)'
     } as any, CTX) as any;
     expect(req.pending_approvers).toEqual(['l1', 'l1']);
     expect(snapshotGroups()).toEqual({ l1: ['legal', 'finance'] });
+  });
+});
+
+/**
+ * [#34862] A link that opens a Console page carries the Console's mount.
+ *
+ * `os serve` serves the Console at `/_console/` and nothing at `/system/*`, so
+ * the approval e-mail's link and the action-link pages' inbox link open a page
+ * only under that mount. The mount is read from the auth service's Console page
+ * composer (`getConsoleUrl`, which reads `AuthConfig.uiBasePath`); the double
+ * below composes exactly as `AuthManager.getConsolePageUrl` does, so the two
+ * mounts pinned here are the two values that setting takes: its `/_console`
+ * default, and `/` for a deployment that serves the Console at the root.
+ */
+describe('ApprovalService — Console page links carry the Console mount (#34862)', () => {
+  const ORIGIN = 'https://app.example.test';
+  /** `AuthManager.getConsolePageUrl`'s composition: `${origin}${uiBasePath}${path}`. */
+  const authComposer = (uiBasePath: string) => (path: string) =>
+    `${ORIGIN}${uiBasePath.replace(/\/$/, '')}${path.startsWith('/') ? path : `/${path}`}`;
+
+  function serviceUnder(uiBasePath: string | undefined) {
+    let n = 0;
+    const engine = makeFakeEngine();
+    const svc = new ApprovalService({
+      engine: engine as any,
+      clock: { now: () => new Date(Date.UTC(2026, 0, 15, 10, 0, n++)) },
+      publicBaseUrl: ORIGIN,
+      ...(uiBasePath === undefined ? {} : { getConsoleUrl: authComposer(uiBasePath) }),
+    });
+    const emitted: any[] = [];
+    svc.attachMessaging({ async emit(input) { emitted.push(input); } });
+    return { svc, emitted };
+  }
+
+  async function requestedLink(uiBasePath: string | undefined) {
+    const { svc, emitted } = serviceUnder(uiBasePath);
+    const { id } = (await svc.openNodeRequest(openInput(['u9']), CTX)) as unknown as { id: string };
+    const [requested] = emitted.filter(e => e.topic === 'approval.requested');
+    return { id, payload: requested.payload };
+  }
+
+  async function inboxHref(uiBasePath: string | undefined) {
+    const { svc } = serviceUnder(uiBasePath);
+    const res = await svc.handleActionPage(new Request(`${ORIGIN}/api/v1/approvals/act?token=not-a-token`));
+    return /<a href="([^"]*)">Open the Approvals Inbox/.exec(await res.text())?.[1];
+  }
+
+  it('under the default /_console mount the e-mail link opens the request in the Console', async () => {
+    const { id, payload } = await requestedLink('/_console');
+    expect(payload.approvalUrl).toBe(`${ORIGIN}/_console/system/approvals?request=${id}`);
+    // The inbox notice's own link stays the Console's route: the Console routes on it.
+    expect(payload.actionUrl).toBe(`/system/approvals?request=${id}`);
+  });
+
+  it('under a root mount the e-mail link stays at the root', async () => {
+    const { id, payload } = await requestedLink('/');
+    expect(payload.approvalUrl).toBe(`${ORIGIN}/system/approvals?request=${id}`);
+  });
+
+  it('the action-link page links the Console inbox under the same mount', async () => {
+    expect(await inboxHref('/_console')).toBe(`${ORIGIN}/_console/system/approvals`);
+    expect(await inboxHref('/')).toBe(`${ORIGIN}/system/approvals`);
+  });
+
+  it('with no auth service there is no mount to read: the e-mail link is the one built before, and the inbox link carries the base', async () => {
+    const { id, payload } = await requestedLink(undefined);
+    expect(payload.approvalUrl).toBe(`${ORIGIN}/system/approvals?request=${id}`);
+    expect(await inboxHref(undefined)).toBe(`${ORIGIN}/system/approvals`);
   });
 });

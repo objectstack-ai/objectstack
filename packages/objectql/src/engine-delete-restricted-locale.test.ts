@@ -106,9 +106,20 @@ const ZH_BUNDLE: Record<string, string> = {
 };
 // Locale-aware, like a real `II18nService`: a bundle it does not carry echoes
 // the key back, which is the contract every resolver here detects a miss by.
-const zhI18n = { t: (key: string, locale: string) => (locale?.startsWith('zh') ? ZH_BUNDLE[key] ?? key : key) };
+// [#34030] The labels are read off `getTranslations`, the bundle the metadata
+// route translates with, so the same rows are served there too.
+const zhI18n = {
+    t: (key: string, locale: string) => (locale?.startsWith('zh') ? ZH_BUNDLE[key] ?? key : key),
+    getLocales: () => ['zh-CN'],
+    getTranslations: (locale: string) => (locale === 'zh-CN' ? {
+        objects: {
+            sys_business_unit: { label: '部门' },
+            os_ehr_sporadic_application: { label: '零星申请', fields: { apply_dept: { label: '申报部门' } } },
+        },
+    } : {}),
+};
 
-async function makeEngine(i18n?: { t: (k: string, l: string) => string }) {
+async function makeEngine(i18n?: Parameters<ObjectQL['setI18nService']>[0]) {
     const engine = new ObjectQL();
     const { driver } = makeStubDriver();
     engine.registerDriver(driver, true);
@@ -180,7 +191,11 @@ describe('#7307 DELETE_RESTRICTED — user copy vs developer guidance', () => {
         });
 
         it('an i18n service that THROWS still yields a 409, not a 500, and still no leak', async () => {
-            const boom = await makeEngine({ t: () => { throw new Error('i18n down'); } });
+            const boom = await makeEngine({
+                t: () => { throw new Error('i18n down'); },
+                getLocales: () => ['zh-CN'],
+                getTranslations: () => { throw new Error('i18n down'); },
+            });
             const err = await refuseDelete(boom, 'zh-CN');
             expect(err).toMatchObject({ code: 'DELETE_RESTRICTED', status: 409 });
             expect(err.message).not.toMatch(/deleteBehavior/i);

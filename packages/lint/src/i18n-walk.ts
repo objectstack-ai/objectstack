@@ -85,6 +85,8 @@
  *     ^ a bulk param spells its hint `help`; an ACTION param spells the same
  *       idea `helpText` (`ui/bulk-action.zod.ts`'s known divergence)
  *   objects.<name>._validations.<rule>.message
+ *   objects.<name>._relatedLists.<list>.label   (an object-form `relatedLists`
+ *                                                entry that authors a `label`)
  *   objects.<name>._actions.<action>.label
  *   objects.<name>._actions.<action>.description
  *   objects.<name>._actions.<action>.confirmText
@@ -138,6 +140,7 @@
  *   flows.<flow>.notices.<node_id>.message                     (#28251)
  *   flows.<flow>.records.<node_id>.fields.<field>              (ruling 6913660232)
  *   flows.<flow>.approvals.<node_id>.label                     (#24916)
+ *   flows.<flow>.nodes.<node_id>.label                         (ruling 7076440876)
  *     ^ walked because the ledger's `flows` row is `live` and warns no
  *       author; a group the ledger does warn on is left out of the walk
  *       (see `authorWarnedTranslationGroups`)
@@ -158,9 +161,10 @@
  *   metadataForms.<type>.fields.<dotPath>.label / .helpText / .placeholder
  *
  * The `metadataForms.*` surface is registry-driven (sourced from
- * `METADATA_FORM_REGISTRY` + `DEFAULT_METADATA_TYPE_REGISTRY` in
- * `@objectstack/spec`) — it is included unconditionally, independent of
- * the supplied stack config.
+ * `METADATA_FORM_REGISTRY`, `METADATA_LIST_REGISTRY` and
+ * `DEFAULT_METADATA_TYPE_REGISTRY` in `@objectstack/spec`; a list column's
+ * header is the `fields.<path>.label` slot of its path) — it is included
+ * unconditionally, independent of the supplied stack config.
  *
  * Pure given its inputs: no network, and the only filesystem read is the
  * shipped liveness ledger behind {@link authorWarnedTranslationGroups} —
@@ -172,6 +176,7 @@
 
 import {
   METADATA_FORM_REGISTRY,
+  METADATA_LIST_REGISTRY,
   PAGE_COMPONENT_COPY_KEYS,
   FLOW_SCREEN_COPY_KEYS,
   FLOW_SCREEN_FIELD_COPY_KEYS,
@@ -185,7 +190,7 @@ import {
 import { FLOW_REGION_SLOTS_BY_TYPE, flowScreenFieldOptionKey, isFlowTextEnvelopeShaped, templateSlotSource } from '@objectstack/spec/automation';
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 import { deriveFieldGroupLayout } from '@objectstack/spec/data';
-import { APPROVAL_NODE_TYPE } from '@objectstack/spec/automation';
+import { APPROVAL_NODE_TYPE, flowDecisionEdgeBranch, isFlowTechnicalNodeType } from '@objectstack/spec/automation';
 import { expandViewContainer, InlineLocaleMapSchema } from '@objectstack/spec/ui';
 import { authorWarnedProperties } from './lint-liveness-properties.js';
 import { walkPageComponents } from './page-walk.js';
@@ -997,6 +1002,28 @@ function pushValidationMessages(
   }
 }
 
+/**
+ * Emit `objects.<object>._relatedLists.<list>.label` for every object-form
+ * `relatedLists` entry of an object that authors a `label` (the record page's
+ * tab title and table heading for that list, which wins over the child FK's
+ * `relatedListTitle`). The key is the entry's literal `list`, a dotted
+ * `object.field` included, indexed as is. Only an AUTHORED label is emitted:
+ * `translateObject` translates that label and swaps nothing in for an entry
+ * that has none, so a key for one would ask a translator for a string no
+ * screen shows.
+ */
+function pushRelatedListLabels(out: ExpectedEntry[], objectName: string, entries: unknown): void {
+  if (!Array.isArray(entries)) return;
+  for (const entry of entries) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
+    const list = (entry as any).list;
+    if (typeof list !== 'string' || list.length === 0) continue;
+    const label = (entry as any).label;
+    if (typeof label !== 'string' || label.length === 0) continue;
+    pushEntry(out, ['objects', objectName, '_relatedLists', list, 'label'], label, 'object', { objectName });
+  }
+}
+
 // ─── Object sections (`objects.<o>._sections.<section>.label`) ─────────
 //
 // A section heading is authored in TWO independent places and rendered from
@@ -1625,6 +1652,14 @@ export function collectExpectedEntries(
 
     // Custom validation-rule rejection messages (`_validations.<rule>.message`).
     pushValidationMessages(out, objectName, obj.validations, 0);
+
+    // Record-page related-list titles (`_relatedLists.<list>.label`): the
+    // `label` an object-form `relatedLists` entry authors on this parent,
+    // keyed by the entry's literal `list` (`object.field` is one key).
+    // `translateObject` overlays only an authored label, so an entry without
+    // one — and a bare-string entry or built-in tab — gets no key: its title
+    // is the child FK's `relatedListTitle`, keyed on the child above.
+    pushRelatedListLabels(out, objectName, obj.relatedLists);
   }
 
   // ── Top-level views ──────────────────────────────────────────────
@@ -2290,6 +2325,42 @@ function collectFlowNodesDeep(nodes: unknown): any[] {
   return out;
 }
 
+
+/**
+ * The folded technical steps a business-altitude flow drawing still names: the
+ * top-level `FLOW_TECHNICAL_NODE_TYPES` node a top-level decision's branch
+ * leads to, in edge order, each once.
+ *
+ * Which out-edges are branches is the spec's `flowDecisionEdgeBranch`, the one
+ * rule the docs viewer lists them by (`decisionBranches`,
+ * `ui/packages/components/src/renderers/basic/flow-branches.ts`): every
+ * out-edge of a decision with no `config.conditions`; otherwise a default
+ * edge (`isDefault`, or the `default` label) and an edge whose label a
+ * condition claims. The viewer finds the target among the top-level nodes
+ * only, so a region's nested node is not one.
+ */
+function decisionBranchTechnicalTargets(flow: any, topLevel: any[]): { id: string; label: unknown }[] {
+  const edges: any[] = Array.isArray(flow?.edges) ? flow.edges : [];
+  const byId = new Map<string, any>();
+  for (const node of topLevel) {
+    if (node && typeof node === 'object' && typeof node.id === 'string' && node.id) byId.set(node.id, node);
+  }
+  const seen = new Set<string>();
+  const targets: { id: string; label: unknown }[] = [];
+  for (const node of topLevel) {
+    if (!node || typeof node !== 'object' || node.type !== 'decision' || typeof node.id !== 'string') continue;
+    const conditions: unknown = node.config && typeof node.config === 'object' ? node.config.conditions : undefined;
+    for (const edge of edges) {
+      if (!edge || typeof edge !== 'object' || edge.source !== node.id || typeof edge.target !== 'string') continue;
+      if (!flowDecisionEdgeBranch(edge, conditions)) continue;
+      const target = byId.get(edge.target);
+      if (!target || !isFlowTechnicalNodeType(target.type) || seen.has(target.id)) continue;
+      seen.add(target.id);
+      targets.push({ id: target.id, label: target.label });
+    }
+  }
+  return targets;
+}
 /**
  * Emit the screen-flow copy surface (#7646, resolver landed in #11287).
  *
@@ -2374,30 +2445,31 @@ function walkScreenFlows(config: any, out: ExpectedEntry[]): void {
     // by the schema, so this is authored text in practice; `pushOptional`
     // keeps a label-less flow from seeding an empty string anyway.
     //
-    // Demanded for a flow with a `screen` node or an `approval` node, at any
-    // depth of the same node universe the walks below read. The predicate
-    // mirrors the two readers of the key, and nothing wider:
+    // Demanded for EVERY named flow. The key has three readers, and the
+    // third draws any flow, whatever its nodes:
     //
     // - the console's `FlowRunner` names the flow by it, in its header and its
-    //   completion toast, and the runner opens only on a run paused at a screen;
+    //   completion toast (a run paused at a screen);
     // - [#24916] the approvals door names a request's flow by it in the
     //   reader's locale (`plugin-approvals` `reader-locale-labels.ts`, the
-    //   inbox, the record's approval panel and the request page), and a request
-    //   exists only where an `approval` node opened one.
+    //   inbox, the record's approval panel and the request page);
+    // - the docs viewer's `type: flow` embed titles its card by it
+    //   (`metadata-viewer.tsx` `FlowView`, `useFlowLabelTranslations`), for
+    //   whichever flow a page names, record-triggered, scheduled and API flows
+    //   included. That is the reader the `nodes` demand below already asks
+    //   every flow's drawn steps for, and a card whose steps are asked for
+    //   and whose title is not draws an English heading over translated
+    //   steps.
     //
-    // A flow with neither (record-triggered, scheduled or an API flow that
-    // only does work) has no surface that shows its translated label: the
-    // console's launch hosts toast the action's copy or the flow's own
-    // `successMessage` / `errorMessage`, never its label. Demanding one would
-    // ask an author for a string that is stored and never read, so `Flow.label`
-    // being required by the schema is not the test. When a reader of such a
-    // flow's label lands, this predicate widens in the same change as that
-    // reader.
-    const hasScreen = nodes.some((node) => node && typeof node === 'object' && node.type === SCREEN_NODE_TYPE);
+    // Until that embed read the key, a flow with neither a screen nor an
+    // approval had no surface showing its translated label, and this
+    // predicate was narrower; it widens with that reader, as the walk's rule
+    // says: a string nobody reads is not demanded, and this one is read. A
+    // flow with no `name` has no key and is skipped above, the one flow no
+    // reader can draw by a bundle entry.
     const approvalNodes = nodes.filter((node) => node && typeof node === 'object' && node.type === APPROVAL_NODE_TYPE);
-    if (hasScreen || approvalNodes.length > 0) {
-      pushOptional(out, ['flows', flowName, 'label'], flow.label, 'flow', scope);
-    }
+    const hasScreen = nodes.some((node) => node && typeof node === 'object' && node.type === SCREEN_NODE_TYPE);
+    pushOptional(out, ['flows', flowName, 'label'], flow.label, 'flow', scope);
 
     // `flows.<flow>.successMessage` / `.errorMessage` (#22507) — the terminal
     // toasts, seeded from the flow's own text and emitted ONLY where the flow
@@ -2532,6 +2604,46 @@ function walkScreenFlows(config: any, out: ExpectedEntry[]): void {
       if (!nodeId) continue;
       pushOptional(out, ['flows', flowName, 'approvals', nodeId, 'label'], node.label, 'flow', scope);
     }
+
+    // [ruling 7076440876] `flows.<flow>.nodes.<node_id>.label` — the label of
+    // every step the docs viewer's `type: flow` embed draws at its default
+    // altitude (`detail: business`): a top-level node whose type
+    // `isFlowTechnicalNodeType` does not fold away, the one table that viewer
+    // reads. An `approval` and an untitled `screen` are drawn too, but their
+    // label is keyed already (`approvals.<node_id>.label`,
+    // `screens.<node_id>.title`), so they are not asked twice. A screen that
+    // authors its own `config.title` is drawn by that heading, keyed
+    // `screens.<node_id>.title` too, unless the heading holds a `{{ }}` hole a
+    // drawing cannot fill; the embed then draws the screen's label, so that
+    // screen alone is asked for its `nodes` key (`flowStepName`,
+    // `metadata-viewer.tsx`). The Studio canvas draws every titled screen by
+    // that key, but the walk asks only for what the docs embed draws, as it
+    // does for the technical steps that canvas also draws. Start and end
+    // nodes are asked like any other step: the viewer draws the author's words
+    // for them, not its own. A region's nested nodes (ADR-0031) are not drawn
+    // by that embed, so they are accepted by `os validate` but not demanded
+    // here.
+    const topLevel: any[] = Array.isArray(flow.nodes) ? flow.nodes : [];
+    for (const node of topLevel) {
+      if (!node || typeof node !== 'object') continue;
+      if (node.type === APPROVAL_NODE_TYPE) continue;
+      if (node.type === SCREEN_NODE_TYPE) {
+        const title: unknown = node.config && typeof node.config === 'object' ? node.config.title : undefined;
+        if (typeof title !== 'string' || !title.includes('{{')) continue;
+      }
+      if (isFlowTechnicalNodeType(node.type)) continue;
+      const nodeId = typeof node.id === 'string' && node.id.length > 0 ? node.id : undefined;
+      // No id, no key: nothing could address the step.
+      if (!nodeId) continue;
+      pushOptional(out, ['flows', flowName, 'nodes', nodeId, 'label'], node.label, 'flow', scope);
+    }
+    // The same embed lists each drawn decision's branches and names the step a
+    // branch leads to by its label, folded technical steps included (a
+    // decision whose branch runs a `script` first). Those folded targets are
+    // drawn words too, so they are asked once each, after the drawn steps.
+    for (const target of decisionBranchTechnicalTargets(flow, topLevel)) {
+      pushOptional(out, ['flows', flowName, 'nodes', target.id, 'label'], target.label, 'flow', scope);
+    }
   }
 }
 
@@ -2645,6 +2757,22 @@ function walkMetadataForms(out: ExpectedEntry[]): void {
       if (Array.isArray(section.fields)) {
         for (const child of section.fields) walkFormField(child, type, '', out);
       }
+    }
+  }
+
+  // 3) List column headers (`METADATA_LIST_REGISTRY`). A column is translated
+  //    through the form field slot of the same path, so only a path the
+  //    type's form does not already declare needs its own entry.
+  const formFieldSlots = new Set(
+    out
+      .filter((e) => e.source === 'metadataFormField' && e.path[0] === 'metadataForms' && e.path[2] === 'fields' && e.path[4] === 'label')
+      .map((e) => `${e.path[1]}\u0000${e.path[3]}`),
+  );
+  for (const [type, list] of Object.entries(METADATA_LIST_REGISTRY)) {
+    for (const column of list.columns) {
+      if (formFieldSlots.has(`${type}\u0000${column.field}`)) continue;
+      formFieldSlots.add(`${type}\u0000${column.field}`);
+      pushEntry(out, ['metadataForms', type, 'fields', column.field, 'label'], inlineText(column.label) ?? humanizeFieldPath(column.field), 'metadataFormField', { metadataType: type });
     }
   }
 }

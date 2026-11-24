@@ -68,6 +68,14 @@ interface FilterFieldDef {
   type?: string;
   options?: Array<{ value: string; label: string }>;
   referenceTo?: string;
+  /**
+   * The field's declared `multiple: true`. With the type it decides which
+   * operators the shared builder offers the row (`jsonColumnFilterOperators`):
+   * a list-valued field takes membership and the empty checks, the operators
+   * the server's engine answers on it — it refuses `=` / `$in` there with
+   * `400 INVALID_FILTER`.
+   */
+  multiple?: boolean;
 }
 
 interface BuilderCondition {
@@ -156,6 +164,7 @@ function deriveFilterFields(schema: any): FilterFieldDef[] {
       // schema, i.e. the protocol. Target contract: the local `FilterFieldDef`,
       // which spells it camelCase `referenceTo`.
       referenceTo: f.reference,
+      ...(f.multiple === true ? { multiple: true } : {}),
     });
   }
   return out;

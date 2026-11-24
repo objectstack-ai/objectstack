@@ -70,6 +70,23 @@ const TRANSLATIONS: Record<string, Record<string, string>> = {
   'zh-CN': { [objectLabelKey('mue_contract')]: '合同' },
 };
 
+/**
+ * [#34030] A locale's flat `a.b.c` rows as the nested translation data
+ * `II18nService.getTranslations()` hands over — what a refusal's labels are
+ * read off, as the metadata route reads them; `t()` keeps answering the
+ * sentence overrides.
+ */
+const nestedRows = (flat: Record<string, string> = {}): Record<string, unknown> => {
+  const out: Record<string, any> = {};
+  for (const [key, value] of Object.entries(flat)) {
+    const parts = key.split('.');
+    let cur = out;
+    for (const part of parts.slice(0, -1)) cur = cur[part] ??= {};
+    cur[parts[parts.length - 1]] = value;
+  }
+  return out;
+};
+
 const text = (name: string) => ({ name, type: 'text' });
 const MASTER_READ_OPT_IN = { sharing: { controlledByParent: { writeRequiresMasterRead: true } } };
 const OBJECTS = [
@@ -125,7 +142,11 @@ beforeAll(async () => {
       list: async () => SETS,
     },
     sharing: { canEdit: async () => true },
-    i18n: { t: (key: string, loc: string) => TRANSLATIONS[loc]?.[key] ?? key },
+    i18n: {
+      t: (key: string, loc: string) => TRANSLATIONS[loc]?.[key] ?? key,
+      getLocales: () => Object.keys(TRANSLATIONS),
+      getTranslations: (loc: string) => nestedRows(TRANSLATIONS[loc]),
+    },
   };
   const ctx = {
     logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },

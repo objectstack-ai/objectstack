@@ -21,7 +21,7 @@ import type { ConversionNotice, ConversionTodoNotice } from '../conversions/type
 import type { ExecutionContext } from '../kernel/execution-context.zod';
 import type { JobRunTrigger } from './job-service';
 import type { FlowRegistration } from '../api/protocol.zod';
-import type { FlowInnerRefusal } from '../api/automation-api.zod';
+import type { FlowInnerRefusal, RecordUpdateStart } from '../api/automation-api.zod';
 import type { DroppedFieldsEvent } from '../data/data-engine.zod';
 
 /**
@@ -946,6 +946,34 @@ export interface ResumeSignal {
      * ignored entirely on nodes that declare `'any'`.
      */
     [RESUME_AUTHORITY_SERVICE]?: true;
+}
+
+/**
+ * [#35928] The input of {@link IAutomationService.listRecordUpdateStarts}: one
+ * record of `object` as it stands (`previous`) and as the proposed update
+ * would leave it (`record`, the stored fields with the update's fields
+ * applied). The caller reads the record; the engine reads nothing.
+ *
+ * Of the writer it carries the user id and tenant only. A live save also
+ * binds the writer's positions, request params and expand into the run, so a
+ * start condition reading those is judged here without them, and the preview
+ * can differ from the save in either direction.
+ */
+export interface RecordUpdateStartsInput {
+    /** Machine name of the record's object. */
+    object: string;
+    /** The record as the proposed update would leave it. */
+    record: Record<string, unknown>;
+    /** The record as it stands before the update. */
+    previous: Record<string, unknown>;
+    /**
+     * The user who would write the update — `current_user` in a start
+     * condition, as the record-change trigger forwards the writer on a live
+     * save. Absent, `current_user` is `null`.
+     */
+    userId?: string;
+    /** The writer's active organization, as the trigger forwards it (`current_user.organizationId`). */
+    tenantId?: string;
 }
 
 /**
@@ -2247,6 +2275,29 @@ export interface IAutomationService {
      * @returns One entry per registered flow
      */
     getFlowRuntimeStates?(): FlowRuntimeState[];
+
+    /**
+     * [#35928] Which flows a proposed update of one record would start — the
+     * preview the stage-change confirms show before the reader confirms the
+     * save (ruling record 7073655354).
+     *
+     * A flow is listed when it is enabled, armed on a record-change trigger of
+     * `input.object` whose token binds an update (the spec's
+     * `recordChangeTriggerFiresOnUpdate`, the grammar the trigger binds by),
+     * and its start condition holds for `input.record` against
+     * `input.previous`, evaluated by the ONE start-condition gate a live run
+     * passes. A condition that cannot be evaluated against the record is not
+     * listed; nothing runs and nothing is written. Each entry carries the
+     * flow's name, its authored label and whether it holds an approval node
+     * (ADR-0019); hooks are not flows and are never listed (ADR-0077 §2).
+     *
+     * Who may ask is the caller's question, not this method's: the dispatcher
+     * door reads the record as its caller first.
+     *
+     * Optional: an automation implementation without it leaves the door
+     * answering 501, never a guess.
+     */
+    listRecordUpdateStarts?(input: RecordUpdateStartsInput): RecordUpdateStart[];
 
     /**
      * This engine's verdict on ONE flow name — whether it holds a registration

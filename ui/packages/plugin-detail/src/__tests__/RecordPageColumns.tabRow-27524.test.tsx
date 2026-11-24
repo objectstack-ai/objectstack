@@ -8,9 +8,10 @@
 
 /**
  * objectstack#27524, Targets 8 and 9 — the record page's tab row, through
- * `RecordPageColumns`: 「概览」, then the related panels in the reader's
- * arrangement with their counts, then 动态 last (objectstack#34590), the hidden
- * panels' tabs at the end of the dropdown; and the enlarged state as the active tab — the header and
+ * `RecordPageColumns`: 「概览」, then EVERY related list in the reader's
+ * arrangement with its count (objectstack#35595: an empty one keeps its place,
+ * muted), then 动态 last (objectstack#34590), the hidden lists' tabs at the end
+ * of the dropdown; and the enlarged state as the active tab — the header and
  * the row stay as they are, the full face is drawn below the row, 「概览」
  * returns. The block renderer is stubbed, so what is measured is the page's
  * own composition; the row's width rule is pinned in `RecordTabRow-27524`.
@@ -67,7 +68,7 @@ beforeEach(() => RelatedCountStore._reset());
 afterEach(() => cleanup());
 
 describe('the record page tab row (objectstack#27524, Target 8)', () => {
-  it('sits at the bottom of the header: 概览, the panels in the reader\'s order, then 动态 (objectstack#34590)', () => {
+  it('sits at the bottom of the header: 详情, the panels in the reader\'s order, then 动态 (objectstack#34590)', () => {
     const stored = editRelatedArrangement(DEFAULT, undefined, { kind: 'move', id: 'call.lead_id', to: 0 }, Date.now());
     const { container } = render(
       <RecordPageColumns
@@ -81,7 +82,8 @@ describe('the record page tab row (objectstack#27524, Target 8)', () => {
     // objectstack#34590 supersedes objectstack#27524 Target 8's 动态-second: 「「动态」在最后」
     expect(tabIds()).toEqual(['overview', 'call.lead_id', 'task.lead_id', 'note.parent_id', RECORD_PAGE_TIMELINE_PANEL]);
     expect(activeTab()).toBe('overview');
-    expect(document.querySelector('[data-record-tab="overview"]')?.textContent).toBe('Overview');
+    // objectstack#35890 — the first tab holds only the fields now: 「详情」.
+    expect(document.querySelector('[data-record-tab="overview"]')?.textContent).toBe('Details');
     // After the header nodes, before the page's columns.
     const frame = container.querySelector('[data-page-type="record"] > div')!;
     const children = Array.from(frame.children);
@@ -103,11 +105,12 @@ describe('the record page tab row (objectstack#27524, Target 8)', () => {
     );
     // objectstack#34590 supersedes objectstack#27524 Target 8's 动态-second: 「「动态」在最后」
     expect(tabIds()).toEqual(['overview', 'task.lead_id', 'call.lead_id', RECORD_PAGE_TIMELINE_PANEL]);
-    expect(document.querySelector('[data-record-tab-more]')?.textContent).toBe('+1');
+    // objectstack#35595 — the dropdown is 「更多 N ▾」.
+    expect(document.querySelector('[data-record-tab-more]')?.textContent).toBe('More 1');
   });
 
-  it('each panel tab carries its count — the hidden ones counted too — and 动态 the stream\'s size', async () => {
-    const find = vi.fn(async (objectName: string) => ({ data: [{ id: 'x' }], total: objectName === 'task' ? 2 : objectName === 'note' ? 0 : 5 }));
+  it('each panel tab carries its count — the hidden ones counted too', async () => {
+    const find = vi.fn(async (objectName: string, _query?: Record<string, unknown>) => ({ data: [{ id: 'x' }], total: objectName === 'task' ? 2 : objectName === 'note' ? 0 : 5 }));
     const dataSource = { find, getObjectSchema: vi.fn(async () => ({ fields: {} })) };
     const stored = editRelatedArrangement(DEFAULT, undefined, { kind: 'hide', id: 'call.lead_id' }, Date.now());
     render(
@@ -123,14 +126,18 @@ describe('the record page tab row (objectstack#27524, Target 8)', () => {
       </RecordContextProvider>,
     );
     await waitFor(() => expect(tabCount('task.lead_id')).toBe('2'));
-    // The empty list's tab waits in the dropdown (objectstack#28469), beside the hidden one.
-    expect(tabIds()).not.toContain('note.parent_id');
-    expect(document.querySelector('[data-record-tab-more]')?.textContent).toBe('+2');
-    expect(tabCount(RECORD_PAGE_TIMELINE_PANEL)).toBe('7');
-    // The hidden panel was asked as well: its tab sits in the dropdown with its count.
-    expect(find.mock.calls.map((call) => call[0]).sort()).toEqual(['call', 'note', 'task']);
-    // One count set feeds the tabs and the panels: no relationship is read twice.
-    expect(find).toHaveBeenCalledTimes(3);
+    // objectstack#35595 (superseding objectstack#28469) — the empty list's tab
+    // keeps its place on the row, muted, with no number; only the hidden one
+    // waits in the dropdown.
+    expect(tabIds()).toEqual(['overview', 'task.lead_id', 'note.parent_id', RECORD_PAGE_TIMELINE_PANEL]);
+    expect(tabCount('note.parent_id')).toBeNull();
+    expect(document.querySelector('[data-record-tab="note.parent_id"]')?.hasAttribute('data-record-tab-empty')).toBe(true);
+    expect(document.querySelector('[data-record-tab-more]')?.textContent).toBe('More 1');
+    // The hidden list was counted as well: its tab sits in the dropdown with its count.
+    const counted = find.mock.calls.filter((call) => call[1]?.$count === true);
+    expect(counted.map((call) => call[0]).sort()).toEqual(['call', 'note', 'task']);
+    // One count set feeds the tabs: no relationship is counted twice.
+    expect(counted).toHaveLength(3);
   });
 
   it('a tab opens its panel\'s face; 概览 closes it', () => {
@@ -291,11 +298,11 @@ describe('the enlarged state is the active tab (objectstack#27524, Target 9)', (
     expect(tabCount(RECORD_PAGE_TIMELINE_PANEL)).toBeNull();
   });
 
-  it('the right column switched off names the 动态 count too', async () => {
+  it('with no rail at any width (objectstack#35890), the details face names the 动态 count from the feed the host holds', async () => {
     const items = [{ id: 'c1', type: 'comment', actor: 'Ada', body: 'hi', createdAt: '2026-10-30T10:00:00Z' }];
     const { container } = render(
       <DiscussionContextProvider items={items as never} loading={false}>
-        <RecordPageColumns tier="wide" columns={columnsOf()} rightColumn={false} onEnlargeRelated={vi.fn()} />
+        <RecordPageColumns tier="wide" columns={columnsOf()} onEnlargeRelated={vi.fn()} />
       </DiscussionContextProvider>,
     );
     expect(container.querySelector('[data-record-column="right"]')).toBeNull();

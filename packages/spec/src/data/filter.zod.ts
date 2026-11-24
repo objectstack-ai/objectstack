@@ -3,6 +3,8 @@
 import { z } from 'zod';
 import { closedObject } from '../shared/strict-object';
 import { assertListComparandShapes } from './filter-comparand-shape';
+import { fixedInnerReadOf, fixedReadLeafNameOf, isFixedReadLeaf } from './fixed-read-leaf';
+import { isComposedReadableIds } from './readable-ids';
 // [#19889] The equality-slot refusal's words, shared with the comparand-shape
 // face so the save door and the query door print one sentence (ruling A,
 // record 5805248669: "one constant, two doors").
@@ -2214,16 +2216,28 @@ function checkFilterConditionComparands(
  * 4. Nested relations: { relation: { field: value } } — a condition on the
  *    related record's own fields, beneath a relation field (`lookup`,
  *    `master_detail`, `user`, `tree`; single or multiple). The query engine
- *    SERVES it in `where`, the same on every driver: it reads the related
- *    object with the condition AS THE CALLER — that object's row scope and
- *    field permissions apply, so a condition on a field the caller cannot read
- *    is refused, never answered empty — and matches the relation field against
- *    the ids it returns (`$in` on a single-valued relation; any member, an
- *    `$or` of `$contains` per id, on a multi-valued one). One level: every key
- *    must be a field the related object declares, and a relation condition
- *    beneath it, or a dotted key, is refused. A condition matching more related
- *    records than the engine's cap is refused rather than truncated; filter the
- *    related object yourself then, and match its ids the same way. An
+ *    SERVES it in `where`: it reads the related object with the condition AS
+ *    THE CALLER — that object's row scope and field permissions apply, so a
+ *    condition on a field the caller cannot read is refused, never answered
+ *    empty — and matches the relation field against what that read selects.
+ *    On a read verb (`find`, `findOne`, `count`, `aggregate`) a single-valued
+ *    relation is one subquery inside the read's own statement where that is
+ *    provably the same read; everywhere else (a multi-valued relation,
+ *    `update`, `delete`, or a read the subquery cannot prove) the related ids
+ *    are read and matched (`$in` on a single-valued relation; any member, an
+ *    `$or` of `$contains` per id, on a multi-valued one). The subquery needs a
+ *    driver that declares `DriverCapabilities.readableIdsLeaf` (ADR-0139 D3, as
+ *    amended): on one without it (MongoDB, OData) a single-valued condition
+ *    on a read verb is refused up front (`INVALID_FILTER` / 400). Up to three
+ *    relationships deep (ADR-0071's 3-hop limit, `RELATION_CONDITION_MAX_HOPS`
+ *    in `packages/objectql/src/relation-filter-lowering.ts`): every key must be
+ *    a field the related object declares (or `id`, `created_at`, `updated_at`),
+ *    a relation key may hold a condition of its own, and a condition past the
+ *    third relationship, or a dotted key, is refused (`INVALID_FILTER` / 400).
+ *    Where ids are read, a condition matching more related records than the
+ *    engine's cap (`RELATION_FILTER_ID_CAP`) is refused rather than
+ *    truncated; filter the related object yourself then, and match its ids
+ *    the same way. An
  *    aggregation's own `filter` and `having` do not serve the form. The same
  *    object beneath a JSON-valued field (a whole-value match) and beneath a
  *    scalar field is refused.
@@ -2232,7 +2246,7 @@ export type FilterCondition = {
   [key: string]: 
     | any  // Implicit equality: key: value
     | z.infer<typeof FieldOperatorsSchema>  // Explicit operators: key: { $op: value }
-    | FilterCondition;  // Nested relation: key: { nested: ... } — served by the engine in `where`, one level (form 4 above)
+    | FilterCondition;  // Nested relation: key: { nested: ... } — served by the engine in `where`, up to three relationships deep (form 4 above)
 } & {
   /** Logical AND - combines all conditions that must be true */
   $and?: FilterCondition[];
@@ -2370,7 +2384,7 @@ export const FilterConditionSchema: z.ZodType<FilterCondition, FilterCondition> 
  *       { email: { $contains: "@company.com" } }
  *     ],
  *     account: {                           // Nested relation (form 4): a field
- *       industry: "tech"                   // of the related record, one level
+ *       industry: "tech"                   // of the related record (up to 3 hops)
  *     }
  *   }
  * }
@@ -2461,7 +2475,7 @@ export type Filter<T = any> = {
         $null?: boolean;
         $exists?: boolean;
       }
-    | (T[K] extends object ? Filter<T[K]> : never);  // Nested relation — typed at any depth here; the engine serves one level, in `where` (see FilterCondition)
+    | (T[K] extends object ? Filter<T[K]> : never);  // Nested relation — typed at any depth here; the engine serves up to three relationships, in `where` (see FilterCondition)
 } & {
   $and?: Filter<T>[];
   $or?: Filter<T>[];
@@ -3009,7 +3023,8 @@ function convertComparison(node: [string, string, unknown]): FilterCondition {
  * [#9228] Whatever this function returns has first passed
  * {@link assertListComparandShapes}: `$in` / `$nin` carry an ARRAY and
  * `$between` a `[min, max]` pair, or the call is refused with the
- * `INVALID_FILTER` / 400 envelope. That gate used to run only at the engine's
+ * `INVALID_FILTER` / 400 envelope (for a condition carrying a fixed-read leaf,
+ * `INTERNAL_ERROR` / 500 instead: the exception at the end of this section). That gate used to run only at the engine's
  * lowering seam, so a caller that lowered a filter here and handed it straight
  * to a driver (`InMemoryDriver.find()` — an embedder, and this repo's own
  * driver conformance suites) met nothing: the shape was carried by mingo's
@@ -3028,6 +3043,10 @@ function convertComparison(node: [string, string, unknown]): FilterCondition {
  * The object form used to pass through this function UNEXAMINED, which is how
  * five drivers came to answer an unsupported comparand type five ways
  * (#7956's divergence matrix); the door module's header carries the ruling.
+ *
+ * [ADR-0155 D4] The one exception to both doors' envelope: when either refuses
+ * a condition that carries a fixed-read leaf, the refusal is `INTERNAL_ERROR` /
+ * 500, naming the leaf and not its inputs ({@link refuseFixedReadLeafAtParse}).
  *
  * @example
  * // Simple condition
@@ -3052,8 +3071,69 @@ export function parseFilterAST(filter: unknown, context?: string): FilterConditi
   // through rather than minted here so the engine's array branch keeps the
   // exact message it has pinned since #6209, now that the shape gate refuses
   // one step earlier than the engine's own call to it.
-  assertListComparandShapes(lowered, context);
-  return normalizeFilterComparandTypes(lowered, context);
+  try {
+    assertListComparandShapes(lowered, context);
+    return normalizeFilterComparandTypes(lowered, context);
+  } catch (refused) {
+    // [ADR-0155 D4, plan step 5] A condition carrying a fixed-read leaf is
+    // refused in D4's envelope instead, whichever door refused it; see
+    // {@link refuseFixedReadLeafAtParse}.
+    refuseFixedReadLeafAtParse(lowered, context);
+    throw refused;
+  }
+}
+
+/**
+ * [ADR-0155 D4, plan step 5: the array-form `in` / `nin` decision] When either
+ * door of {@link parseFilterAST} refuses what it lowered and the condition
+ * carries a fixed-read leaf (`SharedRecordIds`), the refusal is ADR-0139 D3's
+ * envelope, `INTERNAL_ERROR` / 500, naming the first leaf, ⛔ not the door's
+ * `INVALID_FILTER` / 400. The shape door refuses the leaf as an array-form
+ * `in` / `nin` comparand (a non-list); the type door refuses it as a list
+ * member, or as a scalar operator's comparand (`!=`, `>` and the rest), where
+ * it reads as a plain object.
+ *
+ * No request can spell the leaf (its brand is a symbol no JSON carries) and its
+ * one producer places it in the object form at the engine's seam, never in the
+ * array form this function lowers, so a leaf here is the in-process code that
+ * wrote it: D4's reason for the envelope. The 400 was also the wrong answer to
+ * relay: a 4xx message reaches the caller, and both doors' messages printed
+ * the leaf's inputs, a principal's id among them. This message names the leaf
+ * by its name and table only. A leaf neither door refuses (an array-form `=`)
+ * is lowered by reference and refused at the engine's seam, as before.
+ */
+function refuseFixedReadLeafAtParse(condition: unknown, context: string | undefined): void {
+  const onPath = new Set<object>();
+  const find = (value: unknown, at: string): { at: string; leaf: unknown } | null => {
+    if (isFixedReadLeaf(value)) return { at, leaf: value };
+    if (isComposedReadableIds(value)) return find(value.scope, `${at}.scope`);
+    if (value === null || typeof value !== 'object' || onPath.has(value)) return null;
+    onPath.add(value);
+    try {
+      const entries: [string, unknown][] = Array.isArray(value)
+        ? value.map((item, i) => [`${at}[${i}]`, item])
+        : Object.keys(value).map((key) => [`${at}.${key}`, (value as Record<string, unknown>)[key]]);
+      for (const [path, item] of entries) {
+        const found = find(item, path);
+        if (found) return found;
+      }
+      return null;
+    } finally {
+      onPath.delete(value);
+    }
+  };
+  const found = find(condition, 'where');
+  if (found === null || !isFixedReadLeaf(found.leaf)) return;
+  const err = new Error(
+    `${context ? `${context}: ` : ''}${found.at} holds a ${fixedReadLeafNameOf(found.leaf)} leaf, a fixed read of ` +
+      `'${fixedInnerReadOf(found.leaf).table}', in a condition parseFilterAST refuses: only the engine's seam places ` +
+      'such a leaf, in the object form { id: { $in: leaf } } (ADR-0155 D1, D4). Refused rather than read as a ' +
+      'comparand; write the leaf into the object-form where the engine is handed.',
+  ) as Error & { code: 'INTERNAL_ERROR'; status: 500; httpStatus: 500 };
+  err.code = 'INTERNAL_ERROR';
+  err.status = 500;
+  err.httpStatus = 500;
+  throw err;
 }
 
 /**

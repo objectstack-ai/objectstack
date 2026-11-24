@@ -815,9 +815,13 @@ describe('the four refusals (409, ADR-0148 D2): nothing is written and the entry
 describe('RESTORE_UNIQUE_VALUE_TAKEN names an organization-scoped unique field and its label', () => {
   const INVOICE = { id: 'inv1', invoice_no: 'INV-0001', series: 'A', organization_id: 'org_1' };
   const ZH: Record<string, string> = { 'objects.invoice.fields.invoice_no.label': '发票号' };
+  // [#34030] The label is read off `getTranslations`, as the metadata route reads it.
   const i18n = {
     t: (key: string, locale: string) => (locale === 'zh-CN' && ZH[key]) || key,
     getLocales: () => ['en', 'zh-CN'],
+    getTranslations: (locale: string) => (locale === 'zh-CN'
+      ? { objects: { invoice: { fields: { invoice_no: { label: '发票号' } } } } }
+      : {}),
   };
 
   async function deleteInvoice(engine: ObjectQL, driver: any) {

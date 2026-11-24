@@ -1,4 +1,7 @@
 import type { Field as SpecField } from '@objectstack/spec/data';
+import { recordCurrencyField, recordCurrencyPath, resolveFieldCurrency, type FieldCurrencyConfig } from '@object-ui/i18n';
+import { formatCurrency } from './number-format.js';
+import { withFollowedParentObject } from '../currency.js';
 
 /**
  * One declared `{ target, source, overwrite? }` pair of `@objectstack/spec`'s
@@ -40,22 +43,90 @@ function sameValue(a: unknown, b: unknown): boolean {
  *
  * A `source` the picked record does not carry (a field the reader may not
  * read is not served) writes nothing: a missing key is not a value.
+ *
+ * The cross-currency rule (`crossCurrencyRefusal`, read through `currency`):
+ * an amount the pick would write into an amount in another currency is not
+ * written; it is returned under `withheld`, so the host can say why the
+ * target stayed as it was. Without `currency` every value copies as before.
+ * Each amount is judged against the record with this pick's own writes
+ * applied (`currency.targetCurrency`'s `writes`), so a pick that fills a code
+ * field and an amount in that code together copies both.
  */
+export function planDeclaredLookupAutofill(
+  pairs: readonly LookupAutofillPair[] | undefined,
+  picked: Values | null | undefined,
+  current: Values | null | undefined,
+  previous?: Values | null,
+  currency?: AutofillCurrencyContext,
+): LookupAutofillPlan {
+  return judgePickWrites(declaredPickWrites(pairs, picked, current, previous), currency);
+}
+
+/**
+ * The values the declared pairs would write on one pick, under the overwrite
+ * rule ({@link planDeclaredLookupAutofill}), before the cross-currency rule
+ * judges them.
+ */
+export function declaredPickWrites(
+  pairs: readonly LookupAutofillPair[] | undefined,
+  picked: Values | null | undefined,
+  current: Values | null | undefined,
+  previous?: Values | null,
+): PickWrite[] {
+  const out: PickWrite[] = [];
+  if (!pairs?.length || !picked || typeof picked !== 'object') return out;
+  for (const { target, source, overwrite } of pairs) {
+    if (!(source in picked) || picked[source] === undefined) continue;
+    const held = current?.[target];
+    const filledByEarlierPick = !!previous && source in previous && sameValue(held, previous[source]);
+    if (!(overwrite === true || isEmptyValue(held) || filledByEarlierPick)) continue;
+    out.push({ target, source, value: picked[source], held });
+  }
+  return out;
+}
+
+/**
+ * One value a pick would write: `value` from `source` into `target`, which
+ * held `held` at the pick.
+ */
+export interface PickWrite {
+  readonly target: string;
+  readonly source: string;
+  readonly value: unknown;
+  readonly held?: unknown;
+}
+
+/**
+ * The cross-currency judgement of every value one pick would write. Each is
+ * judged against the record with all of this pick's writes applied (the
+ * `writes` `currency.targetCurrency` is handed), so the code a pick writes
+ * beside an amount is the code that amount is judged in. Without `currency`
+ * every value is written.
+ */
+export function judgePickWrites(
+  candidates: readonly PickWrite[],
+  currency: AutofillCurrencyContext | undefined,
+): LookupAutofillPlan {
+  const plan: LookupAutofillPlan = { patch: {}, withheld: [] };
+  const writes: Values = {};
+  for (const c of candidates) writes[c.target] = c.value;
+  for (const c of candidates) {
+    const refused = judgeCopy(currency, c, writes);
+    if (refused) plan.withheld.push(refused);
+    else plan.patch[c.target] = c.value;
+  }
+  return plan;
+}
+
+/** {@link planDeclaredLookupAutofill}'s writes alone. */
 export function declaredLookupAutofillPatch(
   pairs: readonly LookupAutofillPair[] | undefined,
   picked: Values | null | undefined,
   current: Values | null | undefined,
   previous?: Values | null,
+  currency?: AutofillCurrencyContext,
 ): Values {
-  const patch: Values = {};
-  if (!pairs?.length || !picked || typeof picked !== 'object') return patch;
-  for (const { target, source, overwrite } of pairs) {
-    if (!(source in picked) || picked[source] === undefined) continue;
-    const held = current?.[target];
-    const filledByEarlierPick = !!previous && source in previous && sameValue(held, previous[source]);
-    if (overwrite === true || isEmptyValue(held) || filledByEarlierPick) patch[target] = picked[source];
-  }
-  return patch;
+  return planDeclaredLookupAutofill(pairs, picked, current, previous, currency).patch;
 }
 
 /**
@@ -74,4 +145,270 @@ export function lookupAutofillByField(fields: Record<string, unknown> | undefine
     }
   }
   return out;
+}
+
+/**
+ * The currency one amount of a pick is in, for the cross-currency rule a pick
+ * follows (the maintainer's ruling on objectstack-ai/objectstack#36249: when
+ * the two currencies differ, the value is not copied and the form says why).
+ *
+ * - `home`: the amount declares no currency of its own (no `currencyConfig`,
+ *   or `dynamic`), so it is in the organization's home currency (ADR-0144 D2);
+ * - `code`: the amount is in a known ISO 4217 code, a `fixed` code or the
+ *   code its record holds (`record` mode, the parent's code included);
+ * - `unset`: a `record`-mode amount whose record holds no code yet;
+ * - `unknown`: a picked value whose field definition this host does not hold
+ *   (the referenced object's schema did not load), so its currency cannot be
+ *   named. It is copied only into an amount in the home currency;
+ * - `unread`: an amount that follows the code of a parent the record names,
+ *   whose code this host could not read (the read failed, or cannot run), so
+ *   nothing can be judged against it.
+ */
+export type AmountCurrency =
+  | { readonly kind: 'home' }
+  | { readonly kind: 'code'; readonly code: string }
+  | { readonly kind: 'unset' }
+  | { readonly kind: 'unknown' }
+  | { readonly kind: 'unread' };
+
+const HOME: AmountCurrency = Object.freeze({ kind: 'home' });
+const UNSET: AmountCurrency = Object.freeze({ kind: 'unset' });
+const UNKNOWN: AmountCurrency = Object.freeze({ kind: 'unknown' });
+
+interface MoneyDef {
+  type?: unknown;
+  returnType?: unknown;
+  currencyConfig?: FieldCurrencyConfig;
+}
+
+/** Is `def` an amount of money: a `currency` field, or a `formula` returning one. */
+function isMoneyDef(def: MoneyDef | null | undefined): def is MoneyDef {
+  if (!def || typeof def !== 'object') return false;
+  return def.type === 'currency' || (def.type === 'formula' && def.returnType === 'currency');
+}
+
+/**
+ * The currency of the amount `def` declares, read on `record` (the row the
+ * amount sits in), or `undefined` when `def` is no amount of money: a
+ * `number` carries no currency and copies as before.
+ *
+ * Read through `resolveFieldCurrency`, the one resolver every currency face
+ * shares, handed no tenant default: a field it answers no code for declares
+ * none of its own, so it is in the home currency.
+ */
+export function amountCurrencyOf(
+  def: MoneyDef | null | undefined,
+  record?: Readonly<Record<string, unknown>> | null,
+  writes?: Readonly<Record<string, unknown>> | null,
+): AmountCurrency | undefined {
+  if (!isMoneyDef(def)) return undefined;
+  const code = resolveFieldCurrency(def, undefined, withCodeWrite(def, record, writes));
+  if (code) return { kind: 'code', code };
+  return def.currencyConfig?.currencyMode === 'record' ? UNSET : HOME;
+}
+
+/**
+ * `record` with the write `writes` makes to `def`'s own code field applied: a
+ * pick that fills the code beside the amount puts the amount in that code. A
+ * parent's code is not the record's to write, so a parent path reads `record`
+ * as it stands.
+ */
+function withCodeWrite(
+  def: MoneyDef,
+  record: Readonly<Record<string, unknown>> | null | undefined,
+  writes: Readonly<Record<string, unknown>> | null | undefined,
+): Readonly<Record<string, unknown>> | null {
+  const codeField = recordCurrencyField(def);
+  if (!writes || !codeField || recordCurrencyPath(def) || !Object.prototype.hasOwnProperty.call(writes, codeField)) {
+    return record ?? null;
+  }
+  return { ...(record ?? {}), [codeField]: writes[codeField] };
+}
+
+/**
+ * The currency of a picked value whose field definition may be missing: the
+ * field's own answer when `def` is known, else `unknown` for a number (it may
+ * be an amount) and `undefined` for anything else.
+ */
+export function pickedAmountCurrencyOf(
+  def: MoneyDef | null | undefined,
+  value: unknown,
+  picked: Readonly<Record<string, unknown>> | null | undefined,
+): AmountCurrency | undefined {
+  if (def && typeof def === 'object') return amountCurrencyOf(def, picked);
+  return typeof value === 'number' ? UNKNOWN : undefined;
+}
+
+/** The code `c` names, the home currency read as `home` when one is configured. */
+function codeOf(c: AmountCurrency, home: string | undefined): string | undefined {
+  if (c.kind === 'code') return c.code;
+  if (c.kind === 'home') return home || undefined;
+  return undefined;
+}
+
+/**
+ * Why a pick did not copy one value: the picked `amount` and the two
+ * currencies, so the form can say so and a person can price it by hand.
+ *
+ * - `differs`: both currencies are known and differ (`from` → `to`);
+ * - `noTargetCurrency`: the amount being filled follows a record that holds
+ *   no currency yet;
+ * - `noSourceCurrency`: the picked amount's currency cannot be named, while
+ *   the amount being filled is in `to`;
+ * - `targetCurrencyUnread`: the amount being filled follows a parent whose
+ *   code could not be read.
+ *
+ * `held` is the value the target held at the pick when it held one (a re-pick
+ * over a filled target): the target keeps it, and the note says so.
+ */
+export interface WithheldAutofill {
+  readonly target: string;
+  readonly source: string;
+  readonly amount: number;
+  readonly reason: 'differs' | 'noTargetCurrency' | 'noSourceCurrency' | 'targetCurrencyUnread';
+  readonly from?: string;
+  readonly to?: string;
+  readonly held?: unknown;
+}
+
+/**
+ * The cross-currency rule of a pick, as one predicate: `undefined` when the
+ * value copies, else why it does not.
+ *
+ * A value copies as before when either side is no amount of money, and when
+ * both amounts are in the home currency (an organization with no home
+ * currency configured included). Otherwise it copies only when both sides
+ * name the same known code: the home currency counts as its configured code.
+ * Nothing is converted, and nothing is copied at an implied rate of 1.
+ */
+export function crossCurrencyRefusal(
+  source: AmountCurrency | undefined,
+  target: AmountCurrency | undefined,
+  home: string | undefined,
+): Pick<WithheldAutofill, 'reason' | 'from' | 'to'> | undefined {
+  if (!source || !target) return undefined;
+  if (target.kind === 'home' && (source.kind === 'home' || source.kind === 'unknown')) return undefined;
+  const from = codeOf(source, home);
+  const to = codeOf(target, home);
+  if (from && to && from === to) return undefined;
+  if (target.kind === 'unread') return { reason: 'targetCurrencyUnread', ...(from ? { from } : {}) };
+  if (target.kind === 'unset') return { reason: 'noTargetCurrency', ...(from ? { from } : {}) };
+  if (!from) return { reason: 'noSourceCurrency', ...(to ? { to } : {}) };
+  if (!to) return { reason: 'noTargetCurrency', from };
+  return { reason: 'differs', from, to };
+}
+
+/**
+ * What a host knows about the currencies of one pick: the currency of each
+ * value the picked record offers (`sourceCurrency`, by source field name, read
+ * on the picked record) and of each field of the record being edited
+ * (`targetCurrency`, by target name), plus the organization's home currency.
+ * A host that knows neither side passes no context, and every value copies as
+ * before. `targetCurrency` is handed this pick's own writes, by target name: a
+ * target whose code field the pick writes is in that code
+ * (`amountCurrencyOf`'s `writes`).
+ */
+export interface AutofillCurrencyContext {
+  sourceCurrency: (source: string, value: unknown) => AmountCurrency | undefined;
+  targetCurrency: (target: string, writes?: Readonly<Values>) => AmountCurrency | undefined;
+  home: string | undefined;
+}
+
+/** The writes and the withheld values of one pick. */
+export interface LookupAutofillPlan {
+  patch: Values;
+  withheld: WithheldAutofill[];
+}
+
+/** `write` judged against the record with this pick's `writes` applied, or the reason it is not copied. */
+function judgeCopy(
+  ctx: AutofillCurrencyContext | undefined,
+  { target, source, value, held }: PickWrite,
+  writes: Readonly<Values>,
+): WithheldAutofill | undefined {
+  if (!ctx) return undefined;
+  const refusal = crossCurrencyRefusal(ctx.sourceCurrency(source, value), ctx.targetCurrency(target, writes), ctx.home);
+  if (!refusal) return undefined;
+  const amount = typeof value === 'number' ? value : Number(value);
+  return { target, source, amount, ...refusal, ...(isEmptyValue(held) ? {} : { held }) };
+}
+
+/**
+ * Whether the note about `item` still stands over `current`, the value its
+ * target holds now: the target still holds what it held at the pick (empty,
+ * or the earlier value a re-pick left in place). Once somebody writes the
+ * target, the note has said what it had to say.
+ */
+export function withheldStillStands(item: WithheldAutofill, current: unknown): boolean {
+  return item.held === undefined ? isEmptyValue(current) : sameValue(current, item.held);
+}
+
+/** The translation call a widget holds (`useFieldTranslation().t`). */
+type Translate = (key: string, options?: Record<string, unknown>) => string;
+
+/**
+ * The sentence that says why a pick left `item.target` empty, naming both
+ * currencies and the picked amount in its own currency, so a person can
+ * price it by hand. `label` is the target's label. A target that kept the
+ * value it held at the pick (`held`) is said to keep it.
+ */
+export function withheldAutofillMessage(
+  item: WithheldAutofill,
+  label: string,
+  t: Translate,
+  locale: string | undefined,
+): string {
+  const amount = Number.isFinite(item.amount) ? formatCurrency(item.amount, item.from, locale) : String(item.amount);
+  const why =
+    item.reason === 'differs'
+      ? t('lookup.autofillCurrencyDiffers', { field: label, amount, from: item.from, to: item.to })
+      : item.reason === 'noSourceCurrency'
+        ? t('lookup.autofillSourceNoCurrency', { field: label, amount, to: item.to })
+        : item.reason === 'targetCurrencyUnread'
+          ? t('lookup.autofillCurrencyUnread', { field: label, amount })
+          : t('lookup.autofillNoCurrency', { field: label, amount });
+  return item.held === undefined ? why : `${why} ${t('lookup.autofillKept', { field: label })}`;
+}
+
+/**
+ * The key a record form stamps the definitions of a lookup's `lookupAutofill`
+ * targets under, on the lookup's own field metadata: the widget receives one
+ * field, not the object, and a target's currency is its definition's. The
+ * same hand-off shape as `FOLLOWED_PARENT_OBJECT_KEY` (`currency.ts`).
+ */
+export const LOOKUP_AUTOFILL_TARGETS_KEY = 'lookupAutofillTargets';
+
+/**
+ * `def` with the definitions of its `lookupAutofill` targets stamped, read
+ * off `fields` (the edited object's field map), each carrying the parent
+ * object it follows when its currency follows a parent (ADR-0144 D2 as
+ * amended). `labels` names each field as the form shows it (translated);
+ * a target the form draws carries that name as its `label`, so a note about
+ * it names the field the way the form does. `def` itself when it declares no
+ * pairs or `fields` names none of its targets.
+ */
+export function withLookupAutofillTargets<T extends object>(
+  def: T,
+  fields: Readonly<Record<string, unknown>> | null | undefined,
+  labels?: Readonly<Record<string, string>>,
+): T {
+  const pairs = (def as { lookupAutofill?: unknown }).lookupAutofill;
+  if (!Array.isArray(pairs) || pairs.length === 0 || !fields) return def;
+  const targets: Record<string, object> = {};
+  for (const pair of pairs as LookupAutofillPair[]) {
+    const target = fields[pair?.target];
+    if (!target || typeof target !== 'object') continue;
+    const stamped = withFollowedParentObject(target, fields);
+    const shown = labels?.[pair.target];
+    targets[pair.target] = typeof shown === 'string' && shown !== '' ? { ...stamped, label: shown } : stamped;
+  }
+  return Object.keys(targets).length > 0 ? { ...def, [LOOKUP_AUTOFILL_TARGETS_KEY]: targets } : def;
+}
+
+/** The target definitions a form stamped on `field`, or `undefined`. */
+export function readLookupAutofillTargets(field: unknown): Readonly<Record<string, Record<string, unknown>>> | undefined {
+  const value = (field as Record<string, unknown> | null | undefined)?.[LOOKUP_AUTOFILL_TARGETS_KEY];
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, Record<string, unknown>>)
+    : undefined;
 }

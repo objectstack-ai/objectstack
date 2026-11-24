@@ -11,7 +11,8 @@ import { enumWithRetiredValues } from '../shared/retired-key';
 import { strictObject } from '../shared/strict-object';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { LocaleSchema } from '../system/translation.zod';
-import { findClosestMatches, formatSuggestion } from '../shared/suggestions.zod';
+import { formatSuggestion } from '../shared/suggestions.zod';
+import { suggestRename } from '../shared/rename-guess';
 import { resolveInjectedSystemColumns, type InjectedSystemColumnName } from './injected-system-columns';
 import { ColumnApplyOnSchema } from './column-apply-on.zod';
 import { dependentRequired } from '../shared/refinement-projection';
@@ -613,9 +614,11 @@ function assertSeedKeysDeclared(
     if (knownSet.has(key)) return;
     unknownKeys.add(key);
     surfaces.add(surface);
-    const suggestion = formatSuggestion(
-      findClosestMatches(key, known, Math.max(2, Math.floor(key.length / 3)), 1),
-    );
+    // The package's one rename rule (`shared/rename-guess.ts`), so a short
+    // key is not offered an unrelated field: `nmae` is one swap from `name` and
+    // is still offered it, `amt` is two unrelated edits from `name` and is not.
+    const guess = suggestRename(key, known);
+    const suggestion = formatSuggestion(guess === undefined ? [] : [guess]);
     lines.push(
       `  • ${where}: \`${key}\` is not a field of \`${objectDef.name}\`.`
       + (suggestion ? ` ${suggestion}` : ''),

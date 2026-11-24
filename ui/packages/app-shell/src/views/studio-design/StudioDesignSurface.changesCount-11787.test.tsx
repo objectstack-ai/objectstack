@@ -10,8 +10,9 @@
  * the save lands the header says so, and the read the save asks for is sent
  * after it rather than joined to one already on the wire.
  *
- * Driven through a save every author reaches: the Access pillar's
- * "New permission set", whose dialog also carries Studio's one create label.
+ * Driven through a create that still writes a draft: Create app in the Studio
+ * header. objectstack#36511 — a permission set is created live now, so it
+ * leaves no draft for this count to follow.
  *
  * Real: the surface, its pillar, `useMetadataClient` and the client it builds,
  * and `usePendingDrafts`. Stubbed: `globalThis.fetch` (the server; every
@@ -130,14 +131,12 @@ async function drain() {
   for (let i = 0; i < 5; i++) await new Promise((r) => setTimeout(r, 0));
 }
 
-async function createSetThroughTheDialog() {
-  // The rail's "+" (the empty block's button shares its name since objectui#12514).
-  fireEvent.click(await screen.findByTestId('studio-rail-add'));
+async function createAppThroughTheDialog() {
+  const toolbar = await screen.findByTestId('studio-shell-header');
+  fireEvent.click(await within(toolbar).findByRole('button', { name: t('engine.studio.app.create', 'en') }));
   const dialog = await screen.findByRole('dialog');
-  fireEvent.change(within(dialog).getByPlaceholderText(t('engine.studio.access.labelPlaceholder', 'en')), {
-    target: { value: 'Set C' },
-  });
-  // Studio's one create label (objectui#11787): every create dialog writes a draft.
+  fireEvent.change(dialog.querySelectorAll('input')[0], { target: { value: 'Field Desk' } });
+  // A draft-writing create says so (objectui#11787).
   fireEvent.click(within(dialog).getByRole('button', { name: t('engine.studio.createDraft', 'en') }));
 }
 
@@ -156,7 +155,7 @@ describe('the Changes count after a draft save (objectui#11787)', () => {
     const beforeSave = draftReads.length;
 
     await act(async () => {
-      await createSetThroughTheDialog();
+      await createAppThroughTheDialog();
     });
     await waitFor(() => expect(draftSaves).toHaveLength(1));
     await act(drain);
@@ -179,7 +178,7 @@ describe('the Changes count after a draft save (objectui#11787)', () => {
     // The read sent after the save answers with the server's count.
     await act(async () => {
       draftReads[beforeSave].respond([
-        { type: 'permission', name: 'set_c', packageId: PACKAGE_ID },
+        { type: 'app', name: 'a_field_desk', packageId: PACKAGE_ID },
         { type: 'object', name: 'a_account', packageId: PACKAGE_ID },
       ]);
       await drain();

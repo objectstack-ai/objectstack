@@ -9,11 +9,14 @@
 /**
  * Data pillar — object Settings view (builder-ui Phase B).
  *
- * Two stacked cards:
+ * Stacked cards, the business ones first and the developer options last
+ * (objectstack#36512). Every setting's title speaks the author's language;
+ * the metadata key it writes stays off the panel at rest and is the title's
+ * hover text (objectstack#36746, superseding #36512's small print beside it).
  *  1. Basics — hosts the SAME default inspector metadata-admin uses
- *     (`getMetadataDefaultInspector('object')` → ObjectDefaultInspector):
- *     label / pluralLabel / icon / description, one implementation for both
- *     surfaces.
+ *     (`getMetadataDefaultInspector('object')` → ObjectDefaultInspector), in
+ *     its business half: label / pluralLabel / icon / description, one
+ *     implementation for both surfaces.
  *  2. Record sharing (ADR-0056) — the object-level Org-Wide Default (OWD)
  *     `sharingModel` (private | public_read | public_read_write |
  *     controlled_by_parent). This is the baseline record-level visibility the
@@ -27,24 +30,31 @@
  *     first (`7a90afdf9`).
  *  3. Semantic roles (ADR-0085) — the cross-surface presentation roles:
  *     `nameField`, `stageField` (string | false | unset), `highlightFields`
- *     (an ordered list with a strip preview — `HighlightFieldsEditor`), and
+ *     (an ordered list — `HighlightFieldsEditor`), and
  *     `relatedLists` (objectstack#27069), the business order of the record
  *     page's related lists, over the object's inbound relationships
  *     (`RelatedListsEditor`).
  *     These are the ONLY presentation knobs the protocol carries, so the
  *     builder must make them directly editable — otherwise designers fall
- *     back to guessing which heuristic picked their title/stepper/columns.
+ *     back to guessing which heuristic picked their title/stage/columns.
  *  4. Capabilities (framework#2707/#2727) — the `enable.*` record-surface
  *     switches. Only LIVE flags are exposed (every toggle is enforced at
  *     runtime — writer gates, 403s, or UI surfaces): trackHistory & files
  *     are opt-IN (spec default false), feeds/activities/clone are opt-OUT
- *     (spec default true, explicit false disables). `trash`/`mru` were
+ *     (spec default true, explicit false disables). fieldHistory
+ *     (objectstack#36290) has NO default: unset shows values, so its switch
+ *     writes `false` to turn them off and REMOVES the key to turn them back
+ *     on — never a `true` the author did not need. `trash`/`mru` were
  *     REMOVED from the spec (framework#2377 — ObjectCapabilities is now
  *     .strict(), authoring them is a parse error).
+ *  5. Developer options — the same inspector's developer half: the internal
+ *     name (read-only once created), the access posture and the required
+ *     permissions. Expanded, with no switch: nothing here is hidden. Drawn only
+ *     when an object inspector is registered; Basics names the missing one.
  */
 
 import React from 'react';
-import { Settings2, ShieldCheck, Sparkles, ToggleRight } from 'lucide-react';
+import { Code2, Settings2, ShieldCheck, Sparkles, ToggleRight } from 'lucide-react';
 import {
   Select,
   SelectContent,
@@ -54,8 +64,8 @@ import {
 } from '@object-ui/components';
 import { useRegisteredMetadataDefaultInspector } from '../metadata-admin/default-inspector-registry.js';
 import { readFields, type FieldEntry } from '../metadata-admin/previews/object-fields-io.js';
-import { t, type SupportedLocale } from '../metadata-admin/i18n.js';
-import { cbpMasterRefusal, requireCbpMasterDetails } from './owd-sharing.js';
+import { t, tFormat, type SupportedLocale } from '../metadata-admin/i18n.js';
+import { CBP_REFUSAL_KEYS, cbpMasterRefusal, requireCbpMasterDetails, type CbpMasterRefusal } from './owd-sharing.js';
 import { HighlightFieldsEditor } from './HighlightFieldsEditor.js';
 import { RelatedListsEditor } from './RelatedListsEditor.js';
 
@@ -88,19 +98,25 @@ const OUTSIDE_OPTIONS = 'outside';
  *   still has none.
  */
 function SettingsPicker({
+  id,
   value,
   options,
   onPick,
   disabled,
   className,
   testId,
+  ariaLabel,
 }: {
+  /** The trigger's id, for a `<label htmlFor>` that names it. */
+  id?: string;
   value: string;
   options: ReadonlyArray<{ value: string; label: string }>;
   onPick: (value: string) => void;
   disabled?: boolean;
   className: string;
   testId: string;
+  /** The trigger's accessible name, when nothing around it gives one. */
+  ariaLabel?: string;
 }) {
   const at = options.findIndex((o) => o.value === value);
   return (
@@ -113,7 +129,7 @@ function SettingsPicker({
       }}
       disabled={disabled}
     >
-      <SelectTrigger data-testid={testId} className={className}>
+      <SelectTrigger id={id} data-testid={testId} className={className} aria-label={ariaLabel}>
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
@@ -133,6 +149,57 @@ const PICKER_FULL = 'h-7 px-2 py-1 text-[12px]';
 
 /** The classes the inline "add field" picker takes, sized to its label as the native control was. */
 const PICKER_INLINE = 'h-6 w-auto gap-1 px-1.5 py-0.5 text-[11px] text-muted-foreground';
+
+/**
+ * The metadata key a setting writes — the developer's handle on it (what code
+ * and the API spell) — as the hover text of the setting's title, after the
+ * object picker's `nameOnHover` (objectstack#36746). At rest the panel shows
+ * the author's words only. The hover text rides on a wrapper, not on the
+ * `<label>`, so the control's accessible name stays the title alone.
+ */
+function SettingKeyHover({ settingKey, className, children }: { settingKey: string; className?: string; children: React.ReactNode }) {
+  return (
+    <span title={settingKey} data-setting-key={settingKey} className={className ?? 'block w-fit'}>
+      {children}
+    </span>
+  );
+}
+
+/** A setting's title (its control's label when `htmlFor` is given), its key on hover. */
+function SettingHeading({ title, settingKey, htmlFor }: { title: string; settingKey: string; htmlFor?: string }) {
+  return (
+    <SettingKeyHover settingKey={settingKey} className="mb-1 block w-fit">
+      {htmlFor ? (
+        <label htmlFor={htmlFor} className="text-[11px] text-muted-foreground">{title}</label>
+      ) : (
+        <span className="text-[11px] text-muted-foreground">{title}</span>
+      )}
+    </SettingKeyHover>
+  );
+}
+
+/**
+ * The controlled-by-parent refusal in the author's words: the row its shape
+ * selects ({@link CBP_REFUSAL_KEYS}), naming each field by its label (its name
+ * when it has none). With no shape on the spec's issue, the spec's own message.
+ */
+function cbpRefusalText(refusal: CbpMasterRefusal, locale: SupportedLocale | string | undefined): string {
+  if (!refusal.shape) return refusal.message;
+  const names = refusal.fields.map((e) =>
+    tFormat('engine.studio.settings.cbpRefusalField', locale, {
+      name: typeof e.def.label === 'string' && e.def.label ? e.def.label : e.name,
+    }),
+  );
+  // The en row for one required lookup speaks of one field; several take their own row.
+  const key =
+    refusal.shape === 'required-lookup-only' && names.length > 1
+      ? 'engine.studio.settings.cbpRefusalRequiredLookupsOnly'
+      : CBP_REFUSAL_KEYS[refusal.shape];
+  return tFormat(key, locale, {
+    fields: names.join(t('engine.studio.settings.cbpRefusalFieldSeparator', locale)),
+    field: names[0] ?? '',
+  });
+}
 
 /** A field as a picker option: its label and name, or its name alone. */
 function fieldOption(e: FieldEntry): { value: string; label: string } {
@@ -171,6 +238,8 @@ export function ObjectSettingsPanel({
   // Observed (objectui#11939): an object inspector registered after this panel
   // mounted replaces the "not registered" note below without a remount.
   const DefaultInspector = useRegisteredMetadataDefaultInspector('object');
+  const idBase = React.useId();
+  const controlId = (key: string) => `${idBase}-${key}`;
 
   const fields = React.useMemo(() => readFields(draft.fields).entries, [draft.fields]);
   const selectFields = fields.filter((e) => (e.def.type ?? 'text') === 'select');
@@ -226,22 +295,35 @@ export function ObjectSettingsPanel({
   };
   // The spec's own refusal when the object still does not derive exactly one
   // master: no `master_detail` at all, or two or more (the designer never picks
-  // one of them for the author).
+  // one of them for the author). Shown in business wording chosen by the
+  // refusal's code and shape, in the tab's language.
   const objectName = draft.name ?? name;
-  const cbpRefusal = React.useMemo(
+  // Only the verdict is memoised: the text is drawn on every render, as every
+  // other string here is, so a catalogue that lands later re-words it.
+  const cbpVerdict = React.useMemo(
     () => (sharingModel === 'controlled_by_parent' ? cbpMasterRefusal(objectName, draft.fields) : undefined),
     [sharingModel, objectName, draft.fields],
   );
+  const cbpRefusal = cbpVerdict ? cbpRefusalText(cbpVerdict, locale) : undefined;
 
   // Capabilities (`enable.*`, framework#2707/#2727). Checked = the flag's
   // EFFECTIVE runtime value; toggling writes an explicit boolean into the
   // enable block (preserving sibling keys). trackHistory/files are opt-in
   // (=== true enables); searchable/feeds/activities/clone are opt-out (only
-  // an explicit false disables).
+  // an explicit false disables). fieldHistory is opt-out with no default
+  // (objectstack#36290): on is the key ABSENT, so turning it on removes it.
   const enable = (draft.enable && typeof draft.enable === 'object' ? draft.enable : {}) as Record<string, unknown>;
-  const patchEnable = (key: string, value: boolean) => onPatch({ enable: { ...enable, [key]: value } });
-  const CAPABILITIES: Array<{ key: string; optIn: boolean; labelKey: string; descKey: string }> = [
+  const patchEnable = (key: string, value: boolean, unsetWhenOn = false) => {
+    if (value && unsetWhenOn) {
+      const { [key]: _removed, ...rest } = enable;
+      onPatch({ enable: rest });
+      return;
+    }
+    onPatch({ enable: { ...enable, [key]: value } });
+  };
+  const CAPABILITIES: Array<{ key: string; optIn: boolean; unsetWhenOn?: boolean; labelKey: string; descKey: string }> = [
     { key: 'trackHistory', optIn: true,  labelKey: 'engine.studio.settings.capTrackHistory', descKey: 'engine.studio.settings.capTrackHistoryDesc' },
+    { key: 'fieldHistory', optIn: false, unsetWhenOn: true, labelKey: 'engine.studio.settings.capFieldHistory', descKey: 'engine.studio.settings.capFieldHistoryDesc' },
     { key: 'files',        optIn: true,  labelKey: 'engine.studio.settings.capFiles',        descKey: 'engine.studio.settings.capFilesDesc' },
     { key: 'feeds',        optIn: false, labelKey: 'engine.studio.settings.capFeeds',        descKey: 'engine.studio.settings.capFeedsDesc' },
     { key: 'activities',   optIn: false, labelKey: 'engine.studio.settings.capActivities',   descKey: 'engine.studio.settings.capActivitiesDesc' },
@@ -267,6 +349,7 @@ export function ObjectSettingsPanel({
               readOnly={!!disabled}
               locale={locale}
               onBlockingIssuesChange={onBlockingIssuesChange}
+              split={{ part: 'business', keysOnHover: true }}
             />
           ) : (
             <p className="text-[12px] text-muted-foreground">{t('engine.studio.settings.noInspector', locale)}</p>
@@ -283,11 +366,14 @@ export function ObjectSettingsPanel({
           </span>
         </header>
         <div className="grid max-w-xl gap-2 p-3">
-          <label className="block">
-            <span className="mb-1 block text-[11px] text-muted-foreground">
-              {t('engine.studio.settings.sharingModel', locale)}
-            </span>
+          <div>
+            <SettingHeading
+              title={t('engine.studio.settings.sharingModel', locale)}
+              settingKey="sharingModel"
+              htmlFor={controlId('sharingModel')}
+            />
             <SettingsPicker
+              id={controlId('sharingModel')}
               testId="owd-internal-select"
               value={sharingModel}
               disabled={disabled}
@@ -295,7 +381,7 @@ export function ObjectSettingsPanel({
               className={PICKER_FULL}
               options={owdOptions}
             />
-          </label>
+          </div>
           {/* An UNSET internal OWD is not a neutral state — the publish door
               refuses it (`security-owd-unset`). Styled as the problem it is:
               "this authoring choice will be rejected at publish" — reading it
@@ -328,11 +414,14 @@ export function ObjectSettingsPanel({
         </header>
         <div className="grid max-w-xl gap-4 p-3">
           {/* nameField */}
-          <label className="block">
-            <span className="mb-1 block text-[11px] text-muted-foreground">
-              {t('engine.studio.settings.nameField', locale)}
-            </span>
+          <div>
+            <SettingHeading
+              title={t('engine.studio.settings.nameField', locale)}
+              settingKey="nameField"
+              htmlFor={controlId('nameField')}
+            />
             <SettingsPicker
+              id={controlId('nameField')}
               testId="name-field-select"
               value={nameField}
               disabled={disabled}
@@ -343,14 +432,17 @@ export function ObjectSettingsPanel({
                 ...fields.map(fieldOption),
               ]}
             />
-          </label>
+          </div>
 
           {/* stageField */}
-          <label className="block">
-            <span className="mb-1 block text-[11px] text-muted-foreground">
-              {t('engine.studio.settings.stageField', locale)}
-            </span>
+          <div>
+            <SettingHeading
+              title={t('engine.studio.settings.stageField', locale)}
+              settingKey="stageField"
+              htmlFor={controlId('stageField')}
+            />
             <SettingsPicker
+              id={controlId('stageField')}
               testId="stage-field-select"
               value={stageField === false ? '__none__' : (stageField ?? '')}
               disabled={disabled}
@@ -362,13 +454,11 @@ export function ObjectSettingsPanel({
                 ...selectFields.map(fieldOption),
               ]}
             />
-          </label>
+          </div>
 
           {/* highlightFields */}
           <div>
-            <span className="mb-1 block text-[11px] text-muted-foreground">
-              {t('engine.studio.settings.highlightFields', locale)}
-            </span>
+            <SettingHeading title={t('engine.studio.settings.highlightFields', locale)} settingKey="highlightFields" />
             <HighlightFieldsEditor
               value={highlightFields}
               fields={fields}
@@ -395,9 +485,7 @@ export function ObjectSettingsPanel({
 
           {/* relatedLists (objectstack#27069) */}
           <div>
-            <span className="mb-1 block text-[11px] text-muted-foreground">
-              {t('engine.studio.settings.relatedLists', locale)}
-            </span>
+            <SettingHeading title={t('engine.studio.settings.relatedLists', locale)} settingKey="relatedLists" />
             <RelatedListsEditor
               name={name}
               draft={draft}
@@ -407,6 +495,7 @@ export function ObjectSettingsPanel({
               renderAdd={(options, add) => (
                 <SettingsPicker
                   testId="related-lists-add-select"
+                  ariaLabel={t('engine.studio.settings.relatedListsAdd', locale)}
                   value=""
                   onPick={(v) => {
                     if (v) add(v);
@@ -432,28 +521,58 @@ export function ObjectSettingsPanel({
           </span>
         </header>
         <div className="grid max-w-xl gap-3 p-3">
-          {CAPABILITIES.map(({ key, optIn, labelKey, descKey }) => {
+          {CAPABILITIES.map(({ key, optIn, unsetWhenOn, labelKey, descKey }) => {
             const raw = enable[key];
             const checked = optIn ? raw === true : raw !== false;
+            // The title and the description both label the switch; the key
+            // is the title's hover text only (see `SettingKeyHover`).
+            const id = controlId(`enable.${key}`);
             return (
-              <label key={key} className="flex items-start gap-2">
+              <div key={key} className="flex items-start gap-2">
                 <input
+                  id={id}
                   type="checkbox"
                   checked={checked}
                   disabled={disabled}
                   data-testid={`cap-${key}`}
-                  onChange={(e) => patchEnable(key, e.target.checked)}
+                  onChange={(e) => patchEnable(key, e.target.checked, unsetWhenOn)}
                   className="mt-0.5"
                 />
                 <span className="min-w-0">
-                  <span className="block text-[12px]">{t(labelKey, locale)}</span>
-                  <span className="block text-[11px] text-muted-foreground">{t(descKey, locale)}</span>
+                  <SettingKeyHover settingKey={`enable.${key}`}>
+                    <label htmlFor={id} className="text-[12px]">{t(labelKey, locale)}</label>
+                  </SettingKeyHover>
+                  <label htmlFor={id} className="block text-[11px] text-muted-foreground">{t(descKey, locale)}</label>
                 </span>
-              </label>
+              </div>
             );
           })}
         </div>
       </section>
+
+      {DefaultInspector && (
+        <section className="rounded-lg border" data-testid="developer-options-section">
+          <header className="flex items-center gap-2 border-b px-3 py-2">
+            <Code2 className="h-3.5 w-3.5" />
+            <span className="text-[13px] font-medium">{t('engine.studio.settings.developer', locale)}</span>
+            <span className="text-[11px] text-muted-foreground">
+              {t('engine.studio.settings.developerHint', locale)}
+            </span>
+          </header>
+          <div className="max-w-xl p-3">
+            {/* eslint-disable-next-line react-hooks/static-components -- useRegisteredMetadataDefaultInspector returns a registered component (stable), not one created during render */}
+            <DefaultInspector
+              type="object"
+              name={name}
+              draft={draft}
+              onPatch={onPatch}
+              readOnly={!!disabled}
+              locale={locale}
+              split={{ part: 'developer', keysOnHover: true }}
+            />
+          </div>
+        </section>
+      )}
     </div>
   );
 }

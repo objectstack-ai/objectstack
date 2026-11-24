@@ -306,7 +306,7 @@ import type * as M205 from './ai/object-query-source.zod.js';
 import type * as M207 from './api/ai-answer.zod.js';
 
 // ---------------------------------------------------------------------------
-// 886 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 888 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -998,6 +998,8 @@ export type Iso_data_mapping__TransformType = Assert<Eq< z.input< typeof M179.Tr
 export type Iso_data_object__ApiMethod = Assert<Eq< z.input< typeof M70.ApiMethod >, z.infer< typeof M70.ApiMethod > >>;
 export type Iso_data_object__LifecycleClassSchema = Assert<Eq< z.input< typeof M70.LifecycleClassSchema >, z.infer< typeof M70.LifecycleClassSchema > >>;
 export type Iso_data_object__LifecycleSchema = Assert<Eq< z.input< typeof M70.LifecycleSchema >, z.infer< typeof M70.LifecycleSchema > >>;
+export type Iso_data_object__ObjectExtensionFieldPlacementSchema = Assert<Eq< z.input< typeof M70.ObjectExtensionFieldPlacementSchema >, z.infer< typeof M70.ObjectExtensionFieldPlacementSchema > >>;
+export type Iso_data_object__ObjectExtensionListPlacementSchema = Assert<Eq< z.input< typeof M70.ObjectExtensionListPlacementSchema >, z.infer< typeof M70.ObjectExtensionListPlacementSchema > >>;
 export type Iso_data_object__ObjectOwnershipEnum = Assert<Eq< z.input< typeof M70.ObjectOwnershipEnum >, z.infer< typeof M70.ObjectOwnershipEnum > >>;
 export type Iso_data_object__ObjectRequiredPermissionsSchema = Assert<Eq< z.input< typeof M70.ObjectRequiredPermissionsSchema >, z.infer< typeof M70.ObjectRequiredPermissionsSchema > >>;
 export type Iso_data_object__PerOperationRequiredPermissionsSchema = Assert<Eq< z.input< typeof M70.PerOperationRequiredPermissionsSchema >, z.infer< typeof M70.PerOperationRequiredPermissionsSchema > >>;
@@ -1865,7 +1867,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 886 isomorphic pins', () => {
+  it('still declares all 888 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -2977,7 +2979,15 @@ describe('ADR-0122 type-alias convention', () => {
     // `AiConversationMessageSchema` (`api/protocol.zod.ts`), `AiMessageSchema`
     // plus an optional string (Iso_api_protocol__AiConversationMessageSchema).
     // +23 added.
-    expect(pins).toHaveLength(886);
+    // 886 -> 888 is #35901: an object extension's field and list placements,
+    // `ObjectExtensionFieldPlacementSchema` and
+    // `ObjectExtensionListPlacementSchema` (`data/object.zod.ts`), closed
+    // objects of strings and a string array with no default or transform
+    // (Iso_data_object__ObjectExtensionFieldPlacementSchema,
+    // Iso_data_object__ObjectExtensionListPlacementSchema). +2 added. Their
+    // group sibling nests `ObjectFieldGroupSchema`, which has a parsed shape,
+    // so it takes `ObjectExtensionGroupPlacementParsed` instead.
+    expect(pins).toHaveLength(888);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until commit c6b05c76a nothing read either

@@ -25,7 +25,6 @@ import { formatDate, formatDateTime, formatRelativeDate } from './date-display.j
 import { resolveMeasureLabel, type BuiltinAggregateLabels } from './chart-series.js';
 import { composeDrillFilter } from './drill-down.js';
 import { FilterOperatorError } from './filter-converter.js';
-import { extractRecords } from './extract-records.js';
 import { isMultiValueField, referenceTargetOf } from '@objectstack/spec/data';
 import type { DataSource } from '@object-ui/types';
 
@@ -724,11 +723,11 @@ export interface DatasetDrillRange {
  *
  * A dimension whose `field` is a `relationship.field` path (`account.owner`)
  * cannot be filtered on as a dotted key: the data API refuses a dotted filter
- * key with `INVALID_FIELD` / 400, and the client filter dialect has no node
- * for the nested-relation form. Such a dimension is resolved first by
- * {@link resolveDatasetDrillFilter}, which reads the related ids and hands the
- * result back through `resolvedConditions` (`{ account: { $in: [...] } }`).
- * Passing a path dimension in `drillDims` is refused with a
+ * key with `INVALID_FIELD` / 400. Such a dimension is resolved first by
+ * {@link resolveDatasetDrillFilter}, which writes it as a nested-relation
+ * condition and hands it back through `resolvedConditions`
+ * (`{ account: { owner: 'u1' } }`). Passing a path dimension in `drillDims` is
+ * refused with a
  * {@link FilterOperatorError}, the error every caller already catches, so a
  * refused query is never built.
  */
@@ -746,7 +745,7 @@ export function buildDatasetDrillFilter(
       throw new FilterOperatorError(
         `[ObjectUI] The drill dimension '${d}' reads '${dimensionFields[d]}', a relationship path. `
         + 'The data API refuses a dotted filter key, so it cannot be written into the drill filter '
-        + 'as-is. Resolve it with resolveDatasetDrillFilter, which reads the related ids first.',
+        + 'as-is. Resolve it with resolveDatasetDrillFilter, which writes it as a nested-relation condition.',
         { field: dimensionFields[d] },
       );
     }
@@ -782,13 +781,13 @@ export function buildDatasetDrillFilter(
 export const DATASET_DRILL_MAX_HOPS = 3;
 
 /**
- * The most related records one relationship hop of a drill may resolve to.
+ * The most related records one relationship hop of a drill could resolve to
+ * while the drill read related ids on the client.
  *
- * Over it the drill is not opened ({@link DatasetDrillResolution} `too-many`),
- * ⛔ never run over a cut-off id list, which would list fewer records than the
- * clicked number counts. The ids travel as an `$in` list in the drawer's own
- * list read, inside a GET query string, so the cap keeps that request well
- * under a server's request-line limit even with UUID ids.
+ * @deprecated {@link resolveDatasetDrillFilter} reads no related ids any more:
+ * a relationship-path dimension is sent as one nested-relation condition and
+ * the server matches it in the database, so nothing is capped here and no
+ * resolution answers `too-many`. Kept only because it is a published export.
  */
 export const DATASET_DRILL_RELATED_ID_CAP = 200;
 
@@ -834,13 +833,23 @@ export type DatasetDrillUnavailableReason =
   /** The clicked bucket is the empty one: no related read reproduces what it counted. */
   | 'empty-bucket';
 
-/** The answer {@link resolveDatasetDrillFilter} gives for one clicked bucket. */
+/**
+ * The answer {@link resolveDatasetDrillFilter} gives for one clicked bucket.
+ *
+ * `too-many` is no longer produced (see {@link DATASET_DRILL_RELATED_ID_CAP});
+ * the member stays so the published type keeps accepting the consumers that
+ * still handle it.
+ */
 export type DatasetDrillResolution =
   | { status: 'resolved'; filter: Record<string, unknown> }
   | { status: 'too-many'; object: string; cap: number }
   | { status: 'unavailable'; reason: DatasetDrillUnavailableReason; field: string };
 
-/** The two reads the resolution makes, both through the surface's own data source. */
+/**
+ * The data source a relationship-path drill needs: `getObjectSchema`, the one
+ * read the resolution makes, and `find`, which the drawer lists the drilled
+ * records through.
+ */
 export type DatasetDrillDataSource = Pick<DataSource, 'find' | 'getObjectSchema'>;
 
 /** Arguments of {@link resolveDatasetDrillFilter}: {@link buildDatasetDrillFilter}'s, plus where to read. */
@@ -877,31 +886,29 @@ function isDrillDataSource(source: unknown): source is DatasetDrillDataSource {
 /**
  * Build the record-list filter for a drilled dataset bucket whose dimensions
  * may cross a relationship — {@link buildDatasetDrillFilter}, with every
- * `relationship.field` dimension resolved into a filter the data API accepts.
+ * `relationship.field` dimension written as a nested-relation condition the
+ * data API serves.
  *
- * Dotted relationship-path drill filters are resolved here because the client
- * filter grammar has no nested-relation node yet; objectstack#34990 adds it.
- *
- * ## How a path is resolved
+ * ## How a path is written
  *
  * The analytics compiler joins each hop on `<parent>.<relationship> =
  * <related>.id`, the related object being the relationship field's declared
  * target (`hop-object.ts` tier 2 on the server, `referenceTargetOf` here). So
  * the rows a bucket `account.owner = u1` counted are the base rows whose
- * `account` is one of the accounts whose `owner` is `u1`. That is read in two
- * steps through the same data source the drawer lists from, as the viewer:
+ * `account` is an account whose `owner` is `u1`, which is exactly the
+ * nested-relation condition `{ account: { owner: 'u1' } }`; a deeper path
+ * nests one level per hop (`{ account: { parent: { kind: 'x' } } }`). The
+ * filter dialect lowers it as its nested-relation node (`convertFiltersToAST`)
+ * and the server matches it with one in-database subquery per hop, under
+ * each related object's read scope as the viewer: no related id is read here.
  *
- * 1. the related object's ids matching the clicked value
- *    (`find('account', { $filter: { owner: 'u1' }, $select: ['id'] })`), and
- *    for a deeper path the same step again, innermost object first;
- * 2. the base object filtered on the relationship field `$in` those ids —
- *    `{ account: { $in: [...] } }`, an operator the filter dialect already
- *    lowers.
+ * Path dimensions that share a hop share one condition (`account.owner` and
+ * `account.region` both sit under `account`), and a plain dimension on the
+ * relationship field itself joins that condition as an `id` key rather than a
+ * second key on the base object.
  *
- * Path dimensions that share a hop are read together (`account.owner` and
- * `account.region` read the accounts once, on both conditions), and a plain
- * dimension on the relationship field itself joins that read as an `id`
- * condition rather than a second key.
+ * The one read made is each walked object's schema, to confirm that every hop
+ * is a single-valued relationship field before the drill is offered.
  *
  * ## When it does not resolve
  *
@@ -909,13 +916,11 @@ function isDrillDataSource(source: unknown): source is DatasetDrillDataSource {
  *   single-valued relationship field of its object → `unavailable`;
  * - the empty bucket of a path dimension → `unavailable`: that bucket also
  *   counted base rows with no related record and rows whose related record the
- *   viewer cannot read, which no related read can reproduce;
- * - more than {@link DATASET_DRILL_RELATED_ID_CAP} related records at any hop
- *   → `too-many`, never a truncated list.
+ *   viewer cannot read, which no condition on the related record reproduces.
  *
- * A read that fails rejects the promise with the read's own error; a filter
- * the composition refuses rejects with {@link FilterOperatorError}, exactly as
- * {@link buildDatasetDrillFilter} throws it.
+ * A schema read that fails rejects the promise with the read's own error; a
+ * filter the composition refuses rejects with {@link FilterOperatorError},
+ * exactly as {@link buildDatasetDrillFilter} throws it.
  *
  * A bucket with no path dimension resolves to exactly what
  * {@link buildDatasetDrillFilter} returns, with nothing read.
@@ -981,16 +986,18 @@ export async function resolveDatasetDrillFilter(
     return pending;
   };
 
+  /** One object's condition: its own keys, and one nested condition per relationship it walks. */
   const lowerNode = async (nodeObject: string, node: DrillRelationNode, path: string): Promise<Record<string, unknown>> => {
     const where: Record<string, unknown> = { ...node.where };
     for (const [field, child] of node.relations) {
       const fieldPath = path ? `${path}.${field}` : field;
-      where[field] = { $in: await relatedIds(nodeObject, field, child, fieldPath) };
+      const target = await relatedObjectOf(nodeObject, field, fieldPath);
+      where[field] = await lowerNode(target, child, fieldPath);
     }
     return where;
   };
 
-  const relatedIds = async (fromObject: string, field: string, node: DrillRelationNode, fieldPath: string): Promise<unknown[]> => {
+  const relatedObjectOf = async (fromObject: string, field: string, fieldPath: string): Promise<string> => {
     const def = fieldDefinitionOf(await schemaOf(fromObject), field);
     let target: string | undefined;
     try {
@@ -999,31 +1006,15 @@ export async function resolveDatasetDrillFilter(
       // A non-string `reference` carrier: not a relationship this layer can walk.
       target = undefined;
     }
-    // A multi-valued relationship cannot be drilled by `{ FIELD: { $in: ids } }`
-    // (its column holds an array, and `$in` compares a scalar), so it stops here.
-    // "Multi-valued" is decided by the SPEC predicate `isMultiValueField`, and this
-    // code follows the spec side of objectstack#17469, the card on the spec
-    // predicate disagreeing with `driver-sql`'s storage rule for `multiple: true`
-    // outside `MULTI_CAPABLE_TYPES`. That card closed with the driver aligned to
-    // the spec: `isMultiValuedColumn` in driver-sql's `sql-driver-top-level.ts`
-    // now asks `isMultiValueField`, and `FieldSchema` refuses the flag on the
-    // other types. If the two sides ever split again, this refusal follows the spec.
+    // Only a single-valued relationship is a join hop of the analytics compiler,
+    // so only it is drilled; "multi-valued" is the SPEC predicate
+    // `isMultiValueField`, the one `driver-sql`'s storage rule also asks; if
+    // the two sides ever split again, this refusal follows the spec
+    // (objectstack#17469).
     if (!target || isMultiValueField(def as Parameters<typeof isMultiValueField>[0])) {
       throw new DrillResolutionStop({ status: 'unavailable', reason: 'unknown-relationship', field: fieldPath });
     }
-    const where = await lowerNode(target, node, fieldPath);
-    const result = await dataSource.find(target, {
-      $filter: where,
-      $select: ['id'],
-      $top: DATASET_DRILL_RELATED_ID_CAP + 1,
-    });
-    const rows = extractRecords(result);
-    if (rows.length > DATASET_DRILL_RELATED_ID_CAP) {
-      throw new DrillResolutionStop({ status: 'too-many', object: target, cap: DATASET_DRILL_RELATED_ID_CAP });
-    }
-    return rows
-      .map((row) => (row as { id?: unknown } | null)?.id)
-      .filter((id) => id !== undefined && id !== null);
+    return target;
   };
 
   let resolved: Record<string, unknown>;

@@ -21,9 +21,13 @@
  * its full width (objectstack#27545): over it the drawer draws no dimming
  * overlay and is non-modal, so a click on another row swaps the record
  * instead of closing it. A drawer with no list is the modal sheet over the
- * page, as before. A `maximizable` host gets `⤢`, which widens the drawer in
- * place over the whole content area — the sidebar stays — without leaving the
- * URL it is on.
+ * page, as before.
+ *
+ * The drawer is a floating card (objectstack#35854): inset 8 px from the
+ * viewport's top, right and bottom edges, rounded, with a shadow, never flush
+ * with the screen. It has one width state: the full-width 「⤢ maximize in
+ * place」 retired with it (a refresh lost it, and the full page is the wide
+ * face), so the bar's one ⤢ is the host's `onExpand`, which goes to the page.
  *
  * Works in conjunction with useNavigationOverlay hook from @object-ui/react —
  * the hook manages state while this component handles the visual presentation.
@@ -65,7 +69,7 @@
  */
 
 import React from 'react';
-import { ArrowLeft, ArrowUpRight, Maximize2, Minimize2, X } from 'lucide-react';
+import { ArrowLeft, Maximize2, X } from 'lucide-react';
 import { cn } from '../lib/utils';
 import {
   Sheet,
@@ -74,7 +78,6 @@ import {
   SheetTitle,
   SheetDescription,
 } from '../ui/sheet';
-import { useOptionalSidebar } from '../ui/sidebar';
 import { usePopperAwareInteractOutside } from './mobile-dialog-content';
 import { createSafeTranslation } from '@object-ui/i18n';
 import { ActiveListRecordProvider } from './record-list-face';
@@ -96,12 +99,10 @@ const OVERLAY_DEFAULT_TRANSLATIONS: Record<string, string> = {
   // The drag handle is a bare `role="separator"` with no visible label, so
   // this literal IS the control to a screen reader.
   'common.resizeDrawer': 'Resize drawer',
-  // Default accessible name + tooltip of the icon-only ↗ a host's own page
-  // hop draws (`onExpand`). Hosts may override it via the `expandLabel` prop.
+  // Default accessible name + tooltip of the bar's one ⤢, the host's page
+  // hop (`onExpand`, objectstack#35854). Hosts may override it via the
+  // `expandLabel` prop.
   'detail.openAsFullPage': 'Open as full page',
-  // The bar's ⤢ / ⤡ pair (`maximizable`, objectstack#27545).
-  'detail.maximize': 'Maximize',
-  'detail.restoreSize': 'Restore size',
   // The drawer's accessible name when the host passes no `title`. The bar
   // draws no title text (objectstack#26679: the record body names
   // the record), so this is an accessible name only.
@@ -194,23 +195,14 @@ export interface NavigationOverlayProps {
    */
   activeListRecordId?: string | null;
   /**
-   * A host's own page hop, drawn as `↗` on the bar. The console's record
-   * pane passes none: its full page is reached from the list row's `↗` and the
-   * record header's `⋯` menu (objectstack#27545).
+   * The host's page hop, the bar's one `⤢` (objectstack#35854): the record
+   * shown, as the full page. The drawer has no wider state of its own.
    *
    * When omitted, the button is not rendered.
    */
   onExpand?: () => void;
   /**
-   * `⤢` maximize in place (objectstack#27545): the drawer widens over the whole
-   * content area — the viewport less the sidebar's live width — and the list
-   * behind it is hidden; `⤡` or `Esc` restores the width it had. Nothing else
-   * changes: the URL, the history, the list's scroll and the host's stack.
-   * Not remembered: every open starts at the pane's width.
-   */
-  maximizable?: boolean;
-  /**
-   * Optional label for the `↗` host page hop (accessible name & tooltip).
+   * Optional label for the `⤢` host page hop (accessible name & tooltip).
    *
    * When omitted the overlay resolves `detail.openAsFullPage` from the session
    * locale (English when no `I18nProvider` is mounted) — it is no longer a
@@ -279,16 +271,45 @@ export interface NavigationOverlayProps {
    * host's to decide.
    */
   toggles?: React.ReactNode;
+  /**
+   * The record's comment switch (objectstack#36075), drawn in the bar before
+   * the record's button group (`RecordTopBar`'s `comments`).
+   */
+  comments?: React.ReactNode;
+  /**
+   * The record header's one-row bar (objectstack#35593): handed the bar's
+   * element the record's button group is drawn into, after the step pair.
+   */
+  actionSlotRef?: React.Ref<HTMLSpanElement>;
+  /**
+   * Keep the step keys (`↑` / `↓` / `k` / `j`) but draw no counter and no
+   * `↓` `↑` pair (objectstack#35593): a drawer over its list shows the list
+   * beside it, so its header names neither the place nor the neighbours.
+   * objectstack#35853 reversed that: the console's drawer no longer passes
+   * it, and draws ↑ ↓ and 「第 N 条，共 M 条」 in its navigation row.
+   */
+  stepperHidden?: boolean;
+  /**
+   * The bar's record row (objectstack#35853): the record's icon, name and
+   * tags, or the slot the record header portals them into. Handed, the bar
+   * is two rows — navigation (`←`, `trail`, ↑ ↓ and the counter; ⤢ and ✕ at
+   * the right) over the record (this, the button group, `toggles`).
+   */
+  recordRow?: React.ReactNode;
 }
 
 /**
  * The one `storageKey` spelling every record overlay uses, keyed by object.
  *
  * `NavigationOverlay` prefixes it with `ov:` on the way to `localStorage`, so
- * the stored key is `ov:drawer-width:OBJECT`. The console's own object page
- * (`app-shell`'s `ObjectView`) has always used this spelling; after
- * objectui#9299 the five list-type renderers use it too, so one object has one
- * remembered overlay width no matter which view type the user resized it on.
+ * the stored key is `ov:drawer-width:OBJECT`. After objectui#9299 the five
+ * list-type renderers use it, so one object has one remembered overlay width
+ * no matter which of them the user resized it on. The console's own record
+ * preview (`app-shell`'s `ObjectView` and a record page's drawer) uses it only
+ * for an object that authors its drawer's width; every other object's preview
+ * shares one key of its own (objectstack#36149), so it no longer shares a
+ * width with that object's calendar, gantt, kanban, tree or grid overlay.
+ * This helper's spelling is unchanged.
  */
 export function recordOverlayWidthStorageKey(objectName: string): string {
   return `drawer-width:${objectName}`;
@@ -312,42 +333,15 @@ function resolveWidth(width: string | number | undefined): string | undefined {
   return width;
 }
 
-/** Hard floor for drag-resize — narrower than this and the body becomes unusable. */
-const DRAWER_MIN_PX = 360;
 /**
- * The widest a reader can drag the pane, as a share of the viewport
- * (objectstack#27545: wider than that is what `⤢` is for). A remembered
- * width beyond it draws at this bound.
+ * The drag range of the pane (objectstack#36149): 380 px to 900 px. Narrower
+ * and the body becomes unusable; wider is what the full page is for. A
+ * remembered width below it is not used, one above it draws at 900, and the
+ * pane never draws wider than the viewport leaves it
+ * (`sm:w-[calc(100%-1rem)]`).
  */
-const DRAWER_MAX_VW = 60;
-
-/**
- * The sidebar provider's own widths (`--sidebar-width`, `--sidebar-width-icon`
- * in `ui/sidebar.tsx`). Inside the provider the variables resolve to their
- * live values; these stand in only where they do not resolve — the drawer
- * renders in a portal outside the provider's element.
- */
-export const SIDEBAR_WIDTH_FALLBACK = '16rem';
-export const SIDEBAR_WIDTH_ICON_FALLBACK = '3rem';
-
-/**
- * The CSS length the sidebar takes right now: its full width when expanded,
- * its icon rail when collapsed, none on a phone or with no sidebar at all.
- * Read on every render from the sidebar's own state, so a collapse — the
- * reader's or the shell's own — widens a maximized pane at once.
- */
-function useLiveSidebarWidth(): string {
-  const sidebar = useOptionalSidebar();
-  if (!sidebar || sidebar.isMobile) return '0px';
-  return sidebar.state === 'collapsed'
-    ? `var(--sidebar-width-icon, ${SIDEBAR_WIDTH_ICON_FALLBACK})`
-    : `var(--sidebar-width, ${SIDEBAR_WIDTH_FALLBACK})`;
-}
-
-/** The width a maximized pane takes: the viewport less the live sidebar. */
-function maximizedWidthCss(sidebarWidth: string): string {
-  return `calc(100vw - ${sidebarWidth})`;
-}
+const DRAWER_MIN_PX = 380;
+const DRAWER_MAX_PX = 900;
 
 /**
  * Whether an `Esc` belongs to the element it was pressed in rather than to the
@@ -362,6 +356,28 @@ function escapeOwnedByTarget(target: EventTarget | null, pane?: Element | null):
   }
   const owner = target.closest('[role="menu"], [role="listbox"], [role="dialog"], [role="alertdialog"]');
   return !!owner && owner !== pane;
+}
+
+/**
+ * Whether an `Esc` was pressed inside a region of the record that owns its
+ * own `Esc` (`[data-owns-escape]`, such as the record's comment panel), which
+ * then acts on it itself. Only a region inside the pane counts.
+ */
+function escapeOwnedByRegion(target: EventTarget | null, pane?: Element | null): boolean {
+  if (!target || !(target instanceof Element)) return false;
+  const region = target.closest('[data-owns-escape]');
+  return !!region && (!pane || pane.contains(region));
+}
+
+/**
+ * Whether the pane draws a part of the record that owns EVERY `Esc` the pane
+ * hears while it is drawn, wherever the key is pressed
+ * (`[data-owns-pane-escape]`: the record's inline edit session, whose Esc
+ * ends the edit — objectstack#36472). The pane then holds itself open and
+ * leaves the key to it; once the edit ends, the next `Esc` is the pane's.
+ */
+function escapeOwnedByPaneSession(pane?: Element | null): boolean {
+  return !!pane?.querySelector('[data-owns-pane-escape]');
 }
 
 /**
@@ -386,20 +402,30 @@ function useDrawerResize(
   // ⚠️ `parseInt` is deliberate for the legacy value: that is how
   // `RecordDetailDrawer` read its own key, and reading it with a stricter
   // parser than the writer used would drop widths rather than carry them over.
+  //
+  // objectstack#36149 — a host that keeps one pane mounted and switches its
+  // key (a record page's drawer, from one object's record to another's) gets
+  // the width the NEW key holds: a key with no usable width, or no key at
+  // all, drops the previous key's width, so the host's own width applies.
   React.useEffect(() => {
-    if (!storageKey || typeof window === 'undefined') return;
+    if (typeof window === 'undefined') return;
+    if (!storageKey) {
+      setWidth(null);
+      return;
+    }
     try {
       const raw = window.localStorage.getItem(`ov:${storageKey}`);
       if (raw) {
         const n = Number(raw);
-        if (Number.isFinite(n) && n >= DRAWER_MIN_PX) setWidth(n);
+        setWidth(Number.isFinite(n) && n >= DRAWER_MIN_PX ? n : null);
         return;
       }
-      if (!legacyStorageKey) return;
-      const legacyRaw = window.localStorage.getItem(legacyStorageKey);
-      if (!legacyRaw) return;
-      const legacy = parseInt(legacyRaw, 10);
-      if (!Number.isFinite(legacy) || legacy < DRAWER_MIN_PX) return;
+      const legacyRaw = legacyStorageKey ? window.localStorage.getItem(legacyStorageKey) : null;
+      const legacy = legacyRaw ? parseInt(legacyRaw, 10) : Number.NaN;
+      if (!legacyStorageKey || !Number.isFinite(legacy) || legacy < DRAWER_MIN_PX) {
+        setWidth(null);
+        return;
+      }
       setWidth(legacy);
       window.localStorage.setItem(`ov:${storageKey}`, String(legacy));
       // Removing it is what makes this a MIGRATION rather than a permanent
@@ -407,7 +433,8 @@ function useDrawerResize(
       // width must stay gone.
       window.localStorage.removeItem(legacyStorageKey);
     } catch {
-      // ignore (private mode / quota)
+      // private mode / quota: nothing remembered, the host's width applies
+      setWidth(null);
     }
   }, [storageKey, legacyStorageKey]);
 
@@ -416,7 +443,7 @@ function useDrawerResize(
     e.preventDefault();
     draggingRef.current = true;
 
-    const maxPx = Math.floor((window.innerWidth * DRAWER_MAX_VW) / 100);
+    const maxPx = DRAWER_MAX_PX;
     // The drawer is right-anchored, at the viewport's edge.
     const paneRight = e.currentTarget.parentElement?.getBoundingClientRect().right || window.innerWidth;
     document.body.style.cursor = 'col-resize';
@@ -489,7 +516,6 @@ export const NavigationOverlay: React.FC<NavigationOverlayProps> = ({
   mainContent,
   activeListRecordId,
   onExpand,
-  maximizable,
   expandLabel,
   storageKey,
   legacyStorageKey,
@@ -497,6 +523,10 @@ export const NavigationOverlay: React.FC<NavigationOverlayProps> = ({
   trail,
   stepper,
   toggles,
+  comments,
+  actionSlotRef,
+  stepperHidden = false,
+  recordRow,
 }) => {
   // Every chrome string below is locale-driven (objectstack#5430 for the two
   // close affordances, objectstack#5506 for the rest). Must stay above the
@@ -520,21 +550,13 @@ export const NavigationOverlay: React.FC<NavigationOverlayProps> = ({
   // over never remounts it when the mode changes.
   const hasList = mainContent != null;
   const shown = paneMode && isOpen && !!selectedRecord;
-  const [maximizedState, setMaximized] = React.useState(false);
-  // Not remembered: a closed pane opens at its own width again.
-  React.useEffect(() => {
-    if (!shown) setMaximized(false);
-  }, [shown]);
-  const maximized = !!maximizable && shown && maximizedState;
-  const sidebarWidth = useLiveSidebarWidth();
   const handleInteractOutside = usePopperAwareInteractOutside();
   useRecordStepKeys(paneMode && shown, stepper);
-  // `Esc`: from maximized it restores, below the stack's root it goes back one
-  // level, at the root it closes. The drawer's dialog layer asks the same
-  // through `onEscapeKeyDown` below.
+  // `Esc`: below the stack's root it goes back one level, at the root it
+  // closes. The drawer's dialog layer asks the same through `onEscapeKeyDown`
+  // below.
   const handleEscape = () => {
-    if (maximized) setMaximized(false);
-    else if (onBack) onBack();
+    if (onBack) onBack();
     else close();
   };
   // The drawer's dialog layer hears `Esc` on the document in the capture
@@ -543,8 +565,23 @@ export const NavigationOverlay: React.FC<NavigationOverlayProps> = ({
   // or a menu owns it, is not. It still holds the sheet open — left
   // unprevented, the layer would dismiss the whole drawer on it.
   const sheetRef = React.useRef<HTMLDivElement>(null);
+  //
+  // A region inside the record that owns its `Esc` (`[data-owns-escape]`: the
+  // record's comment panel, objectstack#36075) gets the key at every level,
+  // the root too: the drawer holds itself open and leaves the region to act.
+  //
+  // An edit session drawn in the record (`[data-owns-pane-escape]`,
+  // objectstack#36472) gets every key the drawer hears, the root's too: the
+  // first `Esc` ends the edit and the drawer stays; the next one is the
+  // drawer's again. The drawer's layer only hears the key with nothing open
+  // over it, so a popover or menu over the record still closes first.
   const handleDrawerEscape = (e: KeyboardEvent) => {
     if (e.defaultPrevented) return;
+    if (escapeOwnedByRegion(e.target, sheetRef.current) || escapeOwnedByPaneSession(sheetRef.current)) {
+      e.preventDefault();
+      return;
+    }
+    if (!onBack) return;
     e.preventDefault();
     if (escapeOwnedByTarget(e.target, sheetRef.current)) return;
     handleEscape();
@@ -557,12 +594,12 @@ export const NavigationOverlay: React.FC<NavigationOverlayProps> = ({
 
   // Pane width policy: the reader's dragged width, bounded by the drag range
   // even when it was remembered at a wider viewport; otherwise the host's
-  // width as given. A maximized pane takes the content area instead.
+  // width as given.
   const paneWidthCss = resize.width != null
-    ? `min(${resize.width}px, ${DRAWER_MAX_VW}vw)`
+    ? `${Math.min(resize.width, DRAWER_MAX_PX)}px`
     : resolveWidth(width) ?? '42rem';
   const widthStyle: React.CSSProperties = {
-    ['--ov-w' as any]: maximized ? maximizedWidthCss(sidebarWidth) : paneWidthCss,
+    ['--ov-w' as any]: paneWidthCss,
   };
 
   // Use renderView when both renderView and view are provided; otherwise fallback to children
@@ -574,11 +611,11 @@ export const NavigationOverlay: React.FC<NavigationOverlayProps> = ({
   };
 
   /* Drag-resize handle — only rendered on sm+ (mobile uses full viewport so
-     there's nothing meaningful to resize) and never while maximized. The
+     there's nothing meaningful to resize). The
      4px-wide invisible hit-area sits flush with the pane's left edge; the
      visible 1px tint reacts on hover so users discover the affordance.
      Double-click resets to the configured default. */
-  const resizeHandle = resize.enabled && !maximized ? (
+  const resizeHandle = resize.enabled ? (
     <div
       role="separator"
       aria-orientation="vertical"
@@ -594,8 +631,10 @@ export const NavigationOverlay: React.FC<NavigationOverlayProps> = ({
 
   /* The bar — the record's top bar (objectstack#27524, Target 7, after
      objectstack#26679): the left end holds `←` and the host's breadcrumb; the
-     right end the counter and ↓ ↑, the host's panel switches, then ↗, ⤢ / ⤡
-     and ✕. */
+     right end the counter and ↓ ↑, the host's panel switches, then ⤢ and ✕.
+     With a `recordRow` it is two rows (objectstack#35853): ✕, `←`, the
+     breadcrumb, ↑ ↓ and the counter over the record, ⤢ at the right of the
+     first (✕ moved to the left by objectstack#36557). */
   const bar = (
     <RecordTopBar
       leadingTestId="record-drawer-leading"
@@ -609,28 +648,22 @@ export const NavigationOverlay: React.FC<NavigationOverlayProps> = ({
           {trail}
         </>
       }
-      stepper={stepper}
+      stepper={stepperHidden ? undefined : stepper}
+      actionSlotRef={actionSlotRef}
+      record={recordRow}
       toggles={toggles}
+      comments={comments}
       frame={
-        <>
-          {onExpand && (
-            <RecordTopBarButton label={resolvedExpandLabel} onClick={() => onExpand()}>
-              <ArrowUpRight className="h-3.5 w-3.5" />
-            </RecordTopBarButton>
-          )}
-          {maximizable && (
-            <RecordTopBarButton
-              label={maximized ? t('detail.restoreSize') : t('detail.maximize')}
-              onClick={() => setMaximized((was) => !was)}
-              data-testid="record-pane-maximize"
-            >
-              {maximized ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
-            </RecordTopBarButton>
-          )}
-          <RecordTopBarButton label={closeLabel} onClick={close}>
-            <X className="h-3.5 w-3.5" />
+        onExpand ? (
+          <RecordTopBarButton label={resolvedExpandLabel} onClick={() => onExpand()} data-testid="record-pane-open-page">
+            <Maximize2 className="h-3.5 w-3.5" />
           </RecordTopBarButton>
-        </>
+        ) : undefined
+      }
+      close={
+        <RecordTopBarButton label={closeLabel} onClick={close}>
+          <X className="h-3.5 w-3.5" />
+        </RecordTopBarButton>
       }
     />
   );
@@ -658,17 +691,23 @@ export const NavigationOverlay: React.FC<NavigationOverlayProps> = ({
         // documented choice rather than dropping it is what "one shared
         // overlay shell" has to mean when the two shells disagreed.
         onOpenAutoFocus={(e) => e.preventDefault()}
-        // objectstack#27545 — from maximized, `Esc` restores; objectstack#26679
-        // — below the root of an in-place stack, `Esc` goes back one level.
-        // Only the root's `Esc` closes. objectstack#28156 — a field's `Esc`
-        // stays the field's ({@link escapeOwnedByTarget}).
-        onEscapeKeyDown={maximized || onBack ? handleDrawerEscape : undefined}
+        // objectstack#26679 — below the root of an in-place stack, `Esc` goes
+        // back one level. Only the root's `Esc` closes. objectstack#28156 — a
+        // field's `Esc` stays the field's ({@link escapeOwnedByTarget}).
+        // objectstack#36075 — at every level, a region's `Esc` stays the
+        // region's ({@link escapeOwnedByRegion}). objectstack#36472 — while
+        // the record is being edited, `Esc` ends the edit
+        // ({@link escapeOwnedByPaneSession}).
+        onEscapeKeyDown={handleDrawerEscape}
         ref={sheetRef}
         className={cn(
           // Mobile: full width (no inline cap, no max-w from base sheet).
-          // sm+: honor the pane width via the `--ov-w` CSS var. The host's
-          // className still wins on more specific tokens.
-          'w-screen max-w-none sm:w-full sm:max-w-[var(--ov-w,42rem)] p-0 flex flex-col gap-0 overflow-hidden',
+          // sm+: honor the pane width via the `--ov-w` CSS var, as a floating
+          // card (objectstack#35854): 8 px clear of the viewport's top, right
+          // and bottom edges, rounded and shadowed, its own border all round.
+          // The host's className still wins on more specific tokens.
+          'w-screen max-w-none sm:w-[calc(100%-1rem)] sm:max-w-[var(--ov-w,42rem)] p-0 flex flex-col gap-0 overflow-hidden',
+          'sm:inset-y-2 sm:right-2 sm:h-auto sm:rounded-xl sm:border sm:shadow-2xl',
           // Hide shadcn Sheet's auto-rendered close (X) — it's the LAST
           // direct <button> child of SheetContent. We render our own close
           // inside the header so it sits in a single button cluster.
@@ -676,7 +715,7 @@ export const NavigationOverlay: React.FC<NavigationOverlayProps> = ({
           mode === 'drawer' && className,
         )}
         style={widthStyle}
-        data-maximized={maximized ? '' : undefined}
+        data-record-drawer-card=""
       >
         {resizeHandle}
         <SheetHeader className="shrink-0 gap-0 space-y-0 p-0 text-left">
@@ -698,17 +737,14 @@ export const NavigationOverlay: React.FC<NavigationOverlayProps> = ({
   if (!hasList) return drawer;
 
   // --- The list under the drawer ---
-  // One element across every state — closed, drawer, maximized — so the list
-  // never remounts and its scroll survives (objectstack#27545), and it keeps
-  // its full width whether or not a record is open (objectstack#28915).
+  // One element across every state — closed, drawer — so the list never
+  // remounts and its scroll survives (objectstack#27545), and it keeps its
+  // full width whether or not a record is open (objectstack#28915).
   return (
     <>
       <ActiveListRecordProvider recordId={shown ? activeListRecordId ?? null : null}>
         <div
           className="flex h-full min-h-0 min-w-0 flex-1 flex-col"
-          // Maximized, the drawer covers the list; the list keeps its place
-          // and its scroll, out of reach until the drawer is restored.
-          inert={maximized}
           data-testid="record-list-host"
         >
           {mainContent}

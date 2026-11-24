@@ -240,11 +240,12 @@ describe('[#28555–#28558] members read through a relationship path, on the nat
       );
     });
 
-    it('CONTROL, in place of the served windowed key: a compare window over the backed \'account.founded_at\' is refused on every face, naming no declare-it remedy', async () => {
+    it('CONTROL, in place of the served windowed key: a compare window over the backed \'account.founded_at\' is refused on every face, naming a date dimension over it, never one named after it', async () => {
       // A dashboard compare widget lowers a dotted date filter into this very
-      // key. No dimension can be named `account.founded_at` (the dimension
-      // name grammar has no dot), so the refusal states what the comparison
-      // needs instead: a date field of the dataset's own object.
+      // key when the dataset declares no date dimension over it. No dimension
+      // can be named `account.founded_at` (the dimension name grammar has no
+      // dot), so the refusal names the remedy that exists: a date dimension
+      // declared over the field, under another name (objectstack#34350).
       const err = await undeclaredAlike(
         BACKED,
         {
@@ -261,7 +262,9 @@ describe('[#28555–#28558] members read through a relationship path, on the nat
       expect(err.message).not.toContain('declare the member on the dataset');
       expect(err.message).toContain('"account.founded_at" cannot be a dimension name');
       expect(err.message).toContain(
-        'this comparison cannot run on a dataset query unless the dashboard\'s date field is a field of the dataset\'s own object that a declared date dimension names.',
+        'so no date dimension can be declared under it. Declare one date dimension over it instead, with `type: \'date\'` and `field` set to that field, '
+          + 'under any snake_case name (a related record\'s field needs its relationship in the dataset\'s `include`), and name that dimension in '
+          + '`timeDimensions` (and in `compareTo.dimension`, if set): a dashboard compare widget sends its window under that declared name itself.',
       );
     });
 

@@ -130,7 +130,7 @@
  */
 
 import { withoutOperationPrivateKeys } from '@objectstack/core';
-import { resolveDisplayField } from '@objectstack/spec/data';
+import { resolveDisplayField, type EngineQueryOptions } from '@objectstack/spec/data';
 import { renderOperationMessage, type ValidationMessageTranslator } from '@objectstack/spec/system';
 import { redactSnapshot, resolveReadableSnapshotFields, type FieldVisibilitySource } from './payload-redaction.js';
 import { negotiatedReaderLocale, readerLabelsFor, type ReaderLabelI18n } from './reader-locale-labels.js';
@@ -155,6 +155,14 @@ interface MinimalEngine {
    * WORDING, never the lock.
    */
   getSchema?(objectName: string): any | undefined;
+  /**
+   * Has the unit of work `handle` names already closed? Read structurally —
+   * the predicate the engine's own write path reads before it writes into a
+   * threaded handle — so the detail-row lock's cascade yield asks exactly the
+   * question the write answers. Optional for the reason `getSchema` is; absent,
+   * the yield is withheld ({@link inOpenUnit}).
+   */
+  isClosedUnitHandle?(handle: unknown): boolean;
 }
 
 /**
@@ -505,9 +513,85 @@ export async function recordHeldByLockingApproval(
   objectName: string,
   recordId: string,
 ): Promise<boolean> {
+  return (await lockingRequestsForRecords(engine, objectName, [recordId])).length > 0;
+}
+
+/**
+ * Is `recordId` of `objectName` a DETAIL row whose master is held by a LOCKING
+ * pending approval — would an ordinary write of it be refused `RECORD_LOCKED`
+ * by the detail-row lock ({@link bindDetailRowLockHook})?
+ *
+ * The record-anchored read's second half: a line of a locked record is locked
+ * with it, so the read that tells a client "this record is locked" says so of
+ * the line too, instead of offering an edit the hook then refuses. Asked as the
+ * hook asks it of an update or delete of the row: the masters the row stands
+ * under (every `master_detail` edge, {@link masterEdgesOf}), read off its FK
+ * columns as SYSTEM, each judged by the one lookup and judgement the hook uses
+ * ({@link lockingRequestsForRecords}). As with
+ * {@link recordHeldByLockingApproval}, what belongs to a WRITE (the opening
+ * run's own writes) is left out: it is not a property of the row.
+ *
+ * ⚠️ It answers for the row, not for a caller, and the FK read is SYSTEM.
+ * Whether the asker may learn the answer — may read the row at all — is the
+ * caller's question to settle first (`ApprovalService.getRecordLock`).
+ */
+export async function detailRowHeldByLockingApproval(
+  engine: Pick<MinimalEngine, 'find' | 'getSchema'>,
+  objectName: string,
+  recordId: string,
+): Promise<boolean> {
   if (isApprovalBookkeepingObject(objectName)) return false;
-  const gating = await pendingRequestsForRecords(engine, objectName, [recordId]);
-  return gating.some((pending) => nodeConfigLocksRecord(parseJson<unknown>(pending?.node_config_json, {})));
+  const edges = masterEdgesOf(engine, objectName);
+  if (edges.length === 0) return false;
+  const rows = await engine.find(objectName, {
+    where: { id: recordId },
+    fields: ['id', ...edges.map((e) => e.fk)],
+    limit: 1,
+    // SYSTEM_CTX's arrays are `as const` (readonly); the declared type wants mutable ones.
+    context: { ...SYSTEM_CTX, positions: [], permissions: [] },
+  } satisfies EngineQueryOptions);
+  const row = Array.isArray(rows) ? (rows[0] as Record<string, unknown> | undefined) : undefined;
+  if (!row) return false;
+  for (const e of edges) {
+    const masterId = scalarFk(row[e.fk]);
+    if (masterId && (await lockingRequestsForRecords(engine, e.master, [masterId])).length > 0) return true;
+  }
+  return false;
+}
+
+/**
+ * The pending requests that hold any of `recordIds` of `objectName` under a
+ * LOCKING node — the rows {@link recordHeldByLockingApproval} answers from,
+ * handed back whole so a write-side caller can apply the WRITE's exemptions
+ * (the opening run, #3456) per request. One lookup and one judgement
+ * ({@link nodeConfigLocksRecord}) for the record-anchored read and the
+ * detail-row lock below, so the two cannot disagree about "is this held".
+ */
+async function lockingRequestsForRecords(
+  engine: Pick<MinimalEngine, 'find'>,
+  objectName: string,
+  recordIds: ReadonlyArray<string | number>,
+): Promise<any[]> {
+  if (isApprovalBookkeepingObject(objectName)) return [];
+  const gating = await pendingRequestsForRecords(engine, objectName, recordIds);
+  return gating.filter((pending) => nodeConfigLocksRecord(parseJson<unknown>(pending?.node_config_json, {})));
+}
+
+/**
+ * {@link recordHeldByLockingApproval} for many records of one object at once:
+ * the ids among `recordIds` held by a LOCKING pending approval. One
+ * pending-request lookup for the whole list and the same judgement, so a page
+ * asked at once and a record asked alone cannot disagree.
+ *
+ * ⚠️ Like the one-record form, it answers for the records, not for a caller.
+ */
+export async function recordsHeldByLockingApproval(
+  engine: Pick<MinimalEngine, 'find'>,
+  objectName: string,
+  recordIds: ReadonlyArray<string>,
+): Promise<Set<string>> {
+  const held = await lockingRequestsForRecords(engine, objectName, recordIds);
+  return new Set(held.map((pending) => String(pending?.record_id ?? '')));
 }
 
 /**
@@ -684,9 +768,10 @@ export function bindApprovalLockHook(
         : undefined;
       // The sentence is in the writer's locale, and so is the label it names:
       // the translated `objects.<object>.label` when the pack carries one, else
-      // the declared label. ⛔ Never the API name.
+      // the declared label. ⛔ Never the API name. [#35384] The engine hands
+      // the label its served definition and packaged base, as `/meta` reads them.
       const { locale, service, translate } = refusalLocalization(ctx, i18nService);
-      const objectLabel = readerLabelsFor(service, locale)?.objectLabel(object) ?? declaredLabel;
+      const objectLabel = readerLabelsFor(service, locale, engine)?.objectLabel(object) ?? declaredLabel;
       // `previous` is the pre-image the engine already read for THIS row; it is
       // used only when it really is the row this pending request names, so a
       // dispatch that ever carried a different row cannot title the wrong
@@ -718,6 +803,304 @@ export function bindApprovalLockHook(
   }, { packageId: APPROVALS_HOOK_PACKAGE, priority: 50 });
 
   logger?.info?.('[approvals] record-lock hook bound');
+}
+
+/**
+ * One master-detail edge of a detail object: the `master_detail` field on the
+ * DETAIL and the master object it names (ADR-0035 — the field is the single
+ * declaration point of the relationship).
+ */
+interface MasterEdge {
+  fk: string;
+  master: string;
+}
+
+/**
+ * The master-detail edges of `objectName`, read off its registered schema — an
+ * in-memory registry read, no I/O, resolved at write time so a schema the boot
+ * registers after this plugin binds is still seen (AGENTS.md, startup registry
+ * reads).
+ *
+ * EVERY `master_detail` field counts, not only "the" parent: a junction with
+ * two masters is a detail row of each, and a lock on either master holds it.
+ * `reference` is the canonical key; the rejected `referenceTo` alias is read
+ * too, for the reason `@objectstack/objectql`'s `resolveMasterDetailRelation`
+ * gives — a raw `registerObject` skips Zod, and an unread spelling here would
+ * be a lock that silently does not apply.
+ */
+function masterEdgesOf(engine: Pick<MinimalEngine, 'getSchema'>, objectName: string): MasterEdge[] {
+  let schema: any;
+  try { schema = engine.getSchema?.(objectName); } catch { return []; }
+  const fields = schema?.fields;
+  if (!fields || typeof fields !== 'object') return [];
+  const edges: MasterEdge[] = [];
+  for (const [name, def] of Object.entries(fields as Record<string, any>)) {
+    if (!def || def.type !== 'master_detail') continue;
+    const master = typeof def.reference === 'string' && def.reference
+      ? def.reference
+      : (typeof def.referenceTo === 'string' && def.referenceTo ? def.referenceTo : undefined);
+    if (!master || isApprovalBookkeepingObject(master)) continue;
+    edges.push({ fk: def.name ?? name, master });
+  }
+  return edges;
+}
+
+/**
+ * The one relation through which the engine's cascade can delete a row of
+ * `objectName`, when it is one of `edges` — else `undefined`.
+ *
+ * Cascade-capable as the engine's cascade planning resolves it: a
+ * `master_detail` field unless it declares `deleteBehavior: 'restrict'`, and
+ * any other field that declares `deleteBehavior: 'cascade'`. Counted wide on
+ * purpose: a field miscounted as cascade-capable only withholds the
+ * cascade-leg yield ({@link bindDetailRowLockHook}), so the error direction is
+ * a refusal, never a held line removed by another record's delete.
+ */
+function soleCascadeEdgeOf(
+  engine: Pick<MinimalEngine, 'getSchema'>,
+  objectName: string,
+  edges: ReadonlyArray<MasterEdge>,
+): MasterEdge | undefined {
+  let schema: any;
+  try { schema = engine.getSchema?.(objectName); } catch { return undefined; }
+  const fields = schema?.fields;
+  if (!fields || typeof fields !== 'object') return undefined;
+  const cascading = Object.entries(fields as Record<string, any>)
+    .filter(([, def]) => !!def && (def.type === 'master_detail'
+      ? def.deleteBehavior !== 'restrict'
+      : def.deleteBehavior === 'cascade'))
+    .map(([name, def]) => String(def.name ?? name));
+  if (cascading.length !== 1) return undefined;
+  return edges.find((e) => e.fk === cascading[0]);
+}
+
+/**
+ * Is `handle` the handle of a unit of work that is still OPEN — one the
+ * engine's write path would write a cascade leg into, and roll back with the
+ * record's own delete?
+ *
+ * The engine's write path treats the handle of a unit that has already closed
+ * (a run detached from its dispatch's unit — an `async: true` after-hook — or a
+ * caller holding a handle past its unit) as no handle at all, and writes
+ * unenrolled. So a handle present on the context is not enough: it must be one
+ * the engine does not report closed (`isClosedUnitHandle`, the predicate its
+ * write path reads). An engine that cannot answer the question answers "not
+ * open": the yield is withheld, never granted on a guess.
+ */
+function inOpenUnit(engine: Pick<MinimalEngine, 'isClosedUnitHandle'>, handle: unknown): boolean {
+  if (handle === undefined || handle === null) return false;
+  if (typeof engine.isClosedUnitHandle !== 'function') return false;
+  try {
+    return engine.isClosedUnitHandle(handle) === false;
+  } catch {
+    return false;
+  }
+}
+
+/** A scalar foreign-key value, or `null` for an empty or non-scalar one. */
+function scalarFk(value: unknown): string | null {
+  if (typeof value === 'string') return value ? value : null;
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  return null;
+}
+
+/**
+ * A supplied FK value that names SOMETHING but not as a scalar id — an object
+ * such as `{ id }`, or an array. The guard cannot tell which master it names
+ * and does not rely on a later step unwrapping it, so the write is judged as
+ * unresolved (fail closed), never as touching no master (L1-a R2, #35755).
+ */
+function unscalarFk(value: unknown): boolean {
+  if (value === undefined || value === null || value === '') return false;
+  return scalarFk(value) === null;
+}
+
+/**
+ * Bind the DETAIL-ROW lock (ruling A on the record-page edit card,
+ * 「一起锁」): while a master record is held by a LOCKING pending approval, its
+ * master-detail rows refuse insert, update and delete with `RECORD_LOCKED`.
+ * The approver decides "this record with its lines"; lines that move during the
+ * decision change what is being decided.
+ *
+ * ## Which masters a write touches
+ *
+ *   - insert → the master each `master_detail` FK of the new row names;
+ *   - update → the master the row stands under now (`previous`) AND, when the
+ *     write sets the FK, the master it moves to — a reparent is checked at both
+ *     ends, so a line can be neither pulled out of nor pushed into a locked
+ *     record;
+ *   - delete → the master the row stands under (`previous`).
+ *
+ * The engine binds `previous` on every by-id and predicate update/delete
+ * before the `before*` hooks run (ADR-0058 Addendum II, per-row dispatch).
+ * A dispatch that names a row but carries no pre-image reads the FK columns of
+ * that row as SYSTEM (the #4630 rule: a row the caller cannot read is still a
+ * row they must not write). A dispatch that names no row at all — a whole
+ * predicate write handed over in one call — fails CLOSED whenever any record
+ * of a master object is held by a locking approval: "we could not tell which
+ * rows" is never read as "no locked row is touched".
+ *
+ * ## Exemptions — the record lock's own, carried over
+ *
+ *   - a SYSTEM session (engine self-writes, seeds, the approvals service);
+ *   - the run that OPENED the request (`provenance.flowRunId`, #3456 / #3712):
+ *     it may keep writing under the record it holds the request against, so a
+ *     flow that adjusts the lines between opening the approval and the
+ *     decision does not die on its own lock.
+ *
+ * There is no admin exemption, for the reason the module docstring gives.
+ * The status-mirror exemption has no analogue: it is about a field of the
+ * master itself.
+ *
+ * ## Deleting the locked master itself — the cascade leg yields
+ *
+ * Deleting a record while its approval is pending is not refused: the delete
+ * lands and its pending request is cancelled ({@link bindRecordDeleteCancelHook},
+ * #13568, whose ruling vetoed "forbid delete while pending"). A `master_detail`
+ * cascades, so that delete removes the lines too, as the CALLER, through this
+ * hook; refusing those legs would make a locked record with lines undeletable.
+ * So a delete the engine's cascade issued (`ctx.referentialCascadeDelete`, the
+ * declared marker) yields on the edge it can only have come through: when the
+ * detail object's ONE cascade-capable relation ({@link soleCascadeEdgeOf}) is
+ * the `master_detail` edge to the held master, the record being deleted is
+ * that master. Any other shape — a junction under two cascading masters, a
+ * `lookup` that also declares `cascade` — cannot name its cascade's source, so
+ * the leg is judged as a hand delete and refused: deleting a DIFFERENT record
+ * never takes a held record's line with it.
+ *
+ * The yield also needs the delete to run inside an OPEN unit of work: a
+ * `ctx.transaction` handle the engine does not report closed
+ * ({@link inOpenUnit}), such as the one its atomic cascade opens. Without one —
+ * a datasource that declares `supports.transactionsUnsupported`, a cascade the
+ * engine splits across datasources, or a handle whose unit already closed (an
+ * `async: true` after-hook's run) — each leg lands on its own, so
+ * a later refusal of the record's own delete (a `restrict` row met after the
+ * lines were removed) would leave the record held, its request pending and its
+ * lines gone. There the leg is refused, and so the held record's delete is
+ * refused `RECORD_LOCKED`, whole.
+ *
+ * One more shape is the yield's by construction: when the held record is itself
+ * a `master_detail` child, deleting ITS master removes the held record (its own
+ * edge is to an unheld master) and, through that record's own delete, its lines
+ * — and the delete-cancel linkage cancels its request.
+ *
+ * ## The refusal
+ *
+ * The END-USER sentence of the record lock ({@link recordLockRefusal}), naming
+ * the MASTER — the record that is locked, and the reason this line cannot
+ * change. No title: the master row is not read on the deny path (the module
+ * docstring's rule), so the sentence takes its label-only degradation.
+ */
+export function bindDetailRowLockHook(
+  engine: MinimalEngine,
+  logger?: MinimalLogger,
+  i18nService?: () => ReaderLabelI18n | undefined,
+): void {
+  const guard = (event: 'insert' | 'update' | 'delete') => async (ctx: any) => {
+    const object = (ctx?.object ?? ctx?.objectName) as string | undefined;
+    if (!object || isApprovalBookkeepingObject(object)) return;
+    const edges = masterEdgesOf(engine, object);
+    if (edges.length === 0) return;
+    if ((ctx?.session as any)?.isSystem) return;
+
+    const data = (ctx?.input?.data ?? {}) as Record<string, unknown>;
+    // An update that changes nothing writes nothing (the record lock's own rule).
+    if (event === 'update' && Object.keys(data).filter((k) => k !== 'id' && k !== 'updated_at').length === 0) return;
+
+    // The masters this write touches, per edge.
+    const touched: Array<{ master: string; id: string }> = [];
+    let unresolved = false;
+    if (event === 'insert') {
+      for (const e of edges) {
+        const id = scalarFk(data[e.fk]);
+        if (id) touched.push({ master: e.master, id });
+        else if (unscalarFk(data[e.fk])) unresolved = true;
+      }
+    } else {
+      let previous = ctx?.previous as Record<string, unknown> | undefined;
+      const rowId = asIdList(ctx?.input?.id);
+      if (!previous && rowId && rowId.length === 1) {
+        try {
+          const rows = await engine.find(object, {
+            where: { id: rowId[0] },
+            fields: ['id', ...edges.map((e) => e.fk)],
+            limit: 1,
+            // SYSTEM_CTX's arrays are `as const` (readonly); the declared type wants mutable ones.
+            context: { ...SYSTEM_CTX, positions: [], permissions: [] },
+          } satisfies EngineQueryOptions);
+          previous = Array.isArray(rows) && rows[0] ? rows[0] : undefined;
+        } catch {
+          previous = undefined;
+        }
+      }
+      if (!previous) unresolved = true;
+      // A cascade leg of the held master's OWN delete yields on that one edge
+      // (see "Deleting the locked master itself" above); every other edge of the
+      // row is still judged. Only inside an OPEN unit: without one the legs land
+      // one by one, and a later refusal of the record's own delete would leave
+      // the record held with its lines gone.
+      const cascadeSource = event === 'delete' && ctx?.referentialCascadeDelete === true
+        && inOpenUnit(engine, ctx?.transaction)
+        ? soleCascadeEdgeOf(engine, object, edges)
+        : undefined;
+      for (const e of edges) {
+        const before = previous ? scalarFk(previous[e.fk]) : null;
+        if (before && e !== cascadeSource) touched.push({ master: e.master, id: before });
+        if (event === 'update' && Object.prototype.hasOwnProperty.call(data, e.fk)) {
+          const after = scalarFk(data[e.fk]);
+          if (after && after !== before) touched.push({ master: e.master, id: after });
+          else if (unscalarFk(data[e.fk])) unresolved = true;
+        }
+      }
+    }
+
+    const writerRun = (ctx?.provenance as any)?.flowRunId;
+    const exempt = (pending: any) =>
+      !!writerRun && !!pending?.flow_run_id && String(writerRun) === String(pending.flow_run_id);
+
+    // The end-user sentence naming the MASTER object (the record lock's own).
+    const sentenceFor = (master: string): string => {
+      let schema: unknown;
+      try { schema = engine.getSchema?.(master); } catch { /* registry unavailable — label degrades */ }
+      const declaredLabel = typeof (schema as any)?.label === 'string' && (schema as any).label
+        ? String((schema as any).label)
+        : undefined;
+      const { locale, service, translate } = refusalLocalization(ctx, i18nService);
+      const masterLabel = readerLabelsFor(service, locale, engine)?.objectLabel(master) ?? declaredLabel;
+      return recordLockRefusal(masterLabel, undefined, locale, translate);
+    };
+
+    // Fail closed on a write whose rows could not be named: refused when any
+    // record of any master is held by a locking approval.
+    if (unresolved) {
+      for (const e of edges) {
+        const held = (await pendingRequestsForObject(engine, e.master)) ?? [];
+        const locking = held.filter((p) => nodeConfigLocksRecord(parseJson<unknown>(p?.node_config_json, {})) && !exempt(p));
+        if (locking.length > 0) {
+          lockedError(
+            `cannot determine which '${e.master}' record a ${event} on its detail object '${object}' falls under, ` +
+            `and ${locking.length} record(s) of '${e.master}' carry a locking pending approval, so the write is refused`,
+            sentenceFor(e.master),
+          );
+        }
+      }
+    }
+
+    for (const { master, id } of touched) {
+      const locking = (await lockingRequestsForRecords(engine, master, [id])).filter((p) => !exempt(p));
+      if (locking.length === 0) continue;
+      logger?.info?.(
+        `[approvals] ${event} on detail object '${object}' refused RECORD_LOCKED: its master '${master}' ` +
+        `record '${id}' is held by pending approval request '${String(locking[0]?.id ?? '')}'`,
+      );
+      const sentence = sentenceFor(master);
+      lockedError(sentence, sentence);
+    }
+  };
+  engine.registerHook('beforeInsert', guard('insert'), { packageId: APPROVALS_HOOK_PACKAGE, priority: 50 });
+  engine.registerHook('beforeUpdate', guard('update'), { packageId: APPROVALS_HOOK_PACKAGE, priority: 50 });
+  engine.registerHook('beforeDelete', guard('delete'), { packageId: APPROVALS_HOOK_PACKAGE, priority: 50 });
+  logger?.info?.('[approvals] detail-row lock hook bound');
 }
 
 /**

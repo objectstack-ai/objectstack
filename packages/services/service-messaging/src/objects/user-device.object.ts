@@ -172,6 +172,7 @@ export const UserDevice = ObjectSchema.create({
 
     enable: {
         trackHistory: false,
+        fieldHistory: false, // [#36290] keeps this object's "no history": values off in the activity stream
         searchable: false,
         // System-owned: reached only through the device routes.
         apiEnabled: false,

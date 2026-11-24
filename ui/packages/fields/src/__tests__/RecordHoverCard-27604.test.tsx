@@ -25,6 +25,7 @@ const LEAD = {
   name: 'lead',
   label: 'Lead',
   icon: 'user-plus',
+  color: 'orange',
   nameField: 'name',
   fields: {
     name: { type: 'text', label: 'Name' },
@@ -342,5 +343,21 @@ describe('RecordHoverCard over a lookup reference (objectstack#27604)', () => {
     expect(host.openRecord).toHaveBeenCalledWith('lead', 'lead-open');
     expect(onRowClick).not.toHaveBeenCalled();
     await waitFor(() => expect(card()).toBeNull());
+  });
+});
+
+describe('the card names the target object by its tile (objectstack#35985)', () => {
+  it('in the object\'s palette colour, and the neutral gray for an object with none', async () => {
+    renderRefs([
+      { objectName: 'lead', id: 'lead-tile', name: 'Lead tile' },
+      { objectName: 'product', id: 'product-tile', name: 'Widget tile' },
+    ]);
+    await settled();
+    await openCardOver('lead-tile');
+    expect(card()!.querySelector('[data-object-icon-tile]')).toHaveAttribute('data-object-icon-tile', 'orange');
+
+    fireEvent.keyDown(linkOf('product-tile'), { key: ' ' });
+    await waitFor(() => expect(card()).toHaveAttribute('data-record-hover-card-object', 'product'));
+    expect(card()!.querySelector('[data-object-icon-tile]')).toHaveAttribute('data-object-icon-tile', 'gray');
   });
 });

@@ -66,7 +66,6 @@ function hookInputs(navigate: ReturnType<typeof useNavigate>, phone: boolean, se
     viewLabel: (_object: string, _view: string, fallback: string) => fallback,
     unlabelledViewText: 'Untitled view',
     language: 'en',
-    recordOpenPreference: 'object' as never,
     phone,
   };
 }
@@ -115,7 +114,7 @@ describe('a list marks the record page it pushes on a phone (objectstack#29074)'
         activeView: { id: 'all', name: 'all', label: 'All leads', type: 'kanban' } as never,
         objectDef: { name: 'crm_lead', label: 'Lead', fields: {} } as never,
         onEdit: vi.fn(),
-        isAdmin: false,
+        canManageViews: false,
         location: LIST,
         navigate,
         viewId: undefined,

@@ -10,7 +10,11 @@
  * "no entry contract" (`checkStateMachine`), so a record can be CREATED
  * already in any state (born `approved`), walking straight past the process
  * the machine declares. A rule with `active: false` is skipped, as the engine
- * skips it.
+ * skips it, and so is a machine whose `events` leave out `insert`: the
+ * engine runs a rule only on the write contexts its `events` list
+ * (`r.events ?? ['insert', 'update']`, `rule-validator.ts`), so on an
+ * update-only machine `initialStates` is never read and adding it would be
+ * metadata the runtime ignores.
  *
  * It reads the object's own body alone, so the runtime publish gate judges an
  * `object` write exactly as the CLI judges the stack.
@@ -30,6 +34,16 @@ export interface InertObjectDeclarationFinding {
   hint: string;
 }
 
+/**
+ * Whether the engine runs a rule on insert. An absent `events` takes the
+ * schema default `['insert', 'update']`; an explicit list runs on exactly the
+ * contexts it names, so `[]` and `['update']` never run on create.
+ */
+function runsOnInsert(events: unknown): boolean {
+  if (events === undefined || events === null) return true;
+  return Array.isArray(events) && events.includes('insert');
+}
+
 /** Flag an entry-unguarded state machine on every object. */
 export function validateInertObjectDeclarations(stack: Record<string, unknown>): InertObjectDeclarationFinding[] {
   const findings: InertObjectDeclarationFinding[] = [];
@@ -41,6 +55,7 @@ export function validateInertObjectDeclarations(stack: Record<string, unknown>):
     const validationList: readonly unknown[] = Array.isArray(obj.validations) ? obj.validations : [];
     for (const rule of validations) {
       if (rule.type !== 'state_machine' || rule.active === false) continue;
+      if (!runsOnInsert(rule.events)) continue;
       // Absent and empty are the same to the engine: no entry contract.
       if (Array.isArray(rule.initialStates) && rule.initialStates.length > 0) continue;
       const ruleName = typeof rule.name === 'string' ? rule.name : 'state_machine';

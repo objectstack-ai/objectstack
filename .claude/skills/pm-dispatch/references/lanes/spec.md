@@ -27,7 +27,7 @@
 - 收窄不触发条款②,但按 `yes` 申报恒不是错误;⛔ 个案裁决不改本行。
 - 机器面改围契约的仪器,与辅助面不交,⛔ 不碰 `packages/spec/src/**/*.zod.ts` 与 strictness 台账。
 - 机器面卡照北极星「Instruments serve the fleet」那一问写 `Suggested-grade:`,级归分诊。
-- 拿不准 FLAG 回分诊,⛔ 不自设判据;档位随面走,表在 SKILL.md 模型分档,⛔ 不另抄。
+- 拿不准 FLAG 回分诊,⛔ 不自设判据;档位住 `../execution-duties.md` 定档节,⛔ 不另抄。
 
 ## 常设承诺
 

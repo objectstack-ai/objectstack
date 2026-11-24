@@ -60,6 +60,8 @@ const candidates = [
 ];
 
 const makeDataSource = () => ({
+  // The picker's add is one transactional batch (objectstack#35601); a source without it offers no picker.
+  batchTransaction: vi.fn(async () => ({ results: [] })),
   getObjectSchema: vi.fn(async (api: string) =>
     api === 'sys_permission_set' ? permissionSetSchema : junctionSchema,
   ),

@@ -88,8 +88,6 @@ const ACTIVITY = { id: 'ac1', type: 'created', object_name: OBJECT, record_id: '
 const ATTACHMENT = { id: 'f1', parent_object: OBJECT, parent_id: 'c1', file_id: 'file-1', file_name: 'contract.pdf', created_at: '2026-10-02T10:00:00.000Z' };
 
 interface Answers {
-  /** Answer the related rows' owner as a bare id even when the request expands it. */
-  ignoreExpand?: boolean;
   activity?: unknown;
 }
 
@@ -113,7 +111,7 @@ function pageAnswer(id: string, body: any, answers: Answers) {
           id: `t${i}`,
           name: `Task ${i}`,
           contact: id,
-          owner: !answers.ignoreExpand && r.expand?.includes('owner') ? { id: 'u9', name: 'Una Owner' } : 'u9',
+          owner: r.expand?.includes('owner') ? { id: 'u9', name: 'Una Owner' } : 'u9',
         })),
       })),
       ...(body.fieldAccess ? { fieldAccess: { object: OBJECT, recordId: id, readable: ['name', 'account'], editable: ['name'], writable: true } } : {}),
@@ -178,7 +176,6 @@ const STREAMS = ['sys_comment', 'sys_comment_reaction', 'sys_activity', 'sys_att
 const streamReads = (held: Held[]) => STREAMS.flatMap((o) => readsOf(held, o).map(() => o));
 const mentionReads = (held: Held[]) => readsOf(held, 'sys_user').filter((h) => /[?&]\$?top=50\b/.test(h.path));
 const nameProbes = (held: Held[]) => held.filter((h) => h.method === 'GET' && /[?&]\$?top=1\b/.test(h.path));
-const probedObject = (h: Held) => /\/api\/v1\/data\/([^/?]+)\?/.exec(h.path)![1];
 
 beforeEach(() => {
   cleanup();
@@ -186,8 +183,18 @@ beforeEach(() => {
   __resetRecordApprovalsStore();
   RelatedCountStore._reset();
   Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1440 });
+  window.localStorage.clear();
 });
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); window.localStorage.clear(); });
+
+/** objectstack#36075 — the record's comments are drawn in the comment panel, opened from the header's icon. */
+async function openComments(container: HTMLElement, held: Held[]) {
+  const button = container.querySelector('[data-comments-button]') as HTMLElement | null;
+  expect(button, 'the header offers the comments icon').not.toBeNull();
+  await act(async () => { fireEvent.click(button!); });
+  await settle(held);
+  return container.querySelector('[data-comments-panel]') as HTMLElement;
+}
 
 async function boot(answers: Answers = {}) {
   const { fetch, held } = heldTransport(answers);
@@ -235,11 +242,15 @@ describe('objectstack#28470 — one record open is one request', () => {
     });
     expect(page.body.related).toEqual([expect.objectContaining({ object: CHILD, field: 'contact', expand: ['owner'] })]);
 
-    // Every part is drawn from the payload: the comment, the attachment row
-    // and its badge's count.
-    expect(view.container.textContent).toContain('hello from the payload');
-    expect(view.container.textContent).toContain('contract.pdf');
+    // Every part is drawn from the payload: the attachment badge's count at
+    // open (objectstack#35890: no rail card draws the rows on 「详情」), and the
+    // comment in the comment panel, which reads nothing more as it opens.
     expect(RelatedCountStore.get('sys_attachment', recordAttachmentsCountField(OBJECT), 'c1')).toBe(3);
+    expect(view.container.querySelector('[data-record-summary-card]')).toBeNull();
+    const before = held.length;
+    const panel = await openComments(view.container, held);
+    expect(panel.textContent).toContain('hello from the payload');
+    expect(held.slice(before).filter((h) => !isMeta(h))).toEqual([]);
   });
 
   it('reads the mention list on the composer\'s first focus, once', async () => {
@@ -248,14 +259,16 @@ describe('objectstack#28470 — one record open is one request', () => {
     await settle(held);
     expect(mentionReads(held)).toEqual([]);
 
-    const standIn = view.container.querySelector('[data-record-timeline-composer]') as HTMLElement | null;
-    expect(standIn, 'the 动态 panel draws its one-line composer').not.toBeNull();
-    await act(async () => { fireEvent.click(standIn!); });
+    // Since objectstack#36075 the composer is the comment panel's.
+    const panel = await openComments(view.container, held);
+    expect(mentionReads(held)).toEqual([]);
+    const editor = panel.querySelector('[data-comments-composer] textarea') as HTMLTextAreaElement | null;
+    expect(editor, 'the comment panel draws the composer').not.toBeNull();
+    await act(async () => { fireEvent.focus(editor!); });
     await settle(held);
     expect(mentionReads(held)).toHaveLength(1);
 
-    const editor = view.container.querySelector('[data-record-timeline-peek] textarea') as HTMLTextAreaElement;
-    await act(async () => { fireEvent.blur(editor); fireEvent.focus(editor); });
+    await act(async () => { fireEvent.blur(editor!); fireEvent.focus(editor!); });
     await settle(held);
     expect(mentionReads(held)).toHaveLength(1);
   });
@@ -264,9 +277,17 @@ describe('objectstack#28470 — one record open is one request', () => {
     const { held, open } = await boot({ activity: { error: { code: 'PERMISSION_DENIED', status: 403, message: 'No.' } } });
     const view = open();
     await settle(held);
-    expect(view.container.querySelector('[data-denied-source="activity"]')).not.toBeNull();
-    expect(view.container.textContent).toContain('hello from the payload');
+    const panel = await openComments(view.container, held);
+    expect(panel.textContent).toContain('hello from the payload');
     expect(streamReads(held)).toEqual([]);
+    // Drawn on the 动态 tab (objectstack#35890: no rail card on 「详情」).
+    const tab = view.container.querySelector('[role="tab"][data-record-tab="timeline"]') as HTMLElement;
+    await act(async () => { fireEvent.click(tab); });
+    await settle(held);
+    const face = view.container.querySelector('[data-related-enlarged="timeline"]') as HTMLElement;
+    expect(face.querySelector('[data-denied-source="activity"]')).not.toBeNull();
+    // The refused part is not asked again when its tab opens.
+    expect(streamReads(held).filter((o) => o === 'sys_activity')).toEqual([]);
   });
 
   // ── Ablations: the detectors above see each retired read ──────────────
@@ -280,11 +301,7 @@ describe('objectstack#28470 — one record open is one request', () => {
     expect([...new Set(streamReads(held))].sort()).toEqual(['sys_activity', 'sys_attachment', 'sys_comment']);
   });
 
-  it('ablation — rows answered with bare ids pay one name read per referenced object, never the parent\'s', async () => {
-    const { held, open } = await boot({ ignoreExpand: true });
-    open();
-    await settle(held);
-    expect(held.filter(isPage)).toHaveLength(1);
-    expect(nameProbes(held).map(probedObject)).toEqual(['sys_user']);
-  });
+  // objectstack#35596 retired the bare-id ablation, and objectstack#35890 the
+  // rail itself: no surface on the page's open resolves a related row's owner
+  // to probe for.
 });

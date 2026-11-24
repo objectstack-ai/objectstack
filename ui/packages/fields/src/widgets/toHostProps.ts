@@ -124,6 +124,9 @@ const HOST_PLUMBING_KEYS = [
   'onAutofill',
   'openingValue',
   'onCreateNew',
+  // objectstack#35688 — the grid cell editor's face and its commit.
+  'inCell',
+  'onCommit',
 ] as const;
 
 type HostPlumbingKey = (typeof HOST_PLUMBING_KEYS)[number];

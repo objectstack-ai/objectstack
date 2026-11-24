@@ -14,6 +14,7 @@
  */
 
 import * as React from 'react';
+import { createPortal } from 'react-dom';
 import { Link, useLocation } from 'react-router-dom';
 import { getIcon } from '../utils/getIcon.js';
 import {
@@ -28,7 +29,6 @@ import {
   SidebarMenuItem,
   SidebarMenuButton,
   SidebarMenuAction,
-  SidebarInput,
   cn,
   useSidebar,
 } from '@object-ui/components';
@@ -39,7 +39,7 @@ import {
   ChevronRight,
   LayoutGrid,
   Layers,
-  Pin,
+  Search,
 } from 'lucide-react';
 import { NavigationRenderer, hasVisibleNavigationItems, type NavItemActionContext } from '@object-ui/layout';
 import type { NavigationArea, NavigationItem } from '@object-ui/types';
@@ -51,7 +51,11 @@ import { useFavorites } from '../hooks/useFavorites.js';
 import { useNavPins } from '../hooks/useNavPins.js';
 import { useNavActionDispatch } from '../hooks/useNavActionDispatch.js';
 import { useNavTargetLabel } from '../hooks/useNavTargetLabel.js';
-import { useNavTargetIcon } from '../hooks/useNavTargetIcon.js';
+import { useNavTargetColor, useNavTargetIcon } from '../hooks/useNavTargetIcon.js';
+import { ContentItemTile, favoriteItemObject } from './contentItemTile.js';
+import { recentItemObject } from '../console/home/recentItemTypeLabel.js';
+import { readRecentObjects } from '../console/home/readRecentObjects.js';
+import { appSegmentOf } from '../console/home/appLastOpened.js';
 import { useNavDocTargetCheck } from '../hooks/useNavDocTargetCheck.js';
 import { useNavMemberGates } from '../hooks/useNavMemberGates.js';
 import { matchAppBySegment } from '../utils/index.js';
@@ -75,13 +79,36 @@ import {
 } from './ContextSelectors.js';
 import { AppMark } from './AppMark.js';
 import { CONSOLE_BELOW_TOP_BAR } from './consoleTopBar.js';
-import { SIDEBAR_EDGE_ZONE, useConsoleSidebarRail, useConsoleSidebarRailPanel } from './consoleSidebarRail.js';
+import { LocalizedSidebarTrigger } from './LocalizedSidebarTrigger.js';
+import { SidebarAppMenu } from './SidebarAppMenu.js';
+import { InboxBell } from './InboxBell.js';
+import { AccountMenu } from './AccountMenu.js';
+import { useCommandPalette, useCommandPaletteProviderMounted } from '../context/CommandPaletteProvider.js';
+import { confirmUnsavedLeave } from '../chrome/unsavedEdits.js';
+import {
+  CONSOLE_EXPANDED_SIDEBAR_WIDTH,
+  CONSOLE_SIDEBAR_WIDTH_PREFERENCE,
+  SIDEBAR_EDGE_ZONE,
+  SIDEBAR_RESIZING_FRAME,
+  useConsoleSidebarRail,
+  useConsoleSidebarRailPanel,
+} from './consoleSidebarRail.js';
+import { SidebarWidthHandle } from './SidebarWidthHandle.js';
+import { useWorkspacePreference } from '../utils/workspacePreference.js';
 import { SidebarItemMenu, sidebarItemDesignPath, favoriteDesignPath } from './SidebarItemMenu.js';
 import { SortableFavoriteRows, type FavoriteRowDragProps } from './SortableFavoriteRows.js';
 import { favoriteAppSegment } from './listViewFavorites.js';
+import { useDesignModeActive } from './designMode.js';
 import { electSidebarArea, type SidebarAreaRoute } from './sidebarAreaElection.js';
 import type { FavoriteItem } from '../hooks/useFavorites.js';
-import { PhoneAppNavBar, PhoneMenuStar } from './PhoneAppNavBar.js';
+import { usePhoneAppHomeSlot } from './PhoneAppHome.js';
+
+/**
+ * The app's menu as the design mode edits it (objectstack#36363). Loaded on
+ * the mode's first use: it brings the metadata client and the package doors
+ * the menu's write needs, which no other sidebar row reads.
+ */
+const DesignModeMenu = React.lazy(() => import('./DesignModeMenu.js'));
 
 /**
  * The class the Recent group's label carries so that, once the sidebar
@@ -158,13 +185,6 @@ interface UnifiedSidebarProps {
    * every width, collapsed to the primitive's icon rail.
    */
   railOverlay?: boolean;
-  /**
-   * On a phone, draw the app's bottom menu bar (objectstack#34594) and give the
-   * drawer, which its 「More」 cell opens, a search box and a star per entry.
-   * The console layout decides it: a phone, inside an app, not on a record
-   * page or a record form. Ignored outside an app and from 768 px up.
-   */
-  phoneNavBar?: boolean;
 }
 
 function isMetadataDirectoryItem(item: NavigationItem): boolean {
@@ -182,8 +202,8 @@ function isOverviewGroup(item: NavigationItem): boolean {
   return id === 'overview' || label === 'overview';
 }
 
-export function UnifiedSidebar({ activeAppName, railOverlay = false, phoneNavBar = false }: UnifiedSidebarProps) {
-  const { isMobile, openMobile, setOpenMobile } = useSidebar();
+export function UnifiedSidebar({ activeAppName, onAppChange, railOverlay = false }: UnifiedSidebarProps) {
+  const { isMobile, setOpenMobile } = useSidebar();
   const location = useLocation();
   const { t, language } = useObjectTranslation();
   const { appLabel } = useServedAppLabel();
@@ -195,13 +215,34 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false, phoneNavBar
   // hook, so the two surfaces cannot name one entry two ways.
   const resolveNavTargetLabel = useNavTargetLabel({ byName: true });
   const resolveNavTargetIcon = useNavTargetIcon();
+  const resolveNavTargetColor = useNavTargetColor();
   // Collapsed, the console's sidebar is hidden and its menu floats over the
-  // content (objectstack#35062); below the fold width it collapses on its own
-  // (objectstack#27593), and `useResponsiveSidebar` folds and unfolds it.
+  // content (objectstack#35062); a window starts in the reader's choice for
+  // its side of the threshold, else expanded from 1280 px and collapsed below
+  // (objectstack#36112), and `useResponsiveSidebar` gives it that state.
   const rail = useConsoleSidebarRail({ enabled: railOverlay });
   const sidebarRef = React.useRef<HTMLDivElement | null>(null);
   const railPanel = useConsoleSidebarRailPanel(rail, sidebarRef);
-  const keepOpenLabel = t('sidebar.keepOpen', { defaultValue: 'Keep sidebar open' });
+  // objectstack#36227 — from 768 px up the reader drags the docked sidebar's
+  // right edge to resize it; this browser keeps the width, and the menu
+  // floating over a collapsed sidebar takes it too.
+  const [keptWidth, setKeptWidth] = useWorkspacePreference(
+    CONSOLE_SIDEBAR_WIDTH_PREFERENCE,
+    'user',
+    CONSOLE_EXPANDED_SIDEBAR_WIDTH,
+  );
+  const [dragWidth, setDragWidth] = React.useState<number | null>(null);
+  const sidebarWidth = dragWidth ?? keptWidth;
+  // objectstack#36112 — from 768 px up the console draws no top bar: the
+  // sidebar starts at the top of the window and carries the app menu, the
+  // search and the bell in its head, and the account at its foot.
+  const shellChrome = rail.desktop && context === 'app';
+  // objectstack#36362 — while the design mode is on, its bar is above the
+  // sidebar, and the menu shows the app's own entries only: the person's
+  // Favorites are not the app's to change.
+  const designMode = useDesignModeActive();
+  const { openCommandPalette } = useCommandPalette();
+  const hasCommandPalette = useCommandPaletteProviderMounted();
 
   // Swipe-from-left-edge gesture to open sidebar on mobile
   React.useEffect(() => {
@@ -239,16 +280,13 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false, phoneNavBar
   }, [routeKey, isMobile, setOpenMobile]);
 
   const { recentItems: allRecentItems } = useRecentItems();
-  // A Studio package entry is labelled from the package list (objectui#11863),
-  // which this sidebar does not load, so it is left out here rather than drawn
-  // as its id. The Studio landing lists the recent packages.
-  const recentItems = allRecentItems.filter(item => item.type !== 'package');
   // A recent entry's text is the item's own, resolved on this render
   // (objectui#11678); the entry stores identity only.
   const recentLabel = useRecentItemLabel();
   const { favorites, removeFavorite, reorderFavorites } = useFavorites();
 
-  const { apps: metadataApps } = useMetadata();
+  const metadata = useMetadata();
+  const { apps: metadataApps } = metadata;
   const apps = metadataApps || [];
   // objectui#7256 — every "Home" row below follows the product's DECLARED
   // landing, so the sidebar cannot offer a second home the top bar disowns.
@@ -257,7 +295,19 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false, phoneNavBar
   // direct navigation to /apps/account still renders.
   const activeApps = apps.filter((a: any) => a.active !== false && a.hidden !== true);
   // ADR-0048 (A) — route segment may be a package id; match by it (name fallback).
-  const activeApp = matchAppBySegment(apps.filter((a: any) => a.active !== false), activeAppName || currentAppName) || activeApps[0];
+  const enabledApps = apps.filter((a: any) => a.active !== false);
+  const activeApp = matchAppBySegment(enabledApps, activeAppName || currentAppName) || activeApps[0];
+  // A Studio package entry is labelled from the package list (objectui#11863),
+  // which this sidebar does not load, so it is left out here rather than drawn
+  // as its id. The Studio landing lists the recent packages. From 768 px up
+  // the list is this app's own (objectstack#36112, 「这个应用里的最近使用」):
+  // an entry was opened in the app its address names, resolved as the router
+  // resolves it; Home lists every app's. The phone drawer is unchanged.
+  const recentItems = allRecentItems.filter(
+    (item) =>
+      item.type !== 'package' &&
+      (isMobile || (!!activeApp && matchAppBySegment(enabledApps, appSegmentOf(item.href)) === activeApp)),
+  );
   // `type: 'action'` nav items dispatch through here (framework#4509). The
   // sidebar renders inside ConsoleShell's GlobalActionRuntimeProvider, so this
   // resolves to the fully-wired console runner — confirm/param/result dialogs
@@ -514,34 +564,11 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false, phoneNavBar
   // Recent section collapsed by default
   const [recentExpanded, setRecentExpanded] = React.useState(false);
 
-  // objectstack#34594 — the phone's bottom menu bar and the full menu its
-  // 「More」 cell opens. The bar reads every visible area of the app (the drawer
-  // shows one area at a time; a pin from another area keeps its cell), and the
-  // same pruned trees the drawer draws. Studio's menu is the rewritten one the
-  // drawer shows.
-  const phoneMenu = isMobile && phoneNavBar && context === 'app' && !!activeApp;
-  const phoneBarItems: NavigationItem[] = isStudioApp
-    ? studioNavigationItems
-    : visibleAreas.length > 0
-      ? visibleAreas.flatMap((area) => area.navigation ?? [])
-      : readableAppNavigation ?? [];
-  // The full menu's search: ephemeral, cleared whenever the drawer closes.
-  const [menuQuery, setMenuQuery] = React.useState('');
-  const [menuQueryOpen, setMenuQueryOpen] = React.useState(openMobile);
-  if (menuQueryOpen !== openMobile) {
-    // Adjusted while rendering, on the drawer's open state changing (React's
-    // "adjusting state when a prop changes"), not in an effect.
-    setMenuQueryOpen(openMobile);
-    if (!openMobile) setMenuQuery('');
-  }
-  const renderPhoneMenuStar = (item: NavigationItem, row: NavItemActionContext) => (
-    <PhoneMenuStar
-      label={row.label}
-      pinned={!!item.pinned}
-      onToggle={() => togglePin(item.id, !item.pinned, item, row.basePath)}
-      t={t}
-    />
-  );
+  // objectstack#35881 — on a phone the app's root is the app's home, its whole
+  // menu: this sidebar draws its own navigation tree into the slot that page
+  // holds (`PhoneAppHome`), so the page lists what the sidebar lists, in its
+  // order, under the same gates.
+  const phoneHomeSlot = usePhoneAppHomeSlot();
 
   // One ⋯ menu on every entry, in place of the pin action (objectui#12427):
   // its first entry adds the entry to Favorites or removes it, through the
@@ -575,6 +602,30 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false, phoneNavBar
   // rows are the user's to order: dragged, they keep the order on every device
   // (the favorites store's `reorderFavorites`). A phone, which draws no drag,
   // keeps them in that order.
+  // The objects the Recent, Favorites and Starred rows name, asked in ONE
+  // presence read; a name not answered `read` is asked nothing by name
+  // (objectstack#34692, as Home's recent rows).
+  const contentObjectNames = [
+    ...new Set(
+      [
+        ...favorites.map((f) => favoriteItemObject(f)),
+        ...recentItems.slice(0, 5).map((r) => recentItemObject(r)),
+      ].filter((name): name is string => !!name),
+    ),
+  ].sort();
+  const contentObjectReading = readRecentObjects(metadata, contentObjectNames);
+  const contentTile = (kind: string, objectName?: string, icon?: string) => (
+    <ContentItemTile
+      kind={kind}
+      objectName={objectName}
+      objectRead={!objectName || contentObjectReading(objectName) === 'read'}
+      icon={icon}
+      targetIcon={resolveNavTargetIcon}
+      targetColor={resolveNavTargetColor}
+      size={isMobile ? 'md' : 'sm'}
+      className="-mx-0.5"
+    />
+  );
   const contentFavorites = favorites
     .filter(f => f.type !== 'nav')
     .filter(f => f.type !== 'view' || matchAppBySegment(apps.filter((a: any) => a.active !== false), favoriteAppSegment(f.href)) === activeApp)
@@ -584,15 +635,9 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false, phoneNavBar
       <>
         <SidebarMenuButton asChild tooltip={item.label}>
           <Link to={item.href} {...(drag ?? {})}>
-            {item.type === 'view' ? (
-              // `createElement`: the looked-up icon is a value, which
-              // react-hooks/static-components refuses in tag position.
-              React.createElement(getIcon(item.icon), { className: 'h-4 w-4 shrink-0 text-muted-foreground' })
-            ) : (
-              <span className="text-muted-foreground">
-                {item.type === 'dashboard' ? '📊' : item.type === 'report' ? '📈' : item.type === 'page' ? '📄' : '📋'}
-              </span>
-            )}
+            {/* objectstack#36141 — the menu's tiles: an object, one of its
+                views or records is that object's tile, the rest neutral. */}
+            {contentTile(item.type, favoriteItemObject(item), item.type === 'view' ? item.icon : undefined)}
             <span className="truncate">{item.label}</span>
           </Link>
         </SidebarMenuButton>
@@ -618,66 +663,11 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false, phoneNavBar
           />
         );
 
-  return (
-    <div data-testid="console-sidebar-frame" className={railPanel.frameClassName}>
-    <Sidebar
-      ref={sidebarRef}
-      collapsible={railPanel.collapsible}
-      className={cn(CONSOLE_BELOW_TOP_BAR, railPanel.panelClassName)}
-      {...railPanel.panelProps}
-    >
-      {/* Mobile-only drawer header — the app's glyph and name (objectui#12201
-          item 3). On a phone the top bar hides the app pill, so this is the
-          one place that says which app the user is in. It replaces the old
-          Home row, and keeps that row's job: the trailing 「All apps」
-          button is the way back out of the app, since a phone has no
-          path-separator, no back arrow and no top-bar pill to open. Render
-          it inside the sheet header so it survives the SidebarHeader vs
-          SidebarContent split. */}
-      {isMobile && context === 'app' && activeApp && (
-        <SidebarHeader className="border-b p-1.5">
-          <div className="flex min-h-[44px] items-center gap-2.5 px-2" data-testid="mobile-sidebar-app">
-            <AppMark app={activeApp} size="md" />
-            <span className="flex-1 truncate text-[15px] font-semibold">
-              {appLabel(activeApp)}
-            </span>
-            <Link to={homePath} onClick={() => setOpenMobile(false)} data-testid="mobile-sidebar-home" aria-label={t('layout.appSwitcher.allApps', { defaultValue: 'All apps' })} title={t('layout.appSwitcher.allApps', { defaultValue: 'All apps' })} className="inline-flex size-11 shrink-0 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring">
-              <LayoutGrid className="h-5 w-5" />
-            </Link>
-          </div>
-          {/* objectstack#34594 — the full menu the bottom bar's 「More」
-              opens: searchable, and each entry's star offers it to the bar. */}
-          {phoneMenu && (
-            <div className="space-y-1.5 px-2 pb-1.5 pt-1">
-              <SidebarInput
-                type="search"
-                value={menuQuery}
-                onChange={(event) => setMenuQuery(event.target.value)}
-                placeholder={t('console.nav.searchMenu', { defaultValue: 'Search menu' })}
-                aria-label={t('console.nav.searchMenu', { defaultValue: 'Search menu' })}
-                data-testid="phone-menu-search"
-                className="h-10 text-[15px]"
-              />
-              <p data-testid="phone-menu-pin-hint" className="text-xs text-muted-foreground">
-                {t('console.nav.phoneBarHint', {
-                  defaultValue: 'Star an entry to put it in the bottom bar. The bar shows the first four.',
-                })}
-              </p>
-            </div>
-          )}
-        </SidebarHeader>
-      )}
-      <SidebarContent className={`pt-2 ${ICON_RAIL_SCROLLS_VERTICALLY}`}>
-        {/* The sidebar's one navigation landmark, so assistive tech can jump
-            to it. The `Sidebar` primitive draws a plain `div` (and a dialog on
-            a phone) and is Shadcn-synced, so the landmark rides inside its
-            content slot, where it reaches the drawer as well. */}
-        <nav
-          aria-label={t('console.nav.menuLabel', { defaultValue: 'App navigation' })}
-          className="transition-opacity duration-200 ease-in-out"
-        >
-          {context === 'app' && activeApp ? (
-           <>
+  // The app's menu: its context selectors, its area switcher and its
+  // navigation tree. Drawn in the sidebar, and on a phone also into the app
+  // home's slot (objectstack#35881), so the two cannot differ.
+  const renderAppMenu = (where: 'sidebar' | 'home') => (
+    <>
           {/* App-level context selectors (e.g. package scope) */}
           {contextSelectorsUI && (
             <SidebarGroup className="group-data-[state=collapsed]:hidden px-2 pb-1">
@@ -728,7 +718,20 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false, phoneNavBar
 
            {/* App Navigation tree. `locale` is the same `language` the area
                labels above resolve in, so an entry label written as an inline
-               locale map reads the viewer's entry too (objectui#11299). */}
+               locale map reads the viewer's entry too (objectui#11299).
+               objectstack#36363 — while the design mode is on, the app's
+               menu is drawn by its editor instead (an app whose menu is split
+               in areas keeps its menu: the card edits `navigation`). */}
+           {designMode && where === 'sidebar' && context === 'app' && activeApp && areas.length === 0 ? (
+             <React.Suspense fallback={null}>
+               <DesignModeMenu
+                 app={activeApp}
+                 basePath={basePath}
+                 resolveTargetLabel={resolveNavTargetLabel}
+                 resolveTargetIcon={resolveNavTargetIcon}
+               />
+             </React.Suspense>
+           ) : (
            <NavigationRenderer
              items={processedNavigation}
              basePath={basePath}
@@ -736,22 +739,107 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false, phoneNavBar
              checkPermission={checkPerm}
              checkCapability={checkCap}
              checkDocTarget={checkDocTarget}
-             enablePinning={!isMobile}
-             // On a phone the drawer draws no ⋯ menu (objectui#1055); where it
-             // is the bottom bar's full menu, each entry carries a star
-             // instead (objectstack#34594).
-             renderItemAction={isMobile ? (phoneMenu ? renderPhoneMenuStar : undefined) : renderNavItemAction}
-             searchQuery={phoneMenu ? menuQuery : undefined}
-             extraFavorites={contentFavoriteRows}
+             enablePinning={!isMobile && !designMode}
+             // On a phone no row draws a per-entry control (objectui#1055),
+             // the drawer's or the app home's; the pins that once offered an
+             // entry to the bottom bar are gone with it (objectstack#35882).
+             renderItemAction={isMobile ? undefined : renderNavItemAction}
+             // The app home lists the menu alone: no Favorites section there
+             // (objectstack#35881), nor while the design mode is on (objectstack#36362).
+             extraFavorites={where === 'home' || designMode ? undefined : contentFavoriteRows}
              pinnedOrder={pinnedIds}
              onPinnedReorder={reorderPins}
              resolveTargetLabel={resolveNavTargetLabel}
              resolveTargetIcon={resolveNavTargetIcon}
+             resolveTargetColor={resolveNavTargetColor}
              locale={language}
              onAction={dispatchNavAction}
              t={t}
              templateContext={navTemplateContext}
            />
+           )}
+    </>
+  );
+
+  return (
+    <div
+      data-testid="console-sidebar-frame"
+      className={cn(railPanel.frameClassName, dragWidth !== null && SIDEBAR_RESIZING_FRAME)}
+      style={rail.desktop ? ({ '--sidebar-width': `${sidebarWidth}px` } as React.CSSProperties) : undefined}
+    >
+    <Sidebar
+      ref={sidebarRef}
+      collapsible={railPanel.collapsible}
+      className={cn((!rail.desktop || designMode) && CONSOLE_BELOW_TOP_BAR, railPanel.panelClassName)}
+      {...railPanel.panelProps}
+    >
+      {/* Mobile-only drawer header — the app's glyph and name (objectui#12201
+          item 3). On a phone the top bar hides the app pill, so this is the
+          one place that says which app the user is in. It replaces the old
+          Home row, and keeps that row's job: the trailing 「All apps」
+          button is the way back out of the app, since a phone has no
+          path-separator, no back arrow and no top-bar pill to open. Render
+          it inside the sheet header so it survives the SidebarHeader vs
+          SidebarContent split. */}
+      {isMobile && context === 'app' && activeApp && (
+        <SidebarHeader className="border-b p-1.5">
+          <div className="flex min-h-[44px] items-center gap-2.5 px-2" data-testid="mobile-sidebar-app">
+            <AppMark app={activeApp} size="md" />
+            <span className="flex-1 truncate text-[15px] font-semibold">
+              {appLabel(activeApp)}
+            </span>
+            <Link to={homePath} onClick={() => setOpenMobile(false)} data-testid="mobile-sidebar-home" aria-label={t('layout.appSwitcher.allApps', { defaultValue: 'All apps' })} title={t('layout.appSwitcher.allApps', { defaultValue: 'All apps' })} className="inline-flex size-11 shrink-0 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring">
+              <LayoutGrid className="h-5 w-5" />
+            </Link>
+          </div>
+        </SidebarHeader>
+      )}
+      {shellChrome && activeApp && (
+        <SidebarHeader className="gap-1 p-2 pb-1" data-testid="sidebar-shell-head">
+          <div className="flex min-w-0 items-center gap-1">
+            <SidebarAppMenu
+              activeAppName={activeAppName ?? activeApp.name}
+              onAppChange={(segment) => confirmUnsavedLeave(() => onAppChange?.(segment))}
+            />
+            <LocalizedSidebarTrigger
+              className="text-muted-foreground"
+              aria-label={t('sidebar.collapse', { defaultValue: 'Collapse sidebar' })}
+              data-testid="sidebar-collapse"
+            />
+          </div>
+          <div className="flex min-w-0 items-center gap-1">
+            {hasCommandPalette && (
+              <button
+                type="button"
+                data-testid="action:command-palette:open"
+                aria-label={t('console.search', { defaultValue: 'Search…' })}
+                aria-keyshortcuts="Meta+K Control+K"
+                onClick={openCommandPalette}
+                className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-md border bg-background/60 px-2.5 text-muted-foreground transition-colors hover:bg-sidebar-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
+              >
+                <Search className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                <span className="flex-1 truncate text-left text-xs">{t('console.search', { defaultValue: 'Search…' })}</span>
+                <kbd className="pointer-events-none inline-flex h-5 items-center gap-0.5 rounded border bg-background px-1.5 text-xs font-medium text-muted-foreground">
+                  <span className="text-xs">⌘</span>K
+                </kbd>
+              </button>
+            )}
+            <InboxBell />
+          </div>
+        </SidebarHeader>
+      )}
+      <SidebarContent className={`pt-2 ${ICON_RAIL_SCROLLS_VERTICALLY}`}>
+        {/* The sidebar's one navigation landmark, so assistive tech can jump
+            to it. The `Sidebar` primitive draws a plain `div` (and a dialog on
+            a phone) and is Shadcn-synced, so the landmark rides inside its
+            content slot, where it reaches the drawer as well. */}
+        <nav
+          aria-label={t('console.nav.menuLabel', { defaultValue: 'App navigation' })}
+          className="transition-opacity duration-200 ease-in-out"
+        >
+          {context === 'app' && activeApp ? (
+           <>
+          {renderAppMenu('sidebar')}
 
            {/* The app's report index is an entry its navigation declares,
                `{ type: 'report' }` with no `reportName` (objectstack#27525):
@@ -777,9 +865,7 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false, phoneNavBar
                      <SidebarMenuItem key={item.id}>
                        <SidebarMenuButton asChild tooltip={recentLabel(item)}>
                          <Link to={item.href}>
-                           <span className="text-muted-foreground">
-                             {item.type === 'dashboard' ? '📊' : item.type === 'report' ? '📈' : '📄'}
-                           </span>
+                           {contentTile(item.type, recentItemObject(item))}
                            <span className="truncate">{recentLabel(item)}</span>
                          </Link>
                        </SidebarMenuButton>
@@ -860,9 +946,7 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false, phoneNavBar
                      <SidebarMenuItem key={item.id}>
                        <SidebarMenuButton asChild tooltip={item.label}>
                          <Link to={item.href}>
-                           <span className="text-muted-foreground">
-                             {item.type === 'dashboard' ? '📊' : item.type === 'page' ? '📄' : '📋'}
-                           </span>
+                           {contentTile(item.type, favoriteItemObject(item))}
                            <span className="truncate">{item.label}</span>
                          </Link>
                        </SidebarMenuButton>
@@ -883,65 +967,42 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false, phoneNavBar
          )}
         </nav>
       </SidebarContent>
-      {/* "Keep sidebar open": in the floated menu it puts the sidebar back
-          beside the content and keeps it there (on the fold, for this
-          browser); in a sidebar kept open on a narrow window it is pressed,
-          and turns the fold back on (objectstack#35062). */}
-      {railPanel.keepOpenControl && (
-        <SidebarFooter className="border-t border-sidebar-border">
-          <SidebarMenu>
-            <SidebarMenuItem>
-              <SidebarMenuButton
-                data-testid="sidebar-keep-open"
-                aria-pressed={railPanel.keepOpenControl.pressed}
-                isActive={railPanel.keepOpenControl.pressed}
-                tooltip={keepOpenLabel}
-                onClick={railPanel.keepOpenControl.onPress}
-              >
-                <Pin className="h-4 w-4" />
-                <span>{keepOpenLabel}</span>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          </SidebarMenu>
+      {shellChrome && (
+        <SidebarFooter className="gap-1 border-t border-sidebar-border p-2">
+          <AccountMenu trigger="sidebar" />
         </SidebarFooter>
       )}
-      {/* No footer trigger: the app bar's left slot holds the shell's one
-          sidebar trigger at every width (objectui#12429). */}
+      {/* No footer trigger: from 768 px up the trigger is the head's collapse
+          button and, while collapsed, the page header's expand button; on a
+          phone the app bar's left slot holds it. */}
+      {railPanel.docked && (
+        <SidebarWidthHandle width={sidebarWidth} onPreview={setDragWidth} onCommit={setKeptWidth} />
+      )}
     </Sidebar>
     {/* objectstack#35062 — the window's left edge while the sidebar is
         hidden: resting the pointer on it, or a press, floats the menu. For
-        the pointer only; the keyboard has the app bar's trigger and ⌘B. */}
+        the pointer only; the keyboard has the page header's expand button
+        and ⌘B, which dock the sidebar. */}
     {railPanel.edgeZoneProps && (
       <div
         data-testid="console-sidebar-edge"
         aria-hidden="true"
-        className={cn(SIDEBAR_EDGE_ZONE, CONSOLE_BELOW_TOP_BAR)}
+        className={cn(SIDEBAR_EDGE_ZONE, rail.desktop && !designMode ? 'top-0 h-svh' : CONSOLE_BELOW_TOP_BAR)}
         {...railPanel.edgeZoneProps}
       />
     )}
-    {/* objectstack#34594 — the phone's bottom menu bar. After the sidebar,
-        so it takes the sidebar's place before the page in reading order. */}
-    {phoneMenu && (
-      <PhoneAppNavBar
-        items={phoneBarItems}
-        pinnedIds={pinnedIds}
-        basePath={basePath}
-        guards={{
-          evaluateVisibility: evalVis,
-          checkPermission: checkPerm,
-          checkCapability: checkCap,
-          checkDocTarget,
-          hasActionHandler: !!dispatchNavAction,
-        }}
-        templateContext={navTemplateContext}
-        resolveTargetLabel={resolveNavTargetLabel}
-        resolveTargetIcon={resolveNavTargetIcon}
-        locale={language}
-        t={t}
-        menuOpen={openMobile}
-        onOpenMenu={() => setOpenMobile(true)}
-      />
-    )}
+    {/* objectstack#35881 — on a phone, the app's menu on the app's home page. */}
+    {phoneHomeSlot && isMobile && context === 'app' && activeApp
+      ? createPortal(
+          <nav
+            aria-label={t('console.nav.menuLabel', { defaultValue: 'App navigation' })}
+            data-testid="phone-app-home-nav"
+          >
+            {renderAppMenu('home')}
+          </nav>,
+          phoneHomeSlot,
+        )
+      : null}
     </div>
   );
 }

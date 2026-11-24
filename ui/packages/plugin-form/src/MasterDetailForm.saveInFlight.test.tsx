@@ -138,7 +138,7 @@ function renderForm(opts: {
 }
 
 const saveButton = () => screen.getByTestId('md-form-submit') as HTMLButtonElement;
-const qtyInputs = () => screen.getAllByLabelText('Qty') as HTMLInputElement[];
+const qtyInputs = () => screen.queryAllByLabelText('Qty') as HTMLInputElement[];
 const refInput = (container: HTMLElement) => container.querySelector('input[name="ref"]') as HTMLInputElement;
 
 /** The parent form has its values and the stored lines have landed. */
@@ -148,8 +148,9 @@ async function ready(container: HTMLElement, mode: 'create' | 'edit', storedLine
     if (!ref) throw new Error('parent form not ready');
     if (mode === 'edit' && ref.value !== 'PO-1') throw new Error('parent record not loaded');
   });
-  // Every stored line plus the grid's trailing ghost row.
-  await waitFor(() => expect(qtyInputs()).toHaveLength(storedLines + 1));
+  // The grid is drawn, with every stored line (and no entry row below them).
+  await waitFor(() => expect(screen.getByTestId('line-items-add')).toBeTruthy());
+  await waitFor(() => expect(qtyInputs()).toHaveLength(storedLines));
   await waitFor(() => expect(saveButton().disabled).toBe(false));
 }
 
@@ -164,6 +165,9 @@ const click = async (el: HTMLElement) => {
     fireEvent.click(el);
   });
 };
+
+/** Press the grid's Add: the grid draws no trailing entry row (objectstack#35507). */
+const addLine = () => click(screen.getByTestId('line-items-add'));
 
 /** Let real time run past the 1.5 s the old guard re-armed Save after. */
 const pastTheOldGuard = () =>
@@ -188,7 +192,7 @@ async function save(calls: () => number) {
 /** The child operations of the batch sent on save number `n` (0-based). */
 const childOps = (batch: any, n: number): Op[] => (batch.mock.calls[n][0] as Op[]).slice(1);
 
-/** No line of the grid takes input: every cell is disabled, and there is no ghost row, add or remove. */
+/** No line of the grid takes input: every cell is disabled, and there is no add or remove. */
 function expectGridInert(lines: number) {
   expect(qtyInputs()).toHaveLength(lines);
   for (const input of qtyInputs()) expect(input.disabled).toBe(true);
@@ -202,6 +206,7 @@ describe('the Save guard holds until the batch settles, not for 1.5 s', () => {
     const { container, onSuccess } = renderForm({ batchTransaction: batch });
     await ready(container, 'edit', 0);
 
+    await addLine();
     await change(qtyInputs()[0], '5');
     await click(saveButton());
     await waitFor(() => expect(batch).toHaveBeenCalledTimes(1));
@@ -230,6 +235,7 @@ describe('the Save guard holds until the batch settles, not for 1.5 s', () => {
     const { container, onSuccess, onError } = renderForm({ batchTransaction: batch });
     await ready(container, 'edit', 0);
 
+    await addLine();
     await change(qtyInputs()[0], '5');
     await click(saveButton());
     await waitFor(() => expect(batch).toHaveBeenCalledTimes(1));
@@ -244,7 +250,7 @@ describe('the Save guard holds until the batch settles, not for 1.5 s', () => {
     expect(onSuccess).not.toHaveBeenCalled();
     expect(await screen.findByText('The server refused the batch')).toBeTruthy();
     // The grid takes input again after a failure, too.
-    expect(qtyInputs()).toHaveLength(2);
+    expect(qtyInputs()).toHaveLength(1);
     expect(qtyInputs()[0].disabled).toBe(false);
 
     await save(() => batch.mock.calls.length);
@@ -261,6 +267,7 @@ describe('the Save guard holds until the batch settles, not for 1.5 s', () => {
     });
     await ready(container, 'create', 0);
 
+    await addLine();
     await change(qtyInputs()[0], '5'); // the required header field stays empty
     await click(saveButton());
     expect(saveButton().disabled).toBe(true);
@@ -279,6 +286,7 @@ describe('the Save guard holds until the batch settles, not for 1.5 s', () => {
     await ready(container, 'create', 0);
 
     await change(refInput(container), 'PO-9');
+    await addLine();
     await change(qtyInputs()[0], '5');
     await click(saveButton());
     await waitFor(() => expect(batch).toHaveBeenCalledTimes(1));
@@ -296,7 +304,7 @@ describe('the Save guard holds until the batch settles, not for 1.5 s', () => {
     await waitFor(() => expect(onSuccess).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(saveButton().disabled).toBe(false));
     // Cleared for the next entry, and still exactly one create.
-    await waitFor(() => expect(qtyInputs()).toHaveLength(1));
+    await waitFor(() => expect(qtyInputs()).toHaveLength(0));
     await waitFor(() => expect(refInput(container).value).toBe(''));
     expect(batch).toHaveBeenCalledTimes(1);
   });
@@ -306,6 +314,7 @@ describe('the Save guard holds until the batch settles, not for 1.5 s', () => {
     const { container, onSuccess, onError } = renderForm({ batchTransaction: batch });
     await ready(container, 'edit', 0);
 
+    await addLine();
     await change(qtyInputs()[0], '5');
     // The header form is the first <form>: an implicit submission (Enter in a
     // header that has a single text input) reaches it without the Save button.
@@ -340,8 +349,10 @@ describe('the lines take no input while the save is in flight, so the created li
     const held = heldBatch();
     const view = renderForm({ batchTransaction: held.batch, detail, lineSchema });
     await ready(view.container, 'edit', 0);
+    await addLine();
     await change(qtyInputs()[0], '5');
-    await change(qtyInputs()[1], '7'); // the new ghost row
+    await addLine();
+    await change(qtyInputs()[1], '7');
     await click(saveButton());
     await waitFor(() => expect(held.batch).toHaveBeenCalledTimes(1));
     return { ...held, ...view };
@@ -369,7 +380,7 @@ describe('the lines take no input while the save is in flight, so the created li
     });
     await waitFor(() => expect(onSuccess).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(saveButton().disabled).toBe(false));
-    await waitFor(() => expect(qtyInputs()).toHaveLength(3)); // the ghost row is back
+    await waitFor(() => expect(screen.getByTestId('line-items-add')).toBeTruthy()); // Add is back
     expect(qtyInputs()[1].disabled).toBe(false);
 
     await save(() => batch.mock.calls.length);
@@ -400,7 +411,7 @@ describe('the lines take no input while the save is in flight, so the created li
     });
     await waitFor(() => expect(onSuccess).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(saveButton().disabled).toBe(false));
-    await waitFor(() => expect(qtyInputs()).toHaveLength(3));
+    await waitFor(() => expect(screen.getByTestId('line-items-add')).toBeTruthy());
 
     await save(() => batch.mock.calls.length);
     expect(childOps(batch, 1)).toEqual([]);

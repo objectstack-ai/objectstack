@@ -95,7 +95,8 @@ import { registerMfaRequiredEnrollmentPredicate } from './mfa-required-enrollmen
 import { registerPersonalViewHooks } from './personal-view-hooks.js';
 import { registerUserPreferenceHooks } from './user-preference-hooks.js';
 import { registerServiceAccountRowGuard } from './service-account-identity.js';
-import { personalViewCallerResolver, registerPersonalViewRoutes, PERSONAL_VIEW_REMOVE_ROUTE, type PersonalViewEngine } from './personal-view-routes.js';
+import { personalViewCallerResolver, registerPersonalViewRoutes, PERSONAL_VIEW_REMOVE_ROUTE, type PersonalViewEngine, type PersonalViewRoutesDeps } from './personal-view-routes.js';
+import { createPersonalViewDoorsService } from './personal-view-door-member.js';
 import { registerMembershipEndedSessionTrigger } from './membership-ended-session.js';
 import {
   IDP_GROUP_MAPPING_MATCH_PACKAGE_ID,
@@ -128,6 +129,8 @@ import { resolveKernelCache } from './kernel-cache.js';
 import { authIdentityManifest } from './manifest.js';
 import { scheduleLegacySsoSecretMigration } from './sso-client-secret.js';
 import { reportSsoProvidersWithNonBareDomainEntries } from './sso-stored-domain-entries.js';
+import { reportSsoProviderAccessSweep } from './sso-provider-lifecycle.js';
+import { retireDevSeedCredentials, type DevSeedRetirementEngine } from './dev-seed-credential-retirement.js';
 import {
   directSignInNetworkRefusal,
   isDirectSignInDoorNavigation,
@@ -395,8 +398,8 @@ export interface AuthPluginOptions extends Partial<AuthConfig> {
    * else `userDeactivated`). Read per call, so a host wired after boot is
    * still found. A typed `EnvironmentUserHostRefusal` refuses the operation
    * (a refused add is taken back out); any other failure refuses a
-   * deactivation (`503`) and is reported on an add, a reactivation or a
-   * removal as `host: { notified: false, reason }`, which it never undoes.
+   * deactivation or a removal (`503`) and is reported on an add or a
+   * reactivation as `host: { notified: false, reason }`, which it never undoes.
    */
   environmentUserHost?: EnvironmentUserHostAccessor;
 
@@ -1075,6 +1078,16 @@ export class AuthPlugin implements Plugin {
     ctx.registerService('tenancy', tenancy);
     this.tenancy = tenancy;
 
+    // [#36506] The personal-view delete door for a kernel with no
+    // `http.server` (a hosted tenant kernel runs `registerRoutes: false` and
+    // owns no socket): the runtime dispatcher's `/personal-views` domain
+    // forwards the request to this slot's `handlePersonalViewDoor`, which runs
+    // the registrar `mountPersonalViewDoor` runs, over the same deps, on a
+    // private table that never listens. Registered unconditionally, so the
+    // door answers wherever the plugin is composed; the self-hosted mount below
+    // is unchanged and nothing is mounted twice.
+    ctx.registerService('personal-views', createPersonalViewDoorsService(() => this.personalViewDoorDeps()));
+
     // The stack's `demoStaff` — decided here, from configuration alone, so the
     // application's seed (which starts before `kernel:ready`) can wait for the
     // accounts it names. See `DemoStaffingService`.
@@ -1324,6 +1337,21 @@ export class AuthPlugin implements Plugin {
         try { ql = ctx.getService<IDataEngine>('data'); } catch { ql = undefined; }
       }
       await reportSsoProvidersWithNonBareDomainEntries(ql, ctx.logger);
+    });
+
+    // Deleting an SSO provider ends the sessions its sign-ins opened and its projected grants: what a provider
+    // that no longer exists left behind (the grants its sign-ins projected,
+    // the live sessions signed in through it) is removed once per boot
+    // (`sso-provider-lifecycle.ts` `sweepDeletedSsoProviderAccess`). Registered
+    // unconditionally: the grants grant wherever they are read. Never throws
+    // into boot.
+    ctx.hook('kernel:ready', async () => {
+      let ql: IDataEngine | undefined;
+      try { ql = ctx.getService<IDataEngine>('objectql'); } catch { ql = undefined; }
+      if (!ql) {
+        try { ql = ctx.getService<IDataEngine>('data'); } catch { ql = undefined; }
+      }
+      await reportSsoProviderAccessSweep(ql, ctx.logger);
     });
 
     // [#23367, ruling A] Record when this deployment started enforcing the
@@ -1793,6 +1821,23 @@ export class AuthPlugin implements Plugin {
         }
         await reportIfNoSignInMethodAtBoot(this.signInMethodFloorDeps(ctx, this.authManager), ctx.logger);
       }
+    });
+
+    // Outside development mode: retire what the development seed issued to
+    // every stamped account still on its seed password, on `kernel:ready`, so
+    // it has settled before `kernel:listening` opens the socket. Registered
+    // independently of `registerRoutes`: a retired session or key must not act
+    // through any door. A retirement that does not complete THROWS and fails
+    // the boot (`dev-seed-credential-retirement.ts`).
+    ctx.hook('kernel:ready', async () => {
+      let ql: DevSeedRetirementEngine | undefined;
+      try { ql = ctx.getService<DevSeedRetirementEngine>('objectql'); } catch { ql = undefined; }
+      const authManager = this.authManager;
+      await retireDevSeedCredentials({
+        engine: ql,
+        authContext: async () => (authManager ? await authManager.getAuthContext() : undefined),
+        logger: ctx.logger,
+      });
     });
 
     // Dev-only: provision a known, loginable platform admin on an empty DB.
@@ -3733,13 +3778,15 @@ export class AuthPlugin implements Plugin {
         '[auth] auth request refused (403 IP_NOT_ALLOWED): the `allowed_ip_ranges` setting (ADR-0069 D5) is set, '
           + 'but the server could not establish this request\'s client address. '
           + (trustProxy
-            ? '`server.trustProxy` is declared, yet the request carried no X-Forwarded-For / X-Real-IP header '
-              + 'and the transport reported no peer address. '
+            ? '`server.trustProxy` is declared, yet no forwarded header it believes and no peer address the '
+              + 'transport reported established one. '
             : 'The transport reported no peer address, and forwarded headers are not believed because '
               + '`server.trustProxy` is not declared. ')
           + 'While the allow-list is set, every request whose address cannot be established is refused. Fix: '
           + 'serve through a transport that reports the socket address, or terminate on a reverse proxy you '
-          + 'control that sets X-Forwarded-For and declare `server.trustProxy: true`; or clear `allowed_ip_ranges`.',
+          + 'control and declare it: `server.trustProxy: { networks: [...] }` naming that proxy\'s address or '
+          + 'range, or `server.trustProxy: true` only when that proxy OVERWRITES X-Forwarded-For on every request, '
+          + 'never appends to it; or clear `allowed_ip_ranges`.',
       );
       return;
     }
@@ -3750,8 +3797,9 @@ export class AuthPlugin implements Plugin {
       '[auth] auth request refused (403 IP_NOT_ALLOWED) by the `allowed_ip_ranges` setting (ADR-0069 D5): the '
         + 'allow-list judged the connection\'s peer address, because `server.trustProxy` is not declared and so the '
         + 'request\'s X-Forwarded-For / X-Real-IP header was not believed. If this deployment sits behind a reverse '
-        + 'proxy you control, declare `server.trustProxy: true`; until then the allow-list judges the proxy\'s own '
-        + 'address.',
+        + 'proxy you control, declare it: `server.trustProxy: { networks: [...] }` naming that proxy\'s address or '
+        + 'range, or `server.trustProxy: true` only when that proxy OVERWRITES X-Forwarded-For on every request, '
+        + 'never appends to it. Until then the allow-list judges the proxy\'s own address.',
       { judgedAddress: ip },
     );
   }
@@ -3820,15 +3868,25 @@ export class AuthPlugin implements Plugin {
       );
       return;
     }
-    registerPersonalViewRoutes(httpServer, {
+    registerPersonalViewRoutes(httpServer, this.personalViewDoorDeps());
+    ctx.logger.info(`Personal view delete door mounted at DELETE ${PERSONAL_VIEW_REMOVE_ROUTE}`);
+  }
+
+  /**
+   * What the personal view door is composed over, on both of its faces: the
+   * self-hosted mount ({@link mountPersonalViewDoor}) and the `personal-views`
+   * slot's member (#36506). The engine, the auth service and the tenancy
+   * posture are read per request.
+   */
+  private personalViewDoorDeps(): PersonalViewRoutesDeps {
+    return {
       getEngine: () => this.authManager?.getDataEngine() as unknown as PersonalViewEngine | undefined,
       resolveCaller: personalViewCallerResolver({
         getEngine: () => this.authManager?.getDataEngine(),
         getAuth: () => (this.authManager ?? undefined) as unknown as RequestAuthService | undefined,
         tenancy: () => this.tenancy ?? undefined,
       }),
-    });
-    ctx.logger.info(`Personal view delete door mounted at DELETE ${PERSONAL_VIEW_REMOVE_ROUTE}`);
+    };
   }
 
   /**

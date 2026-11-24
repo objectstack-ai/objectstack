@@ -34,7 +34,7 @@
 - >24h 无产出 ⇒ 兄弟席(无则总监)一笔降级:`⏳ vacant`+摘 assignee+证据评论;分诊只敲门记录。
 - L2 欠审:每席巡查跑 `check-owed-reviews.mjs`,只接 take 点名本席的行。
 - L2 前落 `Contract-review-claim:` 行,形、失效、双认照 `contract-review.md`;有活认领 ⛔ 不双做。
-- L2 审核照 `contract-review.md`;PASS 同笔摘标记、FAIL 不摘;总监席巡查列等候逾 24h 的 PR。
+- L2 审核照 `contract-review.md`;总监席巡查列等候逾 24h 的 PR。
 - 车道巡查同跑:hold/closed 解锁重验回队;本仓无卡 fork PR 按 `external-contributions.md` 立卡。
 
 ## 分诊席读数成本三则
@@ -46,7 +46,7 @@
 - 互斥最小尾页读法:尾页配方只覆盖座位贴的两个读数,判空缺另对正文与标题。
 - 配方:`issue_read get` 拿评论总数,按小 `perPage`(~15)算末页页码只读尾页。
 - 尾页缺读数再回翻一页,⛔ 不读整线程;返回数少于总数 ⇒ 记录可能已消失,报缺口。
-- 长线程状态读外包:>~15 条的线程派下限档只读子代理返回结构化摘录,尾部优先。
+- 长线程状态读外包:>~15 条的线程派只读子代理返回结构化摘录,尾部优先。
 - 状态提取 = 找最新转换评论、抽 `Restart-when:` 行、确认 claim 或 report 在不在。
 - ⛔ 裁决级阅读(L2 契约审核、放行判定、呈裁分析)不可外包:那是拿放行质量换 token。
 
@@ -54,7 +54,7 @@
 
 - 小时层三读法之一,sweep 析取①–⑤ = `list_issues` + `since`。
 - 之二,解锁扫描 = 逐张 `pm:blocked` 正向读正文目标:issue 全已关、PR 全已合并才命中走双查。
-- 之三,健康指标 = 逐标签 `perPage: 1` 只读 `totalCount`。
+- 之三,健康指标 = 逐标签 `perPage: 1` 只读 `totalCount`;五项现读 `fleet-roster.mjs --health`。
 - 裸卡数例外:标签缺席无计数可读,取本轮析取①的枚举,⛔ 不另发查询。
 - 每日层(当日首 fire)= 全量对账 + 归集本就日频的职责。
 - 日频职责 = finding 集中轮;`Restart-when:` 批扫归车道巡查,决策箱回填归总监席。
@@ -117,27 +117,30 @@
 
 ## 卡线程(`mode:thread`)
 
-- 席位会话是项目线程(载 coordinator 通道工具)⇒ M 及以上、p1、`security` 卡一卡一线程。
+- 席位会话是项目线程(载 coordinator 通道工具)⇒ M 卡有合适区进区,无则一卡一线程;p1、`security` 只定先后,⛔ 单凭它们不开线程。
 - 大卡同上,先于下行,分区亦然,修复轮随卡;大卡 = L/XL,或欠全量验证(`!` 标题或 narrowing 臂),
-  或改契约:`Clause-②: yes`、`Metadata-protocol` 非 `none`、非测试的 `packages/spec/src/**` 路径。
-- S 级机械卡留席内 `mode:subagent`:开线程要重新克隆、重读 `os-dev.md`,起步成本不值。
-- 披露纪律卡(私密细节不得离开席位会话)也留席内,认领写明;卡线程照计 `batch`。
+  或改契约:`Clause-②: yes`、`Metadata-protocol` 非 `none`、非测试的 `packages/spec/src/**` 路径;三者只定开不开线程,⛔ 不定档位。
+- S 级机械卡留席内或进区 `mode:subagent`:开线程要重新克隆、重读 `os-dev.md`,起步成本不值。
+- 披露纪律卡(私密细节不得离开席位会话)也留席内,认领写明。
 - coordinator 调度卡线程(即 dev),候选与槽位照 `coordinator.md` 三;交回即告知它,REWORK 再占槽。
-- 档位与 effort 席位自推导 ⛔ 不等维护者原话:`--tier` 过路径,MANDATORY 即绑;effort 按难度。
-- 派发令写两者与推导(`--tier` 行或难度读数),协调者照令开线程;常设原话有则作 `reason:`。
-- 席位留认领/派发令/ACCEPT/落地/L2 采纳或补缺;线程实施、开 draft PR、驱动 CI 与可合并。
-- 线程 ⛔ 不做 harness 开 PR 后指派/请审:请审是席位交棒。
+- 档位与 effort 席位照 `execution-duties.md` 定档节自推导 ⛔ 不等维护者原话。
+- 派发令写两者与推导(档位引 `--tier` 行,effort 引难度读数),协调者照令开线程;常设原话有则作 `reason:`。
+- 席位留认领/派发令/ACCEPT/落地/L2 采纳或补缺;线程自己实施、开 draft PR、驱动 CI 与可合并,⛔ 不起 `os-dev` 子代理。
+- p1 卡交回且欠 L2 ⇒ L1 线程并行起 L1 与隔离 L2(`contract-review.md`),两份意见同回席。
+- 线程 ⛔ 不做 harness 开 PR 后指派/请审。
 - 派发令由 coordinator 写进线程开场消息,`Writes:` 行逐字在内,⛔ 不落共享目录;卡上留指针。
 - coordinator 开线程即读线程分支交席位(读不到则线程自报);⛔ 线程不认领、不写卡 assignee。
-- 席位写 assignee+`pm:dispatched`+带该 `Branch:` 的认领;线程核对最新认领指向本分支方开工。
-- 分支约定仍是 `claude/issue-<n>-<slug>`;线程只能推指定分支是实测平台例外,认领如实写。
+- 线程首报带实供档(核对步住 `os-dev.md`),席位写进认领 Container & model 行;与令不符 ⇒ 席位定夺前不开工。
+- 席位写 assignee+`pm:dispatched`+带该 `Branch:` 的认领。
 - worktree 照建;线程读 `os-dev.md`、派发令、卡与全部评论,⛔ 不读 `SKILL.md`;references 按需读。
 - 交回:PR 与报告落地后给席位线程发一条消息(PR、head、报告要点);L1/L2 期线程不关,接 FAIL。
+- 线程每推后 10 分钟核 Actions 已起、非 `dirty`(冲突 PR 不起 CI),否则合 main 重推;等 CI 必留 `send_later` ≤30分钟兜底。
+- 席每轮读在飞卡 PR `pr-state.mjs`:推后 30 分钟零 Actions、`dirty`、2h 无推无报 ⇒ 当轮叫醒线程,⛔ 互等。
 - PR 正文由线程自改(中继 `issue_patch`)再报要点,⛔ 不请席或区代发;线程已关才代改。
 
 ## 派发前置:前提核实,再把本地检出钉到 main
 
-- 先核前提后写码:派发前席派只读子代理(下限档;卡线程卡交候选前);区自领卡认领前测。
+- 先核前提后写码:派发前席派只读子代理(卡线程卡交候选前);区自领卡认领前测。
 - 对 `origin/main` 逐条测:复现、根因句与 file:line、路线对 `check-prior-rulings.mjs`、适用面。
 - 成立 ⇒ 派;不成立而改法明确 ⇒ 改卡再派;判不了 ⇒ 入决策箱,⛔ 不占卡线程槽。
 - 区与卡线程(写码前再核)测得不成立/偏宽/撞裁 ⇒ 停码报席;改卡则席发 `Premise corrected`。
@@ -145,7 +148,7 @@
 - 卡项与既裁冲突 ⇒ 席砍该项再派 ⛔ 不问分诊;行首 `Ruling-ref:` 引既裁出处,原话逐字。
 - 其余砍范围/降级/关卡归人工地板 ⛔ 不借改卡裁;读数落认领 `Premise:` 行,PR 结论限实测。
 - 范围评审:`Source: fleet` 计划命中工作量判据任一或 ≥2 PR ⇒ 派发前过;余源与已裁路线免。
-- 隔离 agent(`CONTRACT_REVIEW_TIER`)评,只拿卡与计划 ⛔ 不拿席位推荐;三问:最小改动、超出项、
+- 隔离 agent 评(档位照定档节),只拿卡与计划 ⛔ 不拿席位推荐;三问:最小改动、超出项、
   每项谁要的(路行、专题卡号、裁决或真实客户原话)。结论落卡一行,diff 超出即 REWORK:
   `Scope-review: 照做 | 砍到最小 | 拆分 · 最小项 · 超出项及出处`。无出处 ⇒ 只派最小项,
   余拆 `Feature` 卡(⛔ 不算「砍半」);最小项不触人工地板即免决策卡;L2 仍只审契约。
@@ -168,10 +171,10 @@
 
 ## 在飞卡衍生与阻塞项三类细则
 
-- 衍生 sub-issue:认领席同笔写父卡域与优先级、附查重词后派发;父卡 checklist 评论记一行。
+- 衍生 sub-issue:认领席同笔写父卡域、查表定级,附查重词后派发;父卡 checklist 评论记一行。
 - 无主阻塞项:只做 `Blocked-by:` 点名的那一张,做完即回,⛔ 不顺手接第二张。
 - 无主阻塞项的契约面(含 `packages/spec`)按 `contract-review.md` 欠达档 L2 记录。
-- 在飞阻塞项:等待者在阻塞卡留行点名自卡;级 ⛔ 不沿链继承,唯挡别仓 p1 者取该 p1 的级
+- 在飞阻塞项:等待者在阻塞卡留行点名自卡;挡路卡取自身与所挡 open 卡里最高的级
 
 ## 停摆复位梯度
 
@@ -218,7 +221,7 @@
 - 原令「有限数字串转数字」与之相左,应派发前送 L1 线程;栅栏点名 A′ spec 散文在范围。
 - 派发令带 L2 路由:dev 交回点名欠 L2 不自敲;席照 contract-review.md 自审或送 L2 席,⛔ 非分诊
 - 新 changeset 文件名用 `<issue>-<slug>.md`,⛔ 不用随机词对名。
-- same-day churn 行:派发时 `git log origin/main --oneline -20 -- <paths>` 见当天合并即加一行。
+- same-day churn 行:派发时文件面见当天合并即加一行;现读 `check-prior-rulings.mjs --paths` ②。
 - 该行原文:基于合并后的代码工作,issue 引用的片段可能已变,先核对当前 main。
 - 在飞重叠每轮拦截:main 新落 PR 与在飞申报文件面求交,相交即发四句警告。
 - 另一腿:本轮删/改名标识符 grep 每个在飞 PR 的 diff,命中同发,⛔ 不因文件面不相交跳过。

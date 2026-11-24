@@ -251,6 +251,9 @@ const MODULES = {
   'packages/rest/src/user-work-routes.ts': { responses: 0, ok: 0, err: 0 },
   // #30237: the recycle-bin doors answer only through the shared writers.
   'packages/rest/src/recycle-bin-routes.ts': { responses: 0, ok: 0, err: 0 },
+  // #35402: the Change Owner doors answer only through the shared writers (and
+  // `handleRouteError`, the `/data` write door's own classification of a throw).
+  'packages/rest/src/change-owner-routes.ts': { responses: 0, ok: 0, err: 0 },
   // #3636 put the right envelope on this module's three read routes but built it
   // inline in four places, so it carried a ratchet at 5 / 4 / 1 until those
   // collapsed behind a local `sendOk` — and then onto the shared one.
@@ -299,6 +302,14 @@ const MODULES = {
   // itself. Declared in the same PR that created the module.
   'packages/services/service-messaging/src/my-preferences-routes.ts': { responses: 0, ok: 0, err: 0 },
 
+  // [#34730] The Slack link doors (`/api/v1/messaging/me/slack-link` and its
+  // proposal / confirm, `/api/v1/messaging/slack/account`,
+  // `/api/v1/messaging/slack/links`), mounted by `MessagingServicePlugin`
+  // beside the preference options door. Every body they answer is written by
+  // the shared pair (`sendOk` / `sendError` / `sendServerFault`), so the module
+  // builds none itself. Declared in the same PR that created the module.
+  'packages/services/service-messaging/src/slack-link-routes.ts': { responses: 0, ok: 0, err: 0 },
+
   // [#30209] The shareable-objects door (`GET /api/v1/sharing/shareable-objects`),
   // mounted by `SharingServicePlugin` straight on `IHttpServer`. Every body it
   // answers is written by the shared pair (`sendOk` / `sendError` /
@@ -309,6 +320,14 @@ const MODULES = {
   // `AuditPlugin` straight on `IHttpServer`. It supplies its part of the shared
   // own-row delete door below and answers nothing itself, so it builds no body.
   'packages/plugins/plugin-audit/src/comment-reaction-routes.ts': { responses: 0, ok: 0, err: 0 },
+
+  // The comment doors (`PUT /api/v1/comments/:id/resolution`, the resolution
+  // door, and `DELETE /api/v1/comments/:id`, the own-comment delete door),
+  // mounted by `AuditPlugin` beside the unreact door. Every body they answer is
+  // written by the shared pair (`sendOk` / `sendError` / `sendServerFault`) or
+  // by the shared own-row delete door below, so the module builds none itself.
+  // Declared in the same PR that created the module.
+  'packages/plugins/plugin-audit/src/comment-routes.ts': { responses: 0, ok: 0, err: 0 },
 
   // The owner's delete door for a personal view (`DELETE /api/v1/personal-views/:id`),
   // mounted by `AuthPlugin` straight on `IHttpServer`. It supplies its part of the
@@ -1080,6 +1099,9 @@ const DISPATCHER_DOMAINS = {
   // refusal it makes itself — the two 501s, the sanitised 500s — goes through
   // `deps.error`.
   'approvals.ts': { handBuilt: 0 },
+  // [#36506] The `/attachments` bridge: two lines naming what
+  // `own-door-bridge.ts` forwards; it builds no answer of its own.
+  'attachments.ts': { handBuilt: 0 },
   // [ADR-0150 D5] Kind 1: the `405` for a shape the domain serves under
   // another verb must carry an `Allow:` header (`deps.error` takes none), as
   // `/actions`' does; its body is `buildApiError`'s declared envelope.
@@ -1101,6 +1123,12 @@ const DISPATCHER_DOMAINS = {
   // ADR-0131 D6), split out of `security.ts` beside the gate it calls. Every
   // answer it gives goes through `deps.success` / `deps.error`.
   'catalog-activation.ts': { handBuilt: 0 },
+  // [#36469] The `/comments` bridge: the comments member's own JSON `Response`
+  // is handed back as `result` (the `/webhooks/redeliver` shape), and every
+  // answer the domain makes itself — the ordinary miss for a shape it does not
+  // serve, the two 501s, the sanitised 500s — goes through `deps.routeNotFound`
+  // / `deps.error`.
+  'comments.ts': { handBuilt: 0 },
   'data.ts': { handBuilt: 0 },
   // [#25785] Was 0. Kind 1: the translation bundle is the one `/i18n` face a
   // browser revalidates. Its `200` must carry `ETag` and `Cache-Control` and
@@ -1112,15 +1140,24 @@ const DISPATCHER_DOMAINS = {
     note: 'the translations 200, which must carry `ETag` and `Cache-Control: private, no-cache` (`deps.success` takes none) and whose body is `deps.success`\'s envelope spread; and the body-less 304 a matching `If-None-Match` is answered, carrying the same two headers',
   },
   'mcp-authoring.ts': { handBuilt: 0 },
+  'mcp-package-docs.ts': { handBuilt: 0 },
   // The "new similar" target rule both clone doors share (ADR-0146 D3/D6):
   // its one answer, `newSimilarTargetRefusalAnswer`, goes through `deps.error`.
   'new-similar-target.ts': { handBuilt: 0 },
   'notifications.ts': { handBuilt: 0 },
+  // [#36506] Not a domain: the shared bridge `/personal-views` and
+  // `/attachments` call. The member's own JSON `Response` is handed back as
+  // `result`, and every answer the bridge makes itself — the ordinary miss,
+  // the two 501s, the sanitised 500s — goes through `deps.routeNotFound` /
+  // `deps.error`.
+  'own-door-bridge.ts': { handBuilt: 0 },
   'packages.ts': { handBuilt: 0 },
   // The `/security` domain's permission-set clone door (ADR-0126 §7.1), beside
   // the activation door. Every answer goes through `deps.success` /
   // `deps.error` / `deps.errorFromThrown`.
   'permission-set-clone.ts': { handBuilt: 0 },
+  // [#36506] The `/personal-views` bridge, as `attachments.ts`.
+  'personal-views.ts': { handBuilt: 0 },
   'security.ts': { handBuilt: 0 },
   // No `storage.ts` — the `/storage` domain was retired in #4087 (it called
   // the storage contract with the wrong arity and read a Buffer as a

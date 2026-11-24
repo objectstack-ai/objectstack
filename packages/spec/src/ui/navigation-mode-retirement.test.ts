@@ -54,18 +54,18 @@ const D3_ID = 'ui-record-open-overlay-modes-retired';
 /** Each retired `navigation.mode` member → the first sentence of its prescription. */
 const MODE_FIRST_SENTENCE = {
   modal:
-    "`navigation.mode: 'modal'` was removed in @objectstack/spec 18.3.0 (ADR-0087 D2) — a record opens one way "
-    + 'per object: in the drawer, which expands to the full page, or as the full page for an object that '
-    + 'declares `page`, so a centred dialog was a third surface for the same record.',
+    "`navigation.mode: 'modal'` was removed in @objectstack/spec 18.3.0 (ADR-0087 D2) — a record opens in the "
+    + 'drawer or as its full page, the same record page at two widths, so a centred dialog was a third surface '
+    + 'for the same record.',
   split:
     "`navigation.mode: 'split'` was removed in @objectstack/spec 18.3.0 (ADR-0087 D2) — whether the record "
-    + "opens beside the list is each reader's own choice, not a mode an author fixes for every reader of the list.",
+    + 'opens beside the list is not a mode an author fixes for every reader of the list.',
   popover:
-    "`navigation.mode: 'popover'` was removed in @objectstack/spec 18.3.0 (ADR-0087 D2) — a record opens one way "
-    + 'per object: in the drawer, which expands to the full page, or as the full page for an object that '
-    + 'declares `page`, so a popover was a cramped fourth surface for the same record.',
+    "`navigation.mode: 'popover'` was removed in @objectstack/spec 18.3.0 (ADR-0087 D2) — a record opens in the "
+    + 'drawer or as its full page, the same record page at two widths, so a popover was a cramped fourth surface '
+    + 'for the same record.',
 } as const;
-const MODE_FIX = "Delete the value — `drawer` is the default; declare `page` only for an object whose record should open as a full page;";
+const MODE_FIX = "Delete the value — an object's list opens a record one way for every reader: the record name opens the full page, and the icon beside it while the row is hovered opens the side panel; `navigation.mode` itself is deprecated, so omit the key.";
 const RECORD_ACTION_FIRST_SENTENCE =
   "`interfaceConfig.recordAction: 'modal'` was removed in @objectstack/spec 18.3.0 (ADR-0087 D2) — a record "
   + 'opens one way per object: in the drawer, which expands to the full page, or as the full page where the '

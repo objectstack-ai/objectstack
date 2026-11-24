@@ -226,7 +226,7 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
       },
       digest: {
         label: "Zusammenfassung",
-        help: "Fasst diese Benachrichtigungen zu einer Zusammenfassung zusammen, statt jede beim Eintreffen zu senden: daily sendet um Mitternacht, weekly montags um Mitternacht, none sendet jede sofort. Kritische Benachrichtigungen werden immer sofort gesendet. Wirkt bei einer Einstellung mit dem Kanal * (alle Kanäle).",
+        help: "Fasst diese Benachrichtigungen zu einer Zusammenfassung zusammen, statt jede beim Eintreffen zu senden: daily sendet um Mitternacht, weekly montags um Mitternacht, none sendet jede sofort. Kritische Benachrichtigungen werden immer sofort gesendet. Wirkt bei einer Einstellung mit dem Kanal * (alle Kanäle). Leer gelassen entscheidet die nächste Einstellung: die Vorgabe für alle Benutzer, dann none.",
         options: {
           none: "keiner",
           daily: "täglich",
@@ -235,7 +235,7 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
       },
       quiet_hours: {
         label: "Ruhezeiten",
-        help: "Ein tägliches Zeitfenster, in dem Benachrichtigungen zurückgehalten und an seinem Ende zugestellt werden, zum Beispiel { \"tz\": \"Europe/Berlin\", \"start\": \"22:00\", \"end\": \"07:00\" }. Zeiten sind HH:MM in dieser Zeitzone (UTC, wenn tz fehlt), und das Fenster darf über Mitternacht reichen. Kritische Benachrichtigungen werden nicht zurückgehalten. Wirkt bei einer Einstellung mit dem Kanal * (alle Kanäle)."
+        help: "Ein tägliches Zeitfenster, in dem Benachrichtigungen zurückgehalten und an seinem Ende zugestellt werden, zum Beispiel { \"tz\": \"Europe/Berlin\", \"start\": \"22:00\", \"end\": \"07:00\" }. Zeiten sind HH:MM in dieser Zeitzone (UTC, wenn tz fehlt), und das Fenster darf über Mitternacht reichen. Kritische Benachrichtigungen werden nicht zurückgehalten. Wirkt bei einer Einstellung mit dem Kanal * (alle Kanäle). { \"off\": true } bedeutet keine Ruhezeiten; leer gelassen entscheidet die nächste Einstellung: die Vorgabe für alle Benutzer, dann keine."
       },
       created_at: {
         label: "Erstellt am"
@@ -487,6 +487,64 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
       },
       created_at: {
         label: "Erstellt am"
+      }
+    }
+  },
+  sys_channel_account: {
+    label: "Kanalkonto",
+    pluralLabel: "Kanalkonten",
+    description: "Die Installation einer Chat-App durch eine Organisation, etwa ihrer eigenen Slack-App, mit dem dafür ausgestellten Bot-Token.",
+    fields: {
+      channel_id: {
+        label: "Kanal"
+      },
+      display_name: {
+        label: "Workspace"
+      },
+      external_id: {
+        label: "Workspace-ID"
+      },
+      bot_token: {
+        label: "Bot-Token"
+      },
+      status: {
+        label: "Status",
+        options: {
+          active: "Aktiv",
+          revoked: "Widerrufen"
+        }
+      }
+    }
+  },
+  sys_channel_user_link: {
+    label: "Kanal-Benutzerverknüpfung",
+    pluralLabel: "Kanal-Benutzerverknüpfungen",
+    description: "Die Verknüpfung einer Person mit ihrem eigenen Benutzer in einem Chat-Workspace: per E-Mail-Abgleich vorgeschlagen, zugestellt wird erst nach ihrer Bestätigung.",
+    fields: {
+      account_id: {
+        label: "Konto"
+      },
+      user_id: {
+        label: "Benutzer"
+      },
+      external_user_id: {
+        label: "Chat-Benutzer-ID"
+      },
+      external_display_name: {
+        label: "Chat-Benutzername"
+      },
+      state: {
+        label: "Zustand",
+        options: {
+          proposed: "Vorgeschlagen",
+          confirmed: "Bestätigt"
+        }
+      },
+      confirmed_at: {
+        label: "Bestätigt am"
+      },
+      proposal_email_hash: {
+        label: "Hash der Vorschlags-E-Mail"
       }
     }
   }

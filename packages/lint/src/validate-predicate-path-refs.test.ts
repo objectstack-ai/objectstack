@@ -699,7 +699,14 @@ describe('#7010 corpus — shipped METADATA_FORM_REGISTRY', () => {
     // It is 91 today, an ADDITION of ONE: #29462 offered the field form's
     // `referenceNameVisible` row, gated on `data.type in ['lookup','user']`. It
     // is an in-list, so it does not reach the literal-comparison census below.
-    expect(predicates, 'the shipped metadata forms carry no predicates at all').toBe(91);
+    // It is 93 today, an ADDITION of TWO: #35096 and #34823 offered the action
+    // form's `texts` and `refusals` rows, each gated like `body` on
+    // `data.type == 'script'`. They reach the literal-comparison census below.
+    // It is 95 today, an ADDITION of TWO: #35315 offered `transferBehavior` on
+    // the field form and on the object form's field rows, each gated on
+    // `data.type in ['lookup','master_detail']`. In-lists, so they do not reach
+    // the literal-comparison census below.
+    expect(predicates, 'the shipped metadata forms carry no predicates at all').toBe(95);
 
     const findings = validatePredicatePathRefs(corrupted);
     expect(findings).toHaveLength(predicates);
@@ -824,7 +831,13 @@ describe('#7010 corpus — shipped METADATA_FORM_REGISTRY', () => {
     // object form) to `user` and respelled them `data.type in ['lookup','user']`,
     // an `in`-list outside this rule, so two `==` literal comparisons left the
     // census.
-    expect(comparisons, 'no shipped predicate carries an `==`/`!=` literal comparison').toBe(63);
+    // It is 65 today: #35047's `field :: percentDisplay` gate also opens for a
+    // percent formula, `data.type == 'formula' && data.returnType == 'percent'`,
+    // two more single-quoted literal comparisons.
+    // It is 67 today: #35096's `action :: texts` and #34823's
+    // `action :: refusals` rows are each gated on `data.type == 'script'`, two
+    // single-quoted literal comparisons.
+    expect(comparisons, 'no shipped predicate carries an `==`/`!=` literal comparison').toBe(67);
 
     const rhsFindings = validatePredicatePathRefs(corrupted)
       .filter((f) => f.rule === PREDICATE_RHS_PATH_SHAPED);
@@ -885,10 +898,11 @@ describe('#7010 corpus — shipped METADATA_FORM_REGISTRY', () => {
     expect(
       restored,
       "the object form's `data.type`-rooted predicates are no longer where this test looks",
-    ).toBe(18);
+      // 19 since #35315: the field rows' `transferBehavior` select joined.
+    ).toBe(19);
 
     const findings = validatePredicatePathRefs({ views: [objectForm] });
-    expect(findings).toHaveLength(18);
+    expect(findings).toHaveLength(19);
     expect(new Set(findings.map((f) => f.rule))).toEqual(new Set([PREDICATE_PATH_UNROOTED]));
     expect(findings[0].message).toContain('`type`');
   });

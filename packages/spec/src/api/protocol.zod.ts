@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
-import { ViewSchema } from '../ui/view.zod';
+import { MetadataListViewSchema, ViewSchema } from '../ui/view.zod';
 import { I18nLabelSchema } from '../ui/i18n.zod';
 import { DiscoverySchema } from './discovery.zod';
 import {
@@ -223,6 +223,7 @@ export const GetMetaTypesResponseSchema = lazySchema(() => z.object({
     domain: z.enum(['data', 'ui', 'automation', 'system', 'security', 'ai']).describe('Protocol domain'),
     overrideSource: z.enum(['registry', 'env']).describe('Whether allowEnvironmentOverlay comes from the static registry or is elevated by the OS_METADATA_WRITABLE environment variable'),
     createSeed: z.unknown().optional().describe('Authoritative minimal valid create seed for this type — Studio/CLI/API derive create defaults from it (single source of truth in @objectstack/spec). Absent for canvas-create types whose shape is built interactively.'),
+    list: MetadataListViewSchema.optional().describe('Studio list layout of this type: the columns its metadata list shows, each naming a key of the type schema, headers in the request locale. Absent for a type with no declared list, which Studio lists by name, label and description.'),
   })).optional().describe('Enriched per-type registry entries (Phase 3a)'),
 }));
 
@@ -961,6 +962,19 @@ export const GetMetaItemLayeredResponseSchema = lazySchema(() => z.object({
     'LAYER 2 — the stored customization row ALONE, not merged with `code`. '
     + '`null` when the environment has not customized the item.',
   ),
+  overlayVersion: z.string().nullable().optional().describe(
+    'ADR-0008 version token of the stored ACTIVE row at this read\'s address '
+    + '(`?package=`, and the bundle member): the published layer a publish of '
+    + 'this item replaces. The same keyed token the plain uncached read serves '
+    + 'as `version` and a publish receipt serves as `version`. Send it back as '
+    + '`If-Match` on `POST /meta/:type/:name/publish` and a publish over a row '
+    + 'that moved since this read is refused 409 `METADATA_CONFLICT` instead of '
+    + 'replacing it. `null` when no active row is stored at that address — an '
+    + 'item served from code or a package artifact alone — so the next publish '
+    + 'creates one: pin it with `If-None-Match: *`. ABSENT from a server that '
+    + 'does not serve it: absence means "not served", never "no row". Opaque — '
+    + 'echo it verbatim, never parse it.',
+  ),
   overlayScope: z.enum(['env']).nullable().describe(
     'Which scope the `overlay` row was read from: `env`, the environment layer — '
     + 'the only layer a read serves (ADR-0131 D6). `null` exactly when `overlay` is null.',
@@ -1219,7 +1233,13 @@ export const SaveMetaItemRequestSchema = lazySchema(() => z.object({
     + 'one package the item\'s active rows are bound to, as a save naming '
     + 'that package does, is refused `409 RESOURCE_CONFLICT` when they are '
     + 'bound to two or more, and with none writes the env-local overlay (no '
-    + 'package stamp); a `draft` save writes the draft of the one package '
+    + 'package stamp). Bound to two or more, one exception: a bundled type\'s '
+    + 'member whose active rows a base package and a package declaring it '
+    + 'both hold, with no package-unbound row beside them, is the row-held '
+    + 'base\'s, as the read naming no package serves it, and the save (either '
+    + 'mode) writes the base\'s row or draft as a save naming the base does; '
+    + 'two packages neither of which declares the other are still refused '
+    + '`409`. A `draft` save writes the draft of the one package '
     + 'the item\'s active rows are bound to (a pending change stays in the '
     + 'package it edits), else its package-unbound draft, adopted into that '
     + 'package — the draft the per-item publish naming no package promotes. '
@@ -1227,7 +1247,8 @@ export const SaveMetaItemRequestSchema = lazySchema(() => z.object({
     + 'draft, else the one package\'s draft, and with no draft at all the save '
     + 'creates the package-unbound draft. It is refused `409 RESOURCE_CONFLICT` '
     + 'when the active rows (or, with none and no package-unbound draft, the '
-    + 'drafts) are bound to two or more packages, as that publish is (see '
+    + 'drafts) are bound to two or more packages, but for the row-held base '
+    + 'above, as that publish is (see '
     + '`PublishMetaItemRequestSchema.packageId`). An `action` is keyed by the '
     + 'object it binds (ADR-0150 D4): when one or more packages\' active rows '
     + 'hold the name and none of those rows binds the object the body binds '
@@ -1426,7 +1447,7 @@ export const FieldStillShownBySchema = lazySchema(() => z.object({
 export const DestructiveChangeIssueSchema = lazySchema(() => z.object({
   code: z.string().describe(
     'What the save loses: `field_removed`, `field_type_change`, `field_required_no_default`, '
-    + '`currency_mode_to_record` or `currency_field_repointed`.',
+    + '`currency_mode_to_record`, `currency_field_repointed`, `unit_code_field_declared` or `unit_mode_to_record`.',
   ),
   field: z.string().optional().describe('The field the finding is about.'),
   message: z.string().describe(
@@ -1559,7 +1580,12 @@ export const PublishMetaItemRequestSchema = lazySchema(() => z.object({
     + 'a package it is the package-unbound draft, else the one package\'s '
     + 'draft. It is refused `409 RESOURCE_CONFLICT` when the active rows (or, '
     + 'with none and no package-unbound draft, the drafts) are bound to two or '
-    + 'more packages. ⚠️ `null` is '
+    + 'more packages, except a bundled type\'s member whose active rows a base '
+    + 'package and a package declaring it both hold, with no package-unbound '
+    + 'row beside them: the read naming no package serves the base\'s row, and '
+    + 'the publish promotes the base\'s draft into it, as naming the base does '
+    + '(two packages neither of which declares the other are still refused). '
+    + '⚠️ `null` is '
     + 'NOT the same as absent: the implementation branches on the KEY BEING '
     + 'PRESENT, and `null` pins the lookup to the package-UNBOUND row. Spread '
     + 'it in conditionally; a present-and-`undefined` key coerces to `null` '
@@ -1567,6 +1593,21 @@ export const PublishMetaItemRequestSchema = lazySchema(() => z.object({
     + '`no_draft`.',
   ),
   member: z.string().optional().describe(BUNDLE_MEMBER_SELECTOR_DESCRIPTION),
+  parentVersion: z.string().nullable().optional().describe(
+    'ADR-0008 optimistic-concurrency pin on the PUBLISHED layer: the version '
+    + 'token of the active row the caller loaded and means to replace (on the '
+    + 'REST door, the `If-Match` request header; the `/layers` read\'s '
+    + '`overlayVersion`, the plain read\'s `version` and a publish receipt\'s '
+    + '`version` serve it). A token that is not the current active row\'s at the '
+    + 'address the promotion writes is refused 409 `METADATA_CONFLICT`, whose '
+    + '`currentVersion` names the active row\'s current token, and nothing is '
+    + 'promoted: the draft stays pending. ⚠️ `null` is NOT the same as absent: a '
+    + 'present `null` asserts "no active row here" (on the REST door, '
+    + '`If-None-Match: *`, which takes `*` alone and never beside `If-Match`), '
+    + 'refused 409 when one exists; an ABSENT key is unpinned and promotes over '
+    + 'whatever is live, as before. It pins the active row only — which draft is '
+    + 'promoted is the address\'s, as without it.',
+  ),
   userTextLocales: userTextLocalesMember(),
 }));
 
@@ -2433,7 +2474,16 @@ export const DeleteMetaItemRequestSchema = lazySchema(() => z.object({
     + 'package: the delete of the `active` row then removes the row of the '
     + 'one package the item\'s active rows are bound to, is refused `409 '
     + 'RESOURCE_CONFLICT` when they are bound to two or more, and with none '
-    + 'removes the env-local row (no package stamp); the discard of the '
+    + 'removes the env-local row (no package stamp). Bound to two or more, '
+    + 'one exception: a bundled type\'s member whose active rows a base '
+    + 'package and a package declaring it both hold, with no package-unbound '
+    + 'row beside them, is the row-held base\'s, as the read naming no '
+    + 'package serves it, and the delete removes the base\'s row as naming '
+    + 'the base does (two packages neither of which declares the other are '
+    + 'still refused `409`). The dependent\'s row is then the item\'s only '
+    + 'row at that address: the read naming no package serves it next, and a '
+    + 'second delete naming no package removes it too; the base\'s copy comes '
+    + 'back only by saving it again. The discard of the '
     + '`draft` removes the draft a draft save naming no package writes, the '
     + 'one the per-item publish naming none promotes, and is refused where '
     + 'that publish is (see `PublishMetaItemRequestSchema.packageId`). That '
@@ -2653,7 +2703,11 @@ const HISTORY_PACKAGE_SELECTOR_DESCRIPTION =
   + 'holds nor ships the name is refused 409 `not-held-by-qualifier` (ADR-0150 D3/D4). '
   + 'Versions attributed to no package, or to the environment, are that slot\'s only '
   + 'while it is the name\'s sole slot. Absent, a name two holders hold (in stored rows '
-  + 'or in code) is refused 409 naming every holder. Refused with 400 `VALIDATION_ERROR` '
+  + 'or in code) is refused 409 naming every holder, except where the read naming no '
+  + 'package serves the row-held base (a bundled type\'s member whose active rows a base '
+  + 'package and a package declaring it both hold, with no package-unbound row beside '
+  + 'them): there the base\'s slot is addressed, as naming the base addresses it. Two '
+  + 'packages neither of which declares the other are still refused. Refused with 400 `VALIDATION_ERROR` '
   + 'on a type not stored per (package, name).';
 
 /**
@@ -4753,6 +4807,17 @@ export const GetLocalesRequestSchema = lazySchema(() => z.object({}));
  * the requester's `Accept-Language`) is a caller's choice the server cannot
  * make for it. Serving real names would put CLDR data behind an endpoint for
  * something every client can already compute, and no consumer asks for it.
+ *
+ * `sourceLocale` (#36504) names the language the app's inline metadata text
+ * is authored in — the declared `i18n.sourceLocale`, else the default locale,
+ * the same collapse the document translators make (`ResolveOptions.defaultLocale`
+ * fed from `getSourceLocale?.() ?? getDefaultLocale?.()`). It differs from the
+ * `isDefault` locale on a deployment authored in one language that defaults
+ * its users to another. A client that edits labels reads it to tell an edit
+ * of the source text from a translation: the console's design mode stores a
+ * menu rename made in any other language as that language's translation.
+ * Named after its config key, as `defaultLocale`'s `isDefault` mark is the
+ * config's `defaultLocale`.
  */
 export const GetLocalesResponseSchema = lazySchema(() => z.object({
   locales: z.array(z.object({
@@ -4762,6 +4827,10 @@ export const GetLocalesResponseSchema = lazySchema(() => z.object({
     ),
     isDefault: z.boolean().default(false).describe('Whether this is the default locale'),
   })).describe('Available locales'),
+  sourceLocale: z.string().optional().describe(
+    'The language the app\'s own text (a plain-string `label`) is written in: the declared `i18n.sourceLocale`, '
+    + 'else the default locale. Absent when the server knows neither. Text typed in any other locale is a translation',
+  ),
 }));
 
 /**

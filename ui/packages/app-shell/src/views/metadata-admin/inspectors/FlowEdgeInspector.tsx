@@ -107,6 +107,9 @@ export function FlowEdgeInspector({
             value: `${trigger.fieldPrefix}${f.name}`,
             label: f.label || f.name,
             type: f.type,
+            // A list-valued column is offered membership, not equality
+            // (`flow-edge-condition-rows`' multi-value spellings).
+            ...(f.multiple ? { multiple: true } : {}),
             ...(f.options ? { options: f.options } : {}),
           }))
         : [],

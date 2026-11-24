@@ -78,8 +78,9 @@ export function temporalExtreme(values: Iterable<unknown>, type: 'min' | 'max'):
  * [objectui#13234] A stored `date` / `datetime` value, drawn as the grid's
  * cell draws the same value. `undefined` for a value the cell has no face for
  * (empty or unparsable), so the caller keeps its own text: a group band keeps
- * the group's own label ("(empty)" for an empty key, the stored text
- * otherwise), and an aggregate is left out.
+ * the group's own label (the grid's empty-value string `grid.empty`, "Empty"
+ * in English, for an empty key; the stored text otherwise), and an aggregate is
+ * left out.
  *
  * The formatting CALLS are the cells' own, with the cells' arguments:
  * `DateCellRenderer` in a grid column (`inGridColumn`, objectstack#25884)

@@ -226,7 +226,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       digest: {
         label: "摘要",
-        help: "将这些通知合并为一份摘要，而不是逐条发送：daily 在午夜发送，weekly 在周一午夜发送，none 则每条立即发送。紧急通知始终立即发送。仅在渠道为 *（所有渠道）的偏好设置上生效。",
+        help: "将这些通知合并为一份摘要，而不是逐条发送：daily 在午夜发送，weekly 在周一午夜发送，none 则每条立即发送。紧急通知始终立即发送。仅在渠道为 *（所有渠道）的偏好设置上生效。留空时由下一条偏好设置决定：先是所有用户的默认设置，然后是 none。",
         options: {
           none: "不摘要",
           daily: "每日",
@@ -235,7 +235,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       quiet_hours: {
         label: "免打扰时段",
-        help: "每天的免打扰时段，期间的通知会暂缓，并在时段结束时送达，例如 { \"tz\": \"Europe/Berlin\", \"start\": \"22:00\", \"end\": \"07:00\" }。时间为该时区的 HH:MM（未填 tz 时为 UTC），时段可以跨越午夜。紧急通知不会暂缓。仅在渠道为 *（所有渠道）的偏好设置上生效。"
+        help: "每天的免打扰时段，期间的通知会暂缓，并在时段结束时送达，例如 { \"tz\": \"Europe/Berlin\", \"start\": \"22:00\", \"end\": \"07:00\" }。时间为该时区的 HH:MM（未填 tz 时为 UTC），时段可以跨越午夜。紧急通知不会暂缓。仅在渠道为 *（所有渠道）的偏好设置上生效。{ \"off\": true } 表示不设免打扰时段；留空时由下一条偏好设置决定：先是所有用户的默认设置，然后是不设。"
       },
       created_at: {
         label: "创建时间"
@@ -487,6 +487,64 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       created_at: {
         label: "创建时间"
+      }
+    }
+  },
+  sys_channel_account: {
+    label: "通道账户",
+    pluralLabel: "通道账户",
+    description: "组织安装的聊天应用（例如其自有的 Slack 应用）及其获颁的机器人令牌。",
+    fields: {
+      channel_id: {
+        label: "通道"
+      },
+      display_name: {
+        label: "工作区"
+      },
+      external_id: {
+        label: "工作区 ID"
+      },
+      bot_token: {
+        label: "机器人令牌"
+      },
+      status: {
+        label: "状态",
+        options: {
+          active: "有效",
+          revoked: "已撤销"
+        }
+      }
+    }
+  },
+  sys_channel_user_link: {
+    label: "通道用户关联",
+    pluralLabel: "通道用户关联",
+    description: "某人与其在聊天工作区中本人用户之间的关联：按邮箱匹配提议，本人确认后才开始投递。",
+    fields: {
+      account_id: {
+        label: "账户"
+      },
+      user_id: {
+        label: "用户"
+      },
+      external_user_id: {
+        label: "聊天用户 ID"
+      },
+      external_display_name: {
+        label: "聊天用户名"
+      },
+      state: {
+        label: "状态",
+        options: {
+          proposed: "已提议",
+          confirmed: "已确认"
+        }
+      },
+      confirmed_at: {
+        label: "确认时间"
+      },
+      proposal_email_hash: {
+        label: "提议邮箱哈希"
       }
     }
   }

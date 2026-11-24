@@ -980,6 +980,18 @@ describe('ObjectView.readersRetired-6152', () => {
       expect(node).not.toHaveProperty('swimlaneField');
     });
 
+    it('kanban: `summary`, `showFieldLabels` and `hideEmptyFields` reach the board when declared (objectstack#36370)', async () => {
+      const node = await generatedNode('kanban', {
+        kanban: { groupByField: 'stage', summarizeField: 'amount', summary: { type: 'none' }, showFieldLabels: false, hideEmptyFields: false },
+      });
+      expect(node.summary).toEqual({ type: 'none' });
+      expect(node.showFieldLabels).toBe(false);
+      expect(node.hideEmptyFields).toBe(false);
+      // CONTROL: a block without them emits none of the three.
+      const bare = await generatedNode('kanban', { kanban: { groupByField: 'stage' } });
+      for (const key of ['summary', 'showFieldLabels', 'hideEmptyFields']) expect(bare).not.toHaveProperty(key);
+    });
+
     it('calendar: the five declared keys reach the calendar, `defaultView` does not', async () => {
       const node = await generatedNode('calendar', {
         calendar: { startDateField: 'a', endDateField: 'b', titleField: 'c', colorField: 'd', allDayField: 'e', defaultView: 'week' },

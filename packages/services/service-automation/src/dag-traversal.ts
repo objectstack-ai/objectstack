@@ -63,9 +63,11 @@ import { FlowValueSlotSchema, VALUE_ENVELOPE_REFUSAL } from '@objectstack/spec/a
 // `previous.*`, `budget > 100000`, …) skipped its flow. A static import binds the
 // engine at module load in both ESM and CJS builds.
 import { ExpressionEngine, validateExpression } from '@objectstack/formula';
+import type { ExprValidationCode } from '@objectstack/formula';
 import { readPartialSteps } from './partial-steps.js';
 import { isRegionSuspensionRefusal, refuseRegionSuspension } from './region-suspension-refusal.js';
 import { stampFlowRunSlot } from './flow-slots.js';
+import { isSkippedScopeKey, scopeContainer } from './scope-key-segments.js';
 
 /**
  * The value the flow CEL scope binds as `current_user` for a run (#19939 —
@@ -1047,14 +1049,19 @@ export function celScope(
     variables: Map<string, unknown>,
     context?: AutomationContext,
 ): { extra: Record<string, unknown> } {
-    const vars: Record<string, unknown> = {};
+    // No variable key reaches a prototype (`./scope-key-segments.ts`):
+    // prototype-free containers, and a key with a skipped segment binds
+    // nothing. A dotted tail whose head names a value the run holds is still
+    // written into that value.
+    const vars = scopeContainer();
     for (const [key, value] of variables) {
         // Convert "step.result" keys into nested object paths.
         const segs = key.split('.');
+        if (isSkippedScopeKey(segs)) continue;
         let cursor = vars;
         for (let i = 0; i < segs.length - 1; i++) {
             if (typeof cursor[segs[i]] !== 'object' || cursor[segs[i]] === null) {
-                cursor[segs[i]] = {};
+                cursor[segs[i]] = scopeContainer();
             }
             cursor = cursor[segs[i]] as Record<string, unknown>;
         }
@@ -1065,11 +1072,25 @@ export function celScope(
     return { extra: { ...vars, vars, current_user: runUserOf(context) } };
 }
 
+/**
+ * One refusal {@link valueEnvelopeRefusals} returns. `code` is the
+ * expression judge's own refusal code (`@objectstack/formula`), present
+ * exactly when the refusal came from `validateExpression`; a refusal of the
+ * envelope's SHAPE (no envelope, no or blank `source`, a dialect other than
+ * `cel`) carries none. `registerFlow` reads it to say which rule its header
+ * names; the message is unchanged by it.
+ */
+export interface ValueEnvelopeRefusal {
+    readonly message: string;
+    readonly source: string;
+    readonly code?: ExprValidationCode;
+}
+
 /** The body of {@link AutomationEngine.valueEnvelopeRefusals}; that method's docblock is its contract. */
 export function valueEnvelopeRefusals(
     value: unknown,
     fieldTypes?: Readonly<Record<string, string>>,
-): { message: string; source: string }[] {
+): ValueEnvelopeRefusal[] {
     // [#16439] Presence, asked before either primitive, because neither can
     // answer it (see rule 0 above). It is stated HERE and not as a guard in
     // {@link evaluateValueEnvelope} deliberately: a reject reason living
@@ -1122,6 +1143,7 @@ export function valueEnvelopeRefusals(
     return parsed.errors.map((e) => ({
         message: `${VALUE_ENVELOPE_REFUSAL} ${e.message}`,
         source: e.source,
+        code: e.code,
     }));
 }
 

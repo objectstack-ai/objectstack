@@ -1,13 +1,27 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * Which fields of an object the app author declared `hidden: true`
- * (objectui#5565).
+ * The figure each Approvals Inbox queue row shows beside its object name, and
+ * the field the inbox's amount sort orders on: one field per object, read
+ * from what the app author DECLARED on that object, never guessed.
  *
- * ## What this exists to enforce, and why here
+ * Two declarations of the object's schema decide it, and both come from one
+ * metadata read:
  *
- * `hidden: true` is a **UI contract** — "hidden from the default UI" — and the
- * maintainer's ruling on objectstack#10749 pinned it there: *`hidden: true`
+ *  - `highlightFields` (ADR-0085) — the object's one curated list of its most
+ *    important fields, in priority order; the spec's docblock says the first
+ *    entry wins wherever only one field fits. A queue row has room for one
+ *    figure, so the figure is the first entry that names a numeric field
+ *    ({@link inboxFigureField}). ⛔ No second "important fields" list, and no
+ *    reading of field NAMES: an object that declares no numeric highlight
+ *    shows no figure.
+ *  - `hidden: true` — a field the author declared hidden is never the figure,
+ *    and the queue never orders on it either (an ordering discloses relative
+ *    magnitude). Details below.
+ *
+ * ## `hidden: true` is a UI contract, and the trim is here
+ *
+ * The maintainer's ruling on objectstack#10749 pinned it: *`hidden: true`
  * stays UI-only; `internal: true` is the serialization primitive*. A field an
  * author wants off the wire entirely is declared `internal: true` and never
  * reaches a client at all; a field-level access control is FLS, which the
@@ -16,26 +30,23 @@
  * `hidden` is neither of those. The producer is **correct** to ship a `hidden`
  * field in an approval request's `payload_json` snapshot, so the UI is not
  * compensating for a bad producer when it declines to render it — the UI is
- * the *only* place that contract lives, and every Approvals Inbox surface —
- * the drawer's business summary card, the queue rows, and the amount sort
- * (objectui#6020) — is default UI. That is why the trim is here and not in
+ * the *only* place that contract lives, and the queue rows and the amount sort
+ * are default UI. That is why the trim is here and not in
  * `@objectstack/plugin-approvals`.
  *
  * ⛔ Do not extend this to `internal`. They are distinct primitives with
  * distinct meanings, and conflating them here would re-introduce the
  * serialization semantic the ruling refused.
  *
- * ## ⚠️ This is a presentation filter, NOT an access control
+ * ## No answer, no figure
  *
- * The server stays the only authority on what a principal may read, and it has
- * already answered by the time a payload reaches this page. So an *unanswered*
- * metadata read leaves the declaration unknown, and an unknown declaration
- * renders the field — the same fail-open direction as `recordReadability` on
- * this page, and for the same reason: degrading an approver's decision surface
- * on a transient metadata error would break the primary workflow to enforce a
- * declaration that was never the security boundary. (Contrast objectui#5553's
- * raw-JSON panel, which fails CLOSED — there the measured defect *was* a
- * non-holder seeing the panel, so absence of an answer had to deny.)
+ * The figure needs a positive declaration, so every case where the
+ * declaration is not known — nothing declared, the read has not answered yet,
+ * the read failed, a source that cannot describe objects — yields no figure.
+ * That is not an access decision: the server stays the only authority on what
+ * a principal may read, and the approver still sees every value on the
+ * request's own page. It only means the queue shows nothing rather than a
+ * number nobody chose.
  *
  * ## Cost
  *
@@ -46,15 +57,14 @@
  * `GET /api/v1/meta/object/:name` — the same read the record form and detail
  * view already perform for any business user — and it lands on the adapter's
  * own `MetadataCache` (LRU, 5-minute TTL, in-flight de-duplication), so
- * repeated drawer opens on one object cost zero round trips. On top of that
- * this hook keeps a per-mount resolved map, so re-renders (the page's 60s
- * clock, search typing, a drawer re-opening) cost nothing at all.
+ * repeated reads of one object cost zero round trips. On top of that this
+ * hook keeps a per-mount resolved map, so re-renders (the page's 60s clock,
+ * search typing) cost nothing at all.
  *
  * Invalidation is therefore: the adapter cache's TTL, an explicit adapter
  * `clearCache()` (which the shell issues on a locale switch), or a page
- * reload. A `hidden` flag flipped in Studio while this page is open is picked
- * up on the next reload — the same staleness `useRecordReadability` accepts,
- * and it is a presentation flag, not a grant.
+ * reload. A declaration changed in Studio while this page is open is picked
+ * up on the next reload — the same staleness `useRecordReadability` accepts.
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -73,63 +83,109 @@ export interface HiddenFieldsSource {
   getObjectSchema?(objectName: string): Promise<unknown>;
 }
 
-/** Nothing declared hidden — also the "we do not know" answer. See the header. */
+/** Nothing declared hidden. */
 const NONE: ReadonlySet<string> = new Set<string>();
 
-/** The empty answer, as a shared instance, so consumers can memo on identity. */
-export const NO_HIDDEN_FIELDS = NONE;
-
 /**
- * Field names an object schema declares `hidden: true`.
+ * The schema's field definitions by name.
  *
  * `fields` arrives in either shape the platform serves: the record shape
  * (`{ name: def }`, the `*.object.ts` spec shape) or the array shape
  * (`[{ name, ...def }]`, the objectql shape). Both are read; anything else
- * yields the empty set.
+ * yields no definitions.
+ */
+function fieldDefinitions(schema: unknown): ReadonlyMap<string, Record<string, unknown>> {
+  const fields = (schema as { fields?: unknown } | null | undefined)?.fields;
+  const out = new Map<string, Record<string, unknown>>();
+  if (!fields || typeof fields !== 'object') return out;
+  if (Array.isArray(fields)) {
+    for (const entry of fields) {
+      if (!entry || typeof entry !== 'object') continue;
+      const def = entry as Record<string, unknown>;
+      const name = def.name;
+      if (typeof name === 'string' && name !== '') out.set(name, def);
+    }
+  } else {
+    for (const [name, def] of Object.entries(fields as Record<string, unknown>)) {
+      if (def && typeof def === 'object') out.set(name, def as Record<string, unknown>);
+    }
+  }
+  return out;
+}
+
+/**
+ * Field names an object schema declares `hidden: true`.
  *
  * Strictly `=== true`. A truthy-but-not-true value (a string `'false'`, a `1`)
  * is not a declaration this can act on, and guessing at one would hide a field
  * the author never asked to hide.
  */
 export function hiddenFieldNames(schema: unknown): ReadonlySet<string> {
-  const fields = (schema as { fields?: unknown } | null | undefined)?.fields;
-  if (!fields || typeof fields !== 'object') return NONE;
   const out = new Set<string>();
-  if (Array.isArray(fields)) {
-    for (const entry of fields) {
-      if (!entry || typeof entry !== 'object') continue;
-      const def = entry as Record<string, unknown>;
-      const name = def.name;
-      if (typeof name === 'string' && name !== '' && def.hidden === true) out.add(name);
-    }
-  } else {
-    for (const [name, def] of Object.entries(fields as Record<string, unknown>)) {
-      if (!def || typeof def !== 'object') continue;
-      if ((def as Record<string, unknown>).hidden === true) out.add(name);
-    }
+  for (const [name, def] of fieldDefinitions(schema)) {
+    if (def.hidden === true) out.add(name);
   }
   return out.size > 0 ? out : NONE;
 }
 
+/** Field types whose stored value is a number (`@objectstack/spec` `FieldType`). */
+const FIGURE_FIELD_TYPES: ReadonlySet<string> = new Set(['number', 'currency', 'percent', 'summary']);
+
+/** A `formula` field's `returnType` values that compute a number. */
+const FIGURE_FORMULA_RETURN_TYPES: ReadonlySet<string> = new Set(['number', 'currency', 'percent']);
+
+function isFigureField(def: Record<string, unknown>): boolean {
+  const type = def.type;
+  if (typeof type !== 'string') return false;
+  if (FIGURE_FIELD_TYPES.has(type)) return true;
+  return type === 'formula'
+    && typeof def.returnType === 'string'
+    && FIGURE_FORMULA_RETURN_TYPES.has(def.returnType);
+}
+
 /**
- * Read one object's hidden-field declaration.
+ * The object's inbox figure: the first `highlightFields` entry (ADR-0085)
+ * that names a numeric field of the object the author did not declare
+ * `hidden: true`. `null` when the object declares no such entry — the queue
+ * then shows no figure.
+ *
+ * Numeric means a `number`, `currency`, `percent` or `summary` (roll-up)
+ * field, or a `formula` whose `returnType` is `number`, `currency` or
+ * `percent`. An entry naming a field the schema does not define is skipped:
+ * there is no type to judge it by.
+ */
+export function inboxFigureField(schema: unknown): string | null {
+  const highlights = (schema as { highlightFields?: unknown } | null | undefined)?.highlightFields;
+  if (!Array.isArray(highlights)) return null;
+  const defs = fieldDefinitions(schema);
+  for (const name of highlights) {
+    if (typeof name !== 'string') continue;
+    const def = defs.get(name);
+    if (!def || def.hidden === true) continue;
+    if (isFigureField(def)) return name;
+  }
+  return null;
+}
+
+/**
+ * Read one object's inbox figure field.
  *
  * Never rejects: a source that cannot answer — no `getObjectSchema`, a 404, a
- * transport error, a principal without metadata read — resolves to the empty
- * set, which is the unknown answer the caller fails open on.
+ * transport error, a principal without metadata read — resolves to `null`,
+ * which shows no figure. See the header.
  */
-export async function readHiddenFields(
+export async function readInboxFigureField(
   source: HiddenFieldsSource | null | undefined,
   objectName: string,
-): Promise<ReadonlySet<string>> {
-  if (typeof source?.getObjectSchema !== 'function') return NONE;
+): Promise<string | null> {
+  if (typeof source?.getObjectSchema !== 'function') return null;
   try {
-    return hiddenFieldNames(await source.getObjectSchema(objectName));
+    return inboxFigureField(await source.getObjectSchema(objectName));
   } catch {
-    // Unknown, so the caller renders the field. Deliberately silent: a viewer
-    // without metadata access to the object hits this on every drawer open,
-    // and a console error per open would be noise, not a signal.
-    return NONE;
+    // Unknown, so no figure. Deliberately silent: a viewer without metadata
+    // access to the object hits this on every mount, and a console error per
+    // mount would be noise, not a signal.
+    return null;
   }
 }
 
@@ -155,39 +211,35 @@ export function planHiddenFieldReads(
 }
 
 /** What a row asks the lookup at render time. */
-export interface HiddenFieldLookup {
+export interface InboxFigureFieldLookup {
   /**
-   * The fields `objectName` declares `hidden: true`.
-   *
-   * The empty set is "nothing known to be hidden" — it covers *nothing
-   * declared*, *this object was never asked about*, *the read has not answered
-   * yet*, and *the read failed*, which are one answer on purpose. See the
-   * header on failing open: callers render the field for all four.
+   * The payload key `objectName`'s rows show as their figure, or `null` for
+   * no figure — which covers *nothing declared*, *this object was never asked
+   * about*, *the read has not answered yet* and *the read failed*, one answer
+   * on purpose. See the header.
    */
-  forObject(objectName: string | null | undefined): ReadonlySet<string>;
+  forObject(objectName: string | null | undefined): string | null;
 }
 
 /**
- * Hidden-field sets for every object on screen, each resolved once per mount.
+ * The inbox figure field of every object on screen, each resolved once per
+ * mount.
  *
- * A queue is N rows spanning K objects, so the answer cannot be one set — one
- * object's declarations applied to every row would hide fields on rows whose
- * object never declared them and miss fields on rows whose object did
- * (objectui#6020). The lookup is therefore keyed by object name, and a row
- * always asks with its OWN `object_name`.
+ * A queue is N rows spanning K objects, so the answer cannot be one field —
+ * each object declares its own `highlightFields` and its own `hidden` fields.
+ * The lookup is therefore keyed by object name, and a row always asks with its
+ * OWN `object_name`.
  *
  * Every object is read at most once per mount: newly loaded rows cost only the
- * objects not seen yet, and re-renders (search typing, the minute clock, a
- * drawer opening) cost nothing. Until a read answers, `forObject` returns the
- * empty set, so the first paint renders exactly what it renders today and the
- * trim applies as soon as the declaration is known — see the header on why
- * this presentation filter fails open, and never the other way.
+ * objects not seen yet, and re-renders (search typing, the minute clock) cost
+ * nothing. Until a read answers, `forObject` returns `null`, so the first
+ * paint shows no figure and the declared one appears once it is known.
  */
-export function useHiddenFieldsByObject(
+export function useInboxFigureFieldByObject(
   objectNames: readonly (string | null | undefined)[],
-): HiddenFieldLookup {
+): InboxFigureFieldLookup {
   const adapter = useAdapter() as HiddenFieldsSource | null | undefined;
-  const [known, setKnown] = useState<ReadonlyMap<string, ReadonlySet<string>>>(() => new Map());
+  const [known, setKnown] = useState<ReadonlyMap<string, string | null>>(() => new Map());
   /** Object names already handed to a read — the "read once" ledger. */
   const attempted = useRef<Set<string>>(new Set());
   /** Latest names without making them an effect dependency (see `signature`). */
@@ -204,26 +256,26 @@ export function useHiddenFieldsByObject(
     if (fresh.length === 0) return;
     for (const n of fresh) attempted.current.add(n);
     let cancelled = false;
-    // `readHiddenFields` never rejects, so one object that cannot be described
-    // resolves to the empty set without dropping the others' answers.
+    // `readInboxFigureField` never rejects, so one object that cannot be
+    // described resolves to `null` without dropping the others' answers.
     void Promise.all(
-      fresh.map(async (n) => [n, await readHiddenFields(adapter, n)] as const),
+      fresh.map(async (n) => [n, await readInboxFigureField(adapter, n)] as const),
     ).then((entries) => {
       if (cancelled) return;
       setKnown((prev) => {
         const next = new Map(prev);
-        for (const [n, hidden] of entries) next.set(n, hidden);
+        for (const [n, field] of entries) next.set(n, field);
         return next;
       });
     });
     return () => { cancelled = true; };
   }, [adapter, signature]);
 
-  return useMemo<HiddenFieldLookup>(() => ({
+  return useMemo<InboxFigureFieldLookup>(() => ({
     forObject: (objectName) => (
       typeof objectName === 'string' && objectName !== ''
-        ? known.get(objectName) ?? NONE
-        : NONE
+        ? known.get(objectName) ?? null
+        : null
     ),
   }), [known]);
 }

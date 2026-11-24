@@ -96,6 +96,9 @@ export const ptBR: TranslationData = {
         nav_settings_hub: { label: 'Todas as configurações' },
         nav_settings_localization: { label: 'Localização' },
         nav_exchange_rates: { label: 'Taxas de câmbio' },
+        nav_units_of_measure: { label: 'Unidades de medida' },
+        nav_work_calendars: { label: 'Calendários de trabalho' },
+        nav_work_calendar_exceptions: { label: 'Exceções de calendário' },
         nav_settings_company: { label: 'Empresa' },
         nav_settings_mail: { label: 'Envio de e-mail' },
         nav_settings_sms: { label: 'Envio de SMS' },
@@ -107,6 +110,7 @@ export const ptBR: TranslationData = {
         nav_settings_knowledge: { label: 'Conhecimento' },
         nav_settings_lifecycle: { label: 'Ciclo de vida dos dados' },
         nav_recycle_bin: { label: 'Lixeira' },
+        nav_public_forms: { label: 'Formulários públicos' },
         nav_notification_preferences: { label: 'Preferências de notificação' },
         nav_notification_templates: { label: 'Modelos de notificação' },
 
@@ -124,6 +128,7 @@ export const ptBR: TranslationData = {
         nav_datasources: { label: 'Fontes de dados' },
         nav_connector_credentials: { label: 'Credenciais dos conectores' },
         nav_connector_connections: { label: 'Conexões dos conectores' },
+        nav_slack: { label: 'Slack' },
 
         nav_oauth_apps: { label: 'Aplicativos OAuth' },
       },

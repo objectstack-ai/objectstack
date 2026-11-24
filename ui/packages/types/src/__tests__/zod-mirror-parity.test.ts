@@ -154,7 +154,20 @@
  *     a delta to this number; count the registry. Nothing asserts it against a written
  *     one, so this line is prose and can rot; the pin that cannot is the one
  *     comparing the two halves to each other.
- *   - **51 entries** in `KnownDrift`, **89 keys** across them — 51 / 88 until
+ *   - **51 entries** in `KnownDrift`, **92 keys** across them — 51 / 91 until
+ *     objectstack#35955 declared `DataTableSchema.onColumnHide`, the host's
+ *     handler for the column menu's "Hide column", as a runtime slot refused
+ *     by name on the mirror, so it JOINED the same
+ *     `data-display.zod.ts#DataTableSchema` entry. It was 51 / 90 until
+ *     objectstack#35678 declared `DataTableSchema.floatingBar`, the host-built
+ *     selection bar the table floats over its rows, as a runtime slot refused
+ *     by name on the mirror, so it JOINED the same
+ *     `data-display.zod.ts#DataTableSchema` entry. It was 51 / 89 until
+ *     objectstack#35548 declared `DataTableSchema.summaryRow`, the host-built
+ *     per-column summary row drawn as the table's own last row, as a runtime
+ *     slot refused by name on the mirror, so it JOINED the same
+ *     `data-display.zod.ts#DataTableSchema` entry: the key total rose by one and
+ *     the entry count did not move. It was 51 / 88 until
  *     objectstack#28434 declared `DataTableSchema.renderRowContextMenu`, the
  *     host's row context menu items, as a runtime slot refused by name on the
  *     mirror, so it JOINED the same `data-display.zod.ts#DataTableSchema` entry:
@@ -2518,7 +2531,20 @@ interface KnownDrift {
     // objectstack#28434 — `renderRowContextMenu` is a RUNTIME SLOT of the same
     // shape: `data-table` calls it with the row when its context menu opens;
     // `ObjectGrid` supplies the items.
-    | 'renderRowContextMenu';
+    | 'renderRowContextMenu'
+    // objectstack#35548 — `summaryRow` is a RUNTIME SLOT in the `rowGroups`
+    // shape: host-built React figures `data-table` draws as its last row
+    // (`ObjectGrid` supplies them from the column summaries); a React node is
+    // no more JSON than a function, so the mirror refuses it by name.
+    | 'summaryRow'
+    // objectstack#35678 — `floatingBar` is a RUNTIME SLOT in the same shape:
+    // the host-built selection bar `data-table` floats over its rows
+    // (`ObjectGrid` supplies it while rows are selected).
+    | 'floatingBar'
+    // objectstack#35955 — `onColumnHide` is a RUNTIME SLOT in the objectui#6124
+    // shape: `data-table` calls it with the column's key when the column menu's
+    // "Hide column" is picked; `ObjectGrid` forwards its host's handler.
+    | 'onColumnHide';
   /** RUNTIME SLOT (objectui#7759 group E, the objectui#6124 shape): `data-table`, `ObjectGrid` and `VirtualGrid` call `col.cell(value, row)`. */
   'data-display.zod.ts#TableColumnSchema': 'cell';
   /**

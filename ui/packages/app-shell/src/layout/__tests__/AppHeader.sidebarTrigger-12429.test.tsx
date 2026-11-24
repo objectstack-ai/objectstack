@@ -11,11 +11,12 @@
  * sidebar carries none (`UnifiedSidebar` side: the sibling test
  * `LocalizedSidebarTrigger.appBar-12429.test.tsx`).
  *
- * Below 768 px that slot changed with objectstack#34594 (the maintainer's
- * direction on epic objectstack#34571): inside an app the menu is the bottom
- * menu bar, whose 「More」 opens the drawer, so the slot goes back to the
- * environment's home instead (the last describe). The describes above run at
- * jsdom's 1024 px.
+ * Below 768 px that slot changed with objectstack#34594, and again with
+ * objectstack#35881: inside an app the menu is the app's home page, so on a
+ * page below it the slot is 「‹」 back to that page, and on the app's home and
+ * the two inbox pages the bottom bar opens it holds nothing: the app pill,
+ * with the app's name, comes first (the last describe). The describes above
+ * run at jsdom's 1024 px.
  *
  * Harness: `AppHeader.appIdentity-12201.test.tsx`'s, with the trigger and the
  * workspace switcher as recorders. Layout is not measured; the responsive
@@ -29,8 +30,9 @@ import { render, screen } from '@testing-library/react';
 import React from 'react';
 import { MePermissionsProvider, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 
+const route = vi.hoisted(() => ({ pathname: '/apps/cloud_control/page/welcome' }));
 vi.mock('react-router-dom', () => ({
-  useLocation: () => ({ pathname: '/apps/cloud_control/page/welcome', search: '', hash: '', state: null, key: 't' }),
+  useLocation: () => ({ pathname: route.pathname, search: '', hash: '', state: null, key: 't' }),
   useParams: () => ({}),
   useNavigate: () => vi.fn(),
   useSearchParams: () => [new URLSearchParams(), vi.fn()] as const,
@@ -130,8 +132,13 @@ vi.mock('../../hooks/useAiSurface', () => ({
 }));
 // Recorders: what the header hands the pill and the stage chip.
 vi.mock('../AppSwitcher', () => ({
-  AppSwitcher: (p: { activeAppName: string; designInStudioPath?: string | null }) => (
-    <div data-testid="app-switcher-stub" data-active={p.activeAppName} data-studio-path={p.designInStudioPath ?? ''} />
+  AppSwitcher: (p: { activeAppName: string; designInStudioPath?: string | null; showNameOnPhone?: boolean }) => (
+    <div
+      data-testid="app-switcher-stub"
+      data-active={p.activeAppName}
+      data-studio-path={p.designInStudioPath ?? ''}
+      data-phone-name={p.showNameOnPhone ? 'on' : 'off'}
+    />
   ),
 }));
 vi.mock('../PreviewBadge', () => ({
@@ -232,27 +239,49 @@ describe('the app bar carries the one sidebar trigger at every width (objectui#1
   });
 });
 
-describe('on a phone the left slot goes back to the environment home (objectstack#34594)', () => {
+describe('on a phone the left slot goes back to the app\'s home (objectstack#35881)', () => {
   const setWidth = (width: number) =>
     Object.defineProperty(window, 'innerWidth', { value: width, configurable: true, writable: true });
-  afterEach(() => setWidth(1024));
+  afterEach(() => {
+    setWidth(1024);
+    route.pathname = '/apps/cloud_control/page/welcome';
+  });
 
-  it('at 375 px inside an app: a 44 px 「Back to home」 link to the home path, first in the slot, and no trigger', () => {
+  it('at 375 px on a page inside an app: a 44 px 「‹」 link to the app\'s home, first in the slot, and no trigger', () => {
     setWidth(375);
     mountApp();
     expect(screen.queryByTestId('sidebar-trigger-stub')).not.toBeInTheDocument();
     const back = screen.getByTestId('app-bar-phone-home');
-    expect(back).toHaveAccessibleName('Back to home');
-    expect(back).toHaveAttribute('href', '/home');
+    expect(back).toHaveAccessibleName('Back to the app menu');
+    expect(back).toHaveAttribute('href', '/apps/cloud_control');
     expect(back.className.split(/\s+/)).toContain('size-11');
     expect(back.parentElement!.firstElementChild).toBe(back);
+    expect(screen.getByTestId('app-switcher-stub')).toHaveAttribute('data-phone-name', 'off');
   });
 
-  it('CONTROL — at 768 px the slot holds the sidebar trigger, and no back link', () => {
+  it('at 375 px on the app\'s home and the two inbox pages: no 「‹」, the pill names the app, no search or bell up top', () => {
+    setWidth(375);
+    for (const path of ['/apps/cloud_control', '/apps/cloud_control/sys_inbox_message', '/apps/cloud_control/system/approvals']) {
+      route.pathname = path;
+      const { unmount } = mountApp();
+      expect(screen.queryByTestId('app-bar-phone-home'), path).not.toBeInTheDocument();
+      expect(screen.queryByTestId('sidebar-trigger-stub'), path).not.toBeInTheDocument();
+      expect(screen.getByTestId('app-switcher-stub'), path).toHaveAttribute('data-phone-name', 'on');
+      expect(screen.queryByTestId('action:command-palette:open-mobile'), path).not.toBeInTheDocument();
+      expect(screen.queryByTestId('inbox-bell-intent'), path).not.toBeInTheDocument();
+      unmount();
+    }
+  });
+
+  it('CONTROL — at 768 px the app\'s home keeps the sidebar trigger, the search and the bell', () => {
     setWidth(768);
+    route.pathname = '/apps/cloud_control';
     mountApp();
     expect(screen.getByTestId('sidebar-trigger-stub')).toBeInTheDocument();
     expect(screen.queryByTestId('app-bar-phone-home')).not.toBeInTheDocument();
+    expect(screen.getByTestId('app-switcher-stub')).toHaveAttribute('data-phone-name', 'off');
+    expect(screen.getByTestId('action:command-palette:open-mobile')).toBeInTheDocument();
+    expect(screen.getByTestId('inbox-bell-intent')).toBeInTheDocument();
   });
 
   it('CONTROL — at 375 px off an app (Home) neither is drawn', () => {

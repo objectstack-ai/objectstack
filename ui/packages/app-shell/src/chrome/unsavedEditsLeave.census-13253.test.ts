@@ -84,13 +84,15 @@ describe('every shell departure in the four files goes through confirmUnsavedLea
     expect(bareCalls(code('chrome/CommandPalette.tsx'), 'onAppChange')).toEqual([]);
   });
 
-  it('UnifiedSidebar: onAppChange is declared but never read, so it is not a departure', () => {
-    // The prop's one appearance is its declaration on the props interface; the
-    // component destructures `activeAppName` only. A sidebar that starts
-    // reading it must wrap it, and this assertion makes that a visible change.
+  it('UnifiedSidebar: its one read of onAppChange, the app menu\'s switch, goes through the seam (objectstack#36112)', () => {
+    // Declared on the props interface, destructured, and read once: the app
+    // menu in the sidebar's head hands it on wrapped (that line names it
+    // twice, the menu's prop and the call). A second read must be wrapped
+    // too, and this count makes it a visible change.
     const sidebar = code('layout/UnifiedSidebar.tsx');
-    expect(sidebar.match(/\bonAppChange\b/g) ?? []).toHaveLength(1);
+    expect(sidebar.match(/\bonAppChange\b/g) ?? []).toHaveLength(4);
     expect(sidebar).toMatch(/onAppChange\?: \(name: string\) => void;/);
+    expect(sidebar).toMatch(/onAppChange=\{\(segment\) => confirmUnsavedLeave\(\(\) => onAppChange\?\.\(segment\)\)\}/);
   });
 
   it('CONTROL: the census sees a bare call, and does not count a wrapped one or a commented one', () => {

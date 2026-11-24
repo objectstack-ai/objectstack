@@ -97,3 +97,39 @@ describe('every other message comes back unchanged', () => {
     expect(driftFindingWithoutRemedy(reworded)).toBe(reworded.message);
   });
 });
+
+/**
+ * The `safe` column entries of a declared field name the act per object kind:
+ * a publish applies them only for an object authored in this environment (a
+ * package object cannot be published here, and its install has no door for
+ * these ops), so for a package object the message names `os migrate apply`.
+ */
+describe('the safe column entries name the remedy per object kind', () => {
+  const safeDrift = diffManagedTable({
+    table: 't',
+    fields: {
+      at: { type: 'datetime' },
+      name: { type: 'text', maxLength: 200 },
+      owner: { type: 'lookup', reference: 'sys_user', defaultValue: 'current_user' },
+    } as never,
+    columns: [
+      { name: 'at', type: 'date', nullable: true },
+      { name: 'name', type: 'character varying', nullable: true, maxLength: 100 },
+      { name: 'owner', type: 'character varying', nullable: true, maxLength: 255, defaultValue: "'current_user'::character varying" },
+    ],
+    dialect: 'postgres',
+  });
+
+  it.each(['widen_date_to_datetime', 'widen_varchar', 'drop_column_default'])('%s', (op) => {
+    const entry = only(safeDrift, op);
+    expect(entry.category).toBe('safe');
+    expect(entry.message).toContain(
+      'For an object authored in this environment, publishing the object applies it; for an object a package ' +
+        'provides (sealed, so it cannot be published here), run "os migrate apply", which applies it for either kind.',
+    );
+    // Not the sentence that told a package object's reader to publish it.
+    expect(entry.message).not.toContain('publishing the object applies it, or run');
+    // A safe entry carries no destructive remedy, so the finding is the message.
+    expect(driftFindingWithoutRemedy(entry)).toBe(entry.message);
+  });
+});

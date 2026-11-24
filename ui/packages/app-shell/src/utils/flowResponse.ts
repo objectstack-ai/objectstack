@@ -132,6 +132,14 @@
  * {@link apiActionFailureMessage} is that door's reading: both api handlers
  * (`useConsoleActionRuntime`'s and `RecordDetailView`'s) call it on a non-2xx.
  *
+ * A refusal raised before any run — the action door's caller-scoped load of
+ * the subject record answering `404 RECORD_NOT_FOUND`, a denied or locked
+ * subject, a missing run on resume, a transport failure — carries no run
+ * members, only the envelope's `userMessage` beside its `message`. Every such
+ * arm, on both doors and on resume, reads it by the same rule, `userMessage`
+ * before `message` (`refusalEnvelopeMessage`, objectstack#36390), so the toast
+ * a non-English user reads is the producer's translated line.
+ *
  * ## A LAUNCH is judged here too, not just interpreted (objectui#9973)
  *
  * Classifying the response was never the whole rule. The two launch handlers
@@ -410,11 +418,47 @@ function flowFailedEnvelopeMessage(
 }
 
 /**
+ * The message of any OTHER failed answer — a refusal the door raised before
+ * the run started or the endpoint ran (the action door's caller-scoped subject
+ * load answering `404 RECORD_NOT_FOUND`, a denied or locked subject, a missing
+ * run, a transport failure) — by {@link flowFailureMessage} with the one
+ * carrier such an envelope has: its producer-marked `userMessage`, then the
+ * envelope's own message (`fallback` when it has none). `FLOW_FAILED`'s
+ * `error.details` carriers are not read: they describe a run, and this answer
+ * had none (objectstack#36390).
+ */
+function refusalEnvelopeMessage(
+    json: unknown,
+    fallback: string,
+    locale: string | undefined,
+): string {
+    return flowFailureMessage(
+        { userMessage: refusalBodyUserMessage(json) },
+        actionErrorDetail(json, fallback),
+        locale,
+    );
+}
+
+/**
+ * A refusal body's producer-marked `userMessage`, from the two members
+ * `@objectstack/client` lifts it from: the ADR-0112 envelope's
+ * `error.userMessage`, else the top level of a flat `{ code, error }` body —
+ * the dialect the approvals door answers, where a decide refusal carries the
+ * decider's own language (objectstack#36463). One predicate for both:
+ * `declaredUserMessage`, so a blank or non-string value is no marking.
+ */
+function refusalBodyUserMessage(json: unknown): string | null {
+    const body = json as { error?: unknown; userMessage?: unknown } | null | undefined;
+    return declaredUserMessage(body?.error) ?? declaredUserMessage({ userMessage: body?.userMessage });
+}
+
+/**
  * The error a `type: 'api'` action shows for a non-2xx answer (objectstack#27487
  * — see the header). A `400 FLOW_FAILED` is a flow the endpoint ran, and reads
  * the run's refusal by the failed arm's rule; `locale` is the host's active
  * language.
- * Every other answer reads `actionErrorDetail`, as the door always has.
+ * Every other answer reads {@link refusalEnvelopeMessage}: its `userMessage`
+ * when it carries one, else its message (objectstack#36390).
  */
 export function apiActionFailureMessage(
     res: { status: number },
@@ -425,7 +469,7 @@ export function apiActionFailureMessage(
     if (res.status === 400 && errorCodeIs((json as { error?: unknown } | null | undefined)?.error, 'FLOW_FAILED')) {
         return flowFailedEnvelopeMessage(json, fallback, locale);
     }
-    return actionErrorDetail(json, fallback);
+    return refusalEnvelopeMessage(json, fallback, locale);
 }
 
 /**
@@ -480,12 +524,15 @@ export function interpretFlowResponse<S = unknown>(
             };
         }
 
-        // Nothing to resume (or no such flow). A retry cannot conjure the run
-        // back; status alone decides, since a proxy 404 carries no envelope.
+        // Nothing to resume (or no such flow, or — on the action door — the
+        // subject record the caller-scoped load could not read). A retry
+        // cannot conjure the run back; status alone decides, since a proxy
+        // 404 carries no envelope. Every arm below reads the refusal's
+        // `userMessage` before its message (objectstack#36390).
         if (res.status === 404) {
             return {
                 kind: 'failed',
-                error: actionErrorDetail(json, `${label} failed (HTTP ${res.status})`),
+                error: refusalEnvelopeMessage(json, `${label} failed (HTTP ${res.status})`, locale),
                 retryable: false,
             };
         }
@@ -494,7 +541,7 @@ export function interpretFlowResponse<S = unknown>(
         // the suspension, so retrying the same run is meaningful.
         return {
             kind: 'failed',
-            error: actionErrorDetail(json, `${label} failed (HTTP ${res.status})`),
+            error: refusalEnvelopeMessage(json, `${label} failed (HTTP ${res.status})`, locale),
             retryable: true,
         };
     }
@@ -504,7 +551,7 @@ export function interpretFlowResponse<S = unknown>(
         // the run started, so nothing was consumed.
         return {
             kind: 'failed',
-            error: actionErrorDetail(json, `${label} failed (HTTP ${res.status})`),
+            error: refusalEnvelopeMessage(json, `${label} failed (HTTP ${res.status})`, locale),
             retryable: true,
         };
     }

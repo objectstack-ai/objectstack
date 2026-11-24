@@ -102,7 +102,7 @@
  *     names the field the entry grants on, is not a read: it is a carrier
  *     ({@link fieldPermissionGrantOf}).
  *   - **A derived inline grid** ({@link creditDerivedInlineGrid},
- *     `deriveInlineGridColumns`). A relationship field that sets `inlineEdit`
+ *     `deriveInlineGridColumns`). A relationship field a parent field group places (objectstack#35889)
  *     with no `inlineColumns`, and a `subforms` entry with no `columns`, both
  *     draw a grid of the child object whose columns are derived from the
  *     child's fields. The derivation is the spec's, and it is the renderer's
@@ -129,7 +129,7 @@
  *     not decided by this rule.
  *
  * One consumer is the relationship itself: a `lookup` or `master_detail`
- * field that sets `inlineEdit` is the inline grid's join key — the renderer
+ * field a parent field group places is the inline grid's join key — the renderer
  * loads the child rows filtered on it and stamps it on every row it saves —
  * so it is read whatever columns the grid draws.
  *
@@ -138,7 +138,7 @@
  * position into on drag-reorder and loads the child rows ordered by. No
  * column draws it — both derivations above skip it — so no column credits
  * it, but every inline grid resolves one, with authored columns or derived
- * ones: a relationship field that sets `inlineEdit` and every `subforms` /
+ * ones: a relationship field a parent field group places and every `subforms` /
  * `details` entry. The field is the spec's derivation, never a copy of its
  * name list; the child's other sort-named fields, and a `record:line_items`
  * panel (which draws no grid of its own), stay uncredited.
@@ -219,7 +219,7 @@ import {
   resolveDisplayField,
 } from '@objectstack/spec/data';
 import type { DisplayNameObjectMeta, ServiceObject } from '@objectstack/spec/data';
-import { referenceTargetOf } from '@objectstack/spec/data';
+import { fieldGroupsPlaceRelationship, isGroupPlaceableRelationship, referenceTargetOf } from '@objectstack/spec/data';
 import type {
   DefaultRowScope,
   FieldPermission,
@@ -694,6 +694,11 @@ class ConsumerLedger {
   readonly datasetObject = new Map<string, string>();
   /** object → its declared field map, the shape the spec's derivations read */
   readonly fieldMapByObject = new Map<string, Record<string, AnyRec>>();
+  /**
+   * object → its declared `fieldGroups`: a parent's group naming a child list
+   * is what inlines that child's grid in the parent's form (objectstack#35889).
+   */
+  readonly fieldGroupsByObject = new Map<string, unknown>();
   /** `object.field` → sites */
   readonly sites = new Map<string, Site[]>();
   /**
@@ -1234,45 +1239,43 @@ function walkObject(ledger: ConsumerLedger, obj: AnyRec, objectName: string, obj
       ledger.record(reference, displayField, { root: 'objects', path: `${fieldPath}.displayField`, kind: 'display' });
     }
     // [#20929] The grid's columns name fields of THIS object, the child. The
-    // grid exists only where the field sets `inlineEdit`: the spec's help text
-    // says `inlineColumns` is "used only when this field sets inlineEdit", and
-    // objectui's `attachInlineSubforms` skips the field otherwise. Without it
-    // the columns name the field and draw nothing, so they are a carrier a
-    // removal must clean, not a consumer.
+    // grid exists only where a field group of the PARENT places this
+    // relationship (objectstack#35889: `fieldGroups[].relatedList`, no longer
+    // the FK's own `inlineEdit`), which is what objectui's
+    // `attachInlineSubforms` reads. Without it the columns name the field and
+    // draw nothing, so they are a carrier a removal must clean, not a consumer.
+    const fieldName = strName(field.name);
+    const formInlined =
+      fieldName !== undefined &&
+      (field.type === 'master_detail' || field.type === 'lookup') &&
+      !!reference &&
+      isGroupPlaceableRelationship(field) &&
+      fieldGroupsPlaceRelationship(ledger.fieldGroupsByObject.get(reference), objectName, fieldName);
     creditInlineGridColumns(
       ledger,
       field.inlineColumns,
       objectName,
-      field.inlineEdit ? 'display' : 'carrier',
+      formInlined ? 'display' : 'carrier',
       'objects',
       `${fieldPath}.inlineColumns`,
     );
-    // [#20951] With `inlineEdit` and no authored `inlineColumns`, the parent's
-    // form still draws a grid of THIS object: the derived columns. The grid
-    // exists for a relationship to a parent, which is what objectui's
-    // `attachInlineSubforms` requires before it builds one: a `master_detail`
-    // or `lookup` field whose target resolves.
-    const fieldName = strName(field.name);
-    if (
-      fieldName !== undefined &&
-      field.inlineEdit &&
-      (field.type === 'master_detail' || field.type === 'lookup') &&
-      !!reference
-    ) {
+    // [#20951] With no authored `inlineColumns`, the parent's form still draws
+    // a grid of THIS object: the derived columns.
+    if (formInlined) {
       // [#21091] The relationship itself is the grid's join key: the renderer
       // loads the child rows filtered on it and stamps it on every row it
       // saves. That holds whether the columns are authored or derived, and
       // for a `lookup` as for a `master_detail` — which is exempt anyway.
-      ledger.record(objectName, fieldName, { root: 'objects', path: `${fieldPath}.inlineEdit`, kind: 'behaviour' });
+      ledger.record(objectName, fieldName, { root: 'objects', path: fieldPath, kind: 'behaviour' });
       // [#32256] So is the grid's line-position field on THIS object, authored
       // columns or derived.
-      creditInlineGridSortField(ledger, objectName, 'objects', `${fieldPath}.inlineEdit`);
+      creditInlineGridSortField(ledger, objectName, 'objects', fieldPath);
       if (!hasAuthoredColumns(field.inlineColumns)) {
         // [#21091] The derived grid's per-row expand form draws more of THIS
-        // object. An explicit `grid` / `form` is the form factor; `true` is
-        // the renderer's smart default, which this rule does not resolve.
+        // object. An explicit `grid` / `form` is the form factor; anything
+        // else is the renderer's smart default, which this rule does not resolve.
         const rowForm = { inlineMode: formFactorOf(field.inlineEdit) };
-        creditDerivedInlineGrid(ledger, objectName, fieldName, rowForm, 'objects', `${fieldPath}.inlineEdit`);
+        creditDerivedInlineGrid(ledger, objectName, fieldName, rowForm, 'objects', fieldPath);
       }
     }
     for (const [key, value] of Object.entries(field)) {
@@ -1496,6 +1499,7 @@ export function validateFieldConsumers(stack: AnyRec): FieldConsumerFinding[] {
     const injected = injectedColumnsFor(obj);
     const titleField = resolveDisplayField(displayMetaOf(obj, fields));
     creditFieldGroupLayout(ledger, obj, objectName, fields);
+    if (!ledger.fieldGroupsByObject.has(objectName)) ledger.fieldGroupsByObject.set(objectName, obj.fieldGroups);
     for (const { rec: field, path: fieldPath } of fields) {
       const fieldName = strName(field.name);
       if (!fieldName) continue;

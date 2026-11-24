@@ -26,8 +26,16 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, cleanup, waitFor } from '@testing-library/react';
 import React from 'react';
 import { SchemaRenderer, SchemaRendererProvider, PrintPageProvider } from '@object-ui/react';
+import { preloadGridField } from '@object-ui/fields';
 // Registers `record:line_items`.
 import '../index';
+
+// The line grid renders behind `@object-ui/fields`' lazy face (objectstack#36102);
+// load its body before the first render, as the record forms' mount-time
+// preload does in the console. The panel's own mount-time preload is not
+// awaited, so without this the cut-off note can commit while the grid still
+// draws its loading face, and a row count read beside the note sees no table.
+await preloadGridField();
 
 const COLUMNS = [{ name: 'qty', label: 'Qty', type: 'number' as const }];
 const LIMIT = 2;

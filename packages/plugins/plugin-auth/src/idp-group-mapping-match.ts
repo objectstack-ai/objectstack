@@ -24,8 +24,9 @@
  * platform-admin door's save). `roles.map` is not enough: the vendor calls it
  * only for a group that has members, so an empty group's rename would never
  * reach it. Every one of those writes goes through the ObjectQL engine (the
- * better-auth adapter's `create` / `update` / `incrementOne` / `delete` all
- * end in an engine call by id), so after-hooks on `sys_scim_group` and on
+ * better-auth adapter's `create` / `update` / `delete` end in an engine call
+ * by id, and its `incrementOne` in a one-row predicate update, whose per-row
+ * after-hooks fire the same way), so after-hooks on `sys_scim_group` and on
  * `sys_idp_group_mapping` see each of them, the same seam
  * `membership-ended-session.ts` measured for `sys_member`. A raw driver write
  * below the engine is not seen; the boot sweep ({@link refreshAllMappingMatches})

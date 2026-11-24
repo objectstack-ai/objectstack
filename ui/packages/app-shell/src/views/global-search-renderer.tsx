@@ -56,7 +56,7 @@ import { Link, useParams } from 'react-router-dom';
 import { ComponentRegistry } from '@object-ui/core';
 import { useRecordSearch, useMetadata, useAdapter } from '@object-ui/react';
 import { usePermissions } from '@object-ui/permissions';
-import { Input, Card, CardContent, Badge } from '@object-ui/components';
+import { Input, Card, CardContent, Badge, ObjectIconTile } from '@object-ui/components';
 import { Search } from 'lucide-react';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { getIcon } from '../utils/getIcon.js';
@@ -169,9 +169,7 @@ export const GlobalSearchRenderer: React.FC<GlobalSearchRendererProps> = ({
                 >
                   <Card className="hover:bg-accent/50 transition-colors">
                     <CardContent className="flex items-center gap-3 p-3">
-                      <div className="flex h-8 w-8 items-center justify-center rounded bg-primary/10 text-primary">
-                        <HitIcon className="h-4 w-4" />
-                      </div>
+                      <ObjectIconTile glyph={HitIcon} color={hit.color} size="lg" />
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-medium">{hit.display}</p>
                         {hit.subtitle && (

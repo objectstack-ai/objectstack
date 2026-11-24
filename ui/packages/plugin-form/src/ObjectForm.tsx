@@ -16,6 +16,7 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import type { ObjectFormSchema, FormField, FormSchema, DataSource } from '@object-ui/types';
 import { SchemaRenderer, useSafeFieldLabel } from '@object-ui/react';
+import { FormOwnerLine } from './formOwnerLine';
 import { pickLocalized, useObjectTranslation, useLocalization, withHomeAmountSource } from '@object-ui/i18n';
 import { useRecordInvalidation } from './recordInvalidation';
 import { useReportedDirtyChange } from './formDirtyReport';
@@ -49,6 +50,7 @@ import {
   sectionedGridLayout,
 } from './autoLayout';
 import { deriveFieldGroupSections, projectSectionDivider, resolveSectionCollapse, type FormFieldWithGroup } from './fieldGroups';
+import { formSlotGroup, formSlotRow, placeFormSlots, type FormSlotHandoff } from './formSlots';
 import { FormSectionNav, useFormSectionNav } from './FormSectionNav';
 import { mergeCustomFields } from './customFieldsMerge';
 import { hasSectionGroupReference, resolveSectionGroupReferences } from './sectionGroups';
@@ -1222,14 +1224,14 @@ const SimpleObjectForm: React.FC<{ schema: LocalizedObjectFormSchema; dataSource
   const isCreateForm = isCreateFormMode(schema);
   // ADR-0144 D8 rule 4 — the organization currency a record-currency code
   // field opens on in create mode.
-  const { currency: homeCurrency } = useLocalization();
+  const { currency: homeCurrency, timezone: homeTimeZone } = useLocalization();
   // [#5683] `currentUserId` lets the one client-resolvable token
   // (`current_user`) pre-fill with the id the server would stamp anyway;
   // null/unloaded seeds nothing and keeps the omit-and-let-the-engine-resolve
   // contract above.
   const schemaDefaults = React.useMemo(
-    () => (isCreateForm ? schemaDefaultValues(objectSchema, { currentUserId: perms.userId, homeCurrency }) : {}),
-    [objectSchema, isCreateForm, perms.userId, homeCurrency],
+    () => (isCreateForm ? schemaDefaultValues(objectSchema, { currentUserId: perms.userId, homeCurrency, homeTimeZone }) : {}),
+    [objectSchema, isCreateForm, perms.userId, homeCurrency, homeTimeZone],
   );
 
   // What the form OPENS with: the seeded defaults, overlaid with the caller's
@@ -1556,6 +1558,29 @@ const SimpleObjectForm: React.FC<{ schema: LocalizedObjectFormSchema; dataSource
   // (so a group declared `collapsed: true` starts closed without pre-seeding).
   const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({});
 
+  // objectstack#35889 — the host's collections a field group of this object
+  // places (`formSlots.ts`): laid out among the sections by the record page's
+  // rule, drawn as `form-slot` rows by the sectioned arm below. The claim names
+  // what the drawn layout places, `[]` for any other layout, and is never made
+  // while the form is still loading.
+  const formSlots = (schema as FormSlotHandoff).formSlots;
+  const drawsSections = !!effectiveSections?.length && (!schema.formType || schema.formType === 'simple');
+  const slotPlacement = React.useMemo(
+    () => placeFormSlots(
+      drawsSections ? effectiveSections! : [],
+      (section) => (typeof section?.name === 'string' ? section.name : undefined),
+      objectSchema?.fieldGroups,
+      formSlots?.requests,
+    ),
+    [drawsSections, effectiveSections, objectSchema, formSlots?.requests],
+  );
+  const slotClaim = loading ? null : (drawsSections && !error && !submitted ? slotPlacement.placed : []).join('\n');
+  const slotHost = formSlots?.host;
+  useEffect(() => {
+    if (slotClaim === null || !slotHost) return;
+    slotHost.claim(slotClaim ? slotClaim.split('\n') : []);
+  }, [slotClaim, slotHost]);
+
   // Render error state
   if (error instanceof RecordNotFoundError) {
     return <RecordNotFoundState testId="simple-form-record-not-found" />;
@@ -1563,7 +1588,7 @@ const SimpleObjectForm: React.FC<{ schema: LocalizedObjectFormSchema; dataSource
   if (error) {
     return (
       <div className="p-3 sm:p-4 border border-red-300 bg-red-50 rounded-md">
-        <h3 className="text-red-800 font-semibold">{t('form.errorLoading')}</h3>
+        <h3 className="text-red-800 font-medium">{t('form.errorLoading')}</h3>
         <p className="text-red-600 text-sm mt-1">{error.message}</p>
       </div>
     );
@@ -1667,7 +1692,22 @@ const SimpleObjectForm: React.FC<{ schema: LocalizedObjectFormSchema; dataSource
       customFields: schema.customFields,
       pool: sourceFields,
     };
-    effectiveSections.forEach((section, index) => {
+    // A placed collection's row is named by its group, once per group, so the
+    // section navigation stops at it between the headings around it.
+    const namedSlotGroups = new Set<string>();
+    slotPlacement.sequence.forEach((item) => {
+      if ('slot' in item) {
+        if (!slotHost) return;
+        const group = formSlotGroup(objectSchema?.fieldGroups, item.slot);
+        const label = group && !namedSlotGroups.has(group.key)
+          ? sectionLabel(schema.objectName, group.key, group.label || group.key)
+          : '';
+        if (group) namedSlotGroups.add(group.key);
+        groupedFields.push(formSlotRow(item.slot, slotHost, label));
+        return;
+      }
+      const { section } = item;
+      const index = effectiveSections.indexOf(section);
       // ⚠️ `?? []`, not a bare `.map` — the second containment layer for
       // objectui#7051. The group-reference resolution above this component
       // means a `{ group }` section never arrives here carrying no `fields`,
@@ -1805,6 +1845,14 @@ const SimpleObjectForm: React.FC<{ schema: LocalizedObjectFormSchema; dataSource
         <FormSectionNavContext.Provider value={sectionNav.sink}>
         <div className="w-full @container">
           {closedAffordanceNotice}
+          {/* objectstack#35403 — the record's owner, read-only, with the host's action beside it. */}
+          <FormOwnerLine
+            mode={schema.mode}
+            objectName={schema.objectName}
+            recordId={schema.recordId}
+            record={loading ? null : initialData}
+            objectSchema={objectSchema}
+          />
           {/* Sticky, so the sections stay one click away down a long page. */}
           <FormSectionNav items={sectionNav.items} className="sticky top-0 z-10 mb-4 bg-background" />
           <SchemaRenderer
@@ -2004,6 +2052,14 @@ const SimpleObjectForm: React.FC<{ schema: LocalizedObjectFormSchema; dataSource
         data-mobile-form={mobileOpts ? 'true' : undefined}
       >
         {closedAffordanceNotice}
+          {/* objectstack#35403 — the record's owner, read-only, with the host's action beside it. */}
+          <FormOwnerLine
+            mode={schema.mode}
+            objectName={schema.objectName}
+            recordId={schema.recordId}
+            record={loading ? null : initialData}
+            objectSchema={objectSchema}
+          />
         <SchemaRenderer schema={formSchema} />
         <UploadInFlightNotice gate={uploadGate} />
         {conflictDialog}

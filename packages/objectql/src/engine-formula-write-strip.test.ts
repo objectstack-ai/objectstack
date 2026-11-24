@@ -244,11 +244,14 @@ describe('[#20805] update — by id and multi, the same strip and the same repor
   it('control: a static readonly key on update is still reported under `readonly`', async () => {
     const { engine, calls } = await makeEngine();
     const l = listener();
-    await engine.update('proj', { id: 'rec_1', note: 'forged', doubled: 99 }, { onFieldsDropped: l.onFieldsDropped });
+    // `title` survives both strips: an update whose every caller key is
+    // dropped writes nothing (engine-update-all-dropped-noop-34746.test.ts).
+    await engine.update('proj', { id: 'rec_1', note: 'forged', doubled: 99, title: 'z' }, { onFieldsDropped: l.onFieldsDropped });
 
     const data = calls.find((c) => c.fn === 'update')!.data;
     expect(data).not.toHaveProperty('note');
     expect(data).not.toHaveProperty('doubled');
+    expect(data).toMatchObject({ title: 'z' });
     expect(l.events).toContainEqual(COMPUTED_DOUBLED);
     expect(l.events).toContainEqual({ object: 'proj', fields: ['note'], reason: 'readonly' });
   });

@@ -33,7 +33,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import * as React from 'react';
 import { render, screen, cleanup, fireEvent, within, waitFor } from '@testing-library/react';
 import { I18nProvider } from '@object-ui/i18n';
-import { GridField } from './GridField';
+import { GridFieldWidget as GridField } from './grid-field/GridFieldWidget';
 
 afterEach(() => cleanup());
 

@@ -297,9 +297,10 @@ describe('a page route reads the objects its page binds, never the whole registr
     await waitFor(() => expect(screen.getByTestId('cloud-only-entry')).toHaveTextContent('false'));
 
     // objectstack#34244 — the `requiresObject` entry and the lookup target in
-    // presence reads; the unregistered `cloud_only` is never asked by name.
+    // presence reads; the unregistered `cloud_only` is never asked by name, and
+    // the served `sys_user` is answered by its read (objectstack#35306).
     expect([...objectCalls()].sort()).toEqual(
-      [`object?package=${CRM}`, 'object?names=cloud_only', 'object?names=sys_user', 'object/sys_user'].sort(),
+      [`object?package=${CRM}`, 'object?names=cloud_only', 'object?names=sys_user'].sort(),
     );
   });
 

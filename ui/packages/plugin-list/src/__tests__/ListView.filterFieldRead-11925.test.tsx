@@ -46,6 +46,7 @@ vi.mock('@object-ui/components', async (importOriginal) => {
 });
 
 import { ListView } from '../ListView';
+import { openAdvancedFilter } from './conditionPanels';
 
 const OBJECT = 'fls_ticket';
 
@@ -121,7 +122,7 @@ function mount({ perms, schemaExtra = {}, props = {}, noDefinitionFields = false
  */
 async function openFilterFieldList(): Promise<string[]> {
   fireEvent.click(screen.getByRole('button', { name: /^filter/i }));
-  await screen.findByText('Filter Records');
+  await openAdvancedFilter();
   await waitFor(() => {
     const latest = captured.fields[captured.fields.length - 1] ?? [];
     expect(latest.some((f) => f.value === 'priority')).toBe(true);
@@ -192,7 +193,7 @@ describe('the Filter panel field list asks the column read check (objectui#11925
   it('the declared-columns fallback (no fields in the definition) drops it too', async () => {
     mount({ perms: RESTRICTED, noDefinitionFields: true });
     fireEvent.click(screen.getByRole('button', { name: /^filter/i }));
-    await screen.findByText('Filter Records');
+    await openAdvancedFilter();
     await waitFor(() => {
       const latest = (captured.fields[captured.fields.length - 1] ?? []).map((f) => f.value);
       expect(latest).toEqual(['title', 'status']);
@@ -202,7 +203,7 @@ describe('the Filter panel field list asks the column read check (objectui#11925
   it('control: the declared-columns fallback still offers every column to a user who may read them all', async () => {
     mount({ perms: FULL_READ, noDefinitionFields: true });
     fireEvent.click(screen.getByRole('button', { name: /^filter/i }));
-    await screen.findByText('Filter Records');
+    await openAdvancedFilter();
     await waitFor(() => {
       const latest = (captured.fields[captured.fields.length - 1] ?? []).map((f) => f.value);
       expect(latest).toEqual(COLUMNS);

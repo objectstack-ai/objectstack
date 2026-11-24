@@ -577,7 +577,10 @@ const PAGE_HEADER = {
     'items-start',
     'sm:flex-row',
   ]),
-  titleColumn: classBefore(containersSrc, CONTAINERS_FILE, '<RecordTitleChip', ['flex-col', 'min-w-0']),
+  // Anchored on the row's own chip, the one that names the object beside the
+  // record: the chip a host's one-row bar takes (objectstack#35593) comes
+  // first in the file and sits in no title column.
+  titleColumn: classBefore(containersSrc, CONTAINERS_FILE, 'objectLabel={objectLabel}', ['flex-col', 'min-w-0']),
   // The tail is `PageHeaderActions`' toolbar — the one row whether or not the
   // host wires `refresh`, which is the first item of its `⋯` menu since
   // objectstack#27055 (no separate `⟳` button).

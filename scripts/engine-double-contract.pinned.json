@@ -67,6 +67,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/core/src/security/change-record-owner.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/core/src/security/resolve-user-grants-cache.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -1057,6 +1062,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.extension-publish-follow-door-35566.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.extension-publish-follow-door-35566.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.extension-publish-follow-door-35566.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.external-binding-named-datasource-refusal.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -1373,6 +1393,21 @@
     },
     {
       "file": "packages/metadata-protocol/src/protocol.meta-types-erased-authoring-mark.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.meta-types-list-layout-36860.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.meta-types-list-layout-36860.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.meta-types-list-layout-36860.test.ts",
       "verb": "update",
       "pinned": 1
     },
@@ -3752,6 +3787,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-audit/src/comment-routes.test.ts",
+      "verb": "findOne",
+      "pinned": 2
+    },
+    {
       "file": "packages/plugins/plugin-audit/src/stored-metadata-body-migration.test.ts",
       "verb": "findOne",
       "pinned": 1
@@ -4059,6 +4099,11 @@
     {
       "file": "packages/plugins/plugin-auth/src/org-create-posture-gate.test.ts",
       "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/org-create-posture-gate.test.ts",
+      "verb": "update",
       "pinned": 1
     },
     {
@@ -4433,6 +4478,11 @@
     },
     {
       "file": "packages/plugins/plugin-security/src/explain-engine.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-security/src/explain-fixed-read-leaf.test.ts",
       "verb": "findOne",
       "pinned": 1
     },
@@ -4972,6 +5022,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/rest/src/change-owner-routes.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/rest/src/email-send-display-name.test.ts",
       "verb": "update",
       "pinned": 1
@@ -5202,6 +5257,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/rest/src/rest-write-route-hook-refusal-sentence.ledger.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/rest/src/user-work-routes.test.ts",
       "verb": "update",
       "pinned": 1
@@ -5320,6 +5380,21 @@
       "file": "packages/runtime/src/domains/actions-addressed-route.test.ts",
       "verb": "findOne",
       "pinned": 2
+    },
+    {
+      "file": "packages/runtime/src/domains/automation-notify-slack-composition.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/domains/automation-notify-slack-composition.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/domains/automation-notify-slack-composition.test.ts",
+      "verb": "update",
+      "pinned": 1
     },
     {
       "file": "packages/runtime/src/domains/catalog-activation-door.test.ts",
@@ -5962,6 +6037,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/services/service-messaging/src/preference-rows-paged-read-35136.integration.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-messaging/src/preference-rows-paged-read-35136.integration.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-messaging/src/preference-rows-paged-read-35136.integration.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/services/service-messaging/src/push-channel.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -5984,6 +6074,21 @@
     {
       "file": "packages/services/service-messaging/src/recipient-resolver.test.ts",
       "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-messaging/src/slack-channel-composition.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-messaging/src/slack-channel-composition.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-messaging/src/slack-channel-composition.test.ts",
+      "verb": "update",
       "pinned": 1
     },
     {

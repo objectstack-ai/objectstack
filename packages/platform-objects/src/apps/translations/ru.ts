@@ -96,6 +96,9 @@ export const ru: TranslationData = {
         nav_settings_hub: { label: 'Все настройки' },
         nav_settings_localization: { label: 'Локализация' },
         nav_exchange_rates: { label: 'Курсы валют' },
+        nav_units_of_measure: { label: 'Единицы измерения' },
+        nav_work_calendars: { label: 'Рабочие календари' },
+        nav_work_calendar_exceptions: { label: 'Исключения календаря' },
         nav_settings_company: { label: 'Компания' },
         nav_settings_mail: { label: 'Доставка почты' },
         nav_settings_sms: { label: 'Доставка SMS' },
@@ -107,6 +110,7 @@ export const ru: TranslationData = {
         nav_settings_knowledge: { label: 'Знания' },
         nav_settings_lifecycle: { label: 'Жизненный цикл данных' },
         nav_recycle_bin: { label: 'Корзина' },
+        nav_public_forms: { label: 'Публичные формы' },
         nav_notification_preferences: { label: 'Настройки уведомлений' },
         nav_notification_templates: { label: 'Шаблоны уведомлений' },
 
@@ -124,6 +128,7 @@ export const ru: TranslationData = {
         nav_datasources: { label: 'Источники данных' },
         nav_connector_credentials: { label: 'Учётные данные коннекторов' },
         nav_connector_connections: { label: 'Подключения коннекторов' },
+        nav_slack: { label: 'Slack' },
 
         nav_oauth_apps: { label: 'Приложения OAuth' },
       },

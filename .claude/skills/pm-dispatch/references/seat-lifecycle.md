@@ -36,7 +36,8 @@
 - 竞态三招:动手前重 fetch 正文、审计评论时间戳先到先得、写后回读。
 - 收班 = 状态 flush + 在飞 `Release:`+`Resume-from:` 回队待兄弟席、不等落地;简报非继承裁决。
 - 坐席同笔:建自绑巡查 routine、开信箱并订阅、存根记 `Patrol:` 与 `Mailbox:`、发 `seat-online`。
-- 分诊席与车道席会话 effort 恒 `high`;坐席时低于即登记行注明,请账号主人以 `high` 重开。
+- 席会话的档位与 effort 照 `execution-duties.md` 定档节;坐席时低于即登记行注明,请账号主人照该值重开。
+- 席会话 ⛔ 中途不改 effort;要另一档就起隔离子代理。
 - 收班同笔删 routine、关信箱、发 `seat-offline`;强制接管者代发 `seat-online`(`project-forms.md`)。
 - 下班席(`seat-offline`,或两敲 `Request: progress` 无答走接管四件)的在飞归同车道在线兄弟席。
 - 兄弟席 `Resume-from:` 引简报或轮次记录认领;待裁先等字;无兄弟席「待席」;公告归安全席。
@@ -60,7 +61,7 @@
 - 在飞子卡逐卡呈维护者:默认 L2 PASS 者落地,余停手转 `pm:on-hold`。
 - 父单留检查点评论(发运/冻结件现状/风险);重启新读它后按表重拆,仍成立的旧卡可重开。
 - 总览单列暂停专题(天数、`Restart-when`);逾 30 天问一次,不续则父单连余卡关 not_planned。
-- 须一手到底的链:写成一卡有序步骤,或具名集中例外打 `pm:epic`(细则 `seat-post-protocol.md`)。
+- 须一手到底的链:写成一卡有序步骤,或维护者开 `pm:epic` 集中例外(见 `seat-post-protocol.md`)。
 
 ## 轮次报告与节奏
 
@@ -73,9 +74,9 @@
 - 报告含 `UNRECOGNISED` 行:对本轮门禁日志 grep `UNRECOGNISED` 逐行照录,`NOT APPLICABLE` 行也在内。
 - 健康指标五个:可派发库存(open `pm:queue` 未认领及趋势);决策箱:决策卡 N·待您审合 PR M。
 - M = open `pm:awaiting-merge` PR,两数 ⛔ 不合计;决策卡点名有开放下游者(`Blocked-by:` 反查现算)。
-- finding 数与中位年龄:裸标签数即未定级数,hold 已换标不在内。
+- finding 数与中位年龄:裸标签数即未定级数,hold 已换标不在内;五项现读`fleet-roster.mjs --health`
 - 裸卡数与中位年龄:sweep 析取①,未定级数另计析取④;老化 = 首触欠账。
-- 发版阻塞 = 窗内三仓 open `priority:p0` 之和,归零 = 三张板都空;总 open 数刻意不在指标内。
+- 发版阻塞 = 窗内主仓、cloud open `priority:p0` 之和,归零 = 两张板都空;总 open 数刻意不计。
 - Version Packages PR 默认永不催,挂着的发布 PR 是常态,⛔ 不进维护者摘要。
 - 唯一例外 = 重要修复已合 main 在等发布;提醒必须点名该修复与不发版的用户可见后果。
 - 波次收工点(执行席):① 收工点 = 会话内在飞归零,⛔ 不在 L1/L2 审核中途压缩;云卡不挡。
@@ -86,9 +87,8 @@
 
 - 停:队列空或 `rounds` 用尽(仅一次性调用适用);一轮 ≥ 半数派发失败或升级;维护者打断。
 - 队列空是待命非退场(按需席除外):巡查跑到收班,只维护者令停;⛔ 不按 N 次无变化即停。
-- 队列空是逐卡表非结论:报无卡可派(维护者/协调者/轮报)即列队列过滤当刻返回的各卡。
-- 逐卡:卡号、同轮现读标签与 assignee(⛔ 不用缓存)、具名卡点;无卡点即候选,⛔ 不得报空。
-- 卡点一份词表:候选定义反面(`execution-duties.md`),open `Blocked-by:`、无分诊审计、他席 `Claim:`。
+- 每轮对所接车道与专题跑 `card-pick.mjs --order <序> --why`,报空即贴;无卡点即当轮派,⛔ 不得报空。
+- 卡点一份词表:候选定义反面,open `Blocked-by:`、`outside --order`、无分诊审计、他席 `Claim:`。
 - 单车道仓 `repo:*` 席:每轮首触 sweep 清空再认领,先于待命五项;cloud 细则见 `lanes/cloud.md`。
 - 巡查每轮探针后读信箱、认领满 `batch`,跑待命五项;间隔按 `execution-duties.md` 收集节②。
 - 待命五项各以其主节为准,⛔ 此处不另抄:findings 配合;`pm:blocked`/`pm:on-hold` 解锁扫描。

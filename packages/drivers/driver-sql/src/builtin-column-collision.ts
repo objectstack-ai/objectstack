@@ -98,6 +98,7 @@ export const FIELD_KEY_STORAGE_CLASS: Readonly<Record<string, FieldKeyClass>> = 
   format: 'presentation',     // display/validation hint
   required: 'presentation',   // ADR-0113: the WRITE contract, enforced by the engine, not the column
   minLength: 'presentation',  // write-time validation
+  unitConfig: 'presentation', // a quantity's unit, or a text field's unit-code marker (ADR-0158 U4): read by the engine's write-time unit membership check (U5), never by `createColumn` — the quantity stays a number column and the code a string column
   valueDomain: 'presentation', // write-time membership validation of the WRITTEN string against a standard (#14168, the settings specifier's closed vocabulary shared with fields) — never read by `createColumn`: the column stays the string `maxLength` sizes, so the DDL has nothing to discard
   min: 'presentation',        // write-time validation
   max: 'presentation',        // write-time validation
@@ -113,9 +114,12 @@ export const FIELD_KEY_STORAGE_CLASS: Readonly<Record<string, FieldKeyClass>> = 
   searchable: 'presentation',
   sortable: 'presentation',
   trackHistory: 'presentation', // history rows live in their own object
+  fieldHistory: 'presentation', // whether this field's old → new values show on the activity timeline (#36290) — read by the audit writer, never by `createColumn`
   group: 'presentation',
   widget: 'presentation',
   hidden: 'presentation',
+  showOnCreate: 'presentation', // whether a create surface asks for the field; the DDL never reads it
+  transferBehavior: 'presentation', // a Change Owner cascade of the relationship (ruling 7000907189 point 4) — read by the Change Owner action, never by `createColumn`
   internal: 'presentation',
   readonly: 'presentation',
   visibleWhen: 'presentation',

@@ -366,12 +366,12 @@ export const SkillSchema = lazySchema(() => strictObject({
    * declares none (ADR-0109). A name here resolves against, in order: the
    * stack's own `stack.tools[]` names; `PLATFORM_PROVIDED_TOOL_NAMES`, the
    * curated registry of tools the cloud AI runtime registers at boot;
-   * `MCP_FILE_TOOL_NAMES`, the file tools the MCP door registers (`read_file`,
-   * `create_upload_link`), only when the skill is offered over MCP
-   * (`mcpPrompt` is not `false`), since an in-product turn runs without them;
-   * and the `action_<name>` family the runtime materialises from the app's own
-   * AI-exposed declarative actions (`ai.exposed` + `ai.description` on a
-   * headless action type — ADR-0011). The first of those is the OPTIONAL
+   * `MCP_DOOR_TOOL_NAMES`, every tool the MCP door registers (`run_action`,
+   * `read_file`, `aggregate_records`, …), only when the skill is offered over
+   * MCP (`mcpPrompt` is not `false`), since an in-product turn runs without the
+   * door tools no cloud package registers; and the `action_<name>` family the
+   * runtime materialises from the app's own AI-exposed declarative actions
+   * (`ai.exposed` + `ai.description` on a headless action type — ADR-0011). The first of those is the OPTIONAL
    * AI-presentation refinement layer (Phase 2: LLM-facing description,
    * parameter narrowing, flow exposure) and has no runtime reader until that
    * lands, so a `stack.tools` record authored today is inert. In the default
@@ -450,8 +450,9 @@ export const SkillSchema = lazySchema(() => strictObject({
    * in-product agent runtime resolves, binds and activates the skill exactly as
    * without it, and its `surface` is validated as before. One authoring verdict
    * reads it: with `false`, `ai-skill-tool-unresolved` resolves `tools` without
-   * the MCP door's file tools (`MCP_FILE_TOOL_NAMES`), since no in-product turn
-   * registers them; every other name is checked as before.
+   * the MCP door's tools (`MCP_DOOR_TOOL_NAMES`), since no in-product turn
+   * registers the ones no cloud package registers, and says so for a name only
+   * the door serves; every other name is checked as before.
    */
   mcpPrompt: z.boolean().optional().describe(
     'Whether this skill is offered as an MCP prompt. false = written for the in-product agents only: never listed by prompts/list and unknown to prompts/get on any MCP connection, whatever its tools binding. Absent or true = offered where the server serves its tools',

@@ -18,6 +18,10 @@
  *    collapse, no ⤢; ⌥↑ / ⌥↓ on the focused handle move the panel.
  *  - Target 11: the compact row's first column skips the foreign key that
  *    points back at this record.
+ *
+ * objectstack#35263 — authored columns that leave the child's name out label
+ * the compact row from their first lookup, so a child named by a copy of the
+ * parent's title does not read the page's own name on every row.
  */
 import { describe, it, expect, vi, beforeAll, afterEach } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -26,6 +30,7 @@ import '@testing-library/jest-dom';
 import React from 'react';
 import { RelatedList } from '../RelatedList';
 import { RelatedCardChromeContext, RelatedListCompactContext, type RelatedCardChrome } from '../relatedListCompact';
+import { PermissionProvider } from '@object-ui/permissions';
 
 // Desktop, pinned rather than inherited: below 768 px a table list renders as a gallery.
 beforeAll(() => {
@@ -223,5 +228,104 @@ describe('the compact row’s first column (objectstack#27524, Target 11)', () =
   it('on the opportunity page, the name field is not that key: the row names the record as everywhere else', async () => {
     renderLines('opportunity');
     await waitFor(() => expect(names()).toEqual(['Widget', 'Widget']));
+  });
+});
+
+describe('the compact row label from the authored columns (objectstack#35263)', () => {
+  // An order line seen from its product: the line is named by a stored COPY of
+  // the product's title, not by the key back to it, so every row of the card
+  // on the product page would read the page's own name.
+  const lineFields = {
+    product: { type: 'lookup', label: 'Product', reference: 'product' },
+    product_title: { type: 'text', label: 'Product title' },
+    opportunity: { type: 'lookup', label: 'Opportunity', reference: 'opportunity' },
+    quantity: { type: 'number', label: 'Qty' },
+  };
+  const lineRows = [
+    { id: 'l1', product: { id: 'p1', name: 'Widget' }, product_title: 'Widget', opportunity: { id: 'o1', name: 'Acme renewal' }, quantity: 2 },
+    { id: 'l2', product: { id: 'p1', name: 'Widget' }, product_title: 'Widget', opportunity: { id: 'o2', name: 'Globex pilot' }, quantity: 5 },
+  ];
+  const lineSchema = { name: 'line_item', nameField: 'product_title', fields: lineFields };
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  const renderLines = (columns: string[] | undefined, opts: { schema?: Record<string, unknown>; restricted?: boolean } = {}) => {
+    // No IntersectionObserver: the card reads its rows at once.
+    vi.stubGlobal('IntersectionObserver', undefined);
+    const find = vi.fn(async () => ({ data: lineRows, total: lineRows.length }));
+    const list = (
+      <RelatedListCompactContext.Provider value>
+        <RelatedList
+          title="Line items"
+          type="table"
+          api="line_item"
+          objectName="line_item"
+          referenceField="product"
+          parentId="p1"
+          columns={columns as never}
+          dataSource={{ find, getObjectSchema: vi.fn(async () => opts.schema ?? lineSchema) } as any}
+        />
+      </RelatedListCompactContext.Provider>
+    );
+    render(
+      opts.restricted ? (
+        <PermissionProvider
+          roles={[{ name: 'restricted', label: 'Restricted' }]}
+          permissions={[
+            {
+              object: 'line_item',
+              roles: { restricted: { actions: ['read'], fieldPermissions: [{ field: 'opportunity', read: false }] } },
+            },
+          ]}
+          userRoles={['restricted']}
+        >
+          {list}
+        </PermissionProvider>
+      ) : (
+        list
+      ),
+    );
+    return find;
+  };
+  const names = () =>
+    Array.from(document.querySelectorAll('[data-related-card-row]')).map((row) => row.firstElementChild?.textContent);
+  const lastQuery = (find: ReturnType<typeof vi.fn>) =>
+    (find.mock.calls.at(-1) as unknown as [string, Record<string, unknown>])[1];
+
+  it('columns that leave the name out label the row from their first lookup, and the card asks for exactly that', async () => {
+    const find = renderLines(['quantity', 'opportunity']);
+    await waitFor(() => expect(names()).toEqual(['Acme renewal', 'Globex pilot']));
+    const query = lastQuery(find);
+    expect(query.$select).toEqual(['id', 'opportunity']);
+    expect(query.$expand).toEqual(['opportunity']);
+  });
+
+  it('columns that include the name keep the title', async () => {
+    renderLines(['product_title', 'opportunity', 'quantity']);
+    await waitFor(() => expect(names()).toEqual(['Widget', 'Widget']));
+  });
+
+  it('no authored columns keep the title', async () => {
+    renderLines(undefined);
+    await waitFor(() => expect(names()).toEqual(['Widget', 'Widget']));
+  });
+
+  it('authored columns with no lookup among them keep the title', async () => {
+    renderLines(['quantity']);
+    await waitFor(() => expect(names()).toEqual(['Widget', 'Widget']));
+  });
+
+  it('a template title is no name field: the row keeps it', async () => {
+    renderLines(['quantity', 'opportunity'], {
+      schema: { name: 'line_item', titleFormat: '{product_title} x {quantity}', fields: lineFields },
+    });
+    await waitFor(() => expect(names()).toEqual(['Widget x 2', 'Widget x 5']));
+  });
+
+  it('a lookup the principal may not read labels nothing and is not asked for: the row keeps the title', async () => {
+    const find = renderLines(['quantity', 'opportunity'], { restricted: true });
+    await waitFor(() => expect(names()).toEqual(['Widget', 'Widget']));
+    expect(screen.queryByText('Acme renewal')).toBeNull();
+    expect(lastQuery(find).$select).not.toContain('opportunity');
   });
 });

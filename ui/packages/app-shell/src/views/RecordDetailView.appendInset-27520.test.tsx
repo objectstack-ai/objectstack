@@ -123,7 +123,7 @@ function renderRecordPage(pages: any[]): HTMLElement {
           onEdit={() => {}}
           objectNameOverride={OBJECT}
           recordIdOverride={REC}
-          embedded
+          /* objectstack#36150 — not `embedded`: an authored page draws on the full page only. */
         />
       </MetadataCtx.Provider>
     </MemoryRouter>,

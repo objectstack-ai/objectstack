@@ -16,8 +16,9 @@
 //   - the self-registration grant (`sys_user_permission_set`) settles on the
 //     self-registrant's FIRST MEMBERSHIP, owned by that membership's
 //     organization (ADR-0131 D3) — never at sign-up, when there is no
-//     organization yet; the invitee is admitted by the invitation, not by the
-//     open posture, and is owed no declared set;
+//     organization yet; the invitee is admitted by the open posture,
+//     invitation or not, so its declared set settles on its first membership
+//     too, the organization whose invitation it accepted;
 //   - the activity writer (`sys_activity`) stamps the organization of the
 //     record it is about, and writes NO row about a record that has none
 //     (ADR-0131 D9; ruling of record 6257510973 item 3, Q3 A);
@@ -212,11 +213,13 @@ for (const posture of ['group', 'isolated'] as const) {
       // The creator's `organization_admin` (the auto org-admin grant) rides
       // the same membership; every grant names the organization.
       expect(grants.filter((g: Row) => g.organization_id !== orgId), 'grants outside the organization').toEqual([]);
-      // The invitee was admitted by the invitation, not by the open posture, so
-      // is owed no declared set (`decideAudienceAdmission`); whatever it holds
-      // names the organization too.
+      // The open posture admits the invitee by its own rule, invitation or not,
+      // so it is owed the declared set like the registrant
+      // (`decideAudienceAdmission`); the grant settles on its first membership,
+      // the organization whose invitation it accepted, and every grant it
+      // holds names that organization.
       const inviteeGrants = await ql.find('sys_user_permission_set', { where: { user_id: inviteeId }, ...SYS });
-      expect(inviteeGrants.filter((g: Row) => g.permission_set === SET), 'the invitee holds no declared grant').toEqual([]);
+      expect(inviteeGrants.filter((g: Row) => g.permission_set === SET).map((g: Row) => g.organization_id), 'the invitee\'s declared grant').toEqual([orgId]);
       expect(inviteeGrants.filter((g: Row) => g.organization_id !== orgId), 'invitee grants outside the organization').toEqual([]);
     });
 

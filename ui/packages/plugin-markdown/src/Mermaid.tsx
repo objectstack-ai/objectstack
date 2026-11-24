@@ -7,6 +7,8 @@
  */
 
 import * as React from "react"
+import { Dialog, DialogContent, DialogTitle } from "@object-ui/components"
+import { MermaidEnlargeContext } from "./MermaidEnlargeContext"
 
 /**
  * Mermaid diagram renderer for ```mermaid fenced code blocks (ADR-0046).
@@ -98,7 +100,7 @@ export function Mermaid({ chart }: { chart: string }) {
     )
   }
 
-  return (
+  const diagram = (
     <div
       data-mermaid
       role="img"
@@ -106,5 +108,50 @@ export function Mermaid({ chart }: { chart: string }) {
       // mermaid strict-mode SVG, rendered post-sanitize by our own trusted component
       dangerouslySetInnerHTML={{ __html: svg }}
     />
+  )
+  return <EnlargeableDiagram svg={svg}>{diagram}</EnlargeableDiagram>
+}
+
+/**
+ * The dialog's copy of a rendered diagram, under its own ids. Mermaid prefixes
+ * the svg's root id, its scoped style selectors and its marker ids with the
+ * render id, so renaming that one prefix keeps the inline copy and the
+ * enlarged copy from sharing ids while the dialog is open.
+ */
+function enlargedSvg(svg: string): string {
+  const match = /\bid="(os-mermaid-\d+)"/.exec(svg)
+  return match ? svg.split(match[1]).join(`${match[1]}-enlarged`) : svg
+}
+
+/** The diagram, plus an enlarge control and dialog when the host asks for one. */
+function EnlargeableDiagram({ svg, children }: { svg: string; children: React.ReactElement }) {
+  const text = React.useContext(MermaidEnlargeContext)
+  const [open, setOpen] = React.useState(false)
+  const dialogSvg = React.useMemo(() => enlargedSvg(svg), [svg])
+  if (!text) return children
+  return (
+    <div className="relative">
+      {children}
+      <button
+        type="button"
+        data-mermaid-enlarge
+        onClick={() => setOpen(true)}
+        className="absolute right-2 top-2 rounded-md border bg-background/90 px-2.5 py-1 text-xs font-medium text-foreground shadow-sm hover:bg-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        {text.enlarge}
+      </button>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="max-w-[95vw] w-[95vw] max-h-[90vh] overflow-auto sm:max-w-[95vw]">
+          <DialogTitle className="sr-only">{text.title}</DialogTitle>
+          <div
+            data-mermaid-enlarged
+            role="img"
+            className="flex justify-center [&_svg]:h-auto [&_svg]:w-full [&_svg]:max-w-none"
+            // the same trusted strict-mode SVG as the inline diagram, under its own ids
+            dangerouslySetInnerHTML={{ __html: dialogSvg }}
+          />
+        </DialogContent>
+      </Dialog>
+    </div>
   )
 }

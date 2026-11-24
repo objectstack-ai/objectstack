@@ -85,6 +85,9 @@ export const jaJP: TranslationData = {
         nav_settings_hub: { label: 'すべての設定' },
         nav_settings_localization: { label: 'ローカリゼーション' },
         nav_exchange_rates: { label: '為替レート' },
+        nav_units_of_measure: { label: '計量単位' },
+        nav_work_calendars: { label: '稼働カレンダー' },
+        nav_work_calendar_exceptions: { label: 'カレンダー例外' },
         nav_settings_company: { label: '会社' },
         nav_settings_mail: { label: 'メール配信' },
         nav_settings_sms: { label: 'SMS 配信' },
@@ -96,6 +99,7 @@ export const jaJP: TranslationData = {
         nav_settings_knowledge: { label: 'ナレッジ' },
         nav_settings_lifecycle: { label: 'データライフサイクル' },
         nav_recycle_bin: { label: 'ごみ箱' },
+        nav_public_forms: { label: '公開フォーム' },
         nav_notification_preferences: { label: '通知設定' },
         nav_notification_templates: { label: '通知テンプレート' },
 
@@ -110,6 +114,7 @@ export const jaJP: TranslationData = {
         nav_datasources: { label: 'データソース' },
         nav_connector_credentials: { label: 'コネクタ認証情報' },
         nav_connector_connections: { label: 'コネクタ接続' },
+        nav_slack: { label: 'Slack' },
 
         nav_oauth_apps: { label: 'OAuth アプリケーション' },
       },

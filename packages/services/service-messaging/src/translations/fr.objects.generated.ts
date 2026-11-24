@@ -226,7 +226,7 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
       },
       digest: {
         label: "Résumé",
-        help: "Regroupe ces notifications en un seul résumé au lieu de les envoyer une à une : daily l’envoie à minuit, weekly le lundi à minuit, none envoie chacune immédiatement. Les notifications critiques partent toujours immédiatement. S’applique à une préférence dont le canal est * (tous les canaux).",
+        help: "Regroupe ces notifications en un seul résumé au lieu de les envoyer une à une : daily l’envoie à minuit, weekly le lundi à minuit, none envoie chacune immédiatement. Les notifications critiques partent toujours immédiatement. S’applique à une préférence dont le canal est * (tous les canaux). Laissé vide, la préférence suivante décide : celle par défaut pour tous les utilisateurs, puis none.",
         options: {
           none: "aucun",
           daily: "quotidien",
@@ -235,7 +235,7 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
       },
       quiet_hours: {
         label: "Heures calmes",
-        help: "Une plage quotidienne pendant laquelle les notifications sont retenues puis livrées à sa fin, par exemple { \"tz\": \"Europe/Berlin\", \"start\": \"22:00\", \"end\": \"07:00\" }. Les heures sont au format HH:MM dans ce fuseau (UTC si tz est omis), et la plage peut dépasser minuit. Les notifications critiques ne sont pas retenues. S’applique à une préférence dont le canal est * (tous les canaux)."
+        help: "Une plage quotidienne pendant laquelle les notifications sont retenues puis livrées à sa fin, par exemple { \"tz\": \"Europe/Berlin\", \"start\": \"22:00\", \"end\": \"07:00\" }. Les heures sont au format HH:MM dans ce fuseau (UTC si tz est omis), et la plage peut dépasser minuit. Les notifications critiques ne sont pas retenues. S’applique à une préférence dont le canal est * (tous les canaux). { \"off\": true } signifie aucune plage de silence ; laissé vide, la préférence suivante décide : celle par défaut pour tous les utilisateurs, puis aucune."
       },
       created_at: {
         label: "Créé le"
@@ -487,6 +487,64 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
       },
       created_at: {
         label: "Créé le"
+      }
+    }
+  },
+  sys_channel_account: {
+    label: "Compte de canal",
+    pluralLabel: "Comptes de canal",
+    description: "L’installation d’une application de chat par une organisation, comme sa propre application Slack, avec le jeton de bot qui lui a été délivré.",
+    fields: {
+      channel_id: {
+        label: "Canal"
+      },
+      display_name: {
+        label: "Espace de travail"
+      },
+      external_id: {
+        label: "ID de l’espace de travail"
+      },
+      bot_token: {
+        label: "Jeton du bot"
+      },
+      status: {
+        label: "Statut",
+        options: {
+          active: "Actif",
+          revoked: "Révoqué"
+        }
+      }
+    }
+  },
+  sys_channel_user_link: {
+    label: "Lien d’utilisateur de canal",
+    pluralLabel: "Liens d’utilisateur de canal",
+    description: "Le lien d’une personne avec son propre utilisateur dans un espace de travail de chat : proposé par correspondance d’e-mail, il livre dès que la personne le confirme.",
+    fields: {
+      account_id: {
+        label: "Compte"
+      },
+      user_id: {
+        label: "Utilisateur"
+      },
+      external_user_id: {
+        label: "ID d’utilisateur du chat"
+      },
+      external_display_name: {
+        label: "Nom d’utilisateur du chat"
+      },
+      state: {
+        label: "État",
+        options: {
+          proposed: "Proposé",
+          confirmed: "Confirmé"
+        }
+      },
+      confirmed_at: {
+        label: "Confirmé le"
+      },
+      proposal_email_hash: {
+        label: "Hachage de l’e-mail de la proposition"
       }
     }
   }

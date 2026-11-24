@@ -25,12 +25,6 @@
 
 import { ComponentRegistry } from '@object-ui/core';
 
-// Eager imports — core views the console shell itself imports by name today
-// (the shell's own helpers and record surfaces reach these two packages'
-// entries), so a lazy stub here would move nothing out of the first load.
-import '@object-ui/plugin-grid';
-import '@object-ui/plugin-detail';
-
 // Lazy plugins — registered as deferred loaders.  The first time the
 // SchemaRenderer encounters one of these `type` values, the plugin module is
 // imported on-demand (and its top-level `ComponentRegistry.register()` calls
@@ -89,6 +83,55 @@ for (const variant of ['view-switcher', 'filter-ui', 'sort-ui']) {
   ComponentRegistry.registerLazy(variant, () => import('@object-ui/plugin-view'), {
     namespace: 'view',
     category: 'view',
+  });
+}
+
+// The grid and the detail view: the shell takes the detail helpers from the
+// side-effect-free `@object-ui/plugin-detail/core` subpath and draws its few
+// detail components behind `lazy()`, and the list and record routes reach both
+// entries through their own lazy route chunks, so nothing on the first load
+// imports either entry. Each tag the entry registers is a stub with the
+// namespace, `skipFallback` and category that registration declares; the first
+// schema naming one loads the package, whose own registrations then replace
+// every stub of it, once.
+ComponentRegistry.registerLazy('object-grid', () => import('@object-ui/plugin-grid'), {
+  namespace: 'plugin-grid',
+  category: 'plugin',
+});
+ComponentRegistry.registerLazy('grid', () => import('@object-ui/plugin-grid'), {
+  namespace: 'view',
+  skipFallback: true,
+  category: 'view',
+});
+ComponentRegistry.registerLazy('detail-view', () => import('@object-ui/plugin-detail'), {
+  namespace: 'plugin-detail',
+  category: 'Views',
+});
+ComponentRegistry.registerLazy('detail-section', () => import('@object-ui/plugin-detail'), {
+  namespace: 'plugin-detail',
+  category: 'Detail Components',
+});
+ComponentRegistry.registerLazy('detail', () => import('@object-ui/plugin-detail'), {
+  namespace: 'view',
+  category: 'view',
+});
+for (const variant of [
+  'details',
+  'related_list',
+  'highlights',
+  'activity',
+  'chatter',
+  'discussion',
+  'path',
+  'quick_actions',
+  'history',
+  'reference_rail',
+  'alert',
+]) {
+  ComponentRegistry.registerLazy(variant, () => import('@object-ui/plugin-detail'), {
+    namespace: 'record',
+    skipFallback: true,
+    category: 'record',
   });
 }
 

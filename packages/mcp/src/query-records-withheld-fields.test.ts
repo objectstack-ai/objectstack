@@ -126,13 +126,13 @@ describe('query_records / get_record — withheldFields, the tool layer', () => 
     const before = makeBridge(undefined);
     expect((await queryRecords(unrestricted)).text).toBe((await queryRecords(before)).text);
     expect((await getRecord(unrestricted)).text).toBe((await getRecord(before)).text);
-    expect((await queryRecords(unrestricted)).payload).toEqual({ object: OBJECT, records: [ROW], total: 1 });
+    expect((await queryRecords(unrestricted)).payload).toEqual({ object: OBJECT, records: [ROW], total: 1, source: expect.any(Object) });
   });
 
   it('a bridge that cannot answer, or whose answer throws, names nothing and never fails the read', async () => {
     for (const visibility of [async () => undefined, async () => { throw new Error('security service unhealthy (test)'); }]) {
       const { payload } = await queryRecords(makeBridge(visibility));
-      expect(payload).toEqual({ object: OBJECT, records: [ROW], total: 1 });
+      expect(payload).toEqual({ object: OBJECT, records: [ROW], total: 1, source: expect.any(Object) });
       expect((await getRecord(makeBridge(visibility))).payload).toEqual(ROW);
     }
   });
@@ -282,7 +282,7 @@ describe('stdio bridge — withheldFields from the served schema and the readabl
     const unsecured = await stdioSession(AUTHOR, undefined);
     try {
       const a = await unrestricted.query();
-      expect(a.payload).toEqual({ object: OBJECT, records: [SERVED_ROW], hasMore: false });
+      expect(a.payload).toEqual({ object: OBJECT, records: [SERVED_ROW], hasMore: false, source: expect.any(Object) });
       expect(security.getReadableFields).toHaveBeenCalledWith(OBJECT, expect.objectContaining({ userId: AUTHOR.userId }));
       expect((await unsecured.query()).text).toBe(a.text);
       expect((await unsecured.get()).payload).toEqual(SERVED_ROW);

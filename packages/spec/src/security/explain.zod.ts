@@ -464,6 +464,12 @@ export const AccessMatrixEntrySchema = lazySchema(() => z.object({
   delete: z.boolean(),
   viewAllRecords: z.boolean(),
   modifyAllRecords: z.boolean(),
+  /**
+   * The set's raw `viewAllFields` bit on the entry (the read vote on every
+   * field). Emitted only when `true`, so the snapshot of a stack that does not
+   * author the bit is byte-identical to the one built before the bit existed.
+   */
+  viewAllFields: z.boolean().optional(),
   readScope: z.string().optional(),
   writeScope: z.string().optional(),
   /** The object's declared OWD (record baseline) for context. */

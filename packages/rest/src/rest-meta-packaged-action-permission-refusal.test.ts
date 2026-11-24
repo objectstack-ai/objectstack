@@ -16,7 +16,8 @@
  *    action-clone half is not chartered; [#30065] its save names the declared
  *    override from the base's paired `.custom` first (ADR-0146 D9 `action`);
  *  - a PERMISSION SET has its clone (§8 item 3, the "New similar" action, which posts
- *    to `POST /api/v1/data/sys_permission_set`) and no switch named here.
+ *    to the catalog's clone door `POST /api/v1/security/permission-sets/:name/clone`
+ *    since C3 stage 8 retired the row object's data route) and no switch named here.
  *
  * The protocol-side pins are
  * `packages/metadata-protocol/src/protocol.packaged-base-refusal.test.ts`; this

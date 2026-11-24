@@ -14,8 +14,8 @@ export const entry: SemanticMigration = {
     + 'a flow node whose `type` no executor in the deployment runs (`flow-node-type-no-executor`, judged at publish '
     + 'against the automation engine\'s sealed node-type vocabulary); an `approval` node whose decision out-edges are '
     + 'not labelled `approve` and `reject` (`flow-approval-decision-unrouted`); an `http` node with no `timeoutMs` '
-    + '(`flow-http-timeout-missing`, a warning); an active `state_machine` validation with no or an empty '
-    + '`initialStates` (`state-machine-no-initial-states`); a standalone action that declares `locations` but no `objectName` '
+    + '(`flow-http-timeout-missing`, a warning); an active `state_machine` validation that runs on insert (its `events` '
+    + 'include `insert`, the default) with no or an empty `initialStates` (`state-machine-no-initial-states`); a standalone action that declares `locations` but no `objectName` '
     + '(`action-no-object-binding`)',
   replacement:
     'Give the node a type the deployment runs (or install the plugin that contributes it); label the approval node\'s '

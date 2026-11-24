@@ -22,6 +22,14 @@ export interface PageHeaderPhoneFace {
   /** The host's bottom bar, the element the header draws its actions into. */
   actionBar: HTMLElement | null;
   /**
+   * The host's slot for the record's `⋯` menu at the right end of its top bar
+   * (objectstack#36151). Handed, the bottom bar holds the action buttons only
+   * and is left empty when there are none, and the `⋯` is drawn here; `null`
+   * until the host's element exists, when no `⋯` is drawn. Absent, the `⋯`
+   * stays the bottom bar's last button.
+   */
+  more?: HTMLElement | null;
+  /**
    * The line under the record's name when the header declares no `subtitle`
    * of its own: on the console's record page, the record's first two declared
    * text highlights.

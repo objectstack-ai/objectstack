@@ -1,241 +1,153 @@
 /**
  * PhoneAppNavBar
  *
- * The phone's bottom menu bar inside an app (objectstack#34594). Below 768 px
- * the app's menu lived only in the sidebar drawer, behind an unlabeled icon at
- * the top left, and many users never found it. The bar keeps the menu on
- * screen: up to four of the app's entries, then 「More」, which opens the full
- * menu (the drawer) where every entry carries a star.
+ * The phone's bottom bar inside an app (objectstack#35882). Three fixed cells,
+ * Home, Notifications and Approvals, and a round search button beside them.
+ * They do not change with the app and the user does not configure them: the
+ * app's menu is the app's home page (objectstack#35881), so the bar no longer
+ * holds menu entries, a 「More」 cell or the stars that pinned entries to it
+ * (objectstack#34594, superseded; pins already stored are simply not read).
  *
- * Which four: the entries the user pinned (the star, `useNavPins`, the same
- * per-user store the desktop sidebar's Favorites section reads), in the
- * user's pinned order, then the app's own entries in menu order to fill the
- * rest. Pins are stored by navigation id and are not scoped per app, so only
- * the pins this app's menu holds are read here. No metadata key is involved.
+ * - Home opens the current app's home, its whole menu (`/apps/SEGMENT`).
+ * - Notifications opens the full-page inbox the bell's 「View all」 opens
+ *   (`sys_inbox_message?view=mine`), and Approvals the approvals inbox
+ *   (`system/approvals`), both hosted under the app the bell hosts them under
+ *   (`resolveHostAppSegment`), so the two doors cannot lead to two pages.
+ * - Search opens the console's command palette, as the top bar's search does.
  *
- * What it draws is what the drawer draws: the tree it is handed is the
- * sidebar's own (already pruned of entries the member may not read), walked by
- * `drawnNavigationEntries`, the sidebar's guard statement and order rule.
- * A cell opens what its drawer row opens (`resolveHref`), and lights when
- * that row lights (`resolveActiveNavItem`). When the row that lights is drawn
- * in the full menu but holds no cell, 「More」 lights in its place
- * (objectstack#35020): one cell at most is lit, and it is the way back to the
- * page in view.
+ * The badges are the bell's two addends (`useInboxBell`, the one wiring of the
+ * shared feeds): unread notification topics on Notifications, pending
+ * approvals on Approvals. Each sits inside its cell, on the glyph's corner, so
+ * the bar's edge cannot cut it (objectstack#34596).
  *
- * The console layout decides where the bar is mounted: on a phone, inside an
- * app, never on a record page or a record form, whose bottom edge belongs to
- * the record's own action bar and submit buttons.
+ * The console layout mounts the bar on the three pages it opens and nowhere
+ * else (`isPhoneTabRoute`): a list, a record, a form or any other page one
+ * level down has the page to itself, and 「‹」 at the top left goes back.
  *
  * @module
  */
 
+import { useMemo } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { MoreHorizontal, Star } from 'lucide-react';
-import { SidebarMenuAction, cn } from '@object-ui/components';
-import {
-  drawnNavigationEntries,
-  resolveActiveNavItem,
-  resolveHref,
-  resolveIcon,
-  resolveNavItemIcon,
-  resolveNavItemLabel,
-  type NavigationVisibilityOptions,
-  type NavTargetIconResolver,
-  type NavTargetLabelResolver,
-  type NavTemplateContext,
-} from '@object-ui/layout';
-import type { NavigationItem } from '@object-ui/types';
+import { Bell, CheckSquare, Home, Search } from 'lucide-react';
+import { cn } from '@object-ui/components';
+import { useObjectTranslation } from '@object-ui/i18n';
+import { useInboxBell } from '../hooks/useInboxBell.js';
+import { useMetadata } from '../providers/MetadataProvider.js';
+import { useCommandPalette } from '../context/CommandPaletteProvider.js';
+import { groupNotifications } from './inboxGrouping.js';
+import { resolveHostAppSegment } from '../utils/appRoute.js';
 
-/** How many of the app's entries the bar holds; 「More」 is the cell after them. */
-export const PHONE_NAV_BAR_ENTRY_CELLS = 4;
+/** Which of the three cells a path opens, or `null` for any other page. */
+export type PhoneTab = 'home' | 'notifications' | 'approvals';
 
 /**
- * The bar's entries: the app's pinned entries in the user's pinned order,
- * then the app's drawn entries in menu order, to at most `cells` entries. A
- * pinned id this app's menu does not draw (another app's pin, or an entry the
- * member cannot see) takes no cell.
+ * The cell `pathname` is the page of: the app's root (its home), the inbox
+ * list, or the approvals inbox. `null` for every other route, where the bar is
+ * not drawn.
  */
-export function phoneNavBarEntries(
-  items: readonly NavigationItem[],
-  pinnedIds: readonly string[],
-  guards: NavigationVisibilityOptions,
-  hasAddress: (item: NavigationItem) => boolean,
-  cells: number = PHONE_NAV_BAR_ENTRY_CELLS,
-): NavigationItem[] {
-  // The drawer's rows in its reading order (the walk every tab bar shares),
-  // less `action` entries (an action runs something; a cell opens a page) and
-  // entries whose target resolves to no address.
-  const entries: NavigationItem[] = drawnNavigationEntries(items, guards).filter(
-    (entry) => entry.type !== 'action' && hasAddress(entry),
-  );
-  const byId = new Map(entries.map((entry) => [entry.id, entry]));
-  const chosen: NavigationItem[] = [];
-  const taken = new Set<string>();
-  for (const id of pinnedIds) {
-    const entry = byId.get(id);
-    if (!entry || taken.has(id)) continue;
-    chosen.push(entry);
-    taken.add(id);
-    if (chosen.length === cells) return chosen;
-  }
-  for (const entry of entries) {
-    if (taken.has(entry.id)) continue;
-    chosen.push(entry);
-    taken.add(entry.id);
-    if (chosen.length === cells) break;
-  }
-  return chosen;
+export function phoneTabOf(pathname: string): PhoneTab | null {
+  const parts = pathname.split('/').filter(Boolean);
+  if (parts[0] !== 'apps' || !parts[1]) return null;
+  if (parts.length === 2) return 'home';
+  if (parts.length === 3 && parts[2] === 'sys_inbox_message') return 'notifications';
+  if (parts.length === 4 && parts[2] === 'system' && parts[3] === 'approvals') return 'approvals';
+  return null;
+}
+
+/** Is `pathname` one of the three pages the phone's bottom bar opens? */
+export function isPhoneTabRoute(pathname: string): boolean {
+  return phoneTabOf(pathname) !== null;
 }
 
 export interface PhoneAppNavBarProps {
-  /** The app's navigation tree, as the sidebar holds it (pruned, every visible area). */
-  items: NavigationItem[];
-  /** The pinned navigation ids, in the user's order (`useNavPins().pinnedIds`). */
-  pinnedIds: readonly string[];
-  /** The app's address, `/apps/SEGMENT`. */
+  /** The app's address, `/apps/SEGMENT`: where Home goes. */
   basePath: string;
-  /** The sidebar's guard inputs. */
-  guards: NavigationVisibilityOptions;
-  templateContext?: NavTemplateContext;
-  resolveTargetLabel?: NavTargetLabelResolver;
-  resolveTargetIcon?: NavTargetIconResolver;
-  locale?: string;
-  t: (key: string, options?: Record<string, unknown>) => string;
-  /** Whether the full menu is open, so 「More」 reads as the current cell. */
-  menuOpen: boolean;
-  /** Opens the full menu (the drawer). */
-  onOpenMenu: () => void;
+  /** The app's `name` (what `ConsoleLayout` publishes), for the inboxes' host. */
+  activeAppName: string;
 }
 
 /** One cell's box: a 44 px-tall target, icon over label. */
 const CELL_CLASS =
   'relative flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 px-1 text-[11px] leading-tight transition-colors outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring';
 
-export function PhoneAppNavBar({
-  items,
-  pinnedIds,
-  basePath,
-  guards,
-  templateContext,
-  resolveTargetLabel,
-  resolveTargetIcon,
-  locale,
-  t,
-  menuOpen,
-  onOpenMenu,
-}: PhoneAppNavBarProps) {
+const BADGE_CLASS =
+  'absolute top-0.5 left-1/2 ml-1.5 h-4 min-w-[16px] rounded-full bg-red-500 px-1 text-center text-[10px] leading-4 text-white';
+
+export function PhoneAppNavBar({ basePath, activeAppName }: PhoneAppNavBarProps) {
   const location = useLocation();
-  const hasAddress = (item: NavigationItem) => {
-    const { href } = resolveHref(item, basePath, templateContext);
-    return !!href && href !== '#';
-  };
-  const entries = phoneNavBarEntries(items, pinnedIds, guards, hasAddress);
-  // The row the drawer lights, elected over the whole tree as the drawer
-  // elects it, so at most one cell lights and it is that row.
-  const currentId =
-    resolveActiveNavItem(items, location.pathname, location.search, basePath, templateContext)?.id ?? null;
-  const activeId = menuOpen ? null : currentId;
-  // A row the full menu draws but no cell holds lights 「More」, the cell that
-  // opens it. A page no drawn row addresses lights nothing: 「More」 lit says
-  // the menu behind it has the page's row selected. While the menu is open,
-  // 「More」 is lit for the open menu and the bar marks no page.
-  const currentBehindMore =
-    currentId !== null &&
-    !entries.some((entry) => entry.id === currentId) &&
-    drawnNavigationEntries(items, guards).some((entry) => entry.id === currentId);
-  const moreMarksPage = !menuOpen && currentBehindMore;
-  const moreLabel = t('common.more', { defaultValue: 'More' });
+  const { t } = useObjectTranslation();
+  const { apps } = useMetadata();
+  const { openCommandPalette } = useCommandPalette();
+  const { notifications, pendingApprovalsCount } = useInboxBell();
+  // The bell's own count: unread TOPICS, not raw rows (#2765).
+  const unreadTopics = useMemo(
+    () => groupNotifications(notifications).reduce((sum, g) => sum + (g.unreadCount > 0 ? 1 : 0), 0),
+    [notifications],
+  );
+  const host = resolveHostAppSegment(apps, activeAppName);
+  const current = phoneTabOf(location.pathname);
+
+  const cells: Array<{ tab: PhoneTab; to: string; label: string; Icon: typeof Home; badge: number }> = [
+    { tab: 'home', to: basePath, label: t('console.nav.phoneHome', { defaultValue: 'Home' }), Icon: Home, badge: 0 },
+    {
+      tab: 'notifications',
+      // `?view=mine`: the user-scoped view, the bell's 「View all」 target.
+      to: `/apps/${host}/sys_inbox_message?view=mine`,
+      label: t('console.nav.phoneNotifications', { defaultValue: 'Notifications' }),
+      Icon: Bell,
+      badge: unreadTopics,
+    },
+    {
+      tab: 'approvals',
+      to: `/apps/${host}/system/approvals`,
+      label: t('console.nav.phoneApprovals', { defaultValue: 'Approvals' }),
+      Icon: CheckSquare,
+      badge: pendingApprovalsCount,
+    },
+  ];
+  const searchLabel = t('console.nav.phoneSearch', { defaultValue: 'Search' });
 
   return (
     <nav
       data-testid="phone-app-nav-bar"
       aria-label={t('console.nav.phoneBarLabel', { defaultValue: 'App menu bar' })}
-      className="fixed inset-x-0 bottom-0 z-40 border-t bg-background/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-sm"
+      className="fixed inset-x-0 bottom-0 z-40 flex items-center gap-2 border-t bg-background/95 px-2 pt-1 pb-[calc(0.25rem+env(safe-area-inset-bottom))] backdrop-blur-sm"
     >
-      <ul className="flex h-12 items-stretch">
-        {entries.map((item) => {
-          const { href, external } = resolveHref(item, basePath, templateContext);
-          const label = resolveNavItemLabel(item, t, resolveTargetLabel, locale);
-          const Icon = resolveIcon(resolveNavItemIcon(item, resolveTargetIcon));
-          const active = item.id === activeId;
-          const className = cn(CELL_CLASS, active ? 'text-primary' : 'text-muted-foreground');
-          const content = (
-            <>
-              <Icon className="h-5 w-5 shrink-0" aria-hidden />
-              <span className="max-w-full truncate">{label}</span>
-            </>
-          );
+      <ul className="flex h-12 min-w-0 flex-1 items-stretch">
+        {cells.map(({ tab, to, label, Icon, badge }) => {
+          const active = current === tab;
           return (
-            <li key={item.id} className="flex min-w-0 flex-1">
-              {external ? (
-                <a href={href} target="_blank" rel="noopener noreferrer" className={className} data-testid="phone-app-nav-cell">
-                  {content}
-                </a>
-              ) : (
-                <Link
-                  to={href}
-                  className={className}
-                  aria-current={active ? 'page' : undefined}
-                  data-testid="phone-app-nav-cell"
-                  data-nav-id={item.id}
-                >
-                  {content}
-                </Link>
-              )}
+            <li key={tab} className="flex min-w-0 flex-1">
+              <Link
+                to={to}
+                aria-current={active ? 'page' : undefined}
+                data-testid="phone-app-nav-cell"
+                data-tab={tab}
+                className={cn(CELL_CLASS, active ? 'text-primary' : 'text-muted-foreground')}
+              >
+                <Icon className="h-5 w-5 shrink-0" aria-hidden />
+                <span className="max-w-full truncate">{label}</span>
+                {badge > 0 && (
+                  <span data-testid="phone-app-nav-badge" className={BADGE_CLASS}>
+                    {badge > 9 ? '9+' : badge}
+                  </span>
+                )}
+              </Link>
             </li>
           );
         })}
-        <li className="flex min-w-0 flex-1">
-          <button
-            type="button"
-            onClick={onOpenMenu}
-            aria-haspopup="dialog"
-            aria-expanded={menuOpen}
-            // `true`, not `page`: the button is where the page in view lives,
-            // not a link to it.
-            aria-current={moreMarksPage ? 'true' : undefined}
-            data-testid="phone-app-nav-more"
-            className={cn(CELL_CLASS, menuOpen || moreMarksPage ? 'text-primary' : 'text-muted-foreground')}
-          >
-            <MoreHorizontal className="h-5 w-5 shrink-0" aria-hidden />
-            <span className="max-w-full truncate">{moreLabel}</span>
-          </button>
-        </li>
       </ul>
+      <button
+        type="button"
+        onClick={openCommandPalette}
+        aria-label={searchLabel}
+        title={searchLabel}
+        data-testid="phone-app-nav-search"
+        className="inline-flex size-11 shrink-0 items-center justify-center rounded-full border bg-muted/60 text-foreground transition-colors outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <Search className="h-5 w-5" aria-hidden />
+      </button>
     </nav>
-  );
-}
-
-export interface PhoneMenuStarProps {
-  /** The text the row shows. */
-  label: string;
-  /** The entry is pinned (it is offered to the bottom bar). */
-  pinned: boolean;
-  onToggle: () => void;
-  t: (key: string, options?: Record<string, unknown>) => string;
-}
-
-/**
- * The star a full-menu row carries on a phone (objectstack#34594): one tap
- * pins the entry, through the same pin store the desktop sidebar's ⋯ menu
- * writes, so it joins the bottom bar; another tap unpins it. Drawn at rest,
- * not on hover (a phone has none), centred on the 44 px row.
- */
-export function PhoneMenuStar({ label, pinned, onToggle, t }: PhoneMenuStarProps) {
-  const name = pinned
-    ? t('console.nav.unpinItem', { defaultValue: 'Unpin {{name}}', name: label })
-    : t('console.nav.pinItem', { defaultValue: 'Pin {{name}}', name: label });
-  return (
-    <SidebarMenuAction
-      onClick={onToggle}
-      aria-pressed={pinned}
-      aria-label={name}
-      title={name}
-      data-testid="phone-menu-star"
-      data-pinned={pinned ? 'true' : 'false'}
-      className="right-1 top-1/2 size-8 -translate-y-1/2 peer-data-[size=default]/menu-button:top-1/2 [&>svg]:size-5"
-    >
-      <Star className={pinned ? 'fill-primary text-primary' : 'text-muted-foreground'} aria-hidden />
-    </SidebarMenuAction>
   );
 }

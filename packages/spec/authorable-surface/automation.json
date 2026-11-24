@@ -33,6 +33,8 @@
     "automation/ApiTriggerTimestampedSignature:signs",
     "automation/ApiTriggerTimestampedSignature:timestampElement",
     "automation/ApprovalEscalation:action",
+    "automation/ApprovalEscalation:calendar",
+    "automation/ApprovalEscalation:clock",
     "automation/ApprovalEscalation:enabled",
     "automation/ApprovalEscalation:escalateTo",
     "automation/ApprovalEscalation:notifySubmitter",

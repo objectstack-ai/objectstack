@@ -137,8 +137,8 @@ Clients that read an `mcpServers` map connect the same way. With an API key:
 Mint a key from the **Connect an AI Assistant** page in the Console. One page, two
 doors — which one you have depends on your permissions:
 
-- **Any signed-in user** — open the avatar menu (top right) → **Connect an AI
-  Assistant**. It opens the page in the Account app, whose sidebar lists it
+- **Any signed-in user** — open the account menu (your name at the foot of the
+  sidebar; on a phone, the avatar at the top right) → **Connect an AI Assistant**. It opens the page in the Account app, whose sidebar lists it
   under **AI Assistant**.
   Direct link: `/_console/apps/com.objectstack.account/page/connect_agent`.
 - **Platform admins** — **Setup → Overview → Connect an AI Assistant**, at
@@ -718,7 +718,10 @@ drive this MCP server. Same word, different layer.
   client already holds on its next call (`401`), and the client gets no new
   ones: a refresh is refused `invalid_client`. Disabling is a pause, not an
   end: the grants and refresh tokens stay, so enabling the client again
-  serves them again. To end a grant, withdraw it.
+  serves them again. To end a grant, withdraw it. A completed password reset
+  of the account that registered a client (its owner) disables that client
+  the same way, and only a platform administrator enables it again
+  ([What a password reset ends](/docs/permissions/authentication#what-a-password-reset-ends-and-what-a-change-keeps)).
 - **Action bodies run as trusted app code** once invoked (the `ai.exposed`
   gate and `requiredPermissions` are checked at *invoke* time). Treat writing
   an action as a code-review-worthy act — that's the real security boundary.

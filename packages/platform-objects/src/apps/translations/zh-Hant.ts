@@ -94,6 +94,9 @@ export const zhHant: TranslationData = {
         nav_settings_hub: { label: '全部設定' },
         nav_settings_localization: { label: '在地化' },
         nav_exchange_rates: { label: '匯率' },
+        nav_units_of_measure: { label: '計量單位' },
+        nav_work_calendars: { label: '工作日曆' },
+        nav_work_calendar_exceptions: { label: '日曆例外' },
         nav_settings_company: { label: '公司' },
         nav_settings_mail: { label: '郵件投遞' },
         nav_settings_sms: { label: '簡訊投遞' },
@@ -105,6 +108,7 @@ export const zhHant: TranslationData = {
         nav_settings_knowledge: { label: '知識庫' },
         nav_settings_lifecycle: { label: '資料生命週期' },
         nav_recycle_bin: { label: '回收站' },
+        nav_public_forms: { label: '對外表單' },
         nav_notification_preferences: { label: '通知偏好設定' },
         nav_notification_templates: { label: '通知範本' },
 
@@ -122,6 +126,7 @@ export const zhHant: TranslationData = {
         nav_datasources: { label: '資料來源' },
         nav_connector_credentials: { label: '連接器憑證' },
         nav_connector_connections: { label: '連接器連線' },
+        nav_slack: { label: 'Slack' },
 
         nav_oauth_apps: { label: 'OAuth 應用程式' },
       },

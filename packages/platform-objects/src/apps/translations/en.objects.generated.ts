@@ -176,7 +176,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       ban_user: {
         label: "Ban User",
-        description: "Ban this user? They will be signed out, unable to sign in, and their API keys refused until unbanned, as are their OAuth access tokens and token refreshes. The keys work again after the unban.",
+        description: "Ban this user? They will be signed out, unable to sign in, and their API keys refused until unbanned, as are their OAuth access tokens and token refreshes. The keys work again after the unban. The ban also suspends the AI service accounts they are accountable for, disables the OAuth applications they registered and revokes the SCIM credentials they minted; the unban restores none of these.",
         successMessage: "User banned",
         params: {
           banReason: {
@@ -284,6 +284,11 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
           }
         }
       },
+      remove_sso_user: {
+        label: "Remove Pending User",
+        confirmText: "Remove this person, who has not signed in yet, and cancel their invitation? If they have signed in meanwhile, or the hosting organization cannot be reached, no one is removed.",
+        successMessage: "Pending user removed"
+      },
       set_user_password: {
         label: "Set Password",
         successMessage: "Password updated",
@@ -322,6 +327,11 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
             helpText: "The user this person reports to. The server refuses a manager outside their organization, a self-assignment, and a link that would close or over-deepen the reporting chain."
           }
         }
+      },
+      remove_user_manager: {
+        label: "Remove Manager",
+        confirmText: "Remove this user's manager? They will report to no one until a manager is set again; approval routing and the own_and_reports record scope follow the change.",
+        successMessage: "Manager removed"
       },
       list_platform_admins: {
         label: "Platform Administrators",
@@ -485,7 +495,11 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       revoke_reason: {
         label: "Revoke Reason",
-        help: "Why the session was revoked (idle_timeout, absolute_max, concurrent_cap, ip_not_allowed, user_revoked, admin, organization_membership_ended, admin_password_reset, password_reset, …)."
+        help: "Why the session was revoked (idle_timeout, absolute_max, concurrent_cap, ip_not_allowed, user_revoked, admin, organization_membership_ended, admin_password_reset, password_reset, sso_provider_deleted, …)."
+      },
+      sso_provider_id: {
+        label: "SSO Provider",
+        help: "The SSO provider this session was signed in through, if any. Deleting that provider ends the session. System-managed."
       },
       active_organization_id: {
         label: "Active Organization"
@@ -4414,6 +4428,202 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         emptyState: {
           title: "No exchange rates yet",
           message: "Add one row per currency for each date its rate changes, for example one row per currency at the start of each month."
+        }
+      }
+    }
+  },
+  sys_unit: {
+    label: "Unit of Measure",
+    pluralLabel: "Units of Measure",
+    description: "The organization's own units of measure, beside the standard units every organization has — one row per unit, named by a code in the organization namespace.",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      code: {
+        label: "Code",
+        help: "The code a quantity stores, in exact uppercase: letters, digits and underscores, at least 4 characters or containing an underscore (BOX_12, JIN1). Standard codes such as KGM and H87 are available to every organization and are not added here. The code cannot be changed after the unit is created."
+      },
+      label: {
+        label: "Label",
+        help: "The name shown beside a quantity in this unit, in the organization's own language."
+      },
+      dimension: {
+        label: "Dimension",
+        help: "What the unit measures. A package unit (a box, a bag) has no fixed ratio. The dimension cannot be changed after the unit is created.",
+        options: {
+          mass: "Mass",
+          length: "Length",
+          area: "Area",
+          volume: "Volume",
+          time: "Time",
+          count: "Count",
+          package: "Package"
+        }
+      },
+      ratio: {
+        label: "Ratio",
+        help: "1 of this unit = Ratio × the base unit of its dimension (mass KGM, length MTR, area MTK, volume MTQ, time SEC, count H87). Example: a unit of half a kilogram in the mass dimension has ratio 0.5. A package unit takes no ratio. Changing the ratio affects only records saved afterwards; records already saved keep the quantity and conversion they were saved with. A changed specification is a new unit, not an edited ratio."
+      },
+      decimal_places: {
+        label: "Decimal Places",
+        help: "How many decimal places a quantity in this unit displays with by default. It never rounds a stored value, and a field's own decimal places still limit what is stored."
+      },
+      retired: {
+        label: "Retired",
+        help: "A retired unit stays on file so its code can never be reused, and records that already use it keep showing it. New records cannot use a retired unit. Retiring cannot be undone."
+      }
+    },
+    _views: {
+      all_units: {
+        label: "All",
+        description: "1 of this unit = Ratio × the base unit of its dimension (mass KGM, length MTR, area MTK, volume MTQ, time SEC, count H87). Example: a unit of half a kilogram in the mass dimension has ratio 0.5. A package unit takes no ratio.",
+        emptyState: {
+          title: "No units of measure yet",
+          message: "Standard units such as kilogram (KGM) and piece (H87) are available already. Add a unit here only when your organization needs one they do not cover."
+        }
+      }
+    },
+    _validations: {
+      unit_code_organization_namespace: {
+        message: "A unit code is uppercase letters, digits and underscores, at least 4 characters long or containing an underscore (for example BOX_12 or JIN1). Shorter codes are reserved for the standard units."
+      },
+      unit_code_immutable: {
+        message: "A unit's code cannot be changed after it is created. Create a new unit with the new code instead."
+      },
+      unit_dimension_immutable: {
+        message: "A unit's dimension cannot be changed after it is created. Create a new unit with the new dimension instead."
+      },
+      unit_ratio_required: {
+        message: "Enter the ratio to the base unit of this dimension."
+      },
+      unit_package_has_no_ratio: {
+        message: "A package unit has no ratio: how much a package holds belongs to the item, not to the unit. Clear the ratio."
+      },
+      unit_retired_one_way: {
+        message: "A retired unit cannot be brought back. Create a unit with a new code instead."
+      }
+    }
+  },
+  sys_work_calendar: {
+    label: "Working Calendar",
+    pluralLabel: "Working Calendars",
+    description: "Working calendars: the weekly working hours, the time zone they are local to, and how far the holidays are maintained. Due dates counted in working time read them.",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      code: {
+        label: "Code",
+        help: "Machine code formulas, approval escalations and packages name this calendar by, such as cn_standard: lowercase letters, digits and underscores."
+      },
+      name: {
+        label: "Name"
+      },
+      timezone: {
+        label: "Time Zone",
+        help: "IANA time zone the working periods are local to, such as Asia/Shanghai. The create form opens with the organization's time zone (Settings → Localization), and a create that leaves it out takes the same zone."
+      },
+      is_default: {
+        label: "Default",
+        help: "The calendar a due date uses when it names none. One per organization."
+      },
+      maintained_from: {
+        label: "Maintained From",
+        help: "First date the holidays and make-up workdays are entered from. A computation that needs an earlier date is refused."
+      },
+      maintained_through: {
+        label: "Maintained Through",
+        help: "Last date the holidays and make-up workdays are entered through. A computation that needs a later date is refused: enter next year's holidays, then move this date."
+      },
+      monday_periods: {
+        label: "Monday",
+        help: "Working periods that day in the calendar's time zone, HH:mm-HH:mm separated by commas, such as 09:00-12:00, 13:00-18:00. A period ends later than it starts on the same day; 24:00 is the latest end. Leave blank for a day off."
+      },
+      tuesday_periods: {
+        label: "Tuesday",
+        help: "Working periods that day in the calendar's time zone, HH:mm-HH:mm separated by commas, such as 09:00-12:00, 13:00-18:00. A period ends later than it starts on the same day; 24:00 is the latest end. Leave blank for a day off."
+      },
+      wednesday_periods: {
+        label: "Wednesday",
+        help: "Working periods that day in the calendar's time zone, HH:mm-HH:mm separated by commas, such as 09:00-12:00, 13:00-18:00. A period ends later than it starts on the same day; 24:00 is the latest end. Leave blank for a day off."
+      },
+      thursday_periods: {
+        label: "Thursday",
+        help: "Working periods that day in the calendar's time zone, HH:mm-HH:mm separated by commas, such as 09:00-12:00, 13:00-18:00. A period ends later than it starts on the same day; 24:00 is the latest end. Leave blank for a day off."
+      },
+      friday_periods: {
+        label: "Friday",
+        help: "Working periods that day in the calendar's time zone, HH:mm-HH:mm separated by commas, such as 09:00-12:00, 13:00-18:00. A period ends later than it starts on the same day; 24:00 is the latest end. Leave blank for a day off."
+      },
+      saturday_periods: {
+        label: "Saturday",
+        help: "Working periods that day in the calendar's time zone, HH:mm-HH:mm separated by commas, such as 09:00-12:00, 13:00-18:00. A period ends later than it starts on the same day; 24:00 is the latest end. Leave blank for a day off."
+      },
+      sunday_periods: {
+        label: "Sunday",
+        help: "Working periods that day in the calendar's time zone, HH:mm-HH:mm separated by commas, such as 09:00-12:00, 13:00-18:00. A period ends later than it starts on the same day; 24:00 is the latest end. Leave blank for a day off."
+      }
+    },
+    _views: {
+      all_calendars: {
+        label: "All",
+        emptyState: {
+          title: "No working calendars yet",
+          message: "Add a calendar with its weekly hours and mark one as the default, then enter its holidays and make-up workdays."
+        }
+      },
+      needs_maintenance: {
+        label: "Needs Maintenance",
+        emptyState: {
+          title: "Every calendar is maintained ahead",
+          message: "A calendar appears here when its holidays run out within the next 60 days; due dates past that date are refused."
+        }
+      }
+    },
+    _validations: {
+      work_calendar_code_shape: {
+        message: "Code must start with a lowercase letter and use only lowercase letters, digits and underscores, such as cn_standard."
+      }
+    }
+  },
+  sys_work_calendar_exception: {
+    label: "Calendar Exception",
+    pluralLabel: "Calendar Exceptions",
+    description: "Dated overrides of a working calendar: public holidays, make-up workdays and shutdowns. A working day carries its full working periods.",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      calendar: {
+        label: "Calendar"
+      },
+      date: {
+        label: "Date"
+      },
+      kind: {
+        label: "Kind",
+        help: "Day Off: the whole date is off. Working Day: the date is worked with the periods below, such as a make-up workday.",
+        options: {
+          off: "Day Off",
+          on: "Working Day"
+        }
+      },
+      periods: {
+        label: "Periods",
+        help: "For a working day, all of that date's hours; they are never taken from the weekday. Working periods that day in the calendar's time zone, HH:mm-HH:mm separated by commas, such as 09:00-12:00, 13:00-18:00. A period ends later than it starts on the same day; 24:00 is the latest end. Leave blank for a day off."
+      },
+      note: {
+        label: "Note",
+        help: "What the date is, such as National Day or a make-up workday for Spring Festival."
+      }
+    },
+    _views: {
+      all_exceptions: {
+        label: "All",
+        emptyState: {
+          title: "No calendar exceptions yet",
+          message: "Add one row per holiday or make-up workday, or import a year of them from a file."
         }
       }
     }

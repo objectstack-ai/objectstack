@@ -21,17 +21,17 @@
  * `objects` → `check` path answer. A mocked `usePermissions` would assert
  * against a hand-written stand-in for that derivation.
  *
- * ## Why being the uploader does not open delete
+ * ## Why the uploader's own row is judged apart (objectstack#36488)
  *
- * The server asks the object grant first — plugin-security's CRUD check wraps
- * the engine's `beforeDelete` hooks — and only a caller who passes it reaches
- * service-storage's uploader-or-parent-editor rule, which compares the row's
- * `uploaded_by` with the session user. So the read-only case below includes a
- * row whose `uploaded_by` IS the caller, and still expects no delete: offering
- * it would be this card's defect again, answered by `PERMISSION_DENIED`.
+ * The grant decides the data door only. The caller's own upload is removed
+ * and renamed through the storage service's own doors at
+ * `/api/v1/attachments/:id`, which admit the row whose `uploaded_by` names the
+ * caller with no grant beyond read. So the grant cases below hold for another
+ * user's row, and the caller's own row offers Delete and Rename under every
+ * grant, read-only included.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, within, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MePermissionsProvider, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
@@ -72,7 +72,7 @@ const OWN_ROW = {
   uploaded_by: ME,
 };
 
-type Grant = { allowCreate?: boolean; allowDelete?: boolean };
+type Grant = { allowCreate?: boolean; allowEdit?: boolean; allowDelete?: boolean };
 
 /** A `/me/permissions` answer for an authenticated caller with this `sys_attachment` grant. */
 function payload(grant: Grant): MePermissionsAuthenticatedResponse {
@@ -88,7 +88,7 @@ function payload(grant: Grant): MePermissionsAuthenticatedResponse {
       sys_attachment: {
         allowRead: true,
         allowCreate: grant.allowCreate ?? false,
-        allowEdit: false,
+        allowEdit: grant.allowEdit ?? false,
         allowDelete: grant.allowDelete ?? false,
       },
     },
@@ -131,6 +131,20 @@ function rowOf(fileName: string): HTMLElement {
   return li as HTMLElement;
 }
 
+/**
+ * The actions in the ⋮ menu of the row listing `fileName`: a file row carries
+ * its Download and Delete in that menu since the dense attachments rows
+ * (objectstack#35602). The menu is closed again before returning.
+ */
+async function rowMenuItems(fileName: string): Promise<string[]> {
+  const user = userEvent.setup();
+  await user.click(within(rowOf(fileName)).getByRole('button', { name: `More for ${fileName}` }));
+  const items = (await screen.findAllByRole('menuitem')).map((el) => el.textContent?.trim() ?? '');
+  await user.keyboard('{Escape}');
+  await waitFor(() => expect(screen.queryByRole('menu')).not.toBeInTheDocument());
+  return items;
+}
+
 async function rowsLoaded() {
   await waitFor(() => expect(screen.getByText('mine.pdf')).toBeInTheDocument());
   expect(screen.getByText('others.pdf')).toBeInTheDocument();
@@ -141,40 +155,32 @@ beforeEach(() => {
 });
 
 describe('RecordAttachmentsPanel — write affordances follow the sys_attachment grant (objectui#12047)', () => {
-  it('a read-only grant renders no Upload and no delete, not even on a row the caller uploaded', async () => {
+  it('a read-only grant renders no Upload, and no delete on another user\'s row', async () => {
     renderWithGrant({});
     await rowsLoaded();
 
     expect(screen.queryByRole('button', { name: 'Upload' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Delete attachment' })).not.toBeInTheDocument();
-    // The own row specifically: `uploaded_by === ME`, and still no delete.
-    expect(
-      within(rowOf('mine.pdf')).queryByRole('button', { name: 'Delete attachment' }),
-    ).not.toBeInTheDocument();
-    // Reading is untouched: both rows keep their Download.
-    expect(screen.getAllByRole('button', { name: 'Download' })).toHaveLength(2);
+    // Reading is untouched: both rows keep their Download. The own row's
+    // Delete and Rename are the uploader's doors, pinned in their own describe.
+    expect(await rowMenuItems('others.pdf')).toEqual(['Download']);
   });
 
-  it('a create grant renders Upload (and no delete without the delete grant)', async () => {
+  it('a create grant renders Upload (and no delete on another user\'s row without the delete grant)', async () => {
     renderWithGrant({ allowCreate: true });
     await rowsLoaded();
 
     expect(screen.getByRole('button', { name: 'Upload' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Delete attachment' })).not.toBeInTheDocument();
+    expect(await rowMenuItems('others.pdf')).toEqual(['Download']);
   });
 
   it('the uploader sees delete on their own file', async () => {
     renderWithGrant({ allowDelete: true });
     await rowsLoaded();
 
-    expect(
-      within(rowOf('mine.pdf')).getByRole('button', { name: 'Delete attachment' }),
-    ).toBeInTheDocument();
+    expect(await rowMenuItems('mine.pdf')).toContain('Delete attachment');
     // Another user's row keeps it too: whether the caller may edit the parent
     // record is the server's to judge, and the refusal mapping answers it.
-    expect(
-      within(rowOf('others.pdf')).getByRole('button', { name: 'Delete attachment' }),
-    ).toBeInTheDocument();
+    expect(await rowMenuItems('others.pdf')).toContain('Delete attachment');
     // No create grant, no Upload.
     expect(screen.queryByRole('button', { name: 'Upload' })).not.toBeInTheDocument();
   });
@@ -252,6 +258,160 @@ describe('RecordAttachmentsPanel — write affordances follow the sys_attachment
     await rowsLoaded();
 
     expect(screen.getByRole('button', { name: 'Upload' })).toBeInTheDocument();
-    expect(screen.getAllByRole('button', { name: 'Delete attachment' })).toHaveLength(2);
+    expect(await rowMenuItems('mine.pdf')).toContain('Delete attachment');
+    expect(await rowMenuItems('others.pdf')).toContain('Delete attachment');
+  });
+});
+
+describe('RecordAttachmentsPanel — Rename follows the rename door\'s two limbs (objectstack#35724)', () => {
+  // The server renames by the attachment delete rule (uploader or parent
+  // editor): the uploader's own rename needs no edit grant, and anyone else's
+  // is written as the caller, which needs the edit grant. So the row menu
+  // offers Rename on the caller's own rows, and on another's only to a reader
+  // who holds the edit grant — the delete grant plays no part in it.
+  it('a reader holding the edit grant but not delete sees Rename on every row, and Delete only on their own', async () => {
+    renderWithGrant({ allowCreate: true, allowEdit: true });
+    await rowsLoaded();
+
+    expect(await rowMenuItems('mine.pdf')).toEqual(['Download', 'Rename', 'Delete attachment']);
+    expect(await rowMenuItems('others.pdf')).toEqual(['Download', 'Rename']);
+  });
+
+  it('the uploader holding delete but not edit sees Rename on their own row and no Rename on another\'s', async () => {
+    renderWithGrant({ allowDelete: true });
+    await rowsLoaded();
+
+    expect(await rowMenuItems('mine.pdf')).toEqual(['Download', 'Rename', 'Delete attachment']);
+    expect(await rowMenuItems('others.pdf')).toEqual(['Download', 'Delete attachment']);
+  });
+
+  it('the same holds where the read expanded the uploader into a user row', async () => {
+    const find = vi.fn(async () => [
+      { ...OTHERS_ROW, uploaded_by: { id: 'u-someone-else', name: 'Someone Else' } },
+      { ...OWN_ROW, uploaded_by: { id: ME, name: 'Me' } },
+    ]);
+    renderWithGrant({ allowDelete: true }, makeDataSource({ find }));
+    await rowsLoaded();
+
+    expect(await rowMenuItems('mine.pdf')).toEqual(['Download', 'Rename', 'Delete attachment']);
+    expect(await rowMenuItems('others.pdf')).toEqual(['Download', 'Delete attachment']);
+  });
+
+  it('a reader who may delete and edit sees Rename beside Delete on every row', async () => {
+    renderWithGrant({ allowDelete: true, allowEdit: true });
+    await rowsLoaded();
+
+    expect(await rowMenuItems('mine.pdf')).toEqual(['Download', 'Rename', 'Delete attachment']);
+    expect(await rowMenuItems('others.pdf')).toEqual(['Download', 'Rename', 'Delete attachment']);
+  });
+});
+
+describe('RecordAttachmentsPanel — the uploader deletes and renames their own upload with no grant beyond the member baseline (objectstack#36488)', () => {
+  // The member baseline on `sys_attachment` is read and create. The storage
+  // service's removal door and rename door admit the row whose `uploaded_by`
+  // names the caller under that baseline, so the row menu offers both verbs
+  // on the caller's own upload, and on another member's upload neither.
+  const MEMBER: Grant = { allowCreate: true };
+
+  // Only `vi.spyOn` spies are restored (vitest 4): the module-level adapter fns keep their wiring.
+  afterEach(() => vi.restoreAllMocks());
+
+  /** Answer every request the panel sends with `status` and `body`, and record them. */
+  function serveDoor(status: number, body: unknown) {
+    return vi.spyOn(globalThis, 'fetch').mockImplementation(
+      async () =>
+        new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } }),
+    );
+  }
+
+  async function chooseOnRow(fileName: string, item: string) {
+    const user = userEvent.setup();
+    await user.click(within(rowOf(fileName)).getByRole('button', { name: `More for ${fileName}` }));
+    await user.click(await screen.findByRole('menuitem', { name: item }));
+    return user;
+  }
+
+  it('a plain member sees Delete and Rename on their own upload, and neither on another member\'s', async () => {
+    renderWithGrant(MEMBER);
+    await rowsLoaded();
+
+    expect(await rowMenuItems('mine.pdf')).toEqual(['Download', 'Rename', 'Delete attachment']);
+    expect(await rowMenuItems('others.pdf')).toEqual(['Download']);
+  });
+
+  it('the same holds where the read expanded the uploader into a user row', async () => {
+    const find = vi.fn(async () => [
+      { ...OTHERS_ROW, uploaded_by: { id: 'u-someone-else', name: 'Someone Else' } },
+      { ...OWN_ROW, uploaded_by: { id: ME, name: 'Me' } },
+    ]);
+    renderWithGrant(MEMBER, makeDataSource({ find }));
+    await rowsLoaded();
+
+    expect(await rowMenuItems('mine.pdf')).toEqual(['Download', 'Rename', 'Delete attachment']);
+    expect(await rowMenuItems('others.pdf')).toEqual(['Download']);
+  });
+
+  it('deleting their own upload goes through the removal door, the row leaves the list, and the data door is not asked', async () => {
+    const fetchSpy = serveDoor(200, { success: true, data: { id: OWN_ROW.id, deleted: true } });
+    const dataSource = makeDataSource();
+    renderWithGrant(MEMBER, dataSource);
+    await rowsLoaded();
+
+    const user = await chooseOnRow('mine.pdf', 'Delete attachment');
+    await user.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Delete' }));
+
+    await waitFor(() => expect(screen.queryByText('mine.pdf')).not.toBeInTheDocument());
+    expect(screen.getByText('others.pdf')).toBeInTheDocument();
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchSpy.mock.calls[0] as [RequestInfo | URL, RequestInit];
+    expect(String(url)).toMatch(/\/api\/v1\/attachments\/a2$/);
+    expect(init.method).toBe('DELETE');
+    expect(dataSource.delete).not.toHaveBeenCalled();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('renaming their own upload goes through the rename door, and the row shows the stored name', async () => {
+    const fetchSpy = serveDoor(200, { success: true, data: { id: OWN_ROW.id, file_name: 'mine-v2.pdf' } });
+    renderWithGrant(MEMBER);
+    await rowsLoaded();
+
+    const user = await chooseOnRow('mine.pdf', 'Rename');
+    const dialog = await screen.findByTestId('attachment-rename-dialog');
+    const input = within(dialog).getByTestId('attachment-rename-input');
+    await user.clear(input);
+    await user.type(input, 'mine-v2.pdf');
+    await user.click(within(dialog).getByTestId('attachment-rename-submit'));
+
+    await waitFor(() => expect(screen.getByText('mine-v2.pdf')).toBeInTheDocument());
+    const [url, init] = fetchSpy.mock.calls[0] as [RequestInfo | URL, RequestInit];
+    expect(String(url)).toMatch(/\/api\/v1\/attachments\/a2$/);
+    expect(init.method).toBe('PATCH');
+    expect(JSON.parse(String(init.body))).toEqual({ file_name: 'mine-v2.pdf' });
+  });
+
+  it('a removal the door refuses keeps the row and names the refusal', async () => {
+    serveDoor(403, { success: false, error: { code: 'PERMISSION_DENIED', message: 'Not your attachment' } });
+    renderWithGrant(MEMBER);
+    await rowsLoaded();
+
+    const user = await chooseOnRow('mine.pdf', 'Delete attachment');
+    await user.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Delete' }));
+
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent("You don't have permission to do that."));
+    expect(screen.getByText('mine.pdf')).toBeInTheDocument();
+  });
+
+  it('a delete-grant holder\'s delete of another member\'s upload still goes through the data door, never the removal door', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    const dataSource = makeDataSource();
+    renderWithGrant({ allowDelete: true }, dataSource);
+    await rowsLoaded();
+
+    const user = await chooseOnRow('others.pdf', 'Delete attachment');
+    await user.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Delete' }));
+
+    await waitFor(() => expect(screen.queryByText('others.pdf')).not.toBeInTheDocument());
+    expect(dataSource.delete).toHaveBeenCalledWith('sys_attachment', OTHERS_ROW.id);
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 });

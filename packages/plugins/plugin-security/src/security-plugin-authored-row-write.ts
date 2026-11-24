@@ -11,7 +11,9 @@
  * A MOVE, not a redesign. The function below is the body of the method of the
  * same name as it stood, re-indented one level and otherwise unedited: the
  * same abstentions in the same order, the same provenance pre-check, the same
- * layered predicate and the same id-only probe read. The scope constant and
+ * layered predicate and the same id-only probe read (since #35917 the floor
+ * leaves that predicate through the sets, not the floor-drop knob; the reason
+ * is at the call). The scope constant and
  * its docblock moved with it unedited, still unexported, and the probe still
  * spreads it at its one call site.
  *
@@ -45,6 +47,7 @@
  * Nothing re-exports this module, so the published surface does not move.
  */
 import type { AuthoredRowWriteOperation, AuthoredRowWriteVerdict } from '@objectstack/spec/contracts';
+import type { PermissionSet } from '@objectstack/spec/security';
 import type { SecurityPlugin } from './security-plugin.js';
 import { isPlatformOwnershipFloorPolicy } from './platform-ownership-policies.js';
 import { policyDeclaresClause } from './rls-compiler.js';
@@ -94,6 +97,17 @@ export interface AuthoredRowWriteHost {
  * middleware can stamp state onto a shared object.
  */
 const AUTHORED_ROW_WRITE_PROBE_CONTEXT = { isSystem: true, positions: [], permissions: [] } as const;
+
+/**
+ * [#35917] A permission set with the platform's own ownership floor policies
+ * taken out (provenance, {@link isPlatformOwnershipFloorPolicy}); the set
+ * itself when it carries none. Every other member is the set's own.
+ */
+function withoutPlatformOwnershipFloor(set: PermissionSet): PermissionSet {
+  const policies = set.rowLevelSecurity;
+  if (!policies?.some(isPlatformOwnershipFloorPolicy)) return set;
+  return { ...set, rowLevelSecurity: policies.filter((p) => !isPlatformOwnershipFloorPolicy(p)) };
+}
 
 /** The body of `SecurityPlugin#checkAuthoredRowWrite`; the method's docblock there is its contract. */
 export async function checkAuthoredRowWrite(
@@ -147,12 +161,22 @@ export async function checkAuthoredRowWrite(
     ).filter((p) => !isPlatformOwnershipFloorPolicy(p) && policyDeclaresClause(p, 'using'));
     if (authored.length === 0) return 'abstain';
 
+    // [#35917] The floor is taken out of the SETS, by provenance, rather than
+    // by `dropPlatformOwnershipFloor`. That knob is the write authority's
+    // `allow` replacing the floor, and since #35917 a replacement keeps the
+    // floor's term beside an authored one (the OR an authored policy stands
+    // in is never shortened by it), which is exactly the case this probe
+    // exists for: through the knob, the floor would answer here as if it
+    // were an authored admission (#5493 / #7281). With the floor gone from
+    // the sets the collection the compiler sees is the one the knob used to
+    // leave: the floor's alternates are materialized only beside a floor
+    // ({@link withOwnershipFloorAlternates}), and the authored `using`
+    // pre-checked above keeps the derive-from-select branch off.
     const { layer0, layer1 } = await this.computeLayeredRlsFilter(
-      permissionSets,
+      permissionSets.map(withoutPlatformOwnershipFloor),
       object,
       operation,
       context,
-      { dropPlatformOwnershipFloor: true },
     );
     // See the doc above: a null Layer 1 means no authored predicate is
     // gating this write, which is an abstention and not an admission.

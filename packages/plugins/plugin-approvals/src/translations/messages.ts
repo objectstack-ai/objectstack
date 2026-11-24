@@ -55,14 +55,46 @@
  * slate: one whole sentence per route the request then took
  * (`submitter-exclusion-note.ts`), with no holes. Rendered the same way as the
  * administrators' note.
+ *
+ * ## The no-approver note
+ *
+ * `approvalNoApprover*` are the system note a request writes when it opens on
+ * the slate that names no one, naming the remedy (`no-approver-note.ts`);
+ * `{{who}}` is the slate's literals, one `approvalNoApproverSlot` each, joined
+ * by `approvalNoApproverSlotSeparator`. A slot's `{{type}}` is its approver
+ * type's word (`approvalApproverType*`) where the catalog holds one, else the
+ * type's machine token, and its `{{value}}` is a position's label where one is
+ * known, else the configured value. The `en` words ARE the machine tokens, so
+ * the English the row stores reads as it always did. The decision door's
+ * refusal of the submitter ends with the same `en` sentence, and the
+ * submitter's notice carries it under `approvalNoApproverTitle`: for a slate
+ * of one slot as `approvalNoApproverHoldingSlot`, the same sentence with the
+ * slot spelled inline, because a notice is rendered per recipient at delivery,
+ * where a hole is filled by one text or one hole-free key and never by a
+ * composed sentence. [#36463] A slate of several slots rides the derived
+ * `approvalNoApproverHoldingSlots<n>` (`slotListSentences` below), each slot
+ * spelled inline the same way.
+ *
+ * `approvalDecideRefused*` are the decision door's refusal of a submitter's
+ * own approval, as the end user reads it (the thrown error's `userMessage`):
+ * `SubmitterExcluded` when the step sets `excludeSubmitter`, `OverrideOwnRequest`
+ * when the administrator override would approve the actor's own request. Their
+ * `{{remedy}}` is the no-approver sentence above when no one else is on the
+ * slate (after the override, inside `OverrideWithdraw`), else
+ * `AnotherApprover` / `OverrideAnotherApprover`. The error's `message` keeps
+ * its English for the developer and the log.
+ *
+ * `approvalPlatformAdminSlotLabel` is not a sentence: it is the display label
+ * of the platform administrators' slot (`platform_admin:*`), which names no
+ * person to label it by.
  */
 
 import type { TranslationData } from '@objectstack/spec/system';
 
 type Messages = NonNullable<TranslationData['messages']>;
 
-/** The ids, as `en` spells them — every other locale carries exactly these. */
-export const enMessages = {
+/** The authored ids, as `en` spells them — every other locale carries exactly these. */
+const enSentences = {
   approvalRequestedTitle: 'Approval requested',
   approvalRequestedBody: 'A decision on {{object}} {{record}} is waiting on you.',
   approvalReminderTitle: 'Approval reminder',
@@ -102,13 +134,87 @@ export const enMessages = {
   approvalSubmitterExcludedRemaining: "The request's submitter was removed from its approvers because this step sets excludeSubmitter; the remaining approvers decide it.",
   approvalSubmitterExcludedFallback: "The request's submitter was removed from its approvers because this step sets excludeSubmitter; the declared fallbackApprovers decide it.",
   approvalSubmitterExcludedAdministrators: "The request's submitter was removed from its approvers because this step sets excludeSubmitter; this organization's administrators decide it.",
-  approvalSubmitterExcludedNoOne: "The request's submitter was removed from its approvers because this step sets excludeSubmitter; no one else could take it, so only a privileged override can decide it.",
+  approvalSubmitterExcludedNoOne: "The request's submitter was removed from its approvers because this step sets excludeSubmitter, and no one else could take it.",
+  approvalNoApprover: 'No one else can approve this request yet. An organization administrator must add a member who can approve it, then reassign the request to them.',
+  approvalNoApproverHolding: 'No one else can approve this request yet. An organization administrator must add a member who holds {{who}}; that member can then decide it.',
+  approvalNoApproverTitle: 'No one can approve your {{object}} {{record}} yet',
+  approvalApproverTypePosition: 'position',
+  approvalApproverTypeTeam: 'team',
+  approvalApproverTypeDepartment: 'department',
+  approvalApproverTypeOrgMembershipLevel: 'org_membership_level',
+  approvalNoApproverSlot: "{{type}} '{{value}}'",
+  approvalNoApproverSlotSeparator: ', ',
+  approvalNoApproverHoldingSlot: "No one else can approve this request yet. An organization administrator must add a member who holds {{type}} '{{value}}'; that member can then decide it.",
+  approvalDecideRefusedSubmitterExcluded: 'You submitted this request, and its approval step keeps its submitter from approving it, so you cannot approve it. {{remedy}}',
+  approvalDecideRefusedOverrideOwnRequest: 'You submitted this request and hold no slot on it, so you cannot approve it through the administrator override. {{remedy}}',
+  approvalDecideRefusedAnotherApprover: 'Another approver on the step decides it; if you hold the only slot, reassign it to someone else.',
+  approvalDecideRefusedOverrideAnotherApprover: 'An approver on the step decides it. To move it, reassign it to someone else, reject it, or recall it and send the record for approval again.',
+  approvalDecideRefusedOverrideWithdraw: '{{remedy}} To withdraw it instead, reject it or recall it.',
+  approvalPlatformAdminSlotLabel: 'Platform administrators',
 } as const satisfies Messages;
+
+/** An authored sentence's id: one every pack below spells by hand. */
+type AuthoredMessageId = keyof typeof enSentences;
+
+type ApprovalMessages = Readonly<Record<AuthoredMessageId, string>>;
+
+/**
+ * [#36463] The most slots the submitter's notice names one by one in the
+ * reader's language. A notice is rendered per recipient at delivery, where a
+ * hole takes one text or one hole-free key, so a list of slot clauses cannot
+ * ride as one param: a slate of `n` slots is spelled inline instead, in
+ * `approvalNoApproverHoldingSlots<n>`, whose `{{type<i>}}` / `{{value<i>}}`
+ * holes are each one such param. A slate of more slots than this names them
+ * in English inside the reader's sentence (`noApproverNotice`).
+ */
+export const NO_APPROVER_NOTICE_MAX_SLOTS = 8;
+
+/** The derived id of the notice sentence for a slate of `n` slots, 2 to {@link NO_APPROVER_NOTICE_MAX_SLOTS}. */
+export type NoApproverHoldingSlotsId = `approvalNoApproverHoldingSlots${2 | 3 | 4 | 5 | 6 | 7 | 8}`;
+
+/** The derived id for a slate of `n` slots, or `undefined` outside 2 to {@link NO_APPROVER_NOTICE_MAX_SLOTS}. */
+export function noApproverHoldingSlotsId(n: number): NoApproverHoldingSlotsId | undefined {
+  return Number.isInteger(n) && n >= 2 && n <= NO_APPROVER_NOTICE_MAX_SLOTS
+    ? `approvalNoApproverHoldingSlots${n}` as NoApproverHoldingSlotsId
+    : undefined;
+}
+
+/**
+ * [#36463] A pack's notice sentences for a slate of 2 to
+ * {@link NO_APPROVER_NOTICE_MAX_SLOTS} slots, derived from the three entries
+ * the timeline note composes the same sentence from: `approvalNoApproverHolding`
+ * with its `{{who}}` spelled as `n` `approvalNoApproverSlot` clauses (holes
+ * numbered from 1) joined by `approvalNoApproverSlotSeparator`. Derived, never
+ * hand-spelled, so the notice reads exactly what the timeline reads for the same
+ * slate and no translation is written twice.
+ */
+function slotListSentences(
+  pack: Pick<ApprovalMessages, 'approvalNoApproverHolding' | 'approvalNoApproverSlot' | 'approvalNoApproverSlotSeparator'>,
+): Record<NoApproverHoldingSlotsId, string> {
+  const out = {} as Record<NoApproverHoldingSlotsId, string>;
+  for (let n = 2; n <= NO_APPROVER_NOTICE_MAX_SLOTS; n++) {
+    const clauses = Array.from({ length: n }, (_, i) => pack.approvalNoApproverSlot
+      .replace('{{type}}', () => `{{type${i + 1}}}`)
+      .replace('{{value}}', () => `{{value${i + 1}}}`));
+    const who = clauses.join(pack.approvalNoApproverSlotSeparator);
+    out[noApproverHoldingSlotsId(n)!] = pack.approvalNoApproverHolding.replace('{{who}}', () => who);
+  }
+  return out;
+}
+
+/** A pack with its derived notice sentences. */
+function withSlotLists<T extends ApprovalMessages>(pack: T): T & Record<NoApproverHoldingSlotsId, string> {
+  return { ...pack, ...slotListSentences(pack) };
+}
+
+/** The ids, as `en` spells them — every other locale carries exactly these. */
+export const enMessages = withSlotLists(enSentences);
 
 /** One approval notification sentence's id. */
 export type ApprovalMessageId = keyof typeof enMessages;
 
-type ApprovalMessages = Readonly<Record<ApprovalMessageId, string>>;
+/** A shipped locale's sentences: the authored ones and the derived ones. */
+type ShippedMessages = Readonly<Record<ApprovalMessageId, string>>;
 
 export const zhCNMessages: ApprovalMessages = {
   approvalRequestedTitle: '新的审批请求',
@@ -150,7 +256,23 @@ export const zhCNMessages: ApprovalMessages = {
   approvalSubmitterExcludedRemaining: '本步骤设置了 excludeSubmitter，提交人已从审批人中移除；由其余审批人决定。',
   approvalSubmitterExcludedFallback: '本步骤设置了 excludeSubmitter，提交人已从审批人中移除；由声明的 fallbackApprovers 决定。',
   approvalSubmitterExcludedAdministrators: '本步骤设置了 excludeSubmitter，提交人已从审批人中移除；由本组织管理员决定。',
-  approvalSubmitterExcludedNoOne: '本步骤设置了 excludeSubmitter，提交人已从审批人中移除；没有其他人可以处理，只有特权管理员的强制处理才能决定此请求。',
+  approvalSubmitterExcludedNoOne: '本步骤设置了 excludeSubmitter，提交人已从审批人中移除，且没有其他人可以处理。',
+  approvalNoApprover: '目前还没有其他人能审批此请求。组织管理员需要添加一名可以审批的成员，然后将请求转交给该成员。',
+  approvalNoApproverHolding: '目前还没有其他人能审批此请求。组织管理员需要添加一名担任{{who}}的成员，之后由该成员决定。',
+  approvalNoApproverTitle: '您的{{object}} {{record}} 暂时无人可以审批',
+  approvalApproverTypePosition: '岗位',
+  approvalApproverTypeTeam: '团队',
+  approvalApproverTypeDepartment: '部门',
+  approvalApproverTypeOrgMembershipLevel: '组织成员级别',
+  approvalNoApproverSlot: '{{type}}「{{value}}」',
+  approvalNoApproverSlotSeparator: '、',
+  approvalNoApproverHoldingSlot: '目前还没有其他人能审批此请求。组织管理员需要添加一名担任{{type}}「{{value}}」的成员，之后由该成员决定。',
+  approvalDecideRefusedSubmitterExcluded: '此请求由您提交，而其审批步骤不允许提交人批准自己的请求，因此您不能批准它。{{remedy}}',
+  approvalDecideRefusedOverrideOwnRequest: '此请求由您提交，且您不在其审批人之列，因此不能以管理员身份代为批准它。{{remedy}}',
+  approvalDecideRefusedAnotherApprover: '由该步骤的其他审批人决定；如果只有您持有审批席位，请将其转交给其他人。',
+  approvalDecideRefusedOverrideAnotherApprover: '由该步骤的审批人决定。如需改由他人处理，可将其转交给其他人、驳回它，或撤回后重新提交审批。',
+  approvalDecideRefusedOverrideWithdraw: '{{remedy}}如需撤销，请驳回或撤回该请求。',
+  approvalPlatformAdminSlotLabel: '平台管理员',
 };
 
 export const jaJPMessages: ApprovalMessages = {
@@ -193,7 +315,23 @@ export const jaJPMessages: ApprovalMessages = {
   approvalSubmitterExcludedRemaining: 'このステップは excludeSubmitter を設定しているため、申請者は承認者から除外されました。他の承認者が判断します。',
   approvalSubmitterExcludedFallback: 'このステップは excludeSubmitter を設定しているため、申請者は承認者から除外されました。宣言された fallbackApprovers が判断します。',
   approvalSubmitterExcludedAdministrators: 'このステップは excludeSubmitter を設定しているため、申請者は承認者から除外されました。この組織の管理者が判断します。',
-  approvalSubmitterExcludedNoOne: 'このステップは excludeSubmitter を設定しているため、申請者は承認者から除外されました。他に引き受けられる人がいないため、特権管理者のオーバーライドでのみ判断できます。',
+  approvalSubmitterExcludedNoOne: 'このステップは excludeSubmitter を設定しているため、申請者は承認者から除外されました。他に引き受けられる人はいません。',
+  approvalNoApprover: 'このリクエストを承認できる人はまだ他にいません。組織の管理者が承認できるメンバーを追加し、リクエストをそのメンバーに再割り当てする必要があります。',
+  approvalNoApproverHolding: 'このリクエストを承認できる人はまだ他にいません。組織の管理者が{{who}}を担うメンバーを追加する必要があります。追加されたメンバーが判断できます。',
+  approvalNoApproverTitle: 'あなたの{{object}} {{record}} を承認できる人がまだいません',
+  approvalApproverTypePosition: '役職',
+  approvalApproverTypeTeam: 'チーム',
+  approvalApproverTypeDepartment: '部署',
+  approvalApproverTypeOrgMembershipLevel: '組織メンバーレベル',
+  approvalNoApproverSlot: '{{type}}「{{value}}」',
+  approvalNoApproverSlotSeparator: '、',
+  approvalNoApproverHoldingSlot: 'このリクエストを承認できる人はまだ他にいません。組織の管理者が{{type}}「{{value}}」を担うメンバーを追加する必要があります。追加されたメンバーが判断できます。',
+  approvalDecideRefusedSubmitterExcluded: 'このリクエストはあなたが申請したもので、その承認ステップでは申請者が自分のリクエストを承認できないため、あなたは承認できません。{{remedy}}',
+  approvalDecideRefusedOverrideOwnRequest: 'このリクエストはあなたが申請したもので、あなたはその承認者に含まれていないため、管理者権限で代わりに承認することはできません。{{remedy}}',
+  approvalDecideRefusedAnotherApprover: 'このステップの他の承認者が判断します。承認枠を持つのがあなただけの場合は、他の人に再割り当てしてください。',
+  approvalDecideRefusedOverrideAnotherApprover: 'このステップの承認者が判断します。担当を変えるには、他の人に再割り当てするか、却下するか、取り下げてからレコードを再度承認に回してください。',
+  approvalDecideRefusedOverrideWithdraw: '{{remedy}}代わりに取りやめるには、却下するか取り下げてください。',
+  approvalPlatformAdminSlotLabel: 'プラットフォーム管理者',
 };
 
 export const esESMessages: ApprovalMessages = {
@@ -236,7 +374,23 @@ export const esESMessages: ApprovalMessages = {
   approvalSubmitterExcludedRemaining: 'El solicitante se quitó de los aprobadores de este paso porque el paso define excludeSubmitter; la deciden los demás aprobadores.',
   approvalSubmitterExcludedFallback: 'El solicitante se quitó de los aprobadores de este paso porque el paso define excludeSubmitter; la deciden los fallbackApprovers declarados.',
   approvalSubmitterExcludedAdministrators: 'El solicitante se quitó de los aprobadores de este paso porque el paso define excludeSubmitter; la deciden los administradores de esta organización.',
-  approvalSubmitterExcludedNoOne: 'El solicitante se quitó de los aprobadores de este paso porque el paso define excludeSubmitter; nadie más puede tomarla, así que solo una anulación privilegiada puede decidirla.',
+  approvalSubmitterExcludedNoOne: 'El solicitante se quitó de los aprobadores de este paso porque el paso define excludeSubmitter, y nadie más puede tomarla.',
+  approvalNoApprover: 'Nadie más puede aprobar esta solicitud todavía. Un administrador de la organización debe añadir un miembro que pueda aprobarla y luego reasignarle la solicitud.',
+  approvalNoApproverHolding: 'Nadie más puede aprobar esta solicitud todavía. Un administrador de la organización debe añadir un miembro que ocupe {{who}}; ese miembro podrá entonces decidirla.',
+  approvalNoApproverTitle: 'Nadie puede aprobar todavía su {{object}} {{record}}',
+  approvalApproverTypePosition: 'el puesto',
+  approvalApproverTypeTeam: 'el equipo',
+  approvalApproverTypeDepartment: 'el departamento',
+  approvalApproverTypeOrgMembershipLevel: 'el nivel de membresía de la organización',
+  approvalNoApproverSlot: "{{type}} '{{value}}'",
+  approvalNoApproverSlotSeparator: ', ',
+  approvalNoApproverHoldingSlot: "Nadie más puede aprobar esta solicitud todavía. Un administrador de la organización debe añadir un miembro que ocupe {{type}} '{{value}}'; ese miembro podrá entonces decidirla.",
+  approvalDecideRefusedSubmitterExcluded: 'Usted envió esta solicitud y su paso de aprobación no permite que quien la envía la apruebe, así que no puede aprobarla. {{remedy}}',
+  approvalDecideRefusedOverrideOwnRequest: 'Usted envió esta solicitud y no ocupa ningún puesto de aprobación en ella, así que no puede aprobarla mediante la anulación de administrador. {{remedy}}',
+  approvalDecideRefusedAnotherApprover: 'La decide otro aprobador del paso; si usted ocupa el único puesto, reasígnela a otra persona.',
+  approvalDecideRefusedOverrideAnotherApprover: 'La decide un aprobador del paso. Para moverla, reasígnela a otra persona, recházela o retírela y vuelva a enviar el registro a aprobación.',
+  approvalDecideRefusedOverrideWithdraw: '{{remedy}} Para retirarla en su lugar, recházela o retírela.',
+  approvalPlatformAdminSlotLabel: 'Administradores de la plataforma',
 };
 
 export const zhHantMessages: ApprovalMessages = {
@@ -279,7 +433,23 @@ export const zhHantMessages: ApprovalMessages = {
   approvalSubmitterExcludedRemaining: '本步驟設定了 excludeSubmitter，因此提交人已從核准人中移除；由其餘核准人決定。',
   approvalSubmitterExcludedFallback: '本步驟設定了 excludeSubmitter，因此提交人已從核准人中移除；由宣告的 fallbackApprovers 決定。',
   approvalSubmitterExcludedAdministrators: '本步驟設定了 excludeSubmitter，因此提交人已從核准人中移除；由本組織的管理員決定。',
-  approvalSubmitterExcludedNoOne: '本步驟設定了 excludeSubmitter，因此提交人已從核准人中移除；沒有其他人能接手，因此只有特權越權才能做出決定。',
+  approvalSubmitterExcludedNoOne: '本步驟設定了 excludeSubmitter，因此提交人已從核准人中移除，且沒有其他人能接手。',
+  approvalNoApprover: '目前還沒有其他人能核准此請求。組織管理員需要新增一名可以核准的成員，再將請求轉交給該成員。',
+  approvalNoApproverHolding: '目前還沒有其他人能核准此請求。組織管理員需要新增一名擔任{{who}}的成員，之後由該成員決定。',
+  approvalNoApproverTitle: '你的{{object}} {{record}} 暫時無人可以核准',
+  approvalApproverTypePosition: '職位',
+  approvalApproverTypeTeam: '團隊',
+  approvalApproverTypeDepartment: '部門',
+  approvalApproverTypeOrgMembershipLevel: '組織成員層級',
+  approvalNoApproverSlot: '{{type}}「{{value}}」',
+  approvalNoApproverSlotSeparator: '、',
+  approvalNoApproverHoldingSlot: '目前還沒有其他人能核准此請求。組織管理員需要新增一名擔任{{type}}「{{value}}」的成員，之後由該成員決定。',
+  approvalDecideRefusedSubmitterExcluded: '此請求由你提交，而其核准步驟不允許提交人核准自己的請求，因此你不能核准它。{{remedy}}',
+  approvalDecideRefusedOverrideOwnRequest: '此請求由你提交，且你不在其核准人之列，因此不能以管理員身分代為核准它。{{remedy}}',
+  approvalDecideRefusedAnotherApprover: '由該步驟的其他核准人決定；如果只有你持有核准席位，請將其轉交給其他人。',
+  approvalDecideRefusedOverrideAnotherApprover: '由該步驟的核准人決定。如需改由他人處理，可將其轉交給其他人、駁回它，或撤回後重新送出核准。',
+  approvalDecideRefusedOverrideWithdraw: '{{remedy}}如需撤銷，請駁回或撤回該請求。',
+  approvalPlatformAdminSlotLabel: '平台管理員',
 };
 
 export const arMessages: ApprovalMessages = {
@@ -322,7 +492,23 @@ export const arMessages: ApprovalMessages = {
   approvalSubmitterExcludedRemaining: 'أُزيل مقدِّم الطلب من الموافِقين لأن هذه الخطوة تضبط excludeSubmitter؛ ويبتّ فيه الموافِقون الباقون.',
   approvalSubmitterExcludedFallback: 'أُزيل مقدِّم الطلب من الموافِقين لأن هذه الخطوة تضبط excludeSubmitter؛ ويبتّ فيه fallbackApprovers المعلنون.',
   approvalSubmitterExcludedAdministrators: 'أُزيل مقدِّم الطلب من الموافِقين لأن هذه الخطوة تضبط excludeSubmitter؛ ويبتّ فيه مسؤولو هذه المؤسسة.',
-  approvalSubmitterExcludedNoOne: 'أُزيل مقدِّم الطلب من الموافِقين لأن هذه الخطوة تضبط excludeSubmitter؛ ولا أحد غيره يمكنه تولّيه، لذا لا يبتّ فيه إلا تجاوز مميَّز.',
+  approvalSubmitterExcludedNoOne: 'أُزيل مقدِّم الطلب من الموافِقين لأن هذه الخطوة تضبط excludeSubmitter، ولا أحد غيره يمكنه تولّيه.',
+  approvalNoApprover: 'لا يمكن لأحد آخر الموافقة على هذا الطلب بعد. يجب على مسؤول المؤسسة إضافة عضو يمكنه الموافقة عليه، ثم إعادة تعيين الطلب إليه.',
+  approvalNoApproverHolding: 'لا يمكن لأحد آخر الموافقة على هذا الطلب بعد. يجب على مسؤول المؤسسة إضافة عضو يشغل {{who}}؛ وعندها يمكن لهذا العضو البتّ فيه.',
+  approvalNoApproverTitle: 'لا يمكن لأحد الموافقة على طلبك بشأن {{object}} {{record}} بعد',
+  approvalApproverTypePosition: 'المنصب',
+  approvalApproverTypeTeam: 'الفريق',
+  approvalApproverTypeDepartment: 'القسم',
+  approvalApproverTypeOrgMembershipLevel: 'مستوى العضوية في المؤسسة',
+  approvalNoApproverSlot: '{{type}} «{{value}}»',
+  approvalNoApproverSlotSeparator: '، ',
+  approvalNoApproverHoldingSlot: 'لا يمكن لأحد آخر الموافقة على هذا الطلب بعد. يجب على مسؤول المؤسسة إضافة عضو يشغل {{type}} «{{value}}»؛ وعندها يمكن لهذا العضو البتّ فيه.',
+  approvalDecideRefusedSubmitterExcluded: 'لقد قدّمت هذا الطلب، وخطوة الموافقة فيه لا تسمح لمقدّمه بالموافقة عليه، لذا لا يمكنك الموافقة عليه. {{remedy}}',
+  approvalDecideRefusedOverrideOwnRequest: 'لقد قدّمت هذا الطلب ولا تشغل أي مقعد موافقة فيه، لذا لا يمكنك الموافقة عليه عبر صلاحية تجاوز المسؤول. {{remedy}}',
+  approvalDecideRefusedAnotherApprover: 'يبتّ فيه موافِق آخر في الخطوة؛ وإن كنت تشغل المقعد الوحيد، فأعد تعيينه إلى شخص آخر.',
+  approvalDecideRefusedOverrideAnotherApprover: 'يبتّ فيه موافِق في الخطوة. لنقله، أعد تعيينه إلى شخص آخر أو ارفضه أو استرجعه ثم أرسل السجل للموافقة مجددًا.',
+  approvalDecideRefusedOverrideWithdraw: '{{remedy}} لسحبه بدلًا من ذلك، ارفضه أو استرجعه.',
+  approvalPlatformAdminSlotLabel: 'مسؤولو المنصة',
 };
 
 export const frMessages: ApprovalMessages = {
@@ -365,7 +551,23 @@ export const frMessages: ApprovalMessages = {
   approvalSubmitterExcludedRemaining: 'Le demandeur a été retiré des approbateurs, car cette étape définit excludeSubmitter ; les autres approbateurs décident.',
   approvalSubmitterExcludedFallback: 'Le demandeur a été retiré des approbateurs, car cette étape définit excludeSubmitter ; les fallbackApprovers déclarés décident.',
   approvalSubmitterExcludedAdministrators: 'Le demandeur a été retiré des approbateurs, car cette étape définit excludeSubmitter ; les administrateurs de cette organisation décident.',
-  approvalSubmitterExcludedNoOne: 'Le demandeur a été retiré des approbateurs, car cette étape définit excludeSubmitter ; personne d’autre ne peut la prendre, seule une dérogation privilégiée peut donc décider.',
+  approvalSubmitterExcludedNoOne: 'Le demandeur a été retiré des approbateurs, car cette étape définit excludeSubmitter, et personne d’autre ne peut la prendre.',
+  approvalNoApprover: 'Personne d’autre ne peut encore approuver cette demande. Un administrateur de l’organisation doit ajouter un membre qui peut l’approuver, puis lui réattribuer la demande.',
+  approvalNoApproverHolding: 'Personne d’autre ne peut encore approuver cette demande. Un administrateur de l’organisation doit ajouter un membre qui occupe {{who}} ; ce membre pourra alors la décider.',
+  approvalNoApproverTitle: 'Personne ne peut encore approuver votre demande sur {{object}} {{record}}',
+  approvalApproverTypePosition: 'le poste',
+  approvalApproverTypeTeam: 'l’équipe',
+  approvalApproverTypeDepartment: 'le département',
+  approvalApproverTypeOrgMembershipLevel: 'le niveau d’adhésion à l’organisation',
+  approvalNoApproverSlot: '{{type}} « {{value}} »',
+  approvalNoApproverSlotSeparator: ', ',
+  approvalNoApproverHoldingSlot: 'Personne d’autre ne peut encore approuver cette demande. Un administrateur de l’organisation doit ajouter un membre qui occupe {{type}} « {{value}} » ; ce membre pourra alors la décider.',
+  approvalDecideRefusedSubmitterExcluded: 'Vous avez soumis cette demande, et son étape d’approbation interdit à son demandeur de l’approuver ; vous ne pouvez donc pas l’approuver. {{remedy}}',
+  approvalDecideRefusedOverrideOwnRequest: 'Vous avez soumis cette demande et n’y occupez aucun poste d’approbation ; vous ne pouvez donc pas l’approuver par la dérogation administrateur. {{remedy}}',
+  approvalDecideRefusedAnotherApprover: 'Un autre approbateur de l’étape la décide ; si vous occupez le seul poste, réattribuez-la à quelqu’un d’autre.',
+  approvalDecideRefusedOverrideAnotherApprover: 'Un approbateur de l’étape la décide. Pour la déplacer, réattribuez-la à quelqu’un d’autre, rejetez-la, ou rappelez-la et renvoyez l’enregistrement en approbation.',
+  approvalDecideRefusedOverrideWithdraw: '{{remedy}} Pour la retirer plutôt, rejetez-la ou rappelez-la.',
+  approvalPlatformAdminSlotLabel: 'Administrateurs de la plateforme',
 };
 
 export const ptBRMessages: ApprovalMessages = {
@@ -408,7 +610,23 @@ export const ptBRMessages: ApprovalMessages = {
   approvalSubmitterExcludedRemaining: 'O solicitante foi removido dos aprovadores porque esta etapa define excludeSubmitter; os demais aprovadores decidem.',
   approvalSubmitterExcludedFallback: 'O solicitante foi removido dos aprovadores porque esta etapa define excludeSubmitter; os fallbackApprovers declarados decidem.',
   approvalSubmitterExcludedAdministrators: 'O solicitante foi removido dos aprovadores porque esta etapa define excludeSubmitter; os administradores desta organização decidem.',
-  approvalSubmitterExcludedNoOne: 'O solicitante foi removido dos aprovadores porque esta etapa define excludeSubmitter; ninguém mais pode assumi-la, então só uma substituição privilegiada pode decidir.',
+  approvalSubmitterExcludedNoOne: 'O solicitante foi removido dos aprovadores porque esta etapa define excludeSubmitter, e ninguém mais pode assumi-la.',
+  approvalNoApprover: 'Ninguém mais pode aprovar esta solicitação ainda. Um administrador da organização precisa adicionar um membro que possa aprová-la e depois reatribuir a solicitação a ele.',
+  approvalNoApproverHolding: 'Ninguém mais pode aprovar esta solicitação ainda. Um administrador da organização precisa adicionar um membro que ocupe {{who}}; esse membro poderá então decidi-la.',
+  approvalNoApproverTitle: 'Ninguém pode aprovar ainda sua solicitação sobre {{object}} {{record}}',
+  approvalApproverTypePosition: 'o cargo',
+  approvalApproverTypeTeam: 'a equipe',
+  approvalApproverTypeDepartment: 'o departamento',
+  approvalApproverTypeOrgMembershipLevel: 'o nível de associação à organização',
+  approvalNoApproverSlot: '{{type}} "{{value}}"',
+  approvalNoApproverSlotSeparator: ', ',
+  approvalNoApproverHoldingSlot: 'Ninguém mais pode aprovar esta solicitação ainda. Um administrador da organização precisa adicionar um membro que ocupe {{type}} "{{value}}"; esse membro poderá então decidi-la.',
+  approvalDecideRefusedSubmitterExcluded: 'Você enviou esta solicitação, e a etapa de aprovação dela não permite que quem a enviou a aprove, então você não pode aprová-la. {{remedy}}',
+  approvalDecideRefusedOverrideOwnRequest: 'Você enviou esta solicitação e não ocupa nenhuma vaga de aprovação nela, então não pode aprová-la pela substituição de administrador. {{remedy}}',
+  approvalDecideRefusedAnotherApprover: 'Outro aprovador da etapa a decide; se você ocupa a única vaga, reatribua-a a outra pessoa.',
+  approvalDecideRefusedOverrideAnotherApprover: 'Um aprovador da etapa a decide. Para movê-la, reatribua-a a outra pessoa, rejeite-a ou recolha-a e envie o registro para aprovação novamente.',
+  approvalDecideRefusedOverrideWithdraw: '{{remedy}} Para retirá-la em vez disso, rejeite-a ou recolha-a.',
+  approvalPlatformAdminSlotLabel: 'Administradores da plataforma',
 };
 
 export const ruMessages: ApprovalMessages = {
@@ -451,7 +669,23 @@ export const ruMessages: ApprovalMessages = {
   approvalSubmitterExcludedRemaining: 'Отправитель запроса исключён из согласующих, так как на этом этапе задан excludeSubmitter; решают остальные согласующие.',
   approvalSubmitterExcludedFallback: 'Отправитель запроса исключён из согласующих, так как на этом этапе задан excludeSubmitter; решают объявленные fallbackApprovers.',
   approvalSubmitterExcludedAdministrators: 'Отправитель запроса исключён из согласующих, так как на этом этапе задан excludeSubmitter; решают администраторы этой организации.',
-  approvalSubmitterExcludedNoOne: 'Отправитель запроса исключён из согласующих, так как на этом этапе задан excludeSubmitter; больше никто не может его взять, поэтому решить может только привилегированное переопределение.',
+  approvalSubmitterExcludedNoOne: 'Отправитель запроса исключён из согласующих, так как на этом этапе задан excludeSubmitter, и больше никто не может его взять.',
+  approvalNoApprover: 'Пока больше никто не может согласовать этот запрос. Администратор организации должен добавить участника, который может его согласовать, и переназначить запрос на него.',
+  approvalNoApproverHolding: 'Пока больше никто не может согласовать этот запрос. Администратор организации должен добавить участника, занимающего {{who}}; затем этот участник сможет принять решение.',
+  approvalNoApproverTitle: 'Ваш запрос по {{object}} {{record}} пока некому согласовать',
+  approvalApproverTypePosition: 'должность',
+  approvalApproverTypeTeam: 'команду',
+  approvalApproverTypeDepartment: 'подразделение',
+  approvalApproverTypeOrgMembershipLevel: 'уровень членства в организации',
+  approvalNoApproverSlot: '{{type}} «{{value}}»',
+  approvalNoApproverSlotSeparator: ', ',
+  approvalNoApproverHoldingSlot: 'Пока больше никто не может согласовать этот запрос. Администратор организации должен добавить участника, занимающего {{type}} «{{value}}»; затем этот участник сможет принять решение.',
+  approvalDecideRefusedSubmitterExcluded: 'Вы отправили этот запрос, а его шаг согласования не позволяет отправителю согласовать его, поэтому вы не можете его согласовать. {{remedy}}',
+  approvalDecideRefusedOverrideOwnRequest: 'Вы отправили этот запрос и не занимаете в нём места согласующего, поэтому не можете согласовать его через права администратора. {{remedy}}',
+  approvalDecideRefusedAnotherApprover: 'Решение принимает другой согласующий шага; если единственное место занимаете вы, переназначьте его на кого-то другого.',
+  approvalDecideRefusedOverrideAnotherApprover: 'Решение принимает согласующий шага. Чтобы передать запрос, переназначьте его на кого-то другого, отклоните его или отзовите и отправьте запись на согласование заново.',
+  approvalDecideRefusedOverrideWithdraw: '{{remedy}} Чтобы вместо этого отозвать его, отклоните или отзовите запрос.',
+  approvalPlatformAdminSlotLabel: 'Администраторы платформы',
 };
 
 export const deMessages: ApprovalMessages = {
@@ -494,7 +728,23 @@ export const deMessages: ApprovalMessages = {
   approvalSubmitterExcludedRemaining: 'Der Einreicher wurde aus den Genehmigern entfernt, weil dieser Schritt excludeSubmitter setzt; die übrigen Genehmiger entscheiden.',
   approvalSubmitterExcludedFallback: 'Der Einreicher wurde aus den Genehmigern entfernt, weil dieser Schritt excludeSubmitter setzt; die deklarierten fallbackApprovers entscheiden.',
   approvalSubmitterExcludedAdministrators: 'Der Einreicher wurde aus den Genehmigern entfernt, weil dieser Schritt excludeSubmitter setzt; die Administratoren dieser Organisation entscheiden.',
-  approvalSubmitterExcludedNoOne: 'Der Einreicher wurde aus den Genehmigern entfernt, weil dieser Schritt excludeSubmitter setzt; niemand sonst kann sie übernehmen, daher kann nur eine privilegierte Übersteuerung entscheiden.',
+  approvalSubmitterExcludedNoOne: 'Der Einreicher wurde aus den Genehmigern entfernt, weil dieser Schritt excludeSubmitter setzt, und niemand sonst kann sie übernehmen.',
+  approvalNoApprover: 'Noch kann niemand sonst diese Anfrage genehmigen. Ein Administrator der Organisation muss ein Mitglied hinzufügen, das sie genehmigen kann, und ihm die Anfrage dann neu zuweisen.',
+  approvalNoApproverHolding: 'Noch kann niemand sonst diese Anfrage genehmigen. Ein Administrator der Organisation muss ein Mitglied hinzufügen, das {{who}} innehat; dieses Mitglied kann dann darüber entscheiden.',
+  approvalNoApproverTitle: 'Noch kann niemand Ihre Anfrage zu {{object}} {{record}} genehmigen',
+  approvalApproverTypePosition: 'die Position',
+  approvalApproverTypeTeam: 'das Team',
+  approvalApproverTypeDepartment: 'die Abteilung',
+  approvalApproverTypeOrgMembershipLevel: 'die Mitgliedschaftsstufe in der Organisation',
+  approvalNoApproverSlot: '{{type}} „{{value}}“',
+  approvalNoApproverSlotSeparator: ', ',
+  approvalNoApproverHoldingSlot: 'Noch kann niemand sonst diese Anfrage genehmigen. Ein Administrator der Organisation muss ein Mitglied hinzufügen, das {{type}} „{{value}}“ innehat; dieses Mitglied kann dann darüber entscheiden.',
+  approvalDecideRefusedSubmitterExcluded: 'Sie haben diese Anfrage eingereicht, und ihr Genehmigungsschritt lässt den Einreicher sie nicht genehmigen, daher können Sie sie nicht genehmigen. {{remedy}}',
+  approvalDecideRefusedOverrideOwnRequest: 'Sie haben diese Anfrage eingereicht und haben keinen Platz darin inne, daher können Sie sie nicht über die Administratorüberschreibung genehmigen. {{remedy}}',
+  approvalDecideRefusedAnotherApprover: 'Ein anderer Genehmiger des Schritts entscheidet darüber; wenn Sie den einzigen Platz innehaben, weisen Sie ihn jemand anderem zu.',
+  approvalDecideRefusedOverrideAnotherApprover: 'Ein Genehmiger des Schritts entscheidet darüber. Um sie zu verschieben, weisen Sie sie jemand anderem zu, lehnen Sie sie ab, oder rufen Sie sie zurück und reichen Sie den Datensatz erneut zur Genehmigung ein.',
+  approvalDecideRefusedOverrideWithdraw: '{{remedy}} Um sie stattdessen zurückzuziehen, lehnen Sie sie ab oder rufen Sie sie zurück.',
+  approvalPlatformAdminSlotLabel: 'Plattformadministratoren',
 };
 
 export const koMessages: ApprovalMessages = {
@@ -537,20 +787,36 @@ export const koMessages: ApprovalMessages = {
   approvalSubmitterExcludedRemaining: '이 단계에 excludeSubmitter가 설정되어 있어 제출자가 승인자에서 제외되었습니다. 나머지 승인자가 결정합니다.',
   approvalSubmitterExcludedFallback: '이 단계에 excludeSubmitter가 설정되어 있어 제출자가 승인자에서 제외되었습니다. 선언된 fallbackApprovers가 결정합니다.',
   approvalSubmitterExcludedAdministrators: '이 단계에 excludeSubmitter가 설정되어 있어 제출자가 승인자에서 제외되었습니다. 이 조직의 관리자가 결정합니다.',
-  approvalSubmitterExcludedNoOne: '이 단계에 excludeSubmitter가 설정되어 있어 제출자가 승인자에서 제외되었습니다. 다른 누구도 맡을 수 없어 특권 재정의로만 결정할 수 있습니다.',
+  approvalSubmitterExcludedNoOne: '이 단계에 excludeSubmitter가 설정되어 있어 제출자가 승인자에서 제외되었으며, 다른 누구도 맡을 수 없습니다.',
+  approvalNoApprover: '아직 다른 누구도 이 요청을 승인할 수 없습니다. 조직 관리자가 승인할 수 있는 구성원을 추가한 뒤 요청을 그 구성원에게 재할당해야 합니다.',
+  approvalNoApproverHolding: '아직 다른 누구도 이 요청을 승인할 수 없습니다. 조직 관리자가 {{who}}을(를) 맡은 구성원을 추가해야 하며, 그러면 그 구성원이 결정할 수 있습니다.',
+  approvalNoApproverTitle: '아직 {{object}} {{record}}을(를) 승인할 수 있는 사람이 없습니다',
+  approvalApproverTypePosition: '직위',
+  approvalApproverTypeTeam: '팀',
+  approvalApproverTypeDepartment: '부서',
+  approvalApproverTypeOrgMembershipLevel: '조직 구성원 등급',
+  approvalNoApproverSlot: "{{type}} '{{value}}'",
+  approvalNoApproverSlotSeparator: ', ',
+  approvalNoApproverHoldingSlot: "아직 다른 누구도 이 요청을 승인할 수 없습니다. 조직 관리자가 {{type}} '{{value}}'을(를) 맡은 구성원을 추가해야 하며, 그러면 그 구성원이 결정할 수 있습니다.",
+  approvalDecideRefusedSubmitterExcluded: '이 요청은 회원님이 제출한 것이며, 해당 승인 단계는 제출자가 자신의 요청을 승인하지 못하게 하므로 회원님은 승인할 수 없습니다. {{remedy}}',
+  approvalDecideRefusedOverrideOwnRequest: '이 요청은 회원님이 제출한 것이며 회원님은 이 요청의 승인자가 아니므로, 관리자 재정의로 승인할 수 없습니다. {{remedy}}',
+  approvalDecideRefusedAnotherApprover: '이 단계의 다른 승인자가 결정합니다. 회원님만 승인 자리를 맡고 있다면 다른 사람에게 재할당하세요.',
+  approvalDecideRefusedOverrideAnotherApprover: '이 단계의 승인자가 결정합니다. 옮기려면 다른 사람에게 재할당하거나, 반려하거나, 회수한 뒤 레코드를 다시 승인 요청하세요.',
+  approvalDecideRefusedOverrideWithdraw: '{{remedy}} 대신 철회하려면 반려하거나 회수하세요.',
+  approvalPlatformAdminSlotLabel: '플랫폼 관리자',
 };
 
 /** The shipped locales, keyed as the bundle beside this file keys them. */
-export const approvalMessages: Readonly<Record<'en' | 'zh-CN' | 'ja-JP' | 'es-ES' | 'zh-Hant' | 'ar' | 'fr' | 'pt-BR' | 'ru' | 'de' | 'ko', ApprovalMessages>> = {
+export const approvalMessages: Readonly<Record<'en' | 'zh-CN' | 'ja-JP' | 'es-ES' | 'zh-Hant' | 'ar' | 'fr' | 'pt-BR' | 'ru' | 'de' | 'ko', ShippedMessages>> = {
   en: enMessages,
-  'zh-CN': zhCNMessages,
-  'ja-JP': jaJPMessages,
-  'es-ES': esESMessages,
-  'zh-Hant': zhHantMessages,
-  ar: arMessages,
-  fr: frMessages,
-  'pt-BR': ptBRMessages,
-  ru: ruMessages,
-  de: deMessages,
-  ko: koMessages,
+  'zh-CN': withSlotLists(zhCNMessages),
+  'ja-JP': withSlotLists(jaJPMessages),
+  'es-ES': withSlotLists(esESMessages),
+  'zh-Hant': withSlotLists(zhHantMessages),
+  ar: withSlotLists(arMessages),
+  fr: withSlotLists(frMessages),
+  'pt-BR': withSlotLists(ptBRMessages),
+  ru: withSlotLists(ruMessages),
+  de: withSlotLists(deMessages),
+  ko: withSlotLists(koMessages),
 };

@@ -12,8 +12,10 @@
  * ## Real subjects
  *
  * `ConsoleLayout` with its real `AppShell`, the real `useConsoleChatDock` host,
- * the real `useChatDockState` and the real `AssistantTopBarButton` (drawn by a
- * stand-in header, since the real `AppHeader` needs the whole metadata stack).
+ * the real `useChatDockState` and the real `AssistantTopBarButton`, drawn in
+ * the page as the page header's button group draws it from 768 px up
+ * (objectstack#36111, objectstack#36112: a desktop app has no top bar). The
+ * phone's top bar is a stand-in that draws nothing.
  * The rail body is a stand-in: which chrome mounts is the subject here, not the
  * chat inside the rail.
  */
@@ -47,17 +49,15 @@ vi.mock('../../hooks/useAiSurface', () => ({
   useAiSurfaceEnabled: () => ({ enabled: true, isLoading: false }),
 }));
 
-// Chrome this card does not touch; the header stand-in draws the real robot.
+// Chrome this card does not touch.
 vi.mock('../UnifiedSidebar', () => ({ UnifiedSidebar: () => null }));
-vi.mock('../AppHeader', async () => {
-  const { AssistantTopBarButton } = await import('../AssistantTopBarButton');
-  return { AppHeader: () => <div data-testid="app-header-stub"><AssistantTopBarButton /></div> };
-});
+vi.mock('../AppHeader', () => ({ AppHeader: () => <div data-testid="app-header-stub" /> }));
 vi.mock('../ConsoleNotificationBanners', () => ({ ConsoleNotificationBanners: () => null }));
 vi.mock('../../preview/DraftPreviewBar', () => ({ DraftPreviewBar: () => null }));
 vi.mock('../../preview/UnpublishedAppBar', () => ({ UnpublishedAppBar: () => null }));
 
 import { ConsoleLayout } from '../ConsoleLayout';
+import { AssistantTopBarButton } from '../AssistantTopBarButton';
 import { NavigationProvider } from '../../context/NavigationContext';
 
 const APP = { name: 'crm', label: 'CRM', active: true, navigation: [] };
@@ -73,6 +73,9 @@ function mountConsole() {
     <MemoryRouter initialEntries={[LIST]}>
       <NavigationProvider>
         <ConsoleLayout activeAppName="crm" activeApp={APP} onAppChange={vi.fn()} objects={[]}>
+          {/* From 768 px up the robot sits in the page header's button group
+              (objectstack#36111), not in a top bar (objectstack#36112). */}
+          <AssistantTopBarButton />
           <div data-testid="route-content">page</div>
           <LocationProbe />
         </ConsoleLayout>

@@ -720,6 +720,26 @@ declared filter is refused with a console explanation rather than dropped —
 answering with more rows than the metadata asked for is the failure this key's
 wiring exists to remove.
 
+On the record page, a related list opened as its own **tab** is the child
+object's full list (objectstack#35892). Its first row is the list's tile and
+name on the left and **+ Add** on the right; its second row is the list page's
+own condition row (`plugin-list`'s `ListConditionsBlock`, which the record page
+hands in through `RelatedListConditionsSlotContext`, since that package depends
+on this one; a host that supplies none gets no condition row): **Sort** and **Filter**, with no view switch, no
+view settings and no search. The table is the list page's grid: the column
+menu, cell editing where the reader may edit the child object, row selection
+with the floating bulk bar, and the footer row, whose calculations cover every
+matching row. Rows load as the page scrolls; there is no pager and no "Open in
+list". The tab title counts every child; the footer counts the rows the filter
+keeps. Whatever the reader changes there (sort, filter, footer calculations)
+lasts while they stay on the record, across its tabs and its drawer, and is
+gone after a reload or on another record. **Discard** appears once something
+changed and puts the tab back; nothing is saved. Column widths and order are
+kept by the grid in the reader's browser, as on the list page. A header sort,
+column widths or order that an earlier version remembered in the reader's
+record-page preference no longer apply. A tab whose child object is grouped
+by status draws no footer row.
+
 The **Add** affordance renders only where every link in its chain is available:
 a spec-valid `add.picker.object` *and* a `dataSource`. The picker dialog and the
 add callback both required the adapter already, so without it the button used to
@@ -759,13 +779,43 @@ affordances (View, Edit, Delete) are not governed by this key.
 }
 ```
 
+### Comments: author avatar, reply focus, mention menu
+
+Every comment and reply in `RecordActivityTimeline` leads with
+`CommentAuthorAvatar`: the author's 20 px image, or their initials on the round
+disc the person chips draw (`getPersonInitials` from `@object-ui/fields`).
+`ThreadedReplies` takes `focusReplyOnOpen`: each time its reply input opens it
+expands the replies and puts the caret in the input, so a host whose input opens
+behind its own Reply button lets the reader type straight away. In
+`RichTextCommentInput`, the `@` mention menu opens under the caret, or above it
+when the window has no room below.
+
 ### InlineEditSaveBar & InlineFieldInput
 
-The record-level inline-edit session (#2407): double-clicking a field (or its
-hover pencil) in the highlights strip or details body stages edits into ONE
-shared draft (`InlineEditProvider` from `@object-ui/react`), committed by
-`<InlineEditSaveBar>` as a single atomic OCC-guarded update. Polish shipped in
-#2572:
+Two ways into an edit, one write path:
+
+- **A field edited in place** (objectstack#36475): on the default record
+  page's field list — the full page, the side preview, a phone, the wide
+  page's pinned column — a click on an editable value (or its pencil) opens
+  `FieldInPlaceEditor` over that value alone. The other fields stay values and
+  no save bar is drawn. The editor is the list cell's (`FieldEditWidget` with
+  `inCell`): Enter or a click elsewhere saves, a multi-line text saves on
+  Cmd/Ctrl+Enter, Esc discards and writes nothing, an unchanged value writes
+  nothing; a single select, a date, a record or a person opens its panel at
+  once and saves on the pick; a check flips and saves on the click. A refused
+  save keeps the editor open with the typed value and the server's reason
+  under the field. Offered where the record context can write the record the
+  page shows; elsewhere the click enters the whole-record session below.
+- **The whole record** (#2407): the header's Edit, and on a page an author
+  laid out a double-click on a field (or its hover pencil), stages edits into
+  ONE shared draft (`InlineEditProvider` from `@object-ui/react`), committed by
+  `<InlineEditSaveBar>` as a single atomic OCC-guarded update.
+
+The in-place editor saves through the same `<InlineEditSaveBar>`, in a session
+of the field's own: `face="field"` draws no bar and binds no window
+shortcuts (its 409 and required-fields dialogs only), and `saveRef` hands the
+host its save, called with the draft to write. Default `face` is `"bar"`.
+Polish shipped in #2572:
 
 - **Editors**: `InlineFieldInput` routes every field type to the same widget
   the form uses — including `number` / `currency` / `percent` (numeric
@@ -798,6 +848,39 @@ shared draft (`InlineEditProvider` from `@object-ui/react`), committed by
   the band decide through one rule, `resolveApprovalLock` from
   `@object-ui/react`.
 
+## A field's change history
+
+Each field of the object on the record page has a history button beside its
+value, shown on hover and on keyboard focus like the copy button. In a list,
+right-clicking a cell of a field the object declares adds **Change history**
+to the row's menu. Both open the same small card in place
+(`FieldHistoryButton`, `FieldHistoryPopover`, both drawing `FieldHistoryCard`):
+
+- only that field's changes on that record: who, when, and old → new in the
+  reader's words (an option by its label, an empty side as the word for empty),
+  newest first, ten at a time with **Load more**;
+- for a field never changed, **No changes recorded** with who created the
+  record and when.
+
+The card reads the record's activity rows (`sys_activity`), the rows the
+activity stream draws, and keeps those that changed the field. The server
+serves each row's changes narrowed to the reader, so a value the reader may not
+read never reaches the browser, and a field the reader may not read
+(`checkField(object, field, 'read')`) offers no history at all. Nor does a
+field whose old → new values are not recorded (`resolveFieldHistory` from
+`@objectstack/spec/data`: `fieldHistory: false` on the field,
+`enable.fieldHistory: false` on the object, a credential field, or a media or
+JSON-like type that does not opt in with `fieldHistory: true`), and nor do the
+platform's own record columns (`id`, `created_at`, …).
+
+The rows are read by record, fifty at a time: a query naming a change column
+is refused for a reader withheld any field of the object, so the field is never
+part of the query. Opening the card reads at most four batches
+(`FIELD_HISTORY_SCAN_BATCHES_PER_LOAD`), and each **Load more** at most four
+more. When they hold no change of the field and older rows remain, the card
+says **No changes in the recent activity** and offers **Load more** to read on;
+it says **No changes recorded** only once every row has been read.
+
 ## Links
 
 - 📚 [Documentation](https://objectstack.ai/docs/frontend/plugins/plugin-detail)
@@ -814,59 +897,71 @@ page that keeps the default tab strip) is laid out by the width of the view it
 occupies — the full page, the split pane, the overlay drawer, the maximized
 pane, a phone — by one rule, never by the viewport:
 
-| Container width | Layout |
+| Where, and how wide | Layout |
 |---|---|
-| 1120 px and up | Details · the right column (380 px). A details section takes up to three field columns; the 动态 panel shows five entries |
-| 760 – 1119 px | Details · the right column (320 px). A details section takes up to two field columns; the 动态 panel shows three entries |
-| below 760 px | One column: the details sections, then the right column's panels in their order |
+| A full page whose content is at least 744 px wide (`RECORD_PAGE_PIN_MIN_WIDTH`: a 320 px left column, a 24 px gap, 400 px of tabs), with at least one other tab, and no field group placing a related table among the fields | The details pinned to a left column, 400 px by default, one field a row; beside it the tab row without the details, open on its first tab. Each side scrolls on its own |
+| Anywhere else: a narrower page, a drawer, a pane, a phone, or a page that places a related table among its fields | The tab row with the details as its first tab (「详情」, Details), the open tab drawn the full width. The details take one field a row, except on a full page whose details are its only tab: up to three field columns there |
 
-The right column holds the panels, each the same shape (a title and a count;
-the header row opens the panel's whole face, the host's `?related=`): first
-**动态** (Activity) — one stream of the discussion, the activity and, with
-`enable.trackHistory`, the field changes, shown as a one-line composer, the
-newest entries and 「查看全部 N 条 →」, which opens the stream in full with its
-All / Activity / Discussion chips, a Changes chip while the record shows its
-field history (the host's `RecordFieldHistoryContext`; it holds the audit's
-field changes with their before and after values, and every activity event,
-`created` and `updated` included, sits under Activity; one action that wrote
-both an activity row and an audit entry is one row, its before and after values
-on it), and paging
-(`?related=timeline`) — then each related list in the reader's arrangement, then Approvals and
-Attachments. The reader's ⊟ (`rightColumn`) takes the right column out of the
-two-column tiers; there is no tabbed tier.
+No width draws a right column of summary panels any more. Each tab's count
+carries what a panel said, and the reader's ⊟ (`rightColumn`) and `rail` are
+ignored. `tier` (`recordPageTierFor`) is still taken and stamped on the page as
+`data-record-page-tier`, but the layout above is decided by the page
+content's own measured width.
 
-A tab row closes the record header in every tier (`RecordTabRow`): 「概览」
-(Overview), then 动态, then one tab per related panel in the reader's
-arrangement, each with its count. A tab is its panel's whole face: choosing it
-draws the full list (every column, paging, sort, inline edit) or the full
-stream below the row, with the header unchanged, and the URL carries it
-(`?related=<object>.<field>`, `?related=timeline`); 「概览」 or Esc returns. The
-row shows as many tabs as its own width fits, measured on every resize, and
-folds the rest into 「+N ▾」, which lists them with their counts and ends with
-the hidden panels' tabs. 「概览」, at least one more tab and the active tab are
-always on the row.
+On a pinned page the left column narrows on its own to leave the tabs 400 px,
+never below 320 px; under that the page is no longer pinned and the details
+become its first tab again. The divider between the column and the tabs is a
+separator: drag it, or move it with ← → (Home / End to either end); a
+double-click puts the column back to the default. The width is the host's to
+keep — `detailsWidth` and `onDetailsWidthChange`, per reader and per object in
+the console — and a double-click keeps the default there too.
 
-The related panels load counts first and rows on demand (`RelatedCardStack`).
-Every panel's count is asked in one request set, and each panel is a
-placeholder until the set has answered. A panel counted at 0 reads no rows. A
-panel above 0 reads its first three rows, projected to the name field and one
-status or date field, once it is in view (`IntersectionObserver`). The details
-column never waits for any of it. `RecordPageColumns` takes `relatedFieldsOf`,
-the child objects' field definitions the host already holds, so the counts
-read no child schema first; `prefetchRelatedCounts` and
+A tab row closes the record header (`RecordTabRow`): 「详情」 (Details) where
+the details are not pinned, then one tab per related list in the reader's
+arrangement, then Attachments, Approvals, and 动态 (Activity) last, each with
+its count. 动态 is left out for an object that switches off all three of its
+sources (`enable.feeds` and `enable.activities` false, `enable.trackHistory`
+not true), since that stream would be empty. A tab is its panel's whole face: choosing it draws the full list
+(every column, paging, sort, inline edit) or the full stream below the row,
+with the header unchanged, and the URL carries it
+(`?related=<object>.<field>`, `?related=timeline`); 「详情」 or Esc returns
+where the details are a tab. The row shows as many tabs as its own width
+fits, measured on every resize, and folds the rest into 「+N ▾」, which lists
+them with their counts and ends with the hidden lists' tabs. The details tab
+(where there is one), at least one more tab and the active tab are always on
+the row.
+
+The 动态 tab is one stream of the discussion, the activity and, with
+`enable.trackHistory`, the field changes, with All / Activity / Discussion
+chips and a Changes chip while the record shows its field history (the host's
+`RecordFieldHistoryContext`; it holds the audit's field changes with their
+before and after values, and every activity event, `created` and `updated`
+included, sits under Activity; one action that wrote both an activity row and
+an audit entry is one row, its before and after values on it), and paging.
+
+The related tabs load their counts first and their rows on demand. Every
+related list the page places, the ones the reader hid included, is counted in
+one request set when the record opens, and the tab row draws its counts from
+it: a tab shows no number while its count is unknown, and a count of 0 mutes
+the tab's label instead of drawing a number. A write to a child list counts it
+again. A related list reads its rows only when its tab is open (on a pinned
+page the first tab of the row is open from the start), and then draws the full
+list. The details never wait for the counts. `RecordPageColumns` takes
+`relatedFieldsOf`, the child objects' field definitions the host already
+holds, so the counts read no child schema first; `prefetchRelatedCounts` and
 `relatedCountTargetsIn` warm another record's counts, which the console's
-drawer does for the record `↑` / `↓` would show next.
+drawer does for the records `↑` / `↓` would show next.
 
-One header (title, actions, highlights, stage path) serves every tier, and
+One header (title, stage tag, actions) serves every layout, and
 the page description stays the tabbed one: its blocks are read off it by each
 tab's stable `value` (`buildDefaultPageColumns`), so Studio's page-create
 seed, a slotted page and the running page never disagree, and no metadata key
 or node type says "columns". An authored record page (`kind: 'full'`) is drawn
 as authored at every width, and so is a page whose strip the partition cannot
 read; `?tab=` addresses those strips. A slotted page keeps the synthesized
-strip, so it takes the tiers.
+strip, so it takes the layout above.
 
-A host wires it with three exports:
+A host wires it with four exports:
 
 ```tsx
 import * as React from 'react';
@@ -877,7 +972,7 @@ import type { ObjectDefLike } from '@object-ui/plugin-detail';
 declare const objectDef: ObjectDefLike;
 
 export function RecordPage() {
-  // The element the record page occupies: its width picks the tier.
+  // The element the record page occupies, measured for the tier.
   const [root, setRoot] = React.useState<HTMLDivElement | null>(null);
   const page = buildDefaultPageSchema(objectDef);
   // `null` until the first reading lands, so nothing is drawn for that one commit.
@@ -887,7 +982,9 @@ export function RecordPage() {
   return (
     <div ref={setRoot}>
       {columns ? (
-        tier === null ? null : <RecordPageColumns tier={tier} columns={columns} />
+        // `fullPage`: a full page, which may pin the details to a left column;
+        // a drawer or a pane leaves it out and keeps the details as a tab.
+        tier === null ? null : <RecordPageColumns tier={tier} columns={columns} fullPage />
       ) : (
         <SchemaRenderer schema={page} />
       )}
@@ -896,12 +993,101 @@ export function RecordPage() {
 }
 ```
 
+## The record's comment panel
+
+On the desktop the record's comments are a panel of their own, beside the
+record rather than inside 动态 (objectstack#36075). `CommentsPanel` draws 「评论」
+and ✕ at its top, the threads oldest first (a thread's replies fold to
+「N 条回复」 and open in place, with a reply box under them), and the comment box
+docked at its foot. Each comment's actions sit in one row at its top right while
+the pointer is over it (`CommentHoverActions`): Reply, an emoji, ✓ (resolve, on
+a thread's first comment) and More with Edit and Delete. Edit and Delete are
+offered on the viewer's own comments. On other people's, Delete needs
+`moderatesComments` on the `DiscussionContext` (the console sets it on the
+explain engine's definite allow of a by-id update of the record, the server's
+rule for moderating another member's comment), and Edit needs it together with
+`updatesOthersComments` (the console sets that on the explain engine's definite
+allow of an `update` of one comment the viewer did not write: the platform's
+row floor lets most members update only their own rows). Read both three-state
+with `useRecordVerdict`. `CommentsButton` is the header's switch: the comments icon
+with the number of unresolved threads.
+
+Resolved threads (objectstack#36071 stores them): where the rows carry a
+`resolved` (`FeedItem.resolved`, set by the host from `is_resolved`), ✓ hands
+`onResolveComment(id, true)`, and a resolved thread leaves the list. ✓ is on a
+thread the viewer started (`authoredByViewer` on its first comment), and on
+anyone's only where the host sets `updatesOthersComments`. The filter
+menu at the panel's top right holds 「显示已解决」 (a resolved thread then shows
+「已由 X 解决」, and its ✓ reopens it) and 「只看我参与的」 (threads the viewer
+started, replied in or is mentioned in, from `authoredByViewer` and
+`mentionsViewer`). The filter is held while the panel is open and not stored.
+Where the rows carry no `resolved`, there is no ✓ and no menu, and the count is
+every thread. `filterCommentThreads`, `unresolvedThreadCount` and
+`threadInvolvesViewer` are the rules, exported.
+
+Every part reads the record's discussion off the host's `DiscussionContext`
+(`useRecordComments`) and offers each write exactly where the host hands it, so
+the panel needs no props beyond `onClose`. Where it sits and how wide is the
+host's to decide; the console's record page gives it 380 px beside the record
+from a 1280 px window, over the record's right edge in a narrower one. The
+console's record drawer (the side preview) draws no panel and no icon: the
+comments are the full page's (objectstack#36225). While the host wraps the
+page in `RecordCommentsInPanelContext` (value `true`; the console does so on
+the full page and in the drawer alike), the default page's 动态
+stream draws the system entries alone: no comment rows, no All / Activity /
+Discussion chips (the Changes chip stays, a toggle), no comment box, and its
+count leaves the comments out.
+
+The pieces are exported one by one (`CommentThread`, `CommentItem`,
+`CommentComposer`, `buildCommentThreads`, and #36070's `CommentAuthorAvatar`) for a surface that
+lays them out another way, such as a phone's comment page.
+
+### The phone's comment page
+
+`CommentsPage` (objectstack#36076) is that other layout: a full-screen page
+(`role="dialog"`, fixed over the host's page) that reads the same
+`useRecordComments`. Props: `threadId` (`null` for the list, else a thread's
+first comment's id), `onOpenThread(id)`, `onBack()`, `backLabel` (what the
+list's 「‹」 returns to) and `onEngage` (a press begins on a comment, when the
+host may ask what the actions take; the 500 ms hold covers the answer). The list draws each thread with
+`CommentThread mode="summary"`; a thread draws `mode="page"`, its comment and
+every reply with no reply box of its own, since the page docks one
+`CommentComposer layout="phone"` at its foot (a new comment in the list, a reply
+in a thread, each its own draft). The page follows the on-screen keyboard
+through `visualViewport`. A long press of 500 ms that travels under 10 px, or
+the context menu, raises `CommentActionSheet` with the comment's
+`CommentItemActions`, the same object `renderActions` hands the desktop's hover
+row, so the gates are the thread's. The sheet follows them while it is up:
+`CommentThread` takes `heldId` and reports the held comment's current actions to
+`onHeldActions` whenever what they offer changes, so an answer that lands after
+the hold adds its rows. `RichTextCommentInput` takes
+`layout="phone"`: the toolbar under the text, at touch size, with no preview and
+no shortcut hints. The console mounts the page from `?comments=` on the phone's
+record page (`RECORD_COMMENTS_PARAM`).
+
+```tsx
+import * as React from 'react';
+import { CommentsButton, CommentsPanel, useRecordComments } from '@object-ui/plugin-detail';
+
+export function RecordCommentsSwitch() {
+  const [open, setOpen] = React.useState(false);
+  const { count } = useRecordComments();
+  return (
+    <>
+      <CommentsButton count={count} pressed={open} onPressedChange={setOpen} />
+      {open && <CommentsPanel onClose={() => setOpen(false)} />}
+    </>
+  );
+}
+```
+
 ## Reference Rail on an authored page
 
 The "Reference Rail" is a right-hand column of summary cards for related
 collections, drawn by the `record:reference_rail` component. The synthesized
-default page never emits it: its right column already shows every related
-list as a compact panel (see *One record page, laid out by its width* above). The
+default page never emits it: each related list it places is a tab of its own
+on the record's tab row, with its count (see *One record page, laid out by its
+width* above). The
 `buildDefaultPageSchema` options that used to opt into the rail
 (`showReferenceRail`, `hideReferenceRail`, `hideRelatedTab`) and the `rightRail`
 slot were removed with the other surface hints ADR-0085 does not admit

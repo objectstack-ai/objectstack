@@ -24,6 +24,9 @@ import { RelatedCountStore } from '../hooks/related-count-store';
 // Registers the renderers at module scope, NOT inside a `beforeAll` — there the
 // cold transform is billed to `hookTimeout` (objectui#3010/#3021).
 import '../renderers';
+// `react-page` reaches this dynamically; load it during collection, not in a
+// clocked case (`check:test-source-alias`).
+import '@object-ui/react-runtime';
 
 const RECORD_OBJECT = 'zz12987_env';
 const PARENT_ID = 'ENV-1';
@@ -94,13 +97,15 @@ describe('page:tabs derived count skips a related list its own visibleWhen hides
     expect(probedObjects(ds)).toEqual([SHOWN_CHILD]);
   });
 
-  it('CONTROL: counts both lists when both are shown', async () => {
-    const { findByLabelText, ds } = renderTabs('pro', {
+  it('CONTROL: both lists shown are both asked — and the tab, merging two tables, carries no number (objectstack#35595)', async () => {
+    const { queryByLabelText, ds } = renderTabs('pro', {
       children: [relatedList(HIDDEN_CHILD, PRO_ONLY), relatedList(SHOWN_CHILD)],
     });
 
-    expect((await findByLabelText('5 items')).textContent).toBe('5');
-    expect(probedObjects(ds)).toEqual([HIDDEN_CHILD, SHOWN_CHILD].sort());
+    await waitFor(() => expect(probedObjects(ds)).toEqual([HIDDEN_CHILD, SHOWN_CHILD].sort()));
+    // One table, one count: the platform does not total two lists.
+    expect(queryByLabelText('5 items')).toBeNull();
+    expect(queryByLabelText('2 items')).toBeNull();
   });
 
   it('CONTROL: an authored count wins over the derived one', async () => {
@@ -141,8 +146,10 @@ describe('page:tabs derived count skips a related list its own visibleWhen hides
 
   it('drops the list from the badge when its gate closes on a later render', async () => {
     const overview = { children: [relatedList(HIDDEN_CHILD, PRO_ONLY), relatedList(SHOWN_CHILD)] };
-    const { findByLabelText, rerender, ds } = renderTabs('pro', overview);
-    await findByLabelText('5 items');
+    const { findByLabelText, queryByLabelText, rerender, ds } = renderTabs('pro', overview);
+    // Both shown: a merged tab, no number (objectstack#35595).
+    await waitFor(() => expect(probedObjects(ds)).toEqual([HIDDEN_CHILD, SHOWN_CHILD].sort()));
+    expect(queryByLabelText('5 items')).toBeNull();
 
     rerender(
       <RecordContextProvider

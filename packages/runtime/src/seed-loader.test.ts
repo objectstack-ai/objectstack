@@ -1236,7 +1236,7 @@ describe('SeedLoaderService', () => {
   });
 
   describe('load — edge cases', () => {
-    it('should handle records with no matching externalId field', async () => {
+    it('refuses a record with no value for its externalId field, writing nothing (#34857)', async () => {
       const metadata = createMockMetadata({
         account: { name: 'account', fields: { name: { type: 'text' } } },
       });
@@ -1253,8 +1253,12 @@ describe('SeedLoaderService', () => {
         },
       });
 
-      // Should still insert (externalId 'code' not present in record, insert path)
-      expect(result.summary.totalInserted).toBe(1);
+      // A keyed record that leaves its key blank could match no row and would
+      // be inserted again on every load: it is refused, by index and field.
+      expect(result.summary.totalInserted).toBe(0);
+      expect(result.summary.totalErrored).toBe(1);
+      expect(result.errors[0]).toMatchObject({ sourceObject: 'account', field: 'code', recordIndex: 0 });
+      expect(engine.insert).not.toHaveBeenCalled();
     });
 
     it('should handle insert errors gracefully', async () => {

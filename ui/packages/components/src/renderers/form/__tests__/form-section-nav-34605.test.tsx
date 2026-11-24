@@ -66,6 +66,27 @@ function renderWithSink(schema: Record<string, unknown>) {
 }
 
 describe('form section list for the host navigation (objectstack#34605)', () => {
+  it('stops at a labelled host slot between the headings around it, and skips an unlabelled one (objectstack#35889)', async () => {
+    const { last } = renderWithSink({
+      fields: [
+        divider('s_header', 'Header', ['name']),
+        { name: 'name', label: 'Name', type: 'input' },
+        { name: '__form_slot__d0', label: 'Lines', type: 'form-slot' },
+        { name: '__form_slot__d1', label: '', type: 'form-slot' },
+        divider('s_totals', 'Totals', ['memo']),
+        { name: 'memo', label: 'Memo', type: 'input' },
+      ],
+    });
+    await waitFor(() => expect(last()).toBeTruthy());
+    const items = last()!;
+    expect(items.map((i) => [i.key, i.label])).toEqual([
+      ['s_header', 'Header'],
+      ['__form_slot__d0', 'Lines'],
+      ['s_totals', 'Totals'],
+    ]);
+    expect(document.getElementById(items[1].anchorId)?.getAttribute('data-form-slot')).toBe('__form_slot__d0');
+  });
+
   it('reports the drawn headings in order, each with the DOM id of its row', async () => {
     const { last } = renderWithSink({ fields: SECTIONED });
     await waitFor(() => expect(last()).toBeTruthy());

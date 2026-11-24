@@ -30,6 +30,7 @@
 
 import type { DriverOptions, FilterCondition } from '@objectstack/spec/data';
 import type { SqlDriver } from './sql-driver.js';
+import { primeFixedReadLeafKeyTypes } from './fixed-read-leaf-key-type.js';
 
 /**
  * The `SqlDriver` members the bodies of {@link DistinctFacet} read — every one of
@@ -59,9 +60,11 @@ export class DistinctFacet {
   static async distinct(this: Pick<DistinctHost, 'applyFilters' | 'applyTenantScope' | 'coercionKey' | 'distinctBackendFault' | 'getBuilder' | 'isMssql' | 'isOracle' | 'presentReadValue' | 'primeMssqlGuidColumns' | 'primeOracleRawUuidColumns' | 'readPresentationKind' | 'remoteColumn'>, object: string, field: string, filters?: FilterCondition, options?: DriverOptions): Promise<any[]> {
     // [#31395] SQL Server: which columns are GUIDs, before a text operator compiles.
     if (this.isMssql) await this.primeMssqlGuidColumns(object, filters);
+    // [ADR-0155 O2] PostgreSQL: the key type a fixed-read leaf's inner read is cast to.
+    await primeFixedReadLeafKeyTypes(this, object, filters, options);
     // [#31390] On Oracle a federated object's RAW(16) uuid columns are read from
     // the remote catalog before a comparand or a written value is bound.
-    if (this.isOracle) await this.primeOracleRawUuidColumns(object);
+    if (this.isOracle) await this.primeOracleRawUuidColumns(object, filters);
     const builder = this.getBuilder(object, options);
     // The third read door that skipped the chokepoint, and the one #6792 does
     // NOT name — the card asserts the opposite ("called at 13 sites — …,

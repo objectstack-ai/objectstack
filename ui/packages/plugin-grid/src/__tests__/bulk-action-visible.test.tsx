@@ -16,7 +16,7 @@ import { render, screen } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import React from 'react';
 import { PredicateScopeProvider } from '@object-ui/react';
-import { BulkActionBar } from '../components/BulkActionBar';
+import { BulkActionBar } from '../components/SelectionBar';
 
 function renderBar(actionDefs: any[], scope: Record<string, any> = {}) {
   return render(

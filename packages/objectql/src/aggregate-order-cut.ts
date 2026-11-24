@@ -45,17 +45,29 @@
  * A driver that answered rows without it did not serve the cut, and its rows
  * are refused as a server fault, never served as an answer.
  *
- * ## Refused, never approximated
+ * ## Refused, or declined to a caller that asked — never approximated
  *
  * Prime Directive 5 (ruling record 6888468549): only a driver that compiles the
  * cut in its own statement serves it ({@link driverCompilesAggregateOrderCut}).
  * Every other driver — the in-memory driver, MongoDB, OData, the remote face of
- * the Turso driver — is refused `INVALID_QUERY` / 400 before anything is read;
- * so is an aggregate the engine would compute in memory (a date bucket the
- * driver does not compile, a reference zone it does not bucket, a measure
- * filter it does not evaluate), an aggregate with a `having` (applied by the
- * engine AFTER the driver, so a cut in the statement would cut before it), and
- * a relation group join. No in-process sort and no slower path exist.
+ * the Turso driver — is not served, and neither is an aggregate the engine
+ * would compute in memory (a date bucket the driver does not compile, a
+ * reference zone it does not bucket, a measure filter it does not evaluate),
+ * an aggregate with a `having` (applied by the engine AFTER the driver, so a
+ * cut in the statement would cut before it), or a relation group join. The
+ * engine never orders or cuts the groups itself: no in-process sort and no
+ * slower path exist here.
+ *
+ * What "not served" answers is the caller's choice. By default the request is
+ * refused `INVALID_QUERY` / 400 before anything is read — the answer
+ * `aggregate_records` gives. A caller that already owns a whole-grid answer
+ * (the analytics `query_dataset` face, which orders and windows the groups it
+ * is handed) sets {@link AggregateOrderCutRequest.declinable}: the request is
+ * then DECLINED instead, exactly as the relation group join declines — nothing
+ * is read, the read answers `[]`, which is not an answer, the reason is on
+ * the request's `declined` slot and its `outcome` stays unset — and the
+ * caller reads the groups the way it always has. A request the caller built wrong (an order key naming no column of the
+ * row) is refused either way.
  */
 
 import { StandardErrorCode } from '@objectstack/spec/api';
@@ -117,6 +129,15 @@ export interface AggregateOrderCutOutcome {
 }
 
 /**
+ * Why the engine declined a {@link AggregateOrderCutRequest.declinable}
+ * request: set instead of {@link AggregateOrderCutOutcome}, before anything
+ * was read — the read's `[]` is no answer.
+ */
+export interface AggregateOrderCutDecline {
+  readonly reason: string;
+}
+
+/**
  * The request: the order of the groups, how many to answer, and the slot the
  * engine writes its {@link AggregateOrderCutOutcome} to. A carrier that hands
  * the request on reads the slot back after the read: a read that came back
@@ -126,7 +147,17 @@ export interface AggregateOrderCutRequest {
   readonly orderBy: readonly AggregateOrderKey[];
   /** The most groups to answer; absent = every group, still ordered and counted. */
   readonly limit?: number;
+  /**
+   * Decline rather than refuse where the cut cannot be served
+   * ({@link aggregateOrderCutRefusal}): nothing is read, the read answers
+   * `[]`, `outcome` stays unset and {@link declined} carries the refusal's
+   * reason. Opt-in — absent, the request is refused `INVALID_QUERY` / 400 as
+   * before.
+   */
+  readonly declinable?: boolean;
   outcome?: AggregateOrderCutOutcome;
+  /** Set by the engine when it declined a {@link declinable} request. */
+  declined?: AggregateOrderCutDecline;
 }
 
 /** What the driver is handed, on the AST under {@link AGGREGATE_ORDER_CUT_DIRECTIVE}. */
@@ -268,7 +299,9 @@ export function assertAggregateOrderCutShape(
  * Why the engine cannot serve the cut for this read, or `undefined` when it
  * can — judged once the driver and the path the aggregate takes are known,
  * before the driver is asked. ⛔ No answer here means "compute it some other
- * way": every reason is a refusal.
+ * way" inside the engine: every reason is a refusal, which a
+ * {@link AggregateOrderCutRequest.declinable} request turns into a decline
+ * ({@link declineAggregateOrderCut}) for its caller to serve.
  */
 export function aggregateOrderCutRefusal(
   object: string,
@@ -310,6 +343,16 @@ export function aggregateOrderCutRefusal(
     );
   }
   return undefined;
+}
+
+/**
+ * Records a decline on a {@link AggregateOrderCutRequest.declinable} request
+ * (the `refusal`'s message is the reason) and answers the read's `[]`, which
+ * is not an answer. Nothing has been read.
+ */
+export function declineAggregateOrderCut(request: AggregateOrderCutRequest, refusal: Error): Record<string, unknown>[] {
+  request.declined = { reason: refusal.message };
+  return [];
 }
 
 /**

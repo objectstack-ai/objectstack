@@ -16,6 +16,7 @@ export const SysAccount = ObjectSchema.create({
   label: 'Account',
   pluralLabel: 'Accounts',
   icon: 'link',
+  color: 'purple',
   isSystem: true,
   managedBy: 'better-auth',
   // ADR-0010 §3.7 — managed by better-auth; tenants may not edit schema,
@@ -338,6 +339,7 @@ export const SysAccount = ObjectSchema.create({
   
   enable: {
     trackHistory: false,
+    fieldHistory: false, // [#36290] keeps this object's "no history": values off in the activity stream
     searchable: false,
     apiEnabled: true,
     // #1591 — reads only: writes are refused by the identity write guard
