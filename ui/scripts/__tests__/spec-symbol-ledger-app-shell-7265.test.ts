@@ -73,6 +73,7 @@ const SITES = [
   'packages/app-shell/src/views/studio-design/DataPillarHelpers.tsx',
   'packages/app-shell/src/views/studio-design/AutomationsPillar.tsx',
   'packages/app-shell/src/views/studio-design/AccessPillar.tsx',
+  'packages/app-shell/src/views/studio-design/DataPillar.tsx',
   'packages/app-shell/src/hooks/useTrackRouteAsRecent.ts',
   'packages/app-shell/src/utils/deriveRelatedLists.ts',
   'packages/app-shell/src/views/metadata-admin/datasource/DatasourceResourcePage.tsx',
