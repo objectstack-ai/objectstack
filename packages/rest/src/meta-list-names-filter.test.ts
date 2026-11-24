@@ -145,6 +145,41 @@ describe('the list chain\'s `?names=` step', () => {
     });
 });
 
+/**
+ * [#36894] The store's `changedAt` (when the stored row each listed item
+ * serves last changed, keyed by name) keys only the names the chain's answer
+ * still lists: the per-caller gate and the query filters leave items out, and
+ * an entry for one of them would tell the caller a name, and when it changed,
+ * that the answer does not list.
+ */
+describe('the list chain keys `changedAt` by the names it still lists', () => {
+    const TIMES = { crm: '2026-11-20T08:00:00.000Z', build_in_flight: '2026-11-24T10:15:00.000Z', helpdesk: '2026-11-22T09:30:00.000Z' };
+    const member = { userId: 'u1', systemPermissions: [] };
+    const answerOf = async (query: Record<string, string>, caller: unknown = member, raw: unknown = { type: 'app', items: structuredClone(APPS), changedAt: { ...TIMES } }) => {
+        const { sources } = chainSources({ caller });
+        const answer: any = await createMetaListAnswer(sources, { metaType: 'app', query, previewDrafts: false })(raw);
+        return answer.data;
+    };
+
+    it('an item the per-caller gate withholds is not keyed', async () => {
+        const data = await answerOf({});
+        expect((data.items as any[]).map((it) => it.name)).toEqual(['crm', 'helpdesk']);
+        expect(data.changedAt).toEqual({ crm: TIMES.crm, helpdesk: TIMES.helpdesk });
+    });
+
+    it('an item a query filter leaves out is not keyed; with none left the field is absent', async () => {
+        expect((await answerOf({ names: 'helpdesk' })).changedAt).toEqual({ helpdesk: TIMES.helpdesk });
+        const none = await answerOf({ id: 'build_in_flight' });
+        expect({ items: none.items, has: 'changedAt' in none }).toEqual({ items: [], has: false });
+    });
+
+    it('control: a caller the gate does not narrow keeps every entry, and an envelope with no `changedAt` gains none', async () => {
+        expect((await answerOf({}, null)).changedAt).toEqual(TIMES);
+        const bare = await answerOf({}, member, { type: 'app', items: structuredClone(APPS) });
+        expect('changedAt' in bare).toBe(false);
+    });
+});
+
 function mockRes() {
     const res: any = { statusCode: 200, headers: {} as Record<string, string> };
     res.status = vi.fn((c: number) => { res.statusCode = c; return res; });
