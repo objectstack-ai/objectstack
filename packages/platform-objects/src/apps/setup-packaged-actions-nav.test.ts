@@ -55,7 +55,13 @@ describe('Setup ships no packaged-automation page (ADR-0146 D4 as amended, D11)'
     expect(items.filter((i) => i.componentRef === 'automation:packaged-actions')).toEqual([]);
   });
 
+  // The retired entries sat in `group_apps`. Since objectstack#36834 that group
+  // carries Setup's Packages entry, so the pin reads what is left there: no
+  // contribution emptied into a shell, and nothing but `nav_packages`
+  // (`setup-packages-door.test.ts` pins that entry itself).
   it('no contribution is an empty group_apps shell left behind', () => {
-    expect(SETUP_NAV_CONTRIBUTIONS.filter((c) => c.group === 'group_apps')).toEqual([]);
+    const apps = SETUP_NAV_CONTRIBUTIONS.filter((c) => c.group === 'group_apps');
+    expect(apps.filter((c) => (c.items ?? []).length === 0)).toEqual([]);
+    expect(apps.flatMap((c) => (c.items as NavItem[]).map((i) => i.id))).toEqual(['nav_packages']);
   });
 });

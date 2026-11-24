@@ -3644,7 +3644,7 @@ export async function selfTest() {
     const SIG = `domain:skills#2 · os-justin · ${SESSION}`;
     const CLAIM_FILE = '/tmp/self-test/claim.md';
     const VERDICT_FILE = '/tmp/self-test/verdict.md';
-    const CLAIM = `${SIG}\nClaim: PM loop round 1 · {{NOW}}\nSession: \`${SESSION}\`\nBranch: \`claude/issue-7-fold\`\nSeat: \`domain:skills#2\`\nClause-②: no\n`;
+    const CLAIM = `${SIG}\nClaim: PM loop round 1 · {{NOW}}\nSession: \`${SESSION}\`\nBranch: \`claude/issue-7-fold\`\nSeat: \`domain:skills#2\`\nClause-②: no\nContainer & model: \`S\`, \`mode:subagent\`, \`model: opus\`, \`effort: medium\`\n`;
     const VERDICT = `${SIG}\nVerdict: ACCEPT at {{NOW}} — the landing rides this stroke.\n`;
     const files = { [CLAIM_FILE]: CLAIM, [VERDICT_FILE]: VERDICT };
     const NOW = () => new Date(Date.UTC(2026, 10, 8, 15, 0, 0));
@@ -4045,7 +4045,7 @@ export async function selfTest() {
     const route = { requested: 'auto', transport: 'dispatch', reason: 'self-test: dispatch', error: null, session: SESSION };
     const SIG = `domain:skills#2 · os-justin · ${SESSION}`;
     const CLAIM_FILE = '/tmp/self-test/claim.md';
-    const CLAIM = `${SIG}\nClaim: PM loop round 1 · {{NOW}}\nSession: \`${SESSION}\`\nBranch: \`claude/issue-7-fold\`\nSeat: \`domain:skills#2\`\nClause-②: no\n`;
+    const CLAIM = `${SIG}\nClaim: PM loop round 1 · {{NOW}}\nSession: \`${SESSION}\`\nBranch: \`claude/issue-7-fold\`\nSeat: \`domain:skills#2\`\nClause-②: no\nContainer & model: \`S\`, \`mode:subagent\`, \`model: opus\`, \`effort: medium\`\n`;
     const at = Date.UTC(2026, 10, 8, 15, 0, 0);
     const claimArgv = ['--repo', 'objectstack-ai/objectstack', '--issue', '7', '--add', 'pm:dispatched', '--remove', 'pm:queue', '--assign', 'dev', '--comment-file', CLAIM_FILE];
     const board = fakeBoard({ labels: ['pm:queue', 'domain:skills'], assignees: [], serverNow: at });
