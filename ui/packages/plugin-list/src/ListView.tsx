@@ -480,6 +480,12 @@ export interface ListViewProps {
    * objectstack#35403 — the built-in bulk Change Owner, forwarded to
    * `ObjectGrid` (which declares it with this signature): the grid's selection
    * bar offers it while the host wires it.
+   *
+   * Grid-only (objectstack#36395): the grid is the one view that holds a
+   * selection of several rows. A kanban, calendar, gallery or any other view
+   * type takes none, so it ignores this prop and offers no bulk Change Owner;
+   * there, a record's owner is changed one record at a time, from its record
+   * page.
    */
   onBulkChangeOwner?: (records: any[]) => void;
   /**
