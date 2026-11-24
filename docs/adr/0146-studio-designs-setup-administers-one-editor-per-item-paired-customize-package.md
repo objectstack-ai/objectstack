@@ -26,6 +26,7 @@ a base's upgrade plan may report, as advice, each `.custom` override that hides 
 It lands by the maintainer's hand-merge of the PR cut from #30881.
 · **Amended in place** (2026-11-06, ruling record [`6691022506`](https://github.com/objectstack-ai/objectstack/issues/29594#issuecomment-6691022506) on [#29594](https://github.com/objectstack-ai/objectstack/issues/29594), maintainer, verbatim: 「① 定制单位 = App；同意」, and the second ruling record [`6691217245`](https://github.com/objectstack-ai/objectstack/issues/29594#issuecomment-6691217245) there, verbatim: 「内核白名单，可以下一版本再处理，首批名单建议：Users、Organizations；其他同意。」): the customization unit is the App, so there is one pair per App, `<app id>.custom`, shared by every package its artifact delivers and never one per module; the kernel is one platform suite with one platform pair, `com.objectstack.kernel.custom`, whose range is the platform version; no kernel object is customizable in this version, and the kernel whitelist (Users, Organizations) belongs to the next one ([D3](#d3), [D11](#d11), Q4, [Consequences](#consequences), merge questions 8 to 12); the App of a package is read from the declarations the registry holds, a package that declares no App is its own unit, and a pair created under the old per-package unit is re-identified as, or moved into, its App's pair by the migration ceremony (merge questions 11 and 12). It lands by the maintainer's hand-merge of the PR cut from #31014.
 · **Amended in place** (2026-11-17, card [#34724](https://github.com/objectstack-ai/objectstack/issues/34724) of epic [#34571](https://github.com/objectstack-ai/objectstack/issues/34571), maintainer, verbatim: 「打包动作不是应该在 studio 对应的软件包中自定义吗」, and on platform actions getting no switch, 「同意，立卡」; ruling record [`6944409840`](https://github.com/objectstack-ai/objectstack/issues/34724#issuecomment-6944409840), verbatim: 「保持原状并写明恢复方法」): the action's ledger switch moves onto the action in Studio and Setup › Packaged Actions retires, so the line above that says D4 "keeps the ledger switch" now reads as the switch living in Studio; the platform's own actions carry no switch in the console, a row that already switches one off stays in force, and the activation door is the way to turn it on again ([D4](#d4), [D9](#d9)). It lands by the hand-merge or authorized approval of the PR cut from #34724.
+· **Amended in place** (2026-11-24, card [#36891](https://github.com/objectstack-ai/objectstack/issues/36891) of epic [#36890](https://github.com/objectstack-ai/objectstack/issues/36890), maintainer, verbatim: 「元数据列表如果全部改成点击之后弹出全屏的详情页呢？是不是对象流程这些可以用同一种风格，顶部的导航也不需要了。」, 「我们说的弹出窗口全屏，应该是右侧全屏对吧，左侧菜单和前端一样可以折叠。」, and on the epic's fifteen numbered decisions, twice, 「全部按建议」): the "All metadata" area is Studio's only entry and the four pillars are no longer places — an item opens on its metadata address and fills the content pane beside one collapsible left menu, the object, the flow and the permission set opening their designers there and no longer a pillar; the menu's six groups and its type-to-group table are [ADR-0084](./0084-application-builder-information-architecture.md)'s as amended the same day; the item's address, its ‹ › order, its leave guard, and where a dashboard or a report opens (an app's own edit state) and is created are fixed in [D1](#d1), and the pillar and landing wording of [D2](#d2), [D3](#d3), [D4](#d4), [D8](#d8), [D11](#d11) and the [Consequences](#consequences) is read through it (merge questions 13 to 15). It lands by the hand-merge or authorized approval of the PR cut from #36891.
 **Decided by**: the maintainer, 2026-10-30, in the desktop session that re-planned the epic, verbatim and
 untranslated as epic #28236 records them — the direction 「方向定为包级覆盖：代码和 Studio 用同一机制，定制都进 .custom。」; the suffix 「同意 后缀改成 .custom」; the eight questions 「等我拍板的 8 个问题，全部同意」; the extension
 fields 「扩展字段用 __c 后缀，只有 .custom 包能用。」; the item toolbar 「同意新增 2h「Studio 项工具栏」并放在 2a 之前」;
@@ -170,7 +171,9 @@ answered it for code and Studio at once: 「方向定为包级覆盖：代码和
 **Studio = the developer's surface: design, catalog, source, layers, references, history with rollback, audit,
 diagnostics — all 30 types.** The four pillars stay the designers for the types they cover; an **"All metadata"** area
 joins them, per package and across packages, holding what `views/metadata-admin` holds today: the type directory,
-lists, the generic item page. A pillar type opened from the directory opens its pillar. **The item tools Setup's right
+lists, the generic item page. A pillar type opened from the directory opens its pillar. *(These two sentences are
+replaced by the 2026-11-24 amendment at the end of this decision: the area is the only entry, and no item opens a
+pillar.)* **The item tools Setup's right
 side offers today belong to Studio, on every pillar item, ahead of any customization work** — maintainer, verbatim:
 「setup 右侧这套界面，包括看版本历史的，本身就应该属于 studio」 and 「同意新增 2h「Studio 项工具栏」并放在 2a 之前」
 (#28239, N-05). On an item of a read-only package the five tools are read-only: layers, references, history, audit and
@@ -190,6 +193,117 @@ Not taken: (a) *Setup keeps the catalog as the "environment view" and Studio kee
 a developer's, and two homes for one item is the defect; (b) *everything metadata-shaped into Studio including the
 administration reached through metadata pages* — rejected by [D7](#d7): holders, assignments and membership are
 administration and get Setup pages of their own.
+
+**Amended 2026-11-24 — the "All metadata" area is Studio's only entry, and an item opens on its metadata address,
+filling the content pane** (card [#36891](https://github.com/objectstack-ai/objectstack/issues/36891) of epic
+[#36890](https://github.com/objectstack-ai/objectstack/issues/36890); maintainer, verbatim:
+「元数据列表如果全部改成点击之后弹出全屏的详情页呢？是不是对象流程这些可以用同一种风格，顶部的导航也不需要了。」 ·
+「对象弹出之后不用再下拉了吧？关闭回到列表重新选就行。」 · 「也不需要在应用打开的按钮。」 · 「上一个下一个可以保留」 ·
+「我们说的弹出窗口全屏，应该是右侧全屏对吧，左侧菜单和前端一样可以折叠。」; and, on the two decision cards that carried
+the epic's fifteen numbered decisions, 「全部按建议」 — 1–9 at 06:36Z, 10–15 at 08:03Z). The two sentences marked above
+are superseded. The rest of this decision stands: Studio owns all metadata, Setup owns the deployment's
+administration, the item tools are Studio's, and both *Not taken*. "All 30 types" reads as every registered type —
+32 at `origin/main` `151e8123`, listed in
+[ADR-0084](./0084-application-builder-information-architecture.md)'s type-to-group table. **The amendment declares;
+the epic's children implement it, and until they land the code still draws the pillars.** A decision is cited below
+by its number in the epic's table; the discussion has no GitHub record beyond the epic's quotations.
+
+- **One entry, no pillars.** Studio's navigation is the left menu of ADR-0084 as amended the same day: six groups
+  that follow the spec's registered domains, a type's row opening that type's list in the content pane. The four
+  pillars, and the "All metadata" tab that sat beside them, are no longer places. What the area held — the type
+  directory, the lists, the item page, history, diagnostics — is what Studio is, and the directory's grouping is the
+  menu. The Interfaces pillar is retired by its own card,
+  [#36502](https://github.com/objectstack-ai/objectstack/issues/36502), ahead of this epic's menu; this amendment
+  neither waits for that card nor repeats it. Data, Automations and Access go with this epic.
+- **The item fills the content pane; the menu stays.** An item opened from a list fills the pane to the right of the
+  menu — the whole pane, not a dialog over the page and not a side sheet. The menu stays, and collapses the way the
+  app's sidebar does (maintainer, 06:31Z, above). The object, the flow and the permission set open **their
+  designers** this way: the designer is that item's page, without the list column it carried as a pillar, because
+  that type's list is now reached from the menu.
+- **One address per item.** An item's address is its metadata address, `/studio/<package>/metadata/<type>/<name>`,
+  and its type's list is `/studio/<package>/metadata/<type>`. An item that opens in Studio opens there and nowhere
+  else; the two types that open in an app instead are below. A pillar
+  address (`/studio/<package>/data?surface=object:<name>` and its Automations and Access siblings) redirects to the
+  item's metadata address — each type switching in the change that mounts its designer there — and keeps redirecting
+  after the pillar routes are deleted, so no bookmark is lost (merge question 13). `?package=`,
+  `?scope=environment` and `?review=1` keep the meaning they have today.
+- **Changing item (decision 7).** × at the top left returns to the list, with its search, filters, sort and scroll
+  position as they were; ‹ › at the top right open the previous and the next item; ⌘K opens any item by name. The
+  item's page carries no item switcher and no "open in app" button (maintainer, above).
+- **The ‹ › order is the list's (decision 10).** The list's search, filters and sort are in the list's address, and
+  the item's address carries that list context: ‹ › walk the list as the person filtered and sorted it, and a
+  refresh keeps the walk. An item opened with no list context — a pasted address, ⌘K, a link from another page — is
+  walked in name order.
+- **Leaving with unsaved edits (decision 12).** The item's page registers its edits with the console's one guard
+  (`ui/packages/app-shell/src/chrome/unsavedEdits.ts#registerUnsavedEdits`,
+  `ui/packages/app-shell/src/chrome/unsavedEdits.ts#confirmUnsavedLeave`): ×, ‹ ›, the left menu, an in-app link, a
+  refresh and closing the tab all ask first. The browser's Back does not, by the platform's standing convention — the
+  console mounts `BrowserRouter`, which gives no way to veto it — and Studio adds no history workaround of its own.
+- **The item tools are tabs (decision 8).** The tools this decision gives Studio are tabs of the item's page, not
+  side sheets: references and history are tabs, audit is read inside History, and the layered comparison inside
+  Source, which a principal who cannot write can still open. The draft review is a status label in the page's
+  header, and `?review=1` still opens it. "On every pillar item" above reads as on every item, a designer's page or
+  the generic one. A type with an editing canvas keeps its Preview tab, which is that canvas (decision 4).
+- **One save model (decisions 1 and 14).** A person's Save on the generic item page takes effect at once, as it has
+  in the designers since epic [#36510](https://github.com/objectstack-ai/objectstack/issues/36510): the two save
+  models of Context §1 become one. An AI's change stays a draft: the page shows the AI's draft version and says so,
+  the person's Save publishes it with their own edit, and discarding the AI's changes is offered. A human draft that
+  exists when this lands is not published by the change: it is marked as having unpublished changes, and a person
+  publishes or discards it, item by item.
+- **A dashboard or a report opens in the app (decisions 3, 6 and 15).** Maintainer, verbatim:
+  「报表、仪表盘这些开发好的，可以页显示列表，点击之后直接弹出前端的设计页面吗？」 A dashboard's or a report's row opens
+  the item in an app's own edit state — the page an end user sees, in editing — and × there returns to Studio's list. Which app, in order:
+  ① the remembered app, when it belongs to the current package or its menu holds the item; ② otherwise the first
+  app the current package publishes; ③ when there is neither, or the item belongs to no package, Studio's generic
+  item page. That the person came from Studio travels in the address, as a parameter and not as navigation state,
+  so × still returns to Studio's list after a refresh. `view`, `page` and `app` open Studio's generic editor for now
+  (decision 3).
+- **"New" on the dashboard list and on the report list (decision 13).** Neither list creates the item in Studio;
+  each sends the person to where the app creates one, in the app the rule above chooses.
+  - **Dashboard** → that app's design mode, opened on "Add menu item → Dashboard" (添加菜单项 → 仪表盘). Maintainer,
+    verbatim, on the decision card 「Studio 仪表盘、报表列表的『新建』怎么做？」: 「新建跳到设计模式加菜单」. This is epic
+    [#36359](https://github.com/objectstack-ai/objectstack/issues/36359)'s rule reached from a second door: a
+    dashboard is created in design mode's "Add menu item" and lands on the menu position made for it, so none is
+    left off every menu.
+  - **Report** → the app's own new-report page, `/apps/<app>/reports/new`. The answer above named design mode for
+    both lists; for a report it is read together with the ruling of the day before on
+    [#36692](https://github.com/objectstack-ai/objectstack/issues/36692) — maintainer, verbatim: 「照 Twenty 分开」 —
+    which made report editing its own entry, mutually exclusive with design mode. PR
+    [#36848](https://github.com/objectstack-ai/objectstack/pull/36848) landed it on 2026-11-24: design mode links
+    existing reports and no longer creates one, and "new report" is on the app's report list. An app lists its
+    reports whether or not a menu holds them, so a report created there is not orphaned the way a dashboard without
+    a menu entry is.
+  - **The three rulings stand together**: #36359 for where a dashboard is created, #36692 for where a report is, and
+    decision 13 for what Studio's two "New" buttons do with them. After decision 13 was ruled the maintainer asked
+    (08:09Z, verbatim: 「新建报表从设计模式里移走了，这是之前的决定，现在建议调整吗」); the answer given was to keep the
+    #36692 ruling (epic comment
+    [`7125835005`](https://github.com/objectstack-ai/objectstack/issues/36890#issuecomment-7125835005)), and
+    decision 13 stands as written unless the maintainer overrides it. Moving "new report" back into design mode
+    would reverse #36692's ruling, which is the maintainer's to make.
+- **Scope (decisions 5 and 9).** The scope unit is still the package, its pair included ([D3](#d3)). Studio is opened
+  on one package and is the development surface of that package's app; its top-left control returns to the app and
+  names the current package's app (ADR-0084, amended). Studio's landing page — the package cards at `/studio` — is
+  removed by its own card, each entry it carries moved first; [D3](#d3)'s line per package is one of them.
+
+Where each of the epic's fifteen decisions is written:
+
+| # | Decision | Written in |
+|:---|:---|:---|
+| 1 | The generic item page saves at once; an AI's change stays a draft | this amendment, *One save model*; the mechanics are #36902's |
+| 2 | Lists gain a "modified" column, empty for an item a code package ships; "has a draft" reads the existing `GET /api/v1/meta/_drafts` | not this record's: #36894, #36898 |
+| 3 | `view`, `page` and `app` stay on the generic editor; a dashboard or a report with no app falls back to it | this amendment, *A dashboard or a report opens in the app* |
+| 4 | A type with a canvas keeps its Preview tab | this amendment, *The item tools are tabs*; its default tab and shared save are #36901's |
+| 5 | The scope unit is the package with its pair; the top left names the current package's app | this amendment, *Scope*; ADR-0084 |
+| 6 | Which app opens a dashboard or a report | this amendment, *A dashboard or a report opens in the app* |
+| 7 | Changing item: ×, ‹ ›, ⌘K; no switcher | this amendment, *Changing item* |
+| 8 | The six side sheets become tabs; `?review=1` is kept | this amendment, *The item tools are tabs* |
+| 9 | Studio's landing page is removed | this amendment, *Scope*; [D3](#d3); ADR-0084 |
+| 10 | The ‹ › order | this amendment, *The ‹ › order is the list's* |
+| 11 | The menu's six groups | ADR-0084, with the type-to-group table |
+| 12 | The browser's Back is not intercepted | this amendment, *Leaving with unsaved edits* |
+| 13 | "New" for dashboards and reports | this amendment, *"New" on the dashboard list and on the report list* |
+| 14 | Human drafts that exist at rollout | this amendment, *One save model* |
+| 15 | "From Studio" travels in the address | this amendment, *A dashboard or a report opens in the app* |
 
 ### D2 — One mechanism: a customization of an installed package is an item of its paired `.custom` package, and overriding an existing item is a declaration in that item's body {#d2}
 
@@ -271,7 +385,7 @@ catalog holds one name per deployment for: **permission sets, positions and capa
 customer pull for in-place customization appears; deferred again here." The pull is on record (HotCRM's pass, the 2026-10-30 walkthrough), and this record charters
 **three of the five** on facts the platform serves: the **badge** (an item of `.custom` is marked "customization"; an
 override is marked "overrides `<base>`" from its declaration), the **customization list** (the per-package read of
-[D8](#d8), and the landing's counts) and **revert** ("Restore package original" = delete the overriding item from
+[D8](#d8), and the landing's counts — whose page moves, [D3](#d3) as amended 2026-11-24) and **revert** ("Restore package original" = delete the overriding item from
 `.custom`, so the base's document is served again). **The advisory upgrade finding above is chartered; a field-level
 diff-vs-base view and the upgrade skip-report as a merge tool stay deferred** (amended 2026-11-06), and §9's
 second bullet — no clone provenance — stands ([D4](#d4)). ADR-0131 D6's sentence that the customer's change is
@@ -406,9 +520,22 @@ contribution, not how a contributed item is drawn). **Studio's customization sur
 maintainer, verbatim: 「我建议先等包级覆盖开发完，再考虑这个界面的修改」 — so this paragraph is P2 of the
 [Rollout](#rollout), after P1.
 
+**Amended 2026-11-24** ([D1](#d1)'s amendment of that date). "The pillar rails" reads as **the type lists of the left
+menu**: one list per type, the base's items and the pair's items in the same list, marked and filterable as the
+paragraph above says. Nothing else in it moves. New, "new similar" and "Customize" still land in the pair without
+asking, and the scope unit is still the package with its pair (decision 5 of epic
+[#36890](https://github.com/objectstack-ai/objectstack/issues/36890)).
+
 **Upgrade and audit.** "What did we change on HotCRM" is one place: `hotcrm.custom` plus the base's switched-off items
 ([D4](#d4)). Studio's landing carries one line per package ("n customized, m switched off", read from [D8](#d8)'s
 per-package read and the ledger); Setup carries nothing per package.
+
+**Amended 2026-11-24** (decision 9 of epic #36890). Studio's landing page is removed by its own card
+([#36908](https://github.com/objectstack-ai/objectstack/issues/36908)), so the line per package keeps its content and
+its two sources and loses that page. **Its next home is not ruled, and this amendment does not choose one** (merge
+question 15): #36908 proposes it — the package's own Studio overview, or Setup's package detail. A home in Setup
+would reverse the last clause of the paragraph above, which is the maintainer's to rule on that card and not a
+reading of this text. Until #36908 lands, the landing carries the line as it does today.
 
 Not taken (2026-11-06, ruling record 6691022506): (a) **a pair per package**, which puts a pair on a module its consumer
 cannot see (ADR-0019 D2); (c) **N pairs sharing `<ns>_custom`**; (e) **an explicit split key**: a vendor who wants
@@ -472,6 +599,14 @@ Fork D), not one of the §9 walls. This record moves the switch to where the ite
   `automation:packaged-actions` page retire in the same change as the switch, so no window is left without one; a
   bookmark of the page opens Studio. Action-clone stays unchartered (ADR-0126 §8 item 2): ⛔ no "new similar" for an
   action, and a customer's own button stays a new action in `.custom` ([D9](#d9)).
+- **Amended 2026-11-24 — where the two switches are found** ([D1](#d1)'s amendment of that date; neither switch, its
+  door nor its gate changes). "On the item" in the first bullet, and "on the item's page in the "All metadata" area"
+  in the 2026-11-17 bullet, both read as **the item's page on its metadata address**: a read-only package's flow
+  carries the ledger switch on its designer there, a standalone `action` on its item page, and an action embedded in
+  an object on the Actions tab of that object's designer, which opens on the object's metadata address. "The landing
+  counts" in the retirement bullet, and in Q8, is a condition of a retirement that has landed: Setup ships no
+  Packaged automation page at `origin/main` `151e8123`. Decision 9 of epic #36890 moves the page those counts are
+  drawn on ([D3](#d3)) and reopens nothing here.
 
 Maintainer, verbatim (2026-10-30): 「打包自动化开关，这个就很奇怪，正常的操作我应该是在studio中进入 hotcrm app，选中一个流程，点禁用或者复制更符合逻辑吧？」
 
@@ -552,7 +687,8 @@ from **one** resolution:
    「HotCRM 视图「定制」→ 三处读取同一列集、导出带声明、「恢复包原版」回原样」.
 4. **A per-package customization read** (N-15) answers, for a base, its overrides, its extensions and its switched-off
    items — served rows and ledger rows, nothing computed — and the landing's counts and Studio's "only customizations"
-   filter read it.
+   filter read it. (Amended 2026-11-24: the page that draws the counts moves, [D3](#d3); the read and its two readers
+   do not.)
 
 The pin that holds this is one test across the five reads for one item (#28238's acceptance names the first three and
 the app's list); `packages/metadata-protocol/src/protocol.item-read-overlay-cache.test.ts` and
@@ -675,7 +811,9 @@ name suffixed, the base untouched (N-23c).
   ([D1](#d1)).
 - **Retire**: the package-less clone ([D4](#d4)), the Setup designer routes for the seven pillar types ([D1](#d1), by
   redirect), Setup › Packaged automation ([D4](#d4), N-28), and the "Read-only · Customize with an overlay" link
-  (#27927) that sends Studio to Setup.
+  (#27927) that sends Studio to Setup. (Amended 2026-11-24: "the seven pillar types" is the 2026-10-31 name for the
+  object, the view, the page, the dashboard, the report, the flow and the permission set. The redirects stay, and
+  follow each item to where [D1](#d1) now opens it.)
 
 This completes ADR-0070 D5 ("Retire the stopgaps via a migration affordance") for the overlay rows, which that record
 left to "A small migration (or admin action)".
@@ -761,6 +899,13 @@ is fixed above where it bites.
   rewritten to the Studio door or marked transitional (N-29). Translations and email templates lose the Setup form; their
   simplified form editor is offered inside Studio's All-metadata area (N-25) — an administrator changing one line of
   mail copy enters Studio, behind `manage_metadata`, and the change is an override in `.custom`.
+- **(Amended 2026-11-24) Studio has one navigation and one address per item** ([D1](#d1)). The pillars stop being
+  places. "The pillar types" of the bullet above are the types whose item opens a designer (the object, the flow, the
+  permission set) or an app's edit state (the dashboard, the report), and "Studio's All-metadata area" is Studio.
+  The cost: every producer of a Studio address moves to one function before any type switches; the three designers
+  lose their list column and are rehosted as the item's page; the tests that pin the pillar navigation and the pillar
+  addresses are rewritten, or kept as pins of the redirects; and the page that draws [D3](#d3)'s line per package is
+  not yet named.
 
 ## Rollout
 
@@ -793,6 +938,12 @@ record merges* bind no seat before that merge. The item toolbar (N-05) runs **ah
 
 Landed ahead of this record, reversing no wall: PR #28076 (the browse entry, [D5](#d5)); #27356 row 19 letter A1 (Studio
 deletes a writable package's flow from the item menu).
+
+**The 2026-11-24 amendment** is tracked by epic [#36890](https://github.com/objectstack-ai/objectstack/issues/36890),
+not by #28236. Card #36891 is its text. Of that epic's children: the menu is #36899; the item's page #36892, #36901
+and #36902; the list #36896, #36897 and #36898; the one address function #36895; the three designers #36903, #36904
+and #36905; the dashboard and report round trip #36906 and #36907; the landing page #36908; and the pillar routes go
+last, #36909.
 
 ## Status-line pointers
 
@@ -919,6 +1070,22 @@ of Q1's refusal and `action` — were ruled by the maintainer on 2026-10-31 (dec
     A kernel one waits with [D11](#d11)'s kernel rows: served as it is until the whitelist version re-identifies it
     as the platform pair and lists the rows it cannot admit. Refusing or deleting such a pair would discard
     customer work this record's earlier text invited.
+13. **A pillar address keeps redirecting to the item's metadata address after the pillar routes are deleted**
+    ([D1](#d1), amended 2026-11-24). No ruling of epic #36890 speaks of bookmarks; the epic's plan cuts the
+    redirects type by type and keeps them when the routes go. This record already retires routes that way — the
+    Setup → Metadata routes "retire behind redirects into Studio" ([D1](#d1)) — and decision 8 keeps `?review=1`
+    for the same reason: an address that a person, the CLI or an AI's review link holds must keep opening the item.
+14. **The readings of the earlier wording** ([D2](#d2), [D3](#d3), [D4](#d4), [D8](#d8), [D11](#d11) and the
+    [Consequences](#consequences), amended 2026-11-24): "the pillar rails" as the type lists of the left menu; "on
+    the item" and "the item's page in the "All metadata" area" as the item's page on its metadata address; "the
+    seven pillar types" as the 2026-10-31 name for seven types. The epic's rulings name [D1](#d1)'s shape and not
+    these sentences. Each reading changes where a thing is drawn and no rule: the pair, the two switches, the
+    per-package read and the redirects are as they were.
+15. **The page for [D3](#d3)'s line per package is left unnamed** (amended 2026-11-24). Decision 9 removes the
+    landing page and names no successor; the card that removes it proposes one. It is listed here so that merging
+    this text is not read as choosing. Of the two candidates, the package's own Studio overview fits [D3](#d3) as
+    written; Setup's package detail would reverse its last clause ("Setup carries nothing per package") and needs
+    the maintainer's ruling on that card.
 
 ## Refs
 
@@ -952,6 +1119,17 @@ of Q1's refusal and `action` — were ruled by the maintainer on 2026-10-31 (dec
   [`6691217245`](https://github.com/objectstack-ai/objectstack/issues/29594#issuecomment-6691217245) on
   [#29594](https://github.com/objectstack-ai/objectstack/issues/29594)); ADR-0019 (D1–D4) and ADR-0130 (D1, D6) are
   read, not amended.
+- Card [#36891](https://github.com/objectstack-ai/objectstack/issues/36891) (2026-11-24, the amendment in place that
+  makes the "All metadata" area Studio's only entry and gives every item one address; the left menu and the
+  type-to-group table are [ADR-0084](./0084-application-builder-information-architecture.md)'s amendment of the same
+  day): epic [#36890](https://github.com/objectstack-ai/objectstack/issues/36890), decisions 1–15, ruled
+  「全部按建议」 on 2026-11-24 at 06:36Z and 08:03Z, with its follow-up on decision 13
+  ([`7125835005`](https://github.com/objectstack-ai/objectstack/issues/36890#issuecomment-7125835005)). The rulings
+  decision 13 is read with: epic [#36359](https://github.com/objectstack-ai/objectstack/issues/36359) (design mode),
+  and [#36692](https://github.com/objectstack-ai/objectstack/issues/36692) with PR
+  [#36848](https://github.com/objectstack-ai/objectstack/pull/36848) (report editing its own entry). Also read: epic
+  [#36510](https://github.com/objectstack-ai/objectstack/issues/36510) (the save model) and
+  [#36502](https://github.com/objectstack-ai/objectstack/issues/36502) (the Interfaces pillar's retirement).
 - [#27356](https://github.com/objectstack-ai/objectstack/issues/27356) rows 12, 13, 14, 19, 20, 21 and their landed
   PRs #27376, #27927, #28076.
 - ADR-0005, ADR-0009, ADR-0010, ADR-0029, ADR-0048 (and its 2026-10-08 addendum), ADR-0070, ADR-0126, ADR-0131,
