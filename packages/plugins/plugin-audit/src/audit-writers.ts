@@ -2984,13 +2984,12 @@ export function installAuditWriters(
    */
 
   /**
-   * The record a comment is on as a Console page under the deployment's
-   * address (`mention-email.ts`): the inbox notice's own `/{object}/{id}`
-   * link, absolute through `getConsoleUrl` when it answers. No record, no
-   * link — and no e-mail.
+   * A comment notice's Console page under the deployment's address
+   * (`mention-email.ts`): the inbox notice's own link (`commentRecordPath`),
+   * absolute through `getConsoleUrl` when it answers. No record, no link —
+   * and no e-mail.
    */
-  const consoleRecordUrl = (object: string | undefined, id: string | undefined): string | null => {
-    const recordPath = object && id ? `/${object}/${id}` : null;
+  const consoleCommentUrl = (recordPath: string | null): string | null => {
     if (!recordPath) return null;
     try {
       return opts.getConsoleUrl?.(recordPath) || recordPath;
@@ -3052,13 +3051,27 @@ export function installAuditWriters(
       actorName = api?.sudo ? (await resolveActorSnapshot(api, editorId)).name : null;
     }
     const bodyPreview = String(row.body ?? '').slice(0, 240);
-    // The mention e-mail's link (`mention-email.ts`): the record the comment
-    // is on — the inbox notice's own `/{object}/{id}` link — as a Console page
-    // under the deployment's address. No record, no e-mail: a mail with no
-    // way back to the thread is not worth the daily mail budget.
-    const mentionUrl = consoleRecordUrl(source_object, source_id);
     const tenantId: string | null = sess.organizationId ?? row.organization_id ?? null;
     const commentId = row.id != null ? String(row.id) : null;
+    // [#36410] The notice opens the record with its comment panel at this
+    // comment's thread: a top-level comment is its own thread; a mention in a
+    // reply walks up to the reply's top-level comment. A walk that fails or
+    // finds no root links the record alone, as before.
+    const parentId = row.parent_id != null && String(row.parent_id) ? String(row.parent_id) : null;
+    let rootId: string | null = parentId ? null : commentId;
+    if (parentId) {
+      try {
+        rootId = await readThreadRootId(engine, parentId, String(row.thread_id ?? ''));
+      } catch (err) {
+        try { (engine as any).logger?.warn?.('Mention thread root read failed; the notice links the record alone', { commentId, err: String((err as any)?.message ?? err) }); } catch {}
+      }
+    }
+    const mentionPath = commentRecordPath(source_object, source_id, rootId, commentId);
+    // The mention e-mail's link (`mention-email.ts`): the inbox notice's own
+    // link as a Console page under the deployment's address. No record, no
+    // e-mail: a mail with no way back to the thread is not worth the daily
+    // mail budget.
+    const mentionUrl = consoleCommentUrl(mentionPath);
 
     // The notification is a copy of the comment (its preview) and a link to
     // the record, so it reaches only a mentioned user who can READ both the
@@ -3127,6 +3140,10 @@ export function installAuditWriters(
             title,
             body: bodyPreview,
             actorName,
+            // [#36410] The inbox row's link (its `action_url`): the record
+            // with the comment panel at this comment. Absent with no record,
+            // where messaging derives none either.
+            ...(mentionPath ? { url: mentionPath } : {}),
           },
         });
         // The e-mail (`mention-email.ts`): a second emit through the same
@@ -3239,7 +3256,10 @@ export function installAuditWriters(
     }
 
     const [source_object, source_id] = String(row.thread_id ?? '').split(':');
-    const replyUrl = consoleRecordUrl(source_object, source_id);
+    // [#36410] The notice opens the record with its comment panel at the
+    // thread's top-level comment, scrolled to this reply.
+    const replyPath = commentRecordPath(source_object, source_id, thread.rootId, commentId);
+    const replyUrl = consoleCommentUrl(replyPath);
     const bodyPreview = String(row.body ?? '').slice(0, 240);
     for (const uid of userIds) {
       try {
@@ -3257,7 +3277,7 @@ export function installAuditWriters(
           actorId: actorId ?? undefined,
           organizationId: tenantId ?? undefined,
           dedupKey: commentId ? `${REPLY_TOPIC}:${commentId}:${uid}` : undefined,
-          payload: { title, body: bodyPreview, actorName },
+          payload: { title, body: bodyPreview, actorName, ...(replyPath ? { url: replyPath } : {}) },
         });
         // The e-mail: the mention e-mail's second emit, under the reply topic
         // and its own 10-minute window (`replyEmailDedupKey`).
@@ -3307,6 +3327,8 @@ export function installAuditWriters(
 
 /** [#36074] Who a comment thread names: its starter and everyone in it, starter first. */
 interface CommentThreadParticipants {
+  /** [#36410] The thread's top-level comment — where its notices open the comment panel. */
+  rootId: string;
   /** The author of the thread's top-level comment. */
   starterId: string | null;
   /** Each distinct author in the thread, the starter first. */
@@ -3329,6 +3351,40 @@ const THREAD_READ_CONTEXT = { isSystem: true } as const;
  * parent cannot be found on this thread — no thread, no notice.
  */
 async function readThreadParticipants(engine: any, parentId: string, threadId: string): Promise<CommentThreadParticipants | null> {
+  const walk = await walkToThreadRoot(engine, parentId, threadId);
+  if (!walk) return null;
+  const { rootId, ancestors } = walk;
+  const replyAuthors: any[] = await engine.aggregate(
+    'sys_comment',
+    {
+      where: { parent_id: rootId, thread_id: threadId },
+      groupBy: ['author_id'],
+      aggregations: [{ function: 'count', field: 'id', alias: 'replies' }],
+    },
+    { context: THREAD_READ_CONTEXT },
+  );
+  const participants: string[] = [];
+  const add = (uid: unknown) => {
+    if (uid == null) return;
+    const id = String(uid);
+    if (id && !participants.includes(id)) participants.push(id);
+  };
+  for (const uid of ancestors) add(uid);
+  for (const r of replyAuthors ?? []) add(r?.author_id);
+  return { rootId, starterId: ancestors[0] ?? null, participants };
+}
+
+/**
+ * Up the `parent_id` chain from `parentId` to the thread's top-level comment
+ * (bounded, cycle-safe, held to `threadId`): its id and each comment's author
+ * on the way, the top-level comment's first. `null` when the parent is not on
+ * this thread.
+ */
+async function walkToThreadRoot(
+  engine: any,
+  parentId: string,
+  threadId: string,
+): Promise<{ rootId: string; ancestors: string[] } | null> {
   if (!threadId) return null;
   const ancestors: string[] = [];
   const seen = new Set<string>();
@@ -3351,25 +3407,43 @@ async function readThreadParticipants(engine: any, parentId: string, threadId: s
     if (comment.author_id != null && String(comment.author_id)) ancestors.unshift(String(comment.author_id));
     cursor = comment.parent_id != null && String(comment.parent_id) ? String(comment.parent_id) : null;
   }
-  if (!rootId) return null;
-  const replyAuthors: any[] = await engine.aggregate(
-    'sys_comment',
-    {
-      where: { parent_id: rootId, thread_id: threadId },
-      groupBy: ['author_id'],
-      aggregations: [{ function: 'count', field: 'id', alias: 'replies' }],
-    },
-    { context: THREAD_READ_CONTEXT },
-  );
-  const participants: string[] = [];
-  const add = (uid: unknown) => {
-    if (uid == null) return;
-    const id = String(uid);
-    if (id && !participants.includes(id)) participants.push(id);
-  };
-  for (const uid of ancestors) add(uid);
-  for (const r of replyAuthors ?? []) add(r?.author_id);
-  return { starterId: ancestors[0] ?? null, participants };
+  return rootId ? { rootId, ancestors } : null;
+}
+
+/** [#36410] The top-level comment of the thread `parentId` is on; `null` when it is not on `threadId`. */
+async function readThreadRootId(engine: any, parentId: string, threadId: string): Promise<string | null> {
+  return (await walkToThreadRoot(engine, parentId, threadId))?.rootId ?? null;
+}
+
+/**
+ * The Console's comment URL parameters (`ui/packages/app-shell/src/urlParams.ts`
+ * holds the reader's half): `comments` names the thread by its top-level
+ * comment's id, `comment` the comment in it to scroll to. Literal here, as the
+ * `/{object}/{id}` route is: plugin-audit takes no dependency on the Console.
+ */
+const COMMENTS_URL_PARAM = 'comments';
+const COMMENT_URL_PARAM = 'comment';
+
+/**
+ * [#36410] A comment notice's Console link, app-relative: the record the
+ * comment is on (`/{object}/{id}`, the link messaging would derive from the
+ * notice's `source`), with the comment panel open at its thread
+ * (`?comments={rootId}`) and, for a reply, the reply to scroll to
+ * (`&comment={commentId}`; a top-level comment IS the thread, so it adds
+ * none). No thread root ⇒ the record alone. No record ⇒ `null`.
+ */
+function commentRecordPath(
+  object: string | undefined,
+  id: string | undefined,
+  rootId: string | null,
+  commentId: string | null,
+): string | null {
+  if (!object || !id) return null;
+  const recordPath = `/${object}/${id}`;
+  if (!rootId) return recordPath;
+  const query = new URLSearchParams({ [COMMENTS_URL_PARAM]: rootId });
+  if (commentId && commentId !== rootId) query.set(COMMENT_URL_PARAM, commentId);
+  return `${recordPath}?${query.toString()}`;
 }
 
 /**
