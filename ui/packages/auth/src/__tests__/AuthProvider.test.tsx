@@ -621,3 +621,75 @@ describe('a 401 on an API call re-checks the session (objectstack#32138)', () =>
     expect(screen.getByTestId('authenticated').textContent).toBe('false');
   });
 });
+
+/**
+ * `updateUser` keeps the signed-in identity (objectstack#36972).
+ *
+ * better-auth's `/update-user` answers `{ status: true }`, not the user. The
+ * provider used to install that answer as the session user, so for a moment
+ * the user had no `id`: every consumer keyed on the identity — the console's
+ * `/auth/me/permissions` request key is one — dropped its children and
+ * remounted them, and the profile page lost its "saved" confirmation. The
+ * double below answers exactly what the server answers.
+ */
+describe('updateUser keeps the signed-in identity (objectstack#36972)', () => {
+  let mounts = 0;
+
+  /** Keyed on the user id, the way the console keys its permissions answer. */
+  function IdentityKeyed() {
+    const { user } = useAuth();
+    return <MountCounter key={user?.id ?? 'no-id'} />;
+  }
+
+  function MountCounter() {
+    const { user, updateUser } = useAuth();
+    React.useEffect(() => {
+      mounts += 1;
+    }, []);
+    return (
+      <div>
+        <span data-testid="u-id">{String(user?.id)}</span>
+        <span data-testid="u-name">{String(user?.name)}</span>
+        <span data-testid="u-email">{String(user?.email)}</span>
+        <button type="button" onClick={() => void updateUser({ name: 'Grace' })}>
+          save
+        </button>
+      </div>
+    );
+  }
+
+  beforeEach(() => {
+    mounts = 0;
+  });
+
+  it('a name save keeps the id and the email, takes the new name, and remounts nothing', async () => {
+    const client = createMockClient({
+      getSession: vi.fn().mockResolvedValue({
+        user: { id: 'usr_1', name: 'Ada', email: 'ada@example.com' },
+        session: { token: 'tok' },
+      }),
+      updateUser: vi.fn().mockResolvedValue({ status: true }),
+    });
+
+    render(
+      <AuthProvider authUrl="/api/auth" client={client}>
+        <IdentityKeyed />
+      </AuthProvider>,
+    );
+    await waitFor(() => expect(screen.getByTestId('u-name').textContent).toBe('Ada'));
+    const mountsBefore = mounts;
+    const button = screen.getByRole('button', { name: 'save' });
+
+    await act(async () => {
+      button.click();
+    });
+
+    expect(client.updateUser).toHaveBeenCalledWith({ name: 'Grace' });
+    expect(screen.getByTestId('u-name').textContent).toBe('Grace');
+    expect(screen.getByTestId('u-id').textContent).toBe('usr_1');
+    expect(screen.getByTestId('u-email').textContent).toBe('ada@example.com');
+    // The same node, not a rebuilt one: nothing keyed on the identity remounted.
+    expect(document.contains(button)).toBe(true);
+    expect(mounts).toBe(mountsBefore);
+  });
+});

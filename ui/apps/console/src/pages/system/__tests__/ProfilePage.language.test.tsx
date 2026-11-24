@@ -54,8 +54,10 @@
  * assertions are about the WRITE and not merely about something rendering.
  */
 
-import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import React from 'react';
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { Toaster, toast } from 'sonner';
 import { normaliseClientError } from '@object-ui/data-objectstack';
 
 const { user, updateUser, findOne, update, offerable, appContent, writable } = vi.hoisted(() => ({
@@ -272,6 +274,86 @@ describe('ProfilePage — my language (objectui#7501)', () => {
     expect(screen.queryByTestId('profile-language-select')).not.toBeInTheDocument();
 
     warn.mockRestore();
+  });
+});
+
+/**
+ * The language save's confirmation survives the remount a language change
+ * causes (objectstack#36972).
+ *
+ * Saving `sys_user.locale` reaches the signed-in user's locale reader through
+ * the data-invalidation bus; when the new value changes the interface
+ * language, the console shell remounts every page under `key={language}`, and
+ * the card's inline alert — local state — goes with it. The confirmation is
+ * also a toast, and the console's toaster sits above that key. The harness
+ * below draws the same shape: a real sonner `Toaster` outside a subtree keyed
+ * on the language, and a write whose settling changes that key.
+ */
+describe('ProfilePage — the language save confirms after a language remount (objectstack#36972)', () => {
+  const shell = { switchLanguage: (_next: string) => {} };
+
+  function Shell() {
+    const [language, setLanguage] = React.useState('en');
+    shell.switchLanguage = setLanguage;
+    return (
+      <>
+        <Toaster />
+        <div key={language} data-testid="keyed-subtree">
+          <ProfilePage />
+        </div>
+      </>
+    );
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    user.value = { id: 'usr_1', name: 'Ada', email: 'ada@example.com' };
+    offerable.value = ['en', 'zh', 'ja'];
+    appContent.value = null;
+    writable.value = true;
+    findOne.mockResolvedValue({ id: 'usr_1' });
+    update.mockResolvedValue({});
+  });
+
+  afterEach(() => {
+    cleanup();
+    toast.dismiss();
+  });
+
+  it('a save that changes the interface language still shows its confirmation, after the remount', async () => {
+    // The write settles, and THEN the language changes, as the bus orders it.
+    update.mockImplementation(async () => {
+      setTimeout(() => shell.switchLanguage('ja'), 0);
+      return {};
+    });
+    render(<Shell />);
+    const select = await screen.findByTestId('profile-language-select');
+
+    await pick(select, '日本語');
+    fireEvent.submit(select.closest('form')!);
+
+    // The remount happened: the select that was used is gone, a new card stands.
+    await waitFor(() => expect(document.contains(select)).toBe(false));
+    await screen.findByTestId('profile-language-select');
+    // The confirmation is still on screen, in the toaster above the key.
+    const confirmation = await screen.findByText('Language preference updated.');
+    expect(confirmation.closest('[data-sonner-toaster]')).not.toBeNull();
+  });
+
+  it('control: a save that leaves the interface language alone shows its confirmation too', async () => {
+    render(<Shell />);
+    const select = await screen.findByTestId('profile-language-select');
+
+    await pick(select, 'English');
+    fireEvent.submit(select.closest('form')!);
+
+    await waitFor(() => expect(update).toHaveBeenCalledWith('sys_user', 'usr_1', { locale: 'en' }));
+    await waitFor(() =>
+      expect(screen.getAllByText('Language preference updated.').length).toBeGreaterThan(0),
+    );
+    // No remount: the same select, and the card's own inline alert beside the toast.
+    expect(document.contains(select)).toBe(true);
+    expect(screen.getByRole('alert')).toHaveTextContent('Language preference updated.');
   });
 });
 
