@@ -218,8 +218,9 @@ export const SYNC_PROVENANCE_FIELD_DEFS = {
     readonly: true,
     system: true,
     description:
-      "The row's key in the source, as text: the source value of the mapping's upsertKey, or for a key of several "
-      + 'fields a JSON array of their values in upsertKey order (ADR-0153 D4). Written by the pull only.',
+      "The row's key in the source, as text: the value the mapping writes to its upsertKey field (the source value "
+      + 'for a plain copy), or for a key of several fields a JSON array of those values in upsertKey order '
+      + '(ADR-0153 D4). Written by the pull only.',
   },
   _sync_pulled_at: {
     type: 'datetime',

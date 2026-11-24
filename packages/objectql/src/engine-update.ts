@@ -35,7 +35,7 @@
 import type { DroppedFieldsEvent, EngineUpdateOptions, HookContext, QueryAST } from '@objectstack/spec/data';
 import type { WriteObservabilityOptions } from '@objectstack/spec/contracts';
 import { collectComposableReadableIds } from './filter-comparand-shape.js';
-import { refuseSyncProvenanceWrite } from './sync-provenance-write.js';
+import { refuseHookSyncProvenanceWrite, refuseSyncProvenanceWrite, snapshotSyncKeys } from './sync-provenance-write.js';
 // [ADR-0155 D4] The fixed-read leaf seam reads the engine through the security
 // resolvers' host, built once per engine, which carries every member it reads.
 import { securityResolversHost } from './engine-facet-hosts.js';
@@ -724,6 +724,8 @@ export class UpdateFacet {
          opCtx.data !== null && typeof opCtx.data === 'object'
            ? recordHookPayloadWrites(opCtx.data as Record<string, unknown>)
            : undefined;
+       // [ADR-0153 D4] The payload's `_sync_` keys before the hooks, judged after the seal.
+       const syncBeforeHooks = snapshotSyncKeys(opCtx.data);
 
        const hookContext: HookContext = {
           object,
@@ -1103,6 +1105,9 @@ export class UpdateFacet {
        const sealedHookWrites = hookWrites?.seal(hookContext.input.data);
        if (sealedHookWrites) hookContext.input.data = sealedHookWrites.data as any;
        let hookWrittenKeys = sealedHookWrites?.hookWrittenKeys;
+       // [ADR-0153 D4] A `_sync_` key a hook assigned, changed or removed is refused,
+       // the pull's own write included (sync-provenance-write.ts, "The hooks' own writes").
+       refuseHookSyncProvenanceWrite(object, syncBeforeHooks, hookContext.input.data, 'update');
 
        // ── [#16344] HAND BACK what was hidden from the hooks ────────────────
        //

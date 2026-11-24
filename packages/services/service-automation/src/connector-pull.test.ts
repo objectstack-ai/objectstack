@@ -68,8 +68,8 @@ function harness(opts: {
     stored?: Array<Record<string, unknown>>;
     /** The `inputSchema` the action declares on `GET /connectors`; absent ⇒ none declared. */
     inputSchema?: Record<string, unknown>;
-    /** The target `contact` as the protocol serves it; absent ⇒ {@link contactObject}. */
-    object?: Record<string, unknown>;
+    /** The target `contact` as the protocol serves it; absent ⇒ {@link contactObject}; `null` ⇒ not served. */
+    object?: Record<string, unknown> | null;
 } = {}): Harness {
     const writes: unknown[] = [];
     const handler = vi.fn(async () => (opts.result ?? { status: 200, ok: true, body: [] }) as Record<string, unknown>);
@@ -80,7 +80,7 @@ function harness(opts: {
                 if (type === 'mapping' && mapping && name === (mapping as { name: string }).name) {
                     return { type, name, item: mapping };
                 }
-                if (type === 'object' && name === 'contact') return { type, name, item: opts.object ?? contactObject };
+                if (type === 'object' && name === 'contact') return { type, name, item: opts.object === undefined ? contactObject : opts.object ?? undefined };
                 return undefined;
             },
             async findData() { return { records: opts.stored ?? [] }; },
@@ -951,6 +951,13 @@ describe('[ADR-0153 D4] a connector pull stamps provenance on a synced target', 
             object: syncedContact,
             mapping: baseMapping({ fieldMapping: [...baseMapping().fieldMapping, { source: 'name', target: '_sync_source' }] }),
         });
+        expectRefused(await refusal(h), { code: 'VALIDATION_ERROR', status: 400, reason: 'mapping_target_refused' });
+        expect(h.handler).not.toHaveBeenCalled();
+        expect(h.writes).toEqual([]);
+    });
+
+    it('a target whose definition cannot be read is refused mapping_target_refused (400) before the action is called', async () => {
+        const h = harness({ object: null });
         expectRefused(await refusal(h), { code: 'VALIDATION_ERROR', status: 400, reason: 'mapping_target_refused' });
         expect(h.handler).not.toHaveBeenCalled();
         expect(h.writes).toEqual([]);

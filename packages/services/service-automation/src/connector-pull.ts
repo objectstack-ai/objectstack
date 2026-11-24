@@ -788,6 +788,15 @@ async function pullOnce(
             `Mapping "${mappingName}": fieldMapping writes '${mappedSync}', a sync-in provenance column the pull stamps `
             + 'itself (ADR-0153 D4); remove that entry.');
     }
+    // A target whose definition this run cannot read is refused before the
+    // call: whether its rows owe the provenance stamps is a question of its
+    // definition, and a row written without them could never be marked or
+    // repaired by a later run. (The datasource pull refuses the same way.)
+    if (!isPlainObject(schema)) {
+        return refuse('VALIDATION_ERROR', 400, 'mapping_target_refused',
+            `Mapping "${mappingName}": the definition of targetObject '${objectName}' could not be read, so the pull `
+            + 'cannot tell which provenance columns its rows carry (ADR-0153 D4). Register the object, then run the pull again.');
+    }
     const stampsProvenance = carriesSyncProvenanceColumns(schema);
     const refusedTarget = refuseUnknownMappingTargets(artifact, objectName, schema);
     if (refusedTarget) return refuseWith(refusedTarget, 'mapping_target_refused');

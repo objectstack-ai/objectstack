@@ -326,8 +326,11 @@ export const OrdersPullJob = defineJob({
   record is kept). `_sync_deleted_at` is there but empty on every row: delete
   marking has not landed yet. Nothing else writes these columns: a write that
   names a `_sync_` column is refused with `400
-  ERR_SYNC_PROVENANCE_WRITE_REFUSED`, a system-context one included, and a
-  mapping whose `fieldMapping` targets one is refused when it runs. A `synced`
+  ERR_SYNC_PROVENANCE_WRITE_REFUSED`, a system-context one included, and so is
+  a write whose `beforeInsert` or `beforeUpdate` hook assigns, changes or
+  removes one, the pull's own write included. A mapping whose `fieldMapping`
+  targets one is refused when it runs, and so is a connector pull whose target
+  object's definition cannot be read. A `synced`
   target that declares `systemFields: false` has none of these columns, and its
   rows are written without them.
 - **How a run is recorded.** A pull the platform refuses — the mapping is gone,

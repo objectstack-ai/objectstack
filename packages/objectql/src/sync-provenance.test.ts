@@ -10,7 +10,9 @@
  *    again so a served document round-trips;
  *  - the engine refuses a `_sync_` column in any write but the pull's,
  *    `isSystem` included, and the pull's mark reaches exactly the one write it
- *    is put on — a hook's `ctx.api` write inside it is refused like any other.
+ *    is put on — a hook's `ctx.api` write inside it is refused like any other,
+ *    and so is a `_sync_` key a `before*` hook assigns, changes or removes,
+ *    on any write, the pull's own included.
  *
  * A REAL {@link ObjectQL} over a minimal stub driver, the shape
  * `engine-audit-anchor-write.test.ts` uses.
@@ -247,6 +249,71 @@ describe('[ADR-0153 D4] the engine refuses a _sync_ column in any write but the 
     const hookContext = seen[0] as Record<PropertyKey, unknown>;
     expect(hookContext?.isSystem).toBe(true);
     expect(SYNC_PULL_WRITE in hookContext).toBe(false);
+  });
+
+  it('a beforeInsert hook that assigns a _sync_ key on a system write is refused before the driver', async () => {
+    engine.registerHook('beforeInsert', async (ctx: any) => {
+      ctx.input.data._sync_deleted_at = new Date().toISOString();
+    }, { object: 'erp_customer' });
+    const err: any = await engine.insert('erp_customer', { code: 'C1' }, { context: system } as any).catch((e) => e);
+    expect(err?.code).toBe(SYNC_PROVENANCE_WRITE_REFUSED_CODE);
+    expect(err?.status).toBe(400);
+    expect(err?.by).toBe('hook');
+    expect(err?.fields).toEqual(['_sync_deleted_at']);
+    expect(rig.calls.create).toBe(0);
+  });
+
+  it('a beforeInsert hook that rewrites the pull\'s own stamp is refused, by in-place write or by replacing the payload', async () => {
+    engine.registerHook('beforeInsert', async (ctx: any) => {
+      if (ctx.input.data.code === 'C1') ctx.input.data._sync_source = 'forged';
+      else ctx.input.data = { ...ctx.input.data, _sync_source: undefined };
+    }, { object: 'erp_customer' });
+    for (const code of ['C1', 'C2']) {
+      const err: any = await engine
+        .insert('erp_customer', { code, _sync_source: 'erp_customers' }, { context: markSyncPullWrite(system) } as any)
+        .catch((e) => e);
+      expect(err?.code, code).toBe(SYNC_PROVENANCE_WRITE_REFUSED_CODE);
+      expect(err?.fields, code).toEqual(['_sync_source']);
+    }
+    expect(rig.calls.create).toBe(0);
+  });
+
+  it('a beforeUpdate hook that assigns a _sync_ key on a system update is refused before the driver', async () => {
+    const row: any = await engine.insert('erp_customer', { code: 'C1' }, { context: system } as any);
+    engine.registerHook('beforeUpdate', async (ctx: any) => {
+      ctx.input.data._sync_source = 'forged';
+    }, { object: 'erp_customer' });
+    const err: any = await engine
+      .update('erp_customer', { id: row.id, title: 'x' }, { context: system } as any)
+      .catch((e) => e);
+    expect(err?.code).toBe(SYNC_PROVENANCE_WRITE_REFUSED_CODE);
+    expect(err?.by).toBe('hook');
+    expect(rig.calls.update).toBe(0);
+  });
+
+  it('a beforeUpdate hook that rewrites the pull\'s stamp on its update is refused', async () => {
+    const row: any = await engine.insert('erp_customer', { code: 'C1', _sync_run_id: 'run_1' }, { context: markSyncPullWrite(system) } as any);
+    engine.registerHook('beforeUpdate', async (ctx: any) => {
+      ctx.input.data._sync_run_id = 'run_x';
+    }, { object: 'erp_customer' });
+    const err: any = await engine
+      .update('erp_customer', { id: row.id, _sync_run_id: 'run_2' }, { context: markSyncPullWrite(system) } as any)
+      .catch((e) => e);
+    expect(err?.code).toBe(SYNC_PROVENANCE_WRITE_REFUSED_CODE);
+    expect(err?.fields).toEqual(['_sync_run_id']);
+    expect(rig.calls.update).toBe(0);
+  });
+
+  it('CONTROL: a hook that writes a mapped field of the pull\'s write lets the stamps through untouched', async () => {
+    engine.registerHook('beforeInsert', async (ctx: any) => {
+      ctx.input.data.title = 'from hook';
+    }, { object: 'erp_customer' });
+    const row: any = await engine.insert(
+      'erp_customer',
+      { code: 'C1', _sync_source: 'erp_customers', _sync_external_id: 'C1' },
+      { context: markSyncPullWrite(system) } as any,
+    );
+    expect(row).toMatchObject({ title: 'from hook', _sync_source: 'erp_customers', _sync_external_id: 'C1' });
   });
 
   it('a hook\'s ctx.api write inside the pull\'s write is refused like any other', async () => {
