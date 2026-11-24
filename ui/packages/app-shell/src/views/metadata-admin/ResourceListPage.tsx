@@ -902,8 +902,9 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
   }
 
   // The table's columns: the list's own, then the source (with the lock),
-  // then the row's controls pinned at its right edge — the Active switch and
-  // Clone (objectui#13091).
+  // then the row's controls — the Active switch, Clone, or both in one cell —
+  // pinned at its right edge (objectui#13091). One column, because the grid
+  // holds one column at that edge.
   const gridColumns: MetadataGridColumn[] = [
     ...shownColumns.map((c, ci) => ({
       key: c.key,
@@ -911,8 +912,15 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
       width: c.width,
     })),
     { key: SOURCE_COLUMN, label: t('engine.list.col.source', locale) },
-    ...(activation ? [{ key: ACTIVE_COLUMN, label: t('engine.catalog.col.active', locale), pinnedRight: true }] : []),
-    ...(CloneDialog ? [{ key: CLONE_COLUMN, label: t('engine.list.col.actions', locale), pinnedRight: true }] : []),
+    ...(activation || CloneDialog
+      ? [
+          {
+            key: CONTROLS_COLUMN,
+            label: t(activation ? 'engine.catalog.col.active' : 'engine.list.col.actions', locale),
+            pinnedRight: true,
+          },
+        ]
+      : []),
   ];
   const sortKeyOfColumn = (c: MetadataGridColumn): ListSortKey | undefined =>
     c.key === primaryKey ? 'name' : c.key === 'label' ? 'label' : undefined;
@@ -968,7 +976,6 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
       <span
         className={cn('inline-flex items-center gap-1.5', cellClass)}
         data-testid={`metadata-row-${info.name}`}
-        data-column={ci}
       >
         {info.invalid && (
           <span
@@ -1015,9 +1022,9 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
       </span>
     );
   };
-  const hostCells: Record<string, (value: unknown, rec: unknown) => React.ReactNode> = {};
+  const cellDraws: Record<string, (value: unknown, rec: unknown) => React.ReactNode> = {};
   shownColumns.forEach((c, ci) => {
-    hostCells[metadataGridField(ci)] = (_value, rec) => {
+    cellDraws[metadataGridField(ci)] = (_value, rec) => {
       const info = rowInfoOf(rec);
       if (!info) return null;
       if (ci === 0) return firstCell(info, ci, c);
@@ -1034,7 +1041,7 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
       );
     };
   });
-  hostCells[metadataGridField(shownColumns.length)] = (_value, rec) => {
+  cellDraws[metadataGridField(shownColumns.length)] = (_value, rec) => {
     const info = rowInfoOf(rec);
     if (!info) return null;
     const { row } = info;
@@ -1086,43 +1093,56 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
       </span>
     );
   };
-  if (activation) {
-    hostCells[metadataGridField(shownColumns.length + 1)] = (_value, rec) => {
+  if (activation || CloneDialog) {
+    cellDraws[metadataGridField(shownColumns.length + 1)] = (_value, rec) => {
       const info = rowInfoOf(rec);
       if (!info) return null;
       return (
-        <CatalogActiveCell
-          itemName={info.name}
-          holding={info.holding}
-          ledger={ledger}
-          refusal={ledgerRefusal}
-          canSwitch={canAuthor && !walled}
-          busy={switching === switchKeyOf(info.name, info.holding)}
-          locale={locale}
-          onToggle={(itemName, enabled) => toggleActive(itemName, enabled, info.holding)}
-        />
+        <span className="inline-flex items-center gap-2">
+          {activation && (
+            <CatalogActiveCell
+              itemName={info.name}
+              holding={info.holding}
+              ledger={ledger}
+              refusal={ledgerRefusal}
+              canSwitch={canAuthor && !walled}
+              busy={switching === switchKeyOf(info.name, info.holding)}
+              locale={locale}
+              onToggle={(itemName, enabled) => toggleActive(itemName, enabled, info.holding)}
+            />
+          )}
+          {CloneDialog && (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 max-w-[88px] px-2 text-xs"
+              onClick={() => setCloning(info.row.item)}
+              title={t('engine.sharingRule.clone.action', locale)}
+              data-testid={`catalog-clone-${info.name}`}
+            >
+              <Copy className="h-3.5 w-3.5 mr-1" />
+              <span className="truncate">{t('engine.sharingRule.clone.action', locale)}</span>
+            </Button>
+          )}
+        </span>
       );
     };
   }
-  if (CloneDialog) {
-    hostCells[metadataGridField(shownColumns.length + (activation ? 2 : 1))] = (_value, rec) => {
-      const info = rowInfoOf(rec);
-      if (!info) return null;
-      return (
-        <Button
-          size="sm"
-          variant="ghost"
-          className="h-7 max-w-[88px] px-2 text-xs"
-          onClick={() => setCloning(info.row.item)}
-          title={t('engine.sharingRule.clone.action', locale)}
-          data-testid={`catalog-clone-${info.name}`}
-        >
-          <Copy className="h-3.5 w-3.5 mr-1" />
-          <span className="truncate">{t('engine.sharingRule.clone.action', locale)}</span>
-        </Button>
-      );
-    };
-  }
+
+  // The grid keeps the cells it was handed as table state, re-seeded a commit
+  // after they change; so the cells it holds are stable and draw through the
+  // latest render's drawers, and a ledger or mark that changes redraws at once.
+  const cellDrawsRef = React.useRef(cellDraws);
+  cellDrawsRef.current = cellDraws;
+  const cellKeys = Object.keys(cellDraws).join(',');
+  const hostCells = React.useMemo(
+    () =>
+      Object.fromEntries(
+        cellKeys.split(',').map((key) => [key, (value: unknown, rec: unknown) => cellDrawsRef.current[key]?.(value, rec) ?? null]),
+      ),
+    [cellKeys],
+  );
+
   const body = (
       <div className="p-6 space-y-4" ref={scrollAnchorRef}>
         <CreatePackageDialog
@@ -1459,8 +1479,7 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
 
 /** The page columns after the list's own (`metadataListGrid.ts` keys none of them as a field). */
 const SOURCE_COLUMN = '__source';
-const ACTIVE_COLUMN = '__active';
-const CLONE_COLUMN = '__clone';
+const CONTROLS_COLUMN = '__controls';
 
 /** Rows per page of the list. */
 const LIST_PAGE_SIZE = 50;

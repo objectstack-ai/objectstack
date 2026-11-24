@@ -392,6 +392,11 @@ export interface ObjectGridComponentProps extends ObjectGridExternalPaginationPr
    * host owns what a cell says. Table view only: the phone's card rows keep
    * the grid's own title and summary.
    *
+   * The table keeps its columns as state, re-seeded after a change of their
+   * identity: a host whose cells draw from state of its own passes the same
+   * functions on every render and reads that state when called (a ref), so
+   * a change redraws at once.
+   *
    * A RUNTIME prop, never authored metadata: it is a React node a host
    * composes, nothing an author writes, and no node key reaches it.
    */

@@ -108,9 +108,8 @@ function mount(at: string) {
 async function rowNames(): Promise<string[]> {
   await screen.findByRole('table');
   return screen
-    .getAllByTestId(/^metadata-row-/)
-    .filter((el) => el.tagName === 'TR')
-    .map((tr) => tr.getAttribute('data-testid')!.replace('metadata-row-', ''));
+    .getAllByTestId(/^metadata-row-(?!api-name$|source$|lock$)/)
+    .map((el) => el.getAttribute('data-testid')!.replace('metadata-row-', ''));
 }
 
 describe('the metadata list keeps its state in its address (objectstack#36896)', () => {

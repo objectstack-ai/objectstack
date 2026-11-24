@@ -27,8 +27,9 @@
  *    projection served) continues in the pre-filled New form;
  *  - the control: the permission-set catalog keeps its create affordance and
  *    shows no Clone column;
- *  - objectui#13091: the row's controls (the Active switch, Clone) are pinned
- *    to the right edge of the table's overflow box, which draws the seam
+ *  - objectui#13091: the row's controls (the Active switch, Clone) are pinned,
+ *    in one cell since objectstack#36897 put the list on `ObjectGrid`, to the
+ *    right edge of the table's overflow box, which draws the seam
  *    shadow, so a 1440 or 1024 screen reaches them (the measured reach is
  *    `e2e/live/declared-sharing-rules-reach-13091.spec.ts`); and a principal
  *    the ledger read refuses reads a plain-language state, with the server's
@@ -448,37 +449,27 @@ describe("the row's controls stay in reach on a narrow screen (objectui#13091)",
   /** The cell (`td` / `th`) holding `el`. */
   const cellOf = (el: Element) => el.closest('td, th') as HTMLElement;
 
-  it('Clone and the Active switch sit in cells pinned to the right edge of the overflow box', async () => {
+  it('Clone and the Active switch share the one cell pinned to the right edge of the table (objectstack#36897)', async () => {
     mount();
     const clone = cellOf(await screen.findByTestId(`catalog-clone-${KEY}`));
     const active = cellOf(await screen.findByTestId(`catalog-active-${KEY}`));
     const scroller = screen.getByTestId('metadata-list-scroller');
     expect(scroller).toContainElement(clone);
-    // Clone holds the right edge at its fixed width; Active sits just left of it.
-    expect(clone).toHaveClass('sticky', 'right-0', 'w-28');
-    expect(active).toHaveClass('sticky', 'right-28');
-    // The pinned pair is the row's trailing pair, Active then Clone.
-    const row = clone.parentElement!;
-    expect(row.lastElementChild).toBe(clone);
-    expect(clone.previousElementSibling).toBe(active);
-    // Their header cells are pinned the same way, so the column heads stay with them.
+    // The grid holds one column at its right edge: the row's controls are that
+    // column, its trailing cell.
+    expect(active).toBe(clone);
+    expect(clone).toHaveClass('sticky', 'right-0');
+    expect(clone.parentElement!.lastElementChild).toBe(clone);
+    // Its header cell is pinned the same way, so the column head stays with it.
     const headers = Array.from(scroller.querySelectorAll('thead th'));
     expect(headers[headers.length - 1]).toHaveClass('sticky', 'right-0');
-    expect(headers[headers.length - 2]).toHaveClass('sticky', 'right-28');
-    // Separated borders: in a collapsed-border table Chrome lets the text
-    // scrolling beneath a sticky cell show through its edge (measured live).
-    expect(scroller.querySelector('table')).toHaveClass('border-separate', 'border-spacing-0');
+    expect(headers[headers.length - 1]).toHaveTextContent(t('engine.catalog.col.active', ADMIN_LOCALE));
   });
 
-  it('the first pinned cell draws the seam shadow, and the box leaves the shadow to it', async () => {
+  it('the pinned cell draws the seam shadow', async () => {
     mount();
     const active = cellOf(await screen.findByTestId(`catalog-active-${KEY}`));
-    const clone = cellOf(screen.getByTestId(`catalog-clone-${KEY}`));
     expect(active.className).toContain('group-data-[overflow-right=true]/hscroll:before:opacity-100');
-    expect(clone.className).not.toContain('group-data-[overflow-right=true]/hscroll:before:opacity-100');
-    // `seam="pinned"`: no edge overlay competes with the seam.
-    expect(screen.getByTestId('metadata-list-scroller')).toHaveClass('group/hscroll');
-    expect(screen.queryByTestId('horizontal-overflow-shadow')).toBeNull();
   });
 
   it('without Clone, the Active column alone holds the right edge and draws the seam', async () => {
