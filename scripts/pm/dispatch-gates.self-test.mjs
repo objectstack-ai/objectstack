@@ -296,6 +296,10 @@ import {
   readBySpecMigrationEntryConsumers,
   SPEC_MIGRATION_ENTRY_ROOTS,
   packageTestSubsetFile,
+  changesFieldSchemaKeySet,
+  declaredKeySet,
+  objectLiteralMembers,
+  FIELD_SCHEMA_KEY_DECLARATIONS,
   adrAnchorTargets,
   breaksAnAdrAnchor,
   carriesACliCommandLiteral,
@@ -5632,6 +5636,115 @@ export function selfTest({ tier = 'full' } = {}) {
     try { return JSON.parse(readFileSync(nodePath.join(ROOT, pkgDir, 'package.json'), 'utf8')).name === '@objectstack/cli'; } catch { return false; }
   })());
 
+  // ── The closure pins a FieldSchema key-set change owes ────────────────────
+  //
+  // Three tests outside the spec package hold FieldSchema's whole key set (two
+  // classification tables both ways, one property count), and CI runs them only
+  // inside Test Core's package test task, so a card adding a field key learned of
+  // them a CI round after a green local ledger. The row is read from the DIFF:
+  // pinned here are the member reader, the declaration reader, the predicate on
+  // every edit shape that does and does not move the set, the rendering and the
+  // runnable union, the `--ran` verdict without one, the STALE branch, the
+  // bindings, and the live census of the reader against the driver's table.
+  const FK_GATES = Object.freeze([
+    'pnpm --filter @objectstack/driver-sql exec vitest run src/builtin-column-collision.test.ts',
+    'pnpm --filter @objectstack/metadata-core exec vitest run src/object-schema-fls-references.test.ts',
+    'pnpm --filter @objectstack/metadata-protocol exec vitest run src/protocol.meta-types-degenerate-derivation.test.ts',
+  ]);
+  const fkEntry = CHANGE_KIND_GATES.filter((k) => k.gates.some((g) => FK_GATES.includes(g.name)));
+  t('⭐ exactly one entry names the three FieldSchema closure pins, bound to the Test Core job and the field-schema-key-set predicate',
+    fkEntry.length === 1 && fkEntry[0].gates.length === 3 && FK_GATES.every((n) => fkEntry[0].gates.some((g) => g.name === n && g.ciJob === 'Test Core'))
+      && CHANGE_KIND_ROWS.filter((r) => r.gates.some((g) => FK_GATES.includes(g.name))).map((r) => r.matches).join() === 'field-schema-key-set');
+  // The member reader, pure.
+  const olm = (src) => objectLiteralMembers(src, src.indexOf('{'));
+  t('the member reader reads names, quoted keys, methods, shorthands and spreads at its own depth',
+    JSON.stringify(olm("{ a: 1, 'b-c': 2, d() {}, get e() { return 1; }, f, ...G.shape, h?: 3 }")) === JSON.stringify(['a', 'b-c', 'd', 'e', 'f', '...G.shape', 'h']));
+  t('…and a computed key as its bracketed text', JSON.stringify(olm('{ [KEY]: 1, z: 2 }')) === JSON.stringify(['[KEY]', 'z']));
+  t('…and nothing nested, commented or quoted',
+    JSON.stringify(olm("{ a: z.object({ inner: 1 }), // gone: 1,\n /* x: 2, */ b: 'c: { d: 1 }', e: [{ f: 1 }], g: (h) => { const i = { j: 1 }; return i; } }")) === JSON.stringify(['a', 'b', 'e', 'g']));
+  t('…and null for a literal that does not close, never a short list', olm('{ a: 1, b: { c: 2 }') === null);
+  // The declaration reader, pure.
+  const FK_FIELD = FIELD_SCHEMA_KEY_DECLARATIONS.find((d) => d.declares === 'FieldSchema');
+  const FK_PROT = FIELD_SCHEMA_KEY_DECLARATIONS.find((d) => d.declares === 'MetadataProtectionFields');
+  const fkSrc = (shape, opts = "surface: 'this field', guidance: { columnName: 'removed' }") =>
+    `import { z } from 'zod';\nexport const FieldSchema = lazySchema(() => {\n  const base = strictObject({ ${opts} }, {\n${shape}\n  });\n  return base.superRefine((f, ctx) => { ctx.addIssue({ code: 'custom', path: ['x'] }); });\n});\n`;
+  const FK_BASE = fkSrc("    name: z.string().describe('Machine name'),\n    type: FieldTypeSchema,\n    ...MetadataProtectionFields,");
+  t('the declaration reader takes the strictObject call\'s SECOND argument, not the options before it',
+    JSON.stringify(declaredKeySet(FK_BASE, FK_FIELD)) === JSON.stringify(['...MetadataProtectionFields', 'name', 'type']));
+  t('…a bare literal row reads the literal after the binding', JSON.stringify(declaredKeySet('export const MetadataProtectionFields = {\n  _lock: x,\n  _provenance: y,\n};', FK_PROT)) === JSON.stringify(['_lock', '_provenance']));
+  t('…and null where the declaration is not where the row says', declaredKeySet(FK_BASE.replace('strictObject(', 'z.object('), FK_FIELD) === null
+    && declaredKeySet('export const Other = {};', FK_PROT) === null);
+  // The predicate, over injected base and head blobs.
+  const FK_PATH = FK_FIELD.path;
+  const fkIo = (head, base) => ({ readHead: () => head, readBase: () => base });
+  const FK_EDITS = Object.freeze({
+    'a key added': [FK_BASE.replace('    type: FieldTypeSchema,', '    type: FieldTypeSchema,\n    showOnCreate: z.boolean().optional(),'), true],
+    'a key removed': [FK_BASE.replace("    name: z.string().describe('Machine name'),\n", ''), true],
+    'a key renamed': [FK_BASE.replace('    type: FieldTypeSchema,', '    kind: FieldTypeSchema,'), true],
+    'a spread added to the shape': [FK_BASE.replace('    ...MetadataProtectionFields,', '    ...MetadataProtectionFields,\n    ...AuditFields,'), true],
+    'the declaration moved out of the reader\'s reach': [FK_BASE.replace('strictObject(', 'z.object('), true],
+    'the file deleted': [null, true],
+    'a describe() reworded': [FK_BASE.replace("'Machine name'", "'Machine name (snake_case)'"), false],
+    'a refine edited': [FK_BASE.replace("path: ['x']", "path: ['x'], message: 'y'"), false],
+    'a key added to a NESTED schema': [FK_BASE.replace('    type: FieldTypeSchema,', '    type: FieldTypeSchema.and(z.object({ inner: z.string() })),'), false],
+    'a guidance entry added to the options': [fkSrc("    name: z.string().describe('Machine name'),\n    type: FieldTypeSchema,\n    ...MetadataProtectionFields,", "surface: 'this field', guidance: { columnName: 'removed', tracked: 'not a key' }"), false],
+    'the keys reordered': [FK_BASE.replace("    name: z.string().describe('Machine name'),\n    type: FieldTypeSchema,", "    type: FieldTypeSchema,\n    name: z.string().describe('Machine name'),"), false],
+  });
+  for (const [edit, [head, expected]] of Object.entries(FK_EDITS)) {
+    t(`${expected ? '' : 'CONTROL: '}${edit} ${expected ? 'derives' : 'derives nothing'}`, changesFieldSchemaKeySet(FK_PATH, fkIo(head, FK_BASE)) === expected);
+  }
+  t('⭐ an unchanged file derives nothing: the surface the PM names before the code exists', !changesFieldSchemaKeySet(FK_PATH, fkIo(FK_BASE, FK_BASE)));
+  t('a key added to the spread protection fields derives, on that file\'s own row',
+    changesFieldSchemaKeySet(FK_PROT.path, fkIo('export const MetadataProtectionFields = {\n  _lock: x,\n  _owner: z,\n};', 'export const MetadataProtectionFields = {\n  _lock: x,\n};')));
+  t('CONTROL: a sibling spec file whose object gained a key is not this row',
+    !changesFieldSchemaKeySet('packages/spec/src/data/object.zod.ts', fkIo(FK_BASE.replace('    type: FieldTypeSchema,', '    type: FieldTypeSchema,\n    extra: z.string(),'), FK_BASE)));
+  t('…a dispatch surface pasted with a leading ./ is the same path', changesFieldSchemaKeySet(`./${FK_PATH}`, fkIo(FK_EDITS['a key added'][0], FK_BASE)));
+  // Through the rendering, with the predicate bound to the fixture IO.
+  const fkResolved = (name, gate = null) => (gate?.ciJob ? name : `pnpm ${name}`);
+  const fkBound = fkEntry.map((k) => ({ ...k, matches: (p) => changesFieldSchemaKeySet(p, fkIo(FK_EDITS['a key added'][0], FK_BASE)) }));
+  const fkLines = changeKindLines([FK_PATH], fkResolved, fkBound);
+  t('a key-set change renders all three pins runnably, anchored on the delimiter', FK_GATES.every((n) => fkLines.some((l) => l.includes(`- ${n}   —`))));
+  t('…each line states its build prerequisite as measured: none for driver-sql, the closure build for the two that read the spec dist',
+    fkLines.some((l) => l.includes(FK_GATES[0]) && /needs NO build/.test(l))
+      && fkLines.some((l) => l.includes(FK_GATES[1]) && l.includes("pnpm --filter '@objectstack/metadata-core^...' build"))
+      && fkLines.some((l) => l.includes(FK_GATES[2]) && l.includes("pnpm --filter '@objectstack/metadata-protocol^...' build")));
+  t('…and carries no tracker number in the text a dev is shown', fkLines.length === 4 && fkLines.every((l) => !/#\d{4,5}\b/.test(l)));
+  const fkDerived = commandsFor({ kindGroups: changeKindGates([FK_PATH], fkResolved, fkBound) });
+  t('the runnable union carries all three', FK_GATES.every((n) => fkDerived.includes(n)));
+  t('CONTROL: a describe-only edit renders none of them',
+    changeKindLines([FK_PATH], fkResolved, fkEntry.map((k) => ({ ...k, matches: (p) => changesFieldSchemaKeySet(p, fkIo(FK_EDITS['a describe() reworded'][0], FK_BASE)) }))).length === 0);
+  for (const gate of FK_GATES) {
+    const without = runReconciliation({ derived: fkDerived, record: parseRunRecord(fkDerived.filter((c) => c !== gate).map((c) => `${c} :: exit 0`).join('\n')) });
+    t(`⭐ a run record carrying every derived command BUT ${gate.split(' ')[2]}'s pin is NOT ok, and names it unrun`, !without.ok && without.unrun.some((u) => u.command === gate));
+  }
+  t('CONTROL: the same record WITH all three is ok', runReconciliation({ derived: fkDerived, record: parseRunRecord(fkDerived.map((c) => `${c} :: exit 0`).join('\n')) }).ok);
+  const fkStale = changeKindLines([FK_PATH], () => null, fkBound);
+  t('an unresolvable binding renders each pin STALE, naming the job and the file it lost (a renamed pin resolves to null)',
+    fkEntry[0]?.gates.every((g) => fkStale.filter((l) => l.includes(`⚠ ${g.name}: STALE`) && l.includes("job named 'Test Core…'") && l.includes(g.ciSubset)).length === 1));
+  t('a pin whose ciSubset names another file REFUSES at load',
+    bindRefuses({ name: FK_GATES[0], ciJob: 'Test Core', ciRunner: 'set -- pnpm turbo run test', ciSubset: 'packages/drivers/driver-sql/src/renamed.test.ts' }));
+  // Against the LIVE tree.
+  for (const g of fkEntry[0]?.gates ?? []) {
+    t(`⭐ LIVE: ${g.ciSubset} exists, inside the package its name filters on, and its binding resolves`, (() => {
+      if (!existsSync(nodePath.join(ROOT, g.ciSubset)) || !ciJobRunsRunner(g, discoverFamilies().workflowEntries)) return false;
+      const pkgDir = g.ciSubset.slice(0, -('/' + packageTestSubsetFile(g.name)).length);
+      try { return JSON.parse(readFileSync(nodePath.join(ROOT, pkgDir, 'package.json'), 'utf8')).name === /--filter\s(\S+)/.exec(g.name)[1]; } catch { return false; }
+    })());
+  }
+  const liveFk = FIELD_SCHEMA_KEY_DECLARATIONS.map((d) => [d, declaredKeySet(readFileSync(nodePath.join(ROOT, d.path), 'utf8'), d)]);
+  t('⭐ LIVE: every declaration row reads on this tree', liveFk.every(([, keys]) => Array.isArray(keys) && keys.length > 0));
+  const liveFieldKeys = (() => {
+    const field = liveFk.find(([d]) => d === FK_FIELD)?.[1] ?? [];
+    const prot = liveFk.find(([d]) => d === FK_PROT)?.[1] ?? [];
+    return [...field.filter((k) => k !== '...MetadataProtectionFields'), ...(field.includes('...MetadataProtectionFields') ? prot : [])].sort();
+  })();
+  const liveStorage = declaredKeySet(readFileSync(nodePath.join(ROOT, 'packages/drivers/driver-sql/src/builtin-column-collision.ts'), 'utf8'),
+    { declares: 'FIELD_KEY_STORAGE_CLASS', call: 'Object.freeze', argument: 0 }) ?? [];
+  t(`⭐ LIVE census: the reader's FieldSchema key set (${liveFieldKeys.length}, the spread expanded, no other spread) equals the driver's classification table (${liveStorage.length}), which its own test holds equal to the schema`,
+    liveFieldKeys.length > 50 && liveFieldKeys.every((k) => !k.startsWith('...')) && JSON.stringify(liveFieldKeys) === JSON.stringify(liveStorage));
+  t('CONTROL: the live files, read at base and head alike, derive nothing',
+    FIELD_SCHEMA_KEY_DECLARATIONS.every((d) => { const text = readFileSync(nodePath.join(ROOT, d.path), 'utf8'); return !changesFieldSchemaKeySet(d.path, fkIo(text, text)); }));
+
   // ── The metadata-form edge (#9116) ────────────────────────────────────────
   //
   // The bundles' OTHER producer, and the half no owning-package test can reach:
@@ -8333,7 +8446,8 @@ export function selfTest({ tier = 'full' } = {}) {
       // 744 -> 748 (#31257): the two imported gate readers and their comment.
       // 748 -> 751 (#31292): the workspace-enumerator import and its comment.
       // 751 -> 753 (#34760): the data import and its re-export each gained SPEC_MIGRATION_ENTRY_ROOTS.
-      'scripts/pm/dispatch-gates.mjs:753 inherited-population',
+      // 753 -> 755 (the FieldSchema key-set row): the data import and its re-export each gained FIELD_SCHEMA_KEY_DECLARATIONS.
+      'scripts/pm/dispatch-gates.mjs:755 inherited-population',
       // Ninth row, added with the declaration it names: the recogniser's mailbox
       // doorbell battery pins the seven key templates verbatim in the pm-dispatch
       // references' project-forms.md, a population claim on a governed file, so
