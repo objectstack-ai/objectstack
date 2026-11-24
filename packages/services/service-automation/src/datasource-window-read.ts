@@ -572,6 +572,19 @@ class WindowRun {
     }
 }
 
+/**
+ * [ADR-0153 D3] The row cap of the floor's over-cap refusal `error`, or
+ * `undefined` for any other error: how a count read through the floor learns
+ * that more rows than the cap match.
+ */
+export function overCapOf(error: unknown): number | undefined {
+    const e = error as Partial<RowCapRefusal> | null | undefined;
+    if (!e || e.code !== EXTERNAL_ROW_CAP_EXCEEDED_CODE) return undefined;
+    const cap = e.details?.cap;
+    if (typeof cap === 'number') return cap;
+    return typeof e.returnedRowCount === 'number' && e.returnedRowCount > 0 ? e.returnedRowCount - 1 : undefined;
+}
+
 function capOf(refusal: RowCapRefusal): number {
     const cap = refusal.details?.cap;
     return typeof cap === 'number' ? cap : refusal.returnedRowCount - 1;
