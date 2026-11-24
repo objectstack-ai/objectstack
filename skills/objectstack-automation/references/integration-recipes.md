@@ -43,11 +43,11 @@ export const StripeBalanceSweep = defineFlow({
   name: 'crm_stripe_balance_sweep', label: 'Stripe balance → house account',
   type: 'schedule', runAs: 'system',
   nodes: [
-    { id: 'start', type: 'start', label: 'Nightly 03:00 UTC',
+    { id: 'start', type: 'start', label: 'Nightly',
       config: { schedule: { type: 'cron', expression: '0 3 * * *', timezone: 'UTC' } } },
     { id: 'bal', type: 'connector_action', label: 'GET /v1/balance',
       connectorConfig: { connectorId: 'stripe', actionId: 'GetBalance', input: {} } },
-    { id: 'write', type: 'update_record', label: 'Write balance', config: {
+    { id: 'write', type: 'update_record', label: 'Write', config: {
       objectName: 'crm_account', filter: { is_house_account: true },
       fields: { stripe_available: { dialect: 'cel', source: 'bal.body.available[0].amount / 100.0' },
                 stripe_synced_at: { dialect: 'cel', source: 'isoDatetime(now())' } } } },

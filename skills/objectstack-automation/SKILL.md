@@ -78,7 +78,7 @@ Built-in (plugins register more; a `type` none runs is refused at a server's pub
 | `try_catch` | Run `config.try`; on failure run `config.catch` with the error in `errorVariable` (default `$error`); `config.retry` re-runs `try` with backoff first; in a `record-after-*` flow it (or `errorHandling.strategy: 'retry'`) may not reach an inline `http` / `connector_action`: the save would wait out every attempt. Inside a `subflow` / `map` child, retried by either flow, that is **silent**: the flow saves but never arms (`GET /api/v1/automation/_status`: `bound: false`, `unboundCause: retried_callout_in_subflow`) until the child's `http` is `durable: true` or nothing retries the call. **No `finally`** — the container's ordinary out-edges are the continuation |
 | `map` | Sequential multi-instance — invoke the `config.flowName` flow (named as `subflow`'s) per item of `config.collection` (shaped as `loop`'s); each may pause (batch approvals); a refused name fails it at the first item |
 | `wait` | Pause until a timer elapses or a named signal arrives |
-| `subflow` | Invoke the flow bare `config.flowName` names: a package's flow gets its own, else the one holder in its `dependencies` closure plus `sys`; a package-less flow, the environment's, else the one package holder. Else `os validate` passes (warning `flow-subflow-unknown` when no flow in the stack has the name, as when another installed package ships it) and the node fails at run time (`subflow 'X' failed: …` naming every candidate; no `code`): `outside-closure` — held only by an undeclared package (declare it) or the environment; `ambiguous-in-closure` / `ambiguous-in-environment` — two packages hold it (package / package-less caller) |
+| `subflow` | Invoke the flow bare `config.flowName` names: a package's flow gets its own, else the one holder in its `dependencies` closure plus `sys`; a package-less flow, the environment's, else the one package holder. Else `os validate` may warn and the node fails at run time (`subflow 'X' failed: …` naming every candidate; no `code`): `outside-closure` — held only by an undeclared package (declare it) or the environment; `ambiguous-in-closure` / `ambiguous-in-environment` — two packages hold it (package / package-less caller) |
 | `parallel_gateway` / `join_gateway` / `boundary_event` | BPMN-interop forms a `parallel` / `try_catch` container lowers into; author the container |
 
 #### Data Operations
@@ -322,11 +322,9 @@ Most are caught by `objectstack build`:
 
 4. **A `select` is compared and written by its option `value`, never its label.**
    The request speaks the label ("Lost"); the row stores the `value` (`lost`).
-   A start `condition: "record.status == 'Lost'"` matches no row and
-   `fields: { status: 'Lost' }` / a `filter` fails the run (`invalid_option`):
-   publish and `os validate` refuse the first two where the options are inline
-   (`flow-condition-option-label`, `flow-node-write-unknown-option`); an edge
-   condition, a `filter` or a `picklist` field is not judged. Read the field's `options`.
+   A start `condition: "record.status == 'Lost'"` or `fields: { status: 'Lost' }`
+   is refused at publish (inline options), else matches no row or fails the
+   run (`invalid_option`). Read the field's `options`.
 
 ---
 
