@@ -1,5 +1,6 @@
 ---
 '@objectstack/lint': patch
+'@objectstack/cli': patch
 ---
 
 fix(lint): the translation coverage check asks every named flow for its label, not only a flow with a screen or an approval step
