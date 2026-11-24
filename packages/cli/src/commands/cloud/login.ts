@@ -77,6 +77,7 @@ import { printHeader, printKV, printSuccess, printError, emitJson, errorCodeFiel
 import { loginWithBrowser, loginWithPassword } from '../../utils/auth-flows.js';
 import { DEFAULT_CLOUD_URL, readCloudConfig, tryReadCloudConfig, writeCloudConfig, type CloudConfig } from '../../utils/cloud-config.js';
 import { isSameControlPlane } from '../../utils/active-environment.js';
+import { terminalText } from '../../utils/terminal-text.js';
 
 /**
  * The `cloud.json` a successful login writes: the new credential, plus the
@@ -209,7 +210,7 @@ export default class CloudLogin extends Command {
             if (flags.json) {
               await emitRecord({ success: false, error: 'Already logged in', email: existing.email, url: existing.url });
             } else {
-              printSuccess(`Already logged in to ${existing.url} as ${existing.email || existing.userId}`);
+              printSuccess(`Already logged in to ${terminalText(existing.url)} as ${terminalText(existing.email || existing.userId)}`);
               console.log('');
               console.log('  Run `os cloud logout` to switch accounts, or use --force to re-authenticate.');
               console.log('');
@@ -225,7 +226,7 @@ export default class CloudLogin extends Command {
 
       if (!flags.json) {
         printHeader('ObjectOS Cloud Login');
-        printKV('Server', url);
+        printKV('Server', terminalText(url));
         console.log('');
       }
 
@@ -261,8 +262,8 @@ export default class CloudLogin extends Command {
         await emitRecord({ success: true, email: result.user?.email, userId: result.user?.id, url });
       } else {
         printSuccess('Cloud authentication successful');
-        if (result.user?.email) printKV('Email', result.user.email);
-        if (result.user?.id) printKV('User ID', result.user.id);
+        if (result.user?.email) printKV('Email', terminalText(result.user.email));
+        if (result.user?.id) printKV('User ID', terminalText(result.user.id));
         console.log('');
         console.log('  Credentials stored in ~/.objectstack/cloud.json');
         console.log('  Next: `os deploy` to put this app on your cloud environment, `os cloud whoami` to verify.');
@@ -277,7 +278,7 @@ export default class CloudLogin extends Command {
         await emitRecord({ success: false, error: error.message, ...errorCodeFields(error) });
         this.exit(1);
       }
-      printError(error.message || String(error));
+      printError(terminalText(error.message || String(error)));
       this.exit(1);
     }
   }

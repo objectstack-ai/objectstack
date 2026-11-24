@@ -343,10 +343,13 @@ export const ZH_CN_SPEC_FORMS: NonNullable<TranslationData['metadataForms']> = {
       'blocks.values': { label: '指标' },
       'blocks.runtimeFilter': { label: '运行时筛选' },
       'blocks.order': { label: '排序' },
-      runtimeFilter: { label: '运行时筛选', helpText: '渲染时的范围筛选，在查询时以 AND 方式并入' },
+      // ⟨36373⟩ follows the English (objectstack#36838); the platform's zh-CN row is
+      // the ledger-pinned rendering of the older render-time / AND sentence.
+      runtimeFilter: { label: '运行时筛选', helpText: '每次显示报表时都会应用的筛选，叠加在数据来源自身的条件之上' },
       chart: { label: '图表', helpText: '图表类型与配置' },
       // ⟨36373⟩ dateRange · exportOptions
-      dateRange: { label: '日期范围', helpText: '默认时间段与自定义范围开关。按数据来源里的一个日期分组筛选；只有一个日期分组时可留空' },
+      // The date-grouping sentence lives on the `dateRange.dimension` child below (objectstack#36838).
+      dateRange: { label: '日期范围', helpText: '打开报表时显示的时间段，以及使用者能否自己选择范围' },
       exportOptions: { label: '导出选项', helpText: '下载格式（csv、xlsx）与文件名。谁可以下载由数据来源对象上的导出权限决定' },
       // The children `report.form.ts` declares for both composites (objectstack#36447),
       // copied from the platform zh-CN bundle like every unmarked row here.
@@ -355,7 +358,7 @@ export const ZH_CN_SPEC_FORMS: NonNullable<TranslationData['metadataForms']> = {
       'dateRange.allowCustomRange': { label: '允许自定义范围', helpText: '允许使用者自己选择开始和结束日期' },
       'exportOptions.formats': { label: '格式', helpText: '可下载的格式。不设置时提供 csv 与 xlsx；空列表则关闭下载' },
       'exportOptions.includeHeaders': { label: '包含表头', helpText: '在下载文件的第一行写入列名' },
-      'exportOptions.fileNamePrefix': { label: '文件名', helpText: '下载文件名的开头，用来代替报表名称' },
+      'exportOptions.fileNamePrefix': { label: '文件名', helpText: '下载文件名的开头。留空时以报表的显示名称命名，没有显示名称时用名称' },
     },
   },
 

@@ -1626,30 +1626,30 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     fields: {
       name: {
         label: "Nome",
-        helpText: "Identificador único em snake_case"
+        helpText: "Nome interno único deste painel: letras minúsculas, números e sublinhados, começando com uma letra (por exemplo, sales_overview)."
       },
       label: {
         label: "Rótulo",
-        helpText: "Nome de exibição"
+        helpText: "O título que as pessoas veem para este painel."
       },
       description: {
         label: "Descrição"
       },
       columns: {
         label: "Colunas",
-        helpText: "Colunas da grade (padrão 12)"
+        helpText: "Em quantas colunas os widgets são organizados, de 1 a 24. Deixe vazio para o painel escolher uma largura que se ajuste aos seus widgets."
       },
       gap: {
         label: "Espaçamento",
-        helpText: "Espaço entre os widgets, em passos de 0.25rem (4 = 1rem)"
+        helpText: "Quanto espaço deixar entre os widgets. Números maiores os afastam mais; deixe vazio para o espaçamento padrão."
       },
       refreshIntervalSeconds: {
         label: "Intervalo de atualização (segundos)",
-        helpText: "Atualização automática (segundos)"
+        helpText: "Com que frequência o painel recarrega os dados, em segundos. Deixe vazio ou informe 0 para desligar a recarga automática."
       },
       header: {
         label: "Cabeçalho",
-        helpText: "Configuração do cabeçalho do painel (título, subtítulo, ações)"
+        helpText: "O que aparece no topo do painel: título, descrição e botões de ação."
       },
       "header.showTitle": {
         label: "Mostrar título",
@@ -1677,7 +1677,7 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       widgets: {
         label: "Widgets",
-        helpText: "Widgets do painel com posição e dimensionamento"
+        helpText: "Os gráficos, números e tabelas deste painel, e onde cada um fica."
       },
       "widgets.id": {
         label: "ID do widget"
@@ -1732,11 +1732,11 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       dateRange: {
         label: "Intervalo de datas",
-        helpText: "Seletor de intervalo de datas padrão"
+        helpText: "O período com que o painel abre e se os usuários podem escolher as próprias datas."
       },
       globalFilters: {
         label: "Filtros globais",
-        helpText: "Filtros aplicados a todos os widgets"
+        helpText: "Filtros que os usuários podem usar para restringir todos os widgets de uma vez, ou só os que você escolher."
       },
       "globalFilters.name": {
         label: "Nome"

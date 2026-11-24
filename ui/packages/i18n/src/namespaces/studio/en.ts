@@ -3494,6 +3494,10 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.pillar.automations': 'Automations',
   'engine.studio.pillar.interfaces': 'Interfaces',
   'engine.studio.pillar.access': 'Access',
+  // objectstack#36502 — the notice on a retired Interfaces link's landing.
+  'engine.studio.interfacesRetired.sentence': 'Interface edits have moved into the app.',
+  'engine.studio.interfacesRetired.backToApp': 'Back to the app',
+  'engine.studio.interfacesRetired.dismiss': 'Dismiss',
   // objectstack#28561 — the "All metadata" area beside the pillars (ADR-0146 D1).
   'engine.studio.pillar.metadata': 'All metadata',
   // Header · package-level publish + app bridge
@@ -4838,6 +4842,14 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.itemTools.sourceReadOnly': 'Read-only: this item cannot be edited here.',
   'engine.studio.itemTools.layersFailed': 'Could not read this item\'s layers: {message}',
   'engine.studio.itemTools.layersRetry': 'Try again',
+  // Studio detail header: the one header of every full-screen detail (objectstack#36892).
+  'engine.studio.detailHeader.close': 'Close and go back to the list',
+  'engine.studio.detailHeader.previous': 'Previous item',
+  'engine.studio.detailHeader.next': 'Next item',
+  'engine.studio.detailHeader.position': 'Item {index} of {total}',
+  'engine.studio.detailHeader.notInList': 'Not in the current list',
+  'engine.studio.detailHeader.package': 'From package {package}',
+  'engine.studio.detailHeader.more': 'More',
 };
 
 export default STUDIO_EN;

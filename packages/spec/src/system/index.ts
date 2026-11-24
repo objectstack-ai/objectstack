@@ -80,6 +80,7 @@ export * from './sms-config.zod';
 export * from './push-config.zod';
 export * from './push-device.zod';
 export * from './metadata-form-registry';
+export * from './metadata-list-registry';
 // compliance.zod (GDPR/HIPAA/PCI configs) and masking.zod (role-based data
 // masking) were REMOVED per ADR-0056 D8 "design+enforce or remove": both were
 // declared-but-never-enforced (no runtime consumer), and compliance-grade

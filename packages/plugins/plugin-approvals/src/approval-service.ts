@@ -148,7 +148,9 @@ import {
   noApproverPositions,
   noApproverSlots,
   noApproverWho,
+  submitterRefusalUserMessage,
   type NoApproverNote,
+  type SubmitterApprovalRefusal,
 } from './no-approver-note.js';
 import {
   localizeRequestLabels,
@@ -5957,21 +5959,35 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     // [#36308] Composed only when it is said, naming a position as the
     // timeline note does: the decider's pack label, else the declared label,
     // else its name. The sentence stays the English the note stores.
+    // [#36463] Beside it, the end user's half: the same refusal in the
+    // decider's language, as the error's `userMessage`
+    // (`submitterRefusalUserMessage`), which the REST door carries to the
+    // wire. The `message` is unchanged byte for byte.
     const noOneElse = namesNoOneBut(pendingApprovers, String(raw.submitter_id ?? ''));
-    const noApproverRemedy = async (): Promise<string> => {
-      const labels = await this.notePositionLabels(slatePositions(pendingApprovers), this.readerLabels(context));
-      return noApproverNoteText({ who: noApproverWho(pendingApprovers, (name) => labels.get(name)) });
+    const refuseOwnApproval = async (
+      refusal: SubmitterApprovalRefusal,
+      message: (remedy: string | undefined) => string,
+    ): Promise<never> => {
+      const reader = this.readerLabels(context);
+      const labels = noOneElse
+        ? await this.notePositionLabels(slatePositions(pendingApprovers), reader)
+        : undefined;
+      const labelOf = (name: string): string | undefined => labels?.get(name);
+      const remedy = noOneElse ? noApproverNoteText({ who: noApproverWho(pendingApprovers, labelOf) }) : undefined;
+      const err = new Error(message(remedy)) as Error & { userMessage?: string };
+      err.userMessage = submitterRefusalUserMessage(
+        refusal, noOneElse ? pendingApprovers : undefined, reader?.sentence, labelOf,
+      );
+      throw err;
     };
     if (
       input.decision === 'approve' && config.excludeSubmitter === true
       && raw.submitter_id && decider && decider === String(raw.submitter_id)
     ) {
-      const remedy = noOneElse ? await noApproverRemedy() : undefined;
-      throw new Error(
+      await refuseOwnApproval('excludeSubmitter', (remedy) =>
         `FORBIDDEN: '${decider}' submitted this request, and its approval step sets excludeSubmitter, so they `
         + `cannot approve it. ${remedy
-          ?? 'Another approver on the step decides it; if the submitter holds the only slot, reassign it to someone else.'}`,
-      );
+          ?? 'Another approver on the step decides it; if the submitter holds the only slot, reassign it to someone else.'}`);
     }
     // [Maintainer ruling 2026-11-17, option B] The #3424 override never
     // approves a request its actor submitted, whatever `excludeSubmitter`
@@ -5983,14 +5999,12 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     // `attachViewers` computes `viewer.can_override_approve` from the same
     // predicate, so the Approve control is not offered where this refuses.
     if (input.decision === 'approve' && viaOverride && overrideApprovesOwnRequest(raw, decider)) {
-      const remedy = noOneElse ? await noApproverRemedy() : undefined;
-      throw new Error(
+      await refuseOwnApproval('override', (remedy) =>
         `FORBIDDEN: '${decider}' submitted this request and holds no slot on it, so they cannot approve it `
         + `through the administrator override. ${remedy !== undefined
           ? `${remedy} To withdraw it instead, reject it or recall it.`
           : 'An approver on the step decides it. To move it, reassign it to someone else, reject it, or recall '
-            + 'it and send the record for approval again.'}`,
-      );
+            + 'it and send the record for approval again.'}`);
     }
 
     // #3447 P2: decision outputs — validated BEFORE any write (audit included)

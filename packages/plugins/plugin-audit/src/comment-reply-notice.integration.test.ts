@@ -197,14 +197,14 @@ describe('a reply notifies the thread\'s starter and earlier repliers', () => {
   it('Alice comments, Bob replies: Alice gets one inbox notice and one e-mail that open the record; Bob gets nothing', async () => {
     rig = await boot();
     const root = await say(rig.engine, ALICE, { body: 'Is the launch plan final?' });
-    await say(rig.engine, BOB, { parentId: root, body: 'Not yet, two items left.' });
+    const bobs = await say(rig.engine, BOB, { parentId: root, body: 'Not yet, two items left.' });
 
     const { reply } = await drained(rig.engine);
     expect(byChannel(reply, ALICE)).toEqual(['email:success', 'inbox:success']);
     expect(byChannel(reply, BOB)).toEqual([]);
     expect(rig.sent).toHaveLength(1);
     expect(rig.sent[0]).toMatchObject({ to: `${ALICE}@example.com`, subject: 'Bob replied to your comment' });
-    expect(rig.sent[0].text).toBe(`Not yet, two items left.\n\nOpen the comment: ${ORIGIN}/_console/${TASK}/t1`);
+    expect(rig.sent[0].text).toBe(`Not yet, two items left.\n\nOpen the comment: ${ORIGIN}/_console/${TASK}/t1?comments=${root}&comment=${bobs}`);
   });
 
   it('Alice comments, Bob replies, Carol replies: Alice and Bob get one notice each, Carol none', async () => {
@@ -241,12 +241,12 @@ describe('a reply notifies the thread\'s starter and earlier repliers', () => {
   it('a reader of zh-CN gets the zh-CN title and link line', async () => {
     rig = await boot();
     const root = await say(rig.engine, MEI);
-    await say(rig.engine, BOB, { parentId: root, body: '已更新' });
+    const bobs = await say(rig.engine, BOB, { parentId: root, body: '已更新' });
 
     await drained(rig.engine);
     expect(rig.sent).toHaveLength(1);
     expect(rig.sent[0]).toMatchObject({ to: `${MEI}@example.com`, subject: 'Bob 回复了你的评论' });
-    expect(rig.sent[0].text).toBe(`已更新\n\n查看评论：${ORIGIN}/_console/${TASK}/t1`);
+    expect(rig.sent[0].text).toBe(`已更新\n\n查看评论：${ORIGIN}/_console/${TASK}/t1?comments=${root}&comment=${bobs}`);
   });
 
   it('burst: three replies within the window are three inbox notices and one e-mail to the starter', async () => {
@@ -339,5 +339,67 @@ describe('a reply notifies the thread\'s starter and earlier repliers', () => {
     const { reply } = await drained(rig.engine);
     expect(reply).toHaveLength(before);
     expect(rig.sent).toEqual([]);
+  });
+});
+
+/** Each inbox row of `topic` for `recipient`, by its link (`sys_inbox_message.action_url`). */
+async function inboxLinks(engine: ObjectQL, topic: string, recipient: string): Promise<string[]> {
+  const rows = (await engine.find('sys_inbox_message', { where: { topic, user_id: recipient }, context: SYSTEM })) as any[];
+  return rows.map((r) => String(r.action_url)).sort();
+}
+
+describe('[#36410] a comment notice opens the record with its comment panel at the comment', () => {
+  it('a reply: the inbox row links the thread by its top-level comment and the reply to scroll to', async () => {
+    rig = await boot();
+    const root = await say(rig.engine, ALICE);
+    const reply = await say(rig.engine, BOB, { parentId: root });
+    await drained(rig.engine);
+    expect(await inboxLinks(rig.engine, 'collab.reply', ALICE)).toEqual([`/${TASK}/t1?comments=${root}&comment=${reply}`]);
+  });
+
+  it('a reply to a reply links the thread by its top-level comment, not the parent', async () => {
+    rig = await boot();
+    const root = await say(rig.engine, ALICE);
+    const bobs = await say(rig.engine, BOB, { parentId: root });
+    await drained(rig.engine);
+    const carols = await say(rig.engine, CAROL, { parentId: bobs });
+    await drained(rig.engine);
+    expect(await inboxLinks(rig.engine, 'collab.reply', BOB)).toEqual([`/${TASK}/t1?comments=${root}&comment=${carols}`]);
+  });
+
+  it('a mention in a top-level comment: the comment is its own thread, so the link names no second comment', async () => {
+    rig = await boot();
+    const id = await say(rig.engine, ALICE, { mentions: [CAROL] });
+    await drained(rig.engine);
+    expect(await inboxLinks(rig.engine, 'collab.mention', CAROL)).toEqual([`/${TASK}/t1?comments=${id}`]);
+  });
+
+  it('a mention in a reply: the thread\'s top-level comment and the reply', async () => {
+    rig = await boot();
+    const root = await say(rig.engine, ALICE);
+    const reply = await say(rig.engine, BOB, { parentId: root, mentions: [CAROL] });
+    await drained(rig.engine);
+    expect(await inboxLinks(rig.engine, 'collab.mention', CAROL)).toEqual([`/${TASK}/t1?comments=${root}&comment=${reply}`]);
+    expect(rig.sent.find((m) => m.to === `${CAROL}@example.com`)?.text).toContain(
+      `${ORIGIN}/_console/${TASK}/t1?comments=${root}&comment=${reply}`,
+    );
+  });
+
+  it('CONTROL: a notice that is not a comment\'s keeps the record link messaging derives from its source', async () => {
+    rig = await boot();
+    await (rig.messaging as unknown as MessagingEmitSurface).emit({
+      topic: 'record.assigned',
+      audience: [ALICE],
+      source: { object: TASK, id: 't1' },
+      organizationId: DEFAULT_ORGANIZATION_ID,
+      payload: { title: 'Assigned to you' },
+    });
+    const deadline = performance.now() + 10_000;
+    let links: string[] = [];
+    while ((links = await inboxLinks(rig.engine, 'record.assigned', ALICE)).length === 0) {
+      if (performance.now() > deadline) throw new Error('the control notice never reached the inbox');
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    expect(links).toEqual([`/${TASK}/t1`]);
   });
 });

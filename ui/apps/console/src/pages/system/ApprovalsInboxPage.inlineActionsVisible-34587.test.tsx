@@ -22,7 +22,7 @@
 
 import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, cleanup, waitFor, within } from '@testing-library/react';
+import { render, screen, cleanup, waitFor, within, fireEvent } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 
 const APP = 'com.objectstack.account';
@@ -76,6 +76,13 @@ const { approvalsApiStub, ADAPTER, AUTH, I18N } = vi.hoisted(() => {
   };
 
   return { approvalsApiStub, ADAPTER, AUTH, I18N };
+});
+
+// objectstack#36463: the inline decision's failure toast is read off sonner.
+const toasts = vi.hoisted(() => ({ error: vi.fn(), success: vi.fn() }));
+vi.mock('sonner', async (importOriginal) => {
+  const real = await importOriginal<Record<string, any>>();
+  return { ...real, toast: Object.assign((...args: unknown[]) => real.toast(...args), real.toast, toasts) };
 });
 
 vi.mock('@object-ui/i18n', async (importOriginal) => ({
@@ -143,6 +150,8 @@ function hidingClasses(el: Element | null): string[] {
 
 beforeEach(() => {
   for (const fn of Object.values(approvalsApiStub)) fn.mockClear();
+  toasts.error.mockClear();
+  toasts.success.mockClear();
 });
 afterEach(cleanup);
 
@@ -194,5 +203,39 @@ describe('Approvals Inbox — inline Approve / Reject shown by default (objectst
       expect(el).not.toHaveClass('w-20');
       expect(el).toHaveClass('w-px', 'whitespace-nowrap');
     }
+  });
+});
+
+// objectstack#36463 — a decide refusal the server marked for the end user
+// (`userMessage`, the decider's language) is the inline Approve's failure
+// toast, ahead of the page's generic "not allowed" line; an unmarked refusal
+// keeps that line. `approvalsApi.call` parks the body on `err.details`.
+describe('Approvals Inbox — a marked decide refusal is shown as written (objectstack#36463)', () => {
+  const MARKED = '此请求由您提交，而其审批步骤不允许提交人批准自己的请求，因此您不能批准它。';
+  const refusal = (userMessage?: string) => Object.assign(
+    new Error("FORBIDDEN: 'u_1' submitted this request, and its approval step sets excludeSubmitter, so they cannot approve it."),
+    {
+      code: 'FORBIDDEN',
+      status: 403,
+      details: { code: 'FORBIDDEN', error: 'refused', ...(userMessage !== undefined ? { userMessage } : {}) },
+    },
+  );
+
+  async function approveQuickFailingWith(err: Error) {
+    approvalsApiStub.approve.mockRejectedValueOnce(err);
+    const rowFor = await renderInbox();
+    fireEvent.click(rowFor('Quick Invoice').approve);
+    const dialog = await screen.findByRole('alertdialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Approve' }));
+    await waitFor(() => expect(toasts.error).toHaveBeenCalledTimes(1));
+    return toasts.error.mock.calls[0][0];
+  }
+
+  it('the marked text is the toast', async () => {
+    expect(await approveQuickFailingWith(refusal(MARKED))).toBe(MARKED);
+  });
+
+  it('CONTROL: an unmarked refusal keeps the generic line', async () => {
+    expect(await approveQuickFailingWith(refusal())).toBe('You are not allowed to perform this action.');
   });
 });

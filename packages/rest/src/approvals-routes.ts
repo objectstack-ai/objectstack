@@ -47,7 +47,7 @@
 // `handleApprovalError` below. Constructor and reader share one module in
 // `@objectstack/types` because the producer is a PLUGIN and rest cannot
 // import one.
-import { strandedDecisionDetails, sendError as sendEnvelopeError, sendOk } from '@objectstack/types';
+import { declaredUserMessage, strandedDecisionDetails, sendError as sendEnvelopeError, sendOk } from '@objectstack/types';
 // [#29880] The declared value set of `sys_approval_request.status`. The
 // object's select options are built FROM this list (#3786), so it is the
 // object's own declaration, read where the object reads it, and not a second
@@ -284,6 +284,16 @@ export function registerApprovalsEndpoints(this: ApprovalsRouteHost, basePath: s
         // a `RESUME_FAILED` from a caller with no decision to report must
         // not be dressed up as one.
         const stranded = strandedDecisionDetails(err);
+        // [#36463] The refusal's end-user text, when the service marked one
+        // on the thrown error (`ApiErrorSchema.userMessage`: presence is the
+        // marking, read once through `declaredUserMessage`). At the top level
+        // of this flat body, the member the stranded envelope below already
+        // carries its own `userMessage` in, and the one `@objectstack/client`
+        // lifts from this dialect. Status-agnostic, as the contract declares
+        // it: every row answers it when the producer marked one, and none
+        // invents one. The decide refusal of a submitter's own approval is
+        // its producer, in the decider's language.
+        const marked = declaredUserMessage(err);
         for (const [re, status, code] of mapping) {
             if (re.test(msg)) {
                 // [#13095] The strip is anchored to the CODE this row just
@@ -300,6 +310,7 @@ export function registerApprovalsEndpoints(this: ApprovalsRouteHost, basePath: s
                 res.status(status).json({
                     code,
                     error: msg.replace(new RegExp(`^${code}:\\s*`), ''),
+                    ...(marked !== undefined ? { userMessage: marked } : {}),
                     // Anchored to the code the envelope describes, for the
                     // same reason the strip above is: these four facts are
                     // about a recorded-decision-with-stranded-run and

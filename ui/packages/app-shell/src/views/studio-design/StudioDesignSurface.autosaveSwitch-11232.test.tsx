@@ -207,7 +207,7 @@ vi.mock('../metadata-admin/AccessExplainPanel', () => ({ AccessExplainPanel: () 
 vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => null }));
 vi.mock('../../preview/DraftChangesPanel', () => ({ DraftChangesPanel: () => null }));
 
-import { AutomationsPillar, DataPillar, InterfacesPillar, StudioDesignSurface } from './StudioDesignSurface';
+import { AutomationsPillar, DataPillar, StudioDesignSurface } from './StudioDesignSurface';
 import { StudioSaveHarness, pressStudioSave } from './__tests__/studioSaveHarness';
 import { ADD_FIELD_OFFERED, addFieldFromGrid } from './__tests__/dataPillarAddField';
 import { createEmptyDataSource } from './__tests__/emptyDataSource';
@@ -319,18 +319,6 @@ function holdLoad(type: string, name: string): () => Promise<void> {
   };
 }
 
-/** Holds the next save in flight until the returned release is called. */
-function holdNextSave(): () => Promise<void> {
-  let release!: () => void;
-  server.saveHold = new Promise<void>((r) => (release = r));
-  return async () => {
-    await act(async () => {
-      release();
-      await new Promise((r) => setTimeout(r, 0));
-    });
-  };
-}
-
 /** Waits past the autosave's debounce: what was sent by then is what will be. */
 async function pastDebounce(ms = 2500): Promise<void> {
   await act(async () => {
@@ -394,73 +382,6 @@ describe('Automations pillar — a flow switch inside the debounce (objectui#112
   }, 30000);
 });
 
-describe('Interfaces page inspector — a page switch inside the debounce (objectui#11232)', () => {
-  const pageLabel = () => within(screen.getByRole('complementary')).findByLabelText(/^Label/, undefined, SLOW);
-
-  it('sends nothing to the newly opened page; the edit after its load saves to it', async () => {
-    render(
-      <MemoryRouter initialEntries={[`/studio/${PKG}/interfaces`]}>
-        <InterfacesPillar packageId={PKG} />
-      </MemoryRouter>,
-    );
-    await screen.findByRole('button', { name: 'Select hello' }, SLOW);
-
-    editText(await pageLabel(), 'Welcome');
-    const release = holdLoad('page', 'landing');
-    fireEvent.click(screen.getByRole('button', { name: /Landing menu/ }));
-    await pastDebounce();
-
-    expect(savesOf('page', 'landing')).toEqual([]);
-    expect(server.saves).toEqual([]);
-
-    await release();
-    await waitFor(() => expect(screen.queryByRole('button', { name: 'Select hello' })).toBeNull(), SLOW);
-    await waitFor(async () => expect(await pageLabel()).toHaveValue('Landing'), SLOW);
-    await pastDebounce(1800);
-    expect(server.saves).toEqual([]);
-
-    // The control: an edit after the switch saves normally, to its own page.
-    editText(await pageLabel(), 'Landing two');
-    await waitFor(() => expect(server.saves).toHaveLength(1), SLOW);
-    expect(savesOf('page', 'landing').map((b) => [b.label, b.regions])).toEqual([['Landing two', LANDING.regions]]);
-  }, 30000);
-});
-
-describe('Interfaces page inspector — a save in flight across a page switch (objectui#11232)', () => {
-  const pageLabel = () => within(screen.getByRole('complementary')).findByLabelText(/^Label/, undefined, SLOW);
-
-  it("the save lands on its own page, and its claim does not clear the page opened since", async () => {
-    render(
-      <MemoryRouter initialEntries={[`/studio/${PKG}/interfaces`]}>
-        <InterfacesPillar packageId={PKG} />
-      </MemoryRouter>,
-    );
-    await screen.findByRole('button', { name: 'Select hello' }, SLOW);
-
-    const releaseSave = holdNextSave();
-    editText(await pageLabel(), 'Welcome');
-    await screen.findByTestId('if-autosaving', undefined, SLOW);
-    const releaseLoad = holdLoad('page', 'landing');
-    fireEvent.click(screen.getByRole('button', { name: /Landing menu/ }));
-    // The save of `home` lands while `landing` is still loading.
-    await releaseSave();
-    // The buffer still holds `home`'s document; an edit typed there is not
-    // `landing`'s, and it is not sent there. objectui#11272: the rail offers
-    // no editor over it under `landing`, so the edit goes to whatever it does
-    // offer, and nothing is.
-    const offered = within(screen.getByRole('complementary')).queryByLabelText(/^Label/);
-    if (offered) editText(offered, 'Typed during load');
-    await pastDebounce();
-    expect(server.saves.map((s) => [s.type, s.name, s.body.label])).toEqual([['page', 'home', 'Welcome']]);
-
-    await releaseLoad();
-    await waitFor(async () => expect(await pageLabel()).toHaveValue('Landing'), SLOW);
-    await pastDebounce(1800);
-    expect(server.saves.map((s) => [s.type, s.name, s.body.label])).toEqual([['page', 'home', 'Welcome']]);
-    expect(offered).toBeNull();
-  }, 30000);
-});
-
 describe('Data pillar — an object switch over an unsaved edit, the control (objectui#11232)', () => {
   it('sends nothing to either object; an edit on the opened object goes to it on Save (objectstack#36511)', async () => {
     render(
@@ -489,125 +410,6 @@ describe('Data pillar — an object switch over an unsaved edit, the control (ob
       ['body', 'new_field'],
     ]);
     expect(savesOf('object', 'acme_task')).toEqual([]);
-  }, 30000);
-});
-
-describe('Studio surface — a package switch over an unsaved nav edit (objectui#11203, folded in)', () => {
-  function surfaceTree() {
-    return (
-      <MemoryRouter initialEntries={[`/studio/${PKG}/interfaces`]}>
-        <PackageDoor to={`/studio/${PKG_B}/interfaces`} />
-        <Routes>
-          <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
-        </Routes>
-      </MemoryRouter>
-    );
-  }
-  // objectui#11776: a save sends an entry only once it names a target, so each
-  // Add here is bound to an object of its package in its inspector, and the
-  // rail shows the label-less entry by that object's name.
-  const addedItems = () => screen.queryAllByRole('button', { name: new RegExp(`${TASK.name}|${BETA_ITEM.name}`) }).length;
-  const navEditingOpen = () => screen.queryAllByRole('button', { name: /Add nav item/ }).length > 0;
-  async function openEditing(): Promise<void> {
-    fireEvent.click(screen.getByTitle(/^Edit navigation/));
-    await screen.findByRole('button', { name: /Add nav item/ }, SLOW);
-  }
-  const addItem = async (objectName: string = TASK.name) => {
-    fireEvent.click(screen.getByRole('button', { name: /Add nav item/ }));
-    // *Link object* is the shared `Select` since objectui#11865: open its list and pick.
-    fireEvent.keyDown(screen.getByTestId('nav-link-object'), { key: 'ArrowDown' });
-    fireEvent.click(await screen.findByRole('option', { name: new RegExp(`\\(${objectName}\\)$`) }));
-  };
-  async function switchTo(confirmed: boolean): Promise<void> {
-    confirmSpy.mockReturnValueOnce(confirmed);
-    fireEvent.click(screen.getByTestId('package-door'));
-  }
-  const savedNav = (body: Record<string, unknown>) =>
-    (body.navigation as Array<Record<string, unknown>>).map((n) =>
-      Object.prototype.hasOwnProperty.call(n, 'label') ? String(n.label) : { id: n.id },
-    );
-
-  it('a confirmed discard sends nothing to the new package; an edit after the switch saves normally', async () => {
-    // Package B's object, for the edit made there after the switch.
-    seedPackageB();
-    render(surfaceTree());
-    await screen.findByRole('button', { name: /Landing menu/ }, SLOW);
-    await openEditing();
-    await addItem();
-    expect(addedItems()).toBe(1);
-
-    await switchTo(true);
-    expect(confirmSpy).toHaveBeenCalledTimes(1);
-    await screen.findByRole('button', { name: /Board menu/ }, SLOW);
-    await pastDebounce(3500);
-
-    expect(server.saves.filter((s) => s.type === 'app')).toEqual([]);
-    // The discarded edit went with the package: editing is closed and nothing is held.
-    expect(navEditingOpen()).toBe(false);
-    expect(addedItems()).toBe(0);
-
-    // The control: an edit made after the switch saves normally, to the new package's app.
-    await openEditing();
-    await addItem(BETA_ITEM.name);
-    await waitFor(() => expect(server.saves.filter((s) => s.type === 'app')).toHaveLength(1), SLOW);
-    expect(server.saves.map((s) => [s.type, s.name, s.packageId])).toEqual([['app', 'beta_app', PKG_B]]);
-    expect(savedNav(server.saves[0].body)).toEqual(['Board menu', { id: 'nav_item_2' }]);
-  }, 30000);
-
-  it("a confirmed discard with the new package's app slow to load sends nothing either", async () => {
-    render(surfaceTree());
-    await screen.findByRole('button', { name: /Landing menu/ }, SLOW);
-    await openEditing();
-    await addItem();
-
-    const release = holdLoad('app', 'beta_app');
-    await switchTo(true);
-    await pastDebounce();
-    expect(server.saves).toEqual([]);
-
-    await release();
-    await screen.findByRole('button', { name: /Board menu/ }, SLOW);
-    await pastDebounce(3500);
-    expect(server.saves).toEqual([]);
-  }, 30000);
-
-  it("the page inspector: a package switch opens the new package's page, and an edit saves to it", async () => {
-    render(surfaceTree());
-    await screen.findByRole('button', { name: 'Select hello' }, SLOW);
-
-    // No nav edit, so no prompt: page edits are not what the guard holds.
-    await switchTo(true);
-    expect(confirmSpy).not.toHaveBeenCalled();
-    await screen.findByRole('button', { name: /Board menu/ }, SLOW);
-    // The previous package's page does not stay open on the new package.
-    await waitFor(() => expect(screen.queryByRole('button', { name: 'Select hello' })).toBeNull(), SLOW);
-
-    // objectui#12725 — the page's properties are in the right slot, which shows
-    // them with no copilot served (this tree mocks it away): no tab to open.
-    const label = await within(screen.getByTestId('studio-slot-props')).findByLabelText(/^Label/, undefined, SLOW);
-    expect(label).toHaveValue('Board');
-    editText(label, 'Board two');
-    await waitFor(() => expect(server.saves).toHaveLength(1), SLOW);
-    expect(server.saves.map((s) => [s.type, s.name, s.packageId, s.body.label])).toEqual([
-      ['page', 'board', PKG_B, 'Board two'],
-    ]);
-  }, 30000);
-
-  it('a cancelled discard keeps package A and its edit, which then saves to A', async () => {
-    render(surfaceTree());
-    await screen.findByRole('button', { name: /Landing menu/ }, SLOW);
-    await openEditing();
-    await addItem();
-
-    await switchTo(false);
-    expect(confirmSpy).toHaveBeenCalledTimes(1);
-    // Still package A: its own nav entry is on the rail.
-    expect(screen.getByRole('button', { name: /Landing menu/ })).toBeInTheDocument();
-    expect(addedItems()).toBe(1);
-
-    await waitFor(() => expect(server.saves).toHaveLength(1), SLOW);
-    expect(server.saves.map((s) => [s.type, s.name, s.packageId])).toEqual([['app', 'acme_app', PKG]]);
-    expect(savedNav(server.saves[0].body)).toEqual(['Home menu', 'Landing menu', { id: 'nav_item_3' }]);
   }, 30000);
 });
 
@@ -645,42 +447,6 @@ describe("the load window: nothing of the previous item is offered, shown or sav
   // author can use. So each sequence USES it when it is there, and records
   // what was shown: every save reading is taken first, and what was shown is
   // asserted last.
-
-  it('Interfaces page inspector: the page form typed into during the load sends nothing; the edit after the load saves once', async () => {
-    render(
-      <MemoryRouter initialEntries={[`/studio/${PKG}/interfaces`]}>
-        <InterfacesPillar packageId={PKG} />
-      </MemoryRouter>,
-    );
-    await screen.findByRole('button', { name: 'Select hello' }, SLOW);
-    const rail = () => within(screen.getByRole('complementary'));
-    await waitFor(() => expect(rail().getByLabelText(/^Label/)).toHaveValue('Home'), SLOW);
-
-    const release = holdLoad('page', 'landing');
-    fireEvent.click(screen.getByRole('button', { name: /Landing menu/ }));
-    const offered = rail().queryByLabelText(/^Label/);
-    if (offered) editText(offered, 'Typed during load');
-    await pastDebounce();
-    expect(savesRead()).toEqual([]);
-    const shownDuringLoad = {
-      pageForm: rail().queryByLabelText(/^Label/) !== null,
-      homeBlock: screen.queryByRole('button', { name: 'Select hello' }) !== null,
-    };
-
-    await release();
-    await waitFor(() => expect(rail().getByLabelText(/^Label/)).toHaveValue('Landing'), SLOW);
-    await pastDebounce(1800);
-    expect(server.saves).toEqual([]);
-
-    // The control: an edit after the load saves once, to its own page.
-    editText(rail().getByLabelText(/^Label/), 'Landing two');
-    await waitFor(() => expect(server.saves).toHaveLength(1), SLOW);
-    expect(server.saves.map((s) => [s.type, s.name, s.body.label, s.body.regions])).toEqual([
-      ['page', 'landing', 'Landing two', LANDING.regions],
-    ]);
-    // Nothing of `home` was shown under `landing` until its own document was in.
-    expect(shownDuringLoad).toEqual({ pageForm: false, homeBlock: false });
-  }, 30000);
 
   it("Automations: the enable switch flipped during the load saves nothing; after the load it saves the flow's own document once", async () => {
     render(
@@ -809,42 +575,3 @@ describe('a package switch: Automations and Data open nothing of the previous pa
   }, 30000);
 });
 
-describe("the page inspector's non-editable round trip (objectui#11272)", () => {
-  it("an edit, a studio-canvas leaf, then the same page again with its reload held: no '{}' is sent as the page's draft", async () => {
-    server.active.set(key('app', APP.name), {
-      pkg: PKG,
-      row: {
-        ...APP,
-        navigation: [...APP.navigation, { id: 'nav_tasks', type: 'object', label: 'Tasks menu', objectName: 'acme_task' }],
-      },
-    });
-    render(
-      <MemoryRouter initialEntries={[`/studio/${PKG}/interfaces`]}>
-        <InterfacesPillar packageId={PKG} />
-      </MemoryRouter>,
-    );
-    await screen.findByRole('button', { name: 'Select hello' }, SLOW);
-    const rail = () => within(screen.getByRole('complementary'));
-
-    // Inside the debounce: edit `home`, open the object leaf, reopen `home`.
-    editText(await rail().findByLabelText(/^Label/, undefined, SLOW), 'Welcome');
-    fireEvent.click(screen.getByRole('button', { name: /Tasks menu/ }));
-    await waitFor(() => expect(screen.queryByRole('button', { name: 'Select hello' })).toBeNull(), SLOW);
-    const release = holdLoad('page', 'home');
-    fireEvent.click(screen.getByRole('button', { name: /Home menu/ }));
-    await pastDebounce();
-    expect(savesRead()).toEqual([]);
-
-    await release();
-    await screen.findByRole('button', { name: 'Select hello' }, SLOW);
-    await pastDebounce(1800);
-    expect(server.saves).toEqual([]);
-
-    // The control: an edit after the reload saves once, `home`'s own document.
-    editText(rail().getByLabelText(/^Label/), 'Home two');
-    await waitFor(() => expect(server.saves).toHaveLength(1), SLOW);
-    expect(server.saves.map((s) => [s.type, s.name, s.body.label, s.body.regions])).toEqual([
-      ['page', 'home', 'Home two', HOME.regions],
-    ]);
-  }, 30000);
-});
