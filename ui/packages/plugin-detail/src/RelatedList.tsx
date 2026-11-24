@@ -4003,6 +4003,11 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   // count until its rows land (out of view, or counted at 0, they never do).
   const countAnswers = compact && cardCount !== null && !loadFailure && (loading || !rowsWanted);
   const recordCount = countAnswers ? cardCount! : windowed && total != null ? total : relatedData.length;
+  // objectstack#36235 — a count not known yet is drawn as nothing, never as
+  // the 0 an empty first read holds: while the first rows are in flight (or a
+  // card out of view has not asked) and no count answers for them, the badge
+  // waits. A refetch over rows already drawn keeps their count.
+  const countPending = !countAnswers && loading && relatedData.length === 0 && !(windowed && total != null);
   // In windowed mode an empty page beyond page 0 is a transient overflow (the
   // step-back effect above corrects it), not an empty collection.
   // A failed read is never empty: it draws its own line (objectstack#26415).
@@ -4287,7 +4292,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
     // Rows still to come: one placeholder per row the count says the card
     // names, so the card does not grow when they land.
     const pendingRows = countAnswers && cardCount! > 0 ? Math.min(cardCount!, COMPACT_RELATED_ROWS) : 0;
-    const countChip = !loadFailure && (
+    const countChip = !loadFailure && !countPending && (
       <span
         className="inline-flex h-5 shrink-0 items-center rounded bg-muted px-1.5 text-xs font-normal text-foreground"
         data-related-card-count=""
@@ -4295,7 +4300,9 @@ export const RelatedList: React.FC<RelatedListProps> = ({
         {recordCount}
       </span>
     );
-    const viewAll = t('detail.relatedPanelViewAll', { count: recordCount, defaultValue: 'View all {{count}}' });
+    const viewAll = countPending
+      ? t('detail.viewAll')
+      : t('detail.relatedPanelViewAll', { count: recordCount, defaultValue: 'View all {{count}}' });
     return (
       <section
         ref={setCompactCard}
@@ -4609,7 +4616,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
             </span>
             {/* No count over a failed read: "0" would be the claim the
                 load-failed line exists to withdraw (objectstack#26415). */}
-            {!loadFailure && (
+            {!loadFailure && !countPending && (
               <Badge
                 variant="secondary"
                 className={cn(
