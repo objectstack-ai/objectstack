@@ -101,7 +101,7 @@ import { ListDraftActions } from './ListDraftActions.js';
 import { viewSaveRefusalText } from './viewSaveRefusal.js';
 import { listDraftPreference, listDraftScope, useListDraft } from './listDraftStore.js';
 import { useObjectViewViewCrud, useRuntimeCreateApp } from './objectViewViewCrud.js';
-import { mayShareViews, useViewSharing } from './objectViewViewSharing.js';
+import { mayManageViews, useViewSharing } from './objectViewViewSharing.js';
 import { useCanAuthorMetadata } from '../hooks/useCanAuthorMetadata.js';
 import {
     PERSONAL_VIEW_OBJECT,
@@ -284,6 +284,15 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     const { user, activeOrganization } = useAuth();
     const { isAdmin } = useWorkspaceAdminStatus();
     const perms = usePermissions();
+    // objectstack#36448 — who is offered the object's views to change: an
+    // administrator holding `manage_metadata`, the capability every `view`
+    // metadata write asks (`./objectViewViewSharing.ts`). Manage views, the
+    // view settings panel, Create View, a Shared new view, and a saved view's
+    // rename and save in place all read this one answer, so an organization
+    // administrator without it is offered none of the writes the server
+    // refuses with 403. `isAdmin` alone still gates what only reads.
+    const canAuthorMetadata = useCanAuthorMetadata();
+    const canManageViews = mayManageViews(isAdmin, canAuthorMetadata);
     
     // Get Object Definition. The outer ObjectView wrapper already guards the
     // missing-object case, so this always resolves while this component is
@@ -911,7 +920,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         ? savedViews.find((sv: any) => viewRowId(sv) === activeView.id)
         : undefined;
     const activeViewPackageSaveRead = usePackageSaveRead(studioPackageId(activeSavedViewRow));
-    const canSaveToSharedView = !isEnvironmentList && !activeIsPersonal && !!activeView && isAdmin
+    const canSaveToSharedView = !isEnvironmentList && !activeIsPersonal && !!activeView && canManageViews
         && activeViewPackageSaveRead === 'takes' && isSavedViewId(savedViews, String(activeView.id));
     const handleSaveToSharedView = async () => {
         if (!activeView || !canSaveToSharedView) return;
@@ -1166,10 +1175,8 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     });
 
     // objectstack#36409 — only an administrator holding the shared view's write
-    // capability creates a shared view, and it is published at once
-    // (`./objectViewViewSharing.ts`).
-    const canAuthorMetadata = useCanAuthorMetadata();
-    const canShareViews = mayShareViews(isAdmin, canAuthorMetadata);
+    // capability (`canManageViews`, above) creates a shared view, and it is
+    // published at once (`./objectViewViewSharing.ts`).
     const sharingApp = useRuntimeCreateApp(t);
     const viewSharing = useViewSharing({
         objectName: objectDef.name,
@@ -1197,7 +1204,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         viewAccess,
         activeViewId,
         handleViewChange,
-        isAdmin,
+        canManageViews,
         handleAddView,
         setManageViewsOpen,
         pinnedViewId,
@@ -1218,7 +1225,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
             createShared: viewSharing.createShared,
             clearSourceListState,
             canCreatePersonal: canCreatePersonalView,
-            canCreateShared: canShareViews,
+            canCreateShared: canManageViews,
             hasUnsavedConditions: listDraftParts.some((part) => part === 'filters' || part === 'sort'),
         },
         onRenamePersonalView: personalViewsReady && personalGrant('update')
@@ -1325,7 +1332,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
                 ? (label: string) => handleRenamePersonalView(String(activeView.id), label)
                 // A read-only package's view is renamed too (objectstack#35974):
                 // `updateView` writes the label into its customization pair.
-                : activeView && isAdmin && savedViews.some((sv: any) => viewRowId(sv) === activeView.id)
+                : activeView && canManageViews && savedViews.some((sv: any) => viewRowId(sv) === activeView.id)
                     ? async (label: string) => { await handleRenameView(String(activeView.id), label); return true; }
                     : undefined,
             save: !isEnvironmentList && listDraftParts.length > 0 ? saveToThisView : undefined,
@@ -1350,7 +1357,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         activeView,
         objectDef,
         onEdit,
-        isAdmin,
+        canManageViews,
         location,
         navigate,
         viewId,
@@ -1600,7 +1607,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
                  the server refused alike. Its Manage views opens the dialog
                  below. On a phone the same switcher leads the list's toolbar
                  row (objectstack#27058). */}
-             {isAdmin && views.length >= 1 && (
+             {canManageViews && views.length >= 1 && (
                <ManageViewsDialog
                  open={manageViewsOpen}
                  onOpenChange={setManageViewsOpen}
@@ -1644,12 +1651,12 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
                 <div
                     data-testid="view-config-panel-wrapper"
                     className={`transition-[max-width,opacity] duration-300 ease-in-out overflow-hidden ${
-                        showViewConfigPanel && isAdmin ? 'max-w-[280px] opacity-100' : 'max-w-0 opacity-0'
+                        showViewConfigPanel && canManageViews ? 'max-w-[280px] opacity-100' : 'max-w-0 opacity-0'
                     }`}
                 >
                     <Suspense fallback={null}>
                         <ViewConfigPanel
-                            open={showViewConfigPanel && isAdmin}
+                            open={showViewConfigPanel && canManageViews}
                             onClose={() => { setShowViewConfigPanel(false); setViewConfigPanelMode('edit'); }}
                             mode={viewConfigPanelMode}
                             activeView={activeView}
@@ -1666,7 +1673,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
                 </div>
                 <Suspense fallback={null}>
                     <CreateViewDialog
-                        open={showCreateViewDialog && isAdmin}
+                        open={showCreateViewDialog && canManageViews}
                         onOpenChange={setShowCreateViewDialog}
                         existingLabels={views.map((v: any) => v.label).filter(Boolean)}
                         objectDef={objectDef}

@@ -3,16 +3,17 @@
 /**
  * Design mode — the app shell's one place where an administrator changes the
  * app's frame in the running app (objectstack#36362, epic objectstack#36359):
- * entered from the page header's 「Edit app」, shown as a bar across the top
- * of the window with 「Design mode」, 「Cancel」 and 「Save」 and nothing else
- * (`DesignModeBar`).
+ * entered from the app menu's 「Design layout」 (objectstack#36758: the mode
+ * edits the app's layout; 「Edit app」 beside it opens the app in Studio),
+ * shown as a bar across the top of the window with 「Design layout」,
+ * 「Cancel」 and 「Save」 and nothing else (`DesignModeBar`).
  *
  * ## What the mode holds
  *
  * The mode is the shell's, not a page's: it is held by `ConsoleLayout` for the
  * app it was entered in, so it stays on while the administrator moves from
  * page to page of that app, and goes off when the app changes. It is never on
- * a phone, which draws no 「Edit app」.
+ * a phone, which draws no 「Design layout」.
  *
  * It holds the changes made under it, and nothing else. Each change is staged
  * under a key by the surface that makes it ({@link useDesignModeChange}): the
@@ -218,7 +219,7 @@ export function useDesignModeController({
 
   // Leaving the app drops what is staged; a page of the same app keeps it.
   const leaveMessage = t('designMode.leaveUnsaved', {
-    defaultValue: 'Leave design mode? Your unsaved changes will be lost.',
+    defaultValue: 'Leave Design layout? Your unsaved changes will be lost.',
   });
   React.useEffect(() => {
     if (!dirty) return undefined;

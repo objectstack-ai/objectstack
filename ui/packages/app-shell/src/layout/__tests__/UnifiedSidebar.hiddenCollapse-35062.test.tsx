@@ -24,7 +24,7 @@
  *   collapsed.
  * - The edge is drawn only while the sidebar is hidden, never on a phone.
  * - objectstack#36485 — the float carries the app-name menu, and its
- *   「Edit app」 enters the design mode from there too.
+ *   「Design layout」 enters the design mode from there too.
  *
  * The test DOM computes no Tailwind and no layout, so widths are read as the
  * class that sets them; the rendered widths are measured in a browser on the
@@ -692,7 +692,7 @@ function reloadDocked(width: number) {
   return reload(width);
 }
 
-describe('the float carries the app menu, and its 「Edit app」 enters the design mode (objectstack#36485)', () => {
+describe('the float carries the app menu, and its 「Design layout」 enters the design mode (objectstack#36485, objectstack#36758)', () => {
   /** The shell's hold on the mode, as `ConsoleLayout` keeps it, and whether it is on. */
   function Shell({ children }: { children: React.ReactNode }) {
     const mode = useDesignModeController({ appName: 'crm', appBasePath: '/apps/crm', enabled: true });
@@ -709,7 +709,7 @@ describe('the float carries the app menu, and its 「Edit app」 enters the desi
     vi.unstubAllGlobals();
   });
 
-  it('collapsed at 1024 px, pressed open from the left edge: the app menu offers 「Edit app」 to an admin who may author, and it turns the mode on', async () => {
+  it('collapsed at 1024 px, pressed open from the left edge: the app menu offers 「Design layout」 to an admin who may author, and it turns the mode on', async () => {
     workspaceAdmin = true;
     vi.stubGlobal(
       'fetch',
@@ -749,8 +749,8 @@ describe('the float carries the app menu, and its 「Edit app」 enters the desi
 
     const menuTrigger = within(panel()).getByTestId('sidebar-app-menu-trigger');
     fireEvent.pointerDown(menuTrigger, { button: 0, ctrlKey: false, pointerType: 'mouse' });
-    const item = await screen.findByTestId('sidebar-app-menu-edit-app');
-    expect(item).toHaveTextContent('Edit app');
+    const item = await screen.findByTestId('sidebar-app-menu-design-layout');
+    expect(item).toHaveTextContent('Design layout');
     expect(screen.getByTestId('mode')).toHaveTextContent('off');
     await act(async () => fireEvent.click(item));
     expect(screen.getByTestId('mode')).toHaveTextContent('on');

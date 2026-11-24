@@ -110,6 +110,7 @@ export const ptBR: TranslationData = {
         nav_settings_knowledge: { label: 'Conhecimento' },
         nav_settings_lifecycle: { label: 'Ciclo de vida dos dados' },
         nav_recycle_bin: { label: 'Lixeira' },
+        nav_public_forms: { label: 'Formulários públicos' },
         nav_notification_preferences: { label: 'Preferências de notificação' },
         nav_notification_templates: { label: 'Modelos de notificação' },
 

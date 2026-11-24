@@ -1691,8 +1691,25 @@ export interface DataTableSchema extends BaseSchema {
    * menu opened on, absent when it opened elsewhere on the row (the selection
    * or "⋮" cell, or the keyboard on the row itself), so a host can add items
    * about that cell, such as the field's change history.
+   *
+   * `context.cell` (objectstack#36289) is what the table itself does with that
+   * data cell, present exactly when `column` is: `copy` writes the cell's value
+   * to the clipboard as Ctrl/Cmd+C on the selected cell does, `paste` reads the
+   * clipboard and writes it into the cell as a paste on the selected cell does
+   * (the same conversion, the editor's checks and the same save), and `clear`
+   * empties the cell as Backspace on the selected cell does. Each is absent
+   * where the table would refuse it: `copy` on a masked cell; `paste` on a cell
+   * the reader may not edit; `clear` there too, and on a required or a
+   * two-state (yes/no) cell. A host draws them as items about that cell.
    */
-  renderRowContextMenu?: (row: any, context: { selected: boolean; column?: string }) => React.ReactNode;
+  renderRowContextMenu?: (
+    row: any,
+    context: {
+      selected: boolean;
+      column?: string;
+      cell?: { copy?: () => void; paste?: () => void; clear?: () => void };
+    },
+  ) => React.ReactNode;
   /**
    * Group bands (objectui#12620): draw the table as ONE table, with one header,
    * whose body is a band row per group followed by that group's rows.
