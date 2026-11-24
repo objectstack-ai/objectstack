@@ -3492,16 +3492,25 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.copilotChanges.discardConfirm': 'Discard every unpublished change in this package, yours included? This cannot be undone.',
   'engine.studio.copilotChanges.discardFailed': 'Some changes could not be discarded: {items}.',
   'engine.studio.copilotChanges.itemSeparator': ', ',
-  'engine.studio.pillar.data': 'Data',
-  'engine.studio.pillar.automations': 'Automations',
-  'engine.studio.pillar.interfaces': 'Interfaces',
-  'engine.studio.pillar.access': 'Access',
+  // objectstack#36899 — Studio's left menu (ADR-0084, amended): six groups,
+  // named by the domain dictionary, and the entries that open no type's list.
+  'engine.studio.menu.label': 'Studio menu',
+  'engine.studio.menu.search': 'Search the menu',
+  'engine.studio.menu.noMatches': 'Nothing in the menu matches.',
+  'engine.studio.menu.expand': 'Show the menu',
+  'engine.studio.menu.collapse': 'Hide the menu',
+  'engine.studio.menu.typeCount': '{count} types',
+  'engine.studio.menu.itemCount': '{count} items',
+  'engine.studio.menu.orgFlows': 'Organization flows',
+  'engine.studio.menu.owd': 'Default sharing',
+  'engine.studio.menu.diagnostics': 'Diagnostics',
+  'engine.studio.menu.environment': 'Positions and permissions',
+  'engine.studio.menu.groupSystem': 'Platform',
+  'engine.studio.menu.groupSecurity': 'Access',
   // objectstack#36502 — the notice on a retired Interfaces link's landing.
   'engine.studio.interfacesRetired.sentence': 'Interface edits have moved into the app.',
   'engine.studio.interfacesRetired.backToApp': 'Back to the app',
   'engine.studio.interfacesRetired.dismiss': 'Dismiss',
-  // objectstack#28561 — the "All metadata" area beside the pillars (ADR-0146 D1).
-  'engine.studio.pillar.metadata': 'All metadata',
   // Header · package-level publish + app bridge
   'engine.studio.changes': 'Changes',
   // objectstack#36501 — the top bar's left end: 「‹ Back to app」, the app's
