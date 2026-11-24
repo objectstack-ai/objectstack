@@ -145,8 +145,8 @@ import { t, tFormat, useMetadataLocale } from '../metadata-admin/i18n.js';
 import { useRegisterUnsavedEdits } from '../../chrome/unsavedEdits.js';
 import { CommandPalette, type StudioPaletteSurface } from '../../chrome/CommandPalette.js';
 import { CommandPaletteProvider } from '../../context/CommandPaletteProvider.js';
-import { COMMAND_PALETTE_PARAM } from '../../urlParams.js';
 import { StudioPaletteGroups } from './StudioPaletteGroups.js';
+import { studioPaletteDeparture } from './studioPaletteModel.js';
 import { CreateItemDialog } from './CreateItemDialog.js';
 // objectui#11787 — the shared draft autosave, moved to its own module unchanged.
 import {
@@ -1252,13 +1252,9 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
   const currentPathname = useLocation().pathname;
   const openFromPalette = React.useCallback(
     (to: string) => {
-      const [path, query = ''] = to.split('?');
-      if (path !== currentPathname) {
-        if (confirmLeavePillar()) shellNavigate(to);
-        return;
-      }
-      if (samePageQuery(query, currentSearch)) return;
-      if (reenterPillar()) shellNavigate(to);
+      const departure = studioPaletteDeparture(to, { pathname: currentPathname, search: currentSearch });
+      if (departure === 'stay') return;
+      if (departure === 'leave' ? confirmLeavePillar() : reenterPillar()) shellNavigate(to);
     },
     [currentPathname, currentSearch, confirmLeavePillar, reenterPillar, shellNavigate],
   );
@@ -1719,22 +1715,6 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
     </SurfaceDeepLinkProvider>
     </CommandPaletteProvider>
   );
-}
-
-/** The palette overlay's own query keys (`CommandPaletteProvider`: `?palette=`, alias `?cmdk=`). */
-const PALETTE_QUERY_KEYS = [COMMAND_PALETTE_PARAM, 'cmdk'];
-
-/**
- * Whether `query` (no `?`) names the page `search` (with its `?`) already
- * shows, the palette overlay's own keys aside and in any order.
- */
-function samePageQuery(query: string, search: string): boolean {
-  const canonical = (params: URLSearchParams) => {
-    for (const key of PALETTE_QUERY_KEYS) params.delete(key);
-    params.sort();
-    return params.toString();
-  };
-  return canonical(new URLSearchParams(query)) === canonical(new URLSearchParams(search));
 }
 
 // objectstack#29988 — the Automations rail's flow helpers moved to their own module; re-exported for their pins.

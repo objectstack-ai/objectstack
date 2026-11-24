@@ -29,6 +29,7 @@
  */
 
 import { customizationPackageId } from '@objectstack/spec/kernel';
+import { COMMAND_PALETTE_PARAM } from '../../urlParams.js';
 import { studioItemPath, studioItemPillar, studioMetadataItemAddress } from './studioAddress.js';
 import type { StudioMenuEntry, StudioMenuGroup, StudioMenuGroupModel } from './studioMenuModel.js';
 
@@ -135,4 +136,37 @@ export function buildStudioPaletteGroups(
     if (group) itemsOf.get(group)!.push(item);
   }
   return menu.map(({ group, entries }) => ({ group, entries, items: itemsOf.get(group)! }));
+}
+
+/**
+ * The palette overlay's own query keys: `CommandPaletteProvider` opens it on
+ * `?palette=` and reads the alias `?cmdk=`. Neither is part of a page's query.
+ */
+const PALETTE_QUERY_KEYS: readonly string[] = [COMMAND_PALETTE_PARAM, 'cmdk'];
+
+function pageQuery(query: string): string {
+  const params = new URLSearchParams(query);
+  for (const key of PALETTE_QUERY_KEYS) params.delete(key);
+  params.sort();
+  return params.toString();
+}
+
+/**
+ * What opening `to` from the palette does on the page at `pathname` +
+ * `search` (`search` with its `?`), the way the left menu's entries leave:
+ *  - `'leave'`: another page; the surface asks about unsaved work, then goes;
+ *  - `'reenter'`: the page already open on another query (the Access pillar
+ *    on the default sharing overview); a pillar reads its deep link once, at
+ *    mount, so the surface asks, then remounts it on the new query;
+ *  - `'stay'`: the page already shown, the palette's own keys aside; nothing
+ *    to open, nothing to ask.
+ */
+export function studioPaletteDeparture(
+  to: string,
+  at: { pathname: string; search: string },
+): 'leave' | 'reenter' | 'stay' {
+  const cut = to.indexOf('?');
+  const path = cut < 0 ? to : to.slice(0, cut);
+  if (path !== at.pathname) return 'leave';
+  return pageQuery(cut < 0 ? '' : to.slice(cut + 1)) === pageQuery(at.search) ? 'stay' : 'reenter';
 }
