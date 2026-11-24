@@ -103,6 +103,10 @@ describe('DetailSection — the frameless face (objectstack#27055)', () => {
     const fixed = section('Address', ['street'], { collapsible: false });
     render(onDefaultPage(<DetailSection section={fixed} data={{ street: 'Main St' }} />));
     expect(screen.getByRole('button', { name: 'Address' }).getAttribute('aria-expanded')).toBe('true');
+    // The toggle sits inside the group's heading: heading navigation still
+    // finds the group, and the heading holds the disclosure.
+    const heading = screen.getByRole('heading', { name: 'Address' });
+    expect(heading.querySelector('button[aria-expanded]')).toBe(screen.getByRole('button', { name: 'Address' }));
   });
 
   it('CONTROL — outside the default page the card face draws', () => {

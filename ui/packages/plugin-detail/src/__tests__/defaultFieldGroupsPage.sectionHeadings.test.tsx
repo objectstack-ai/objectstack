@@ -310,6 +310,10 @@ describe('default `fieldGroups` record page — every titled group folds (object
       ['Basic Information', 'true'],
       ['Financial Details', 'true'],
     ]);
+    // Each fold sits inside its group's heading.
+    for (const name of ['Basic Information', 'Financial Details']) {
+      expect(within(block).getByRole('heading', { name }).querySelector('button[aria-expanded]')).not.toBeNull();
+    }
   });
 
   it("`collapse: 'collapsed'` starts closed and `'none'` starts open", () => {

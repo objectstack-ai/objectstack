@@ -1265,7 +1265,9 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
         data-detail-section-list={listFace ? '' : undefined}
       >
         {section.title && (
-          <div className={cn('border-b border-border', headerColorClass(section.headerColor))}>
+          // The disclosure sits inside the group's heading, so heading
+          // navigation still finds every titled group.
+          <h3 className={cn('border-b border-border', headerColorClass(section.headerColor))}>
             <button
               type="button"
               aria-expanded={!isCollapsed}
@@ -1284,7 +1286,7 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
                 <ChevronUp className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
               )}
             </button>
-          </div>
+          </h3>
         )}
         {section.description && !isCollapsed && (
           <p className="mt-1 text-xs text-muted-foreground">{section.description}</p>
