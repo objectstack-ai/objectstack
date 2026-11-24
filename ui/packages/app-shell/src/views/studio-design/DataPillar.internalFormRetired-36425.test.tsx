@@ -15,7 +15,7 @@
  *
  * Pinned:
  *  - an object with a default internal form view: the field groups are the
- *    canvas, the chip says so, Add group then the top bar's Save
+ *    canvas, the tab says where they are used (objectstack#36505), Add group then the top bar's Save
  *    (objectstack#36511) saves the object's `fieldGroups` and writes no view; Preview shows the field groups, not the view's sections;
  *  - CONTROL: no form view: the same canvas and the same save.
  */
@@ -173,7 +173,7 @@ async function openForm(props: { readOnly?: boolean; customization?: StudioBaseC
 
 /** The headings the canvas draws for its declared sections. */
 const sectionTitles = () => screen.queryAllByRole('textbox', { name: SECTION_NAME }).map((el) => (el as HTMLInputElement).value);
-const chip = () => screen.getByTestId('form-layout-source-chip');
+const usedOn = () => screen.getByTestId('form-layout-used-on');
 
 type SaveCall = [string, string, Record<string, unknown>, { packageId?: string; mode?: string }];
 const saves = () => mockClient.save.mock.calls as unknown as SaveCall[];
@@ -183,7 +183,7 @@ describe('the Form tab lays out by field groups, internal form or not (objectsta
     await openForm();
 
     await waitFor(() => expect(sectionTitles()).toEqual(['Designer group']));
-    expect(chip()).toHaveAttribute('data-source', 'field-groups');
+    expect(usedOn()).toHaveTextContent(t('engine.studio.data.form.usedOn', 'en'));
     expect(screen.queryByDisplayValue('Basic info')).toBeNull();
     expect(screen.queryByTestId('form-layout-flow')).toBeNull();
 
@@ -192,10 +192,13 @@ describe('the Form tab lays out by field groups, internal form or not (objectsta
     await waitFor(() => expect(saves().length).toBe(1), { timeout: 4000 });
     const [type, name, body] = saves()[0];
     expect([type, name]).toEqual(['object', OBJECT]);
+    // objectstack#36505 — the first save converts the older per-field
+    // `group` to the group's own list.
     expect(body.fieldGroups).toEqual([
-      { key: 'designer', label: 'Designer group' },
+      { key: 'designer', label: 'Designer group', fields: ['name'] },
       { key: 'new_group', label: NEW_GROUP },
     ]);
+    expect((body.fields as Record<string, Record<string, unknown>>).name.group).toBeUndefined();
     expect(saves().some(([ty]) => ty === 'view')).toBe(false);
   });
 
@@ -218,7 +221,7 @@ describe('the Form tab lays out by field groups, internal form or not (objectsta
     await openForm();
 
     await waitFor(() => expect(sectionTitles()).toEqual(['Designer group']));
-    expect(chip()).toHaveAttribute('data-source', 'field-groups');
+    expect(usedOn()).toHaveTextContent(t('engine.studio.data.form.usedOn', 'en'));
     expect(screen.getByText(UNGROUPED)).toBeInTheDocument();
 
     await userEvent.click(screen.getByTestId('form-designer-add-section-footer'));
@@ -226,10 +229,13 @@ describe('the Form tab lays out by field groups, internal form or not (objectsta
     await waitFor(() => expect(saves().length).toBe(1), { timeout: 4000 });
     const [type, name, body] = saves()[0];
     expect([type, name]).toEqual(['object', OBJECT]);
+    // objectstack#36505 — the first save converts the older per-field
+    // `group` to the group's own list.
     expect(body.fieldGroups).toEqual([
-      { key: 'designer', label: 'Designer group' },
+      { key: 'designer', label: 'Designer group', fields: ['name'] },
       { key: 'new_group', label: NEW_GROUP },
     ]);
+    expect((body.fields as Record<string, Record<string, unknown>>).name.group).toBeUndefined();
     expect(saves().some(([ty]) => ty === 'view')).toBe(false);
   });
 });

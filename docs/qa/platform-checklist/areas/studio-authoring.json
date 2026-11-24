@@ -9,7 +9,7 @@
       "title": "The first-run authoring loop closes: package → object → record → app → publish → end-user, zero code, zero restarts",
       "since": "v16",
       "status": "active",
-      "revision": 14,
+      "revision": 15,
       "priority": "P0",
       "surface": "mixed",
       "personas": ["admin (seeded admin@objectos.ai)", "end user (same account driving the published app)"],
@@ -28,7 +28,7 @@
       "steps": [
         "boot the showcase example (objectstack dev --ui --seed-admin -p <port> -d file:/tmp/<run>/data.db), sign in as admin@objectos.ai/admin123, and note the boot timestamp in the server log (the zero-restart clause reads it later). Run steps[0] to [8] once per locale leg (fixtures.requires[0]): the en leg, then the zh-CN leg, each switched with the avatar-menu language switcher right after sign-in",
         "Home → the build chip → create a NEW writable package (维修中心 / com.example.repairs, namespace repairs) via the new-package wizard. Type the identifier yourself: since #29734 a Chinese display name derives its id through pinyin (维修中心 gives com.ORG.weixiu-zhongxin, deriveCreatePackageId in ui/packages/app-shell/src/views/metadata-admin/PackageFormDialog.tsx), which is not the id the later steps name, and the namespace derives from the id you type. The build chip has two forms (ui/packages/app-shell/src/console/home/HomePage.tsx): with an agent catalog it reads 'Build an app' (data-testid home-build-app) and opens the Studio landing, where New package opens the wizard; with none it reads 'New in Studio' (home-build-in-studio) and opens Studio with the New package dialog already open, the form QA run #27481 met on the stock showcase. Record which",
-        "Data pillar → new object 'Repair Ticket' (the identifier auto-suggests repair_ticket from the display name, and the dialog PREFIXES it with the package namespace, so the object is named repairs_repair_ticket — the name every later step and clause uses (framework#2694, objectui StudioDesignSurface prefixObjectName). The dialog also carries an OWD (sharing model) choice, pre-selected to the platform's recommended baseline: confirm or change it, then click 'Save as draft', the dialog's confirm button (engine.studio.createDraft; no Studio create dialog has a button named Create)) → add a picklist field Status with 3 values. After a navigation the object surface opens on its Records tab (the Data pillar's default view, ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx); Add field is the Form tab's button (where QA run #28545 found it; the Records grid's add-column header carries it too). Each option's stored value derives from its label as you type it — 'In Repair' stores in_repair (ui/packages/app-shell/src/views/metadata-admin/inspectors/ObjectFieldInspector.tsx OptionsEditor) — so overwrite the value wherever the run wants a different one (a short code such as wip), and note the three stored values: acceptance[1] and acceptance[2] read them. There is no Save draft button: the designer autosaves, and a picklist field is held unsaved until it has at least one option (the status line reads 'Not saved yet: the field “Status” needs at least one option'), so add the field and fill its options, and the draft save fires",
+        "Data pillar → new object 'Repair Ticket' (the identifier auto-suggests repair_ticket from the display name, and the dialog PREFIXES it with the package namespace, so the object is named repairs_repair_ticket — the name every later step and clause uses (framework#2694, objectui StudioDesignSurface prefixObjectName). The dialog also carries an OWD (sharing model) choice, pre-selected to the platform's recommended baseline: confirm or change it, then click 'Save as draft', the dialog's confirm button (engine.studio.createDraft; no Studio create dialog has a button named Create)) → add a picklist field Status with 3 values. After a navigation the object surface opens on its Records tab (the Data pillar's default view, ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx); Add field is the Field layout tab's (字段布局, formerly Form) button (where QA run #28545 found it; the Records grid's add-column header carries it too). Each option's stored value derives from its label as you type it — 'In Repair' stores in_repair (ui/packages/app-shell/src/views/metadata-admin/inspectors/ObjectFieldInspector.tsx OptionsEditor) — so overwrite the value wherever the run wants a different one (a short code such as wip), and note the three stored values: acceptance[1] and acceptance[2] read them. There is no Save draft button: the designer autosaves, and a picklist field is held unsaved until it has at least one option (the status line reads 'Not saved yet: the field “Status” needs at least one option'), so add the field and fill its options, and the draft save fires",
         "open the Changes panel and Publish, then confirm with 'Publish all' in the review sheet; the toast names the count — 'Published N items in this package' (N = the drafts promoted), 'Published 1 item in this package' for one (engine.studio.publishedAllCount / publishedAllCountOne, objectui#11807; 'Published all drafts in this package' is the fallback when the count is unknown) — and, because the publish puts an object live, it adds 'Members can use it once a permission set grants them access.' with an 'Open Access' action (StudioDesignSurface.tsx)",
         "create a record in the runtime-faithful Records grid with a Status value chosen",
         "Create app 'Repair Center' (identifier auto-suggested), leaving 'Add this package's objects as menu items' on, so the app's navigation holds an entry bound to repairs_repair_ticket; the dialog stays on the Data pillar → Publish",
@@ -100,7 +100,8 @@
         { "revision": 11, "date": "2026-11-03", "change": "fixtures.requires[0], steps[0] and a new negative[2] name two locale legs, en and zh-CN, and a clause holds only on both; a new fixtures.knownGaps[3] records the zh-CN leg's open failure; steps[1]'s identifier note follows pinyin derivation. QA run #29672 found the item named no locale while steps[1] uses a Chinese display name: its en leg passed and its zh-CN leg failed acceptance[2] (#29673, extracted by the run), so a run that drove one locale could score the loop either way. Read at base 339f63da30: the registry judge and the swallowed registration are unchanged and #29673 is open; and since #29734 (11c4eb59dd) a Chinese display name derives a pinyin package id (deriveCreatePackageId), so steps[1]'s 'derives no package id' no longer held, while its instruction to type com.example.repairs stands. No clause text changed; each now holds per leg. Card #29679, from QA run #29672", "ref": "#29679" },
         { "revision": 12, "date": "2026-11-04", "change": "acceptance[0].verify re-pointed: the Studio package switcher, which declares the studio-pkg-chip testid, moved unchanged from ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx to PackageSwitcher.tsx beside it (#29988 slice 2, a move-only split). Re-read at base f7aab8958. No clause changed", "ref": "#29988" },
         { "revision": 13, "date": "2026-11-04", "change": "fixtures.knownGaps[3] corrected from QA run #29877 (W5-P0, at 589049b0; the list of record is comment 6600018008 on #27377): the zh-CN leg's acceptance[2] failure is fixed by PR #29790 (#29673 closed), and the run read that leg passing acceptance[2] and [3], so the instruction to score it FAIL citing #29673 is withdrawn and the row is a regression row. Read at base f68b47ca", "ref": "#29906" },
-        { "revision":  14, "date":  "2026-11-24", "change":  "steps[5] and knownGaps[1] no longer route through Studio's Interfaces pillar, retired by #36502: the Create-app scaffold (box on) is the nav item, the dialog stays on the Data pillar, and a hand-wired entry is the running app's design-mode menu editor. No clause changed", "ref":  "#36502" }
+        { "revision":  14, "date":  "2026-11-24", "change":  "steps[5] and knownGaps[1] no longer route through Studio's Interfaces pillar, retired by #36502: the Create-app scaffold (box on) is the nav item, the dialog stays on the Data pillar, and a hand-wired entry is the running app's design-mode menu editor. No clause changed", "ref":  "#36502" },
+        { "revision": 15, "date": "2026-11-24", "change": "steps name the object page tab by its new name, Field layout (字段布局, formerly Form; card #36505).", "ref": "#36505" }
       ]
     },
     {
@@ -108,7 +109,7 @@
       "title": "Object designer round-trip: field add/edit/reorder persists to metadata, identifiers derive and survive typing",
       "since": "v16",
       "status": "active",
-      "revision": 13,
+      "revision": 14,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["admin"],
@@ -127,7 +128,7 @@
         "add a Text field, set its label to 'Asset Code', blur — the API name input must derive asset_code (F3)",
         "add a Picklist field and author its 3 real options, THEN add one EMPTY option row; wait out the debounced live validation — no validation banner may appear for the empty row (F4). ⚠ Order matters: with NO real option yet the select-needs-options banner fires, legitimately — the empty rows ARE dropped, so the field has no options — which collides with a literal 'no banner' (objectui F4, as repaired at 0b36ffa, gives its picklist one real option first for this reason). Assert the empty-row half with real options present",
         "let the autosave land (Studio has no Save button; on the Data pillar the autosave shows as the PUT …?mode=draft answering 200 and the header chip 'Draft · N unpublished', engine.studio.itemDraftPending; QA run #29893 found no 'Saved HH:MM' status there), then Publish → the review sheet → 'Publish all'; GET /api/v1/meta/object/NS_repair_asset and record the full field list and its order",
-        "reopen the object in the Data pillar: rename one picklist value, then reorder the fields on the Form tab — the form designer is dnd-kit (ObjectFormDesigner.tsx: a PointerSensor with a 4 px activation distance and a KeyboardSensor), so drag with intermediate pointer moves past 4 px, or focus a field's drag handle and press Space, an arrow key, Space; a single synthetic jump does not start a drag (automation-input). Let the autosave land and Publish again",
+        "reopen the object in the Data pillar: rename one picklist value, then reorder the fields on the Field layout tab (字段布局, formerly Form) — the form designer is dnd-kit (ObjectFormDesigner.tsx: a PointerSensor with a 4 px activation distance and a KeyboardSensor), so drag with intermediate pointer moves past 4 px, or focus a field's drag handle and press Space, an arrow key, Space; a single synthetic jump does not start a drag (automation-input). Let the autosave land and Publish again",
         "GET /api/v1/meta/object/NS_repair_asset again — the rename AND the new field order must be in the persisted metadata, not just the canvas",
         "create a record via the Records tab and GET /api/v1/data/NS_repair_asset/<id> — the stored column key must be the derived API name (asset_code)"
       ],
@@ -233,6 +234,12 @@
           "date": "2026-11-04",
           "change": "steps[4] corrected from QA run #29893 (W5-STUDIO, at 589049b0): the Data pillar shows no 'Saved HH:MM' line; the autosave is read as the draft PUT's 200 and the 'Draft · N unpublished' chip. Wording only. Read at base f68b47ca",
           "ref": "#29906"
+        },
+        {
+          "revision": 14,
+          "date": "2026-11-24",
+          "change": "steps name the object page tab by its new name, Field layout (字段布局, formerly Form; card #36505).",
+          "ref": "#36505"
         }
       ]
     },
@@ -2263,7 +2270,7 @@
       "title": "Studio asks before an unsent edit is left behind: a held (incomplete) or dirty edit in any pillar survives a pillar switch, a rail switch, the package switcher, Home and a reload — or is discarded only after the author confirms",
       "since": "v18",
       "status": "active",
-      "revision": 10,
+      "revision": 11,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -2383,6 +2390,12 @@
           "date": "2026-11-15",
           "change": "steps[4]: departure (a) from the Automations pillar must use another pillar's link, since the Automations link is a no-op there (QA run #33861, comment 6894395705; ledger 6896511848 of #33761 row 167; the record numbers it steps[2]). The clauses are unchanged. Read at base 895783a1",
           "ref": "#33981"
+        },
+        {
+          "revision": 11,
+          "date": "2026-11-24",
+          "change": "steps name the object page tab by its new name, Field layout (字段布局, formerly Form; card #36505).",
+          "ref": "#36505"
         }
       ]
     },
@@ -3246,7 +3259,7 @@
       "title": "The Data pillar's API tab is a truthful REST reference: five endpoints under /api/v1/data/OBJECT, an example body built from the object's draft fields that the write path accepts, and copied cURL commands that succeed once a token is put in",
       "since": "v18",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -3262,7 +3275,7 @@
       },
       "steps": [
         "open /_console/studio/PKG/data → the object → API: list the endpoints the tab shows (method + path) and read the create example body",
-        "add a field in the Form tab WITHOUT publishing; return to API and re-read the example body (with the inspector panel open, the flat tabs, API among them, fold into 'Advanced' below about 1000 px of container width: reach API through Advanced or close the panel)",
+        "add a field in the Field layout tab (字段布局, formerly Form) WITHOUT publishing; return to API and re-read the example body (with the inspector panel open, the flat tabs, API among them, fold into 'Advanced' below about 1000 px of container width: reach API through Advanced or close the panel)",
         "publish; copy each endpoint's cURL (Copy cURL), replace <token> with the session token and each `<id of a TARGET record>` placeholder (a REQUIRED reference) with the id of an existing TARGET record, and run them in order: list, create (with the tab's example body), get, update, delete on the created id"
       ],
       "acceptance": [
@@ -3319,6 +3332,12 @@
           "date": "2026-11-04",
           "change": "steps[1] annotated from QA run #29893 (W5-STUDIO, at 589049b0): with the inspector open the tabs fold into 'Advanced' in a narrow container. Wording only. Read at base f68b47ca",
           "ref": "#29906"
+        },
+        {
+          "revision": 4,
+          "date": "2026-11-24",
+          "change": "steps name the object page tab by its new name, Field layout (字段布局, formerly Form; card #36505).",
+          "ref": "#36505"
         }
       ]
     },

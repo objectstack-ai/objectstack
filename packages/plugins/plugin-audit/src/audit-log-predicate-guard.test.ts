@@ -12,6 +12,11 @@
  * snapshots as before. The same rule, and the same guard, as the activity
  * stream's value-bearing columns (`activity-predicate-guard.test.ts`).
  *
+ * [#34700] A free-text search the SERVER resolved over those columns is not a
+ * probe the reader wrote: the columns leave its search set instead, and the
+ * search answers over the rest. A search naming one in `searchFields` is
+ * still refused.
+ *
  * ## Why a real engine, a real driver and the real plugin
  *
  * The rows are written by the real audit writer's CRUD mirror and every probe
@@ -213,18 +218,31 @@ describe('[#21154] a query over the ledger snapshots by a reader withheld a pare
         });
       }
 
-      it('a free-text search reaching the snapshot columns is refused, matching or not', async () => {
-        const searched = /^\[Security\] Access denied: query on 'sys_audit_log' references field\(s\) not readable by the caller: old_value, new_value\.$/;
+      it('[#34700] a server-chosen search leaves the snapshot columns out: a matching and a non-matching probe both answer no row', async () => {
+        // Before #34700 the guard refused the whole search (the auditor's
+        // 审计日志 search turned the list into 「无权访问」). The columns now
+        // leave the server-resolved set, so a value held only there matches
+        // nothing, exactly as a value held nowhere: no oracle either way.
         for (const value of [reader.cases[1].stored, V.none]) {
-          let thrown: any = null;
-          try {
-            await find(reader.ctx, { object_name: ITEM }, { search: value });
-          } catch (err) {
-            thrown = err;
+          expect(await find(reader.ctx, { object_name: ITEM }, { search: value })).toHaveLength(0);
+          expect(await find(reader.ctx, {}, { search: value })).toHaveLength(0);
+          expect(await engine.count(LEDGER, { where: { object_name: ITEM }, search: value, context: reader.ctx })).toBe(0);
+        }
+      });
+
+      it('[#34700] the same search still matches on the columns the reader may query', async () => {
+        expect((await find(reader.ctx, { object_name: ITEM }, { search: ids.item })).length).toBeGreaterThanOrEqual(2);
+        expect((await find(reader.ctx, {}, { search: ids.item })).length).toBeGreaterThanOrEqual(2);
+      });
+
+      it('[#34700] a search that names a snapshot column itself is still refused, matching or not', async () => {
+        for (const c of reader.cases) {
+          for (const value of [c.stored, V.none]) {
+            await expectRefused(
+              find(reader.ctx, { object_name: ITEM }, { search: value, searchFields: [c.column] }),
+              predicateWords([c.column]),
+            );
           }
-          expect(thrown, 'the probe was answered instead of refused').not.toBeNull();
-          expect(thrown.code).toBe('PERMISSION_DENIED');
-          expect(firstSentence(String(thrown.message))).toMatch(searched);
         }
       });
 
@@ -251,6 +269,8 @@ describe('[#21154] a query over the ledger snapshots by a reader withheld a pare
     expect(await find(CONTROL, contains('new_value', V.none, null))).toHaveLength(0);
     expect((await find(CONTROL, {}, { search: V.masked2 })).length).toBeGreaterThan(0);
     expect(await find(CONTROL, {}, { search: V.none })).toHaveLength(0);
+    // [#34700] …and nothing is withheld from its server-chosen search set.
+    expect((await find(CONTROL, { object_name: ITEM }, { search: V.unserved2 })).length).toBeGreaterThan(0);
   });
 
   it('control: the unrestricted reader filters, groups and sorts by both snapshot columns of a pinned parent, as before', async () => {

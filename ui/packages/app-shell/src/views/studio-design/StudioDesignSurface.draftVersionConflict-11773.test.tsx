@@ -411,7 +411,7 @@ describe('Data pillar — a create sends If-None-Match: * (objectui#11773)', () 
     expect([server.saves[0]!.ifMatch, server.saves[0]!.ifNoneMatch]).toEqual([undefined, '*']);
 
     await loaded(a, '1 field');
-    fireEvent.click(within(a).getAllByRole('button', { name: 'Form' })[0]!);
+    fireEvent.click(within(a).getAllByRole('button', { name: 'Field layout' })[0]!);
     await addFieldAndSave(a, addFieldFromFormToolbar);
     await addFieldAndSave(a, addFieldFromFormToolbar, SECOND);
     // The skeleton's draft, which the create publishes at once (objectstack#36511):
