@@ -7,14 +7,16 @@
  *
  *  1. On a package: the menu's groups, in its order, under the menu's names,
  *     each with the menu's own entries and the items of its types, from the
- *     package and its `.custom` pair only; every package's objects and flows
+ *     package and its `.custom` pair only, kept by the list page's own rule
+ *     (its `include` and predicate); every package's objects and flows
  *     are neither read nor listed; the packages still are.
  *  2. A pick opens through the page (`surface.open`): an item at the address
  *     the one builder gives, a menu entry where the menu entry goes.
  *  3. The query matches an item by label, name or type, a menu entry by its
  *     label, type or group.
  *  4. While a list is still read, an empty result says "Searching…".
- *  5. Nothing is read until the palette opens. CONTROL: opened, it reads.
+ *  5. No item list is read until the palette opens; the types come from the
+ *     menu's own data (`StudioMenuDataProvider`). CONTROL: opened, it reads.
  *  6. On the cross-package leg (`~all`) the menu's environment entries join
  *     every package's objects and flows, as on the landing.
  *
@@ -40,16 +42,21 @@ const reads = vi.hoisted(() => {
       { name: 'crm_account', label: 'Account', _packageId: PKG },
       { name: 'hr_employee', label: 'Employee', _packageId: 'com.acme.hr' },
     ],
-    hook: [{ name: 'on_lead_created', label: 'On lead created', _packageId: PAIR }],
+    hook: [
+      { name: 'on_lead_created', label: 'On lead created', _packageId: PAIR },
+      // Hidden by the type's own list predicate, as its list page hides it.
+      { name: 'legacy_hook', label: 'Legacy', _packageId: PKG, legacy: true },
+    ],
     dashboard: [{ name: 'crm_pipeline', label: 'Pipeline', _packageId: PKG }],
     flow: [{ name: 'crm_onboard', label: 'Onboard account', _packageId: PKG }],
     permission: [{ name: 'sales_rep', label: 'Sales Rep', _packageId: PKG }],
     datasource: [{ name: 'crm_db', label: 'CRM database', _packageId: PKG }],
   };
-  const state = { calls: [] as string[], hold: null as Promise<void> | null };
+  const state = { calls: [] as string[], options: {} as Record<string, unknown>, hold: null as Promise<void> | null };
   const client = {
-    list: async (type: string) => {
+    list: async (type: string, options?: unknown) => {
       state.calls.push(type);
+      state.options[type] = options;
       if (state.hold) await state.hold;
       return LISTS[type] ?? [];
     },
@@ -97,10 +104,20 @@ import '@object-ui/plugin-detail';
 import { CommandPalette, type StudioPaletteSurface } from '../../chrome/CommandPalette';
 import { CommandPaletteProvider } from '../../context/CommandPaletteProvider';
 import { StudioPaletteGroups } from './StudioPaletteGroups';
+import { StudioMenuDataProvider } from './StudioMenu';
+import { registerMetadataResource } from '../metadata-admin/registry';
 import { studioMenuGroupLabel } from './studioMenuGroupLabel';
-import { translateMetadataType } from '../metadata-admin/i18n';
+import { tFormat, translateMetadataType } from '../metadata-admin/i18n';
 
 const { PKG, PAIR } = reads;
+
+// The hook list as its list page reads it: served with an `include`, and a
+// predicate that hides legacy rows.
+registerMetadataResource({
+  type: 'hook',
+  listInclude: 'grants',
+  listFilter: (item: Record<string, unknown>) => item.legacy !== true,
+} as never);
 
 /** The landing's metadata cache, counting what the cross-package lists read. */
 function metadataCache() {
@@ -133,6 +150,7 @@ let fetchMock: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
   reads.state.calls = [];
+  reads.state.options = {};
   reads.state.hold = null;
   fetchMock = vi.fn(async (url: string) => {
     if (String(url).endsWith('/api/v1/packages')) {
@@ -162,7 +180,7 @@ function mount(segment: string, opts: { at?: string; packageScope?: boolean } = 
   const open = vi.fn();
   const surface: StudioPaletteSurface = {
     packageScope: opts.packageScope ?? true,
-    renderGroups: (props) => <StudioPaletteGroups segment={segment} {...props} />,
+    renderGroups: (props) => <StudioPaletteGroups segment={segment} packageLabel="Acme CRM" {...props} />,
     open,
   };
   render(
@@ -170,7 +188,9 @@ function mount(segment: string, opts: { at?: string; packageScope?: boolean } = 
       <MetadataCtx.Provider value={cache.value}>
         <MemoryRouter initialEntries={[opts.at ?? `/studio/${segment}/data?palette=1`]}>
           <CommandPaletteProvider>
-            <CommandPalette scope="studio" surface={surface} />
+            <StudioMenuDataProvider segment={segment}>
+              <CommandPalette scope="studio" surface={surface} />
+            </StudioMenuDataProvider>
           </CommandPaletteProvider>
         </MemoryRouter>
       </MetadataCtx.Provider>
@@ -243,21 +263,26 @@ describe("on a package, the palette lists the left menu and the package's items 
       `studio-item permission ${PKG} sales_rep`,
     ]);
     expect(reads.state.calls).not.toContain('datasource');
+    // The list page's own read and rule: its `include`, and its predicate.
+    expect(reads.state.options.hook).toEqual({ include: 'grants' });
+    expect(values('studio-item hook ')).toEqual([`studio-item hook ${PAIR} on_lead_created`]);
     expect(values('studio-package ')).toHaveLength(2);
     expect(values('studio-object ')).toEqual([]);
     expect(values('studio-flow ')).toEqual([]);
     expect(cacheReads).toEqual([]);
   });
 
-  it('names an item by its label, its type on the right, and the pair beside the type', async () => {
+  it("names an item by its label and its type, and a customization by the package's name, never the pair's id", async () => {
     mount(PKG);
     await itemsListed();
     const text = (value: string) =>
       (document.querySelector(`[cmdk-item][data-value="${value}"]`)?.textContent ?? '').trim();
     expect(text(`studio-item object ${PKG} crm_account`)).toBe(`Account${translateMetadataType('object', 'en')}`);
     expect(text(`studio-item hook ${PAIR} on_lead_created`)).toBe(
-      `On lead created${translateMetadataType('hook', 'en')} · ${PAIR}`,
+      `On lead created${translateMetadataType('hook', 'en')} · ${tFormat('engine.customizationMark.customizationOf', 'en', { baseName: 'Acme CRM' })}`,
     );
+    const shownText = Array.from(document.querySelectorAll('[cmdk-item]')).map((el) => el.textContent ?? '');
+    expect(shownText.filter((x) => x.includes('.custom'))).toEqual([]);
   });
 
   /** Mount, pick one entry and read what the page was asked to open: a pick closes the palette. */

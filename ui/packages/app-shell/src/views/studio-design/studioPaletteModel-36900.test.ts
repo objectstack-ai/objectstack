@@ -10,26 +10,32 @@
  *     designs its type, else its area page on its owning package;
  *  3. the groups are the left menu's, in its order, each with the items of
  *     the types it lists;
- *  4. a pick leaves, re-enters the page open on another query, or stays.
+ *  4. a pick leaves, re-enters the page open on another query, or stays;
+ *  5. leaving asks the shell's unsaved-edits seam (every registered editor,
+ *     not only the surface's own work), and re-entering asks through the host.
  */
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { registerUnsavedEdits } from '../../chrome/unsavedEdits';
 import { STUDIO_ITEM_PILLAR, studioItemPath, studioMetadataItemAddress } from './studioAddress';
 import { buildStudioMenu, studioMenuScope } from './studioMenuModel';
 import {
   buildStudioPaletteGroups,
+  openStudioPaletteAddress,
   studioPaletteDeparture,
   studioPaletteItemAddress,
   studioPaletteItemsOf,
-  studioPalettePackages,
+  studioPalettePairId,
+  studioSamePageSearch,
 } from './studioPaletteModel';
 
 const PKG = 'com.acme.crm';
 const PAIR = 'com.acme.crm.custom';
 
 describe("a package's palette lists its items and its pair's (ADR-0146 D3)", () => {
-  it('reads the package and its .custom pair', () => {
-    expect(studioPalettePackages(PKG)).toEqual([PKG, PAIR]);
+  it('reads the package and its .custom pair; a pair has no pair of its own', () => {
+    expect(studioPalettePairId(PKG)).toBe(PAIR);
+    expect(studioPalettePairId(PAIR)).toBeNull();
   });
 
   it("keeps the two packages' rows, unwrapped, named by the type's key, once per name and package", () => {
@@ -42,7 +48,7 @@ describe("a package's palette lists its items and its pair's (ADR-0146 D3)", () 
       { name: 'crm_account', label: 'Account (member)', _packageId: PKG },
       null,
     ];
-    expect(studioPaletteItemsOf('object', rows, { packages: [PKG, PAIR] })).toEqual([
+    expect(studioPaletteItemsOf('object', rows, { packageId: PKG, pairId: PAIR })).toEqual([
       { type: 'object', name: 'crm_account', label: 'Account', packageId: PKG },
       { type: 'object', name: 'crm_lead', label: { key: 'crm.lead', defaultValue: 'Lead' }, packageId: PAIR },
     ]);
@@ -55,7 +61,8 @@ describe("a package's palette lists its items and its pair's (ADR-0146 D3)", () 
     ];
     expect(
       studioPaletteItemsOf('email_template', rows, {
-        packages: [PKG],
+        packageId: PKG,
+        pairId: null,
         primaryKey: 'id',
         listFilter: (item) => item.container !== true,
       }).map((i) => i.name),
@@ -143,5 +150,73 @@ describe('a pick leaves, re-enters or stays, as a menu entry does (decision 12)'
       }),
     ).toBe('stay');
     expect(studioPaletteDeparture('/studio/x/data', { pathname: '/studio/x/data', search: '?palette=1' })).toBe('stay');
+  });
+});
+
+describe('a pick leaves through the shell seam, and re-enters through the host (objectstack#36900 M1)', () => {
+  const at = { pathname: '/studio/com.acme.crm/metadata/hook/on_lead', search: '?package=com.acme.crm&palette=1' };
+  let release: (() => void) | null = null;
+  afterEach(() => {
+    release?.();
+    release = null;
+    vi.unstubAllGlobals();
+  });
+
+  /** This project has no DOM: the seam's `window` and `document`, with `confirm` as the test answers it. */
+  function stubBrowser(confirm: (message?: string) => boolean) {
+    const listeners = { addEventListener: () => {}, removeEventListener: () => {} };
+    vi.stubGlobal('window', { ...listeners, confirm });
+    vi.stubGlobal('document', listeners);
+  }
+
+  it('with an editor registered (the item page), leaving asks its question: Cancel stays, OK goes', () => {
+    const confirm = vi.fn((_message?: string) => false);
+    stubBrowser(confirm);
+    release = registerUnsavedEdits('Discard the item page edits?');
+    const navigate = vi.fn();
+    const reenter = vi.fn(() => true);
+
+    openStudioPaletteAddress('/studio/com.acme.crm/data?surface=object%3Acrm_account', at, { navigate, reenter });
+    expect(confirm).toHaveBeenCalledWith('Discard the item page edits?');
+    expect(navigate).not.toHaveBeenCalled();
+
+    confirm.mockReturnValue(true);
+    openStudioPaletteAddress('/studio/com.acme.crm/data?surface=object%3Acrm_account', at, { navigate, reenter });
+    expect(navigate).toHaveBeenCalledWith('/studio/com.acme.crm/data?surface=object%3Acrm_account');
+    expect(reenter).not.toHaveBeenCalled();
+  });
+
+  it('CONTROL — with nothing registered, leaving goes at once and asks nothing', () => {
+    const confirm = vi.fn((_message?: string) => false);
+    stubBrowser(confirm);
+    const navigate = vi.fn();
+    openStudioPaletteAddress('/studio/com.acme.crm/data', at, { navigate, reenter: () => true });
+    expect(confirm).not.toHaveBeenCalled();
+    expect(navigate).toHaveBeenCalledWith('/studio/com.acme.crm/data');
+  });
+
+  it('re-entering hands the host the query it must wait for, and goes only on its yes', () => {
+    const navigate = vi.fn();
+    const reenter = vi.fn(() => false);
+    const to = '/studio/com.acme.crm/metadata/hook/on_lead?package=com.acme.crm&sort=name';
+    openStudioPaletteAddress(to, at, { navigate, reenter });
+    expect(reenter).toHaveBeenCalledWith('?package=com.acme.crm&sort=name');
+    expect(navigate).not.toHaveBeenCalled();
+    reenter.mockReturnValue(true);
+    openStudioPaletteAddress(to, at, { navigate, reenter });
+    expect(navigate).toHaveBeenCalledWith(to);
+  });
+
+  it('the page already shown neither asks nor goes', () => {
+    const navigate = vi.fn();
+    const reenter = vi.fn(() => true);
+    openStudioPaletteAddress('/studio/com.acme.crm/metadata/hook/on_lead?package=com.acme.crm', at, { navigate, reenter });
+    expect(navigate).not.toHaveBeenCalled();
+    expect(reenter).not.toHaveBeenCalled();
+  });
+
+  it("the re-entry's query matches the router's once the palette's own key is gone, in any order", () => {
+    expect(studioSamePageSearch('?b=2&a=1&palette=1', '?a=1&b=2')).toBe(true);
+    expect(studioSamePageSearch('?surface=owd%3Aoverview', '?surface=permission%3Asales_rep')).toBe(false);
   });
 });

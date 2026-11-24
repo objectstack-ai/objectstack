@@ -30,6 +30,8 @@
 
 import { customizationPackageId } from '@objectstack/spec/kernel';
 import { COMMAND_PALETTE_PARAM } from '../../urlParams.js';
+import { confirmUnsavedLeave } from '../../chrome/unsavedEdits.js';
+import { scopeListRows } from '../metadata-admin/metadataListState.js';
 import { studioItemPath, studioItemPillar, studioMetadataItemAddress } from './studioAddress.js';
 import type { StudioMenuEntry, StudioMenuGroup, StudioMenuGroupModel } from './studioMenuModel.js';
 
@@ -58,42 +60,47 @@ export interface StudioPaletteGroup {
  */
 export const STUDIO_PALETTE_ITEMLESS_TYPES: ReadonlySet<string> = new Set(['datasource']);
 
-/** The packages whose items one package's palette lists: the package, and its `.custom` pair when it has one. */
-export function studioPalettePackages(packageId: string): string[] {
+/** A package's `.custom` pair, whose items its palette also lists, or `null` when it has none. */
+export function studioPalettePairId(packageId: string): string | null {
   const pair = customizationPackageId(packageId);
-  return pair.ok ? [packageId, pair.value] : [packageId];
+  return pair.ok ? pair.value : null;
 }
 
 /**
  * The items of one type a package's palette lists, from that type's served
- * list read: the rows the open package and its pair own (`_packageId`), kept
- * by the type's own list predicate when it has one, each named by the type's
- * primary key, as the list page names its rows. A row with no name is not
- * listed; one name a package serves twice (two members of a bundle) is listed
- * once, as ‹ › step through it.
+ * list read: the rows the type's list page holds for the package
+ * (`scopeListRows`, the page's own rule: the package and its pair, through the
+ * type's list predicate), each named by the type's primary key, as the list
+ * page names its rows. A row with no name is not listed; one name a package
+ * serves twice (two members of a bundle) is listed once, as ‹ › step through
+ * it.
  */
 export function studioPaletteItemsOf(
   type: string,
-  rows: readonly unknown[],
+  served: readonly unknown[],
   options: {
-    packages: readonly string[];
+    packageId: string;
+    pairId: string | null;
     primaryKey?: string;
     listFilter?: (item: Record<string, unknown>) => boolean;
   },
 ): StudioPaletteItem[] {
   const key = options.primaryKey ?? 'name';
+  // A row may come wrapped as `{ item }`, as the list page unwraps it.
+  const rows = served.flatMap((raw) => {
+    const item = raw && typeof raw === 'object' && 'item' in raw ? (raw as { item: unknown }).item : raw;
+    return item && typeof item === 'object' ? [{ item: item as Record<string, unknown> }] : [];
+  });
+  const scoped = scopeListRows(rows, {
+    listFilter: options.listFilter,
+    unscoped: false,
+    activePackage: options.packageId,
+    pairId: options.pairId,
+  });
   const seen = new Set<string>();
   const items: StudioPaletteItem[] = [];
-  for (const raw of rows) {
-    // A row may come wrapped as `{ item }`, as the list page unwraps it.
-    const item = (raw && typeof raw === 'object' && 'item' in raw ? (raw as { item: unknown }).item : raw) as
-      | Record<string, unknown>
-      | null
-      | undefined;
-    if (!item || typeof item !== 'object') continue;
-    const packageId = item._packageId;
-    if (typeof packageId !== 'string' || !options.packages.includes(packageId)) continue;
-    if (options.listFilter && !options.listFilter(item)) continue;
+  for (const { item } of scoped) {
+    const packageId = item._packageId as string;
     const name = item[key];
     if (typeof name !== 'string' || name === '') continue;
     // A package id never holds `|`, so the pair is one key.
@@ -169,4 +176,33 @@ export function studioPaletteDeparture(
   const path = cut < 0 ? to : to.slice(0, cut);
   if (path !== at.pathname) return 'leave';
   return pageQuery(cut < 0 ? '' : to.slice(cut + 1)) === pageQuery(at.search) ? 'stay' : 'reenter';
+}
+
+/** Whether two searches (`?` optional) name the same page, the palette's own keys and the order aside. */
+export function studioSamePageSearch(a: string, b: string): boolean {
+  return pageQuery(a) === pageQuery(b);
+}
+
+/**
+ * Opens `to`, picked in the palette on the page at `at`, the way a menu entry
+ * leaves (decision 12 of the Studio redesign): another page asks the shell's
+ * unsaved-edits seam first (`confirmUnsavedLeave`: the open page's own edits
+ * and every editor below it that registered, the "All metadata" item page
+ * among them), then goes; the page already open on another query asks through
+ * the host's `reenter` (which remounts the page once the router shows that
+ * query), then goes; the page already shown stays.
+ */
+export function openStudioPaletteAddress(
+  to: string,
+  at: { pathname: string; search: string },
+  act: { navigate: (to: string) => void; reenter: (search: string) => boolean },
+): void {
+  const departure = studioPaletteDeparture(to, at);
+  if (departure === 'stay') return;
+  if (departure === 'leave') {
+    confirmUnsavedLeave(() => act.navigate(to));
+    return;
+  }
+  const cut = to.indexOf('?');
+  if (act.reenter(cut < 0 ? '' : to.slice(cut))) act.navigate(to);
 }

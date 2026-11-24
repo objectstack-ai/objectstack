@@ -23,7 +23,8 @@ import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { Link, MemoryRouter, Route, Routes } from 'react-router-dom';
+import { Link, MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
+import { CommandItem } from '@object-ui/components';
 import { z } from 'zod';
 import { ComponentRegistry } from '@object-ui/core';
 import { DocSchema } from '@objectstack/spec/system';
@@ -89,6 +90,9 @@ import { registerDefaultMetadataSchemas } from './default-schemas';
 import { registerBuiltinPreviews } from './previews';
 import { t } from './i18n';
 import { confirmUnsavedLeave } from '../../chrome/unsavedEdits';
+import { CommandPalette, type StudioPaletteSurface } from '../../chrome/CommandPalette';
+import { CommandPaletteProvider } from '../../context/CommandPaletteProvider';
+import { openStudioPaletteAddress } from '../studio-design/studioPaletteModel';
 
 const DOC_JSON_SCHEMA = z.toJSONSchema(DocSchema as unknown as z.ZodType) as Record<string, unknown>;
 client.current = new MetadataClient({ baseUrl: '', fetch: vi.fn(serve) as unknown as typeof fetch });
@@ -217,6 +221,85 @@ describe('MetadataResourceEditPage registers its unsaved draft with the shell se
     confirmUnsavedLeave(go);
     expect(go).toHaveBeenCalledTimes(1);
     expect(unloadHeld()).toBe(false);
+    expect(confirmSpy).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * objectstack#36900 (L1 M1) — a Studio palette pick leaves this page the way
+ * the Studio surface opens it (`openStudioPaletteAddress`): through the seam,
+ * so the page's own registered draft is asked about, though the surface's own
+ * unsaved bit never saw it. The real page and the real palette; the surface's
+ * groups are one entry.
+ */
+describe('a Studio palette pick asks before it drops this page\'s unsaved draft (objectstack#36900)', () => {
+  function StudioPalette() {
+    const navigate = useNavigate();
+    const { pathname, search } = useLocation();
+    const surface: StudioPaletteSurface = {
+      packageScope: true,
+      renderGroups: ({ open }) => (
+        <CommandItem value="studio-entry docs" onSelect={() => open('/metadata/doc')}>
+          All docs
+        </CommandItem>
+      ),
+      open: (to) => openStudioPaletteAddress(to, { pathname, search }, { navigate, reenter: () => true }),
+    };
+    return <CommandPalette scope="studio" surface={surface} />;
+  }
+
+  // The studio palette reads the package list when it opens: an empty one.
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn(async () => json(200, { data: [] })));
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  async function openGuideWithPalette() {
+    active.set('doc/guide', { name: 'guide', label: 'Guide', content: '# Live', group: 'reference' });
+    render(
+      <MemoryRouter initialEntries={['/metadata/doc/guide']}>
+        <CommandPaletteProvider>
+          <StudioPalette />
+          <Routes>
+            <Route path="/metadata/doc/:name" element={<MetadataResourceEditPage type="doc" name="guide" />} />
+            <Route path="/metadata/doc" element={<div>Docs list</div>} />
+          </Routes>
+        </CommandPaletteProvider>
+      </MemoryRouter>,
+    );
+    expect(await source()).toHaveValue('# Live');
+    await settle();
+  }
+
+  async function pickAllDocs() {
+    fireEvent.keyDown(document, { key: 'k', ctrlKey: true });
+    const item = await screen.findByText('All docs');
+    fireEvent.click(item);
+    await settle();
+  }
+
+  it("Cancel keeps the page and the draft; OK leaves", async () => {
+    await openGuideWithPalette();
+    await editSource();
+
+    await pickAllDocs();
+    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    expect(confirmSpy).toHaveBeenCalledWith(QUESTION);
+    expect(screen.queryByText('Docs list')).toBeNull();
+    expect(await source()).toHaveValue('# Live, edited');
+
+    confirmSpy.mockReturnValue(true);
+    await pickAllDocs();
+    expect(confirmSpy).toHaveBeenCalledTimes(2);
+    expect(await screen.findByText('Docs list')).toBeTruthy();
+  });
+
+  it('CONTROL: a clean page leaves at once, asking nothing', async () => {
+    await openGuideWithPalette();
+    await pickAllDocs();
+    expect(await screen.findByText('Docs list')).toBeTruthy();
     expect(confirmSpy).not.toHaveBeenCalled();
   });
 });

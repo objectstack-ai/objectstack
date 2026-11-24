@@ -7,16 +7,17 @@
  * What it lists and where each entry opens is `studioPaletteModel.ts`; this
  * file reads it and draws it inside the palette.
  *
- * ## Read only while the palette is open
+ * ## What it reads, and when
  *
- * The palette mounts this component inside its open dialog, so nothing here
- * is read on a page where ⌘K is never pressed. It reads what the left menu
- * reads, with the same rule (`scopeDirectoryEntries` over the registry's type
- * entries and the diagnostics sweep), so the palette and the menu never
- * disagree on which types a package holds; then, on a package, each of those
- * types' served list, the read the type's own list page makes. A list that
- * fails to answer lists none of its items: the type's list page shows that
- * read's error, and its menu entry is still offered here.
+ * The types and their counts are the left menu's own data
+ * (`StudioMenuDataProvider`, which the surface mounts once for the page), so
+ * the palette and the menu never disagree on which types a package holds and
+ * opening the palette re-reads neither. The items are read only while the
+ * palette is open (it mounts this component inside its open dialog): on a
+ * package, each listed type's served list, the read the type's own list page
+ * makes (its `include` too), kept by that page's own rule (`scopeListRows`). A
+ * list that fails to answer lists none of its items: the type's list page
+ * shows that read's error, and its menu entry is still offered here.
  *
  * ## Matched, not filtered by cmdk
  *
@@ -27,62 +28,28 @@
  */
 
 import * as React from 'react';
-import {
-  Activity,
-  Building2,
-  Database,
-  KeyRound,
-  Layers,
-  List,
-  Settings,
-  Share2,
-  ShieldCheck,
-  Sparkles,
-  Workflow,
-  type LucideIcon,
-} from 'lucide-react';
+import { List, Building2, Share2, Activity, KeyRound, type LucideIcon } from 'lucide-react';
 import { CommandGroup, CommandItem } from '@object-ui/components';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { matchesPaletteQuery } from '../../chrome/paletteMatch.js';
 import type { StudioPaletteGroupsProps } from '../../chrome/CommandPalette.js';
 import { resolveKeyedI18nLabel } from '../../utils/index.js';
-import { scopeDirectoryEntries } from '../metadata-admin/directoryScope.js';
 import { t, tFormat, translateMetadataType, useMetadataLocale } from '../metadata-admin/i18n.js';
 import { resolveResourceConfig } from '../metadata-admin/registry.js';
-import {
-  useGlobalDiagnostics,
-  useMetadataClient,
-  useMetadataTypes,
-  type RichMetadataTypeEntry,
-} from '../metadata-admin/useMetadata.js';
+import { useMetadataClient, type RichMetadataTypeEntry } from '../metadata-admin/useMetadata.js';
+import { STUDIO_MENU_ENTRY_LABEL_KEYS, STUDIO_MENU_GROUP_ICONS, useStudioMenuData } from './StudioMenu.js';
 import { studioMenuGroupLabel } from './studioMenuGroupLabel.js';
-import {
-  STUDIO_MENU_DESIGNER_TYPES,
-  buildStudioMenu,
-  studioMenuScope,
-  type StudioMenuEntry,
-  type StudioMenuGroup,
-} from './studioMenuModel.js';
+import { buildStudioMenu, studioMenuScope, type StudioMenuEntry } from './studioMenuModel.js';
 import {
   STUDIO_PALETTE_ITEMLESS_TYPES,
   buildStudioPaletteGroups,
   studioPaletteItemAddress,
   studioPaletteItemsOf,
-  studioPalettePackages,
+  studioPalettePairId,
   type StudioPaletteItem,
 } from './studioPaletteModel.js';
 
-/** The icon an item of each group draws, the menu's group icon. */
-const GROUP_ICONS: Record<StudioMenuGroup, LucideIcon> = {
-  data: Database,
-  ui: Layers,
-  automation: Workflow,
-  system: Settings,
-  security: ShieldCheck,
-  ai: Sparkles,
-};
-
-/** The icon each menu entry draws: a type's list, or the page it opens. */
+/** The icon each menu entry draws in the palette: a type's list, or the page it opens. */
 const ENTRY_ICONS: Record<StudioMenuEntry['kind'], LucideIcon> = {
   type: List,
   orgFlows: Building2,
@@ -91,26 +58,18 @@ const ENTRY_ICONS: Record<StudioMenuEntry['kind'], LucideIcon> = {
   environment: KeyRound,
 };
 
-/** The menu's own names of the entries that are not a type (`StudioMenu.tsx` names them so). */
-const ENTRY_LABEL_KEYS: Record<Exclude<StudioMenuEntry['kind'], 'type'>, string> = {
-  orgFlows: 'engine.studio.menu.orgFlows',
-  owd: 'engine.studio.menu.owd',
-  diagnostics: 'engine.studio.menu.diagnostics',
-  environment: 'engine.studio.menu.environment',
-};
-
 /**
- * The items of a package's palette: each listed type's served list, scoped to
- * the package and its pair. `types` is `null` until the menu's rule has
- * answered, so the lists are read once, for the types the menu settled on.
- * The read is keyed on the package and the type names, never on the identity
- * of the memoised `types` (`ui/AGENTS.md` #10).
+ * The items of a package's palette: each listed type's served list, kept by
+ * the list page's rule for the package and its pair. `types` is `null` until
+ * the menu's data has settled, so the lists are read once, for the types the
+ * menu settled on. The read is keyed on the package and the type names, never
+ * on the identity of the `types` array (`ui/AGENTS.md` #10).
  */
 function useStudioPaletteItems(
-  client: ReturnType<typeof useMetadataClient>,
   packageId: string | null,
   types: readonly RichMetadataTypeEntry[] | null,
 ): { items: StudioPaletteItem[]; loading: boolean } {
+  const client = useMetadataClient();
   const key = packageId && types ? `${packageId}|${types.map((e) => e.type).join(',')}` : null;
   const typesRef = React.useRef(types);
   React.useLayoutEffect(() => {
@@ -121,16 +80,20 @@ function useStudioPaletteItems(
     const listed = typesRef.current;
     if (!key || !packageId || !listed) return;
     let cancelled = false;
-    const packages = studioPalettePackages(packageId);
+    const pairId = studioPalettePairId(packageId);
     Promise.all(
       listed
         .filter((entry) => !STUDIO_PALETTE_ITEMLESS_TYPES.has(entry.type))
         .map(async (entry) => {
           const config = resolveResourceConfig(entry.type, entry);
           try {
-            const rows = await client.list<unknown>(entry.type);
+            const rows = await client.list<unknown>(
+              entry.type,
+              config.listInclude ? { include: config.listInclude } : undefined,
+            );
             return studioPaletteItemsOf(entry.type, rows ?? [], {
-              packages,
+              packageId,
+              pairId,
               primaryKey: config.primaryKey,
               listFilter: config.listFilter,
             });
@@ -153,36 +116,28 @@ function useStudioPaletteItems(
 export interface StudioPaletteGroupsComponentProps extends StudioPaletteGroupsProps {
   /** The `/studio/:segment` the palette is open on: a package id, `~org` or `~all`. */
   segment: string;
+  /** The open package's name, as the header shows it; its `.custom` items are named "Customization of" it. */
+  packageLabel?: string;
 }
 
 export function StudioPaletteGroups({
   segment,
+  packageLabel,
   query,
   open,
   onLoadingChange,
-}: StudioPaletteGroupsComponentProps): React.ReactElement {
+}: StudioPaletteGroupsComponentProps): React.ReactElement | null {
   const locale = useMetadataLocale();
   const { t: translate } = useObjectTranslation();
   const scope = studioMenuScope(segment);
   const packageId = scope.kind === 'package' ? scope.packageId : null;
-  const environment = scope.kind !== 'package';
 
-  // The left menu's reads and rule (`StudioMenu.tsx`), so the two agree.
-  const client = useMetadataClient();
-  const { entries, loading: typesLoading } = useMetadataTypes(client);
-  const { countsByType, packagesByType, loading: sweepLoading } = useGlobalDiagnostics(
-    client,
-    'error',
-    packageId ?? undefined,
-  );
-  const types = scopeDirectoryEntries(entries, {
-    environment,
-    packageId,
-    packagesByType,
-    always: STUDIO_MENU_DESIGNER_TYPES,
-  });
-  const settled = !typesLoading && !sweepLoading;
-  const { items, loading: itemsLoading } = useStudioPaletteItems(client, packageId, settled ? types : null);
+  // The left menu's own data, read once for the page (`StudioMenuDataProvider`).
+  const shared = useStudioMenuData();
+  const data = shared && shared.segment === segment ? shared : null;
+  const types = data?.types ?? [];
+  const settled = data?.settled ?? false;
+  const { items, loading: itemsLoading } = useStudioPaletteItems(packageId, settled ? types : null);
 
   const loading = !settled || itemsLoading;
   const onLoadingChangeRef = React.useRef(onLoadingChange);
@@ -194,15 +149,25 @@ export function StudioPaletteGroups({
   }, [loading]);
   React.useEffect(() => () => onLoadingChangeRef.current(false), []);
 
+  if (!data) return null;
+
   const served = new Map(types.map((e) => [e.type, e]));
   const typeLabel = (type: string) =>
     translateMetadataType(type, locale, (served.get(type) as { label?: string } | undefined)?.label);
   const entryLabel = (entry: StudioMenuEntry) =>
-    entry.kind === 'type' ? typeLabel(entry.type ?? '') : t(ENTRY_LABEL_KEYS[entry.kind], locale);
+    entry.kind === 'type' ? typeLabel(entry.type ?? '') : t(STUDIO_MENU_ENTRY_LABEL_KEYS[entry.kind], locale);
   const itemLabel = (item: StudioPaletteItem) =>
     resolveKeyedI18nLabel(item.label as Parameters<typeof resolveKeyedI18nLabel>[0], translate) || item.name;
+  // ADR-0146 D3 — an item of the package's customization package is named as
+  // the list marks it, by the package's name, never by the pair's raw id.
+  const itemDetail = (item: StudioPaletteItem) =>
+    item.packageId === packageId
+      ? typeLabel(item.type)
+      : `${typeLabel(item.type)} · ${tFormat('engine.customizationMark.customizationOf', locale, {
+          baseName: packageLabel || packageId || '',
+        })}`;
 
-  const groups = buildStudioPaletteGroups(buildStudioMenu({ scope, types, counts: countsByType }), items);
+  const groups = buildStudioPaletteGroups(buildStudioMenu({ scope, types, counts: data.counts }), items);
 
   return (
     <>
@@ -215,7 +180,7 @@ export function StudioPaletteGroups({
           matchesPaletteQuery(query, [itemLabel(item), item.name, typeLabel(item.type)]),
         );
         if (shownEntries.length === 0 && shownItems.length === 0) return null;
-        const ItemIcon = GROUP_ICONS[group];
+        const ItemIcon = STUDIO_MENU_GROUP_ICONS[group];
         return (
           <CommandGroup key={group} heading={groupLabel} data-testid={`studio-palette-group-${group}`}>
             {shownEntries.map((entry) => {
@@ -247,7 +212,7 @@ export function StudioPaletteGroups({
                 <ItemIcon className="mr-2 h-4 w-4" />
                 <span className="truncate">{itemLabel(item)}</span>
                 <span className="ml-auto max-w-[45%] shrink-0 truncate text-xs text-muted-foreground">
-                  {item.packageId === packageId ? typeLabel(item.type) : `${typeLabel(item.type)} · ${item.packageId}`}
+                  {itemDetail(item)}
                 </span>
               </CommandItem>
             ))}
