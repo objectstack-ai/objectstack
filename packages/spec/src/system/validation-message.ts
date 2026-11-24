@@ -60,6 +60,13 @@
  * this issue is about; the column and the offending value are what the importer
  * can act on.
  *
+ * `import_duplicate_match_key` is the importer's ROW refusal for rows of one
+ * file that share a match key (`DUPLICATE_MATCH_KEY`, `core/import-runner.ts`):
+ * not a cell's failure, but a sentence in the same row report, so it is read in
+ * the same language. `{{label}}` is the key set by field LABEL (`Email`,
+ * `Supplier + Type`), never the API names, and `{{rows}}` the row numbers that
+ * carry the key, both filled by the runner.
+ *
  * ## Interpolation
  *
  * `{{name}}` placeholders, matching `II18nService.t()`'s convention, filled from
@@ -162,6 +169,7 @@ export const BUILTIN_VALIDATION_MESSAGES: Record<string, Record<string, string>>
     import_unknown_option: '{{label}}: "{{value}}" is not a known option',
     import_reference_ambiguous: '{{label}}: "{{value}}" matches more than one record — use a unique value or the record id',
     import_reference_not_found: '{{label}}: no record matches "{{value}}"',
+    import_duplicate_match_key: 'Rows {{rows}} of this import have the same match key ({{label}}), so none of them was written: keep one row per key and import again',
   },
   'zh-CN': {
     required: '{{label}}不能为空',
@@ -212,6 +220,7 @@ export const BUILTIN_VALIDATION_MESSAGES: Record<string, Record<string, string>>
     import_unknown_option: '{{label}}:“{{value}}”不是可选值之一',
     import_reference_ambiguous: '{{label}}:“{{value}}”匹配到多条记录,请改用唯一值或记录 ID',
     import_reference_not_found: '{{label}}:未找到与“{{value}}”匹配的记录',
+    import_duplicate_match_key: '本次导入的第 {{rows}} 行匹配键({{label}})相同,因此均未写入:每个匹配键只保留一行后重新导入',
   },
   'ja-JP': {
     required: '{{label}}は必須です',
@@ -259,6 +268,7 @@ export const BUILTIN_VALIDATION_MESSAGES: Record<string, Record<string, string>>
     import_unknown_option: '{{label}}:「{{value}}」は選択肢にありません',
     import_reference_ambiguous: '{{label}}:「{{value}}」に複数のレコードが一致します。一意の値かレコード ID を指定してください',
     import_reference_not_found: '{{label}}:「{{value}}」に一致するレコードが見つかりません',
+    import_duplicate_match_key: 'このインポートの {{rows}} 行目は一致キー({{label}})が同じため、いずれも書き込まれませんでした。キーごとに 1 行だけ残して、もう一度インポートしてください',
   },
   'es-ES': {
     required: '{{label}} es obligatorio',
@@ -306,6 +316,7 @@ export const BUILTIN_VALIDATION_MESSAGES: Record<string, Record<string, string>>
     import_unknown_option: '{{label}}: «{{value}}» no es una opción conocida',
     import_reference_ambiguous: '{{label}}: «{{value}}» coincide con más de un registro; use un valor único o el id del registro',
     import_reference_not_found: '{{label}}: ningún registro coincide con «{{value}}»',
+    import_duplicate_match_key: 'Las filas {{rows}} de esta importación tienen la misma clave de coincidencia ({{label}}), así que no se escribió ninguna: deje una sola fila por clave e importe de nuevo',
   },
 };
 

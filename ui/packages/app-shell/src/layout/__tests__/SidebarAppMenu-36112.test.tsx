@@ -29,6 +29,12 @@
  * 「Design layout」 stays drawn and choosing it refuses with the prompt to
  * save or cancel those changes first; the mode stays off. `sonner`'s toast is
  * spied.
+ *
+ * objectstack#36969 — 「Add app」 offers building with AI only where the agent
+ * catalog serves the build agent (alias-aware). Where in-app building is
+ * closed the catalog keeps `ask` and drops `build`: the door gives way to 「New
+ * in Studio」, the template and the marketplace stay. The real
+ * `useAiSurfaceEnabled` reads a stubbed catalog (`useAgents`).
  */
 
 import '@testing-library/jest-dom/vitest';
@@ -96,8 +102,11 @@ let canAuthor = true;
 vi.mock('../../hooks/useCanAuthorMetadata', () => ({
   useCanAuthorMetadata: () => canAuthor,
 }));
-vi.mock('../../hooks/useAiSurface', () => ({
-  useAiSurfaceEnabled: () => ({ enabled: true, isLoading: false }),
+/** The agent catalog the real `useAiSurfaceEnabled` reads. */
+let catalog: Array<{ name: string }> = [{ name: 'build' }, { name: 'ask' }];
+vi.mock('@object-ui/plugin-chatbot/core', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  useAgents: () => ({ agents: catalog, isLoading: false, error: undefined, refetch: () => {} }),
 }));
 vi.mock('../../runtime-config', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -152,6 +161,7 @@ afterEach(() => {
   apps = [];
   admin = false;
   canAuthor = true;
+  catalog = [{ name: 'build' }, { name: 'ask' }];
   authOverride = {};
   toastError.mockReset();
   vi.unstubAllGlobals();
@@ -226,6 +236,45 @@ describe('the sidebar app menu only switches apps (objectstack#36112)', () => {
     canAuthor = false;
     renderMenu('crm');
     expect(menu().queryByTestId('sidebar-app-menu-add')).toBeNull();
+  });
+});
+
+describe('「Add app」 offers building with AI only where the catalog serves build (objectstack#36969)', () => {
+  function addChoices() {
+    apps = [CRM];
+    admin = true;
+    renderMenu('crm');
+    return within(screen.getByTestId('add-app-choices'));
+  }
+
+  it('in-app building closed (`ask` served, `build` not): no build-with-AI door; Studio, a template, the marketplace', () => {
+    catalog = [{ name: 'ask' }];
+    const choices = addChoices();
+    expect(choices.queryByTestId('sidebar-app-menu-add-build-with-ai')).toBeNull();
+    expect(choices.getByTestId('sidebar-app-menu-add-new-in-studio')).toHaveAttribute('href', '/studio?new=package');
+    expect(choices.getByTestId('sidebar-app-menu-add-template')).toHaveAttribute('href', '/apps/setup/system/marketplace');
+    expect(choices.getByTestId('sidebar-app-menu-add-marketplace')).toHaveAttribute('href', '/apps/setup/system/marketplace');
+  });
+
+  it('a catalog of other agents only offers no build-with-AI door either', () => {
+    catalog = [{ name: 'custom_helper' }];
+    const choices = addChoices();
+    expect(choices.queryByTestId('sidebar-app-menu-add-build-with-ai')).toBeNull();
+    expect(choices.getByTestId('sidebar-app-menu-add-new-in-studio')).toBeInTheDocument();
+  });
+
+  it.each([
+    ['build', [{ name: 'build' }, { name: 'ask' }]],
+    ['its legacy id', [{ name: 'metadata_assistant' }, { name: 'data_chat' }]],
+  ])('regression: with %s served the door is unchanged, to Studio', (_served, served) => {
+    catalog = served;
+    const choices = addChoices();
+    expect(choices.getByTestId('sidebar-app-menu-add-build-with-ai')).toHaveAttribute('href', '/studio');
+    expect(choices.getByTestId('sidebar-app-menu-add-build-with-ai')).toHaveTextContent('Build with AI');
+    expect(choices.queryByTestId('sidebar-app-menu-add-new-in-studio')).toBeNull();
+    expect(
+      Array.from(screen.getByTestId('add-app-choices').querySelectorAll('a')).map((a) => a.getAttribute('data-testid')),
+    ).toEqual(['sidebar-app-menu-add-build-with-ai', 'sidebar-app-menu-add-template', 'sidebar-app-menu-add-marketplace']);
   });
 });
 

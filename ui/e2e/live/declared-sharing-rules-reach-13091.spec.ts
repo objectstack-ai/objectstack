@@ -10,8 +10,8 @@ import { test, expect, type Locator } from '@playwright/test';
  *  - the first Clone button and the first Active switch both lie wholly inside
  *    the viewport AND inside the visible box of the table's scroller, with the
  *    table not scrolled at all;
- *  - when the table is wider than its box, the box says so
- *    (`data-overflow-right`, which drives the seam shadow on the pinned cells).
+ *  - when the table is wider than its box, the grid draws its seam shadow at
+ *    the pinned cells (objectstack#36897: the list is drawn by ObjectGrid).
  *
  * The unit pins for the same page are in
  * `ResourceListPage.declaredSharingRules-12982.test.tsx`.
@@ -30,9 +30,10 @@ test.use({ viewport: { width: 1440, height: 1000 } });
 
 test('at 1440 px, Clone and the Active switch are inside the viewport and the table box', async ({ page }) => {
   await page.goto(LIST);
-  // The table's own scroll box, found by structure rather than by a test id,
-  // so the measurement reads the same element before and after the fix.
-  const scroller = page.locator('table').first().locator('xpath=..');
+  // The table's own scroll box. objectstack#36897 — the list is drawn by
+  // ObjectGrid, whose table box marks itself (`data-table-scroll-box`); the
+  // table's parent is no longer the element that scrolls.
+  const scroller = page.locator('[data-table-scroll-box]').first();
   await expect(scroller).toBeVisible();
   const clone = page.locator('[data-testid^="catalog-clone-"]').first();
   const active = page.locator('[data-testid^="catalog-active-"]').first();
@@ -50,9 +51,9 @@ test('at 1440 px, Clone and the Active switch are inside the viewport and the ta
     expect(b.x + b.width, `${what} ends inside the table box`).toBeLessThanOrEqual(frame.x + frame.width + 0.5);
   }
 
-  // The box reports its overflow, which is what draws the seam shadow.
+  // While columns remain to the right, the grid draws its seam shadow.
   const widths = await scroller.evaluate((el) => ({ scroll: el.scrollWidth, client: el.clientWidth }));
   if (widths.scroll > widths.client + 1) {
-    await expect(scroller).toHaveAttribute('data-overflow-right', 'true');
+    await expect(page.getByTestId('data-table-scroll-shadow-right').first()).toBeVisible();
   }
 });

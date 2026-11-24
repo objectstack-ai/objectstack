@@ -1092,15 +1092,54 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
   },
   seed: {
     label: "Données d’amorçage",
-    description: "Données de fixture / d’initialisation appliquées à la publication"
+    description: "Données de fixture / d’initialisation appliquées à la publication",
+    fields: {
+      object: {
+        label: "Objet"
+      },
+      mode: {
+        label: "Mode"
+      }
+    }
   },
   picklist: {
     label: "Liste de sélection",
-    description: "Liste d’options partagée que les champs de sélection référencent par son nom"
+    description: "Liste d’options partagée que les champs de sélection référencent par son nom",
+    fields: {
+      name: {
+        label: "Nom"
+      },
+      label: {
+        label: "Libellé"
+      },
+      options: {
+        label: "Options"
+      },
+      description: {
+        label: "Description"
+      }
+    }
   },
   mapping: {
     label: "Mappage d’import",
-    description: "Mappage de champs d’import/export réutilisable (renommage + transformations), référencé par son nom lors de l’import"
+    description: "Mappage de champs d’import/export réutilisable (renommage + transformations), référencé par son nom lors de l’import",
+    fields: {
+      name: {
+        label: "Nom"
+      },
+      label: {
+        label: "Libellé"
+      },
+      targetObject: {
+        label: "Objet cible"
+      },
+      mode: {
+        label: "Mode"
+      },
+      sourceFormat: {
+        label: "Format source"
+      }
+    }
   },
   view: {
     label: "Vue",
@@ -1424,6 +1463,9 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       "sharing.lockedBy": {
         label: "Verrouillé par",
         helpText: "Utilisateur qui a verrouillé la configuration de la vue"
+      },
+      object: {
+        label: "Objet"
       }
     }
   },
@@ -2580,7 +2622,24 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
     }
   },
   job: {
-    label: "Tâche en arrière-plan"
+    label: "Tâche en arrière-plan",
+    fields: {
+      name: {
+        label: "Nom"
+      },
+      label: {
+        label: "Libellé"
+      },
+      schedule: {
+        label: "Planification"
+      },
+      enabled: {
+        label: "Activé"
+      },
+      description: {
+        label: "Description"
+      }
+    }
   },
   datasource: {
     label: "Source de données"
@@ -2590,10 +2649,41 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
   },
   api: {
     label: "Point de terminaison d’API",
-    description: "Une URL HTTP stable que d’autres systèmes appellent pour exécuter un flux ou manipuler les enregistrements de l’application"
+    description: "Une URL HTTP stable que d’autres systèmes appellent pour exécuter un flux ou manipuler les enregistrements de l’application",
+    fields: {
+      name: {
+        label: "Nom"
+      },
+      method: {
+        label: "Méthode"
+      },
+      path: {
+        label: "Chemin"
+      },
+      type: {
+        label: "Type"
+      },
+      "objectParams.object": {
+        label: "Objet"
+      },
+      "objectParams.operation": {
+        label: "Opération"
+      }
+    }
   },
   translation: {
-    label: "Traduction"
+    label: "Traduction",
+    fields: {
+      name: {
+        label: "Nom"
+      },
+      label: {
+        label: "Libellé"
+      },
+      locale: {
+        label: "Langue"
+      }
+    }
   },
   email_template: {
     label: "Modèle d’e-mail",
@@ -2670,11 +2760,45 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
   },
   doc: {
     label: "Documentation",
-    description: "Une page d’aide rédigée en Markdown, fournie par un package ou écrite par vous-même"
+    description: "Une page d’aide rédigée en Markdown, fournie par un package ou écrite par vous-même",
+    fields: {
+      name: {
+        label: "Nom"
+      },
+      label: {
+        label: "Libellé"
+      },
+      group: {
+        label: "Groupe"
+      },
+      tags: {
+        label: "Mots-clés"
+      },
+      description: {
+        label: "Description"
+      }
+    }
   },
   book: {
     label: "Livre de documentation",
-    description: "Une table des matières qui regroupe les pages d’aide en sections ordonnées"
+    description: "Une table des matières qui regroupe les pages d’aide en sections ordonnées",
+    fields: {
+      name: {
+        label: "Nom"
+      },
+      label: {
+        label: "Libellé"
+      },
+      audience: {
+        label: "Public"
+      },
+      groups: {
+        label: "Groupes"
+      },
+      description: {
+        label: "Description"
+      }
+    }
   },
   permission: {
     label: "Ensemble d’autorisations",
@@ -2778,15 +2902,66 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
   },
   sharing_rule: {
     label: "Règle de partage",
-    description: "Une règle qu’un package déclare pour partager des enregistrements ; les organisations créent les leurs dans Configuration"
+    description: "Une règle qu’un package déclare pour partager des enregistrements ; les organisations créent les leurs dans Configuration",
+    fields: {
+      name: {
+        label: "Nom"
+      },
+      label: {
+        label: "Libellé"
+      },
+      object: {
+        label: "Objet"
+      },
+      sharedWith: {
+        label: "Partagé avec"
+      },
+      accessLevel: {
+        label: "Niveau d’accès"
+      }
+    }
   },
   queue: {
     label: "File d’attente",
-    description: "Un groupe nommé de personnes dans lequel des enregistrements peuvent attendre jusqu’à ce que l’une d’elles prenne l’enregistrement ; les organisations y affectent leurs propres membres dans Configuration"
+    description: "Un groupe nommé de personnes dans lequel des enregistrements peuvent attendre jusqu’à ce que l’une d’elles prenne l’enregistrement ; les organisations y affectent leurs propres membres dans Configuration",
+    fields: {
+      name: {
+        label: "Nom"
+      },
+      label: {
+        label: "Libellé"
+      },
+      members: {
+        label: "Membres"
+      },
+      description: {
+        label: "Description"
+      }
+    }
   },
   assignment_rule: {
     label: "Règle d’attribution",
-    description: "Une règle qu’un package déclare pour acheminer les nouveaux enregistrements vers une file d’attente ou une personne"
+    description: "Une règle qu’un package déclare pour acheminer les nouveaux enregistrements vers une file d’attente ou une personne",
+    fields: {
+      name: {
+        label: "Nom"
+      },
+      label: {
+        label: "Libellé"
+      },
+      object: {
+        label: "Objet"
+      },
+      entries: {
+        label: "Entrées"
+      },
+      active: {
+        label: "Actif"
+      },
+      description: {
+        label: "Description"
+      }
+    }
   },
   agent: {
     label: "Agent IA",
@@ -2868,6 +3043,9 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       guardrails: {
         label: "Garde-fous",
         helpText: "Règles de sécurité et politiques de contenu"
+      },
+      "model.model": {
+        label: "Modèle"
       }
     }
   },

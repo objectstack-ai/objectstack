@@ -79,6 +79,19 @@ export interface ResolveSurfaceAgentInput {
 }
 
 /**
+ * objectstack#36969 — does the live catalog serve the build agent (alias-aware:
+ * `build` or its legacy id)? The console's AI-build entries — 「Add app」's
+ * build-with-AI door, Home's "Build an app" chip, the Studio copilot dock —
+ * gate on THIS, never on "any agent at all" and never on a hosted/self-hosted
+ * guess: a deployment that closes in-app building keeps `ask` in the catalog
+ * and persists `build` inactive, so the catalog stops listing it and the chat
+ * route refuses it. Where it is listed, every entry behaves as before.
+ */
+export function catalogServesBuild(agents: readonly AgentDescriptor[]): boolean {
+  return resolveAgentParam('build', agents.map((a) => a.name)) !== undefined;
+}
+
+/**
  * cloud#1674 — is this session on the CONVERGED maker surface? True when the
  * principal may author, the deployment offers authoring, and the catalog
  * actually serves a build agent. This is the ONE predicate the console's chat
@@ -90,11 +103,7 @@ export function makerConvergedOnBuild(
   canAuthorMetadata: boolean,
   aiStudioEnabled = true,
 ): boolean {
-  return (
-    canAuthorMetadata &&
-    aiStudioEnabled &&
-    resolveAgentParam('build', agents.map((a) => a.name)) !== undefined
-  );
+  return canAuthorMetadata && aiStudioEnabled && catalogServesBuild(agents);
 }
 
 /**

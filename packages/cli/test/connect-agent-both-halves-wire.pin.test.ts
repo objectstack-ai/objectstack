@@ -264,7 +264,7 @@ describe('#17647 — Connect-an-Agent visibility: BOTH halves, over the wire', (
         // The Setup tree the platform admin is served BY THIS COMPOSITION: 9
         // authored groups less `group_approvals` and `group_integrations`,
         // which nothing in it contributes into and the filter collapses, plus
-        // the 29 entries `SETUP_NAV_CONTRIBUTIONS` carries, plus the MCP one.
+        // the 28 entries `SETUP_NAV_CONTRIBUTIONS` carries, plus the MCP one.
         // (25 until #25098 moved the unfiltered Packages entry to Studio; 24
         // until #30204 removed the Feature Flags entry with its namespace; 32
         // until #30895 moved the MCP entry out of `group_integrations`, the
@@ -280,13 +280,16 @@ describe('#17647 — Connect-an-Agent visibility: BOTH halves, over the wire', (
         // the public forms entry, `nav_public_forms`, joined it, #36444; 35
         // until objectstack#36834 gave Setup its Packages entry,
         // `nav_packages`, in `group_apps`, so that group is served again:
-        // +2, `group_apps` and `nav_packages`.)
+        // +2, `group_apps` and `nav_packages`; 37 until #33933 moved the
+        // Knowledge entry, `nav_settings_knowledge`, to
+        // `@objectstack/service-knowledge`, which contributes it only where the
+        // knowledge service is mounted.)
         // `nav_settings_branding` is not among them, and not because of a
         // tenancy wall (this harness boots none): since #24766 it is
         // contributed by `@objectstack/service-settings` together with the
         // `branding` namespace, offered only where no organization wall stands,
         // and this harness composes platform-objects and the MCP bundle alone.
-        expect(allowedIds).toHaveLength(37);
+        expect(allowedIds).toHaveLength(36);
         expect(allowedIds).toContain('nav_packages');
         expect(groupChildren(setupAllowed.body?.item, 'group_apps')).toEqual(['nav_packages']);
         expect(allowedIds).toContain('nav_public_forms');
@@ -294,6 +297,7 @@ describe('#17647 — Connect-an-Agent visibility: BOTH halves, over the wire', (
         expect(allowedIds).toContain('nav_work_calendar_exceptions');
         expect(allowedIds).not.toContain('nav_packaged_actions');
         expect(allowedIds).toContain('nav_settings_access_policy');
+        expect(allowedIds).not.toContain('nav_settings_knowledge');
         expect(allowedIds).toContain('nav_recycle_bin');
         expect(allowedIds).toContain('nav_units_of_measure');
         expect(allowedIds).not.toContain('nav_settings_branding');
@@ -318,8 +322,8 @@ describe('#17647 — Connect-an-Agent visibility: BOTH halves, over the wire', (
         expect(withAccountHalf.statusCode).toBe(200);
         expect(withoutAccountHalf.statusCode).toBe(200);
         expect(navIds(withAccountHalf.body?.item)).toEqual(navIds(withoutAccountHalf.body?.item));
-        // 37: the composition the count in the test above states.
-        expect(navIds(withAccountHalf.body?.item)).toHaveLength(37);
+        // 36: the composition the count in the test above states.
+        expect(navIds(withAccountHalf.body?.item)).toHaveLength(36);
 
         // The mechanism behind the invariance, asserted rather than assumed:
         // the bundle aims exactly one contribution at `setup` and one at

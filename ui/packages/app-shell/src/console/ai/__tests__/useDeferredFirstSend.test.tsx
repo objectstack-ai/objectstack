@@ -27,15 +27,31 @@ import { useChatConversation } from '../../../hooks/useChatConversation';
 
 const API = 'https://example.test/api/v1/ai/agents/build/chat';
 
-/**
+/*
  * objectstack#32031 — the replay fires on the next task, not inside the effect
  * (a send issued inside it is stopped by the chat runtime's own effect
- * teardown under StrictMode). Let that task run.
+ * teardown under StrictMode). How a case waits for that task:
+ *
+ * - A step that SHOULD replay waits on the replay's own observable (`waitFor`
+ *   on `doSend` or the stash), never on a fixed tick. A fixed tick races the
+ *   effect that arms the replay timer whenever React flushes that effect
+ *   outside `act` — the pane remount after the async create below — and on a
+ *   starved runner the tick fires first and the assertion reads 0 calls.
+ * - A step that must NOT replay has no observable to wait for: a `waitFor` on
+ *   a negative passes before the replay had its chance. It runs through
+ *   `actThenRunPendingTimers`, which fires every timer the step armed, so any
+ *   replay has provably run before the assertion reads.
  */
-async function flushReplay(): Promise<void> {
-  await act(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 0));
-  });
+function actThenRunPendingTimers(step: () => void): void {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  try {
+    act(step);
+    act(() => {
+      vi.runOnlyPendingTimers();
+    });
+  } finally {
+    vi.useRealTimers();
+  }
 }
 
 function setup(initial: { chatApi?: string; conversationId?: string }) {
@@ -61,14 +77,12 @@ describe('useDeferredFirstSend', () => {
 
     // POST /conversations resolved → the stashed message is replayed exactly once.
     act(() => rerender({ chatApi: API, conversationId: 'c1' }));
-    await flushReplay();
-    expect(doSend).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(doSend).toHaveBeenCalledTimes(1));
     expect(doSend).toHaveBeenCalledWith('please build me a CRM', undefined);
     expect(pendingRef.current).toBeNull();
 
     // A later id change (URL mirror / switch) must not re-fire the consumed send.
-    act(() => rerender({ chatApi: API, conversationId: 'c2' }));
-    await flushReplay();
+    actThenRunPendingTimers(() => rerender({ chatApi: API, conversationId: 'c2' }));
     expect(doSend).toHaveBeenCalledTimes(1);
   });
 
@@ -93,8 +107,7 @@ describe('useDeferredFirstSend', () => {
       pendingRef.current = { content: 'handoff prompt', files: undefined };
       rerender({ pendingSignal: 1 });
     });
-    await flushReplay();
-    expect(doSend).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(doSend).toHaveBeenCalledTimes(1));
     expect(doSend).toHaveBeenCalledWith('handoff prompt', undefined);
     expect(pendingRef.current).toBeNull();
 
@@ -103,8 +116,7 @@ describe('useDeferredFirstSend', () => {
       pendingRef.current = { content: 'second handoff', files: undefined };
       rerender({ pendingSignal: 2 });
     });
-    await flushReplay();
-    expect(doSend).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(doSend).toHaveBeenCalledTimes(2));
     expect(doSend).toHaveBeenLastCalledWith('second handoff', undefined);
   });
 
@@ -130,18 +142,16 @@ describe('useDeferredFirstSend', () => {
 
     // Handoff seed lands while the pane is still ask-bound (stale window):
     // held untouched — not consumed, not sent.
-    act(() => {
+    actThenRunPendingTimers(() => {
       pendingRef.current = { content: 'handoff prompt', targetAgentRoute: 'build' };
       rerender({ agentRoute: 'ask', pendingSignal: 1 });
     });
-    await flushReplay();
     expect(doSend).not.toHaveBeenCalled();
     expect(pendingRef.current).not.toBeNull();
 
     // The pane re-binds to build (transition settled) → replayed exactly once.
     act(() => rerender({ agentRoute: 'build', pendingSignal: 1 }));
-    await flushReplay();
-    expect(doSend).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(doSend).toHaveBeenCalledTimes(1));
     expect(doSend).toHaveBeenCalledWith('handoff prompt', undefined);
     expect(pendingRef.current).toBeNull();
   });
@@ -165,8 +175,7 @@ describe('useDeferredFirstSend', () => {
       pendingRef.current = { content: 'typed by user' };
       rerender({ pendingSignal: 1 });
     });
-    await flushReplay();
-    expect(doSend).toHaveBeenCalledWith('typed by user', undefined);
+    await waitFor(() => expect(doSend).toHaveBeenCalledWith('typed by user', undefined));
   });
 
   it('sends straight through when a conversation id is already present', () => {
@@ -187,8 +196,7 @@ describe('useDeferredFirstSend', () => {
     expect(pendingRef.current).toEqual({ content: 'with a file', files: [file] });
 
     act(() => rerender({ chatApi: API, conversationId: 'c1' }));
-    await flushReplay();
-    expect(doSend).toHaveBeenCalledWith('with a file', [file]);
+    await waitFor(() => expect(doSend).toHaveBeenCalledWith('with a file', [file]));
   });
 
   // objectstack#32984 — a doubled submit that carries a file is the same
@@ -202,8 +210,7 @@ describe('useDeferredFirstSend', () => {
     expect(pendingRef.current).toEqual({ content: 'with a file', files: [file] });
 
     act(() => rerender({ chatApi: API, conversationId: 'c1' }));
-    await flushReplay();
-    expect(doSend).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(doSend).toHaveBeenCalledTimes(1));
     expect(doSend).toHaveBeenCalledWith('with a file', [file]);
   });
 
@@ -216,8 +223,7 @@ describe('useDeferredFirstSend', () => {
     act(() => result.current('and the logo', [spec, logo]));
 
     act(() => rerender({ chatApi: API, conversationId: 'c1' }));
-    await flushReplay();
-    expect(doSend).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(doSend).toHaveBeenCalledTimes(1));
     expect(doSend).toHaveBeenCalledWith('with a file\n\nand the logo', [spec, logo]);
   });
 
@@ -274,9 +280,8 @@ describe('useDeferredFirstSend', () => {
     // Conversation id resolves → the pane REMOUNTS, and the new instance replays
     // the stashed message (this is what used to be silently dropped).
     fireEvent.click(screen.getByTestId('resolve'));
-    await flushReplay();
+    await waitFor(() => expect(doSend).toHaveBeenCalledTimes(1));
     expect(mounts).toBe(2); // proves the remount actually happened
-    expect(doSend).toHaveBeenCalledTimes(1);
     expect(doSend).toHaveBeenCalledWith('first message', undefined);
     expect(pendingRef.current).toBeNull();
   });
@@ -354,8 +359,7 @@ describe('useDeferredFirstSend — the first send creates the conversation (obje
     fireEvent.click(screen.getByTestId('send-a'));
     await waitFor(() => expect(screen.getByTestId('conv').textContent).toBe('conv-1'));
     expect(createCount()).toBe(1);
-    await flushReplay();
-    expect(doSend).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(doSend).toHaveBeenCalledTimes(1));
     expect(doSend).toHaveBeenCalledWith('first message', undefined);
   });
 
@@ -367,9 +371,8 @@ describe('useDeferredFirstSend — the first send creates the conversation (obje
     fireEvent.click(screen.getByTestId('send-a'));
     await waitFor(() => expect(screen.getByTestId('conv').textContent).toBe('conv-1'));
     expect(createCount()).toBe(1);
-    await flushReplay();
     // The same text submitted twice is sent once, not repeated.
-    expect(doSend).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(doSend).toHaveBeenCalledTimes(1));
     expect(doSend).toHaveBeenCalledWith('first message', undefined);
   });
 
@@ -383,8 +386,7 @@ describe('useDeferredFirstSend — the first send creates the conversation (obje
     fireEvent.click(screen.getByTestId('send-b'));
     await waitFor(() => expect(screen.getByTestId('conv').textContent).toBe('conv-1'));
     expect(createCount()).toBe(1);
-    await flushReplay();
-    expect(doSend).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(doSend).toHaveBeenCalledTimes(1));
     expect(doSend).toHaveBeenCalledWith('first message\n\nsecond message', undefined);
   });
 
@@ -420,10 +422,12 @@ describe('useDeferredFirstSend — the first send creates the conversation (obje
         <Pane />
       </React.StrictMode>,
     );
-    await flushReplay();
+    // The replay consumes the stash in the same task that sends, so waiting on
+    // the consumption also covers the send; an in-effect replay would consume
+    // it at once and be read below as the abort it suffers.
+    await waitFor(() => expect(pendingRef.current).toBeNull());
     expect(chat.aborted).toEqual([]);
     expect(chat.inflight).toBe('first message');
-    expect(pendingRef.current).toBeNull();
   });
 
   it('a stash seeded out of band (the handoff) asks for the conversation itself', async () => {

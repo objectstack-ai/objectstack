@@ -1092,15 +1092,54 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
   },
   seed: {
     label: "시드 데이터",
-    description: "게시할 때 적용되는 픽스처 / 초기화 데이터"
+    description: "게시할 때 적용되는 픽스처 / 초기화 데이터",
+    fields: {
+      object: {
+        label: "객체"
+      },
+      mode: {
+        label: "모드"
+      }
+    }
   },
   picklist: {
     label: "선택 목록",
-    description: "선택 필드가 이름으로 참조하는 공유 옵션 목록"
+    description: "선택 필드가 이름으로 참조하는 공유 옵션 목록",
+    fields: {
+      name: {
+        label: "이름"
+      },
+      label: {
+        label: "레이블"
+      },
+      options: {
+        label: "옵션"
+      },
+      description: {
+        label: "설명"
+      }
+    }
   },
   mapping: {
     label: "가져오기 매핑",
-    description: "가져올 때 이름으로 참조하는 재사용 가능한 가져오기/내보내기 필드 매핑(이름 변경 + 변환)"
+    description: "가져올 때 이름으로 참조하는 재사용 가능한 가져오기/내보내기 필드 매핑(이름 변경 + 변환)",
+    fields: {
+      name: {
+        label: "이름"
+      },
+      label: {
+        label: "레이블"
+      },
+      targetObject: {
+        label: "대상 객체"
+      },
+      mode: {
+        label: "모드"
+      },
+      sourceFormat: {
+        label: "원본 형식"
+      }
+    }
   },
   view: {
     label: "뷰",
@@ -1424,6 +1463,9 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       "sharing.lockedBy": {
         label: "잠근 작업자",
         helpText: "뷰 구성을 잠근 사용자"
+      },
+      object: {
+        label: "객체"
       }
     }
   },
@@ -2580,7 +2622,24 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
     }
   },
   job: {
-    label: "백그라운드 작업"
+    label: "백그라운드 작업",
+    fields: {
+      name: {
+        label: "이름"
+      },
+      label: {
+        label: "레이블"
+      },
+      schedule: {
+        label: "일정"
+      },
+      enabled: {
+        label: "사용"
+      },
+      description: {
+        label: "설명"
+      }
+    }
   },
   datasource: {
     label: "데이터 소스"
@@ -2590,10 +2649,41 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
   },
   api: {
     label: "API 엔드포인트",
-    description: "다른 시스템이 호출해 플로우를 실행하거나 앱의 레코드를 다루는 안정적인 HTTP URL"
+    description: "다른 시스템이 호출해 플로우를 실행하거나 앱의 레코드를 다루는 안정적인 HTTP URL",
+    fields: {
+      name: {
+        label: "이름"
+      },
+      method: {
+        label: "메서드"
+      },
+      path: {
+        label: "경로"
+      },
+      type: {
+        label: "유형"
+      },
+      "objectParams.object": {
+        label: "객체"
+      },
+      "objectParams.operation": {
+        label: "작업"
+      }
+    }
   },
   translation: {
-    label: "번역"
+    label: "번역",
+    fields: {
+      name: {
+        label: "이름"
+      },
+      label: {
+        label: "레이블"
+      },
+      locale: {
+        label: "로캘"
+      }
+    }
   },
   email_template: {
     label: "이메일 템플릿",
@@ -2670,11 +2760,45 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
   },
   doc: {
     label: "문서",
-    description: "패키지가 제공하거나 직접 작성하는 Markdown 도움말 페이지"
+    description: "패키지가 제공하거나 직접 작성하는 Markdown 도움말 페이지",
+    fields: {
+      name: {
+        label: "이름"
+      },
+      label: {
+        label: "레이블"
+      },
+      group: {
+        label: "그룹"
+      },
+      tags: {
+        label: "태그"
+      },
+      description: {
+        label: "설명"
+      }
+    }
   },
   book: {
     label: "문서 책",
-    description: "도움말 페이지를 순서 있는 섹션으로 묶는 목차"
+    description: "도움말 페이지를 순서 있는 섹션으로 묶는 목차",
+    fields: {
+      name: {
+        label: "이름"
+      },
+      label: {
+        label: "레이블"
+      },
+      audience: {
+        label: "대상"
+      },
+      groups: {
+        label: "그룹"
+      },
+      description: {
+        label: "설명"
+      }
+    }
   },
   permission: {
     label: "권한 세트",
@@ -2778,15 +2902,66 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
   },
   sharing_rule: {
     label: "공유 규칙",
-    description: "패키지가 레코드를 공유하기 위해 선언하는 규칙으로, 조직은 설정에서 자체 규칙을 작성합니다"
+    description: "패키지가 레코드를 공유하기 위해 선언하는 규칙으로, 조직은 설정에서 자체 규칙을 작성합니다",
+    fields: {
+      name: {
+        label: "이름"
+      },
+      label: {
+        label: "레이블"
+      },
+      object: {
+        label: "객체"
+      },
+      sharedWith: {
+        label: "공유 대상"
+      },
+      accessLevel: {
+        label: "액세스 수준"
+      }
+    }
   },
   queue: {
     label: "대기열",
-    description: "구성원 중 한 명이 레코드를 맡을 때까지 레코드가 머무를 수 있는 이름 있는 사람 집합으로, 조직은 설정에서 자체 대기열의 인원을 구성합니다"
+    description: "구성원 중 한 명이 레코드를 맡을 때까지 레코드가 머무를 수 있는 이름 있는 사람 집합으로, 조직은 설정에서 자체 대기열의 인원을 구성합니다",
+    fields: {
+      name: {
+        label: "이름"
+      },
+      label: {
+        label: "레이블"
+      },
+      members: {
+        label: "구성원"
+      },
+      description: {
+        label: "설명"
+      }
+    }
   },
   assignment_rule: {
     label: "배정 규칙",
-    description: "패키지가 새 레코드를 대기열이나 사람에게 보내기 위해 선언하는 규칙"
+    description: "패키지가 새 레코드를 대기열이나 사람에게 보내기 위해 선언하는 규칙",
+    fields: {
+      name: {
+        label: "이름"
+      },
+      label: {
+        label: "레이블"
+      },
+      object: {
+        label: "객체"
+      },
+      entries: {
+        label: "항목"
+      },
+      active: {
+        label: "활성"
+      },
+      description: {
+        label: "설명"
+      }
+    }
   },
   agent: {
     label: "AI 에이전트",
@@ -2868,6 +3043,9 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       guardrails: {
         label: "보호 장치",
         helpText: "안전 규칙과 콘텐츠 정책"
+      },
+      "model.model": {
+        label: "모델"
       }
     }
   },

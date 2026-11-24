@@ -17,7 +17,10 @@
  *                              the form editor of an email template or a
  *                              translation (`StudioBundleItemEditor`, #28569),
  *                              and of a read-only package's dataset (#30064)
- *   <root>/:type/:name/history the item's history
+ *   <root>/:type/:name/history the item's history: its History tab
+ *                              (`?tab=history`), the old address redirected;
+ *                              the history page for a type with an editor of
+ *                              its own
  *
  * Mirroring Setup's shapes keeps every relative link the pages emit pointing
  * where it points there. What the area adds, it hands the pages through
@@ -48,7 +51,8 @@ import {
   studioMetadataAreaPath,
 } from './metadataArea.js';
 import { StudioBundleItemEditor } from './StudioBundleItemEditor.js';
-import { BUNDLE_MEMBER_PARAM } from '../metadata-admin/registry.js';
+import { BUNDLE_MEMBER_PARAM, getMetadataResource } from '../metadata-admin/registry.js';
+import { ITEM_TOOL_TAB_PARAM } from '../item-tools/ItemToolTabs.js';
 import type { StudioBaseCustomization } from './StudioDesignSurface.js';
 import type { StudioRefusal } from './metadataError.js';
 
@@ -85,26 +89,31 @@ const MetadataResourceHistoryPage = React.lazy(() =>
  * verdict rule is the one `parsePackages` applies. One request either way: the
  * readers of that endpoint share it (`packages-io.ts`).
  */
-function useListedPackageWritable(packageId: string | null): boolean | null | undefined {
-  const [answer, setAnswer] = React.useState<{ id: string; writable: boolean | null } | null>(null);
+function useListedPackageWritable(packageId: string | null): { writable: boolean | null | undefined; kernel: boolean } {
+  const [answer, setAnswer] = React.useState<{ id: string; writable: boolean | null; kernel: boolean } | null>(null);
   React.useEffect(() => {
     if (packageId === null) return;
     let cancelled = false;
     fetchListedPackageManifests().then(
       (manifests) => {
-        if (!cancelled) setAnswer({ id: packageId, writable: manifests.get(packageId)?.writable ?? null });
+        if (cancelled) return;
+        const listed = manifests.get(packageId);
+        // objectstack#36897 — a kernel package (manifest scope `system` or
+        // `cloud`) has no pair: the ensure door refuses it (ADR-0146 D3).
+        const scope = listed?.manifest?.scope;
+        setAnswer({ id: packageId, writable: listed?.writable ?? null, kernel: scope === 'system' || scope === 'cloud' });
       },
       () => {
         // The surface reports the failure once (its package-list toast).
-        if (!cancelled) setAnswer({ id: packageId, writable: null });
+        if (!cancelled) setAnswer({ id: packageId, writable: null, kernel: false });
       },
     );
     return () => {
       cancelled = true;
     };
   }, [packageId]);
-  if (packageId === null) return null;
-  return answer?.id === packageId ? answer.writable : undefined;
+  if (packageId === null) return { writable: null, kernel: false };
+  return answer?.id === packageId ? { writable: answer.writable, kernel: answer.kernel } : { writable: undefined, kernel: false };
 }
 
 function AreaLoading({ locale }: { locale: string }): React.ReactElement {
@@ -178,15 +187,93 @@ function AreaItemOpen({
   return <MetadataResourceEditPage />;
 }
 
-/** `<root>/:type/new`: a read-only package takes no new item, so its create URL lands on the list. */
-function AreaCreate(): React.ReactElement {
+/**
+ * `<root>/:type/:name/history`: the item's history is its page's History tab
+ * (objectstack#36901, decision 8), so the standalone address opens the item
+ * on that tab, its query kept (`?package=`, `?member=`, the list context).
+ * Cut from the path as it is spelled, so an encoded name stays encoded.
+ *
+ * A type whose item page is an editor of its own (`registerMetadataResource`'s
+ * `EditPage`: the permission set's matrix) has no tabs, and its History button
+ * opens this address: it keeps the standalone history page. So does an item
+ * whose address opens a pillar's designer, until the designer mounts the tabs.
+ */
+function AreaHistoryRedirect(): React.ReactElement {
+  const { type = '', name = '' } = useParams<{ type: string; name: string }>();
+  const { pathname, search } = useLocation();
+  const host = useMetadataAreaHost();
+  const params = new URLSearchParams(search);
+  const ownEditor = !!getMetadataResource(type)?.EditPage;
+  // An item a pillar's designer opens has no tab row yet (its tabs are the
+  // designers' cards): its history keeps the standalone page too.
+  const pillarItem = areaItemPillarPath({ packageId: host?.packageId ?? null, type, name, search: params }) !== null;
+  if (ownEditor || pillarItem) return <MetadataResourceHistoryPage />;
+  params.set(ITEM_TOOL_TAB_PARAM, 'history');
+  return <Navigate to={{ pathname: pathname.replace(/\/history\/?$/, ''), search: `?${params}` }} replace />;
+}
+
+/**
+ * `<root>/:type/new`. A read-only package takes no new item of its own:
+ * objectstack#36897 — on a read-only base the create is its `.custom` pair's
+ * (ADR-0146 D3), asked of the ensure door and opened there; where the door
+ * refuses this caller (`customization.walled`), the package is a kernel
+ * package (which has no pair), or there is no base to pair,
+ * the create URL lands on the list, as before.
+ */
+function AreaCreate({ customization }: { customization: StudioBaseCustomization | null }): React.ReactElement {
   const { type = '' } = useParams<{ type: string }>();
   const { search } = useLocation();
   const host = useMetadataAreaHost();
   if (host?.readOnly) {
+    if (customization && host.pairCreate) {
+      return <AreaPairedCreate type={type} search={search} customization={customization} />;
+    }
     return <Navigate to={`${host.basePath}/${encodeURIComponent(type)}${search}`} replace />;
   }
   return <MetadataResourceEditPage createMode />;
+}
+
+/** The create of a read-only base's pair: the ensure door names the pair (creating it on first use), then its create opens. */
+function AreaPairedCreate({
+  type,
+  search,
+  customization,
+}: {
+  type: string;
+  search: string;
+  customization: StudioBaseCustomization;
+}): React.ReactElement {
+  const locale = useMetadataLocale();
+  const [answer, setAnswer] = React.useState<{ to: string } | { error: string } | null>(null);
+  // Asked once per create: the surface may hand a new `customization` on any render.
+  const ensureRef = React.useRef(customization.ensurePackage);
+  ensureRef.current = customization.ensurePackage;
+  React.useEffect(() => {
+    let cancelled = false;
+    ensureRef.current().then(
+      (pair) => {
+        if (cancelled) return;
+        const query = new URLSearchParams(search);
+        query.set('package', pair.packageId);
+        setAnswer({ to: `${studioMetadataAreaPath(pair.packageId)}/${encodeURIComponent(type)}/new?${query.toString()}` });
+      },
+      (e: unknown) => {
+        if (!cancelled) setAnswer({ error: e instanceof Error ? e.message : String(e) });
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [type, search]);
+  if (answer && 'to' in answer) return <Navigate to={answer.to} replace />;
+  if (answer) {
+    return (
+      <div role="alert" className="p-6 text-sm text-destructive" data-testid="studio-area-pair-create-refused">
+        {answer.error}
+      </div>
+    );
+  }
+  return <AreaLoading locale={locale} />;
 }
 
 export interface StudioMetadataAreaProps {
@@ -225,10 +312,14 @@ export function StudioMetadataArea({
   // manifests (see the hook). Unknown stays ungated, as on the pillars: the
   // server's write gate is the authority, and a failed probe must not lock an
   // author out of a writable package.
-  const writable = useListedPackageWritable(packageId);
+  const { writable, kernel } = useListedPackageWritable(packageId);
+  const readOnly = packageId !== null && writable === false;
+  // objectstack#36897 — the list offers a create exactly where `AreaCreate`
+  // opens one in the pair; never on a kernel package, which has none.
+  const pairCreate = readOnly && !kernel && !!customization && !customization.walled;
   const host = React.useMemo<MetadataAreaHost>(
-    () => ({ packageId, readOnly: packageId !== null && writable === false, basePath }),
-    [packageId, writable, basePath],
+    () => ({ packageId, readOnly, basePath, ...(pairCreate ? { pairCreate } : {}) }),
+    [packageId, readOnly, basePath, pairCreate],
   );
   const editor: AreaEditorProps = { customization, publishNonce, onDraftSaved, publishRefusalFor };
 
@@ -249,9 +340,9 @@ export function StudioMetadataArea({
             <Route path="_diagnostics" element={<MetadataDiagnosticsPage />} />
             <Route path="datasource/*" element={<Navigate to={SETUP_DATASOURCES_PATH} replace />} />
             <Route path=":type" element={<MetadataResourceListPage />} />
-            <Route path=":type/new" element={<AreaCreate />} />
+            <Route path=":type/new" element={<AreaCreate customization={customization} />} />
             <Route path=":type/:name" element={<AreaItem editor={editor} />} />
-            <Route path=":type/:name/history" element={<MetadataResourceHistoryPage />} />
+            <Route path=":type/:name/history" element={<AreaHistoryRedirect />} />
           </Routes>
         </React.Suspense>
       </div>

@@ -1385,7 +1385,6 @@ const STUDIO_EN: Record<string, string> = {
   'engine.edit.detail': 'Detail',
   'engine.edit.preview': 'Preview',
   'engine.edit.designer': 'Designer',
-  'engine.edit.related': 'Related',
   'engine.edit.hideInspector': 'Hide inspector',
   'engine.edit.showInspector': 'Show inspector',
   'engine.edit.noChanges': 'No changes to save',
@@ -4054,6 +4053,13 @@ const STUDIO_EN: Record<string, string> = {
   'engine.list.sort.name.desc': 'API name (Z–A)',
   'engine.list.sort.label.asc': 'Label (A–Z)',
   'engine.list.sort.label.desc': 'Label (Z–A)',
+  'engine.list.sort.changed.asc': 'Modified (oldest first)',
+  'engine.list.sort.changed.desc': 'Modified (newest first)',
+  'engine.list.col.changedAt': 'Modified',
+  'engine.list.draftMark.human': 'Unpublished changes',
+  'engine.list.draftMark.humanTitle': 'This item has a draft nobody has published yet. Publish or discard it from the item.',
+  'engine.list.draftMark.ai': 'Unpublished AI changes',
+  'engine.list.draftMark.aiTitle': 'The AI assistant drafted changes to this item that are not published yet. Review them on the item.',
   'engine.package.writableRequired': 'Pick or create a writable base (package) first — this item cannot be authored into a read-only code package.',
   'engine.list.source.artifact': 'Artifact',
   'engine.list.source.runtime': 'Runtime',
@@ -4863,6 +4869,14 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.detailHeader.notInList': 'Not in the current list',
   'engine.studio.detailHeader.package': 'From package {package}',
   'engine.studio.detailHeader.more': 'More',
+  // Studio item tabs: the item tools as tabs of the item page (objectstack#36901).
+  'engine.studio.itemTabs.details': 'Details',
+  'engine.studio.itemTabs.preview': 'Preview',
+  'engine.studio.itemTabs.related': 'Related',
+  'engine.studio.itemTabs.references': 'Referenced by',
+  'engine.studio.itemTabs.history': 'History',
+  'engine.studio.itemTabs.source': 'Source',
+  'engine.studio.itemTabs.versions': 'Versions',
 };
 
 export default STUDIO_EN;

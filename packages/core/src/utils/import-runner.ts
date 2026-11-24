@@ -3,7 +3,7 @@
 import { randomUUID } from 'node:crypto';
 import { coerceRow, type CoerceContext, type ReferenceMaster, type RefResolver, type RefMatch } from './import-coerce.js';
 import type { ExportFieldMeta } from './import-field-meta.js';
-import type { ValidationMessageTranslator } from '@objectstack/spec/system';
+import { renderValidationMessage, type ValidationMessageTranslator } from '@objectstack/spec/system';
 import {
   canServeApiOperation, isMultiValueField, isUniqueDeclared, isVirtualSearchField, referenceTargetOf, resolveDisplayField,
   STRUCTURED_JSON_TYPES,
@@ -1071,6 +1071,23 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
   };
 
   /**
+   * The sentence a {@link rowsSharingKey} row is refused with, in the importing
+   * principal's locale through the same catalog and override hook as the cell
+   * failures beside it (`validation.field.import_duplicate_match_key`). The
+   * key set is named by field LABEL, the API name only where a field has none,
+   * as the cell failures name their column; the row numbers are kept.
+   */
+  const duplicateMatchKeyMessage = (rowNos: readonly number[], keySet: readonly string[]): string =>
+    renderValidationMessage(
+      {
+        messageKey: 'import_duplicate_match_key',
+        label: keySet.map((f) => metaMap.get(f)?.label?.trim() || f).join(' + '),
+        params: { rows: rowNos.join(', ') },
+      },
+      { locale: coerceCtx.locale, translate: coerceCtx.translate },
+    );
+
+  /**
    * [#26133] The rows of this import that share a match key, each mapped to
    * the row numbers carrying that key and the key set it was read by. Asked
    * once, before any row is written: every row of a shared key then fails with
@@ -1587,7 +1604,7 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
           errCount++;
           results[i] = {
             row: rowNo, ok: false, action: 'failed', code: 'DUPLICATE_MATCH_KEY',
-            error: `Rows ${shared.rowNos.join(', ')} of this import have the same match key (${shared.keySet.join(' + ')}), so none of them was written: keep one row per key and import again`,
+            error: duplicateMatchKeyMessage(shared.rowNos, shared.keySet),
           };
         } else {
           // [#22183] This row's write context: the kept option values ride along.

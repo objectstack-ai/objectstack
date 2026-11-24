@@ -1092,15 +1092,54 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
   },
   seed: {
     label: "البيانات الأولية",
-    description: "بيانات تجهيز / تهيئة تُطبَّق عند النشر"
+    description: "بيانات تجهيز / تهيئة تُطبَّق عند النشر",
+    fields: {
+      object: {
+        label: "الكائن"
+      },
+      mode: {
+        label: "الوضع"
+      }
+    }
   },
   picklist: {
     label: "قائمة الاختيار",
-    description: "قائمة خيارات مشتركة تشير إليها حقول الاختيار بالاسم"
+    description: "قائمة خيارات مشتركة تشير إليها حقول الاختيار بالاسم",
+    fields: {
+      name: {
+        label: "الاسم"
+      },
+      label: {
+        label: "التسمية"
+      },
+      options: {
+        label: "الخيارات"
+      },
+      description: {
+        label: "الوصف"
+      }
+    }
   },
   mapping: {
     label: "تعيين الاستيراد",
-    description: "تعيين حقول قابل لإعادة الاستخدام للاستيراد/التصدير (إعادة تسمية + تحويلات)، يُشار إليه بالاسم عند الاستيراد"
+    description: "تعيين حقول قابل لإعادة الاستخدام للاستيراد/التصدير (إعادة تسمية + تحويلات)، يُشار إليه بالاسم عند الاستيراد",
+    fields: {
+      name: {
+        label: "الاسم"
+      },
+      label: {
+        label: "التسمية"
+      },
+      targetObject: {
+        label: "الكائن الهدف"
+      },
+      mode: {
+        label: "الوضع"
+      },
+      sourceFormat: {
+        label: "تنسيق المصدر"
+      }
+    }
   },
   view: {
     label: "طريقة العرض",
@@ -1424,6 +1463,9 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       "sharing.lockedBy": {
         label: "مقفل بواسطة",
         helpText: "المستخدم الذي قفل تهيئة طريقة العرض"
+      },
+      object: {
+        label: "الكائن"
       }
     }
   },
@@ -2580,7 +2622,24 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
     }
   },
   job: {
-    label: "مهمة خلفية"
+    label: "مهمة خلفية",
+    fields: {
+      name: {
+        label: "الاسم"
+      },
+      label: {
+        label: "التسمية"
+      },
+      schedule: {
+        label: "الجدول الزمني"
+      },
+      enabled: {
+        label: "مُفعَّل"
+      },
+      description: {
+        label: "الوصف"
+      }
+    }
   },
   datasource: {
     label: "مصدر البيانات"
@@ -2590,10 +2649,41 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
   },
   api: {
     label: "نقطة نهاية API",
-    description: "عنوان HTTP ثابت تستدعيه الأنظمة الأخرى لتشغيل تدفق أو للعمل مع السجلات في التطبيق"
+    description: "عنوان HTTP ثابت تستدعيه الأنظمة الأخرى لتشغيل تدفق أو للعمل مع السجلات في التطبيق",
+    fields: {
+      name: {
+        label: "الاسم"
+      },
+      method: {
+        label: "الأسلوب"
+      },
+      path: {
+        label: "المسار"
+      },
+      type: {
+        label: "النوع"
+      },
+      "objectParams.object": {
+        label: "الكائن"
+      },
+      "objectParams.operation": {
+        label: "العملية"
+      }
+    }
   },
   translation: {
-    label: "الترجمة"
+    label: "الترجمة",
+    fields: {
+      name: {
+        label: "الاسم"
+      },
+      label: {
+        label: "التسمية"
+      },
+      locale: {
+        label: "اللغة"
+      }
+    }
   },
   email_template: {
     label: "قالب البريد الإلكتروني",
@@ -2670,11 +2760,45 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
   },
   doc: {
     label: "الوثائق",
-    description: "صفحة مساعدة مكتوبة بصيغة Markdown تشحنها حزمة أو تكتبها بنفسك"
+    description: "صفحة مساعدة مكتوبة بصيغة Markdown تشحنها حزمة أو تكتبها بنفسك",
+    fields: {
+      name: {
+        label: "الاسم"
+      },
+      label: {
+        label: "التسمية"
+      },
+      group: {
+        label: "المجموعة"
+      },
+      tags: {
+        label: "الوسوم"
+      },
+      description: {
+        label: "الوصف"
+      }
+    }
   },
   book: {
     label: "كتاب الوثائق",
-    description: "جدول محتويات يجمّع صفحات المساعدة في أقسام مرتبة"
+    description: "جدول محتويات يجمّع صفحات المساعدة في أقسام مرتبة",
+    fields: {
+      name: {
+        label: "الاسم"
+      },
+      label: {
+        label: "التسمية"
+      },
+      audience: {
+        label: "الجمهور"
+      },
+      groups: {
+        label: "المجموعات"
+      },
+      description: {
+        label: "الوصف"
+      }
+    }
   },
   permission: {
     label: "مجموعة الأذونات",
@@ -2778,15 +2902,66 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
   },
   sharing_rule: {
     label: "قاعدة المشاركة",
-    description: "قاعدة تعلنها حزمة لمشاركة السجلات؛ وتؤلّف المؤسسات قواعدها الخاصة في الإعداد"
+    description: "قاعدة تعلنها حزمة لمشاركة السجلات؛ وتؤلّف المؤسسات قواعدها الخاصة في الإعداد",
+    fields: {
+      name: {
+        label: "الاسم"
+      },
+      label: {
+        label: "التسمية"
+      },
+      object: {
+        label: "الكائن"
+      },
+      sharedWith: {
+        label: "مُشارَك مع"
+      },
+      accessLevel: {
+        label: "مستوى الوصول"
+      }
+    }
   },
   queue: {
     label: "قائمة الانتظار",
-    description: "مجموعة مُسمّاة من الأشخاص يمكن أن تبقى السجلات فيها حتى يتولّى أحدهم السجل؛ وتزوّد المؤسسات قوائمها بالأشخاص في الإعداد"
+    description: "مجموعة مُسمّاة من الأشخاص يمكن أن تبقى السجلات فيها حتى يتولّى أحدهم السجل؛ وتزوّد المؤسسات قوائمها بالأشخاص في الإعداد",
+    fields: {
+      name: {
+        label: "الاسم"
+      },
+      label: {
+        label: "التسمية"
+      },
+      members: {
+        label: "الأعضاء"
+      },
+      description: {
+        label: "الوصف"
+      }
+    }
   },
   assignment_rule: {
     label: "قاعدة الإسناد",
-    description: "قاعدة تعلنها حزمة لتوجيه السجلات الجديدة إلى قائمة انتظار أو إلى شخص"
+    description: "قاعدة تعلنها حزمة لتوجيه السجلات الجديدة إلى قائمة انتظار أو إلى شخص",
+    fields: {
+      name: {
+        label: "الاسم"
+      },
+      label: {
+        label: "التسمية"
+      },
+      object: {
+        label: "الكائن"
+      },
+      entries: {
+        label: "الإدخالات"
+      },
+      active: {
+        label: "نشط"
+      },
+      description: {
+        label: "الوصف"
+      }
+    }
   },
   agent: {
     label: "وكيل الذكاء الاصطناعي",
@@ -2868,6 +3043,9 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       guardrails: {
         label: "حواجز الحماية",
         helpText: "قواعد السلامة وسياسات المحتوى"
+      },
+      "model.model": {
+        label: "النموذج"
       }
     }
   },
