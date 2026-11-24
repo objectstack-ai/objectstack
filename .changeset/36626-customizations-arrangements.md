@@ -1,12 +1,12 @@
 ---
-'@objectstack/spec': patch
-'@objectstack/runtime': patch
+'@objectstack/spec': minor
+'@objectstack/runtime': minor
 ---
 
 feat(runtime): `GET /packages/:id/customizations` lists the arrangements the base's `.custom` pair writes
 
 Clause-②: yes (widening)
-Metadata-protocol: none
+Metadata-protocol: added
 
 An administrator who arranges an installed object's record page (reorders, retitles or hides its tabs, or arranges its field groups or actions) writes that arrangement into the base's paired `<base>.custom` package as an object extension (ADR-0146 D10). Until now the per-base customization read did not show it: its lists covered the overrides, the extension fields, validation rules and indexes, the switched-off items and other packages' contributions, so a tab arrangement was a customization nobody could see in that read.
 
