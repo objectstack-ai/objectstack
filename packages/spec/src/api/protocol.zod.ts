@@ -1,7 +1,8 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
-import { MetadataListViewSchema, ViewSchema } from '../ui/view.zod';
+import { FormViewSchema, MetadataListViewSchema, ViewSchema } from '../ui/view.zod';
+import { ActionSchema } from '../ui/action.zod';
 import { I18nLabelSchema } from '../ui/i18n.zod';
 import { DiscoverySchema } from './discovery.zod';
 import {
@@ -211,6 +212,7 @@ export const GetMetaTypesResponseSchema = lazySchema(() => z.object({
   types: z.array(z.string()).describe('Available metadata type names (e.g., "object", "plugin", "view")'),
   entries: z.array(z.object({
     type: z.string().describe('Singular type identifier'),
+    schemaId: z.string().describe('Same value as `type`: the id the type\'s `schema`, `form` and `list` are bound to'),
     label: z.string().describe('Human-readable label'),
     description: z.string().optional().describe('Brief description'),
     filePatterns: z.array(z.string()).describe('Glob patterns used to discover artifacts of this type'),
@@ -223,7 +225,10 @@ export const GetMetaTypesResponseSchema = lazySchema(() => z.object({
     domain: z.enum(['data', 'ui', 'automation', 'system', 'security', 'ai']).describe('Protocol domain'),
     overrideSource: z.enum(['registry', 'env']).describe('Whether allowEnvironmentOverlay comes from the static registry or is elevated by the OS_METADATA_WRITABLE environment variable'),
     createSeed: z.unknown().optional().describe('Authoritative minimal valid create seed for this type — Studio/CLI/API derive create defaults from it (single source of truth in @objectstack/spec). Absent for canvas-create types whose shape is built interactively.'),
+    schema: z.record(z.string(), z.unknown()).optional().describe('JSON Schema of the type, derived from its spec schema, for the generic metadata editor. Absent for a type with neither a spec schema nor a hand-crafted one.'),
+    form: FormViewSchema.optional().describe('Form layout of the type\'s Studio editor, labels in the request locale. Absent for a type with no declared form, which Studio edits from `schema` alone.'),
     list: MetadataListViewSchema.optional().describe('Studio list layout of this type: the columns its metadata list shows, each naming a key of the type schema, headers in the request locale. Absent for a type with no declared list, which Studio lists by name, label and description.'),
+    actions: z.array(ActionSchema).optional().describe('Type-level actions on a definition of this type (e.g. a datasource "Test connection"): the registry\'s declarative actions merged with plugin-registered ones. Absent when there are none.'),
   })).optional().describe('Enriched per-type registry entries (Phase 3a)'),
 }));
 
@@ -4912,6 +4917,8 @@ export type GetDiscoveryRequest = z.input<typeof GetDiscoveryRequestSchema>;
 export type GetDiscoveryResponse = z.input<typeof GetDiscoveryResponseSchema>;
 export type GetMetaTypesRequest = z.input<typeof GetMetaTypesRequestSchema>;
 export type GetMetaTypesResponse = z.input<typeof GetMetaTypesResponseSchema>;
+/** Post-parse shape of {@link GetMetaTypesResponse} — defaults applied, transforms run (ADR-0122). */
+export type GetMetaTypesResponseParsed = z.infer<typeof GetMetaTypesResponseSchema>;
 export type GetMetaItemsRequest = z.input<typeof GetMetaItemsRequestSchema>;
 export type FlowRegistrationRefusal = z.input<typeof FlowRegistrationRefusalSchema>;
 export type FlowRegistration = z.input<typeof FlowRegistrationSchema>;
