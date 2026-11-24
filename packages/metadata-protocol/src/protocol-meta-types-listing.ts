@@ -18,7 +18,7 @@
 // Not exported from the package index: no new public name.
 
 import type { MetadataTypeRegistryEntryParsed } from '@objectstack/spec/kernel';
-import type { Action, FormView } from '@objectstack/spec/ui';
+import type { Action, FormView, MetadataListViewParsed } from '@objectstack/spec/ui';
 
 /** Flattens an intersection into one object type, so it compares EQUAL to an inferred object literal. */
 type Flatten<T> = { [K in keyof T]: T[K] };
@@ -42,6 +42,8 @@ export type MetaTypesListingEntry = Flatten<
         schema: Record<string, unknown>;
         /** Form layout of the type's editor. */
         form: FormView;
+        /** Studio list layout of the type (`METADATA_LIST_REGISTRY`); absent for a type with none. */
+        list?: MetadataListViewParsed;
         /** The minimal create seed, when the spec declares one. */
         createSeed?: {} | null;
         /**

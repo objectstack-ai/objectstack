@@ -48,7 +48,6 @@
         "search.command-palette-navigation",
         "platform-core.marketplace-install-local-lifecycle",
         "platform-core.marketplace-console-honesty",
-        "studio-authoring.interfaces-create-dialogs",
         "studio-authoring.app-and-nav-properties"
       ]
     },
@@ -276,7 +275,6 @@
         "platform-core.nav-surfaces-render",
         "search.command-palette-navigation",
         "platform-core.marketplace-console-honesty",
-        "studio-authoring.interfaces-create-dialogs",
         "studio-authoring.authored-page-slots-and-variables",
         "studio-authoring.uninstalled-package-refused",
         "api-backend.meta-qualified-item-read",
@@ -353,7 +351,6 @@
         "dashboards.dataset-report-authoring",
         "dashboards.drill-through-range",
         "search.command-palette-navigation",
-        "studio-authoring.interfaces-create-dialogs",
         "studio-authoring.report-authoring-options",
         "studio-authoring.package-customize-restore-display",
         "dashboards.report-measure-drill-scope"

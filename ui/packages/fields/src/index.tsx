@@ -24,6 +24,7 @@ import { SchemaRendererContext as _SchemaRendererContext } from '@object-ui/reac
 import { useRelatedRecordActions } from '@object-ui/react';
 import { usePermissions } from '@object-ui/permissions';
 import { withFieldCarrier } from './withFieldCarrier.js';
+import { recoverableLazy } from './recoverableLazy.js';
 // Pure formatting rule shared with `AddressField`'s readonly branch — no React,
 // so this does not pull the widget out of its lazy chunk (objectui#4037).
 import { formatAddress, type AddressValue } from './widgets/address-format.js';
@@ -593,6 +594,10 @@ function isPlainObjectValue(value: unknown): value is Record<string, unknown> {
 
 import { resolveFieldCurrency, summaryDeclaresCurrency } from './currency.js';
 export { withFollowedParentObject, FOLLOWED_PARENT_OBJECT_KEY } from './currency.js';
+import { resolveFormulaValueType } from './formulaValueType.js';
+// The face a `formula` / `summary` cell draws its result as, for a surface
+// that decides something before the cell draws (objectstack#37008).
+export { resolveFormulaValueType };
 import { HomeAmountHint } from './widgets/CurrencyField.js';
 // `summaryDeclaresCurrency` is the cell's own test for drawing a roll-up as
 // money; the grid footer formats the same field's total by it.
@@ -2961,17 +2966,18 @@ export function FormulaCellRenderer({ value, field, dependentValues }: CellRende
   // own field form says of `returnType` that consumers read it "instead of
   // re-parsing the expression", so a formula over two currency fields that
   // declares `number` (or nothing) renders as a number here, not as money.
-  const returnType = field && 'returnType' in field ? field.returnType : undefined;
+  //
   // A roll-up that declares its currency is money (ADR-0144 D6 as amended):
   // the currency cell draws it, with the parent row as its record, so a
   // `record` roll-up reads the parent's code as its children's amounts do, and
   // a `dynamic` one (a roll-up of a child `currency` field in `dynamic` mode,
   // a stored home amount included) reads the tenant default, as that child
   // field's own cells do.
-  const declaresMoney = (field as { type?: unknown } | undefined)?.type === 'summary' && summaryDeclaresCurrency(field);
-  const valueType = declaresMoney && typeof value === 'number'
-    ? 'currency'
-    : returnType ?? (typeof value === 'number' ? 'number' : 'text');
+  //
+  // The rule is `resolveFormulaValueType`, exported, so a surface that must
+  // know the face before this cell draws (a gallery card's label) asks the
+  // same function and cannot disagree with it (objectstack#37008).
+  const valueType = resolveFormulaValueType(field, value);
   if (valueType === 'number') {
     return <NumberCellRenderer value={value} field={field} />;
   }
@@ -4834,8 +4840,8 @@ const fieldWidgetMap = {
   'vector': () => import('./widgets/VectorField.js').then(m => ({ default: m.VectorField })),
   // The grid's public face, already in this chunk, not its body: the face loads
   // the body through its one loader (objectstack#36102) and asks again after a
-  // failed load, where a `React.lazy` wrapped around the body here would keep
-  // the failure until the page is reloaded (objectstack#36451).
+  // failed load, where a lazy wrapper around the body here would add a second
+  // loader beside the face's own (objectstack#36451).
   'grid': () => Promise.resolve({ default: GridField }),
   
   // Additional field types from @objectstack/spec
@@ -4969,22 +4975,24 @@ export { fieldHelpText } from './fieldHelpText.js';
 // page's compact related rows).
 export { RecordHoverCard, type RecordHoverCardProps, type RecordHoverCardObjectDef } from './RecordHoverCard.js';
 
-/** Cache so each widget type creates one lazy component (and one chunk request). */
+/** Cache so each widget type creates one lazy component (and one chunk request at a time). */
 const lazyFieldWidgets = new Map<string, React.ComponentType<any>>();
 
 /**
  * Lazily-loaded form field widget for a field type. Shares the exact loaders
  * of {@link fieldWidgetMap} (the same components `registerField` registers for
- * forms), wrapped in `React.lazy` and cached per type — so a consumer can
+ * forms), wrapped in `recoverableLazy` and cached per type — so a consumer can
  * render any form-supported field type without eagerly bundling every widget.
  * Render inside a `<Suspense>` boundary. Unknown types resolve to the `text`
- * widget via {@link resolveFormWidgetType}.
+ * widget via {@link resolveFormWidgetType}. A failed chunk load reaches the
+ * nearest error boundary and is not kept: the next mount loads again
+ * (objectstack#36608).
  */
 export function getLazyFieldWidget(fieldType: string): React.ComponentType<any> {
   const key = resolveFormWidgetType(fieldType);
   // A retired key has no loader in `fieldWidgetMap` by construction, so it is
   // answered with the tombstone before the lazy path (which would otherwise
-  // call `React.lazy(undefined)`). The tombstone is BOUND to `key`: a host
+  // call the lazy wrapper with no loader). The tombstone is BOUND to `key`: a host
   // that resolved the key from an authored `widget` hands over a `field` whose
   // `type` is a live type, and the refusal must name what was resolved
   // (objectui#10471) — see {@link retiredFieldTombstoneFor}.
@@ -4992,7 +5000,7 @@ export function getLazyFieldWidget(fieldType: string): React.ComponentType<any> 
   let Widget = lazyFieldWidgets.get(key);
   if (!Widget) {
     // `resolveFormWidgetType` only returns keys the map holds, hence the `!`.
-    Widget = React.lazy(fieldWidgetLoaderByKey[key]!);
+    Widget = recoverableLazy(fieldWidgetLoaderByKey[key]!);
     lazyFieldWidgets.set(key, Widget);
   }
   return Widget;
@@ -5052,7 +5060,7 @@ const FIELD_TYPES_SKIP_FALLBACK = new Set([
   // `kind:'html'` page drew a code editor and dropped its text.
   'code',
   // No other package owns the bare `time`/`address` key, but `registerField`
-  // wraps each call in a fresh `React.lazy(...)`, so re-registration (HMR,
+  // wraps each call in a fresh lazy component, so re-registration (HMR,
   // re-import) fails the registry's identity check every time and logs the
   // same "bare-name fallback overwritten" warning at every boot regardless.
   'time',
@@ -5229,8 +5237,9 @@ export function registerField(fieldType: string): void {
     return;
   }
   
-  // Create lazy component
-  const LazyFieldWidget = React.lazy(loader);
+  // Create lazy component. A failed chunk load is not kept: the next mount
+  // loads again (objectstack#36608).
+  const LazyFieldWidget = recoverableLazy(loader);
 
   // Register with field namespace. No LAYOUT wrapper — the form renderer owns
   // label/description/spacing. The only thing wrapped is the metadata carrier:

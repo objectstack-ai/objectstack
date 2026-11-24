@@ -619,6 +619,15 @@ export { StudioMetadataArea } from './views/studio-design/StudioMetadataArea.js'
 // area (the datasource's stays in Setup). A host whose legacy aliases forward
 // onto Setup's metadata routes lands them in one hop through this.
 export { setupMetadataStudioPath } from './views/studio-design/setupMetadataRedirect.js';
+// objectstack#36895 — the one builder of Studio addresses. A host that
+// declares the `/studio` routes, or links into them, spells every address
+// through these, never by hand (`studioAddress.guard.test.ts`).
+export {
+  STUDIO_ROOT_PATH,
+  STUDIO_HOME_PILLAR,
+  studioLandingPath,
+  studioPackagePath,
+} from './views/studio-design/studioAddress.js';
 
 
 // AI assistant bus — connects the metadata designers to the global chat.

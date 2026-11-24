@@ -40,7 +40,7 @@ interface SearchResult {
   id: string;
   label: string;
   href: string;
-  type: 'object' | 'dashboard' | 'page' | 'report';
+  type: 'object' | 'dashboard' | 'page' | 'report' | 'component' | 'doc' | 'url';
   description?: string;
 }
 

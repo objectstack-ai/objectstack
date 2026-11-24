@@ -83,6 +83,12 @@ import {
 import { resolveCardOwner, type KanbanCardOwner } from './KanbanCardOwner';
 import { lanesFromOptions, type LaneLifecycleKind } from './kanbanLaneLifecycle';
 import { lanesFromRecords, laneValueOf } from './kanbanReferenceLanes';
+import {
+  compileLaneStatisticQuery,
+  isLaneAggregate,
+  readLaneFigures,
+  type LaneFigure,
+} from './KanbanLaneStatistic';
 
 /**
  * English fallbacks for the record-detail drawer heading this board opens on
@@ -1146,6 +1152,22 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
       : undefined;
   const { def: laneTargetDef } = useSettledSchema<any>(laneTargetObject, dataSource);
 
+  // Use grouping.fields[0].field as swimlaneField fallback when no explicit swimlaneField
+  const effectiveSwimlaneField = schema.swimlaneField
+    || (schema.grouping?.fields?.[0]?.field);
+
+  /**
+   * objectstack#36930 — the swimlane field's referenced object, read once per
+   * board, so a reference swimlane is titled by the target's declared
+   * `nameField` (ADR-0079: the one canonical primary-title pointer) exactly as
+   * a column lane over the same reference is (`laneTargetDef` above). Handed
+   * to the board as a PROP (`swimlaneTargetDef`), never a schema key. No read
+   * when the swimlane field names no object.
+   */
+  const swimlaneFieldDef = effectiveSwimlaneField ? objectDef?.fields?.[effectiveSwimlaneField] : undefined;
+  const swimlaneTargetObject = typeof swimlaneFieldDef?.reference === 'string' ? swimlaneFieldDef.reference : '';
+  const { def: swimlaneTargetDef } = useSettledSchema<any>(swimlaneTargetObject, dataSource);
+
   // Enhance data with title mapping and ensure IDs
   // The host predicate scope a card's declared deadline is judged in
   // (objectui#11815).
@@ -1628,46 +1650,131 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
       : undefined;
   // objectstack#36370 — the view's lane statistic (`kanban.summary`), drawn at
   // each lane's foot; it takes the place of the `summarizeField` total, and
-  // `{ type: 'none' }` draws neither. The spec publishes only what the board
-  // computes (`KanbanLaneSummarySchema`: none, count, sum); a type outside it
-  // (an older draft) draws no statistic and keeps the `summarizeField` total. Read as primitives, so a host's new object of equal content
-  // builds nothing anew.
+  // `{ type: 'none' }` draws neither. The spec publishes the closed set
+  // (`KanbanLaneSummarySchema`: none, count, sum, avg, min, max); a type outside
+  // it draws no statistic and keeps the `summarizeField` total. Read as
+  // primitives, so a host's new object of equal content builds nothing anew.
   const statisticType = typeof schema.summary?.type === 'string' ? schema.summary.type : undefined;
   const statisticField = typeof schema.summary?.field === 'string' && schema.summary.field !== '' ? schema.summary.field : undefined;
+  // objectstack#36520 — may the board draw an aggregate over `statisticField`?
+  // Not over a field the definition does not declare (`ListView`'s projection
+  // drops it) nor one the reader may not read: the server refuses that
+  // aggregate (`403`), and the board asks nothing it would refuse.
+  const statisticFieldDrawable =
+    isLaneAggregate(statisticType) &&
+    !!statisticField &&
+    objectDefReady &&
+    !(objectDef?.fields && !objectDef.fields[statisticField]) &&
+    !(objectDef?.fields?.[statisticField] && perms?.isLoaded && schema.objectName && !perms.checkField(schema.objectName, statisticField, 'read'));
+  /**
+   * objectstack#36520 — the lanes the server lane read folds its groups into,
+   * as a string: the paged lanes (matched exactly, as each lane's query
+   * matches), else the declared lanes or the lane field's options (matched
+   * without case, as `index.tsx` buckets the cards), else `null`, lanes from
+   * the data. See `KanbanLaneStatistic.ts`.
+   */
+  const statisticLanesKey = useMemo((): string => {
+    if (pagedLaneIdsKey !== null) return JSON.stringify({ ids: JSON.parse(pagedLaneIdsKey).map(String), foldCase: false });
+    const usable = (id: unknown) => id !== undefined && id !== null && id !== '';
+    const declared =
+      Array.isArray(schema.columns) && schema.columns.length > 0 && typeof schema.columns[0] === 'object'
+        ? (schema.columns as Array<{ id?: unknown }>).map((col) => col?.id).filter(usable)
+        : [];
+    const options = schema.groupBy ? objectDef?.fields?.[schema.groupBy]?.options : undefined;
+    const ids = declared.length > 0
+      ? declared
+      : Array.isArray(options)
+        ? options.map((opt: { value?: unknown }) => opt?.value).filter(usable)
+        : [];
+    return JSON.stringify({ ids: ids.length > 0 ? ids.map(String) : null, foldCase: true });
+  }, [pagedLaneIdsKey, schema.columns, schema.groupBy, objectDef]);
+  /**
+   * objectstack#36520 — the server lane read: ONE grouped aggregate over the
+   * board's own query, asked only when the board queries its cards itself.
+   * `''` asks nothing; the figures are then absent (cards handed in) or `null`.
+   */
+  const boardQueriesItself = !hasExternalData && !boundData && !schema.data && !!schema.objectName && !!dataSource;
+  const laneStatisticQuestion = useMemo((): string => {
+    if (!boardQueriesItself || !statisticFieldDrawable || !isLaneAggregate(statisticType) || !statisticField) return '';
+    if (!schema.groupBy || schema.swimlaneField || schema.grouping?.fields?.[0]?.field) return '';
+    if (typeof dataSource?.queryGroupHeaders !== 'function') return '';
+    const hostSearch = JSON.parse(hostSearchKey) as { $search?: string; $searchFields?: string[] };
+    const query = compileLaneStatisticQuery({
+      laneField: schema.groupBy,
+      type: statisticType,
+      field: statisticField,
+      filter: queryFilter,
+      search: hostSearch.$search,
+      searchFields: hostSearch.$searchFields,
+    });
+    return query ? JSON.stringify([schema.objectName, query]) : '';
+  }, [boardQueriesItself, statisticFieldDrawable, statisticType, statisticField, schema.groupBy, schema.swimlaneField, schema.grouping, schema.objectName, dataSource, hostSearchKey, queryFilter]);
+  const [laneStatistics, setLaneStatistics] = useState<{ question: string; figures: Record<string, LaneFigure> | null } | null>(null);
+  useEffect(() => {
+    if (!laneStatisticQuestion || !dataSource?.queryGroupHeaders || !isLaneAggregate(statisticType) || !statisticField || !schema.groupBy) return;
+    let cancelled = false;
+    const [objectName, query] = JSON.parse(laneStatisticQuestion) as [string, Parameters<NonNullable<DataSource['queryGroupHeaders']>>[1]];
+    const lanes = JSON.parse(statisticLanesKey) as { ids: string[] | null; foldCase: boolean };
+    const reading = {
+      laneField: schema.groupBy,
+      type: statisticType,
+      field: statisticField,
+      laneIds: lanes.ids,
+      foldCase: lanes.foldCase,
+      uncolumnedId: KANBAN_UNCOLUMNED_ID,
+    };
+    // Nothing is cleared before the answer lands: re-asking the question in
+    // hand (a refresh, a write) keeps its figures on screen until the new ones.
+    Promise.resolve().then(() => dataSource.queryGroupHeaders!(objectName, query)).then(
+      (rows) => {
+        if (!cancelled) setLaneStatistics({ question: laneStatisticQuestion + statisticLanesKey, figures: readLaneFigures(rows, reading) });
+      },
+      () => {
+        // A refusal (a field the reader may not read: `403`) draws no figure.
+        if (!cancelled) setLaneStatistics({ question: laneStatisticQuestion + statisticLanesKey, figures: null });
+      },
+    );
+    return () => { cancelled = true; };
+  }, [laneStatisticQuestion, statisticLanesKey, dataSource, statisticType, statisticField, schema.groupBy, refreshKey, invalidationNonce, hostReloadKey]);
+  // Read in the render the question changes, never one render late.
+  const laneFigures: Readonly<Record<string, LaneFigure>> | null | undefined = !boardQueriesItself
+    ? undefined
+    : laneStatistics && laneStatistics.question === laneStatisticQuestion + statisticLanesKey && laneStatisticQuestion !== ''
+      ? laneStatistics.figures
+      : null;
   const columnSummary = useMemo<KanbanColumnSummary | null>(() => {
     const words: Record<KanbanLaneStatisticType, string> = {
       count: tt('grid.summary.count', 'Count'),
       sum: tt('grid.summary.sum', 'Sum'),
+      avg: tt('grid.summary.avg', 'Avg'),
+      min: tt('grid.summary.min', 'Min'),
+      max: tt('grid.summary.max', 'Max'),
     };
     if (statisticType === 'none') return null;
-    if (statisticType === 'count' || statisticType === 'sum') {
-      const type = statisticType as KanbanLaneStatisticType;
-      if (type === 'count') {
-        return {
-          field: '',
-          label: words.count,
-          typeLabel: words.count,
-          type,
-          placement: 'foot',
-          renderTotal: (total: number) => <>{total}</>,
-        };
-      }
-      if (!statisticField || !objectDefReady) return null;
+    if (statisticType === 'count') {
+      return {
+        field: '',
+        label: words.count,
+        typeLabel: words.count,
+        type: 'count',
+        placement: 'foot',
+        renderTotal: (total: number | string) => <>{total}</>,
+      };
+    }
+    if (isLaneAggregate(statisticType)) {
+      if (!statisticFieldDrawable || !statisticField) return null;
       const def = objectDef?.fields?.[statisticField];
-      if (objectDef?.fields && !def) return null;
-      if (def && perms?.isLoaded && schema.objectName && !perms.checkField(schema.objectName, statisticField, 'read')) {
-        return null;
-      }
       const fieldType = resolveCellRendererType(def ?? { type: 'number' });
       const CellRenderer = getCellRenderer(fieldType);
       const fieldForCell = def ?? { name: statisticField, type: fieldType };
       return {
         field: statisticField,
         label: fieldLabel(objectDef?.name || schema.objectName || '', statisticField, def?.label || statisticField),
-        typeLabel: words[type],
-        type,
+        typeLabel: words[statisticType],
+        type: statisticType,
         placement: 'foot',
-        renderTotal: (total: number) => <CellRenderer value={total} field={fieldForCell} />,
+        renderTotal: (total: number | string) => <CellRenderer value={total} field={fieldForCell} />,
+        ...(laneFigures !== undefined ? { figures: laneFigures } : {}),
       };
     }
     // Until the definition settles the board does not yet know how the cards
@@ -1691,18 +1798,14 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
     return {
       field: summarizeField,
       label: fieldLabel(objectDef?.name || schema.objectName || '', summarizeField, def?.label || summarizeField),
-      renderTotal: (total: number) => <CellRenderer value={total} field={fieldForCell} />,
+      renderTotal: (total: number | string) => <CellRenderer value={total} field={fieldForCell} />,
     };
-  }, [statisticType, statisticField, summarizeField, objectDefReady, objectDef, schema.objectName, perms, fieldLabel, tt]);
+  }, [statisticType, statisticField, statisticFieldDrawable, laneFigures, summarizeField, objectDefReady, objectDef, schema.objectName, perms, fieldLabel, tt]);
   // objectstack#36370 — how a card draws its fields (`kanban.showFieldLabels`).
   const showFieldLabels = schema.showFieldLabels !== false;
   const cardDisplay = useMemo(() => ({ showFieldLabels }), [showFieldLabels]);
 
   // Clone schema to inject data and className
-  // Use grouping.fields[0].field as swimlaneField fallback when no explicit swimlaneField
-  const effectiveSwimlaneField = schema.swimlaneField
-    || (schema.grouping?.fields?.[0]?.field);
-
   const effectiveSchema = {
       ...schema,
       data: effectiveData,
@@ -2254,6 +2357,10 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
         // definition, never an authoring surface. On the schema bag it was
         // reachable by an author through `BaseSchema`'s passthrough.
         objectFields={objectDef?.fields}
+        // objectstack#36930 — the swimlane field's target object, so a
+        // reference swimlane is titled by its `nameField` (see
+        // `swimlaneTargetDef` above). A PROP for the reason `objectFields` is.
+        swimlaneTargetDef={swimlaneTargetDef ?? undefined}
         // A PROP, not a schema key (objectui#9342, executing the ruling on PR
         // objectui#9338) — the same remedy `objectFields` above took one card
         // earlier. `handleCardMove` owns the optimistic write, the

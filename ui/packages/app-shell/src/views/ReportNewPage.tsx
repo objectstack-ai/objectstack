@@ -15,18 +15,21 @@
  * romanised, as the Studio inspector derives it) and made unique against the
  * reports the console already knows, so a new report never writes over one.
  *
- * Opened from the design mode's 「Add menu item → Reports → New report…」
- * (objectstack#36364), the page fills the menu's held place: a slot is
- * offered for this app (`designModeReportSlot`), and Save hands the report to
- * it, which creates the report in the menu's package and saves its menu entry
- * with every other staged design change. Close cancels the place and writes
- * nothing.
+ * Opened from the reports index's 「New report」 (objectstack#36692): a report
+ * is made from its own entry, never from the design mode, whose menu only
+ * links reports that exist. The builder's Save and Close in its own header
+ * are the screen's one Save/Cancel set: while the builder is open it holds
+ * the design mode out (`useHoldDesignModeOut`), so entering the mode refuses.
+ * The address can still be reached with the mode already on (the browser's
+ * Back from a page of the app the mode was entered on), so while the mode is
+ * on the page draws a prompt in place of the builder, and the builder opens
+ * once the mode is saved or cancelled.
  *
  * @module
  */
 
 import * as React from 'react';
-import { useLocation, useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { Loader2 } from 'lucide-react';
 import { Empty, EmptyDescription, EmptyTitle } from '@object-ui/components';
@@ -36,7 +39,7 @@ import { formatMetadataError } from '@object-ui/data-objectstack';
 import type { DataSource } from '@object-ui/types';
 import type { ReportDraft } from '@object-ui/plugin-report';
 import { ReportBuilderHost } from './ReportBuilderHost.js';
-import { useNewReportSlot } from '../layout/designModeReportSlot.js';
+import { useDesignModeActive, useHoldDesignModeOut } from '../layout/designMode.js';
 import { saveAndPublishRuntimeMetadata } from './runtime-metadata-persistence.js';
 import { useMetadataClient } from './metadata-admin/useMetadata.js';
 import { useMetadata } from '../providers/MetadataProvider.js';
@@ -91,17 +94,14 @@ export function ReportNewPage({ dataSource }: { dataSource?: DataSource }) {
   const metadataClient = useMetadataClient();
   const { reports, loading, refresh } = useMetadata();
   const { isAdmin, isResolved } = useWorkspaceAdminStatus();
-  /** The menu place this report fills, when the design mode opened the page for one. */
-  const slot = useNewReportSlot(useLocation().pathname);
+  const designing = useDesignModeActive();
+  // The builder is open whenever this page draws it (objectstack#36692).
+  useHoldDesignModeOut(isResolved && isAdmin && !designing);
 
   const backToReports = React.useCallback(() => {
-    if (slot) {
-      // Back to the page the design mode was on; the held place is dropped.
-      slot.cancel();
-      navigate(-1);
-    } else if (appName) navigate(`/apps/${appName}/reports`);
+    if (appName) navigate(`/apps/${appName}/reports`);
     else navigate(-1);
-  }, [navigate, appName, slot]);
+  }, [navigate, appName]);
 
   const handleSave = React.useCallback(
     async (draft: ReportDraft): Promise<boolean> => {
@@ -124,18 +124,13 @@ export function ReportNewPage({ dataSource }: { dataSource?: DataSource }) {
           return false;
         }
         const body = { ...draft, label, name };
-        if (slot) {
-          // The design mode creates it with its menu entry, and says why when it cannot.
-          if (!(await slot.save(name, typed || String(label), body))) return false;
-        } else {
-          const outcome = await saveAndPublishRuntimeMetadata('report', name, body, {
-            metadataClient,
-            dataSource: dataSource as any,
-          });
-          if (outcome === 'pending-draft') {
-            toast.error(t('form.saveError'), { description: t('report.builder.pendingDraft') });
-            return false;
-          }
+        const outcome = await saveAndPublishRuntimeMetadata('report', name, body, {
+          metadataClient,
+          dataSource: dataSource as any,
+        });
+        if (outcome === 'pending-draft') {
+          toast.error(t('form.saveError'), { description: t('report.builder.pendingDraft') });
+          return false;
         }
       } catch (err) {
         toast.error(t('form.saveError'), {
@@ -150,7 +145,7 @@ export function ReportNewPage({ dataSource }: { dataSource?: DataSource }) {
       });
       return true;
     },
-    [metadataClient, reports, language, dataSource, refresh, navigate, appName, t, slot],
+    [metadataClient, reports, language, dataSource, refresh, navigate, appName, t],
   );
 
   if (loading || !isResolved) {
@@ -172,19 +167,24 @@ export function ReportNewPage({ dataSource }: { dataSource?: DataSource }) {
     );
   }
 
+  // Never a second Save/Cancel set under the design mode's bar (objectstack#36692).
+  if (designing) {
+    return (
+      <div className="flex h-full items-center justify-center p-8" data-testid="report-new-design-mode">
+        <Empty>
+          <EmptyTitle>{t('report.builder.designModeOnTitle')}</EmptyTitle>
+          <EmptyDescription>{t('report.builder.designModeOn')}</EmptyDescription>
+        </Empty>
+      </div>
+    );
+  }
+
   return (
     <ReportBuilderHost
       initial={NEW_REPORT_SEED}
       onSave={handleSave}
       onClose={backToReports}
       dataSource={dataSource}
-      banner={
-        slot ? (
-          <p className="mb-3 text-sm text-muted-foreground" data-testid="report-new-adds-to-menu">
-            {t('report.builder.addsToMenu')}
-          </p>
-        ) : undefined
-      }
     />
   );
 }

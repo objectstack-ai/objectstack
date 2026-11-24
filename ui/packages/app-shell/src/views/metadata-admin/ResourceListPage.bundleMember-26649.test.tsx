@@ -20,6 +20,8 @@
  *  - a row that declares no member (the canonical one) links by its name alone;
  *  - CONTROL: a type with no members gets no column and no `?member=`.
  */
+// Paid at collection, not inside a case's clock (check:test-source-alias).
+import '@objectstack/lint';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, cleanup, screen, within } from '@testing-library/react';
 import '@testing-library/jest-dom';
@@ -88,6 +90,9 @@ function queryOf(href: string): URLSearchParams {
   return new URLSearchParams(q === -1 ? '' : href.slice(q + 1));
 }
 
+/** The table row of `el`'s first cell: the row's test id sits there, and `ObjectGrid` draws the row (objectstack#36897). */
+const trOf = (el: HTMLElement) => el.closest('tr') as HTMLElement;
+
 describe('Setup list: each bundle member opens itself (objectstack#26649)', () => {
   it('two members of one template are two rows whose links differ by ?member=, keeping the scope', async () => {
     mount('email_template', '?scope=environment');
@@ -117,7 +122,7 @@ describe('Setup list: each bundle member opens itself (objectstack#26649)', () =
     const headers = screen.getAllByRole('columnheader').map((h) => h.textContent?.trim());
     expect(headers[1]).toBe(t('engine.list.col.locale', 'en-US'));
     expect(t('engine.list.col.locale', 'en-US')).toBe('Locale');
-    const [enRow, zhRow] = screen.getAllByTestId('metadata-row-duly.task_overdue');
+    const [enRow, zhRow] = screen.getAllByTestId('metadata-row-duly.task_overdue').map(trOf);
     expect(within(enRow!).getAllByRole('cell')[1]).toHaveTextContent('en');
     expect(within(zhRow!).getAllByRole('cell')[1]).toHaveTextContent('zh-CN');
   });

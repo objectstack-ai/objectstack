@@ -12,6 +12,7 @@ import {
   groupsOf,
   inShownOrder,
   insertEntry,
+  labelGoesToTranslation,
   menuTargets,
   moveBy,
   moveEntry,
@@ -20,6 +21,7 @@ import {
   placeOf,
   rebaseMenuEdits,
   removeEntry,
+  splitLabelEdits,
   storedEntriesById,
   targetKeyFor,
   targetKeyOf,
@@ -259,5 +261,53 @@ describe('a level in the sidebar order, and that order written back as `order` (
     expect(orders(next)).toEqual([undefined, [undefined, [0, 1]], [undefined, [undefined]]]);
     expect(next[2]).toBe(menu[2]);
     expect(withOrderRewritten(MENU)).toBe(MENU);
+  });
+});
+
+describe('the labels that are translations (objectstack#36504)', () => {
+  const ZH = { locale: 'zh-CN', source: false };
+  const EN = { locale: 'en', source: true };
+  const stored = { id: 'leads', type: 'object', objectName: 'crm_lead', label: 'Leads' };
+  const servedZh = { ...stored, label: '线索' };
+
+  it('outside the source language every label is a translation; in it, only one typed over a translation', () => {
+    expect(labelGoesToTranslation(ZH, servedZh, stored)).toBe(true);
+    expect(labelGoesToTranslation(ZH, null, undefined)).toBe(true);
+    expect(labelGoesToTranslation(EN, stored, stored)).toBe(false);
+    expect(labelGoesToTranslation(EN, null, undefined)).toBe(false);
+    expect(labelGoesToTranslation(EN, { ...stored, label: 'Leads (bundle)' }, stored)).toBe(true);
+    // An entry inheriting its target's name (no stored label) is renamed in its stored label.
+    const { label: _l, ...bare } = stored;
+    expect(labelGoesToTranslation(EN, bare, bare)).toBe(false);
+  });
+
+  it('the split puts a translated label back as served, takes an added entry\'s off, and leaves other edits', () => {
+    const served: Menu = [servedZh, { id: 'sales', type: 'group', label: '销售', children: [] }];
+    let edited = patchEntry(served, 'leads', { label: '潜在客户', icon: 'user' });
+    edited = insertEntry(edited, 'sales', 0, { id: 'nav_item_1', type: 'url', label: '帮助', url: 'https://h' });
+    const split = splitLabelEdits(served, edited, storedEntriesById(served, [stored]), ZH, 'zh-CN');
+    expect([...split.labels]).toEqual([
+      ['leads', '潜在客户'],
+      ['nav_item_1', '帮助'],
+    ]);
+    expect(split.navigation).toEqual([
+      { ...servedZh, icon: 'user' },
+      { id: 'sales', type: 'group', label: '销售', children: [{ id: 'nav_item_1', type: 'url', url: 'https://h' }] },
+    ]);
+  });
+
+  it('in the source language the split takes nothing, and hands back the menu given', () => {
+    const edited = patchEntry([stored], 'leads', { label: 'Prospects' });
+    const split = splitLabelEdits([stored], edited, storedEntriesById([stored], [stored]), EN, 'en');
+    expect(split.labels.size).toBe(0);
+    expect(split.navigation).toBe(edited);
+  });
+
+  it('an added entry whose id the stored menu took is written under a fresh id, and `writtenAs` is told', () => {
+    const writtenAs = new Map<string, string>();
+    const storedNav: Menu = [stored, { id: 'nav_item_1', type: 'page', pageName: 'secret' }];
+    const out = rebaseMenuEdits([stored], [stored, { id: 'nav_item_1', type: 'url', url: 'https://h' }], storedNav, writtenAs);
+    expect(out.map((e) => e.id)).toEqual(['leads', 'nav_item_2', 'nav_item_1']);
+    expect([...writtenAs]).toEqual([['nav_item_1', 'nav_item_2']]);
   });
 });

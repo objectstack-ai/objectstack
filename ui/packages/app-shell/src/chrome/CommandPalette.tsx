@@ -81,7 +81,7 @@ import { useAuth } from '@object-ui/auth';
 import { matchesPaletteQuery } from './paletteMatch.js';
 import { fetchPackages, type PkgEntry } from '../views/studio-design/packages-io.js';
 import { isPackageLessItem, studioOrgScopePath } from '../views/studio-design/studioScope.js';
-import { DESIGNER_SURFACE_PARAM, formatSurfaceParam } from '../views/metadata-admin/nav-selection.js';
+import { studioHomePath, studioItemPath } from '../views/studio-design/studioAddress.js';
 import { flattenNavigation, useAppReportEntries } from '../views/appReportIndex.js';
 import { useServedApps } from '../hooks/useLauncherApps.js';
 import { servedObjectLabel } from '../hooks/servedObjectLabel.js';
@@ -1034,16 +1034,6 @@ interface StudioPaletteEntries {
 const NO_STUDIO_ENTRIES: StudioPaletteEntries = { packages: [], objects: [], flows: [], loading: false };
 
 /**
- * A Studio pillar opened on one item, through the pillar's `?surface=` deep
- * link: the shape `studioOrgScopePath` builds for the package-less scope, under
- * a package. An object opens in the Data pillar and a flow in Automations,
- * the pillars `StudioDesignSurface` routes those surface types to.
- */
-function studioSurfacePath(packageId: string, pillar: 'data' | 'automations', surface: { type: string; name: string }): string {
-  return `/studio/${encodeURIComponent(packageId)}/${pillar}?${DESIGNER_SURFACE_PARAM}=${encodeURIComponent(formatSurfaceParam(surface))}`;
-}
-
-/**
  * The Studio's packages, objects and flows, as the `studio` scope lists them
  * (objectui#11863). Nothing is read until `enabled` (the palette is open in that
  * scope). The package list is read again each time it opens; until that read
@@ -1115,7 +1105,7 @@ function useStudioPaletteEntries(enabled: boolean): StudioPaletteEntries {
       key: `${pkg.id}:${item.name}`,
       label: resolveKeyedI18nLabel(item.label, t) || item.name,
       name: item.name,
-      href: studioSurfacePath(pkg.id, 'data', { type: 'object', name: item.name }),
+      href: studioItemPath(pkg.id, 'object', item.name),
       packageName: pkg.name,
     });
   }
@@ -1139,7 +1129,7 @@ function useStudioPaletteEntries(enabled: boolean): StudioPaletteEntries {
       key: `${pkg.id}:${item.name}`,
       label,
       name: item.name,
-      href: studioSurfacePath(pkg.id, 'automations', { type: 'flow', name: item.name }),
+      href: studioItemPath(pkg.id, 'flow', item.name),
       packageName: pkg.name,
     });
   }
@@ -1149,7 +1139,7 @@ function useStudioPaletteEntries(enabled: boolean): StudioPaletteEntries {
       key: pkg.id,
       label: pkg.name,
       name: pkg.id,
-      href: `/studio/${encodeURIComponent(pkg.id)}/data`,
+      href: studioHomePath(pkg.id),
     })),
     objects,
     flows,

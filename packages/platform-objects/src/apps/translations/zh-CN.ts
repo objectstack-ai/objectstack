@@ -40,7 +40,7 @@ export const zhCN: TranslationData = {
         group_overview: { label: '总览' },
         group_apps: { label: '应用' },
         nav_marketplace_browse: { label: '浏览应用市场' },
-        nav_marketplace_installed: { label: '已安装应用' },
+        nav_packages: { label: '软件包' },
         nav_cloud_connection: { label: '云连接' },
         group_people_org: { label: '人员与组织' },
         group_access_control: { label: '访问控制' },

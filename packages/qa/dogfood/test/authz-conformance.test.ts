@@ -1101,6 +1101,8 @@ describe('the ledger-sourced population and its baseline bite', () => {
       'dispatcher-domain:route-ledger.ts:/packages',
       // [#36506] classified by `own-row-doors-session`.
       'dispatcher-domain:route-ledger.ts:/personal-views',
+      // [#36840] classified by `print-door-session`.
+      'dispatcher-domain:route-ledger.ts:/print',
       // [ADR-0138 D2] classified by `anonymous-deny-share-links`.
       'dispatcher-domain:route-ledger.ts:/share-links',
       // [ADR-0138 D2, second slice] classified by `anonymous-deny-ui`.

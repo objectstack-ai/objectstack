@@ -467,6 +467,12 @@ describe('ObjectStack Protocol', () => {
         { code: 'es-ES', label: 'Spanish (Spain)' },
       ],
     }).success).toBe(true);
+    // [#36504] The source locale is declared, so the parse keeps it (an
+    // undeclared key would be stripped), and it is optional.
+    expect(GetLocalesResponseSchema.parse({
+      locales: [{ code: 'zh-CN', label: 'zh-CN', isDefault: true }],
+      sourceLocale: 'en',
+    }).sourceLocale).toBe('en');
     expect(GetTranslationsRequestSchema.safeParse({ locale: 'en-US' }).success).toBe(true);
     // The request is locale-only. `namespace`/`keys` were declared here but read
     // by no serving surface, so they were trimmed (#3676). Asserting on the

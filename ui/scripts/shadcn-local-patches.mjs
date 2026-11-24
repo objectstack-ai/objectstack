@@ -157,12 +157,64 @@ const sidebarCookieReadPatches = [
       'the first render, not applied after one expanded paint. Precedence is ' +
       'cookie > `defaultOpen`; the controlled `open` prop still wins, because ' +
       'it is applied downstream of this state (`openProp ?? _open`). ' +
-      'SIDEBAR_COOKIE_NAME is passed in so the cookie name keeps exactly one ' +
-      'spelling — the write side\'s.',
+      'The provider\'s `cookieName` (default SIDEBAR_COOKIE_NAME, the ' +
+      '`sidebar-cookie-name-*` patches below) is passed in so the read and the ' +
+      'write name the same cookie.',
     find: 'const [_open, _setOpen] = React.useState(defaultOpen)',
     replace:
-      'const [_open, _setOpen] = React.useState(() => readSidebarStateCookie(SIDEBAR_COOKIE_NAME) ?? defaultOpen)',
-    marker: 'readSidebarStateCookie(SIDEBAR_COOKIE_NAME)',
+      'const [_open, _setOpen] = React.useState(() => readSidebarStateCookie(cookieName) ?? defaultOpen)',
+    marker: 'readSidebarStateCookie(cookieName)',
+    occurrences: 1,
+  },
+];
+
+/**
+ * The sidebar cookie-name patches (objectstack#36899).
+ *
+ * `SidebarProvider` reads and writes ONE cookie, `sidebar_state`, so a second
+ * provider in the same console (Studio's left menu) would share the app
+ * sidebar's collapse state: collapsing one collapsed the other on the next
+ * load. A `cookieName` prop, defaulting to `SIDEBAR_COOKIE_NAME`, lets a
+ * provider keep its own; every existing provider passes none and is unchanged.
+ * The read above takes the same prop.
+ *
+ * @type {LocalPatch[]}
+ */
+const sidebarCookieNamePatches = [
+  {
+    id: 'sidebar-cookie-name-prop',
+    issue: 'objectstack#36899',
+    reason: 'Declares the provider\'s optional `cookieName` prop beside `onOpenChange`.',
+    find: '    onOpenChange?: (open: boolean) => void\n',
+    replace: '    onOpenChange?: (open: boolean) => void\n    cookieName?: string\n',
+    marker: '    cookieName?: string\n',
+    occurrences: 1,
+  },
+  {
+    id: 'sidebar-cookie-name-destructure',
+    issue: 'objectstack#36899',
+    reason: 'Reads the prop, defaulting to the one name every existing provider uses.',
+    find: '      onOpenChange: setOpenProp,\n',
+    replace: '      onOpenChange: setOpenProp,\n      cookieName = SIDEBAR_COOKIE_NAME,\n',
+    marker: 'cookieName = SIDEBAR_COOKIE_NAME,',
+    occurrences: 1,
+  },
+  {
+    id: 'sidebar-cookie-name-write',
+    issue: 'objectstack#36899',
+    reason: 'Writes the collapse state under the provider\'s own cookie name.',
+    find: 'document.cookie = `${SIDEBAR_COOKIE_NAME}=${openState}',
+    replace: 'document.cookie = `${cookieName}=${openState}',
+    marker: '`${cookieName}=${openState}',
+    occurrences: 1,
+  },
+  {
+    id: 'sidebar-cookie-name-write-deps',
+    issue: 'objectstack#36899',
+    reason: 'The write\'s callback depends on the name it writes.',
+    find: '      [setOpenProp, open]\n',
+    replace: '      [setOpenProp, open, cookieName]\n',
+    marker: '[setOpenProp, open, cookieName]',
     occurrences: 1,
   },
 ];
@@ -956,6 +1008,7 @@ export const LOCAL_PATCHES = {
     'import * as AlertDialogPrimitive from "@radix-ui/react-alert-dialog"',
   ),
   sidebar: [
+    ...sidebarCookieNamePatches,
     ...sidebarCookieReadPatches,
     ...sidebarOptionalContextPatches,
     ...sidebarOffcanvasStateQualifierPatches,

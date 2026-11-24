@@ -45,7 +45,13 @@ const mockClient = vi.hoisted(() => ({
 
 vi.mock('../metadata-admin/useMetadata', async (importOriginal) => {
   const mod = await importOriginal<typeof import('../metadata-admin/useMetadata')>();
-  return { ...mod, useMetadataClient: () => mockClient, useMetadataTypes: () => ({ entries: [] }) };
+  return { ...mod, useMetadataClient: () => mockClient, // objectstack#36899 — the registry serves the designer types the left menu lists.
+    useMetadataTypes: () => ({
+      entries: [
+        { type: 'object', domain: 'data' },
+        { type: 'flow', domain: 'automation' },
+      ],
+    }), };
 });
 
 vi.mock('./packages-io', async (importOriginal) => {
@@ -140,6 +146,8 @@ async function openTask(): Promise<void> {
     <MemoryRouter initialEntries={[`/studio/${PKG}/data`]}>
       <Routes>
         <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
+        {/* objectstack#36899 — a menu type entry opens that type's area list. */}
+        <Route path="/studio/:packageId/metadata/*" element={<output data-testid="area-landed" />} />
       </Routes>
     </MemoryRouter>,
   );
@@ -148,7 +156,7 @@ async function openTask(): Promise<void> {
 
 /** The card's repro: add a Picklist "Priority" with no option yet; the autosave holds it. */
 async function holdAPicklist(): Promise<void> {
-  fireEvent.click(await screen.findByRole('button', { name: 'Form' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Field layout' }));
   await addFieldFromFormToolbar(undefined, { label: 'Priority', type: /^Picklist$/ });
   await screen.findByTestId('studio-held', undefined, { timeout: 8000 });
 }
@@ -160,29 +168,28 @@ function reloadAsks(): boolean {
   return e.defaultPrevented;
 }
 
-const pillarLink = (name: string) => within(screen.getByTestId('studio-pillar-nav')).getByRole('link', { name });
+/** objectstack#36899 — the left menu's entry for a type: a link to that type's area list. */
+const menuEntry = (type: string) => within(screen.getByTestId('studio-menu')).getByTestId(`studio-menu-entry-type:${type}`);
 const railRow = (label: string) => within(screen.getByTestId('studio-rail-data')).getByRole('button', { name: label });
 
 describe('a held Data field guards every departure (objectstack#26705)', () => {
-  it('leaving the pillar asks; Cancel keeps the held field, OK leaves and clears the guard', async () => {
+  it('leaving the pillar through the menu asks; Cancel keeps the held field, OK leaves and clears the guard', async () => {
     await openTask();
     await holdAPicklist();
 
     confirmSpy.mockReturnValueOnce(false);
-    fireEvent.click(pillarLink('Automations'));
+    fireEvent.click(menuEntry('flow'));
     expect(confirmSpy).toHaveBeenCalledTimes(1);
     expect(confirmSpy).toHaveBeenCalledWith(LEAVE_QUESTION);
     expect(screen.getByTestId('studio-held')).toBeInTheDocument();
     expect(screen.getByTestId('studio-rail-data')).toBeInTheDocument();
 
     confirmSpy.mockReturnValueOnce(true);
-    fireEvent.click(pillarLink('Automations'));
+    fireEvent.click(menuEntry('flow'));
     expect(confirmSpy).toHaveBeenCalledTimes(2);
-    await screen.findByTestId('studio-rail-automations');
+    await screen.findByTestId('area-landed');
     // The unmounted pillar took its hold back: nothing is asked any more.
     expect(reloadAsks()).toBe(false);
-    fireEvent.click(pillarLink('Data'));
-    expect(confirmSpy).toHaveBeenCalledTimes(2);
   });
 
   it('opening another object in the rail asks; Cancel keeps the held field, OK opens the other object', async () => {
@@ -215,14 +222,14 @@ describe('a held Data field guards every departure (objectstack#26705)', () => {
   });
 
   // CONTROL: nothing held, nothing asked.
-  it('with no edit held, the rail, the reload and the pillar link never ask', async () => {
+  it('with no edit held, the rail, the reload and the menu link never ask', async () => {
     await openTask();
 
     fireEvent.click(railRow('Note'));
     await openObjectIs('acme_note');
     expect(reloadAsks()).toBe(false);
-    fireEvent.click(pillarLink('Automations'));
-    await screen.findByTestId('studio-rail-automations');
+    fireEvent.click(menuEntry('flow'));
+    await screen.findByTestId('area-landed');
     expect(confirmSpy).not.toHaveBeenCalled();
   });
 });

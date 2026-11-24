@@ -212,6 +212,17 @@ async function confirmSave() {
   await settle();
 }
 
+/**
+ * objectstack#36395 — a board the reader switches to asks the object-level
+ * `transfer` verdict (the grid-only Change Owner note). The read is served
+ * here, at module scope for the whole file, so it never reaches a socket; it
+ * answers a refusal, so no note joins what these cases read.
+ */
+vi.stubGlobal('fetch', vi.fn(async (input: unknown) => {
+  const body = String(input).endsWith('/api/v1/security/explain') ? { allowed: false } : { data: [] };
+  return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
+}));
+
 const metaConflict = () => Object.assign(new Error('A draft is pending'), { status: 409, code: 'METADATA_CONFLICT' });
 
 beforeEach(() => {

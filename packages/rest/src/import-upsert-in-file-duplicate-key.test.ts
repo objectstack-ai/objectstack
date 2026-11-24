@@ -105,7 +105,8 @@ const csvOf = (...lines: string[]) => ['Supplier,Type,No,Note', ...lines].join('
 const upsert = (csv: string, extra: Record<string, unknown> = {}) =>
   ({ format: 'csv', csv, mapping: MAPPING, writeMode: 'upsert', matchFields: KEY, ...extra });
 
-const duplicate = (row: number, rows: number[], keySet = 'supplier + cert_type + cert_no') => ({
+// The key set is named by field label (#36980), as the cell errors name their column.
+const duplicate = (row: number, rows: number[], keySet = 'Supplier + Type + No.') => ({
   row, ok: false, action: 'failed', code: 'DUPLICATE_MATCH_KEY',
   error: `Rows ${rows.join(', ')} of this import have the same match key (${keySet}), so none of them was written: keep one row per key and import again`,
 });
@@ -210,8 +211,8 @@ describe('[#26133] an upsert import refuses rows of its own that share a match k
     expect(summary.results).toEqual([
       { row: 1, ok: true, action: 'created', id: expect.any(String) },
       { row: 2, ok: true, action: 'created', id: expect.any(String) },
-      duplicate(3, [3, 4], 'supplier + note'),
-      duplicate(4, [3, 4], 'supplier + note'),
+      duplicate(3, [3, 4], 'Supplier + Note'),
+      duplicate(4, [3, 4], 'Supplier + Note'),
     ]);
   });
 

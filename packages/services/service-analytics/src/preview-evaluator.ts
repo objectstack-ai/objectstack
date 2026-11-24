@@ -41,6 +41,7 @@ import {
   temporalComparandKind,
   temporalStorageForm,
   type BucketGranularity,
+  type JsonColumnFieldClass,
   type TemporalComparandKind,
 } from '@objectstack/core';
 import { explicitDateRangeWindow } from './date-range-array-arm.js';
@@ -59,7 +60,7 @@ import type { DurationMeasureSpec } from './strategies/types.js';
 // the same gate, every other arm of the shared comparand-shape face. [#20035]
 // And the comparand-TYPE face, through the same gate again.
 import { invalidFilterError, normalizeWhereComparands } from './strategies/filter-normalizer.js';
-import { refusePreviewJsonColumnComparisons } from './json-column-comparison-refusal.js';
+import { comparisonColumnClass, refusePreviewJsonColumnComparisons } from './json-column-comparison-refusal.js';
 import { isJsonStoredShape } from './contains-membership-sql.js';
 import type { AnalyticsQuery, AnalyticsResult } from '@objectstack/spec/contracts';
 import { emptyGroupValueFor, lowerFilterCondition, type Cube, type FilterLoweringOptions, type ValueShapeFieldDef } from '@objectstack/spec/data';
@@ -858,6 +859,7 @@ export function lowerPreviewRowFilters(
   declaredType?: (field: string) => string | undefined,
   whereColumns?: Readonly<Record<string, string>>,
   declaredShape?: (field: string) => ValueShapeFieldDef | undefined,
+  storedJsonClass?: (field: string) => JsonColumnFieldClass | undefined,
 ): PreviewRowFilters {
   const aliased = Object.entries(whereColumns ?? {});
   const whereType =
@@ -905,8 +907,13 @@ export function lowerPreviewRowFilters(
   // JSON-stored, refused as the live faces refuse it: a drafted row holds the
   // list, which never equals a scalar, so `$in` matched no row and `$nin`
   // matched the row it excludes. Judged once, before any row is read.
-  if (declaredShape) {
-    refusePreviewJsonColumnComparisons(lowered, declaredShape, (member) => whereColumns?.[member] ?? member);
+  // [#36190] …and `storedJsonClass`, the storing driver's own answer, which
+  // also names a single-value media column it keeps as JSON: the live faces
+  // refuse that class in the media-column words (`comparisonColumnClass`
+  // decides which class a column meets, from the two inputs).
+  if (declaredShape || storedJsonClass) {
+    const classOf = (column: string) => comparisonColumnClass(declaredShape?.(column), storedJsonClass?.(column));
+    refusePreviewJsonColumnComparisons(lowered, classOf, (member) => whereColumns?.[member] ?? member);
   }
   // [#21505] …then each value comparison in the temporal STORAGE form, the
   // comparand here and the row value at the match (see {@link previewTemporalKind}).

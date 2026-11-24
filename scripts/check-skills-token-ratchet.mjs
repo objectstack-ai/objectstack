@@ -734,7 +734,20 @@ export const CEILINGS = new Map([
   // bytes -> ceil(24030 / 4) = 6008; the ceiling moves +11, the measured
   // remainder only. Pinned AT the measurement.
   //   ceil(($(wc -c < skills/objectstack-formula/SKILL.md) - 20) / 4) == ceil(24030 / 4)
-  ['skills/objectstack-formula/SKILL.md', 6008], //     -53 (was 6055), then -5 A2′ (was 6002), then +11 (was 5997)
+  // #35356 (ADR-0157 D4), by the standing ruling 「A:先削重复,余额按实测提高」
+  // (record 6513306068): the working-day functions paragraph, with the
+  // contract review's asks on PR #36796 (start excluded and end included, the
+  // refused sites, the blank-until-next-write consequence, and the PRIOR() and
+  // date `+ duration` sentences it found were not restatement). Paid first by
+  // deleting restatement IN THIS FILE: the "No date arithmetic" note folded
+  // into the table header it repeated, the Salesforce-flavor examples the
+  // translation table lists, and the ISBLANK() translation. Priced bytes
+  // against `main`'s 24016 (headroom 4): the changed lines remove 789 bytes and
+  // add 1130, so the LANDED priced text is 24357 bytes -> ceil(24357 / 4) =
+  // 6090; the ceiling moves +82, the measured remainder only. Pinned AT the
+  // measurement.
+  //   ceil(($(wc -c < skills/objectstack-formula/SKILL.md) - 20) / 4) == ceil(24357 / 4)
+  ['skills/objectstack-formula/SKILL.md', 6090], //     -53 (was 6055), then -5 A2′ (was 6002), then +11 (was 5997), then +82 (was 6008)
   ['skills/objectstack-i18n/SKILL.md', 6333], //        -11 (was 6349), then -5 A2′ (was 6338)
   // 12705 -> 12984 (2026-08-31 app-repo-principles raise, see the block above).
   // The largest of the five and the frame the other four are read under: what an
@@ -1324,8 +1337,25 @@ export const CEILINGS = new Map([
   // `origin/main` the file was 16164 bytes (4041 tokens, headroom 0); the
   // LANDED file is 16272 bytes -> 4068 tokens, ceiling +27, pinned AT the
   // measurement, zero headroom.
-  //   ceil($(wc -c < skills/objectstack-data/rules/security.md) / 4) == ceil(16272 / 4)
-  ['skills/objectstack-data/rules/security.md', 4068],
+  // 4068 -> 4292 (card #36053, the Skills-docs follow-up of the field-axis
+  // split, ruling of record 6912661484): the three permission axes in the
+  // ruled model's words (object permission, record scope, fields);
+  // `viewAllFields` as "reads every field" (a read vote on every field, never
+  // an edit vote; the set's own `readable: false` row beats it; no object
+  // access and no record; on `'*'` it also votes on a private-posture object's
+  // fields; authored in metadata); the three sensitivity tiers; "from v19"
+  // View All / Modify All open no field; and `maskingRule` beside a field's
+  // `requiredPermissions` — none of which the file taught, so an author
+  // granted View All to open fields. Same standing ruling, tap A, verbatim and
+  // untranslated: 「A:先削重复,余额按实测提高」 (record 6513306068). PAID DOWN
+  // FIRST, 274 bytes: the `when` section's "Locks, never grants" bullet (140;
+  // the choice rule above it already says the other sets keep their grant,
+  // and the new section states the union rule) and the recipe URL (134; the
+  // docs anchor the same bullet keeps links it). On `origin/main` the file was
+  // 16272 bytes (4068 tokens, headroom 0); the LANDED file is 17168 bytes ->
+  // 4292 tokens, ceiling +224, pinned AT the measurement, zero headroom.
+  //   ceil($(wc -c < skills/objectstack-data/rules/security.md) / 4) == ceil(17168 / 4)
+  ['skills/objectstack-data/rules/security.md', 4292],
   // 3024 -> 3109 (2026-08-31 app-repo-principles raise, see the block above).
   // Severity Levels listed the three values and left the CHOICE unstated: a
   // block rests on a judgement a person made, so a machine-inferred signal — a
@@ -1510,7 +1540,21 @@ export const CEILINGS = new Map([
   // before, ceiling +378, the measured remainder only, pinned AT the measurement. Same ruling
   // (2026-10-27, tap A): 「A:先削重复,余额按实测提高」 (ruling record 6513306068, letter B).
   //   ceil($(wc -c < skills/objectstack-ui/rules/actions.md) / 4) == ceil(14843 / 4)
-  ['skills/objectstack-ui/rules/actions.md', 3711],
+  // 3711 -> 3880 (#36630): one section after the `locations` table, "Button Order
+  // (`actionLayout`)": the object key's arms and parts, the limit of 3 pinned, which placements
+  // each arm takes and where the `record` arm is drawn, the list page's `$import` / `$export` as
+  // pinned-only built-ins, that `os validate` refuses a name the arm's scope does not place, and
+  // that on an installed object only the paired `.custom` package's extension writes it. PAID
+  // DOWN FIRST by 49 bytes of restatement in this file: " (`'Choose the new owner of
+  // {{ record.name }}.'`)" beside `description` on the copy-holes bullet (the `helpText` bullet
+  // right below it and the Reassign Lead block's `successMessage` show the `{{ record.name }}`
+  // spelling). Nothing else in the file restates another passage (see the 2777 -> 2808 note
+  // above), so the same ruling's second half carries the rest. Arithmetic: the text adds 726
+  // bytes, the cut removes 49, so the file is 14842 -> 15519 bytes -> 3880 tokens, zero headroom
+  // before, ceiling +169, the measured remainder only, pinned AT the measurement. Same ruling
+  // (2026-10-27, tap A): 「A:先削重复,余额按实测提高」 (ruling record 6513306068, letter B).
+  //   ceil($(wc -c < skills/objectstack-ui/rules/actions.md) / 4) == ceil(15519 / 4)
+  ['skills/objectstack-ui/rules/actions.md', 3880],
   // 6090 -> 6252 (#19715, card item 4): a 5-line table of contents at the top,
   // anchors to the file's existing headings, nothing else changed. +162 tokens,
   // zero headroom to absorb any of it, ceiling +162. Maintainer ruling

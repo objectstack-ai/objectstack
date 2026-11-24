@@ -168,6 +168,7 @@ import type { AIToolDefinition } from '@objectstack/spec/contracts';
 import type { HttpProtocolContext } from '../http-dispatcher.js';
 import type { DomainHandlerDeps } from '../domain-handler-registry.js';
 import { readEffectiveTenancyPosture } from './activation-gate.js';
+import { studioChangesReviewLink, studioItemReviewLink } from '@objectstack/types';
 
 /** The read tools' names, in the order the registry lists them. */
 export const OPEN_AUTHORING_READ_TOOL_NAMES = ['list_metadata_items', 'get_metadata_item', 'list_drafts'] as const;
@@ -1284,14 +1285,13 @@ function verdictOf(judgement: OpenAuthoringDraftJudgement): {
 
 /**
  * Where a person reviews the draft, as Console routes: the package's Changes
- * drawer (`?changes=review` on its Interfaces pillar, `studioChangesLink.ts`)
+ * drawer (`?changes=review` on its Studio home, the Data pillar, `studioChangesLink.ts`)
  * and the item's draft review on Studio's metadata area (`?review=1`).
  */
 function reviewRoutes(packageId: string, type: string, name: string): { changes: string; item: string; note: string } {
-    const pkg = encodeURIComponent(packageId);
     return {
-        changes: `/studio/${pkg}/interfaces?changes=review`,
-        item: `/studio/${pkg}/metadata/${encodeURIComponent(type)}/${encodeURIComponent(name)}?review=1`,
+        changes: studioChangesReviewLink(packageId),
+        item: studioItemReviewLink(packageId, type, name),
         note: 'Console routes. A person reviews and publishes the draft there; this server cannot publish.',
     };
 }

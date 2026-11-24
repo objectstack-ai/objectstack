@@ -137,13 +137,14 @@ const RECOVERY_SITES: ReadonlyArray<{
   {
     file: 'packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx',
     alsoReads: [
-      'packages/app-shell/src/views/studio-design/StudioNavItemInspector.tsx',
       'packages/app-shell/src/views/studio-design/PackageSwitcher.tsx',
       'packages/app-shell/src/views/studio-design/StudioBackToApp.tsx',
-      'packages/app-shell/src/views/studio-design/InterfacesNavRail.tsx',
       'packages/app-shell/src/views/studio-design/AutomationsFlowRail.tsx',
       'packages/app-shell/src/views/studio-design/StudioPillarKit.tsx',
       'packages/app-shell/src/views/studio-design/DataPillarHelpers.tsx',
+      'packages/app-shell/src/views/studio-design/AutomationsPillar.tsx',
+      'packages/app-shell/src/views/studio-design/AccessPillar.tsx',
+      'packages/app-shell/src/views/studio-design/DataPillar.tsx',
     ],
     site: 'Studio: the header Back to app, with no app to name',
     expression: /const homePath = useHomePath\(\)/,

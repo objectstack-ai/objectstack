@@ -37,6 +37,7 @@ import { SEARCHABLE_ENUM_TYPES, SEARCHABLE_TEXTUAL_TYPES } from './search-filter
 import { ExpressionEngine, analyzeRelationshipTraversals, formulaReadOrder, isUnparseableDate } from '@objectstack/formula';
 import type { EvalError, EvalOptionLabels, EvalPermissions } from '@objectstack/formula';
 import { declaredOptionLabels, planCallsOptionLabel } from './formula-option-labels.js';
+import { planWorkCalendarNeeds, type FormulaWorkCalendars } from './formula-work-calendars.js';
 import { ASSEMBLED_VIEW_ITEMS_KEY, AssembledViewArtifactSchema, isAggregatedViewContainer, isViewContainerShaped } from '@objectstack/spec';
 import type { Expression } from '@objectstack/spec';
 import { deriveViewContainerObject } from '@objectstack/metadata/view-container';
@@ -2050,13 +2051,15 @@ function assertProjectionHasNoDottedPaths(
  * one the caller may not query, so the narrowing in `expandSearchOnAst` left
  * nothing. Same code and status — the search cannot be honoured for this
  * caller either way — with a message that names the cause, not a declaration
- * fault the object does not have.
+ * fault the object does not have. [#34700] A field a registered search-field
+ * withholder names counts as one the caller may not query.
  */
 function emptySearchSetError(object: string, schema: any, internalExcluded: boolean, withheld = false): Error {
   const declared: unknown[] = Array.isArray(schema?.searchableFields) ? schema.searchableFields : [];
   const err: any = withheld ? new Error(
     `Object '${object}' has no field this caller may search, so 'search' cannot be honoured on it: `
-    + `every field it searches is one field-level security does not let this caller query. `
+    + `every field it searches is one field-level security, or a query guard of the object's own, `
+    + `does not let this caller query. `
     + 'Answering every row instead would read as "everything matched". Grant read access to one of '
     + `its searchable fields, or filter on a field this caller can read.`,
   ) : new Error(
@@ -3023,6 +3026,14 @@ function applyFormulaPlan(
    * when no formula of the plan calls `label()`.
    */
   optionLabels?: EvalOptionLabels,
+  /**
+   * [ADR-0157 D4] What the working-day functions count with: each row's
+   * organization's calendars, resolved once per call by
+   * `formulaWorkCalendarsFor` (`formula-work-calendars.ts`). `undefined` when no formula
+   * of the plan calls one, or where no resolution runs (a synchronous
+   * evaluation), where such a formula then reads `null` and says why.
+   */
+  workCalendars?: FormulaWorkCalendars,
 ): void {
   if (!plan.length) return;
   const now = new Date();
@@ -3058,7 +3069,9 @@ function applyFormulaPlan(
         scope = hop.record;
         empty = hop.empty;
       }
-      const evaluated = ExpressionEngine.evaluate(fp.expression, { now, timezone, user, org, permissions, optionLabels, record: scope });
+      const evaluated = ExpressionEngine.evaluate(fp.expression, {
+        now, timezone, user, org, permissions, optionLabels, workCalendars: workCalendars?.(rec), record: scope,
+      });
       // An invalid Date minted from text `date()` could not parse evaluates
       // `ok` (a predicate relies on that) but serializes to the `null` an empty
       // source gives: for a field it is a fault, said like any other.
@@ -3138,6 +3151,8 @@ async function hydrateWriteFormulas(
   relatedFor?: (plan: FormulaPlanEntry[], records: ReadonlyArray<Record<string, unknown>>) => Promise<FormulaRelated | undefined>,
   /** [#26608] The option labels `label()` reads, in the writer's locale — the reader of this response. */
   optionLabelsFor?: (plan: FormulaPlanEntry[]) => EvalOptionLabels | undefined,
+  /** [ADR-0157 D4] The calendars the working-day functions count with, resolved over `records`. */
+  workCalendarsFor?: (plan: FormulaPlanEntry[], records: ReadonlyArray<Record<string, unknown>>) => Promise<FormulaWorkCalendars | undefined>,
 ): Promise<void> {
   const records = results.filter(
     (r): r is Record<string, unknown> => r != null && typeof r === 'object',
@@ -3147,7 +3162,7 @@ async function hydrateWriteFormulas(
   if (plan.length === 0) return;
   applyFormulaPlan(
     plan, records, execCtx, await permissionsFor(plan, records), onFault, await relatedFor?.(plan, records),
-    optionLabelsFor?.(plan),
+    optionLabelsFor?.(plan), await workCalendarsFor?.(plan, records),
   );
 }
 
@@ -3241,6 +3256,10 @@ function unservableReason(
     return { reason: `reads through ${[...entry.hops.keys()].map((f) => `'${f}'`).join(', ')}, a reference the write path does not follow` };
   }
   if (planCallsOptionLabel([entry])) return { reason: 'calls label(), which the write path does not answer' };
+  // [ADR-0157 D4] The validator's formula values resolve no working calendar.
+  if (planWorkCalendarNeeds([entry])) {
+    return { reason: 'calls a working-day function, which counts with a working calendar the write path does not load' };
+  }
   if (!permissions && readsPermissionPredicate(entry.expression)) {
     return { reason: 'calls current_user.can(), and this write resolved no permission map' };
   }
@@ -3356,6 +3375,14 @@ interface StoredExpressionServing {
    * every later reader and by search, so it never depends on the writer's locale.
    */
   optionLabelsFor?: (plan: FormulaPlanEntry[]) => EvalOptionLabels | undefined;
+  /**
+   * [ADR-0157 D4, open point 1] The calendars the working-day functions count
+   * with, resolved over the images in each one's organization. A calendar
+   * refusal (D8) stores the field blank, as any expression that does not
+   * evaluate does, with the fault reported once through `onFault`; the write
+   * itself goes through.
+   */
+  workCalendarsFor?: (plan: FormulaPlanEntry[], records: ReadonlyArray<Record<string, unknown>>) => Promise<FormulaWorkCalendars | undefined>;
 }
 
 /**
@@ -3377,7 +3404,7 @@ async function computeStoredExpressions(
   const scratch = images.map((image) => ({ ...image }));
   applyFormulaPlan(
     plan, scratch, execCtx, await serving.permissionsFor(plan, scratch), serving.onFault,
-    await serving.relatedFor?.(plan, scratch), serving.optionLabelsFor?.(plan),
+    await serving.relatedFor?.(plan, scratch), serving.optionLabelsFor?.(plan), await serving.workCalendarsFor?.(plan, scratch),
   );
   return scratch.map((row) => {
     const values: Record<string, unknown> = {};
@@ -4326,6 +4353,54 @@ export type EngineMiddleware = (
   ctx: OperationContext,
   next: () => Promise<void>
 ) => Promise<void>;
+
+/**
+ * [#34700] What a search-field withholder is asked, once per read that carries
+ * a non-blank `search` on its object: the caller's `where` as written (before
+ * the search is ANDed in and before any middleware adds its own predicate),
+ * the context the middlewares will see, and the fields the server resolved
+ * the search over before any withholding.
+ */
+export interface SearchFieldWithholdingRequest {
+  readonly object: string;
+  readonly where: unknown;
+  readonly context: ExecutionContext;
+  readonly searchFields: readonly string[];
+}
+
+/**
+ * [#34700] A guard of an object's own — a middleware that refuses a query
+ * naming some of its columns for some callers — tells the search expansion
+ * which of `searchFields` this caller may not query, so a server-chosen search
+ * set never names them (`EngineMiddlewareOptions.withholdSearchFields`).
+ * `undefined` or `[]` withholds nothing. A throw propagates, as from the
+ * security service's `getQueryableFields`.
+ */
+export type SearchFieldWithholder = (
+  request: SearchFieldWithholdingRequest,
+) => Promise<readonly string[] | undefined> | readonly string[] | undefined;
+
+/** The options of `ObjectQL#registerMiddleware`. */
+export interface EngineMiddlewareOptions {
+  /** The object the middleware runs for; absent or `'*'` = every object. */
+  object?: string;
+  /**
+   * [#34700] The middleware is a guard of the object's own (plugin-audit's
+   * parent-field query guard, #21154) and this names the fields a non-blank
+   * `search` must not scan for the caller, asked for the reads the middleware
+   * runs on. They leave the server-resolved search set before the expansion,
+   * beside what the security service's `getQueryableFields` withholds
+   * (#25672). A field the caller names in `searchFields` is never withheld, so
+   * the middleware still refuses it; a context-less read is not asked. The
+   * middleware stays the enforcement.
+   */
+  withholdSearchFields?: SearchFieldWithholder;
+}
+
+/** One registered middleware, as `ObjectQL#registerMiddleware` stores it. */
+export interface EngineMiddlewareEntry extends EngineMiddlewareOptions {
+  fn: EngineMiddleware;
+}
 
 /**
  * "Which of these tombstoned `sys_file` rows is something still holding?"

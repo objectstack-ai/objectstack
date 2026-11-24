@@ -35,7 +35,7 @@ import type { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { ApprovalsServicePlugin } from './approvals-plugin.js';
 import type { ApprovalService } from './approval-service.js';
-import { renderResultPage } from './action-link-pages.js';
+import { REJECT_REASON_REQUIRED_COPY, renderConfirmPage, renderResultPage } from './action-link-pages.js';
 import { installDefaultOrganization } from './default-organization.testkit.js';
 // Clocked windows measure behaviour, never loading. On an `ObjectKernel` the
 // core `i18n` fallback is present, so the plugin's `kernel:ready` hook imports
@@ -171,6 +171,9 @@ const getRequest = (token: string) =>
 const postRequest = (body: string, contentType = 'application/x-www-form-urlencoded', headers: Record<string, string> = {}) =>
   new Request(`${ORIGIN}${ACT_PATH}`, { method: 'POST', headers: { 'Content-Type': contentType, ...headers }, body });
 const tokenForm = (token: string) => new URLSearchParams({ token }).toString();
+/** A reject form as the confirm page posts it: the token and the reason typed. */
+const rejectForm = (token: string, comment = 'Dates clash with the release.') =>
+  new URLSearchParams({ token, comment }).toString();
 
 /** Everything a response says, the body as bytes. */
 async function snapshot(res: Response) {
@@ -214,7 +217,7 @@ describe('[#22578] handleActionPage — the ADR-0043 action page from a Request'
     const rejectTokens = await svc.issueActionTokens(rejected, APPROVER);
 
     const a = await snapshot(await svc.handleActionPage(postRequest(tokenForm(approveTokens.approve))));
-    const r = await snapshot(await svc.handleActionPage(postRequest(tokenForm(rejectTokens.reject))));
+    const r = await snapshot(await svc.handleActionPage(postRequest(rejectForm(rejectTokens.reject))));
     expect([a.status, r.status]).toEqual([200, 200]);
     expect(text(a)).toBe(renderResultPage('approved', (await svc.getRequest(approved, SYSTEM))!));
     expect(text(r)).toBe(renderResultPage('rejected', (await svc.getRequest(rejected, SYSTEM))!));
@@ -226,6 +229,9 @@ describe('[#22578] handleActionPage — the ADR-0043 action page from a Request'
       expect(decisions).toHaveLength(1);
       expect(decisions[0]).toMatchObject({ action, actor_id: APPROVER, acted_as: APPROVER });
     }
+    // The reject records the reason typed on the page; the approve its fixed text.
+    expect((await decisionsOf(rejected))[0].comment).toBe('Dates clash with the release.');
+    expect((await decisionsOf(approved))[0].comment).toBe('Via action link');
     expect(host.resumed.map((x) => x.branchLabel)).toEqual(['approve', 'reject']);
   });
 
@@ -236,7 +242,7 @@ describe('[#22578] handleActionPage — the ADR-0043 action page from a Request'
     await sleep(10);
     const consumedOn = await openRequest();
     const consumed = await svc.issueActionTokens(consumedOn, APPROVER);
-    await svc.handleActionPage(postRequest(tokenForm(consumed.reject)));
+    await svc.handleActionPage(postRequest(rejectForm(consumed.reject)));
     const consumedRow = (await svc.getRequest(consumedOn, SYSTEM))!;
 
     const cases: Array<[string, string, string]> = [
@@ -379,7 +385,7 @@ describe('[#22578] parity — the member answers what the self-hosted mount answ
     const expired = await svc.issueActionTokens(await openRequest(), APPROVER, { ttlMs: 1 });
     await sleep(10);
     const consumed = await svc.issueActionTokens(await openRequest(), APPROVER);
-    await svc.redeemActionToken(consumed.reject);
+    await svc.redeemActionToken(consumed.reject, { comment: 'Dates clash with the release.' });
     const liveOn = await openRequest();
     const live = await svc.issueActionTokens(liveOn, APPROVER);
 
@@ -483,5 +489,74 @@ describe('[#22578] the composition — one mount where a raw app exists, the mem
     expect(typeof svc.handleActionPage).toBe('function');
     expect(plugin.infos.filter((line) => line.includes(ACT_PATH))).toEqual([]);
     expect(plugin.infos.filter((line) => line.includes('/approvals/act domain'))).toHaveLength(1);
+  });
+});
+
+describe('the reject link asks for a reason — a blank one is refused on the page, and the link stays live', () => {
+  it('the reject confirm page carries a required reason field; the approve page does not', async () => {
+    const { svc, openRequest } = await bootStack({ rawApp: false });
+    const { approve, reject } = await svc.issueActionTokens(await openRequest(), APPROVER);
+    const rejectPage = text(await snapshot(await svc.handleActionPage(getRequest(reject))));
+    const approvePage = text(await snapshot(await svc.handleActionPage(getRequest(approve))));
+    expect(rejectPage).toContain('<textarea id="comment" name="comment" required>');
+    expect(approvePage).not.toContain('name="comment"');
+    // Neither page shows the refusal until a blank reason came back.
+    expect([rejectPage, approvePage].filter((page) => page.includes(REJECT_REASON_REQUIRED_COPY))).toEqual([]);
+  });
+
+  it('a reject posted with no reason, or a blank one, is answered the confirm page again with 400 — nothing decided, nothing consumed', async () => {
+    const { svc, openRequest, statusOf, decisionsOf } = await bootStack({ rawApp: false });
+    const requestId = await openRequest();
+    const { reject } = await svc.issueActionTokens(requestId, APPROVER);
+    const row = (await svc.getRequest(requestId, SYSTEM))!;
+    const refusal = renderConfirmPage({
+      request: row, action: 'reject', approverId: APPROVER, token: reject, actPath: ACT_PATH, refusal: 'reason_required',
+    });
+    expect(refusal).toContain(REJECT_REASON_REQUIRED_COPY);
+
+    for (const body of [tokenForm(reject), rejectForm(reject, ''), rejectForm(reject, '  \n  ')]) {
+      const page = await snapshot(await svc.handleActionPage(postRequest(body)));
+      expect(page.status, body).toBe(400);
+      expect(page.headers).toEqual([['content-type', 'text/html; charset=utf-8']]);
+      expect(text(page), body).toBe(refusal);
+    }
+    expect(await statusOf(requestId)).toBe('pending');
+    expect(await decisionsOf(requestId)).toEqual([]);
+
+    // The link was never consumed: the same token decides once a reason comes with it.
+    const decided = await snapshot(await svc.handleActionPage(postRequest(rejectForm(reject, 'Overlaps the audit week.'))));
+    expect(decided.status).toBe(200);
+    expect(text(decided)).toBe(renderResultPage('rejected', (await svc.getRequest(requestId, SYSTEM))!));
+    expect(await decisionsOf(requestId)).toEqual([
+      expect.objectContaining({ action: 'reject', actor_id: APPROVER, comment: 'Overlaps the audit week.' }),
+    ]);
+  });
+
+  it('parity: both doors answer a blank reason with the same 400 page, and both record a typed one', async () => {
+    const { app, svc, openRequest, statusOf, decisionsOf } = await bootStack({ rawApp: true });
+    const viaMember = await openRequest('Twin leave');
+    const viaMount = await openRequest('Twin leave');
+    const memberTokens = await svc.issueActionTokens(viaMember, APPROVER);
+    const mountTokens = await svc.issueActionTokens(viaMount, APPROVER);
+
+    // A blank reason consumes nothing, so ONE token asks both doors the same question.
+    for (const body of [tokenForm(memberTokens.reject), rejectForm(memberTokens.reject, ' ')]) {
+      const member = await snapshot(await svc.handleActionPage(postRequest(body)));
+      const mount = await snapshot(await app!.fetch(postRequest(body)));
+      expect(mount.status).toBe(400);
+      expect(member, body).toEqual(mount);
+    }
+    // A repeated field: the LAST reason is the one both doors read.
+    const lastBlank = `${rejectForm(memberTokens.reject, 'first')}&comment=`;
+    const member = await snapshot(await svc.handleActionPage(postRequest(lastBlank)));
+    expect(member).toEqual(await snapshot(await app!.fetch(postRequest(lastBlank))));
+    expect(member.status).toBe(400);
+    expect(await statusOf(viaMember)).toBe('pending');
+
+    await svc.handleActionPage(postRequest(rejectForm(memberTokens.reject, 'Member door reason.')));
+    const viaMountPage = await snapshot(await app!.fetch(postRequest(rejectForm(mountTokens.reject, 'Mount door reason.'))));
+    expect(viaMountPage.status).toBe(200);
+    expect(await decisionsOf(viaMember)).toEqual([expect.objectContaining({ action: 'reject', comment: 'Member door reason.' })]);
+    expect(await decisionsOf(viaMount)).toEqual([expect.objectContaining({ action: 'reject', comment: 'Mount door reason.' })]);
   });
 });

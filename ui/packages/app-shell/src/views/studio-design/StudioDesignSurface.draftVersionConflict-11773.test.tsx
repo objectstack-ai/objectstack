@@ -411,7 +411,7 @@ describe('Data pillar — a create sends If-None-Match: * (objectui#11773)', () 
     expect([server.saves[0]!.ifMatch, server.saves[0]!.ifNoneMatch]).toEqual([undefined, '*']);
 
     await loaded(a, '1 field');
-    fireEvent.click(within(a).getAllByRole('button', { name: 'Form' })[0]!);
+    fireEvent.click(within(a).getAllByRole('button', { name: 'Field layout' })[0]!);
     await addFieldAndSave(a, addFieldFromFormToolbar);
     await addFieldAndSave(a, addFieldFromFormToolbar, SECOND);
     // The skeleton's draft, which the create publishes at once (objectstack#36511):
@@ -542,5 +542,60 @@ describe('Data pillar — two Saves over one published object are not last-write
     await loaded(a, '2 fields');
     await addFieldAndSave(a);
     expect(server.publishes.map((p) => [p.ifMatch, p.ifNoneMatch])).toEqual([[undefined, undefined]]);
+  });
+});
+
+describe('Data pillar — a reload over a pending draft does not pin its publish to the fresh read (objectstack#36726)', () => {
+  const LIVE = 'hmac-sha256:live0';
+  const MOVED = 'hmac-sha256:moved';
+
+  /**
+   * The residual the draft pin cannot stop: a draft is pending before the
+   * Save (a copilot's), and another writer moves the live row without
+   * touching it (a direct active save, a rollback). The Save writes into the
+   * pending draft, its publish is refused, and the author reloads: the draft,
+   * which the Save never discards, is re-read carrying the page's edit.
+   */
+  async function reloadOverPendingDraft(): Promise<HTMLElement> {
+    server.servesPublishedVersion = true;
+    server.activeVersions.set(`object/${OBJECT.name}`, LIVE);
+    servePendingDraft();
+    const a = openEditor();
+    await loaded(a, '2 fields');
+    server.active.set(`object/${OBJECT.name}`, { ...JSON.parse(JSON.stringify(OBJECT)), label: 'Task (moved)' });
+    server.activeVersions.set(`object/${OBJECT.name}`, MOVED);
+    await addFieldFromGrid(a);
+    await saveIn(a);
+    await screen.findByTestId('draft-conflict-dialog', undefined, { timeout: 8000 });
+    expect(server.saves[server.saves.length - 1]!.ifMatch).toBe(PENDING);
+    fireEvent.click(screen.getByTestId('draft-conflict-reload'));
+    await waitFor(() => expect(screen.queryByTestId('draft-conflict-dialog')).toBeNull(), { timeout: 8000 });
+    await loaded(a, '3 fields');
+    expect(server.drafts.size).toBe(1);
+    return a;
+  }
+
+  it('the next Save is asked again, pinned to the version the conflict was raised on', async () => {
+    const a = await reloadOverPendingDraft();
+    const publishesBefore = server.publishes.length;
+    await addFieldFromGrid(a, SECOND);
+    await saveIn(a);
+    await screen.findByTestId('draft-conflict-dialog', undefined, { timeout: 8000 });
+    expect(server.publishes.slice(publishesBefore).map((p) => p.ifMatch)).toEqual([LIVE]);
+    expect(server.active.get(`object/${OBJECT.name}`)!.label).toBe('Task (moved)');
+    expect(liveFields()).toEqual(['title', 'status']);
+  });
+
+  it('asked again, "overwrite" is the re-confirmation: it publishes over the moved row, pinned to it', async () => {
+    const a = await reloadOverPendingDraft();
+    await addFieldFromGrid(a, SECOND);
+    await saveIn(a);
+    await screen.findByTestId('draft-conflict-dialog', undefined, { timeout: 8000 });
+    fireEvent.click(screen.getByTestId('draft-conflict-overwrite'));
+    await act(async () => {
+      fireEvent.click(await screen.findByTestId('draft-conflict-overwrite-confirm'));
+    });
+    await waitFor(() => expect(liveFields()).toEqual(['title', 'status', 'new_field', 'second_field']), { timeout: 8000 });
+    expect(server.publishes[server.publishes.length - 1]!.ifMatch).toBe(MOVED);
   });
 });

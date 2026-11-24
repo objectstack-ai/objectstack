@@ -143,7 +143,7 @@ describe('Studio Data pillar — a landed Save names what it saved (objectstack#
   it('a landed save toasts the object by its label', async () => {
     const success = vi.spyOn(toast, 'success');
     mount();
-    fireEvent.click(await screen.findByRole('button', { name: 'Form' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Field layout' }));
     await addFieldFromFormToolbar();
     await pressStudioSave();
     expect(puts.some((u) => u.includes('mode=draft')), `PUTs: ${puts.join(' | ')}`).toBe(true);
@@ -157,7 +157,7 @@ describe('Studio Data pillar — a landed Save names what it saved (objectstack#
     server.refuse = true;
     const success = vi.spyOn(toast, 'success');
     mount();
-    fireEvent.click(await screen.findByRole('button', { name: 'Form' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Field layout' }));
     await addFieldFromFormToolbar();
     await pressStudioSave();
     await screen.findByTestId('studio-refusal', undefined, { timeout: 5000 });
@@ -170,7 +170,7 @@ describe('Studio Data pillar — a landed Save names what it saved (objectstack#
   it('saving one object again keeps one toast on screen, under one id', async () => {
     const success = vi.spyOn(toast, 'success');
     mount();
-    fireEvent.click(await screen.findByRole('button', { name: 'Form' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Field layout' }));
     await addFieldFromFormToolbar();
     await screen.findByText('Label', { selector: 'label' }, { timeout: 4000 });
     await pastAutosave();

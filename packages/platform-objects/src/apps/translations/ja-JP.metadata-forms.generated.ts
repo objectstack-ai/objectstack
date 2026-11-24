@@ -114,7 +114,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "fieldGroups.collapse": {
         label: "折りたたみ",
-        helpText: "セクションを折りたためるかどうか。入力フォームとレコード詳細ページに適用されます。未設定の場合は none です。"
+        helpText: "セクションを折りたためるかどうか。入力フォームは設定どおりに動作します。既定のレコードページでは閲覧者がタイトル付きのグループをすべて折りたためるため、そこでは初期状態だけを決めます。collapsed は閉じた状態、それ以外は開いた状態で始まります。未設定の場合は none です。"
       },
       "fieldGroups.visibleWhen": {
         label: "表示条件",
@@ -239,6 +239,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "fields.deleteBehavior": {
         label: "削除動作",
         helpText: "参照先レコード削除時の動作"
+      },
+      "fields.transferBehavior": {
+        label: "所有者変更の連動",
+        helpText: "参照先レコードの所有者を変更するとき、このフィールドでそのレコードを参照しているレコードも一緒に移せるかどうか"
       },
       "fields.multiple": {
         label: "複数選択",
@@ -769,6 +773,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "削除動作",
         helpText: "参照先レコード削除時の動作"
       },
+      transferBehavior: {
+        label: "所有者変更の連動",
+        helpText: "参照先レコードの所有者を変更するとき、このフィールドでそのレコードを参照しているレコードも一緒に移せるかどうか"
+      },
       relatedListFilter: {
         label: "関連リストのフィルター",
         helpText: "親レコードの詳細ページに表示される、この関係の関連リストの既定フィルター — 親レコードとの一致条件と AND で結合され、タブのバッジも同じ集合を数えます"
@@ -1080,15 +1088,54 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
   },
   seed: {
     label: "シードデータ",
-    description: "公開時に適用されるフィクスチャ／初期化データ"
+    description: "公開時に適用されるフィクスチャ／初期化データ",
+    fields: {
+      object: {
+        label: "オブジェクト"
+      },
+      mode: {
+        label: "モード"
+      }
+    }
   },
   picklist: {
     label: "選択リスト",
-    description: "選択フィールドが名前で参照する共有の選択肢リスト"
+    description: "選択フィールドが名前で参照する共有の選択肢リスト",
+    fields: {
+      name: {
+        label: "名前"
+      },
+      label: {
+        label: "表示名"
+      },
+      options: {
+        label: "選択肢"
+      },
+      description: {
+        label: "説明"
+      }
+    }
   },
   mapping: {
     label: "インポートマッピング",
-    description: "再利用可能なインポート／エクスポートのフィールドマッピング（リネーム + 変換）。インポート時に名前で参照します"
+    description: "再利用可能なインポート／エクスポートのフィールドマッピング（リネーム + 変換）。インポート時に名前で参照します",
+    fields: {
+      name: {
+        label: "名前"
+      },
+      label: {
+        label: "表示名"
+      },
+      targetObject: {
+        label: "対象オブジェクト"
+      },
+      mode: {
+        label: "モード"
+      },
+      sourceFormat: {
+        label: "ソース形式"
+      }
+    }
   },
   view: {
     label: "ビュー",
@@ -1412,6 +1459,9 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "sharing.lockedBy": {
         label: "ロックしたユーザー",
         helpText: "ビューの設定をロックしたユーザー"
+      },
+      object: {
+        label: "オブジェクト"
       }
     }
   },
@@ -1618,30 +1668,30 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     fields: {
       name: {
         label: "名前",
-        helpText: "snake_case の一意識別子"
+        helpText: "このダッシュボードの一意の内部名。英小文字・数字・アンダースコアを使い、先頭は英字にします（例: sales_overview）。"
       },
       label: {
         label: "表示名",
-        helpText: "表示名"
+        helpText: "利用者に表示されるダッシュボードのタイトル。"
       },
       description: {
         label: "説明"
       },
       columns: {
         label: "列",
-        helpText: "グリッド列（既定 12）"
+        helpText: "ウィジェットを並べる列数（1〜24）。空欄にすると、ウィジェットの幅に合わせて自動で決まります。"
       },
       gap: {
         label: "間隔",
-        helpText: "ウィジェット間の間隔、0.25rem 刻み（4 = 1rem）"
+        helpText: "ウィジェット同士の間隔。数値が大きいほど広がります。空欄にすると標準の間隔になります。"
       },
       refreshIntervalSeconds: {
         label: "更新間隔",
-        helpText: "自動更新（秒）"
+        helpText: "ダッシュボードがデータを再読み込みする間隔（秒）。空欄または 0 で自動再読み込みをオフにします。"
       },
       header: {
         label: "ヘッダー",
-        helpText: "ダッシュボードヘッダー設定（title, subtitle, actions）"
+        helpText: "ダッシュボード上部に表示する内容（タイトル、説明、操作ボタン）。"
       },
       "header.showTitle": {
         label: "タイトルを表示",
@@ -1669,7 +1719,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       widgets: {
         label: "ウィジェット",
-        helpText: "位置とサイズを持つダッシュボードウィジェット"
+        helpText: "このダッシュボードに置くグラフ・数値・表と、それぞれの配置。"
       },
       "widgets.id": {
         label: "ウィジェット ID"
@@ -1724,11 +1774,11 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       dateRange: {
         label: "日付範囲",
-        helpText: "既定の日付範囲セレクター"
+        helpText: "ダッシュボードを開いたときの期間と、閲覧者が日付を自分で選べるかどうか。"
       },
       globalFilters: {
         label: "グローバルフィルター",
-        helpText: "全ウィジェットに適用するフィルター"
+        helpText: "閲覧者がすべてのウィジェット、または指定したウィジェットだけをまとめて絞り込めるフィルター。"
       },
       "globalFilters.name": {
         label: "名前"
@@ -2190,7 +2240,8 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "表示名"
       },
       description: {
-        label: "説明"
+        label: "説明",
+        helpText: "このレポートで何がわかるかを一文で。名前の下に表示されます。"
       },
       type: {
         label: "型",
@@ -2272,9 +2323,33 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "日付範囲",
         helpText: "既定の期間とカスタム範囲の切り替え。ディメンションはデータセットの日付ディメンションである必要があります。データセットに日付ディメンションが 1 つだけの場合は空欄のままにします。"
       },
+      "dateRange.dimension": {
+        label: "日付フィールド",
+        helpText: "期間を適用する、データソースの日付グループ。データソースに日付グループが 1 つしかない場合は空のままにします。"
+      },
+      "dateRange.defaultRange": {
+        label: "既定の期間",
+        helpText: "レポートを開いたときに表示される期間。"
+      },
+      "dateRange.allowCustomRange": {
+        label: "カスタム範囲を許可",
+        helpText: "開始日と終了日を利用者が自分で選べるようにします。"
+      },
       exportOptions: {
         label: "エクスポートオプション",
         helpText: "ダウンロード形式（csv, xlsx）とファイル名。ダウンロードできるユーザーは、データセットのオブジェクトのエクスポート権限で決まります。"
+      },
+      "exportOptions.formats": {
+        label: "形式",
+        helpText: "ダウンロードできる形式。未設定なら csv と xlsx の両方、空のリストならダウンロードはオフになります。"
+      },
+      "exportOptions.includeHeaders": {
+        label: "見出しを含める",
+        helpText: "ダウンロードしたファイルの 1 行目に列名を入れます。"
+      },
+      "exportOptions.fileNamePrefix": {
+        label: "ファイル名",
+        helpText: "ダウンロードするファイル名の先頭部分。空欄の場合はレポートの表示名が使われ、表示名がない場合は名前が使われます。"
       }
     }
   },
@@ -2543,7 +2618,24 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     }
   },
   job: {
-    label: "バックグラウンドジョブ"
+    label: "バックグラウンドジョブ",
+    fields: {
+      name: {
+        label: "名前"
+      },
+      label: {
+        label: "表示名"
+      },
+      schedule: {
+        label: "スケジュール"
+      },
+      enabled: {
+        label: "有効"
+      },
+      description: {
+        label: "説明"
+      }
+    }
   },
   datasource: {
     label: "データソース"
@@ -2553,10 +2645,41 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
   },
   api: {
     label: "API エンドポイント",
-    description: "他のシステムが呼び出す固定の HTTP URL。フローを実行したり、アプリのレコードを操作したりします"
+    description: "他のシステムが呼び出す固定の HTTP URL。フローを実行したり、アプリのレコードを操作したりします",
+    fields: {
+      name: {
+        label: "名前"
+      },
+      method: {
+        label: "メソッド"
+      },
+      path: {
+        label: "パス"
+      },
+      type: {
+        label: "型"
+      },
+      "objectParams.object": {
+        label: "オブジェクト"
+      },
+      "objectParams.operation": {
+        label: "操作"
+      }
+    }
   },
   translation: {
-    label: "翻訳"
+    label: "翻訳",
+    fields: {
+      name: {
+        label: "名前"
+      },
+      label: {
+        label: "表示名"
+      },
+      locale: {
+        label: "ロケール"
+      }
+    }
   },
   email_template: {
     label: "メールテンプレート",
@@ -2633,11 +2756,45 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
   },
   doc: {
     label: "ドキュメント",
-    description: "Markdown で書かれたヘルプページ。パッケージに同梱されるほか、自分で作成することもできます"
+    description: "Markdown で書かれたヘルプページ。パッケージに同梱されるほか、自分で作成することもできます",
+    fields: {
+      name: {
+        label: "名前"
+      },
+      label: {
+        label: "表示名"
+      },
+      group: {
+        label: "グループ"
+      },
+      tags: {
+        label: "タグ"
+      },
+      description: {
+        label: "説明"
+      }
+    }
   },
   book: {
     label: "ドキュメントブック",
-    description: "ヘルプページを順序付きのセクションにまとめた目次"
+    description: "ヘルプページを順序付きのセクションにまとめた目次",
+    fields: {
+      name: {
+        label: "名前"
+      },
+      label: {
+        label: "表示名"
+      },
+      audience: {
+        label: "対象者"
+      },
+      groups: {
+        label: "グループ"
+      },
+      description: {
+        label: "説明"
+      }
+    }
   },
   permission: {
     label: "権限セット",
@@ -2741,15 +2898,66 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
   },
   sharing_rule: {
     label: "共有ルール",
-    description: "パッケージが宣言するレコード共有ルール。組織は自身のルールを設定で作成します"
+    description: "パッケージが宣言するレコード共有ルール。組織は自身のルールを設定で作成します",
+    fields: {
+      name: {
+        label: "名前"
+      },
+      label: {
+        label: "表示名"
+      },
+      object: {
+        label: "オブジェクト"
+      },
+      sharedWith: {
+        label: "共有先"
+      },
+      accessLevel: {
+        label: "アクセスレベル"
+      }
+    }
   },
   queue: {
     label: "キュー",
-    description: "名前付きの担当者の集まり。レコードはその中の誰かが引き受けるまでここに置かれます。組織は自身のキューを設定で用意します"
+    description: "名前付きの担当者の集まり。レコードはその中の誰かが引き受けるまでここに置かれます。組織は自身のキューを設定で用意します",
+    fields: {
+      name: {
+        label: "名前"
+      },
+      label: {
+        label: "表示名"
+      },
+      members: {
+        label: "メンバー"
+      },
+      description: {
+        label: "説明"
+      }
+    }
   },
   assignment_rule: {
     label: "割り当てルール",
-    description: "パッケージが宣言するルール。新しいレコードをキューまたは担当者に振り分けます"
+    description: "パッケージが宣言するルール。新しいレコードをキューまたは担当者に振り分けます",
+    fields: {
+      name: {
+        label: "名前"
+      },
+      label: {
+        label: "表示名"
+      },
+      object: {
+        label: "オブジェクト"
+      },
+      entries: {
+        label: "エントリ"
+      },
+      active: {
+        label: "有効"
+      },
+      description: {
+        label: "説明"
+      }
+    }
   },
   agent: {
     label: "AI エージェント",
@@ -2831,6 +3039,9 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       guardrails: {
         label: "ガードレール",
         helpText: "安全ルールとコンテンツポリシー"
+      },
+      "model.model": {
+        label: "モデル"
       }
     }
   },

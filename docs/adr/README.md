@@ -13,12 +13,12 @@
 
 ## Summary
 
-159 records under `docs/adr/` (154 numbers), 11 under `ui/docs/adr/` (listed separately below).
+160 records under `docs/adr/` (155 numbers), 11 under `ui/docs/adr/` (listed separately below).
 
 | Status | Records |
 |---|---|
 | Accepted | 138 |
-| Proposed | 7 |
+| Proposed | 8 |
 | Superseded | 4 |
 | Draft | 3 |
 | Deferred | 2 |
@@ -26,7 +26,7 @@
 | Amended | 1 |
 | Partially implemented | 1 |
 | Revised | 1 |
-| **Total** | **159** |
+| **Total** | **160** |
 
 ## Shared numbers
 
@@ -153,7 +153,7 @@ A bare `ADR-0006` names the decision; its current text is [0006-project-environm
 | [ADR-0080](./0080-ai-authored-ui-jsx-source.md) | AI-authored UI pages — JSX source compiled to the SDUI tree (parse ≠ execute); the component registry is the… | Accepted — 2026-10-28 (ruled on objectstack#26553, ADR batch 4; proposed 2… | 2026-10-28 | — | ADR-0065 |
 | [ADR-0081](./0081-trusted-react-page-tier.md) | A trusted `kind:'react'` page tier — real React executed in the main tree, gated by a host capability; and re… | Accepted — 2026-06-30 — framework scope implemented (`html`/`react` page k… | 2026-06-30 | — | ADR-0065 |
 | [ADR-0082](./0082-react-component-contract-governance.md) | Governing the react-tier component contract — spec is the protocol source of truth, the registry is a designe… | Accepted — 2026-06-30 | 2026-06-30 | — | — |
-| [ADR-0084](./0084-application-builder-information-architecture.md) | Application-builder information architecture — four content pillars + Settings/Advanced | Accepted — 2026-07-01 | 2026-07-01 | — | — |
+| [ADR-0084](./0084-application-builder-information-architecture.md) | Application-builder information architecture — six domain groups in a left menu (was: four content pillars) | Accepted — 2026-07-01 · Amended in place (2026-11-24, card #36891 of epic… | 2026-07-01 | — | — |
 | [ADR-0085](./0085-object-semantic-roles-over-surface-hint-blocks.md) | Presentation intent on an object is declared as cross-surface semantic roles, never as per-surface hint block… | Accepted — 2026-07-16 — proposed 2026-07-02; execution complete through PR… | 2026-07-16 | *the `detail.` passthrough-block approac…* | — |
 | [ADR-0086](./0086-authz-metadata-config-boundary-and-cross-package-composition.md) | Authorization metadata↔config boundary + cross-package composition — DEFINITION travels, ASSIGNMENT stays, pa… | Accepted — 2026-07-04 — substantially implemented; parts refined/supersede… | 2026-07-04 | — | ADR-0090, ADR-0094 |
 | [ADR-0087](./0087-metadata-protocol-upgrade-contract.md) | Metadata protocol upgrades for AI consumers — conversion over notification, executable migrations, machine-ve… | Accepted — 2026-07-04, #2582 · trued up to as-built 2026-07-15 (see Addend… | 2026-07-04 | — | — |
@@ -226,6 +226,7 @@ A bare `ADR-0006` names the decision; its current text is [0006-project-environm
 | [ADR-0156](./0156-compiled-metadata-answer-cache-every-source-counts-its-own-changes.md) | A compiled metadata answer is cached only when every source it reads counts its own changes, and a bound cove… | Accepted — 2026-11-16 — maintainer ruling on #34206, comment 6920925378, v… | 2026-11-16 | — | — |
 | [ADR-0157](./0157-working-calendars-are-org-editable-runtime-data-resolved-by-code-or-refused.md) | Working calendars are organization-editable runtime data — a consumer names a calendar by code or takes the o… | Accepted — 2026-11-19 — maintainer ruling on #35340, comment `7000950747`,… | 2026-11-19 | — | — |
 | [ADR-0158](./0158-units-of-measure-standard-unit-table-org-units-quantity-unit-declaration-base-quantity.md) | Units of measure — a closed standard unit table in the spec, organization-owned units, a quantity field that… | Accepted — 2026-11-19, ruled on objectstack#35339 (ruling record `70011930… | 2026-11-19 | — | — |
+| [ADR-0159](./0159-forms-are-their-own-metadata-type-public-forms-are-form-items-view-is-lists-only.md) | Forms are their own metadata type — a `form` item is a named form with a consumer, public forms are `form` it… | Proposed — 2026-11-24, written for objectstack#36868 on the maintainer's r… | 2026-11-24 | — | — |
 
 ## ObjectUI registry — `ui/docs/adr/` (`ui-` prefix)
 

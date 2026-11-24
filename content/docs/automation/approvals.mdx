@@ -1005,9 +1005,9 @@ declares its `comment` param required, so the action door, MCP `run_action` and 
 dialog refuse a reject whose `comment` is missing or blank (`400`, the declared
 param contract's `required` refusal), and `ApprovalService.decide()`, behind the
 `/reject` route and the SDK's `client.approvals.reject`, refuses one the same
-way (`400 VALIDATION_ERROR`); the inbox keeps Reject disabled until a reason is typed. The one
-exception is the email action link, which still records the fixed text "Via
-action link" instead of the approver's reason (tracked in #35722).
+way (`400 VALIDATION_ERROR`); the inbox keeps Reject disabled until a reason is typed. The email
+action link asks too: its reject confirm page has a required reason field, and a reject sent with a
+blank one is answered the page again (`400`) with the link still unused.
 
 On the record itself, a record with approval requests grows an **Approvals** tab
 beside Details and Related, with a request-count badge: the current step, decision

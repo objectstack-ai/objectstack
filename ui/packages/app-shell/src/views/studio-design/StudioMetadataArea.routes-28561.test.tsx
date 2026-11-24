@@ -17,6 +17,7 @@ import * as React from 'react';
 import { render, screen, cleanup, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation, useSearchParams } from 'react-router-dom';
 import { useMetadataAreaHost } from '../metadata-admin/metadataAreaHost';
+import { registerMetadataResource } from '../metadata-admin/registry';
 
 function PageStub({ page }: { page: string }) {
   const host = useMetadataAreaHost();
@@ -73,6 +74,9 @@ vi.mock('./packages-io.js', async (importOriginal) => ({
 }));
 
 import { StudioMetadataArea } from './StudioMetadataArea';
+// The source under test reaches dynamic imports of `@objectstack/lint`; their first
+// load is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@objectstack/lint';
 
 const WRITABLE = 'com.example.crm';
 const READ_ONLY = 'com.vendor.hr';
@@ -169,6 +173,21 @@ describe('the area mounts the metadata pages (objectstack#28561)', () => {
     mount(`/studio/${WRITABLE}/metadata/_diagnostics?package=${WRITABLE}`);
     expect((await page()).page).toBe('diagnostics');
     cleanup();
+    // objectstack#36901 — history is the item page's History tab: the old
+    // address opens it there, its query kept.
+    mount(`/studio/${WRITABLE}/metadata/hook/h1/history?package=${WRITABLE}`);
+    expect((await page()).page).toBe('item');
+    expect(where()).toBe(`/studio/${WRITABLE}/metadata/hook/h1?package=${WRITABLE}&tab=history`);
+  });
+
+  it('CONTROL: a type whose item page is its own editor, or a designer\'s, keeps the standalone history page', async () => {
+    // The permission set's matrix editor links `./history`; it has no tabs.
+    registerMetadataResource({ type: 'matrix_36901', EditPage: () => null });
+    mount(`/studio/${WRITABLE}/metadata/matrix_36901/m1/history?package=${WRITABLE}`);
+    expect((await page()).page).toBe('history');
+    expect(where()).toBe(`/studio/${WRITABLE}/metadata/matrix_36901/m1/history?package=${WRITABLE}`);
+    cleanup();
+    // So does an item a pillar's designer opens (a flow), which has no tab row yet.
     mount(`/studio/${WRITABLE}/metadata/flow/f1/history?package=${WRITABLE}`);
     expect((await page()).page).toBe('history');
   });
@@ -188,11 +207,86 @@ describe('the area mounts the metadata pages (objectstack#28561)', () => {
   });
 });
 
+/**
+ * objectstack#36897 — on a read-only base with its customization handed in,
+ * the create is the pair's: the ensure door is asked once and its answer's
+ * package opens the create; a walled door, or a refusal, never writes.
+ */
+describe("a read-only base's create opens in its .custom pair (objectstack#36897)", () => {
+  const PAIR = `${READ_ONLY}.custom`;
+  const customizationOf = (walled: boolean, ensurePackage: () => Promise<unknown>) =>
+    ({ base: READ_ONLY, baseLabel: 'HR', basedOn: null, walled, pairId: null, ensure: async () => PAIR, ensurePackage }) as any;
+  function mountCustomized(customization: unknown, at = `/studio/${READ_ONLY}/metadata/translation/new?package=${READ_ONLY}`) {
+    return render(
+      <MemoryRouter initialEntries={[at]}>
+        <Where />
+        <Routes>
+          <Route path={`/studio/${READ_ONLY}/metadata/*`} element={<StudioMetadataArea packageId={READ_ONLY} customization={customization as any} />} />
+          <Route path="/studio/:packageId/metadata/*" element={<PackageArea />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+  }
+
+  it("the ensure door's pair opens the create", async () => {
+    listed.set(PAIR, { id: PAIR, name: 'HR (customizations)', writable: true, manifest: {} });
+    const ensurePackage = vi.fn(async () => ({ basePackageId: READ_ONLY, packageId: PAIR, namespace: 'hrx', created: true, writable: true }));
+    mountCustomized(customizationOf(false, ensurePackage));
+    await waitFor(() => expect(where()).toBe(`/studio/${PAIR}/metadata/translation/new?package=${encodeURIComponent(PAIR)}`));
+    expect((await page()).page).toBe('create');
+    expect(ensurePackage).toHaveBeenCalledTimes(1);
+  });
+
+  it('a refusal is shown where the create was asked, and nothing opens', async () => {
+    const ensurePackage = vi.fn(async () => {
+      throw new Error('The customization package could not be created.');
+    });
+    mountCustomized(customizationOf(false, ensurePackage));
+    expect(await screen.findByTestId('studio-area-pair-create-refused')).toHaveTextContent('could not be created');
+    expect(where()).toBe(`/studio/${READ_ONLY}/metadata/translation/new?package=${READ_ONLY}`);
+  });
+
+  it("the list is told it may offer the create exactly where the area opens one in the pair", async () => {
+    const list = `/studio/${READ_ONLY}/metadata/translation?package=${READ_ONLY}`;
+    mountCustomized(customizationOf(false, vi.fn()), list);
+    expect((await page()).host).toMatchObject({ readOnly: true, pairCreate: true });
+    cleanup();
+    mountCustomized(customizationOf(true, vi.fn()), list);
+    expect((await page()).host).not.toHaveProperty('pairCreate');
+    cleanup();
+    mount(list);
+    expect((await page()).host).not.toHaveProperty('pairCreate');
+  });
+
+  it('a kernel package has no pair: no create is offered, and its create URL lands on the list', async () => {
+    const ensurePackage = vi.fn();
+    const kernelCustomization = { ...customizationOf(false, ensurePackage), base: KERNEL };
+    render(
+      <MemoryRouter initialEntries={[`/studio/${KERNEL}/metadata/agent/new?package=${KERNEL}`]}>
+        <Where />
+        <Routes>
+          <Route path={`/studio/${KERNEL}/metadata/*`} element={<StudioMetadataArea packageId={KERNEL} customization={kernelCustomization} />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    const at = await page();
+    expect(at.page).toBe('list');
+    expect(at.host).not.toHaveProperty('pairCreate');
+    expect(ensurePackage).not.toHaveBeenCalled();
+  });
+
+  it('a walled door never asks, and lands on the list as before', async () => {
+    const ensurePackage = vi.fn();
+    mountCustomized(customizationOf(true, ensurePackage));
+    expect((await page()).page).toBe('list');
+    expect(ensurePackage).not.toHaveBeenCalled();
+  });
+});
+
 describe('a pillar type opened from the area opens its pillar', () => {
   for (const [type, pillar] of [
     ['object', 'data'],
     ['flow', 'automations'],
-    ['view', 'interfaces'],
     ['permission', 'access'],
   ] as const) {
     it(`${type} → ${pillar}, with \`?surface=\``, async () => {
@@ -207,6 +301,25 @@ describe('a pillar type opened from the area opens its pillar', () => {
   it('a type no pillar designs opens the generic page', async () => {
     mount(`/studio/${WRITABLE}/metadata/agent/support_bot?package=${WRITABLE}`);
     expect((await page()).page).toBe('item');
+  });
+
+  // objectstack#36502 — the Interfaces pillar is retired, so a view (like a
+  // page, dashboard or report) is read and edited on the generic page.
+  it('a view opens the generic page, no longer the retired Interfaces pillar', async () => {
+    mount(`/studio/${WRITABLE}/metadata/view/item_1?package=${WRITABLE}`);
+    expect((await page()).page).toBe('item');
+    expect(new URL(where(), 'http://x').pathname).toBe(`/studio/${WRITABLE}/metadata/view/item_1`);
+  });
+
+  it('on a read-only package a view opens the Customize editor, the door the retired Interfaces pillar was (objectstack#36502)', async () => {
+    mount(`/studio/${READ_ONLY}/metadata/view/item_1?package=${READ_ONLY}`);
+    expect((await page()).page).toBe('form-editor');
+    expect(JSON.parse(screen.getByTestId('form-editor').getAttribute('data-item') ?? 'null')).toEqual({
+      type: 'view',
+      name: 'item_1',
+      member: null,
+      readOnly: true,
+    });
   });
 
   it('`?review=1` opens the generic page and its review, and the page stays once the review is open', async () => {

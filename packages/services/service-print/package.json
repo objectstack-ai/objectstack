@@ -26,6 +26,7 @@
   },
   "dependencies": {
     "@objectstack/core": "workspace:*",
+    "@objectstack/plugin-hono-server": "workspace:*",
     "@objectstack/service-storage": "workspace:*",
     "@objectstack/spec": "workspace:*",
     "@objectstack/types": "workspace:*",

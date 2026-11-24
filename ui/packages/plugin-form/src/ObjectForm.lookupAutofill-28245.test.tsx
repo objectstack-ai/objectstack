@@ -437,3 +437,237 @@ describe('ObjectForm — a pick does not copy an amount into a field in another 
     expect(price?.value ?? '').toBe('');
   });
 });
+
+describe('ObjectForm — cross-currency pick follow-ups (objectstack#36412)', () => {
+  const recordPrice = (currencyField: string) => ({
+    type: 'currency',
+    label: 'Unit Price',
+    currencyConfig: { currencyMode: 'record', currencyField },
+  });
+  const SCHEMAS_36412: Record<string, unknown> = {
+    // A quote whose price follows its own code; a pick may write the price over a typed one.
+    ow_quote: {
+      name: 'ow_quote',
+      fields: {
+        currency_code: { type: 'text', label: 'Currency' },
+        product: {
+          type: 'lookup',
+          label: 'Product',
+          reference: 'cc_product',
+          lookupAutofill: [
+            { target: 'unit_price', source: 'list_price', overwrite: true },
+            { target: 'description', source: 'summary' },
+          ],
+        },
+        unit_price: recordPrice('currency_code'),
+        description: { type: 'text', label: 'Description' },
+      },
+    },
+    // A quote whose pick copies the product's code and its price together.
+    cc_quote: {
+      name: 'cc_quote',
+      fields: {
+        currency_code: { type: 'text', label: 'Currency' },
+        product: {
+          type: 'lookup',
+          label: 'Product',
+          reference: 'cc_product',
+          lookupAutofill: [
+            { target: 'currency_code', source: 'currency_code' },
+            { target: 'unit_price', source: 'list_price' },
+          ],
+        },
+        unit_price: recordPrice('currency_code'),
+      },
+    },
+    // Control: the same quote, whose pick does not copy the code.
+    nc_quote: {
+      name: 'nc_quote',
+      fields: {
+        currency_code: { type: 'text', label: 'Currency' },
+        product: {
+          type: 'lookup',
+          label: 'Product',
+          reference: 'cc_product',
+          lookupAutofill: [{ target: 'unit_price', source: 'list_price' }],
+        },
+        unit_price: recordPrice('currency_code'),
+      },
+    },
+    // A line whose price follows its header's code (ADR-0144 D2 as amended).
+    fp_line: {
+      name: 'fp_line',
+      fields: {
+        invoice: { type: 'master_detail', label: 'Invoice', reference: 'fp_invoice' },
+        product: {
+          type: 'lookup',
+          label: 'Product',
+          reference: 'fx_product',
+          lookupAutofill: [
+            { target: 'unit_price', source: 'list_price' },
+            { target: 'description', source: 'summary' },
+          ],
+        },
+        unit_price: recordPrice('invoice.currency_code'),
+        description: { type: 'text', label: 'Description' },
+      },
+    },
+    fp_invoice: { name: 'fp_invoice', fields: { name: { type: 'text', label: 'Name' }, currency_code: { type: 'text', label: 'Currency' } } },
+    fx_product: {
+      name: 'fx_product',
+      fields: {
+        name: { type: 'text', label: 'Name' },
+        list_price: { type: 'currency', label: 'List Price' },
+        summary: { type: 'text', label: 'Summary' },
+      },
+    },
+    cc_product: {
+      name: 'cc_product',
+      fields: {
+        name: { type: 'text', label: 'Name' },
+        currency_code: { type: 'text', label: 'Currency' },
+        list_price: recordPrice('currency_code'),
+        summary: { type: 'text', label: 'Summary' },
+      },
+    },
+  };
+  const ROWS_36412: Record<string, Record<string, unknown>[]> = {
+    fx_product: [{ id: 'p1', name: 'Widget', list_price: 100, summary: 'A widget' }],
+    cc_product: [{ id: 'p1', name: 'Widget', currency_code: 'EUR', list_price: 100, summary: 'A widget' }],
+    fp_invoice: [{ id: 'h1', name: 'INV-1', currency_code: 'USD' }],
+  };
+  const makeDS36412 = (parentRead: 'answers' | 'fails' | 'none' = 'answers') => {
+    const ds: Record<string, unknown> = {
+      getObjectSchema: vi.fn(async (name: string) => SCHEMAS_36412[name]),
+      find: vi.fn(async (name: string, params?: { $filter?: { id?: { $in?: unknown[] } } }) => {
+        const wanted = params?.$filter?.id?.$in;
+        const rows = (ROWS_36412[name] ?? []).filter((r) => !wanted || wanted.includes(r.id));
+        return { data: rows.map((r) => ({ ...r })), total: rows.length };
+      }),
+      create: vi.fn(async (_o: string, d: Record<string, unknown>) => ({ id: 'n1', ...d })),
+      update: vi.fn(),
+    };
+    if (parentRead !== 'none') {
+      ds.findOne = vi.fn(async (name: string, id: string) => {
+        if (name === 'fp_invoice' && parentRead === 'fails') throw new Error('network down');
+        const row = (ROWS_36412[name] ?? []).find((r) => r.id === id);
+        return row ? { ...row } : null;
+      });
+    }
+    return ds;
+  };
+
+  function renderOn(objectName: string, initialValues: Record<string, unknown>, parentRead?: 'answers' | 'fails' | 'none') {
+    const ds = makeDS36412(parentRead);
+    const view = render(
+      <LocalizationProvider value={{ currency: 'USD' }}>
+        <SchemaRendererContext.Provider value={{ dataSource: ds } as never}>
+          <ObjectForm schema={{ type: 'object-form', objectName, mode: 'create', initialValues } as any} dataSource={ds as any} />
+        </SchemaRendererContext.Provider>
+      </LocalizationProvider>,
+    );
+    return { ds, container: view.container };
+  }
+  const valueOf = (c: HTMLElement, name: string) => (c.querySelector(`input[name="${name}"]`) as HTMLInputElement | null)?.value ?? '';
+
+  it('a pick over a filled amount in another currency keeps it and says so', async () => {
+    const { container } = renderOn('ow_quote', { currency_code: 'JPY', unit_price: 80 });
+    await input(container, 'description');
+    await pick('product', 'Widget');
+
+    await waitFor(() => expect(valueOf(container, 'description')).toBe('A widget'));
+    const note = await screen.findByTestId('lookup-autofill-withheld');
+    expect(note.querySelector('[data-withheld-target="unit_price"]')?.textContent).toContain('Unit Price still holds its earlier value.');
+    expect(note.textContent).toContain('JPY');
+    expect(valueOf(container, 'unit_price')).toContain('80');
+  });
+
+  it('control: the same pick over a filled amount in its own currency replaces it, with no note', async () => {
+    const { container } = renderOn('ow_quote', { currency_code: 'EUR', unit_price: 80 });
+    await input(container, 'description');
+    await pick('product', 'Widget');
+
+    await waitFor(() => expect(valueOf(container, 'unit_price')).toContain('100'));
+    expect(screen.queryByTestId('lookup-autofill-withheld')).toBeNull();
+  });
+
+  it('a pick that copies the code and the price together copies both onto a quote with no code yet', async () => {
+    // The create form seeds a code field with the home currency: cleared here.
+    const { container } = renderOn('cc_quote', { currency_code: null });
+    await input(container, 'currency_code');
+    await pick('product', 'Widget');
+
+    await waitFor(() => expect(valueOf(container, 'currency_code')).toBe('EUR'));
+    await waitFor(() => expect(valueOf(container, 'unit_price')).toContain('100'));
+    expect(screen.queryByTestId('lookup-autofill-withheld')).toBeNull();
+  });
+
+  it('control: a pick that does not copy the code leaves the price empty and says no currency is chosen', async () => {
+    const { container } = renderOn('nc_quote', { currency_code: null });
+    await input(container, 'currency_code');
+    await pick('product', 'Widget');
+
+    const note = await screen.findByTestId('lookup-autofill-withheld');
+    expect(note.textContent).toContain('no currency is chosen');
+    expect(valueOf(container, 'unit_price')).toBe('');
+  });
+
+  it('the opening fill does not wait for a parent read that failed: the description fills, the price says why', async () => {
+    const { container } = renderOn('fp_line', { invoice: 'h1', product: 'p1' }, 'fails');
+    await waitFor(() => expect(valueOf(container, 'description')).toBe('A widget'));
+    const note = await screen.findByTestId('lookup-autofill-withheld');
+    expect(note.textContent).toContain('the currency here could not be read');
+    expect(valueOf(container, 'unit_price')).toBe('');
+  });
+
+  it('the opening fill does not wait for a parent read that cannot run (no findOne)', async () => {
+    const { container } = renderOn('fp_line', { invoice: 'h1', product: 'p1' }, 'none');
+    await waitFor(() => expect(valueOf(container, 'description')).toBe('A widget'));
+    expect((await screen.findByTestId('lookup-autofill-withheld')).textContent).toContain('the currency here could not be read');
+  });
+
+  // Every layout a record form draws through stamps the targets
+  // (`gateFormFields` → `stampRecordFormFields`), so the rule reaches each.
+  const HOST_LAYOUTS: Array<{ layout: string; schema: Record<string, unknown> }> = [
+    { layout: 'simple / flat (default arm)', schema: {} },
+    { layout: 'simple / sections (default arm)', schema: { sections: [{ name: 'main', label: 'Main', fields: ['currency_code', 'product', 'unit_price'] }] } },
+    { layout: 'drawer (DrawerForm)', schema: { formType: 'drawer' } },
+    { layout: 'modal (ModalForm)', schema: { formType: 'modal' } },
+    { layout: 'tabbed (TabbedForm)', schema: { formType: 'tabbed', sections: [{ name: 'main', label: 'Main', fields: ['currency_code', 'product', 'unit_price'] }] } },
+    { layout: 'wizard (WizardForm)', schema: { formType: 'wizard', sections: [{ name: 'main', label: 'Main', fields: ['currency_code', 'product', 'unit_price'] }] } },
+  ];
+  for (const { layout, schema } of HOST_LAYOUTS) {
+    it(`every record-form host judges the pick: ${layout} withholds a EUR price from a JPY quote, and fills a EUR one`, async () => {
+      for (const [code, fills] of [['JPY', false], ['EUR', true]] as const) {
+        const ds = makeDS36412();
+        const view = render(
+          <LocalizationProvider value={{ currency: 'USD' }}>
+            <SchemaRendererContext.Provider value={{ dataSource: ds } as never}>
+              <ObjectForm
+                schema={{ type: 'object-form', objectName: 'nc_quote', mode: 'create', initialValues: { currency_code: code }, ...schema } as any}
+                dataSource={ds as any}
+              />
+            </SchemaRendererContext.Provider>
+          </LocalizationProvider>,
+        );
+        await input(document.body, 'currency_code');
+        await pick('product', 'Widget');
+        if (fills) {
+          await waitFor(() => expect(valueOf(document.body, 'unit_price')).toContain('100'));
+          expect(screen.queryByTestId('lookup-autofill-withheld')).toBeNull();
+        } else {
+          expect((await screen.findByTestId('lookup-autofill-withheld')).textContent).toContain('JPY');
+          expect(valueOf(document.body, 'unit_price')).toBe('');
+        }
+        view.unmount();
+      }
+    });
+  }
+
+  it('control: a parent read that answers fills the price in its code, with no note', async () => {
+    const { container } = renderOn('fp_line', { invoice: 'h1', product: 'p1' }, 'answers');
+    await waitFor(() => expect(valueOf(container, 'description')).toBe('A widget'));
+    await waitFor(() => expect(valueOf(container, 'unit_price')).toContain('100'));
+    expect(screen.queryByTestId('lookup-autofill-withheld')).toBeNull();
+  });
+});

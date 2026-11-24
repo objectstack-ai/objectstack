@@ -281,8 +281,9 @@ describe('Studio adds an action to an installed app’s object, in its customiza
     expect(name).not.toBe(VENDOR.name);
     expect(body).toMatchObject({ name, objectName: OBJECT, operation: 'update', locations: ['record_header'] });
     expect(opts).toMatchObject({ mode: 'draft', packageId: PAIR, ifNoneMatch: '*' });
-    // Then that one action is published at the pair: live at once.
-    expect(mockClient.publish).toHaveBeenCalledWith('action', name, { packageId: PAIR });
+    // Then that one action is published at the pair: live at once, asserting
+    // no published action of its name (objectstack#36726).
+    expect(mockClient.publish).toHaveBeenCalledWith('action', name, { packageId: PAIR, ifNoneMatch: '*' });
     expect(mockClient.save.mock.invocationCallOrder[0]).toBeLessThan(mockClient.publish.mock.invocationCallOrder[0]);
     expect(ensure).toHaveBeenCalledTimes(1);
     expect(saves().filter(([type]) => type === 'object')).toHaveLength(0);

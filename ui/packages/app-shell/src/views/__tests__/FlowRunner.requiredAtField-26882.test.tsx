@@ -190,9 +190,12 @@ describe('objectstack#26882 — a retryable engine refusal keeps the screen, its
 
     await user.click(screen.getByRole('button', { name: 'Submit' }));
     await waitFor(() => expect(onComplete).toHaveBeenCalledTimes(1));
-    expect(authFetch).toHaveBeenCalledTimes(2);
-    expect(authFetch.mock.calls[1][0]).toBe(authFetch.mock.calls[0][0]);
-    expect(JSON.parse(String(authFetch.mock.calls[1][1]?.body)).inputs).toEqual({
+    // Counted as RESUMES: a retryable refusal also re-reads the run's screen
+    // first (objectstack#36831), a GET that resumes nothing.
+    const resumes = authFetch.mock.calls.filter(([, init]) => init?.method === 'POST');
+    expect(resumes).toHaveLength(2);
+    expect(resumes[1][0]).toBe(resumes[0][0]);
+    expect(JSON.parse(String(resumes[1][1]?.body)).inputs).toEqual({
       nextStep: 'Call back',
       notes: 'Asked for Tuesday',
     });

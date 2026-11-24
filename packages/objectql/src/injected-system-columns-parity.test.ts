@@ -46,6 +46,10 @@ const CASES: Array<[string, Record<string, unknown>]> = [
   ['sys_* namespace', { name: 'sys_thing', fields: fields() }],
   ["managedBy: 'platform'", { name: 'crm_contact', managedBy: 'platform', fields: fields() }],
   ["managedBy: 'better-auth'", { name: 'crm_contact', managedBy: 'better-auth', fields: fields() }],
+  // [ADR-0153 D4] The five `_sync_` provenance columns, on this bucket only.
+  ["managedBy: 'synced'", { name: 'crm_contact', managedBy: 'synced', fields: fields() }],
+  ["managedBy: 'synced' + tenancy.enabled: false", { name: 'crm_contact', managedBy: 'synced', tenancy: { enabled: false }, fields: fields() }],
+  ["managedBy: 'synced' + systemFields: false", { name: 'crm_contact', managedBy: 'synced', systemFields: false, fields: fields() }],
   ['systemFields: false', { name: 'crm_contact', systemFields: false, fields: fields() }],
   ['systemFields.tenant: false', { name: 'crm_contact', systemFields: { tenant: false }, fields: fields() }],
   ['systemFields.audit: false', { name: 'crm_contact', systemFields: { audit: false }, fields: fields() }],
@@ -95,6 +99,7 @@ describe('[#5378] resolveInjectedSystemColumns ↔ applySystemFields parity', ()
       expect(plan.owner, `${label}: owner`).toBe(injected.has('owner_id') || declared.has('owner_id'));
       expect(plan.owningBusinessUnit, `${label}: owningBusinessUnit`)
         .toBe(injected.has('owning_business_unit_id') || declared.has('owning_business_unit_id'));
+      expect(plan.sync, `${label}: sync`).toBe(injected.has('_sync_source') || declared.has('_sync_source'));
     }
   });
 

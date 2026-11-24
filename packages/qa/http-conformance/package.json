@@ -29,6 +29,7 @@
     "@objectstack/plugin-webhooks": "workspace:*",
     "@objectstack/runtime": "workspace:*",
     "@objectstack/service-messaging": "workspace:*",
+    "@objectstack/service-print": "workspace:*",
     "@objectstack/service-storage": "workspace:*",
     "@objectstack/spec": "workspace:*",
     "@types/node": "^26.6.5",

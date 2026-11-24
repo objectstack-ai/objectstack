@@ -21,8 +21,9 @@
 
 import type { Environment } from '@marcbachmann/cel-js';
 
-import type { EvalContext, EvalOptionLabels, EvalPermissions, EvalSystemPermissions } from './types';
+import type { EvalContext, EvalOptionLabels, EvalPermissions, EvalSystemPermissions, EvalWorkCalendars } from './types';
 import { rmbUpper } from './rmb-upper';
+import { registerWorkingDayFunctions } from './working-day';
 import { createEvalUser, type EvalUser } from '@objectstack/spec';
 // The verb vocabulary lives on the SECURITY subpath, where the permission
 // contract it is seeded from lives — not on the root barrel, which exports a
@@ -641,6 +642,8 @@ export interface StdLibBinding {
   readonly timezone: string;
   readonly permissionBinding: PermissionBinding | undefined;
   readonly optionLabels?: EvalOptionLabels | undefined;
+  /** ADR-0157 D4: what the working-day functions count with (`working-day.ts`). */
+  readonly workCalendars?: EvalWorkCalendars | undefined;
 }
 
 /**
@@ -661,6 +664,7 @@ export function registerBoundStdLib(env: Environment, read: () => StdLibBinding)
   bindPermissionPredicate(env, () => read().permissionBinding);
   bindCapabilityPredicate(env, () => read().permissionBinding);
   bindOptionLabel(env, () => read().optionLabels);
+  registerWorkingDayFunctions(env, () => read().workCalendars);
   const now = (): Date => read().now();
   const today = (): Date => {
     const binding = read();

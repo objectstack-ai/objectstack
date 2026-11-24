@@ -78,6 +78,13 @@ describe('areaLocationRedirect — the query names the leg', () => {
     expect(areaLocationRedirect(STUDIO_ALL_PACKAGES_SEGMENT, '', '')).toBeNull();
     expect(areaLocationRedirect(STUDIO_ALL_PACKAGES_SEGMENT, 'flow/f1', '?review=1')).toBeNull();
   });
+
+  it('the package-less scope is never written into `?package=`: it lands on its flows (objectstack#36899)', () => {
+    expect(areaLocationRedirect('~org', '', '')).toBe('/studio/~org/automations');
+    expect(areaLocationRedirect('~org', 'flow', '')).toBe('/studio/~org/automations');
+    expect(areaLocationRedirect(STUDIO_ALL_PACKAGES_SEGMENT, 'flow', '?package=~org')).toBe('/studio/~org/automations');
+    expect(areaLocationRedirect(PKG, 'flow', '?package=~org')).toBe('/studio/~org/automations');
+  });
 });
 
 describe('areaItemPillarPath — a pillar type opens its pillar', () => {
@@ -85,14 +92,10 @@ describe('areaItemPillarPath — a pillar type opens its pillar', () => {
   const open = (type: string, q = '', packageId: string | null = PKG) =>
     areaItemPillarPath({ packageId, type, name: 'n_1', search: search(q) });
 
-  it('object, flow, the four Interfaces types and permission open their pillar with `?surface=`', () => {
+  it('object, flow and permission open their pillar with `?surface=`', () => {
     const expected: Record<string, string> = {
       object: 'data',
       flow: 'automations',
-      page: 'interfaces',
-      dashboard: 'interfaces',
-      report: 'interfaces',
-      view: 'interfaces',
       permission: 'access',
     };
     expect(AREA_PILLAR_FOR_TYPE).toEqual(expected);
@@ -106,7 +109,8 @@ describe('areaItemPillarPath — a pillar type opens its pillar', () => {
   });
 
   it('every other type opens the generic item page', () => {
-    for (const type of ['translation', 'email_template', 'agent', 'position', 'sharing_rule', 'app']) {
+    // objectstack#36502 — page, dashboard, report and view lost their pillar with Interfaces.
+    for (const type of ['translation', 'email_template', 'agent', 'position', 'sharing_rule', 'app', 'page', 'dashboard', 'report', 'view']) {
       expect(open(type), type).toBeNull();
     }
   });
@@ -145,5 +149,16 @@ describe('areaItemOpensFormEditor — a read-only package’s dataset opens its 
       expect(areaItemOpensFormEditor(at(type, true))).toBe(true);
       expect(areaItemOpensFormEditor(at(type, false))).toBe(true);
     }
+  });
+  // objectstack#36502 — the Interfaces pillar was their Customize door; retired, it is this editor.
+  it('a view, dashboard, report and page open the form editor on a read-only package, and the generic page on a writable one', () => {
+    for (const type of ['view', 'dashboard', 'report', 'page']) {
+      expect(areaItemOpensFormEditor(at(type, true)), type).toBe(true);
+      expect(areaItemOpensFormEditor(at(type, false)), type).toBe(false);
+      expect(areaItemOpensFormEditor(at(type, true, 'review=1')), type).toBe(false);
+    }
+    // CONTROL: a type no editor customizes stays on the generic page.
+    expect(areaItemOpensFormEditor(at('flow', true))).toBe(false);
+    expect(areaItemOpensFormEditor(at('object', true))).toBe(false);
   });
 });

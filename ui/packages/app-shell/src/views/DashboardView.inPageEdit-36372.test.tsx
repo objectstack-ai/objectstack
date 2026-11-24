@@ -119,6 +119,8 @@ vi.mock('./metadata-admin/previews/AddWidgetPicker', () => ({
 }));
 
 import { DashboardView } from './DashboardView';
+import { DesignModeProvider, useDesignModeController } from '../layout/designMode';
+import { DesignModeBar } from '../layout/DesignModeBar';
 
 /** The served dashboard: translated for the session, with its read's decorations. */
 const served = {
@@ -396,5 +398,82 @@ describe('DashboardView with no cards yet (objectstack#36364)', () => {
     mount({ name: 'ops_board', label: 'Payment analysis', _packageId: 'crm', widgets: [] });
     await screen.findByTestId('dashboard-editing-badge');
     expect(screen.queryByTestId('dashboard-no-cards')).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * objectstack#36692 — the dashboard's own edit state and the shell's design
+ * mode are two entries that exclude each other, both ways (the maintainer's
+ * 「照 Twenty 分开」): no Edit while the mode is on, and the mode's door
+ * refuses, saying why, while the edit state is open. So the screen never
+ * shows two Save/Cancel sets, and the bar's Cancel can never end the mode
+ * under a dashboard left in edit.
+ *
+ * Real subjects added: the shell's design-mode controller and its bar.
+ */
+describe('DashboardView and the design mode exclude each other (objectstack#36692)', () => {
+  function Shell({ children }: { children: React.ReactNode }) {
+    const mode = useDesignModeController({ appName: 'crm', appBasePath: '/apps/crm', enabled: true });
+    return (
+      <DesignModeProvider value={mode}>
+        {mode.active && <DesignModeBar mode={mode} />}
+        <button type="button" data-testid="enter-design-mode" onClick={() => mode.enter()}>
+          enter
+        </button>
+        {children}
+      </DesignModeProvider>
+    );
+  }
+
+  function mountInShell() {
+    meta.value = {
+      apps: [],
+      objects: [],
+      dashboards: [served],
+      reports: [],
+      pages: [],
+      loading: false,
+      error: null,
+      refresh: async () => {},
+      invalidate: () => {},
+      ensureType: async () => [],
+      getItem: vi.fn(async () => null),
+      getItemsByType: () => [],
+      getTypeStatus: () => 'ready',
+    };
+    render(
+      <MetadataCtx.Provider value={meta.value as React.ContextType<typeof MetadataCtx>}>
+        <Shell>
+          <DashboardView />
+        </Shell>
+      </MetadataCtx.Provider>,
+    );
+  }
+
+  it('while the mode is on, Edit is not offered; the mode left, it is again', async () => {
+    mountInShell();
+    await screen.findByTestId('dashboard-edit');
+    fireEvent.click(screen.getByTestId('enter-design-mode'));
+    expect(await screen.findByTestId('design-mode-bar')).toBeInTheDocument();
+    expect(screen.queryByTestId('dashboard-edit')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('design-mode-cancel'));
+    expect(await screen.findByTestId('dashboard-edit')).toBeInTheDocument();
+  });
+
+  it('while the edit state is open, entering the mode is refused with the prompt: one Save/Cancel set, and no bar Cancel to strand the edit', async () => {
+    mountInShell();
+    await openEdit();
+    fireEvent.click(screen.getByTestId('enter-design-mode'));
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    expect(screen.queryByTestId('design-mode-bar')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('design-mode-cancel')).not.toBeInTheDocument();
+    expect(toasts.error).toEqual([['Save or cancel your dashboard or report changes before designing the layout.']]);
+    expect(screen.getByTestId('dashboard-editing-badge')).toBeInTheDocument();
+    expect(screen.getByTestId('dashboard-edit-save')).toBeInTheDocument();
+    // The edit state closed, the door opens.
+    fireEvent.click(screen.getByTestId('dashboard-edit-discard'));
+    fireEvent.click(screen.getByTestId('enter-design-mode'));
+    expect(await screen.findByTestId('design-mode-bar')).toBeInTheDocument();
+    expect(toasts.error).toHaveLength(1);
   });
 });

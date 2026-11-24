@@ -65,7 +65,7 @@ import {
 import { applySavedRecordEcho } from './recordSaveEcho.js';
 import { authoredRecordPageApplies } from './recordPageSurface.js';
 import { withPageTabsUrlSync } from '../utils/pageTabsUrlSync.js';
-import { RECORD_COMMENTS_PARAM, RECORD_COMMENTS_PUSHED_STATE as COMMENTS_PUSHED, RECORD_DETAIL_TAB_PARAM, RECORD_DRAWER_PARAM, RECORD_RELATED_ENLARGE_PARAM, RECORD_RELATED_ENLARGE_PUSHED_STATE as RELATED_ENLARGE_PUSHED, RECORD_TRAIL_PARAM, decodeRecordTrail, buildRecordTrailHref } from '../urlParams.js';
+import { RECORD_COMMENT_PARAM, RECORD_COMMENTS_PARAM, RECORD_COMMENTS_PUSHED_STATE as COMMENTS_PUSHED, RECORD_DETAIL_TAB_PARAM, RECORD_DRAWER_PARAM, RECORD_RELATED_ENLARGE_PARAM, RECORD_RELATED_ENLARGE_PUSHED_STATE as RELATED_ENLARGE_PUSHED, RECORD_TRAIL_PARAM, decodeRecordTrail, buildRecordTrailHref } from '../urlParams.js';
 import { resolveActionParams } from '@object-ui/fields';
 import { createConsoleServerActionHandler } from '../utils/consoleServerAction.js';
 import { withNewTabUrlFastPath } from '../utils/newTabUrlFastPath.js';
@@ -91,7 +91,7 @@ import { useNavigationContext, useRecordBreadcrumbTitle } from '../context/Navig
 import { deriveRecordDetailSections } from './recordDetailSections.js';
 import type { DataSource, FeedItem, Reaction, RecordPageOperation, RecordPagePayload } from '@object-ui/types';
 import { arrangedHeaderActions, placedHeaderActions } from '@object-ui/types';
-import type { ActionDef, ActionParamDef, ActionResult, ConfirmationHandler, ParamCollectionHandler } from '@object-ui/core';
+import type { ActionContext, ActionDef, ActionParamDef, ActionResult, ConfirmationHandler, ParamCollectionHandler } from '@object-ui/core';
 import type { ConsoleActionDispatch } from '../consoleActionDispatch.js';
 import { useRecordApprovals, openApprovalOf, isSubmitterOf } from '../hooks/useRecordApprovals.js';
 import { RecordAttachmentsPanel } from './RecordAttachmentsPanel.js';
@@ -1097,10 +1097,8 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // In a pane, the record's title is what its top bar's breadcrumb names
   // (objectstack#27524, Target 7); the pane's slot for the record's ⊟ is there
   // too (`RecordPaneBarToggles` below).
+  // The report itself waits for `recordCrumbName` below (objectstack#36235).
   const paneBar = useRecordPaneBar();
-  useEffect(() => {
-    if (embedded && recordId) paneBar?.reportTitle(recordId, recordTitle);
-  }, [embedded, paneBar, recordId, recordTitle]);
   // objectstack#35593 — the page's top bar is the record's one header row: its
   // two slots for the record header (`page:header` draws its name and tags,
   // and its button group, into them), and whether a header holds the bar,
@@ -1357,6 +1355,14 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   const commentsParam = commentsPageOffered ? tabSearchParams.get(RECORD_COMMENTS_PARAM) : null;
   const commentsPageOpen = commentsParam !== null;
   const commentsPageThread = commentsParam ? commentsParam : null;
+  // objectstack#36410 — a comment notice's link (`?comments={thread}`, and
+  // `&comment={reply}` for a reply): on the desktop it opens the panel at
+  // that thread, whatever this browser last chose, without changing the
+  // choice; on the phone the page above opens at it. The comment to scroll
+  // to rides with either.
+  const commentsLinkParam = commentsPanelOffered ? tabSearchParams.get(RECORD_COMMENTS_PARAM) : null;
+  const commentsLinkThread = commentsLinkParam ? commentsLinkParam : null;
+  const commentsLinkComment = commentsLinkThread || commentsPageThread ? tabSearchParams.get(RECORD_COMMENT_PARAM) || null : null;
   // Opening pushes an entry (Back and 「‹」 return to the record where it was
   // scrolled: the record stays mounted under the page), a thread pushes one
   // over the list, and 「‹」 pops the entry this view pushed or, on an entry a
@@ -1364,6 +1370,8 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   const openCommentsPage = useCallback((thread?: string) => {
     const sp = new URLSearchParams(location.search);
     sp.set(RECORD_COMMENTS_PARAM, thread ?? '');
+    // Another thread, or the list: the linked comment was the old thread's.
+    sp.delete(RECORD_COMMENT_PARAM);
     const state = location.state && typeof location.state === 'object' ? location.state : {};
     setTabSearchParams(sp, { state: { ...(state as object), [COMMENTS_PUSHED]: true } });
   }, [setTabSearchParams, location.search, location.state]);
@@ -1375,6 +1383,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     const sp = new URLSearchParams(location.search);
     if (sp.get(RECORD_COMMENTS_PARAM)) sp.set(RECORD_COMMENTS_PARAM, '');
     else sp.delete(RECORD_COMMENTS_PARAM);
+    sp.delete(RECORD_COMMENT_PARAM);
     setTabSearchParams(sp, { replace: true, state: location.state });
   }, [setTabSearchParams, location.search, location.state, navigate]);
   // Closed, the focus goes back to the comments icon that opened the page.
@@ -1385,8 +1394,20 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     }
     commentsPageWasOpen.current = commentsPageOpen;
   }, [commentsPageOpen]);
-  const [commentsOpenChosen, setCommentsOpen] = useCommentsPanelOpen();
-  const commentsOpen = commentsPanelOffered && commentsOpenChosen;
+  const [commentsOpenChosen, setCommentsOpenChosen] = useCommentsPanelOpen();
+  const commentsOpen = commentsPanelOffered && (commentsOpenChosen || commentsLinkThread !== null);
+  // Closing a panel a link opened drops the link's params (replacing the
+  // entry), so it stays closed; opening or closing is still the reader's
+  // stored choice.
+  const setCommentsOpen = useCallback((open: boolean) => {
+    if (!open && commentsLinkThread !== null) {
+      const sp = new URLSearchParams(location.search);
+      sp.delete(RECORD_COMMENTS_PARAM);
+      sp.delete(RECORD_COMMENT_PARAM);
+      setTabSearchParams(sp, { replace: true, state: location.state });
+    }
+    setCommentsOpenChosen(open);
+  }, [commentsLinkThread, location.search, location.state, setTabSearchParams, setCommentsOpenChosen]);
   const commentsPlacement = commentsPanelPlacement(useWindowWidth());
   const recordPageTier = useRecordPageTier(pageRootEl, {
     enabled: pageColumnsEligible,
@@ -2241,7 +2262,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
    *   declared action is absent from `objects`, so it keeps that route too,
    *   as every flow click did before.
    */
-  const flowHandler = useCallback(async (action: ActionDef) => {
+  const flowHandler = useCallback(async (action: ActionDef, context?: ActionContext) => {
     const flowName = action.target || action.name;
     if (!flowName) {
       return { success: false, error: 'No flow target provided for flow action' };
@@ -2304,8 +2325,11 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         });
       }
       // Ended `refused`: the Close-only notice carries the engine's sentence,
-      // titled with the action the user clicked.
-      if (judged.followUp?.kind === 'refusal') {
+      // titled with the action the user clicked. A caller that reports the
+      // refusal itself (`reportsRefusal`, the per-record bulk fan-out of a
+      // list on this page) gets it on `judged.result.refusal` instead, as
+      // useConsoleActionRuntime's copy does, so no notice stacks on its result.
+      if (judged.followUp?.kind === 'refusal' && context?.reportsRefusal !== true) {
         setFlowRefusal({ open: true, title: action.label, message: judged.followUp.message });
       }
       if (judged.refresh) notifyViewChanged();
@@ -4913,6 +4937,29 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     || (holdsRouteRecord
       ? (pureRecordId ? shortRecordId(pureRecordId) : '')
       : objectDef ? servedObjectLabel(objectDef, language, objectLabel) : objectName ?? '');
+  // objectstack#36235 — the pane's bar names the record by what this page
+  // reports, and draws a placeholder until it does. So the report is the
+  // record's title once the page holds the record, and the short id only for a
+  // held record with nothing to be named by; a read in flight reports nothing,
+  // and the bar never reads the raw id while the record loads. A page that
+  // settles WITHOUT the record (not found, deleted, access ended, forbidden,
+  // failed, the object unknown, the named page refused) reports the name its
+  // crumb draws then, the object's label, so the bar's placeholder ends with
+  // the read instead of standing over the page's own state.
+  const settledWithoutRecord = !isLoading && (
+    !objectDef
+    || namedPageState === 'refused'
+    || recordDeleted
+    || pageRecordStatus === 'missing'
+    || pageRecordStatus === 'accessEnded'
+    || pageRecordStatus === 'forbidden'
+    || pageRecordStatus === 'failed'
+  );
+  const paneRecordTitle = recordTitle
+    || ((holdsRouteRecord || settledWithoutRecord) && recordCrumbName ? recordCrumbName : undefined);
+  useEffect(() => {
+    if (embedded && recordId) paneBar?.reportTitle(recordId, paneRecordTitle);
+  }, [embedded, paneBar, recordId, paneRecordTitle]);
 
   // objectstack#27058, Target 3 — the top bar on a phone: one link that
   // returns where the page came from. A top-level page reads
@@ -6552,6 +6599,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
             {commentsPageOpen && (
               <CommentsPage
                 threadId={commentsPageThread}
+                focusCommentId={commentsLinkComment}
                 onOpenThread={openCommentsPage}
                 onBack={leaveCommentsPage}
                 backLabel={recordCrumbName}
@@ -6562,6 +6610,8 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
               <RecordCommentsAside
                 placement={commentsPlacement}
                 onClose={() => setCommentsOpen(false)}
+                focusThreadId={commentsLinkThread}
+                focusCommentId={commentsLinkComment}
                 onEngage={engageComments}
               />
             )}

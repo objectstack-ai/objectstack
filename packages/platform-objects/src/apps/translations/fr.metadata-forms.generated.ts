@@ -114,7 +114,7 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fieldGroups.collapse": {
         label: "Réduire",
-        helpText: "Indique si la section peut être réduite, sur le formulaire de saisie et la page de détail de l’enregistrement. Non défini : non."
+        helpText: "Indique si la section peut être réduite. Le formulaire de saisie applique le réglage tel quel. Sur la page d’enregistrement par défaut, le lecteur peut réduire chaque groupe titré ; le réglage n’y fixe que l’état initial : Collapsed commence réduit, les autres ouverts. Non défini : non."
       },
       "fieldGroups.visibleWhen": {
         label: "Visible si",
@@ -239,6 +239,10 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       "fields.deleteBehavior": {
         label: "Comportement à la suppression",
         helpText: "Ce qui se passe lorsque l’enregistrement référencé est supprimé"
+      },
+      "fields.transferBehavior": {
+        label: "Comportement au changement de propriétaire",
+        helpText: "Indique si « Changer de propriétaire » sur l'enregistrement référencé peut aussi déplacer les enregistrements qui pointent vers lui par ce champ"
       },
       "fields.multiple": {
         label: "Multiple",
@@ -769,6 +773,10 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Comportement à la suppression",
         helpText: "Ce qui se passe lorsque l’enregistrement référencé est supprimé"
       },
+      transferBehavior: {
+        label: "Comportement au changement de propriétaire",
+        helpText: "Indique si « Changer de propriétaire » sur l'enregistrement référencé peut aussi déplacer les enregistrements qui pointent vers lui par ce champ"
+      },
       relatedListFilter: {
         label: "Filtre de la liste associée",
         helpText: "Filtre par défaut de la liste associée de cette relation sur la page de détail du parent — combiné par ET avec la correspondance à l’enregistrement parent, et le badge de l’onglet compte le même ensemble"
@@ -1080,15 +1088,54 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
   },
   seed: {
     label: "Données d’amorçage",
-    description: "Données de fixture / d’initialisation appliquées à la publication"
+    description: "Données de fixture / d’initialisation appliquées à la publication",
+    fields: {
+      object: {
+        label: "Objet"
+      },
+      mode: {
+        label: "Mode"
+      }
+    }
   },
   picklist: {
     label: "Liste de sélection",
-    description: "Liste d’options partagée que les champs de sélection référencent par son nom"
+    description: "Liste d’options partagée que les champs de sélection référencent par son nom",
+    fields: {
+      name: {
+        label: "Nom"
+      },
+      label: {
+        label: "Libellé"
+      },
+      options: {
+        label: "Options"
+      },
+      description: {
+        label: "Description"
+      }
+    }
   },
   mapping: {
     label: "Mappage d’import",
-    description: "Mappage de champs d’import/export réutilisable (renommage + transformations), référencé par son nom lors de l’import"
+    description: "Mappage de champs d’import/export réutilisable (renommage + transformations), référencé par son nom lors de l’import",
+    fields: {
+      name: {
+        label: "Nom"
+      },
+      label: {
+        label: "Libellé"
+      },
+      targetObject: {
+        label: "Objet cible"
+      },
+      mode: {
+        label: "Mode"
+      },
+      sourceFormat: {
+        label: "Format source"
+      }
+    }
   },
   view: {
     label: "Vue",
@@ -1412,6 +1459,9 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       "sharing.lockedBy": {
         label: "Verrouillé par",
         helpText: "Utilisateur qui a verrouillé la configuration de la vue"
+      },
+      object: {
+        label: "Objet"
       }
     }
   },
@@ -1618,30 +1668,30 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
     fields: {
       name: {
         label: "Nom",
-        helpText: "Identifiant unique snake_case"
+        helpText: "Nom interne unique de ce tableau de bord : lettres minuscules, chiffres et tirets bas, en commençant par une lettre (par exemple sales_overview)."
       },
       label: {
         label: "Libellé",
-        helpText: "Nom d’affichage"
+        helpText: "Le titre que les utilisateurs voient pour ce tableau de bord."
       },
       description: {
         label: "Description"
       },
       columns: {
         label: "Colonnes",
-        helpText: "Colonnes de la grille (12 par défaut)"
+        helpText: "Nombre de colonnes sur lesquelles les widgets sont disposés, de 1 à 24. Laissez vide pour que le tableau de bord choisisse une largeur adaptée à ses widgets."
       },
       gap: {
         label: "Espacement",
-        helpText: "Espace entre les widgets, par pas de 0,25rem (4 = 1rem)"
+        helpText: "Espace à laisser entre les widgets. Plus le nombre est grand, plus ils sont espacés ; laissez vide pour l’espacement standard."
       },
       refreshIntervalSeconds: {
         label: "Intervalle d’actualisation (secondes)",
-        helpText: "Actualisation automatique (secondes)"
+        helpText: "Fréquence à laquelle le tableau de bord recharge ses données, en secondes. Laissez vide ou saisissez 0 pour désactiver le rechargement automatique."
       },
       header: {
         label: "En-tête",
-        helpText: "Configuration de l’en-tête du tableau de bord (titre, sous-titre, actions)"
+        helpText: "Ce qui s’affiche en haut du tableau de bord : son titre, sa description et les boutons d’action."
       },
       "header.showTitle": {
         label: "Afficher le titre",
@@ -1669,7 +1719,7 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       widgets: {
         label: "Widgets",
-        helpText: "Widgets du tableau de bord avec leur position et leur taille"
+        helpText: "Les graphiques, chiffres et tableaux de ce tableau de bord, et l’emplacement de chacun."
       },
       "widgets.id": {
         label: "ID du widget"
@@ -1724,11 +1774,11 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       dateRange: {
         label: "Plage de dates",
-        helpText: "Sélecteur de plage de dates par défaut"
+        helpText: "La période affichée à l’ouverture du tableau de bord, et si les utilisateurs peuvent choisir leurs propres dates."
       },
       globalFilters: {
         label: "Filtres globaux",
-        helpText: "Filtres appliqués à tous les widgets"
+        helpText: "Filtres que les utilisateurs peuvent utiliser pour restreindre tous les widgets à la fois, ou seulement ceux que vous choisissez."
       },
       "globalFilters.name": {
         label: "Nom"
@@ -2190,7 +2240,8 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Libellé"
       },
       description: {
-        label: "Description"
+        label: "Description",
+        helpText: "One sentence on what this report shows, displayed under its name."
       },
       type: {
         label: "Type",
@@ -2272,9 +2323,33 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Plage de dates",
         helpText: "Période par défaut et sélecteur de plage personnalisée. La dimension doit être une dimension de date du jeu de données ; laissez vide lorsque le jeu de données en a exactement une."
       },
+      "dateRange.dimension": {
+        label: "Date Field",
+        helpText: "The date grouping of the data source the period applies to. Leave it empty when the data source has only one."
+      },
+      "dateRange.defaultRange": {
+        label: "Default Period",
+        helpText: "The period the report opens with."
+      },
+      "dateRange.allowCustomRange": {
+        label: "Allow Custom Range",
+        helpText: "Let people pick their own start and end dates."
+      },
       exportOptions: {
         label: "Options d’export",
         helpText: "Formats de téléchargement (csv, xlsx) et nom de fichier. Qui peut télécharger dépend de l’autorisation d’export sur l’objet du jeu de données."
+      },
+      "exportOptions.formats": {
+        label: "Formats",
+        helpText: "The download formats offered. Left unset, both csv and xlsx are offered; an empty list turns downloads off."
+      },
+      "exportOptions.includeHeaders": {
+        label: "Include Headers",
+        helpText: "Put the column names in the first row of the downloaded file."
+      },
+      "exportOptions.fileNamePrefix": {
+        label: "File Name",
+        helpText: "The start of the downloaded file’s name, used instead of the report name."
       }
     }
   },
@@ -2543,7 +2618,24 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
     }
   },
   job: {
-    label: "Tâche en arrière-plan"
+    label: "Tâche en arrière-plan",
+    fields: {
+      name: {
+        label: "Nom"
+      },
+      label: {
+        label: "Libellé"
+      },
+      schedule: {
+        label: "Planification"
+      },
+      enabled: {
+        label: "Activé"
+      },
+      description: {
+        label: "Description"
+      }
+    }
   },
   datasource: {
     label: "Source de données"
@@ -2553,10 +2645,41 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
   },
   api: {
     label: "Point de terminaison d’API",
-    description: "Une URL HTTP stable que d’autres systèmes appellent pour exécuter un flux ou manipuler les enregistrements de l’application"
+    description: "Une URL HTTP stable que d’autres systèmes appellent pour exécuter un flux ou manipuler les enregistrements de l’application",
+    fields: {
+      name: {
+        label: "Nom"
+      },
+      method: {
+        label: "Méthode"
+      },
+      path: {
+        label: "Chemin"
+      },
+      type: {
+        label: "Type"
+      },
+      "objectParams.object": {
+        label: "Objet"
+      },
+      "objectParams.operation": {
+        label: "Opération"
+      }
+    }
   },
   translation: {
-    label: "Traduction"
+    label: "Traduction",
+    fields: {
+      name: {
+        label: "Nom"
+      },
+      label: {
+        label: "Libellé"
+      },
+      locale: {
+        label: "Langue"
+      }
+    }
   },
   email_template: {
     label: "Modèle d’e-mail",
@@ -2633,11 +2756,45 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
   },
   doc: {
     label: "Documentation",
-    description: "Une page d’aide rédigée en Markdown, fournie par un package ou écrite par vous-même"
+    description: "Une page d’aide rédigée en Markdown, fournie par un package ou écrite par vous-même",
+    fields: {
+      name: {
+        label: "Nom"
+      },
+      label: {
+        label: "Libellé"
+      },
+      group: {
+        label: "Groupe"
+      },
+      tags: {
+        label: "Mots-clés"
+      },
+      description: {
+        label: "Description"
+      }
+    }
   },
   book: {
     label: "Livre de documentation",
-    description: "Une table des matières qui regroupe les pages d’aide en sections ordonnées"
+    description: "Une table des matières qui regroupe les pages d’aide en sections ordonnées",
+    fields: {
+      name: {
+        label: "Nom"
+      },
+      label: {
+        label: "Libellé"
+      },
+      audience: {
+        label: "Public"
+      },
+      groups: {
+        label: "Groupes"
+      },
+      description: {
+        label: "Description"
+      }
+    }
   },
   permission: {
     label: "Ensemble d’autorisations",
@@ -2741,15 +2898,66 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
   },
   sharing_rule: {
     label: "Règle de partage",
-    description: "Une règle qu’un package déclare pour partager des enregistrements ; les organisations créent les leurs dans Configuration"
+    description: "Une règle qu’un package déclare pour partager des enregistrements ; les organisations créent les leurs dans Configuration",
+    fields: {
+      name: {
+        label: "Nom"
+      },
+      label: {
+        label: "Libellé"
+      },
+      object: {
+        label: "Objet"
+      },
+      sharedWith: {
+        label: "Partagé avec"
+      },
+      accessLevel: {
+        label: "Niveau d’accès"
+      }
+    }
   },
   queue: {
     label: "File d’attente",
-    description: "Un groupe nommé de personnes dans lequel des enregistrements peuvent attendre jusqu’à ce que l’une d’elles prenne l’enregistrement ; les organisations y affectent leurs propres membres dans Configuration"
+    description: "Un groupe nommé de personnes dans lequel des enregistrements peuvent attendre jusqu’à ce que l’une d’elles prenne l’enregistrement ; les organisations y affectent leurs propres membres dans Configuration",
+    fields: {
+      name: {
+        label: "Nom"
+      },
+      label: {
+        label: "Libellé"
+      },
+      members: {
+        label: "Membres"
+      },
+      description: {
+        label: "Description"
+      }
+    }
   },
   assignment_rule: {
     label: "Règle d’attribution",
-    description: "Une règle qu’un package déclare pour acheminer les nouveaux enregistrements vers une file d’attente ou une personne"
+    description: "Une règle qu’un package déclare pour acheminer les nouveaux enregistrements vers une file d’attente ou une personne",
+    fields: {
+      name: {
+        label: "Nom"
+      },
+      label: {
+        label: "Libellé"
+      },
+      object: {
+        label: "Objet"
+      },
+      entries: {
+        label: "Entrées"
+      },
+      active: {
+        label: "Actif"
+      },
+      description: {
+        label: "Description"
+      }
+    }
   },
   agent: {
     label: "Agent IA",
@@ -2831,6 +3039,9 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       guardrails: {
         label: "Garde-fous",
         helpText: "Règles de sécurité et politiques de contenu"
+      },
+      "model.model": {
+        label: "Modèle"
       }
     }
   },
