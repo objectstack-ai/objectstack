@@ -1385,7 +1385,6 @@ const STUDIO_EN: Record<string, string> = {
   'engine.edit.detail': 'Detail',
   'engine.edit.preview': 'Preview',
   'engine.edit.designer': 'Designer',
-  'engine.edit.related': 'Related',
   'engine.edit.hideInspector': 'Hide inspector',
   'engine.edit.showInspector': 'Show inspector',
   'engine.edit.noChanges': 'No changes to save',

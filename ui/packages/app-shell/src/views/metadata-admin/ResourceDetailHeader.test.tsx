@@ -74,13 +74,14 @@ const location = () => screen.getByTestId('location').textContent;
 describe('detail addresses (pure)', () => {
   it('× keeps the list context and the scope, and drops what belongs to the item', () => {
     const search = new URLSearchParams('package=crm&q=tr&sort=-label&tab=history&member=fr&review=1&open=view:a&sel=nav:x');
-    expect(detailListHref(search)).toBe('..?package=crm&q=tr&sort=-label');
+    expect(detailListHref('/studio/crm/metadata/skill/triage', search)).toBe('/studio/crm/metadata/skill?package=crm&q=tr&sort=-label');
   });
 
   it('‹ › keep the list context, the scope and the open tab, and drop the member', () => {
     const search = new URLSearchParams('package=crm&q=tr&member=fr&tab=details');
-    expect(detailSiblingHref(search, 'next one', 'history')).toBe('../next%20one?package=crm&q=tr&tab=history');
-    expect(detailSiblingHref(search, 'n', null)).toBe('../n?package=crm&q=tr');
+    const at = '/studio/crm/metadata/skill/triage';
+    expect(detailSiblingHref(at, search, 'next one', 'history')).toBe('/studio/crm/metadata/skill/next%20one?package=crm&q=tr&tab=history');
+    expect(detailSiblingHref(`${at}/`, search, 'n', null)).toBe('/studio/crm/metadata/skill/n?package=crm&q=tr');
   });
 });
 

@@ -26,7 +26,7 @@
  */
 
 import * as React from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { StudioDetailHeader, type StudioDetailHeaderProps } from '../studio-detail/StudioDetailHeader.js';
 import { BUNDLE_MEMBER_PARAM } from './registry.js';
 import { useListOrderedNames } from './useListOrderedNames.js';
@@ -53,16 +53,28 @@ export function detailListSearch(search: URLSearchParams): URLSearchParams {
   return next;
 }
 
-/** Where × goes, relative to the item's path: one segment up, with {@link detailListSearch}. */
-export function detailListHref(search: URLSearchParams): string {
-  return withQuery('..', detailListSearch(search));
+/** The item path's parent: the type's list. Read from the address, never from the route, so a host's route shape does not matter. */
+function parentPath(pathname: string): string {
+  const trimmed = pathname.replace(/\/+$/, '');
+  return trimmed.slice(0, trimmed.lastIndexOf('/')) || '/';
 }
 
-/** Where ‹ › go, relative to the item's path: the sibling `name`, with the list context and the open tab. */
-export function detailSiblingHref(search: URLSearchParams, name: string, tabAddress: string | null): string {
+/** Where × goes from the item at `pathname`: one segment up, with {@link detailListSearch}. */
+export function detailListHref(pathname: string, search: URLSearchParams): string {
+  return withQuery(parentPath(pathname), detailListSearch(search));
+}
+
+/** Where ‹ › go from the item at `pathname`: the sibling `name`, with the list context and the open tab. */
+export function detailSiblingHref(
+  pathname: string,
+  search: URLSearchParams,
+  name: string,
+  tabAddress: string | null,
+): string {
   const next = detailListSearch(search);
   if (tabAddress) next.set(ITEM_TOOL_TAB_PARAM, tabAddress);
-  return withQuery(`../${encodeURIComponent(name)}`, next);
+  const parent = parentPath(pathname);
+  return withQuery(`${parent === '/' ? '' : parent}/${encodeURIComponent(name)}`, next);
 }
 
 export interface ResourceDetailHeaderProps
@@ -82,11 +94,12 @@ export function ResourceDetailHeader({ pager = true, ...props }: ResourceDetailH
 
 function useAddressNavigation(name: string, tabAddress: string | null | undefined) {
   const navigate = useNavigate();
+  const { pathname } = useLocation();
   const [searchParams] = useSearchParams();
   return {
-    close: () => navigate(detailListHref(searchParams), { relative: 'path' }),
+    close: () => navigate(detailListHref(pathname, searchParams)),
     open: (next: string) => {
-      if (next !== name) navigate(detailSiblingHref(searchParams, next, tabAddress ?? null), { relative: 'path' });
+      if (next !== name) navigate(detailSiblingHref(pathname, searchParams, next, tabAddress ?? null));
     },
   };
 }

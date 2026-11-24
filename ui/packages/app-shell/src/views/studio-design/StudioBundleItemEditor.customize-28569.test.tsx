@@ -40,7 +40,7 @@ import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, useLocation } from 'react-router-dom';
 
 const BASE = 'com.example.hotcrm';
 const PAIR = 'com.example.hotcrm.custom';
@@ -391,6 +391,37 @@ describe('a writable package (objectstack#28569)', () => {
     expect(srv.ensure).toEqual([]);
     expect(await screen.findByTestId('studio-bundle-editor-status')).toHaveTextContent('Unpublished draft');
   });
+
+  it('objectstack#36901 — under the detail header the tabs share the one buffer, and × returns to the list', async () => {
+    function Where() {
+      const { pathname, search } = useLocation();
+      return <output data-testid="where">{pathname + search}</output>;
+    }
+    render(
+      <MemoryRouter initialEntries={[`/studio/${WRITABLE}/metadata/email_template/welcome?package=${WRITABLE}&member=zh-CN`]}>
+        <Host type="email_template" name="welcome" member="zh-CN" packageId={WRITABLE} />
+        <Where />
+      </MemoryRouter>,
+    );
+    const subject = await field('Subject');
+    expect(screen.getByTestId('studio-bundle-editor-header')).toBeInTheDocument();
+    // A form editor has no canvas tab: its preview is drawn beside the form.
+    expect(screen.queryByTestId('item-tab-preview')).toBeNull();
+    fireEvent.change(subject, { target: { value: '欢迎！' } });
+
+    fireEvent.click(screen.getByTestId('item-tab-source'));
+    const source = await screen.findByRole('textbox', { name: 'JSON source' }, { timeout: 8000 });
+    expect((source as HTMLTextAreaElement).value).toContain('欢迎！');
+    fireEvent.click(screen.getByTestId('item-tab-details'));
+    expect(await field('Subject')).toHaveValue('欢迎！');
+
+    // × waits for the edit to be kept (the leave guard), then opens the list,
+    // the member left behind.
+    await waitFor(() => expect(srv.saves).toHaveLength(1), { timeout: 5000 });
+    await waitFor(() => expect(screen.getByTestId('studio-bundle-editor-status')).toHaveTextContent('Unpublished draft'));
+    fireEvent.click(screen.getByTestId('studio-detail-close'));
+    expect(screen.getByTestId('where').textContent).toBe(`/studio/${WRITABLE}/metadata/email_template?package=${WRITABLE}`);
+  }, 20000);
 });
 
 describe('Customize a read-only base’s email template, one locale (objectstack#28569)', () => {

@@ -1226,7 +1226,6 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.edit.detail': '详情',
   'engine.edit.preview': '预览',
   'engine.edit.designer': '可视化编辑器',
-  'engine.edit.related': '关联',
   'engine.edit.hideInspector': '隐藏属性面板',
   'engine.edit.showInspector': '显示属性面板',
   'engine.edit.noChanges': '没有需要保存的更改',
