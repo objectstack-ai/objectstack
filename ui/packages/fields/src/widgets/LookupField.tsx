@@ -2011,9 +2011,9 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
   // The candidate panel: the popover's body, the phone drawer's body, or the
   // list cell's editor itself.
   //
-  // In the popover and the drawer the search row is pinned at the top, the options scroll in
-  // the middle, and "show all results" and quick-create sit in a footer pinned
-  // under the list (objectstack#36825). Inside the room Radix reports the list
+  // In the popover and the drawer the search row is pinned at the top, the
+  // options scroll in the middle, and "show all results" and quick-create sit
+  // in a footer pinned under the list (objectstack#36825). Inside the room Radix reports the list
   // is what gives way, so they stay whole and clickable whatever its length,
   // on either side the popover opens to. The footer reads the same `canCreate`
   // as the empty state's create button, and is not drawn when it would hold
