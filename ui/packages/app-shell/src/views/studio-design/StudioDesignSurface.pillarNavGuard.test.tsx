@@ -43,7 +43,7 @@ import '@testing-library/jest-dom/vitest';
 // The source under test reaches these through dynamic imports: their first load is paid at collection.
 import '@objectstack/lint';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 
 let clientImpl: any;
