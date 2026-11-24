@@ -1,5 +1,6 @@
 ---
 '@object-ui/auth': patch
+'@object-ui/plugin-grid': patch
 ---
 
 fix(auth): signing out keeps the list layout for the same person; a change of user still clears it
