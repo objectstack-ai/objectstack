@@ -383,6 +383,8 @@ export function usePairObjectActions(
     setSaving(true);
     setError(null);
     const refusals: string[] = [];
+    // The author chose to reload over a conflict: nothing of that row was saved.
+    let reloaded = false;
     try {
       let pair: string;
       try {
@@ -420,6 +422,7 @@ export function usePairObjectActions(
           } else if (
             (await saveGuarded('action', name, row.body, { mode: 'draft', packageId: pair, surface: 'studio' })) === 'reloaded'
           ) {
+            reloaded = true;
             setEdited(new Set());
             continue;
           }
@@ -428,6 +431,7 @@ export function usePairObjectActions(
           const outcome = await publishSavedItem(client, { type: 'action', name, packageId: pair }, row.draft, publishGuarded);
           // The published action moved and the author chose to reload: the pair's read installs it.
           if (!outcome.ok && 'reloaded' in outcome) {
+            reloaded = true;
             setEdited(new Set());
             if (isNew) {
               setCreated((prev) => {
@@ -481,7 +485,7 @@ export function usePairObjectActions(
       setError(reason);
       return { kind: 'refused', reason };
     }
-    return { kind: 'saved' };
+    return reloaded ? { kind: 'declined' } : { kind: 'saved' };
   }, [client, created, edited, removed, pairForWrite, saveGuarded, publishGuarded, recordRead, recordPublished, reload]);
 
   const cancel = React.useCallback(() => {
