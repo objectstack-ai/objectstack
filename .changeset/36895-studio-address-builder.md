@@ -8,7 +8,7 @@
 
 refactor(studio): every Studio address comes from one builder; no address changes
 
-Clause-②: no
+Clause-②: yes (widening)
 Metadata-protocol: none
 
 Studio redesign groundwork (#36895, epic #36890). Every place that produced a `/studio...` URL now calls one builder, so a later change can move an item type to its metadata address in one place. Every address is byte-for-byte what it was: no link, bookmark or redirect changes.

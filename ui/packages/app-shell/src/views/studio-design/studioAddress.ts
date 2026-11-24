@@ -140,6 +140,10 @@ export interface StudioPathOptions {
  * in its URL form (`object/account`), then the query and the fragment. Every
  * part is optional from the right; a part after an absent one is not allowed
  * (a section names nothing without its scope).
+ *
+ * An empty segment counts as absent and drops the section and rest with it, so
+ * `studioHomePath('')` is `/studio`, not `/studio//data`. Callers guard a
+ * missing package themselves; the builder does not stand in for that check.
  */
 export function studioPath(
   segment?: string | null,
