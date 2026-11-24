@@ -4297,7 +4297,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the size refusal: a 422 the platform answered is not a route that never existed': 53,
   'the two positions: a declaration renders as bare digits, and the patrol reads digits': 24,
   'the shared rule: this tool and H56 cannot come to disagree': 6,
-  'the keyed lines: a claim\'s exact-value fields, judged by the readers that own them': 30,
+  'the keyed lines: a claim\'s exact-value fields, judged by the readers that own them': 35,
   'the record line: a `## Contract review` record\'s `Head-sha:` and `Local-runs:` lines, judged when present — an absent line is not re-judged': 18,
   'the vacant body: a VACANT seat post\'s ledger holds pointers, never obligations': 27,
   'the decision facets: a decision analysis carries its marker, and a delta, a record or a quotation is not one': 22,
