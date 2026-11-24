@@ -264,7 +264,7 @@ describe.each(CASES)('Data pillar on an object with $title (objectui#11780)', ({
   it('Form preview: the injected-and-hidden fields are not form fields; the author fields are', async () => {
     renderPillar();
     await waitFor(() => expect(screen.getByTestId('grid-columns')).toBeInTheDocument(), { timeout: 4000 });
-    fireEvent.click(screen.getByRole('button', { name: 'Form' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Field layout' }));
     fireEvent.click(screen.getByRole('button', { name: 'Preview' }));
     await waitFor(() => expect(screen.getByTestId('form-fields')).toBeInTheDocument(), { timeout: 4000 });
 
@@ -277,7 +277,7 @@ describe.each(CASES)('Data pillar on an object with $title (objectui#11780)', ({
   it('form designer: no card for the injected-and-hidden fields; the author fields have one', async () => {
     renderPillar();
     await waitFor(() => expect(screen.getByTestId('grid-columns')).toBeInTheDocument(), { timeout: 4000 });
-    fireEvent.click(screen.getByRole('button', { name: 'Form' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Field layout' }));
     await waitFor(() => expect(screen.getByText('Account Name')).toBeInTheDocument(), { timeout: 4000 });
 
     for (const label of AUTHOR_VISIBLE_LABELS) expect(screen.getByText(label)).toBeInTheDocument();
@@ -288,7 +288,7 @@ describe.each(CASES)('Data pillar on an object with $title (objectui#11780)', ({
   it('write-back: a designer drop saves `fields` that still carry every hidden system field, definition unchanged', async () => {
     renderPillar();
     await waitFor(() => expect(screen.getByTestId('grid-columns')).toBeInTheDocument(), { timeout: 4000 });
-    fireEvent.click(screen.getByRole('button', { name: 'Form' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Field layout' }));
     await waitFor(() => expect(screen.getByText('Account Name')).toBeInTheDocument(), { timeout: 4000 });
     expect(dnd.onDragEnd).not.toBeNull();
 

@@ -68,6 +68,8 @@ vi.mock('@object-ui/react', async (importOriginal) => {
   return { ...mod, useAdapter: () => dataSource };
 });
 
+// The source reaches a dynamic `import('@objectstack/lint')`: its first load is paid at collection (`check:test-source-alias`).
+import '@objectstack/lint';
 import { DataPillar } from '../../studio-design/StudioDesignSurface';
 import { createEmptyDataSource, failOnAbsorbedFetchError } from '../../studio-design/__tests__/emptyDataSource';
 import { getMetadataInspector, listMetadataInspectorTypes } from '../inspector-registry';
@@ -93,7 +95,7 @@ describe('Data pillar field rail — the built-in designers arrive after it rend
         <DataPillar packageId="com.example.showcase" />
       </MemoryRouter>,
     );
-    fireEvent.click(await screen.findByRole('button', { name: 'Form' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Field layout' }));
     const card = (await screen.findByText('Title')).closest('.cursor-grab') as HTMLElement;
     expect(card).toBeTruthy();
     fireEvent.click(card);

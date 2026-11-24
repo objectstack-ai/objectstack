@@ -10,8 +10,14 @@
  * Every arrangement editor of an installed object is a caller of this one
  * writer, never a second writer: the record page's 「Configure tabs」 hands it
  * `relatedLists` (objectstack#36499); the design mode's 「Header buttons」
- * hands it `actionLayout` (objectstack#36366); a field-layout editor hands it
- * `fieldGroups` the same way.
+ * hands it `actionLayout` (objectstack#36366). One editor composes with
+ * {@link extensionWithArrangement} instead of calling the save: Studio's
+ * 「字段布局」 tab (objectstack#36505) edits `fieldGroups` inside the Data
+ * pillar's buffer of this same extension document, which already holds the
+ * object's `__c` fields and field patches and is saved, pinned and published
+ * by the pillar's extension Save. A save of its own would be a second writer
+ * of that buffered document: refused while the buffer's draft is pending, and
+ * overwritten by the buffer's next save once it lands.
  *
  * - Where: the pair the ensure door answers for the object's package
  *   (`ensureCustomizationPackage`, which creates it on first use and names
