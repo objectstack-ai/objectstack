@@ -2190,7 +2190,8 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "레이블"
       },
       description: {
-        label: "설명"
+        label: "설명",
+        helpText: "One sentence on what this report shows, displayed under its name."
       },
       type: {
         label: "유형",
@@ -2272,9 +2273,33 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "날짜 범위",
         helpText: "기본 기간과 사용자 지정 범위 전환입니다. 차원은 데이터 세트의 날짜 차원이어야 하며, 데이터 세트에 날짜 차원이 정확히 하나이면 비워 두세요."
       },
+      "dateRange.dimension": {
+        label: "Date Field",
+        helpText: "The date grouping of the data source the period applies to. Leave it empty when the data source has only one."
+      },
+      "dateRange.defaultRange": {
+        label: "Default Period",
+        helpText: "The period the report opens with."
+      },
+      "dateRange.allowCustomRange": {
+        label: "Allow Custom Range",
+        helpText: "Let people pick their own start and end dates."
+      },
       exportOptions: {
         label: "내보내기 옵션",
         helpText: "다운로드 형식(csv, xlsx)과 파일 이름입니다. 다운로드할 수 있는 사람은 데이터 세트 객체의 내보내기 권한이 결정합니다."
+      },
+      "exportOptions.formats": {
+        label: "Formats",
+        helpText: "The download formats offered. Left unset, both csv and xlsx are offered; an empty list turns downloads off."
+      },
+      "exportOptions.includeHeaders": {
+        label: "Include Headers",
+        helpText: "Put the column names in the first row of the downloaded file."
+      },
+      "exportOptions.fileNamePrefix": {
+        label: "File Name",
+        helpText: "The start of the downloaded file’s name, used instead of the report name."
       }
     }
   },
