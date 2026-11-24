@@ -117,3 +117,49 @@ describe('loadLanguage brings the declared fallback chain (objectstack#36809)', 
     expect(resources).toHaveProperty('app.flows');
   });
 });
+
+describe('the language is negotiated against the server locales first (objectstack#36809)', () => {
+  // The server negotiates a request's tag against the locales it holds before
+  // it resolves (`negotiatedTranslationLocale`, `@objectstack/rest`), so an
+  // alias of the authored locale is the authored request and walks no chain.
+  const ALIAS_LOCALES = [{ code: 'zh-CN', label: 'zh-CN', isDefault: true }, { code: 'en', label: 'en', isDefault: false }];
+
+  it.each(['zh-Hans', 'zh'])('a %s console on a zh-CN-authored stack with fallback en shows the authored Chinese, as the server does', async (lang) => {
+    const asked = serve({ locales: ALIAS_LOCALES, sourceLocale: 'zh-CN', fallbackChain: ['en'] }, { [lang]: ZH, en: EN });
+    const { resources, instance } = await loaded(lang);
+    expect(asked.some((url) => url.endsWith('/translations/en'))).toBe(false);
+    expect(resources).not.toHaveProperty(DECLARED_FLOWS_FALLBACK_KEY);
+
+    // The server: the request negotiated to zh-CN, the source locale, so its
+    // own bundle and then the authored label answer.
+    const serverBundle = { 'zh-CN': ZH, en: EN } as unknown as TranslationBundle;
+    const server = translateFlow<{ name: string; label?: string }>(
+      { name: FLOW, label: '交易审核 (authored)' },
+      serverBundle,
+      { locale: 'zh-CN', fallbackChain: ['en'], defaultLocale: 'zh-CN' },
+    ).label;
+    expect(server).toBe('交易审核 (authored)');
+
+    const options = flowsResolveOptions(instance, lang);
+    const consoleLabel = translateFlow<{ name: string; label?: string }>(
+      { name: FLOW, label: '交易审核 (authored)' },
+      activeFlowsBundle(instance, lang, FLOW),
+      options,
+    ).label;
+    expect(consoleLabel).toBe(server);
+  });
+
+  it('a ja console on a stack holding ja-JP resolves as ja-JP and still reads the fallback', async () => {
+    const asked = serve(
+      { locales: [...LOCALES.filter((l) => l.code !== 'ja-JP'), { code: 'ja-JP', label: 'ja-JP', isDefault: false }], sourceLocale: 'zh-CN', fallbackChain: ['en'] },
+      { ja: ZH, en: EN },
+    );
+    const { instance } = await loaded('ja');
+    expect(asked.some((url) => url.endsWith('/translations/en'))).toBe(true);
+    const options = flowsResolveOptions(instance, 'ja');
+    expect(options).toEqual({ locale: 'ja-JP', fallbackChain: ['en'], defaultLocale: 'zh-CN' });
+    const t = flowLabelTranslations(activeFlowsBundle(instance, 'ja', FLOW), FLOW, 'ja', options);
+    expect(t?.flowLabel).toBe('Deal review');
+    expect(t?.stepLabel({ id: 'score_deal', type: 'script' })).toBe('评分');
+  });
+});

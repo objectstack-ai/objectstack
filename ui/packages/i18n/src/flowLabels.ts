@@ -73,7 +73,8 @@ export interface FlowLabelTranslations {
  * resolution path, and an approval step's label through the spec's
  * `resolveFlowApprovalStepLabel`, the server's; both are asked with the same
  * options: `{ locale: language }` plus the server's declared `fallbackChain`
- * and `defaultLocale` when `declared` carries them ({@link flowsResolveOptions},
+ * and `defaultLocale` (and the negotiated `locale`) when `declared` carries
+ * them ({@link flowsResolveOptions},
  * objectstack#36809), so a label the active language lacks reads the declared
  * fallback locale's text before the authored one, as on the server. Any other
  * step label is the spec-typed address of the node's name (see the module
@@ -84,10 +85,12 @@ export function flowLabelTranslations(
   bundle: TranslationBundle | undefined,
   flowName: string,
   language: string,
-  declared?: Pick<ResolveOptions, 'fallbackChain' | 'defaultLocale'>,
+  declared?: Pick<ResolveOptions, 'locale' | 'fallbackChain' | 'defaultLocale'>,
 ): FlowLabelTranslations | undefined {
   if (!bundle || !flowName) return undefined;
-  const resolveOptions: ResolveOptions = { ...declared, locale: language };
+  // `declared.locale` is the language as the server negotiated it, when the
+  // loader recorded one (`flowsResolveOptions`); else `language` as it is.
+  const resolveOptions: ResolveOptions = { ...declared, locale: declared?.locale ?? language };
   const flowLabel = translateFlow<{ name: string; label?: string }>({ name: flowName }, bundle, resolveOptions).label;
   // The `nodes` and `screens` reads walk the locales the resolvers above walk
   // (`flowsLocaleChain`), each tag matched by the spec's one locale ladder

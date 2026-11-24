@@ -217,7 +217,9 @@ Where the Console resolves a string itself (the `flows` group below), it walks
 the same chain. `GET /api/v1/i18n/locales` names the declared chain as
 `fallbackChain` (absent when the stack declares none) beside `sourceLocale`,
 and the Console loads each fallback locale's `flows` group with the active
-locale's bundle. A flow label the active locale lacks then reads the fallback
+locale's bundle. It first matches its own language against the locales that
+answer lists, as the server matches a request's locale, so a `zh-Hans` Console
+on a stack authored in `zh-CN` reads the authored Chinese and walks no chain. A flow label the active locale lacks then reads the fallback
 locale's text before the authored one, as the server's own reads do; with no
 declared chain it reads the active locale, then the authored label.
 

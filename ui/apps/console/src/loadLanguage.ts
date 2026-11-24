@@ -20,11 +20,15 @@
  *
  * The server resolves translated metadata through the deployment's declared
  * fallback chain: the requested locale, then each fallback, then the authored
- * text. `GET /api/v1/i18n/locales` names that chain (`fallbackChain`) and the
- * authored language (`sourceLocale`). The loader reads both beside the bundle
- * and, unless `lang` is the authored language (the server walks no chain
- * then), fetches each fallback locale's bundle too, keeping its `flows`
- * group. It lays them beside the app namespace
+ * text. `GET /api/v1/i18n/locales` names that chain (`fallbackChain`), the
+ * authored language (`sourceLocale`) and the locales the server holds
+ * (`locales[].code`). The loader reads them beside the bundle and first
+ * negotiates `lang` against those codes, as the server negotiates a request's
+ * tag before it resolves (`resolveLocaleAmong(lang, codes) ?? lang`;
+ * `negotiatedTranslationLocale` in `@objectstack/rest`): a `zh-Hans` or `zh`
+ * console on a stack holding `zh-CN` is the `zh-CN` request. Unless that
+ * negotiated language is the authored one (the server walks no chain then),
+ * it fetches each fallback locale's bundle too, keeping its `flows` group. It lays them beside the app namespace
  * (`withDeclaredFlowsFallback`, `@object-ui/i18n`), where the flow-label
  * readers find them, so a flow label `lang` does not carry reads the fallback
  * locale's text, as the server's own reads do. A server that declares no chain
@@ -38,6 +42,7 @@ import {
   type DeclaredFlowsFallback,
   type FlowsTranslation,
 } from '@object-ui/i18n';
+import { resolveLocaleAmong } from '@objectstack/spec/system';
 import { i18nFetch, whenSessionAnswered } from './i18nSession';
 
 const serverUrl = () => import.meta.env.VITE_SERVER_URL || '';
@@ -56,11 +61,19 @@ async function fetchTranslations(lang: string): Promise<Record<string, unknown> 
   return json;
 }
 
+interface DeclaredChain {
+  fallbackChain: string[];
+  sourceLocale?: string;
+  /** `locales[].code`: what the server negotiates a request's tag against. */
+  codes: string[];
+}
+
 /**
- * The declared chain and authored language off `GET /api/v1/i18n/locales`,
- * or `null` when the server declares no chain or the read fails.
+ * The declared chain, authored language and held locales off
+ * `GET /api/v1/i18n/locales`, or `null` when the server declares no chain or
+ * the read fails.
  */
-async function fetchDeclaredChain(): Promise<{ fallbackChain: string[]; sourceLocale?: string } | null> {
+async function fetchDeclaredChain(): Promise<DeclaredChain | null> {
   try {
     const res = await i18nFetch(`${serverUrl()}/api/v1/i18n/locales`);
     if (!res.ok) return null;
@@ -70,7 +83,11 @@ async function fetchDeclaredChain(): Promise<{ fallbackChain: string[]; sourceLo
     const fallbackChain = chain.filter((code): code is string => typeof code === 'string' && code.length > 0);
     if (fallbackChain.length === 0) return null;
     const sourceLocale = typeof body?.sourceLocale === 'string' && body.sourceLocale ? body.sourceLocale : undefined;
-    return { fallbackChain, sourceLocale };
+    const descriptors: unknown[] = Array.isArray(body?.locales) ? body.locales : [];
+    const codes = descriptors
+      .map((d) => (d && typeof d === 'object' ? (d as { code?: unknown }).code : undefined))
+      .filter((code): code is string => typeof code === 'string' && code.length > 0);
+    return { fallbackChain, sourceLocale, codes };
   } catch {
     return null;
   }
@@ -80,19 +97,21 @@ const sameTag = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 
 /**
  * The fallback locales' `flows` groups for `lang`, or `undefined` when there
- * is nothing to lay beside its bundle: no declared chain, or `lang` is the
- * authored language (the resolvers walk no chain for it).
+ * is nothing to lay beside its bundle: no declared chain, or `lang`,
+ * negotiated against the server's locales, is the authored language (the
+ * resolvers walk no chain for it).
  */
 async function declaredFlowsFallback(
   lang: string,
-  declared: { fallbackChain: string[]; sourceLocale?: string } | null,
+  declared: DeclaredChain | null,
 ): Promise<DeclaredFlowsFallback | undefined> {
   if (!declared) return undefined;
-  if (declared.sourceLocale && sameTag(lang, declared.sourceLocale)) return undefined;
+  const locale = resolveLocaleAmong(lang, declared.codes) ?? lang;
+  if (declared.sourceLocale && sameTag(locale, declared.sourceLocale)) return undefined;
   const bundles: DeclaredFlowsFallback['bundles'] = {};
   await Promise.all(
     declared.fallbackChain
-      .filter((code) => !sameTag(code, lang))
+      .filter((code) => !sameTag(code, locale))
       .map(async (code) => {
         try {
           const translations = await fetchTranslations(code);
@@ -104,6 +123,7 @@ async function declaredFlowsFallback(
       }),
   );
   return {
+    locale,
     fallbackChain: declared.fallbackChain,
     ...(declared.sourceLocale ? { defaultLocale: declared.sourceLocale } : {}),
     bundles,

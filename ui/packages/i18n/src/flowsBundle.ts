@@ -56,6 +56,14 @@ export const DECLARED_FLOWS_FALLBACK_KEY = '__declaredFlowsFallback';
 
 /** What a language's tree holds under {@link DECLARED_FLOWS_FALLBACK_KEY}. */
 export interface DeclaredFlowsFallback {
+  /**
+   * The active language NEGOTIATED against `GET /i18n/locales` `locales[].code`
+   * (`resolveLocaleAmong(language, codes) ?? language`), the tag the server
+   * hands the resolvers (`negotiatedTranslationLocale`, `@objectstack/rest`):
+   * a `zh-Hans` console on a stack holding `zh-CN` resolves as `zh-CN`.
+   * Absent: the active language as it is.
+   */
+  locale?: string;
   /** `GET /i18n/locales` `fallbackChain`: the locales the server consults after the requested one. */
   fallbackChain: string[];
   /** `GET /i18n/locales` `sourceLocale`: the authored language, the resolvers' `defaultLocale`. */
@@ -89,6 +97,7 @@ function readDeclared(tree: Record<string, unknown> | undefined): DeclaredFlowsF
   const fallbackChain = entry.fallbackChain.filter((code): code is string => typeof code === 'string' && code.length > 0);
   if (fallbackChain.length === 0) return undefined;
   return {
+    locale: typeof entry.locale === 'string' && entry.locale ? entry.locale : undefined,
     fallbackChain,
     defaultLocale: typeof entry.defaultLocale === 'string' && entry.defaultLocale ? entry.defaultLocale : undefined,
     bundles: entry.bundles && typeof entry.bundles === 'object' ? entry.bundles : {},
@@ -100,17 +109,20 @@ const sameTag = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 /**
  * The spec `ResolveOptions` the flow-label readers hand the resolvers in
  * `language`: `{ locale: language }`, plus the server's declared
- * `fallbackChain` and `defaultLocale` when the loaded tree carries them. The
- * server's metadata translations pass the same three
- * (`metaTranslateOptions`, `@objectstack/rest`), so the console and the server
- * walk the same locales. With no declared chain the answer is
- * `{ locale: language }`: the requested locale, then the authored copy.
+ * `fallbackChain` and `defaultLocale` when the loaded tree carries them, with
+ * `locale` the language as the server negotiated it against its own locales
+ * ({@link DeclaredFlowsFallback.locale}). The server's metadata translations
+ * pass the same three (`metaTranslateOptions`, `@objectstack/rest`), so the
+ * console and the server walk the same locales, and an alias of the authored
+ * locale (`zh-Hans` for `zh-CN`) walks no chain on either side. With no
+ * declared chain the answer is `{ locale: language }`: the requested locale,
+ * then the authored copy.
  */
 export function flowsResolveOptions(i18n: TranslationResourceReader | undefined, language: string): ResolveOptions {
   const declared = readDeclared(readTree(i18n, language));
   if (!declared) return { locale: language };
   return {
-    locale: language,
+    locale: declared.locale ?? language,
     fallbackChain: declared.fallbackChain,
     ...(declared.defaultLocale ? { defaultLocale: declared.defaultLocale } : {}),
   };
@@ -143,7 +155,9 @@ export function flowsLocaleChain(options: ResolveOptions): string[] {
  * The active language's row comes from the app namespace at the top of its
  * resource tree (`app` for a spec payload, whatever the payload named for an
  * already-namespaced one): the first namespace whose `flows` group addresses
- * this flow. When the server declares a fallback chain (`GET /i18n/locales`
+ * this flow, keyed by the language as the server negotiated it when the loader
+ * recorded one ({@link DeclaredFlowsFallback.locale}), else by `language`.
+ * When the server declares a fallback chain (`GET /i18n/locales`
  * `fallbackChain`, objectstack#36809), each fallback locale whose `flows`
  * group addresses this flow adds its own row, keyed by the locale as the
  * chain names it, out of the entry the console's loader laid beside the tree
@@ -164,17 +178,20 @@ export function activeFlowsBundle(
   const tree = readTree(i18n, language);
   if (!tree) return undefined;
   const bundle: TranslationBundle = {};
+  const declared = readDeclared(tree);
+  // The active row is keyed by the tag the resolvers are asked for
+  // (`flowsResolveOptions`): the negotiated one when the server declared a chain.
+  const active = declared?.locale ?? language;
   for (const [key, namespace] of Object.entries(tree)) {
     if (key === DECLARED_FLOWS_FALLBACK_KEY) continue;
     const flows = (namespace as { flows?: unknown } | null)?.flows;
     if (flows && typeof flows === 'object' && (flows as Record<string, unknown>)[flowName]) {
-      bundle[language] = { flows: flows as FlowsTranslation };
+      bundle[active] = { flows: flows as FlowsTranslation };
       break;
     }
   }
-  const declared = readDeclared(tree);
   for (const code of declared?.fallbackChain ?? []) {
-    if (sameTag(code, language) || bundle[code]) continue;
+    if (sameTag(code, active) || bundle[code]) continue;
     const flows = declared?.bundles[code]?.flows;
     if (flows && typeof flows === 'object' && flows[flowName]) bundle[code] = { flows };
   }

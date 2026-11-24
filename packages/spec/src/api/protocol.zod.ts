@@ -4823,11 +4823,16 @@ export const GetLocalesRequestSchema = lazySchema(() => z.object({}));
  * service's `getFallbackLocale()` (the stack's `i18n.fallbackLocale`, else its
  * `defaultLocale`, as the boot collapses them), which the server's own
  * metadata translations already hand the spec resolvers as
- * `ResolveOptions.fallbackChain`. It is absent when the service declares no
- * fallback, and a client then resolves the requested locale alone, as the
- * server does. A client that resolves translated metadata itself (the
- * console's flow labels) reads it beside `sourceLocale` (the resolvers'
- * `defaultLocale`) so its answer and the server's walk the same locales.
+ * `ResolveOptions.fallbackChain`. It is absent when the i18n service reports
+ * no fallback (the file-backed service always reports one, collapsed from
+ * `fallbackLocale || defaultLocale || 'en'`), and a client then resolves the
+ * requested locale alone, as the server does. A client that resolves
+ * translated metadata itself (the console's flow labels) reads it beside
+ * `sourceLocale` (the resolvers' `defaultLocale`), after negotiating its
+ * request tag against `locales[].code` as the server negotiates a request's
+ * tag (`resolveLocaleAmong`), so its answer and the server's walk the same
+ * locales: a `zh-Hans` request on a deployment holding `zh-CN` is the
+ * `zh-CN` request, and walks no chain when `zh-CN` is the source locale.
  */
 export const GetLocalesResponseSchema = lazySchema(() => z.object({
   locales: z.array(z.object({
@@ -4843,8 +4848,9 @@ export const GetLocalesResponseSchema = lazySchema(() => z.object({
   ),
   fallbackChain: z.array(z.string()).optional().describe(
     'The locales the server consults, in order, after the requested one and before the authored text: the deployment\'s '
-    + 'declared fallback (`i18n.fallbackLocale`, else `defaultLocale`). Absent when the server declares none; the requested '
-    + 'locale alone is then consulted. Not walked for a request in `sourceLocale`',
+    + 'declared fallback (`i18n.fallbackLocale`, else `defaultLocale`). Absent when the i18n service reports none; the '
+    + 'requested locale alone is then consulted. A request tag is negotiated against `locales[].code` first, and the chain '
+    + 'is not walked for a request that negotiates to `sourceLocale`',
   ),
 }));
 
