@@ -3259,18 +3259,28 @@ export function disabledHoldersOnlyRefusal(
  * that base does, and every dependent's row stays where it is, read and
  * written at its own `?package=`.
  *
- * Asked only where those doors would refuse naming two or more packages, and
- * answered over the item's ACTIVE rows at `member`, as the read judges them:
+ * Asked where those doors would refuse naming two or more packages, and
+ * [#35524] by the save (publish and draft mode) and the draft doors'
+ * address ({@link packagelessRowHeldBaseDraftAddress}) where the rows are
+ * bound to one package; answered over the item's ACTIVE rows at `member`, as
+ * the read judges them:
  *
  *  - the base, when two or more packages hold a row there, none of them
  *    package-less (#33210: a package-less row beside them is a customization
  *    of no one holder, and the refusal stands), and one is the row-held base;
- *  - `undefined` otherwise, and the door refuses as before: a type with no
+ *  - [#35524] the base, when one dependent holds the only row there, at a
+ *    named non-canonical member the base holds no row of: the read takes the
+ *    base's address there (and answers 404 until the base holds a row), so
+ *    the bare save writes the base's row or draft, as the save naming the
+ *    base does, and the next bare read serves it. The canonical member stays
+ *    the dependent's, as the read serves it (#33210 contract review S1);
+ *  - `undefined` otherwise, and the door answers as before: a type with no
  *    members (#34441 contract review M1: no bundle additions), a name a
  *    package ships, holders with no base relation, a disabled holder (the
- *    served-holder judgment's), and a member the base holds no row of (the
- *    read takes the base's address there and answers 404; that cell is not
- *    moved here).
+ *    served-holder judgment's), and, of the one-holder cell, the base's own
+ *    row. The bare delete, history, diff and rollback ask only with two or
+ *    more holders, so at the one-holder cell they still act on the
+ *    dependent's row.
  *
  * FROM (`main` 8596c80eda): each of those doors refused `409
  * RESOURCE_CONFLICT` naming the base and the dependent while the read
@@ -3304,6 +3314,40 @@ export async function packagelessRowHeldBaseAddress(
     // holder: a dependent's addition the base holds no row of, where the read
     // takes the base's address (`rowHeldBaseAddressOf`'s S1-guarded arm).
     return address.candidates.includes(base) === address.candidates.length > 1 ? base : undefined;
+}
+
+/**
+ * [#35524, epic ruling 6781691009, #34348 ruling (b)] THE DRAFT ADDRESS the
+ * draft doors naming no package take (the draft save, the strict draft read,
+ * the per-item publish and the draft discard, through
+ * `packagelessDraftAddress`), at a named non-canonical member whose active
+ * rows are bound to one dependent only, where the read naming no package
+ * takes the row-held base's address ({@link packagelessRowHeldBaseAddress}):
+ * that base's draft, promoted into the base's row, as the same request naming
+ * the base addresses it. So the draft a bare draft save writes there is the
+ * draft the bare draft read, publish and discard act on, and the dependent's
+ * draft is read, published and discarded at its own `?package=`.
+ *
+ * `address` itself otherwise: an ambiguous address (the doors ask
+ * {@link packagelessRowHeldBaseAddress} for it themselves, #34681), an address
+ * not bound to a package by the active rows, and every cell that judgment
+ * declines.
+ *
+ * FROM (`main` a73edb3cd7): the bare draft save wrote the dependent's draft
+ * there and the bare publish promoted it into the dependent's row, while the
+ * bare read at the member answered 404 (the base's address).
+ */
+export async function packagelessRowHeldBaseDraftAddress(
+    host: Pick<ProtocolHost, 'declinesStoredRow' | 'engine' | 'packagelessAddress' | 'readItemActiveRows' | 'rethrowUnlessMetadataStoreUnprovisioned' | 'shippedArtifactsOf'>,
+    type: string,
+    name: string,
+    member: string | undefined,
+    address: Awaited<ReturnType<ProtocolHost['packagelessDraftAddress']>>,
+): Promise<Awaited<ReturnType<ProtocolHost['packagelessDraftAddress']>>> {
+    if (address.kind === 'ambiguous' || address.into === null) return address;
+    const base = await packagelessRowHeldBaseAddress(host, type, name, member);
+    if (base === undefined) return address;
+    return { kind: address.drafts.candidates.includes(base) ? 'draft' : 'none', key: base, into: base, drafts: address.drafts };
 }
 
 /**
