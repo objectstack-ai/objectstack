@@ -9,7 +9,7 @@ import { useObjectTranslation } from '@object-ui/i18n';
 import { useAgents } from '@object-ui/plugin-chatbot/core';
 import { useChatConversation } from '../../hooks/useChatConversation.js';
 import { chatConversationScope, chatProductOfAgent } from '../../hooks/chatScope.js';
-import { resolveSurfaceAgent } from '../../hooks/surfaceAgent.js';
+import { catalogServesBuild, resolveSurfaceAgent } from '../../hooks/surfaceAgent.js';
 import { ChatPane, resolveApiBase, type PendingFirstMessage } from '../../console/ai/AiChatPage.js';
 import { ConversationsSidebar } from '../../console/ai/ConversationsSidebar.js';
 import { resolvePublicShareBase } from '../../console/organizations/resolveHomeUrl.js';
@@ -236,8 +236,13 @@ export function StudioChatDock({
 
   // The catalog gate lives HERE: the slot asks it, and draws nothing of a
   // copilot the catalog does not serve (community edition / no seat).
+  // objectstack#36969 — the copilot is the build agent, so the gate is the
+  // build agent being served (alias-aware), not any agent: where in-app
+  // building is closed the catalog keeps `ask`, and a copilot resolving to it
+  // would offer building it cannot do. The slot then shows the properties
+  // alone, as it does for an empty catalog; ask stays in the console's drawer.
   const { agents, isLoading: agentsLoading } = useAgents({ apiBase });
-  const available = agentsLoading || agents.length > 0;
+  const available = agentsLoading || catalogServesBuild(agents);
   // objectui#11666 — read off the assistant bus the chat publishes to.
   const planPendingCount = usePlanApprovalPendingCount();
   const onStatusChangeRef = React.useRef(onStatusChange);

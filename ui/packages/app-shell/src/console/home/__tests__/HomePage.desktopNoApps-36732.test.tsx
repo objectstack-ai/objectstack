@@ -33,7 +33,7 @@ vi.mock('@object-ui/i18n', async (importOriginal) => ({
   useObjectLabel: () => ({ appLabel: (app: any) => String(app?.label ?? app?.name ?? '') }),
 }));
 
-const viewer = { isAdmin: true, canAuthor: true, aiEnabled: true };
+const viewer = { isAdmin: true, canAuthor: true, aiEnabled: true, buildServed: true };
 
 vi.mock('@object-ui/auth', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -75,7 +75,8 @@ vi.mock('../../../hooks/useHomeInbox', () => ({
 }));
 vi.mock('../../../hooks/useAiSurface', () => ({
   resolveAiApiBase: () => '',
-  useAiSurfaceEnabled: () => ({ enabled: viewer.aiEnabled, loading: false }),
+  // objectstack#36969 — the AI door reads whether the catalog serves `build`.
+  useAiSurfaceEnabled: () => ({ enabled: viewer.aiEnabled, buildServed: viewer.aiEnabled && viewer.buildServed, loading: false }),
 }));
 vi.mock('../../../views/metadata-admin/useMetadata', () => ({
   useMetadataClient: () => ({ listDrafts: async () => [] }),
@@ -104,6 +105,7 @@ beforeEach(() => {
   viewer.isAdmin = true;
   viewer.canAuthor = true;
   viewer.aiEnabled = true;
+  viewer.buildServed = true;
   appsFixture = [SETUP, STUDIO];
   vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ drafts: [] }) })));
 });
@@ -132,6 +134,14 @@ describe('HomePage — the desktop no-apps empty state (objectstack#36732)', () 
     render(<HomePage />);
     expect(screen.queryByTestId('home-no-apps-build-with-ai')).not.toBeInTheDocument();
     expect(screen.getByTestId('home-no-apps-new-in-studio')).toBeInTheDocument();
+  });
+
+  it('opens Studio on a new package where in-app building is closed: agents served, build not (objectstack#36969)', () => {
+    viewer.buildServed = false;
+    render(<HomePage />);
+    expect(screen.queryByTestId('home-no-apps-build-with-ai')).not.toBeInTheDocument();
+    expect(screen.getByTestId('home-no-apps-new-in-studio')).toHaveAttribute('href', '/studio?new=package');
+    expect(screen.getByTestId('home-no-apps-template')).toBeInTheDocument();
   });
 
   it('tells an admin without manage_metadata why there is no door', () => {
