@@ -178,15 +178,19 @@ const TYPE_LABELS_ZH: Record<string, string> = {
   picklist: '选项列表',
 };
 
+// ADR-0084 (amended 2026-11-24) — the registered domains are Studio's six menu
+// groups, and `system` and `security` are drawn by the group names decision 11
+// gives them: Platform and Access. Every directory heading, chip and list badge
+// says the same word as the menu.
 const DOMAIN_LABELS_EN: Record<string, string> = {
   data: 'Data',
   ui: 'UI',
   automation: 'Automation',
   ai: 'AI',
-  system: 'System',
+  system: 'Platform',
   platform: 'Platform',
   identity: 'Identity',
-  security: 'Security',
+  security: 'Access',
   other: 'Other',
 };
 
@@ -195,10 +199,10 @@ const DOMAIN_LABELS_ZH: Record<string, string> = {
   ui: '界面',
   automation: '自动化',
   ai: 'AI',
-  system: '系统',
+  system: '平台',
   platform: '平台',
   identity: '身份',
-  security: '安全',
+  security: '访问',
   other: '其他',
 };
 
