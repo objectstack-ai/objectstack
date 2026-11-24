@@ -26,8 +26,10 @@
  *   (`CUBE_TO_MONGO_OP`, the inverse of the normaliser's own operator map), so
  *   no second list exists here. `$contains` / `$notContains` (membership) and
  *   the null predicates are absent from that set and keep answering.
- * - The words are `jsonColumnOperatorRefusalText`'s DIAGNOSTIC, which names the
- *   field and the operator and prescribes `$contains`. The filters this compiler
+ * - The words are `jsonColumnOperatorRefusalText`'s DIAGNOSTIC for the column's
+ *   class, which names the field and the operator and prescribes `$contains`
+ *   for a multi-value or JSON field ([#36190] and the media-column move for a
+ *   single-value media one, below). The filters this compiler
  *   compiles are the caller's `where` (the dataset door's `runtimeFilter`
  *   arrives merged into it), the dataset's own `filter` and its measures'
  *   `filter`s; the ObjectQL strategy marks those `'author'` before the engine,
@@ -114,7 +116,6 @@ export function whereComparisonColumnClass(
   target: { object: string; field: string },
 ): JsonColumnFieldClass | undefined {
   const shape = declaredValueShapeResolver(ctx, target.object)?.(target.field);
-  if (isJsonStoredShape(shape)) return 'multi-value-or-json';
   return comparisonColumnClass(shape, storedJsonColumnClass(ctx, target.object, target.field));
 }
 
@@ -131,7 +132,9 @@ export function jsonColumnRefusedSpelling(leafOperator: string): string | undefi
 /**
  * Throw `INVALID_FILTER` / 400 when `operator` (a normalised leaf operator) is
  * one the JSON-column refusal covers and the (object, field) the leaf binds
- * against is declared multi-valued or JSON-stored. Returns otherwise, having
+ * against is a JSON column ({@link whereComparisonColumnClass}: declared
+ * multi-valued or JSON-stored, or a single-value media column the storing
+ * driver keeps as JSON), in that class's words. Returns otherwise, having
  * bound nothing.
  */
 export function refuseWhereJsonColumnComparison(req: {
