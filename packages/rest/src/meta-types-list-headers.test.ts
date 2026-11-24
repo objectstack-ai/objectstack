@@ -12,6 +12,9 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+// The server's routes reach `import('@objectstack/objectql')`; pay its first
+// load at collection, never inside a clocked case.
+import '@objectstack/objectql';
 import { RestServer } from './rest-server.js';
 
 const LIST = () => ({
