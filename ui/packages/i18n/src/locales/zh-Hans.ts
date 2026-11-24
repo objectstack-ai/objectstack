@@ -1845,7 +1845,6 @@ const zh = {
       settings: '报表设置',
       pendingDraft: '这张报表有一份还没发布的修改。先在上方发布或丢弃它，再保存。',
       nameTaken: '由这个名称生成的标识都已被占用。请给报表换个名称再保存。',
-      addsToMenu: '保存后会建好这张报表，放进菜单里你占好的位置，并一并保存设计布局里的其他改动。',
       adminOnlyTitle: '只有系统管理员能搭建报表',
       adminOnly: '报表对工作区里所有人生效，所以由系统管理员搭建。',
       type: {
@@ -2484,6 +2483,7 @@ const zh = {
     },
     reportIndex: {
       title: '报表',
+      newReport: '新建报表',
       emptyTitle: '暂无报表',
       emptyDescription: '此应用没有你可以打开的报表。',
       otherApps: '你的其它应用中的报表：',
@@ -3726,6 +3726,7 @@ const zh = {
     title: '设计布局',
     leaveUnsaved: '离开设计布局？未保存的改动将会丢失。',
     saveFailed: '部分改动没有保存：{{reason}}',
+    editorOpen: '请先保存或取消仪表盘、报表的修改，再设计布局。',
     menu: {
       title: '菜单',
       addItem: '添加菜单项',
@@ -3769,13 +3770,11 @@ const zh = {
       keyboardHint: '拖动菜单项即可移动；也可以聚焦后按空格键，再用方向键移动。按回车键打开。',
       newDashboard: '新建仪表盘…',
       newDashboardTitle: '新建仪表盘',
-      newReport: '新建报表…',
       newItemSavesAll: '创建时会一并保存设计布局里的其他改动，然后打开它进行编辑。',
       create: '创建',
       creating: '正在创建…',
       newItemPendingDraft: '这个名称下已有一份未发布的草稿，请再试一次。',
       newItemLeft: '新建的仪表盘「{{name}}」没能删除，请在 Studio 里删除它。',
-      newReportLeft: '新建的报表「{{name}}」没能删除，请在 Studio 里删除它。',
     },
     pins: {
       button: '页头按钮',

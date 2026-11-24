@@ -2751,6 +2751,7 @@ const pt = {
     },
     reportIndex: {
       title: "Relatórios",
+      newReport: 'Novo relatório',
       emptyTitle: "Nenhum relatório",
       emptyDescription: "Este aplicativo não tem relatórios que você possa abrir.",
       otherApps: "Relatórios nos seus outros aplicativos:",
@@ -3660,6 +3661,7 @@ const pt = {
     title: 'Projetar layout',
     leaveUnsaved: 'Sair do design do layout? As alterações não salvas serão perdidas.',
     saveFailed: 'Algumas alterações não foram salvas: {{reason}}',
+    editorOpen: 'Salve ou descarte as alterações do painel ou do relatório antes de projetar o layout.',
     menu: {
       title: 'Menu',
       addItem: 'Adicionar item de menu',
@@ -3703,13 +3705,11 @@ const pt = {
       keyboardHint: 'Arraste um item para movê-lo, ou foque-o e pressione Espaço e depois as setas. Enter o abre.',
       newDashboard: 'Novo painel…',
       newDashboardTitle: 'Novo painel',
-      newReport: 'Novo relatório…',
       newItemSavesAll: 'Ao criá-lo, suas outras alterações de design também são salvas e ele é aberto para edição.',
       create: 'Criar',
       creating: 'Criando…',
       newItemPendingDraft: 'Já existe um rascunho pendente com este nome. Tente novamente.',
       newItemLeft: 'Não foi possível remover o novo painel "{{name}}"; remova-o no Studio.',
-      newReportLeft: 'Não foi possível remover o novo relatório "{{name}}"; remova-o no Studio.',
     },
     pins: {
       button: 'Botões do cabeçalho',
@@ -4192,7 +4192,6 @@ const pt = {
       settings: "Configurações do relatório",
       pendingDraft: "Este relatório tem alterações não publicadas. Publique ou descarte-as acima e depois salve.",
       nameTaken: "Todos os identificadores gerados a partir deste nome já estão em uso. Dê outro nome ao relatório e salve.",
-      addsToMenu: "Ao salvar, este relatório é criado e adicionado ao menu no lugar escolhido, junto com suas outras alterações de design.",
       adminOnlyTitle: "Somente administradores do espaço de trabalho podem criar relatórios",
       adminOnly: "Um relatório é compartilhado com todo o espaço de trabalho, por isso um administrador o cria.",
       type: {

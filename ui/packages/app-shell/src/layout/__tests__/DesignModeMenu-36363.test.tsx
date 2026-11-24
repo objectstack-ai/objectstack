@@ -16,7 +16,7 @@ import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
-import { MemoryRouter, useLocation, useNavigate } from 'react-router-dom';
+import { MemoryRouter, useLocation } from 'react-router-dom';
 import { SidebarProvider } from '@object-ui/components';
 import { NavigationRenderer } from '@object-ui/layout';
 import type { NavigationItem } from '@object-ui/types';
@@ -144,7 +144,6 @@ import DesignModeMenu from '../DesignModeMenu';
 import { closestCenter, type CollisionDetection } from '@dnd-kit/core';
 import { confirmUnsavedLeave } from '../../chrome/unsavedEdits';
 import { __resetDefaultLocale } from '../designModeMenuSave';
-import { newReportSlotFor } from '../designModeReportSlot';
 
 const NAVIGATION = [
   { id: 'home', type: 'report', reportName: 'pipeline', label: 'Home' },
@@ -819,135 +818,45 @@ async function openReports() {
   return picker;
 }
 
-/** A link elsewhere in the app, as the sidebar would follow one. */
-function GoElsewhere() {
-  const navigate = useNavigate();
-  return (
-    <button type="button" onClick={() => navigate('/apps/crm/object/crm_lead')}>
-      go elsewhere
-    </button>
-  );
-}
-
-function startOnBuilderPath() {
-  render(
-    <MemoryRouter initialEntries={['/apps/crm']}>
-      <Harness />
-      <Landing />
-      <GoElsewhere />
-    </MemoryRouter>,
-  );
-  fireEvent.click(screen.getByText('enter'));
-}
-
-const REPORT_BODY = {
-  label: 'Payment analysis',
-  type: 'summary',
-  dataset: 'invoice_metrics',
-  values: ['invoice_count'],
-  chart: { type: 'metric', xAxis: '', yAxis: 'invoice_count' },
-};
-
-describe('a new report from 「Add menu item」 (objectstack#36364, report half)', () => {
-  it('「Reports」 lists 「New report…」 first; it holds the place and opens the report builder, writing nothing', async () => {
-    startOnBuilderPath();
-    const picker = await openReports();
-    const rows = within(within(picker).getByTestId('design-menu-picker-rows')).getAllByRole('button').map((b) => b.textContent);
-    // The report the menu already opens (Home → pipeline) is not offered again.
-    expect(rows).toEqual(['New report…']);
-    fireEvent.click(within(picker).getByTestId('design-menu-picker-new-report'));
-    await flush();
-    expect(screen.queryByTestId('design-menu-picker')).toBeNull();
-    expect(screen.getByTestId('landing')).toHaveTextContent('/apps/crm/reports/new null');
-    // The place stays held, saying what it waits for.
-    expect(order()).toEqual(['home', ['sales', ['leads', 'accounts']], ['insights', ['…']]]);
-    expect(screen.getByTestId('design-menu-placeholder')).toHaveTextContent('New report…');
-    expect(newReportSlotFor('/apps/crm/reports/new')).not.toBeNull();
-    expect(newReportSlotFor('/apps/hr/reports/new')).toBeNull();
-    expect(written).toEqual([]);
+/**
+ * objectstack#36692 — the design mode stops hosting the report builder (the
+ * maintainer's 「照 Twenty 分开」): 「Reports」 only links reports that exist;
+ * a new report is made from the reports index, with its own Save.
+ */
+describe('「Reports」 links existing reports only (objectstack#36692)', () => {
+  it('lists the reports not in the menu yet, and no 「New report…」 row', async () => {
+    listed.report = [
+      { name: 'pipeline', label: 'Pipeline' },
+      { name: 'revenue_by_month', label: 'Revenue by month' },
+    ];
+    try {
+      start();
+      const picker = await openReports();
+      const rows = within(within(picker).getByTestId('design-menu-picker-rows')).getAllByRole('button').map((b) => b.textContent);
+      // The report the menu already opens (Home → pipeline) is not offered again.
+      expect(rows).toEqual(['Revenue by month']);
+      expect(within(picker).queryByTestId('design-menu-picker-new-report')).toBeNull();
+      expect(within(picker).queryByText('New report…')).toBeNull();
+    } finally {
+      listed.report = [{ name: 'pipeline', label: 'Pipeline' }];
+    }
   });
 
-  it('the builder\'s Save: the report, then the menu with its entry in the held place and every other staged edit; the mode is left', async () => {
-    startOnBuilderPath();
-    await act_on('accounts', 'Move up'); // another staged edit, saved with it
-    const picker = await openReports();
-    fireEvent.click(within(picker).getByTestId('design-menu-picker-new-report'));
-    await flush();
-    const slot = newReportSlotFor('/apps/crm/reports/new')!;
-    let saved: boolean | undefined;
-    await act(async () => {
-      saved = await slot.save('payment_analysis', 'Payment analysis', { ...REPORT_BODY, name: 'payment_analysis' });
-    });
-    await flush();
-
-    expect(saved).toBe(true);
-    expect(written.map(([verb, type, name]) => `${verb} ${type} ${name}`)).toEqual([
-      'save report payment_analysis',
-      'publish report payment_analysis',
-      'save app crm',
-      'publish app crm',
-    ]);
-    expect(written[0][3]).toEqual({ ...REPORT_BODY, name: 'payment_analysis' });
-    expect(written[0][4]).toEqual({ mode: 'draft', ifNoneMatch: '*', packageId: 'com.acme.crm' });
-    const navigation = (written[2][3] as { navigation: Array<{ id: string; children?: unknown[] }> }).navigation;
-    expect(navigation[1].children!.map((c) => (c as { id: string }).id)).toEqual(['accounts', 'leads']);
-    expect(navigation[2].children).toEqual([
-      { id: 'nav_item_1', type: 'report', reportName: 'payment_analysis', label: 'Payment analysis' },
-    ]);
-    expect(screen.queryByTestId('design-mode-bar')).toBeNull();
-    expect(newReportSlotFor('/apps/crm/reports/new')).toBeNull();
-  });
-
-  it('a refused menu removes the new report; the mode, the held place and the other staged edits stay', async () => {
-    server.appSave = new Error('the app was refused');
-    startOnBuilderPath();
-    await act_on('accounts', 'Move up');
-    const picker = await openReports();
-    fireEvent.click(within(picker).getByTestId('design-menu-picker-new-report'));
-    await flush();
-    let saved: boolean | undefined;
-    await act(async () => {
-      saved = await newReportSlotFor('/apps/crm/reports/new')!.save('payment_analysis', 'Payment analysis', { ...REPORT_BODY, name: 'payment_analysis' });
-    });
-    await flush();
-
-    expect(saved).toBe(false);
-    expect(written.map(([verb, type, name, opt]) => `${verb} ${type} ${name} ${verb === 'reset' ? JSON.stringify(opt) : ''}`.trim())).toEqual([
-      'save report payment_analysis',
-      'publish report payment_analysis',
-      'save app crm',
-      'reset report payment_analysis {"packageId":"com.acme.crm"}',
-    ]);
-    expect(toastError).toHaveBeenCalledWith('Some changes were not saved: the app was refused');
-    expect(screen.getByTestId('design-mode-bar')).toBeInTheDocument();
-    expect(order()).toEqual(['home', ['sales', ['accounts', 'leads']], ['insights', ['…']]]);
-    expect(newReportSlotFor('/apps/crm/reports/new')).not.toBeNull();
-  });
-
-  it('the builder\'s Close drops the held place and writes nothing; the mode and its other edits stay', async () => {
-    startOnBuilderPath();
-    await act_on('accounts', 'Move up');
-    const picker = await openReports();
-    fireEvent.click(within(picker).getByTestId('design-menu-picker-new-report'));
-    await flush();
-    act(() => newReportSlotFor('/apps/crm/reports/new')!.cancel());
-    await flush();
-    expect(order()).toEqual(['home', ['sales', ['accounts', 'leads']], ['insights', []]]);
-    expect(newReportSlotFor('/apps/crm/reports/new')).toBeNull();
-    expect(written).toEqual([]);
-    expect(screen.getByTestId('design-mode-save')).toBeEnabled();
-  });
-
-  it('leaving the builder another way drops the held place too', async () => {
-    startOnBuilderPath();
-    const picker = await openReports();
-    fireEvent.click(within(picker).getByTestId('design-menu-picker-new-report'));
-    await flush();
-    fireEvent.click(screen.getByText('go elsewhere'));
-    await flush();
-    expect(order()).toEqual(['home', ['sales', ['leads', 'accounts']], ['insights', []]]);
-    expect(newReportSlotFor('/apps/crm/reports/new')).toBeNull();
-    expect(written).toEqual([]);
+  it('picking one links it in the held place, staged with the mode; nothing is written, nothing navigates', async () => {
+    listed.report = [{ name: 'revenue_by_month', label: 'Revenue by month' }];
+    try {
+      startWithLanding();
+      const picker = await openReports();
+      fireEvent.click(within(picker).getByRole('button', { name: 'Revenue by month' }));
+      await flush();
+      expect(screen.queryByTestId('design-menu-picker')).toBeNull();
+      expect(order()).toEqual(['home', ['sales', ['leads', 'accounts']], ['insights', ['nav_item_1']]]);
+      expect(written).toEqual([]);
+      expect(screen.getByTestId('landing')).toHaveTextContent('/apps/crm null');
+      expect(screen.getByTestId('design-mode-save')).toBeEnabled();
+    } finally {
+      listed.report = [{ name: 'pipeline', label: 'Pipeline' }];
+    }
   });
 });
 

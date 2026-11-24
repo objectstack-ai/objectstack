@@ -1845,7 +1845,6 @@ const zhHant = {
       settings: '報表設定',
       pendingDraft: '這張報表有一份還沒釋出的修改。先在上方釋出或丟棄它，再儲存。',
       nameTaken: '由這個名稱生成的標識都已被佔用。請給報表換個名稱再儲存。',
-      addsToMenu: '儲存後會建好這張報表，放進選單裡你佔好的位置，並一併儲存設計佈局裡的其他改動。',
       adminOnlyTitle: '只有系統管理員能搭建報表',
       adminOnly: '報表對工作區裡所有人生效，所以由系統管理員搭建。',
       type: {
@@ -2484,6 +2483,7 @@ const zhHant = {
     },
     reportIndex: {
       title: '報表',
+      newReport: '新建報表',
       emptyTitle: '暫無報表',
       emptyDescription: '此應用沒有你可以開啟的報表。',
       otherApps: '你的其它應用中的報表：',
@@ -3726,6 +3726,7 @@ const zhHant = {
     title: '設計佈局',
     leaveUnsaved: '離開設計佈局？未儲存的改動將會丟失。',
     saveFailed: '部分改動沒有儲存：{{reason}}',
+    editorOpen: '請先儲存或取消儀表盤、報表的修改，再設計佈局。',
     menu: {
       title: '選單',
       addItem: '新增選單項',
@@ -3769,13 +3770,11 @@ const zhHant = {
       keyboardHint: '拖動選單項即可移動；也可以聚焦後按空格鍵，再用方向鍵移動。按回車鍵開啟。',
       newDashboard: '新建儀表盤…',
       newDashboardTitle: '新建儀表盤',
-      newReport: '新建報表…',
       newItemSavesAll: '建立時會一併儲存設計佈局裡的其他改動，然後開啟它進行編輯。',
       create: '建立',
       creating: '正在建立…',
       newItemPendingDraft: '這個名稱下已有一份未釋出的草稿，請再試一次。',
       newItemLeft: '新建的儀表盤「{{name}}」沒能刪除，請在 Studio 裡刪除它。',
-      newReportLeft: '新建的報表「{{name}}」沒能刪除，請在 Studio 裡刪除它。',
     },
     pins: {
       button: '頁頭按鈕',

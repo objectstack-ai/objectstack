@@ -2207,7 +2207,6 @@ const en = {
       settings: 'Report settings',
       pendingDraft: 'This report has unpublished changes. Publish or discard them above, then save.',
       nameTaken: 'Every name made from this one is already taken. Give the report another name, then save.',
-      addsToMenu: 'Saving creates this report and adds it to the menu where you placed it, with your other design changes.',
       adminOnlyTitle: 'Only workspace admins can build reports',
       adminOnly: 'A report is shared with everyone in the workspace, so an admin builds it.',
       type: {
@@ -2939,6 +2938,7 @@ const en = {
     },
     reportIndex: {
       title: 'Reports',
+      newReport: 'New report',
       emptyTitle: 'No reports',
       emptyDescription: 'This app has no reports you can open.',
       otherApps: 'Reports in your other apps:',
@@ -4332,6 +4332,7 @@ const en = {
     title: 'Design layout',
     leaveUnsaved: 'Leave Design layout? Your unsaved changes will be lost.',
     saveFailed: 'Some changes were not saved: {{reason}}',
+    editorOpen: 'Save or cancel your dashboard or report changes before designing the layout.',
     menu: {
       title: 'Menu',
       addItem: 'Add menu item',
@@ -4375,13 +4376,11 @@ const en = {
       keyboardHint: 'Drag an item to move it, or focus it and press Space, then the arrow keys. Enter opens it.',
       newDashboard: 'New dashboard…',
       newDashboardTitle: 'New dashboard',
-      newReport: 'New report…',
       newItemSavesAll: 'Creating it saves your other design changes too, then opens it for editing.',
       create: 'Create',
       creating: 'Creating…',
       newItemPendingDraft: 'A draft with this name is already pending. Try again.',
       newItemLeft: 'The new dashboard "{{name}}" could not be removed again; remove it in Studio.',
-      newReportLeft: 'The new report "{{name}}" could not be removed again; remove it in Studio.',
     },
     pins: {
       button: 'Header buttons',

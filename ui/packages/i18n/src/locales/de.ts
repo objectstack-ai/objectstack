@@ -2682,6 +2682,7 @@ const de = {
     },
     reportIndex: {
       title: "Berichte",
+      newReport: 'Neuer Bericht',
       emptyTitle: "Keine Berichte",
       emptyDescription: "Diese App hat keine Berichte, die Sie öffnen können.",
       otherApps: "Berichte in Ihren anderen Apps:",
@@ -3583,6 +3584,7 @@ const de = {
     title: 'Layout gestalten',
     leaveUnsaved: 'Layout-Gestaltung verlassen? Nicht gespeicherte Änderungen gehen verloren.',
     saveFailed: 'Einige Änderungen wurden nicht gespeichert: {{reason}}',
+    editorOpen: 'Speichern oder verwerfen Sie zuerst Ihre Änderungen am Dashboard oder Bericht, dann gestalten Sie das Layout.',
     menu: {
       title: 'Menü',
       addItem: 'Menüeintrag hinzufügen',
@@ -3626,13 +3628,11 @@ const de = {
       keyboardHint: 'Ziehen Sie einen Eintrag, um ihn zu verschieben, oder fokussieren Sie ihn und drücken Sie die Leertaste, dann die Pfeiltasten. Die Eingabetaste öffnet ihn.',
       newDashboard: 'Neues Dashboard…',
       newDashboardTitle: 'Neues Dashboard',
-      newReport: 'Neuer Bericht…',
       newItemSavesAll: 'Beim Erstellen werden auch Ihre anderen Designänderungen gespeichert; danach wird es zum Bearbeiten geöffnet.',
       create: 'Erstellen',
       creating: 'Wird erstellt…',
       newItemPendingDraft: 'Unter diesem Namen liegt bereits ein unveröffentlichter Entwurf. Versuchen Sie es erneut.',
       newItemLeft: 'Das neue Dashboard „{{name}}“ konnte nicht wieder entfernt werden; entfernen Sie es in Studio.',
-      newReportLeft: 'Der neue Bericht „{{name}}“ konnte nicht wieder entfernt werden; entfernen Sie ihn in Studio.',
     },
     pins: {
       button: 'Kopfzeilen-Schaltflächen',
@@ -4107,7 +4107,6 @@ const de = {
       settings: "Berichtseinstellungen",
       pendingDraft: "Dieser Bericht hat unveröffentlichte Änderungen. Veröffentlichen oder verwerfen Sie sie oben und speichern Sie dann.",
       nameTaken: "Alle aus diesem Namen gebildeten Kennungen sind bereits vergeben. Geben Sie dem Bericht einen anderen Namen und speichern Sie dann erneut.",
-      addsToMenu: "Beim Speichern wird dieser Bericht erstellt und an der gewählten Stelle ins Menü aufgenommen, zusammen mit Ihren anderen Designänderungen.",
       adminOnlyTitle: "Nur Workspace-Administratoren können Berichte erstellen",
       adminOnly: "Ein Bericht gilt für alle im Workspace, daher erstellt ihn ein Administrator.",
       type: {
