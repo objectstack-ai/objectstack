@@ -554,6 +554,9 @@ async function previousOwners(
  * Move, for each moved record, the rows of each named relationship that point
  * at it and are owned by its previous owner, to `newOwner` — as the caller,
  * one by-id update each, at most `cap` rows in all. Every refused row is listed.
+ * Each child write is {@link writeOwner}, the parent's own: a child whose
+ * `owner_id` is locked on that row is listed with `FIELD_NOT_ACCESSIBLE` and
+ * keeps its owner. A refused child never undoes its parent's move.
  *
  * The probe is grouped by previous owner: the moved records that shared one
  * owner are read together, one `find` per (previous owner, relationship) with
@@ -615,7 +618,10 @@ async function runCascade(
           if (childId === undefined || childId === null) continue;
           budget -= 1;
           try {
-            const written = await engine.update(rel.object, { [SystemFieldName.OWNER_ID]: newOwner }, { where: { id: childId }, context });
+            // The parent's own owner write, so a child whose `owner_id` is locked
+            // on that row (read-only, or a `readonlyWhen` that holds) is refused
+            // `403 FIELD_NOT_ACCESSIBLE` and listed here, never counted as moved.
+            const written = await writeOwner(engine, rel.object, String(childId), { [SystemFieldName.OWNER_ID]: newOwner }, context);
             if (written === null || written === undefined || written === 0) {
               throw recordNotFoundError(rel.object, String(childId), context as Parameters<typeof recordNotFoundError>[2]);
             }

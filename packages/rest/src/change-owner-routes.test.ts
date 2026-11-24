@@ -231,6 +231,7 @@ describe('[#35402] POST /data/:object/:id/change-owner', () => {
  */
 describe('POST /data/:object/(:id/)change-owner — a readonlyWhen lock on the owner, over a real engine', () => {
   const OBJECT = 'case_owner_lock';
+  const CHILD = 'case_owner_lock_task';
   const SYS = { isSystem: true, userId: 'u_system', tenantId: DEFAULT_ORGANIZATION_ID };
   const MEMBER = { userId: 'u_manager', tenantId: DEFAULT_ORGANIZATION_ID };
   const SENT = { delivered: 0, enqueued: 1 };
@@ -260,14 +261,29 @@ describe('POST /data/:object/(:id/)change-owner — a readonlyWhen lock on the o
         owner_id: { ...OWNER_FIELD_DEF, readonlyWhen: "record.status == 'closed'" },
       },
     } as any, '@objectstack/rest');
+    // [#35315 phase 2] A cascade child of the case whose own owner locks once the task is closed.
+    engine.registry.registerObject({
+      name: CHILD, label: 'Case Task', sharingModel: 'private',
+      fields: {
+        status: { type: 'text' },
+        case_ref: { type: 'lookup', reference: OBJECT, transferBehavior: 'cascade' },
+        owner_id: { ...OWNER_FIELD_DEF, readonlyWhen: "record.status == 'closed'" },
+      },
+    } as any, '@objectstack/rest');
     await engine.syncSchemas();
     await installDefaultOrganization(engine as any);
     for (const id of ['u_a', 'u_next', 'u_manager']) await engine.insert('sys_user', { id, name: id, banned: false }, { context: SYS });
     for (const [id, status] of [['k_open', 'open'], ['k_closed', 'closed'], ['k_open2', 'open']] as const) {
       await engine.insert(OBJECT, { id, subject: id, status, owner_id: 'u_a' }, { context: SYS });
     }
+    for (const [id, status] of [['ct_open', 'open'], ['ct_closed', 'closed'], ['ct_open2', 'open']] as const) {
+      await engine.insert(CHILD, { id, status, case_ref: 'k_open', owner_id: 'u_a' }, { context: SYS });
+    }
     const stored = async (id: string) => (await engine.find(OBJECT, { where: { id }, fields: ['id', 'owner_id', 'queue'], context: SYS }))[0];
-    return { engine, stored };
+    const childOwners = async () => Object.fromEntries(
+      (await engine.find(CHILD, { fields: ['id', 'owner_id'], context: SYS })).map((r: any) => [r.id, r.owner_id]),
+    );
+    return { engine, stored, childOwners };
   }
 
   it('single: the locked record answers the refusal, not 200; owner unchanged, nobody told', async () => {
@@ -318,6 +334,32 @@ describe('POST /data/:object/(:id/)change-owner — a readonlyWhen lock on the o
     expect(many.body.data).toMatchObject({ ownerId: null, queue: 'triage', updated: 1, failed: 1 });
     expect(many.body.data.failures.map((f: any) => [f.id, f.code])).toEqual([['k_closed', 'FIELD_NOT_ACCESSIBLE']]);
     expect(await stored('k_closed')).toMatchObject({ owner_id: 'u_a', queue: null });
+  });
+
+  it('[#35315 phase 2] a cascade child whose owner_id is locked is listed FIELD_NOT_ACCESSIBLE and keeps its owner; its siblings move', async () => {
+    const { engine, stored, childOwners } = await boot();
+    const update = vi.spyOn(engine, 'update');
+    const messaging = { emit: vi.fn(async () => SENT) };
+    const { single } = buildServer(engine, { caller: MEMBER, messaging });
+    const res = mockRes();
+    await single!.handler(req({ object: OBJECT, id: 'k_open' }, {
+      ownerId: 'u_next', notify: true, cascade: [{ object: CHILD, field: 'case_ref' }],
+    }), res);
+    expect(res.statusCode, JSON.stringify(res.body)).toBe(200);
+    // The parent moved; the locked child is the cascade's failure, never counted moved.
+    expect(res.body.data).toMatchObject({ ownerId: 'u_next', notified: true });
+    expect((await stored('k_open'))?.owner_id).toBe('u_next');
+    expect(res.body.data.cascade).toHaveLength(1);
+    expect(res.body.data.cascade[0]).toMatchObject({ object: CHILD, field: 'case_ref', updated: 2, failed: 1, remaining: 0 });
+    expect(res.body.data.cascade[0].failures.map((f: any) => [f.id, f.code])).toEqual([['ct_closed', 'FIELD_NOT_ACCESSIBLE']]);
+    expect(await childOwners()).toEqual({ ct_open: 'u_next', ct_closed: 'u_a', ct_open2: 'u_next' });
+    // Every child write passed the strict option, as the parent's did.
+    const childWrites = update.mock.calls.filter((c) => c[0] === CHILD);
+    expect(childWrites).toHaveLength(3);
+    for (const c of childWrites) expect(c[2]).toMatchObject({ strictReadonlyWrites: true });
+    // The one notice names the parent only.
+    expect(messaging.emit).toHaveBeenCalledTimes(1);
+    expect((messaging.emit.mock.calls[0] as any[])[0].payload.recordIds).toEqual(['k_open']);
   });
 
   it('an emit that resolves with zero delivered and zero enqueued answers notified: false, and the move stands', async () => {

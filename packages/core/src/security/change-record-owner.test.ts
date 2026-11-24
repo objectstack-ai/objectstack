@@ -615,6 +615,41 @@ describe('[#35315 phase 2] the Change Owner cascade', () => {
     expect(ownersOf(engine, 'lead_task')).toMatchObject({ t1: 'u_a', t3: 'u_next', t5: 'u_a' });
   });
 
+  it('a child whose owner_id is locked is listed FIELD_NOT_ACCESSIBLE, keeps its owner, is not counted moved, and is named in no notice', async () => {
+    const engine = fakeEngine({ locked: lockedWhenClosed() });
+    engine.tables.lead_task!.find((r) => r.id === 't3')!.status = 'closed';
+    const messaging = { emit: vi.fn(async () => SENT) };
+    const result = await changeRecordOwner(engine, 'lead', 'l1', { ownerId: 'u_next' }, CALLER, {
+      cascade: [{ object: 'lead_task', field: 'lead' }], notify: true, messaging,
+    });
+    // The parent's move stands; the locked child is the cascade's failure, its sibling moved.
+    expect(result).toMatchObject({ ownerId: 'u_next', notified: true });
+    expect(engine.tables.lead!.find((r) => r.id === 'l1')!.owner_id).toBe('u_next');
+    expect(result.cascade).toHaveLength(1);
+    expect(result.cascade![0]).toMatchObject({ updated: 1, failed: 1, remaining: 0 });
+    expect(result.cascade![0]!.failures.map((f) => [f.id, f.code])).toEqual([['t3', 'FIELD_NOT_ACCESSIBLE']]);
+    expect(ownersOf(engine, 'lead_task')).toEqual({ t1: 'u_next', t2: 'u_b', t3: 'u_a', t4: 'u_b' });
+    // Every child write passed the strict option, as the parent's did.
+    const writes = engine.calls.filter((c) => c.op === 'update');
+    expect(writes.map((w) => w.object)).toEqual(['lead', 'lead_task', 'lead_task']);
+    expect(engine.strictWrites).toEqual([true, true, true]);
+    // The one notice names the parent only.
+    expect(messaging.emit).toHaveBeenCalledTimes(1);
+    expect((messaging.emit.mock.calls[0] as any[])[0].payload.recordIds).toEqual(['l1']);
+  });
+
+  it('bulk: a locked child is the cascade\'s failure and its siblings move', async () => {
+    const engine = fakeEngine({ locked: lockedWhenClosed() });
+    engine.tables.lead_task!.find((r) => r.id === 't1')!.status = 'closed';
+    const report = await changeRecordsOwner(engine, 'lead', ['l1', 'l2'], { ownerId: 'u_next' }, CALLER, {
+      cascade: [{ object: 'lead_task', field: 'lead' }],
+    });
+    expect(report).toMatchObject({ updated: 2, failed: 0 });
+    expect(report.cascade![0]).toMatchObject({ updated: 2, failed: 1, remaining: 0 });
+    expect(report.cascade![0]!.failures.map((f) => [f.id, f.code])).toEqual([['t1', 'FIELD_NOT_ACCESSIBLE']]);
+    expect(ownersOf(engine, 'lead_task')).toEqual({ t1: 'u_a', t2: 'u_b', t3: 'u_next', t4: 'u_next' });
+  });
+
   it('a request that names no cascade answers no cascade member and reads no previous owner', async () => {
     const engine = fakeEngine();
     const result = await changeRecordOwner(engine, 'lead', 'l1', { ownerId: 'u_next' }, CALLER);
