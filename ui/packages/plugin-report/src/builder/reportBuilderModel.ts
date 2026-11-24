@@ -20,7 +20,11 @@
  *   measure, `seriesBy` = the second layer where the chart can split. The
  *   「表格」 choice is `chart.type: 'table'`, which the renderer draws as the
  *   report's own table and no duplicate chart (`planReportChart`);
- * - the period chip is `dateRange` with a date dimension the report groups by.
+ * - the period chip is `dateRange` with a date dimension the report groups by;
+ * - the filter under the data source is `runtimeFilter` (objectstack#36645),
+ *   keyed by fields of the dataset's object. The host draws and writes it (see
+ *   `ReportBuilderProps.filter`); this module only clears it when the data
+ *   source changes, since the old dataset's fields mean nothing on the new one.
  *
  * No function here reads the network: the host hands in the dataset catalog
  * and the bound dataset's members, so the builder is drawable in a test and in

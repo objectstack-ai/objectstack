@@ -17,6 +17,9 @@
  *      console's default landing (`useHomePath`), with no app name. A draft
  *      app has no running front-end yet, so it counts as none.
  *
+ * With no app to name, the name slot names the open package instead
+ * (objectstack#36748), so the bar still says what the author is building.
+ *
  * Leaving asks first when a pillar holds unsaved work, like every other
  * header departure (`beforeNavigate`).
  */
@@ -72,6 +75,7 @@ export function studioBackTarget({
 
 export function StudioBackToApp({
   packageId,
+  packageLabel,
   apps,
   locale,
   beforeNavigate,
@@ -79,6 +83,11 @@ export function StudioBackToApp({
 }: {
   /** The open package, or `null` in the package-less scope. */
   packageId: string | null;
+  /**
+   * The open package's display name: the name slot shows it when there is no
+   * app to name (objectstack#36748). Absent while the package list loads.
+   */
+  packageLabel?: string | null;
   /** The package's published apps. */
   apps: readonly StudioAppTarget[];
   locale: string;
@@ -94,6 +103,10 @@ export function StudioBackToApp({
   const title = target.appLabel
     ? tFormat('engine.studio.backToAppTitle', locale, { app: target.appLabel })
     : t('engine.studio.backToAppTitleNoApp', locale);
+  // objectstack#36748 — no app to name: the slot names the open package. The
+  // package-less scope has none, so it shows nothing there.
+  const fallbackLabel = packageId !== null ? packageLabel?.trim() || null : null;
+  const name = target.appLabel ?? fallbackLabel;
 
   return (
     <div className="flex min-w-0 items-center gap-1.5 whitespace-nowrap text-[13px]" data-testid="studio-back">
@@ -111,14 +124,20 @@ export function StudioBackToApp({
         <ChevronLeft className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
         {t('engine.studio.backToApp', locale)}
       </button>
-      {target.appLabel && (
+      {name && (
         <>
           <span aria-hidden="true" className="shrink-0 text-muted-foreground">
             ·
           </span>
-          {/* The one piece that gives way on a narrow bar. */}
-          <span data-testid="studio-back-app-name" className="min-w-0 truncate font-semibold" title={target.appLabel}>
-            {target.appLabel}
+          {/* The one piece that gives way on a narrow bar. `data-names` says
+              whether it names the app or, with none, the package. */}
+          <span
+            data-testid="studio-back-app-name"
+            data-names={target.appLabel ? 'app' : 'package'}
+            className="min-w-0 truncate font-semibold"
+            title={name}
+          >
+            {name}
           </span>
         </>
       )}

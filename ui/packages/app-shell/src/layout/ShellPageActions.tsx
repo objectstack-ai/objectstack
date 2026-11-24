@@ -42,7 +42,10 @@ import { cn, useSidebar } from '@object-ui/components';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { useMetadata } from '../providers/MetadataProvider.js';
 import { useNavigationContext } from '../context/NavigationContext.js';
-import { matchAppBySegment, appStudioRoutePath } from '../utils/index.js';
+import { matchAppBySegment } from '../utils/index.js';
+// From its own module, not the barrel: the sidebar's app menu reads this hook
+// too (objectstack#36758), and the sidebar's suites stub the barrel.
+import { appStudioRoutePath } from '../utils/appRoute.js';
 import { useStudioEntryGate, type StudioEntry } from '../hooks/useStudioDesignGate.js';
 import { useAiSurfaceEnabled } from '../hooks/useAiSurface.js';
 import {

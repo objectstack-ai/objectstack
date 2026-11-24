@@ -16,7 +16,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 // real binding.
 const emitMetadataRefresh = vi.fn();
 
-import { recordTabsCatalog, type RecordTabsDraft } from '../recordTabsConfig';
+import { recordTabsCatalog, type RecordTabsDraft } from '../recordTabsConfigModel';
 import { resolveRecordTabsSaveTarget, saveRecordTabs, type RecordTabsSaveDoors } from '../recordTabsConfigSave';
 
 const TEXTS = { notListed: 'not listed', pendingDraft: 'pending draft', notWritable: 'not writable', pairNotWritable: 'pair not writable' };

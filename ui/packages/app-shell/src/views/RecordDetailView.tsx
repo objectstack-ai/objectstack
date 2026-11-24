@@ -76,7 +76,7 @@ import { matchAppBySegment, resolveHostAppSegment } from '../utils/appRoute.js';
 import { hostInConsolePath } from '../utils/hostInConsolePath.js';
 import { useShellPageActionsSlot, useShellSidebarExpandSlot } from '../layout/shellPageActionsSlot.js';
 import { DesignModeHeaderPins, useObjectPins } from '../layout/DesignModeHeaderPins.js';
-import { headerReadsPins } from '../layout/designModeHeaderPins.js';
+import { headerReadsPins } from '../layout/designModeHeaderPinsModel.js';
 import { useDesignModeActive } from '../layout/designMode.js';
 import { recycleBinRefusalLabelsOf, recycleBinRestoreOf } from '../utils/recycleBinRestore.js';
 import { launchConsoleFlow } from '../utils/flowLaunch.js';

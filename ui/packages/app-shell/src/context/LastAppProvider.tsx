@@ -1,8 +1,8 @@
 /**
  * LastAppProvider
  *
- * The app this person last had open (objectstack#35881): where a phone lands
- * after sign-in. On a phone it comes first, ahead of the app the product
+ * The app this person last had open (objectstack#35881): where a sign-in
+ * lands, on a phone and, since objectstack#36732, on a desktop. On a phone it comes first, ahead of the app the product
  * declares as default, which applies only when there is no record yet (ruling
  * 7045309332, 「上次用的优先」). Stored per person, so it follows them to
  * another device: one `sys_user_preference` row, `ui.app.last`, holding the
@@ -12,8 +12,10 @@
  * adapter.
  *
  * Written whenever an app is open, at any width: it is the person's last app,
- * not their last phone app. Read only by the phone's landing:
- * `RootLandingRedirect` in the console app, through `resolvePhoneLandingPath`.
+ * not their last phone app. Read by the landing at every width
+ * (`RootLandingRedirect` in the console app; from 768 px up also the retired
+ * `/home` address, objectstack#36732) and by the desktop chrome's Home
+ * (`useHomePath`).
  *
  * @module
  */
