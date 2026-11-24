@@ -160,6 +160,7 @@ describe('[#20919] connector pull — the five ordered refusals', () => {
                 connectorSource: {
                     connector: 'crm_api', action: 'request',
                     watermark: { field: 'modified', param: 'since' },
+                    deletePolicy: 'ignore',
                 },
             }),
         });
@@ -176,6 +177,7 @@ describe('[#20919] connector pull — the five ordered refusals', () => {
                 connectorSource: {
                     connector: 'crm_api', action: 'request',
                     watermark: { field: 'updated_at', param: 'since' },
+                    deletePolicy: 'ignore',
                 },
             }),
         });
@@ -265,6 +267,7 @@ describe('[#20919] connector pull — one action call, the watermark read from t
                     connector: 'crm_api', action: 'request',
                     input: { method: 'GET', path: '/contacts', query: { limit: 50 } },
                     watermark: { field: 'updated_at', param: 'since' },
+                    deletePolicy: 'ignore',
                 },
             }),
             stored: [{ id: 'r1', synced_at: '2026-01-02T00:00:00.000Z' }],
@@ -291,6 +294,7 @@ describe('[#20919] connector pull — one action call, the watermark read from t
                 connectorSource: {
                     connector: 'crm_api', action: 'request', input: { path: '/contacts' },
                     watermark: { field: 'updated_at', param: 'since' },
+                    deletePolicy: 'ignore',
                 },
             }),
             stored: [],
@@ -373,6 +377,7 @@ describe('[#28040] connector pull — the input is checked against the action\'s
                 connectorSource: {
                     connector: 'crm_api', action: 'request', input: { path: '/contacts', query: { limit: 50 } },
                     watermark: { field: 'updated_at', param: 'since' },
+                    deletePolicy: 'ignore',
                 },
             }),
             stored: [{ synced_at: '2026-01-02T00:00:00.000Z' }],
@@ -963,11 +968,22 @@ describe('[ADR-0153 D4] a connector pull stamps provenance on a synced target', 
         expect(h.writes).toEqual([]);
     });
 
-    it('a synced target that withholds every injected column (systemFields: false) is written unstamped, unmarked', async () => {
-        const h = harness({ object: { ...syncedContact, systemFields: false }, result: { status: 200, ok: true, body: body.slice(0, 1) } });
-        await pullConnectorSource(h.deps, { mapping: 'crm_contacts', context: { isSystem: true } });
+    it('a synced target that withholds every injected column (systemFields: false) under deletePolicy ignore is written unstamped, unmarked', async () => {
+        const ignore = baseMapping({ connectorSource: { ...baseMapping().connectorSource, deletePolicy: 'ignore' } });
+        const h = harness({ object: { ...syncedContact, systemFields: false }, mapping: ignore, result: { status: 200, ok: true, body: body.slice(0, 1) } });
+        const result = await pullConnectorSource(h.deps, { mapping: 'crm_contacts', context: { isSystem: true } });
+        expect(result.source === 'connector' && result.deletes).toBeUndefined();
         const [w] = h.writes as Array<{ data: Record<string, unknown>; context: object }>;
         expect(Object.keys(w!.data).filter((k) => k.startsWith('_sync_'))).toEqual([]);
         expect(SYNC_PULL_WRITE in w!.context).toBe(false);
+    });
+
+    it('[ADR-0153 D3] the same target under deletePolicy absent (mark) is refused mapping_target_refused (400) before the action: no row could carry the mark', async () => {
+        const h = harness({ object: { ...syncedContact, systemFields: false }, result: { status: 200, ok: true, body: body.slice(0, 1) } });
+        const err = await refusal(h);
+        expectRefused(err, { code: 'VALIDATION_ERROR', status: 400, reason: 'mapping_target_refused' });
+        expect(err.message).toContain('systemFields: false');
+        expect(h.handler).not.toHaveBeenCalled();
+        expect(h.writes).toEqual([]);
     });
 });

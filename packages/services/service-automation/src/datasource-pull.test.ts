@@ -14,7 +14,7 @@
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { LifecycleService, ObjectQL, assertEngineDeleteDispatch, type LifecycleEngineLike, type LifecycleObjectLike } from '@objectstack/objectql';
+import { LifecycleService, ObjectQL, assertEngineDeleteDispatch, markSyncPullWrite, type LifecycleEngineLike, type LifecycleObjectLike } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import type { EngineQueryOptions } from '@objectstack/spec/data';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
@@ -67,7 +67,7 @@ const MAPPING = {
         { source: 'amount', target: 'amount' },
         { source: 'updated_at', target: 'source_updated_at' },
     ],
-    datasourceSource: { object: 'erp_order', watermark: { field: 'updated_at', start: '2026-01-01' } },
+    datasourceSource: { object: 'erp_order', watermark: { field: 'updated_at', start: '2026-01-01' }, deletePolicy: 'ignore' },
 };
 
 const ERP_DEF = { name: 'erp', driver: 'sqlite', schemaMode: 'external' };
@@ -402,7 +402,10 @@ describe('[S3] through the real data door: no count beside a read, and every rea
         const reads = sourceReads(find, 'erp_order');
         expect(reads.length).toBeGreaterThan(3);
         expect(reads.every((q) => typeof q.limit === 'number' && q.limit <= 3)).toBe(true);
-        expect(count.mock.calls.filter((c: unknown[]) => c[0] === 'erp_order')).toEqual([]);
+        // [ADR-0153 D2 invariant 11, D3] The one count of the run is the NULL-watermark count, never one beside a page.
+        const counts = count.mock.calls.filter((c: unknown[]) => c[0] === 'erp_order');
+        expect(counts).toHaveLength(1);
+        expect(JSON.stringify(counts[0][1])).toContain('"$null":true');
     });
 
     it('floored path: a window read through findData runs no engine.count, so the remote is asked once per window', async () => {
@@ -431,11 +434,13 @@ describe('[S3] through the real data door: no count beside a read, and every rea
         expect(result.source === 'datasource' && result.readPath).toBe('floored');
         expect(result.summary.created).toBe(2);
         const reads = sourceReads(find, 'wh_order');
-        expect(reads).toHaveLength(1);
-        expect(reads[0].limit).toBe(4);
+        // The window, then [ADR-0153 D2 invariant 11, D3] the NULL-watermark count, read through the floor.
+        expect(reads).toHaveLength(2);
+        expect(reads.every((q) => q.limit === 4)).toBe(true);
+        expect(JSON.stringify(reads[1].where)).toContain('"$null":true');
         expect(count.mock.calls.filter((c: unknown[]) => c[0] === 'wh_order')).toEqual([]);
-        // One window, one remote fetch: the floor was not asked to count it a second time.
-        expect(remoteFinds).toHaveLength(1);
+        // One remote fetch per read: the floor was not asked to count the window a second time.
+        expect(remoteFinds).toHaveLength(2);
     });
 });
 
@@ -501,6 +506,7 @@ describe('[ADR-0153 D7] every pull leaves one sys_sync_run row, and says how it 
 
         expect(info.filter((m) => m.startsWith('[Automation] pull of mapping'))).toEqual([
             `[Automation] pull of mapping "${MAPPING.name}" completed: read 3, created 3, updated 0, refused 0; `
+            + 'deletes ignored: marked 0, cleared 0; '
             + `read position committed at ${at(3000)} (${SYNC_RUN_OBJECT} ${String(r.id)})`,
         ]);
     });
@@ -933,5 +939,161 @@ describe('[ADR-0153 D4] every row a datasource pull writes carries its provenanc
         const rows = await h.ql.find('order_copy', { context: SYSTEM as never });
         expect(rows).toHaveLength(1);
         expect(Object.keys(rows[0] as Rec).filter((k) => k.startsWith('_sync_'))).toEqual([]);
+    });
+});
+
+describe('[ADR-0153 D3] delete marking on a datasource source', () => {
+    /** A full pull under `deletePolicy` absent (reads as 'mark'). */
+    const FULL = { ...MAPPING, datasourceSource: { object: 'erp_order', watermark: { field: 'updated_at', start: '2026-01-01' }, full: true } };
+
+    /** Each copy's key and whether it carries the mark, by key. */
+    async function marks(ql: ObjectQL): Promise<Record<string, boolean>> {
+        const rows = await ql.find('order_copy', { orderBy: [{ field: 'external_no', order: 'asc' }], context: SYSTEM as never });
+        return Object.fromEntries(rows.map((r: Rec) => [String(r.external_no), r._sync_deleted_at !== null && r._sync_deleted_at !== undefined]));
+    }
+    async function lastRun(ql: ObjectQL): Promise<Rec> {
+        const rows = await runRows(ql);
+        return rows[rows.length - 1]!;
+    }
+
+    it('a complete full pull marks the row the source no longer has, and a later pull that reads it again clears it', async () => {
+        const h = await harness(THREE, { mapping: FULL, runs: true });
+        await pullConnectorSource(h.deps, { mapping: MAPPING.name, context: JOB });
+        expect(await marks(h.ql)).toEqual({ 'A-1': false, 'A-2': false, 'A-3': false });
+
+        await h.erp.knex.raw("delete from ERP_ORDERS where ORDER_NO = 'A-2'");
+        const second = await pullConnectorSource(h.deps, { mapping: MAPPING.name, context: JOB });
+        expect(second.source === 'datasource' && second.deletes).toEqual({ note: 'judged', marked: 1, cleared: 0, skippedNullWatermark: 0 });
+        expect(await marks(h.ql)).toEqual({ 'A-1': false, 'A-2': true, 'A-3': false });
+        const run = await lastRun(h.ql);
+        expect({ deletes: run.deletes, marked: Number(run.marked_deleted_count), nulls: Number(run.skipped_null_watermark) })
+            .toEqual({ deletes: 'judged', marked: 1, nulls: 0 });
+
+        await h.erp.knex.raw('insert into ERP_ORDERS values (?, ?, ?, ?)', ['A-2', at(2000), 20, DEFAULT_ORGANIZATION_ID]);
+        const third = await pullConnectorSource(h.deps, { mapping: MAPPING.name, context: JOB });
+        expect(third.source === 'datasource' && third.deletes).toMatchObject({ note: 'judged', marked: 0, cleared: 1 });
+        expect(await marks(h.ql)).toEqual({ 'A-1': false, 'A-2': false, 'A-3': false });
+    });
+
+    it('the mark judges only rows the read could have read: a copied watermark below a raised start is left as it was', async () => {
+        const h = await harness(THREE, { mapping: FULL });
+        await pullConnectorSource(h.deps, { mapping: MAPPING.name, context: SYSTEM });
+        await h.erp.knex.raw("delete from ERP_ORDERS where ORDER_NO in ('A-1', 'A-3')");
+        h.meta.mapping.set(MAPPING.name, { ...FULL, datasourceSource: { ...FULL.datasourceSource, watermark: { field: 'updated_at', start: at(2500) } } });
+        const result = await pullConnectorSource(h.deps, { mapping: MAPPING.name, context: SYSTEM });
+        expect(result.source === 'datasource' && result.deletes.marked).toBe(1);
+        // A-1 (gone, below the start) and A-2 (still there, below the start) are outside the read; A-3 is inside it and gone.
+        expect(await marks(h.ql)).toEqual({ 'A-1': false, 'A-2': false, 'A-3': true });
+    });
+
+    it('a source row with a NULL watermark makes the run mark nothing, and is counted on the run record', async () => {
+        const h = await harness([...THREE, { no: 'N-1', at: null }], { mapping: FULL, runs: true });
+        await pullConnectorSource(h.deps, { mapping: MAPPING.name, context: JOB });
+        await h.erp.knex.raw("delete from ERP_ORDERS where ORDER_NO = 'A-2'");
+        const result = await pullConnectorSource(h.deps, { mapping: MAPPING.name, context: JOB });
+        expect(result.source === 'datasource' && result.deletes).toEqual({ note: 'unjudged, null watermark', marked: 0, cleared: 0, skippedNullWatermark: 1 });
+        expect(await marks(h.ql)).toEqual({ 'A-1': false, 'A-2': false, 'A-3': false });
+        const run = await lastRun(h.ql);
+        expect({ deletes: run.deletes, nulls: Number(run.skipped_null_watermark) }).toEqual({ deletes: 'unjudged, null watermark', nulls: 1 });
+    });
+
+    it('the NULL-watermark count carries the organization predicate: another organization\'s NULL row does not stop the mark', async () => {
+        process.env.OS_TENANCY_POSTURE = 'isolated';
+        const walled = { ...SOURCE, fields: { ...SOURCE.fields, organization_id: { name: 'organization_id', label: 'Organization', type: 'text' } } };
+        const h = await harness([...THREE, { no: 'B-9', at: null, org: 'org_other' }], { mapping: FULL, source: walled });
+        await pullConnectorSource(h.deps, { mapping: MAPPING.name, context: JOB });
+        await h.erp.knex.raw("delete from ERP_ORDERS where ORDER_NO = 'A-2'");
+        const result = await pullConnectorSource(h.deps, { mapping: MAPPING.name, context: JOB });
+        expect(result.source === 'datasource' && result.deletes).toMatchObject({ note: 'judged', marked: 1, skippedNullWatermark: 0 });
+    });
+
+    it('a row the runner refused was read, so it is not marked; a row the source deleted beside it is', async () => {
+        const h = await harness(THREE, { mapping: FULL });
+        await pullConnectorSource(h.deps, { mapping: MAPPING.name, context: SYSTEM });
+        await h.erp.knex.raw("update ERP_ORDERS set AMOUNT = 'not-a-number', UPDATED_AT = ? where ORDER_NO = 'A-1'", [at(4000)]);
+        await h.erp.knex.raw("delete from ERP_ORDERS where ORDER_NO = 'A-3'");
+        const result = await pullConnectorSource(h.deps, { mapping: MAPPING.name, context: SYSTEM });
+        expect(result.summary.errors).toBe(1);
+        expect(await marks(h.ql)).toEqual({ 'A-1': false, 'A-2': false, 'A-3': true });
+    });
+
+    it('a pull refused part-way marks nothing by absence', async () => {
+        const h = await harness(THREE, { mapping: FULL });
+        await pullConnectorSource(h.deps, { mapping: MAPPING.name, context: SYSTEM });
+        await h.erp.knex.raw("delete from ERP_ORDERS where ORDER_NO = 'A-2'");
+        // The open-above window is read after the high-water read; stop the run there.
+        onSourceReads(h, (where) => where.includes('"$gte"') && !where.includes('"$lt"'));
+        const stopped = await pullConnectorSource(h.deps, { mapping: MAPPING.name, context: SYSTEM }).then(() => false, () => true);
+        expect(stopped).toBe(true);
+        expect(await marks(h.ql)).toEqual({ 'A-1': false, 'A-3': false, 'A-2': false });
+    });
+
+    it('rows another mapping wrote into the same target are not this mapping\'s to mark', async () => {
+        const h = await harness(THREE, { mapping: FULL });
+        await pullConnectorSource(h.deps, { mapping: MAPPING.name, context: SYSTEM });
+        await h.ql.insert('order_copy', { external_no: 'X-1', _sync_source: 'other_mapping', _sync_external_id: 'X-1', _sync_pulled_at: START },
+            { context: markSyncPullWrite(SYSTEM) as never });
+        await h.erp.knex.raw("delete from ERP_ORDERS where ORDER_NO = 'A-2'");
+        await pullConnectorSource(h.deps, { mapping: MAPPING.name, context: SYSTEM });
+        expect(await marks(h.ql)).toEqual({ 'A-1': false, 'A-2': true, 'A-3': false, 'X-1': false });
+    });
+
+    it('deletePolicy ignore leaves every row as it is', async () => {
+        const h = await harness(THREE, { mapping: { ...FULL, datasourceSource: { ...FULL.datasourceSource, deletePolicy: 'ignore' } } });
+        await pullConnectorSource(h.deps, { mapping: MAPPING.name, context: SYSTEM });
+        await h.erp.knex.raw("delete from ERP_ORDERS where ORDER_NO = 'A-2'");
+        const result = await pullConnectorSource(h.deps, { mapping: MAPPING.name, context: SYSTEM });
+        expect(result.source === 'datasource' && result.deletes).toMatchObject({ note: 'ignored', marked: 0 });
+        expect(await marks(h.ql)).toEqual({ 'A-1': false, 'A-2': false, 'A-3': false });
+    });
+
+    it('an incremental source reads deletedField: a truthy value marks the row, a falsy one clears it', async () => {
+        const source = {
+            ...SOURCE,
+            external: { ...SOURCE.external, columnMap: { ...SOURCE.external.columnMap, GONE: 'gone' } },
+            fields: { ...SOURCE.fields, gone: { name: 'gone', label: 'Gone', type: 'boolean' } },
+        };
+        const incremental = { ...MAPPING, datasourceSource: { object: 'erp_order', watermark: { field: 'updated_at', start: '2026-01-01' }, deletedField: 'gone' } };
+        const h = await harness([], { source, mapping: incremental, runs: true });
+        await h.erp.knex.raw('alter table ERP_ORDERS add column GONE integer');
+        for (const r of THREE) await h.erp.knex.raw('insert into ERP_ORDERS values (?, ?, ?, ?, 0)', [r.no, r.at, r.amount, DEFAULT_ORGANIZATION_ID]);
+        await pullConnectorSource(h.deps, { mapping: MAPPING.name, context: JOB });
+
+        await h.erp.knex.raw("update ERP_ORDERS set GONE = 1, UPDATED_AT = ? where ORDER_NO = 'A-2'", [at(5000)]);
+        const second = await pullConnectorSource(h.deps, { mapping: MAPPING.name, context: JOB });
+        expect(second.source === 'datasource' && second.deletes).toMatchObject({ note: 'by deletedField', marked: 1 });
+        expect(await marks(h.ql)).toEqual({ 'A-1': false, 'A-2': true, 'A-3': false });
+        expect((await lastRun(h.ql)).deletes).toBe('by deletedField');
+
+        await h.erp.knex.raw("update ERP_ORDERS set GONE = 0, UPDATED_AT = ? where ORDER_NO = 'A-2'", [at(6000)]);
+        const third = await pullConnectorSource(h.deps, { mapping: MAPPING.name, context: JOB });
+        expect(third.source === 'datasource' && third.deletes).toMatchObject({ marked: 0, cleared: 1 });
+        expect(await marks(h.ql)).toEqual({ 'A-1': false, 'A-2': false, 'A-3': false });
+    });
+
+    it('an incremental source under mark with no deletedField is refused delete_policy_unhonourable (400) before anything is read', async () => {
+        const incremental = { ...MAPPING, datasourceSource: { object: 'erp_order', watermark: { field: 'updated_at', start: '2026-01-01' } } };
+        const h = await harness(THREE, { mapping: incremental });
+        const reads = onSourceReads(h);
+        const err = await refusalOf(pullConnectorSource(h.deps, { mapping: MAPPING.name, context: SYSTEM }));
+        expect([err.code, err.status, err.reason]).toEqual(['VALIDATION_ERROR', 400, 'delete_policy_unhonourable']);
+        expect(err.message).toContain('deletedField');
+        expect(reads).toEqual([]);
+        expect(await copies(h.ql)).toEqual([]);
+    });
+
+    it('a deletedField that is not a field of the source object is refused source_binding_invalid (400)', async () => {
+        const h = await harness(THREE, { mapping: { ...FULL, datasourceSource: { ...FULL.datasourceSource, deletedField: 'gone' } } });
+        const err = await refusalOf(pullConnectorSource(h.deps, { mapping: MAPPING.name, context: SYSTEM }));
+        expect([err.code, err.status, err.reason]).toEqual(['VALIDATION_ERROR', 400, 'source_binding_invalid']);
+        expect(await copies(h.ql)).toEqual([]);
+    });
+
+    it('a synced target that withholds the provenance columns is refused mapping_target_refused (400) under mark', async () => {
+        const h = await harness(THREE, { mapping: FULL, target: { ...TARGET, systemFields: false } });
+        const err = await refusalOf(pullConnectorSource(h.deps, { mapping: MAPPING.name, context: SYSTEM }));
+        expect([err.code, err.status, err.reason]).toEqual(['VALIDATION_ERROR', 400, 'mapping_target_refused']);
+        expect(err.message).toContain('systemFields: false');
+        expect(await copies(h.ql)).toEqual([]);
     });
 });

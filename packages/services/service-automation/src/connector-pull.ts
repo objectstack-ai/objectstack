@@ -252,8 +252,8 @@ export interface ConnectorSourcePullOutcome {
     pulled: number;
     /** The import runner's report for the write. */
     summary: ImportRunSummary;
-    /** [ADR-0153 D3] What the run did about deletes. */
-    deletes: SyncPullDeletes;
+    /** [ADR-0153 D3] What the run did about deletes; absent for a target that carries no provenance columns. */
+    deletes?: SyncPullDeletes;
 }
 
 /** `connectorSource` as a stored mapping carries it (raw; the spec shape is `MappingSchema.connectorSource`). */
@@ -854,7 +854,12 @@ async function pullOnce(
                 : 'No object of that name is registered: register the object, then run the pull again.'));
     }
     const stampsProvenance = carriesSyncProvenanceColumns(schema);
-    if (deletePolicy.policy === 'mark' && !stampsProvenance) {
+    // [ADR-0153 D3] A `synced` target that withholds the columns cannot carry
+    // a mark. A target of another bucket is refused at build (a sourced
+    // mapping targets a `synced` object); one that reaches the pull unjudged is
+    // written as before, unstamped, and its deletes are not judged at all.
+    const synced = schema.managedBy === 'synced';
+    if (synced && deletePolicy.policy === 'mark' && !stampsProvenance) {
         return refuse('VALIDATION_ERROR', 400, 'mapping_target_refused', `Mapping "${mappingName}": ${targetWithoutSyncColumns(objectName)}`);
     }
     const refusedTarget = refuseUnknownMappingTargets(artifact, objectName, schema);
@@ -999,27 +1004,31 @@ async function pullOnce(
 
     // 8. [ADR-0153 D3] Deletes: `deletedField` row by row, then, on a full
     //    pull whose one response is the whole set, every row it did not read.
-    const marker = new SyncDeleteMarker({
-        protocol, ...(environmentId ? { environmentId } : {}), mapping: mappingName, targetObject: objectName,
-        policy: deletePolicy, readContext: context ?? { isSystem: true }, writeContext, runStartedAt,
-    });
-    const written = rows.map((_, i) => {
-        const r = refused.summary.results[i];
-        return r?.ok === true && (r.action === 'created' || r.action === 'updated');
-    });
-    await marker.afterBatch(records as Array<Record<string, unknown>>, rows, written);
-    let note: SyncDeletesNote;
-    const pagingStyle = isPlainObject(source.paging) ? source.paging.style : undefined;
-    if (deletePolicy.policy === 'ignore') note = 'ignored';
-    else if (declaredWatermark) note = 'by deletedField';
-    else if (pagingStyle === undefined) note = 'unjudged, no paging declared';
-    else if (pagingStyle !== 'none') note = 'unjudged, pages not followed';
-    else if (!marker.canMarkAbsent()) note = 'unjudged, rows refused';
-    else {
-        await marker.markAbsent();
-        note = 'judged';
+    let deletes: SyncPullDeletes | undefined;
+    if (stampsProvenance) {
+        const marker = new SyncDeleteMarker({
+            protocol, ...(environmentId ? { environmentId } : {}), mapping: mappingName, targetObject: objectName,
+            policy: deletePolicy, readContext: context ?? { isSystem: true }, writeContext, runStartedAt,
+        });
+        const written = rows.map((_, i) => {
+            const r = refused.summary.results[i];
+            return r?.ok === true && (r.action === 'created' || r.action === 'updated');
+        });
+        await marker.afterBatch(records as Array<Record<string, unknown>>, rows, written);
+        let note: SyncDeletesNote;
+        const pagingStyle = isPlainObject(source.paging) ? source.paging.style : undefined;
+        if (deletePolicy.policy === 'ignore') note = 'ignored';
+        else if (declaredWatermark) note = 'by deletedField';
+        else if (pagingStyle === undefined) note = 'unjudged, no paging declared';
+        else if (pagingStyle !== 'none') note = 'unjudged, pages not followed';
+        else if (!marker.canMarkAbsent()) note = 'unjudged, rows refused';
+        else {
+            await marker.markAbsent();
+            note = 'judged';
+        }
+        run.progress.marked = marker.marked;
+        deletes = { note, marked: marker.marked, cleared: marker.cleared };
     }
-    run.progress.marked = marker.marked;
     if (refused.count > 0) {
         logger.warn(
             `[Automation] connector pull: mapping "${mappingName}" — ${refused.count} pulled record(s) carry no value for `
@@ -1037,7 +1046,7 @@ async function pullOnce(
         ...(watermark ? { watermark } : {}),
         pulled: records.length,
         summary: refused.summary,
-        deletes: { note, marked: marker.marked, cleared: marker.cleared },
+        ...(deletes ? { deletes } : {}),
     };
 }
 
