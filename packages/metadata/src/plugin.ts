@@ -564,6 +564,32 @@ function artifactItemOwnerStampRefusal(
     return err;
 }
 
+/**
+ * [#37013] The platform's provenance (`_provenance: 'platform'`) is set only by
+ * the metadata service's own platform registration
+ * (`register(…, { origin: 'platform' })`). An artifact item that carries it
+ * was authored with a value no author writes, so the door refuses it — with
+ * or without a manifest id — before the sink stores anything, naming the key
+ * and the fix.
+ */
+export function artifactItemPlatformStampRefusal(
+    metaType: string,
+    name: string,
+    item: unknown,
+): (Error & { code: 'VALIDATION_ERROR'; status: 400; httpStatus: 400; issues: Array<{ path: string; message: string; code: string }> }) | undefined {
+    if (item === null || typeof item !== 'object' || (item as Record<string, unknown>)._provenance !== 'platform') return undefined;
+    const issueMessage = "'platform' is set only by the metadata service's own platform registration; "
+        + 'remove `_provenance` from the item (the door stamps the provenance itself).';
+    const err = new Error(`${metaType} '${name}' carries _provenance: 'platform': ${issueMessage}`) as Error & {
+        code: 'VALIDATION_ERROR'; status: 400; httpStatus: 400; issues: Array<{ path: string; message: string; code: string }>;
+    };
+    err.code = 'VALIDATION_ERROR';
+    err.status = 400;
+    err.httpStatus = 400;
+    err.issues = [{ path: '_provenance', message: issueMessage, code: 'custom' }];
+    return err;
+}
+
 async function registerArtifactBodyCollections(
     sink: ArtifactRegistrationSink,
     body: Record<string, unknown>,
@@ -603,6 +629,8 @@ async function registerArtifactBodyCollections(
                 if (nameRefusal) throw nameRefusal;
                 const ownerStamp = artifactItemOwnerStampRefusal(field, metaType, viewObject, item, packageId);
                 if (ownerStamp) throw ownerStamp;
+                const platformStamp = artifactItemPlatformStampRefusal(metaType, viewObject, item);
+                if (platformStamp) throw platformStamp;
                 applyProtection(item as any, {
                     packageId: packageId,
                     packageVersion: packageVersion,
@@ -646,6 +674,8 @@ async function registerArtifactBodyCollections(
             const name = slot.name;
             const ownerStamp = artifactItemOwnerStampRefusal(field, metaType, name, item, packageId);
             if (ownerStamp) throw ownerStamp;
+            const platformStamp = artifactItemPlatformStampRefusal(metaType, name, item);
+            if (platformStamp) throw platformStamp;
             // ADR-0010 §3.7 — translate the author-facing
             // `protection` block into the private `_lock` envelope
             // and stamp package provenance in one call. Strips the
