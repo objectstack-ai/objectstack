@@ -430,6 +430,15 @@ function readActivePackageBinding(): string | undefined {
  * such an item still has none, and asking `/layers` again only logs the same
  * 404.
  */
+/**
+ * The item as its package ships it (the layered read's `code`), handed to a
+ * scoped inspector so an undone change restores it (objectstack#37031).
+ */
+function shippedLayerOf(layered: MetadataLayered<unknown> | null): Record<string, unknown> | null {
+  const code = layered?.code;
+  return code && typeof code === 'object' && !Array.isArray(code) ? (code as Record<string, unknown>) : null;
+}
+
 function holdsNoLayer(layered: MetadataLayered<unknown> | null): boolean {
   return !!layered && layered.code == null && layered.overlay == null && layered.effective == null;
 }
@@ -3852,6 +3861,7 @@ function MetadataResourceEditPageImpl({
                             type={type}
                             name={name}
                             draft={draft}
+                            shipped={shippedLayerOf(layered)}
                             selection={selection}
                             onPatch={(patch) =>
                               handleDraftChange((d) => ({
