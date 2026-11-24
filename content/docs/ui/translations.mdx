@@ -213,6 +213,16 @@ Resolved labels are served straight from the REST metadata endpoints (the
 locale is part of the ETag), so the Console and any SDUI client get translated
 metadata without doing lookups themselves.
 
+Where the Console resolves a string itself (the `flows` group below), it walks
+the same chain. `GET /api/v1/i18n/locales` names the declared chain as
+`fallbackChain` (absent when the stack declares none) beside `sourceLocale`,
+and the Console loads each fallback locale's `flows` group with the active
+locale's bundle. It first matches its own language against the locales that
+answer lists, as the server matches a request's locale, so a `zh-Hans` Console
+on a stack authored in `zh-CN` reads the authored Chinese and walks no chain. A flow label the active locale lacks then reads the fallback
+locale's text before the authored one, as the server's own reads do; with no
+declared chain it reads the active locale, then the authored label.
+
 ### An edit beats the packaged catalog
 
 A package's bundle translates the strings that package shipped, so it applies
@@ -497,8 +507,8 @@ Honest limits worth knowing before you plan around them:
     console's screen-flow runner;
   - the flow's own `label` names the flow in the runner's header, above the
     step's heading, and in the completion toast. A locale the bundle does not
-    cover shows the label authored on the flow, and a backend that serves no
-    label shows the flow's API name.
+    cover reads the declared fallback locale's label, then the label authored
+    on the flow, and a backend that serves no label shows the flow's API name.
 
   A `successMessage` authored on the flow replaces the completion sentence, so
   the translated label appears in the toast only when the flow declares none.
