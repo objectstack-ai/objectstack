@@ -1,7 +1,8 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * The design mode's bar (objectstack#36362): 「Design mode」 at its left,
+ * The design mode's bar (objectstack#36362): 「Design layout」 at its left
+ * (objectstack#36758: the word its door in the app menu reads),
  * 「Cancel」 and 「Save」 at its right, and nothing else (no app name, no
  * explanation, no way to Studio). `ConsoleLayout` draws it in the app shell's
  * top slot, across the whole window, while the mode is on (`designMode.tsx`).
@@ -14,7 +15,7 @@ import type { DesignModeValue } from './designMode.js';
 
 export function DesignModeBar({ mode }: { mode: DesignModeValue }) {
   const { t } = useObjectTranslation();
-  const title = t('designMode.title', { defaultValue: 'Design mode' });
+  const title = t('designMode.title', { defaultValue: 'Design layout' });
   return (
     <div
       role="region"

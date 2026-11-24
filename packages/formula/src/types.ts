@@ -14,6 +14,7 @@
 
 import type { Expression } from '@objectstack/spec';
 import type { EffectiveObjectPermission } from '@objectstack/spec/security';
+import type { WorkCalendar } from '@objectstack/spec/data';
 
 /**
  * The acting subject's effective object permissions, indexed by object name —
@@ -71,6 +72,36 @@ export type EvalSystemPermissions = ReadonlyArray<string>;
  * evaluation.
  */
 export type EvalOptionLabels = Readonly<Record<string, Readonly<Record<string, string>>>>;
+
+/**
+ * One working calendar as the working-day functions read it: the resolved
+ * calendar, or the refusal resolving it met (ADR-0157 D2, D8), held as the
+ * error the function throws. A refusal is data too: the caller resolved it
+ * before evaluation, so the function never asks the host again.
+ */
+export type EvalWorkCalendar = WorkCalendar | Error;
+
+/**
+ * The working calendars one evaluation counts with — the
+ * {@link EvalContext.workCalendars} payload, and the only input
+ * `addWorkingDays()`, `workingDaysBetween()` and `addWorkingHours()` read
+ * (ADR-0157 D4).
+ *
+ * `default` is the calendar a call that names no code counts with (D2: the
+ * organization's default); `byCode` holds each calendar a call names by a
+ * quoted code. The caller resolves both in the record's own organization
+ * before evaluating, from the calls the expression spells
+ * (`workingDayCalendarNeeds`), so a code the expression does not spell as a
+ * literal is never loaded.
+ *
+ * **A pure DATA map, never a resolver**, for the reason {@link EvalPermissions}
+ * gives: the stdlib computes synchronously over pinned data, so the calendar
+ * service resolves first and the functions count over what it answered.
+ */
+export interface EvalWorkCalendars {
+  readonly default?: EvalWorkCalendar;
+  readonly byCode?: Readonly<Record<string, EvalWorkCalendar>>;
+}
 
 /**
  * Runtime context for evaluating an expression.
@@ -212,6 +243,21 @@ export interface EvalContext {
    * options, and `label()` throws for that too.
    */
   optionLabels?: EvalOptionLabels;
+  /**
+   * The working calendars of the record's organization — see
+   * {@link EvalWorkCalendars} for the shape and where it comes from.
+   *
+   * Read by exactly three functions, `addWorkingDays()`,
+   * `workingDaysBetween()` and `addWorkingHours()` (ADR-0157 D4). ⛔ NOT
+   * mounted as a CEL variable, on the terms {@link permissions} is.
+   *
+   * **Absent ≠ refused.** With no map at all the three THROW
+   * (`ok: false, kind: 'runtime'`): a context that was never given calendars
+   * cannot count, and counting on the weekly pattern or the wall clock instead
+   * is the quiet wrong answer ADR-0157 D2 forbids. A calendar the caller could
+   * not resolve is in the map as its refusal, and the call throws that.
+   */
+  workCalendars?: EvalWorkCalendars;
   /** Free-form bag for niche call sites; merged onto the variable scope. */
   extra?: Record<string, unknown>;
 }

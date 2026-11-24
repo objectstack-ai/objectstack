@@ -124,6 +124,9 @@ function makeClient(server: Server) {
       server.byName[name] = payload;
       return payload;
     },
+    // objectstack#36511 — a create and a Save publish that one set at once.
+    publish: async () => ({ success: true }),
+    reset: async () => ({}),
   } as any;
 }
 
@@ -308,8 +311,8 @@ describe('AccessPillar — unsaved OWD overview edits guard (#2600)', () => {
     fireEvent.change(within(dialog).getByPlaceholderText('Display name (e.g. Sales permissions)'), {
       target: { value: 'Set C' },
     });
-    // objectui#11787 — the create dialog's one label: it writes a draft.
-    fireEvent.click(within(dialog).getByRole('button', { name: t('engine.studio.createDraft', 'en-US') }));
+    // objectstack#36511 — a permission set is created live: the dialog says Create.
+    fireEvent.click(within(dialog).getByRole('button', { name: t('engine.studio.createLive', 'en-US') }));
 
     await findInSetHeader('set_c');
     expect(screen.queryByTestId('owd-overview')).not.toBeInTheDocument();

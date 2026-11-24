@@ -96,6 +96,7 @@ import {
   buildScope,
   declaresOptionsOnceServed,
   findHopListEquality,
+  computedCalendarCodeMessage,
 } from '@objectstack/formula';
 import type { ExprFaultOutcome, RelationshipTraversalAnalysis } from '@objectstack/formula';
 import {
@@ -119,6 +120,7 @@ import { bulkConfirmTemplateRoots } from '@objectstack/spec/ui';
 // is a `template` slot too, judged in its own module by the same judge.
 import { actionCopyTemplateIssues } from './validate-action-copy-templates.js';
 import { actionRefusalTemplateIssues, hookRefusalTemplateIssues } from './validate-hook-refusal-templates.js';
+import { workingDayElsewhereMessage, workingDayValueSiteIssues } from './validate-working-day-sites.js';
 // [#15137] The `value`-role half. Same two published primitives the engine
 // composes at `registerFlow` (`AutomationEngine.valueEnvelopeRefusals`), in the
 // same order: the SHAPE rule lives in the spec's `FlowValueSlotSchema` (the
@@ -2966,6 +2968,12 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     }
   };
 
+  /** ADR-0157 D4: a working-day call at a site the engine loads no calendar for (see `workingDayElsewhereMessage`). */
+  const refuseWorkingDayElsewhere = (where: string, raw: unknown): void => {
+    const message = workingDayElsewhereMessage(raw);
+    if (message) issues.push({ where, message, source: celSourceOf(raw) ?? '', severity: 'error' });
+  };
+
   const check = (
     where: string,
     raw: unknown,
@@ -3091,6 +3099,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     // in the source, so flattened flow conditions are covered without ever
     // judging a bare identifier.
     warnUnprovisionedAnchors(where, raw, objectName);
+    refuseWorkingDayElsewhere(where, raw);
   };
 
   /**
@@ -3200,6 +3209,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     const res = validateExpression('predicate', raw as string | { dialect?: string; source?: string });
     for (const e of res.errors) issues.push({ where, message: e.message, source: e.source, severity: 'error' });
     for (const w of res.warnings) issues.push({ where, message: w.message, source: w.source, severity: 'warning' });
+    refuseWorkingDayElsewhere(where, raw);
     return { refused: false };
   };
 
@@ -3258,6 +3268,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     for (const w of res.warnings) {
       issues.push({ where, message: w.message, source: w.source, severity: 'warning' });
     }
+    refuseWorkingDayElsewhere(where, raw);
     return { refused: false };
   };
 
@@ -3984,6 +3995,10 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
       // [#8116] Formulas read the same record binding the predicates do, so
       // a `record.<anchor>` read inside one degrades identically.
       warnUnprovisionedAnchors(fieldWhere, f.expression, objectName);
+      // ADR-0157 D4: the engine loads the calendars an expression names before
+      // evaluating it, so a calendar code must be a quoted literal.
+      const computedCode = computedCalendarCodeMessage(celSourceOf(f.expression));
+      if (computedCode) issues.push({ where: fieldWhere, message: computedCode, source: celSourceOf(f.expression) ?? '', severity: 'error' });
       // [#32529, #32554] A STORED field's `expression` (any field but a
       // `formula`) is computed at the write and kept: a read of another
       // record, of the clock, of the acting user or of a permission is
@@ -4879,6 +4894,10 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
   // [#34273] An action refusal sentence over declared `params` — the hook
   // refusal's compile half, on the same collections the copy pass reads.
   issues.push(...actionRefusalTemplateIssues(stack, { actions: !objectWrite, objects: true }));
+  // [#35356] ADR-0157 D4/D6: a working-day call in a field's expression
+  // `defaultValue` (every run) or a seed record's expression value (off an
+  // object write), the two value sites the passes above do not walk.
+  issues.push(...workingDayValueSiteIssues(stack, { data: !objectWrite }));
 
   return issues;
 }

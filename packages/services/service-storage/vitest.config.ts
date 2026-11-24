@@ -84,6 +84,10 @@ export default defineConfig({
       { find: /^@objectstack\/core$/, replacement: path.resolve(__dirname, '../../core/src/index.ts') },
       { find: /^@objectstack\/driver-sql$/, replacement: path.resolve(__dirname, '../../drivers/driver-sql/src/index.ts') },
       { find: /^@objectstack\/plugin-audit$/, replacement: path.resolve(__dirname, '../../plugins/plugin-audit/src/index.ts') },
+      // [#36506] The never-listening route table `attachment-door-member.ts`
+      // serves the attachment doors on for a kernel with no `http.server`: to
+      // source, so the suite's verdict is about the checkout.
+      { find: /^@objectstack\/plugin-hono-server$/, replacement: path.resolve(__dirname, '../../plugins/plugin-hono-server/src/index.ts') },
       { find: /^@objectstack\/service-cluster$/, replacement: path.resolve(__dirname, '../service-cluster/src/index.ts') },
       { find: /^@objectstack\/service-settings$/, replacement: path.resolve(__dirname, '../service-settings/src/index.ts') },
     ],

@@ -48,7 +48,7 @@ import { resolveI18nLabel as resolveInlineI18nLabel } from '@objectstack/spec/ui
 import { stateMachineNextValues } from './inline-edit-options';
 import { isStateMachineField, stateLabelOf, type StateChangeConfirm } from './objectGridStateConfirm';
 import { useCellRequiredPrompt } from './objectGridRequiredPrompt';
-import { cellReadOnlyKind, readOnlyReasonText, inlineTyping, choiceFromText, inlineEditorPlacement, clearRefusalText, cellValueRefusal } from './objectGridCellFacts';
+import { cellReadOnlyKind, readOnlyReasonText, inlineTyping, choiceFromText, inlineEditorPlacement, clearRefusalText, cellValueRefusal, pastesFromText } from './objectGridCellFacts';
 import {
   Badge, Button, NavigationOverlay, EmptyValue,
   legacyRecordDrawerWidthKey, recordOverlayWidthStorageKey,
@@ -81,6 +81,8 @@ import {
   useDetailTranslation,
   StageChangeStarts,
   useRecordUpdateStarts,
+  FieldHistoryPopover,
+  fieldHistoryOffered,
   type ConcurrentUpdateConflict,
 } from '@object-ui/plugin-detail';
 import { ChevronRight, ChevronLeft, ChevronsLeft, ChevronsRight, Download, Rows2, Rows3, Rows4, AlignJustify, Loader2, Check } from 'lucide-react';
@@ -90,6 +92,7 @@ import { resolveRowCrudAffordances, resolveRowRecordCrudAffordance } from './row
 import { useRecordCrudVerdicts } from './hooks/useRecordCrudVerdicts';
 import { useRowApprovalLocks } from './hooks/useRowApprovalLocks';
 import { resolveLegacyRowActions } from './resolveLegacyRowActions';
+import { rankRowActionDefs } from './rowActionArrangement';
 import { resolveBulkActions, resolvePromotedBulkParams } from './resolveBulkActions';
 import { useUndeclaredActionNamesWarning } from './undeclaredActionNames';
 import { partitionBulkRows } from './bulkEligibility';
@@ -958,6 +961,11 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   onRowGroupsChange,
 }) => {
   const [data, setData] = useState<any[]>([]);
+  // objectstack#36290 — the field change-history card a cell's context menu
+  // opened: which record and field, and where. Ephemeral, like the menu.
+  const [fieldHistoryAt, setFieldHistoryAt] = useState<
+    { recordId: string; field: string; x: number; y: number } | null
+  >(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
   // Tenant default currency (ADR-0053) backstops amount cells that lack a code.
@@ -1364,11 +1372,17 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   // `list_item` def stops rendering a dead twin of it). A name the object does
   // not declare draws nothing and is reported below, in development. See
   // `resolveLegacyRowActions` for the full rationale (objectui#2960).
-  const { defs: resolvedRowActionDefs, undeclared: undeclaredRowActions } = resolveLegacyRowActions({
+  const { defs: foldedRowActionDefs, undeclared: undeclaredRowActions } = resolveLegacyRowActions({
     rowActions: rowActionsList.filter(a => a !== 'edit' && a !== 'delete'),
     rowActionDefs: rowActionDefsList,
     objectActions: (objectSchema as any)?.actions,
   });
+  // objectstack#36494 — the row's menus list the actions the object's record
+  // scope arrangement (`actionLayout.record`, as served) names first, in its
+  // order, then the rest as before (`./rowActionArrangement`). Keyed on the
+  // arm's content so an unchanged arm hands the menus the same defs.
+  const recordArmKey = JSON.stringify((objectSchema as any)?.actionLayout?.record ?? null);
+  const resolvedRowActionDefs = useMemo(() => rankRowActionDefs(foldedRowActionDefs, JSON.parse(recordArmKey)), [foldedRowActionDefs, recordArmKey]);
   // Honor the object's resolved CRUD affordance: the ADR-0103 lifecycle bucket
   // (`managedBy`), the `userActions.edit`/`delete` override — explicit `false`
   // opts out of the generic row Edit/Delete (e.g. sys_environment ships a
@@ -3567,6 +3581,21 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     return (orderedColumns as any[]).map((c) => (c === titleColumn ? adorned : c));
   })();
 
+  // objectstack#36290 — the card a cell's 「Change history」 item opened
+  // (`fieldHistoryAt`, declared with the grid's other state above).
+  const fieldHistoryPopover = fieldHistoryAt && dataSource && schema.objectName ? (
+    <FieldHistoryPopover
+      key={`${fieldHistoryAt.recordId}:${fieldHistoryAt.field}`}
+      at={{ x: fieldHistoryAt.x, y: fieldHistoryAt.y }}
+      onClose={() => setFieldHistoryAt(null)}
+      dataSource={dataSource}
+      objectName={schema.objectName}
+      recordId={fieldHistoryAt.recordId}
+      field={fieldHistoryAt.field}
+      objectSchema={objectSchema}
+    />
+  ) : null;
+
   /**
    * objectstack#28434 — what a right-click (or the context-menu key) on a row
    * opens; `data-table` owns the menu and calls this for its items.
@@ -3582,7 +3611,14 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
    *   browser's menu: the menu is a second way to reach the row's actions, not
    *   a new surface.
    */
-  const renderRowContextMenu = (row: any, context: { selected: boolean }): React.ReactNode => {
+  const renderRowContextMenu = (
+    row: any,
+    context: {
+      selected: boolean;
+      column?: string;
+      cell?: { copy?: () => void; paste?: () => void; clear?: () => void };
+    },
+  ): React.ReactNode => {
     if (context.selected && selectedRows.length >= 2) {
       return (
         <SelectionContextMenuItems
@@ -3598,12 +3634,41 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
         />
       );
     }
+    const recordId = rowRecordId(row);
+    // objectstack#36290 — the change history of the field whose cell the menu
+    // opened on: a field the object declares, whose changes are recorded with
+    // their values, that the reader may read, on a stored record. Offered on
+    // any table that reads its rows from a data source, row actions or none.
+    const historyField =
+      context.column
+      && typeof dataSource?.find === 'function'
+      && schema.objectName
+      && recordId != null && recordId !== ''
+      && Object.prototype.hasOwnProperty.call(objectSchema?.fields ?? {}, context.column)
+      && fieldHistoryOffered(perms, schema.objectName, context.column, objectSchema)
+        ? context.column
+        : null;
+    const onFieldHistory = historyField
+      ? (at: { x: number; y: number }) =>
+          setFieldHistoryAt({ recordId: String(recordId), field: historyField, ...at })
+      : undefined;
+    // objectstack#36289 — the data cell's own Copy, Paste and Clear, as the
+    // table offers them; Paste only for a field type pasted text can stand
+    // for (`pastesFromText`).
+    const cellFieldType = context.column
+      && Object.prototype.hasOwnProperty.call(objectSchema?.fields ?? {}, context.column)
+      ? (objectSchema as any).fields[context.column]?.type
+      : undefined;
+    const cell = context.cell ? { ...context.cell, pasteable: pastesFromText(cellFieldType) } : undefined;
+    // Something the cell can be changed by: what makes a cell's own section
+    // worth replacing the browser's menu for (its Copy alone is not).
+    const cellWrites = !!cell && ((!!cell.paste && cell.pasteable) || !!cell.clear);
     // The browser's menu stays on a table that offers no row action at all and
     // whose rows cannot be selected — a face-level answer, so a row whose own
     // actions are all hidden by their predicates still opens Open / Open in
-    // new tab like its neighbours.
-    if (!tableOffersRowActions && !selectionMode) return null;
-    const recordId = rowRecordId(row);
+    // new tab like its neighbours — unless the cell offers its field's history
+    // or a change of its value.
+    if (!tableOffersRowActions && !selectionMode && !onFieldHistory && !cellWrites) return null;
     const newTabHref =
       schema.objectName && recordId != null && recordId !== '' && recordLinkHost?.recordHref
         ? recordLinkHost.recordHref(schema.objectName, recordId)
@@ -3615,13 +3680,16 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     const opens = rowOpensRecord !== false
       && (!!onRowClick || (navigation.mode !== 'none' && !schema.navigation?.preventNavigation));
     const openHref = rowOpensRecord === false ? null : newTabHref;
-    // Nothing at all to list for this row: no Open, no URL, no action.
-    if (!opens && !openHref && !rowOffersAction(row)) return null;
+    // Nothing at all to list for this row: no Open, no URL, no history, no
+    // change of the cell, no action.
+    if (!opens && !openHref && !onFieldHistory && !cellWrites && !rowOffersAction(row)) return null;
     return (
       <RowContextMenuItems
         menu={rowActionMenuProps(row)}
         onOpen={opens ? () => navigation.handleClick(row) : undefined}
         newTabHref={openHref}
+        onFieldHistory={onFieldHistory}
+        cell={cell}
       />
     );
   };
@@ -5035,6 +5103,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
       </HorizontalOverflowBox>
       {selectionBar && <FloatingSelectionBarAnchor>{selectionBar}</FloatingSelectionBarAnchor>}
       {groupedPager}
+      {fieldHistoryPopover}
     </div>
   ) : (
     <div className="flex flex-col flex-1 min-h-0">
@@ -5047,6 +5116,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
         <SchemaRenderer schema={dataTableSchema} />
       </div>
       {summaryFooter}
+      {fieldHistoryPopover}
     </div>
   );
 

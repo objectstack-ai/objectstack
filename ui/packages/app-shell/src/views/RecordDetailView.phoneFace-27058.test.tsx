@@ -834,3 +834,34 @@ describe('a disabledWhen-greyed Edit or Delete says why (objectstack#35135)', ()
     expect(screen.queryByText(PREDICATE_REASON)).toBeNull();
   });
 });
+
+describe('the phone bottom bar reads the object\'s record scope arrangement (objectstack#36366)', () => {
+  /** The three-action lead, with `actionLayout` on the lead object. */
+  function arranged(actionLayout: unknown) {
+    const [lead, ...rest] = objectsWith([
+      action('convert', 'Convert Lead'),
+      action('assign', 'Assign'),
+      action('call', 'Log Call'),
+    ]) as unknown as Array<Record<string, unknown>>;
+    return [{ ...lead, actionLayout }, ...rest] as never;
+  }
+
+  it('the pinned actions are the bar\'s buttons, in pin order; `more` leads the top bar\'s ⋯ in its order, before Edit', async () => {
+    mountPage([`/apps/${APP}/${LEAD}/record/r-1`], arranged({ record: { pinned: ['call', 'convert'], more: ['assign'] } }));
+    const toolbar = await barDrawn();
+    expect(toolbar.getAttribute('data-page-header-actions-face')).toBe('bar');
+    expect(barButtons()).toEqual(['Log Call', 'Convert Lead']);
+    const items = await moreItems();
+    expect(items).not.toContain('Log Call');
+    expect(items).not.toContain('Convert Lead');
+    expect(items.indexOf('Assign')).toBeGreaterThanOrEqual(0);
+    expect(items.indexOf('Assign')).toBeLessThan(items.indexOf('Edit'));
+  });
+
+  it('`pinned: []` draws no bar button: every action is in the top bar\'s ⋯', async () => {
+    mountPage([`/apps/${APP}/${LEAD}/record/r-1`], arranged({ record: { pinned: [] } }));
+    const items = await moreItems();
+    expect(items).toEqual(expect.arrayContaining(['Convert Lead', 'Assign', 'Log Call', 'Edit']));
+    expect(actionBar()?.querySelectorAll('[role="toolbar"] > button').length ?? 0).toBe(0);
+  });
+});

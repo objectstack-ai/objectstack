@@ -128,6 +128,21 @@ export function choiceFromText(
 }
 
 /**
+ * Field types a list cell's menu Paste writes pasted text into
+ * (objectstack#36289): text, figures, dates and a single choice, matched by
+ * an option's value or label. A record reference, a person, a multi-choice and
+ * every other type draw Paste unavailable.
+ */
+const PASTE_FIELD_TYPES: ReadonlySet<string> = new Set([
+  ...TYPED_FIELD_TYPES, 'date', 'datetime', ...CHOICE_FIELD_TYPES,
+]);
+
+/** Whether a list cell's menu offers Paste on a field of this type. */
+export function pastesFromText(fieldType: unknown): boolean {
+  return typeof fieldType === 'string' && PASTE_FIELD_TYPES.has(fieldType);
+}
+
+/**
  * Field types whose cell editor is a panel opened under the cell, which keeps
  * showing its value (objectstack#36023): a list to pick from, a calendar, a
  * clock, a palette, and the text box of a rich-content field (markdown, HTML,

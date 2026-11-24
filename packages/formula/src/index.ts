@@ -219,6 +219,13 @@ export {
   workingDaysBetween,
   addWorkingHours,
 } from './work-calendar';
+// ADR-0157 D4 — the working-day formula functions: their names, and which
+// calendars an expression names, so a caller resolves those calendars before
+// it evaluates (`EvalContext.workCalendars`).
+export { WORKING_DAY_FUNCTIONS, workCalendarsNotLoadedMessage } from './working-day';
+export type { WorkingDayFunction } from './working-day';
+export { callsWorkingDayFunction, workingDayCalendarNeeds, computedCalendarCodeMessage } from './working-day-needs';
+export type { WorkingDayCalendarNeeds } from './working-day-needs';
 // The closed set of refusal codes `validateExpression` and
 // `collectCelRootIdentifiers` carry beside their English message, with the
 // typed params each message interpolates — so a localized author surface keys
@@ -234,4 +241,4 @@ export type {
   ExpressionSourceKind,
 } from './expression-refusal';
 export type { SeedValue, SeedPrimitive } from './seed-eval';
-export type { DialectEngine, EvalContext, EvalResult, EvalError, EvalPermissions, EvalSystemPermissions, EvalOptionLabels } from './types';
+export type { DialectEngine, EvalContext, EvalResult, EvalError, EvalPermissions, EvalSystemPermissions, EvalOptionLabels, EvalWorkCalendar, EvalWorkCalendars } from './types';

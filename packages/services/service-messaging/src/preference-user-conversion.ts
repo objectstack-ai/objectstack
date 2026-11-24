@@ -59,7 +59,7 @@ const DUPLICATE_RECORD_CODE = 'DUPLICATE_RECORD';
  */
 const OBJECT: typeof PREFERENCE_OBJECT = 'sys_notification_preference';
 
-/** How many rows one pass reads — the same ceiling `PreferenceResolver.loadRows` reads with. */
+/** How many rows one pass reads; passes repeat until a read returns no row this run has not already handled. */
 const PASS_LIMIT = 10000;
 
 export interface PreferenceUserConversionLogger {

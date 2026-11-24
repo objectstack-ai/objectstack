@@ -81,7 +81,7 @@ let writeText: ReturnType<typeof vi.fn>;
 
 /** The two raw credentials. Neither may reach the DOM or the clipboard. */
 const RAW_PASSWORD = 's3cret-value';
-const RAW_SECRET = 'sk_live_51H8xQ2';
+const RAW_SECRET = 'sk_live_FAKE_8440';
 const MASK = '••••••';
 const CONTROL_VALUE = 'Plain String Value';
 

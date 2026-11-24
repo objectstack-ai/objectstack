@@ -114,7 +114,7 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fieldGroups.collapse": {
         label: "접기",
-        helpText: "입력 양식과 레코드 상세 페이지에서 섹션을 접을 수 있는지 여부입니다. 설정하지 않으면 없음입니다."
+        helpText: "섹션을 접을 수 있는지 여부입니다. 입력 양식은 설정을 그대로 따릅니다. 기본 레코드 페이지에서는 읽는 사람이 제목이 있는 모든 그룹을 접을 수 있으므로, 거기서는 초기 상태만 정합니다. Collapsed는 접힌 상태로, 나머지는 펼친 상태로 시작합니다. 설정하지 않으면 없음입니다."
       },
       "fieldGroups.visibleWhen": {
         label: "표시 조건",
@@ -239,6 +239,10 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       "fields.deleteBehavior": {
         label: "삭제 동작",
         helpText: "참조된 레코드가 삭제될 때 일어나는 일"
+      },
+      "fields.transferBehavior": {
+        label: "소유자 변경 연동",
+        helpText: "참조된 레코드의 소유자를 변경할 때, 이 필드로 그 레코드를 가리키는 레코드도 함께 옮길 수 있는지 여부"
       },
       "fields.multiple": {
         label: "다중",
@@ -468,6 +472,18 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       "userActions.transfer": {
         label: "소유자 변경",
         helpText: "소유자 변경 작업(단건 및 일괄): 켜면 제공하고 끄면 숨깁니다. 설정하지 않으면 켜짐이며, controlled_by_parent 상세 개체에서는 꺼짐입니다. 레코드에 재할당 가능한 소유자가 있는 개체(ownership이 user이거나 미설정, managedBy 없음, sys_ 개체 아님, owner_id가 읽기 전용 아님, 외부 개체에서는 owner_id가 선언되거나 매핑됨)에서만 제공됩니다. 다른 개체에서 켜면 거부됩니다. 작업만 제어하며 owner_id의 일반 편집에는 영향을 주지 않습니다. 저장된 {enabled, visibleWhen, disabledWhen} 개체는 키별로 편집됩니다. 레코드마다 작업을 제어하려면 소스에 작성하세요."
+      },
+      actionLayout: {
+        label: "작업 배치",
+        helpText: "이 객체 작업의 순서와 버튼으로 표시할 작업을 범위별로 지정합니다: pinned(버튼 최대 3개, 순서대로)와 more(「더 보기」 메뉴의 순서. 둘 다에 없는 작업은 기본 순서로 뒤에 이어집니다). 설정하지 않으면 각 화면이 이전처럼 작업의 order로 버튼을 고릅니다."
+      },
+      "actionLayout.list": {
+        label: "목록",
+        helpText: "목록 페이지 도구 모음, {\"pinned\": [...], \"more\": [...]} 형식: 목록 도구 모음에 배치된 작업 이름; $import / $export는 pinned에만 씁니다. 고정은 최대 3개. 고정하지 않아도 페이지는 자체 가져오기 / 내보내기 메뉴를 표시합니다. os validate는 이 객체의 작업이 아니거나 목록 도구 모음에 배치되지 않은 이름을 거부하며, 그런 이름은 아무것도 표시하지 않습니다."
+      },
+      "actionLayout.record": {
+        label: "레코드",
+        helpText: "레코드 헤더(레코드 페이지, 측면 미리보기, 휴대폰 하단 바), {\"pinned\": [...], \"more\": [...]} 형식: 레코드 헤더나 그 「더 보기」 메뉴에 배치된 작업 이름. 고정은 최대 3개. os validate는 이 객체의 작업이 아니거나 레코드 페이지에 배치되지 않은 이름을 거부하며, 그런 이름은 아무것도 표시하지 않습니다."
       },
       editMode: {
         label: "편집 모드",
@@ -756,6 +772,10 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       deleteBehavior: {
         label: "삭제 동작",
         helpText: "참조된 레코드가 삭제될 때 일어나는 일"
+      },
+      transferBehavior: {
+        label: "소유자 변경 연동",
+        helpText: "참조된 레코드의 소유자를 변경할 때, 이 필드로 그 레코드를 가리키는 레코드도 함께 옮길 수 있는지 여부"
       },
       relatedListFilter: {
         label: "관련 목록 필터",
@@ -2178,7 +2198,8 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "레이블"
       },
       description: {
-        label: "설명"
+        label: "설명",
+        helpText: "One sentence on what this report shows, displayed under its name."
       },
       type: {
         label: "유형",
@@ -2260,9 +2281,33 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "날짜 범위",
         helpText: "기본 기간과 사용자 지정 범위 전환입니다. 차원은 데이터 세트의 날짜 차원이어야 하며, 데이터 세트에 날짜 차원이 정확히 하나이면 비워 두세요."
       },
+      "dateRange.dimension": {
+        label: "Date Field",
+        helpText: "The date grouping of the data source the period applies to. Leave it empty when the data source has only one."
+      },
+      "dateRange.defaultRange": {
+        label: "Default Period",
+        helpText: "The period the report opens with."
+      },
+      "dateRange.allowCustomRange": {
+        label: "Allow Custom Range",
+        helpText: "Let people pick their own start and end dates."
+      },
       exportOptions: {
         label: "내보내기 옵션",
         helpText: "다운로드 형식(csv, xlsx)과 파일 이름입니다. 다운로드할 수 있는 사람은 데이터 세트 객체의 내보내기 권한이 결정합니다."
+      },
+      "exportOptions.formats": {
+        label: "Formats",
+        helpText: "The download formats offered. Left unset, both csv and xlsx are offered; an empty list turns downloads off."
+      },
+      "exportOptions.includeHeaders": {
+        label: "Include Headers",
+        helpText: "Put the column names in the first row of the downloaded file."
+      },
+      "exportOptions.fileNamePrefix": {
+        label: "File Name",
+        helpText: "The start of the downloaded file’s name, used instead of the report name."
       }
     }
   },

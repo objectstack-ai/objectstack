@@ -99,6 +99,8 @@ import {
 } from '../preview/PreviewModeContext.js';
 import { usePreviewListDataSource } from '../preview/unpublishedObjectReads.js';
 import { useTenancyPosture } from '../hooks/useTenancyPosture.js';
+import { useCanAuthorMetadata } from '../hooks/useCanAuthorMetadata.js';
+import { mayManageViews } from './objectViewViewSharing.js';
 import { servedObjectLabel, servedObjectPluralLabel } from '../hooks/servedObjectLabel.js';
 import type { RowCrudPredicates } from '../utils/crudAffordances.js';
 import { servesRecordRead } from '../utils/recordReadServed.js';
@@ -332,6 +334,11 @@ export function ObjectDataPage({ dataSource, objects }: any) {
   const { canRead } = useFieldPermissions(objectName ?? '');
   const { user, activeOrganization } = useAuth();
   const { isAdmin } = useWorkspaceAdminStatus();
+  // objectstack#36448 — "Save as view" writes `view` metadata, which the
+  // server refuses without `manage_metadata`: offered to an administrator
+  // holding it (`mayManageViews`), never to one the save would answer 403.
+  const canAuthorMetadata = useCanAuthorMetadata();
+  const canSaveAsView = mayManageViews(isAdmin, canAuthorMetadata);
   const metadataClient = useMetadataClient();
   // ADR-0105: group posture appends a trailing organization_id attribution
   // column to the auto-derived columns (reads span all the user's orgs).
@@ -908,7 +915,7 @@ export function ObjectDataPage({ dataSource, objects }: any) {
       <span className="hidden sm:inline">{t('console.objectView.new')}</span>
     </Button>
   ) : null;
-  const saveAsViewButton = isAdmin ? (
+  const saveAsViewButton = canSaveAsView ? (
     <Button
       size="sm"
       variant="outline"
@@ -981,7 +988,7 @@ export function ObjectDataPage({ dataSource, objects }: any) {
           foldedActions={
             newButton && <>
               {newButton}
-              {isAdmin && (
+              {canSaveAsView && (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button
@@ -1130,7 +1137,7 @@ export function ObjectDataPage({ dataSource, objects }: any) {
         </NavigationOverlay>
       )}
 
-      {isAdmin && (
+      {canSaveAsView && (
         <CreateViewDialog
           open={showCreateViewDialog}
           onOpenChange={setShowCreateViewDialog}

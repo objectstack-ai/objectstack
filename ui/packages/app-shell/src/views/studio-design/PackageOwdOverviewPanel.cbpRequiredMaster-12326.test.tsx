@@ -22,6 +22,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { ObjectSchema } from '@objectstack/spec/data';
 import { t, tFormat } from '../metadata-admin/i18n';
 import { PackageOwdOverviewPanel } from './PackageOwdOverviewPanel';
+import { StudioSaveHarness } from './__tests__/studioSaveHarness';
 
 const NO_MASTER = t('engine.studio.owd.byParentNoMaster', 'en-US');
 const CBP_LABEL = t('engine.studio.settings.sharingControlledByParent', 'en-US');
@@ -34,6 +35,8 @@ function makeClient(objects: Record<string, Body>, saved: Array<{ name: string; 
       type === 'object' ? Object.entries(objects).map(([name, body]) => ({ name, label: body.label ?? name })) : [],
     listDrafts: async () => [],
     layered: async (_type: string, name: string) => ({ effective: objects[name] ?? {}, code: null }),
+    publish: async () => ({}),
+    reset: async () => ({}),
     getDraft: async () => null,
     save: async (_type: string, name: string, body: Body) => {
       saved.push({ name, body });
@@ -45,7 +48,7 @@ function makeClient(objects: Record<string, Body>, saved: Array<{ name: string; 
 
 function renderPanel(objects: Record<string, Body>) {
   const saved: Array<{ name: string; body: Body }> = [];
-  render(<PackageOwdOverviewPanel client={makeClient(objects, saved)} packageId="com.example.crm" locale="en-US" />);
+  render(<StudioSaveHarness><PackageOwdOverviewPanel client={makeClient(objects, saved)} packageId="com.example.crm" locale="en-US" /></StudioSaveHarness>);
   return { saved };
 }
 
@@ -111,7 +114,7 @@ describe('PackageOwdOverviewPanel — switching a row to controlled_by_parent (o
       tFormat('engine.studio.owd.byParent', 'en-US', { master: 'crm_account' }),
     );
 
-    fireEvent.click(screen.getByTestId('owd-save'));
+    fireEvent.click(await screen.findByTestId('studio-save'));
     await waitFor(() => expect(saved.length).toBe(1));
     expect(saved[0].body.sharingModel).toBe('controlled_by_parent');
     expect((saved[0].body.fields as Record<string, Body>).account.required).toBe(true);
@@ -135,7 +138,7 @@ describe('PackageOwdOverviewPanel — switching a row to controlled_by_parent (o
       tFormat('engine.studio.owd.byParent', 'en-US', { master: 'crm_account' }),
     );
 
-    fireEvent.click(screen.getByTestId('owd-save'));
+    fireEvent.click(await screen.findByTestId('studio-save'));
     await waitFor(() => expect(saved.length).toBe(1));
     expect(saved[0].body.sharingModel).toBe('controlled_by_parent');
     expect((saved[0].body.fields as Record<string, Body>).account.required).toBe(false);

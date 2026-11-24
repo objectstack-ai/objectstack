@@ -35,8 +35,8 @@ const issues = (input: unknown) => {
 };
 
 describe('the arrangement keys', () => {
-  it('are fieldGroups and relatedLists, frozen', () => {
-    expect([...CUSTOM_ARRANGEMENT_KEYS]).toEqual(['fieldGroups', 'relatedLists']);
+  it('are fieldGroups, relatedLists and [#36366] actionLayout, frozen', () => {
+    expect([...CUSTOM_ARRANGEMENT_KEYS]).toEqual(['fieldGroups', 'relatedLists', 'actionLayout']);
     expect(Object.isFrozen(CUSTOM_ARRANGEMENT_KEYS)).toBe(true);
   });
 
@@ -46,6 +46,9 @@ describe('the arrangement keys', () => {
     [{ extend: 'a', relatedLists: ['task'] }, ['relatedLists']],
     [{ extend: 'a', relatedLists: [], fieldGroups: [{ key: 'b', label: 'B' }] }, ['fieldGroups', 'relatedLists']],
     [{ extend: 'a', fieldGroups: undefined, relatedLists: null }, []],
+    [{ extend: 'a', actionLayout: { record: { pinned: [] } } }, ['actionLayout']],
+    [{ extend: 'a', actionLayout: {}, relatedLists: [] }, ['relatedLists', 'actionLayout']],
+    [{ extend: 'a', actionLayout: null }, []],
     [undefined, []],
     [['fieldGroups'], []],
   ])('extensionArrangementKeys(%j) → %j', (body, keys) => {

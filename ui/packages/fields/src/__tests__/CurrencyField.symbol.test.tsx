@@ -37,13 +37,14 @@
  * silent wrong-answer bug and not a hypothetical.
  */
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import React from 'react';
 import { render } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { LocalizationProvider } from '@object-ui/i18n';
 import { CurrencyField } from '../widgets/CurrencyField';
 import { currencySymbol } from '../currency';
+import { INSET_LADDER, pickInsetClass } from '../widgets/adornmentInset';
 
 /**
  * ICU separates a currency CODE from the amount with U+00A0 and sets a SYMBOL
@@ -194,5 +195,78 @@ describe('currencySymbol() — neither a bad code nor a bad locale may escape as
   it('the widget renders the code instead of throwing when the code is junk', () => {
     const { container } = renderField({ currency: 'not-a-code' });
     expect(adornment(container)).toBe('not-a-code');
+  });
+});
+
+/**
+ * objectstack#36678 — the input's left inset clears the symbol, whatever its
+ * width. A fixed `pl-8` was sized for `$`; zh-CN renders USD as `US$`, en-US
+ * renders CAD as `CA$` and CHF as `CHF`, and each sat on the amount's leading
+ * digit (`150000` read as `US$50000`).
+ *
+ * jsdom has no layout, so these pins give the adornment the box a browser
+ * gives it: the symbol starts at `left-3` (12px) inside the wrapper and is as
+ * wide as the table below says (text-sm, measured in Chromium).
+ */
+const SYMBOL_PX: Record<string, number> = { $: 8, 'US$': 27, 'CA$': 26, CHF: 27 };
+const SYMBOL_LEFT_PX = 12;
+
+function layOut(): void {
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+    const width = this.tagName === 'SPAN' ? SYMBOL_PX[this.textContent ?? ''] ?? 0 : 300;
+    const left = this.tagName === 'SPAN' ? SYMBOL_LEFT_PX : 0;
+    return { x: left, y: 0, left, top: 0, width, height: 20, right: left + width, bottom: 20, toJSON: () => ({}) } as DOMRect;
+  });
+}
+
+/** The rem the input reserves on its left, read off its ladder class. */
+const reservedRem = (input: Element | null): number =>
+  INSET_LADDER.find((r) => input?.classList.contains(r.className))?.rem ?? 0;
+
+describe('CurrencyField adornment — the input reserves at least the symbol\'s width (objectstack#36678)', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it.each([
+    ['zh-CN', 'USD', 'US$'],
+    ['en-US', 'CAD', 'CA$'],
+    ['en-US', 'CHF', 'CHF'],
+  ])('%s / %s — the symbol is `%s` and the typed amount starts after it', (locale, currency, symbol) => {
+    layOut();
+    const { container } = renderField({ currency }, { locale });
+    expect(adornment(container)).toBe(symbol);
+    const input = container.querySelector('input');
+    // Past the symbol's right edge — the old fixed 2rem stopped short of it.
+    expect(reservedRem(input) * 16).toBeGreaterThan(SYMBOL_LEFT_PX + SYMBOL_PX[symbol]);
+    expect(input).not.toHaveClass('pl-8');
+  });
+
+  it('`$` keeps exactly the inset it always had', () => {
+    layOut();
+    const { container } = renderField({ currency: 'USD' }, { locale: 'en-US' });
+    expect(container.querySelector('input')).toHaveClass('pl-8');
+  });
+
+  it('before layout (no width to read) a wide symbol is still given room by its length', () => {
+    const { container } = renderField({ currency: 'USD' }, { locale: 'zh-CN' });
+    expect(adornment(container)).toBe('US$');
+    expect(reservedRem(container.querySelector('input'))).toBeGreaterThan(2);
+  });
+
+  it('the inset follows the symbol when the currency changes under the same input', () => {
+    layOut();
+    const field = (currency: string) => (
+      <LocalizationProvider value={{ locale: 'en-US' }}>
+        <CurrencyField value={150000} onChange={vi.fn()} field={{ type: 'currency', currency } as any} />
+      </LocalizationProvider>
+    );
+    const { container, rerender } = render(field('USD'));
+    expect(container.querySelector('input')).toHaveClass('pl-8');
+    rerender(field('CHF'));
+    expect(reservedRem(container.querySelector('input')) * 16).toBeGreaterThan(SYMBOL_LEFT_PX + SYMBOL_PX.CHF);
+  });
+
+  it('a symbol wider than every rung gets the widest rung, never the floor', () => {
+    expect(pickInsetClass(100, 'pl-8')).toBe(INSET_LADDER[INSET_LADDER.length - 1].className);
+    expect(pickInsetClass(1, 'pl-8')).toBe('pl-8');
   });
 });

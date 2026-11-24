@@ -13,6 +13,14 @@ import { useMemo, useState, useCallback, useEffect, useRef, lazy, Suspense, type
 import { useParams, useSearchParams, useNavigate, useLocation, useHref, createSearchParams } from 'react-router-dom';
 import { resolveAffordance, type FilterTokenScope, type SchemaLike } from '@object-ui/core';
 import { useObjectListLayout } from './listLayoutStore.js';
+/**
+ * objectstack#36395 — the list layouts that hold no selection of several
+ * records, and so offer no bulk Change Owner: every layout `ListView` draws
+ * with records as items except the grid. An unknown type is not here: the list
+ * draws it as a grid, which does select.
+ */
+const LAYOUTS_WITHOUT_BULK_SELECTION: ReadonlySet<string> = new Set(['kanban', 'calendar', 'gallery', 'timeline', 'gantt', 'map', 'tree']);
+
 const ImportWizard = lazy(() =>
   import('@object-ui/plugin-grid').then((m) => ({ default: m.ImportWizard })),
 );
@@ -20,7 +28,7 @@ import { ObjectView as PluginObjectView, ManageViewsDialog } from '@object-ui/pl
 // Plugin registration is handled by the host app (e.g. apps/console/src/main.tsx
 // uses ComponentRegistry.registerLazy so heavy plugins stay code-split).
 // Do NOT add eager `import '@object-ui/plugin-*'` side-effect imports here.
-import { CheckSquare, Plus } from 'lucide-react';
+import { CheckSquare, Info, Plus } from 'lucide-react';
 import { DropdownMenuItem, ObjectIconTile } from '@object-ui/components';
 import { requestListSelection, useListPageSelectable, useListPageSelecting } from '@object-ui/plugin-grid';
 import type { ListToolbarTrailingState } from '@object-ui/plugin-list';
@@ -101,7 +109,7 @@ import { ListDraftActions } from './ListDraftActions.js';
 import { viewSaveRefusalText } from './viewSaveRefusal.js';
 import { listDraftPreference, listDraftScope, useListDraft } from './listDraftStore.js';
 import { useObjectViewViewCrud, useRuntimeCreateApp } from './objectViewViewCrud.js';
-import { mayShareViews, useViewSharing } from './objectViewViewSharing.js';
+import { mayManageViews, useViewSharing } from './objectViewViewSharing.js';
 import { useCanAuthorMetadata } from '../hooks/useCanAuthorMetadata.js';
 import {
     PERSONAL_VIEW_OBJECT,
@@ -284,6 +292,15 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     const { user, activeOrganization } = useAuth();
     const { isAdmin } = useWorkspaceAdminStatus();
     const perms = usePermissions();
+    // objectstack#36448 — who is offered the object's views to change: an
+    // administrator holding `manage_metadata`, the capability every `view`
+    // metadata write asks (`./objectViewViewSharing.ts`). Manage views, the
+    // view settings panel, Create View, a Shared new view, and a saved view's
+    // rename and save in place all read this one answer, so an organization
+    // administrator without it is offered none of the writes the server
+    // refuses with 403. `isAdmin` alone still gates what only reads.
+    const canAuthorMetadata = useCanAuthorMetadata();
+    const canManageViews = mayManageViews(isAdmin, canAuthorMetadata);
     
     // Get Object Definition. The outer ObjectView wrapper already guards the
     // missing-object case, so this always resolves while this component is
@@ -764,6 +781,16 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     // has not saved (`./listDraftStore.ts`). It outlives this page while a
     // record is open as a page, and goes when another view or object opens.
     const listDraft = useListDraft(listDraftScope(user?.id, objectName ?? '', activeView?.id ? String(activeView.id) : ''));
+    // objectstack#36395 — bulk Change Owner lives in the grid's selection bar.
+    // On a layout that selects no rows (the reader's unsaved layout first, as
+    // the list draws it), a reader the grid would offer it to is told so in one
+    // line: the object offers the action and the object-level transfer verdict
+    // allows it, asked only while such a layout is on screen.
+    const listLayoutType = String(listDraft.draft.viewType ?? (activeView as any)?.type ?? 'grid');
+    const bulkChangeOwnerGridOnly = useListChangeOwnerOffered(
+        objectDef as any,
+        bulkChangeOwnerReachable && LAYOUTS_WITHOUT_BULK_SELECTION.has(listLayoutType),
+    );
     /** The list on screen in the reader-state shape the view builders read (draft + kept widths and row height). */
     const draftPreferenceOf = (id: string | undefined) =>
         id ? listDraftPreference(listDraft.draft, listLayout.layout.perView?.[id]) : undefined;
@@ -911,7 +938,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         ? savedViews.find((sv: any) => viewRowId(sv) === activeView.id)
         : undefined;
     const activeViewPackageSaveRead = usePackageSaveRead(studioPackageId(activeSavedViewRow));
-    const canSaveToSharedView = !isEnvironmentList && !activeIsPersonal && !!activeView && isAdmin
+    const canSaveToSharedView = !isEnvironmentList && !activeIsPersonal && !!activeView && canManageViews
         && activeViewPackageSaveRead === 'takes' && isSavedViewId(savedViews, String(activeView.id));
     const handleSaveToSharedView = async () => {
         if (!activeView || !canSaveToSharedView) return;
@@ -1166,10 +1193,8 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     });
 
     // objectstack#36409 — only an administrator holding the shared view's write
-    // capability creates a shared view, and it is published at once
-    // (`./objectViewViewSharing.ts`).
-    const canAuthorMetadata = useCanAuthorMetadata();
-    const canShareViews = mayShareViews(isAdmin, canAuthorMetadata);
+    // capability (`canManageViews`, above) creates a shared view, and it is
+    // published at once (`./objectViewViewSharing.ts`).
     const sharingApp = useRuntimeCreateApp(t);
     const viewSharing = useViewSharing({
         objectName: objectDef.name,
@@ -1197,7 +1222,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         viewAccess,
         activeViewId,
         handleViewChange,
-        isAdmin,
+        canManageViews,
         handleAddView,
         setManageViewsOpen,
         pinnedViewId,
@@ -1218,7 +1243,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
             createShared: viewSharing.createShared,
             clearSourceListState,
             canCreatePersonal: canCreatePersonalView,
-            canCreateShared: canShareViews,
+            canCreateShared: canManageViews,
             hasUnsavedConditions: listDraftParts.some((part) => part === 'filters' || part === 'sort'),
         },
         onRenamePersonalView: personalViewsReady && personalGrant('update')
@@ -1325,7 +1350,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
                 ? (label: string) => handleRenamePersonalView(String(activeView.id), label)
                 // A read-only package's view is renamed too (objectstack#35974):
                 // `updateView` writes the label into its customization pair.
-                : activeView && isAdmin && savedViews.some((sv: any) => viewRowId(sv) === activeView.id)
+                : activeView && canManageViews && savedViews.some((sv: any) => viewRowId(sv) === activeView.id)
                     ? async (label: string) => { await handleRenameView(String(activeView.id), label); return true; }
                     : undefined,
             save: !isEnvironmentList && listDraftParts.length > 0 ? saveToThisView : undefined,
@@ -1350,7 +1375,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         activeView,
         objectDef,
         onEdit,
-        isAdmin,
+        canManageViews,
         location,
         navigate,
         viewId,
@@ -1600,7 +1625,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
                  the server refused alike. Its Manage views opens the dialog
                  below. On a phone the same switcher leads the list's toolbar
                  row (objectstack#27058). */}
-             {isAdmin && views.length >= 1 && (
+             {canManageViews && views.length >= 1 && (
                <ManageViewsDialog
                  open={manageViewsOpen}
                  onOpenChange={setManageViewsOpen}
@@ -1620,6 +1645,17 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
 
              {/* objectui#13330 — where people are invited on a managed environment. */}
              {managedUsers && <ManagedUsersInviteLine t={t} />}
+
+             {/* objectstack#36395 — where bulk Change Owner is, on a layout that selects no rows. */}
+             {bulkChangeOwnerGridOnly && (
+               <p
+                 className="flex items-center gap-2 border-b px-3 sm:px-4 py-1.5 text-xs text-muted-foreground"
+                 data-testid="object-view-bulk-change-owner-grid-only"
+               >
+                 <Info className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                 <span className="min-w-0">{t('console.changeOwner.gridOnly')}</span>
+               </p>
+             )}
 
              {/* 2. Content — Plugin ObjectView with ViewSwitcher + Filter + Sort */}
              <div className="flex-1 overflow-hidden relative flex flex-row">
@@ -1644,12 +1680,12 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
                 <div
                     data-testid="view-config-panel-wrapper"
                     className={`transition-[max-width,opacity] duration-300 ease-in-out overflow-hidden ${
-                        showViewConfigPanel && isAdmin ? 'max-w-[280px] opacity-100' : 'max-w-0 opacity-0'
+                        showViewConfigPanel && canManageViews ? 'max-w-[280px] opacity-100' : 'max-w-0 opacity-0'
                     }`}
                 >
                     <Suspense fallback={null}>
                         <ViewConfigPanel
-                            open={showViewConfigPanel && isAdmin}
+                            open={showViewConfigPanel && canManageViews}
                             onClose={() => { setShowViewConfigPanel(false); setViewConfigPanelMode('edit'); }}
                             mode={viewConfigPanelMode}
                             activeView={activeView}
@@ -1666,7 +1702,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
                 </div>
                 <Suspense fallback={null}>
                     <CreateViewDialog
-                        open={showCreateViewDialog && isAdmin}
+                        open={showCreateViewDialog && canManageViews}
                         onOpenChange={setShowCreateViewDialog}
                         existingLabels={views.map((v: any) => v.label).filter(Boolean)}
                         objectDef={objectDef}

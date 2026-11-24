@@ -85,6 +85,7 @@ vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => null }));
 vi.mock('../../preview/DraftChangesPanel', () => ({ DraftChangesPanel: () => null }));
 
 import { StudioDesignSurface } from './StudioDesignSurface';
+import { pressStudioSave } from './__tests__/studioSaveHarness';
 import { t, tFormat } from '../metadata-admin/i18n';
 
 window.matchMedia = ((query: string) => ({
@@ -118,8 +119,9 @@ const READ = {
   overrides: [],
   extensions: [],
   switchedOff: [],
+  arrangements: [],
   contributions: [],
-  counts: { overrides: 0, extensions: 0, switchedOff: 0, contributions: 0 },
+  counts: { overrides: 0, extensions: 0, switchedOff: 0, arrangements: 0, contributions: 0 },
 };
 
 /** Each package's list, by type: the base ships its objects and its set; the pair holds only the copy. */
@@ -255,6 +257,8 @@ describe('a "New similar" copy in the pair shows the grants it holds on the base
     renderAccess(COPY);
     await copyOpen();
     fireEvent.click(within(matrix()).getByLabelText(`sc_note ${t('perm.action.edit', 'en')}`));
+    // objectstack#36511 — sent by the top bar's Save.
+    await pressStudioSave();
 
     await waitFor(() => expect(srv.saves).toHaveLength(1), { timeout: 8000 });
     const [saved] = srv.saves;

@@ -283,6 +283,12 @@ export const DETAIL_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'detail.fieldChangeEmpty': 'Empty',
   'detail.fieldChangeExpand': 'Show all',
   'detail.fieldChangeCollapse': 'Show less',
+  // objectstack#36290 — one field's change-history card: its entry point's
+  // name (the record page's field button, the list cell's context menu) and
+  // what it says for a field never changed.
+  'detail.fieldHistory': 'Change history',
+  'detail.fieldHistoryNone': 'No changes recorded',
+  'detail.fieldHistoryNoneRecent': 'No changes in the recent activity',
   // …and the punctuation that joins its field list: the shared list key the
   // form's field lists already use, not a second spelling of it.
   'validation.formInvalidJoiner': ', ',

@@ -848,6 +848,39 @@ Polish shipped in #2572:
   the band decide through one rule, `resolveApprovalLock` from
   `@object-ui/react`.
 
+## A field's change history
+
+Each field of the object on the record page has a history button beside its
+value, shown on hover and on keyboard focus like the copy button. In a list,
+right-clicking a cell of a field the object declares adds **Change history**
+to the row's menu. Both open the same small card in place
+(`FieldHistoryButton`, `FieldHistoryPopover`, both drawing `FieldHistoryCard`):
+
+- only that field's changes on that record: who, when, and old → new in the
+  reader's words (an option by its label, an empty side as the word for empty),
+  newest first, ten at a time with **Load more**;
+- for a field never changed, **No changes recorded** with who created the
+  record and when.
+
+The card reads the record's activity rows (`sys_activity`), the rows the
+activity stream draws, and keeps those that changed the field. The server
+serves each row's changes narrowed to the reader, so a value the reader may not
+read never reaches the browser, and a field the reader may not read
+(`checkField(object, field, 'read')`) offers no history at all. Nor does a
+field whose old → new values are not recorded (`resolveFieldHistory` from
+`@objectstack/spec/data`: `fieldHistory: false` on the field,
+`enable.fieldHistory: false` on the object, a credential field, or a media or
+JSON-like type that does not opt in with `fieldHistory: true`), and nor do the
+platform's own record columns (`id`, `created_at`, …).
+
+The rows are read by record, fifty at a time: a query naming a change column
+is refused for a reader withheld any field of the object, so the field is never
+part of the query. Opening the card reads at most four batches
+(`FIELD_HISTORY_SCAN_BATCHES_PER_LOAD`), and each **Load more** at most four
+more. When they hold no change of the field and older rows remain, the card
+says **No changes in the recent activity** and offers **Load more** to read on;
+it says **No changes recorded** only once every row has been read.
+
 ## Links
 
 - 📚 [Documentation](https://objectstack.ai/docs/frontend/plugins/plugin-detail)
@@ -886,7 +919,9 @@ the console — and a double-click keeps the default there too.
 A tab row closes the record header (`RecordTabRow`): 「详情」 (Details) where
 the details are not pinned, then one tab per related list in the reader's
 arrangement, then Attachments, Approvals, and 动态 (Activity) last, each with
-its count. A tab is its panel's whole face: choosing it draws the full list
+its count. 动态 is left out for an object that switches off all three of its
+sources (`enable.feeds` and `enable.activities` false, `enable.trackHistory`
+not true), since that stream would be empty. A tab is its panel's whole face: choosing it draws the full list
 (every column, paging, sort, inline edit) or the full stream below the row,
 with the header unchanged, and the URL carries it
 (`?related=<object>.<field>`, `?related=timeline`); 「详情」 or Esc returns

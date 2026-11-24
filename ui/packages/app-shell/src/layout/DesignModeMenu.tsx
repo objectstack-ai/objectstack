@@ -15,7 +15,11 @@
  *   to a group, add an item before or after it, rename and icon, remove from
  *   the menu. Removing takes the entry off the menu only; what it opened is
  *   kept, and the picker offers it again.
- * - An entry can be dragged to another place, in its group or another one.
+ * - An entry can be dragged to another place, in its group or another one,
+ *   or moved from the keyboard: Space picks it up, the arrows move it, Space
+ *   or Enter drops it and Escape puts it back. Enter on an entry not picked up
+ *   opens its page (objectstack#36538, review N13). A drop outside the menu
+ *   moves nothing (review N14).
  *
  * A name is changed only in the app's source language (objectstack#36363,
  * ruling (4)): the stored labels are the app's own, and a translation is
@@ -31,6 +35,10 @@
  * 「⋮」 says it is changed in that package, and it is not dragged. Adding an
  * item before or after it stays open; no other entry is moved past it (a
  * move up, a move down or a drop onto it), since its place is that package's.
+ * A group another package puts into the menu takes no own entry: it is not
+ * offered by 「Move to group」, is no drop target, and has no 「Add menu item」
+ * (objectstack#36538, review N9), since the save could put such an entry
+ * nowhere but the end of the stored menu.
  *
  * In the picker's 「Dashboards」, the first row is 「New dashboard…」
  * (objectstack#36364): it asks for a name, and on 「Create」 the dashboard is
@@ -38,6 +46,10 @@
  * place, and the mode saves at once, every other staged change with it
  * (`saveAppMenuWithNewItem`); then the mode is left and the new dashboard
  * opens for editing (`dashboardEditArrival`). 「Cancel」 writes nothing.
+ * In 「Reports」 the first row is 「New report…」: a report needs a data source
+ * and a measure, so the place stays held and the report builder opens; its
+ * Save creates the report and saves the mode the same way
+ * (`designModeReportSlot`), and its Close drops the place, writing nothing.
  *
  * Every edit is staged with the mode (`useDesignModeChange`), under one key
  * for the app's menu: the mode's 「Save」 writes it (`saveAppMenu`), its
@@ -56,17 +68,21 @@
  */
 
 import * as React from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
   DndContext,
+  KeyboardCode,
   KeyboardSensor,
   PointerSensor,
   closestCenter,
   useDroppable,
   useSensor,
   useSensors,
+  type CollisionDetection,
   type DragEndEvent,
+  type DragStartEvent,
+  type KeyboardCodes,
 } from '@dnd-kit/core';
 import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -147,6 +163,7 @@ import {
   storedEntriesById,
   targetKeyFor,
   withEntryIds,
+  withOwnBeforeForeignRuns,
   type Menu,
   type MenuEntry,
   type MenuTargetKind,
@@ -160,6 +177,7 @@ import {
 } from './designModeMenuSave.js';
 import { freeItemName, isNewMenuItemKind, saveAppMenuWithNewItem, type NewMenuItemKind } from './designModeMenuCreate.js';
 import { dashboardEditArrival } from './designModeArrival.js';
+import { offerNewReportSlot, withdrawNewReportSlot, type NewReportSlot } from './designModeReportSlot.js';
 
 /**
  * The group label's icon-mode hiding, as the sidebar's own labels declare it
@@ -187,6 +205,22 @@ const parentOfEndZone = (id: string): string | null | undefined => {
   return rest === '' ? null : rest;
 };
 
+/**
+ * The keys of a keyboard move (objectstack#36538, review N13): Space picks an
+ * entry up, so Enter on an entry still opens its page, as on any link; Space
+ * or Enter drops it, Escape puts it back.
+ */
+const MENU_KEYBOARD_CODES: KeyboardCodes = {
+  start: [KeyboardCode.Space],
+  cancel: [KeyboardCode.Esc],
+  end: [KeyboardCode.Space, KeyboardCode.Enter],
+};
+
+/** Whether the point `at` lies outside the box `box`. */
+function outside(at: { x: number; y: number }, box: DOMRect): boolean {
+  return at.x < box.left || at.x > box.right || at.y < box.top || at.y > box.bottom;
+}
+
 export interface DesignModeMenuProps {
   /** The app on screen: its name, its served `navigation` and its package. */
   readonly app: { readonly name: string; readonly navigation?: unknown; readonly _packageId?: unknown };
@@ -206,7 +240,7 @@ export default function DesignModeMenu({ app, basePath, resolveTargetLabel, reso
     () => withEntryIds(inShownOrder(Array.isArray(app.navigation) ? (app.navigation as Menu) : [])),
     [app.navigation],
   );
-  const menu = change.value ?? served;
+  const staged = change.value ?? served;
 
   const texts = React.useMemo(
     () => ({
@@ -221,6 +255,12 @@ export default function DesignModeMenu({ app, basePath, resolveTargetLabel, reso
       }),
       notWritable: t('designMode.menu.notWritable', {
         defaultValue: "This app's customization package cannot be written, so its menu cannot be saved.",
+      }),
+      storedUnread: t('designMode.menu.storedUnread', {
+        defaultValue: "This app's saved menu could not be read, so nothing was saved.",
+      }),
+      publishedMoved: t('designMode.menu.publishedMoved', {
+        defaultValue: "Someone published this app's menu while you were saving, so nothing was saved. Save again to apply your changes over theirs.",
       }),
     }),
     [t],
@@ -255,6 +295,12 @@ export default function DesignModeMenu({ app, basePath, resolveTargetLabel, reso
   );
   /** Whether the entry `id` is another package's (served, and not in the stored menu). */
   const contributed = (id: string): boolean => !!storedById && !storedById.has(id) && !!entryOf(served, id);
+  // An own entry the editor put in or past another package's closing entries
+  // before the stored read told them apart is drawn where the save puts it:
+  // before them (objectstack#36538, review N10).
+  const menu = storedById ? withOwnBeforeForeignRuns(staged, served, contributed) : staged;
+  /** Whether the group `parentId` (the top level for `null`) is another package's: no own entry goes into it. */
+  const foreignGroup = (parentId: string | null): boolean => parentId !== null && contributed(parentId);
   /** Whether the entry beside `id`, `by` places away in its group, is another package's. */
   const besideContributed = (id: string, by: -1 | 1): boolean => {
     const place = placeOf(menu, id);
@@ -288,8 +334,22 @@ export default function DesignModeMenu({ app, basePath, resolveTargetLabel, reso
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates, keyboardCodes: MENU_KEYBOARD_CODES }),
   );
+  // The collision rule (objectstack#36538, review N14): a pointer released
+  // outside the menu's own box is over nothing, so the drop moves nothing;
+  // inside it, and for a keyboard move (which has no pointer), the nearest
+  // entry's centre, as before.
+  const menuArea = React.useRef<HTMLDivElement>(null);
+  const collision = React.useCallback<CollisionDetection>((args) => {
+    const at = args.pointerCoordinates;
+    const box = at ? menuArea.current?.getBoundingClientRect() : null;
+    if (at && box && outside(at, box)) return [];
+    return closestCenter(args);
+  }, []);
+  const keyboardHint = t('designMode.menu.keyboardHint', {
+    defaultValue: 'Drag an item to move it, or focus it and press Space, then the arrow keys. Enter opens it.',
+  });
   const leafIds = React.useMemo(() => {
     const out: string[] = [];
     const walk = (entries: Menu) => {
@@ -307,18 +367,33 @@ export default function DesignModeMenu({ app, basePath, resolveTargetLabel, reso
   // it is not a click, so it opens nothing. dnd-kit stops that click's
   // propagation in the document's capture phase but leaves its default (a full
   // navigation), so the default is cancelled before it, on the window.
+  //
+  // The window after a pointer drag starts at the RELEASE of the press that
+  // dragged, never at the drag's end: an Escape while the button is held ends
+  // the drag, and the release that follows, however late, is still no click
+  // (objectstack#36538, review N12). A keyboard move holds the links shut
+  // until it ends, whatever the pointer does meanwhile (review N16).
   const lastDragEnd = React.useRef(0);
-  const dragging = React.useRef(false);
-  const onDragStart = () => {
-    dragging.current = true;
+  /** A pointer press began a drag, and has not been released. */
+  const pointerDrag = React.useRef(false);
+  /** A keyboard move is held. */
+  const keyboardDrag = React.useRef(false);
+  /** A pointer button is down. */
+  const pointerHeld = React.useRef(false);
+  const onDragStart = (event: DragStartEvent) => {
+    if (typeof KeyboardEvent !== 'undefined' && event.activatorEvent instanceof KeyboardEvent) keyboardDrag.current = true;
+    else pointerDrag.current = true;
   };
   const endDrag = () => {
-    dragging.current = false;
+    keyboardDrag.current = false;
+    // Still held (an Escape mid-drag): the release stamps the window.
+    if (pointerHeld.current) return;
+    pointerDrag.current = false;
     lastDragEnd.current = Date.now();
   };
   React.useEffect(() => {
     const onClick = (event: MouseEvent) => {
-      const justDragged = dragging.current || Date.now() - lastDragEnd.current < 300;
+      const justDragged = keyboardDrag.current || pointerDrag.current || Date.now() - lastDragEnd.current < 300;
       if (justDragged && event.target instanceof Element && event.target.closest('[data-design-menu-link]')) event.preventDefault();
     };
     // The drag's end is stamped from the pointer itself too: dnd-kit reports a
@@ -326,11 +401,13 @@ export default function DesignModeMenu({ app, basePath, resolveTargetLabel, reso
     // that would leave the flag set and every link of the editor shut. A new
     // press starts over.
     const onPress = () => {
-      dragging.current = false;
+      pointerHeld.current = true;
+      pointerDrag.current = false;
     };
     const onRelease = () => {
-      if (!dragging.current) return;
-      dragging.current = false;
+      pointerHeld.current = false;
+      if (!pointerDrag.current) return;
+      pointerDrag.current = false;
       lastDragEnd.current = Date.now();
     };
     window.addEventListener('click', onClick, true);
@@ -352,12 +429,12 @@ export default function DesignModeMenu({ app, basePath, resolveTargetLabel, reso
     if (!overId || overId === id) return;
     const endParent = parentOfEndZone(overId);
     if (endParent !== undefined) {
-      update(moveToOwnEnd(id, endParent));
+      if (!foreignGroup(endParent)) update(moveToOwnEnd(id, endParent));
       return;
     }
     const from = placeOf(menu, id);
     const to = placeOf(menu, overId);
-    if (!from || !to || contributed(overId)) return;
+    if (!from || !to || contributed(overId) || foreignGroup(to.parentId)) return;
     // `to.index` read after the entry leaves: below its old place in the same
     // group it lands after the entry dropped on, elsewhere before it.
     update(moveEntry(menu, id, to.parentId, to.index));
@@ -417,6 +494,83 @@ export default function DesignModeMenu({ app, basePath, resolveTargetLabel, reso
     return true;
   };
 
+  // objectstack#36364 (report half) — 「New report…」: a report cannot be
+  // made from a name (the spec wants `dataset` and `values`), so the place
+  // stays held and the report builder opens at `reports/new`. The builder
+  // saves through the slot offered here (`designModeReportSlot`): the report
+  // is created in the menu's package and its entry saved in the held place
+  // with every other staged change, in one act; nothing is written before.
+  // The builder's Close drops the place. Resolves `false` when nothing was
+  // saved (the mode has said why); the builder stays open for another try.
+  const [buildingReport, setBuildingReport] = React.useState(false);
+  const saveNewReport = async (name: string, label: string, body: Record<string, unknown>): Promise<boolean> => {
+    if (!addAt) return false;
+    // A report entry with no label shows its machine name (only an object,
+    // view or dashboard entry inherits its target's label), so the entry
+    // carries the name the reader gave the report.
+    const entry = { ...entryFor('report', name, newEntryId([...menu, ...(storedMenu ?? [])])), label };
+    const itemTexts = {
+      ...texts,
+      itemPendingDraft: t('designMode.menu.newItemPendingDraft', {
+        defaultValue: 'A draft with this name is already pending. Try again.',
+      }),
+      itemLeft: t('designMode.menu.newReportLeft', {
+        defaultValue: 'The new report "{{name}}" could not be removed again; remove it in Studio.',
+        name: label,
+      }),
+    };
+    const saved = await saveWith(insertEntry(menu, addAt.parentId, addAt.index, entry), (navigation) =>
+      saveAppMenuWithNewItem(
+        { appName, packageId, served, navigation, item: { kind: 'report', name, label, body } },
+        itemTexts,
+        consoleAppMenuDoors(client as never),
+      ),
+    );
+    if (!saved) return false;
+    setAddAt(null);
+    setBuildingReport(false);
+    return true;
+  };
+  // The builder's address the held place waits on.
+  const newReportPath = `${basePath}/reports/new`;
+  const saveNewReportRef = React.useRef(saveNewReport);
+  React.useLayoutEffect(() => {
+    saveNewReportRef.current = saveNewReport;
+  });
+  React.useEffect(() => {
+    if (!buildingReport) return;
+    const slot: NewReportSlot = {
+      path: newReportPath,
+      save: (name, label, body) => saveNewReportRef.current(name, label, body),
+      cancel: () => {
+        setBuildingReport(false);
+        setAddAt(null);
+      },
+    };
+    offerNewReportSlot(slot);
+    // Withdrawn when the place is no longer held, and when the menu unmounts
+    // (the design mode ended): the builder then saves on its own, off the menu.
+    return () => withdrawNewReportSlot(slot);
+  }, [buildingReport, newReportPath]);
+  // Leaving the builder another way than its Save or Close (a menu link, the
+  // browser's Back) drops the place too, so no held row waits for a builder
+  // that is gone. Read once the builder has been reached.
+  const { pathname } = useLocation();
+  const [reachedBuilder, setReachedBuilder] = React.useState(false);
+  const onBuilder = pathname === newReportPath || pathname.endsWith(newReportPath);
+  if (buildingReport && onBuilder && !reachedBuilder) setReachedBuilder(true);
+  if (!buildingReport && reachedBuilder) setReachedBuilder(false);
+  if (buildingReport && reachedBuilder && !onBuilder) {
+    setBuildingReport(false);
+    setReachedBuilder(false);
+    setAddAt(null);
+  }
+  const startNewReport = () => {
+    if (!addAt) return;
+    setBuildingReport(true);
+    navigate(newReportPath);
+  };
+
   const renderLeaf = (entry: MenuEntry, depth: number) => {
     const id = String(entry.id);
     const place = placeOf(menu, id);
@@ -437,8 +591,9 @@ export default function DesignModeMenu({ app, basePath, resolveTargetLabel, reso
             canUp={canMoveBy(menu, id, -1) && !besideContributed(id, -1)}
             canDown={canMoveBy(menu, id, 1) && !besideContributed(id, 1)}
             groups={groups
-              .filter((g) => g.id !== place?.parentId)
+              .filter((g) => g.id !== place?.parentId && !contributed(g.id))
               .map((g) => ({ id: g.id, label: labelOf(g.entry), depth: g.depth }))}
+            canAdd={!foreignGroup(place?.parentId ?? null)}
             atTopLevel={place?.parentId === null}
             onUp={() => update(moveBy(menu, id, -1))}
             onDown={() => update(moveBy(menu, id, 1))}
@@ -456,7 +611,7 @@ export default function DesignModeMenu({ app, basePath, resolveTargetLabel, reso
   const renderEntries = (entries: Menu, parentId: string | null, depth: number): React.ReactNode[] => {
     const rows: React.ReactNode[] = [];
     entries.forEach((entry, index) => {
-      if (addAt && addAt.parentId === parentId && addAt.index === index) rows.push(<Placeholder key="placeholder" depth={depth} />);
+      if (addAt && addAt.parentId === parentId && addAt.index === index) rows.push(<Placeholder key="placeholder" depth={depth} buildingReport={buildingReport} />);
       if (isGroup(entry)) {
         const gid = String(entry.id);
         rows.push(
@@ -477,7 +632,9 @@ export default function DesignModeMenu({ app, basePath, resolveTargetLabel, reso
         rows.push(renderLeaf(entry, depth));
       }
     });
-    if (addAt && addAt.parentId === parentId && addAt.index >= entries.length) rows.push(<Placeholder key="placeholder" depth={depth} />);
+    if (addAt && addAt.parentId === parentId && addAt.index >= entries.length) rows.push(<Placeholder key="placeholder" depth={depth} buildingReport={buildingReport} />);
+    // Another package's group takes no own entry: no 「Add menu item」, no drop at its end.
+    if (foreignGroup(parentId)) return rows;
     rows.push(
       <AddRow
         key="add"
@@ -503,26 +660,36 @@ export default function DesignModeMenu({ app, basePath, resolveTargetLabel, reso
   return (
     <SidebarGroup data-testid="design-mode-menu">
       <SidebarGroupLabel className={HIDDEN_ICON_LABEL_NOT_FOCUSABLE}>{t('designMode.menu.title', { defaultValue: 'Menu' })}</SidebarGroupLabel>
+      <p
+        className={cn('px-2 pb-1 text-xs text-sidebar-foreground/60', HIDDEN_ICON_LABEL_NOT_FOCUSABLE)}
+        data-testid="design-menu-keyboard-hint"
+      >
+        {keyboardHint}
+      </p>
       <SidebarGroupContent>
         <DndContext
           sensors={sensors}
-          collisionDetection={closestCenter}
+          collisionDetection={collision}
+          accessibility={{ screenReaderInstructions: { draggable: keyboardHint } }}
           onDragStart={onDragStart}
           onDragEnd={onDragEnd}
           onDragCancel={endDrag}
         >
           <SortableContext items={leafIds} strategy={verticalListSortingStrategy}>
-            <SidebarMenu>{renderEntries(menu, null, 0)}</SidebarMenu>
+            <div ref={menuArea} data-testid="design-menu-area">
+              <SidebarMenu>{renderEntries(menu, null, 0)}</SidebarMenu>
+            </div>
           </SortableContext>
         </DndContext>
       </SidebarGroupContent>
-      {addAt && (
+      {addAt && !buildingReport && (
         <MenuItemPicker
           packageId={packageId}
           inMenu={menuTargets(menu)}
           onClose={() => setAddAt(null)}
           onPick={(kind, name, link) => pick(entryFor(kind, name, newEntryId([...menu, ...(storedMenu ?? [])]), link))}
           onCreate={createItem}
+          onNewReport={startNewReport}
           language={language}
         />
       )}
@@ -612,12 +779,14 @@ function MenuLeaf({
   );
 }
 
-function Placeholder({ depth }: { depth: number }) {
+function Placeholder({ depth, buildingReport }: { depth: number; buildingReport?: boolean }) {
   const { t } = useObjectTranslation();
   return (
     <li className="list-none" style={indent(depth)} data-testid="design-menu-placeholder">
       <div className="mx-0.5 flex h-8 items-center rounded-md border border-dashed border-sidebar-border px-2 text-sm text-sidebar-foreground/60">
-        {t('designMode.menu.placeholder', { defaultValue: 'Choose a menu item…' })}
+        {buildingReport
+          ? t('designMode.menu.newReport', { defaultValue: 'New report…' })
+          : t('designMode.menu.placeholder', { defaultValue: 'Choose a menu item…' })}
       </div>
     </li>
   );
@@ -646,6 +815,7 @@ function EntryActions({
   canUp,
   canDown,
   groups,
+  canAdd,
   atTopLevel,
   onUp,
   onDown,
@@ -661,6 +831,8 @@ function EntryActions({
   canUp: boolean;
   canDown: boolean;
   groups: Array<{ id: string; label: string; depth: number }>;
+  /** Whether an item may be added beside it: not in another package's group. */
+  canAdd: boolean;
   atTopLevel: boolean;
   onUp: () => void;
   onDown: () => void;
@@ -715,10 +887,10 @@ function EntryActions({
           </DropdownMenuSubContent>
         </DropdownMenuSub>
         <DropdownMenuSeparator />
-        <DropdownMenuItem onSelect={onAddBefore}>
+        <DropdownMenuItem disabled={!canAdd} onSelect={onAddBefore}>
           {t('designMode.menu.addBefore', { defaultValue: 'Add an item before' })}
         </DropdownMenuItem>
-        <DropdownMenuItem onSelect={onAddAfter}>
+        <DropdownMenuItem disabled={!canAdd} onSelect={onAddAfter}>
           {t('designMode.menu.addAfter', { defaultValue: 'Add an item after' })}
         </DropdownMenuItem>
         <DropdownMenuItem disabled={fixed} onSelect={onRename}>
@@ -811,6 +983,7 @@ function MenuItemPicker({
   onClose,
   onPick,
   onCreate,
+  onNewReport,
   language,
 }: {
   packageId: string;
@@ -819,6 +992,8 @@ function MenuItemPicker({
   onPick: (kind: MenuTargetKind, name: string, link?: { label: string; url: string }) => void;
   /** Create a new `kind` named `label`; `taken` is every name of that kind the picker lists. */
   onCreate: (kind: NewMenuItemKind, label: string, taken: readonly string[]) => Promise<boolean>;
+  /** Build a new report for the held place, in the report builder. */
+  onNewReport: () => void;
   language: string;
 }) {
   const { t } = useObjectTranslation();
@@ -940,6 +1115,19 @@ function MenuItemPicker({
                 >
                   <Plus className="h-4 w-4 shrink-0" aria-hidden="true" />
                   <span className="flex-1 truncate">{newTexts[kind]}</span>
+                </button>
+              </li>
+            )}
+            {kind === 'report' && (
+              <li>
+                <button
+                  type="button"
+                  onClick={onNewReport}
+                  className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm font-medium text-primary hover:bg-accent"
+                  data-testid="design-menu-picker-new-report"
+                >
+                  <Plus className="h-4 w-4 shrink-0" aria-hidden="true" />
+                  <span className="flex-1 truncate">{t('designMode.menu.newReport', { defaultValue: 'New report…' })}</span>
                 </button>
               </li>
             )}

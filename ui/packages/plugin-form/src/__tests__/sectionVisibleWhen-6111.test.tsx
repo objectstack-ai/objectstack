@@ -12,8 +12,8 @@
  *
  * `@objectstack/spec` declares `FormSection.visibleWhen`; this repo's spec
  * bridge carries it (`packages/react/src/spec-bridge/bridges/form-view.ts:250`);
- * `RecordFormPage` / `resolveFormViewLayout` wire whole `sections` objects into
- * the layouts. Every layout then renders a section header as a virtual
+ * `RecordFormPage` and the record dialog wired whole `sections` objects into
+ * the layouts (until #36425, which stopped both loading a form view). Every layout then renders a section header as a virtual
  * `section-divider` pseudo-field — and none of them copied the predicate onto
  * it, so the key was declared, mapped, carried, and dropped one hop before
  * anything evaluated it.
@@ -59,8 +59,8 @@
  *
  * Routing the modal/drawer/split rows through `ObjectForm` (which is what
  * `RecordFormPage` does) exercises BOTH hops; the direct `ModalForm` row covers
- * `resolveFormViewLayout`, which mounts `ModalForm` without passing through
- * `ObjectForm` at all.
+ * a host that mounts `ModalForm` without passing through `ObjectForm` at all
+ * (the record dialog's shape before #36425).
  *
  * ## Reverse verification (direction predicted BEFORE running)
  *
@@ -219,7 +219,7 @@ const renderObjectForm = async (
   await waitFor(() => expect(inForm().getByText('Always')).toBeTruthy());
 };
 
-/** Mount `ModalForm` directly — the shape `resolveFormViewLayout` produces. */
+/** Mount `ModalForm` directly — the shape a host that skips `ObjectForm` mounts. */
 const renderModalFormDirect = async (
   scope: Record<string, unknown>,
   extra: Record<string, unknown> = {},
@@ -270,7 +270,7 @@ const LAYOUTS: {
     mount: (scope, gate) => renderObjectForm(scope, { formType: 'modal', open: true }, gate),
   },
   {
-    label: 'ModalForm — mounted directly (the resolveFormViewLayout shape)',
+    label: 'ModalForm — mounted directly (a host that skips ObjectForm)',
     mount: (scope, gate) => renderModalFormDirect(scope, {}, gate),
   },
   {

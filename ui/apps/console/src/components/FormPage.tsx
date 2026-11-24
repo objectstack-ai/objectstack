@@ -57,10 +57,11 @@
  *
  * It is the SECOND form renderer in this repo, which is why the gap survived.
  * objectui#2212 recorded this exact symptom and PR #2214 fixed it on the OTHER
- * chain — `ModalForm` -> `resolveFormViewLayout` -> `@object-ui/plugin-form`
- * `sectionFields.ts` -> `@object-ui/components` `renderers/form/form.tsx` —
- * which this file is on at no point, and #2212's regression pin lives with
- * that chain, so nothing in the suite could see this copy.
+ * chain — `ModalForm` -> `@object-ui/plugin-form` `sectionFields.ts` ->
+ * `@object-ui/components` `renderers/form/form.tsx`, which the record dialog
+ * fed a form view's sections until #36425 stopped that dialog loading a form
+ * view — which this file is on at no point, and #2212's regression pin lives
+ * with that chain, so nothing in the suite could see this copy.
  *
  * The wiring is #2212's ruling applied verbatim, not a second semantics: see
  * {@link isFieldVisible} for the engine, the bound scope, and what the fix
