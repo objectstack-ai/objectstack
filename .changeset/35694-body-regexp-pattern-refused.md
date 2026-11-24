@@ -8,7 +8,7 @@ fix(lint)!: a body whose regular-expression pattern the runtime's QuickJS also r
 
 Clause-②: no (narrowing)
 Metadata-protocol: narrowed
-Skills-docs: follow-up owed — skills/objectstack-data/references/data-hooks.md (its "Refused when it does not compile" bullet says every regex pattern the checking engine refuses is a warning; now only a duplicate named capture group or a modifier group is)
+Skills-docs: follow-up #36727
 
 <!-- adr-0087: registered body-regexp-pattern-refused -->
 
