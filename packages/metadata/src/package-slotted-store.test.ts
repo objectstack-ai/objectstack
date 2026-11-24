@@ -243,8 +243,12 @@ describe('[#37013] the platform\'s record of a name keeps the bare slot beside a
 
   it('the platform\'s removal takes its own slot only, whatever packages hold the name; a package\'s removal takes the package\'s only', () => {
     const store = writtenSkills(platform('platform'), shippedBy(ALPHA, 'alpha'), shippedBy(BETA, 'beta'));
-    expect(storePlatformRemovalKeys(store, SKILL, ASK)).toEqual({ keys: [ASK], packagelessOnly: true });
+    expect(storePlatformRemovalKeys(store, SKILL, ASK)).toEqual({ keys: [ASK], platformOnly: true });
     expect(storeRemovalKeys(store, SKILL, ASK, ALPHA).keys).toEqual([`${ALPHA}\u0000${ASK}`]);
+  });
+
+  it('the platform\'s removal leaves the environment\'s own item in the bare slot: it takes its own record only', () => {
+    expect(storePlatformRemovalKeys(writtenSkills(environment('env')), SKILL, ASK)).toEqual({ keys: [], platformOnly: true });
   });
 
   it('a platform read answers the platform\'s record only: never a package\'s, never the environment\'s own', () => {

@@ -4259,6 +4259,21 @@ describe('[#37013] a platform-registered skill and a package\'s same-named skill
     expect(JSON.stringify(await rowOf(PKG))).toBe(before);
   });
 
+  it('the platform withdrawing its record leaves the environment\'s own item of the name', async () => {
+    const manager = managerOver();
+    await manager.register('skill', NAME, platformSkill('platform v1'), { notify: false, origin: 'platform' });
+    await manager.register('skill', NAME, platformSkill('edited in the environment'), { notify: false });
+    await manager.unregister('skill', NAME, { notify: false, origin: 'platform' });
+    expect(((await manager.get('skill', NAME)) as any)?.instructions).toBe('edited in the environment');
+    expect((await rows()).map((row) => [row.package_id, row.body.instructions])).toEqual([[null, 'edited in the environment']]);
+  });
+
+  it('list() returns the platform\'s record and the package\'s item, each with its own stamp, and the platform\'s carries no package', async () => {
+    const manager = await platformThenPackage();
+    const listed = ((await manager.list('skill')) as any[]).map((item) => [item._provenance, item._packageId ?? null]).sort();
+    expect(listed).toEqual([['package', PKG], ['platform', null]]);
+  });
+
   it('the package\'s removal leaves the platform\'s slot', async () => {
     const manager = await platformThenPackage();
     await manager.unregister('skill', NAME, { notify: false, packageId: PKG });
