@@ -932,6 +932,7 @@
     "api/GetMetaItemsRequest:packageId",
     "api/GetMetaItemsRequest:previewDrafts",
     "api/GetMetaItemsRequest:type",
+    "api/GetMetaItemsResponse:changedAt",
     "api/GetMetaItemsResponse:disabledActions",
     "api/GetMetaItemsResponse:items",
     "api/GetMetaItemsResponse:registrations",

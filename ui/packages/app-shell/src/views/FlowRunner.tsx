@@ -338,6 +338,27 @@
  * the engine's sentence. The engine's refusal itself is unchanged. A loop that
  * pauses on the same screen node again is indistinguishable from a retry by
  * `nodeId`, and keeps today's answer.
+ *
+ * ## Following a record link ends the dialog (objectstack#36849)
+ *
+ * A `record_link` field leads to another record's page, and the host holds
+ * only the run's LAUNCH state — the step the run first paused on; every later
+ * step lives in this component. A record page redraws its loading skeleton on
+ * every object or record change, so a dialog left open across the link's
+ * navigation unmounted with it and came back from that launch state: step one,
+ * its inputs and a live Next, which posted step one's values to a run already
+ * past it.
+ *
+ * So following a link in this window (`ScreenView`'s `onRecordLinkFollow`; a
+ * new-tab click leaves the dialog alone) ends the dialog through the same door
+ * as its close button, before the route changes: the host is told to close at
+ * once (`onClose`), so whatever it draws on the record page holds no run. On a
+ * result screen the run is then completed exactly as Done completes it (the
+ * resume-RESULT and result-screen sections above): the empty resume, its
+ * toast, `notifyDataChanged`, `onComplete`. Its answer arrives after the
+ * dialog is gone, so a failure is told by its toast alone. On any other screen
+ * the link closes as Cancel does and resumes nothing; while a resume is in
+ * flight, or after one has failed, it only closes, as the close button does.
  */
 import { Suspense, useEffect, useState } from 'react';
 import {
@@ -593,7 +614,11 @@ export interface FlowRunnerProps {
   authFetch: (url: string, init?: RequestInit) => Promise<Response>;
   /** API base (e.g. `import.meta.env.VITE_SERVER_URL || ''`). */
   baseUrl: string;
-  /** User dismissed the runner without completing. */
+  /**
+   * The dialog closes. Usually the user dismissed it without completing; a
+   * result screen's record link closes it first and completes the run after,
+   * so `onComplete` can follow (objectstack#36849 — see the header).
+   */
   onClose: () => void;
   /** The flow ran to completion — host should refresh. */
   onComplete: () => void;
@@ -928,6 +953,14 @@ export function FlowRunner({ state, authFetch, baseUrl, onClose, onComplete, dat
   // resume has failed, when closing is a plain close again and Done the retry.
   const resultScreen = !terminal && !anotherScreen && isDisplayOnlyScreen(screen);
   const dismiss = resultScreen && !resumeError ? () => { void submit(); } : onClose;
+  // A record link followed in this window ends the dialog before the route
+  // changes (objectstack#36849 — see the header): the host closes now, and a
+  // result screen's run completes behind it, as its close button completes it.
+  const followRecordLink = () => {
+    const complete = resultScreen && !resumeError && !submitting;
+    onClose();
+    if (complete) void submit();
+  };
 
   return (
     <Dialog open onOpenChange={(o) => { if (!o && !submitting) dismiss(); }}>
@@ -1001,6 +1034,7 @@ export function FlowRunner({ state, authFetch, baseUrl, onClose, onComplete, dat
                   values={values}
                   onValueChange={setVal}
                   errors={fieldErrors}
+                  onRecordLinkFollow={followRecordLink}
                   dataSource={dataSource}
                   objects={objects}
                   // Two columns from `sm` up; `space-y-0` replaces the body's own

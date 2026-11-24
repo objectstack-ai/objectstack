@@ -652,6 +652,8 @@ const es = {
       aggregateNotCompleted: "La acción no se completó para los registros seleccionados. Es posible que algunos registros ya se hayan modificado; al cerrar, la lista muestra sus valores actuales.",
       resultNotConfirmed: " · Sin confirmar {{count}}",
       notConfirmedRecords: "La acción no informó sobre estos registros. Compruebe sus valores actuales:",
+      resultRefused: " · Rechazados {{count}}",
+      refusedRecords: "La acción rechazó estos registros:",
       aggregateUnreadable: "La acción terminó, pero no se pudo leer su resultado, así que no se sabe qué registros se modificaron. Al cerrar, la lista muestra sus valores actuales.",
       retry: "Reintentar",
       downloadErrorCsv: "Descargar CSV de errores",

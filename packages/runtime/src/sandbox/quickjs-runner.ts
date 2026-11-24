@@ -453,8 +453,8 @@ export class QuickJSScriptRunner implements ScriptRunner {
         }
         const err = vm.dump(evalRes.error);
         evalRes.error.dispose();
-        if (args.origin.kind === 'action' && isCompileFailure(err)) {
-          throw actionBodyCompileFailure(args.origin.name, formatErr(err));
+        if (isCompileFailure(err)) {
+          throw bodyCompileFailure(args.origin, formatErr(err));
         }
         throw new SandboxError(
           `${args.origin.kind} '${args.origin.name}' threw: ${formatErr(err)}`,
@@ -2411,28 +2411,48 @@ function isCompileFailure(err: unknown): boolean {
 }
 
 /**
- * The error an action whose body does not compile answers with, on every run.
+ * The error an action, a hook or a job whose body does not compile answers
+ * with, on every run.
  *
- * Not a crash, and not a refusal. A crash (`TypeError` in `innerMessage`) is
- * answered with the sanitised `500 Internal server error`, because its text may
- * carry the data the body was reading; a compile error carries none, and the
- * opaque answer was all an MCP caller of `run_action` ever saw for a body that
- * can never run. So the sentence names the action and the compiler's reason,
- * and the declared status is `500`: the caller sent nothing wrong, the
- * deployed metadata is broken, and no retry of the same call can succeed. No
- * code is declared, so the doors answer the status's own `INTERNAL_ERROR` and
- * relay the sentence (a declared 5xx code would withhold it). The operator line
- * keeps the runner's `KIND 'NAME' …` shape.
+ * Its `.message`, the operator line, keeps the runner's `KIND 'NAME' …` shape
+ * and says `does not compile` where a body that ran and threw says `threw`, so
+ * the log tells the two apart for every body kind and names the body's owner
+ * and the compiler's reason.
  *
- * The author-time rule `action-body-does-not-compile` refuses such a body at
- * `os validate` / `os build` / publish; this is the answer for one that got
- * past it (deployed before the rule, or syntax the author's host accepted).
+ * An ACTION's is not a crash, and not a refusal. A crash (`TypeError` in
+ * `innerMessage`) is answered with the sanitised `500 Internal server error`,
+ * because its text may carry the data the body was reading; a compile error
+ * carries none, and the opaque answer was all an MCP caller of `run_action`
+ * ever saw for a body that can never run. So its caller sentence names the
+ * action and the compiler's reason, and the declared status is `500`: the
+ * caller sent nothing wrong, the deployed metadata is broken, and no retry of
+ * the same call can succeed. No code is declared, so the `/actions` door
+ * answers the status's own `INTERNAL_ERROR` and relays the sentence (a declared
+ * 5xx code would withhold it).
+ *
+ * A HOOK's and a JOB's keep the compiler's own text in `innerMessage` and
+ * declare no status, exactly as before: no door that answers a hook or a job
+ * relays a server-band sentence (the `/data` door withholds it, and answers a
+ * declared `500` without its `INTERNAL_ERROR` code), so a caller sentence there
+ * would reach nobody and the declared status would only cost the envelope its
+ * code. The native `SyntaxError: …` keeps the doors' crash read, the sanitised
+ * `500 INTERNAL_ERROR`, unchanged.
+ *
+ * The author-time rules `action-body-does-not-compile`,
+ * `hook-body-does-not-compile` and `job-body-does-not-compile` refuse such a
+ * body at `os validate` / `os build` / publish; this is the answer for one that
+ * got past them (deployed before the rule, brought in from an artifact by the
+ * boot or `os package install`, which run no author-time rule, or syntax the
+ * author's host accepted).
  */
-function actionBodyCompileFailure(actionName: string, compilerError: string): SandboxError {
+function bodyCompileFailure(origin: ScriptOrigin, compilerError: string): SandboxError {
+  if (origin.kind !== 'action') {
+    return new SandboxError(`${origin.kind} '${origin.name}' does not compile: ${compilerError}`, userFacingMessage(compilerError));
+  }
   const reason = compilerError.split('\n')[0].slice(0, 240);
   return markRunnerOwnFault(new SandboxError(
-    `action '${actionName}' does not compile: ${compilerError}`,
-    `Action '${actionName}' cannot run: its body does not compile (${reason}). ` +
+    `${origin.kind} '${origin.name}' does not compile: ${compilerError}`,
+    `Action '${origin.name}' cannot run: its body does not compile (${reason}). ` +
       'The action\'s author must fix its body.source and publish it again.',
     { status: 500 },
   ));
@@ -2445,7 +2465,7 @@ function actionBodyCompileFailure(actionName: string, compilerError: string): Sa
  * A timeout is neither a refusal nor a crash. It stays a server fault, so the
  * declared status is `500` and no code is declared: the doors answer the
  * status's own `INTERNAL_ERROR` and relay this sentence, as they do for an
- * action body that does not compile ({@link actionBodyCompileFailure}). What
+ * action body that does not compile ({@link bodyCompileFailure}). What
  * the sentence adds is the one fact a caller cannot get any other way: this
  * action was slow, the platform did not break. A crash keeps the sanitised
  * `Internal server error`, because its native text may carry the data the body
@@ -2602,7 +2622,7 @@ export function isHostRelayedSandboxError(err: unknown): boolean {
 /**
  * The faults this runner made itself that still carry a caller sentence: an
  * action's timeout ({@link actionTimeoutSentence}) and an action body that does
- * not compile ({@link actionBodyCompileFailure}). Both are `innerMessage` + a
+ * not compile ({@link bodyCompileFailure}). Both are `innerMessage` + a
  * declared `500` + no `code`, which is also what a body's own code-less throw
  * of `{ status: 500 }` looks like, so no field tells them apart: identity does,
  * for the reason {@link relayedRefusals} gives. The runner's other faults carry
