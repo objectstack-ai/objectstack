@@ -23,7 +23,9 @@ import {
   foldObjectExtension,
   objectExtensionBodyOf,
   routeFoldedFieldsEdit,
+  withoutReplacedPlacements,
 } from './StudioCustomizeControls.js';
+import { groupMembership, readFields } from '../metadata-admin/previews/object-fields-io.js';
 
 const OBJECT = 'crm_account';
 const served = {
@@ -132,5 +134,77 @@ describe('an edit of the folded fields, routed (#28575)', () => {
         fieldPatches: { name: { label: 'Company', description: '' }, industry: { options: { technology: { label: '' } } } },
       }),
     ).toEqual({ extend: OBJECT, fieldPatches: { name: { label: 'Company' } } });
+  });
+});
+
+describe('the extension\'s whole field arrangement, folded and written (objectstack#36505)', () => {
+  const grouped = {
+    name: OBJECT,
+    fieldGroups: [{ key: 'basic', label: 'Basic' }, { key: 'more', label: 'More' }],
+    fields: {
+      name: { type: 'text', label: 'Account Name', group: 'basic' },
+      industry: { type: 'select', label: 'Industry', group: 'basic' },
+      notes: { type: 'textarea', label: 'Notes', group: 'more' },
+    },
+  };
+  const membersOf = (object: Record<string, unknown>) =>
+    [...groupMembership(readFields(object.fields), object.fieldGroups).members];
+
+  it('the buffer\'s fieldGroups replace the object\'s, as the registry fold serves them', () => {
+    const ext = {
+      extend: OBJECT,
+      fields: { region__c: { type: 'text', label: 'Region', group: 'more' } },
+      fieldGroups: [
+        { key: 'more', label: 'More', fields: ['industry', 'notes'] },
+        { key: 'mine', label: 'Mine', fields: ['region__c'] },
+      ],
+    };
+    const folded = foldObjectExtension(grouped, ext);
+    expect((folded.fieldGroups as Array<{ key: string }>).map((g) => g.key)).toEqual(['more', 'mine']);
+    // `name` named `basic`, which the arrangement no longer has: it shows
+    // after the last group. `industry` follows the list that names it.
+    expect(membersOf(folded)).toEqual([
+      ['more', ['industry', 'notes']],
+      ['mine', ['region__c']],
+    ]);
+    const fields = folded.fields as Record<string, Record<string, unknown>>;
+    expect(fields.name.group).toBeUndefined();
+    expect(fields.industry.group).toBe('more');
+  });
+
+  it('CONTROL: an extension with no fieldGroups leaves the object\'s groups as served', () => {
+    const folded = foldObjectExtension(grouped, { extend: OBJECT, fields: {} });
+    expect(folded.fieldGroups).toBe(grouped.fieldGroups);
+    expect(membersOf(folded)).toEqual(membersOf(grouped));
+  });
+
+  it('a field or group placement beside the arrangement is taken off; a list placement stays', () => {
+    const body = {
+      extend: OBJECT,
+      place: [
+        { field: 'region__c', after: 'name' },
+        { group: { key: 'mine', label: 'Mine' }, after: 'basic' },
+        { list: 'crm_visit', after: 'crm_contact' },
+      ],
+    };
+    expect(withoutReplacedPlacements(body)).toEqual({ extend: OBJECT, place: [{ list: 'crm_visit', after: 'crm_contact' }] });
+    expect(withoutReplacedPlacements({ extend: OBJECT, place: [{ field: 'region__c', after: 'name' }] })).toEqual({ extend: OBJECT });
+    const untouched = { extend: OBJECT, place: [{ list: 'crm_visit', after: 'crm_contact' }] };
+    expect(withoutReplacedPlacements(untouched)).toBe(untouched);
+  });
+});
+
+describe('a field the extension places into a group stays there when its declaration is laid over (objectstack#36505)', () => {
+  it('keeps the served group of a placed field, and only of a placed one', () => {
+    const servedPlaced = {
+      name: OBJECT,
+      fieldGroups: [{ key: 'more', label: 'More' }],
+      fields: { name: { type: 'text', label: 'Account Name' }, region__c: { type: 'text', label: 'Region', group: 'more' } },
+    };
+    const region = { type: 'text', label: 'Region' };
+    const placed = foldObjectExtension(servedPlaced, { extend: OBJECT, fields: { region__c: region }, place: [{ field: 'region__c', group: 'more' }] });
+    expect((placed.fields as Record<string, Record<string, unknown>>).region__c.group).toBe('more');
+    const unplaced = foldObjectExtension(servedPlaced, { extend: OBJECT, fields: { region__c: region } });
+    expect((unplaced.fields as Record<string, Record<string, unknown>>).region__c.group).toBeUndefined();
   });
 });

@@ -397,6 +397,14 @@ export default defineConfig({
               find: /^@objectstack\/plugin-sharing$/,
               replacement: path.resolve(__dirname, '../../plugins/plugin-sharing/src/index.ts'),
             },
+            // The print dogfood tests import service-print's SOURCE by relative
+            // path, and that source builds its print-door member over
+            // `createDoorTableMember`; the member is part of what those tests
+            // boot, so it resolves to THIS checkout's source too.
+            {
+              find: /^@objectstack\/plugin-hono-server$/,
+              replacement: path.resolve(__dirname, '../../plugins/plugin-hono-server/src/index.ts'),
+            },
           ],
         },
         test: {

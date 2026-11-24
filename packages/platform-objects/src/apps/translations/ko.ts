@@ -40,7 +40,7 @@ export const ko: TranslationData = {
         group_overview: { label: '개요' },
         group_apps: { label: '앱' },
         nav_marketplace_browse: { label: '마켓플레이스 둘러보기' },
-        nav_marketplace_installed: { label: '설치된 앱' },
+        nav_packages: { label: '패키지' },
         nav_cloud_connection: { label: '클라우드 연결' },
         group_people_org: { label: '사용자 및 조직' },
         group_access_control: { label: '액세스 제어' },

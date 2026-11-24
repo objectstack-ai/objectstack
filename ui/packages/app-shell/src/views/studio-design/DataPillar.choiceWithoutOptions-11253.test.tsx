@@ -157,7 +157,7 @@ async function addFieldAndType(typeLabel: RegExp): Promise<string> {
       <DataPillar packageId="com.example.showcase" />
     </MemoryRouter></StudioSaveHarness>,
   );
-  fireEvent.click(await screen.findByRole('button', { name: 'Form' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Field layout' }));
   await addFieldFromFormToolbar();
   await screen.findByText('Type', { selector: 'label' }, { timeout: 4000 });
   const fieldName = (controlUnder('API name') as HTMLInputElement).value;
@@ -210,7 +210,7 @@ describe('Studio data page — an object that already stores an empty select (ob
         <DataPillar packageId="com.example.showcase" />
       </MemoryRouter></StudioSaveHarness>,
     );
-    fireEvent.click(await screen.findByRole('button', { name: 'Form' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Field layout' }));
 
     // The unrelated edit: rename the text field's label.
     await selectCard('Title');

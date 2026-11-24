@@ -26,9 +26,10 @@ import type { NavigationContribution } from '@objectstack/spec/ui';
 
 const BASE_PRIORITY = 100;
 
-// Marketplace entries (browse / installed) moved to
-// @objectstack/cloud-connection's marketplace plugins (cloud ADR-0009:
-// the nav lives and dies with the capability — no plugin, no entry).
+// The marketplace's Browse entry lives in @objectstack/cloud-connection's
+// marketplace plugins (cloud ADR-0009: the nav lives and dies with the
+// capability — no plugin, no entry). What is installed is listed by this
+// package's own Packages entry below (objectstack#36834).
 export const SETUP_NAV_CONTRIBUTIONS: NavigationContribution[] = [
   {
     app: 'setup',
@@ -38,26 +39,45 @@ export const SETUP_NAV_CONTRIBUTIONS: NavigationContribution[] = [
       { id: 'nav_system_overview', type: 'dashboard', label: 'System Overview', dashboardName: 'system_overview', icon: 'activity' },
     ],
   },
-  // No `group_apps` entry ships from this package.
-  //
-  // No unfiltered Packages entry (#25098, ruling 甲 amending #23892 B): the
-  // full `developer:packages` list is a development surface, so its door is in
-  // Studio only. The Studio that every boot serves is the console's own, at
-  // `/_console/studio` (the `@objectstack/studio` app is not default-loaded,
-  // so `studio.app.ts`'s Overview → Packages entry is served only where a host
-  // loads that app). There, the landing's "All packages" link opens the
-  // unfiltered page, and each package card's Manage (like the top-bar
-  // switcher's "Package info & settings") opens the package's detail sheet,
-  // with Disable / Enable (#35196, pinned on the console side by
-  // `BuilderLanding.packagesDoor-35196.test.tsx`). Setup reaches installed
-  // packages through the marketplace-filtered "Installed Apps" door
-  // (`nav_marketplace_installed`, `developer:packages` with
-  // `params: { source: 'marketplace' }`), which
-  // `@objectstack/cloud-connection` contributes to this group wherever the
-  // marketplace capability is present. `setup-packages-door.test.ts` pins
-  // what this package ships for each app.
-  //
-  // And no Packaged Actions entry (objectstack#34724, the ADR-0146 D4
+  {
+    app: 'setup',
+    group: 'group_apps',
+    priority: BASE_PRIORITY,
+    items: [
+      // objectstack#36834 — Setup's one door to what is installed, amending
+      // ruling 甲 of #25098 (which kept the full package list in Studio only,
+      // as a development surface). The entry opens the same
+      // `developer:packages` page with `params: { face: 'admin' }`, which the
+      // sidebar sends as the query string: the page's ADMINISTRATION face —
+      // every package of every source (with a Source filter on the page),
+      // enable / disable, delete with the keep-data choice, and New Package,
+      // which lands in Studio on the new package. The authoring actions
+      // (import, publish, revert, discard drafts, adopt loose items, manifest
+      // edit) stay on the face Studio opens: the landing's "All packages" link
+      // and each package card's Manage, unchanged.
+      //
+      // It replaces the marketplace-filtered "Installed Apps" entry
+      // (`nav_marketplace_installed`, retired from
+      // `@objectstack/cloud-connection`'s `MARKETPLACE_INSTALLED_UI_BUNDLE`):
+      // marketplace installs are this list under Source = marketplace, and an
+      // old `?source=marketplace` link still opens that face filtered.
+      //
+      // Gated like Setup's other administration entries (All Settings, Public
+      // Forms): `manage_platform_settings`. The server's gates on the package
+      // routes stay the authority (`manage_metadata` on every write).
+      // `setup-packages-door.test.ts` pins what this package ships for each app.
+      {
+        id: 'nav_packages',
+        type: 'component',
+        label: 'Packages',
+        componentRef: 'developer:packages',
+        params: { face: 'admin' },
+        icon: 'package',
+        requiredPermissions: ['manage_platform_settings'],
+      },
+    ],
+  },
+  // No Packaged Actions entry (objectstack#34724, the ADR-0146 D4
   // amendment of 2026-11-17): a packaged action's on/off switch for this
   // deployment is on the action, in its app in Studio (the object's Actions
   // view, a standalone action's item page), the way D4 put the flow switch on

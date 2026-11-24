@@ -46,7 +46,7 @@ import { isMissingTableError } from '@objectstack/metadata/errors';
 import { ORGANIZATION_OBJECT, SystemWriteOrganizationRequiredError, carriesOrganization, resolveSystemWriteOrganization, resolveTenantFieldName, type SystemWriteOrganizationDecision } from './tenancy/system-write-organization.js';
 import { isFederatedObject } from './federated-object.js';
 import { cascadeBatchIdsOf } from './engine-top-level.js';
-import type { EngineMiddleware, OperationContext } from './engine-top-level.js';
+import type { EngineMiddleware, EngineMiddlewareOptions, OperationContext } from './engine-top-level.js';
 import type { ObjectQL } from './engine.js';
 
 /**
@@ -106,8 +106,9 @@ export class MiddlewareAndContextFacet {
   }
 
   /** The body of `ObjectQL#registerMiddleware`; the method's docblock there is its contract. */
-  static registerMiddleware(this: Pick<MiddlewareAndContextHost, 'logger' | 'middlewares'>, fn: EngineMiddleware, options?: { object?: string }): void {
-    this.middlewares.push({ fn, object: options?.object });
+  static registerMiddleware(this: Pick<MiddlewareAndContextHost, 'logger' | 'middlewares'>, fn: EngineMiddleware, options?: EngineMiddlewareOptions): void {
+    const withholdSearchFields = options?.withholdSearchFields;
+    this.middlewares.push({ fn, object: options?.object, ...(withholdSearchFields ? { withholdSearchFields } : {}) });
     this.logger.debug('Registered middleware', { object: options?.object, total: this.middlewares.length });
   }
 

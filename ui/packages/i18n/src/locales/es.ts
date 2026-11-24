@@ -40,6 +40,8 @@ const es = {
     allResults: 'Todos los resultados',
     createNew: 'Crear nuevo',
     createNamed: 'Crear «{{name}}»',
+    createdOutsideFilters: 'El registro se creó, pero no cumple los filtros de este campo, así que no se puede elegir aquí.',
+    createdUnchecked: 'El registro se creó, pero no se pudo comprobar si cumple los filtros de este campo, así que no se ha elegido. Búsquelo aquí en lugar de crearlo de nuevo.',
     showingResults: 'Mostrando {{shown}} de {{total}} resultados',
     showAllResults: 'Ver todos los resultados ({{count}})',
     selectedBadge: 'Seleccionado',
@@ -66,6 +68,8 @@ const es = {
     autofillCurrencyDiffers: 'No se rellenó {{field}}: el importe elegido es {{amount}} en {{from}}, pero aquí {{field}} está en {{to}}. Introdúzcalo en {{to}}.',
     autofillSourceNoCurrency: 'No se rellenó {{field}}: el importe elegido {{amount}} no indica moneda, pero aquí {{field}} está en {{to}}. Introdúzcalo en {{to}}.',
     autofillNoCurrency: 'No se rellenó {{field}}: el importe elegido es {{amount}}, pero aquí aún no se ha elegido moneda. Elija la moneda y luego introduzca {{field}}.',
+    autofillCurrencyUnread: 'No se rellenó {{field}}: el importe elegido es {{amount}}, pero no se pudo leer la moneda de aquí. Compruebe la moneda y luego introduzca {{field}}.',
+    autofillKept: '{{field}} conserva su valor anterior.',
   },
   common: {
     // objectui#13461 — a disclosure toggle's name (the tree-view node toggle).
@@ -157,6 +161,7 @@ const es = {
     completedNamed: 'Acción completada: {{action}}',
     failed: 'La acción falló',
     parallelFailed: 'Una o más acciones paralelas fallaron',
+    serviceUnavailable: 'Esta acción necesita un servicio que no está disponible en este entorno. Contacte con su administrador.',
     selectExactlyOneRow: 'Esta acción se ejecuta sobre un solo registro: seleccione exactamente una fila.',
     selectRowFirst: 'Esta acción se ejecuta sobre un solo registro: seleccione primero una fila.',
     undo: 'Deshacer',
@@ -2870,6 +2875,7 @@ const es = {
       targetQueue: 'Una cola',
       queue: 'Cola',
       queuePlaceholder: 'Elige una cola',
+      declaredQueues: 'O una cola que declara una aplicación instalada',
       notify: 'Notificar al nuevo propietario',
       alreadyOwner: 'Esta persona ya es propietaria de este registro.',
       submit: 'Cambiar propietario',

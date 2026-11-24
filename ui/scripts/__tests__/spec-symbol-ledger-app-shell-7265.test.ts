@@ -57,19 +57,23 @@ const BURNED: ReadonlyArray<readonly [name: string, subpath: string, ns: Record<
 /**
  * The seven sites, relative to the repo root, plus the modules a move-only split
  * cut out of one of them (objectstack#29988): a moved body stays in the reading
- * list (ruling 6597555122 item 3).
+ * list (ruling 6597555122 item 3). A site deleted outright leaves it
+ * (objectstack#36502 retired `InterfacesNavRail.tsx`); `StudioNavItemInspector.tsx`'s
+ * surviving body, its picker, is read at `StudioPicker.tsx`.
  */
 const SITES = [
   'packages/app-shell/src/views/metadata-admin/PermissionAdvancedFacets.tsx',
   'packages/app-shell/src/utils/appRoute.ts',
   'packages/app-shell/src/views/metadata-admin/inspectors/FlowEdgeInspector.tsx',
   'packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx',
-  'packages/app-shell/src/views/studio-design/StudioNavItemInspector.tsx',
+  'packages/app-shell/src/views/studio-design/StudioPicker.tsx',
   'packages/app-shell/src/views/studio-design/PackageSwitcher.tsx',
-  'packages/app-shell/src/views/studio-design/InterfacesNavRail.tsx',
   'packages/app-shell/src/views/studio-design/AutomationsFlowRail.tsx',
   'packages/app-shell/src/views/studio-design/StudioPillarKit.tsx',
   'packages/app-shell/src/views/studio-design/DataPillarHelpers.tsx',
+  'packages/app-shell/src/views/studio-design/AutomationsPillar.tsx',
+  'packages/app-shell/src/views/studio-design/AccessPillar.tsx',
+  'packages/app-shell/src/views/studio-design/DataPillar.tsx',
   'packages/app-shell/src/hooks/useTrackRouteAsRecent.ts',
   'packages/app-shell/src/utils/deriveRelatedLists.ts',
   'packages/app-shell/src/views/metadata-admin/datasource/DatasourceResourcePage.tsx',

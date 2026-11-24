@@ -23,6 +23,15 @@
  * cannot disagree about a wrapper. ⛔ Never spell a wrapper a second time
  * anywhere: a copy is a second shape the next edit can move one side of.
  *
+ * The parse checks' `async function __body(ctx) {\n…\n}`
+ * (`validate-hook-body-writes.ts`, `checked-parse.ts`) is not a second
+ * spelling of a run wrapper but a different thing: a PARSE enclosure that hands
+ * the TypeScript parser a function-body context, so bare `return` and `await`
+ * parse, with the source starting on its own line. A parser reports no early
+ * error, so the enclosure's binding list decides nothing there, and nothing is
+ * compiled or run in it; a question about what the runtime compiles goes
+ * through the two expressions below, never through that enclosure.
+ *
  * No imports: the runtime reaches this module through `@objectstack/lint/runtime`.
  */
 

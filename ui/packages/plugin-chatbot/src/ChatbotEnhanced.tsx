@@ -775,7 +775,7 @@ export interface ChatbotEnhancedProps extends React.HTMLAttributes<HTMLDivElemen
    * Studio" action (the console's 在 Studio 中查看). Beside `onOpenBuiltApp` it is
    * the SECONDARY action — "Open app" (打开应用) is primary (objectui#12724);
    * without `onOpenBuiltApp` it takes the primary slot. The host wires this to
-   * its Studio route (e.g. `navigate('/studio/<pkg>/interfaces')`).
+   * its Studio route (e.g. `navigate('/studio/<pkg>/data')`).
    */
   onDesignBuiltApp?: (appName: string, appSegment?: string) => void;
   /** Label for the design-built-app action (default "Design in Studio"). */

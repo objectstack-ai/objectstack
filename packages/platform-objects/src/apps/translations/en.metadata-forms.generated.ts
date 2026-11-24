@@ -1668,30 +1668,30 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
     fields: {
       name: {
         label: "Name",
-        helpText: "snake_case unique identifier"
+        helpText: "A unique internal name for this dashboard: lowercase letters, numbers and underscores, starting with a letter (for example sales_overview)."
       },
       label: {
         label: "Label",
-        helpText: "Display name"
+        helpText: "The title people see for this dashboard."
       },
       description: {
         label: "Description"
       },
       columns: {
         label: "Columns",
-        helpText: "Grid columns (default 12)"
+        helpText: "How many columns the widgets are laid out on, from 1 to 24. Leave it empty and the dashboard picks a width that fits its widgets."
       },
       gap: {
         label: "Gap",
-        helpText: "Space between widgets, in steps of 0.25rem (4 = 1rem)"
+        helpText: "How much space to leave between widgets. Larger numbers spread them further apart; leave it empty for the standard spacing."
       },
       refreshIntervalSeconds: {
         label: "Refresh Interval Seconds",
-        helpText: "Auto-refresh (seconds)"
+        helpText: "How often the dashboard reloads its data, in seconds. Leave it empty or enter 0 to turn automatic reloading off."
       },
       header: {
         label: "Header",
-        helpText: "Dashboard header config (title, subtitle, actions)"
+        helpText: "What shows at the top of the dashboard: its title, its description and action buttons."
       },
       "header.showTitle": {
         label: "Show Title",
@@ -1719,7 +1719,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       widgets: {
         label: "Widgets",
-        helpText: "Dashboard widgets with position and sizing"
+        helpText: "The charts, numbers and tables on this dashboard, and where each one sits."
       },
       "widgets.id": {
         label: "Widget ID"
@@ -1774,11 +1774,11 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       dateRange: {
         label: "Date Range",
-        helpText: "Default date range selector"
+        helpText: "The period the dashboard opens with, and whether viewers may pick their own dates."
       },
       globalFilters: {
         label: "Global Filters",
-        helpText: "Filters applied to all widgets"
+        helpText: "Filters viewers can use to narrow every widget at once, or only the widgets you choose."
       },
       "globalFilters.name": {
         label: "Name"

@@ -2547,6 +2547,9 @@ importers:
       '@objectstack/service-messaging':
         specifier: workspace:*
         version: link:../../services/service-messaging
+      '@objectstack/service-print':
+        specifier: workspace:*
+        version: link:../../services/service-print
       '@objectstack/service-storage':
         specifier: workspace:*
         version: link:../../services/service-storage
@@ -3262,6 +3265,9 @@ importers:
       '@objectstack/core':
         specifier: workspace:*
         version: link:../../core
+      '@objectstack/plugin-hono-server':
+        specifier: workspace:*
+        version: link:../../plugins/plugin-hono-server
       '@objectstack/service-storage':
         specifier: workspace:*
         version: link:../service-storage

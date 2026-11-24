@@ -17,11 +17,10 @@
  * Pinned:
  *  - the item header says it is read-only (the top bar's chip that also said
  *    so left with the package switcher, objectstack#36501);
- *  - Customize is offered on its dashboard, and the first edit asks the door
- *    and writes the pair's draft declaring the override at the listed version;
- *  - a system package the door refuses (its manifest states no version, so the
- *    pair's dependency range cannot be declared): Customize disabled, saying
- *    so, and the door is never asked;
+ *  - (Customize on its dashboard, and the door-refused Customize of a package
+ *    with no manifest version, were read in the Interfaces pillar and retired
+ *    with it, objectstack#36502: a packaged dashboard is customized in the
+ *    running app now.)
  *  - CONTROL: an ordinary writable package opens with no mark and no Customize.
  */
 
@@ -31,7 +30,7 @@ import '@testing-library/jest-dom/vitest';
 import '@objectstack/lint';
 import * as React from 'react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
 /** A system-scope package, as the platform ships its own (manifest scope `system`). */
@@ -90,7 +89,6 @@ vi.mock('../../preview/DraftChangesPanel', () => ({
 
 import { StudioDesignSurface } from './StudioDesignSurface';
 import { registerMetadataPreview } from '../metadata-admin/preview-registry';
-import { tFormat } from '../metadata-admin/i18n';
 
 window.matchMedia = ((query: string) => ({
   matches: false,
@@ -197,7 +195,7 @@ afterEach(() => {
 
 function renderAt(packageId: string) {
   return render(
-    <MemoryRouter initialEntries={[`/studio/${packageId}/interfaces`]}>
+    <MemoryRouter initialEntries={[`/studio/${packageId}/data`]}>
       <Routes>
         <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
       </Routes>
@@ -205,44 +203,11 @@ function renderAt(packageId: string) {
   );
 }
 
-const header = () => screen.getByTestId('if-item-header');
-
-async function openOverview(): Promise<void> {
-  await waitFor(() => expect(screen.getByTestId('board-label')).toHaveTextContent(/^System overview/), { timeout: 8000 });
-}
 
 describe('a system-scope package opens read-only, as the server judges it (objectstack#29567)', () => {
   it('the item header says it is read-only', async () => {
     renderAt(BASE);
     await waitFor(() => expect(screen.getAllByTestId('studio-readonly-link').length).toBeGreaterThan(0), { timeout: 8000 });
-  });
-
-  it('offers Customize on its dashboard, and the first edit asks the door and writes the pair', async () => {
-    renderAt(BASE);
-    await openOverview();
-    fireEvent.click(await within(header()).findByTestId('studio-customize', undefined, { timeout: 8000 }));
-
-    fireEvent.click(screen.getByRole('button', { name: 'patch the board' }));
-    await waitFor(() => expect(srv.saves).toHaveLength(1), { timeout: 8000 });
-    expect(srv.ensure).toEqual([201]);
-    const [saved] = srv.saves;
-    expect(new URLSearchParams(saved!.search).get('package')).toBe(PAIR);
-    expect(saved!.body).toStrictEqual({
-      ...OVERVIEW,
-      label: 'System overview (ours)',
-      overrides: { package: BASE, basedOn: '3.2.0' },
-    });
-  });
-
-  it('a system package the door refuses (no manifest version): Customize disabled, saying so, door never asked', async () => {
-    srv.baseVersion = undefined;
-    renderAt(BASE);
-    await openOverview();
-    const blocked = await within(header()).findByTestId('studio-customize-blocked', undefined, { timeout: 8000 });
-    expect(blocked).toHaveAttribute('data-block', 'noVersion');
-    expect(blocked).toHaveAttribute('title', tFormat('engine.studio.customize.noVersion', 'en', { package: 'Authentication' }));
-    expect(within(blocked).getByTestId('studio-customize')).toBeDisabled();
-    expect(srv.ensure).toEqual([]);
   });
 
   it('CONTROL: an ordinary writable package opens with no read-only mark and no Customize', async () => {

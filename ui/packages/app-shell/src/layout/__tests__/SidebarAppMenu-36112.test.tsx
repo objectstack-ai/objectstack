@@ -359,7 +359,7 @@ describe('「Edit app」 in the app menu opens this app in Studio (objectstack#3
 
   it('it follows the route the way the app switcher\'s Studio row does: a dashboard opens its design surface', async () => {
     await mountMenu({ route: '/apps/crm/dashboard/pipeline' });
-    expect(editInStudio()).toHaveAttribute('href', '/studio/com.acme.crm/interfaces?surface=dashboard:pipeline');
+    expect(editInStudio()).toHaveAttribute('href', '/studio/com.acme.crm/metadata/dashboard/pipeline');
   });
 
   it('an installed (read-only) package\'s app: 「View in Studio」 behind an eye, never the pencil', async () => {
