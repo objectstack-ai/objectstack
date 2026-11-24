@@ -27,7 +27,8 @@
  * which is itself applied after the paint. Until it answers, the provider
  * offers the built-in packs, as it does for any `[]`.
  */
-import { i18nFetch, whenSessionAnswered } from './i18nSession';
+import { whenSessionAnswered } from './i18nSession';
+import { readLocales } from './localesRead';
 
 /** The boot splashes: `LoadingScreen`'s marker, and the pre-JS one in `index.html`. */
 const BOOT_SPLASH_SELECTOR = '[data-boot-splash], #boot-splash';
@@ -85,32 +86,30 @@ export async function loadLocales(): Promise<string[]> {
   // nothing rather than an anonymous read.
   await whenBootPainted();
   if (!(await whenSessionAnswered())) return [];
-  try {
-    const serverUrl = import.meta.env.VITE_SERVER_URL || '';
-    const res = await i18nFetch(`${serverUrl}/api/v1/i18n/locales`);
-    if (!res.ok) {
-      console.warn(`[i18n] Failed to load the app locale list: HTTP ${res.status}`);
-      return [];
-    }
-    const json = await res.json();
-    // Unwrap the spec REST API envelope when present; mock / local-dev servers
-    // may answer with the bare `{ locales: [...] }` body or a plain array.
-    const raw = json?.data?.locales ?? json?.locales ?? json;
-    if (!Array.isArray(raw)) {
-      console.warn('[i18n] Unexpected /i18n/locales payload; ignoring.');
-      return [];
-    }
-    const codes: string[] = [];
-    for (const entry of raw) {
-      // Descriptors are the contract; a bare string is tolerated only because
-      // `getLocales()` hands back `string[]` and older mocks pass it straight
-      // through — the very drift the shared descriptor mapping exists to stop.
-      const code = typeof entry === 'string' ? entry : entry?.code;
-      if (typeof code === 'string' && code.length > 0 && !codes.includes(code)) codes.push(code);
-    }
-    return codes;
-  } catch (err) {
-    console.warn('[i18n] Failed to load the app locale list:', err);
+  // One read per page load, shared with `loadLanguage`'s declared-chain read
+  // (`./localesRead.ts`, cloud#4964): by the time the paint releases this
+  // reader, that read has usually answered, and nothing more is sent.
+  const answer = await readLocales();
+  if (!answer.ok) {
+    if (answer.status !== undefined) console.warn(`[i18n] Failed to load the app locale list: HTTP ${answer.status}`);
+    else console.warn('[i18n] Failed to load the app locale list:', answer.error);
     return [];
   }
+  const json = answer.body as { data?: { locales?: unknown }; locales?: unknown } | null;
+  // Unwrap the spec REST API envelope when present; mock / local-dev servers
+  // may answer with the bare `{ locales: [...] }` body or a plain array.
+  const raw = json?.data?.locales ?? json?.locales ?? json;
+  if (!Array.isArray(raw)) {
+    console.warn('[i18n] Unexpected /i18n/locales payload; ignoring.');
+    return [];
+  }
+  const codes: string[] = [];
+  for (const entry of raw) {
+    // Descriptors are the contract; a bare string is tolerated only because
+    // `getLocales()` hands back `string[]` and older mocks pass it straight
+    // through — the very drift the shared descriptor mapping exists to stop.
+    const code = typeof entry === 'string' ? entry : entry?.code;
+    if (typeof code === 'string' && code.length > 0 && !codes.includes(code)) codes.push(code);
+  }
+  return codes;
 }

@@ -20,6 +20,7 @@ import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { TokenStorage } from '@object-ui/auth';
 import { loadLocales } from './loadLocales';
 import { publishAuthState } from './i18nSession';
+import { __resetLocalesRead } from './localesRead';
 
 /**
  * A real `Response`: the loader reads through the console's authenticated
@@ -34,6 +35,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  // One /i18n/locales read per page load (cloud#4964): each case is its own page load.
+  __resetLocalesRead();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   TokenStorage.clear();

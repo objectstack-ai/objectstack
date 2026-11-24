@@ -594,6 +594,10 @@ function isPlainObjectValue(value: unknown): value is Record<string, unknown> {
 
 import { resolveFieldCurrency, summaryDeclaresCurrency } from './currency.js';
 export { withFollowedParentObject, FOLLOWED_PARENT_OBJECT_KEY } from './currency.js';
+import { resolveFormulaValueType } from './formulaValueType.js';
+// The face a `formula` / `summary` cell draws its result as, for a surface
+// that decides something before the cell draws (objectstack#37008).
+export { resolveFormulaValueType };
 import { HomeAmountHint } from './widgets/CurrencyField.js';
 // `summaryDeclaresCurrency` is the cell's own test for drawing a roll-up as
 // money; the grid footer formats the same field's total by it.
@@ -2962,17 +2966,18 @@ export function FormulaCellRenderer({ value, field, dependentValues }: CellRende
   // own field form says of `returnType` that consumers read it "instead of
   // re-parsing the expression", so a formula over two currency fields that
   // declares `number` (or nothing) renders as a number here, not as money.
-  const returnType = field && 'returnType' in field ? field.returnType : undefined;
+  //
   // A roll-up that declares its currency is money (ADR-0144 D6 as amended):
   // the currency cell draws it, with the parent row as its record, so a
   // `record` roll-up reads the parent's code as its children's amounts do, and
   // a `dynamic` one (a roll-up of a child `currency` field in `dynamic` mode,
   // a stored home amount included) reads the tenant default, as that child
   // field's own cells do.
-  const declaresMoney = (field as { type?: unknown } | undefined)?.type === 'summary' && summaryDeclaresCurrency(field);
-  const valueType = declaresMoney && typeof value === 'number'
-    ? 'currency'
-    : returnType ?? (typeof value === 'number' ? 'number' : 'text');
+  //
+  // The rule is `resolveFormulaValueType`, exported, so a surface that must
+  // know the face before this cell draws (a gallery card's label) asks the
+  // same function and cannot disagree with it (objectstack#37008).
+  const valueType = resolveFormulaValueType(field, value);
   if (valueType === 'number') {
     return <NumberCellRenderer value={value} field={field} />;
   }
