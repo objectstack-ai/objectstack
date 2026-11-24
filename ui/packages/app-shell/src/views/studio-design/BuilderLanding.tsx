@@ -67,6 +67,7 @@ import { STUDIO_NEW_PARAM, STUDIO_NEW_PACKAGE_VALUE } from './studioNewPackage.j
 import { foldCustomizationPairs } from './StudioRailCustomizations.js';
 import { loadPackageLessSurfaces } from './packageSurfaces.js';
 import { useMetadataClient } from '../metadata-admin/useMetadata.js';
+import { newAppStep } from './newAppDoor.js';
 
 /**
  * objectui#11808 — where a read-only package's card sends the author beyond
@@ -287,6 +288,8 @@ export function BuilderLanding(): React.ReactElement {
     .join('\n');
   const [customizationLines, setCustomizationLines] = React.useState<Record<string, CustomizationLine>>({});
   const metadataClient = useMetadataClient();
+  // objectstack#36748 — the app half of the 「新建自己的应用」 door.
+  const appStep = React.useMemo(() => newAppStep(metadataClient, locale), [metadataClient, locale]);
   React.useEffect(() => {
     if (!customizationTargetKey) return;
     let cancelled = false;
@@ -729,7 +732,9 @@ export function BuilderLanding(): React.ReactElement {
           </div>
         ))}
 
-        {/* new-package card — opens the spec-driven create dialog (PackageFormDialog) */}
+        {/* 「新建自己的应用」 — opens the spec-driven create dialog
+          * (PackageFormDialog) as the new-app door (objectstack#36748): one
+          * confirm creates the package and its app, live at once. */}
         <button
           type="button"
           data-testid="studio-landing-new-app"
@@ -747,6 +752,7 @@ export function BuilderLanding(): React.ReactElement {
         mode="create"
         open={createOpen}
         onOpenChange={setCreateOpen}
+        newApp={appStep}
         onSaved={(r) => open(r.id)}
       />
       <PackageDetailSheet

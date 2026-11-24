@@ -319,36 +319,33 @@ describe('/studio/* — the entry decision, both ways', () => {
   it("the refusal's way home leads to the DECLARED landing where there is one (objectui#7373)", async () => {
     // The card's case on this gate: a control-plane customer who follows a
     // `/studio` link they may not enter. Pre-#7373 the way out defaulted to the
-    // `/home` literal, which on that deployment is the environment launcher —
-    // "Build an app" / "Start from a template" cards acting on an environment
-    // the control plane does not have. This pin fails on that implementation.
-    // Since objectui#12035 the way out is the refusal's link, not a redirect.
+    // `/home` literal, which on that deployment was the environment launcher.
+    // Since objectstack#36732 that page is retired from 768 px up: `/home` is
+    // the desktop resolver, which lands in the declared app (pinned in
+    // `RootLandingRedirect.route.test.tsx`). Studio sits outside the `/me/apps`
+    // provider, so the way out names that resolver and never an app it cannot
+    // tell a permission set hides. Since objectui#12035 the way out is the
+    // refusal's link, not a redirect.
     renderStudioDeepLink('/studio/hotcrm/data', CONTROL_PLANE_APPS);
 
-    await expectRefusedAt('/studio/hotcrm/data', '/apps/cloud_control');
-    await userEvent.click(screen.getByRole('link', { name: WAY_HOME }));
-
-    await waitFor(() => expect(pathname()).toBe('/apps/cloud_control'));
-    expect(screen.getByTestId('declared-landing')).toBeInTheDocument();
-    expect(screen.queryByTestId('home-launcher')).not.toBeInTheDocument();
+    await expectRefusedAt('/studio/hotcrm/data', '/home');
+    expect(screen.queryByTestId('declared-landing')).not.toBeInTheDocument();
     // The load-bearing half is unchanged by the retarget: refusing is still
     // refusing, and the builder is still never mounted.
     expect(designSurface).not.toHaveBeenCalled();
   });
 
-  it('keeps the launcher for an environment that declares no landing', async () => {
-    // The status quo, as its own case: a real app list WITHOUT a declaration
-    // resolves to the launcher, exactly like the no-context cases above.
+  it('objectstack#36732 — on a desktop with no declaration the way home is the /home resolver too', async () => {
+    // A real app list WITHOUT a declaration: the `/home` resolver lands in
+    // its first product app, the place `/` lands, never Setup.
     renderStudioDeepLink('/studio/hotcrm/data', [
-      { name: 'crm', label: 'CRM' },
       { name: 'setup', label: 'Setup' },
+      { name: 'crm', label: 'CRM' },
     ]);
 
     await expectRefusedAt('/studio/hotcrm/data', '/home');
     await userEvent.click(screen.getByRole('link', { name: WAY_HOME }));
-
     await waitFor(() => expect(pathname()).toBe('/home'));
-    expect(screen.getByTestId('home-launcher')).toBeInTheDocument();
     expect(designSurface).not.toHaveBeenCalled();
   });
 
@@ -387,10 +384,7 @@ describe('/studio/* — the entry decision, both ways', () => {
     await waitFor(() => expect(screen.getByTestId('studio-front-door')).toBeInTheDocument());
     // The mark is named 「PRODUCT home」 since objectui#12605 (the ruled
     // accessible name: product name + home); its target is unchanged.
-    expect(screen.getByRole('link', { name: 'ObjectOS home' })).toHaveAttribute(
-      'href',
-      '/apps/cloud_control',
-    );
+    expect(screen.getByRole('link', { name: 'ObjectOS home' })).toHaveAttribute('href', '/home');
   });
 
   it('the package-less scope\'s bare leg lands on its one pillar, the builder mounted (objectui#11553)', async () => {

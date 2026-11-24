@@ -48,7 +48,7 @@ import { resolveI18nLabel as resolveInlineI18nLabel } from '@objectstack/spec/ui
 import { stateMachineNextValues } from './inline-edit-options';
 import { isStateMachineField, stateLabelOf, type StateChangeConfirm } from './objectGridStateConfirm';
 import { useCellRequiredPrompt } from './objectGridRequiredPrompt';
-import { cellReadOnlyKind, readOnlyReasonText, inlineTyping, choiceFromText, inlineEditorPlacement, clearRefusalText, cellValueRefusal } from './objectGridCellFacts';
+import { cellReadOnlyKind, readOnlyReasonText, inlineTyping, choiceFromText, inlineEditorPlacement, clearRefusalText, cellValueRefusal, pastesFromText } from './objectGridCellFacts';
 import {
   Badge, Button, NavigationOverlay, EmptyValue,
   legacyRecordDrawerWidthKey, recordOverlayWidthStorageKey,
@@ -92,6 +92,7 @@ import { resolveRowCrudAffordances, resolveRowRecordCrudAffordance } from './row
 import { useRecordCrudVerdicts } from './hooks/useRecordCrudVerdicts';
 import { useRowApprovalLocks } from './hooks/useRowApprovalLocks';
 import { resolveLegacyRowActions } from './resolveLegacyRowActions';
+import { rankRowActionDefs } from './rowActionArrangement';
 import { resolveBulkActions, resolvePromotedBulkParams } from './resolveBulkActions';
 import { useUndeclaredActionNamesWarning } from './undeclaredActionNames';
 import { partitionBulkRows } from './bulkEligibility';
@@ -1371,11 +1372,17 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   // `list_item` def stops rendering a dead twin of it). A name the object does
   // not declare draws nothing and is reported below, in development. See
   // `resolveLegacyRowActions` for the full rationale (objectui#2960).
-  const { defs: resolvedRowActionDefs, undeclared: undeclaredRowActions } = resolveLegacyRowActions({
+  const { defs: foldedRowActionDefs, undeclared: undeclaredRowActions } = resolveLegacyRowActions({
     rowActions: rowActionsList.filter(a => a !== 'edit' && a !== 'delete'),
     rowActionDefs: rowActionDefsList,
     objectActions: (objectSchema as any)?.actions,
   });
+  // objectstack#36494 — the row's menus list the actions the object's record
+  // scope arrangement (`actionLayout.record`, as served) names first, in its
+  // order, then the rest as before (`./rowActionArrangement`). Keyed on the
+  // arm's content so an unchanged arm hands the menus the same defs.
+  const recordArmKey = JSON.stringify((objectSchema as any)?.actionLayout?.record ?? null);
+  const resolvedRowActionDefs = useMemo(() => rankRowActionDefs(foldedRowActionDefs, JSON.parse(recordArmKey)), [foldedRowActionDefs, recordArmKey]);
   // Honor the object's resolved CRUD affordance: the ADR-0103 lifecycle bucket
   // (`managedBy`), the `userActions.edit`/`delete` override — explicit `false`
   // opts out of the generic row Edit/Delete (e.g. sys_environment ships a
@@ -3604,7 +3611,14 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
    *   browser's menu: the menu is a second way to reach the row's actions, not
    *   a new surface.
    */
-  const renderRowContextMenu = (row: any, context: { selected: boolean; column?: string }): React.ReactNode => {
+  const renderRowContextMenu = (
+    row: any,
+    context: {
+      selected: boolean;
+      column?: string;
+      cell?: { copy?: () => void; paste?: () => void; clear?: () => void };
+    },
+  ): React.ReactNode => {
     if (context.selected && selectedRows.length >= 2) {
       return (
         <SelectionContextMenuItems
@@ -3638,11 +3652,23 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
       ? (at: { x: number; y: number }) =>
           setFieldHistoryAt({ recordId: String(recordId), field: historyField, ...at })
       : undefined;
+    // objectstack#36289 — the data cell's own Copy, Paste and Clear, as the
+    // table offers them; Paste only for a field type pasted text can stand
+    // for (`pastesFromText`).
+    const cellFieldType = context.column
+      && Object.prototype.hasOwnProperty.call(objectSchema?.fields ?? {}, context.column)
+      ? (objectSchema as any).fields[context.column]?.type
+      : undefined;
+    const cell = context.cell ? { ...context.cell, pasteable: pastesFromText(cellFieldType) } : undefined;
+    // Something the cell can be changed by: what makes a cell's own section
+    // worth replacing the browser's menu for (its Copy alone is not).
+    const cellWrites = !!cell && ((!!cell.paste && cell.pasteable) || !!cell.clear);
     // The browser's menu stays on a table that offers no row action at all and
     // whose rows cannot be selected — a face-level answer, so a row whose own
     // actions are all hidden by their predicates still opens Open / Open in
-    // new tab like its neighbours — unless the cell offers its field's history.
-    if (!tableOffersRowActions && !selectionMode && !onFieldHistory) return null;
+    // new tab like its neighbours — unless the cell offers its field's history
+    // or a change of its value.
+    if (!tableOffersRowActions && !selectionMode && !onFieldHistory && !cellWrites) return null;
     const newTabHref =
       schema.objectName && recordId != null && recordId !== '' && recordLinkHost?.recordHref
         ? recordLinkHost.recordHref(schema.objectName, recordId)
@@ -3654,14 +3680,16 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     const opens = rowOpensRecord !== false
       && (!!onRowClick || (navigation.mode !== 'none' && !schema.navigation?.preventNavigation));
     const openHref = rowOpensRecord === false ? null : newTabHref;
-    // Nothing at all to list for this row: no Open, no URL, no history, no action.
-    if (!opens && !openHref && !onFieldHistory && !rowOffersAction(row)) return null;
+    // Nothing at all to list for this row: no Open, no URL, no history, no
+    // change of the cell, no action.
+    if (!opens && !openHref && !onFieldHistory && !cellWrites && !rowOffersAction(row)) return null;
     return (
       <RowContextMenuItems
         menu={rowActionMenuProps(row)}
         onOpen={opens ? () => navigation.handleClick(row) : undefined}
         newTabHref={openHref}
         onFieldHistory={onFieldHistory}
+        cell={cell}
       />
     );
   };

@@ -15,6 +15,10 @@ import { describe, it, expect } from 'vitest';
 import { translateObject, type TranslationBundle } from '@objectstack/spec/system';
 import { QUEUE_FIELD_DEF, OWNER_FIELD_DEF } from '@objectstack/spec/data';
 import { restoreTranslatedEchoes, translatedEchoLocales } from './protocol-translated-echo.js';
+import { ProtocolDiscoveryAndBasesFacet } from './protocol-discovery-and-bases.js';
+// The save door's module reaches `@objectstack/lint` through dynamic imports;
+// its first load is paid here, during collection, never inside a case's clock.
+import '@objectstack/lint';
 
 const bundle: TranslationBundle = {
     'zh-CN': {
@@ -236,5 +240,105 @@ describe('[#34836] a patch entry answers a slot its patch changed, and only wher
         const { item, restored } = restoreTranslatedEchoes(row({ label: 'Tax ID', description: '注册号说明' }), { source, bundle: catalog, packagedBase, patchBundles }) as any;
         expect(item.fields.registration_number.description).toBe('注册号说明');
         expect(restored).toEqual([]);
+    });
+});
+
+/**
+ * What a CODE extender brings, over a stored row saved before the extending
+ * package was installed: the fold serves the extender's added field and the
+ * entry its `place` splices into `relatedLists`, translated against the
+ * packaged base, and the stored row carries no copy of either. The packaged
+ * base is the last source for them, told from the owner's own declaration.
+ */
+describe('a code extender\'s placed title or added field, over a stored row that predates it', () => {
+    const catalog = {
+        'zh-CN': {
+            objects: {
+                crm_lead: {
+                    fields: { name: { label: '名称' }, cb_market: { label: '市场' } },
+                    _relatedLists: { crm_task: { label: '任务' }, acme_audit: { label: '审计' } },
+                },
+            },
+        },
+    } as unknown as TranslationBundle;
+    const owner = () => ({
+        name: 'crm_lead',
+        label: 'Lead',
+        fields: { name: { type: 'text', label: 'Name' } } as Record<string, unknown>,
+        relatedLists: [{ list: 'crm_task', label: 'Tasks' }, 'crm_note'] as unknown[],
+    });
+    /** The packaged base: the owner, the extender's added field and its placed tab. */
+    const packagedBase = () => ({
+        ...owner(),
+        fields: { ...owner().fields, cb_market: { type: 'text', label: 'Market' } },
+        relatedLists: [{ list: 'crm_task', label: 'Tasks' }, { list: 'acme_audit', label: 'Audit trail' }, 'crm_note'],
+    });
+    /** The stored overlay row, saved before the extender: it declares `relatedLists` without the placed entry. */
+    const storedRow = () => ({ ...owner(), label: 'Prospect' });
+    /** The `/meta` read in zh-CN: the fold over the stored row, translated against the packaged base. */
+    const zhRead = (): any => {
+        const served = { ...storedRow(), fields: packagedBase().fields, relatedLists: packagedBase().relatedLists };
+        return structuredClone(translateObject(served as any, catalog, { locale: 'zh-CN', packagedBase: packagedBase() } as any));
+    };
+    const labelOf = (body: any, list: string) => body.relatedLists.find((e: any) => typeof e === 'object' && e.list === list)?.label;
+
+    it('the read does translate both: the case is real, not a no-op', () => {
+        const echo = zhRead();
+        expect(labelOf(echo, 'acme_audit')).toBe('审计');
+        expect(echo.fields.cb_market.label).toBe('市场');
+    });
+
+    it('a zh-CN save of the folded read keeps the placed title and the added field\'s label as their source', () => {
+        const { item, restored } = restoreTranslatedEchoes(zhRead(), {
+            source: storedRow(), bundle: catalog, packagedBase: packagedBase(), packagedOwner: owner(),
+        }) as any;
+        expect(labelOf(item, 'acme_audit')).toBe('Audit trail');
+        expect(item.fields.cb_market.label).toBe('Market');
+        expect(restored.map((r: any) => r.path).sort()).toEqual([
+            'fields.cb_market.label', 'fields.name.label', 'relatedLists[acme_audit].label', 'relatedLists[crm_task].label',
+        ]);
+        // The stored row's own text is what it was: the object label diverged, so the read served it as written.
+        expect(item.label).toBe('Prospect');
+    });
+
+    it('a placed entry the stored row declares is the stored row\'s to explain: a tenant\'s rename, typed over as the catalog string, is kept', () => {
+        const source: any = storedRow();
+        source.relatedLists = [...source.relatedLists, { list: 'acme_audit', label: 'Audit log' }];
+        const body = zhRead();
+        expect(labelOf(body, 'acme_audit')).toBe('审计');
+        const { item } = restoreTranslatedEchoes(body, { source, bundle: catalog, packagedBase: packagedBase(), packagedOwner: owner() }) as any;
+        expect(labelOf(item, 'acme_audit')).toBe('审计');
+    });
+
+    it('an entry or field the OWNER declares and the stored row dropped is no extender\'s: the body\'s text is kept', () => {
+        const source: any = { ...storedRow(), fields: {}, relatedLists: ['crm_note'] };
+        const body = zhRead();
+        const { item } = restoreTranslatedEchoes(body, { source, bundle: catalog, packagedBase: packagedBase(), packagedOwner: owner() }) as any;
+        expect(labelOf(item, 'crm_task')).toBe('任务');
+        expect(item.fields.name.label).toBe('名称');
+        // …while the extender's own still come back as their source.
+        expect(labelOf(item, 'acme_audit')).toBe('Audit trail');
+        expect(item.fields.cb_market.label).toBe('Market');
+    });
+
+    it('the save door hands the restore the packaged owner: a non-source-locale save over the stored row lacking the entry keeps the source title', async () => {
+        const host = {
+            engine: { registry: { getPackagedObjectOwner: (name: string) => (name === 'crm_lead' ? { definition: owner() } : undefined) } },
+            getPackagedObjectBase: (name: string) => (name === 'crm_lead' ? packagedBase() : undefined),
+            getPackagedFieldPatchBases: () => [],
+            getPackageTranslationBundle: async () => undefined,
+            registeredTranslationBundle: () => catalog,
+        };
+        const repo = { headAt: async () => ({ head: { body: storedRow() }, packageId: null }) };
+        const { item, restored } = await ProtocolDiscoveryAndBasesFacet.restoreTranslatedObjectEchoes(
+            host as any,
+            { type: 'object', name: 'crm_lead', item: zhRead() } as any,
+            repo as any,
+            { type: 'object', name: 'crm_lead', org: 'env' } as any,
+            'publish',
+        ) as any;
+        expect(labelOf(item, 'acme_audit')).toBe('Audit trail');
+        expect(item.fields.cb_market.label).toBe('Market');
+        expect(restored.map((r: any) => r.path)).toEqual(expect.arrayContaining(['relatedLists[acme_audit].label', 'fields.cb_market.label']));
     });
 });

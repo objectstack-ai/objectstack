@@ -33,6 +33,8 @@ import { RECORD_PAGE_BUILTIN_TABS, relatedListEntryHidden, relatedListEntryName,
 import { refuseStageFieldWithoutKinds } from './stage-field-kinds';
 // [#32763] The `icon` leaf, shared with the AI blueprint object.
 import { OBJECT_COLOR_SCHEMA, OBJECT_ICON_SCHEMA } from './object-icon';
+// [#36366] The action arrangement per scope (pinned, more), shared with the object extension.
+import { OBJECT_ACTION_LAYOUT_SCHEMA } from './object-action-layout';
 // The masked-on-read declaration (#20141); `warnGenericPasswordFields` reads its
 // `password` exemption rather than restating it. No runtime cycle: that module's
 // only imports are type-only.
@@ -72,7 +74,7 @@ import { injectedSystemColumnDefs } from './injected-system-column-provenance';
 // [ruling 7000907189 point 1] Change Owner's structural test, read by the
 // `userActions.transfer` refusal. The same cycle as above, one module further
 // (it reads `resolveInjectedSystemColumns`): called only at parse time.
-import { transferIneligibilityReason } from './user-action-transfer';
+import { transferCascadeIneligibilityReason, transferIneligibilityReason } from './user-action-transfer';
 import {
   BOOLEAN_VALUE_TYPES,
   CALENDAR_DATE_TYPES,
@@ -1462,7 +1464,7 @@ export const ObjectFieldGroupSchema = lazySchema(() => strictObject({
     expanded:
       '`expanded` is not a group key — use the `collapse` enum: ' +
       "`collapse: 'expanded'` (collapsible, starts open), `'collapsed'` (starts closed), " +
-      "or `'none'` (always open, no toggle).",
+      "or `'none'` (always open, no toggle; the default record page still lets the reader fold it).",
     visibleOn:
       '`visibleOn` is not a field-group key — the section predicate slot is `visibleWhen` ' +
       '(ADR-0089 canonical spelling; re-added with its enforcement under ADR-0085 §5). ' +
@@ -1596,15 +1598,19 @@ export const ObjectFieldGroupSchema = lazySchema(() => strictObject({
   ).meta({ title: 'Requires Feature' }),
 
   /**
-   * [ADR-0085] Collapse behaviour of the group's rendered section, on every
-   * surface (form, detail, drawer). One enum, three valid states — replaces
+   * [ADR-0085] Collapse behaviour of the group's rendered section. Forms, the
+   * designer preview and authored record pages honour all three states as
+   * written, and a print page draws every group open; the synthesized
+   * (default) record page lets the reader fold every titled group, so there
+   * only the first state is read (`'collapsed'` closed, `'none'` and
+   * `'expanded'` open). One enum, three valid states — replaces
    * the old `defaultExpanded` flag AND the UI-dialect `collapsible`/`collapsed`
    * boolean pair, which could express contradictions and had drifted between
    * spec and renderer (spec declared a key no renderer read; renderers read
    * keys the spec rejected).
    */
   collapse: z.enum(['none', 'expanded', 'collapsed']).optional().default('none')
-    .describe("[ADR-0085] Section collapse behaviour: 'none' (always open, no toggle), 'expanded' (collapsible, starts open), 'collapsed' (collapsible, starts closed).").meta({ title: 'Collapse' }),
+    .describe("[ADR-0085] Section collapse behaviour: 'none' (always open, no toggle), 'expanded' (collapsible, starts open), 'collapsed' (collapsible, starts closed). On the synthesized (default) record page the reader can fold every titled group, so there 'none' and 'expanded' both start open and only 'collapsed' starts closed.").meta({ title: 'Collapse' }),
 
   /**
    * @deprecated [ADR-0085 → `collapse`] Accepted as a parse-time alias:
@@ -3943,6 +3949,46 @@ function refuseIneligibleUserActionTransfer(
 }
 
 /**
+ * [ruling 7000907189 point 4 · ADR-0049] `transferBehavior: 'cascade'` on a
+ * reference field asks a Change Owner of the parent to move THIS object's rows
+ * too, by the same action — so this object must offer Change Owner itself
+ * (`transferCascadeIneligibilityReason`, `user-action-transfer.ts`):
+ * structurally eligible, not a `controlled_by_parent` detail (its access
+ * follows its master, so it is not cascaded for access), and its
+ * `userActions.transfer` not off. One located issue at
+ * `['fields', <name>, 'transferBehavior']` per such field anywhere else — the
+ * endpoint would never run the cascade, so the declaration would be a key
+ * nothing honours. `'none'` is accepted everywhere the field's own type
+ * admits the key (the type half is `FieldSchema`'s).
+ *
+ * Refused at parse on every door: the key is new, so no stored object carries
+ * it. Kept in the existing callback so it adds no check node the JSON Schema
+ * projection would have to drop.
+ */
+function refuseIneligibleTransferCascades(
+  object: { name?: unknown; fields?: unknown },
+  ctx: z.RefinementCtx,
+): void {
+  const fields = object.fields;
+  if (fields === null || typeof fields !== 'object' || Array.isArray(fields)) return;
+  let reason: string | undefined | null = null;
+  for (const [fieldName, field] of Object.entries(fields as Record<string, unknown>)) {
+    if ((field as { transferBehavior?: unknown } | null)?.transferBehavior !== 'cascade') continue;
+    if (reason === null) reason = transferCascadeIneligibilityReason(object);
+    if (reason === undefined) return;
+    const name = typeof object.name === 'string' && object.name.length > 0 ? object.name : 'this object';
+    ctx.addIssue({
+      code: 'custom',
+      path: ['fields', fieldName, 'transferBehavior'],
+      message:
+        `Field '${fieldName}' declares transferBehavior: 'cascade', but object '${name}' cannot take a Change ` +
+        `Owner cascade: ${reason}. A cascade moves this object's records by the Change Owner action, so it ` +
+        "acts only on an object that offers that action itself. Set transferBehavior to 'none' or remove it.",
+    });
+  }
+}
+
+/**
  * [ruling A on the read half of #32442] `enable.aiReadable` is declared only
  * where it has a reader: a `sys_*` object outside the stored-metadata family.
  * One located issue at `['enable', 'aiReadable']`; the family is judged before
@@ -4060,6 +4106,8 @@ const ObjectSchemaBase = strictObject(
   icon: OBJECT_ICON_SCHEMA,
   // [#35985] The colour of the square the icon is drawn on, from a closed palette.
   color: OBJECT_COLOR_SCHEMA,
+  // [#36366] The order of the object's actions and which are buttons, per scope (list, record).
+  actionLayout: OBJECT_ACTION_LAYOUT_SCHEMA,
 
   /**
    * Taxonomy & Organization
@@ -5338,6 +5386,9 @@ const ObjectSchemaBase = strictObject(
   // [ruling 7000907189 point 1 · ADR-0049] `userActions.transfer` opens Change
   // Owner only on a structurally eligible object. See the helper's docblock.
   refuseIneligibleUserActionTransfer(object, ctx);
+  // [ruling 7000907189 point 4 · ADR-0049] `transferBehavior: 'cascade'` only on
+  // a field of an object that offers Change Owner itself. See the helper's docblock.
+  refuseIneligibleTransferCascades(object, ctx);
   // [ADR-0154 D10] Each `lifecycle.seal.valueFields` name is a declared field.
   // See the helper's docblock.
   refuseUndeclaredSealValueFields(object.lifecycle, object.fields, ctx);
@@ -6846,6 +6897,20 @@ const CUSTOM_ARRANGEMENT_WRITER =
   'refused at those doors: the registry merge does not apply what it writes here, alone or beside the pair, ' +
   'and the boot log names it.';
 
+/** [#36366, ADR-0146 D10] The extension's `actionLayout` description. */
+function objectExtensionActionLayoutDescription(): string {
+  return (
+    'The arrangement of the extended object\'s actions, per scope (`list`, `record`), in the object\'s own shape. ' +
+    'Written only by the object extension of the paired `.custom` package of the App the object belongs to ' +
+    '(ADR-0146 D10). An extension in a package that is not a `.custom` package is refused at publish, by ' +
+    '`os validate` / `os build` and at install, and the registry merge skips it with a warning; an action that ' +
+    'package brings is placed by its own `locations` and `order`. A `.custom` package that is not this object\'s ' +
+    'pair is not applied. Each arm written replaces the arm the object serves for that scope, whole, after ' +
+    'every other layer; an arm not written stays as the object gives it, and removing the key, or uninstalling ' +
+    'or disabling the package, restores it.'
+  );
+}
+
 /** [ADR-0146 D10] The extension's `fieldGroups` description. */
 function objectExtensionFieldGroupsDescription(): string {
   return (
@@ -6933,12 +6998,16 @@ export const ObjectExtensionSchema = lazySchema(() => strictObject({
   guidance: {
     // The merge in `objectql/src/engine.ts` copies EXACTLY the declared keys
     // (extend / fields / fieldPatches / label / pluralLabel / description /
-    // validations / indexes / priority) onto the extension def. Anything else
-    // is not "unsupported yet" — there is no slot for it to arrive through.
+    // validations / indexes / priority, and the paired `.custom` package's
+    // fieldGroups / relatedLists / actionLayout) onto the extension def.
+    // Anything else is not "unsupported yet" — there is no slot for it to
+    // arrive through.
     actions:
       '`actions` cannot be contributed through an object extension — the merge carries ' +
       '`fields`, `label`, `pluralLabel`, `description`, `validations` and `indexes`, and ' +
-      'applies `fieldPatches`, and nothing else. ' +
+      'applies `fieldPatches`; only the base\'s paired `.custom` package also writes ' +
+      '`fieldGroups`, `relatedLists` and `actionLayout` (the order of the object\'s actions, ' +
+      'never a new one); nothing else. ' +
       "Declare a top-level action with `objectName: '<target>'` in the same stack: " +
       '`defineStack()` accepts it because the stack extends the target, keeps it in the ' +
       'top-level `actions`, and the engine\'s schema registry attaches it to the target ' +
@@ -6960,9 +7029,9 @@ export const ObjectExtensionSchema = lazySchema(() => strictObject({
       'carry them. Declare the views as a top-level `view` in the stack that defines the ' +
       'target object. `defineStack()` refuses a top-level `view` whose `list` or `form` data ' +
       'source is an object the stack does not define, an extended one included.',
-    // [#35901, ADR-0146 D10] `fieldGroups` and `relatedLists` are KEYS of this
-    // schema, not guidance: the paired `.custom` package's extension writes
-    // them, and which package an extension belongs to is not in its body, so
+    // [#35901, #36366, ADR-0146 D10] `fieldGroups`, `relatedLists` and
+    // `actionLayout` are KEYS of this schema, not guidance: the paired
+    // `.custom` package's extension writes them, and which package an extension belongs to is not in its body, so
     // the refusal of any other writer is the server's (`CUSTOM_ARRANGEMENT_KEYS`
     // and its judge, at publish, `os validate` / `os build` and install).
     // A membership key belongs to the package that owns the roster object, so a
@@ -7047,6 +7116,17 @@ export const ObjectExtensionSchema = lazySchema(() => strictObject({
   
   /** Override description */
   description: z.string().optional().describe('Override description for the extended object'),
+
+  /**
+   * [#36366, ADR-0146 D10] The arrangement of the extended object's actions,
+   * as on the object itself (`ObjectSchema.actionLayout`), written by the
+   * object extension of the base's paired `.custom` package and by no other
+   * (`CUSTOM_ARRANGEMENT_KEYS`). Applied by role, last, arm by arm: each arm
+   * it writes replaces the arm the object serves for that scope, whole; an
+   * arm it leaves out stays. Refused for any other writer where `fieldGroups`
+   * is. See {@link objectExtensionActionLayoutDescription}.
+   */
+  actionLayout: OBJECT_ACTION_LAYOUT_SCHEMA.describe(objectExtensionActionLayoutDescription()),
   
   /** Additional validation rules to add */
   validations: z.array(ValidationRuleSchema).optional().describe('Additional validation rules to merge into the target object'),

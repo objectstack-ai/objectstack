@@ -18,11 +18,17 @@
  * With no app yet it is drawn above the empty state at every width, and while
  * the page is loading it is not drawn, so it mounts once, where it stays.
  *
+ * From 768 px up the page is retired (objectstack#36732): the host redirects
+ * `/home` into an app whenever the viewer has a product app, so a desktop
+ * reaches this page only with none, and draws the no-apps empty state
+ * ({@link DesktopNoApps}): build with AI, start from a template, the app
+ * marketplace, for the viewers who may add an app.
+ *
  * @module
  */
 
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useMetadata } from '../../providers/MetadataProvider.js';
 import { useRecentItems, type RecentItem } from '../../hooks/useRecentItems.js';
 import { useRecentItemLabel } from '../../hooks/useRecentItemLabel.js';
@@ -42,6 +48,7 @@ import { useCanAuthorMetadata, useCanReadPendingDrafts } from '../../hooks/useCa
 import { HomeAppsStrip } from './HomeAppsStrip.js';
 import { PhoneAppList } from '../../layout/PhoneAppList.js';
 import { appAddressSegment } from '../../utils/appRoute.js';
+import { inboxPagePath } from '../../views/inbox/inboxPageModel.js';
 import { appSegmentOf, lastOpenedByApp } from './appLastOpened.js';
 import { recentItemObject, recentItemTypeLabel } from './recentItemTypeLabel.js';
 import { RecoveryPasswordReminder } from './RecoveryPasswordReminder.js';
@@ -84,6 +91,8 @@ import { resolveAiApiBase } from '../../hooks/useAiSurface.js';
 import { isAiStudioEnabled, isMarketplaceEnabled } from '../../runtime-config.js';
 import { STUDIO_NEW_PACKAGE_PATH } from '../../views/studio-design/studioNewPackage.js';
 import { useOpenAssistant } from '../../layout/chatDockControl.js';
+import { isProductApp } from '../../utils/homePath.js';
+import { useAddAppEntries, useMayAddApp } from '../../hooks/useAddAppEntries.js';
 
 /**
  * Which AI home CTAs to surface, driven by the live agent catalog (the single
@@ -198,6 +207,73 @@ function BuilderChip({
         <TooltipContent className="max-w-xs">{disabledReason}</TooltipContent>
       </Tooltip>
     </TooltipProvider>
+  );
+}
+
+/**
+ * The desktop's no-apps empty state (objectstack#36732; design board 45,
+ * picture 4): what is left of the retired platform home page. A viewer who may
+ * add an app (`useMayAddApp`, the sidebar app menu's own gate) is offered its
+ * 「Add app」 doors as buttons, the first one primary; an administrator
+ * without `manage_metadata` is told why there are none (objectstack#8270);
+ * anyone else is told their administrator shares apps with them.
+ */
+function DesktopNoApps({
+  showAuthoringGate,
+  authoringGateReason,
+  t,
+}: {
+  showAuthoringGate: boolean;
+  authoringGateReason: string;
+  t: (key: string, opts?: any) => string;
+}) {
+  const mayAddApp = useMayAddApp();
+  return (
+    <Empty data-testid="home-no-apps">
+      <EmptyTitle>{t('home.noAppsTitle', { defaultValue: 'No applications yet' })}</EmptyTitle>
+      {mayAddApp ? (
+        <EmptyDescription>
+          {t('home.noAppsAddDescription', {
+            defaultValue: 'Build your first app, or start from a template or the app marketplace.',
+          })}
+        </EmptyDescription>
+      ) : showAuthoringGate ? (
+        <EmptyDescription data-testid="home-authoring-gate-reason-empty">{authoringGateReason}</EmptyDescription>
+      ) : (
+        <EmptyDescription>
+          {t('home.noAppsDescription', {
+            defaultValue: 'The system is being set up — apps your admin shares with you will show up here.',
+          })}
+        </EmptyDescription>
+      )}
+      {mayAddApp && <NoAppsAddActions />}
+    </Empty>
+  );
+}
+
+/**
+ * The 「Add app」 doors as the empty state's buttons. Its own component so
+ * only a viewer who may add an app pays the agent-catalog read the list makes.
+ */
+function NoAppsAddActions() {
+  const entries = useAddAppEntries();
+  if (entries.length === 0) return null;
+  return (
+    <div className="mt-6 flex flex-col items-center gap-3 sm:flex-row">
+      {entries.map((entry, index) => (
+        <Button
+          key={entry.key}
+          asChild
+          variant={index === 0 ? 'default' : 'outline'}
+          className="max-sm:h-11"
+        >
+          <Link to={entry.to} data-testid={`home-no-apps-${entry.key}`}>
+            <entry.icon className="mr-2 h-4 w-4" />
+            {entry.label}
+          </Link>
+        </Button>
+      ))}
+    </div>
   );
 }
 
@@ -673,7 +749,13 @@ export function HomePage({ checklist }: HomePageProps = {}) {
     );
   }
 
-  if (activeApps.length === 0) {
+  // objectstack#36732 — a desktop with no product app (none at all, or only
+  // the platform's own Setup and Studio) draws the no-apps empty state.
+  // The launcher's list (`/me/apps`): an app a permission set hides is not one
+  // of the viewer's, as the landing that sent them here reads it.
+  const desktopNoApps = !phone && !launcher.apps.some(isProductApp);
+
+  if (activeApps.length === 0 || desktopNoApps) {
     return (
       <div className="flex flex-col flex-1">
         {/* With no app yet, the drafts row is the whole of "My work": the
@@ -704,7 +786,13 @@ export function HomePage({ checklist }: HomePageProps = {}) {
           builder CTAs, so they get the reason instead of the instruction. AI
           "Ask" stays offered — it reads data and needs no authoring capability.
         */}
-        {isAdmin && !canAuthorMetadata ? (
+        {desktopNoApps ? (
+          <DesktopNoApps
+            showAuthoringGate={isAdmin && !canAuthorMetadata}
+            authoringGateReason={authoringGateReason}
+            t={t}
+          />
+        ) : isAdmin && !canAuthorMetadata ? (
           <Empty>
             <EmptyTitle>{t('home.noAppsTitle', { defaultValue: 'No applications yet' })}</EmptyTitle>
             <EmptyDescription data-testid="home-authoring-gate-reason-empty">
@@ -986,10 +1074,9 @@ export function HomePage({ checklist }: HomePageProps = {}) {
                 ),
               })
             }
-            /* The bell's own "view all" target (`InboxPopover`): `?view=mine`
-               selects the user-scoped view, so the full page matches what the
-               column showed (objectui#4074). */
-            onOpenInbox={() => navigate(`/apps/${hostAppSegment}/sys_inbox_message?view=mine`)}
+            /* The inbox page the bell opens (objectstack#36741), which lists
+               the same signed-in user's messages the column showed. */
+            onOpenInbox={() => navigate(inboxPagePath(hostAppSegment))}
             /* `action_url` is APP-RELATIVE (`/{object}/{id}`, ADR-0030 L5),
                so it has to be hosted under an app before it is a route —
                navigating it verbatim is objectui#5179, where the console
@@ -1005,7 +1092,7 @@ export function HomePage({ checklist }: HomePageProps = {}) {
               openInboxNotification(n, isApprovalsInboxLink(n.actionUrl) ? approvalsHostSegment : hostAppSegment, {
                 markRead: markNotificationRead,
                 goTo: (path) => navigate(path),
-                openInbox: () => navigate(`/apps/${hostAppSegment}/sys_inbox_message?view=mine`),
+                openInbox: () => navigate(inboxPagePath(hostAppSegment)),
               })
             }
             t={t}

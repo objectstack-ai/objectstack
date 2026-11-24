@@ -510,7 +510,9 @@ export function ObjectPicker({
           value={shown}
           disabled={disabled}
           placeholder={placeholder}
-          className={cn('h-8 text-sm', !restingLabel && 'font-mono')}
+          // A machine name is typed or shown in mono; the placeholder and a
+          // label are prose. The chevron's room is reserved on the right.
+          className={cn('h-8 pr-7 text-sm', !restingLabel && shown && 'font-mono')}
           onFocus={() => {
             setFocused(true);
             setText(value);
@@ -533,6 +535,12 @@ export function ObjectPicker({
             else close();
           }}
           onKeyDown={onKeyDown}
+        />
+        {/* Says the input opens a list; focusing it is what opens it. */}
+        <ChevronDown
+          aria-hidden
+          data-testid="object-picker-chevron"
+          className="pointer-events-none absolute right-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"
         />
         {open && catalog.status !== 'error' && (
           <div

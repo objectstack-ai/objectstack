@@ -18,7 +18,7 @@ const mockSurface = vi.mocked(useAiSurfaceEnabled);
  * Who is looking, and whether this runtime offers authoring: the three terms
  * the no-assistant screen offers Studio's new-package flow on.
  */
-const viewer = vi.hoisted(() => ({ isAdmin: true, canAuthorMetadata: true, aiStudio: true }));
+const viewer = vi.hoisted(() => ({ isAdmin: true, canAuthorMetadata: true, aiStudio: true, phone: false }));
 vi.mock('@object-ui/auth', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useWorkspaceAdminStatus: () => ({ isAdmin: viewer.isAdmin, isResolved: true }),
@@ -26,6 +26,13 @@ vi.mock('@object-ui/auth', async (importOriginal) => ({
 vi.mock('../../hooks/useCanAuthorMetadata', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useCanAuthorMetadata: () => viewer.canAuthorMetadata,
+}));
+// objectstack#36732 — the width decides the Home target: a phone goes to the
+// declared landing directly; a desktop, here outside the `/me/apps` provider,
+// names `/home`, whose desktop route resolves the same landing.
+vi.mock('../../hooks/usePhoneViewport', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  usePhoneViewport: () => viewer.phone,
 }));
 vi.mock('../../runtime-config', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -86,6 +93,7 @@ describe('RequireAiSurface', () => {
     viewer.isAdmin = true;
     viewer.canAuthorMetadata = true;
     viewer.aiStudio = true;
+    viewer.phone = false;
   });
 
   it('renders the AI surface when the server serves agents (cloud install)', () => {
@@ -141,6 +149,8 @@ describe('RequireAiSurface', () => {
     // control plane that serves no agent. Pre-#7373 the default was the `/home`
     // literal, so the customer landed among environment cards that cannot act
     // on anything their deployment has. This pin fails on that implementation.
+    // On a phone, which still has its own Home page (#36732).
+    viewer.phone = true;
     const user = userEvent.setup();
     mockSurface.mockReturnValue({ enabled: false, isLoading: false });
     renderGuardedAi([
@@ -152,11 +162,28 @@ describe('RequireAiSurface', () => {
     expect(screen.queryByText('HOME')).not.toBeInTheDocument();
   });
 
+  it('on a desktop, outside the /me/apps provider, leads to /home — the route that resolves the declared landing (objectstack#36732)', async () => {
+    // `/ai/*` is not under `LauncherAppsProvider`, so the guard cannot tell
+    // whether a permission set hides the declared app. It names `/home`, which
+    // on a desktop is no longer the launcher page but the resolver that lands
+    // in the declared app once it knows.
+    const user = userEvent.setup();
+    mockSurface.mockReturnValue({ enabled: false, isLoading: false });
+    renderGuardedAi([
+      { name: 'cloud_control', label: 'Cloud', isDefault: true },
+      { name: 'account', label: 'Account' },
+    ]);
+    await user.click(screen.getByTestId('ai-unavailable-home'));
+    expect(screen.getByText('HOME')).toBeInTheDocument();
+  });
+
   it('keeps the launcher for an ordinary environment that declares nothing', async () => {
     // The status quo, stated as its own case so the two answers cannot be
-    // confused for one: an app list WITHOUT a declaration still resolves to the
-    // launcher, and so does a guard mounted outside a metadata provider (every
-    // other case in this file).
+    // confused for one: an app list WITHOUT a declaration resolves to the
+    // launcher. `/ai/*` sits outside the `/me/apps` provider, so on a desktop
+    // Home names `/home`, the route that resolves the last-used / first app
+    // once it knows which apps a permission set hides (#36732); a guard mounted
+    // outside a metadata provider resolves there too (every other case here).
     const user = userEvent.setup();
     mockSurface.mockReturnValue({ enabled: false, isLoading: false });
     renderGuardedAi([{ name: 'crm', label: 'CRM' }, { name: 'setup', label: 'Setup' }]);

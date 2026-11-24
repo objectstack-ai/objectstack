@@ -114,7 +114,7 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       },
       "fieldGroups.collapse": {
         label: "摺疊",
-        helpText: "該分割區能否摺疊，作用於輸入表單和記錄詳細資料頁面。未設定：none。"
+        helpText: "該分割區能否摺疊。輸入表單依設定執行；預設記錄頁面上讀者可以摺疊每個有標題的分組，因此那裡只決定初始狀態：collapsed 先收合，其餘先展開。未設定：none。"
       },
       "fieldGroups.visibleWhen": {
         label: "可見條件",
@@ -239,6 +239,10 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       "fields.deleteBehavior": {
         label: "刪除行為",
         helpText: "被參照記錄刪除時的處理方式"
+      },
+      "fields.transferBehavior": {
+        label: "轉移行為",
+        helpText: "變更被引用記錄的負責人時，是否也可一併轉移透過此欄位指向它的記錄"
       },
       "fields.multiple": {
         label: "多選",
@@ -468,6 +472,18 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       "userActions.transfer": {
         label: "變更負責人",
         helpText: "變更負責人操作（單筆與批次）：開啟即提供，關閉即隱藏。未設定時開啟，但 controlled_by_parent 明細物件預設關閉。僅在記錄有可重新指派負責人的物件上提供（ownership 為 user 或未設定、無 managedBy、不是 sys_ 物件、owner_id 未設為唯讀，外部物件上 owner_id 已宣告或已對應）；在其他物件上開啟會被拒絕。它只控制該操作，不影響直接編輯 owner_id。已儲存的 {enabled, visibleWhen, disabledWhen} 物件逐鍵編輯；在原始碼中寫一個即可按每筆記錄控制該操作。"
+      },
+      actionLayout: {
+        label: "動作佈局",
+        helpText: "本物件動作的順序及哪些顯示為按鈕，按作用域分：pinned（最多 3 個按鈕，按順序）和 more（「更多」選單的順序；兩者都沒寫的動作按預設順序排在後面）。未設定時，各處仍按動作的排序選按鈕。"
+      },
+      "actionLayout.list": {
+        label: "列表",
+        helpText: "列表頁工具列，寫作 {\"pinned\": [...], \"more\": [...]}：放在列表工具列上的動作名稱；$import / $export 只能放在 pinned。最多固定 3 個。未固定時，頁面仍顯示自己的匯入 / 匯出選單。os validate 會拒絕不是本物件動作、或未放在列表工具列上的名稱；這樣的名稱什麼也不顯示。"
+      },
+      "actionLayout.record": {
+        label: "記錄",
+        helpText: "記錄頁頭（記錄頁、側邊預覽、手機底欄），寫作 {\"pinned\": [...], \"more\": [...]}：放在記錄頁頭或其「更多」選單中的動作名稱。最多固定 3 個。os validate 會拒絕不是本物件動作、或未放在記錄頁上的名稱；這樣的名稱什麼也不顯示。"
       },
       editMode: {
         label: "編輯方式",
@@ -756,6 +772,10 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       deleteBehavior: {
         label: "刪除行為",
         helpText: "被參照記錄刪除時的處理方式"
+      },
+      transferBehavior: {
+        label: "轉移行為",
+        helpText: "變更被引用記錄的負責人時，是否也可一併轉移透過此欄位指向它的記錄"
       },
       relatedListFilter: {
         label: "關聯清單篩選",
@@ -2178,7 +2198,8 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
         label: "顯示名稱"
       },
       description: {
-        label: "描述"
+        label: "描述",
+        helpText: "One sentence on what this report shows, displayed under its name."
       },
       type: {
         label: "類型",
@@ -2260,9 +2281,33 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
         label: "日期範圍",
         helpText: "預設時間段與自訂範圍開關。維度必須是資料集的日期維度；資料集只有一個日期維度時可留空"
       },
+      "dateRange.dimension": {
+        label: "Date Field",
+        helpText: "The date grouping of the data source the period applies to. Leave it empty when the data source has only one."
+      },
+      "dateRange.defaultRange": {
+        label: "Default Period",
+        helpText: "The period the report opens with."
+      },
+      "dateRange.allowCustomRange": {
+        label: "Allow Custom Range",
+        helpText: "Let people pick their own start and end dates."
+      },
       exportOptions: {
         label: "匯出選項",
         helpText: "下載格式（csv、xlsx）與檔案名稱。誰可以下載由資料集物件上的匯出權限決定"
+      },
+      "exportOptions.formats": {
+        label: "Formats",
+        helpText: "The download formats offered. Left unset, both csv and xlsx are offered; an empty list turns downloads off."
+      },
+      "exportOptions.includeHeaders": {
+        label: "Include Headers",
+        helpText: "Put the column names in the first row of the downloaded file."
+      },
+      "exportOptions.fileNamePrefix": {
+        label: "File Name",
+        helpText: "The start of the downloaded file’s name, used instead of the report name."
       }
     }
   },

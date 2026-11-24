@@ -29,6 +29,7 @@ import { Webhook, Plus, Loader2 } from 'lucide-react';
 import { SchemaForm } from '../metadata-admin/SchemaForm.js';
 import { useRegisteredMetadataDefaultInspector } from '../metadata-admin/default-inspector-registry.js';
 import { HookTargetScopeContext } from '../metadata-admin/inspectors/HookDefaultInspector.js';
+import type { FormViewSpec } from '../metadata-admin/form-spec.js';
 import { StudioEmptyState, StudioEmptyStateAction } from './StudioEmptyState.js';
 import { t, tFormat, useMetadataLocale } from '../metadata-admin/i18n.js';
 import { formatMetadataError } from '@object-ui/data-objectstack';
@@ -38,6 +39,7 @@ export function ObjectHooksPanel({
   buffer,
   disabled,
   hookSchema,
+  hookForm,
 }: {
   /** The pillar's hooks buffer for the open object. */
   buffer: ObjectHooksBuffer;
@@ -48,6 +50,13 @@ export function ObjectHooksPanel({
    * metadata contract rather than being synthesised from the value shape.
    */
   hookSchema?: Record<string, unknown>;
+  /**
+   * The served FormView layout for the `hook` type (`/meta/types`), handed to
+   * HookDefaultInspector as `serverForm` so the rows it draws from the served
+   * form (the refusal catalogue and declared texts) take their served face,
+   * not the raw JSON editor (objectstack#36725).
+   */
+  hookForm?: FormViewSpec;
 }) {
   const locale = useMetadataLocale();
   // Curated hook authoring surface; falls back to the generic SchemaForm if
@@ -215,6 +224,7 @@ export function ObjectHooksPanel({
                     readOnly={!!disabled}
                     locale={locale}
                     serverSchema={hookSchema}
+                    serverForm={hookForm}
                     onBlockingIssuesChange={reportCel}
                   />
                 </HookTargetScopeContext.Provider>

@@ -38,6 +38,7 @@ import {
   servedReportTextOf,
   type ServedReportText,
 } from './studio-design/servedReportText.js';
+import { conditionToGroup, type FilterCondition } from './metadata-admin/inspectors/datasetFilterCondition.js';
 
 /**
  * The report keys whose text the server translates where it serves the report
@@ -74,16 +75,23 @@ export function previewWithServedText(
  * (several datasets, one per block) and a pre-dataset report (`objectName`,
  * `dataSource` or inline `data`) keep the report inspector panel, which edits
  * every shape the spec allows; so does a dataset report the builder has no
- * setting for (a cross-tab, a saved filter, several values).
+ * setting for (a cross-tab, several values, or a saved filter its 「+ Filter」
+ * cannot hold — an `$or`, a nested group, an operator it does not offer).
+ * A saved filter it CAN hold opens in the builder (objectstack#36645).
  */
 export function opensInBuilder(report: Record<string, unknown> | null | undefined): boolean {
   if (!report) return false;
   if (report.type === 'joined') return false;
   if (report.objectName !== undefined || report.dataSource !== undefined || report.data !== undefined) return false;
   // Shapes the builder has no setting for keep the panel, which edits them: a
-  // cross-tab (`columns`), a saved filter (`runtimeFilter`) and several values.
+  // cross-tab (`columns`), several values, and a saved filter (`runtimeFilter`)
+  // the builder's filter cannot hold. The question is the filter editor's own
+  // read-back (`conditionToGroup`), asked without the field list: its shape
+  // alone decides here, and an operator the field's type does not offer is
+  // kept as saved in the builder, not rewritten (objectstack#36645).
   const filled = (v: unknown) => Array.isArray(v) ? v.length > 0 : v !== undefined && v !== null;
-  if (filled(report.columns) || filled(report.runtimeFilter)) return false;
+  if (filled(report.columns)) return false;
+  if (filled(report.runtimeFilter) && !conditionToGroup(report.runtimeFilter as FilterCondition).representable) return false;
   if (Array.isArray(report.values) && report.values.length > 1) return false;
   return true;
 }

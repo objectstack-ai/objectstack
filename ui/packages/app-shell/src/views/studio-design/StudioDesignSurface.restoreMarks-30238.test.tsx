@@ -24,6 +24,8 @@
  *  - CONTROL: an item that stays customized keeps its mark and its count.
  */
 
+// Paid at collection, not inside a case's clock (check:test-source-alias).
+import '@objectstack/lint';
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -116,8 +118,9 @@ function customizationRead() {
     overrides,
     extensions: [],
     switchedOff: [],
+    arrangements: [],
     contributions: [],
-    counts: { overrides: overrides.length, extensions: 0, switchedOff: 0, contributions: 0 },
+    counts: { overrides: overrides.length, extensions: 0, switchedOff: 0, arrangements: 0, contributions: 0 },
   };
 }
 

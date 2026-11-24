@@ -24,16 +24,19 @@
  * answers nothing for it and the drawing keeps the authored label.
  *
  * The Studio flow designer and the docs viewer's `type: flow` embed
- * (`element:metadata_viewer`) both read them here, and the flow label goes
- * through the spec's `translateFlow`, the runner's resolution path, so no two
- * surfaces can disagree about what a flow or a step is called. An edge label
+ * (`element:metadata_viewer`) both read them here. The flow label goes
+ * through the spec's `translateFlow`, the runner's resolution path, and an
+ * approval step's label through the spec's `resolveFlowApprovalStepLabel`,
+ * the server's approval reader's resolution path, both with the same resolve
+ * options, so no two surfaces can disagree about what a flow or an approval
+ * step is called. An edge label
  * has no key and stays the authored text.
  *
  * Display only: nothing here rewrites the flow, so an editor keeps working on
  * the authored label.
  */
 
-import { translateFlow, type TranslationBundle } from '@objectstack/spec/system';
+import { resolveFlowApprovalStepLabel, translateFlow, type TranslationBundle } from '@objectstack/spec/system';
 import { useObjectTranslation } from './provider.js';
 import { activeFlowsBundle } from './flowsBundle.js';
 
@@ -61,8 +64,11 @@ export interface FlowLabelTranslations {
  * `undefined` when there is no bundle (nothing to translate with).
  *
  * The flow label goes through the spec's `translateFlow`, the runner's
- * resolution path; the step label is the spec-typed address of the node's
- * name (see the module note), read by node type.
+ * resolution path, and an approval step's label through the spec's
+ * `resolveFlowApprovalStepLabel`, the server's; both are asked with the same
+ * options (`{ locale: language }`, no declared fallback chain, as
+ * `activeFlowsBundle` promises). Any other step label is the spec-typed
+ * address of the node's name (see the module note), read by node type.
  */
 export function flowLabelTranslations(
   bundle: TranslationBundle | undefined,
@@ -70,14 +76,17 @@ export function flowLabelTranslations(
   language: string,
 ): FlowLabelTranslations | undefined {
   if (!bundle || !flowName) return undefined;
-  const flowLabel = translateFlow<{ name: string; label?: string }>({ name: flowName }, bundle, { locale: language }).label;
+  const resolveOptions = { locale: language };
+  const flowLabel = translateFlow<{ name: string; label?: string }>({ name: flowName }, bundle, resolveOptions).label;
   const flow = bundle[language]?.flows?.[flowName];
   const text = (value: unknown) => (typeof value === 'string' && value ? value : undefined);
   return {
     flowLabel: text(flowLabel),
     stepLabel: (node) => {
       if (typeof node.id !== 'string' || !node.id) return undefined;
-      if (node.type === 'approval') return text(flow?.approvals?.[node.id]?.label);
+      if (node.type === 'approval') {
+        return text(resolveFlowApprovalStepLabel(bundle, flowName, node.id, undefined, resolveOptions));
+      }
       if (node.type === 'screen') {
         const config = node.config && typeof node.config === 'object' ? (node.config as { title?: unknown }) : {};
         if (config.title === undefined || config.title === null || config.title === '') {

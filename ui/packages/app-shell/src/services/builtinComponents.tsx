@@ -23,6 +23,7 @@ import { CONNECTOR_CREDENTIALS_REF } from '../views/setup/connectorCredentials.j
 import { CONNECTOR_CONNECTIONS_REF } from '../views/setup/connectorConnections.js';
 import { PERMISSION_SET_ASSIGNMENT_REF, POSITION_HOLDERS_REF } from '../views/setup/peopleAssignments.js';
 import { RECYCLE_BIN_REF } from '../views/setup/recycleBin.js';
+import { PUBLIC_FORMS_REF } from '../views/setup/publicFormsRef.js';
 import {
   isAggregatedViewContainer,
   viewDisplayType,
@@ -135,6 +136,9 @@ const PermissionSetAssignmentPage = lazyPage('permission set assignments', () =>
 );
 const RecycleBinPage = lazyPage('recycle bin', () =>
   import('../views/setup/RecycleBinPage.js').then((m) => m.RecycleBinPage),
+);
+const PublicFormsSetupPage = lazyPage('public forms', () =>
+  import('../views/setup/PublicFormsSetupPage.js').then((m) => m.PublicFormsSetupPage),
 );
 const SlackSetupPage = lazyPage('slack', () =>
   import('../views/setup/SlackSetupPage.js').then((m) => m.SlackSetupPage),
@@ -276,6 +280,19 @@ registerAppComponent({
   label: 'Recycle Bin',
   source: '@object-ui/app-shell',
   component: RecycleBinPage,
+});
+
+/**
+ * Setup → Configuration → Public forms (objectstack#36444): every public form
+ * of the environment, switched on or off, its address copied or opened; for
+ * system administrators. Studio designs the forms. The entry naming this ref is
+ * `@objectstack/platform-objects`' Setup navigation contribution.
+ */
+registerAppComponent({
+  ref: PUBLIC_FORMS_REF,
+  label: 'Public Forms',
+  source: '@object-ui/app-shell',
+  component: PublicFormsSetupPage,
 });
 
 /**
