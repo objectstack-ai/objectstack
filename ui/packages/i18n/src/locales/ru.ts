@@ -6250,6 +6250,8 @@ const ru = {
     sourceDefault: "По умолчанию в организации",
     sourceBuiltin: "По умолчанию",
     sourceMandatory: "Обязательно",
+    followOrganization: "Следовать настройке организации",
+    followOrganizationFor: "{{setting}}: следовать настройке организации",
   },
   slackLink: {
     title: "Личные сообщения в Slack",

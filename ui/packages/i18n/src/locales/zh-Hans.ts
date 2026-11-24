@@ -5976,6 +5976,8 @@ const zh = {
     sourceDefault: "组织默认",
     sourceBuiltin: "默认",
     sourceMandatory: "必收",
+    followOrganization: "跟随组织设置",
+    followOrganizationFor: "{{setting}}：跟随组织设置",
   },
   slackLink: {
     title: "Slack 私信",

@@ -6079,6 +6079,8 @@ const es = {
     sourceDefault: "Predeterminado de la organización",
     sourceBuiltin: "Predeterminado",
     sourceMandatory: "Obligatorio",
+    followOrganization: "Seguir la configuración de la organización",
+    followOrganizationFor: "{{setting}}: seguir la configuración de la organización",
   },
   slackLink: {
     title: "Mensajes directos de Slack",
