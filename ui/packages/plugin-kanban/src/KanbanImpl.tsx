@@ -32,7 +32,8 @@ import type { KanbanCard, KanbanColumn } from './types'
 import { createSafeTranslation } from "@object-ui/i18n"
 import { EyeOff, FoldHorizontal, MoreHorizontal, Plus, Sigma, UnfoldHorizontal } from "lucide-react"
 import { useKanbanRecordsSettled } from './KanbanRecordsSettled'
-import { useKanbanColumnSummary, sumLaneField, laneStatistic } from './KanbanColumnSummary'
+import { useKanbanColumnSummary, sumLaneField } from './KanbanColumnSummary'
+import { laneFigureOf } from './KanbanLaneStatistic'
 import { useKanbanCardDisplay } from './KanbanCardDisplay'
 import { laneCount, useKanbanLanePaging } from './KanbanLanePaging'
 import { readCollapsedLanes, useKanbanLaneMenu, writeCollapsedLanes } from './KanbanLaneMenu'
@@ -86,7 +87,6 @@ const useKanbanT = createSafeTranslation(
     'kanban.laneMenu.hideHint': 'Its cards move to Uncategorized',
     'kanban.laneMenu.createIn': 'New record in {{column}}',
     'kanban.laneMenu.create': 'New',
-    'kanban.laneStatistic.loadedOnly': 'loaded cards',
   },
   'kanban.noCards',
 )
@@ -785,37 +785,39 @@ function LaneTotal({
  * objectstack#36370 — the view's lane statistic (`kanban.summary`), at the
  * lane's foot: its calculation's name and its figure, 「Sum · Amount
  * ¥1,200」. A count over a lane the board pages for itself is the server's
- * count of the lane, and carries the windowed `+` where that is a floor. A sum
- * covers the cards the lane holds: over a lane that holds more than it drew it
- * is no bound (a value may be negative), so it says so in words, 「Sum ·
- * Amount · loaded cards」, rather than with a `+`. Renders nothing without
- * the statistic, or while the figure is unknowable.
+ * count of the lane, and carries the windowed `+` where that is a floor.
+ *
+ * objectstack#36520 — a `sum`, `avg`, `min` or `max` covers every record of
+ * the lane: the server lane read's figure (`KanbanColumnSummary.figures`),
+ * never one added up over the cards the lane has loaded. Over cards a host
+ * handed in whole, a `sum` adds them. Renders nothing without the statistic,
+ * or while the figure is pending or unknowable.
  */
 function LaneFootStatistic({
+  laneId,
   cards,
   count,
-  partial,
 }: {
+  laneId: string
   cards: KanbanCard[]
   /** The lane's count as its header writes it, for a `count`. */
   count: { count: number; atLeast: boolean }
-  partial: boolean
 }) {
-  const { t } = useKanbanT()
   const summary = useKanbanColumnSummary()
   if (!summary || summary.placement !== 'foot' || !summary.type) return null
-  const isCount = summary.type === 'count'
-  const value = isCount ? count.count : laneStatistic(cards, summary.field, summary.type)
+  const type = summary.type
+  const isCount = type === 'count'
+  const value = isCount
+    ? count.count
+    : summary.figures !== undefined
+      ? summary.figures === null ? null : laneFigureOf(summary.figures, laneId, type)
+      : type === 'sum' ? sumLaneField(cards, summary.field) : null
   if (value === null) return null
-  const partialSum = !isCount && partial
-  const name = isCount
-    ? summary.typeLabel
-    : `${summary.typeLabel} · ${summary.label}${partialSum ? ` · ${t('kanban.laneStatistic.loadedOnly')}` : ''}`
+  const name = isCount ? summary.typeLabel : `${summary.typeLabel} · ${summary.label}`
   return (
     <div
       className="flex items-center justify-between gap-2 border-t border-border/40 px-3 sm:px-4 py-1.5 text-xs text-muted-foreground tabular-nums"
       data-kanban-lane-statistic=""
-      {...(partialSum ? { 'data-kanban-lane-statistic-partial': '' } : {})}
     >
       <span className="truncate" title={name}>{name}</span>
       <span className="shrink-0 font-medium text-foreground/85">
@@ -1153,9 +1155,9 @@ function KanbanColumnView({
       )}
       {!isCollapsed && !countPending && (
         <LaneFootStatistic
+          laneId={String(column.id)}
           cards={safeCards}
           count={pagedCount ?? { count: safeCards.length, atLeast: countsAreWindowed === true }}
-          partial={laneTotalPartial}
         />
       )}
     </div>
