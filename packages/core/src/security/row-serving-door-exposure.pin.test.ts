@@ -36,7 +36,7 @@
  * here, not held. Knowledge retrieval is HELD, by name, in
  * {@link HELD_BY_NAME}: its passages are built under a system context and
  * served to any caller of the knowledge search (the MCP door's
- * `search_knowledge` among them), so it asks the exposure decision and the
+ * `search_knowledge` will be one once it serves the tool), so it asks the exposure decision and the
  * caller's queryable fields per source itself (`knowledge-source-admission.ts`).
  *
  * The scan surface and its prefilter follow
@@ -150,7 +150,7 @@ const CALLERS: Record<string, Classification> = {
 const HELD_BY_NAME: Record<string, Extract<Classification, { kind: 'door' }>> = {
   'packages/services/service-knowledge/src/knowledge-service.ts': {
     kind: 'door',
-    door: 'knowledge retrieval (`IKnowledgeService.search`, and the `search_knowledge` tool every door builds on it)',
+    door: 'knowledge retrieval (`IKnowledgeService.search`, which every door serving `search_knowledge` will build on)',
     operation: 'search',
     decisionSite: 'packages/services/service-knowledge/src/knowledge-source-admission.ts',
     pin: 'packages/services/service-knowledge/src/__tests__/knowledge-source-admission.test.ts',

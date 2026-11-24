@@ -306,7 +306,7 @@ searched for a non-system caller, the service asks, once per object per search:
 - **System objects** — a `sys_*` object is searched only when it declares
   `enable.aiReadable: true` (the AI read tools' posture).
 - **Field-level rules** — every field the source serves (each `contentFields`
-  member, `'*'` meaning every field the object declares; each `metadataFields`
+  member, `'*'` meaning every field the object declares except `id`; each `metadataFields`
   member; `title`), less the credential-class and `internal: true` fields an
   index never carries, must be one the caller may **query**, per the `security`
   service's `getQueryableFields`. Without that answer: its `getReadableFields`
@@ -320,9 +320,15 @@ mix the hidden field's text into one unit that cannot be partially withheld.
 To keep a source searchable for restricted callers, declare its
 `contentFields` / `metadataFields` from fields every intended reader may query,
 and put sensitive fields in a separate source. Every gate fails closed: a
-lookup that throws, or a `security` service that answers neither field
-question, keeps the source out of that caller's search. The system context
-bypasses these gates as it bypasses the row re-check. A restricted caller's
+lookup that throws — the `security` service lookup included, unless the kernel
+answers that no `security` service is registered — or a `security` service
+that answers neither field question, keeps the source out of that caller's
+search. The system context bypasses these gates as it bypasses the row
+re-check. A caller with no execution context, or a service with no data engine
+bound, is searched no `object` source at all; an `object` source's hit with no
+`sourceRecordId` cannot be re-checked and is dropped; and a hit is served only
+as the source it was searched for (an adapter answering another source's
+passage from a store two sources share has it dropped). A restricted caller's
 empty answer is this narrowing, not a missing index.
 
 For `file` and `http` sources (no underlying ObjectQL record), the
