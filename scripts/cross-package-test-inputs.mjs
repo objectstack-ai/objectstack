@@ -405,7 +405,13 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
     // to a workspace-root marker file, so it names no root-level path and this
     // entry adds no new top-level root for `check-ci-filter-parity.mjs` to want
     // in ci.yml's `crosspkg:` filter. Its own header records that trade.
-    globs: ['packages/**/*.ts'],
+    //
+    // src/studio-review-links.callers.test.ts (#36895) walks the same `.ts`
+    // population for hand-built Studio addresses, and reads the one skill eval
+    // that quotes the server's draft review links, to hold each quoted link
+    // equal to what this package builds. That file sits under the published
+    // skills root, which ci.yml's `crosspkg:` filter already covers whole.
+    globs: ['packages/**/*.ts', 'skills/objectstack-mcp-build/evals/draft-door-procedure.json'],
   },
   '@objectstack/organizations': {
     // src/no-framework-dependents.pin.test.ts is ADR-0132 D3's mechanical half.

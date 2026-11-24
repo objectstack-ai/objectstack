@@ -16,19 +16,20 @@
  * The sentence is `StudioInterfacesRetiredNotice`.
  */
 
-import { STUDIO_CHANGES_PARAM } from './studioChangesLink.js';
+import { STUDIO_HOME_PILLAR, studioPillarPath } from './studioAddress.js';
+import { STUDIO_RETIRED_INTERFACES_KEPT_PARAMS } from './studioAddressTable.js';
 
-/** The retired pillar's route segment. No pillar answers to it any more. */
-export const RETIRED_INTERFACES_SEGMENT = 'interfaces';
-
-/** The Studio home: the pillar a package's Studio opens on. */
-export const STUDIO_HOME_PILLAR = 'data';
+// objectstack#36895 — the retired segment and the Studio home are Studio
+// address vocabulary, owned by `studioAddress.ts`; re-exported here. Which
+// parameters survive the redirect is the address table's call.
+/** The retired pillar's route segment, and the Studio home: the pillar a package's Studio opens on. */
+export { RETIRED_INTERFACES_SEGMENT, STUDIO_HOME_PILLAR } from './studioAddress.js';
 
 /** The navigation state a retired-URL landing carries, read once by the surface. */
 export const INTERFACES_RETIRED_STATE = 'studioInterfacesRetired';
 
-/** The query keys an old Interfaces URL may carry that still mean something on the home pillar. */
-const KEPT_PARAMS: readonly string[] = [STUDIO_CHANGES_PARAM];
+/** The query keys an old Interfaces URL may carry that still mean something on the home pillar (`studioAddressTable.ts`). */
+const KEPT_PARAMS: readonly string[] = STUDIO_RETIRED_INTERFACES_KEPT_PARAMS;
 
 /**
  * Where an old Interfaces URL lands: the scope's home pillar, with only the
@@ -40,8 +41,7 @@ export function retiredInterfacesTarget(scopeSegment: string, search: string): s
   for (const key of KEPT_PARAMS) {
     for (const value of from.getAll(key)) kept.append(key, value);
   }
-  const query = kept.toString();
-  return `/studio/${encodeURIComponent(scopeSegment)}/${STUDIO_HOME_PILLAR}${query ? `?${query}` : ''}`;
+  return studioPillarPath(scopeSegment, STUDIO_HOME_PILLAR, { query: kept });
 }
 
 /** The navigation state that marks a landing from an old Interfaces URL. */
