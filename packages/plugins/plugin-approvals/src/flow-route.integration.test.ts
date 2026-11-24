@@ -33,7 +33,10 @@
  *  - a gateway right after the current step is served `undecided`, never the
  *    trunk's branch, and a gateway ahead of a step the graph decides lets that
  *    step through;
- *  - a decided request ends its route at itself, `decided`.
+ *  - a decided request ends its route at itself, `decided`;
+ *  - [#35863] and carries `outcome`: a later request pending (step 2 of a
+ *    two-step route), the approval ended with a later step's decision, or
+ *    ended at the request itself; a pending request carries none.
  *
  * ⚠️ Direction, predicted before running: every `flow_route` pin is RED on the
  * unfixed door (it served no such member); the `flow_steps` pins are green on
@@ -198,6 +201,12 @@ describe('[#26668] the approvals get serves the route a request takes, not the f
     expect([out.finalized, out.resumed], `${decider} approved ${req.flow_node_id}`).toEqual([true, true]);
     return pendingOn(req.record_id);
   };
+  /** `decider` rejects `req`; the run walks the `reject` edge to its end. */
+  const reject = async (req: any, decider: string): Promise<void> => {
+    const out = await svc.decide(req.id, { decision: 'reject', actorId: decider }, asUser(decider));
+    expect([out.finalized, out.resumed], `${decider} rejected ${req.flow_node_id}`).toEqual([true, true]);
+    expect(await pendingOn(req.record_id), 'nothing pending after the rejection').toBeUndefined();
+  };
   /** The get, as the submitter reads it. */
   const get = async (req: any): Promise<any> => svc.getRequest(req.id, asUser(SUBMITTER));
   const states = (steps: any[] | undefined) => (steps ?? []).map((s) => [s.id, s.state]);
@@ -280,7 +289,7 @@ describe('[#26668] the approvals get serves the route a request takes, not the f
     expect(row.flow_route.ahead).toBe('undecided');
   });
 
-  it('a decided request ends its route at itself', async () => {
+  it('a decided request ends its route at itself; at the last step, the outcome says the approval ended', async () => {
     const manager = await submit(CONTRACT.name, { amount: 250000, route_finance: true });
     const finance = await approve(manager, 'u_mgr');
     await approve(finance, 'u_fin');
@@ -293,7 +302,43 @@ describe('[#26668] the approvals get serves the route a request takes, not the f
         { id: 'finance_only', label: 'Finance', state: 'done' },
       ],
       ahead: 'decided',
+      // [#35863] Both gateways past the finance rung fall through to the end: no later request.
+      outcome: { status: 'approved', ended: true },
     });
+  });
+
+  it('[#35863] a request decided at step 1 of a two-step route: the outcome says step 2 is pending, then that the approval ended there', async () => {
+    const manager = await submit(CONTRACT.name, { amount: 250000, route_finance: true });
+    const finance = await approve(manager, 'u_mgr');
+
+    const before = await get(manager);
+    expect(before.flow_route).toEqual({
+      steps: [{ id: 'manager_review', label: 'Manager', state: 'done' }],
+      ahead: 'decided',
+      outcome: { step: { id: 'finance_only', label: 'Finance' }, status: 'pending', ended: false },
+    });
+
+    await reject(finance, 'u_fin');
+    const after = await get(manager);
+    expect(after.flow_route.outcome).toEqual({ step: { id: 'finance_only', label: 'Finance' }, status: 'rejected', ended: true });
+  });
+
+  it('[#35863] a request rejected at the first step: the outcome says the approval ended there, rejected', async () => {
+    const manager = await submit(CONTRACT.name, { amount: 250000, route_finance: true });
+    await reject(manager, 'u_mgr');
+
+    const row = await get(manager);
+    expect(row.flow_route).toEqual({
+      steps: [{ id: 'manager_review', label: 'Manager', state: 'current' }],
+      ahead: 'decided',
+      outcome: { status: 'rejected', ended: true },
+    });
+  });
+
+  it('[#35863] a pending request is never served an outcome', async () => {
+    const manager = await submit(CONTRACT.name, { amount: 250000, route_finance: true });
+    const row = await get(manager);
+    expect('outcome' in row.flow_route).toBe(false);
   });
 
   it('on a linear flow the trunk is the route: at every step the route equals flow_steps, ending at the flow\'s end', async () => {

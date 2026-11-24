@@ -11652,6 +11652,12 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
    * A step is named as `flow_steps` names it ([#24863]): the reader's label,
    * else the node's authored label; a node no longer in the graph by the
    * label its request stored. Display-only and best-effort.
+   *
+   * [#35863] A decided request's route carries `outcome`, where the record's
+   * approval stands now: off the same rows, plus whether the run has ended,
+   * asked of the run itself ({@link TERMINAL_RUN_STATUSES}, the dead-run
+   * sweep's own reading). A run that cannot be read is not ended: the outcome
+   * then rests on the rows alone.
    */
   private async attachFlowRoute(
     row: ApprovalRequestRow,
@@ -11677,9 +11683,25 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
       }
       const label = (nodeId: string): string =>
         labels?.stepLabel(flowName, nodeId) ?? (nodesById.get(nodeId)?.label || stored.get(nodeId) || nodeId);
-      const route = flowRoute(row, flow, rows, label);
+      const route = flowRoute(row, flow, rows, label, row.status !== 'pending' && await this.runHasEnded(row.flow_run_id));
       if (route) (row as any).flow_route = route;
     } catch { /* display-only — never fail the read */ }
+  }
+
+  /**
+   * [#35863] Whether the flow run `runId` has stopped for good: its status is
+   * one of {@link TERMINAL_RUN_STATUSES}. `false` when there is no `getRun`,
+   * no such run, or the read throws: display-only, so an unreadable run is
+   * only ever "not known to have ended", never a failed read.
+   */
+  private async runHasEnded(runId: string): Promise<boolean> {
+    if (typeof this.automation?.getRun !== 'function') return false;
+    try {
+      const status = (await this.automation.getRun(runId))?.status;
+      return !!status && TERMINAL_RUN_STATUSES.has(status);
+    } catch {
+      return false;
+    }
   }
 
   async listActions(requestId: string, context: ExecutionContext): Promise<ApprovalActionRow[]> {

@@ -384,11 +384,39 @@ export interface ApprovalRequestRow {
    *   yet. Steps past it are not listed, and the trunk is never listed in
    *   their place.
    * - `decided` — the request is decided, so nothing past it is walked. The
-   *   steps its run reached next are the later requests' own routes.
+   *   steps its run reached next are the later requests' own routes;
+   *   `outcome` says where the record's approval stands now.
    */
   flow_route?: {
     steps: Array<{ id: string; label: string; state: 'done' | 'current' | 'upcoming' }>;
     ahead: 'end' | 'undecided' | 'decided';
+    /**
+     * Where the record's approval stands after this request, on a decided
+     * request only (`ahead: 'decided'`), read off the request's flow run and
+     * never guessed:
+     *
+     * - `step` — the run's latest request, when that is a later one than
+     *   this request: a request of the same `flow_run_id` opened after this
+     *   one, on any node (a later round of this request's own node too). A
+     *   pending one wins over a decided one. Absent when no later request was
+     *   opened, so the approval stands at this request.
+     * - `status` — that latest request's status (this request's own when
+     *   `step` is absent). `pending` with a `step`: the approval went on to
+     *   that step and waits on its decision.
+     * - `ended` — the run has stopped and will never resume, so `status` is
+     *   the last decision the record's approval took.
+     *
+     * Absent when nothing past this request is known: no later request was
+     * opened and the run has not ended (it is still between steps, or waits
+     * for a resubmit), the run's state cannot be read, or several later
+     * requests are pending at once (parallel steps), which no single step
+     * answers.
+     */
+    outcome?: {
+      step?: { id: string; label: string };
+      status: ApprovalStatus;
+      ended: boolean;
+    };
   };
   /**
    * ADR-0044 revision round of this request on its (run, node): 1 (or absent)
