@@ -251,7 +251,9 @@ describe('objectstack#36395 — a kanban says plainly that bulk Change Owner is 
 
   it('CONTROL: a kanban of an object that does not offer Change Owner: no note, and nothing asked', async () => {
     mountDeals(true, [{ ...BOARD_OBJECTS[0], ownership: 'none' }], 'board');
-    await screen.findByText('Alpha', undefined, { timeout: 5000 });
+    // The page is drawn on the board view (its tab is on screen); the note's
+    // inputs are the object and the layout, both read on this render.
+    await screen.findAllByText('Board', undefined, { timeout: 5000 });
     await act(async () => {});
     expect(note()).toBeNull();
     expect(transferAsks).toEqual([]);
