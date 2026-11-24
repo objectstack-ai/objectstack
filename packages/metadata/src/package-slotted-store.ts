@@ -37,6 +37,13 @@
  *    is refused naming every holder when two or more do (D3), so it never
  *    takes both and never picks one.
  *
+ * [#37013] The platform's record — an item its own code registers, stamped
+ * {@link PLATFORM_PROVENANCE} ({@link isPlatformOrigin}) — is no package's
+ * customization: it fills the name's bare slot whatever packages hold the
+ * name, a package's first item never takes that slot over, and the
+ * platform's removal drops that slot only ({@link storePlatformRemovalKeys}).
+ * So a package's skill named like a platform skill stays beside it.
+ *
  * [#32246] The loaders under the registry hold these types by the same rules:
  * the artifact door's `MemoryLoader` under these keys, `DatabaseLoader` one
  * row per `(package, name)`; and a read the registry cannot answer reads the
