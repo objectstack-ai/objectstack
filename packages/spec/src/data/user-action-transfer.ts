@@ -7,8 +7,8 @@ import type { RowCrudPredicates } from './object.zod';
 /**
  * Which objects offer the dedicated Change Owner action: the structural test,
  * the object switch `userActions.transfer`, and the one resolution the server's
- * Change Owner endpoint and the console's action both read (maintainer
- * ruling 7000907189, point 1). The server's endpoint (`@objectstack/core`'s
+ * Change Owner endpoint, the console's action and the offboarding hand-over all
+ * read (maintainer ruling 7000907189, point 1). The server's endpoint (`@objectstack/core`'s
  * `change-record-owner.ts`, card #35402) refuses an object this resolves off;
  * the console's action is card #35403.
  *
@@ -52,10 +52,15 @@ import type { RowCrudPredicates } from './object.zod';
  * Closing the switch there restates what the structure already says and is
  * accepted.
  *
- * The switch gates the dedicated action — single, bulk and cascade — and not
- * the raw write: a plain `owner_id` update stays governed by `allowTransfer`
- * alone, so import mappings and hooks are unaffected (ruling point 2). An author
- * who wants a hard block declares `owner_id` read-only.
+ * The switch gates two consumers: the dedicated action — single, bulk and
+ * cascade — and the offboarding hand-over of a user's assigned work
+ * (`@objectstack/core`'s `user-assigned-work.ts`). Where it resolves off, the
+ * hand-over's count reports the object's `owner_id` rows as held
+ * (`transfer_off`) and its transfer leaves their owner where it is; the
+ * hand-over reads only the resolved on/off, not the per-record predicates. It
+ * does not gate the raw write: a plain `owner_id` update stays governed by
+ * `allowTransfer` alone, so import mappings and hooks are unaffected (ruling
+ * point 2). An author who wants a hard block declares `owner_id` read-only.
  *
  * Tolerant of bare, un-parsed metadata records (the same contract as
  * {@link resolveInjectedSystemColumns}), so a runtime reading a registered
@@ -194,10 +199,13 @@ function derivedTransferDefault(obj: AnyRec): boolean {
  * `sharingModel` implies, the same collapse the CRUD entries take onto their
  * `managedBy` default.
  *
- * The one resolution, for its two readers: the server's Change Owner endpoint
+ * The one resolution, for its three readers: the server's Change Owner endpoint
  * (card #35402) refuses an object this answers `enabled: false` for, and the
  * console (card #35403) shows the action only where it answers `true` — both
- * then asking the caller's transfer verdict per record.
+ * then asking the caller's transfer verdict per record; the offboarding
+ * hand-over (`@objectstack/core`'s `user-assigned-work.ts`) counts an eligible
+ * object's `owner_id` rows as held, and leaves them, where it answers
+ * `enabled: false`.
  */
 export function resolveUserActionTransfer(def: unknown): UserActionTransferResolution {
   if (!isTransferEligible(def)) return { enabled: false };
